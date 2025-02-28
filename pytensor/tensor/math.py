@@ -602,37 +602,228 @@ def isneginf(x):
 
 @scalar_elemwise
 def lt(a, b):
-    """a < b"""
+    """a < b
+
+    Computes element-wise less than comparison between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where a < b,
+        and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> y = pt.vector("y")
+    >>> f = pytensor.function([x, y], pt.lt(x, y))
+    >>> f([1, 2, 3], [2, 2, 2])
+    array([ True, False, False])
+    """
 
 
 @scalar_elemwise
 def gt(a, b):
-    """a > b"""
+    """a > b
+
+    Computes element-wise greater than comparison between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where a > b,
+        and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> y = pt.vector("y")
+    >>> f = pytensor.function([x, y], pt.gt(x, y))
+    >>> f([1, 2, 3], [0, 2, 4])
+    array([ True, False, False])
+    """
 
 
 @scalar_elemwise
 def le(a, b):
-    """a <= b"""
+    """a <= b
+
+    Computes element-wise less than or equal comparison between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where a <= b,
+        and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> y = pt.vector("y")
+    >>> f = pytensor.function([x, y], pt.le(x, y))
+    >>> f([1, 2, 3], [2, 2, 2])
+    array([ True,  True, False])
+    """
 
 
 @scalar_elemwise
 def ge(a, b):
-    """a >= b"""
+    """a >= b
+
+    Computes element-wise greater than or equal comparison between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where a >= b,
+        and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> y = pt.vector("y")
+    >>> f = pytensor.function([x, y], pt.ge(x, y))
+    >>> f([1, 2, 3], [0, 2, 4])
+    array([ True,  True, False])
+    """
 
 
 @scalar_elemwise
 def eq(a, b):
-    """a == b"""
+    """a == b
+
+    Computes element-wise equality between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where elements are equal,
+        and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> y = pt.vector("y")
+    >>> f = pytensor.function([x, y], pt.eq(x, y))
+    >>> f([1, 2, 3], [1, 4, 3])
+    array([ True, False,  True])
+
+    Notes
+    -----
+    Due to Python rules, it is not possible to overload the equality symbol `==` for hashable objects and have it return something other than a boolean,
+    so `eq` must always be used to compute the Elemwise equality of TensorVariables (which are hashable).
+    """
 
 
 @scalar_elemwise
 def neq(a, b):
-    """a != b"""
+    """a != b
+
+    Computes element-wise inequality comparison between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where a != b,
+        and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> y = pt.vector("y")
+    >>> f = pytensor.function([x, y], pt.neq(x, y))
+    >>> f([1, 2, 3], [1, 4, 3])
+    array([False,  True, False])
+
+    Notes
+    -----
+    Due to Python rules, it is not possible to overload the inequality symbol `!=` for hashable objects and have it return something other than a boolean,
+    so `neq` must always be used to compute the Elemwise inequality of TensorVariables (which are hashable).
+    """
 
 
 @scalar_elemwise
 def isnan(a):
-    """isnan(a)"""
+    """isnan(a)
+
+    Computes element-wise detection of NaN values.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where elements are NaN,
+        and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.isnan(x))
+    >>> f([1, np.nan, 3])
+    array([False,  True, False])
+    """
 
 
 # Rename isnan to isnan_ to allow to bypass it when not needed.
@@ -652,7 +843,31 @@ def isnan(a):
 
 @scalar_elemwise
 def isinf(a):
-    """isinf(a)"""
+    """isinf(a)
+
+    Computes element-wise detection of infinite values.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where elements are infinite,
+        and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.isinf(x))
+    >>> f([1, np.inf, -np.inf, 3])
+    array([False,  True,  True, False])
+    """
 
 
 # Rename isnan to isnan_ to allow to bypass it when not needed.
@@ -678,9 +893,9 @@ def allclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
 
     Parameters
     ----------
-    a : tensor
+    a : TensorLike
         Input to compare.
-    b : tensor
+    b : TensorLike
         Input to compare.
     rtol : float
         The relative tolerance parameter.
@@ -717,9 +932,9 @@ def isclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
 
     Parameters
     ----------
-    a : tensor
+    a : TensorLike
         Input to compare.
-    b : tensor
+    b : TensorLike
         Input to compare.
     rtol : float
         The relative tolerance parameter.
@@ -817,22 +1032,140 @@ def isclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
 
 @scalar_elemwise
 def and_(a, b):
-    """bitwise a & b"""
+    """bitwise a & b
+
+    Computes element-wise bitwise AND operation between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the bitwise AND of corresponding elements in a and b.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x", dtype="int32")
+    >>> y = pt.vector("y", dtype="int32")
+    >>> f = pytensor.function([x, y], pt.and_(x, y))
+    >>> f([1, 2, 3], [4, 2, 1])
+    array([0, 2, 1], dtype=int32)
+
+    Notes
+    -----
+    This function can also be used for logical AND operations
+    on boolean tensors.
+    """
 
 
 @scalar_elemwise
 def or_(a, b):
-    """bitwise a | b"""
+    """bitwise a | b
+
+    Computes element-wise bitwise OR operation between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the bitwise OR of corresponding elements in a and b.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x", dtype="int32")
+    >>> y = pt.vector("y", dtype="int32")
+    >>> f = pytensor.function([x, y], pt.or_(x, y))
+    >>> f([1, 2, 3], [4, 2, 1])
+    array([5, 2, 3], dtype=int32)
+
+    Notes
+    -----
+    This function can also be used for logical OR operations
+    on boolean tensors.
+    """
 
 
 @scalar_elemwise
 def xor(a, b):
-    """bitwise a ^ b"""
+    """bitwise a ^ b
+
+    Computes element-wise bitwise XOR (exclusive OR) operation between two tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    b : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the bitwise XOR of corresponding elements in a and b.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x", dtype="int32")
+    >>> y = pt.vector("y", dtype="int32")
+    >>> f = pytensor.function([x, y], pt.xor(x, y))
+    >>> f([1, 2, 3], [4, 2, 1])
+    array([5, 0, 2], dtype=int32)
+
+    Notes
+    -----
+    For boolean tensors, it computes the logical XOR
+    (true when exactly one input is true).
+    """
 
 
 @scalar_elemwise
 def invert(a):
-    """bitwise ~a"""
+    """bitwise ~a
+
+    Computes element-wise bitwise inversion (NOT) of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the bitwise negation of each element in a.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x", dtype="int8")
+    >>> f = pytensor.function([x], pt.invert(x))
+    >>> f([0, 1, 2, 3])
+    array([-1, -2, -3, -4], dtype=int8)
+
+    Notes
+    -----
+    For boolean tensors, this function computes the logical NOT.
+
+    For integers, this inverts the bits in the binary representation.
+    """
 
 
 ##########################
@@ -850,52 +1183,320 @@ pprint.assign(abs, printing.PatternPrinter(("|%(0)s|", -1000)))
 
 @scalar_elemwise
 def exp(a):
-    """e^`a`"""
+    """e^`a`
+
+    Computes the element-wise exponential of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the exponential of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.exp(x))
+    >>> f([0, 1, 2])
+    array([1., 2.71828183, 7.3890561 ])
+
+    """
 
 
 @scalar_elemwise
 def exp2(a):
-    """2^`a`"""
+    """2^`a`
+
+    Computes element-wise base-2 exponential of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with 2 raised to the power of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.exp2(x))
+    >>> f([0, 1, 2, 3])
+    array([1., 2., 4., 8.])
+
+    Notes
+    -----
+    This operation is equivalent to `2**a` but may be more numerically stable
+    for some values. It corresponds to NumPy's `np.exp2` function.
+    """
 
 
 @scalar_elemwise
 def expm1(a):
-    """e^`a` - 1"""
+    """e^`a` - 1
+
+    Computes element-wise exponential of a tensor minus 1: exp(a) - 1.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with exp(x) - 1 computed for each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.expm1(x))
+    >>> f([-1, 0, 1])
+    array([-0.63212056,  0.        ,  1.71828183])
+
+    Notes
+    -----
+    This function is more accurate than the naive computation of exp(x) - 1
+    for small values of x (where exp(x) is close to 1). It corresponds to
+    NumPy's `np.expm1` function.
+    """
 
 
 @scalar_elemwise
 def neg(a):
-    """-a"""
+    """-a
+
+    Computes element-wise negation of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the negative of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.neg(x))
+    >>> f([1, -2, 3])
+    array([-1,  2, -3])
+
+    Notes
+    -----
+    This is equivalent to the arithmetic operation `-a` but works within
+    the PyTensor computational graph. For complex numbers, this computes
+    the complex negative.
+    """
 
 
 @scalar_elemwise
 def reciprocal(a):
-    """1.0/a"""
+    """1.0/a
+
+    Computes element-wise reciprocal (1/x) of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the reciprocal of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.reciprocal(x))
+    >>> f([1, 2, 4])
+    array([1.  , 0.5 , 0.25])
+
+    Notes
+    -----
+    This is equivalent to 1/a but is often more numerically stable.
+    Division by zero will result in the appropriate IEEE floating point values
+    (inf or -inf) or in an error depending on the backend.
+    """
 
 
 @scalar_elemwise
 def log(a):
-    """base e logarithm of a"""
+    """base e logarithm of a
+
+    Computes the element-wise natural logarithm of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the natural logarithm of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.log(x))
+    >>> f([1, 2.7, 10])
+    array([0., 0.99325178, 2.30258509])
+
+    """
 
 
 @scalar_elemwise
 def log2(a):
-    """base 2 logarithm of a"""
+    """base 2 logarithm of a
+
+    Computes element-wise base-2 logarithm of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the base-2 logarithm of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.log2(x))
+    >>> f([1, 2, 4, 8])
+    array([0., 1., 2., 3.])
+
+    Notes
+    -----
+    This function computes log(x)/log(2) but may be more numerically accurate
+    than the naive computation.
+    """
 
 
 @scalar_elemwise
 def log10(a):
-    """base 10 logarithm of a"""
+    """base 10 logarithm of a
+
+    Computes element-wise base-10 logarithm of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the base-10 logarithm of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.log10(x))
+    >>> f([1, 10, 100, 1000])
+    array([0., 1., 2., 3.])
+
+    Notes
+    -----
+    This function computes log(x)/log(10) but may be more numerically accurate
+    than the naive computation.
+    """
 
 
 @scalar_elemwise
 def log1p(a):
-    """log(1+a)"""
+    """log(1+a)
+
+    Computes element-wise natural logarithm of 1 plus a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the natural logarithm of (1 + a) for each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.log1p(x))
+    >>> f([0, 1e-7, 1, 3])
+    array([0.0000000e+00, 1.0000050e-07, 6.9314718e-01, 1.3862944e+00])
+
+    Notes
+    -----
+    This function is more accurate than the naive computation of log(1+x)
+    for small values of x (close to zero).
+    """
 
 
 @scalar_elemwise
 def sign(a):
-    """sign of a"""
+    """sign of a
+
+    Computes element-wise sign of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the sign of each element in `a`: -1 for negative values,
+        0 for zero, and 1 for positive values.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.sign(x))
+    >>> f([-2, 0, 3])
+    array([-1.,  0.,  1.])
+
+    Notes
+    -----
+    For complex inputs, this function
+    returns the sign of the magnitude.
+    """
 
 
 def sgn(a):
@@ -910,17 +1511,83 @@ def sgn(a):
 
 @scalar_elemwise
 def ceil(a):
-    """ceiling of a"""
+    """ceiling of a
+
+    Computes element-wise ceiling (smallest integer greater than or equal to x) of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the ceiling of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.ceil(x))
+    >>> f([1.5, 2.0, -3.7])
+    array([ 2.,  2., -3.])
+    """
 
 
 @scalar_elemwise
 def floor(a):
-    """floor of a"""
+    """floor of a
+
+    Computes element-wise floor (largest integer less than or equal to x) of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the floor of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.floor(x))
+    >>> f([1.5, 2.0, -3.7])
+    array([ 1.,  2., -4.])
+    """
 
 
 @scalar_elemwise
 def trunc(a):
-    """trunc of a"""
+    """trunc of a
+
+    Computes element-wise truncation (the integer part) of a tensor, effectively rounding downward.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the truncated value (integer part) of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.trunc(x))
+    >>> f([1.5, 2.0, -3.7])
+    array([ 1.,  2., -3.])
+    """
 
 
 def iround(a, mode=None):
@@ -960,7 +1627,33 @@ def round_half_away_from_zero(a):
 
 @scalar_elemwise
 def sqr(a):
-    """square of a"""
+    """square of a
+
+    Computes element-wise square (x²) of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the square of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.sqr(x))
+    >>> f([-2, 0, 3])
+    array([4, 0, 9])
+
+    Notes
+    -----
+    This is equivalent to a**2 or a*a, but may be computed more efficiently.
+    """
 
 
 def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=None):
@@ -1031,92 +1724,599 @@ def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=N
 
 @scalar_elemwise
 def sqrt(a):
-    """square root of a"""
+    """square root of a
+
+    Computes element-wise square root of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor (should contain non-negative values)
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the square root of each element in `a`
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.sqrt(x))
+    >>> f([0, 1, 4, 9])
+    array([0., 1., 2., 3.])
+
+    Notes
+    -----
+    For negative inputs, the behavior depends on the backend, typically
+    resulting in NaN values.
+    """
 
 
 @scalar_elemwise
 def deg2rad(a):
-    """convert degree a to radian"""
+    """convert degree a to radian
+
+    Computes element-wise conversion from degrees to radians.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor in degrees
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with values converted to radians
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.deg2rad(x))
+    >>> f([0, 90, 180, 270, 360])
+    array([0.        , 1.57079633, 3.14159265, 4.71238898, 6.28318531])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.deg2rad` function.
+    The conversion formula is: radians = degrees * (π / 180)
+    """
 
 
 @scalar_elemwise
 def rad2deg(a):
-    """convert radian a to degree"""
+    """convert radian a to degree
+
+    Computes element-wise conversion from radians to degrees.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor in radians
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with values converted to degrees
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.rad2deg(x))
+    >>> f([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    array([  0.,  90., 180., 270., 360.])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.rad2deg` function.
+    The conversion formula is: degrees = radians * (180 / π)
+    """
 
 
 @scalar_elemwise
 def cos(a):
-    """cosine of a"""
+    """cosine of a
+
+    Computes element-wise cosine of a tensor in radians.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor in radians
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the cosine of each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.cos(x))
+    >>> f([0, np.pi / 2, np.pi])
+    array([ 1.000000e+00,  6.123234e-17, -1.000000e+00])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.cos` function.
+    """
 
 
 @scalar_elemwise
 def arccos(a):
-    """arccosine of a"""
+    """arccosine of a
+
+    Computes element-wise inverse cosine (arc cosine) of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor (values should be in the range [-1, 1])
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the arc cosine of each element in radians,
+        in the range [0, π]
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.arccos(x))
+    >>> f([1, 0, -1])
+    array([0.        , 1.57079633, 3.14159265])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.arccos` function.
+    The values returned are in the range [0, π]. Input values outside
+    the domain [-1, 1] will produce NaN outputs.
+    """
 
 
 @scalar_elemwise
 def sin(a):
-    """sine of a"""
+    """sine of a
+
+    Computes element-wise sine of a tensor in radians.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor in radians
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the sine of each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.sin(x))
+    >>> f([0, np.pi / 2, np.pi])
+    array([ 0.00000000e+00,  1.00000000e+00,  1.22464680e-16])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.sin` function.
+    """
 
 
 @scalar_elemwise
 def arcsin(a):
-    """arcsine of a"""
+    """arcsine of a
+
+    Computes element-wise inverse sine (arc sine) of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor (values should be in the range [-1, 1])
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the arc sine of each element in radians,
+        in the range [-π/2, π/2]
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.arcsin(x))
+    >>> f([-1, 0, 1])
+    array([-1.57079633,  0.        ,  1.57079633])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.arcsin` function.
+    The values returned are in the range [-π/2, π/2]. Input values outside
+    the domain [-1, 1] will produce NaN outputs.
+    """
 
 
 @scalar_elemwise
 def tan(a):
-    """tangent of a"""
+    """tangent of a
+
+    Computes element-wise tangent of a tensor in radians.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor in radians
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the tangent of each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.tan(x))
+    >>> f([0, np.pi / 4, np.pi / 2 - 1e-10])  # Avoiding exact π/2 which is undefined
+    array([0.00000000e+00, 1.00000000e+00, 1.25655683e+10])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.tan` function.
+    Tangent is undefined at π/2 + nπ where n is an integer.
+    """
 
 
 @scalar_elemwise
 def arctan(a):
-    """arctangent of a"""
+    """arctangent of a
+
+    Computes element-wise inverse tangent (arc tangent) of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the arc tangent of each element in radians,
+        in the range [-π/2, π/2]
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.arctan(x))
+    >>> f([-1, 0, 1])
+    array([-0.78539816,  0.        ,  0.78539816])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.arctan` function.
+    The values returned are in the range [-π/2, π/2].
+    For the two-argument inverse tangent function, see `arctan2`.
+    """
 
 
 @scalar_elemwise
 def arctan2(a, b):
-    """arctangent of a / b"""
+    """arctangent of a / b
+
+    Computes element-wise arc tangent of two values, taking into account
+    the quadrant based on the signs of the inputs.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor, representing the numerator (y-coordinates)
+    b : TensorLike
+        Second input tensor, representing the denominator (x-coordinates)
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the arc tangent of a/b in radians, in the range [-π, π]
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> y = pt.vector("y")
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([y, x], pt.arctan2(y, x))
+    >>> f([1, -1, 0, 0], [1, -1, 1, -1])
+    array([ 0.78539816, -2.35619449,  0.        ,  3.14159265])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.arctan2` function.
+    The returned values are in the range [-π, π].
+
+    This function is similar to calculating the arc tangent of a/b, except
+    that the signs of both arguments are used to determine the quadrant of
+    the result.
+    """
 
 
 @scalar_elemwise
 def cosh(a):
-    """hyperbolic cosine of a"""
+    """hyperbolic cosine of a
+
+    Computes element-wise hyperbolic cosine of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the hyperbolic cosine of each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.cosh(x))
+    >>> f([0, 1, 2])
+    array([1.        , 1.54308063, 3.76219569])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.cosh` function.
+    The hyperbolic cosine is defined as: cosh(x) = (exp(x) + exp(-x))/2
+    """
 
 
 @scalar_elemwise
 def arccosh(a):
-    """hyperbolic arc cosine of a"""
+    """hyperbolic arc cosine of a
+
+    Computes element-wise inverse hyperbolic cosine of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor (values should be ≥ 1)
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the hyperbolic arc cosine of each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.arccosh(x))
+    >>> f([1, 2, 10])
+    array([0.        , 1.31695789, 2.99322285])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.arccosh` function.
+    The domain is [1, inf]; values outside this range will produce NaN outputs.
+    """
 
 
 @scalar_elemwise
 def sinh(a):
-    """hyperbolic sine of a"""
+    """hyperbolic sine of a
+
+    Computes element-wise hyperbolic sine of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the hyperbolic sine of each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.sinh(x))
+    >>> f([0, 1, 2])
+    array([0.        , 1.17520119, 3.62686041])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.sinh` function.
+    The hyperbolic sine is defined as: sinh(x) = (exp(x) - exp(-x))/2
+    """
 
 
 @scalar_elemwise
 def arcsinh(a):
-    """hyperbolic arc sine of a"""
+    """hyperbolic arc sine of a
+
+    Computes element-wise inverse hyperbolic sine of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the hyperbolic arc sine of each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.arcsinh(x))
+    >>> f([-1, 0, 1])
+    array([-0.88137359,  0.        ,  0.88137359])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.arcsinh` function.
+    The inverse hyperbolic sine is defined for all real numbers.
+    """
 
 
 @scalar_elemwise
 def tanh(a):
-    """hyperbolic tangent of a"""
+    """hyperbolic tangent of a
+
+    Computes element-wise hyperbolic tangent of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the hyperbolic tangent of each element,
+        with values in the range [-1, 1]
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.tanh(x))
+    >>> f([-1, 0, 1])
+    array([-0.76159416,  0.        ,  0.76159416])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.tanh` function.
+    The hyperbolic tangent is defined as: tanh(x) = sinh(x)/cosh(x)
+    """
 
 
 @scalar_elemwise
 def arctanh(a):
-    """hyperbolic arc tangent of a"""
+    """hyperbolic arc tangent of a
+
+    Computes element-wise inverse hyperbolic tangent of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor (values should be in the range [-1, 1])
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the hyperbolic arc tangent of each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.arctanh(x))
+    >>> f([-0.5, 0, 0.5])
+    array([-0.54930614,  0.        ,  0.54930614])
+
+    Notes
+    -----
+    This function corresponds to NumPy's `np.arctanh` function.
+    The domain of arctanh is [-1, 1]; values outside this range
+    will produce NaN outputs.
+    """
 
 
 @scalar_elemwise
 def erf(a):
-    """error function"""
+    """error function
+
+    Computes the element-wise error function of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the error function evaluated at each element,
+        with values in the range [-1, 1]
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.erf(x))
+    >>> f([-1, 0, 1])
+    array([-0.84270079,  0.        ,  0.84270079])
+
+    Notes
+    -----
+    This function corresponds to SciPy's `scipy.special.erf` function.
+    The error function is defined as:
+    erf(x) = (2/√π) * ∫(0 to x) exp(-t²) dt
+    """
 
 
 @scalar_elemwise
 def erfc(a):
-    """complementary error function"""
+    """complementary error function
+
+    Computes the element-wise complementary error function of a tensor.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor with the complementary error function evaluated at each element
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.erfc(x))
+    >>> f([-1, 0, 1])
+    array([1.84270079, 1.        , 0.15729921])
+
+    Notes
+    -----
+    This function corresponds to SciPy's `scipy.special.erfc` function.
+    The complementary error function is defined as:
+    erfc(x) = 1 - erf(x) = (2/√π) * ∫(x to ∞) exp(-t²) dt
+    """
 
 
 @scalar_elemwise
@@ -1521,7 +2721,7 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
 
     Parameters
     ----------
-    x: TensorVariable
+    x: TensorLike
         The input tensor.
     axis: None or int or (list of int) (see `Sum`)
         Compute the median along this axis of the tensor.
@@ -1559,13 +2759,68 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
 
 @scalar_elemwise(symbolname="scalar_maximum")
 def maximum(x, y):
-    """elemwise maximum. See max for the maximum in one tensor"""
+    """elemwise maximum. See max for the maximum in one tensor
+
+    Computes element-wise maximum of two tensors.
+
+    Parameters
+    ----------
+    x : TensorLike
+        First input tensor
+    y : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorLike
+        Output tensor with the maximum of corresponding elements in x and y
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> a = pt.vector("a")
+    >>> b = pt.vector("b")
+    >>> f = pytensor.function([a, b], pt.maximum(a, b))
+    >>> f([1, 3, 5], [2, 3, 4])
+    array([2, 3, 5])
+
+    Notes
+    -----
+    This computes the element-wise maximum, while `max(x)` computes the
+    maximum value over all elements in a single tensor.
+    """
     # see decorator for function body
 
 
 @scalar_elemwise(symbolname="scalar_minimum")
 def minimum(x, y):
-    """elemwise minimum. See min for the minimum in one tensor"""
+    """elemwise minimum. See min for the minimum in one tensor
+
+    Computes element-wise minimum of two tensors.
+
+    Parameters
+    ----------
+    x : TensorLike
+        First input tensor
+    y : TensorLike
+        Second input tensor
+
+    Returns
+    -------
+    TensorLike
+        Output tensor with the minimum of corresponding elements in x and y
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> a = pt.vector("a")
+    >>> b = pt.vector("b")
+    >>> f = pytensor.function([a, b], pt.minimum(a, b))
+    >>> f([1, 3, 5], [2, 3, 4])
+    array([1, 3, 4])
+    """
     # see decorator for function body
 
 
@@ -1576,7 +2831,33 @@ def divmod(x, y):
 
 @scalar_elemwise
 def add(a, *other_terms):
-    """elementwise addition"""
+    """elementwise addition
+
+    Computes element-wise addition of tensors.
+
+    Parameters
+    ----------
+    a : TensorLike
+        First input tensor
+    *other_terms : tensors
+        Other tensors to add
+
+    Returns
+    -------
+    TensorLike
+        Output tensor with the elementwise sum of all inputs
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> y = pt.vector("y")
+    >>> z = pt.vector("z")
+    >>> f = pytensor.function([x, y, z], pt.add(x, y, z))
+    >>> f([1, 2], [3, 4], [5, 6])
+    array([ 9, 12])
+    """
     # see decorator for function body
 
 
@@ -2071,7 +3352,7 @@ def tensordot(
 
     Parameters
     ----------
-    a, b : tensor_like
+    a, b : TensorLike
         Tensors to "dot".
 
     axes : int or (2,) array_like
@@ -2084,7 +3365,7 @@ def tensordot(
 
     Returns
     -------
-    output : TensorVariable
+    output : TensorLike
         The tensor dot product of the input.
         Its shape will be equal to the concatenation of `a` and `b` shapes
         (ignoring the dimensions that were summed over given in ``a_axes``
@@ -2722,7 +4003,7 @@ def logaddexp(*xs):
 
     Returns
     -------
-    tensor
+    TensorVariable
 
     """
 
@@ -2750,7 +4031,7 @@ def logsumexp(x, axis=None, keepdims=False):
 
     Returns
     -------
-    tensor
+    TensorVariable
 
     """
 
