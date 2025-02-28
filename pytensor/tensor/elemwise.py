@@ -301,7 +301,7 @@ pprint.assign(DimShuffle, DimShufflePrinter())
 class Elemwise(OpenMPOp):
     """Generalizes a scalar `Op` to tensors.
 
-    `All the inputs must have the same number of dimensions. When the
+    All the inputs must have the same number of dimensions. When the
     `Op` is performed, for each dimension, each input's size for that
     dimension must be the same. As a special case, it can also be one
     but only if the input's `broadcastable` flag is ``True`` for that
