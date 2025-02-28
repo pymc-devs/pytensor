@@ -776,7 +776,7 @@ def eq(a, b):
 
     Notes
     -----
-    Due to Python rules, it is not possible to correctly overload the equality symbol `==` for hashable objects,
+    Due to Python rules, it is not possible to overload the equality symbol `==` for hashable objects and have it return something other than a boolean,
     so `eq` must always be used to compute the Elemwise equality of TensorVariables (which are hashable).
     """
 
