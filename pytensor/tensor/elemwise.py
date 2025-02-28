@@ -301,7 +301,7 @@ pprint.assign(DimShuffle, DimShufflePrinter())
 class Elemwise(OpenMPOp):
     """Generalizes a scalar `Op` to tensors.
 
-    All the inputs must have the same number of dimensions. When the
+    `All the inputs must have the same number of dimensions. When the
     `Op` is performed, for each dimension, each input's size for that
     dimension must be the same. As a special case, it can also be one
     but only if the input's `broadcastable` flag is ``True`` for that
@@ -1645,25 +1645,6 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
     should take nin + nout inputs. `nout == 0` means that the numpy function does
     not take a NumPy array argument to put its result in.
 
-    This decorator is used to create element-wise operations on tensors.
-    It transforms scalar operations (those that work on individual values)
-    into operations that work on entire tensors by applying the scalar
-    operation to each element of the tensor.
-
-    Examples
-    --------
-    @scalar_elemwise
-    def add(a, b):
-        "Add two values together."
-        # The actual implementation is provided by the decorator
-
-    x = tensor('x')
-    y = tensor('y')
-    z = add(x, y)  # Creates a computational graph node
-
-    The decorator creates an Elemwise op that handles broadcasting,
-    different input shapes, dtype conversions, and other details needed
-    for tensor operations.
     """
     import pytensor.scalar as scalar
 
@@ -1686,7 +1667,7 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
             rval = Elemwise(scalar_op, nfunc_spec=(nfunc and (nfunc, nin, nout)))
 
         if getattr(symbol, "__doc__"):
-            rval.__doc__ = symbol.__doc__ + "\n\n    " + rval.__doc__
+            rval.__doc__ = symbol.__doc__
 
         # for the meaning of this see the ./epydoc script
         # it makes epydoc display rval as if it were a function, not an object
