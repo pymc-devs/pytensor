@@ -615,7 +615,7 @@ def lt(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor of type bool, with 1 (True) where a < b,
         and 0 (False) elsewhere.
 
@@ -628,11 +628,6 @@ def lt(a, b):
     >>> f = pytensor.function([x, y], pt.lt(x, y))
     >>> f([1, 2, 3], [2, 2, 2])
     array([ True, False, False])
-
-    Notes
-    -----
-    Due to Python rules, it is not possible to correctly overload the less than symbol `<` for hashable objects,
-    so `lt` must always be used to compute the Elemwise less than comparison of TensorVariables (which are hashable).
     """
 
 
@@ -651,7 +646,7 @@ def gt(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor of type bool, with 1 (True) where a > b,
         and 0 (False) elsewhere.
 
@@ -664,11 +659,6 @@ def gt(a, b):
     >>> f = pytensor.function([x, y], pt.gt(x, y))
     >>> f([1, 2, 3], [0, 2, 4])
     array([ True, False, False])
-
-    Notes
-    -----
-    Due to Python rules, it is not possible to correctly overload the greater than symbol `>` for hashable objects,
-    so `gt` must always be used to compute the Elemwise greater than comparison of TensorVariables (which are hashable).
     """
 
 
@@ -687,7 +677,7 @@ def le(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor of type bool, with 1 (True) where a <= b,
         and 0 (False) elsewhere.
 
@@ -700,11 +690,6 @@ def le(a, b):
     >>> f = pytensor.function([x, y], pt.le(x, y))
     >>> f([1, 2, 3], [2, 2, 2])
     array([ True,  True, False])
-
-    Notes
-    -----
-    Due to Python rules, it is not possible to correctly overload the less than or equal symbol `<=` for hashable objects,
-    so `le` must always be used to compute the Elemwise less than or equal comparison of TensorVariables (which are hashable).
     """
 
 
@@ -723,7 +708,7 @@ def ge(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor of type bool, with 1 (True) where a >= b,
         and 0 (False) elsewhere.
 
@@ -736,11 +721,6 @@ def ge(a, b):
     >>> f = pytensor.function([x, y], pt.ge(x, y))
     >>> f([1, 2, 3], [0, 2, 4])
     array([ True,  True, False])
-
-    Notes
-    -----
-    Due to Python rules, it is not possible to correctly overload the greater than or equal symbol `>=` for hashable objects,
-    so `ge` must always be used to compute the Elemwise greater than or equal comparison of TensorVariables (which are hashable).
     """
 
 
@@ -759,7 +739,7 @@ def eq(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor of type bool, with 1 (True) where elements are equal,
         and 0 (False) elsewhere.
 
@@ -796,7 +776,7 @@ def neq(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor of type bool, with 1 (True) where a != b,
         and 0 (False) elsewhere.
 
@@ -812,7 +792,7 @@ def neq(a, b):
 
     Notes
     -----
-    Due to Python rules, it is not possible to correctly overload the inequality symbol `!=` for hashable objects,
+    Due to Python rules, it is not possible to overload the inequality symbol `!=` for hashable objects and have it return something other than a boolean,
     so `neq` must always be used to compute the Elemwise inequality of TensorVariables (which are hashable).
     """
 
@@ -830,7 +810,7 @@ def isnan(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor of type bool, with 1 (True) where elements are NaN,
         and 0 (False) elsewhere.
 
@@ -874,7 +854,7 @@ def isinf(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor of type bool, with 1 (True) where elements are infinite,
         and 0 (False) elsewhere.
 
@@ -1065,7 +1045,7 @@ def and_(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the bitwise AND of corresponding elements in a and b.
 
     Examples
@@ -1100,7 +1080,7 @@ def or_(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the bitwise OR of corresponding elements in a and b.
 
     Examples
@@ -1135,7 +1115,7 @@ def xor(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the bitwise XOR of corresponding elements in a and b.
 
     Examples
@@ -1168,7 +1148,7 @@ def invert(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the bitwise negation of each element in a.
 
     Examples
@@ -1214,7 +1194,7 @@ def exp(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the exponential of each element in `a`
 
     Examples
@@ -1243,7 +1223,7 @@ def exp2(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with 2 raised to the power of each element in `a`
 
     Examples
@@ -1275,7 +1255,7 @@ def expm1(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with exp(x) - 1 computed for each element in `a`
 
     Examples
@@ -1308,7 +1288,7 @@ def neg(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the negative of each element in `a`
 
     Examples
@@ -1341,7 +1321,7 @@ def reciprocal(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the reciprocal of each element in `a`
 
     Examples
@@ -1374,7 +1354,7 @@ def log(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the natural logarithm of each element in `a`
 
     Examples
@@ -1403,7 +1383,7 @@ def log2(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the base-2 logarithm of each element in `a`
 
     Examples
@@ -1435,7 +1415,7 @@ def log10(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the base-10 logarithm of each element in `a`
 
     Examples
@@ -1467,7 +1447,7 @@ def log1p(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the natural logarithm of (1 + a) for each element
 
     Examples
@@ -1499,7 +1479,7 @@ def sign(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the sign of each element in `a`: -1 for negative values,
         0 for zero, and 1 for positive values.
 
@@ -1542,7 +1522,7 @@ def ceil(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the ceiling of each element in `a`
 
     Examples
@@ -1569,7 +1549,7 @@ def floor(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the floor of each element in `a`
 
     Examples
@@ -1596,7 +1576,7 @@ def trunc(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the truncated value (integer part) of each element in `a`
 
     Examples
@@ -1658,7 +1638,7 @@ def sqr(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the square of each element in `a`
 
     Examples
@@ -1755,7 +1735,7 @@ def sqrt(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the square root of each element in `a`
 
     Examples
@@ -1787,7 +1767,7 @@ def deg2rad(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with values converted to radians
 
     Examples
@@ -1819,7 +1799,7 @@ def rad2deg(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with values converted to degrees
 
     Examples
@@ -1852,7 +1832,7 @@ def cos(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the cosine of each element
 
     Examples
@@ -1884,7 +1864,7 @@ def arccos(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the arc cosine of each element in radians,
         in the range [0, π]
 
@@ -1918,7 +1898,7 @@ def sin(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the sine of each element
 
     Examples
@@ -1950,7 +1930,7 @@ def arcsin(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the arc sine of each element in radians,
         in the range [-π/2, π/2]
 
@@ -1984,7 +1964,7 @@ def tan(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the tangent of each element
 
     Examples
@@ -2017,7 +1997,7 @@ def arctan(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the arc tangent of each element in radians,
         in the range [-π/2, π/2]
 
@@ -2054,7 +2034,7 @@ def arctan2(a, b):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the arc tangent of a/b in radians, in the range [-π, π]
 
     Examples
@@ -2091,7 +2071,7 @@ def cosh(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the hyperbolic cosine of each element
 
     Examples
@@ -2123,7 +2103,7 @@ def arccosh(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the hyperbolic arc cosine of each element
 
     Examples
@@ -2155,7 +2135,7 @@ def sinh(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the hyperbolic sine of each element
 
     Examples
@@ -2187,7 +2167,7 @@ def arcsinh(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the hyperbolic arc sine of each element
 
     Examples
@@ -2219,7 +2199,7 @@ def tanh(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the hyperbolic tangent of each element,
         with values in the range [-1, 1]
 
@@ -2252,7 +2232,7 @@ def arctanh(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the hyperbolic arc tangent of each element
 
     Examples
@@ -2285,7 +2265,7 @@ def erf(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the error function evaluated at each element,
         with values in the range [-1, 1]
 
@@ -2319,7 +2299,7 @@ def erfc(a):
 
     Returns
     -------
-    tensor
+    TensorVariable
         Output tensor with the complementary error function evaluated at each element
 
     Examples
@@ -2741,7 +2721,7 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
 
     Parameters
     ----------
-    x: TensorVariable
+    x: TensorLike
         The input tensor.
     axis: None or int or (list of int) (see `Sum`)
         Compute the median along this axis of the tensor.
@@ -2785,14 +2765,14 @@ def maximum(x, y):
 
     Parameters
     ----------
-    x : tensor
+    x : TensorLike
         First input tensor
-    y : tensor
+    y : TensorLike
         Second input tensor
 
     Returns
     -------
-    tensor
+    TensorLike
         Output tensor with the maximum of corresponding elements in x and y
 
     Examples
@@ -2821,14 +2801,14 @@ def minimum(x, y):
 
     Parameters
     ----------
-    x : tensor
+    x : TensorLike
         First input tensor
-    y : tensor
+    y : TensorLike
         Second input tensor
 
     Returns
     -------
-    tensor
+    TensorLike
         Output tensor with the minimum of corresponding elements in x and y
 
     Examples
@@ -2857,14 +2837,14 @@ def add(a, *other_terms):
 
     Parameters
     ----------
-    a : tensor
+    a : TensorLike
         First input tensor
     *other_terms : tensors
         Other tensors to add
 
     Returns
     -------
-    tensor
+    TensorLike
         Output tensor with the elementwise sum of all inputs
 
     Examples
@@ -3372,7 +3352,7 @@ def tensordot(
 
     Parameters
     ----------
-    a, b : tensor_like
+    a, b : TensorLike
         Tensors to "dot".
 
     axes : int or (2,) array_like
@@ -3385,7 +3365,7 @@ def tensordot(
 
     Returns
     -------
-    output : TensorVariable
+    output : TensorLike
         The tensor dot product of the input.
         Its shape will be equal to the concatenation of `a` and `b` shapes
         (ignoring the dimensions that were summed over given in ``a_axes``
@@ -4023,7 +4003,7 @@ def logaddexp(*xs):
 
     Returns
     -------
-    tensor
+    TensorVariable
 
     """
 
@@ -4051,7 +4031,7 @@ def logsumexp(x, axis=None, keepdims=False):
 
     Returns
     -------
-    tensor
+    TensorVariable
 
     """
 
