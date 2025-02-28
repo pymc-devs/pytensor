@@ -37,6 +37,7 @@ def function_dump(
     profile: bool | ProfileStats | None = None,
     on_unused_input: str | None = None,
     extra_tag_to_remove: str | None = None,
+    trust_input: bool = False,
 ):
     """
     This is helpful to make a reproducible case for problems during PyTensor
@@ -82,6 +83,7 @@ def function_dump(
         "allow_input_downcast": allow_input_downcast,
         "profile": profile,
         "on_unused_input": on_unused_input,
+        "trust_input": trust_input,
     }
     with Path(filename).open("wb") as f:
         pickler = pytensor.misc.pkl_utils.StripPickler(
@@ -107,6 +109,7 @@ def function(
     allow_input_downcast: bool | None = None,
     profile: bool | ProfileStats | None = None,
     on_unused_input: str | None = None,
+    trust_input: bool = False,
 ):
     """
     Return a :class:`callable object <pytensor.compile.function.types.Function>`
@@ -164,6 +167,12 @@ def function(
     on_unused_input
         What to do if a variable in the 'inputs' list is not used in the graph.
         Possible values are 'raise', 'warn', 'ignore' and None.
+    trust_input: bool, default False
+        If True, no input validation checks are performed when the function is
+        called. This includes checking the number of inputs, their types and
+        that multiple inputs are not aliased to each other. Failure to meet any
+        of these conditions can lead to computational errors or to the
+        interpreter crashing.
 
     Returns
     -------
@@ -310,7 +319,12 @@ def function(
                 "semantics, which disallow using updates and givens"
             )
         fn = orig_function(
-            inputs, outputs, mode=mode, accept_inplace=accept_inplace, name=name
+            inputs,
+            outputs,
+            mode=mode,
+            accept_inplace=accept_inplace,
+            name=name,
+            trust_input=trust_input,
         )
     else:
         # note: pfunc will also call orig_function -- orig_function is
@@ -329,5 +343,6 @@ def function(
             on_unused_input=on_unused_input,
             profile=profile,
             output_keys=output_keys,
+            trust_input=trust_input,
         )
     return fn

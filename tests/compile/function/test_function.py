@@ -54,6 +54,16 @@ def test_function_name():
     assert regex.match(func.name) is not None
 
 
+def test_trust_input():
+    x = dvector()
+    y = shared(1)
+    z = x + y
+    f = function([x], z)
+    assert f.trust_input is False
+    f = function([x], z, trust_input=True)
+    assert f.trust_input is True
+
+
 class TestFunctionIn:
     def test_in_strict(self):
         a = dvector()
