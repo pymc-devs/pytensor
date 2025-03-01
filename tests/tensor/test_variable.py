@@ -451,6 +451,21 @@ class TestTensorInstanceMethods:
         with pytest.raises(TypeError, match=msg):
             x[0] += 5
 
+    def test_transpose(self):
+        X, _ = self.vars
+        x, _ = self.vals
+
+        # Turn (2,2) -> (1,2)
+        X, x = X[1:, :], x[1:, :]
+
+        assert_array_equal(X.transpose(0, 1).eval({X: x}), x.transpose(0, 1))
+        assert_array_equal(X.transpose(1, 0).eval({X: x}), x.transpose(1, 0))
+
+        # Test handing in tuples, lists and np.arrays
+        equal_computations([X.transpose((1, 0))], [X.transpose(1, 0)])
+        equal_computations([X.transpose([1, 0])], [X.transpose(1, 0)])
+        equal_computations([X.transpose(np.array([1, 0]))], [X.transpose(1, 0)])
+
 
 def test_deprecated_import():
     with pytest.warns(

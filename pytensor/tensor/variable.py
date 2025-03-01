@@ -346,7 +346,7 @@ class _tensor_py_operators:
         DimShuffle
 
         """
-        if (len(pattern) == 1) and (isinstance(pattern[0], list | tuple)):
+        if (len(pattern) == 1) and (isinstance(pattern[0], list | tuple | np.ndarray)):
             pattern = pattern[0]
         ds_op = pt.elemwise.DimShuffle(input_ndim=self.type.ndim, new_order=pattern)
         return ds_op(self)
