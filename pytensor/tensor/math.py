@@ -4145,17 +4145,24 @@ def vecdot(
 
     Notes
     -----
-    This is similar to `np.vecdot` and computes the dot product of
+    This is equivalent to `numpy.vecdot` and computes the dot product of
     vectors along the last axis of both inputs. Broadcasting is supported
     across all other dimensions.
 
     Examples
     --------
     >>> import pytensor.tensor as pt
-    >>> x = pt.matrix("x")
-    >>> y = pt.matrix("y")
-    >>> z = pt.vecdot(x, y)
-    >>> # Equivalent to np.sum(x * y, axis=-1)
+    >>> # Vector dot product with shape (5,) inputs
+    >>> x = pt.vector("x")  # shape (5,)
+    >>> y = pt.vector("y")  # shape (5,)
+    >>> z = pt.vecdot(x, y)  # scalar output
+    >>> # Equivalent to numpy.vecdot(x, y) or numpy.sum(x * y)
+    >>>
+    >>> # With batched inputs of shape (3, 5)
+    >>> x_batch = pt.matrix("x")  # shape (3, 5)
+    >>> y_batch = pt.matrix("y")  # shape (3, 5)
+    >>> z_batch = pt.vecdot(x_batch, y_batch)  # shape (3,)
+    >>> # Equivalent to numpy.sum(x_batch * y_batch, axis=-1)
     """
     x1 = as_tensor_variable(x1)
     x2 = as_tensor_variable(x2)
@@ -4199,17 +4206,16 @@ def matvec(
     Examples
     --------
     >>> import pytensor.tensor as pt
-    >>> import numpy as np
     >>> # Matrix-vector product
-    >>> A = pt.matrix("A")  # shape (M, K)
-    >>> v = pt.vector("v")  # shape (K,)
-    >>> result = pt.matvec(A, v)  # shape (M,)
-    >>> # Equivalent to np.matmul(A, v)
+    >>> A = pt.matrix("A")  # shape (3, 4)
+    >>> v = pt.vector("v")  # shape (4,)
+    >>> result = pt.matvec(A, v)  # shape (3,)
+    >>> # Equivalent to numpy.matmul(A, v)
     >>>
     >>> # Batched matrix-vector product
-    >>> batched_A = pt.tensor3("A")  # shape (B, M, K)
-    >>> batched_v = pt.matrix("v")  # shape (B, K)
-    >>> result = pt.matvec(batched_A, batched_v)  # shape (B, M)
+    >>> batched_A = pt.tensor3("A")  # shape (2, 3, 4)
+    >>> batched_v = pt.matrix("v")  # shape (2, 4)
+    >>> result = pt.matvec(batched_A, batched_v)  # shape (2, 3)
     """
     x1 = as_tensor_variable(x1)
     x2 = as_tensor_variable(x2)
@@ -4252,17 +4258,16 @@ def vecmat(
     Examples
     --------
     >>> import pytensor.tensor as pt
-    >>> import numpy as np
     >>> # Vector-matrix product
-    >>> v = pt.vector("v")  # shape (K,)
-    >>> A = pt.matrix("A")  # shape (K, N)
-    >>> result = pt.vecmat(v, A)  # shape (N,)
-    >>> # Equivalent to np.matmul(v, A)
+    >>> v = pt.vector("v")  # shape (3,)
+    >>> A = pt.matrix("A")  # shape (3, 4)
+    >>> result = pt.vecmat(v, A)  # shape (4,)
+    >>> # Equivalent to numpy.matmul(v, A)
     >>>
     >>> # Batched vector-matrix product
-    >>> batched_v = pt.matrix("v")  # shape (B, K)
-    >>> batched_A = pt.tensor3("A")  # shape (B, K, N)
-    >>> result = pt.vecmat(batched_v, batched_A)  # shape (B, N)
+    >>> batched_v = pt.matrix("v")  # shape (2, 3)
+    >>> batched_A = pt.tensor3("A")  # shape (2, 3, 4)
+    >>> result = pt.vecmat(batched_v, batched_A)  # shape (2, 4)
     """
     x1 = as_tensor_variable(x1)
     x2 = as_tensor_variable(x2)

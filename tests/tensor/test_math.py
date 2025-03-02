@@ -2080,55 +2080,36 @@ class TestDot:
 
 
 class TestMatrixVectorOps:
-    def test_vecdot(self):
-        """Test vecdot function with various input shapes."""
-        rng = np.random.default_rng(seed=utt.fetch_seed())
-
-        # Test vector-vector
-        x = vector()
-        y = vector()
-        z = vecdot(x, y)
-        f = function([x, y], z)
-        x_val = random(5, rng=rng).astype(config.floatX)
-        y_val = random(5, rng=rng).astype(config.floatX)
-        np.testing.assert_allclose(f(x_val, y_val), np.dot(x_val, y_val))
-
-        # Test batched vectors
-        x = tensor3()
-        y = tensor3()
-        z = vecdot(x, y)
-        f = function([x, y], z)
-
-        x_val = random(2, 3, 4, rng=rng).astype(config.floatX)
-        y_val = random(2, 3, 4, rng=rng).astype(config.floatX)
-        expected = np.sum(x_val * y_val, axis=-1)
-        np.testing.assert_allclose(f(x_val, y_val), expected)
+    """Test vecdot, matvec, and vecmat helper functions."""
 
     @pytest.mark.parametrize(
-        "func,x_shape,y_shape,make_expected",
+        "func,x_shape,y_shape,np_func,batch_axis",
         [
-            # matvec tests - Matrix(M,K) @ Vector(K) -> Vector(M)
-            (matvec, (3, 4), (4,), lambda x, y: np.dot(x, y)),
-            # matvec batch tests - Tensor3(B,M,K) @ Matrix(B,K) -> Matrix(B,M)
+            # vecdot
+            (vecdot, (5,), (5,), lambda x, y: np.dot(x, y), None),
+            (vecdot, (3, 5), (3, 5), lambda x, y: np.sum(x * y, axis=-1), -1),
+            # matvec
+            (matvec, (3, 4), (4,), lambda x, y: np.dot(x, y), None),
             (
                 matvec,
                 (2, 3, 4),
                 (2, 4),
                 lambda x, y: np.array([np.dot(x[i], y[i]) for i in range(len(x))]),
+                0,
             ),
-            # vecmat tests - Vector(K) @ Matrix(K,N) -> Vector(N)
-            (vecmat, (3,), (3, 4), lambda x, y: np.dot(x, y)),
-            # vecmat batch tests - Matrix(B,K) @ Tensor3(B,K,N) -> Matrix(B,N)
+            # vecmat
+            (vecmat, (3,), (3, 4), lambda x, y: np.dot(x, y), None),
             (
                 vecmat,
                 (2, 3),
                 (2, 3, 4),
                 lambda x, y: np.array([np.dot(x[i], y[i]) for i in range(len(x))]),
+                0,
             ),
         ],
     )
-    def test_mat_vec_ops(self, func, x_shape, y_shape, make_expected):
-        """Parametrized test for matvec and vecmat functions."""
+    def test_matrix_vector_ops(self, func, x_shape, y_shape, np_func, batch_axis):
+        """Test all matrix-vector helper functions."""
         rng = np.random.default_rng(seed=utt.fetch_seed())
 
         # Create PyTensor variables with appropriate dimensions
@@ -2146,17 +2127,24 @@ class TestMatrixVectorOps:
         else:
             y = tensor3()
 
-        # Apply the function
+        # Test basic functionality
         z = func(x, y)
         f = function([x, y], z)
 
-        # Create random values
         x_val = random(*x_shape, rng=rng).astype(config.floatX)
         y_val = random(*y_shape, rng=rng).astype(config.floatX)
 
-        # Compare with the expected result
-        expected = make_expected(x_val, y_val)
+        expected = np_func(x_val, y_val)
         np.testing.assert_allclose(f(x_val, y_val), expected)
+
+        # Test with dtype parameter (to improve code coverage)
+        # Use float64 to ensure we can detect the difference
+        z_dtype = func(x, y, dtype="float64")
+        f_dtype = function([x, y], z_dtype)
+
+        result = f_dtype(x_val, y_val)
+        assert result.dtype == np.float64
+        np.testing.assert_allclose(result, expected)
 
 
 class TestTensordot:
