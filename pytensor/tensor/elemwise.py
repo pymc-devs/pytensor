@@ -847,7 +847,7 @@ class Elemwise(OpenMPOp):
         # for each input:
         # same as range(ndim), but with 'x' at all broadcastable positions
         orders = [
-            [s == 1 and "x" or i for i, s in enumerate(input.type.shape)]
+            [(s == 1 and "x") or i for i, s in enumerate(input.type.shape)]
             for input in inputs
         ]
 
@@ -1671,8 +1671,10 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
             scalar_op = getattr(scalar, symbolname)
             rval = Elemwise(scalar_op, nfunc_spec=(nfunc and (nfunc, nin, nout)))
 
+        # Set the docstring to be just the original function's docstring
+        # without appending the generic Elemwise docstring
         if getattr(symbol, "__doc__"):
-            rval.__doc__ = symbol.__doc__ + "\n\n    " + rval.__doc__
+            rval.__doc__ = symbol.__doc__
 
         # for the meaning of this see the ./epydoc script
         # it makes epydoc display rval as if it were a function, not an object

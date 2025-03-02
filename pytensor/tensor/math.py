@@ -622,7 +622,36 @@ def ge(a, b):
 
 @scalar_elemwise
 def eq(a, b):
-    """a == b"""
+    """Element-wise equality comparison.
+
+    Computes a tensor of 0s and 1s where 1 indicates the corresponding
+    elements of a and b are equal.
+
+    Parameters
+    ----------
+    a, b : tensor_like
+        Input tensors of same shape.
+
+    Returns
+    -------
+    tensor
+        Boolean tensor of same shape as inputs, with 1s where corresponding
+        elements are equal, 0s otherwise.
+
+    Examples
+    --------
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector()
+    >>> y = pt.vector()
+    >>> f = pt.function([x, y], pt.eq(x, y))
+    >>> f([1, 2, 3], [1, 4, 3])
+    array([ True, False,  True])
+
+    Notes
+    -----
+    This function supports the Python syntax `a == b` when used with PyTensor tensors.
+    """
 
 
 @scalar_elemwise
@@ -850,7 +879,29 @@ pprint.assign(abs, printing.PatternPrinter(("|%(0)s|", -1000)))
 
 @scalar_elemwise
 def exp(a):
-    """e^`a`"""
+    """Exponential function (e^a).
+
+    Computes the element-wise exponential of a tensor.
+
+    Parameters
+    ----------
+    a : tensor_like
+        Input tensor
+
+    Returns
+    -------
+    tensor
+        Output tensor with the exponential of each element in `a`.
+
+    Examples
+    --------
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector()
+    >>> f = pt.function([x], pt.exp(x))
+    >>> f([0.0, 1.0, 2.0])
+    array([1.        , 2.7182817 , 7.389056  ], dtype=float32)
+    """
 
 
 @scalar_elemwise
@@ -875,7 +926,34 @@ def reciprocal(a):
 
 @scalar_elemwise
 def log(a):
-    """base e logarithm of a"""
+    """Natural logarithm (base e).
+
+    Computes the element-wise natural logarithm of a tensor.
+
+    Parameters
+    ----------
+    a : tensor_like
+        Input tensor. Should contain only positive values.
+
+    Returns
+    -------
+    tensor
+        Output tensor with the natural logarithm of each element in `a`.
+
+    Examples
+    --------
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector()
+    >>> f = pt.function([x], pt.log(x))
+    >>> f([1.0, 2.7182817, 7.389056])
+    array([0.       , 1.       , 1.9999998], dtype=float32)
+
+    Notes
+    -----
+    For negative or zero values, this function will output NaN.
+    Consider using log1p(x-1) for values close to 1 to avoid numerical precision issues.
+    """
 
 
 @scalar_elemwise
@@ -1956,8 +2034,7 @@ def _tensordot_as_dot(a, b, axes, dot, batched):
 
     if not np.isscalar(axes) and len(axes) != 2:
         raise ValueError(
-            "Axes should be an integer or a "
-            f"list/tuple of len 2 ({axes} was provided)"
+            f"Axes should be an integer or a list/tuple of len 2 ({axes} was provided)"
         )
 
     # if 'axes' is a number of axes to multiply and sum over (trailing axes
@@ -2934,150 +3011,150 @@ equal = eq
 not_equal = neq
 
 __all__ = [
-    "max_and_argmax",
-    "max",
-    "matmul",
-    "argmax",
-    "min",
-    "argmin",
-    "smallest",
-    "largest",
-    "lt",
-    "less",
-    "gt",
-    "greater",
-    "le",
-    "less_equal",
-    "ge",
-    "greater_equal",
-    "eq",
-    "equal",
-    "neq",
-    "not_equal",
-    "isnan",
-    "isinf",
-    "isposinf",
-    "isneginf",
-    "allclose",
-    "isclose",
-    "and_",
-    "bitwise_and",
-    "or_",
-    "bitwise_or",
-    "xor",
-    "bitwise_xor",
-    "invert",
-    "bitwise_not",
     "abs",
-    "exp",
-    "exp2",
-    "expm1",
-    "neg",
-    "reciprocal",
-    "log",
-    "log2",
-    "log10",
-    "log1p",
-    "sgn",
-    "sign",
-    "ceil",
-    "floor",
-    "trunc",
-    "iround",
-    "round",
-    "round_half_to_even",
-    "round_half_away_from_zero",
-    "sqr",
-    "square",
-    "cov",
-    "sqrt",
-    "deg2rad",
-    "rad2deg",
-    "cos",
+    "add",
+    "all",
+    "allclose",
+    "and_",
+    "angle",
+    "any",
     "arccos",
-    "sin",
+    "arccosh",
     "arcsin",
-    "tan",
+    "arcsinh",
     "arctan",
     "arctan2",
-    "cosh",
-    "arccosh",
-    "sinh",
-    "arcsinh",
-    "tanh",
     "arctanh",
+    "argmax",
+    "argmin",
+    "betainc",
+    "betaincinv",
+    "bitwise_and",
+    "bitwise_not",
+    "bitwise_or",
+    "bitwise_xor",
+    "ceil",
+    "ceil_intdiv",
+    "chi2sf",
+    "clip",
+    "complex",
+    "complex_from_polar",
+    "conj",
+    "conjugate",
+    "cos",
+    "cosh",
+    "cov",
+    "deg2rad",
+    "dense_dot",
+    "digamma",
+    "divmod",
+    "dot",
+    "eq",
+    "equal",
     "erf",
     "erfc",
+    "erfcinv",
     "erfcx",
     "erfinv",
-    "erfcinv",
-    "owens_t",
+    "exp",
+    "exp2",
+    "expit",
+    "expm1",
+    "floor",
+    "floor_div",
     "gamma",
-    "gammaln",
-    "psi",
-    "digamma",
-    "tri_gamma",
-    "polygamma",
-    "chi2sf",
     "gammainc",
     "gammaincc",
-    "gammau",
-    "gammal",
-    "gammaincinv",
     "gammainccinv",
+    "gammaincinv",
+    "gammal",
+    "gammaln",
+    "gammau",
+    "ge",
+    "greater",
+    "greater_equal",
+    "gt",
+    "hyp2f1",
+    "i0",
+    "i1",
+    "imag",
+    "int_div",
+    "invert",
+    "iround",
+    "isclose",
+    "isinf",
+    "isnan",
+    "isneginf",
+    "isposinf",
+    "iv",
+    "ive",
     "j0",
     "j1",
     "jv",
-    "i0",
-    "i1",
-    "iv",
-    "ive",
     "kv",
     "kve",
-    "sigmoid",
-    "expit",
-    "softplus",
-    "log1pexp",
+    "largest",
+    "le",
+    "less",
+    "less_equal",
+    "log",
     "log1mexp",
-    "betainc",
-    "betaincinv",
-    "real",
-    "imag",
-    "angle",
-    "complex",
-    "conj",
-    "conjugate",
-    "complex_from_polar",
-    "sum",
-    "prod",
-    "mean",
-    "median",
-    "var",
-    "std",
-    "std",
-    "maximum",
-    "minimum",
-    "divmod",
-    "add",
-    "sub",
-    "mul",
-    "true_div",
-    "int_div",
-    "floor_div",
-    "ceil_intdiv",
-    "mod",
-    "pow",
-    "clip",
-    "dot",
-    "dense_dot",
-    "tensordot",
-    "outer",
-    "any",
-    "all",
-    "ptp",
-    "power",
+    "log1p",
+    "log1pexp",
+    "log2",
+    "log10",
     "logaddexp",
     "logsumexp",
-    "hyp2f1",
+    "lt",
+    "matmul",
+    "max",
+    "max_and_argmax",
+    "maximum",
+    "mean",
+    "median",
+    "min",
+    "minimum",
+    "mod",
+    "mul",
     "nan_to_num",
+    "neg",
+    "neq",
+    "not_equal",
+    "or_",
+    "outer",
+    "owens_t",
+    "polygamma",
+    "pow",
+    "power",
+    "prod",
+    "psi",
+    "ptp",
+    "rad2deg",
+    "real",
+    "reciprocal",
+    "round",
+    "round_half_away_from_zero",
+    "round_half_to_even",
+    "sgn",
+    "sigmoid",
+    "sign",
+    "sin",
+    "sinh",
+    "smallest",
+    "softplus",
+    "sqr",
+    "sqrt",
+    "square",
+    "std",
+    "std",
+    "sub",
+    "sum",
+    "tan",
+    "tanh",
+    "tensordot",
+    "tri_gamma",
+    "true_div",
+    "trunc",
+    "var",
+    "xor",
 ]
