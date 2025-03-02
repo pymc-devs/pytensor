@@ -417,6 +417,17 @@ def _right_to_left_path(n: int) -> tuple[tuple[int, int], ...]:
     return tuple(pairwise(reversed(range(n))))
 
 
+def _ensure_not_equal(elements):
+    """
+    Ensures that any pair in a list of elements are not the same object. If a pair of elements is found to be equal, then one of them is converted to a copy.
+    """
+    for i in range(len(elements)):
+        for j in range(i + 1, len(elements)):
+            if elements[i] == elements[j]:
+                elements[j] = elements[j].copy()
+    return elements
+
+
 def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVariable:
     """
     Multiplication and summation of tensors using the Einstein summation convention.
@@ -553,7 +564,7 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
             "If you need this functionality open an issue in https://github.com/pymc-devs/pytensor/issues to let us know. "
         )
 
-    tensor_operands = [as_tensor(operand) for operand in operands]
+    tensor_operands = _ensure_not_equal([as_tensor(operand) for operand in operands])
     shapes = [operand.type.shape for operand in tensor_operands]
 
     path: PATH
