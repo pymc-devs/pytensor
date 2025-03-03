@@ -422,9 +422,8 @@ def _ensure_not_equal(elements):
     Ensures that any pair in a list of elements are not the same object. If a pair of elements is found to be equal, then one of them is converted to a copy.
     """
     elements = list(elements)
-    n_elem = len(elements)
     for i, elem1 in enumerate(elements[:-1]):
-        for j, elem2 in enumerate(elements[i + 1:], start=i+1):
+        for j, elem2 in enumerate(elements[i + 1 :], start=i + 1):
             if elem1 is elem2:
                 elements[j] = elem1.copy()
     return elements
