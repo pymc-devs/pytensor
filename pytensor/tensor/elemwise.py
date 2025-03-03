@@ -515,27 +515,6 @@ class Elemwise(OpenMPOp):
         # Compute grad with respect to broadcasted input
         rval = self._bgrad(inputs, outs, ograds)
 
-        # TODO: make sure that zeros are clearly identifiable
-        # to the gradient.grad method when the outputs have
-        # some integer and some floating point outputs
-        if any(out.type.dtype not in continuous_dtypes for out in outs):
-            # For integer output, return value may only be zero or undefined
-            # We don't bother with trying to check that the scalar ops
-            # correctly returned something that evaluates to 0, we just make
-            # the return value obviously zero so that gradient.grad can tell
-            # this op did the right thing.
-            new_rval = []
-            for elem, ipt in zip(rval, inputs, strict=True):
-                if isinstance(elem.type, NullType | DisconnectedType):
-                    new_rval.append(elem)
-                else:
-                    elem = ipt.zeros_like()
-                    if str(elem.type.dtype) not in continuous_dtypes:
-                        elem = elem.astype(config.floatX)
-                    assert str(elem.type.dtype) not in discrete_dtypes
-                    new_rval.append(elem)
-            return new_rval
-
         # sum out the broadcasted dimensions
         for i, ipt in enumerate(inputs):
             if isinstance(rval[i].type, NullType | DisconnectedType):
