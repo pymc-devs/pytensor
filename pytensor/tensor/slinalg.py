@@ -296,13 +296,12 @@ class SolveBase(Op):
         # We need to return (dC/d[inv(A)], dC/db)
         c_bar = output_gradients[0]
 
-        trans_solve_op = type(self)(
-            **{
-                k: (not getattr(self, k) if k == "lower" else getattr(self, k))
-                for k in self.__props__
-            }
-        )
-        b_bar = trans_solve_op(A.T, c_bar)
+        props_dict = self._props_dict()
+        props_dict["lower"] = not self.lower
+
+        solve_op = type(self)(**props_dict)
+
+        b_bar = solve_op(A.T, c_bar)
         # force outer product if vector second input
         A_bar = -ptm.outer(b_bar, c) if c.ndim == 1 else -b_bar.dot(c.T)
 
@@ -385,7 +384,6 @@ class SolveTriangular(SolveBase):
     """Solve a system of linear equations."""
 
     __props__ = (
-        "trans",
         "unit_diagonal",
         "lower",
         "check_finite",
@@ -393,11 +391,10 @@ class SolveTriangular(SolveBase):
         "overwrite_b",
     )
 
-    def __init__(self, *, trans=0, unit_diagonal=False, **kwargs):
+    def __init__(self, *, unit_diagonal=False, **kwargs):
         if kwargs.get("overwrite_a", False):
             raise ValueError("overwrite_a is not supported for SolverTriangulare")
         super().__init__(**kwargs)
-        self.trans = trans
         self.unit_diagonal = unit_diagonal
 
     def perform(self, node, inputs, outputs):
@@ -406,7 +403,7 @@ class SolveTriangular(SolveBase):
             A,
             b,
             lower=self.lower,
-            trans=self.trans,
+            trans=0,
             unit_diagonal=self.unit_diagonal,
             check_finite=self.check_finite,
             overwrite_b=self.overwrite_b,
@@ -445,9 +442,9 @@ def solve_triangular(
 
     Parameters
     ----------
-    a
+    a: TensorVariable
         Square input data
-    b
+    b: TensorVariable
         Input data for the right hand side.
     lower : bool, optional
         Use only data contained in the lower triangle of `a`. Default is to use upper triangle.
@@ -468,10 +465,17 @@ def solve_triangular(
         This will influence how batched dimensions are interpreted.
     """
     b_ndim = _default_b_ndim(b, b_ndim)
+
+    if trans in [1, "T", True]:
+        a = a.mT
+        lower = not lower
+    if trans in [2, "C"]:
+        a = a.conj().mT
+        lower = not lower
+
     ret = Blockwise(
         SolveTriangular(
             lower=lower,
-            trans=trans,
             unit_diagonal=unit_diagonal,
             check_finite=check_finite,
             b_ndim=b_ndim,
@@ -534,6 +538,7 @@ def solve(
     *,
     assume_a="gen",
     lower=False,
+    transposed=False,
     check_finite=True,
     b_ndim: int | None = None,
 ):
@@ -564,8 +569,10 @@ def solve(
     b : (..., N, NRHS) array_like
         Input data for the right hand side.
     lower : bool, optional
-        If True, only the data contained in the lower triangle of `a`. Default
+        If True, use only the data contained in the lower triangle of `a`. Default
         is to use upper triangle. (ignored for ``'gen'``)
+    transposed: bool, optional
+        If True, solves the system A^T x = b. Default is False.
     check_finite : bool, optional
         Whether to check that the input matrices contain only finite numbers.
         Disabling may give a performance gain, but may result in problems
@@ -577,6 +584,11 @@ def solve(
         This will influence how batched dimensions are interpreted.
     """
     b_ndim = _default_b_ndim(b, b_ndim)
+
+    if transposed:
+        a = a.mT
+        lower = not lower
+
     return Blockwise(
         Solve(
             lower=lower,
