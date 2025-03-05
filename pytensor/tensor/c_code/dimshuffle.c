@@ -33,12 +33,17 @@ int APPLY_SPECIFIC(cpu_dimshuffle)(PyArrayObject *input, PyArrayObject **res, PA
     npy_intp original_size = PyArray_SIZE(input);
     npy_intp new_size = 1;
     for (npy_intp i = 0; i < nd_out; ++i) {
+        // We set the strides of length 1 dimensions to PyArray_ITEMSIZE(input).
+        // The value is arbitrary, because there is never a next element.
+        // np.expand_dims(x, 0) and x[None] do different things here.
+        // I would prefer zero, but there are some poorly implemented BLAS operations
+        // That don't handle zero strides correctly. At least they won't fail because of DimShuffle.
         if (new_order[i] != -1) {
             dimensions[i] = PyArray_DIMS(input)[new_order[i]];
-            strides[i] = PyArray_DIMS(input)[new_order[i]] == 1 ? 0 : PyArray_STRIDES(input)[new_order[i]];
+            strides[i] = PyArray_DIMS(input)[new_order[i]] == 1 ? PyArray_ITEMSIZE(input) : PyArray_STRIDES(input)[new_order[i]];
         } else {
             dimensions[i] = 1;
-            strides[i] = 0;
+            strides[i] = PyArray_ITEMSIZE(input);
         }
         new_size *= dimensions[i];
     }
