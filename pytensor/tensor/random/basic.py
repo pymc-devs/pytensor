@@ -3,7 +3,6 @@ import warnings
 from typing import Literal
 
 import numpy as np
-import scipy.stats as stats
 from numpy import broadcast_shapes as np_broadcast_shapes
 from numpy import einsum as np_einsum
 from numpy import sqrt as np_sqrt
@@ -19,6 +18,11 @@ from pytensor.tensor.random.utils import (
     broadcast_params,
     normalize_size_param,
 )
+
+
+# Scipy.stats is considerably slow to import
+# We import scipy.stats lazily inside `ScipyRandomVariable`
+stats = None
 
 
 try:
@@ -57,6 +61,9 @@ class ScipyRandomVariable(RandomVariable):
 
     @classmethod
     def rng_fn(cls, *args, **kwargs):
+        global stats
+        if stats is None:
+            import scipy.stats as stats
         size = args[-1]
         res = cls.rng_fn_scipy(*args, **kwargs)
 
