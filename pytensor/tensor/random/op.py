@@ -2,7 +2,7 @@ import warnings
 from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any, cast
-
+from itertools import zip_longest
 import numpy as np
 
 import pytensor
@@ -11,6 +11,7 @@ from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
+from pytensor.tensor.basic import get_underlying_scalar_constant_value
 from pytensor.tensor.basic import (
     as_tensor_variable,
     concatenate,
@@ -30,6 +31,13 @@ from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst, NoneTypeT
 from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
+
+
+def _get_value(x):
+    try:
+        return get_underlying_scalar_constant_value(x)
+    except Exception:
+        return x
 
 
 class RandomVariable(Op):
@@ -393,11 +401,26 @@ class RandomVariable(Op):
     def perform(self, node, inputs, outputs):
         rng, size, *args = inputs
 
-        # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng` otherwise.
+        # Draw from `rng` if `self.inplace` is True; otherwise, use a copy.
         if not self.inplace:
             rng = deepcopy(rng)
 
+        # Validate that 'size' is broadcastable with the expected batch dimensions.
+        # Use the shape of the first input argument (if provided) as the expected batch shape.
+        if size is not None and args:
+            expected_shape = args[0].shape  # Shape of the first input tensor
+            # Evaluate symbolic elements to concrete values when possible.
+            size_tuple = tuple(_get_value(s) for s in size)
+            expected_shape_concrete = tuple(_get_value(e) for e in expected_shape)
+            for s, e in zip_longest(size_tuple, expected_shape_concrete, fillvalue=1):
+                # Broadcasting rule: dimensions are compatible if they are equal or one of them is 1.
+                if not (s == e or s == 1 or e == 1):
+                    raise ValueError("Size length is incompatible with batched dimensions.")
+
+        # Assign the (possibly updated) RNG state.
         outputs[0][0] = rng
+
+        # Generate the random values and assign them to the output.
         outputs[1][0] = np.asarray(
             self.rng_fn(rng, *args, None if size is None else tuple(size)),
             dtype=self.dtype,
