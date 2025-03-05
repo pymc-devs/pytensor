@@ -89,6 +89,7 @@ from pytensor.tensor.math import (
     logaddexp,
     logsumexp,
     matmul,
+    matvec,
     max,
     max_and_argmax,
     maximum,
@@ -123,6 +124,8 @@ from pytensor.tensor.math import (
     true_div,
     trunc,
     var,
+    vecdot,
+    vecmat,
 )
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
@@ -2074,6 +2077,74 @@ class TestDot:
                             assert is_super_shape(x, g)
                             g = grad(z.sum(), y)
                             assert is_super_shape(y, g)
+
+
+class TestMatrixVectorOps:
+    """Test vecdot, matvec, and vecmat helper functions."""
+
+    @pytest.mark.parametrize(
+        "func,x_shape,y_shape,np_func,batch_axis",
+        [
+            # vecdot
+            (vecdot, (5,), (5,), lambda x, y: np.dot(x, y), None),
+            (vecdot, (3, 5), (3, 5), lambda x, y: np.sum(x * y, axis=-1), -1),
+            # matvec
+            (matvec, (3, 4), (4,), lambda x, y: np.dot(x, y), None),
+            (
+                matvec,
+                (2, 3, 4),
+                (2, 4),
+                lambda x, y: np.array([np.dot(x[i], y[i]) for i in range(len(x))]),
+                0,
+            ),
+            # vecmat
+            (vecmat, (3,), (3, 4), lambda x, y: np.dot(x, y), None),
+            (
+                vecmat,
+                (2, 3),
+                (2, 3, 4),
+                lambda x, y: np.array([np.dot(x[i], y[i]) for i in range(len(x))]),
+                0,
+            ),
+        ],
+    )
+    def test_matrix_vector_ops(self, func, x_shape, y_shape, np_func, batch_axis):
+        """Test all matrix-vector helper functions."""
+        rng = np.random.default_rng(seed=utt.fetch_seed())
+
+        # Create PyTensor variables with appropriate dimensions
+        if len(x_shape) == 1:
+            x = vector()
+        elif len(x_shape) == 2:
+            x = matrix()
+        else:
+            x = tensor3()
+
+        if len(y_shape) == 1:
+            y = vector()
+        elif len(y_shape) == 2:
+            y = matrix()
+        else:
+            y = tensor3()
+
+        # Test basic functionality
+        z = func(x, y)
+        f = function([x, y], z)
+
+        x_val = random(*x_shape, rng=rng).astype(config.floatX)
+        y_val = random(*y_shape, rng=rng).astype(config.floatX)
+
+        expected = np_func(x_val, y_val)
+        np.testing.assert_allclose(f(x_val, y_val), expected)
+
+        # Test with dtype parameter (to improve code coverage)
+        # Use float64 to ensure we can detect the difference
+        z_dtype = func(x, y, dtype="float64")
+        f_dtype = function([x, y], z_dtype)
+
+        result = f_dtype(x_val, y_val)
+        assert result.dtype == np.float64
+        np.testing.assert_allclose(result, expected)
 
 
 class TestTensordot:
