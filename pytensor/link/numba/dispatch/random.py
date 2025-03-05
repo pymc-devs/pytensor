@@ -398,7 +398,19 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     core_shape_len = get_vector_length(core_shape)
     inplace = rv_op.inplace
 
-    core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
+    try:
+        core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
+    except NotImplementedError:
+        import warnings
+        warnings.warn(
+            f"RandomVariable {rv_op} is not implemented in Numba. Falling back to object mode."
+        )
+
+        def fallback_object_mode(*args, **kwargs):
+            return None  # Default behavior when RV is not implemented
+
+        return fallback_object_mode
+        
     nin = 1 + len(dist_params)  # rng + params
     core_op_fn = store_core_outputs(core_rv_fn, nin=nin, nout=1)
 
