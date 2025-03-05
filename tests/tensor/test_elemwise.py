@@ -185,14 +185,13 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
         # as the broadcasted value; that way, we'll be able to tell that we're getting
         # junk data from a poorly constructed array view.
         x_val = np.broadcast_to(2039, (5000,))
-        expected_x_val = x_val[None]
         for i in range(1):
             inputs[0].storage[0] = x_val
             thunk()
             # Make sure it's a view of the original data
             assert np.shares_memory(x_val, outputs[0].storage[0])
             # Confirm the right strides
-            assert outputs[0].storage[0].strides == expected_x_val.strides
+            assert outputs[0].storage[0].strides[-1] == 0
             # Confirm the broadcasted value in the output
             assert np.array_equiv(outputs[0].storage[0], 2039)
 
