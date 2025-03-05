@@ -1,15 +1,14 @@
-from pytensor.tensor.ssignal import GaussSpline, gauss_spline
-from pytensor.tensor.type import matrix
-from pytensor import function
-from pytensor import tensor as pt
 import numpy as np
 import pytest
-from tests import unittest_tools as utt
-
 import scipy.signal as scipy_signal
 
+from pytensor import function
+from pytensor.tensor.ssignal import GaussSpline, gauss_spline
+from pytensor.tensor.type import matrix
+from tests import unittest_tools as utt
+
+
 class TestGaussSpline(utt.InferShapeTester):
-    
     def setup_method(self):
         super().setup_method()
         self.op_class = GaussSpline
@@ -20,7 +19,7 @@ class TestGaussSpline(utt.InferShapeTester):
         a = matrix()
         with pytest.raises(ValueError, match="n must be a non-negative integer"):
             self.op(a, n=n)
-        
+
     def test_perform(self):
         a = matrix()
         f = function([a], self.op(a, n=10))

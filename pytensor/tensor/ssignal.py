@@ -1,14 +1,14 @@
-from pytensor.tensor import Op, as_tensor_variable
-from pytensor.graph.basic import Apply 
-import pytensor.tensor as pt
-from pytensor.tensor.type import TensorType
 import scipy.signal as scipy_signal
+
+from pytensor.graph.basic import Apply
+from pytensor.tensor import Op, as_tensor_variable
+from pytensor.tensor.type import TensorType
 
 
 class GaussSpline(Op):
     __props__ = ("n",)
 
-    def __init__(self, n: int = None):
+    def __init__(self, n: int):
         self.n = n
 
     def make_node(self, knots):
