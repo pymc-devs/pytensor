@@ -74,7 +74,9 @@ class PytorchLinker(JITLinker):
                     if getattr(pytensor.link.utils, n[1:], False):
                         delattr(pytensor.link.utils, n[1:])
 
-                return tuple(out.cpu().numpy() for out in outs)
+                return tuple(
+                    out.cpu().numpy() if torch.is_tensor(out) else out for out in outs
+                )
 
             def __del__(self):
                 del self.gen_functors

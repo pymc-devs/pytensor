@@ -25,9 +25,10 @@ def torch_funcify_RandomVariable(op: ptr.RandomVariable, node, **kwargs):
     rv = node.outputs[1]
     out_dtype = rv.type.dtype
     shape = rv.type.shape
+    rv_sample = pytorch_sample_fn(op, node=node)
 
-    def sample_fn(rng, size, *parameters):
-        return pytorch_sample_fn(op, node=node)(rng, shape, out_dtype, *parameters)
+    def sample_fn(rng, size, *args):
+        return rv_sample(rng, shape, out_dtype, *args)
 
     return sample_fn
 
