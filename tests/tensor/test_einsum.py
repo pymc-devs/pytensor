@@ -8,6 +8,7 @@ import pytensor
 from pytensor import Mode, config, function
 from pytensor.graph import FunctionGraph
 from pytensor.graph.op import HasInnerGraph
+from pytensor.tensor import matrix
 from pytensor.tensor.basic import moveaxis
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.einsum import _delta, _general_dot, _iota, einsum
@@ -280,4 +281,16 @@ def test_threeway_mul(static_length):
     np.testing.assert_allclose(
         out.eval({x: x_test, y: y_test, z: z_test}),
         np.full((3,), fill_value=6),
+    )
+
+
+def test_repeated_inputs():
+    x = matrix("x")
+    out_repeated = einsum("ij,ij->i", x, x)
+    out_copy = einsum("ij,ij->i", x, x.copy())
+
+    x_test = np.array([[1, 2], [3, 4]])
+
+    np.testing.assert_allclose(
+        out_repeated.eval({x: x_test}), out_copy.eval({x: x_test})
     )
