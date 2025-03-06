@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Callable
 
 import numba
@@ -1071,14 +1072,17 @@ def numba_funcify_Solve(op, node, **kwargs):
     elif assume_a == "sym":
         solve_fn = _solve_symmetric
     elif assume_a == "her":
-        raise NotImplementedError(
-            'Use assume_a = "sym" for symmetric real matrices. If you need compelx support, '
-            "please open an issue on github."
-        )
+        # We already ruled out complex inputs
+        solve_fn = _solve_symmetric
     elif assume_a == "pos":
         solve_fn = _solve_psd
     else:
-        raise NotImplementedError(f"Assumption {assume_a} not supported in Numba mode")
+        warnings.warn(
+            f"Numba assume_a={assume_a} not implemented. Falling back to general solve.\n"
+            f"If appropriate, you may want to set assume_a to one of 'sym', 'pos', or 'her' to improve performance.",
+            UserWarning,
+        )
+        solve_fn = _solve_gen
 
     @numba_basic.numba_njit(inline="always")
     def solve(a, b):

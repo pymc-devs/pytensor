@@ -10,6 +10,8 @@ import pytensor
 from pytensor import function, grad
 from pytensor import tensor as pt
 from pytensor.configdefaults import config
+from pytensor.graph.basic import equal_computations
+from pytensor.tensor import TensorVariable
 from pytensor.tensor.slinalg import (
     Cholesky,
     CholeskySolve,
@@ -211,8 +213,8 @@ class TestSolveBase:
         )
 
 
-def test_solve_raises_on_invalid_A():
-    with pytest.raises(ValueError, match="is not a recognized matrix structure"):
+def test_solve_raises_on_invalid_assume_a():
+    with pytest.raises(ValueError, match="Invalid assume_a: test. It must be one of"):
         Solve(assume_a="test", b_ndim=2)
 
 
@@ -225,6 +227,10 @@ solve_test_cases = [
     ("pos", False, False),
     ("pos", True, False),
     ("pos", True, True),
+    ("diagonal", False, False),
+    ("diagonal", False, True),
+    ("tridiagonal", False, False),
+    ("tridiagonal", False, True),
 ]
 solve_test_ids = [
     f'{assume_a}_{"lower" if lower else "upper"}_{"A^T" if transposed else "A"}'
@@ -239,6 +245,16 @@ class TestSolve(utt.InferShapeTester):
             return x @ x.T
         elif assume_a == "sym":
             return (x + x.T) / 2
+        elif assume_a == "diagonal":
+            eye_fn = pt.eye if isinstance(x, TensorVariable) else np.eye
+            return x * eye_fn(x.shape[1])
+        elif assume_a == "tridiagonal":
+            eye_fn = pt.eye if isinstance(x, TensorVariable) else np.eye
+            return x * (
+                eye_fn(x.shape[1], k=0)
+                + eye_fn(x.shape[1], k=-1)
+                + eye_fn(x.shape[1], k=1)
+            )
         else:
             return x
 
@@ -345,6 +361,22 @@ class TestSolve(utt.InferShapeTester):
         utt.verify_grad(
             lambda A, b: solve_op(A_func(A), b), [A_val, b_val], 3, rng, eps=eps
         )
+
+    def test_solve_tringular_indirection(self):
+        a = pt.matrix("a")
+        b = pt.vector("b")
+
+        indirect = solve(a, b, assume_a="lower triangular")
+        direct = solve_triangular(a, b, lower=True, trans=False)
+        assert equal_computations([indirect], [direct])
+
+        indirect = solve(a, b, assume_a="upper triangular")
+        direct = solve_triangular(a, b, lower=False, trans=False)
+        assert equal_computations([indirect], [direct])
+
+        indirect = solve(a, b, assume_a="upper triangular", transposed=True)
+        direct = solve_triangular(a, b, lower=False, trans=True)
+        assert equal_computations([indirect], [direct])
 
 
 class TestSolveTriangular(utt.InferShapeTester):
