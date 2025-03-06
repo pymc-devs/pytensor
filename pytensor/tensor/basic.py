@@ -4369,7 +4369,7 @@ atleast_2d = partial(atleast_Nd, n=2)
 atleast_3d = partial(atleast_Nd, n=3)
 
 
-def expand_dims(a: np.ndarray | TensorVariable, axis: Sequence[int]) -> TensorVariable:
+def expand_dims(a: "TensorLike", axis: Sequence[int] | int) -> TensorVariable:
     """Expand the shape of an array.
 
     Insert a new axis that will appear at the `axis` position in the expanded
