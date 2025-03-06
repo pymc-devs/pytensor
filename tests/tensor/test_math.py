@@ -2093,15 +2093,19 @@ def test_matrix_vector_ops():
     # For matvec: x1(b,m,k) @ x2(b,k) -> out(b,m)
     # For vecmat: x1(b,k) @ x2(b,k,n) -> out(b,n)
 
-    # Create tensor variables
-    mat_mk = tensor(name="mat_mk", shape=(batch_size, dim_m, dim_k))
-    mat_kn = tensor(name="mat_kn", shape=(batch_size, dim_k, dim_n))
-    vec_k = tensor(name="vec_k", shape=(batch_size, dim_k))
+    # Create test values using config.floatX to match PyTensor's default dtype
+    mat_mk_val = random(batch_size, dim_m, dim_k, rng=rng).astype(config.floatX)
+    mat_kn_val = random(batch_size, dim_k, dim_n, rng=rng).astype(config.floatX)
+    vec_k_val = random(batch_size, dim_k, rng=rng).astype(config.floatX)
 
-    # Create test values
-    mat_mk_val = random(batch_size, dim_m, dim_k, rng=rng).astype("float64")
-    mat_kn_val = random(batch_size, dim_k, dim_n, rng=rng).astype("float64")
-    vec_k_val = random(batch_size, dim_k, rng=rng).astype("float64")
+    # Create tensor variables with matching dtype
+    mat_mk = tensor(
+        name="mat_mk", shape=(batch_size, dim_m, dim_k), dtype=config.floatX
+    )
+    mat_kn = tensor(
+        name="mat_kn", shape=(batch_size, dim_k, dim_n), dtype=config.floatX
+    )
+    vec_k = tensor(name="vec_k", shape=(batch_size, dim_k), dtype=config.floatX)
 
     # Test 1: vecdot with matching dimensions
     vecdot_out = vecdot(vec_k, vec_k, dtype="int32")
@@ -2123,7 +2127,7 @@ def test_matrix_vector_ops():
     result_matvec = matvec_fn(mat_mk_val, vec_k_val)
 
     # Calculate expected manually
-    expected_matvec = np.zeros((batch_size, dim_m), dtype=np.float64)
+    expected_matvec = np.zeros((batch_size, dim_m), dtype=config.floatX)
     for i in range(batch_size):
         expected_matvec[i] = np.dot(mat_mk_val[i], vec_k_val[i])
     np.testing.assert_allclose(result_matvec, expected_matvec)
@@ -2134,7 +2138,7 @@ def test_matrix_vector_ops():
     result_vecmat = vecmat_fn(vec_k_val, mat_kn_val)
 
     # Calculate expected manually
-    expected_vecmat = np.zeros((batch_size, dim_n), dtype=np.float64)
+    expected_vecmat = np.zeros((batch_size, dim_n), dtype=config.floatX)
     for i in range(batch_size):
         expected_vecmat[i] = np.dot(vec_k_val[i], mat_kn_val[i])
     np.testing.assert_allclose(result_vecmat, expected_vecmat)
