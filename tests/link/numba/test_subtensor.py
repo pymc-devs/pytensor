@@ -392,8 +392,8 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             np.array(-99),  # Broadcasted value
             ([1, 2], [2, 3]),  # 2 vector indices
             False,
-            True,
-            True,
+            False,
+            False,
         ),
         (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
