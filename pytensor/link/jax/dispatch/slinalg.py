@@ -1,3 +1,5 @@
+import warnings
+
 import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
@@ -39,13 +41,29 @@ def jax_funcify_Cholesky(op, **kwargs):
 
 @jax_funcify.register(Solve)
 def jax_funcify_Solve(op, **kwargs):
-    if op.assume_a != "gen" and op.lower:
-        lower = True
-    else:
-        lower = False
+    assume_a = op.assume_a
+    lower = op.lower
 
-    def solve(a, b, lower=lower):
-        return jax.scipy.linalg.solve(a, b, lower=lower)
+    if assume_a == "tridiagonal":
+        # jax.scipy.solve does not yet support tridiagonal matrices
+        # But there's a jax.lax.linalg.tridiaonal_solve we can use instead.
+        def solve(a, b):
+            dl = jax.numpy.diagonal(a, offset=-1, axis1=-2, axis2=-1)
+            d = jax.numpy.diagonal(a, offset=0, axis1=-2, axis2=-1)
+            du = jax.numpy.diagonal(a, offset=1, axis1=-2, axis2=-1)
+            return jax.lax.linalg.tridiagonal_solve(dl, d, du, b, lower=lower)
+
+    else:
+        if assume_a not in ("gen", "sym", "her", "pos"):
+            warnings.warn(
+                f"JAX solve does not support assume_a={op.assume_a}. Defaulting to assume_a='gen'.\n"
+                f"If appropriate, you may want to set assume_a to one of 'sym', 'pos', 'her' or 'tridiagonal' to improve performance.",
+                UserWarning,
+            )
+            assume_a = "gen"
+
+        def solve(a, b):
+            return jax.scipy.linalg.solve(a, b, lower=lower, assume_a=assume_a)
 
     return solve
 
