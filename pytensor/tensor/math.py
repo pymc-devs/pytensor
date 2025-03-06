@@ -4164,9 +4164,6 @@ def vecdot(
     >>> z_batch = pt.vecdot(x_batch, y_batch)  # shape (3,)
     >>> # Equivalent to numpy.vecdot(x_batch, y_batch)
     """
-    x1 = as_tensor_variable(x1)
-    x2 = as_tensor_variable(x2)
-
     out = _inner_prod(x1, x2)
 
     if dtype is not None:
@@ -4216,9 +4213,6 @@ def matvec(
     >>> result = pt.matvec(batched_A, batched_v)  # shape (2, 3)
     >>> # Equivalent to numpy.matvec(batched_A, batched_v)
     """
-    x1 = as_tensor_variable(x1)
-    x2 = as_tensor_variable(x2)
-
     out = _matrix_vec_prod(x1, x2)
 
     if dtype is not None:
@@ -4268,9 +4262,6 @@ def vecmat(
     >>> result = pt.vecmat(batched_v, batched_A)  # shape (2, 4)
     >>> # Equivalent to numpy.vecmat(batched_v, batched_A)
     """
-    x1 = as_tensor_variable(x1)
-    x2 = as_tensor_variable(x2)
-
     out = _vec_matrix_prod(x1, x2)
 
     if dtype is not None:
