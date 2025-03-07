@@ -474,7 +474,7 @@ class TestScanSITSOTBuffer:
             expected_buffer_size = 3
         elif buffer_size == "whole":
             xs_kept = xs  # What users think is the whole buffer
-            expected_buffer_size = n_steps - 1
+            expected_buffer_size = n_steps
         elif buffer_size == "whole+init":
             xs_kept = xs.owner.inputs[0]  # Whole buffer actually used by Scan
             expected_buffer_size = n_steps

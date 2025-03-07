@@ -1420,9 +1420,18 @@ def scan_save_mem(fgraph, node):
                     store_steps[i] = 0
                     break
 
-                if isinstance(this_slice[0], slice) and this_slice[0].start is None:
-                    store_steps[i] = 0
-                    break
+                if isinstance(this_slice[0], slice):
+                    start = this_slice[0].start
+                    if isinstance(start, Constant):
+                        start = start.data
+                    # Don't do anything if the subtensor is starting from the beginning of the buffer
+                    # Or just skipping the initial values (default output returned to the user).
+                    # Trimming the initial values would require a roll to align the buffer once scan is done
+                    # As it always starts writing at position [0+max(taps)], and ends up at position [:max(taps)]
+                    # It's cheaper to just keep the initial values in the buffer and slice them away (default output)
+                    if start in (0, None, init_l[i]):
+                        store_steps[i] = 0
+                        break
 
                 # Special case for recurrent outputs where only the last result
                 # is requested. This is needed for this rewrite to apply to
