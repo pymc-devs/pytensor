@@ -742,7 +742,7 @@ class TestPushOutAddScan:
         utt.assert_allclose(f_opt_output, f_no_opt_output)
 
     def test_non_zero_init(self):
-        """Test the case where the initial value for the nitsot output is non-zero."""
+        """Test the case where the initial value for the sitsot output is non-zero."""
 
         input1 = tensor3()
         input2 = tensor3()
@@ -759,8 +759,7 @@ class TestPushOutAddScan:
 
         init = pt.as_tensor_variable(np.random.normal(size=(3, 7)))
 
-        # Compile the function twice, once with the optimization and once
-        # without
+        # Compile the function twice, once with the optimization and once without
         opt_mode = mode.including("scan")
         h, _ = pytensor.scan(
             inner_fct,
@@ -792,7 +791,7 @@ class TestPushOutAddScan:
         output_opt = f_opt(input1_value, input2_value, input3_value)
         output_no_opt = f_no_opt(input1_value, input2_value, input3_value)
 
-        utt.assert_allclose(output_opt, output_no_opt)
+        np.testing.assert_allclose(output_opt, output_no_opt)
 
 
 class TestScanMerge:

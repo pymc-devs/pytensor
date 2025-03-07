@@ -454,6 +454,19 @@ else:
         RewriteDatabaseQuery(include=["fast_run", "py_only"]),
     )
 
+NUMBA = Mode(
+    NumbaLinker(),
+    RewriteDatabaseQuery(
+        include=["fast_run", "numba"],
+        exclude=[
+            "cxx_only",
+            "BlasOpt",
+            "local_careduce_fusion",
+            "scan_save_mem_prealloc",
+        ],
+    ),
+)
+
 JAX = Mode(
     JAXLinker(),
     RewriteDatabaseQuery(
@@ -463,6 +476,7 @@ JAX = Mode(
             "BlasOpt",
             "fusion",
             "inplace",
+            "scan_save_mem_prealloc",
         ],
     ),
 )
@@ -476,14 +490,8 @@ PYTORCH = Mode(
             "fusion",
             "inplace",
             "local_uint_constant_indices",
+            "scan_save_mem_prealloc",
         ],
-    ),
-)
-NUMBA = Mode(
-    NumbaLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run", "numba"],
-        exclude=["cxx_only", "BlasOpt", "local_careduce_fusion"],
     ),
 )
 
