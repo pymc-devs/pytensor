@@ -1,7 +1,7 @@
 import logging
 import sys
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from itertools import chain, groupby
 from textwrap import dedent
 from typing import cast, overload
@@ -645,7 +645,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
 
 
 def get_slice_elements(
-    idxs: list,
+    idxs: Sequence,
     cond: Callable = lambda x: isinstance(x, Variable),
 ) -> list:
     """Extract slice elements conditional on a given predicate function.

@@ -1085,7 +1085,9 @@ def add_scan_configvars():
         "scan__allow_output_prealloc",
         "Allow/disallow memory preallocation for outputs inside of scan "
         "(default: True)",
-        BoolParam(True),
+        # Non-mutable because ScanSaveMem rewrite checks it,
+        # and we can't have the rewrite and the implementation mismatch
+        BoolParam(True, mutable=False),
         in_c_key=False,
     )
 

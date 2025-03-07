@@ -465,7 +465,7 @@ class TestScanSITSOTBuffer:
         )
         if buffer_size == "unit":
             xs_kept = xs[-1]  # Only last state is used
-            expected_buffer_size = 2
+            expected_buffer_size = 1
         elif buffer_size == "aligned":
             xs_kept = xs[-2:]  # The buffer will be aligned at the end of the 9 steps
             expected_buffer_size = 2
@@ -555,8 +555,7 @@ class TestScanMITSOTBuffer:
             accept_inplace=True,
             on_unused_input="ignore",
         )
-        assert tuple(mitsot_buffer_shape) == (3,)
-
+        assert tuple(mitsot_buffer_shape) == (2,)
         if benchmark is not None:
             numba_fn.trust_input = True
             benchmark(numba_fn, *test_vals)
