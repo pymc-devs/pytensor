@@ -43,6 +43,7 @@ from pytensor.tensor import (
     get_vector_length,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
+from pytensor.tensor.einsum import _iota
 from pytensor.tensor.elemwise import (
     DimShuffle,
     Elemwise,
@@ -1084,35 +1085,18 @@ def nonzero_values(a):
     return _a.flatten()[flatnonzero(_a)]
 
 
-class Tri(Op):
+class Tri(OpFromGraph):
+    """
+    Wrapper Op for np.tri graphs
+    """
+
     __props__ = ("dtype",)
 
-    def __init__(self, dtype=None):
-        if dtype is None:
-            dtype = config.floatX
+    def __init__(self, *args, M, k, dtype, **kwargs):
+        self.M = M
+        self.k = k
         self.dtype = dtype
-
-    def make_node(self, N, M, k):
-        N = as_tensor_variable(N)
-        M = as_tensor_variable(M)
-        k = as_tensor_variable(k)
-        return Apply(
-            self,
-            [N, M, k],
-            [TensorType(dtype=self.dtype, shape=(None, None))()],
-        )
-
-    def perform(self, node, inp, out_):
-        N, M, k = inp
-        (out,) = out_
-        out[0] = np.tri(N, M, k, dtype=self.dtype)
-
-    def infer_shape(self, fgraph, node, in_shapes):
-        out_shape = [node.inputs[0], node.inputs[1]]
-        return [out_shape]
-
-    def grad(self, inp, grads):
-        return [grad_undefined(self, i, inp[i]) for i in range(3)]
+        super().__init__(*args, **kwargs, strict=True)
 
 
 def tri(N, M=None, k=0, dtype=None):
@@ -1144,8 +1128,8 @@ def tri(N, M=None, k=0, dtype=None):
         dtype = config.floatX
     if M is None:
         M = N
-    op = Tri(dtype)
-    return op(N, M, k)
+    output = ((_iota(M) + k) > _iota(N)).astype(int)
+    return Tri(inputs=[N], outputs=[output], M=M, k=k, dtype=dtype)(N)
 
 
 def tril(m, k=0):
