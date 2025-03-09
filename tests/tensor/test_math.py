@@ -89,6 +89,7 @@ from pytensor.tensor.math import (
     logaddexp,
     logsumexp,
     matmul,
+    matvec,
     max,
     max_and_argmax,
     maximum,
@@ -123,6 +124,8 @@ from pytensor.tensor.math import (
     true_div,
     trunc,
     var,
+    vecdot,
+    vecmat,
 )
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
@@ -2074,6 +2077,71 @@ class TestDot:
                             assert is_super_shape(x, g)
                             g = grad(z.sum(), y)
                             assert is_super_shape(y, g)
+
+
+def test_matrix_vector_ops():
+    """Test vecdot, matvec, and vecmat helper functions."""
+    rng = np.random.default_rng(seed=utt.fetch_seed())
+
+    # Create test data with batch dimension (2)
+    batch_size = 2
+    dim_k = 4  # Common dimension
+    dim_m = 3  # Matrix rows
+    dim_n = 5  # Matrix columns
+
+    # Create input tensors with appropriate shapes
+    # For matvec: x1(b,m,k) @ x2(b,k) -> out(b,m)
+    # For vecmat: x1(b,k) @ x2(b,k,n) -> out(b,n)
+
+    # Create test values using config.floatX to match PyTensor's default dtype
+    mat_mk_val = random(batch_size, dim_m, dim_k, rng=rng).astype(config.floatX)
+    mat_kn_val = random(batch_size, dim_k, dim_n, rng=rng).astype(config.floatX)
+    vec_k_val = random(batch_size, dim_k, rng=rng).astype(config.floatX)
+
+    # Create tensor variables with matching dtype
+    mat_mk = tensor(
+        name="mat_mk", shape=(batch_size, dim_m, dim_k), dtype=config.floatX
+    )
+    mat_kn = tensor(
+        name="mat_kn", shape=(batch_size, dim_k, dim_n), dtype=config.floatX
+    )
+    vec_k = tensor(name="vec_k", shape=(batch_size, dim_k), dtype=config.floatX)
+
+    # Test 1: vecdot with matching dimensions
+    vecdot_out = vecdot(vec_k, vec_k, dtype="int32")
+    vecdot_fn = function([vec_k], vecdot_out)
+    result = vecdot_fn(vec_k_val)
+
+    # Check dtype
+    assert result.dtype == np.int32
+
+    # Calculate expected manually
+    expected_vecdot = np.zeros((batch_size,), dtype=np.int32)
+    for i in range(batch_size):
+        expected_vecdot[i] = np.sum(vec_k_val[i] * vec_k_val[i])
+    np.testing.assert_allclose(result, expected_vecdot)
+
+    # Test 2: matvec - matrix-vector product
+    matvec_out = matvec(mat_mk, vec_k)
+    matvec_fn = function([mat_mk, vec_k], matvec_out)
+    result_matvec = matvec_fn(mat_mk_val, vec_k_val)
+
+    # Calculate expected manually
+    expected_matvec = np.zeros((batch_size, dim_m), dtype=config.floatX)
+    for i in range(batch_size):
+        expected_matvec[i] = np.dot(mat_mk_val[i], vec_k_val[i])
+    np.testing.assert_allclose(result_matvec, expected_matvec)
+
+    # Test 3: vecmat - vector-matrix product
+    vecmat_out = vecmat(vec_k, mat_kn)
+    vecmat_fn = function([vec_k, mat_kn], vecmat_out)
+    result_vecmat = vecmat_fn(vec_k_val, mat_kn_val)
+
+    # Calculate expected manually
+    expected_vecmat = np.zeros((batch_size, dim_n), dtype=config.floatX)
+    for i in range(batch_size):
+        expected_vecmat[i] = np.dot(vec_k_val[i], mat_kn_val[i])
+    np.testing.assert_allclose(result_vecmat, expected_vecmat)
 
 
 class TestTensordot:
