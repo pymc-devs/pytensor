@@ -231,8 +231,8 @@ def expand_empty(tensor_var, size):
 
     if size == 0:
         return tensor_var
-    shapes = [tensor_var.shape[x] for x in range(tensor_var.ndim)]
-    new_shape = [size + shapes[0]] + shapes[1:]
+    shapes = tuple(tensor_var.shape)
+    new_shape = (size + shapes[0], *shapes[1:])
     empty = AllocEmpty(tensor_var.dtype)(*new_shape)
 
     ret = set_subtensor(empty[: shapes[0]], tensor_var)
