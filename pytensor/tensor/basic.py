@@ -2943,6 +2943,8 @@ def stack(tensors: Sequence["TensorLike"], axis: int = 0):
     ):
         # In case there is direct scalar
         tensors = list(map(as_tensor_variable, tensors))
+        if len(tensors) == 1:
+            return atleast_1d(tensors[0])
         dtype = ps.upcast(*[i.dtype for i in tensors])
         return MakeVector(dtype)(*tensors)
     return join(axis, *[shape_padaxis(t, axis) for t in tensors])

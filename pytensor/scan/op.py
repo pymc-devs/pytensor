@@ -321,6 +321,16 @@ class ScanMethodsMixin:
             self.info.n_seqs + n_mitmot_taps : self.info.n_seqs + ntaps_upto_sit_sot
         ]
 
+    def oldest_inner_mitsot(self, list_inputs):
+        inner_mitsot_inputs = self.inner_mitsot(list_inputs)
+        oldest_inner_mitsot_inputs = []
+        offset = 0
+        for taps in self.info.mit_sot_in_slices:
+            oldest_tap = np.argmin(taps)
+            oldest_inner_mitsot_inputs += [inner_mitsot_inputs[offset + oldest_tap]]
+            offset += len(taps)
+        return oldest_inner_mitsot_inputs
+
     def outer_mitsot(self, list_inputs):
         offset = 1 + self.info.n_seqs + self.info.n_mit_mot
         return list_inputs[offset : offset + self.info.n_mit_sot]

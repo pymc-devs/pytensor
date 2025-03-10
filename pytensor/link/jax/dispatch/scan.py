@@ -29,7 +29,7 @@ def jax_funcify_Scan(op: Scan, **kwargs):
         # Extract JAX scan inputs
         outer_inputs = list(outer_inputs)
         n_steps = outer_inputs[0]  # JAX `length`
-        seqs = op.outer_seqs(outer_inputs)  # JAX `xs`
+        seqs = [seq[:n_steps] for seq in op.outer_seqs(outer_inputs)]  # JAX `xs`
 
         mit_sot_init = []
         for tap, seq in zip(

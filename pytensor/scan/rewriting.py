@@ -3,7 +3,6 @@
 import copy
 import dataclasses
 from itertools import chain
-from sys import maxsize
 from typing import cast
 
 import numpy as np
@@ -70,8 +69,9 @@ from pytensor.tensor.subtensor import (
     get_idx_list,
     get_slice_elements,
     set_subtensor,
+    undo_scalarization,
 )
-from pytensor.tensor.variable import TensorConstant
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 list_opt_slice = [
@@ -1183,8 +1183,7 @@ def while_scan_merge_subtensor_last_element(fgraph, scan_node):
     return subtensor_merge_replacements
 
 
-@node_rewriter([Scan])
-def scan_save_mem(fgraph, node):
+def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: bool):
     r"""Graph optimizer that reduces scan memory consumption.
 
     This optimizations attempts to determine if a `Scan` node, during its execution,
@@ -1215,10 +1214,16 @@ def scan_save_mem(fgraph, node):
 
     The scan perform implementation takes the output sizes into consideration,
     saving the newest results over the oldest ones whenever the buffer is filled.
-    """
-    if not isinstance(node.op, Scan):
-        return False
 
+    Paramaters
+    ----------
+    backend_supports_output_pre_allocation: bool
+        When the backend supports output pre-allocation Scan must keep buffers
+        with a length of required_states + 1, because the inner function will
+        attempt to write the inner function outputs directly into the provided
+        position in the outer circular buffer. This would invalidate results,
+        if the input is still needed for some other output computation.
+    """
     if hasattr(fgraph, "shape_feature"):
         shape_of = fgraph.shape_feature.shape_of
     else:
@@ -1271,6 +1276,7 @@ def scan_save_mem(fgraph, node):
     # Note: For simplicity while Scans also have global_nsteps set to None.
     #  All step optimizations require knowing the shape of the output, which
     #  cannot be determined from the inputs alone.
+    global_nsteps: None | dict
     assert len(node.outputs) >= c_outs
     if len(node.outputs) == c_outs and not op.info.as_while:
         global_nsteps = {"real": -1, "sym": []}
@@ -1278,7 +1284,7 @@ def scan_save_mem(fgraph, node):
         global_nsteps = None
 
     # Keeps track of the original slices that each client represent
-    slices = [None for o in node.outputs]
+    slices: list[None | list] = [None for o in node.outputs]
 
     # A list for each output indicating how many intermediate values
     # should be stored. If negative it means none of the intermediate
@@ -1295,7 +1301,7 @@ def scan_save_mem(fgraph, node):
     # or not
     flag_store = False
 
-    # 2.2 Loop over the clients
+    # 2.2 Loop over the clients to figure out how many steps we actually need to do in the Scan
     for i, out in enumerate(node.outputs[:c_outs]):
         # look at all its clients
         slices[i] = []
@@ -1338,7 +1344,9 @@ def scan_save_mem(fgraph, node):
                     except KeyError:
                         length = out.shape[0]
                 cf_slice = get_canonical_form_slice(this_slice[0], length)
-                slices[i] += [(cf_slice, this_slice)]
+                cf_slice = (undo_scalarization(cf_slice[0]), cf_slice[1])
+
+                slices[i] += [(cf_slice, this_slice)]  # type: ignore
 
                 if isinstance(this_slice[0], slice) and this_slice[0].stop is None:
                     global_nsteps = None
@@ -1351,10 +1359,9 @@ def scan_save_mem(fgraph, node):
                         get_scalar_constant_value(cf_slice[0], raise_not_constant=False)
                         + 1
                     )
-                if stop == maxsize or stop == get_scalar_constant_value(
-                    length, raise_not_constant=False
-                ):
+                if stop == get_scalar_constant_value(length, raise_not_constant=False):
                     stop = None
+                    global_nsteps = None
                 else:
                     # there is a **gotcha** here ! Namely, scan returns an
                     # array that contains the initial state of the output
@@ -1366,21 +1373,13 @@ def scan_save_mem(fgraph, node):
                     # initial state)
                     stop = stop - init_l[i]
 
-                # 2.3.3 we might get away with less number of steps
+                # 2.3.3 we might get away with fewer steps
                 if stop is not None and global_nsteps is not None:
                     # yes if it is a tensor
                     if isinstance(stop, Variable):
                         global_nsteps["sym"] += [stop]
-                    # not if it is maxsize
-                    elif isinstance(stop, int) and stop == maxsize:
-                        global_nsteps = None
-                    # yes if it is a int k, 0 < k < maxsize
-                    elif isinstance(stop, int) and global_nsteps["real"] < stop:
-                        global_nsteps["real"] = stop
-                    # yes if it is a int k, 0 < k < maxsize
-                    elif isinstance(stop, int) and stop > 0:
-                        pass
-                    # not otherwise
+                    elif isinstance(stop, int | np.integer):
+                        global_nsteps["real"] = max(global_nsteps["real"], stop)
                     else:
                         global_nsteps = None
 
@@ -1430,9 +1429,18 @@ def scan_save_mem(fgraph, node):
                     store_steps[i] = 0
                     break
 
-                if isinstance(this_slice[0], slice) and this_slice[0].start is None:
-                    store_steps[i] = 0
-                    break
+                if isinstance(this_slice[0], slice):
+                    start = this_slice[0].start
+                    if isinstance(start, Constant):
+                        start = start.data
+                    # Don't do anything if the subtensor is starting from the beginning of the buffer
+                    # Or just skipping the initial values (default output returned to the user).
+                    # Trimming the initial values would require a roll to align the buffer once scan is done
+                    # As it always starts writing at position [0+max(taps)], and ends up at position [:max(taps)]
+                    # It's cheaper to just keep the initial values in the buffer and slice them away (default output)
+                    if start in (0, None, init_l[i]):
+                        store_steps[i] = 0
+                        break
 
                 # Special case for recurrent outputs where only the last result
                 # is requested. This is needed for this rewrite to apply to
@@ -1478,7 +1486,10 @@ def scan_save_mem(fgraph, node):
                     # for mitsots and sitsots (because mitmots are not
                     # currently supported by the mechanism) and only if
                     # the pre-allocation mechanism is activated.
-                    prealloc_outs = config.scan__allow_output_prealloc
+                    prealloc_outs = (
+                        backend_supports_output_pre_allocation
+                        and config.scan__allow_output_prealloc
+                    )
 
                     first_mitsot_idx = op_info.n_mit_mot
                     last_sitsot_idx = (
@@ -1487,6 +1498,8 @@ def scan_save_mem(fgraph, node):
                     preallocable_output = first_mitsot_idx <= i <= last_sitsot_idx
 
                     if prealloc_outs and preallocable_output:
+                        # TODO: If there's only one output or other outputs do not depend
+                        #  on the same input, we could reduce the buffer size to the minimum
                         pval = select_max(nw_steps - start + init_l[i], init_l[i] + 1)
                     else:
                         pval = select_max(nw_steps - start + init_l[i], init_l[i])
@@ -1653,7 +1666,7 @@ def scan_save_mem(fgraph, node):
             name=op.name,
             allow_gc=op.allow_gc,
         )
-        new_outs = new_op(*node_ins, return_list=True)
+        new_outs = cast(list[TensorVariable], new_op(*node_ins, return_list=True))
 
         old_new = []
         # 3.7 Get replace pairs for those outputs that do not change
@@ -1683,7 +1696,7 @@ def scan_save_mem(fgraph, node):
                     sl_ins = get_slice_elements(
                         nw_slice, lambda entry: isinstance(entry, Variable)
                     )
-                    new_o = subtens(new_outs[nw_pos], *sl_ins)
+                    new_o = cast(TensorVariable, subtens(new_outs[nw_pos], *sl_ins))
                     if new_o.ndim > 0:
                         new_o = new_o[:: cnf_slice[1]]
                     replaced_outs.append(idx)
@@ -1703,10 +1716,7 @@ def scan_save_mem(fgraph, node):
                             - init_l[pos]
                             + store_steps[pos]
                         )
-                        if (
-                            cnf_slice[0].stop is not None
-                            and cnf_slice[0].stop != maxsize
-                        ):
+                        if cnf_slice[0].stop is not None:
                             stop = (
                                 cnf_slice[0].stop
                                 - nw_steps
@@ -1741,7 +1751,7 @@ def scan_save_mem(fgraph, node):
                     sl_ins = get_slice_elements(
                         nw_slice, lambda entry: isinstance(entry, Variable)
                     )
-                    new_o = subtens(new_outs[nw_pos], *sl_ins)
+                    new_o = cast(TensorVariable, subtens(new_outs[nw_pos], *sl_ins))
                     if new_o.ndim > 0:
                         new_o = new_o[:: cnf_slice[1]]
                     old_new += [(old, new_o)]
@@ -1770,6 +1780,20 @@ def scan_save_mem(fgraph, node):
             return replacements
 
         return False
+
+
+@node_rewriter([Scan])
+def scan_save_mem_prealloc(fgraph, node):
+    return scan_save_mem_rewrite(
+        fgraph, node, backend_supports_output_pre_allocation=True
+    )
+
+
+@node_rewriter([Scan])
+def scan_save_mem_no_prealloc(fgraph, node):
+    return scan_save_mem_rewrite(
+        fgraph, node, backend_supports_output_pre_allocation=False
+    )
 
 
 class ScanMerge(GraphRewriter):
@@ -2499,10 +2523,20 @@ optdb.register("scan_eqopt1", scan_eqopt1, "fast_run", "scan", position=0.05)
 optdb.register("scan_eqopt2", scan_eqopt2, "fast_run", "scan", position=1.6)
 # ScanSaveMem should execute only once per node.
 optdb.register(
-    "scan_save_mem",
-    in2out(scan_save_mem, ignore_newtrees=True),
+    "scan_save_mem_prealloc",
+    in2out(scan_save_mem_prealloc, ignore_newtrees=True),
     "fast_run",
     "scan",
+    "scan_save_mem",
+    position=1.61,
+)
+optdb.register(
+    "scan_save_mem_no_prealloc",
+    in2out(scan_save_mem_no_prealloc, ignore_newtrees=True),
+    "numba",
+    "jax",
+    "pytorch",
+    use_db_name_as_tag=False,
     position=1.61,
 )
 optdb.register(
