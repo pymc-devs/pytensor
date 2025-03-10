@@ -55,7 +55,7 @@ def array0d_range(x):
 
 
 @numba_funcify.register(Scan)
-def numba_funcify_Scan(op, node, **kwargs):
+def numba_funcify_Scan(op: Scan, node, **kwargs):
     # Apply inner rewrites
     # TODO: Not sure this is the right place to do this, should we have a rewrite that
     #  explicitly triggers the optimization of the inner graphs of Scan?
@@ -67,9 +67,32 @@ def numba_funcify_Scan(op, node, **kwargs):
         .optimizer
     )
     fgraph = op.fgraph
+    # When the buffer can only hold one SITSOT or as as many MITSOT as there are taps,
+    # We must always discard the oldest tap, so it's safe to destroy it in the inner function.
+    # TODO: Allow inplace for MITMOT
+    destroyable_sitsot = [
+        inner_sitsot
+        for outer_sitsot, inner_sitsot in zip(
+            op.outer_sitsot(node.inputs), op.inner_sitsot(fgraph.inputs), strict=True
+        )
+        if outer_sitsot.type.shape[0] == 1
+    ]
+    destroyable_mitsot = [
+        oldest_inner_mitmot
+        for outer_mitsot, oldest_inner_mitmot, taps in zip(
+            op.outer_mitsot(node.inputs),
+            op.oldest_inner_mitsot(fgraph.inputs),
+            op.info.mit_sot_in_slices,
+            strict=True,
+        )
+        if outer_mitsot.type.shape[0] == abs(min(taps))
+    ]
+    destroyable = {*destroyable_sitsot, *destroyable_mitsot}
     add_supervisor_to_fgraph(
         fgraph=fgraph,
-        input_specs=[In(x, borrow=True, mutable=False) for x in fgraph.inputs],
+        input_specs=[
+            In(x, borrow=True, mutable=x in destroyable) for x in fgraph.inputs
+        ],
         accept_inplace=True,
     )
     rewriter(fgraph)
