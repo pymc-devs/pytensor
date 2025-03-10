@@ -289,7 +289,7 @@ def test_repeated_inputs():
     out_repeated = einsum("ij,ij->i", x, x)
     out_copy = einsum("ij,ij->i", x, x.copy())
 
-    x_test = np.array([[1, 2], [3, 4]])
+    x_test = np.array([[1, 2], [3, 4]]).astype(x.dtype)
 
     np.testing.assert_allclose(
         out_repeated.eval({x: x_test}), out_copy.eval({x: x_test})
