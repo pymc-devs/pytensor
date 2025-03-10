@@ -50,7 +50,7 @@ from pytensor.tensor.type import (
     tensor,
     uint_dtypes,
 )
-from pytensor.tensor.utils import as_list, normalize_reduce_axis
+from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import (
     TensorVariable,
     _tensor_py_operators,
@@ -3206,133 +3206,6 @@ def dense_dot(a, b):
         return tensordot(a, b, [[a.ndim - 1], [np.maximum(0, b.ndim - 2)]])
     else:
         return _dot(a, b)
-
-
-def _tensordot_as_dot(a, b, axes, dot, batched):
-    """
-    Reduces a tensor dot product to a matrix or vector dot product. Based
-    on code from Tijmen Tieleman's gnumpy
-    (http://www.cs.toronto.edu/~tijmen/gnumpy.html).
-
-    Please see the documentation of tensordot for the meaning of the a, b
-    and axes arguments.
-
-    :param dot: a function that accepts two symbolic variables and computes
-                the appropriate dot product (e.g. dot, batched_dot)
-    :type dot: function
-
-    :param batched: whether to treat the first axis of a and b as a batch
-                    axis.  If so, this axis will be preserved in the output,
-                    allowing this function to be used also for batched
-                    tensor dot products.
-    :type batched: boolean
-
-    :returns: a tensor with shape equal to the concatenation of a's shape
-              (less any dimensions that were summed over) and b's shape
-              (less the first dimension and any dimensions that were summed
-              over).
-    :rtype: symbolic tensor
-    """
-    a, b = as_tensor_variable(a), as_tensor_variable(b)
-
-    if not np.isscalar(axes) and len(axes) != 2:
-        raise ValueError(
-            "Axes should be an integer or a "
-            f"list/tuple of len 2 ({axes} was provided)"
-        )
-
-    # if 'axes' is a number of axes to multiply and sum over (trailing axes
-    # of a, leading axes of b), we can just reshape and use dot.
-    elif np.isscalar(axes):
-        axes = int(axes)
-
-        for operand_name, operand in (("a", a), ("b", b)):
-            if axes > operand.ndim:
-                raise ValueError(
-                    f"axes can not be larger than the dimension of {operand_name} "
-                    f"({operand_name}.ndim={operand.ndim}, axes={axes})"
-                )
-            if batched and axes == operand.ndim:
-                raise ValueError(
-                    "axes to sum over must not include the batch axis "
-                    f"of {operand_name} ({operand_name}.ndim={operand.ndim}, axes={axes})"
-                )
-
-        batch_axes = 1 if batched else 0
-        a_outaxes = slice(0, a.ndim - axes)
-        b_outaxes = slice(batch_axes + axes, b.ndim)
-        outshape = concatenate([a.shape[a_outaxes], b.shape[b_outaxes]])
-        outbcast = a.broadcastable[a_outaxes] + b.broadcastable[b_outaxes]
-        outndim = len(outbcast)
-
-        a_shape = [1] * 2
-        b_shape = [1] * 2
-
-        # compute total size of summed axes
-        for i in range(0, axes):
-            a_shape[1] *= a.shape[-(i + 1)]
-            b_shape[0] *= b.shape[batch_axes + i]
-        # compute total size of other axes
-        for i in range(0, a.ndim - axes - batch_axes):
-            a_shape[0] *= a.shape[batch_axes + i]
-        for i in range(0, b.ndim - axes - batch_axes):
-            b_shape[1] *= b.shape[-(i + 1)]
-
-        if batched:
-            a_shape.insert(0, a.shape[0])
-            b_shape.insert(0, b.shape[0])
-
-        a_reshaped = a.reshape(a_shape)
-        b_reshaped = b.reshape(b_shape)
-
-        out_reshaped = dot(a_reshaped, b_reshaped)
-        out = out_reshaped.reshape(outshape, ndim=outndim)
-        # Make sure the broadcastable pattern of the result is correct,
-        # since some shape information can be lost in the reshapes.
-        if out.type.broadcastable != outbcast:
-            out = specify_broadcastable(
-                out, *(ax for (ax, b) in enumerate(outbcast) if b)
-            )
-        return out
-
-    # if 'axes' is a list, transpose a and b such that the summed axes of a
-    # are last and the summed axes of b are first.
-    else:
-        axes = [as_list(axes_) for axes_ in axes]
-
-        if len(axes[0]) != len(axes[1]):
-            raise ValueError("Axes elements must have the same length.")
-
-        for i, (operand_name, operand) in enumerate((("a", a), ("b", b))):
-            if len(axes[i]) > operand.ndim:
-                raise ValueError(
-                    f"axes[{i}] should be array_like with length less than "
-                    f"the dimensions of {operand_name} ({operand_name}.ndim={operand.ndim}, len(axes[0])={len(axes[i])})."
-                )
-            if len(axes[i]) > 0 and np.max(axes[i]) >= operand.ndim:
-                raise ValueError(
-                    f"axes[{i}] contains dimensions greater than or equal "
-                    f"to {operand_name}.ndim ({operand_name}.ndim={operand.ndim}, max(axes[0])={np.max(np.array(axes[i]))})."
-                )
-            if batched and 0 in axes[i]:
-                raise ValueError(
-                    "axes to sum over must not contain the batch axis "
-                    f"(axes[{i}]={axes[i]})"
-                )
-
-        batch_axes = [0] if batched else []
-        other_axes = [
-            [x for x in range(operand.ndim) if x not in axes[i] and x not in batch_axes]
-            for i, operand in enumerate((a, b))
-        ]
-
-        a_shuffled = a.dimshuffle(batch_axes + other_axes[0] + axes[0])
-        b_shuffled = b.dimshuffle(batch_axes + axes[1] + other_axes[1])
-
-        # now that a and b are in the right order, recur with integer axes
-        return _tensordot_as_dot(
-            a_shuffled, b_shuffled, len(axes[0]), dot=dot, batched=batched
-        )
 
 
 def tensordot(
