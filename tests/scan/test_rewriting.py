@@ -9,7 +9,7 @@ from pytensor.compile.io import In
 from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
-from pytensor.graph.basic import equal_computations
+from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace
 from pytensor.scan.op import Scan
@@ -1208,7 +1208,7 @@ class TestScanInplaceOptimizer:
 
 
 class TestSaveMem:
-    mode = get_default_mode().including("scan_save_mem", "scan_save_mem")
+    mode = get_default_mode().including("scan_save_mem")
 
     def test_save_mem(self):
         rng = np.random.default_rng(utt.fetch_seed())
@@ -1295,11 +1295,27 @@ class TestSaveMem:
             [x1[:2], x2[4], x3[idx], x4[:idx], x5[-10], x6[-jdx], x7[:-jdx]],
             updates=updates,
             allow_input_downcast=True,
-            mode=self.mode,
+            mode=self.mode.excluding("scan_push_out_seq"),
         )
+        # Check we actually have a Scan in the compiled function
+        [scan_node] = [
+            node for node in f2.maker.fgraph.toposort() if isinstance(node.op, Scan)
+        ]
+
         # get random initial values
         rng = np.random.default_rng(utt.fetch_seed())
-        v_u = rng.uniform(-5.0, 5.0, size=(20,))
+        v_u = rng.uniform(-5.0, 5.0, size=(20,)).astype(u.type.dtype)
+
+        # Check the number of steps is actually reduced from 20
+        n_steps = scan_node.inputs[0]
+        n_steps_fn = pytensor.function(
+            [u, idx, jdx], n_steps, accept_inplace=True, on_unused_input="ignore"
+        )
+        assert n_steps_fn(u=v_u, idx=3, jdx=15) == 11  # x5[const=-10] requires 11 steps
+        assert n_steps_fn(u=v_u, idx=3, jdx=3) == 18  # x6[jdx=-3] requires 18 steps
+        assert n_steps_fn(u=v_u, idx=16, jdx=15) == 17  # x3[idx=16] requires 17 steps
+        assert n_steps_fn(u=v_u, idx=-5, jdx=15) == 16  # x3[idx=-5] requires 16 steps
+        assert n_steps_fn(u=v_u, idx=19, jdx=15) == 20  # x3[idx=19] requires 20 steps
 
         # compute the output in numpy
         tx1, tx2, tx3, tx4, tx5, tx6, tx7 = f2(v_u, 3, 15)
@@ -1311,6 +1327,49 @@ class TestSaveMem:
         utt.assert_allclose(tx5, v_u[-10] + 5.0)
         utt.assert_allclose(tx6, v_u[-15] + 6.0)
         utt.assert_allclose(tx7, v_u[:-15] + 7.0)
+
+    def test_save_mem_reduced_number_of_steps_constant(self):
+        x0 = pt.scalar("x0")
+        xs, _ = scan(
+            lambda xtm1: xtm1 + 1,
+            outputs_info=[x0],
+            n_steps=10,
+        )
+
+        fn = function([x0], xs[:5], mode=self.mode)
+        [scan_node] = [
+            node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
+        ]
+        n_steps = scan_node.inputs[0]
+        assert isinstance(n_steps, Constant) and n_steps.data == 5
+
+        np.testing.assert_allclose(fn(0), np.arange(1, 11)[:5])
+
+    def test_save_mem_cannot_reduce_constant_number_of_steps(self):
+        x0 = pt.scalar("x0")
+        [xs, ys], _ = scan(
+            lambda xtm1, ytm1: (xtm1 + 1, ytm1 - 1),
+            outputs_info=[x0, x0],
+            n_steps=10,
+        )
+
+        # Because of ys[-1] we need all the steps!
+        fn = function([x0], [xs[:5], ys[-1]], mode=self.mode)
+        [scan_node] = [
+            node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
+        ]
+        n_steps = scan_node.inputs[0]
+        assert isinstance(n_steps, Constant) and n_steps.data == 10
+
+        res_x, res_y = fn(0)
+        np.testing.assert_allclose(
+            res_x,
+            np.arange(1, 11)[:5],
+        )
+        np.testing.assert_allclose(
+            res_y,
+            -np.arange(1, 11)[-1],
+        )
 
     def test_save_mem_store_steps(self):
         def f_rnn(u_t, x1_tm1, x1_tm3, x2_tm1, x3tm2, x3_tm1, x4_tm1):
