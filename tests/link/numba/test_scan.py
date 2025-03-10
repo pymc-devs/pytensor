@@ -451,6 +451,80 @@ def test_vector_taps_benchmark(benchmark):
     benchmark(numba_fn, *test.values())
 
 
+@pytest.mark.parametrize("n_steps_constant", (True, False))
+def test_inplace_taps(n_steps_constant):
+    """Test that numba will inplace in the inner_function of the oldest sit-sot, mit-sot taps."""
+    n_steps = 10 if n_steps_constant else scalar("n_steps", dtype=int)
+    a = scalar("a")
+    x0 = scalar("x0")
+    y0 = vector("y0", shape=(2,))
+    z0 = vector("z0", shape=(3,))
+
+    def step(ztm3, ztm1, xtm1, ytm1, ytm2, a):
+        z = ztm1 + 1 + ztm3 + a
+        x = xtm1 + 1
+        y = ytm1 + 1 + ytm2 + a
+        return z, x, z + x + y, y
+
+    [zs, xs, ws, ys], _ = scan(
+        fn=step,
+        outputs_info=[
+            dict(initial=z0, taps=[-3, -1]),
+            dict(initial=x0, taps=[-1]),
+            None,
+            dict(initial=y0, taps=[-1, -2]),
+        ],
+        non_sequences=[a],
+        n_steps=n_steps,
+    )
+    numba_fn, _ = compare_numba_and_py(
+        [n_steps] * (not n_steps_constant) + [a, x0, y0, z0],
+        [zs[-1], xs[-1], ws[-1], ys[-1]],
+        [10] * (not n_steps_constant) + [np.pi, np.e, [1, np.euler_gamma], [0, 1, 2]],
+        numba_mode="NUMBA",
+        eval_obj_mode=False,
+    )
+    [scan_op] = [
+        node.op
+        for node in numba_fn.maker.fgraph.toposort()
+        if isinstance(node.op, Scan)
+    ]
+
+    # Scan reorders inputs internally, so we need to check its ordering
+    inner_inps = scan_op.fgraph.inputs
+    mit_sot_inps = scan_op.inner_mitsot(inner_inps)
+    oldest_mit_sot_inps = [
+        # Implicitly assume that the first mit-sot input is the one with 3 taps
+        # This is not a required behavior and the test can change if we need to change Scan.
+        mit_sot_inps[:2][scan_op.info.mit_sot_in_slices[0].index(-3)],
+        mit_sot_inps[2:][scan_op.info.mit_sot_in_slices[1].index(-2)],
+    ]
+    [sit_sot_inp] = scan_op.inner_sitsot(inner_inps)
+
+    inner_outs = scan_op.fgraph.outputs
+    mit_sot_outs = scan_op.inner_mitsot_outs(inner_outs)
+    [sit_sot_out] = scan_op.inner_sitsot_outs(inner_outs)
+    [nit_sot_out] = scan_op.inner_nitsot_outs(inner_outs)
+
+    if n_steps_constant:
+        assert mit_sot_outs[0].owner.op.destroy_map == {
+            0: [mit_sot_outs[0].owner.inputs.index(oldest_mit_sot_inps[0])]
+        }
+        assert mit_sot_outs[1].owner.op.destroy_map == {
+            0: [mit_sot_outs[1].owner.inputs.index(oldest_mit_sot_inps[1])]
+        }
+        assert sit_sot_out.owner.op.destroy_map == {
+            0: [sit_sot_out.owner.inputs.index(sit_sot_inp)]
+        }
+    else:
+        # This is not a feature, but a current limitation
+        # https://github.com/pymc-devs/pytensor/issues/1283
+        assert mit_sot_outs[0].owner.op.destroy_map == {}
+        assert mit_sot_outs[1].owner.op.destroy_map == {}
+        assert sit_sot_out.owner.op.destroy_map == {}
+    assert nit_sot_out.owner.op.destroy_map == {}
+
+
 @pytest.mark.parametrize(
     "buffer_size", ("unit", "aligned", "misaligned", "whole", "whole+init")
 )
