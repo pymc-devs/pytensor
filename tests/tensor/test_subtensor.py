@@ -16,6 +16,7 @@ from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph import Constant
+from pytensor.graph.basic import equal_computations
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.printing import pprint
@@ -23,7 +24,7 @@ from pytensor.scalar.basic import as_scalar, int16
 from pytensor.tensor import as_tensor, get_vector_length, vectorize
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import exp, isinf
+from pytensor.tensor.math import exp, isinf, lt, switch
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.subtensor import (
@@ -136,30 +137,41 @@ class TestGetCanonicalFormSlice:
     def test_scalar_constant(self):
         a = as_scalar(0)
         length = lscalar()
-        res = get_canonical_form_slice(a, length)
-        assert isinstance(res[0].owner.op, ptb.ScalarFromTensor)
-        assert res[1] == 1
+        res, direction = get_canonical_form_slice(a, length)
+        assert res == 0
+        assert direction == 1
+
+        b = as_scalar(-1)
+        res, direction = get_canonical_form_slice(b, length)
+        assert equal_computations([res], [as_tensor(-1) + length])
+        assert direction == 1
 
     def test_tensor_constant(self):
         a = as_tensor(0)
         length = lscalar()
-        res = get_canonical_form_slice(a, length)
-        assert isinstance(res[0].owner.op, ptb.ScalarFromTensor)
-        assert res[1] == 1
+        res, direction = get_canonical_form_slice(a, length)
+        assert equal_computations([res], [a])
+        assert direction == 1
+
+        b = as_tensor(-1)
+        res, direction = get_canonical_form_slice(b, length)
+        assert equal_computations([res], [b + length])
+        assert direction == 1
 
     def test_symbolic_scalar(self):
         a = int16()
         length = lscalar()
-        res = get_canonical_form_slice(a, length)
-        assert res[0].owner.op, ptb.switch
-        assert res[1] == 1
+        res, direction = get_canonical_form_slice(a, length)
+        a_t = as_tensor(a)
+        assert equal_computations([res], [switch(lt(a_t, 0), a_t + length, a_t)])
+        assert direction == 1
 
     def test_symbolic_tensor(self):
         a = lscalar()
         length = lscalar()
-        res = get_canonical_form_slice(a, length)
-        assert isinstance(res[0].owner.op, ptb.ScalarFromTensor)
-        assert res[1] == 1
+        res, direction = get_canonical_form_slice(a, length)
+        assert equal_computations([res], [switch(lt(a, 0), a + length, a)])
+        assert direction == 1
 
     @pytest.mark.parametrize("int_fn", [int, np.int64, as_tensor, as_scalar])
     def test_all_integer(self, int_fn):
