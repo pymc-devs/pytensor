@@ -33,7 +33,9 @@ from pytensor.tensor.basic import (
     alloc,
     get_scalar_constant_value,
     nonzero,
-    scalar_from_tensor,
+)
+from pytensor.tensor.basic import (
+    constant as tensor_constant,
 )
 from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
@@ -256,20 +258,20 @@ def get_idx_list(inputs, idx_list):
 def get_canonical_form_slice(
     theslice: slice,
     length: int | np.integer | ScalarVariable | TensorVariable,
-) -> tuple[slice, int | ScalarConstant]: ...
+) -> tuple[slice, int | TensorVariable]: ...
 
 
 @overload
 def get_canonical_form_slice(
     theslice: int | np.integer | ScalarVariable | TensorVariable,
     length: int | np.integer | ScalarVariable | TensorVariable,
-) -> tuple[ScalarVariable, int]: ...
+) -> tuple[TensorVariable, int]: ...
 
 
 def get_canonical_form_slice(
     theslice: slice | int | np.integer | ScalarVariable | TensorVariable,
     length: int | np.integer | ScalarVariable | TensorVariable,
-) -> tuple[slice | ScalarVariable, int | ScalarConstant]:
+) -> tuple[slice | TensorVariable, int | TensorVariable]:
     """Convert indices or slices to canonical form.
 
     Scalar integer indices or python Slices with Scalar/None attributes
@@ -296,30 +298,56 @@ def get_canonical_form_slice(
     """
     from pytensor.tensor import ge, lt, sign, switch
 
-    # Other non-slice types are the scalar indexing case
-    if not isinstance(theslice, slice):
-        if isinstance(theslice, int | np.integer | ScalarVariable) or (
-            isinstance(theslice, TensorVariable) and theslice.ndim == 0
-        ):
-            cano = switch(lt(theslice, 0), (theslice + length), theslice)
-            return scalar_from_tensor(cano), 1
-        raise ValueError(f"Slice {theslice} is not a supported slice type.")
+    def undo_scalarization(x):
+        """Undo scalarization of a variable.
 
-    # At this point we have a slice object. Possibly with symbolic inputs.
+        PyTensor Basic index operations use ScalarVariables for the indices/slice arguments.
+        But reasoning symbolically about the result of multiple indexing operations, we usually
+        want to work on TensorVariables, since rewrites work on those and not ScalarVariables.
+
+        This function undoes ScalarFromTensor operation or converts ScalarConstants to TensorConstants.
+        """
+        if isinstance(x, ScalarVariable):
+            if isinstance(x, ScalarConstant):
+                return tensor_constant(x.data, dtype=x.dtype)
+            elif x.owner is not None and isinstance(x.owner.op, ScalarFromTensor):
+                return x.owner.inputs[0]
+            else:
+                return as_tensor_variable(x)
+        return x
 
     def analyze(x):
         try:
             x_constant = as_index_literal(x)
             is_constant = True
         except NotScalarConstantError:
-            x_constant = x
+            x_constant = undo_scalarization(x)
             is_constant = False
         return x_constant, is_constant
 
+    length, is_length_constant = analyze(length)
+
+    # Other non-slice types are the scalar indexing case
+    if not isinstance(theslice, slice):
+        if not (
+            isinstance(theslice, int | np.integer | ScalarVariable)
+            or (isinstance(theslice, TensorVariable) and theslice.ndim == 0)
+        ):
+            raise ValueError(f"Slice {theslice} is not a supported slice type.")
+
+        idx, is_index_constant = analyze(theslice)
+        if is_index_constant:
+            if idx >= 0:
+                return idx, 1
+            else:
+                return idx + length, 1
+        else:
+            return switch(lt(idx, 0), idx + length, idx), 1
+
+    # At this point we have a slice object. Possibly with symbolic inputs.
     start, is_start_constant = analyze(theslice.start)
     stop, is_stop_constant = analyze(theslice.stop)
     step, is_step_constant = analyze(theslice.step)
-    length, is_length_constant = analyze(length)
 
     if (
         is_start_constant
