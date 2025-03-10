@@ -35,6 +35,9 @@ from pytensor.tensor.basic import (
     nonzero,
     scalar_from_tensor,
 )
+from pytensor.tensor.basic import (
+    constant as tensor_constant,
+)
 from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
@@ -252,6 +255,23 @@ def get_idx_list(inputs, idx_list):
     return indices_from_subtensor(inputs[1:], idx_list)
 
 
+def undo_scalarization(x):
+    """Undo scalarization of a variable.
+
+    PyTensor Basic index operations use ScalarVariables for the indices/slice arguments.
+    When reason symbolically about the result of multiple indexing operations, we usually
+    want to work on TensorVariables, since rewrites work on those and not ScalarVariables.
+
+    This function undoes ScalarFromTensor operation or converts ScalarConstants to TensorConstants.
+    """
+    if isinstance(x, ScalarVariable):
+        if isinstance(x, ScalarConstant):
+            return tensor_constant(x.data, dtype=x.dtype)
+        elif x.owner is not None and isinstance(x.owner.op, ScalarFromTensor):
+            return x.owner.inputs[0]
+    return x
+
+
 @overload
 def get_canonical_form_slice(
     theslice: slice,
@@ -298,6 +318,7 @@ def get_canonical_form_slice(
 
     # Other non-slice types are the scalar indexing case
     if not isinstance(theslice, slice):
+        theslice = undo_scalarization(theslice)
         if isinstance(theslice, int | np.integer | ScalarVariable) or (
             isinstance(theslice, TensorVariable) and theslice.ndim == 0
         ):
@@ -381,6 +402,7 @@ def get_canonical_form_slice(
         elif is_stop_length:
             # start:length:1
             if is_start_constant and start >= 0:
+                length = undo_scalarization(length)
                 return slice(switch(lt(start, length), start, length), length, 1), 1
             start_plus_len = start + length
             start = switch(

@@ -84,6 +84,7 @@ from pytensor.tensor.subtensor import (
     get_slice_elements,
     inc_subtensor,
     indices_from_subtensor,
+    undo_scalarization,
 )
 from pytensor.tensor.type import TensorType, integer_dtypes
 from pytensor.tensor.type_other import NoneTypeT, SliceConstant, SliceType
@@ -1136,6 +1137,7 @@ def merge_two_slices(fgraph, slice1, len1, slice2, len2):
             # We are in the more complex case when we do not actually know
             # if the first slice was in reverse or not.
             # in case it was not in reverse:
+            sl2 = undo_scalarization(sl2)
             p_val = sl1.start + sl2 * sl1.step
             # case it was in reverse we need to realize that we do not want
             # the k-th element from sl.start but the k-th element from

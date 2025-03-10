@@ -69,6 +69,7 @@ from pytensor.tensor.subtensor import (
     get_idx_list,
     get_slice_elements,
     set_subtensor,
+    undo_scalarization,
 )
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
@@ -1343,6 +1344,8 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                     except KeyError:
                         length = out.shape[0]
                 cf_slice = get_canonical_form_slice(this_slice[0], length)
+                cf_slice = (undo_scalarization(cf_slice[0]), cf_slice[1])
+
                 slices[i] += [(cf_slice, this_slice)]  # type: ignore
 
                 if isinstance(this_slice[0], slice) and this_slice[0].stop is None:
