@@ -3,7 +3,6 @@
 import copy
 import dataclasses
 from itertools import chain
-from sys import maxsize
 from typing import cast
 
 import numpy as np
@@ -1351,10 +1350,9 @@ def scan_save_mem(fgraph, node):
                         get_scalar_constant_value(cf_slice[0], raise_not_constant=False)
                         + 1
                     )
-                if stop == maxsize or stop == get_scalar_constant_value(
-                    length, raise_not_constant=False
-                ):
+                if stop == get_scalar_constant_value(length, raise_not_constant=False):
                     stop = None
+                    global_nsteps = None
                 else:
                     # there is a **gotcha** here ! Namely, scan returns an
                     # array that contains the initial state of the output
@@ -1366,21 +1364,13 @@ def scan_save_mem(fgraph, node):
                     # initial state)
                     stop = stop - init_l[i]
 
-                # 2.3.3 we might get away with less number of steps
+                # 2.3.3 we might get away with fewer steps
                 if stop is not None and global_nsteps is not None:
                     # yes if it is a tensor
                     if isinstance(stop, Variable):
                         global_nsteps["sym"] += [stop]
-                    # not if it is maxsize
-                    elif isinstance(stop, int) and stop == maxsize:
-                        global_nsteps = None
-                    # yes if it is a int k, 0 < k < maxsize
-                    elif isinstance(stop, int) and global_nsteps["real"] < stop:
-                        global_nsteps["real"] = stop
-                    # yes if it is a int k, 0 < k < maxsize
-                    elif isinstance(stop, int) and stop > 0:
-                        pass
-                    # not otherwise
+                    elif isinstance(stop, int | np.integer):
+                        global_nsteps["real"] = max(global_nsteps["real"], stop)
                     else:
                         global_nsteps = None
 
@@ -1703,10 +1693,7 @@ def scan_save_mem(fgraph, node):
                             - init_l[pos]
                             + store_steps[pos]
                         )
-                        if (
-                            cnf_slice[0].stop is not None
-                            and cnf_slice[0].stop != maxsize
-                        ):
+                        if cnf_slice[0].stop is not None:
                             stop = (
                                 cnf_slice[0].stop
                                 - nw_steps
