@@ -46,7 +46,8 @@ def test_random_bernoulli(size, p):
     g = pt.random.bernoulli(p, size=size, rng=rng)
     g_fn = function([], g, mode=pytorch_mode)
     samples = g_fn()
-    np.testing.assert_allclose(samples.mean(axis=0), 0.5, 1)
+    samples_mean = samples.mean(axis=0) if samples.shape else samples
+    np.testing.assert_allclose(samples_mean, 0.5, 1)
 
 
 @pytest.mark.parametrize(

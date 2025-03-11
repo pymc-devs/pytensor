@@ -45,9 +45,6 @@ def pytorch_sample_fn(op, node):
 def pytorch_sample_fn_bernoulli(op, node):
     def sample_fn(rng, size, dtype, p):
         gen = rng["pytorch_gen"]
-        if not size:
-            size = (1,)
-
         sample = torch.bernoulli(torch.broadcast_to(p, size), generator=gen)
         rng["pytorch_gen"] = gen
         return (rng, sample)
@@ -59,11 +56,8 @@ def pytorch_sample_fn_bernoulli(op, node):
 def pytorch_sample_fn_binomial(op, node):
     def sample_fn(rng, size, dtype, n, p):
         gen = rng["pytorch_gen"]
-        if not size:
-            size = (1,)
-
         sample = torch.binomial(
-            torch.broadcast_to(n.to(p.dtype), size),
+            torch.broadcast_to(n, size),
             torch.broadcast_to(p, size),
             generator=gen,
         )
