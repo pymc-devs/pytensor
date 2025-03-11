@@ -1634,21 +1634,33 @@ class TestSaveMem:
         assert stored_ys_steps == 2
         assert stored_zs_steps == 1
 
-    def test_vector_zeros_init(self):
+    @pytest.mark.parametrize("val_ndim", (0, 1))
+    @pytest.mark.parametrize("keep_beginning", (False, True))
+    def test_broadcasted_init(self, keep_beginning, val_ndim):
+        # Regression test when the original value is a broadcasted alloc
+        # The scan save mem rewrite used to wrongly slice on the unbroadcasted value
+        val_shape = (1,) * val_ndim
+        val = pt.tensor("val", shape=val_shape)
+        val_test = np.zeros(val_shape, dtype=val.dtype)
+
+        init = pt.full((2,), val)
         ys, _ = pytensor.scan(
-            fn=lambda ytm2, ytm1: ytm1 + ytm2,
-            outputs_info=[{"initial": pt.zeros(2), "taps": range(-2, 0)}],
+            fn=lambda *args: pt.add(*args),
+            outputs_info=[{"initial": init, "taps": (-2, -1)}],
             n_steps=100,
         )
 
-        fn = pytensor.function([], ys[-50:], mode=self.mode)
-        assert tuple(fn().shape) == (50,)
+        out = ys[:-50] if keep_beginning else ys[-50:]
+        fn = pytensor.function([val], out, mode=self.mode)
+        assert fn(val_test).shape == (50,)
 
         # Check that rewrite worked
         [scan_node] = (n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, ys_trace = scan_node.inputs
-        debug_fn = pytensor.function([], ys_trace.shape[0], accept_inplace=True)
-        assert debug_fn() == 50
+        buffer_size_fn = pytensor.function(
+            [val], ys_trace.shape[0], accept_inplace=True
+        )
+        assert buffer_size_fn(val_test) == 52 if keep_beginning else 50
 
 
 def test_inner_replace_dot():
