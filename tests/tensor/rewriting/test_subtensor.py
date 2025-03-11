@@ -28,7 +28,6 @@ from pytensor.tensor.rewriting.subtensor import (
 )
 from pytensor.tensor.shape import (
     SpecifyShape,
-    Unbroadcast,
     _shape,
     shape,
     specify_shape,
@@ -55,7 +54,6 @@ from pytensor.tensor.type import (
     lscalar,
     lscalars,
     matrix,
-    row,
     scalar,
     tensor,
     tensor3,
@@ -920,64 +918,6 @@ class TestLocalSubtensorLift:
         assert isinstance(prog[1].op.scalar_op, ps.Composite)
         assert len(prog) == 2
         f([1, 2, 3], 4)  # let debugmode test something
-
-    def test_basic_8(self):
-        # Test that Subtensor(Unbroadcast(x)) gets optimized into
-        # Unbroadcast(Subtensor(x)).
-
-        # test basic case
-        x = row("x")
-        xval = np.random.random((1, 10)).astype(config.floatX)
-        assert x.broadcastable == (True, False)
-        newx = Unbroadcast(0)(x)
-        assert newx.broadcastable == (False, False)
-
-        f1 = function([x], newx[:2, :5], mode=mode_opt)
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f1, ops_to_check=[Subtensor, Unbroadcast])
-        prog = f1.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)
-        assert isinstance(prog[1].op, Unbroadcast)
-        assert (f1(xval) == xval[:2, :5]).all()
-
-        # corner case 1: Unbroadcast changes dims which are dropped through subtensor
-        y = tensor(dtype="float64", shape=(1, 10, 1, 3), name="x")
-        yval = np.random.random((1, 10, 1, 3)).astype(config.floatX)
-        assert y.broadcastable == (True, False, True, False)
-        newy = Unbroadcast(0, 2)(y)
-        assert newy.broadcastable == (False, False, False, False)
-
-        f2 = function([y], newy[:, 3, 0, :], mode=mode_opt)
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f2, ops_to_check=[Subtensor, Unbroadcast])
-        prog = f2.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)
-        assert isinstance(prog[1].op, Unbroadcast)
-        assert (f2(yval) == yval[:, 3, 0, :]).all()
-
-        # corner case 2: subtensor idx_list is shorter than resulting broadcast pattern
-        f3 = function([y], newy[:, 3, 0], mode=mode_opt)
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f3, ops_to_check=[Subtensor, Unbroadcast])
-        prog = f3.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)
-        assert isinstance(prog[1].op, Unbroadcast)
-        assert (f3(yval) == yval[:, 3, 0]).all()
-
-        # corner case 3: subtensor idx_list is shorter than Unbroadcast.axis
-        z = tensor(dtype="float64", shape=(4, 10, 3, 1), name="x")
-        zval = np.random.random((4, 10, 3, 1)).astype(config.floatX)
-        assert z.broadcastable == (False, False, False, True)
-        newz = Unbroadcast(3)(z)
-        assert newz.broadcastable == (False, False, False, False)
-
-        f4 = function([z], newz[:, 3, 0], mode=mode_opt)
-        # Check stacktrace was copied over correctly after opt was applied
-        assert check_stack_trace(f4, ops_to_check=[Subtensor, Unbroadcast])
-        prog = f4.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, Subtensor)
-        assert isinstance(prog[1].op, Unbroadcast)
-        assert (f4(zval) == zval[:, 3, 0]).all()
 
 
 class TestLocalSubtensorMerge:

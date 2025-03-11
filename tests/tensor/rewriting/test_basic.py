@@ -77,9 +77,7 @@ from pytensor.tensor.shape import (
     Reshape,
     Shape_i,
     SpecifyShape,
-    Unbroadcast,
     specify_shape,
-    unbroadcast,
 )
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor1,
@@ -556,48 +554,6 @@ class TestTile:
                 assert isinstance(topo[0].op, DimShuffle)
                 assert check_stack_trace(f, ops_to_check=[DimShuffle])
                 f(data)
-
-
-class TestUnbroadcast:
-    def setup_method(self):
-        self.mode = get_default_mode().including("canonicalize")
-
-    def test_local_useless_unbroadcast(self):
-        x1 = tensor(dtype="float64", shape=(1, 2))
-        x2 = tensor(dtype="float64", shape=(2, 1))
-        unbroadcast_op = Unbroadcast(0)
-
-        f = function([x1], unbroadcast_op(x1), mode=self.mode)
-        assert (
-            sum(isinstance(node.op, Unbroadcast) for node in f.maker.fgraph.toposort())
-            == 1
-        )
-
-        f = function([x2], unbroadcast_op(x2), mode=self.mode)
-        assert (
-            sum(isinstance(node.op, Unbroadcast) for node in f.maker.fgraph.toposort())
-            == 0
-        )
-
-    def test_local_unbroadcast_lift(self):
-        x = tensor(dtype="float64", shape=(1, 1))
-        y = unbroadcast(pt.exp(unbroadcast(x, 0)), 1)
-
-        assert (
-            sum(
-                isinstance(node.op, Unbroadcast)
-                for node in FunctionGraph([x], [y], copy_inputs=False).toposort()
-            )
-            == 2
-        )
-
-        f = function([x], y, mode=self.mode)
-        assert (
-            sum(isinstance(node.op, Unbroadcast) for node in f.maker.fgraph.toposort())
-            == 1
-        )
-
-        np.testing.assert_almost_equal(f([[1]]), np.exp([[1]]))
 
 
 class TestUselessElemwise:

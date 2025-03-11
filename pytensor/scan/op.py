@@ -166,8 +166,7 @@ def check_broadcast(v1, v2):
         "axis %d in `output_info`. This can happen if one of the "
         "dimension is fixed to 1 in the input, while it is still "
         "variable in the output, or vice-verca. You have to make "
-        "them consistent, e.g. using pytensor.tensor."
-        "{unbroadcast, specify_broadcastable}."
+        "them consistent, e.g. using pytensor.tensor.specify_broadcastable."
     )
     size = min(v1.type.ndim, v2.type.ndim)
     for n, (b1, b2) in enumerate(

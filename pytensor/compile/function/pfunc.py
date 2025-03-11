@@ -292,14 +292,8 @@ def rebuild_collect_shared(
                 f" shared_var.type={store_into.type},"
                 f" update_val={update_val}, update_val.type={getattr(update_val, 'type', None)})."
             )
-            err_sug = (
-                "If the difference is related to the broadcast pattern,"
-                " you can call the"
-                " tensor.shape.unbroadcast(var, axis_to_unbroadcast[, ...])"
-                " function to mask broadcastable dimensions."
-            )
 
-            raise TypeError(err_msg, err_sug)
+            raise TypeError(err_msg)
         assert store_into.type.is_super(update_val.type)
 
         update_d[store_into] = update_val

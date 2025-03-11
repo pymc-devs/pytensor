@@ -15,7 +15,7 @@ from pytensor.scan.utils import expand_empty, safe_new, until
 from pytensor.tensor.basic import get_underlying_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import minimum
-from pytensor.tensor.shape import shape_padleft, unbroadcast
+from pytensor.tensor.shape import shape_padleft
 from pytensor.tensor.type import TensorType, integer_dtypes
 from pytensor.updates import OrderedUpdates
 
@@ -748,7 +748,7 @@ def scan(
             # defined in scan utils
             sit_sot_scan_inputs.append(
                 expand_empty(
-                    unbroadcast(shape_padleft(actual_arg), 0),
+                    shape_padleft(actual_arg),
                     actual_n_steps,
                 )
             )
@@ -865,13 +865,13 @@ def scan(
     if n_fixed_steps in (1, -1):
         for pos, inner_out in enumerate(outputs):
             # we need to see if we need to pad our sequences with an
-            # unbroadcastable dimension; case example : we return an
+            # extra dimension; case example : we return an
             # output for which we want all intermediate. If n_steps is 1
             # then, if we return the output as given by the innner function
             # this will represent only a slice and it will have one
             # dimension less.
             if isinstance(inner_out.type, TensorType) and return_steps.get(pos, 0) != 1:
-                outputs[pos] = unbroadcast(shape_padleft(inner_out), 0)
+                outputs[pos] = shape_padleft(inner_out)
 
         if not return_list and len(outputs) == 1:
             outputs = outputs[0]
@@ -1002,7 +1002,7 @@ def scan(
                 sit_sot_inner_inputs.append(new_var)
                 sit_sot_scan_inputs.append(
                     expand_empty(
-                        unbroadcast(shape_padleft(input.variable), 0),
+                        shape_padleft(input.variable),
                         actual_n_steps,
                     )
                 )
