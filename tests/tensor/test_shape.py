@@ -19,14 +19,12 @@ from pytensor.tensor.shape import (
     Shape,
     Shape_i,
     SpecifyShape,
-    Unbroadcast,
     _specify_shape,
     reshape,
     shape,
     shape_tuple,
     specify_broadcastable,
     specify_shape,
-    unbroadcast,
 )
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
@@ -696,66 +694,6 @@ def test_get_vector_length():
     assert get_vector_length(x) == 10
 
 
-class TestUnbroadcast:
-    def test_basic(self):
-        x = matrix()
-        assert unbroadcast(x, 0) is x
-        assert unbroadcast(x, 1) is x
-        assert unbroadcast(x, 1, 0) is x
-        assert unbroadcast(x, 0, 1) is x
-
-        x = row()
-        assert unbroadcast(x, 0) is not x
-        assert unbroadcast(x, 1) is x
-        assert unbroadcast(x, 1, 0) is not x
-        assert unbroadcast(x, 0, 1) is not x
-
-        assert unbroadcast(unbroadcast(x, 0), 0).owner.inputs[0] is x
-
-    def test_infer_shape(self):
-        x = matrix()
-        y = unbroadcast(x, 0)
-        f = pytensor.function([x], y.shape)
-        assert (f(np.zeros((2, 5), dtype=config.floatX)) == [2, 5]).all()
-        topo = f.maker.fgraph.toposort()
-        if config.mode != "FAST_COMPILE":
-            assert len(topo) == 3
-            assert isinstance(topo[0].op, Shape_i)
-            assert isinstance(topo[1].op, Shape_i)
-            assert isinstance(topo[2].op, MakeVector)
-
-        x = row()
-        y = unbroadcast(x, 0)
-        f = pytensor.function([x], y.shape)
-        assert (f(np.zeros((1, 5), dtype=config.floatX)) == [1, 5]).all()
-        topo = f.maker.fgraph.toposort()
-        if config.mode != "FAST_COMPILE":
-            assert len(topo) == 2
-            assert isinstance(topo[0].op, Shape_i)
-            assert isinstance(topo[1].op, MakeVector)
-
-    def test_error_checks(self):
-        with pytest.raises(TypeError, match="needs integer axes"):
-            Unbroadcast(0.0)
-
-        with pytest.raises(ValueError, match="^Trying to unbroadcast"):
-            Unbroadcast(1)(vector())
-
-
-class TestUnbroadcastInferShape(utt.InferShapeTester):
-    def test_basic(self):
-        rng = np.random.default_rng(3453)
-        adtens4 = tensor(dtype="float64", shape=(1, 1, 1, None))
-        adtens4_val = rng.random((1, 1, 1, 3)).astype(config.floatX)
-        self._compile_and_check(
-            [adtens4],
-            [Unbroadcast(0, 2)(adtens4)],
-            [adtens4_val],
-            Unbroadcast,
-            warn=False,
-        )
-
-
 def test_shape_tuple():
     x = Variable(MyType2(), None, None)
     assert shape_tuple(x) == ()
@@ -882,16 +820,3 @@ class TestVectorize:
             match="Invalid number of shape arguments passed into vectorize node of SpecifyShape",
         ):
             vectorize_node(node, tns, *(5, 3, 2, x))
-
-    def test_unbroadcast(self):
-        mat = tensor(
-            shape=(
-                1,
-                1,
-            )
-        )
-        tns = tensor(shape=(4, 1, 1, 1))
-
-        node = unbroadcast(mat, 0).owner
-        vect_node = vectorize_node(node, tns)
-        assert equal_computations(vect_node.outputs, [unbroadcast(tns, 2)])

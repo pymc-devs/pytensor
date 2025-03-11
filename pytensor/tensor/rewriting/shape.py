@@ -42,9 +42,7 @@ from pytensor.tensor.shape import (
     Shape,
     Shape_i,
     SpecifyShape,
-    Unbroadcast,
     specify_shape,
-    unbroadcast,
 )
 from pytensor.tensor.subtensor import Subtensor, get_idx_list
 from pytensor.tensor.type import TensorType, discrete_dtypes, integer_dtypes
@@ -1296,78 +1294,3 @@ def local_track_shape_i(fgraph, node):
     # structure.
     replacement = shape_feature.scheduled[node]
     return [shape_feature.shape_of[replacement][node.op.i]]
-
-
-@register_useless
-@register_canonicalize
-@register_specialize
-@node_rewriter([Unbroadcast])
-def local_useless_unbroadcast(fgraph, node):
-    """Remove `Unbroadcast` if it does not actually change the broadcasting pattern."""
-    if isinstance(node.op, Unbroadcast):
-        x = node.inputs[0]
-        if x.type.ndim == node.outputs[0].type.ndim and all(
-            s1 == s2
-            for s1, s2 in zip(x.type.shape, node.outputs[0].type.shape, strict=True)
-            if s1 == 1 or s2 == 1
-        ):
-            # No broadcastable flag was modified
-            # No need to copy over stack trace,
-            # because x should already have a stack trace.
-            return [x]
-        else:
-            # Keep the flags that modify something
-            new_axes = tuple(ax for ax in node.op.axes if x.type.shape[ax] == 1)
-            if new_axes == node.op.axes:
-                # All flags are useful
-                return None
-            else:
-                r = unbroadcast(x, *new_axes)
-                # Copy over stacktrace from previous output
-                copy_stack_trace(node.outputs, r)
-                return [r]
-
-
-@register_canonicalize
-@register_specialize
-@node_rewriter([Unbroadcast])
-def local_unbroadcast_lift(fgraph, node):
-    """
-    Lifts `Unbroadcast` through unary Elemwise operations,
-    and merges consecutive `Unbroadcast`s.
-
-    Unbroadcast(Elemwise(x)) => Elemwise(Unbroadcast(x))
-    Unbroadcast(Unbroadcast(x)) => Unbroadcast(x)
-
-    TODO: Implement equivalent Elemwise lift for SpecifyShape
-    """
-    op = node.op
-    if not isinstance(op, Unbroadcast):
-        return False
-
-    inp = node.inputs[0]
-    inode = inp.owner
-    if inode and isinstance(inode.op, Elemwise) and len(inode.inputs) == 1:
-        if len(fgraph.clients.get(inp, ())) == 1:
-            unbroadcasted = unbroadcast(inode.inputs[0], *op.axes)
-            copy_stack_trace(node.outputs, unbroadcasted)
-
-            rval = inode.op.make_node(unbroadcasted).outputs
-
-            # Copy over stacktrace from previous output (after unbroadcasting)
-            # and input (after elemwise operation) to new output, because an
-            # error in the new graph could have been caused by either of the
-            # two ops.
-            copy_stack_trace(node.outputs + node.inputs, rval)
-            return rval
-
-    if inode and isinstance(inode.op, Unbroadcast):
-        # Merge axis of each unbroadcast
-        axis = tuple(set(inode.op.axes).union(set(op.axes)))
-        iinput = inode.inputs[0]
-        rval = [unbroadcast(iinput, *axis)]
-        # Copy over stacktrace from previous output (after second unbroadcasting)
-        # and from previous input (after first unbroadcasting) because an error in
-        # the new graph could have been caused by either of the two Unbroadcast ops.
-        copy_stack_trace(node.outputs + node.inputs, rval)
-        return rval
