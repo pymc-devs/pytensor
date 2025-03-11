@@ -59,11 +59,9 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.shape import (
     Shape,
     SpecifyShape,
-    Unbroadcast,
     shape_padleft,
     shape_tuple,
     specify_shape,
-    unbroadcast,
 )
 from pytensor.tensor.sharedvar import TensorSharedVariable
 from pytensor.tensor.subtensor import (
@@ -429,7 +427,6 @@ def local_subtensor_lift(fgraph, node):
     Handles the following unary ops:
     elemwise(x,...)[idx] -> elemwise(x[idx],...)
       when x,... are broadcasted scalar or not broadcasted at all
-    Unbroadcast(x)[idx] => Unbroadcast(x[idx])
 
     """
     if isinstance(node.op, Subtensor):
@@ -487,40 +484,6 @@ def local_subtensor_lift(fgraph, node):
                 # and stacktrace from previous unary operation
                 copy_stack_trace([node.outputs[0], node.inputs[0]], ret)
                 return [ret]
-
-        if isinstance(u.owner.op, Unbroadcast):
-            # Subtensor might reduce dim., adapt broadcast pattern accordingly
-            old_axes = u.owner.op.axes
-            new_axes = []
-
-            # loop through indices being subtensor-ed
-            # i indexes broadcastable pattern before subtensor
-            # j indexes broadcastable pattern after subtensor
-            j = 0
-            for i, x in enumerate(node.op.idx_list):
-                # if it is not a slice, it will reduce the dimension, should
-                # not appear in the broascastable dimensions
-                if isinstance(x, slice):
-                    if i in old_axes:
-                        new_axes.append(j)
-                    j += 1
-            # now keep the broadcastable pattern of all
-            # items not appearing in subtensor list
-            for i in range(len(node.op.idx_list), len(u.broadcastable)):
-                if i in old_axes:
-                    new_axes.append(j)
-                j += 1
-
-            subt_x = node.op(u.owner.inputs[0], *node.inputs[1:])
-            # Copy over previous output stacktrace
-            copy_stack_trace(node.outputs[0], subt_x)
-
-            rbcast_subt_x = unbroadcast(subt_x, *new_axes)
-            # Copy over previous output stacktrace
-            # and stacktrace from previous unary operation
-            copy_stack_trace([node.outputs[0], node.inputs[0]], rbcast_subt_x)
-
-            return [rbcast_subt_x]
 
 
 @register_canonicalize

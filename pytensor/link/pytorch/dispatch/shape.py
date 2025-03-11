@@ -2,7 +2,7 @@ import torch
 
 from pytensor.graph.basic import Constant
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape, Unbroadcast
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
 @pytorch_funcify.register(Reshape)
@@ -56,11 +56,3 @@ def pytorch_funcify_SpecifyShape(op, node, **kwargs):
         return x
 
     return specifyshape
-
-
-@pytorch_funcify.register(Unbroadcast)
-def pytorch_funcify_Unbroadcast(op, **kwargs):
-    def unbroadcast(x):
-        return x
-
-    return unbroadcast

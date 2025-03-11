@@ -28,7 +28,6 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor.math import argmax, dot
 from pytensor.tensor.math import max as pt_max
-from pytensor.tensor.shape import unbroadcast
 from pytensor.tensor.type import matrix, vector
 from tests import unittest_tools as utt
 
@@ -251,13 +250,6 @@ class TestRopLop(RopLopChecker):
         # I need the sum, because the setup expects the output to be a
         # vector
         self.check_rop_lop(self.x[:4].dimshuffle("x", 0).sum(axis=0), (4,))
-
-    def test_unbroadcast(self):
-        # I need the sum, because the setup expects the output to be a
-        # vector
-        self.check_rop_lop(
-            unbroadcast(self.x[:4].dimshuffle("x", 0), 0).sum(axis=1), (1,)
-        )
 
     def test_join(self):
         tv = np.asarray(self.rng.uniform(size=(10,)), pytensor.config.floatX)

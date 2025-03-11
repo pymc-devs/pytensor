@@ -287,7 +287,7 @@ TestAlloc13GradBroadcast = makeBroadcastTester(
     ),
 )
 
-# unbroadcast a row to a matrix
+# broadcast a row to a matrix
 TestAllocb1GradBroadcast = makeBroadcastTester(
     name="Allocb1GradTester",
     op=lambda x: alloc(x, s1, s2),
@@ -299,7 +299,7 @@ TestAllocb1GradBroadcast = makeBroadcastTester(
     ),
 )
 
-# unbroadcast a row to a tensor3
+# broadcast a row to a tensor3
 TestAllocb2GradBroadcast = makeBroadcastTester(
     name="Allocb2GradTester",
     op=lambda x: alloc(x, s1, s2, s3),
@@ -311,7 +311,7 @@ TestAllocb2GradBroadcast = makeBroadcastTester(
     ),
 )
 
-# unbroadcast a col to a matrix
+# broadcast a col to a matrix
 TestAllocb3GradBroadcast = makeBroadcastTester(
     name="Allocb3GradTester",
     op=lambda x: alloc(x, s1, s2),
@@ -323,7 +323,7 @@ TestAllocb3GradBroadcast = makeBroadcastTester(
     ),
 )
 
-# unbroadcast a col to a tensor3
+# broadcast a col to a tensor3
 TestAllocb4GradBroadcast = makeBroadcastTester(
     name="Allocb4GradTester",
     op=lambda x: alloc(x, s1, s2, s3),
@@ -336,7 +336,7 @@ TestAllocb4GradBroadcast = makeBroadcastTester(
 )
 
 
-# Partial unbroadcast of a dimshuffled input
+# Partial broadcast of a dimshuffled input
 TestAllocDimshuffleGradBroadcast = makeBroadcastTester(
     name="Allocb4GradTester",
     op=lambda x: alloc(x.dimshuffle("x", "x", 0), 1, s2, s3),
