@@ -4355,7 +4355,7 @@ def empty_like(
 
 
 def atleast_Nd(
-    arry: np.ndarray | TensorVariable, n: int = 1, left: bool = True
+    arry: np.ndarray | TensorVariable, *, n: int = 1, left: bool = True
 ) -> TensorVariable:
     """Convert input to an array with at least `n` dimensions."""
 

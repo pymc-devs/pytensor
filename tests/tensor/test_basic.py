@@ -4364,8 +4364,8 @@ def test_atleast_Nd():
 
     for n in range(1, 3):
         ary1, ary2 = dscalar(), dvector()
-        res_ary1 = atleast_Nd(ary1, n)
-        res_ary2 = atleast_Nd(ary2, n)
+        res_ary1 = atleast_Nd(ary1, n=n)
+        res_ary2 = atleast_Nd(ary2, n=n)
 
         assert res_ary1.ndim == n
         if n == ary2.ndim:
