@@ -4355,28 +4355,22 @@ def empty_like(
 
 
 def atleast_Nd(
-    *arys: np.ndarray | TensorVariable, n: int = 1, left: bool = True
+    arry: np.ndarray | TensorVariable, n: int = 1, left: bool = True
 ) -> TensorVariable:
-    """Convert inputs to arrays with at least `n` dimensions."""
-    res = []
-    for ary in arys:
-        ary = as_tensor(ary)
+    """Convert input to an array with at least `n` dimensions."""
 
-        if ary.ndim >= n:
-            result = ary
-        else:
-            result = (
-                shape_padleft(ary, n - ary.ndim)
-                if left
-                else shape_padright(ary, n - ary.ndim)
-            )
+    arry = as_tensor(arry)
 
-        res.append(result)
-
-    if len(res) == 1:
-        return res[0]
+    if arry.ndim >= n:
+        result = arry
     else:
-        return res
+        result = (
+            shape_padleft(arry, n - arry.ndim)
+            if left
+            else shape_padright(arry, n - arry.ndim)
+        )
+
+    return result
 
 
 atleast_1d = partial(atleast_Nd, n=1)
