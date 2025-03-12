@@ -13,6 +13,7 @@ from numbers import Number
 from typing import TYPE_CHECKING, Union
 from typing import cast as type_cast
 
+import numba as nb
 import numpy as np
 from numpy.exceptions import AxisError
 
@@ -972,6 +973,7 @@ class Nonzero(Op):
         output = [TensorType(dtype="int64", shape=(None,))() for i in range(a.ndim)]
         return Apply(self, [a], output)
 
+    @nb.njit
     def perform(self, node, inp, out_):
         a = inp[0]
 
