@@ -58,6 +58,7 @@ from pytensor.tensor.basic import (
     identity_like,
     infer_static_shape,
     inverse_permutation,
+    iota,
     join,
     make_vector,
     mgrid,
@@ -978,6 +979,29 @@ class TestEye:
         l = lscalar("l")
         assert eye(5, 3, l).type.shape == (5, 3)
         assert eye(1, l, 3).type.shape == (1, None)
+
+
+def test_iota():
+    mode = Mode(linker="py", optimizer=None)
+    np.testing.assert_allclose(
+        iota((4, 8), 0).eval(mode=mode),
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 2, 2, 2, 2],
+            [3, 3, 3, 3, 3, 3, 3, 3],
+        ],
+    )
+
+    np.testing.assert_allclose(
+        iota((4, 8), 1).eval(mode=mode),
+        [
+            [0, 1, 2, 3, 4, 5, 6, 7],
+            [0, 1, 2, 3, 4, 5, 6, 7],
+            [0, 1, 2, 3, 4, 5, 6, 7],
+            [0, 1, 2, 3, 4, 5, 6, 7],
+        ],
+    )
 
 
 class TestTriangle:

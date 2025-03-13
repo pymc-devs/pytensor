@@ -10,7 +10,7 @@ from pytensor.graph import FunctionGraph
 from pytensor.graph.op import HasInnerGraph
 from pytensor.tensor.basic import moveaxis
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.einsum import _delta, _general_dot, _iota, einsum
+from pytensor.tensor.einsum import _delta, _general_dot, einsum
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.type import tensor
 
@@ -36,29 +36,6 @@ def assert_no_blockwise_in_graph(fgraph: FunctionGraph, core_op=None) -> None:
             else:
                 inner_fgraph = node.op.fgraph
             assert_no_blockwise_in_graph(inner_fgraph, core_op=core_op)
-
-
-def test_iota():
-    mode = Mode(linker="py", optimizer=None)
-    np.testing.assert_allclose(
-        _iota((4, 8), 0).eval(mode=mode),
-        [
-            [0, 0, 0, 0, 0, 0, 0, 0],
-            [1, 1, 1, 1, 1, 1, 1, 1],
-            [2, 2, 2, 2, 2, 2, 2, 2],
-            [3, 3, 3, 3, 3, 3, 3, 3],
-        ],
-    )
-
-    np.testing.assert_allclose(
-        _iota((4, 8), 1).eval(mode=mode),
-        [
-            [0, 1, 2, 3, 4, 5, 6, 7],
-            [0, 1, 2, 3, 4, 5, 6, 7],
-            [0, 1, 2, 3, 4, 5, 6, 7],
-            [0, 1, 2, 3, 4, 5, 6, 7],
-        ],
-    )
 
 
 def test_delta():
