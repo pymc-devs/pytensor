@@ -202,6 +202,39 @@ def _parse_gufunc_signature(
     )
 
 
+def _gufunc_to_out_shape(
+    signature: str, shapes: list[tuple[int, ...]]
+) -> list[tuple[int, ...]]:
+    """
+    Compute the shape of the output of an Op given its gufunc signature and the
+    shapes of its inputs.
+
+    Parameters
+    ----------
+    signature : str
+        The gufunc signature of the Op.
+        eg: "(m,n),(n,p)->(m,p)".
+
+    shapes : list of tuple of int
+        The list of shapes of the inputs.
+
+    Returns
+    -------
+    out_shape : list of tuple of int
+        The list of shapes of the outputs.
+    """
+    parsed = _parse_gufunc_signature(signature)
+    out_shape = []
+    dic = dict()
+    for i in range(len(parsed[0])):
+        for j in range(len(parsed[0][i])):
+            dic[parsed[0][i][j]] = shapes[i][j]
+    for i in range(len(parsed[1])):
+        temp_list = [dic[x] for x in parsed[1][i]]
+        out_shape.append(tuple(temp_list))
+    return out_shape
+
+
 def safe_signature(
     core_inputs_ndim: Sequence[int],
     core_outputs_ndim: Sequence[int],

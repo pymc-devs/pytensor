@@ -17,6 +17,7 @@ from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import Variable, dvector, lscalar, matrix, scalar, vector
+from pytensor.tensor.utils import _gufunc_to_out_shape
 
 
 class MatrixPinv(Op):
@@ -63,7 +64,7 @@ class MatrixPinv(Op):
         return [grad]
 
     def infer_shape(self, fgraph, node, shapes):
-        return [list(reversed(shapes[0]))]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
 
 def pinv(x, hermitian=False):
@@ -156,7 +157,7 @@ class MatrixInverse(Op):
         return [-matrix_dot(xi, ev, xi)]
 
     def infer_shape(self, fgraph, node, shapes):
-        return shapes
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
 
 inv = matrix_inverse = Blockwise(MatrixInverse())
@@ -225,7 +226,7 @@ class Det(Op):
         return [gz * self(x) * matrix_inverse(x).T]
 
     def infer_shape(self, fgraph, node, shapes):
-        return [()]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def __str__(self):
         return "Det"
@@ -259,7 +260,7 @@ class SLogDet(Op):
             raise ValueError("Failed to compute determinant", x) from e
 
     def infer_shape(self, fgraph, node, shapes):
-        return [(), ()]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def __str__(self):
         return "SLogDet"
@@ -317,8 +318,7 @@ class Eig(Op):
         w[0], v[0] = (z.astype(x.dtype) for z in np.linalg.eig(x))
 
     def infer_shape(self, fgraph, node, shapes):
-        n = shapes[0][0]
-        return [(n,), (n, n)]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
 
 eig = Blockwise(Eig())
@@ -619,16 +619,7 @@ class SVD(Op):
             s[0] = np.linalg.svd(x, self.full_matrices, self.compute_uv)
 
     def infer_shape(self, fgraph, node, shapes):
-        (x_shape,) = shapes
-        M, N = x_shape
-        K = ptm.minimum(M, N)
-        s_shape = (K,)
-        if self.compute_uv:
-            u_shape = (M, M) if self.full_matrices else (M, K)
-            vt_shape = (N, N) if self.full_matrices else (K, N)
-            return [u_shape, s_shape, vt_shape]
-        else:
-            return [s_shape]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def L_op(
         self,
