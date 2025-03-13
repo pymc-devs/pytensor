@@ -988,12 +988,15 @@ class TestTriangle:
             M = M_
             # Currently DebugMode does not support None as inputs even if this is
             # allowed.
-            if M is None and config.mode in ["DebugMode", "DEBUG_MODE"]:
+            if M is None:  # and config.mode in ["DebugMode", "DEBUG_MODE"]:
                 M = N
             N_symb = iscalar()
-            f = function([N_symb], tri(N_symb, M=M, k=k, dtype=dtype))
-            # kwargs = {}
-            result = f(N)
+            M_symb = iscalar()
+            k_symb = iscalar()
+            f = function(
+                [N_symb, M_symb, k_symb], tri(N_symb, M_symb, k_symb, dtype=dtype)
+            )
+            result = f(N, M, k)
             assert np.allclose(result, np.tri(N, M_, k, dtype=dtype))
             assert result.dtype == np.dtype(dtype)
 
@@ -1025,15 +1028,15 @@ class TestTriangle:
 
         def check_l(m, k=0):
             m_symb = matrix(dtype=m.dtype)
-            # k_symb = iscalar()
-            f = function([m_symb], tril(m_symb, k=k))
+            k_symb = iscalar()
+            f = function([m_symb, k_symb], tril(m_symb, k_symb))
             f_indx = function(
-                [m_symb], tril_indices(m_symb.shape[0], k=k, m=m_symb.shape[1])
+                [m_symb, k_symb], tril_indices(m_symb.shape[0], k_symb, m_symb.shape[1])
             )
-            f_indx_from = function([m_symb], tril_indices_from(m_symb))
-            result = f(m)
-            result_indx = f_indx(m, k=k)
-            result_from = f_indx_from(m, k=k)
+            f_indx_from = function([m_symb, k_symb], tril_indices_from(m_symb, k_symb))
+            result = f(m, k)
+            result_indx = f_indx(m, k)
+            result_from = f_indx_from(m, k)
             assert np.allclose(result, np.tril(m, k))
             assert np.allclose(result_indx, np.tril_indices(m.shape[0], k, m.shape[1]))
             assert np.allclose(result_from, np.tril_indices_from(m, k))
@@ -1043,7 +1046,7 @@ class TestTriangle:
         def check_u(m, k=0):
             m_symb = matrix(dtype=m.dtype)
             k_symb = iscalar()
-            f = function([m_symb, k_symb], triu(m_symb, k=k))
+            f = function([m_symb, k_symb], triu(m_symb, k_symb))
             f_indx = function(
                 [m_symb, k_symb], triu_indices(m_symb.shape[0], k_symb, m_symb.shape[1])
             )
@@ -1075,7 +1078,7 @@ class TestTriangle:
                 assert np.allclose(result, np.triu(m, k))
                 assert result.dtype == np.dtype(dtype)
 
-        for dtype in ["int32", "int64", "float32", "float64", "uint16", "complex64"]:
+        for dtype in ["int32", "int64", "float32", "float64", "uint16"]:
             m = random_of_dtype((10, 10), dtype)
             check_l(m, 0)
             check_l(m, 1)

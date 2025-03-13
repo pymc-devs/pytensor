@@ -34,7 +34,7 @@ from pytensor.link.c.params_type import ParamsType
 from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
 from pytensor.raise_op import CheckAndRaise
-from pytensor.scalar import int32, upcast
+from pytensor.scalar import int32
 from pytensor.scalar.basic import ScalarConstant, ScalarType, ScalarVariable
 from pytensor.tensor import (
     _as_tensor_variable,
@@ -1148,14 +1148,6 @@ class Tri(OpFromGraph):
     Wrapper Op for np.tri graphs
     """
 
-    __props__ = ("dtype",)
-
-    def __init__(self, *args, M, k, dtype, **kwargs):
-        self.M = M
-        self.k = k
-        self.dtype = dtype
-        super().__init__(*args, **kwargs, strict=True)
-
 
 def tri(N, M=None, k=0, dtype=None):
     """
@@ -1184,14 +1176,19 @@ def tri(N, M=None, k=0, dtype=None):
     """
     if dtype is None:
         dtype = config.floatX
+    dtype = np.dtype(dtype)
+
     if M is None:
         M = N
+
+    N = as_tensor_variable(N)
+    M = as_tensor_variable(M)
+    k = as_tensor_variable(k)
 
     output = ((iota(as_tensor((N, 1)), 0) + k + 1) > iota(as_tensor((1, M)), 1)).astype(
         dtype
     )
-    N = as_tensor_variable(N)
-    return Tri(inputs=[N], outputs=[output], M=M, k=k, dtype=dtype)(N)
+    return Tri(inputs=[N, M, k], outputs=[output])(N, M, k)
 
 
 def tril(m, k=0):
@@ -1245,9 +1242,7 @@ def tril(m, k=0):
             [55, 56, 57, 58,  0]]])
 
     """
-    N, M = m.shape[-2:]
-    dtype = upcast(m.dtype)
-    return m * tri(N, M=M, k=k, dtype=dtype)  # M is symbolic, while it shouldnt be
+    return m * tri(*m.shape[-2:], k=k, dtype=m.dtype)
 
 
 def triu(m, k=0):
