@@ -1006,7 +1006,8 @@ class TestTriangle:
             "float32",
             "float64",
             "uint16",
-        ]:  # Handle "complex64" ?
+            "complex64",
+        ]:
             check(dtype, 3)
             # M != N, k = 0
             check(dtype, 3, 5)
@@ -1078,7 +1079,7 @@ class TestTriangle:
                 assert np.allclose(result, np.triu(m, k))
                 assert result.dtype == np.dtype(dtype)
 
-        for dtype in ["int32", "int64", "float32", "float64", "uint16"]:
+        for dtype in ["int32", "int64", "float32", "float64", "uint16", "complex64"]:
             m = random_of_dtype((10, 10), dtype)
             check_l(m, 0)
             check_l(m, 1)
