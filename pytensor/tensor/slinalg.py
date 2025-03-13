@@ -20,8 +20,8 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import kron, matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
-from pytensor.tensor.variable import TensorVariable
 from pytensor.tensor.utils import _gufunc_to_out_shape
+from pytensor.tensor.variable import TensorVariable
 
 
 logger = logging.getLogger(__name__)
