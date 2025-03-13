@@ -20,6 +20,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import kron, matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
+from pytensor.tensor.utils import _gufunc_to_out_shape
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -51,7 +52,7 @@ class Cholesky(Op):
             self.destroy_map = {0: [0]}
 
     def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def make_node(self, x):
         x = as_tensor_variable(x)
@@ -269,13 +270,7 @@ class SolveBase(Op):
         return Apply(self, [A, b], [x])
 
     def infer_shape(self, fgraph, node, shapes):
-        Ashape, Bshape = shapes
-        rows = Ashape[1]
-        if len(Bshape) == 1:
-            return [(rows,)]
-        else:
-            cols = Bshape[1]
-            return [(rows, cols)]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def L_op(self, inputs, outputs, output_gradients):
         r"""Reverse-mode gradient updates for matrix solve operation :math:`c = A^{-1} b`.
@@ -891,7 +886,7 @@ class SolveContinuousLyapunov(Op):
         X[0] = scipy_linalg.solve_continuous_lyapunov(A, B).astype(out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def grad(self, inputs, output_grads):
         # Gradient computations come from Kao and Hennequin (2020), https://arxiv.org/pdf/2011.11430.pdf
@@ -963,7 +958,7 @@ class BilinearSolveDiscreteLyapunov(Op):
         )
 
     def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def grad(self, inputs, output_grads):
         # Gradient computations come from Kao and Hennequin (2020), https://arxiv.org/pdf/2011.11430.pdf
@@ -1083,7 +1078,7 @@ class SolveDiscreteARE(Op):
         X[0] = scipy_linalg.solve_discrete_are(A, B, Q, R).astype(out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def grad(self, inputs, output_grads):
         # Gradient computations come from Kao and Hennequin (2020), https://arxiv.org/pdf/2011.11430.pdf
@@ -1181,8 +1176,7 @@ class BaseBlockDiagonal(Op):
         return [gout[0][slc] for slc in slices]
 
     def infer_shape(self, fgraph, nodes, shapes):
-        first, second = zip(*shapes, strict=True)
-        return [(pt.add(*first), pt.add(*second))]
+        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def _validate_and_prepare_inputs(self, matrices, as_tensor_func):
         if len(matrices) != self.n_inputs:
