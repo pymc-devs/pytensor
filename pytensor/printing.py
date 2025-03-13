@@ -101,6 +101,7 @@ def debugprint(
     print_view_map: bool = False,
     print_memory_map: bool = False,
     print_fgraph_inputs: bool = False,
+    print_inner_graphs: bool = True,
 ) -> str | TextIO:
     r"""Print a graph as text.
 
@@ -161,6 +162,8 @@ def debugprint(
         Whether to set both `print_destroy_map` and `print_view_map` to ``True``.
     print_fgraph_inputs
         Print the inputs of `FunctionGraph`\s.
+    print_inner_graphs
+        Whether to print the inner graphs of `Op`\s
 
     Returns
     -------
@@ -322,7 +325,7 @@ N.B.:
             print_view_map=print_view_map,
         )
 
-    if len(inner_graph_vars) > 0:
+    if len(inner_graph_vars) > 0 and print_inner_graphs:
         print("", file=_file)
         prefix = ""
         new_prefix = prefix + " ← "
