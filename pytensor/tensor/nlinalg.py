@@ -619,7 +619,16 @@ class SVD(Op):
             s[0] = np.linalg.svd(x, self.full_matrices, self.compute_uv)
 
     def infer_shape(self, fgraph, node, shapes):
-        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
+        (x_shape,) = shapes
+        M, N = x_shape
+        K = ptm.minimum(M, N)
+        s_shape = (K,)
+        if self.compute_uv:
+            u_shape = (M, M) if self.full_matrices else (M, K)
+            vt_shape = (N, N) if self.full_matrices else (K, N)
+            return [u_shape, s_shape, vt_shape]
+        else:
+            return [s_shape]
 
     def L_op(
         self,

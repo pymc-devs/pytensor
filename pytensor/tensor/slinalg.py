@@ -20,8 +20,8 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import kron, matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
-from pytensor.tensor.utils import _gufunc_to_out_shape
 from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.utils import _gufunc_to_out_shape
 
 
 logger = logging.getLogger(__name__)
@@ -1176,7 +1176,8 @@ class BaseBlockDiagonal(Op):
         return [gout[0][slc] for slc in slices]
 
     def infer_shape(self, fgraph, nodes, shapes):
-        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
+        first, second = zip(*shapes, strict=True)
+        return [(pt.add(*first), pt.add(*second))]
 
     def _validate_and_prepare_inputs(self, matrices, as_tensor_func):
         if len(matrices) != self.n_inputs:
