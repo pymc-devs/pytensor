@@ -8,8 +8,10 @@ import pytensor
 import pytensor.scalar.basic as ps
 from pytensor import compile
 from pytensor.compile import optdb
+from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
+    EquilibriumGraphRewriter,
     WalkingGraphRewriter,
     copy_stack_trace,
     in2out,
@@ -55,6 +57,16 @@ from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
+)
+from pytensor.tensor.rewriting.extremum import (
+    local_extremum_plus_x,
+    local_flatten_extremum,
+    local_useless_extremum_branches,
+)
+from pytensor.tensor.rewriting.math import (
+    local_add_canonizer,
+    local_intdiv_by_one,
+    local_mul_canonizer,
 )
 from pytensor.tensor.shape import (
     Shape,
@@ -558,6 +570,22 @@ def local_subtensor_merge(fgraph, node):
             )
             # Do not call make_node for test_value
             out = subtens(x, *sl_ins)
+
+            # Eagerly clean up merged subtensor graph, which can be a mess
+            rewriter = EquilibriumGraphRewriter(
+                [
+                    local_extremum_plus_x,
+                    local_add_canonizer,
+                    local_mul_canonizer,
+                    local_intdiv_by_one,
+                    local_useless_extremum_branches,
+                    local_flatten_extremum,
+                ],
+                max_use_ratio=10.0,
+            )
+            fg = FunctionGraph(outputs=[out], clone=False)
+            rewriter.rewrite(fg)
+            [out] = fg.outputs
 
             # Copy over previous output stacktrace
             # and stacktrace from previous slicing operation.

@@ -1466,7 +1466,7 @@ class TestSubtensorInferShape:
         fg = FunctionGraph(outputs=[y], clone=False)
         rewrite_graph(fg, include=("ShapeOpt", "canonicalize"), clone=False)
         assert not any(isinstance(node.op, Subtensor) for node in fg.apply_nodes)
-        assert len(fg.apply_nodes) <= 8
+        assert len(fg.apply_nodes) <= 7
 
         fn = pytensor.function(
             [x],
