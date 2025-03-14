@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Callable
 
 import numba
@@ -653,7 +654,7 @@ def solve_gen_impl(
 
 def _sysv(
     A: np.ndarray, B: np.ndarray, lower: bool, overwrite_a: bool, overwrite_b: bool
-) -> tuple[np.ndarray, np.ndarray, int]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
     """
     Placeholder for solving a linear system with a symmetric matrix; used by linalg.solve.
     """
@@ -664,7 +665,8 @@ def _sysv(
 def sysv_impl(
     A: np.ndarray, B: np.ndarray, lower: bool, overwrite_a: bool, overwrite_b: bool
 ) -> Callable[
-    [np.ndarray, np.ndarray, bool, bool, bool], tuple[np.ndarray, np.ndarray, int]
+    [np.ndarray, np.ndarray, bool, bool, bool],
+    tuple[np.ndarray, np.ndarray, np.ndarray, int],
 ]:
     ensure_lapack()
     _check_scipy_linalg_matrix(A, "sysv")
@@ -740,8 +742,8 @@ def sysv_impl(
         )
 
         if B_is_1d:
-            return B_copy[..., 0], IPIV, int_ptr_to_val(INFO)
-        return B_copy, IPIV, int_ptr_to_val(INFO)
+            B_copy = B_copy[..., 0]
+        return A_copy, B_copy, IPIV, int_ptr_to_val(INFO)
 
     return impl
 
@@ -770,7 +772,7 @@ def sycon_impl(
 
         N = val_to_int_ptr(_N)
         LDA = val_to_int_ptr(_N)
-        UPLO = val_to_int_ptr(ord("L"))
+        UPLO = val_to_int_ptr(ord("U"))
         ANORM = np.array(anorm, dtype=dtype)
         RCOND = np.empty(1, dtype=dtype)
         WORK = np.empty(2 * _N, dtype=dtype)
@@ -843,10 +845,10 @@ def solve_symmetric_impl(
     ) -> np.ndarray:
         _solve_check_input_shapes(A, B)
 
-        x, ipiv, info = _sysv(A, B, lower, overwrite_a, overwrite_b)
+        lu, x, ipiv, info = _sysv(A, B, lower, overwrite_a, overwrite_b)
         _solve_check(A.shape[-1], info)
 
-        rcond, info = _sycon(A, ipiv, _xlange(A, order="I"))
+        rcond, info = _sycon(lu, ipiv, _xlange(A, order="I"))
         _solve_check(A.shape[-1], info, True, rcond)
 
         return x
@@ -1070,14 +1072,16 @@ def numba_funcify_Solve(op, node, **kwargs):
     elif assume_a == "sym":
         solve_fn = _solve_symmetric
     elif assume_a == "her":
-        raise NotImplementedError(
-            'Use assume_a = "sym" for symmetric real matrices. If you need compelx support, '
-            "please open an issue on github."
-        )
+        # We already ruled out complex inputs
+        solve_fn = _solve_symmetric
     elif assume_a == "pos":
         solve_fn = _solve_psd
     else:
-        raise NotImplementedError(f"Assumption {assume_a} not supported in Numba mode")
+        warnings.warn(
+            f"Numba assume_a={assume_a} not implemented. Falling back to general solve.",
+            UserWarning,
+        )
+        solve_fn = _solve_gen
 
     @numba_basic.numba_njit(inline="always")
     def solve(a, b):
