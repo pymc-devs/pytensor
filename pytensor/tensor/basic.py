@@ -1268,7 +1268,7 @@ def triu(m, k=0):
            [ 0,  8,  9],
            [ 0,  0, 12]])
 
-    >>> pt.triu(np.arange(3 * 4 * 5).reshape((3, 4, 5))).eval()
+    >>> pt.triu(pt.arange(3 * 4 * 5).reshape((3, 4, 5))).eval()
     array([[[ 0,  1,  2,  3,  4],
             [ 0,  6,  7,  8,  9],
             [ 0,  0, 12, 13, 14],
