@@ -3930,15 +3930,15 @@ class TestInferShape(utt.InferShapeTester):
         biscal = iscalar()
         ciscal = iscalar()
         self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [4, 4, 0], Tri
+            [aiscal, biscal, ciscal], [tri(aiscal, biscal, ciscal)], [4, 4, 0], Tri
         )
 
         self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [4, 5, 0], Tri
+            [aiscal, biscal, ciscal], [tri(aiscal, biscal, ciscal)], [4, 5, 0], Tri
         )
 
         self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [3, 5, 0], Tri
+            [aiscal, biscal, ciscal], [tri(aiscal, biscal, ciscal)], [3, 5, 0], Tri
         )
 
     def test_ExtractDiag(self):
