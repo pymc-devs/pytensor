@@ -88,6 +88,7 @@ def debugprint(
     | FunctionGraph
     | Sequence[Variable | Apply | Function | FunctionGraph],
     depth: int = -1,
+    inner_depth: int = -1,
     print_type: bool = False,
     print_shape: bool = False,
     file: Literal["str"] | TextIO | None = None,
@@ -299,7 +300,7 @@ N.B.:
                 isinstance(var.owner.op, HasInnerGraph)
                 or hasattr(var.owner.op, "scalar_op")
                 and isinstance(var.owner.op.scalar_op, HasInnerGraph)
-            ) and var not in inner_graph_vars:
+            ) and not inner_depth and var not in inner_graph_vars:
                 inner_graph_vars.append(var)
             if print_op_info:
                 op_information.update(op_debug_information(var.owner.op, var.owner))
@@ -325,7 +326,7 @@ N.B.:
             print_view_map=print_view_map,
         )
 
-    if len(inner_graph_vars) > 0 and print_inner_graphs:
+    if len(inner_graph_vars) > 0 and inner_depth:
         print("", file=_file)
         prefix = ""
         new_prefix = prefix + " ← "
@@ -377,7 +378,7 @@ N.B.:
             _debugprint(
                 ig_var,
                 prefix=prefix,
-                depth=depth,
+                depth=inner_depth,
                 done=done,
                 print_type=print_type,
                 print_shape=print_shape,
@@ -400,7 +401,7 @@ N.B.:
                     _debugprint(
                         inp,
                         prefix=" → ",
-                        depth=depth,
+                        depth=inner_depth,
                         done=done,
                         print_type=print_type,
                         print_shape=print_shape,
@@ -435,7 +436,7 @@ N.B.:
                 _debugprint(
                     out,
                     prefix=new_prefix,
-                    depth=depth,
+                    depth=inner_depth,
                     done=done,
                     print_type=print_type,
                     print_shape=print_shape,
