@@ -53,7 +53,6 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import (
     Shape,
     Shape_i,
-    Unbroadcast,
     shape,
     shape_padaxis,
     shape_padleft,
@@ -334,9 +333,7 @@ def _get_underlying_scalar_constant_value(
         if not only_process_constants and getattr(v, "owner", None) and max_recur > 0:
             op = v.owner.op
             max_recur -= 1
-            if isinstance(
-                op, Alloc | DimShuffle | Unbroadcast | OutputGuard | DeepCopyOp
-            ):
+            if isinstance(op, Alloc | DimShuffle | OutputGuard | DeepCopyOp):
                 # OutputGuard is only used in debugmode but we
                 # keep it here to avoid problems with old pickles
                 v = v.owner.inputs[0]
@@ -498,14 +495,6 @@ def _get_underlying_scalar_constant_value(
                     grandparent = leftmost_parent.owner.inputs[0]
                     gp_shape = grandparent.type.shape
                     ndim = grandparent.type.ndim
-                    if grandparent.owner and isinstance(
-                        grandparent.owner.op, Unbroadcast
-                    ):
-                        ggp_shape = grandparent.owner.inputs[0].type.shape
-                        l = [
-                            _get_underlying_scalar_constant_value(s) for s in ggp_shape
-                        ]
-                        gp_shape = tuple(l)
 
                     if not (idx < ndim):
                         msg = (

@@ -2,7 +2,7 @@ import numpy as np
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
-from pytensor.tensor.shape import Shape, Shape_i, Unbroadcast, reshape
+from pytensor.tensor.shape import Shape, Shape_i, reshape
 from pytensor.tensor.type import iscalar, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
@@ -50,10 +50,3 @@ def test_pytorch_Reshape_dynamic():
     compare_pytorch_and_py(
         [a, shape_pt], [x], [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX), 2]
     )
-
-
-def test_pytorch_unbroadcast():
-    x_np = np.zeros((20, 1, 1))
-    x = Unbroadcast(0, 2)(pt.as_tensor_variable(x_np))
-
-    compare_pytorch_and_py([], [x], [])

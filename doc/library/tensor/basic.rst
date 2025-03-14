@@ -620,8 +620,7 @@ dimensions, see :meth:`_tensor_py_operators.dimshuffle`.
 .. function:: shape_padleft(x, n_ones=1)
 
     Reshape `x` by left padding the shape with `n_ones` 1s. Note that all
-    this new dimension will be broadcastable. To make them non-broadcastable
-    see the :func:`unbroadcast`.
+    this new dimension will be broadcastable.
 
     :param x: variable to be reshaped
     :type x: any `TensorVariable` (or compatible)
@@ -634,8 +633,7 @@ dimensions, see :meth:`_tensor_py_operators.dimshuffle`.
 .. function:: shape_padright(x, n_ones=1)
 
     Reshape `x` by right padding the shape with `n_ones` ones. Note that all
-    this new dimension will be broadcastable. To make them non-broadcastable
-    see the :func:`unbroadcast`.
+    this new dimension will be broadcastable.
 
     :param x: variable to be reshaped
     :type x: any TensorVariable (or compatible)
@@ -647,8 +645,7 @@ dimensions, see :meth:`_tensor_py_operators.dimshuffle`.
 .. function:: shape_padaxis(t, axis)
 
     Reshape `t` by inserting ``1`` at the dimension `axis`. Note that this new
-    dimension will be broadcastable. To make it non-broadcastable
-    see the :func:`unbroadcast`.
+    dimension will be broadcastable.
 
     :type x: any `TensorVariable` (or compatible)
     :param x: variable to be reshaped

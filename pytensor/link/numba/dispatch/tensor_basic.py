@@ -17,7 +17,6 @@ from pytensor.tensor.basic import (
     Split,
     TensorFromScalar,
 )
-from pytensor.tensor.shape import Unbroadcast
 
 
 @numba_funcify.register(AllocEmpty)
@@ -230,15 +229,6 @@ def makevector({", ".join(input_names)}):
     )
 
     return numba_basic.numba_njit(makevector_fn)
-
-
-@numba_funcify.register(Unbroadcast)
-def numba_funcify_Unbroadcast(op, **kwargs):
-    @numba_basic.numba_njit
-    def unbroadcast(x):
-        return x
-
-    return unbroadcast
 
 
 @numba_funcify.register(TensorFromScalar)

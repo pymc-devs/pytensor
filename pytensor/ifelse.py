@@ -26,7 +26,7 @@ from pytensor.graph.op import _NoPythonOp
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
 from pytensor.graph.type import HasDataType, HasShape
-from pytensor.tensor.shape import Reshape, Shape, SpecifyShape, Unbroadcast
+from pytensor.tensor.shape import Reshape, Shape, SpecifyShape
 
 
 if TYPE_CHECKING:
@@ -481,7 +481,6 @@ acceptable_ops = (
     Shape,
     SpecifyShape,
     Reshape,
-    Unbroadcast,
     pt.math.Dot,
     pt.math.Max,
     pt.math.Argmax,

@@ -7,7 +7,6 @@ import pytensor.tensor.basic as ptb
 from pytensor import config, function
 from pytensor.compile import get_mode
 from pytensor.scalar import Add
-from pytensor.tensor.shape import Unbroadcast
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     compare_shape_dtype,
@@ -68,16 +67,6 @@ def test_TensorFromScalar():
 def test_ScalarFromTensor():
     v, v_test = pt.scalar(), np.array(1.0, dtype=config.floatX)
     g = ptb.ScalarFromTensor()(v)
-    compare_numba_and_py(
-        [v],
-        g,
-        [v_test],
-    )
-
-
-def test_Unbroadcast():
-    v, v_test = pt.row(), np.array([[1.0, 2.0]], dtype=config.floatX)
-    g = Unbroadcast(0)(v)
     compare_numba_and_py(
         [v],
         g,

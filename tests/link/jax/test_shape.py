@@ -4,7 +4,7 @@ import pytest
 import pytensor.tensor as pt
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.configdefaults import config
-from pytensor.tensor.shape import Shape, Shape_i, Unbroadcast, reshape
+from pytensor.tensor.shape import Shape, Shape_i, reshape
 from pytensor.tensor.type import iscalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
@@ -70,10 +70,6 @@ def test_jax_compile_ops():
     compare_jax_and_py([], [x], [])
 
     x_np = np.zeros((20, 1, 1))
-    x = Unbroadcast(0, 2)(pt.as_tensor_variable(x_np))
-
-    compare_jax_and_py([], [x], [])
-
     x = ViewOp()(pt.as_tensor_variable(x_np))
 
     compare_jax_and_py([], [x], [])
