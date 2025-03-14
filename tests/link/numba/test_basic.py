@@ -31,6 +31,7 @@ from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
 from pytensor.tensor import blas
+from pytensor.tensor.basic import Nonzero
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
@@ -893,3 +894,25 @@ def test_function_overhead(mode, benchmark):
     assert np.sum(fn(test_x)) == 1000
 
     benchmark(fn, test_x)
+
+
+@pytest.mark.parametrize(
+    "input_data",
+    [np.array([1, 0, 3]), np.array([[0, 1], [2, 0]]), np.array([[0, 0], [0, 0]])],
+)
+def test_Nonzero(input_data):
+    if input_data.ndim == 0:
+        a = pt.scalar("a")
+    elif input_data.ndim == 1:
+        a = pt.vector("a")
+    elif input_data.ndim == 2:
+        a = pt.matrix("a")
+
+    nonzero_op = Nonzero()
+
+    node = nonzero_op.make_node(a)
+    graph_outputs = node.outputs
+
+    compare_numba_and_py(
+        graph_inputs=[a], graph_outputs=graph_outputs, test_inputs=[input_data]
+    )
