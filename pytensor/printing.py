@@ -102,7 +102,6 @@ def debugprint(
     print_view_map: bool = False,
     print_memory_map: bool = False,
     print_fgraph_inputs: bool = False,
-    print_inner_graphs: bool = True,
 ) -> str | TextIO:
     r"""Print a graph as text.
 
@@ -125,6 +124,8 @@ def debugprint(
         The object(s) to be printed.
     depth
         Print graph to this depth (``-1`` for unlimited).
+    inner_depth
+        Print inner graph to this depth (``-1`` for unlimited).
     print_type
         If ``True``, print the `Type`\s of each `Variable` in the graph.
     print_shape
@@ -302,7 +303,7 @@ N.B.:
                     or hasattr(var.owner.op, "scalar_op")
                     and isinstance(var.owner.op.scalar_op, HasInnerGraph)
                 )
-                and not inner_depth
+                and inner_depth
                 and var not in inner_graph_vars
             ):
                 inner_graph_vars.append(var)
