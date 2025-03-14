@@ -3,7 +3,6 @@ import warnings
 import numpy as np
 
 from pytensor.compile import SharedVariable, shared_constructor
-from pytensor.tensor import _get_vector_length
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorVariable
 
@@ -49,11 +48,6 @@ class TensorSharedVariable(SharedVariable, TensorVariable):
             self.container.value[...] = 0
         else:
             self.container.value = 0 * self.container.value
-
-
-@_get_vector_length.register(TensorSharedVariable)
-def _get_vector_length_TensorSharedVariable(var_inst, var):
-    return len(var.get_value(borrow=True))
 
 
 @shared_constructor.register(np.ndarray)
