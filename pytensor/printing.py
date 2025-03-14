@@ -297,10 +297,14 @@ N.B.:
     ):
         if hasattr(var.owner, "op"):
             if (
-                isinstance(var.owner.op, HasInnerGraph)
-                or hasattr(var.owner.op, "scalar_op")
-                and isinstance(var.owner.op.scalar_op, HasInnerGraph)
-            ) and not inner_depth and var not in inner_graph_vars:
+                (
+                    isinstance(var.owner.op, HasInnerGraph)
+                    or hasattr(var.owner.op, "scalar_op")
+                    and isinstance(var.owner.op.scalar_op, HasInnerGraph)
+                )
+                and not inner_depth
+                and var not in inner_graph_vars
+            ):
                 inner_graph_vars.append(var)
             if print_op_info:
                 op_information.update(op_debug_information(var.owner.op, var.owner))
