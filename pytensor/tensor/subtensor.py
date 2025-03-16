@@ -33,6 +33,7 @@ from pytensor.tensor.basic import (
     alloc,
     get_scalar_constant_value,
     nonzero,
+    switch,
 )
 from pytensor.tensor.basic import (
     constant as tensor_constant,
@@ -40,7 +41,8 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
-from pytensor.tensor.math import clip
+from pytensor.tensor.math import abs as pt_abs
+from pytensor.tensor.math import clip, eq, ge, lt, maximum, minimum, sign
 from pytensor.tensor.shape import Reshape, Shape_i, specify_broadcastable
 from pytensor.tensor.type import (
     TensorType,
@@ -55,6 +57,7 @@ from pytensor.tensor.type import (
     lscalar,
     tensor,
     ubscalar,
+    uint_dtypes,
     uiscalar,
     ulscalar,
     uwscalar,
@@ -254,6 +257,25 @@ def get_idx_list(inputs, idx_list):
     return indices_from_subtensor(inputs[1:], idx_list)
 
 
+def undo_scalarization(x):
+    """Undo scalarization of a variable.
+
+    PyTensor Basic index operations use ScalarVariables for the indices/slice arguments.
+    But reasoning symbolically about the result of multiple indexing operations, we usually
+    want to work on TensorVariables, since rewrites work on those and not ScalarVariables.
+
+    This function undoes ScalarFromTensor operation or converts ScalarConstants to TensorConstants.
+    """
+    if isinstance(x, ScalarVariable):
+        if isinstance(x, ScalarConstant):
+            return tensor_constant(x.data, dtype=x.dtype)
+        elif x.owner is not None and isinstance(x.owner.op, ScalarFromTensor):
+            return x.owner.inputs[0]
+        else:
+            return as_tensor_variable(x)
+    return x
+
+
 @overload
 def get_canonical_form_slice(
     theslice: slice,
@@ -296,25 +318,6 @@ def get_canonical_form_slice(
     direction
         Direction to iterate the resulting elements in. (-1 or 1). May be symbolic.
     """
-    from pytensor.tensor import ge, lt, sign, switch
-
-    def undo_scalarization(x):
-        """Undo scalarization of a variable.
-
-        PyTensor Basic index operations use ScalarVariables for the indices/slice arguments.
-        But reasoning symbolically about the result of multiple indexing operations, we usually
-        want to work on TensorVariables, since rewrites work on those and not ScalarVariables.
-
-        This function undoes ScalarFromTensor operation or converts ScalarConstants to TensorConstants.
-        """
-        if isinstance(x, ScalarVariable):
-            if isinstance(x, ScalarConstant):
-                return tensor_constant(x.data, dtype=x.dtype)
-            elif x.owner is not None and isinstance(x.owner.op, ScalarFromTensor):
-                return x.owner.inputs[0]
-            else:
-                return as_tensor_variable(x)
-        return x
 
     def analyze(x):
         try:
@@ -845,6 +848,17 @@ def as_nontensor_scalar(a: Variable) -> ps.ScalarVariable:
         return ps.as_scalar(a)
 
 
+def _eager_switch(
+    cond: TensorVariable | bool, a: TensorVariable, b: TensorVariable
+) -> TensorVariable:
+    # Do not create a switch if cond is True/False
+    # We need this because uint types cannot be negative and creating the lazy switch could upcast everything to float64
+    # It also simplifies immediately the graph that's returned
+    if isinstance(cond, bool):
+        return a if cond else b
+    return cast(TensorVariable, switch(cond, a, b))
+
+
 class Subtensor(COp):
     """Basic NumPy indexing operator."""
 
@@ -956,27 +970,112 @@ class Subtensor(COp):
         padded = actual_idx_list + [slice(None, None, None)] * (
             len(xshp) - len(self.idx_list)
         )
+
+        zero = tensor_constant(np.array(0, dtype="int64"))
+        one = tensor_constant(np.array(1, dtype="int64"))
         i = 0
         for idx, xl in zip(padded, xshp, strict=True):
             if isinstance(idx, slice):
-                # If it is the default (None, None, None) slice, or a variant,
-                # the shape will be xl
+                a, b, step = idx.start, idx.stop, idx.step
                 if (
-                    (idx.start in [None, 0])
-                    and (idx.stop in [None, sys.maxsize])
-                    and (idx.step is None or idx.step == 1)
+                    a is None
+                    and b is None
+                    and step is not None
+                    and get_scalar_constant_value(step, raise_not_constant=False) == -1
                 ):
+                    # Shortcut for x[::-1]
                     outshp.append(xl)
+
                 else:
-                    cnf = get_canonical_form_slice(idx, xl)[0]
-                    if cnf.step == 1:
-                        length = cnf.stop - cnf.start
+                    if step is None:
+                        step_pos = True
+                        unit_step = True
+                        abs_step = one
                     else:
-                        length = (cnf.stop - cnf.start - 1) // cnf.step + 1
-                    outshp.append(length)
+                        step = undo_scalarization(step)
+                        if step.dtype in uint_dtypes:
+                            step_pos = True
+                            abs_step = step.astype("int64")
+                        else:
+                            step_pos = ge(step, zero)
+                            abs_step = pt_abs(step)
+                        unit_step = eq(abs_step, one)
+
+                    if a is None:
+                        a_pos = True
+                        a = _eager_switch(step_pos, zero, xl)
+                    else:
+                        a = undo_scalarization(a)
+                        if a.dtype in uint_dtypes:
+                            a_pos = True
+                            a = a.astype("int64")
+                        else:
+                            a_pos = ge(a, zero)
+
+                    if b is None:
+                        # For negative steps there is no numerical equivalent for stop=None.
+                        # The formulas below work if we set it to -1 and consider `b_pos=True`
+                        b_pos = True
+                        b = _eager_switch(step_pos, xl, -one)
+                    else:
+                        b = undo_scalarization(b)
+                        if b.dtype in uint_dtypes:
+                            b = b.astype("int64")
+                            b_pos = True
+                        else:
+                            b_pos = ge(b, zero)
+
+                    slice_length_pos_step = _eager_switch(
+                        a_pos,
+                        _eager_switch(
+                            b_pos,
+                            minimum(b - a, xl - a),  # [a: b]
+                            ((xl + b) - a),  # [a: -b]
+                        ),
+                        _eager_switch(
+                            b_pos,
+                            # The [-a: b] is peculiar, the slice length actually decreases for larger arrays
+                            # The branch -a is useless when b - a / 2 <= -a. Similar for the branch b
+                            minimum(minimum(xl, b - a - xl), minimum(-a, b)),  # [-a: b]
+                            minimum(b - a, xl + b),  # [-a: -b]
+                        ),
+                    )
+
+                    slice_length_neg_step = _eager_switch(
+                        a_pos,
+                        _eager_switch(
+                            b_pos,
+                            minimum(a - b, xl - b - one),  # [a: b]
+                            minimum(
+                                minimum(xl, a - (xl + b)), minimum(a + one, -b - one)
+                            ),  # [a: -b]
+                        ),
+                        _eager_switch(
+                            b_pos,
+                            ((xl + a) - b),  # [-a: b]
+                            minimum(a - b, xl + a + one),  # [-a: -b]
+                        ),
+                    )
+
+                    slice_length = _eager_switch(
+                        step_pos,
+                        slice_length_pos_step,
+                        slice_length_neg_step,
+                    )
+
+                    # Incorporate step size
+                    slice_length = _eager_switch(
+                        unit_step,
+                        slice_length,
+                        (slice_length - one) // abs_step + one,
+                    )
+                    # Catch negative sizes
+                    slice_length = maximum(zero, slice_length)
+                    outshp.append(slice_length)
+
                 i += 1
             else:
-                # That dimension is dropped
+                # That dimension is dropped by integer indexing
                 pass
         assert i == node.outputs[0].ndim
         assert len(outshp) == node.outputs[0].ndim
