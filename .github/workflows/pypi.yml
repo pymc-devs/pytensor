@@ -80,7 +80,7 @@ jobs:
           persist-credentials: false
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.23.0
+        uses: pypa/cibuildwheel@v2.23.1
 
       - name: Attest GitHub build provenance
         uses: actions/attest-build-provenance@v2
