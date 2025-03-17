@@ -384,7 +384,7 @@ def get_canonical_form_slice(
         )
         is_stop_length = (
             stop is None
-            or stop in [length, sys.maxsize]
+            or stop == length
             or (is_stop_constant and is_length_constant and stop >= length)
         )
         if is_start_0:
@@ -1036,7 +1036,7 @@ class Subtensor(COp):
                             b_pos,
                             # The [-a: b] is peculiar, the slice length actually decreases for larger arrays
                             # The branch -a is useless when b - a / 2 <= -a. Similar for the branch b
-                            minimum(minimum(xl, b - a - xl), minimum(-a, b)),  # [-a: b]
+                            minimum(xl, b - a - xl, -a, b),  # [-a: b]
                             minimum(b - a, xl + b),  # [-a: -b]
                         ),
                     )
@@ -1046,9 +1046,7 @@ class Subtensor(COp):
                         _eager_switch(
                             b_pos,
                             minimum(a - b, xl - b - one),  # [a: b]
-                            minimum(
-                                minimum(xl, a - (xl + b)), minimum(a + one, -b - one)
-                            ),  # [a: -b]
+                            minimum(xl, a - (xl + b), a + one, -b - one),  # [a: -b]
                         ),
                         _eager_switch(
                             b_pos,
