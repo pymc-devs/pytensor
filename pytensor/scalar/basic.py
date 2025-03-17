@@ -1884,8 +1884,14 @@ class Maximum(BinaryScalarOp):
         (z,) = outputs
         if any(i.type in complex_types for i in node.inputs):
             raise NotImplementedError()
-        # Test for both y>x and x>=y to detect NaN
-        return f'{z} = (({y})>({x})? ({y}): (({x})>=({y})? ({x}): nan("")));'
+        if all(i.type in discrete_dtypes for i in node.inputs):
+            return f"{z} = (({y})>({x})? ({y}): (({x});"
+        else:
+            # Test for both y>x and x>=y to detect NaN
+            return f'{z} = (({y})>({x})? ({y}): (({x})>=({y})? ({x}): nan("")));'
+
+    def c_code_cache_version(self):
+        return (1,)
 
     def L_op(self, inputs, outputs, gout):
         (x, y) = inputs
@@ -1927,7 +1933,14 @@ class Minimum(BinaryScalarOp):
         (z,) = outputs
         if any(i.type in complex_types for i in node.inputs):
             raise NotImplementedError()
-        return f'{z} = (({y})<({x})? ({y}): (({x})<=({y})? ({x}): nan("")));'
+        if all(i.type in discrete_dtypes for i in node.inputs):
+            return f"{z} = (({y})<({x})? ({y}): (({x});"
+        else:
+            # Second check catches `NAN`s
+            return f'{z} = (({y})<({x})? ({y}): (({x})<=({y})? ({x}): nan("")));'
+
+    def c_code_cache_version(self):
+        return (1,)
 
     def L_op(self, inputs, outputs, gout):
         (x, y) = inputs
