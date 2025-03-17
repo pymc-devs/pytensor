@@ -3829,10 +3829,7 @@ def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
 
     fgraph = f.maker.fgraph.toposort()
     for node in fgraph:
-        if (
-            hasattr(node.op, "scalar_op")
-            and node.op.scalar_op == ps.basic.scalar_maximum
-        ):
+        if hasattr(node.op, "scalar_op") and node.op.scalar_op == ps.basic.maximum:
             return
 
         # In mode FAST_COMPILE, the rewrites don't replace the
