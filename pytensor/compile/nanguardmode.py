@@ -34,7 +34,7 @@ def _is_numeric_value(arr, var):
 
     if isinstance(arr, _cdata_type):
         return False
-    elif isinstance(arr, np.random.mtrand.RandomState | np.random.Generator):
+    elif isinstance(arr, np.random.Generator):
         return False
     elif var is not None and isinstance(var.type, RandomType):
         return False
