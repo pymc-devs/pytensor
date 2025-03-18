@@ -2861,6 +2861,12 @@ class TestARange:
             assert np.all(f(2) == len(np.arange(0, 2)))
             assert np.all(f(0) == len(np.arange(0, 0)))
 
+    def test_static_shape(self):
+        assert np.arange(1, 10).shape == arange(1, 10).type.shape
+        assert np.arange(10, 1, -1).shape == arange(10, 1, -1).type.shape
+        assert np.arange(1, -9, 2).shape == arange(1, -9, 2).type.shape
+        assert np.arange(1.3, 17.48, 2.67).shape == arange(1.3, 17.48, 2.67).type.shape
+
 
 class TestNdGrid:
     def setup_method(self):

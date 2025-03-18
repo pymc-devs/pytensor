@@ -3224,13 +3224,29 @@ class ARange(Op):
         self.dtype = dtype
 
     def make_node(self, start, stop, step):
+        types = TensorConstant
+        shape = (None,)
+        # if it is possible to directly determine the shape i.e static shape is present, we find it.
+        if (
+            isinstance(start, types)
+            and isinstance(stop, types)
+            and isinstance(step, types)
+        ):
+            length = max(
+                np.max(np.ceil((stop.value - start.value) / step.value))
+                .astype(int)
+                .item(),
+                0,
+            )
+            shape = (length,)
+
         start, stop, step = map(as_tensor_variable, (start, stop, step))
         assert start.ndim == 0
         assert stop.ndim == 0
         assert step.ndim == 0
 
         inputs = [start, stop, step]
-        outputs = [tensor(dtype=self.dtype, shape=(None,))]
+        outputs = [tensor(dtype=self.dtype, shape=shape)]
 
         return Apply(self, inputs, outputs)
 
