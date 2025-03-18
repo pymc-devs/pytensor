@@ -1,6 +1,6 @@
 import warnings
 
-from numpy.random import Generator, RandomState
+from numpy.random import Generator
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.link.basic import JITLinker
@@ -21,7 +21,7 @@ class JAXLinker(JITLinker):
 
         # Replace any shared RNG inputs so that their values can be updated in place
         # without affecting the original RNG container. This is necessary because
-        # JAX does not accept RandomState/Generators as inputs, and they will have to
+        # JAX does not accept Generators as inputs, and they will have to
         # be tipyfied
         if shared_rng_inputs:
             warnings.warn(
@@ -79,7 +79,7 @@ class JAXLinker(JITLinker):
         thunk_inputs = []
         for n in self.fgraph.inputs:
             sinput = storage_map[n]
-            if isinstance(sinput[0], RandomState | Generator):
+            if isinstance(sinput[0], Generator):
                 new_value = jax_typify(
                     sinput[0], dtype=getattr(sinput[0], "dtype", None)
                 )

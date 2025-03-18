@@ -1,12 +1,13 @@
 from typing import TypeVar
 
 import numpy as np
+from numpy.random import Generator
 
 import pytensor
 from pytensor.graph.type import Type
 
 
-T = TypeVar("T", np.random.RandomState, np.random.Generator)
+T = TypeVar("T")
 
 
 gen_states_keys = {
@@ -24,14 +25,10 @@ numpy_bit_gens = {0: "MT19937", 1: "PCG64", 2: "Philox", 3: "SFC64"}
 
 
 class RandomType(Type[T]):
-    r"""A Type wrapper for `numpy.random.Generator` and `numpy.random.RandomState`."""
-
-    @staticmethod
-    def may_share_memory(a: T, b: T):
-        return a._bit_generator is b._bit_generator  # type: ignore[attr-defined]
+    r"""A Type wrapper for `numpy.random.Generator."""
 
 
-class RandomGeneratorType(RandomType[np.random.Generator]):
+class RandomGeneratorType(RandomType[Generator]):
     r"""A Type wrapper for `numpy.random.Generator`.
 
     The reason this exists (and `Generic` doesn't suffice) is that
@@ -47,6 +44,10 @@ class RandomGeneratorType(RandomType[np.random.Generator]):
     def __repr__(self):
         return "RandomGeneratorType"
 
+    @staticmethod
+    def may_share_memory(a: Generator, b: Generator):
+        return a._bit_generator is b._bit_generator  # type: ignore[attr-defined]
+
     def filter(self, data, strict=False, allow_downcast=None):
         """
         XXX: This doesn't convert `data` to the same type of underlying RNG type
@@ -58,7 +59,7 @@ class RandomGeneratorType(RandomType[np.random.Generator]):
         `Type.filter`, we need to have it here to avoid surprising circular
         dependencies in sub-classes.
         """
-        if isinstance(data, np.random.Generator):
+        if isinstance(data, Generator):
             return data
 
         if not strict and isinstance(data, dict):
