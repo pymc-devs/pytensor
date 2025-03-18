@@ -749,18 +749,11 @@ def numba_funcify_IfElse(op, **kwargs):
 
 @numba_funcify.register(Nonzero)
 def numba_funcify_Nonzero(op, node, **kwargs):
-    a = node.inputs[0]
-
-    if a.ndim == 0:
-        raise ValueError("Nonzero only supports non-scalar arrays.")
-
     @numba_njit
     def nonzero(a):
-        if a.ndim == 1:
-            indices = np.where(a != 0)[0]
-            return indices.astype(np.int64)
-
         result_tuple = np.nonzero(a)
+        if a.ndim == 1:
+            return result_tuple[0]
         return list(result_tuple)
 
     return nonzero

@@ -31,7 +31,6 @@ from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
 from pytensor.tensor import blas
-from pytensor.tensor.basic import Nonzero
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
@@ -288,7 +287,6 @@ def compare_numba_and_py(
     )
     test_inputs_copy = (inp.copy() for inp in test_inputs) if inplace else test_inputs
     numba_res = pytensor_numba_fn(*test_inputs_copy)
-
     if isinstance(graph_outputs, tuple | list):
         for j, p in zip(numba_res, py_res, strict=True):
             assert_fn(j, p)
@@ -901,17 +899,9 @@ def test_function_overhead(mode, benchmark):
     [np.array([1, 0, 3]), np.array([[0, 1], [2, 0]]), np.array([[0, 0], [0, 0]])],
 )
 def test_Nonzero(input_data):
-    if input_data.ndim == 0:
-        a = pt.scalar("a")
-    elif input_data.ndim == 1:
-        a = pt.vector("a")
-    elif input_data.ndim == 2:
-        a = pt.matrix("a")
+    a = pt.tensor("a", shape=(None,) * input_data.ndim)
 
-    nonzero_op = Nonzero()
-
-    node = nonzero_op.make_node(a)
-    graph_outputs = node.outputs
+    graph_outputs = pt.nonzero(a)
 
     compare_numba_and_py(
         graph_inputs=[a], graph_outputs=graph_outputs, test_inputs=[input_data]
