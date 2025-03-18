@@ -2866,6 +2866,7 @@ class TestARange:
         assert np.arange(10, 1, -1).shape == arange(10, 1, -1).type.shape
         assert np.arange(1, -9, 2).shape == arange(1, -9, 2).type.shape
         assert np.arange(1.3, 17.48, 2.67).shape == arange(1.3, 17.48, 2.67).type.shape
+        assert np.arange(-64, 64).shape == arange(-64, 64).type.shape
 
 
 class TestNdGrid:

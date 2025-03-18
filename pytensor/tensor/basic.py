@@ -3224,6 +3224,8 @@ class ARange(Op):
         self.dtype = dtype
 
     def make_node(self, start, stop, step):
+        from math import ceil
+
         types = TensorConstant
         shape = (None,)
         # if it is possible to directly determine the shape i.e static shape is present, we find it.
@@ -3232,11 +3234,9 @@ class ARange(Op):
             and isinstance(stop, types)
             and isinstance(step, types)
         ):
+            # Convert to int32 or int64 before calculation
             length = max(
-                np.max(np.ceil((stop.value - start.value) / step.value))
-                .astype(int)
-                .item(),
-                0,
+                ceil((float(stop.value) - float(start.value)) / float(step.value)), 0
             )
             shape = (length,)
 
