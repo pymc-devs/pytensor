@@ -3234,7 +3234,7 @@ class ARange(Op):
             and isinstance(step, TensorConstant)
         ):
             length = max(
-                ceil((float(stop) - float(start.value)) / float(step.value)), 0
+                ceil((float(stop.value) - float(start.value)) / float(step.value)), 0
             )
             shape = (length,)
 
