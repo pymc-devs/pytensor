@@ -527,11 +527,13 @@ class QRFull(Op):
         Optimization Methods and Software, 27:2, 391-403, DOI: 10.1080/10556788.2011.610454
         """
 
+        from pytensor.tensor.slinalg import solve_triangular
+
         (A,) = (cast(ptb.TensorVariable, x) for x in inputs)
         *_, m, n = A.type.shape
 
         def _H(x: ptb.TensorVariable):
-            return x.conj().T
+            return x.conj().mT
 
         def _copyutl(x: ptb.TensorVariable):
             return ptb.triu(x, k=0) + _H(ptb.triu(x, k=1))
@@ -550,8 +552,9 @@ class QRFull(Op):
             Q, R = qr(A, mode="reduced")
             dR = cast(ptb.TensorVariable, output_grads[0])
             R_dRt = R @ _H(dR)
-            Rinvt = _H(inv(R))
-            A_bar = Q @ ((ptb.tril(R_dRt - _H(R_dRt), k=-1)) @ Rinvt + dR)
+            M = ptb.tril(R_dRt - _H(R_dRt), k=-1)
+            M_Rinvt = _H(solve_triangular(R, _H(M)))
+            A_bar = Q @ (M_Rinvt + dR)
             return [A_bar]
 
         else:
@@ -575,12 +578,11 @@ class QRFull(Op):
 
             (dQ, dR) = (cast(ptb.TensorVariable, x) for x in new_output_grads)
 
-            Rinvt = _H(inv(R))
             Qt_dQ = _H(Q) @ dQ
             R_dRt = R @ _H(dR)
-            A_bar = (
-                Q @ (ptb.tril(R_dRt - _H(R_dRt), k=-1) - _copyutl(Qt_dQ)) + dQ
-            ) @ Rinvt + Q @ dR
+            M = Q @ (ptb.tril(R_dRt - _H(R_dRt), k=-1) - _copyutl(Qt_dQ)) + dQ
+            M_Rinvt = _H(solve_triangular(R, _H(M)))
+            A_bar = M_Rinvt + Q @ dR
 
             return [A_bar]
 

@@ -152,16 +152,56 @@ def test_qr_modes():
         assert "name 'complete' is not defined" in str(e)
 
 
-@pytest.mark.parametrize("shape", [(3, 3), (6, 3)], ids=["shape=(3, 3)", "shape=(6,3)"])
-@pytest.mark.parametrize("output", [0, 1], ids=["Q", "R"])
-def test_qr_grad(shape, output):
+@pytest.mark.parametrize(
+    "shape, gradient_test_case, mode",
+    (
+        [(s, c, "reduced") for s in [(3, 3), (6, 3), (3, 6)] for c in [0, 1, 2]]
+        + [(s, c, "complete") for s in [(3, 3), (6, 3), (3, 6)] for c in [0, 1, 2]]
+        + [(s, 0, "r") for s in [(3, 3), (6, 3), (3, 6)]]
+        + [((3, 3), 0, "raw")]
+    ),
+    ids=(
+        [
+            f"shape={s}, gradient_test_case={c}, mode=reduced"
+            for s in [(3, 3), (6, 3), (3, 6)]
+            for c in ["Q", "R", "both"]
+        ]
+        + [
+            f"shape={s}, gradient_test_case={c}, mode=complete"
+            for s in [(3, 3), (6, 3), (3, 6)]
+            for c in ["Q", "R", "both"]
+        ]
+        + [f"shape={s}, gradient_test_case=R, mode=r" for s in [(3, 3), (6, 3), (3, 6)]]
+        + ["shape=(3, 3), gradient_test_case=Q, mode=raw"]
+    ),
+)
+def test_qr_grad(shape, gradient_test_case, mode):
     rng = np.random.default_rng(utt.fetch_seed())
 
-    def _test_fn(x):
-        return qr(x, mode="reduced")[output]
+    def _test_fn(x, case=2, mode="reduced"):
+        if case == 0:
+            return qr(x, mode=mode)[0].sum()
+        elif case == 1:
+            return qr(x, mode=mode)[1].sum()
+        elif case == 2:
+            Q, R = qr(x, mode=mode)
+            return Q.sum() + R.sum()
 
+    m, n = shape
     a = rng.standard_normal(shape).astype(config.floatX)
-    utt.verify_grad(_test_fn, [a], rng=np.random)
+
+    if m < n or (mode == "complete" and m != n) or mode == "raw":
+        with pytest.raises(NotImplementedError):
+            utt.verify_grad(
+                partial(_test_fn, case=gradient_test_case, mode=mode),
+                [a],
+                rng=np.random,
+            )
+
+    else:
+        utt.verify_grad(
+            partial(_test_fn, case=gradient_test_case, mode=mode), [a], rng=np.random
+        )
 
 
 class TestSvd(utt.InferShapeTester):
