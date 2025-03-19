@@ -3226,6 +3226,12 @@ class ARange(Op):
     def make_node(self, start, stop, step):
         from math import ceil
 
+        start, stop, step = map(as_tensor_variable, (start, stop, step))
+
+        assert start.ndim == 0
+        assert stop.ndim == 0
+        assert step.ndim == 0
+
         shape = (None,)
         # if it is possible to directly determine the shape i.e static shape is present, we find it.
         if (
@@ -3234,14 +3240,9 @@ class ARange(Op):
             and isinstance(step, TensorConstant)
         ):
             length = max(
-                ceil((float(stop.value) - float(start.value)) / float(step.value)), 0
+                ceil((float(stop.data) - float(start.data)) / float(step.data)), 0
             )
             shape = (length,)
-
-        start, stop, step = map(as_tensor_variable, (start, stop, step))
-        assert start.ndim == 0
-        assert stop.ndim == 0
-        assert step.ndim == 0
 
         inputs = [start, stop, step]
         outputs = [tensor(dtype=self.dtype, shape=shape)]
