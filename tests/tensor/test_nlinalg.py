@@ -152,6 +152,18 @@ def test_qr_modes():
         assert "name 'complete' is not defined" in str(e)
 
 
+@pytest.mark.parametrize("shape", [(3, 3), (6, 3)], ids=["shape=(3, 3)", "shape=(6,3)"])
+@pytest.mark.parametrize("output", [0, 1], ids=["Q", "R"])
+def test_qr_grad(shape, output):
+    rng = np.random.default_rng(utt.fetch_seed())
+
+    def _test_fn(x):
+        return qr(x, mode="reduced")[output]
+
+    a = rng.standard_normal(shape).astype(config.floatX)
+    utt.verify_grad(_test_fn, [a], rng=np.random)
+
+
 class TestSvd(utt.InferShapeTester):
     op_class = SVD
 
