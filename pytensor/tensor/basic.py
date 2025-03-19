@@ -3226,17 +3226,15 @@ class ARange(Op):
     def make_node(self, start, stop, step):
         from math import ceil
 
-        types = TensorConstant
         shape = (None,)
         # if it is possible to directly determine the shape i.e static shape is present, we find it.
         if (
-            isinstance(start, types)
-            and isinstance(stop, types)
-            and isinstance(step, types)
+            isinstance(start, TensorConstant)
+            and isinstance(stop, TensorConstant)
+            and isinstance(step, TensorConstant)
         ):
-            # Convert to int32 or int64 before calculation
             length = max(
-                ceil((float(stop.value) - float(start.value)) / float(step.value)), 0
+                ceil((float(stop) - float(start.value)) / float(step.value)), 0
             )
             shape = (length,)
 
