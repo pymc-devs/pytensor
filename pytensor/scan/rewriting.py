@@ -1623,6 +1623,7 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
         if global_nsteps is not None:
             for idx, val in enumerate(store_steps[op_info.n_mit_mot :]):
                 if val == 0:
+                    raise ValueError()
                     # val == 0 means that we want to keep all intermediate
                     # results for that state, including the initial values.
                     if idx < op_info.n_mit_sot + op_info.n_sit_sot:
