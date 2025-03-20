@@ -126,6 +126,9 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
     dtype = A.dtype
     w_type = _get_underlying_float(dtype)
     numba_trtrs = _LAPACK().numba_xtrtrs(dtype)
+    if isinstance(dtype, types.Complex):
+        # If you want to make this work with complex numbers make sure you handle the c_contiguous trick correctly
+        raise TypeError("This function is not expected to work with complex numbers")
 
     def impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b):
         _N = np.int32(A.shape[-1])
@@ -135,8 +138,15 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
         # could potentially be 3d (it didn't understand b_ndim was always equal to B.ndim)
         B_is_1d = B.ndim == 1
 
-        # This will only copy if A is not already fortran contiguous
-        A_f = np.asfortranarray(A)
+        if A.flags.f_contiguous or (A.flags.c_contiguous and trans in (0, 1)):
+            A_f = A
+            if A.flags.c_contiguous:
+                # An upper/lower triangular c_contiguous is the same as a lower/upper triangular f_contiguous
+                # Is this valid for complex matrices that were .conj().mT by PyTensor?
+                lower = not lower
+                trans = 1 - trans
+        else:
+            A_f = np.asfortranarray(A)
 
         if overwrite_b and B.flags.f_contiguous:
             B_copy = B
@@ -633,6 +643,11 @@ def solve_gen_impl(
         _N = np.int32(A.shape[-1])
         _solve_check_input_shapes(A, B)
 
+        if overwrite_a and A.flags.c_contiguous:
+            # Work with the transposed system to avoid copying A
+            A = A.T
+            transposed = not transposed
+
         order = "I" if transposed else "1"
         norm = _xlange(A, order=order)
 
@@ -682,8 +697,11 @@ def sysv_impl(
         _LDA, _N = np.int32(A.shape[-2:])  # type: ignore
         _solve_check_input_shapes(A, B)
 
-        if overwrite_a and A.flags.f_contiguous:
+        if overwrite_a and (A.flags.f_contiguous or A.flags.c_contiguous):
             A_copy = A
+            if A.flags.c_contiguous:
+                # An upper/lower triangular c_contiguous is the same as a lower/upper triangular f_contiguous
+                lower = not lower
         else:
             A_copy = _copy_to_fortran_order(A)
 
@@ -905,8 +923,11 @@ def posv_impl(
 
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and A.flags.f_contiguous:
+        if overwrite_a and (A.flags.f_contiguous or A.flags.c_contiguous):
             A_copy = A
+            if A.flags.c_contiguous:
+                # An upper/lower triangular c_contiguous is the same as a lower/upper triangular f_contiguous
+                lower = not lower
         else:
             A_copy = _copy_to_fortran_order(A)
 
@@ -1128,7 +1149,13 @@ def cho_solve_impl(C, B, lower=False, overwrite_b=False, check_finite=True):
         _solve_check_input_shapes(C, B)
 
         _N = np.int32(C.shape[-1])
-        C_f = np.asfortranarray(C)
+        if C.flags.f_contiguous or C.flags.c_contiguous:
+            C_f = C
+            if C.flags.c_contiguous:
+                # An upper/lower triangular c_contiguous is the same as a lower/upper triangular f_contiguous
+                lower = not lower
+        else:
+            C_f = np.asfortranarray(C)
 
         if overwrite_b and B.flags.f_contiguous:
             B_copy = B

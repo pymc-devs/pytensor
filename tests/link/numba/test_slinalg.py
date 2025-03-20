@@ -169,7 +169,8 @@ class TestSolves:
         b_val_c_contig = np.copy(b_val, order="C")
         res_c_contig = f(A_val_c_contig, b_val_c_contig)
         np.testing.assert_allclose(res_c_contig, res)
-        np.testing.assert_allclose(A_val_c_contig, A_val)
+        # We can destroy C-contiguous A arrays by inverting `tranpose/lower` at runtime
+        assert np.allclose(A_val_c_contig, A_val) == (not overwrite_a)
         # b vectors are always f_contiguous if also c_contiguous
         assert np.allclose(b_val_c_contig, b_val) == (
             not (overwrite_b and b_val_c_contig.flags.f_contiguous)
