@@ -3232,7 +3232,6 @@ class ARange(Op):
         assert stop.ndim == 0
         assert step.ndim == 0
 
-        shape = (None,)
         # if it is possible to directly determine the shape i.e static shape is present, we find it.
         if (
             isinstance(start, TensorConstant)
@@ -3243,6 +3242,8 @@ class ARange(Op):
                 ceil((float(stop.data) - float(start.data)) / float(step.data)), 0
             )
             shape = (length,)
+        else:
+            shape = (None,)
 
         inputs = [start, stop, step]
         outputs = [tensor(dtype=self.dtype, shape=shape)]
