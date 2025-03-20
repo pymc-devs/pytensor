@@ -33,6 +33,7 @@ from pytensor.scalar.basic import ScalarOp, as_scalar
 from pytensor.tensor import blas
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+from pytensor.tensor.sort import ArgSortOp, SortOp
 
 
 if TYPE_CHECKING:
@@ -375,6 +376,20 @@ def test_Shape(x, i):
 
     g = Shape_i(i)(pt.as_tensor_variable(x))
 
+    compare_numba_and_py([], [g], [])
+
+
+@pytest.mark.parametrize("kind", ["quicksort"])
+def test_Sort(kind):
+    x = [5, 4, 3, 2, 1]
+    g = SortOp(kind)(pt.as_tensor_variable(x))
+    compare_numba_and_py([], [g], [])
+
+
+@pytest.mark.parametrize("kind", ["quicksort", "mergesort"])
+def test_ArgSort(kind):
+    x = [5, 4, 3, 2, 1]
+    g = ArgSortOp(kind)(pt.as_tensor_variable(x))
     compare_numba_and_py([], [g], [])
 
 
