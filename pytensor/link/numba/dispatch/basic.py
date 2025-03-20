@@ -75,7 +75,7 @@ def numba_njit(*args, fastmath=None, **kwargs):
         message=(
             "(\x1b\\[1m)*"  # ansi escape code for bold text
             "Cannot cache compiled function "
-            '"(numba_funcified_fgraph|store_core_outputs)" '
+            '"(numba_funcified_fgraph|store_core_outputs|cholesky|solve|solve_triangular|cho_solve)" '
             "as it uses dynamic globals"
         ),
         category=NumbaWarning,
