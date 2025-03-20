@@ -390,3 +390,70 @@ class _LAPACK:
             _ptr_int,  # INFO
         )
         return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xgttrf(cls, dtype):
+        """
+        Compute the LU factorization of a tridiagonal matrix A using row interchanges.
+
+        Called by scipy.linalg.lu_factor
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "gttrf")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # N
+            float_pointer,  # DL
+            float_pointer,  # D
+            float_pointer,  # DU
+            float_pointer,  # DU2
+            _ptr_int,  # IPIV
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xgttrs(cls, dtype):
+        """
+        Solve a system of linear equations A @ X = B with a tridiagonal matrix A using the LU factorization computed by numba_gttrf.
+
+        Called by scipy.linalg.lu_solve
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "gttrs")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # TRANS
+            _ptr_int,  # N
+            _ptr_int,  # NRHS
+            float_pointer,  # DL
+            float_pointer,  # D
+            float_pointer,  # DU
+            float_pointer,  # DU2
+            _ptr_int,  # IPIV
+            float_pointer,  # B
+            _ptr_int,  # LDB
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xgtcon(cls, dtype):
+        """
+        Estimate the reciprocal of the condition number of a tridiagonal matrix A using the LU factorization computed by numba_gttrf.
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "gtcon")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # NORM
+            _ptr_int,  # N
+            float_pointer,  # DL
+            float_pointer,  # D
+            float_pointer,  # DU
+            float_pointer,  # DU2
+            _ptr_int,  # IPIV
+            float_pointer,  # ANORM
+            float_pointer,  # RCOND
+            float_pointer,  # WORK
+            _ptr_int,  # IWORK
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)

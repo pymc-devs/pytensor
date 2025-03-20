@@ -22,7 +22,7 @@ rng = np.random.default_rng(42849)
 def test_lamch():
     from scipy.linalg import get_lapack_funcs
 
-    from pytensor.link.numba.dispatch.slinalg import _xlamch
+    from pytensor.link.numba.dispatch.linalg.utils import _xlamch
 
     @numba.njit()
     def xlamch(kind):
@@ -45,7 +45,7 @@ def test_xlange(ord_numba, ord_scipy):
     # xlange is called internally only, we don't dispatch pt.linalg.norm to it
     from scipy import linalg
 
-    from pytensor.link.numba.dispatch.slinalg import _xlange
+    from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 
     @numba.njit()
     def xlange(x, ord):
@@ -60,7 +60,8 @@ def test_xgecon(ord_numba, ord_scipy):
     # gecon is called internally only, we don't dispatch pt.linalg.norm to it
     from scipy.linalg import get_lapack_funcs
 
-    from pytensor.link.numba.dispatch.slinalg import _xgecon, _xlange
+    from pytensor.link.numba.dispatch.linalg.solve.general import _xgecon
+    from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 
     @numba.njit()
     def gecon(x, norm):
