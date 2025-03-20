@@ -541,7 +541,9 @@ def _lu_factor(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray]:
     Thin wrapper around scipy.linalg.lu_factor. Used as an overload target to avoid side-effects on users who import
     Pytensor.
     """
-    return linalg.lu_factor(A, overwrite_a=overwrite_a)
+    return typing_cast(
+        tuple[np.ndarray, np.ndarray], linalg.lu_factor(A, overwrite_a=overwrite_a)
+    )
 
 
 @overload(_lu_factor)

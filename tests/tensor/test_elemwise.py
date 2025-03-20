@@ -11,7 +11,7 @@ import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
-from pytensor import grad, In, Out
+from pytensor import In, Out, grad
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
