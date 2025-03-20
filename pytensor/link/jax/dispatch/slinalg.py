@@ -9,6 +9,7 @@ from pytensor.tensor.slinalg import (
     Cholesky,
     Eigvalsh,
     LUFactor,
+    LUSolve,
     Solve,
     SolveTriangular,
 )
@@ -119,9 +120,27 @@ def jax_funcify_LUFactor(op, **kwargs):
     check_finite = op.check_finite
     overwrite_a = op.overwrite_a
 
-    def lu_factor(*inputs):
+    def lu_factor(a):
         return jax.scipy.linalg.lu_factor(
-            *inputs, check_finite=check_finite, overwrite_a=overwrite_a
+            a, check_finite=check_finite, overwrite_a=overwrite_a
         )
 
     return lu_factor
+
+
+@jax_funcify.register(LUSolve)
+def jax_funcify_LUSolve(op, **kwargs):
+    trans = op.trans
+    check_finite = op.check_finite
+    overwrite_b = op.overwrite_b
+
+    def lu_solve(lu, pivots, b):
+        return jax.scipy.linalg.lu_solve(
+            (lu, pivots),
+            b,
+            trans=trans,
+            check_finite=check_finite,
+            overwrite_b=overwrite_b,
+        )
+
+    return lu_solve
