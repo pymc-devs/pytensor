@@ -7,6 +7,7 @@ from unittest import mock
 import numpy as np
 import pytest
 
+from pytensor.compile import SymbolicInput
 from tests.tensor.test_math_scipy import scipy
 
 
@@ -120,6 +121,7 @@ opts = RewriteDatabaseQuery(
 numba_mode = Mode(
     NumbaLinker(), opts.including("numba", "local_useless_unbatched_blockwise")
 )
+numba_inplace_mode = numba_mode.including("inplace")
 py_mode = Mode("py", opts)
 
 rng = np.random.default_rng(42849)
@@ -261,7 +263,11 @@ def compare_numba_and_py(
                 x, y
             )
 
-    if any(inp.owner is not None for inp in graph_inputs):
+    if any(
+        inp.owner is not None
+        for inp in graph_inputs
+        if not isinstance(inp, SymbolicInput)
+    ):
         raise ValueError("Inputs must be root variables")
 
     pytensor_py_fn = function(
