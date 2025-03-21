@@ -239,11 +239,7 @@ def _gufunc_to_out_shape(
             # Prefer constants
             elif not isinstance(prev_size, Constant):
                 dim_to_size[dim_name] = size
-            elif prev_size.data != size:
-                raise ValueError(
-                    f"Invalid signature {signature} for shapes {shapes}. "
-                    f"Dimension {dim_name} is not consistent across inputs."
-                )
+
     out_shapes = []
     for output_shape in output_sig:
         temp_list = []
