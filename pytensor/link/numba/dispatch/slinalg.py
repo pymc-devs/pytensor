@@ -18,12 +18,14 @@ from pytensor.link.numba.dispatch._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.basic import numba_funcify
+from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
 from pytensor.tensor.slinalg import (
     LU,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
+    LUFactor,
+    PivotToPermutations,
     Solve,
     SolveTriangular,
 )
@@ -34,6 +36,18 @@ _COMPLEX_DTYPE_NOT_SUPPORTED_MSG = (
     "Complex dtype for {op} not supported in numba mode. "
     "If you need this functionality, please open an issue at: https://github.com/pymc-devs/pytensor"
 )
+
+
+@numba_funcify.register(PivotToPermutations)
+def pivot_to_permutation(op, node, **kwargs):
+    @numba_basic.numba_njit
+    def pivot_to_permutation(p):
+        p_inv = np.arange(len(p))
+        for i in range(len(p)):
+            p_inv[i], p_inv[p[i]] = p_inv[p[i]], p_inv[i]
+        return p_inv
+
+    return pivot_to_permutation
 
 
 @numba_basic.numba_njit(inline="always")
@@ -816,6 +830,20 @@ def numba_funcify_LU(op, node, **kwargs):
         return res
 
     return lu
+
+
+@numba_funcify.register(LUFactor)
+def numba_funcify_LUFactor(op, node, **kwargs):
+    overwrite_a = op.overwrite_a
+
+    @numba_njit
+    def lu_factor(A):
+        N = A.shape[1]
+        LU, IPIV, INFO = _getrf(A, overwrite_a=overwrite_a)
+        _solve_check(N, INFO)
+        return LU, IPIV - 1
+
+    return lu_factor
 
 
 def _getrs(

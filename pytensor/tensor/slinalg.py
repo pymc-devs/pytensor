@@ -21,7 +21,7 @@ from pytensor.tensor.basic import diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import kron, matrix_dot
 from pytensor.tensor.shape import reshape
-from pytensor.tensor.type import matrix, tensor, vector
+from pytensor.tensor.type import ivector, matrix, tensor, vector
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -583,31 +583,21 @@ def lu(
     )
 
 
-def _pivot_to_permutation(pivots):
-    """
-    Converts a sequence of row exchanges to a permutation matrix that represents the same row exchanges. This
-    represents the inverse permutation, which can be used to reconstruct the original matrix from its LU factorization.
-    To get the actual permutation, the inverse permutation must be argsorted.
-    """
+class PivotToPermutations(Op):
+    itypes = [ivector]
+    otypes = [ivector]
 
-    def step(i, permutation, swaps):
-        j = swaps[i]
-        x = permutation[i]
-        y = permutation[j]
+    __props__ = ()
 
-        permutation = permutation[i].set(y)
-        return permutation[j].set(x)
+    def perform(self, node, inputs, outputs):
+        [p] = inputs
+        p_inv = np.arange(len(p))
+        for i in range(len(p)):
+            p_inv[i], p_inv[p[i]] = p_inv[p[i]], p_inv[i]
+        outputs[0][0] = p_inv
 
-    pivots = as_tensor_variable(pivots)
-    n = pivots.shape[0]
-    p_inv, _ = pytensor.scan(
-        step,
-        sequences=[pt.arange(n.copy())],
-        outputs_info=[pt.arange(n.copy())],
-        non_sequences=[pivots],
-    )
 
-    return p_inv[-1]
+_pivot_to_permutation = PivotToPermutations()
 
 
 class LUFactor(Op):
@@ -810,13 +800,7 @@ def lu_solve(
     )
     x = x[pt.argsort(inv_permutation)] if trans else x
 
-    return LUSolve(
-        inputs=[LU, pivots, b],
-        outputs=[x],
-        trans=trans,
-        b_ndim=b_ndim,
-        check_finite=check_finite,
-    )(LU, pivots, b)
+    return x
 
 
 class SolveTriangular(SolveBase):
