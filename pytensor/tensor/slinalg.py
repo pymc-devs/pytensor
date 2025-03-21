@@ -566,7 +566,8 @@ class Solve(SolveBase):
         if 1 in allowed_inplace_inputs:
             # Give preference to overwrite_b
             new_props["overwrite_b"] = True
-        else:  # allowed inputs == [0]
+        # We can't overwrite_a if we're assuming tridiagonal
+        elif not self.assume_a == "tridiagonal":  # allowed inputs == [0]
             new_props["overwrite_a"] = True
         return type(self)(**new_props)
 

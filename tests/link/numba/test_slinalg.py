@@ -22,7 +22,7 @@ rng = np.random.default_rng(42849)
 def test_lamch():
     from scipy.linalg import get_lapack_funcs
 
-    from pytensor.link.numba.dispatch.slinalg import _xlamch
+    from pytensor.link.numba.dispatch.linalg.utils import _xlamch
 
     @numba.njit()
     def xlamch(kind):
@@ -45,7 +45,7 @@ def test_xlange(ord_numba, ord_scipy):
     # xlange is called internally only, we don't dispatch pt.linalg.norm to it
     from scipy import linalg
 
-    from pytensor.link.numba.dispatch.slinalg import _xlange
+    from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 
     @numba.njit()
     def xlange(x, ord):
@@ -60,7 +60,8 @@ def test_xgecon(ord_numba, ord_scipy):
     # gecon is called internally only, we don't dispatch pt.linalg.norm to it
     from scipy.linalg import get_lapack_funcs
 
-    from pytensor.link.numba.dispatch.slinalg import _xgecon, _xlange
+    from pytensor.link.numba.dispatch.linalg.solve.general import _xgecon
+    from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 
     @numba.njit()
     def gecon(x, norm):
@@ -94,7 +95,7 @@ class TestSolves:
         [(5, 1), (5, 5), (5,)],
         ids=["b_col_vec", "b_matrix", "b_vec"],
     )
-    @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos"], ids=str)
+    @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos", "tridiagonal"], ids=str)
     def test_solve(
         self,
         b_shape: tuple[int],
@@ -103,7 +104,7 @@ class TestSolves:
         overwrite_a: bool,
         overwrite_b: bool,
     ):
-        if assume_a not in ("sym", "her", "pos") and not lower:
+        if assume_a not in ("sym", "her", "pos", "tridiagonal") and not lower:
             # Avoid redundant tests with lower=True and lower=False for non symmetric matrices
             pytest.skip("Skipping redundant test already covered by lower=True")
 
@@ -117,6 +118,14 @@ class TestSolves:
                 # We have to set the unused triangle to something other than zero
                 # to see lapack destroying it.
                 x[np.triu_indices(n, 1) if lower else np.tril_indices(n, 1)] = np.pi
+            elif assume_a == "tridiagonal":
+                _x = x
+                x = np.zeros_like(x)
+                n = x.shape[-1]
+                arange_n = np.arange(n)
+                x[arange_n[1:], arange_n[:-1]] = np.diag(_x, k=-1)
+                x[arange_n, arange_n] = np.diag(_x, k=0)
+                x[arange_n[:-1], arange_n[1:]] = np.diag(_x, k=1)
             return x
 
         A = pt.matrix("A", dtype=floatX)
@@ -143,7 +152,14 @@ class TestSolves:
 
         op = f.maker.fgraph.outputs[0].owner.op
         assert isinstance(op, Solve)
+        assert op.assume_a == assume_a
         destroy_map = op.destroy_map
+
+        if overwrite_a and assume_a == "tridiagonal":
+            # Tridiagonal solve never destroys the A matrix
+            # Treat test from here as if overwrite_a is False
+            overwrite_a = False
+
         if overwrite_a and overwrite_b:
             raise NotImplementedError(
                 "Test not implemented for simultaneous overwrite_a and overwrite_b, as that's not currently supported by PyTensor"
