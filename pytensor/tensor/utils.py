@@ -7,6 +7,7 @@ import numpy as np
 import pytensor
 from pytensor.graph import FunctionGraph, Variable
 from pytensor.npy_2_compat import normalize_axis_tuple
+from pytensor.tensor import Any, Constant
 from pytensor.utils import hash_from_code
 
 
@@ -203,8 +204,8 @@ def _parse_gufunc_signature(
 
 
 def _gufunc_to_out_shape(
-    signature: str, shapes: list[tuple[int, ...]]
-) -> list[tuple[int, ...]]:
+    signature: str, shapes: list[tuple[Any, ...]]
+) -> list[tuple[Any, ...]]:
     """
     Compute the shape of the output of an Op given its gufunc signature and the
     shapes of its inputs.
@@ -215,24 +216,47 @@ def _gufunc_to_out_shape(
         The gufunc signature of the Op.
         eg: "(m,n),(n,p)->(m,p)".
 
-    shapes : list of tuple of int
+    shapes : list of tuple of Any
         The list of shapes of the inputs.
 
     Returns
     -------
-    out_shape : list of tuple of int
+    out_shape : list of tuple of Any
         The list of shapes of the outputs.
+
+    Raises
+    ------
+    ValueError
+        If the signature is invalid for the shapes of the inputs.
     """
-    parsed = _parse_gufunc_signature(signature)
-    out_shape = []
-    dic = dict()
-    for i in range(len(parsed[0])):
-        for j in range(len(parsed[0][i])):
-            dic[parsed[0][i][j]] = shapes[i][j]
-    for i in range(len(parsed[1])):
-        temp_list = [dic[x] for x in parsed[1][i]]
-        out_shape.append(tuple(temp_list))
-    return out_shape
+    input_sig, output_sig = _parse_gufunc_signature(signature)
+    dim_to_size: dict[str, Any] = {}
+    for input_shape, sig in zip(shapes, input_sig, strict=True):
+        for size, dim_name in zip(input_shape, sig, strict=True):
+            prev_size = dim_to_size.get(dim_name)
+            if prev_size is None:
+                dim_to_size[dim_name] = size
+            # Prefer constants
+            elif not isinstance(prev_size, Constant):
+                dim_to_size[dim_name] = size
+            elif prev_size.data != size:
+                raise ValueError(
+                    f"Invalid signature {signature} for shapes {shapes}. "
+                    f"Dimension {dim_name} is not consistent across inputs."
+                )
+    out_shapes = []
+    for output_shape in output_sig:
+        temp_list = []
+        for dim in output_shape:
+            if dim not in dim_to_size:
+                raise ValueError(
+                    f"Invalid signature {signature} for shapes {shapes}. "
+                    f"Dimension {dim} not in input dimensions."
+                )
+            else:
+                temp_list.append(dim_to_size[dim])
+        out_shapes.append((*temp_list,))
+    return out_shapes
 
 
 def safe_signature(
