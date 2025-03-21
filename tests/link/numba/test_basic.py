@@ -379,18 +379,47 @@ def test_Shape(x, i):
     compare_numba_and_py([], [g], [])
 
 
-@pytest.mark.parametrize("kind", ["quicksort"])
-def test_Sort(kind):
+@pytest.mark.parametrize(
+    "kind, exc",
+    [
+        ["quicksort", None],
+        ["mergesort", UserWarning],
+        ["heapsort", UserWarning],
+        ["stable", UserWarning],
+    ],
+)
+def test_Sort(kind, exc):
     x = [5, 4, 3, 2, 1]
+
     g = SortOp(kind)(pt.as_tensor_variable(x))
+
+    if exc:
+        with pytest.warns(exc):
+            compare_numba_and_py([], [g], [])
+    else:
+        compare_numba_and_py([], [g], [])
+
     compare_numba_and_py([], [g], [])
 
 
-@pytest.mark.parametrize("kind", ["quicksort", "mergesort"])
-def test_ArgSort(kind):
+@pytest.mark.parametrize(
+    "kind, exc",
+    [
+        ["quicksort", None],
+        ["mergesort", None],
+        ["heapsort", UserWarning],
+        ["stable", UserWarning],
+    ],
+)
+def test_ArgSort(kind, exc):
     x = [5, 4, 3, 2, 1]
     g = ArgSortOp(kind)(pt.as_tensor_variable(x))
-    compare_numba_and_py([], [g], [])
+
+    if exc:
+        with pytest.warns(exc):
+            compare_numba_and_py([], [g], [])
+    else:
+        compare_numba_and_py([], [g], [])
 
 
 @pytest.mark.parametrize(

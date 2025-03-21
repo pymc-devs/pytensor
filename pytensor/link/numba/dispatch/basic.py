@@ -435,18 +435,18 @@ def numba_funcify_Shape_i(op, **kwargs):
 
 @numba_funcify.register(SortOp)
 def numba_funcify_SortOp(op, node, **kwargs):
-    if op.kind == "quicksort":
+    @numba_njit
+    def sort_f(a, axis):
+        return np.sort(a)  # numba supports sort without arguments
 
-        @numba_njit
-        def sort_f(a, axis):
-            return np.sort(a)  # numba supports sort without arguments
-    else:
-        ret_sig = get_numba_type(node.outputs[0].type)
-
-        def sort_f(a, axis):
-            with numba.objmode(ret=ret_sig):
-                ret = np.sort(a, axis=axis, kind=op.kind)
-            return ret
+    if op.kind != "quicksort":
+        warnings.warn(
+            (
+                f'Numba function sort doesn\'t support kind="{op.kind}"'
+                " switching to `quicksort`."
+            ),
+            UserWarning,
+        )
 
     return sort_f
 
@@ -460,17 +460,20 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
 
         return argsort_f
 
-    if op.kind in ["quicksort", "mergesort"]:
-        return argsort_f_kind(op.kind)
+    kind = op.kind
+
+    if kind in ["quicksort", "mergesort"]:
+        return argsort_f_kind(kind)
     else:
-        ret_sig = get_numba_type(node.outputs[0].type)
+        warnings.warn(
+            (
+                f'Numba function argsort doesn\'t support kind="{op.kind}"'
+                " switching to `quicksort`."
+            ),
+            UserWarning,
+        )
 
-        def argsort_f(a, axis):
-            with numba.objmode(ret=ret_sig):
-                ret = np.argsort(a, axis=axis, kind=op.kind)
-            return ret
-
-    return argsort_f
+        return argsort_f_kind("quicksort")
 
 
 @numba.extending.intrinsic
