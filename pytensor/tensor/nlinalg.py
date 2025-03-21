@@ -17,7 +17,6 @@ from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import Variable, dvector, lscalar, matrix, scalar, vector
-from pytensor.tensor.utils import _gufunc_to_out_shape
 
 
 class MatrixPinv(Op):
@@ -62,9 +61,6 @@ class MatrixPinv(Op):
             + matrix_dot((ptb.identity_like(z_dot_x) - z_dot_x), gz, z.T, z)
         ).T
         return [grad]
-
-    def infer_shape(self, fgraph, node, shapes):
-        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
 
 def pinv(x, hermitian=False):
@@ -156,9 +152,6 @@ class MatrixInverse(Op):
             return [None]
         return [-matrix_dot(xi, ev, xi)]
 
-    def infer_shape(self, fgraph, node, shapes):
-        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
-
 
 inv = matrix_inverse = Blockwise(MatrixInverse())
 
@@ -225,9 +218,6 @@ class Det(Op):
         (x,) = inputs
         return [gz * self(x) * matrix_inverse(x).T]
 
-    def infer_shape(self, fgraph, node, shapes):
-        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
-
     def __str__(self):
         return "Det"
 
@@ -258,9 +248,6 @@ class SLogDet(Op):
             sign[0], det[0] = (np.array(z, dtype=x.dtype) for z in np.linalg.slogdet(x))
         except Exception as e:
             raise ValueError("Failed to compute determinant", x) from e
-
-    def infer_shape(self, fgraph, node, shapes):
-        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
     def __str__(self):
         return "SLogDet"
@@ -316,9 +303,6 @@ class Eig(Op):
         (x,) = inputs
         (w, v) = outputs
         w[0], v[0] = (z.astype(x.dtype) for z in np.linalg.eig(x))
-
-    def infer_shape(self, fgraph, node, shapes):
-        return _gufunc_to_out_shape(self.gufunc_signature, shapes)
 
 
 eig = Blockwise(Eig())
