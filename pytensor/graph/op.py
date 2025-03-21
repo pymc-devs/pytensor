@@ -20,7 +20,6 @@ from pytensor.graph.utils import (
     add_tag_trace,
     get_variable_trace_string,
 )
-from pytensor.tensor.utils import _gufunc_to_out_shape
 
 
 if TYPE_CHECKING:
@@ -599,6 +598,8 @@ class Op(MetaObject):
 
     def infer_shape(self, fgraph, node, input_shapes):
         if hasattr(self, "gufunc_signature"):
+            from pytensor.tensor.utils import _gufunc_to_out_shape
+
             return _gufunc_to_out_shape(self.gufunc_signature, input_shapes)
         else:
             raise NotImplementedError(f"Op {self} does not implement infer_shape")
