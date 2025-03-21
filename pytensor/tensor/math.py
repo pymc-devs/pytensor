@@ -2453,6 +2453,11 @@ def kv(v, x):
     return kve(v, x) * exp(-x)
 
 
+def kn(n, x):
+    """Modified Bessel function of the second kind of integer order v."""
+    return kv(n, x)
+
+
 @scalar_elemwise
 def sigmoid(x):
     """Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit"""
@@ -4337,6 +4342,7 @@ __all__ = [
     "i1",
     "iv",
     "ive",
+    "kn",
     "kv",
     "kve",
     "sigmoid",
