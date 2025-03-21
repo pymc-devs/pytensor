@@ -9,6 +9,7 @@ from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
 from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
 from pytensor.link.numba.dispatch.linalg.solve.symmetric import _solve_symmetric
 from pytensor.link.numba.dispatch.linalg.solve.triangular import _solve_triangular
+from pytensor.link.numba.dispatch.linalg.solve.tridiagonal import _solve_tridiagonal
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
@@ -114,10 +115,12 @@ def numba_funcify_Solve(op, node, **kwargs):
         solve_fn = _solve_symmetric
     elif assume_a == "pos":
         solve_fn = _solve_psd
+    elif assume_a == "tridiagonal":
+        solve_fn = _solve_tridiagonal
     else:
         warnings.warn(
             f"Numba assume_a={assume_a} not implemented. Falling back to general solve.\n"
-            f"If appropriate, you may want to set assume_a to one of 'sym', 'pos', 'her', or 'triangular' to improve performance.",
+            f"If appropriate, you may want to set assume_a to one of 'sym', 'pos', 'her', 'triangular' or 'tridiagonal' to improve performance.",
             UserWarning,
         )
         solve_fn = _solve_gen
