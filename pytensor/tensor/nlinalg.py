@@ -11,6 +11,7 @@ from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.npy_2_compat import normalize_axis_tuple
+from pytensor.raise_op import Assert
 from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
@@ -530,7 +531,6 @@ class QRFull(Op):
         from pytensor.tensor.slinalg import solve_triangular
 
         (A,) = (cast(ptb.TensorVariable, x) for x in inputs)
-        *_, m, n = A.type.shape
 
         def _H(x: ptb.TensorVariable):
             return x.conj().mT
@@ -538,18 +538,33 @@ class QRFull(Op):
         def _copyutl(x: ptb.TensorVariable):
             return ptb.triu(x, k=0) + _H(ptb.triu(x, k=1))
 
-        if self.mode == "raw" or (self.mode == "complete" and m != n):
-            raise NotImplementedError("Gradient of qr not implemented")
+        if self.mode == "raw":
+            raise NotImplementedError("Gradient of qr not implemented for mode=raw")
 
-        elif m < n:
-            raise NotImplementedError(
-                "Gradient of qr not implemented for m x n matrices with m < n"
+        elif self.mode == "complete":
+            Q, R = (cast(ptb.TensorVariable, x) for x in outputs)
+            qr_assert_op = Assert(
+                "Gradient of qr not implemented for m x n matrices with m != n and mode=complete"
             )
+            R = qr_assert_op(R, ptm.eq(R.shape[0], R.shape[1]))
 
         elif self.mode == "r":
+            qr_assert_op = Assert(
+                "Gradient of qr not implemented for m x n matrices with m < n and mode=r"
+            )
+            A = qr_assert_op(A, ptm.ge(A.shape[0], A.shape[1]))
             # We need all the components of the QR to compute the gradient of A even if we only
             # use the upper triangular component in the cost function.
             Q, R = qr(A, mode="reduced")
+
+        else:
+            Q, R = (cast(ptb.TensorVariable, x) for x in outputs)
+            qr_assert_op = Assert(
+                "Gradient of qr not implemented for m x n matrices with m < n and mode=reduced"
+            )
+            R = qr_assert_op(R, ptm.eq(R.shape[0], R.shape[1]))
+
+        if self.mode == "r":
             dR = cast(ptb.TensorVariable, output_grads[0])
             R_dRt = R @ _H(dR)
             M = ptb.tril(R_dRt - _H(R_dRt), k=-1)
@@ -558,8 +573,6 @@ class QRFull(Op):
             return [A_bar]
 
         else:
-            Q, R = (cast(ptb.TensorVariable, x) for x in outputs)
-
             new_output_grads = []
             is_disconnected = [
                 isinstance(x.type, DisconnectedType) for x in output_grads

@@ -190,8 +190,15 @@ def test_qr_grad(shape, gradient_test_case, mode):
     m, n = shape
     a = rng.standard_normal(shape).astype(config.floatX)
 
-    if m < n or (mode == "complete" and m != n) or mode == "raw":
+    if mode == "raw":
         with pytest.raises(NotImplementedError):
+            utt.verify_grad(
+                partial(_test_fn, case=gradient_test_case, mode=mode),
+                [a],
+                rng=np.random,
+            )
+    elif m < n or (mode == "complete" and m != n):
+        with pytest.raises(AssertionError):
             utt.verify_grad(
                 partial(_test_fn, case=gradient_test_case, mode=mode),
                 [a],
