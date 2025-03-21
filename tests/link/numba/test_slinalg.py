@@ -131,7 +131,8 @@ def test_getrs(trans, overwrite_a, overwrite_b, b_shape):
     x_sp = scipy.linalg.lu_solve(lu_and_piv, b, trans, overwrite_b=False)
 
     x, lu, info = lu_solve(
-        a, b, trans, overwrite_a=overwrite_a, overwrite_b=overwrite_b)
+        a, b, trans, overwrite_a=overwrite_a, overwrite_b=overwrite_b
+    )
 
     assert info == 0
 
