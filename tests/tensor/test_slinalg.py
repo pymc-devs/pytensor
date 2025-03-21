@@ -15,7 +15,6 @@ from pytensor.tensor import TensorVariable
 from pytensor.tensor.slinalg import (
     Cholesky,
     CholeskySolve,
-    LUSolve,
     Solve,
     SolveBase,
     SolveTriangular,
@@ -1033,33 +1032,3 @@ def test_block_diagonal_blockwise():
     B = np.random.normal(size=(1, batch_size, 4, 4)).astype(config.floatX)
     result = block_diag(A, B).eval()
     assert result.shape == (10, batch_size, 6, 6)
-
-
-def lu_solve_1(A, b):
-    lu, pivots = pt.linalg.lu_factor(A)
-    return pt.linalg.lu_solve((lu, pivots), b)
-
-
-def lu_solve_2(A, b, b_ndim=1, trans=0, check_finite=False):
-    lu, pivots = pt.linalg.lu_factor(A)
-    return LUSolve(b_ndim=1, trans=0, check_finite=False)(lu, pivots, b)
-
-
-@pytest.mark.parametrize(
-    "op", [lu_solve_1, lu_solve_2, pt.linalg.solve], ids=["lu_1", "lu_2", "solve"]
-)
-@pytest.mark.parametrize("n", [500])
-def test_solve_methods(op, n, benchmark):
-    A = pt.tensor("A", shape=(n, n))
-    b = pt.tensor("b", shape=(n,))
-
-    x = op(A, b)
-    gx = pt.grad(x.sum(), [A, b])
-    f = pytensor.function([A, b], [x, *gx])
-
-    A_val = np.random.normal(size=(n, n)).astype(config.floatX)
-    b_val = np.random.normal(size=(n,)).astype(config.floatX)
-
-    # Trigger compilation if we're a jit mode
-    f(A_val, b_val)
-    benchmark(f, A_val, b_val)

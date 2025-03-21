@@ -12,7 +12,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
@@ -741,7 +741,8 @@ class LUSolve(OpFromGraph):
 
     def __init__(
         self,
-        *args,
+        inputs: list[Variable],
+        outputs: list[Variable],
         trans: bool = False,
         b_ndim: int | None = None,
         check_finite: bool = False,
@@ -753,7 +754,7 @@ class LUSolve(OpFromGraph):
         self.check_finite = check_finite
         self.overwrite_b = overwrite_b
 
-        super().__init__(*args, **kwargs)
+        super().__init__(inputs=inputs, outputs=outputs, **kwargs)
 
 
 def lu_solve(
