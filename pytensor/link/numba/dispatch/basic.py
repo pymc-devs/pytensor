@@ -33,6 +33,7 @@ from pytensor.link.utils import (
 from pytensor.scalar.basic import ScalarType
 from pytensor.scalar.math import Softplus
 from pytensor.sparse import SparseTensorType
+from pytensor.tensor.basic import Nonzero
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
@@ -657,3 +658,15 @@ def numba_funcify_IfElse(op, **kwargs):
             return res[0]
 
     return ifelse
+
+
+@numba_funcify.register(Nonzero)
+def numba_funcify_Nonzero(op, node, **kwargs):
+    @numba_njit
+    def nonzero(a):
+        result_tuple = np.nonzero(a)
+        if a.ndim == 1:
+            return result_tuple[0]
+        return list(result_tuple)
+
+    return nonzero

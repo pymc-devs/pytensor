@@ -293,7 +293,6 @@ def compare_numba_and_py(
     )
     test_inputs_copy = (inp.copy() for inp in test_inputs) if inplace else test_inputs
     numba_res = pytensor_numba_fn(*test_inputs_copy)
-
     if isinstance(graph_outputs, tuple | list):
         for j, p in zip(numba_res, py_res, strict=True):
             assert_fn(j, p)
@@ -899,3 +898,17 @@ def test_function_overhead(mode, benchmark):
     assert np.sum(fn(test_x)) == 1000
 
     benchmark(fn, test_x)
+
+
+@pytest.mark.parametrize(
+    "input_data",
+    [np.array([1, 0, 3]), np.array([[0, 1], [2, 0]]), np.array([[0, 0], [0, 0]])],
+)
+def test_Nonzero(input_data):
+    a = pt.tensor("a", shape=(None,) * input_data.ndim)
+
+    graph_outputs = pt.nonzero(a)
+
+    compare_numba_and_py(
+        graph_inputs=[a], graph_outputs=graph_outputs, test_inputs=[input_data]
+    )
