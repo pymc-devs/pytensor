@@ -58,6 +58,7 @@ from pytensor.tensor.basic import (
     identity_like,
     infer_static_shape,
     inverse_permutation,
+    iota,
     join,
     make_vector,
     mgrid,
@@ -980,6 +981,29 @@ class TestEye:
         assert eye(1, l, 3).type.shape == (1, None)
 
 
+def test_iota():
+    mode = Mode(linker="py", optimizer=None)
+    np.testing.assert_allclose(
+        iota((4, 8), 0).eval(mode=mode),
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 2, 2, 2, 2],
+            [3, 3, 3, 3, 3, 3, 3, 3],
+        ],
+    )
+
+    np.testing.assert_allclose(
+        iota((4, 8), 1).eval(mode=mode),
+        [
+            [0, 1, 2, 3, 4, 5, 6, 7],
+            [0, 1, 2, 3, 4, 5, 6, 7],
+            [0, 1, 2, 3, 4, 5, 6, 7],
+            [0, 1, 2, 3, 4, 5, 6, 7],
+        ],
+    )
+
+
 class TestTriangle:
     def test_tri(self):
         def check(dtype, N, M_=None, k=0):
@@ -988,7 +1012,7 @@ class TestTriangle:
             M = M_
             # Currently DebugMode does not support None as inputs even if this is
             # allowed.
-            if M is None and config.mode in ["DebugMode", "DEBUG_MODE"]:
+            if M is None:  # and config.mode in ["DebugMode", "DEBUG_MODE"]:
                 M = N
             N_symb = iscalar()
             M_symb = iscalar()
@@ -1000,7 +1024,14 @@ class TestTriangle:
             assert np.allclose(result, np.tri(N, M_, k, dtype=dtype))
             assert result.dtype == np.dtype(dtype)
 
-        for dtype in ["int32", "int64", "float32", "float64", "uint16", "complex64"]:
+        for dtype in [
+            "int32",
+            "int64",
+            "float32",
+            "float64",
+            "uint16",
+            "complex64",
+        ]:
             check(dtype, 3)
             # M != N, k = 0
             check(dtype, 3, 5)
@@ -3899,15 +3930,15 @@ class TestInferShape(utt.InferShapeTester):
         biscal = iscalar()
         ciscal = iscalar()
         self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [4, 4, 0], Tri
+            [aiscal, biscal, ciscal], [tri(aiscal, biscal, ciscal)], [4, 4, 0], Tri
         )
 
         self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [4, 5, 0], Tri
+            [aiscal, biscal, ciscal], [tri(aiscal, biscal, ciscal)], [4, 5, 0], Tri
         )
 
         self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [3, 5, 0], Tri
+            [aiscal, biscal, ciscal], [tri(aiscal, biscal, ciscal)], [3, 5, 0], Tri
         )
 
     def test_ExtractDiag(self):
