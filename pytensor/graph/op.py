@@ -602,7 +602,9 @@ class Op(MetaObject):
 
             return _gufunc_to_out_shape(self.gufunc_signature, input_shapes)
         else:
-            raise NotImplementedError(f"Op {self} does not implement infer_shape")
+            from pytensor.tensor.exceptions import ShapeError
+
+            raise ShapeError(f"Op {self} does not implement infer_shape")
 
     def __str__(self):
         return getattr(type(self), "__name__", super().__str__())
