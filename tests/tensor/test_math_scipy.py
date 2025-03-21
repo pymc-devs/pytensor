@@ -18,7 +18,7 @@ from pytensor import function, grad
 from pytensor import tensor as pt
 from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
-from pytensor.tensor import gammaincc, inplace, kv, kve, vector
+from pytensor.tensor import gammaincc, inplace, kn, kv, kve, vector
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
     _good_broadcast_unary_chi2sf,
@@ -1219,4 +1219,18 @@ def test_kv():
     np.testing.assert_allclose(
         out.eval({v: test_v, x: test_x}),
         scipy.special.kv(test_v[:, None], test_x[None, :]),
+    )
+
+
+def test_kn():
+    n = vector("n")
+    x = vector("x")
+
+    out = kn(n[:, None], x[None, :])
+    test_n = np.array([-3, 4, 0, 5], dtype=n.type.dtype)
+    test_x = np.linspace(0, 512, 10, dtype=x.type.dtype)
+
+    np.testing.assert_allclose(
+        out.eval({n: test_n, x: test_x}),
+        scipy.special.kn(test_n[:, None], test_x[None, :]),
     )
