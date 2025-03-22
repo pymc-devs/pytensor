@@ -62,9 +62,6 @@ class MatrixPinv(Op):
         ).T
         return [grad]
 
-    def infer_shape(self, fgraph, node, shapes):
-        return [list(reversed(shapes[0]))]
-
 
 def pinv(x, hermitian=False):
     """Computes the pseudo-inverse of a matrix :math:`A`.
@@ -155,9 +152,6 @@ class MatrixInverse(Op):
             return [None]
         return [-matrix_dot(xi, ev, xi)]
 
-    def infer_shape(self, fgraph, node, shapes):
-        return shapes
-
 
 inv = matrix_inverse = Blockwise(MatrixInverse())
 
@@ -224,9 +218,6 @@ class Det(Op):
         (x,) = inputs
         return [gz * self(x) * matrix_inverse(x).T]
 
-    def infer_shape(self, fgraph, node, shapes):
-        return [()]
-
     def __str__(self):
         return "Det"
 
@@ -257,9 +248,6 @@ class SLogDet(Op):
             sign[0], det[0] = (np.array(z, dtype=x.dtype) for z in np.linalg.slogdet(x))
         except Exception as e:
             raise ValueError("Failed to compute determinant", x) from e
-
-    def infer_shape(self, fgraph, node, shapes):
-        return [(), ()]
 
     def __str__(self):
         return "SLogDet"
@@ -315,10 +303,6 @@ class Eig(Op):
         (x,) = inputs
         (w, v) = outputs
         w[0], v[0] = (z.astype(x.dtype) for z in np.linalg.eig(x))
-
-    def infer_shape(self, fgraph, node, shapes):
-        n = shapes[0][0]
-        return [(n,), (n, n)]
 
 
 eig = Blockwise(Eig())
