@@ -796,7 +796,7 @@ def test_random_custom_implementation():
     @jax_sample_fn.register(CustomRV)
     def jax_sample_fn_custom(op, node):
         def sample_fn(rng, size, dtype, *parameters):
-            return (rng, 0)
+            return 0
 
         return sample_fn
 
