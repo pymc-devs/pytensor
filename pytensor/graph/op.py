@@ -366,7 +366,7 @@ class Op(MetaObject):
         .. [1] Giles, Mike. 2008. “An Extended Collection of Matrix Derivative Results for Forward and Reverse Mode Automatic Differentiation.”
 
         """
-        raise NotImplementedError()
+        raise NotImplementedError(f"grad not implemented for Op {self}")
 
     def L_op(
         self,
