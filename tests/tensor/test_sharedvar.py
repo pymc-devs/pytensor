@@ -605,6 +605,7 @@ def makeSharedTester(
         def test_values_eq(self):
             # Test the type.values_eq[_approx] function
             dtype = self.dtype
+
             if dtype is None:
                 dtype = pytensor.config.floatX
 
@@ -691,8 +692,12 @@ def test_scalar_shared_deprecated():
 
 
 def test_get_vector_length():
-    x = pytensor.shared(np.array((2, 3, 4, 5)))
+    arr = np.array((2, 3, 4, 5))
+    x = pytensor.shared(arr, shape=arr.shape, strict=True)
     assert get_vector_length(x) == 4
+
+    with pytest.raises(ValueError):
+        get_vector_length(pytensor.shared(arr))
 
 
 def test_shared_masked_array_not_implemented():
