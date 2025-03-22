@@ -38,6 +38,7 @@ from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.math import Dot
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.tensor.slinalg import Solve
+from pytensor.tensor.sort import ArgSortOp, SortOp
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import MakeSlice, NoneConst
 
@@ -431,6 +432,49 @@ def numba_funcify_Shape_i(op, **kwargs):
         return np.asarray(np.shape(x)[i])
 
     return shape_i
+
+
+@numba_funcify.register(SortOp)
+def numba_funcify_SortOp(op, node, **kwargs):
+    @numba_njit
+    def sort_f(a, axis):
+        return np.sort(a)  # numba supports sort without arguments
+
+    if op.kind != "quicksort":
+        warnings.warn(
+            (
+                f'Numba function sort doesn\'t support kind="{op.kind}"'
+                " switching to `quicksort`."
+            ),
+            UserWarning,
+        )
+
+    return sort_f
+
+
+@numba_funcify.register(ArgSortOp)
+def numba_funcify_ArgSortOp(op, node, **kwargs):
+    def argsort_f_kind(kind):
+        @numba_njit
+        def argsort_f(a, axis):
+            return np.argsort(a, kind=kind)
+
+        return argsort_f
+
+    kind = op.kind
+
+    if kind in ["quicksort", "mergesort"]:
+        return argsort_f_kind(kind)
+    else:
+        warnings.warn(
+            (
+                f'Numba function argsort doesn\'t support kind="{op.kind}"'
+                " switching to `quicksort`."
+            ),
+            UserWarning,
+        )
+
+        return argsort_f_kind("quicksort")
 
 
 @numba.extending.intrinsic
