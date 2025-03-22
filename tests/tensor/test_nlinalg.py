@@ -197,7 +197,8 @@ def test_qr_grad(shape, gradient_test_case, mode):
                 [a],
                 rng=np.random,
             )
-    elif m < n or (mode == "complete" and m != n):
+
+    elif mode == "complete" and m > n:
         with pytest.raises(AssertionError):
             utt.verify_grad(
                 partial(_test_fn, case=gradient_test_case, mode=mode),

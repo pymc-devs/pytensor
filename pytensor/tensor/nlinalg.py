@@ -5,6 +5,7 @@ from typing import Literal, cast
 
 import numpy as np
 
+import pytensor.tensor as pt
 from pytensor import scalar as ps
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
@@ -515,64 +516,43 @@ class QRFull(Op):
 
     def L_op(self, inputs, outputs, output_grads):
         """
-        Reverse-mode gradient of the QR function. Adapted from ..[1], which is used in the forward-mode implementation in jax here:
-        https://github.com/jax-ml/jax/blob/54691b125ab4b6f88c751dae460e4d51f5cf834a/jax/_src/lax/linalg.py#L1803
-
-        And from ..[2] which describes a solution in the square matrix case.
+        Reverse-mode gradient of the QR function.
 
         References
         ----------
-        .. [1] Townsend, James. "Differentiating the qr decomposition." online draft https://j-towns.github.io/papers/qr-derivative.pdf (2018)
-        .. [2] Sebastian F. Walter , Lutz Lehmann & René Lamour. "On evaluating higher-order derivatives
-        of the QR decomposition of tall matrices with full column rank in forward and reverse mode algorithmic differentiation",
-        Optimization Methods and Software, 27:2, 391-403, DOI: 10.1080/10556788.2011.610454
+        .. [1] Jinguo Liu. "Linear Algebra Autodiff (complex valued)", blog post https://giggleliu.github.io/posts/2019-04-02-einsumbp/
+        .. [2] Hai-Jun Liao, Jin-Guo Liu, Lei Wang, Tao Xiang. "Differentiable Programming Tensor Networks", arXiv:1903.09650v2
         """
 
         from pytensor.tensor.slinalg import solve_triangular
 
         (A,) = (cast(ptb.TensorVariable, x) for x in inputs)
+        m, n = A.shape
 
         def _H(x: ptb.TensorVariable):
             return x.conj().mT
 
-        def _copyutl(x: ptb.TensorVariable):
-            return ptb.triu(x, k=0) + _H(ptb.triu(x, k=1))
+        def _copyltu(x: ptb.TensorVariable):
+            return ptb.tril(x, k=0) + _H(ptb.tril(x, k=-1))
 
         if self.mode == "raw":
             raise NotImplementedError("Gradient of qr not implemented for mode=raw")
 
-        elif self.mode == "complete":
-            Q, R = (cast(ptb.TensorVariable, x) for x in outputs)
-            qr_assert_op = Assert(
-                "Gradient of qr not implemented for m x n matrices with m != n and mode=complete"
-            )
-            R = qr_assert_op(R, ptm.eq(R.shape[0], R.shape[1]))
-
         elif self.mode == "r":
-            qr_assert_op = Assert(
-                "Gradient of qr not implemented for m x n matrices with m < n and mode=r"
-            )
-            A = qr_assert_op(A, ptm.ge(A.shape[0], A.shape[1]))
             # We need all the components of the QR to compute the gradient of A even if we only
             # use the upper triangular component in the cost function.
             Q, R = qr(A, mode="reduced")
+            dQ = Q.zeros_like()
+            dR = cast(ptb.TensorVariable, output_grads[0])
 
         else:
             Q, R = (cast(ptb.TensorVariable, x) for x in outputs)
-            qr_assert_op = Assert(
-                "Gradient of qr not implemented for m x n matrices with m < n and mode=reduced"
-            )
-            R = qr_assert_op(R, ptm.eq(R.shape[0], R.shape[1]))
+            if self.mode == "complete":
+                qr_assert_op = Assert(
+                    "Gradient of qr not implemented for m x n matrices with m > n and mode=complete"
+                )
+                R = qr_assert_op(R, ptm.le(m, n))
 
-        if self.mode == "r":
-            dR = cast(ptb.TensorVariable, output_grads[0])
-            R_dRt = R @ _H(dR)
-            M = ptb.tril(R_dRt - _H(R_dRt), k=-1)
-            M_Rinvt = _H(solve_triangular(R, _H(M)))
-            A_bar = Q @ (M_Rinvt + dR)
-            return [A_bar]
-
-        else:
             new_output_grads = []
             is_disconnected = [
                 isinstance(x.type, DisconnectedType) for x in output_grads
@@ -591,13 +571,22 @@ class QRFull(Op):
 
             (dQ, dR) = (cast(ptb.TensorVariable, x) for x in new_output_grads)
 
-            Qt_dQ = _H(Q) @ dQ
-            R_dRt = R @ _H(dR)
-            M = Q @ (ptb.tril(R_dRt - _H(R_dRt), k=-1) - _copyutl(Qt_dQ)) + dQ
-            M_Rinvt = _H(solve_triangular(R, _H(M)))
-            A_bar = M_Rinvt + Q @ dR
+        # gradient expression when m >= n
+        M = R @ _H(dR) - _H(dQ) @ Q
+        K = dQ + Q @ _copyltu(M)
+        A_bar_m_ge_n = _H(solve_triangular(R, _H(K)))
 
-            return [A_bar]
+        # gradient expression when m < n
+        Y = A[:, m:]
+        U = R[:, :m]
+        dU, dV = dR[:, :m], dR[:, m:]
+        dQ_Yt_dV = dQ + Y @ _H(dV)
+        M = U @ _H(dU) - _H(dQ_Yt_dV) @ Q
+        X_bar = _H(solve_triangular(U, _H(dQ_Yt_dV + Q @ _copyltu(M))))
+        Y_bar = Q @ dV
+        A_bar_m_lt_n = pt.concatenate([X_bar, Y_bar], axis=1)
+
+        return [pt.switch(ptm.ge(m, n), A_bar_m_ge_n, A_bar_m_lt_n)]
 
 
 def qr(a, mode="reduced"):
