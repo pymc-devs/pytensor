@@ -448,11 +448,13 @@ def _jax_multinomial(n, p, shape=None, key=None):
         broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), jnp.shape(p)[:-1])
         n = jnp.broadcast_to(n, broadcast_shape)
         p = jnp.broadcast_to(p, broadcast_shape + jnp.shape(p)[-1:])
+
     if shape is not None:
         broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), shape)
         n = jnp.broadcast_to(n, broadcast_shape)
+
     else:
-        shape = shape or p.shape[:-1]
+        shape = p.shape[:-1]
 
     p = p / jnp.sum(p, axis=-1, keepdims=True)
     binom_p = jnp.moveaxis(p, -1, 0)[:-1, ...]
@@ -469,7 +471,7 @@ def _jax_multinomial(n, p, shape=None, key=None):
 
     (remain, _), samples = jax.lax.scan(
         _binomial_sample_fn,
-        (n.astype("float"), jnp.ones(binom_p.shape[1:])),
+        (n.astype(np.float64), jnp.ones(binom_p.shape[1:])),
         (binom_p, sampling_rng),
     )
     return jnp.concatenate(

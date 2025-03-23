@@ -703,19 +703,31 @@ def test_beta_binomial():
     )
 
 
-@pytest.mark.skipif(
-    not numpyro_available, reason="Multinomial dispatch requires numpyro"
-)
 def test_multinomial():
     rng = shared(np.random.default_rng(123))
+
+    # test with 'size' argument and n.shape == p.shape[:-1]
     n = np.array([10, 40])
     p = np.array([[0.3, 0.7, 0.0], [0.1, 0.4, 0.5]])
-    g = pt.random.multinomial(n, p, size=(10_000, 2), rng=rng)
+    size = (10_000, 2)
+
+    g = pt.random.multinomial(n, p, size=size, rng=rng)
     g_fn = compile_random_function([], g, mode="JAX")
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n[..., None] * p, rtol=0.1)
     np.testing.assert_allclose(
         samples.std(axis=0), np.sqrt(n[..., None] * p * (1 - p)), rtol=0.1
+    )
+
+    # test with no 'size' argument and n.shape != p.shape[:-1]
+    n = np.broadcast_to(np.array([10, 40]), size)
+
+    g = pt.random.multinomial(n, p, rng=rng)
+    g_fn = compile_random_function([], g, mode="JAX")
+    samples = g_fn()
+    np.testing.assert_allclose(samples.mean(axis=0), n[0, :, None] * p, rtol=0.1)
+    np.testing.assert_allclose(
+        samples.std(axis=0), np.sqrt(n[0, :, None] * p * (1 - p)), rtol=0.1
     )
 
 
