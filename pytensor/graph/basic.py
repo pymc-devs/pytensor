@@ -827,10 +827,6 @@ class Constant(AtomicVariable[_TypeType]):
         if value is not None:
             raise ValueError("Constant instances cannot have an owner.")
 
-    @property
-    def value(self):
-        return self.data
-
 
 def walk(
     nodes: Iterable[T],
