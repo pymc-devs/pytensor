@@ -1,6 +1,7 @@
 from functools import singledispatch
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 from numpy.random import Generator
 from numpy.random.bit_generator import (  # type: ignore[attr-defined]
@@ -429,25 +430,51 @@ def jax_sample_fn_binomial(op, node):
 
 @jax_sample_fn.register(ptr.MultinomialRV)
 def jax_sample_fn_multinomial(op, node):
-    if not numpyro_available:
-        raise NotImplementedError(
-            f"No JAX implementation for the given distribution: {op.name}. "
-            "Implementation is available if NumPyro is installed."
-        )
-
-    from numpyro.distributions.util import multinomial
-
     def sample_fn(rng, size, dtype, n, p):
         rng_key = rng["jax_state"]
         rng_key, sampling_key = jax.random.split(rng_key, 2)
 
-        sample = multinomial(key=sampling_key, n=n, p=p, shape=size)
+        sample = _jax_multinomial(key=sampling_key, n=n, p=p, shape=size)
 
         rng["jax_state"] = rng_key
 
         return (rng, sample)
 
     return sample_fn
+
+
+def _jax_multinomial(n, p, shape=None, key=None):
+    if jnp.shape(n) != jnp.shape(p)[:-1]:
+        broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), jnp.shape(p)[:-1])
+        n = jnp.broadcast_to(n, broadcast_shape)
+        p = jnp.broadcast_to(p, broadcast_shape + jnp.shape(p)[-1:])
+    if shape is not None:
+        broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), shape)
+        n = jnp.broadcast_to(n, broadcast_shape)
+    else:
+        shape = shape or p.shape[:-1]
+
+    p = p / jnp.sum(p, axis=-1, keepdims=True)
+    binom_p = jnp.moveaxis(p, -1, 0)[:-1, ...]
+
+    sampling_rng = jax.random.split(key, binom_p.shape[0])
+
+    def _binomial_sample_fn(carry, p_rng):
+        s, rho = carry
+        p, rng = p_rng
+        samples = jax.random.binomial(rng, s, p / rho, shape)
+        s = s - samples
+        rho = rho - p
+        return ((s, rho), samples)
+
+    (remain, _), samples = jax.lax.scan(
+        _binomial_sample_fn,
+        (n.astype("float"), jnp.ones(binom_p.shape[1:])),
+        (binom_p, sampling_rng),
+    )
+    return jnp.concatenate(
+        [jnp.moveaxis(samples, 0, -1), jnp.expand_dims(remain, -1)], axis=-1
+    )
 
 
 @jax_sample_fn.register(ptr.VonMisesRV)
