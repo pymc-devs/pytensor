@@ -396,7 +396,7 @@ def jax_sample_fn_binomial(op, node):
 @jax_sample_fn.register(ptr.MultinomialRV)
 def jax_sample_fn_multinomial(op, node):
     def sample_fn(rng_key, size, dtype, n, p):
-        sample = _jax_multinomial(key=rng_key, n=n, p=p, shape=size)
+        sample = _jax_multinomial(key=rng_key, n=n, p=p, size=size)
         return sample
 
     return sample_fn
@@ -407,7 +407,7 @@ def _jax_multinomial(n, p, size=None, key=None):
         broadcast_shape_n = jax.lax.broadcast_shapes(jnp.shape(n), size)
         n = jnp.broadcast_to(n, broadcast_shape_n)
 
-        broadcast_shape_p = jax.lax.broadcast_shapes(jnp.shape(n), jnp.shape(p)[:-1])
+        broadcast_shape_p = jax.lax.broadcast_shapes(jnp.shape(p)[:-1], size)
         p = jnp.broadcast_to(p, broadcast_shape_p + jnp.shape(p)[-1:])
 
     else:
