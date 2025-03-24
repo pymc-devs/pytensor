@@ -404,11 +404,8 @@ def jax_sample_fn_multinomial(op, node):
 
 def _jax_multinomial(n, p, size=None, key=None):
     if size is not None:
-        broadcast_shape_n = jax.lax.broadcast_shapes(jnp.shape(n), size)
-        n = jnp.broadcast_to(n, broadcast_shape_n)
-
-        broadcast_shape_p = jax.lax.broadcast_shapes(jnp.shape(p)[:-1], size)
-        p = jnp.broadcast_to(p, broadcast_shape_p + jnp.shape(p)[-1:])
+        n = jnp.broadcast_to(n, size)
+        p = jnp.broadcast_to(p, size + jnp.shape(p)[-1:])
 
     else:
         broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), jnp.shape(p)[:-1])

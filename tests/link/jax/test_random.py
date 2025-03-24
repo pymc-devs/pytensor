@@ -722,7 +722,7 @@ def test_multinomial():
     # test with no 'size' argument and n.shape != p.shape[:-1]
     n = np.broadcast_to(np.array([10, 40]), size)
 
-    g = pt.random.multinomial(n, p, rng=rng)
+    g = pt.random.multinomial(n, p, rng=rng, size=None)
     g_fn = compile_random_function([], g, mode="JAX")
     samples = g_fn()
     np.testing.assert_allclose(samples.mean(axis=0), n[0, :, None] * p, rtol=0.1)
