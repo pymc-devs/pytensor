@@ -14,8 +14,6 @@ from tests import unittest_tools as utt
 @pytest.mark.parametrize("data_shape", [3, 5, 8], ids=lambda x: f"data_shape={x}")
 @pytest.mark.parametrize("mode", ["full", "valid", "same"])
 def test_convolve(mode, data_shape, kernel_shape):
-    rng = np.random.default_rng()
-
     data = vector("data")
     kernel = vector("kernel")
     op = partial(convolve, mode=mode)
