@@ -402,28 +402,26 @@ def jax_sample_fn_multinomial(op, node):
     return sample_fn
 
 
-def _jax_multinomial(n, p, shape=None, key=None):
-    if jnp.shape(n) != jnp.shape(p)[:-1]:
+def _jax_multinomial(n, p, size=None, key=None):
+    if size is not None:
+        broadcast_shape_n = jax.lax.broadcast_shapes(jnp.shape(n), size)
+        n = jnp.broadcast_to(n, broadcast_shape_n)
+
+        broadcast_shape_p = jax.lax.broadcast_shapes(jnp.shape(n), jnp.shape(p)[:-1])
+        p = jnp.broadcast_to(p, broadcast_shape_p + jnp.shape(p)[-1:])
+
+    else:
         broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), jnp.shape(p)[:-1])
         n = jnp.broadcast_to(n, broadcast_shape)
         p = jnp.broadcast_to(p, broadcast_shape + jnp.shape(p)[-1:])
 
-    if shape is not None:
-        broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), shape)
-        n = jnp.broadcast_to(n, broadcast_shape)
-
-    else:
-        shape = p.shape[:-1]
-
-    p = p / jnp.sum(p, axis=-1, keepdims=True)
     binom_p = jnp.moveaxis(p, -1, 0)[:-1, ...]
-
     sampling_rng = jax.random.split(key, binom_p.shape[0])
 
     def _binomial_sample_fn(carry, p_rng):
         s, rho = carry
         p, rng = p_rng
-        samples = jax.random.binomial(rng, s, p / rho, shape)
+        samples = jax.random.binomial(rng, s, p / rho)
         s = s - samples
         rho = rho - p
         return ((s, rho), samples)
