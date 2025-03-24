@@ -5,8 +5,8 @@ import pytest
 from scipy.signal import convolve as scipy_convolve
 
 from pytensor import function
-from pytensor.signal.conv import convolve
 from pytensor.tensor import vector
+from pytensor.tensor.signal.conv import convolve
 from tests import unittest_tools as utt
 
 

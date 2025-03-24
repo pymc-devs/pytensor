@@ -97,13 +97,14 @@ def convolve(
 
     if mode == "same":
         # We implement "same" as "valid" with padded data.
+        data_batch_shape = tuple(data.shape)[:-1]
         zeros_left = kernel.shape[0] // 2
         zeros_right = (kernel.shape[0] - 1) // 2
         data = join(
-            0,
-            zeros(zeros_left, dtype=kernel.dtype),
+            -1,
+            zeros((*data_batch_shape, zeros_left), dtype=kernel.dtype),
             data,
-            zeros(zeros_right, dtype=kernel.dtype),
+            zeros((*data_batch_shape, zeros_right), dtype=kernel.dtype),
         )
         mode = "valid"
 
