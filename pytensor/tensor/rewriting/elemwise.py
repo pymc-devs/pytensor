@@ -80,8 +80,6 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         #  and ScalarLoops
         if isinstance(node.op.scalar_op, ScalarLoop):
             return []
-        if isinstance(node.op.scalar_op, ps.Composite) and (len(node.outputs) > 1):
-            return []
         else:
             return range(len(node.outputs))
 
