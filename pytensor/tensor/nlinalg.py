@@ -11,6 +11,7 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.ifelse import ifelse
 from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.raise_op import Assert
 from pytensor.tensor import TensorLike
@@ -586,7 +587,7 @@ class QRFull(Op):
         Y_bar = Q @ dV
         A_bar_m_lt_n = pt.concatenate([X_bar, Y_bar], axis=1)
 
-        return [pt.switch(ptm.ge(m, n), A_bar_m_ge_n, A_bar_m_lt_n)]
+        return [ifelse(ptm.ge(m, n), A_bar_m_ge_n, A_bar_m_lt_n)]
 
 
 def qr(a, mode="reduced"):
