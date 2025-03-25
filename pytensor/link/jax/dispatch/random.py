@@ -396,41 +396,37 @@ def jax_sample_fn_binomial(op, node):
 @jax_sample_fn.register(ptr.MultinomialRV)
 def jax_sample_fn_multinomial(op, node):
     def sample_fn(rng_key, size, dtype, n, p):
-        sample = _jax_multinomial(key=rng_key, n=n, p=p, size=size)
+        if size is not None:
+            n = jnp.broadcast_to(n, size)
+            p = jnp.broadcast_to(p, size + jnp.shape(p)[-1:])
+
+        else:
+            broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), jnp.shape(p)[:-1])
+            n = jnp.broadcast_to(n, broadcast_shape)
+            p = jnp.broadcast_to(p, broadcast_shape + jnp.shape(p)[-1:])
+
+        binom_p = jnp.moveaxis(p, -1, 0)[:-1, ...]
+        sampling_rng = jax.random.split(rng_key, binom_p.shape[0])
+
+        def _binomial_sample_fn(carry, p_rng):
+            s, rho = carry
+            p, rng = p_rng
+            samples = jax.random.binomial(rng, s, p / rho)
+            s = s - samples
+            rho = rho - p
+            return ((s, rho), samples)
+
+        (remain, _), samples = jax.lax.scan(
+            _binomial_sample_fn,
+            (n.astype(np.float64), jnp.ones(binom_p.shape[1:])),
+            (binom_p, sampling_rng),
+        )
+        sample = jnp.concatenate(
+            [jnp.moveaxis(samples, 0, -1), jnp.expand_dims(remain, -1)], axis=-1
+        )
         return sample
 
     return sample_fn
-
-
-def _jax_multinomial(n, p, size=None, key=None):
-    if size is not None:
-        n = jnp.broadcast_to(n, size)
-        p = jnp.broadcast_to(p, size + jnp.shape(p)[-1:])
-
-    else:
-        broadcast_shape = jax.lax.broadcast_shapes(jnp.shape(n), jnp.shape(p)[:-1])
-        n = jnp.broadcast_to(n, broadcast_shape)
-        p = jnp.broadcast_to(p, broadcast_shape + jnp.shape(p)[-1:])
-
-    binom_p = jnp.moveaxis(p, -1, 0)[:-1, ...]
-    sampling_rng = jax.random.split(key, binom_p.shape[0])
-
-    def _binomial_sample_fn(carry, p_rng):
-        s, rho = carry
-        p, rng = p_rng
-        samples = jax.random.binomial(rng, s, p / rho)
-        s = s - samples
-        rho = rho - p
-        return ((s, rho), samples)
-
-    (remain, _), samples = jax.lax.scan(
-        _binomial_sample_fn,
-        (n.astype(np.float64), jnp.ones(binom_p.shape[1:])),
-        (binom_p, sampling_rng),
-    )
-    return jnp.concatenate(
-        [jnp.moveaxis(samples, 0, -1), jnp.expand_dims(remain, -1)], axis=-1
-    )
 
 
 @jax_sample_fn.register(ptr.VonMisesRV)
