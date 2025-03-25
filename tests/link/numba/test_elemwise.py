@@ -12,7 +12,7 @@ from pytensor import config, function
 from pytensor.compile import get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
-from pytensor.scalar import float64
+from pytensor.scalar import Composite, float64
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
@@ -548,7 +548,7 @@ def test_Argmax(x, axes, exc):
         )
 
 
-def test_elemwise_out_type():
+def test_elemwise_inplace_out_type():
     # Create a graph with an elemwise
     # Ravel failes if the elemwise output type is reported incorrectly
     x = pt.matrix()
@@ -561,6 +561,28 @@ def test_elemwise_out_type():
     x_val = np.broadcast_to(np.zeros((3,)), (6, 3))
 
     assert func(x_val).shape == (18,)
+
+
+def test_elemwise_multiple_inplace_outs():
+    x = pt.vector()
+    y = pt.vector()
+
+    x_ = pt.scalar_from_tensor(x[0])
+    y_ = pt.scalar_from_tensor(y[0])
+    out_ = x_ + 1, y_ + 1
+
+    composite_op = Composite([x_, y_], out_)
+    elemwise_op = Elemwise(composite_op, inplace_pattern={0: 0, 1: 1})
+    out = elemwise_op(x, y)
+
+    fn = function([x, y], out, mode="NUMBA", accept_inplace=True)
+    x_test = np.array([1, 2, 3], dtype=config.floatX)
+    y_test = np.array([4, 5, 6], dtype=config.floatX)
+    out1, out2 = fn(x_test, y_test)
+    assert out1 is x_test
+    assert out2 is y_test
+    np.testing.assert_allclose(out1, [2, 3, 4])
+    np.testing.assert_allclose(out2, [5, 6, 7])
 
 
 def test_scalar_loop():
