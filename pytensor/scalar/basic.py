@@ -4441,16 +4441,12 @@ class Composite(ScalarInnerGraphOp):
         if hasattr(self, "_c_code"):
             return self._c_code
 
-        subd = dict(
-            chain(
-                ((e, f"%(i{int(i)})s") for i, e in enumerate(self.fgraph.inputs)),
-                ((e, f"%(o{int(i)})s") for i, e in enumerate(self.fgraph.outputs)),
-            )
-        )
+        fg = self.fgraph
+        subd = {e: f"%(i{int(i)})s" for i, e in enumerate(fg.inputs)}
 
-        for var in self.fgraph.variables:
+        for var in fg.variables:
             if var.owner is None:
-                if var not in self.fgraph.inputs:
+                if var not in fg.inputs:
                     # This is an orphan
                     if isinstance(var, Constant) and isinstance(var.type, CLinkerType):
                         subd[var] = f"({var.type.c_literal(var.data)})"
@@ -4465,29 +4461,34 @@ class Composite(ScalarInnerGraphOp):
                 # flag for elemwise ops to check.
                 self.inner_float16 = True
 
-        _c_code = "{\n"
-        self.nodenames = [
-            f"%(nodename)s_subnode{int(j)}"
-            for j, n in enumerate(self.fgraph.toposort())
-        ]
+        self.nodenames = nodenames = []  # Used by self.c_support_code_apply
 
+        _c_code = "{\n"
         i = 0
-        for j, node in enumerate(self.fgraph.toposort()):
+        for j, node in enumerate(fg.toposort()):
             for output in node.outputs:
                 if output not in subd:
                     i += 1
                     name = f"V%(id)s_tmp{int(i)}"
                     subd[output] = name
                     _c_code += f"{output.type.dtype_specs()[1]} {name};\n"
+
+            nodename = f"%(nodename)s_subnode{int(j)}"
+            nodenames.append(nodename)
+
             s = node.op.c_code(
                 node,
-                self.nodenames[j],
+                nodename,
                 [subd[input] for input in node.inputs],
                 [subd[output] for output in node.outputs],
                 dict(fail="%(fail)s", id=f"%(id)s_{int(j)}"),
             )
             _c_code += s
             _c_code += "\n"
+
+        # Copy the temporary outputs to the real outputs
+        for i, output in enumerate(fg.outputs):
+            _c_code += f"%(o{int(i)})s = {subd[output]};\n"
 
         _c_code += "}\n"
 
@@ -4512,7 +4513,7 @@ class Composite(ScalarInnerGraphOp):
         return self.c_code_template % d
 
     def c_code_cache_version_outer(self) -> tuple[int, ...]:
-        return (5,)
+        return (6,)
 
 
 class Compositef32:
