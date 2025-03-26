@@ -1302,19 +1302,7 @@ class ScalarOp(COp):
     def __str__(self):
         if hasattr(self, "name") and self.name:
             return self.name
-        else:
-            param = [
-                (k, v)
-                for k, v in self.__dict__.items()
-                if k
-                not in ("name", "_op_use_c_code", "bool", "output_types_preference")
-            ]
-            if param:
-                classname = self.__class__.__name__
-                args = ", ".join(f"{k}={v}" for k, v in param)
-                return f"{classname}{{{args}}}"
-            else:
-                return self.__class__.__name__
+        return self.__class__.__name__
 
     def c_code_cache_version(self):
         return (4,)
@@ -4102,6 +4090,7 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
 
     def __init__(self, *args, **kwargs):
         self.prepare_node_called = set()
+        super().__init__(*args, **kwargs)
 
     def _cleanup_graph(self, inputs, outputs):
         # TODO: We could convert to TensorVariable, optimize graph,
