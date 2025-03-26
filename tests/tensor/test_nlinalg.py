@@ -175,7 +175,7 @@ def test_qr_modes():
         + ["shape=(3, 3), gradient_test_case=Q, mode=raw"]
     ),
 )
-@pytest.mark.parametrize("is_complex", [True, False], ["complex", "real"])
+@pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
 def test_qr_grad(shape, gradient_test_case, mode, is_complex):
     rng = np.random.default_rng(utt.fetch_seed())
 
