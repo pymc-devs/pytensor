@@ -175,7 +175,8 @@ def test_qr_modes():
         + ["shape=(3, 3), gradient_test_case=Q, mode=raw"]
     ),
 )
-def test_qr_grad(shape, gradient_test_case, mode):
+@pytest.mark.parametrize("is_complex", [True, False], ["complex", "real"])
+def test_qr_grad(shape, gradient_test_case, mode, is_complex):
     rng = np.random.default_rng(utt.fetch_seed())
 
     def _test_fn(x, case=2, mode="reduced"):
@@ -187,8 +188,13 @@ def test_qr_grad(shape, gradient_test_case, mode):
             Q, R = qr(x, mode=mode)
             return Q.sum() + R.sum()
 
+    if is_complex:
+        pytest.xfail("Complex inputs currently not supported by verify_grad")
+
     m, n = shape
     a = rng.standard_normal(shape).astype(config.floatX)
+    if is_complex:
+        a += 1j * rng.standard_normal(shape).astype(config.floatX)
 
     if mode == "raw":
         with pytest.raises(NotImplementedError):
