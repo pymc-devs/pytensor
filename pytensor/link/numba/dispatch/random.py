@@ -386,6 +386,56 @@ def numba_funcify_RandomVariable_core(op: RandomVariable, **kwargs):
     )
 
 
+def rv_fallback_impl(op: RandomVariableWithCoreShape, node):
+    """Create a fallback implementation for random variables using object mode."""
+    import warnings
+
+    [rv_node] = op.fgraph.apply_nodes
+    rv_op: RandomVariable = rv_node.op
+
+    warnings.warn(
+        f"Numba will use object mode to execute the random variable {rv_op.name}",
+        UserWarning,
+    )
+
+    size = rv_op.size_param(rv_node)
+    size_len = None if isinstance(size.type, NoneTypeT) else get_vector_length(size)
+    inplace = rv_op.inplace
+
+    def random_wrapper(core_shape, rng, size, *dist_params):
+        if not inplace:
+            rng = copy(rng)
+
+        fixed_size = (
+            None if size_len is None else numba_ndarray.to_fixed_tuple(size, size_len)
+        )
+
+        with numba.objmode(res="UniTuple(types.npy_rng, types.pyobject)"):
+            # Convert tuple params back to arrays for perform method
+            np_dist_params = [np.asarray(p) for p in dist_params]
+
+            # Prepare output storage for perform method
+            outputs = [[None], [None]]
+
+            # Call the perform method directly
+            rv_op.perform(rv_node, [rng, fixed_size, *np_dist_params], outputs)
+
+            next_rng = outputs[0][0]
+            result = outputs[1][0]
+            res = (next_rng, result)
+
+        return res
+
+    def random(core_shape, rng, size, *dist_params):
+        raise NotImplementedError("Non-jitted random variable not implemented")
+
+    @overload(random, jit_options=_jit_options)
+    def ov_random(core_shape, rng, size, *dist_params):
+        return random_wrapper
+
+    return random
+
+
 @numba_funcify.register
 def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs):
     core_shape = node.inputs[0]
@@ -398,44 +448,53 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     core_shape_len = get_vector_length(core_shape)
     inplace = rv_op.inplace
 
-    core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
-    nin = 1 + len(dist_params)  # rng + params
-    core_op_fn = store_core_outputs(core_rv_fn, nin=nin, nout=1)
+    try:
+        core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
+        nin = 1 + len(dist_params)  # rng + params
+        core_op_fn = store_core_outputs(core_rv_fn, nin=nin, nout=1)
 
-    batch_ndim = rv_op.batch_ndim(rv_node)
+        batch_ndim = rv_op.batch_ndim(rv_node)
 
-    # numba doesn't support nested literals right now...
-    input_bc_patterns = encode_literals(
-        tuple(input_var.type.broadcastable[:batch_ndim] for input_var in dist_params)
-    )
-    output_bc_patterns = encode_literals(
-        (rv_node.outputs[1].type.broadcastable[:batch_ndim],)
-    )
-    output_dtypes = encode_literals((rv_node.default_output().type.dtype,))
-    inplace_pattern = encode_literals(())
-
-    def random_wrapper(core_shape, rng, size, *dist_params):
-        if not inplace:
-            rng = copy(rng)
-
-        draws = _vectorized(
-            core_op_fn,
-            input_bc_patterns,
-            output_bc_patterns,
-            output_dtypes,
-            inplace_pattern,
-            (rng,),
-            dist_params,
-            (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),
-            None if size_len is None else numba_ndarray.to_fixed_tuple(size, size_len),
+        # numba doesn't support nested literals right now...
+        input_bc_patterns = encode_literals(
+            tuple(
+                input_var.type.broadcastable[:batch_ndim] for input_var in dist_params
+            )
         )
-        return rng, draws
+        output_bc_patterns = encode_literals(
+            (rv_node.outputs[1].type.broadcastable[:batch_ndim],)
+        )
+        output_dtypes = encode_literals((rv_node.default_output().type.dtype,))
+        inplace_pattern = encode_literals(())
 
-    def random(core_shape, rng, size, *dist_params):
-        raise NotImplementedError("Non-jitted random variable not implemented")
+        def random_wrapper(core_shape, rng, size, *dist_params):
+            if not inplace:
+                rng = copy(rng)
 
-    @overload(random, jit_options=_jit_options)
-    def ov_random(core_shape, rng, size, *dist_params):
-        return random_wrapper
+            draws = _vectorized(
+                core_op_fn,
+                input_bc_patterns,
+                output_bc_patterns,
+                output_dtypes,
+                inplace_pattern,
+                (rng,),
+                dist_params,
+                (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),
+                None
+                if size_len is None
+                else numba_ndarray.to_fixed_tuple(size, size_len),
+            )
+            return rng, draws
 
-    return random
+        def random(core_shape, rng, size, *dist_params):
+            raise NotImplementedError("Non-jitted random variable not implemented")
+
+        @overload(random, jit_options=_jit_options)
+        def ov_random(core_shape, rng, size, *dist_params):
+            return random_wrapper
+
+        return random
+
+    except NotImplementedError:
+        # Fall back to object mode for random variables that don't have core implementation
+        return rv_fallback_impl(op, node)
