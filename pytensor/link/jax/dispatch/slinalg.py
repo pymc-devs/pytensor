@@ -4,9 +4,12 @@ import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.slinalg import (
+    LU,
     BlockDiagonal,
     Cholesky,
     Eigvalsh,
+    LUFactor,
+    LUSolve,
     Solve,
     SolveTriangular,
 )
@@ -93,3 +96,51 @@ def jax_funcify_BlockDiagonalMatrix(op, **kwargs):
         return jax.scipy.linalg.block_diag(*inputs)
 
     return block_diag
+
+
+@jax_funcify.register(LU)
+def jax_funcify_LU(op, **kwargs):
+    permute_l = op.permute_l
+    p_indices = op.p_indices
+    check_finite = op.check_finite
+
+    if p_indices:
+        raise ValueError("JAX does not support the p_indices argument")
+
+    def lu(*inputs):
+        return jax.scipy.linalg.lu(
+            *inputs, permute_l=permute_l, check_finite=check_finite
+        )
+
+    return lu
+
+
+@jax_funcify.register(LUFactor)
+def jax_funcify_LUFactor(op, **kwargs):
+    check_finite = op.check_finite
+    overwrite_a = op.overwrite_a
+
+    def lu_factor(a):
+        return jax.scipy.linalg.lu_factor(
+            a, check_finite=check_finite, overwrite_a=overwrite_a
+        )
+
+    return lu_factor
+
+
+@jax_funcify.register(LUSolve)
+def jax_funcify_LUSolve(op, **kwargs):
+    trans = op.trans
+    check_finite = op.check_finite
+    overwrite_b = op.overwrite_b
+
+    def lu_solve(lu, pivots, b):
+        return jax.scipy.linalg.lu_solve(
+            (lu, pivots),
+            b,
+            trans=trans,
+            check_finite=check_finite,
+            overwrite_b=overwrite_b,
+        )
+
+    return lu_solve

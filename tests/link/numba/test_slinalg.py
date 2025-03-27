@@ -20,15 +20,13 @@ rng = np.random.default_rng(42849)
 
 
 def test_lamch():
-    from scipy.linalg import get_lapack_funcs
-
     from pytensor.link.numba.dispatch.slinalg import _xlamch
 
     @numba.njit()
     def xlamch(kind):
         return _xlamch(kind)
 
-    lamch = get_lapack_funcs("lamch", (np.array([0.0], dtype=floatX),))
+    lamch = scipy.linalg.get_lapack_funcs("lamch", (np.array([0.0], dtype=floatX),))
 
     np.testing.assert_allclose(xlamch("E"), lamch("E"))
     np.testing.assert_allclose(xlamch("S"), lamch("S"))
@@ -43,8 +41,6 @@ def test_lamch():
 )
 def test_xlange(ord_numba, ord_scipy):
     # xlange is called internally only, we don't dispatch pt.linalg.norm to it
-    from scipy import linalg
-
     from pytensor.link.numba.dispatch.slinalg import _xlange
 
     @numba.njit()
@@ -52,14 +48,12 @@ def test_xlange(ord_numba, ord_scipy):
         return _xlange(x, ord)
 
     x = np.random.normal(size=(5, 5)).astype(floatX)
-    np.testing.assert_allclose(xlange(x, ord_numba), linalg.norm(x, ord_scipy))
+    np.testing.assert_allclose(xlange(x, ord_numba), scipy.linalg.norm(x, ord_scipy))
 
 
 @pytest.mark.parametrize("ord_numba, ord_scipy", [("1", 1), ("I", np.inf)])
 def test_xgecon(ord_numba, ord_scipy):
     # gecon is called internally only, we don't dispatch pt.linalg.norm to it
-    from scipy.linalg import get_lapack_funcs
-
     from pytensor.link.numba.dispatch.slinalg import _xgecon, _xlange
 
     @numba.njit()
@@ -74,12 +68,80 @@ def test_xgecon(ord_numba, ord_scipy):
 
     # Test against direct call to the underlying LAPACK functions
     # Solution does **not** agree with 1 / np.linalg.cond(x) !
-    lange, gecon = get_lapack_funcs(("lange", "gecon"), (x,))
+    lange, gecon = scipy.linalg.get_lapack_funcs(("lange", "gecon"), (x,))
     norm = lange(ord_numba, x)
     rcond2, _ = gecon(x, norm, norm=ord_numba)
 
     assert info == 0
     np.testing.assert_allclose(rcond, rcond2)
+
+
+@pytest.mark.parametrize("overwrite_a", [True, False])
+def test_getrf(overwrite_a):
+    from pytensor.link.numba.dispatch.slinalg import _getrf
+
+    # TODO: Refactor this test to use compare_numba_and_py after we implement lu_factor in pytensor
+
+    @numba.njit()
+    def getrf(x, overwrite_a):
+        return _getrf(x, overwrite_a=overwrite_a)
+
+    x = np.random.normal(size=(5, 5)).astype(floatX)
+    x = np.asfortranarray(
+        x
+    )  # x needs to be fortran-contiguous going into getrf for the overwrite option to work
+
+    lu, ipiv = scipy.linalg.lu_factor(x, overwrite_a=False)
+    LU, IPIV, info = getrf(x, overwrite_a=overwrite_a)
+
+    assert info == 0
+    np.testing.assert_allclose(LU, lu)
+
+    if overwrite_a:
+        np.testing.assert_allclose(x, LU)
+
+    # TODO: It seems IPIV is 1-indexed in FORTRAN, so we need to subtract 1. I can't find evidence that scipy is doing
+    #  this, though.
+    np.testing.assert_allclose(IPIV - 1, ipiv)
+
+
+@pytest.mark.parametrize("trans", [0, 1])
+@pytest.mark.parametrize("overwrite_a", [True, False])
+@pytest.mark.parametrize("overwrite_b", [True, False])
+@pytest.mark.parametrize("b_shape", [(5,), (5, 3)], ids=["b_1d", "b_2d"])
+def test_getrs(trans, overwrite_a, overwrite_b, b_shape):
+    from pytensor.link.numba.dispatch.slinalg import _getrf, _getrs
+
+    # TODO: Refactor this test to use compare_numba_and_py after we implement lu_solve in pytensor
+
+    @numba.njit()
+    def lu_solve(a, b, trans, overwrite_a, overwrite_b):
+        lu, ipiv, info = _getrf(a, overwrite_a=overwrite_a)
+        x, info = _getrs(lu, b, ipiv, trans=trans, overwrite_b=overwrite_b)
+        return x, lu, info
+
+    a = np.random.normal(size=(5, 5)).astype(floatX)
+    b = np.random.normal(size=b_shape).astype(floatX)
+
+    # inputs need to be fortran-contiguous going into getrf and getrs for the overwrite option to work
+    a = np.asfortranarray(a)
+    b = np.asfortranarray(b)
+
+    lu_and_piv = scipy.linalg.lu_factor(a, overwrite_a=False)
+    x_sp = scipy.linalg.lu_solve(lu_and_piv, b, trans, overwrite_b=False)
+
+    x, lu, info = lu_solve(
+        a, b, trans, overwrite_a=overwrite_a, overwrite_b=overwrite_b
+    )
+
+    assert info == 0
+
+    if overwrite_a:
+        np.testing.assert_allclose(a, lu)
+    if overwrite_b:
+        np.testing.assert_allclose(b, x)
+
+    np.testing.assert_allclose(x, x_sp)
 
 
 class TestSolves:
@@ -476,3 +538,56 @@ def test_block_diag():
     C_val = np.random.normal(size=(2, 2)).astype(floatX)
     D_val = np.random.normal(size=(4, 4)).astype(floatX)
     compare_numba_and_py([A, B, C, D], [X], [A_val, B_val, C_val, D_val])
+
+
+@pytest.mark.parametrize(
+    "permute_l, p_indices",
+    [(True, False), (False, True), (False, False)],
+    ids=["PL", "p_indices", "P"],
+)
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_numba_lu(permute_l, p_indices, shape: tuple[int]):
+    rng = np.random.default_rng()
+    A = pt.tensor(
+        "A",
+        shape=shape,
+        dtype=config.floatX,
+    )
+
+    out = pt.linalg.lu(A, permute_l=permute_l, p_indices=p_indices)
+    f = pytensor.function([A], out, mode="NUMBA")
+
+    A_val = rng.normal(size=shape).astype(config.floatX)
+    if len(shape) == 2:
+        compare_numba_and_py([A], out, test_inputs=[A_val], inplace=True)
+
+    else:
+        # compare_numba_and_py fails: NotImplementedError: Non-jitted BlockwiseWithCoreShape not implemented
+        pt_out = f(A_val.copy())
+        sp_out = scipy.linalg.lu(
+            A_val.copy(), permute_l=permute_l, p_indices=p_indices, check_finite=False
+        )
+
+        for a, b in zip(pt_out, sp_out, strict=True):
+            np.testing.assert_allclose(a, b)
+
+
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_numba_lu_factor(shape: tuple[int]):
+    rng = np.random.default_rng(123)
+    A = pt.tensor("A", shape=shape, dtype=config.floatX)
+    out = pt.linalg.lu_factor(A)
+
+    A_val = rng.normal(size=shape).astype(config.floatX)
+    f = pytensor.function([A], out, mode="NUMBA")
+
+    if len(shape) == 2:
+        compare_numba_and_py([A], out, [A_val], inplace=True)
+    else:
+        pt_out = f(A_val.copy())
+        sp_out = np.vectorize(scipy.linalg.lu_factor, signature="(n,n)->(n,n),(n)")(
+            A_val.copy()
+        )
+
+        for a, b in zip(pt_out, sp_out, strict=True):
+            np.testing.assert_allclose(a, b)
