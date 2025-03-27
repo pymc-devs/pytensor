@@ -116,6 +116,7 @@ from pytensor.tensor import (
 # isort: off
 from pytensor.tensor import linalg
 from pytensor.tensor import special
+from pytensor.tensor import signal
 
 # For backward compatibility
 from pytensor.tensor import nlinalg
