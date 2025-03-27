@@ -265,7 +265,7 @@ def _vectorized(
             ctx.nrt.incref(
                 builder,
                 sig.return_type.types[inplace_idx],
-                outputs[inplace_idx]._get_value(),
+                outputs[inplace_idx]._getvalue(),
             )
         return ctx.make_tuple(
             builder, sig.return_type, [out._getvalue() for out in outputs]

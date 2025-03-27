@@ -1104,7 +1104,8 @@ class TestFusion:
             np.random.random((5, 5)), np.random.random((5, 5)), np.random.random((5, 5))
         )
 
-    def test_fusion_multiout_inplace(self):
+    @pytest.mark.parametrize("linker", ["cvm", "py"])
+    def test_fusion_multiout_inplace(self, linker):
         x = vector("x")
 
         # Create Composite where inplacing the first non-constant output would corrupt the second output
@@ -1118,17 +1119,16 @@ class TestFusion:
         f = pytensor.function(
             [In(x, mutable=True)],
             outs,
-            mode=self.mode.including("inplace"),
+            mode=Mode(linker=linker, optimizer=self.rewrites.including("inplace")),
         )
         (composite_node,) = f.maker.fgraph.apply_nodes
 
-        # Destroy map must be None or the last toposorted output
         destroy_map = composite_node.op.destroy_map
-        assert (destroy_map == {}) or (
-            destroy_map == {1: [composite_node.inputs.index(x)]}
-        )
+        assert destroy_map == {0: [0]}
 
-        res = f([0, 1, 2])
+        inp = np.array([0, 1, 2], dtype=config.floatX)
+        res = f(inp)
+        assert not np.allclose(inp, [0, 1, 2])
         assert np.allclose(res[0], [1, 2, 3])
         assert np.allclose(res[1], np.cos([1, 2, 3]) + np.array([0, 1, 2]))
 
