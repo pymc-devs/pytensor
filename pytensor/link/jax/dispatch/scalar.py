@@ -14,6 +14,8 @@ from pytensor.scalar.basic import (
     Composite,
     Identity,
     IntDiv,
+    Maximum,
+    Minimum,
     Mod,
     Mul,
     ScalarOp,
@@ -168,6 +170,22 @@ def jax_funcify_scalar_IntDiv(op):
 def jax_funcify_scalar_Mod(op):
     def elemwise(x, y):
         return x % y
+
+    return elemwise
+
+
+@jax_funcify.register(Maximum)
+def jax_funcify_scalar_Maximum(op, **kwargs):
+    def elemwise(*inputs):
+        return functools.reduce(jnp.maximum, inputs[1:], inputs[0])
+
+    return elemwise
+
+
+@jax_funcify.register(Minimum)
+def jax_funcify_scalar_Minimum(op, **kwargs):
+    def elemwise(*inputs):
+        return functools.reduce(jnp.minimum, inputs[1:], inputs[0])
 
     return elemwise
 

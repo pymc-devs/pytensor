@@ -262,8 +262,8 @@ _scalar_constant_value_elemwise_ops = (
     ps.Mul,
     ps.IntDiv,
     ps.TrueDiv,
-    ps.ScalarMinimum,
-    ps.ScalarMaximum,
+    ps.Minimum,
+    ps.Maximum,
 )
 
 
