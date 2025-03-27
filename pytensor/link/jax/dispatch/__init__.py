@@ -14,6 +14,7 @@ import pytensor.link.jax.dispatch.random
 import pytensor.link.jax.dispatch.scalar
 import pytensor.link.jax.dispatch.scan
 import pytensor.link.jax.dispatch.shape
+import pytensor.link.jax.dispatch.signal
 import pytensor.link.jax.dispatch.slinalg
 import pytensor.link.jax.dispatch.sort
 import pytensor.link.jax.dispatch.sparse
