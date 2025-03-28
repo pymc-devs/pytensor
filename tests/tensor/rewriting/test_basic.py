@@ -1,5 +1,4 @@
 import copy
-import re
 
 import numpy as np
 import pytest
@@ -143,55 +142,68 @@ def rewrite(g, level="fast_run"):
     return g
 
 
-def test_local_useless_slice():
-    # test a simple matrix
-    x = matrix("x")
-    mode_excluding = get_default_mode().excluding(
-        "local_useless_slice", "local_mul_canonizer"
-    )
-    mode_including = (
-        get_default_mode()
-        .including("local_useless_slice")
-        .excluding("local_mul_canonizer")
-    )
+class TestME:
+    def local_useless_slice_tester(self):
+        # test a simple matrix
+        x = matrix("x")
+        mode_excluding = get_mode("NUMBA").excluding(
+            "local_useless_slice", "local_mul_canonizer"
+        )
+        mode_including = (
+            get_mode("NUMBA")
+            .including("local_useless_slice")
+            .excluding("local_mul_canonizer")
+        )
 
-    # test with and without the useless slice
-    o = 2 * x[0, :]
-    f_excluding = function([x], o, mode=mode_excluding)
-    f_including = function([x], o, mode=mode_including)
-    rng = np.random.default_rng(utt.fetch_seed())
-    test_inp = rng.integers(-10, 10, (4, 4)).astype("float32")
-    assert all(f_including(test_inp) == f_excluding(test_inp))
-    # test to see if the slice is truly gone
-    apply_node = f_including.maker.fgraph.toposort()[0]
-    subtens = apply_node.op
-    assert not any(isinstance(idx, slice) for idx in subtens.idx_list)
+        # test with and without the useless slice
+        o = 2 * x[0, :]
+        f_excluding = function([x], o, mode=mode_excluding)
+        f_including = function([x], o, mode=mode_including)
+        rng = np.random.default_rng(utt.fetch_seed())
+        test_inp = rng.integers(-10, 10, (4, 4)).astype("float32")
+        assert all(f_including(test_inp) == f_excluding(test_inp))
+        # test to see if the slice is truly gone
+        apply_node = f_including.maker.fgraph.toposort()[0]
+        subtens = apply_node.op
+        assert not any(isinstance(idx, slice) for idx in subtens.idx_list)
 
-    # Now test that the stack trace is copied over properly,
-    # before before and after rewriting.
-    assert check_stack_trace(f_excluding, ops_to_check="all")
-    assert check_stack_trace(f_including, ops_to_check="all")
+        # Now test that the stack trace is copied over properly,
+        # before before and after rewriting.
+        assert check_stack_trace(f_excluding, ops_to_check="all")
+        assert check_stack_trace(f_including, ops_to_check="all")
 
-    # test a 4d tensor
-    z = tensor4("z")
-    o2 = z[1, :, :, 1]
-    o3 = z[0, :, :, :]
-    f_including_check = function([z], o2, mode=mode_including)
-    f_including_check_apply = function([z], o3, mode=mode_including)
+        # test a 4d tensor
+        z = tensor4("z")
+        o2 = z[1, :, :, 1]
+        o3 = z[0, :, :, :]
+        f_including_check = function([z], o2, mode=mode_including)
+        f_including_check_apply = function([z], o3, mode=mode_including)
 
-    # The rewrite shouldn't apply here
-    apply_node = f_including_check.maker.fgraph.toposort()[0]
-    subtens = apply_node.op
-    assert [isinstance(idx, slice) for idx in subtens.idx_list].count(True) == 2
-    # But it should here
-    apply_node = f_including_check_apply.maker.fgraph.toposort()[0]
-    subtens = apply_node.op
-    assert not any(isinstance(idx, slice) for idx in subtens.idx_list)
+        # The rewrite shouldn't apply here
+        apply_node = f_including_check.maker.fgraph.toposort()[0]
+        subtens = apply_node.op
+        assert [isinstance(idx, slice) for idx in subtens.idx_list].count(True) == 2
+        # But it should here
+        apply_node = f_including_check_apply.maker.fgraph.toposort()[0]
+        subtens = apply_node.op
+        assert not any(isinstance(idx, slice) for idx in subtens.idx_list)
 
-    # Finally, test that the stack trace is copied over properly,
-    # before before and after rewriting.
-    assert check_stack_trace(f_including_check, ops_to_check=Subtensor)
-    assert check_stack_trace(f_including_check_apply, ops_to_check=Subtensor)
+        # Finally, test that the stack trace is copied over properly,
+        # before before and after rewriting.
+        assert check_stack_trace(f_including_check, ops_to_check=Subtensor)
+        assert check_stack_trace(f_including_check_apply, ops_to_check=Subtensor)
+
+    def test_t0(self):
+        import pytensor
+
+        x = pt.vector("x")
+        pytensor.function([x], x + 1)
+
+    def test_t1(self):
+        self.local_useless_slice_tester()
+
+    def test_t2(self):
+        self.local_useless_slice_tester()
 
 
 def test_local_useless_fill():
@@ -307,9 +319,7 @@ class TestLocalCanonicalizeAlloc:
             # Error raised by Alloc Op
             with pytest.raises(
                 ValueError,
-                match=re.escape(
-                    "cannot assign slice of shape (3, 7) from input of shape (6, 7)"
-                ),
+                match=r"could not broadcast input array from shape \(3,7\) into shape \(6,7\)",
             ):
                 f()
 
@@ -1206,7 +1216,6 @@ class TestLocalOptAlloc:
         f(5)
 
 
-@pytest.mark.xfail(reason="Numba does not support float16")
 class TestLocalOptAllocF16(TestLocalOptAlloc):
     dtype = "float16"
 
