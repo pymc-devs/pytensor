@@ -196,6 +196,14 @@ def numba_funcify_Add(op, node, **kwargs):
 
 @numba_funcify.register(Mul)
 def numba_funcify_Mul(op, node, **kwargs):
+    if len(node.inputs) == 2:
+
+        @numba_basic.numba_njit
+        def binary_mul(x, y):
+            return x * y
+
+        return binary_mul
+
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "mul", "*")
 

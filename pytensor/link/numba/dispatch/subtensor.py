@@ -13,6 +13,7 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
+    get_idx_list,
 )
 from pytensor.tensor.type_other import NoneTypeT, SliceType
 
@@ -95,12 +96,34 @@ def {function_name}({", ".join(input_names)}):
     return np.asarray(z)
     """
 
+    print()
+    node.dprint(depth=2, print_type=True)
+    print("subtensor_def_src:", subtensor_def_src)
     func = compile_function_src(
         subtensor_def_src,
         function_name=function_name,
         global_env=globals() | {"np": np},
     )
     return numba_njit(func, boundscheck=True)
+
+
+@numba_funcify.register(Subtensor)
+def numba_funcify_subtensor_custom(op, node, **kwargs):
+    idxs = get_idx_list(node.inputs, op.idx_list)
+
+    if (
+        idxs
+        and not isinstance(idxs[0], slice)
+        and all(idx == slice(None) for idx in idxs[1:])
+    ):
+
+        @numba_njit
+        def scalar_subtensor_leading_dim(x, idx):
+            return x[idx]
+
+        return scalar_subtensor_leading_dim
+
+    return numba_funcify_default_subtensor(op, node, **kwargs)
 
 
 @numba_funcify.register(AdvancedSubtensor)

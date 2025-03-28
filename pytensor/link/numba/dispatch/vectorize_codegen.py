@@ -35,6 +35,16 @@ def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
         on[...] = ton
 
     """
+    if nin == 2 and nout == 1:
+
+        @numba_basic.numba_njit
+        def store_core_outputs_2in1out(i0, i1, o0):
+            t0 = core_op_fn(i0, i1)
+            o0[...] = t0
+
+        return store_core_outputs_2in1out
+    print(nin, nout)
+
     inputs = [f"i{i}" for i in range(nin)]
     outputs = [f"o{i}" for i in range(nout)]
     inner_outputs = [f"t{output}" for output in outputs]

@@ -16,7 +16,6 @@ from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
     encode_literals,
-    store_core_outputs,
 )
 from pytensor.link.utils import compile_function_src
 from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
@@ -276,7 +275,12 @@ def numba_funcify_Elemwise(op, node, **kwargs):
 
     nin = len(node.inputs)
     nout = len(node.outputs)
-    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
+    # core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
+    if isinstance(op.scalar_op, Mul) and len(node.inputs) == 2:
+
+        @numba_njit
+        def core_op_fn(x, y, out):
+            out[...] = x * y
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
     output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)

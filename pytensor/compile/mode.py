@@ -507,6 +507,7 @@ PYTORCH = Mode(
 predefined_modes = {
     "FAST_COMPILE": FAST_COMPILE,
     "FAST_RUN": FAST_RUN,
+    "OLD_FAST_RUN": Mode("cvm", "fast_run"),
     "JAX": JAX,
     "NUMBA": NUMBA,
     "PYTORCH": PYTORCH,
