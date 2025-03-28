@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import pickle
 from collections.abc import Callable, Sequence
+from hashlib import sha256
 from textwrap import indent
 from typing import Any, cast
 
@@ -15,15 +16,19 @@ from numba.core.base import BaseContext
 from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
+from pytensor.graph.op import HasInnerGraph
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.utils import compile_function_src
+from pytensor.link.numba.super_utils import compile_function_src2
+from pytensor.scalar import ScalarOp
 
 
 def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
-def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
+def store_core_outputs(
+    core_op_fn: Callable, core_op: ScalarOp, nin: int, nout: int
+) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
     @njit
@@ -52,9 +57,14 @@ def store_core_outputs({inp_signature}, {out_signature}):
 {indent(store_outputs, " " * 4)}
 """
     global_env = {"core_op_fn": core_op_fn}
-    func = compile_function_src(
-        func_src, "store_core_outputs", {**globals(), **global_env}
-    )
+    # func = compile_function_src(
+    #     func_src, "store_core_outputs", {**globals(), **global_env},
+    # )
+    if isinstance(core_op, HasInnerGraph):
+        key = sha256(core_op.c_code_template.encode()).hexdigest()
+    else:
+        key = str(core_op)
+    func = compile_function_src2(key, func_src, "store_core_outputs", global_env)
     return cast(Callable, numba_basic.numba_njit(func))
 
 
