@@ -63,9 +63,8 @@ def register_linker(name, linker):
 # If a string is passed as the optimizer argument in the constructor
 # for Mode, it will be used as the key to retrieve the real optimizer
 # in this dictionary
-exclude = []
-if not config.cxx:
-    exclude = ["cxx_only"]
+
+exclude = ["cxx_only", "BlasOpt"]
 OPT_NONE = RewriteDatabaseQuery(include=[], exclude=exclude)
 # Even if multiple merge optimizer call will be there, this shouldn't
 # impact performance.
@@ -346,6 +345,11 @@ class Mode:
             optimizer = predefined_optimizers[optimizer]
         if isinstance(optimizer, RewriteDatabaseQuery):
             self.provided_optimizer = optimizer
+
+        # Force numba-required rewrites if using NumbaLinker
+        if isinstance(linker, NumbaLinker):
+            optimizer = optimizer.including("numba")
+
         self._optimizer = optimizer
         self.call_time = 0
         self.fn_time = 0
@@ -443,16 +447,20 @@ class Mode:
 # string as the key
 # Use VM_linker to allow lazy evaluation by default.
 FAST_COMPILE = Mode(
-    VMLinker(use_cloop=False, c_thunks=False),
-    RewriteDatabaseQuery(include=["fast_compile", "py_only"]),
+    NumbaLinker(),
+    # TODO: Fast_compile should just use python code, CHANGE ME!
+    RewriteDatabaseQuery(
+        include=["fast_compile", "numba"],
+        exclude=["cxx_only", "BlasOpt", "local_careduce_fusion"],
+    ),
 )
-if config.cxx:
-    FAST_RUN = Mode("cvm", "fast_run")
-else:
-    FAST_RUN = Mode(
-        "vm",
-        RewriteDatabaseQuery(include=["fast_run", "py_only"]),
-    )
+FAST_RUN = Mode(
+    NumbaLinker(),
+    RewriteDatabaseQuery(
+        include=["fast_run", "numba"],
+        exclude=["cxx_only", "BlasOpt", "local_careduce_fusion"],
+    ),
+)
 
 NUMBA = Mode(
     NumbaLinker(),
@@ -565,6 +573,7 @@ def register_mode(name, mode):
     Add a `Mode` which can be referred to by `name` in `function`.
 
     """
+    # TODO: Remove me
     if name in predefined_modes:
         raise ValueError(f"Mode name already taken: {name}")
     predefined_modes[name] = mode
