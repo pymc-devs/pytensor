@@ -380,45 +380,59 @@ def test_Shape(x, i):
 
 
 @pytest.mark.parametrize(
-    "kind, exc",
+    "x, axis, kind, exc",
     [
-        ["quicksort", None],
-        ["mergesort", UserWarning],
-        ["heapsort", UserWarning],
-        ["stable", UserWarning],
+        [[3, 2, 1], None, "quicksort", None],
+        [[], None, "quicksort", None],
+        [[[3, 2, 1], [5, 6, 7]], None, "quicksort", None],
+        [[3, 2, 1], None, "mergesort", UserWarning],
+        [[3, 2, 1], None, "heapsort", UserWarning],
+        [[3, 2, 1], None, "stable", UserWarning],
+        [[[3, 2, 1], [5, 6, 7]], 0, "quicksort", None],
+        [[[3, 2, 1], [5, 6, 7]], 1, "quicksort", None],
+        [[[3, 2, 1], [5, 6, 7]], -1, "quicksort", None],
+        [[3, 2, 1], 0, "quicksort", None],
+        [np.random.randint(0, 100, (40, 40, 40, 40)), 3, "quicksort", None],
     ],
 )
-def test_Sort(kind, exc):
-    x = [5, 4, 3, 2, 1]
-
-    g = SortOp(kind)(pt.as_tensor_variable(x))
-
-    if exc:
-        with pytest.warns(exc):
-            compare_numba_and_py([], [g], [])
+def test_Sort(x, axis, kind, exc):
+    if axis:
+        g = SortOp(kind)(pt.as_tensor_variable(x), axis)
     else:
-        compare_numba_and_py([], [g], [])
+        g = SortOp(kind)(pt.as_tensor_variable(x))
 
-    compare_numba_and_py([], [g], [])
+    cm = contextlib.suppress() if not exc else pytest.warns(exc)
+
+    with cm:
+        compare_numba_and_py([], [g], [])
 
 
 @pytest.mark.parametrize(
-    "kind, exc",
+    "x, axis, kind, exc",
     [
-        ["quicksort", None],
-        ["mergesort", None],
-        ["heapsort", UserWarning],
-        ["stable", UserWarning],
+        [[3, 2, 1], None, "quicksort", None],
+        [[], None, "quicksort", None],
+        [[[3, 2, 1], [5, 6, 7]], None, "quicksort", None],
+        [[3, 2, 1], None, "heapsort", UserWarning],
+        [[3, 2, 1], None, "stable", UserWarning],
+        [[[3, 2, 1], [5, 6, 7]], 0, "quicksort", None],
+        [[[3, 2, 1], [5, 6, 7]], None, "quicksort", None],
+        [[[3, 2, 1], [5, 6, 7]], 1, "quicksort", None],
+        [[[3, 2, 1], [5, 6, 7]], -1, "quicksort", None],
+        [[3, 2, 1], 0, "quicksort", None],
+        [np.random.randint(0, 10, (3, 2, 3)), 1, "quicksort", None],
+        [np.random.randint(0, 10, (3, 2, 3, 4, 4)), 2, "quicksort", None],
     ],
 )
-def test_ArgSort(kind, exc):
-    x = [5, 4, 3, 2, 1]
-    g = ArgSortOp(kind)(pt.as_tensor_variable(x))
-
-    if exc:
-        with pytest.warns(exc):
-            compare_numba_and_py([], [g], [])
+def test_ArgSort(x, axis, kind, exc):
+    if axis:
+        g = ArgSortOp(kind)(pt.as_tensor_variable(x), axis)
     else:
+        g = ArgSortOp(kind)(pt.as_tensor_variable(x))
+
+    cm = contextlib.suppress() if not exc else pytest.warns(exc)
+
+    with cm:
         compare_numba_and_py([], [g], [])
 
 

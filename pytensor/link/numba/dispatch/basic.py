@@ -11,7 +11,7 @@ import numpy as np
 import scipy
 import scipy.special
 from llvmlite import ir
-from numba import types
+from numba import prange, types
 from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box, overload
@@ -437,7 +437,14 @@ def numba_funcify_Shape_i(op, **kwargs):
 def numba_funcify_SortOp(op, node, **kwargs):
     @numba_njit
     def sort_f(a, axis):
-        return np.sort(a)  # numba supports sort without arguments
+        if not isinstance(axis, int):
+            axis = -1
+
+        a_swapped = np.swapaxes(a, axis, -1)
+        a_sorted = np.sort(a_swapped)
+        a_sorted_swapped = np.swapaxes(a_sorted, -1, axis)
+
+        return a_sorted_swapped
 
     if op.kind != "quicksort":
         warnings.warn(
@@ -455,10 +462,27 @@ def numba_funcify_SortOp(op, node, **kwargs):
 def numba_funcify_ArgSortOp(op, node, **kwargs):
     def argsort_f_kind(kind):
         @numba_njit
-        def argsort_f(a, axis):
-            return np.argsort(a, kind=kind)
+        def argort_vec(X, axis):
+            if axis > len(X.shape):
+                raise ValueError("Wrong axis.")
 
-        return argsort_f
+            axis = axis.item()
+
+            Y = np.swapaxes(X, axis, 0)
+            result = np.empty_like(Y)
+
+            N = int(np.prod(np.array(Y.shape)[1:]))
+            indices = list(np.ndindex(Y.shape[1:]))
+
+            for i in prange(N):
+                idx = indices[i]
+                result[:, *idx] = np.argsort(Y[:, *idx], kind=kind)
+
+            result = np.swapaxes(result, 0, axis)
+
+            return result
+
+        return argort_vec
 
     kind = op.kind
 
