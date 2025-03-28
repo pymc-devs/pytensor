@@ -12,7 +12,7 @@ import scipy
 import scipy.special
 from llvmlite import ir
 from numba import types
-from numba.core.errors import TypingError
+from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box, overload
 
@@ -71,16 +71,16 @@ def numba_njit(*args, fastmath=None, **kwargs):
 
     # Suppress cache warning for internal functions
     # We have to add an ansi escape code for optional bold text by numba
-    # warnings.filterwarnings(
-    #     "ignore",
-    #     message=(
-    #         "(\x1b\\[1m)*"  # ansi escape code for bold text
-    #         "Cannot cache compiled function "
-    #         '"(numba_funcified_fgraph|store_core_outputs|cholesky|solve|solve_triangular|cho_solve)" '
-    #         "as it uses dynamic globals"
-    #     ),
-    #     category=NumbaWarning,
-    # )
+    warnings.filterwarnings(
+        "ignore",
+        message=(
+            "(\x1b\\[1m)*"  # ansi escape code for bold text
+            "Cannot cache compiled function "
+            '"(numba_funcified_fgraph|store_core_outputs|cholesky|solve|solve_triangular|cho_solve)" '
+            "as it uses dynamic globals"
+        ),
+        category=NumbaWarning,
+    )
 
     if len(args) > 0 and callable(args[0]):
         return numba.njit(*args[1:], fastmath=fastmath, **kwargs)(args[0])
