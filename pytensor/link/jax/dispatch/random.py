@@ -409,12 +409,14 @@ def jax_sample_fn_multinomial(op, node):
         sampling_rng = jax.random.split(rng_key, binom_p.shape[0])
 
         def _binomial_sample_fn(carry, p_rng):
-            s, rho = carry
+            remaining_n, remaining_p = carry
             p, rng = p_rng
-            samples = jax.random.binomial(rng, s, p / rho)
-            s = s - samples
-            rho = rho - p
-            return ((s, rho), samples)
+            samples = jnp.where(
+                p == 0, 0, jax.random.binomial(rng, remaining_n, p / remaining_p)
+            )
+            remaining_n -= samples
+            remaining_p -= p
+            return ((remaining_n, remaining_p), samples)
 
         (remain, _), samples = jax.lax.scan(
             _binomial_sample_fn,
