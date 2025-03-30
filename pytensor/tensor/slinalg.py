@@ -425,7 +425,7 @@ class LU(Op):
             self.gufunc_signature = "(m,m)->(m,m),(m,m),(m,m)"
 
         if self.overwrite_a:
-            self.destroy_map = {0: [0]}
+            self.destroy_map = {0: [0]} if self.permute_l else {1: [0]}
 
     def infer_shape(self, fgraph, node, shapes):
         n = shapes[0][0]
@@ -482,6 +482,7 @@ class LU(Op):
             new_props = self._props_dict()  # type: ignore
             new_props["overwrite_a"] = True
             return type(self)(**new_props)
+
         else:
             return self
 
