@@ -742,7 +742,7 @@ def grad(
     for var in grad_dict:
         g = grad_dict[var]
         if hasattr(g.type, "dtype"):
-            assert g.type.dtype in pytensor.tensor.type.float_dtypes
+            assert g.type.dtype in pytensor.tensor.type.continuous_dtypes
 
     _rval: Sequence[Variable] = _populate_grad_dict(
         var_to_app_to_idx, grad_dict, _wrt, cost_name
@@ -1411,7 +1411,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                                 )
 
                 if not isinstance(term.type, NullType | DisconnectedType):
-                    if term.type.dtype not in pytensor.tensor.type.float_dtypes:
+                    if term.type.dtype not in pytensor.tensor.type.continuous_dtypes:
                         raise TypeError(
                             str(node.op) + ".grad illegally "
                             " returned an integer-valued variable."
@@ -1562,7 +1562,7 @@ def _float_ones_like(x):
     """
 
     dtype = x.type.dtype
-    if dtype not in pytensor.tensor.type.float_dtypes:
+    if dtype not in pytensor.tensor.type.continuous_dtypes:
         dtype = config.floatX
 
     return x.ones_like(dtype=dtype)
