@@ -21,7 +21,7 @@ from pytensor.tensor.basic import diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.nlinalg import kron, matrix_dot
 from pytensor.tensor.shape import reshape
-from pytensor.tensor.type import ivector, matrix, tensor, vector
+from pytensor.tensor.type import matrix, tensor, vector
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -585,10 +585,14 @@ def lu(
 
 
 class PivotToPermutations(Op):
-    itypes = [ivector]
-    otypes = [ivector]
+    __props__ = ("inverse", "inplace")
 
-    __props__ = ()
+    def __init__(self, inverse=True, inplace=False):
+        self.inverse = inverse
+        self.inplace = inplace
+        self.destroy_map = {}
+        if self.inplace:
+            self.destroy_map = {0: [0]}
 
     def make_node(self, pivots):
         pivots = as_tensor_variable(pivots)
@@ -598,15 +602,29 @@ class PivotToPermutations(Op):
 
         return Apply(self, [pivots], [permutations])
 
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        if 0 in allowed_inplace_inputs:
+            new_props = self._props_dict()  # type: ignore
+            new_props["inplace"] = True
+            return type(self)(**new_props)
+        else:
+            return self
+
     def perform(self, node, inputs, outputs):
         [p] = inputs
         p_inv = np.arange(len(p)).astype(p.dtype)
         for i in range(len(p)):
             p_inv[i], p_inv[p[i]] = p_inv[p[i]], p_inv[i]
-        outputs[0][0] = p_inv
+
+        if self.inverse:
+            outputs[0][0] = p_inv
+
+        outputs[0][0] = np.argsort(p_inv)
 
 
-_pivot_to_permutation = PivotToPermutations()
+def pivot_to_permutation(p: TensorLike, inverse=False) -> Variable:
+    p = pt.as_tensor_variable(p)
+    return PivotToPermutations(inverse=inverse)(p)
 
 
 class LUFactor(Op):
@@ -631,7 +649,7 @@ class LUFactor(Op):
             )
 
         LU = matrix(shape=A.type.shape, dtype=A.type.dtype)
-        pivots_or_permutations = vector(shape=(A.type.shape[0],), dtype="int32")
+        pivots_or_permutations = vector(shape=(A.type.shape[0],), dtype="int64")
 
         return Apply(self, [A], [LU, pivots_or_permutations])
 
@@ -681,8 +699,7 @@ class LUFactor(Op):
         U = cast(TensorVariable, ptb.triu(LU))
 
         if not self.permutation_indices:
-            p_indices_inv = _pivot_to_permutation(cast(TensorVariable, p_indices))
-            p_indices = pt.argsort(p_indices_inv)
+            p_indices = pivot_to_permutation(p_indices, inverse=False)
 
         # Split LU_bar into L_bar and U_bar. This is valid because of the triangular structure of L and U
         L_bar = ptb.tril(LU_bar, k=-1)
@@ -784,7 +801,7 @@ def lu_solve(
     LU, pivots = LU_and_pivots
 
     LU, pivots, b = map(pt.as_tensor_variable, [LU, pivots, b])
-    inv_permutation = _pivot_to_permutation(pivots)
+    inv_permutation = pivot_to_permutation(pivots, inverse=True)
 
     x = b[inv_permutation] if not trans else b
 
