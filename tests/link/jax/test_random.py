@@ -733,6 +733,18 @@ def test_multinomial():
         samples.std(axis=0), np.sqrt(n[0, :, None] * p * (1 - p)), rtol=0.1
     )
 
+    # Test with p=0
+    g = pt.random.multinomial(n=5, p=pt.eye(4))
+    g_fn = compile_random_function([], g, mode="JAX")
+    samples = g_fn()
+    np.testing.assert_array_equal(samples, np.eye(4) * 5)
+
+    # Test with n=0
+    g = pt.random.multinomial(n=0, p=np.ones(4) / 4)
+    g_fn = compile_random_function([], g, mode="JAX")
+    samples = g_fn()
+    np.testing.assert_array_equal(samples, np.zeros(4))
+
 
 @pytest.mark.skipif(not numpyro_available, reason="VonMises dispatch requires numpyro")
 def test_vonmises_mu_outside_circle():
