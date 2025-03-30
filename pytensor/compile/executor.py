@@ -531,6 +531,21 @@ class Function:
         f_cpy.unpack_single = self.unpack_single
         return f_cpy
 
+    def _add_note_to_invalid_argument_exception(self, e, arg_container, arg):
+        i = self.input_storage.index(arg_container)
+        function_name = (
+            f"PyTensor function '{self.name}'" if self.name else "PyTensor function"
+        )
+        argument_name = (
+            f"argument '{arg.name}'" if getattr(arg, "name", None) else "argument"
+        )
+        where = (
+            ""
+            if config.exception_verbosity == "low"
+            else get_variable_trace_string(self.maker.inputs[i].variable)
+        )
+        e.add_note(f"\nInvalid {argument_name} to {function_name} at index {i}.{where}")
+
     def _validate_inputs(self, args, kwargs):
         input_storage = self.input_storage
 
@@ -550,31 +565,7 @@ class Function:
                 )
 
             except Exception as e:
-                i = input_storage.index(arg_container)
-                function_name = "pytensor function"
-                argument_name = "argument"
-                if self.name:
-                    function_name += ' with name "' + self.name + '"'
-                if hasattr(arg, "name") and arg.name:
-                    argument_name += ' with name "' + arg.name + '"'
-                where = get_variable_trace_string(self.maker.inputs[i].variable)
-                if len(e.args) == 1:
-                    e.args = (
-                        "Bad input "
-                        + argument_name
-                        + " to "
-                        + function_name
-                        + f" at index {int(i)} (0-based). {where}"
-                        + e.args[0],
-                    )
-                else:
-                    e.args = (
-                        "Bad input "
-                        + argument_name
-                        + " to "
-                        + function_name
-                        + f" at index {int(i)} (0-based). {where}"
-                    ) + e.args
+                self._add_note_to_invalid_argument_exception(e, arg_container, arg)
                 raise
             arg_container.provided += 1
 
