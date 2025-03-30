@@ -639,7 +639,7 @@ class LUFactor(Op):
         self.gufunc_signature = "(m,m)->(m,m),(m)"
 
         if self.overwrite_a:
-            self.destroy_map = {0: [0]}
+            self.destroy_map = {1: [0]}
 
     def make_node(self, A):
         A = as_tensor_variable(A)
