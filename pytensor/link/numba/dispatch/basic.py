@@ -476,7 +476,9 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
 
             for i in prange(N):
                 idx = indices[i]
-                result[:, *idx] = np.argsort(Y[:, *idx], kind=kind)
+                result[(slice(None), *idx)] = np.argsort(
+                    Y[(slice(None), *idx)], kind=kind
+                )
 
             result = np.swapaxes(result, 0, axis)
 
