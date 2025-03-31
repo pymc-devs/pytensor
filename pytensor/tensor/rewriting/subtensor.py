@@ -21,6 +21,7 @@ from pytensor.tensor.basic import (
     Join,
     MakeVector,
     ScalarFromTensor,
+    Split,
     TensorFromScalar,
     alloc,
     as_tensor,
@@ -614,6 +615,39 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         all_dim = range(node.inputs[0].ndim)
         remain_dim = [x for x in all_dim if x not in remove_dim]
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
+
+
+@register_specialize("shape_unsafe")
+@node_rewriter(tracks=[Split])
+def split_to_subtensor(fgraph, node):
+    """Rewrite split(2)(x, 0) -> (x[:split_sizes[0]], x[split_sizes[0]:).
+
+    This allows lifting the underlying split close to the inputs, and increases fusion opportunities.
+    It automatically handles unused split outputs as well
+
+    It only works for constant axis
+    """
+    x, axis, split_sizes = node.inputs
+
+    n_splits = node.op.len_splits
+    if n_splits <= 1:
+        return [x]
+
+    if not isinstance(axis, Constant):
+        return None
+
+    empty_slices = (slice(None),) * int(axis.data)
+    ys = []
+
+    end = split_sizes[0]
+    ys.append(x[(*empty_slices, slice(None, end))])
+    prev_start = end
+    for i in range(1, n_splits - 1):
+        end = prev_start + split_sizes[i]
+        ys.append(x[(*empty_slices, slice(prev_start, end))])
+        prev_start = end
+    ys.append(x[(*empty_slices, slice(prev_start, None))])
+    return ys
 
 
 @register_infer_shape
