@@ -437,8 +437,7 @@ def numba_funcify_Shape_i(op, **kwargs):
 def numba_funcify_SortOp(op, node, **kwargs):
     @numba_njit
     def sort_f(a, axis):
-        if not isinstance(axis, int):
-            axis = -1
+        axis = axis.item()
 
         a_swapped = np.swapaxes(a, axis, -1)
         a_sorted = np.sort(a_swapped)
@@ -463,9 +462,6 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
     def argsort_f_kind(kind):
         @numba_njit
         def argort_vec(X, axis):
-            if axis > len(X.shape):
-                raise ValueError("Wrong axis.")
-
             axis = axis.item()
 
             Y = np.swapaxes(X, axis, 0)
