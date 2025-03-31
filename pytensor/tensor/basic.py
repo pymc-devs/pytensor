@@ -2201,8 +2201,28 @@ class Split(COp):
             raise TypeError("`axis` parameter must be an integer scalar")
 
         inputs = [x, axis, splits]
-        out_type = TensorType(dtype=x.dtype, shape=(None,) * x.type.ndim)
-        outputs = [out_type() for i in range(self.len_splits)]
+
+        x_dtype = x.type.dtype
+        if isinstance(axis, Constant):
+            # In this case we can preserve more static shape info
+            static_axis = axis.data.item()
+            outputs = []
+            x_static_shape = list(x.type.shape)
+            for i in range(self.len_splits):
+                try:
+                    static_split_size = int(get_scalar_constant_value(splits[i]))
+                except NotScalarConstantError:
+                    static_split_size = None
+                except IndexError:
+                    raise ValueError("Number of splits is larger than splits size")
+                static_out_shape = x_static_shape.copy()
+                static_out_shape[static_axis] = static_split_size
+                outputs.append(tensor(shape=tuple(static_out_shape), dtype=x_dtype))
+        else:
+            outputs = [
+                tensor(shape=(None,) * x.type.ndim, dtype=x_dtype)
+                for i in range(self.len_splits)
+            ]
 
         return Apply(self, inputs, outputs)
 
