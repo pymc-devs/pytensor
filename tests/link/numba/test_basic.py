@@ -393,6 +393,7 @@ def test_Shape(x, i):
         [[[3, 2, 1], [5, 6, 7]], -1, "quicksort", None],
         [[3, 2, 1], 0, "quicksort", None],
         [np.random.randint(0, 100, (40, 40, 40, 40)), 3, "quicksort", None],
+        [[3, 2, 1], -5, "quicksort", np.exceptions.AxisError],
     ],
 )
 def test_Sort(x, axis, kind, exc):
@@ -401,7 +402,13 @@ def test_Sort(x, axis, kind, exc):
     else:
         g = SortOp(kind)(pt.as_tensor_variable(x))
 
-    cm = contextlib.suppress() if not exc else pytest.warns(exc)
+    cm = (
+        contextlib.suppress()
+        if not exc
+        else pytest.warns(exc)
+        if isinstance(exc, Warning)
+        else pytest.raises(exc)
+    )
 
     with cm:
         compare_numba_and_py([], [g], [])
