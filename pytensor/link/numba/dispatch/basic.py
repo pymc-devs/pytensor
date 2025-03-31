@@ -11,7 +11,7 @@ import numpy as np
 import scipy
 import scipy.special
 from llvmlite import ir
-from numba import prange, types
+from numba import types
 from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box, overload
@@ -467,11 +467,9 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
             Y = np.swapaxes(X, axis, 0)
             result = np.empty_like(Y)
 
-            N = int(np.prod(np.array(Y.shape)[1:]))
             indices = list(np.ndindex(Y.shape[1:]))
 
-            for i in prange(N):
-                idx = indices[i]
+            for idx in indices:
                 result[(slice(None), *idx)] = np.argsort(
                     Y[(slice(None), *idx)], kind=kind
                 )
