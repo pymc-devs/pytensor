@@ -5,6 +5,7 @@ from pytensor.link.numba.dispatch import numba_funcify
 from pytensor.link.numba.dispatch.basic import generate_fallback_impl, numba_njit
 from pytensor.link.utils import compile_function_src, unique_name_generator
 from pytensor.tensor import TensorType
+from pytensor.tensor.rewriting.basic import BufferJoin
 from pytensor.tensor.rewriting.subtensor import is_full_slice
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -101,6 +102,15 @@ def {function_name}({", ".join(input_names)}):
         global_env=globals() | {"np": np},
     )
     return numba_njit(func, boundscheck=True)
+
+
+@numba_funcify.register(BufferJoin)
+def numba_funcify_buffer_join(op, node, **kwargs):
+    @numba_njit
+    def buffer_join(x, *args):
+        return x
+
+    return buffer_join
 
 
 @numba_funcify.register(AdvancedSubtensor)
