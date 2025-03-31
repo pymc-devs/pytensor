@@ -136,10 +136,7 @@ def numba_funcify_Join(op, **kwargs):
 def numba_funcify_Split(op, **kwargs):
     @numba_basic.numba_njit
     def split(tensor, axis, indices):
-        # Work around for https://github.com/numba/numba/issues/8257
-        axis = axis % tensor.ndim
-        axis = numba_basic.to_scalar(axis)
-        return np.split(tensor, np.cumsum(indices)[:-1], axis=axis)
+        return np.split(tensor, np.cumsum(indices)[:-1], axis=axis.item())
 
     return split
 
