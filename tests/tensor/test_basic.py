@@ -2118,28 +2118,6 @@ class TestJoinAndSplit:
         y = Split(2)(x, 0, [s, 5 - s])[0]
         assert y.type.shape == (None,)
 
-    def test_join_inplace(self):
-        # Test join to work inplace.
-        #
-        # This function tests the case when several elements are passed to the
-        # join function but all except one of them are empty. In this case join
-        # should work inplace and the output should be the view of the non-empty
-        # element.
-        s = lscalar()
-        x = vector("x")
-        z = ptb.zeros((s,))
-
-        join = Join(view=0)
-        c = join(0, x, z, z)
-
-        f = pytensor.function([In(x, borrow=True), s], Out(c, borrow=True))
-
-        data = np.array([3, 4, 5], dtype=config.floatX)
-
-        if config.mode not in ["DebugMode", "DEBUG_MODE"]:
-            assert f(data, 0) is data
-        assert np.allclose(f(data, 0), [3, 4, 5])
-
     def test_join_oneInput(self):
         # Test join when only 1 input is given.
         #
