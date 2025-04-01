@@ -87,14 +87,7 @@ def jax_funcify_Join(op, **kwargs):
     def join(axis, *tensors):
         # tensors could also be tuples, and in this case they don't have a ndim
         tensors = [jnp.asarray(tensor) for tensor in tensors]
-        view = op.view
-        if (view != -1) and all(
-            tensor.shape[axis] == 0 for tensor in tensors[0:view] + tensors[view + 1 :]
-        ):
-            return tensors[view]
-
-        else:
-            return jnp.concatenate(tensors, axis=axis)
+        return jnp.concatenate(tensors, axis=axis)
 
     return join
 
