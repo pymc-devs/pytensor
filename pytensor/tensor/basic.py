@@ -2439,27 +2439,7 @@ class Join(COp):
     """
 
     check_input = False
-    __props__ = ("view",)
-
-    def __init__(self, view=-1):
-        self.view = view
-        if view != -1:
-            # since the first input is always the axis, the tensors
-            # start from index 1.
-            self.view_map = {0: [1 + view]}
-
-    def __str__(self):
-        if self.view == -1:
-            return self.__class__.__name__
-        else:
-            classname = self.__class__.__name__
-            args = ", ".join(f"{p}={getattr(self, p)!r}" for p in self.__props__)
-            return f"{classname}{{{args}}}"
-
-    def __setstate__(self, d):
-        self.__dict__.update(d)
-        if not hasattr(self, "view"):
-            self.view = -1
+    __props__ = ()
 
     def make_node(self, axis, *tensors):
         """
@@ -2476,74 +2456,62 @@ class Join(COp):
         if not tensors:
             raise ValueError("Cannot join an empty list of tensors")
 
-        tensors = [as_tensor_variable(x) for x in tensors]
-        out_dtype = ps.upcast(*[x.type.dtype for x in tensors])
+        axis = as_tensor_variable(axis)
+        if axis.type.dtype not in int_dtypes:
+            raise TypeError(f"Axis {axis} must be an integer type.")
+        if axis.type.ndim > 0:
+            raise TypeError(f"Axis {axis} must be 0-d.")
 
-        if not builtins.all(targs.type.ndim for targs in tensors):
+        tensors = [as_tensor_variable(x) for x in tensors]
+
+        if not builtins.all(targs.type.ndim > 0 for targs in tensors):
             raise TypeError(
                 "Join cannot handle arguments of dimension 0."
-                " Use `stack` to join scalar values."
+                " Use `stack` to join scalar values and/or increase rank of scalars."
             )
 
         if len(tensors) == 1:
             out_shape = tensors[0].type.shape
         else:
-            # When the axis is fixed, a dimension should be
-            # broadcastable if at least one of the inputs is
-            # broadcastable on that dimension (see justification below),
-            # except for the axis dimension.
-            # Initialize bcastable all false, and then fill in some trues with
-            # the loops.
-
-            if not isinstance(axis, int):
-                try:
-                    axis = int(get_scalar_constant_value(axis))
-                except NotScalarConstantError:
-                    pass
-
             ndim = tensors[0].type.ndim
-            if isinstance(axis, int):
-                # Basically, broadcastable -> length 1, but the
-                # converse does not hold. So we permit e.g. T/F/T
-                # joins, and if they fail at runtime they fail, but if
-                # they don't then it means that the argument where
-                # that broadcastable flag was False had length 1 along
-                # this dimension, and therefore this dimension should
-                # be broadcastable for the output.
 
-                if axis < -ndim:
-                    raise IndexError(
-                        f"Axis value {axis} is out of range for the given input dimensions"
-                    )
-                if axis < 0:
-                    axis += ndim
-                if axis > ndim - 1:
-                    raise ValueError(
-                        f"Axis value {axis} is out of range for the given input dimensions"
-                    )
-                # NOTE: Constant negative axis can no longer be negative at this point.
+            if not builtins.all(x.ndim == ndim for x in tensors):
+                raise TypeError(
+                    "Only tensors with the same number of dimensions can be joined"
+                )
 
-                in_shapes = [x.type.shape for x in tensors]
-                in_ndims = [len(s) for s in in_shapes]
-                if set(in_ndims) != {ndim}:
-                    raise TypeError(
-                        "Only tensors with the same number of dimensions can be joined."
-                        f" Input ndims were: {in_ndims}."
-                    )
+            try:
+                # Note: This is dubious, if a user passed a constant we should propagate it to the inputs
+                # Not override it.
+                static_axis = int(get_scalar_constant_value(axis))
+            except NotScalarConstantError:
+                static_axis = None
+
+            if static_axis is None:
+                # When axis isn't static, we can't canclude anything about output dimension
+                # (unless we had some degenerate zero arrays) that can be removed during rewrites.
+                # We could also raise errors if any dimensions are pairwise inconsistent across all the axes
+                # As no matter the join it would be invalid.
+                # However, dynamic axis is so rare that is not worth the trouble
+                out_shape = [None] * ndim
+
+            else:  # We know the axis statically
+                static_axis = normalize_axis_index(static_axis, ndim)
+                static_shapes = [x.type.shape for x in tensors]
 
                 # Determine output shapes from a matrix of input shapes
-                in_shapes = np.array(in_shapes)
+                static_shapes = np.array(static_shapes)
                 out_shape = [None] * ndim
                 for d in range(ndim):
-                    ins = in_shapes[:, d]
-                    if d == axis:
-                        # Any unknown size along the axis means we can't sum
+                    ins = static_shapes[:, d]
+                    if d == static_axis:
+                        # Any unknown size along the axis means we can't infer it
                         if None in ins:
                             out_shape[d] = None
                         else:
                             out_shape[d] = sum(ins)
                     else:
-                        inset = set(in_shapes[:, d])
+                        inset = set(static_shapes[:, d])
                         # Other dims must match exactly,
                         # or if a mix of None and ? the output will be ?
                         # otherwise the input shapes are incompatible.
@@ -2553,54 +2521,27 @@ class Join(COp):
                             (out_shape[d],) = inset - {None}
                         else:
                             raise ValueError(
-                                f"all input array dimensions other than the specified `axis` ({axis})"
+                                f"all input array dimensions other than the specified `axis` ({static_axis})"
                                 " must match exactly, or be unknown (None),"
                                 f" but along dimension {d}, the inputs shapes are incompatible: {ins}"
                             )
-            else:
-                # When the axis may vary, no dimension can be guaranteed to be
-                # broadcastable.
-                out_shape = [None] * tensors[0].type.ndim
 
-            if not builtins.all(x.ndim == len(out_shape) for x in tensors):
-                raise TypeError(
-                    "Only tensors with the same number of dimensions can be joined"
-                )
-
-        inputs = [as_tensor_variable(axis), *tensors]
-
-        if inputs[0].type.dtype not in int_dtypes:
-            raise TypeError(f"Axis value {inputs[0]} must be an integer type")
-
+        inputs = [axis, *tensors]
+        out_dtype = ps.upcast(*[x.type.dtype for x in tensors])
         return Apply(self, inputs, [tensor(dtype=out_dtype, shape=out_shape)])
 
-    def perform(self, node, axis_and_tensors, out_):
-        (out,) = out_
-        view = self.view
-        axis, tens = axis_and_tensors[0], axis_and_tensors[1:]
-        # we check these tensors for being empty.
-        if (view != -1) and all(
-            tensor.shape[axis] == 0 for tensor in tens[0:view] + tens[view + 1 :]
-        ):
-            out[0] = tens[view]
-
-        else:
-            ndim = tens[0].ndim
-            if axis < -ndim:
-                raise IndexError(
-                    f"Join axis {int(axis)} out of bounds [0, {int(ndim)})"
-                )
-
-            out[0] = np.asarray(
-                np.concatenate(tens, axis=axis), dtype=node.outputs[0].type.dtype
-            )
+    def perform(self, node, inputs, output_storage):
+        axis, *arrays = inputs
+        output_storage[0][0] = np.concatenate(
+            arrays, axis=axis, dtype=node.outputs[0].type.dtype
+        )
 
     def c_code_cache_version(self):
         return (5,)
 
     def c_code(self, node, name, inputs, outputs, sub):
         axis, tens = inputs[0], inputs[1:]
-        view = self.view
+        view = -1
         non_empty_tensor = tens[view]
         input_1 = tens[0]
         l = len(tens)
@@ -2656,22 +2597,21 @@ class Join(COp):
             return [None]
         return self.make_node(inputs[0], *eval_points[1:]).outputs
 
-    def grad(self, axis_and_tensors, grads):
+    def L_op(self, inputs, outputs, grads):
         """The gradient wrt a join op is a `Split`, used to partition
         the gradient along the `axis` which was used for joining.
         """
-        (gz,) = grads
-        axis, tens = axis_and_tensors[0], axis_and_tensors[1:]
+        [gz] = grads
+        [out] = outputs
+        axis, *tensors = inputs
 
         rval = [grad_undefined(self, 0, axis)]
-
-        dtypes = [as_tensor_variable(x).type.dtype for x in tens]
-        out_dtype = ps.upcast(*dtypes)
+        out_dtype = out.type.dtype
 
         if "float" in out_dtype or "complex" in out_dtype:
             # assume that this is differentiable
-            split = Split(len(tens))
-            split_gz = split(gz, axis, stack([shape(x)[axis] for x in tens]))
+            split_sizes = stack([shape(x)[axis] for x in tensors])
+            split_gz = split(gz, split_sizes, n_splits=len(tensors), axis=axis)
             # If there is only one split, it might not be in a list.
             if not isinstance(split_gz, list):
                 split_gz = [split_gz]
@@ -2684,13 +2624,12 @@ class Join(COp):
                 else specify_broadcastable(
                     g, *(ax for (ax, s) in enumerate(t.type.shape) if s == 1)
                 )
-                for t, g in zip(tens, split_gz, strict=True)
+                for t, g in zip(tensors, split_gz, strict=True)
             ]
             rval = rval + split_gz
         else:
-            # the output has integer type, so the gradient through it
-            # is 0
-            rval = rval + [t.zeros_like(dtype=config.floatX) for t in tens]
+            # the output has integer type, so the gradient through it is 0
+            rval = rval + [t.zeros_like(dtype=config.floatX) for t in tensors]
 
         return rval
 
@@ -2710,7 +2649,8 @@ class Join(COp):
         # An axis < -n_dim or >= ndim would be invalid, but this is
         # not checked here. A `CheckAndRaise` `Op` would be a way of
         # addressing that, but it may disrupt optimizations.
-        join_dim = switch(ge(node.inputs[0], 0), node.inputs[0], node.inputs[0] + n_dim)
+        axis = node.inputs[0]
+        join_dim = switch(ge(axis, 0), axis, axis + n_dim)
         out_shapes = []
         for dim in range(n_dim):
             # we have to deal with 2 possible cases in here :
@@ -2733,7 +2673,7 @@ class Join(COp):
         return [tuple(out_shapes)]
 
 
-join_ = Join()
+_join = Join()
 pprint.assign(Join, printing.FunctionPrinter(["join"]))
 
 
@@ -2776,7 +2716,7 @@ def join(axis, *tensors_list):
     if len(tensors_list) == 1:
         return tensors_list[0]
     else:
-        return join_(axis, *tensors_list)
+        return _join(axis, *tensors_list)
 
 
 @_vectorize_node.register(Join)
