@@ -482,9 +482,8 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
 
     kind = op.kind
 
-    if kind in ["quicksort", "mergesort"]:
-        return argsort_f_kind(kind)
-    else:
+    if kind not in ["quicksort", "mergesort"]:
+        kind = "quicksort"
         warnings.warn(
             (
                 f'Numba function argsort doesn\'t support kind="{op.kind}"'
@@ -493,7 +492,7 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
             UserWarning,
         )
 
-        return argsort_f_kind("quicksort")
+    return argsort_f_kind(kind)
 
 
 @numba.extending.intrinsic

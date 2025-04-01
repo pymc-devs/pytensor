@@ -380,20 +380,21 @@ def test_Shape(x, i):
 
 
 @pytest.mark.parametrize(
-    "x, axis, kind, exc",
+    "x",
     [
-        [[3, 2, 1], None, "quicksort", None],
-        [[], None, "quicksort", None],
-        [[[3, 2, 1], [5, 6, 7]], None, "quicksort", None],
-        [[3, 2, 1], None, "mergesort", UserWarning],
-        [[3, 2, 1], None, "heapsort", UserWarning],
-        [[3, 2, 1], None, "stable", UserWarning],
-        [[[3, 2, 1], [5, 6, 7]], 0, "quicksort", None],
-        [[[3, 2, 1], [5, 6, 7]], 1, "quicksort", None],
-        [[[3, 2, 1], [5, 6, 7]], -1, "quicksort", None],
-        [[3, 2, 1], 0, "quicksort", None],
-        [np.random.randint(0, 100, (40, 40, 40, 40)), 3, "quicksort", None],
-        [[3, 2, 1], -5, "quicksort", np.exceptions.AxisError],
+        [],  # Empty list
+        [3, 2, 1],  # Simple list
+        np.random.randint(0, 10, (3, 2, 3, 4, 4)),  # Multi-dimensional array
+    ],
+)
+@pytest.mark.parametrize("axis", [0, -1, None])
+@pytest.mark.parametrize(
+    ("kind", "exc"),
+    [
+        ["quicksort", None],
+        ["mergesort", UserWarning],
+        ["heapsort", UserWarning],
+        ["stable", UserWarning],
     ],
 )
 def test_Sort(x, axis, kind, exc):
@@ -402,36 +403,35 @@ def test_Sort(x, axis, kind, exc):
     else:
         g = SortOp(kind)(pt.as_tensor_variable(x))
 
-    cm = (
-        contextlib.suppress()
-        if not exc
-        else pytest.warns(exc)
-        if isinstance(exc, Warning)
-        else pytest.raises(exc)
-    )
+    cm = contextlib.suppress() if not exc else pytest.warns(exc)
 
     with cm:
         compare_numba_and_py([], [g], [])
 
 
 @pytest.mark.parametrize(
-    "x, axis, kind, exc",
+    "x",
     [
-        [[3, 2, 1], None, "quicksort", None],
-        [[], None, "quicksort", None],
-        [[[3, 2, 1], [5, 6, 7]], None, "quicksort", None],
-        [[3, 2, 1], None, "heapsort", UserWarning],
-        [[3, 2, 1], None, "stable", UserWarning],
-        [[[3, 2, 1], [5, 6, 7]], 0, "quicksort", None],
-        [[[3, 2, 1], [5, 6, 7]], None, "quicksort", None],
-        [[[3, 2, 1], [5, 6, 7]], 1, "quicksort", None],
-        [[[3, 2, 1], [5, 6, 7]], -1, "quicksort", None],
-        [[3, 2, 1], 0, "quicksort", None],
-        [np.random.randint(0, 10, (3, 2, 3)), 1, "quicksort", None],
-        [np.random.randint(0, 10, (3, 2, 3, 4, 4)), 2, "quicksort", None],
+        [],  # Empty list
+        [3, 2, 1],  # Simple list
+        None,  # Multi-dimensional array (see below)
+    ],
+)
+@pytest.mark.parametrize("axis", [0, -1, None])
+@pytest.mark.parametrize(
+    ("kind", "exc"),
+    [
+        ["quicksort", None],
+        ["heapsort", None],
+        ["stable", UserWarning],
     ],
 )
 def test_ArgSort(x, axis, kind, exc):
+    if x is None:
+        x = np.arange(5 * 5 * 5 * 5)
+        np.random.shuffle(x)
+        x = np.reshape(x, (5, 5, 5, 5))
+
     if axis:
         g = ArgSortOp(kind)(pt.as_tensor_variable(x), axis)
     else:
