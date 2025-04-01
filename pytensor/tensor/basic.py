@@ -2537,58 +2537,185 @@ class Join(COp):
         )
 
     def c_code_cache_version(self):
-        return (5,)
+        return None
+        return (6,)
 
     def c_code(self, node, name, inputs, outputs, sub):
-        axis, tens = inputs[0], inputs[1:]
-        view = -1
-        non_empty_tensor = tens[view]
-        input_1 = tens[0]
-        l = len(tens)
-        (out,) = outputs
+        axis, *arrays = inputs
+        [out] = outputs
+
+        n = len(arrays)
+        out_dtype = node.outputs[0].type.dtype_specs()[2]
+        out_itemsize = np.dtype(node.outputs[0].dtype).itemsize
+        ndim = node.outputs[0].type.ndim
         fail = sub["fail"]
-        adtype = node.inputs[0].type.dtype_specs()[1]
 
-        copy_to_list = (
-            f"""Py_INCREF({inp}); PyList_SetItem(list, {i}, (PyObject*){inp});"""
-            for i, inp in enumerate(tens)
-        )
-
-        copy_inputs_to_list = "\n".join(copy_to_list)
-        n = len(tens)
+        # Most times axis is constant, inline it
+        # This is safe to do because the hash of the c_code includes the constant signature
+        if isinstance(node.inputs[0], Constant):
+            static_axis = int(node.inputs[0].data)
+            static_axis = normalize_axis_index(static_axis, ndim)
+            axis_def = f"{static_axis};"
+            axis_check = ""
+        else:
+            axis_dtype = node.inputs[0].type.dtype_specs()[1]
+            axis_def = f"(({axis_dtype} *)PyArray_DATA({axis}))[0];"
+            axis_check = f"""
+                if (axis < 0){{
+                    axis = {ndim} + axis;
+                }}
+                if (axis >= {ndim} || axis < 0) {{
+                    PyErr_SetString(PyExc_ValueError, "Join axis is out of bounds");
+                    {fail}
+                }}
+            """
 
         code = f"""
-        int axis = (({adtype} *)PyArray_DATA({axis}))[0];
-        PyObject* list = PyList_New({l});
-        {copy_inputs_to_list}
-        int tensors_lens_sum;
-        if({view} != -1) {{
-            tensors_lens_sum = 0;
+            int axis = {axis_def}
+            PyArrayObject* arrays[{n}] = {{{','.join(arrays)}}};
+            npy_intp out_shape[{ndim}];
+            npy_intp join_size = 0;
+            int out_is_valid = 0;
+            PyArrayObject_fields *view;
 
-            for(int i=0; i < {n}; i++){{
-                tensors_lens_sum += PyArray_DIM((PyArrayObject *)(PyList_GetItem(list, i)), axis);
+            // Validate input shapes and compute join size
+            npy_intp *shape = PyArray_SHAPE(arrays[0]);
+
+            {axis_check}
+
+            for (int i = 0; i < {n}; i++) {{
+                if (PyArray_NDIM(arrays[i]) != {ndim}) {{
+                    PyErr_SetString(PyExc_ValueError, "Input to join has wrong ndim");
+                    {fail}
+                }}
+
+                join_size += PyArray_SHAPE(arrays[i])[axis];
+
+                if(i > 0){{
+                    for (int j = 0; j < {ndim}; j++) {{
+                        if((j != axis) && (PyArray_SHAPE(arrays[i])[j] != shape[j])) {{
+                            PyErr_SetString(PyExc_ValueError, "Arrays shape must match along non join axis");
+                            {fail}
+                        }}
+                    }}
+                }}
             }}
-            tensors_lens_sum -= PyArray_DIM({non_empty_tensor}, axis);
-        }}
-        if({view} != -1 && tensors_lens_sum == 0) {{
-            Py_XDECREF({out});
-            Py_INCREF({non_empty_tensor});
-            {out} = {non_empty_tensor};
-        }}else{{
-            //PyObject* PyArray_Concatenate(PyObject* obj, int axis)
-            int ndim = PyArray_NDIM({input_1});
-            if( axis < -ndim ){{
-                PyErr_Format(PyExc_IndexError,
-                             "Join axis %d out of bounds [0, %d)", axis, ndim);
+
+            // Define dimensions of output array
+            memcpy(out_shape, shape, {ndim} * sizeof(npy_intp));
+            out_shape[axis] = join_size;
+
+            // Reuse output or allocate new one
+            if ({out} != NULL) {{
+                out_is_valid = (PyArray_NDIM({out}) == {ndim});
+                for (int i = 0; i < {ndim}; i++) {{
+                    out_is_valid &= (PyArray_SHAPE({out})[i] == out_shape[i]);
+                }}
+            }}
+
+            if (!out_is_valid) {{
+                Py_XDECREF({out});
+
+                // Find best memory layout to match the input tensors
+                // Adapted from numpy PyArray_CreateMultiSortedStridePerm
+                // https://github.com/numpy/numpy/blob/214b9f7c6d27f48b163dd7adbf9de368ad59859f/numpy/_core/src/multiarray/shape.c#L801
+                int strideperm[{ndim}] = {{{','.join(map(str, range(ndim)))}}};
+                npy_intp strides[{ndim}];
+
+                // Sort strides (insertion sort)
+                for (int i0 = 1; i0 < {ndim}; ++i0) {{
+                    int ipos = i0;
+                    int ax_j0 = strideperm[i0];
+
+                    for (int i1 = i0 - 1; i1 >= 0; --i1) {{
+                        int ambig = 1, shouldswap = 0;
+                        int ax_j1 = strideperm[i1];
+
+                        for (int iarrays = 0; iarrays < {n}; ++iarrays) {{
+                            if (PyArray_SHAPE(arrays[iarrays])[ax_j0] != 1 && PyArray_SHAPE(arrays[iarrays])[ax_j1] != 1) {{
+                                npy_intp stride0 = PyArray_STRIDES(arrays[iarrays])[ax_j0];
+                                npy_intp stride1 = PyArray_STRIDES(arrays[iarrays])[ax_j1];
+                                if (stride0 < 0) stride0 = -stride0;
+                                if (stride1 < 0) stride1 = -stride1;
+
+                                if (stride0 <= stride1) {{
+                                    shouldswap = 0;
+                                }}
+                                else if (ambig) {{
+                                    shouldswap = 1;
+                                }}
+                                ambig = 0;
+                            }}
+                        }}
+
+                        if (!ambig) {{
+                            if (shouldswap) {{
+                                ipos = i1;
+                            }}
+                            else {{
+                                break;
+                            }}
+                        }}
+                    }}
+
+                    if (ipos != i0) {{
+                        for (int i1 = i0; i1 > ipos; --i1) {{
+                            strideperm[i1] = strideperm[i1-1];
+                        }}
+                        strideperm[ipos] = ax_j0;
+                    }}
+                }}
+
+                // Calculate strides based on sorted order
+                npy_intp stride = {out_itemsize};
+                for (int i = {ndim}-1; i >= 0; --i) {{
+                    int ax = strideperm[i];
+                    strides[ax] = stride;
+                    stride *= out_shape[ax];
+                }}
+
+                {out} = (PyArrayObject *)PyArray_NewFromDescr(&PyArray_Type,
+                                                             PyArray_DescrFromType({out_dtype}),
+                                                             {ndim},
+                                                             out_shape,
+                                                             strides,
+                                                             NULL,  /* data */
+                                                             NPY_ARRAY_DEFAULT,
+                                                             NULL);
+
+                if ({out} == NULL) {{
+                    {fail}
+                }}
+            }}
+
+            // Create view into output buffer
+            // PyArray_NewFromDescr steals a reference to descr, so we need to increase it
+            Py_INCREF(PyArray_DESCR({out}));
+            view = (PyArrayObject_fields *)PyArray_NewFromDescr(&PyArray_Type,
+                                                                  PyArray_DESCR({out}),
+                                                                  {ndim},
+                                                                  PyArray_SHAPE(arrays[0]),
+                                                                  PyArray_STRIDES({out}),
+                                                                  PyArray_DATA({out}),
+                                                                  NPY_ARRAY_WRITEABLE,
+                                                                  NULL);
+            if (view == NULL) {{
                 {fail}
             }}
-            Py_XDECREF({out});
-            {out} = (PyArrayObject *)PyArray_Concatenate(list, axis);
-            Py_DECREF(list);
-            if(!{out}){{
-                {fail}
+
+            // Copy data into output buffer
+            for (int i = 0; i < {n}; i++) {{
+                view->dimensions[axis] = PyArray_SHAPE(arrays[i])[axis];
+
+                if (PyArray_CopyInto((PyArrayObject*)view, arrays[i]) != 0) {{
+                    Py_DECREF(view);
+                    {fail}
+                }}
+
+                view->data += (view->dimensions[axis] * view->strides[axis]);
             }}
-        }}
+
+            Py_DECREF(view);
         """
         return code
 
