@@ -49,7 +49,7 @@ def test_convolve1d_batch():
     np.testing.assert_allclose(res[1], res_np, rtol=rtol)
 
 
-def test_convolve1d_same():
+def test_convolve1d_batch_same():
     x = matrix("data")
     y = matrix("kernel")
     out = convolve1d(x, y, mode="same")
