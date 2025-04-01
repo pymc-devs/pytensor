@@ -2541,7 +2541,7 @@ class Join(COp):
         )
 
     def c_code_cache_version(self):
-        return (6,)
+        return (7,)
 
     def c_code(self, node, name, inputs, outputs, sub):
         axis, *arrays = inputs
@@ -2580,16 +2580,86 @@ class Join(COp):
         code = f"""
         int axis = {axis_def}
         PyArrayObject* arrays[{n}] = {{{','.join(arrays)}}};
-        PyObject* arrays_tuple = PyTuple_New({n});
+        int out_is_valid = {out} != NULL;
 
         {axis_check}
 
-        Py_XDECREF({out});
-        {copy_arrays_to_tuple}
-        {out} = (PyArrayObject *)PyArray_Concatenate(arrays_tuple, axis);
-        Py_DECREF(arrays_tuple);
-        if(!{out}){{
-            {fail}
+        if (out_is_valid) {{
+            // Check if we can reuse output
+            npy_intp join_size = 0;
+            npy_intp out_shape[{ndim}];
+            npy_intp *shape = PyArray_SHAPE(arrays[0]);
+
+            for (int i = 0; i < {n}; i++) {{
+                if (PyArray_NDIM(arrays[i]) != {ndim}) {{
+                    PyErr_SetString(PyExc_ValueError, "Input to join has wrong ndim");
+                    {fail}
+                }}
+
+                join_size += PyArray_SHAPE(arrays[i])[axis];
+
+                if (i > 0){{
+                    for (int j = 0; j < {ndim}; j++) {{
+                        if ((j != axis) && (PyArray_SHAPE(arrays[i])[j] != shape[j])) {{
+                            PyErr_SetString(PyExc_ValueError, "Arrays shape must match along non join axis");
+                            {fail}
+                        }}
+                    }}
+                }}
+            }}
+
+            memcpy(out_shape, shape, {ndim} * sizeof(npy_intp));
+            out_shape[axis] = join_size;
+
+            for (int i = 0; i < {ndim}; i++) {{
+                out_is_valid &= (PyArray_SHAPE({out})[i] == out_shape[i]);
+            }}
+        }}
+
+        if (!out_is_valid) {{
+            // Use PyArray_Concatenate
+            Py_XDECREF({out});
+            PyObject* arrays_tuple = PyTuple_New({n});
+            {copy_arrays_to_tuple}
+            {out} = (PyArrayObject *)PyArray_Concatenate(arrays_tuple, axis);
+            Py_DECREF(arrays_tuple);
+            if(!{out}){{
+                {fail}
+            }}
+        }}
+        else {{
+            // Copy the data to the pre-allocated output buffer
+
+            // Create view into output buffer
+            PyArrayObject_fields *view;
+
+            // PyArray_NewFromDescr steals a reference to descr, so we need to increase it
+            Py_INCREF(PyArray_DESCR({out}));
+            view = (PyArrayObject_fields *)PyArray_NewFromDescr(&PyArray_Type,
+                                                                  PyArray_DESCR({out}),
+                                                                  {ndim},
+                                                                  PyArray_SHAPE(arrays[0]),
+                                                                  PyArray_STRIDES({out}),
+                                                                  PyArray_DATA({out}),
+                                                                  NPY_ARRAY_WRITEABLE,
+                                                                  NULL);
+            if (view == NULL) {{
+                {fail}
+            }}
+
+            // Copy data into output buffer
+            for (int i = 0; i < {n}; i++) {{
+                view->dimensions[axis] = PyArray_SHAPE(arrays[i])[axis];
+
+                if (PyArray_CopyInto((PyArrayObject*)view, arrays[i]) != 0) {{
+                    Py_DECREF(view);
+                    {fail}
+                }}
+
+                view->data += (view->dimensions[axis] * view->strides[axis]);
+            }}
+
+            Py_DECREF(view);
         }}
         """
         return code

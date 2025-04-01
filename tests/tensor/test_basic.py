@@ -117,6 +117,7 @@ from pytensor.tensor.type import (
     ivector,
     lscalar,
     lvector,
+    matrices,
     matrix,
     row,
     scalar,
@@ -1762,7 +1763,7 @@ class TestJoinAndSplit:
         got = f(-2)
         assert np.allclose(got, want)
 
-        with pytest.raises(IndexError):
+        with pytest.raises(ValueError):
             f(-3)
 
     @pytest.mark.parametrize("py_impl", (False, True))
@@ -1805,7 +1806,7 @@ class TestJoinAndSplit:
         got = f()
         assert np.allclose(got, want)
 
-        with pytest.raises(IndexError):
+        with pytest.raises(ValueError):
             join(-3, a, b)
 
         with impl_ctxt:
@@ -2151,6 +2152,32 @@ class TestJoinAndSplit:
         for r, expected in zip(res, ([], [0, 1, 2], [3, 4]), strict=True):
             assert np.allclose(r, expected)
             assert r.base is x_test
+
+    @pytest.mark.parametrize("gc", (True, False), ids=lambda x: f"gc={x}")
+    @pytest.mark.parametrize("memory_layout", ["C-contiguous", "F-contiguous", "Mixed"])
+    @pytest.mark.parametrize("axis", (0, 1), ids=lambda x: f"axis={x}")
+    @pytest.mark.parametrize("ndim", (1, 2), ids=["vector", "matrix"])
+    @config.change_flags(cmodule__warn_no_version=False)
+    def test_join_performance(self, ndim, axis, memory_layout, gc, benchmark):
+        if ndim == 1 and not (memory_layout == "C-contiguous" and axis == 0):
+            pytest.skip("Redundant parametrization")
+        n = 64
+        inputs = vectors("abcdef") if ndim == 1 else matrices("abcdef")
+        out = join(axis, *inputs)
+        fn = pytensor.function(inputs, Out(out, borrow=True), trust_input=True)
+        fn.vm.allow_gc = gc
+        test_values = [np.zeros((n, n)[:ndim], dtype=inputs[0].dtype) for _ in inputs]
+        if memory_layout == "C-contiguous":
+            pass
+        elif memory_layout == "F-contiguous":
+            test_values = [t.T for t in test_values]
+        elif memory_layout == "Mixed":
+            test_values = [t if i % 2 else t.T for i, t in enumerate(test_values)]
+        else:
+            raise ValueError
+
+        assert fn(*test_values).shape == (n * 6, n)[:ndim] if axis == 0 else (n, n * 6)
+        benchmark(fn, *test_values)
 
 
 def test_TensorFromScalar():
