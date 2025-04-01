@@ -119,8 +119,8 @@ def convolve1d(
     if mode == "same":
         # We implement "same" as "valid" with padded `in1`.
         in1_batch_shape = tuple(in1.shape)[:-1]
-        zeros_left = in2.shape[0] // 2
-        zeros_right = (in2.shape[0] - 1) // 2
+        zeros_left = in2.shape[-1] // 2
+        zeros_right = (in2.shape[-1] - 1) // 2
         in1 = join(
             -1,
             zeros((*in1_batch_shape, zeros_left), dtype=in2.dtype),

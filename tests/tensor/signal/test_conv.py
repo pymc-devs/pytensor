@@ -47,3 +47,16 @@ def test_convolve1d_batch():
     res_np = np.convolve(x_test[0], y_test[0])
     np.testing.assert_allclose(res[0], res_np, rtol=rtol)
     np.testing.assert_allclose(res[1], res_np, rtol=rtol)
+
+
+def test_convolve1d_batch_same():
+    x = matrix("data")
+    y = matrix("kernel")
+    out = convolve1d(x, y, mode="same")
+
+    rng = np.random.default_rng(38)
+    x_test = rng.normal(size=(2, 8)).astype(x.dtype)
+    y_test = rng.normal(size=(2, 8)).astype(x.dtype)
+
+    res = out.eval({x: x_test, y: y_test})
+    assert res.shape == (2, 8)
