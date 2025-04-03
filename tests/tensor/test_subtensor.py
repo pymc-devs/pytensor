@@ -3003,3 +3003,28 @@ def test_flip(size: tuple[int]):
         z = flip(x_pt, axis=list(axes))
         f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
         np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
+
+
+class TestBenchmarks:
+    @pytest.mark.parametrize(
+        "static_shape", (False, True), ids=lambda x: f"static_shape={x}"
+    )
+    @pytest.mark.parametrize("gc", (False, True), ids=lambda x: f"gc={x}")
+    def test_advanced_subtensor1(self, static_shape, gc, benchmark):
+        x = vector("x", shape=(85 if static_shape else None,))
+
+        x_values = np.random.normal(size=(85,))
+        idxs_values = np.arange(85).repeat(11)
+
+        # With static shape and constant indices we know all idxs are valid
+        # And can use faster mode in numpy.take
+        out = x[idxs_values]
+
+        fn = pytensor.function(
+            [x],
+            pytensor.Out(out, borrow=True),
+            on_unused_input="ignore",
+            trust_input=True,
+        )
+        fn.vm.allow_gc = gc
+        benchmark(fn, x_values, idxs_values)
