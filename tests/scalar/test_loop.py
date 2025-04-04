@@ -3,7 +3,8 @@ import re
 import numpy as np
 import pytest
 
-from pytensor import Mode, function
+from pytensor import In, Mode, function
+from pytensor.compile import get_default_mode
 from pytensor.scalar import (
     Composite,
     as_scalar,
@@ -18,6 +19,8 @@ from pytensor.scalar import (
 )
 from pytensor.scalar.loop import ScalarLoop
 from pytensor.tensor import exp as tensor_exp
+from pytensor.tensor import lvector
+from pytensor.tensor.elemwise import Elemwise
 
 
 mode = pytest.mark.parametrize(
@@ -255,3 +258,46 @@ def test_inner_loop(mode):
         out16,
         3**2 + 2.5,
     )
+
+
+@pytest.mark.parametrize("mutate_arg_idx", (0, 1, 2, 3))
+def test_elemwise_inplace(mutate_arg_idx):
+    x0 = int64("x0")
+    y0 = int64("y0")
+    c = int64("c")
+    x = x0 - y0 + c
+    y = y0 - x0 + c
+    op = Elemwise(ScalarLoop(init=[x0, y0], constant=[c], update=[x, y]))
+
+    n_steps = lvector("n_steps")
+    x0v = lvector("x0")
+    y0v = lvector("y0")
+    cv = lvector("c")
+    xv, yv = op(n_steps, x0v, y0v, cv)
+
+    inputs = [
+        In(inp, mutable=i == mutate_arg_idx)
+        for i, inp in enumerate([n_steps, x0v, y0v, cv])
+    ]
+
+    fn = function(
+        inputs,
+        [xv, yv],
+        mode=get_default_mode().including("inplace"),
+    )
+    fn.dprint()
+    elem_op = fn.maker.fgraph.outputs[0].owner.op
+    assert isinstance(elem_op, Elemwise) and isinstance(elem_op.scalar_op, ScalarLoop)
+    destroy_map = elem_op.destroy_map
+    assert destroy_map == {0: [mutate_arg_idx]}
+
+    n_test = np.array([1, 4, 8], dtype="int64")
+    x0v_test = np.array([0, 0, 0], dtype="int64")
+    y0v_test = np.array([1, 1, 1], dtype="int64")
+    cv_test = np.array([0, 0, 0], dtype="int64")
+
+    xv_res, yv_res = fn(n_test, x0v_test, y0v_test, cv_test)
+    # Check the outputs are the destroyed inputs
+    assert xv_res is (n_test, x0v_test, y0v_test, cv_test)[mutate_arg_idx]
+    np.testing.assert_allclose(xv_res, [-1, -8, -128])
+    np.testing.assert_allclose(yv_res, [1, 8, 128])
