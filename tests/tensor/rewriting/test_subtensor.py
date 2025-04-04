@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import pytest
 
@@ -16,17 +18,19 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.type import Type
 from pytensor.raise_op import Assert
-from pytensor.tensor import inplace
+from pytensor.tensor import inplace, switch
 from pytensor.tensor.basic import Alloc, MakeVector, _convert_to_int8, make_vector
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Dot, add, dot, exp, sqr
+from pytensor.tensor.math import Dot, add, dot, exp, maximum, minimum, sqr
+from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.rewriting.subtensor import (
     local_replace_AdvancedSubtensor,
     local_subtensor_make_vector,
     local_subtensor_shape_constant,
 )
 from pytensor.tensor.shape import (
+    Shape_i,
     SpecifyShape,
     _shape,
     shape,
@@ -984,7 +988,6 @@ class TestLocalSubtensorMerge:
                     with pytest.raises(IndexError):
                         g(x_val, idx)
 
-    @pytest.mark.slow
     def test_const2(self):
         # var[::-1][const] -> var[-1]
         x = matrix("x")
@@ -2415,3 +2418,133 @@ class TestUselessSlice:
             f(test_x, -2),
             test_x[0:3:-2, -1:-6:2, ::],
         )
+
+
+class TestSubtensorShapeSimplifies:
+    """The tests in this class make sure we don't end up with too crazy shape graphs for Subtensor.
+
+    The exact form is not critical, so if rewrites change it slightly in the future, it's fine to tweak the tests.
+    Just make sure we don't end up with a bazillion nodes.
+
+    https://github.com/pymc-devs/pytensor/issues/112
+    """
+
+    @classmethod
+    def setup_class(cls):
+        # Excluding neg_to_mul, because it makes it clumsier to write the expected graphs
+        cls.rewrite = partial(
+            rewrite_graph,
+            include=("ShapeOpt", "canonicalize"),
+            exclude=("local_neg_to_mul",),
+        )
+
+    def test_start(self):
+        rewrite = self.rewrite
+        x = vector("x", shape=(None,))
+        x_sh0 = Shape_i(0)(x)
+
+        sh = rewrite(x[3:].shape[0])
+        expected_sh = maximum(0, -3 + x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        sh = rewrite(x[-3:].shape[0])
+        expected_sh = minimum(3, x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        a = scalar("a", dtype="int64")
+        sh = rewrite(x[a:].shape[0])
+        expected = maximum(0, switch(a >= 0, x_sh0 - a, minimum(x_sh0, -a)))
+        assert equal_computations([sh], [expected], strict_dtype=False)
+
+        # Cases where a must be non-negative
+        sh = rewrite(x[pt_abs(a) :].shape[0])
+        expected_sh = maximum(0, x_sh0 - pt_abs(a))
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        # Not implemented yet
+        # sh = rewrite(x[assert_op(a, a >= 0) :].shape[0])
+        # expected_sh = maximum(x_sh0 - assert_op(a, a >= 0), 0)
+        # assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        y = pt.vector("y", shape=(None,))
+        sh = rewrite(x[y.shape[0] :].shape[0])
+        expected_sh = maximum(0, x_sh0 - Shape_i(0)(y))
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        a_uint = scalar("a_uint", dtype="uint64")
+        sh = rewrite(x[a_uint:].shape[0])
+        expected_sh = maximum(0, x_sh0 - a_uint.astype("int64"))
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+    def test_stop(self):
+        rewrite = self.rewrite
+        x = vector("x", shape=(None,))
+        x_sh0 = Shape_i(0)(x)
+
+        sh = rewrite(x[:3].shape[0])
+        expected_sh = minimum(3, x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        sh = rewrite(x[:-3].shape[0])
+        expected_sh = maximum(0, -3 + x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        a = scalar("a", dtype="int64")
+        sh = rewrite(x[:a].shape[0])
+        expected = maximum(0, switch(a >= 0, minimum(a, x_sh0), x_sh0 + a))
+        assert equal_computations([sh], [expected], strict_dtype=False)
+
+        # Cases where a must be non-negative
+        sh = rewrite(x[: abs(a)].shape[0])
+        expected_sh = minimum(abs(a), x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        # Not implemented yet
+        # sh = rewrite(x[: assert_op(a, a >= 0)].shape[0])
+        # expected_sh = minimum(assert_op(a, a >= 0), x_sh0)
+        # assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        y = pt.vector("y", shape=(None,))
+        sh = rewrite(x[: y.shape[0]].shape[0])
+        expected_sh = minimum(Shape_i(0)(y), x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        a_uint = scalar("a_uint", dtype="uint64")
+        sh = rewrite(x[:a_uint].shape[0])
+        expected_sh = minimum(a_uint.astype("int64"), x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+    def test_nested_start(self):
+        rewrite = self.rewrite
+        x = vector("x", shape=(None,))
+        x_sh0 = Shape_i(0)(x)
+
+        sh = rewrite(x[3:][::-1][2:][::-1][4:].shape[0])
+        expected_sh = maximum(0, -9 + x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        sh = rewrite(x[-3:][::-1][-2:][::-1][-4:].shape[0])
+        expected_sh = minimum(2, x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+    def test_nested_stop(self):
+        rewrite = self.rewrite
+        x = vector("x", shape=(None,))
+        x_sh0 = Shape_i(0)(x)
+
+        sh = rewrite(x[:3][::-1][:2][::-1][:4].shape[0])
+        expected_sh = minimum(2, x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+        sh = rewrite(x[:-3][::-1][:-2][::-1][:-4].shape[0])
+        expected_sh = maximum(0, -9 + x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
+
+    def test_nested_start_and_stop(self):
+        rewrite = self.rewrite
+        x = vector("x", shape=(None,))
+        x_sh0 = Shape_i(0)(x)
+
+        sh = rewrite(x[1:-1][3:-2][1:-1].shape[0])
+        expected_sh = maximum(0, -9 + x_sh0)
+        assert equal_computations([sh], [expected_sh], strict_dtype=False)
