@@ -23,6 +23,7 @@ from pytensor.scalar.basic import (
     Composite,
     Identity,
     Mul,
+    Pow,
     Reciprocal,
     ScalarOp,
     Second,
@@ -152,6 +153,21 @@ def switch(condition, x, y):
 @numba_funcify.register(Switch)
 def numba_funcify_Switch(op, node, **kwargs):
     return numba_basic.global_numba_func(switch)
+
+
+@numba_funcify.register(Pow)
+def numba_funcify_Pow(op, node, **kwargs):
+    pow_dtype = node.inputs[1].type.dtype
+
+    def pow(x, y):
+        return x**y
+
+    # Work-around https://github.com/numba/numba/issues/9554
+    # fast-math casuse kernel crash
+    patch_kwargs = {}
+    if pow_dtype.startswith("int"):
+        patch_kwargs["fastmath"] = False
+    return numba_basic.numba_njit(**patch_kwargs)(pow)
 
 
 def binary_to_nary_func(inputs: list[Variable], binary_op_name: str, binary_op: str):
