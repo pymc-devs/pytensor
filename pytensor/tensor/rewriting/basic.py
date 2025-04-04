@@ -817,52 +817,38 @@ def local_join_1(fgraph, node):
         return [tensors[0]]
 
 
-# TODO: merge in local_useless_join
-@register_infer_shape
 @register_useless
-@register_specialize
 @register_canonicalize
+@register_specialize
 @node_rewriter([Join])
 def local_join_empty(fgraph, node):
     """Join(i, x, y, empty) => Join(i, x, y)
 
     Remove empty inputs to joins. The empty inputs can be anywhere.
-
     """
-    if not isinstance(node.op, Join):
-        return
-    new_inputs = []
+    axis, *tensors = node.inputs
+
     try:
-        join_idx = get_scalar_constant_value(
+        static_axis = get_scalar_constant_value(
             node.inputs[0], only_process_constants=True
         )
     except NotScalarConstantError:
         return
-    for idx in range(1, len(node.inputs)):
-        inp = node.inputs[idx]
-        # We can not use size == 0,, as this can change shape from 3,0
-        # to 2,0.  This trigger DebugMode error. This happen with
-        # stack(...,[]) as this add a dimshuffle on [], that add a
-        # dimensions with shape 1.
-        if isinstance(inp, Constant) and inp.data.shape[join_idx] == 0:
-            continue
-        new_inputs.append(inp)
-    if len(new_inputs) < len(node.inputs) - 1:
-        if len(new_inputs) == 0:
-            # at.join do not work in that case.
-            # constant folding will take care of this case.
-            return
-        ret = join(node.inputs[0], *new_inputs)
-        o = node.outputs[0]
-        if ret.dtype != o.dtype:
-            # Join can upcast some inputs
-            return
 
-        # Copy over stacktrace from previous output (after join op)
-        # to new output, because an error in the new op must be caused
-        # by an error in the old join op.
-        copy_stack_trace(node.outputs, ret)
+    new_tensors = [tensor for tensor in tensors if tensor.type.shape[static_axis] != 0]
 
+    # If there are zero tensors, the join is useless but so is any other operation
+    # Another rewrite will (one day) handle all those cases
+    if 0 < len(new_tensors) < len(tensors):
+        # join eagerly returns a tensor when there is only one, no need for us to check
+        ret = join(axis, *new_tensors)
+
+        [old_output] = node.outputs
+
+        if ret.dtype != old_output.dtype:
+            ret = ret.astype(old_output.dtype)
+
+        copy_stack_trace(old_output, ret)
         return [ret]
 
 
