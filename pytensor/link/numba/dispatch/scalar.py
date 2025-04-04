@@ -23,6 +23,7 @@ from pytensor.scalar.basic import (
     Composite,
     Identity,
     Mul,
+    Pow,
     Reciprocal,
     ScalarOp,
     Second,
@@ -154,6 +155,21 @@ def numba_funcify_Switch(op, node, **kwargs):
     return numba_basic.global_numba_func(switch)
 
 
+@numba_funcify.register(Pow)
+def numba_funcify_Pow(op, node, **kwargs):
+    pow_dtype = node.inputs[1].type.dtype
+
+    def pow(x, y):
+        return x**y
+
+    # Work-around https://github.com/numba/numba/issues/9554
+    # fast-math casuse kernel crash
+    patch_kwargs = {}
+    if pow_dtype.startswith("int"):
+        patch_kwargs["fastmath"] = False
+    return numba_basic.numba_njit(**patch_kwargs)(pow)
+
+
 def binary_to_nary_func(inputs: list[Variable], binary_op_name: str, binary_op: str):
     """Create a Numba-compatible N-ary function from a binary function."""
     unique_names = unique_name_generator(["binary_op_name"], suffix_sep="_")
@@ -172,18 +188,64 @@ def {binary_op_name}({input_signature}):
 
 @numba_funcify.register(Add)
 def numba_funcify_Add(op, node, **kwargs):
+    match len(node.inputs):
+        case 2:
+
+            def add(i0, i1):
+                return i0 + i1
+        case 3:
+
+            def add(i0, i1, i2):
+                return i0 + i1 + i2
+        case 4:
+
+            def add(i0, i1, i2, i3):
+                return i0 + i1 + i2 + i3
+        case 5:
+
+            def add(i0, i1, i2, i3, i4):
+                return i0 + i1 + i2 + i3 + i4
+        case _:
+            add = None
+
+    if add is not None:
+        return numba_basic.numba_njit(add)
+
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "add", "+")
 
-    return numba_basic.numba_njit(signature)(nary_add_fn)
+    return numba_basic.numba_njit(signature, cache=False)(nary_add_fn)
 
 
 @numba_funcify.register(Mul)
 def numba_funcify_Mul(op, node, **kwargs):
+    match len(node.inputs):
+        case 2:
+
+            def mul(i0, i1):
+                return i0 * i1
+        case 3:
+
+            def mul(i0, i1, i2):
+                return i0 * i1 * i2
+        case 4:
+
+            def mul(i0, i1, i2, i3):
+                return i0 * i1 * i2 * i3
+        case 5:
+
+            def mul(i0, i1, i2, i3, i4):
+                return i0 * i1 * i2 * i3 * i4
+        case _:
+            mul = None
+
+    if mul is not None:
+        return numba_basic.numba_njit(mul)
+
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "mul", "*")
 
-    return numba_basic.numba_njit(signature)(nary_add_fn)
+    return numba_basic.numba_njit(signature, cache=False)(nary_add_fn)
 
 
 @numba_funcify.register(Cast)
@@ -233,7 +295,7 @@ def numba_funcify_Composite(op, node, **kwargs):
 
     _ = kwargs.pop("storage_map", None)
 
-    composite_fn = numba_basic.numba_njit(signature)(
+    composite_fn = numba_basic.numba_njit(signature, cache=False)(
         numba_funcify(op.fgraph, squeeze_output=True, **kwargs)
     )
     return composite_fn
