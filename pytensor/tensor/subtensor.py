@@ -2203,12 +2203,16 @@ class AdvancedSubtensor1(COp):
                     }}
                 }}
             }}
+            if ({output_name}==NULL){{
+                printf("Have to allocate new AdvancedSubtensor1 output\n");
+            }}
             {output_name} = (PyArrayObject*)PyArray_TakeFrom(
                         {a_name}, (PyObject*){i_name}, 0, {output_name}, NPY_RAISE);
             if ({output_name} == NULL) {fail};
         """
 
     def c_code_cache_version(self):
+        return None
         return (4,)
 
 

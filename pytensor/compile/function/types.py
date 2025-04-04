@@ -14,7 +14,7 @@ import numpy as np
 import pytensor
 import pytensor.compile.profiling
 from pytensor.compile.io import In, SymbolicInput, SymbolicOutput
-from pytensor.compile.ops import deep_copy_op, view_op
+from pytensor.compile.ops import deep_copy_op
 from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
@@ -1260,9 +1260,11 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
             # and not(wrapped_outputs[i].borrow and wrapped_outputs[j].borrow):
             if fgraph.outputs[j] in views_of_output_i:
                 if wrapped_outputs[i].borrow and wrapped_outputs[j].borrow:
-                    fgraph.change_node_input(
-                        *output_client, view_op(original_out), reason=reason
-                    )
+                    pass
+
+                    # fgraph.change_node_input(
+                    #     *output_client, view_op(original_out), reason=reason
+                    # )
                 else:
                     fgraph.change_node_input(
                         *output_client, deep_copy_op(original_out), reason=reason
@@ -1287,11 +1289,11 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
                     if input_j in fgraph.inputs:
                         j = fgraph.inputs.index(input_j)
                         if wrapped_outputs[i].borrow and wrapped_inputs[j].borrow:
-                            fgraph.change_node_input(
-                                *output_client,
-                                view_op(original_out),
-                                reason=reason,
-                            )
+                            # fgraph.change_node_input(
+                            #     *output_client,
+                            #     view_op(original_out),
+                            #     reason=reason,
+                            # )
                             break
                         else:
                             fgraph.change_node_input(
@@ -1301,11 +1303,11 @@ def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
                             )
                             break
                     elif wrapped_outputs[i].borrow:
-                        fgraph.change_node_input(
-                            *output_client,
-                            view_op(original_out),
-                            reason=reason,
-                        )
+                        # fgraph.change_node_input(
+                        #     *output_client,
+                        #     view_op(original_out),
+                        #     reason=reason,
+                        # )
                         break
                     else:
                         fgraph.change_node_input(
