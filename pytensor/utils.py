@@ -143,7 +143,7 @@ def subprocess_Popen(command: str | list[str], **params):
         # Unless "shell=True", "g++.bat" is not executed when trying to
         # execute "g++" without extensions.
         # (Executing "g++.bat" explicitly would also work.)
-        params["shell"] = True
+        params["shell"] = False
         # "If shell is True, it is recommended to pass args as a string rather than as a sequence." (cite taken from https://docs.python.org/2/library/subprocess.html#frequently-used-arguments)
         # In case when command arguments have spaces, passing a command as a list will result in incorrect arguments break down, and consequently
         # in "The filename, directory name, or volume label syntax is incorrect" error message.
