@@ -11,15 +11,13 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.npy_2_compat import (
     _find_contraction,
     _parse_einsum_input,
-    normalize_axis_index,
     normalize_axis_tuple,
 )
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
-    arange,
     as_tensor,
     expand_dims,
-    get_vector_length,
+    iota,
     moveaxis,
     stack,
     transpose,
@@ -28,7 +26,6 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.functional import vectorize
 from pytensor.tensor.math import and_, eq, tensordot
-from pytensor.tensor.shape import shape_padright
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -61,64 +58,6 @@ class Einsum(OpFromGraph):
 
     def __str__(self):
         return f"Einsum{{{self.subscripts=}, {self.path=}, {self.optimized=}}}"
-
-
-def _iota(shape: TensorVariable, axis: int) -> TensorVariable:
-    """
-    Create an array with values increasing along the specified axis.
-
-    Iota is a multidimensional generalization of the `arange` function. The returned array is filled with whole numbers
-    increasing along the specified axis.
-
-    Parameters
-    ----------
-    shape: TensorVariable
-        The shape of the array to be created.
-    axis: int
-        The axis along which to fill the array with increasing values.
-
-    Returns
-    -------
-    TensorVariable
-        An array with values increasing along the specified axis.
-
-    Examples
-    --------
-    In the simplest case where ``shape`` is 1d, the output will be equivalent to ``pt.arange``:
-
-    .. testcode::
-
-        import pytensor.tensor as pt
-        from pytensor.tensor.einsum import _iota
-
-        shape = pt.as_tensor((5,))
-        print(_iota(shape, 0).eval())
-
-    .. testoutput::
-
-         [0 1 2 3 4]
-
-    In higher dimensions, it will look like many concatenated `arange`:
-
-    .. testcode::
-
-        shape = pt.as_tensor((5, 5))
-        print(_iota(shape, 1).eval())
-
-    .. testoutput::
-
-        [[0 1 2 3 4]
-         [0 1 2 3 4]
-         [0 1 2 3 4]
-         [0 1 2 3 4]
-         [0 1 2 3 4]]
-
-    Setting ``axis=0`` above would result in the transpose of the output.
-    """
-    len_shape = get_vector_length(shape)
-    axis = normalize_axis_index(axis, len_shape)
-    values = arange(shape[axis])
-    return broadcast_to(shape_padright(values, len_shape - axis - 1), shape)
 
 
 def _delta(shape: TensorVariable, axes: Sequence[int]) -> TensorVariable:
@@ -201,7 +140,7 @@ def _delta(shape: TensorVariable, axes: Sequence[int]) -> TensorVariable:
     if len(axes) == 1:
         raise ValueError("Need at least two axes to create a delta tensor")
     base_shape = stack([shape[axis] for axis in axes])
-    iotas = [_iota(base_shape, i) for i in range(len(axes))]
+    iotas = [iota(base_shape, i) for i in range(len(axes))]
     eyes = [eq(i1, i2) for i1, i2 in pairwise(iotas)]
     result = reduce(and_, eyes)
     non_axes = [i for i in range(len(tuple(shape))) if i not in axes]

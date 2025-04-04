@@ -203,6 +203,6 @@ def jax_funcify_Tri(op, node, **kwargs):
             x if const_x is None else const_x
             for x, const_x in zip(args, const_args, strict=True)
         ]
-        return jnp.tri(*args, dtype=op.dtype)
+        return jnp.tri(*args)
 
     return tri
