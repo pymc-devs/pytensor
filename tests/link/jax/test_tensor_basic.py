@@ -150,12 +150,14 @@ class TestJaxSplit:
         ):
             fn(np.zeros((6, 4), dtype=pytensor.config.floatX))
 
-        a_splits = ptb.split(a, splits_size=[2, 4], n_splits=3, axis=0)
-        fn = pytensor.function([a], a_splits, mode="JAX")
+        # This check is triggered at compile time if splits_size has incompatible static length
+        splits_size = vector("splits_size", shape=(None,), dtype=int)
+        a_splits = ptb.split(a, splits_size=splits_size, n_splits=3, axis=0)
+        fn = pytensor.function([a, splits_size], a_splits, mode="JAX")
         with pytest.raises(
             ValueError, match="Length of splits is not equal to n_splits"
         ):
-            fn(np.zeros((6, 4), dtype=pytensor.config.floatX))
+            fn(np.zeros((6, 4), dtype=pytensor.config.floatX), [2, 2])
 
         a_splits = ptb.split(a, splits_size=[2, 4], n_splits=2, axis=0)
         fn = pytensor.function([a], a_splits, mode="JAX")
