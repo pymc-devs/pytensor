@@ -5,6 +5,7 @@ from io import StringIO
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
+from packaging import version
 
 import pytensor
 import pytensor.scalar as scal
@@ -26,7 +27,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import exp, isinf, lt, switch
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.shape import specify_shape
+from pytensor.tensor.shape import specify_broadcastable, specify_shape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -1101,9 +1102,9 @@ class TestSubtensor(utt.OptimizationTestMixin):
         n = self.shared(data)
 
         for idx in idxs:
-            # Should stay on the cpu.
-            idx_ = shared(np.asarray(idx))
-            t = n[idx_]
+            idx_np = np.asarray(idx)
+            idx_pt = shared(idx_np, shape=(1 if idx_np.shape[0] == 1 else None,))
+            t = n[idx_pt]
             gn = pytensor.grad(pt_sum(exp(t)), n)
             f = self.function([], [gn, gn.shape], op=AdvancedIncSubtensor1)
             topo = f.maker.fgraph.toposort()
@@ -1126,13 +1127,13 @@ class TestSubtensor(utt.OptimizationTestMixin):
             assert np.allclose(gshape, data.shape)
 
             def fct(t):
-                return pt_sum(t[idx_])
+                return pt_sum(t[idx_pt])
 
             utt.verify_grad(fct, [data], mode=self.mode)
 
             # Test the grad of the grad (e.i. AdvancedIncSubtensor1.grad)
             def fct2(t):
-                return pytensor.grad(pt_sum(t[idx_]), t)
+                return pytensor.grad(pt_sum(t[idx_pt]), t)
 
             utt.verify_grad(fct2, [data], mode=self.mode)
 
@@ -1143,7 +1144,9 @@ class TestSubtensor(utt.OptimizationTestMixin):
                 ops = subtensor_ops
             if idx is idxs[0]:
                 # TODO FIXME: This is a very poorly specified test.
-                f = self.function([], [gn.shape, n[idx_].shape], op=ops, N=0, N_fast=0)
+                f = self.function(
+                    [], [gn.shape, n[idx_pt].shape], op=ops, N=0, N_fast=0
+                )
                 f()
 
     def test_wrong_exception_regression(self):
@@ -1231,10 +1234,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
                     data_num_init = np.arange(data_size, dtype=self.dtype)
                     data_num_init = data_num_init.reshape(data_shape)
                     inc_shapes = [data_shape[i:] for i in range(0, len(data_shape) + 1)]
-                    # Test broadcasting of y.
-                    inc_shapes += [(1,) + inc_shapes[-1][1:]]
                     for inc_shape in inc_shapes:
-                        inc_n_dims = len(inc_shape)
                         # We copy the numeric value to be 100% sure there is no
                         # risk of accidentally sharing it.
                         data_num = data_num_init.copy()
@@ -1263,10 +1263,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
                             replace=(not set_instead_of_inc),
                         )
                         idx_num = idx_num.astype("int64")
-                        # Symbolic variable with increment value.
-                        inc_var = TensorType(
-                            shape=(None,) * inc_n_dims, dtype=self.dtype
-                        )()
+
                         # Trick for the case where `inc_shape` is the same as
                         # `data_shape`: what we actually want is the first
                         # shape element to be equal to the number of rows to
@@ -1275,6 +1272,15 @@ class TestSubtensor(utt.OptimizationTestMixin):
                             len(inc_shapes) == 0 or inc_shape[0] != 1
                         ):
                             inc_shape = (n_to_inc,) + inc_shape[1:]
+
+                        # Symbolic variable with increment value.
+                        inc_var_static_shape = tuple(
+                            1 if dim_length == 1 else None for dim_length in inc_shape
+                        )
+                        inc_var = TensorType(
+                            shape=inc_var_static_shape, dtype=self.dtype
+                        )()
+
                         # The param dtype is needed when inc_shape is empty.
                         # By default, it would return a float and rng.uniform
                         # with NumPy 1.10 will raise a Deprecation warning.
@@ -1340,6 +1346,31 @@ class TestSubtensor(utt.OptimizationTestMixin):
             # NB: if this assert fails, it will probably be easier to debug if
             # you enable the debug code above.
             assert np.allclose(f_out, output_num), (params, f_out, output_num)
+
+    @pytest.mark.skipif(
+        version.parse(np.__version__) < version.parse("2.0"),
+        reason="Legacy C-implementation did not check for runtime broadcast",
+    )
+    @pytest.mark.parametrize("func", (advanced_inc_subtensor1, advanced_set_subtensor1))
+    def test_advanced1_inc_runtime_broadcast(self, func):
+        y = matrix("y", dtype="float64", shape=(None, None))
+
+        x = ptb.zeros((10, 5))
+        idxs = np.repeat(np.arange(10), 2)
+        out = func(x, y, idxs)
+
+        f = function([y], out)
+        f(np.ones((20, 5)))  # Fine
+        with pytest.raises(
+            ValueError,
+            match="Runtime broadcasting not allowed. AdvancedIncSubtensor1 was asked",
+        ):
+            f(np.ones((1, 5)))
+        with pytest.raises(
+            ValueError,
+            match="Runtime broadcasting not allowed. AdvancedIncSubtensor1 was asked",
+        ):
+            f(np.ones((20, 1)))
 
     def test_adv_constant_arg(self):
         # Test case provided (and bug detected, gh-607) by John Salvatier
@@ -2398,7 +2429,11 @@ class TestInferShape(utt.InferShapeTester):
         aivec_val = [2, 3]
         self._compile_and_check(
             [admat, bdmat],
-            [advanced_set_subtensor1(admat, bdmat, aivec_val)],
+            [
+                advanced_set_subtensor1(
+                    admat, specify_broadcastable(bdmat, 0), aivec_val
+                )
+            ],
             [admat_val, [[1, 2, 3, 4]]],
             AdvancedIncSubtensor1,
         )
@@ -2425,7 +2460,11 @@ class TestInferShape(utt.InferShapeTester):
         aivec_val = [2, 3]
         self._compile_and_check(
             [adtens4, bdtens4],
-            [advanced_set_subtensor1(adtens4, bdtens4, aivec_val)],
+            [
+                advanced_set_subtensor1(
+                    adtens4, specify_broadcastable(bdtens4, 0, 1, 2), aivec_val
+                )
+            ],
             [adtens4_val, [[[[1, 2, 3, 4, 5]]]]],
             AdvancedIncSubtensor1,
             warn=False,
@@ -2476,7 +2515,11 @@ class TestInferShape(utt.InferShapeTester):
         aivec_val = [2, 3]
         self._compile_and_check(
             [adtens4, bdtens4],
-            [advanced_set_subtensor1(adtens4, bdtens4, aivec_val)],
+            [
+                advanced_set_subtensor1(
+                    adtens4, specify_broadcastable(bdtens4, 1, 2), aivec_val
+                )
+            ],
             [adtens4_val, [[[[1, 2, 3, 4, 5]]], [[[6, 7, 8, 9, 10]]]]],
             AdvancedIncSubtensor1,
             warn=False,
@@ -3028,3 +3071,29 @@ class TestBenchmarks:
         )
         fn.vm.allow_gc = gc
         benchmark(fn, x_values, idxs_values)
+
+    @pytest.mark.parametrize(
+        "static_shape", (False, True), ids=lambda x: f"static_shape={x}"
+    )
+    @pytest.mark.parametrize("gc", (False, True), ids=lambda x: f"gc={x}")
+    @pytest.mark.parametrize("func", (inc_subtensor, set_subtensor))
+    def test_advanced_incsubtensor1(self, func, static_shape, gc, benchmark):
+        x = vector("x", shape=(85 if static_shape else None,))
+        x_values = np.zeros((85,))
+        buffer = ptb.zeros_like(x)
+        y_values = np.random.normal(size=(85 * 11,))
+        idxs_values = np.arange(85).repeat(11)
+
+        # With static shape and constant indices we know all idxs are valid
+        # Reuse same buffer of zeros, to check we rather allocate twice than copy inside IncSubtensor
+        out1 = func(buffer[idxs_values], y_values)
+        out2 = func(buffer[idxs_values[::-1]], y_values)
+
+        fn = pytensor.function(
+            [x],
+            [pytensor.Out(out1, borrow=True), pytensor.Out(out2, borrow=True)],
+            on_unused_input="ignore",
+            trust_input=True,
+        )
+        fn.vm.allow_gc = gc
+        benchmark(fn, x_values)
