@@ -109,6 +109,8 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
 
         def adv_set_subtensor(x, y, *indices):
             check_negative_steps(indices)
+            if isinstance(op, AdvancedIncSubtensor1):
+                op._check_runtime_broadcasting(node, x, y, indices)
             if not inplace:
                 x = x.clone()
             x[indices] = y.type_as(x)
@@ -120,6 +122,8 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
 
         def adv_inc_subtensor_no_duplicates(x, y, *indices):
             check_negative_steps(indices)
+            if isinstance(op, AdvancedIncSubtensor1):
+                op._check_runtime_broadcasting(node, x, y, indices)
             if not inplace:
                 x = x.clone()
             x[indices] += y.type_as(x)
