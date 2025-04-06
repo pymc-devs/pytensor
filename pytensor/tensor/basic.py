@@ -1648,6 +1648,11 @@ class Alloc(COp):
         o_static_shape = node.outputs[0].type.shape
         v_ndim = len(v_static_shape)
         o_ndim = len(o_static_shape)
+        is_zero = (
+            all(node.inputs[0].type.broadcastable)
+            and isinstance(node.inputs[0], Constant)
+            and (node.inputs[0].unique_value == 0)
+        )
         assert o_ndim == len(inp[1:])
 
         # Declare variables
@@ -1688,16 +1693,18 @@ class Alloc(COp):
                     {fail}
                 }}
             }}
-
+            if ({int(is_zero)} && (PyArray_IS_C_CONTIGUOUS({zz}) || PyArray_IS_F_CONTIGUOUS({zz}))){{
+                PyArray_FILLWBYTE({zz}, 0);
+            }}
             // This function takes care of broadcasting
-            if (PyArray_CopyInto({zz}, {vv}) == -1)
+            else if (PyArray_CopyInto({zz}, {vv}) == -1)
               {fail}
             """
 
         return code
 
     def c_code_cache_version(self):
-        return (4,)
+        return (5,)
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [node.inputs[1:]]
