@@ -1295,12 +1295,26 @@ compile.optdb.register(
 
 @node_rewriter([AdvancedIncSubtensor1], inplace=True)
 def local_inplace_AdvancedIncSubtensor1(fgraph, node):
-    if isinstance(node.op, AdvancedIncSubtensor1) and not node.op.inplace:
-        new_op = node.op.clone_inplace()
-        new_node = new_op(*node.inputs)
-        copy_stack_trace(node.outputs, new_node)
-        return [new_node]
-    return False
+    if node.op.inplace:
+        return
+
+    x, y, idx = node.inputs
+    if fgraph.has_destroyers([x]):
+        # In this case we can't operate inplace, but if x is just an alloc of zeros
+        # We're better off duplicating it and then acting on it inplace.
+        if (
+            x.owner is not None
+            and isinstance(x.owner.op, Alloc)
+            and x.owner.op.value_is_scalar_zero(x.owner.inputs[0])
+        ):
+            x = x.owner.clone().outputs[0]
+        else:
+            return None  # Inplace isn't valid
+
+    new_op = node.op.clone_inplace()
+    new_node = new_op(x, y, idx)
+    copy_stack_trace(node.outputs, new_node)
+    return [new_node]
 
 
 compile.optdb.register(
