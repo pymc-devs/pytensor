@@ -7,7 +7,7 @@ from pytensor import config
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import FunctionGraph
-from pytensor.graph.basic import Apply, Constant, ancestors
+from pytensor.graph.basic import Apply, Constant, explicit_graph_inputs
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
 from pytensor.graph.replace import (
@@ -190,7 +190,7 @@ class Blockwise(Op):
         core_op_infer_shape = getattr(self.core_op, "infer_shape", None)
         if core_op_infer_shape is not None:
             dummy_core_node = self._create_dummy_core_node(node.inputs)
-            dummy_core_inputs = dummy_core_node.inputs
+            dummy_core_inputs = tuple(explicit_graph_inputs(dummy_core_node.inputs))
             dummy_fgraph = FunctionGraph(outputs=dummy_core_node.outputs, clone=False)
             core_input_shapes = [
                 input_shape[batch_ndims:] for input_shape in input_shapes
@@ -214,7 +214,8 @@ class Blockwise(Op):
                         # of the core_node as the value is not constant across batch dims of the Blockwise
                         core_out_dim = core_output_shapes[o][i]
                         if not (
-                            set(dummy_core_inputs) & set(ancestors([core_out_dim]))
+                            set(dummy_core_inputs)
+                            & set(explicit_graph_inputs([core_out_dim]))
                         ):
                             core_out_shape.append(core_out_dim)
                             continue
