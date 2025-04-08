@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 from scipy.signal import convolve as scipy_convolve
 
-from pytensor import config, function
+from pytensor import config, function, grad
+from pytensor.graph import ancestors, rewrite_graph
 from pytensor.tensor import matrix, vector
-from pytensor.tensor.signal.conv import convolve1d
+from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.signal.conv import Conv1d, convolve1d
 from tests import unittest_tools as utt
 
 
@@ -60,3 +62,23 @@ def test_convolve1d_batch_same():
 
     res = out.eval({x: x_test, y: y_test})
     assert res.shape == (2, 8)
+
+
+@pytest.mark.parametrize("mode", ("full", "valid", "same"))
+def test_convolve1d_batch_graph(mode):
+    """Test that we don't have slow Blockwise Subtensors in graph of a batched convolve1d"""
+    x = matrix("x")
+    y = matrix("y")
+    out = convolve1d(x, y, mode=mode)
+    grads = grad(out.sum(), wrt=[x, y])
+    final_grads = rewrite_graph(
+        grads, include=("ShapeOpt", "canonicalize", "stabilize", "specialize")
+    )
+
+    blockwise_nodes = [
+        var.owner
+        for var in ancestors(final_grads)
+        if var.owner is not None and isinstance(var.owner.op, Blockwise)
+    ]
+    # Check any Blockwise are just Conv1d
+    assert all(isinstance(node.op.core_op, Conv1d) for node in blockwise_nodes)
