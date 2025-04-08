@@ -14,7 +14,12 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.shape import Reshape
-from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor, Subtensor
+from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
+    AdvancedSubtensor,
+    Subtensor,
+    indices_from_subtensor,
+)
 
 
 @node_rewriter([Blockwise])
@@ -216,9 +221,9 @@ def local_blockwise_reshape(fgraph, node):
 
     Reshape is tricky to vectorize eagerly, because a graph like
     `x.reshape([x.shape[0] * x.shape[1], -1])` has many operations
-    that must be vectorized before we arrize at the reshape operation.
+    that must be vectorized before we arrive at the reshape operation.
 
-    For the square Reshape case, we must wait for all the intemediate
+    For the square Reshape case, we must wait for all the intermediate
     operations to be lifted as Allocs
     """
     if not isinstance(node.op.core_op, Reshape):
@@ -232,6 +237,29 @@ def local_blockwise_reshape(fgraph, node):
         new_out = x.reshape([*tuple(batched_shape), *tuple(core_reshape)])
         copy_stack_trace(node.outputs[0], new_out)
         return [new_out]
+
+
+@register_stabilize
+@register_specialize
+@node_rewriter([Blockwise])
+def local_blockwise_of_subtensor(fgraph, node):
+    """Rewrite Blockwise of Subtensor, where the only batch input is the indexed tensor.
+
+    Blockwise(Subtensor{a: b})(x, a, b) -> x[:, a:b] when x has one batch dimension, and a/b none
+    """
+    if not isinstance(node.op.core_op, Subtensor):
+        return
+
+    x, *idxs = node.inputs
+    if not all(all(idx.type.broadcastable) for idx in idxs):
+        return
+
+    core_idxs = indices_from_subtensor(
+        [idx.squeeze() for idx in idxs], node.op.core_op.idx_list
+    )
+    # Add empty slices for the batch dims
+    none_slices = (slice(None),) * node.op.batch_ndim(node)
+    return [x[(*none_slices, *core_idxs)]]
 
 
 @node_rewriter(tracks=[Blockwise], inplace=True)
