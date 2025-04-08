@@ -15,7 +15,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import OpKeyGraphRewriter, PatternNodeRewriter
 from pytensor.graph.utils import MissingInputError
-from pytensor.link.vm import VMLinker
+from pytensor.link.basic import Container
 from pytensor.printing import debugprint
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.math import sum as pt_sum
@@ -193,96 +193,6 @@ class TestFunction:
             # got unexpected keyword argument 'x'
             f(5.0, x=9)
 
-    def test_naming_rule3(self):
-        a = scalar()  # the a is for 'anonymous' (un-named).
-        x, s = scalars("xs")
-
-        # x's name is not ignored (as in test_naming_rule2) because a has a default value.
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function([x, In(a, value=1.0), s], a / s + x)
-        assert f(9, 2, 4) == 9.5  # can specify all args in order
-        assert f(9, 2, s=4) == 9.5  # can give s as kwarg
-        assert f(9, s=4) == 9.25  # can give s as kwarg, get default a
-        assert f(x=9, s=4) == 9.25  # can give s as kwarg, omit a, x as kw
-        with pytest.raises(TypeError):
-            # got unexpected keyword argument 'a'
-            f(x=9, a=2, s=4)
-        with pytest.raises(TypeError):
-            # takes exactly 3 non-keyword arguments (0 given)
-            f()
-        with pytest.raises(TypeError):
-            # takes exactly 3 non-keyword arguments (1 given)
-            f(x=9)
-
-    def test_naming_rule4(self):
-        a = scalar()  # the a is for 'anonymous' (un-named).
-        x, s = scalars("xs")
-
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function([x, In(a, value=1.0, name="a"), s], a / s + x)
-
-        assert f(9, 2, 4) == 9.5  # can specify all args in order
-        assert f(9, 2, s=4) == 9.5  # can give s as kwarg
-        assert f(9, s=4) == 9.25  # can give s as kwarg, get default a
-        assert f(9, a=2, s=4) == 9.5  # can give s as kwarg, a as kwarg
-        assert f(x=9, a=2, s=4) == 9.5  # can give all kwargs
-        assert f(x=9, s=4) == 9.25  # can give all kwargs
-        with pytest.raises(TypeError):
-            # takes exactly 3 non-keyword arguments (0 given)
-            f()
-        with pytest.raises(TypeError):
-            # got multiple values for keyword argument 'x'
-            f(5.0, x=9)
-
-    @pytest.mark.parametrize(
-        "mode",
-        [
-            Mode(
-                linker=VMLinker(allow_gc=True, use_cloop=False, c_thunks=False),
-                optimizer="fast_compile",
-            ),
-            Mode(
-                linker=VMLinker(allow_gc=True, use_cloop=False, c_thunks=False),
-                optimizer="fast_run",
-            ),
-            Mode(linker="cvm", optimizer="fast_compile"),
-            Mode(linker="cvm", optimizer="fast_run"),
-        ],
-    )
-    def test_state_access(self, mode):
-        a = scalar()
-        x, s = scalars("xs")
-
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function(
-                [x, In(a, value=1.0, name="a"), In(s, value=0.0, update=s + a * x)],
-                s + a * x,
-                mode=mode,
-            )
-
-        assert f[a] == 1.0
-        assert f[s] == 0.0
-
-        assert f(3.0) == 3.0
-        assert f[s] == 3.0
-        assert f(3.0, a=2.0) == 9.0  # 3.0 + 2*3.0
-
-        assert (
-            f[a] == 1.0
-        )  # state hasn't changed permanently, we just overrode it last line
-        assert f[s] == 9.0
-
-        f[a] = 5.0
-        assert f[a] == 5.0
-        assert f(3.0) == 24.0  # 9 + 3*5
-        assert f[s] == 24.0
-
     def test_same_names(self):
         a, x, s = scalars("xxx")
         # implicit names would cause error.  What do we do?
@@ -300,9 +210,9 @@ class TestFunction:
         def t():
             f = function(
                 [
-                    In(a, name={"adsf", ()}, value=1.0),
-                    In(x, name=(), value=2.0),
-                    In(s, name=scalar(), value=3.0),
+                    In(a, name={"adsf", ()}),
+                    In(x, name=()),
+                    In(s, name=scalar()),
                 ],
                 a + x + s,
             )
@@ -315,47 +225,29 @@ class TestFunction:
         a = scalar()
         x, s = scalars("xs")
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=0.0, update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        f = function(
+            [
+                x,
+                In(a, name="a"),
+                In(s, name="s"),
+            ],
+            s + a * x,
+        )
 
-            g = copy.copy(f)
+        g = f.copy()
 
         assert f.unpack_single == g.unpack_single
         assert f.trust_input == g.trust_input
 
-        assert g.container[x].storage is not f.container[x].storage
-        assert g.container[a].storage is not f.container[a].storage
-        assert g.container[s].storage is not f.container[s].storage
+        assert g._finder[x].storage is not f._finder[x].storage
+        assert g._finder[a].storage is not f._finder[a].storage
+        assert g._finder[s].storage is not f._finder[s].storage
 
-        # Should not have been copied
-        assert g.value[a] is f.value[a]
+        assert g._finder[a].value is None and f._finder[a].value is None
+        assert g._finder[s].value is None and f._finder[s].value is None
 
-        # Should have been copied because it is mutable
-        assert g.value[s] is not f.value[s]
-
-        # Their contents should be equal, though
-        assert np.array_equal(g.value[s], f.value[s])
-
-        # They should be in sync, default value should be copied
-        assert np.array_equal(f(2, 1), g(2))
-
-        # They should be in sync, default value should be copied
-        assert np.array_equal(f(2, 1), g(2))
-
-        # Put them out of sync
-        f(1, 2)
-
-        # They should not be equal anymore
-        assert not np.array_equal(f(1, 2), g(1, 2))
+        assert np.array_equal(f(2, 1, 0), g(2, 1, 0))
+        assert np.array_equal(f(2, 1, 0), g(2, 1, 0))
 
     def test_copy_share_memory(self):
         x = fscalar("x")
@@ -519,88 +411,90 @@ class TestFunction:
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=0.0, update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
-            g = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=f.container[s], update=s - a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        f = function(
+            [
+                x,
+                In(a, name="a"),
+                In(
+                    s,
+                    value=Container(s, storage=[np.array(0.0)]),
+                    update=s + a * x,
+                    mutable=True,
+                ),
+            ],
+            s + a * x,
+        )
+        g = function(
+            [
+                x,
+                In(a, name="a"),
+                In(s, value=f._finder[s], update=s - a * x, mutable=True),
+            ],
+            s + a * x,
+        )
 
         f(1, 2)
-        assert f[s] == 2
-        assert g[s] == 2
+        assert f._finder[s].value == 2
+        assert g._finder[s].value == 2
         g(1, 2)
-        assert f[s] == 0
-        assert g[s] == 0
+        assert f._finder[s].value == 0
+        assert g._finder[s].value == 0
 
     def test_shared_state1(self):
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=0.0, update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
-            g = function(
-                [x, In(a, value=1.0, name="a"), In(s, value=f.container[s])], s + a * x
-            )
+        f = function(
+            [
+                x,
+                In(a, name="a"),
+                In(
+                    s,
+                    value=Container(s, storage=[np.array(0.0)]),
+                    update=s + a * x,
+                    mutable=True,
+                ),
+            ],
+            s + a * x,
+        )
+        g = function([x, In(a, name="a"), In(s, value=f._finder[s])], s + a * x)
 
         f(1, 2)
-        assert f[s] == 2
-        assert g[s] == 2
+        assert f._finder[s].value == 2
+        assert g._finder[s].value == 2
         f(1, 2)
         g(1, 2)
-        assert f[s] == 4
-        assert g[s] == 4
+        assert f._finder[s].value == 4
+        assert g._finder[s].value == 4
 
     def test_shared_state2(self):
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=0.0, update=s + a * x, mutable=False),
-                ],
-                s + a * x,
-            )
-            g = function(
-                [x, In(a, value=1.0, name="a"), In(s, value=f.container[s])], s + a * x
-            )
+        f = function(
+            [
+                x,
+                In(a, name="a"),
+                In(
+                    s,
+                    value=Container(s, storage=[np.array(0.0)]),
+                    update=s + a * x,
+                    mutable=False,
+                ),
+            ],
+            s + a * x,
+        )
+        g = function([x, In(a, name="a"), In(s, value=f._finder[s])], s + a * x)
 
         f(1, 2)
-        assert f[s] == 2
-        assert g[s] == 2
+        assert f._finder[s].value == 2
+        assert g._finder[s].value == 2
         f(1, 2)
-        assert f[s] == 4
-        assert g[s] == 4
+        assert f._finder[s].value == 4
+        assert g._finder[s].value == 4
         g(1, 2)  # has no effect on state
-        assert f[s] == 4
-        assert g[s] == 4
+        assert f._finder[s].value == 4
+        assert g._finder[s].value == 4
 
     def test_shared_state_not_implicit(self):
         # This test is taken from the documentation in
@@ -608,18 +502,20 @@ class TestFunction:
         # behavior is still intended the doc and the test should both be
         # updated accordingly.
         x, s = scalars("xs")
-        inc = function([x, In(s, update=(s + x), value=10.0)], [])
-        dec = function(
-            [x, In(s, update=(s - x), value=inc.container[s], implicit=False)], []
+        inc = function(
+            [x, In(s, update=(s + x), value=Container(s, storage=[np.array(10.0)]))], []
         )
-        assert dec[s] is inc[s]
-        inc[s] = 2
-        assert dec[s] == 2
+        dec = function(
+            [x, In(s, update=(s - x), value=inc._finder[s], implicit=False)], []
+        )
+        assert dec._finder[s].value is inc._finder[s].value
+        inc._finder[s].value = 2
+        assert dec._finder[s].value == 2
         dec(1)
-        assert inc[s] == 1
+        assert inc._finder[s].value == 1
         dec(1, 0)
-        assert inc[s] == -1
-        assert dec[s] == -1
+        assert inc._finder[s].value == -1
+        assert dec._finder[s].value == -1
 
     def test_constant_output(self):
         # Test that if the output is a constant, we respect the pytensor memory interface
@@ -736,22 +632,6 @@ class TestFunction:
             if not isinstance(key, Constant):
                 assert val[0] is None
 
-    def test_default_values(self):
-        # Check that default values are restored
-        # when an exception occurs in interactive mode.
-
-        a, b = dscalars("a", "b")
-        c = a + b
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            funct = function([In(a, name="first"), In(b, value=1, name="second")], c)
-        x = funct(first=1)
-        try:
-            funct(second=2)
-        except TypeError:
-            assert funct(first=1) == x
-
     def test_check_for_aliased_inputs(self):
         b = np.random.random((5, 4))
         s1 = shared(b)
@@ -802,78 +682,11 @@ class TestFunction:
         # Tests that function works when outputs is a dictionary
 
         x = scalar()
-        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
-            f = function([x], outputs={"a": x, "c": x * 2, "b": x * 3, "1": x * 4})
-
-        outputs = f(10.0)
-
-        assert outputs["a"] == 10.0
-        assert outputs["b"] == 30.0
-        assert outputs["1"] == 40.0
-        assert outputs["c"] == 20.0
-
-    def test_input_named_variables(self):
-        # Tests that named variables work when outputs is a dictionary
-
-        x = scalar("x")
-        y = scalar("y")
-
-        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
-            f = function([x, y], outputs={"a": x + y, "b": x * y})
-
-        assert f(2, 4) == {"a": 6, "b": 8}
-        assert f(2, y=4) == f(2, 4)
-        assert f(x=2, y=4) == f(2, 4)
-
-    def test_output_order_sorted(self):
-        # Tests that the output keys are sorted correctly.
-
-        x = scalar("x")
-        y = scalar("y")
-        z = scalar("z")
-        e1 = scalar("1")
-        e2 = scalar("2")
-
-        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
-            f = function(
-                [x, y, z, e1, e2], outputs={"x": x, "y": y, "z": z, "1": e1, "2": e2}
-            )
-
-        assert "1" in str(f.outputs[0])
-        assert "2" in str(f.outputs[1])
-        assert "x" in str(f.outputs[2])
-        assert "y" in str(f.outputs[3])
-        assert "z" in str(f.outputs[4])
-
-    def test_composing_function(self):
-        # Tests that one can compose two pytensor functions when the outputs are
-        # provided in a dictionary.
-
-        x = scalar("x")
-        y = scalar("y")
-
-        a = x + y
-        b = x * y
-
-        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
-            f = function([x, y], outputs={"a": a, "b": b})
-
-        a = scalar("a")
-        b = scalar("b")
-
-        l = a + b
-        r = a * b
-
-        g = function([a, b], outputs=[l, r])
-
-        result = g(**f(5, 7))
-
-        assert result[0] == 47.0
-        assert result[1] == 420.0
+        with pytest.raises(ValueError, match="output_keys was deprecated"):
+            function([x], outputs={"a": x, "c": x * 2, "b": x * 3, "1": x * 4})
 
     def test_output_list_still_works(self):
         # Test that function works if outputs is a list.
-
         x = scalar("x")
 
         f = function([x], outputs=[x * 3, x * 2, x * 4, x])
@@ -911,17 +724,14 @@ class TestPicklefunction:
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a", mutable=True),
-                    In(s, value=0.0, update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        f = function(
+            [
+                x,
+                In(a, name="a", mutable=True),
+                In(s, update=s + a * x, mutable=True),
+            ],
+            s + a * x,
+        )
         try:
             g = copy.deepcopy(f)
         except NotImplementedError as e:
@@ -933,12 +743,10 @@ class TestPicklefunction:
         # print [(k, id(k)) for k in f.finder]
         # print [(k, id(k)) for k in g.finder]
 
-        assert g.container[0].storage is not f.container[0].storage
-        assert g.container[1].storage is not f.container[1].storage
-        assert g.container[2].storage is not f.container[2].storage
-        assert x not in g.container
-        assert x not in g.value
-        assert len(f.defaults) == len(g.defaults)
+        assert g._finder[0].storage is not f._finder[0].storage
+        assert g._finder[1].storage is not f._finder[1].storage
+        assert g._finder[2].storage is not f._finder[2].storage
+        assert x not in g._finder
         # Shared variable is the first input
         assert (
             f._potential_aliased_input_groups
@@ -947,45 +755,24 @@ class TestPicklefunction:
         )
         assert f.name == g.name
         assert f.maker.fgraph.name == g.maker.fgraph.name
-        # print(f"{f.defaults = }")
-        # print(f"{g.defaults = }")
-        for (f_req, f_feed, f_val), (g_req, g_feed, g_val) in zip(
-            f.defaults, g.defaults, strict=True
-        ):
-            assert f_req == g_req and f_feed == g_feed and f_val == g_val
 
-        assert g.value[1] is not f.value[1]  # should not have been copied
-        assert (
-            g.value[2] is not f.value[2]
-        )  # should have been copied because it is mutable.
-        assert not (g.value[2] != f.value[2]).any()  # its contents should be identical
+        assert g._finder[1].value is None and f._finder[1].value is None
+        assert g._finder[2].value is None and f._finder[2].value is None
 
-        assert f(2, 1) == g(
-            2
-        )  # they should be in sync, default value should be copied.
-        assert f(2, 1) == g(
-            2
-        )  # they should be in sync, default value should be copied.
-        f(1, 2)  # put them out of sync
-        assert f(1, 2) != g(1, 2)  # they should not be equal anymore.
-        g(1, 2)  # put them back in sync
-        assert f(3) == g(3)  # They should be in sync again.
+        assert f(2, 1, 0) == g(2, 1, 0)
 
     def test_deepcopy_trust_input(self):
         a = dscalar()  # the a is for 'anonymous' (un-named).
         x, s = dscalars("xs")
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=0.0, update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        f = function(
+            [
+                x,
+                In(a, name="a"),
+                In(s, update=s + a * x, mutable=True),
+            ],
+            s + a * x,
+        )
         f.trust_input = True
         try:
             g = copy.deepcopy(f)
@@ -995,35 +782,19 @@ class TestPicklefunction:
             else:
                 raise
         assert f.trust_input is g.trust_input
-        f(np.asarray(2.0))
+        f(np.array(2.0), np.array(1.0), np.array(0.0))
         with pytest.raises((ValueError, AttributeError, InvalidValueError)):
-            f(2.0)
-        g(np.asarray(2.0))
+            f(2.0, np.array(1.0), np.array(0.0))
+        g(np.array(2.0), np.array(1.0), np.array(0.0))
         with pytest.raises((ValueError, AttributeError, InvalidValueError)):
-            g(2.0)
-
-    def test_output_keys(self):
-        x = vector()
-        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
-            f = function([x], {"vec": x**2})
-        o = f([2, 3, 4])
-        assert isinstance(o, dict)
-        assert np.allclose(o["vec"], [4, 9, 16])
-        with pytest.warns(FutureWarning, match="output_keys is deprecated."):
-            g = copy.deepcopy(f)
-        o = g([2, 3, 4])
-        assert isinstance(o, dict)
-        assert np.allclose(o["vec"], [4, 9, 16])
+            g(2.0, np.array(1.0), np.array(0.0))
 
     def test_deepcopy_shared_container(self):
         # Ensure that shared containers remain shared after a deep copy.
         a, x = scalars("ax")
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            h = function([In(a, value=0.0)], a)
-        f = function([x, In(a, value=h.container[a], implicit=True)], x + a)
+        h = function([In(a, value=Container(a, storage=[np.array(0.0)]))], a)
+        f = function([x, In(a, value=h._finder[a], implicit=True)], x + a)
 
         try:
             memo = {}
@@ -1037,26 +808,23 @@ class TestPicklefunction:
                 return
             else:
                 raise
-        h[a] = 1
-        hc[ac] = 2
-        assert f[a] == 1
-        assert fc[ac] == 2
+        h._finder[a].value = 1
+        hc._finder[ac].value = 2
+        assert f._finder[a].value == 1
+        assert fc._finder[ac].value == 2
 
     def test_pickle(self):
         a = scalar()  # the a is for 'anonymous' (un-named).
         x, s = scalars("xs")
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=0.0, update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        f = function(
+            [
+                x,
+                In(a, name="a"),
+                In(s, update=s + a * x, mutable=True),
+            ],
+            s + a * x,
+        )
 
         try:
             # Note that here we also test protocol 0 on purpose, since it
@@ -1072,26 +840,14 @@ class TestPicklefunction:
         # print [(k, id(k)) for k in f.finder]
         # print [(k, id(k)) for k in g.finder]
 
-        assert g.container[0].storage is not f.container[0].storage
-        assert g.container[1].storage is not f.container[1].storage
-        assert g.container[2].storage is not f.container[2].storage
-        assert x not in g.container
-        assert x not in g.value
+        assert g._finder[0].storage is not f._finder[0].storage
+        assert g._finder[1].storage is not f._finder[1].storage
+        assert g._finder[2].storage is not f._finder[2].storage
+        assert x not in g._finder
 
-        assert g.value[1] is not f.value[1]  # should not have been copied
-        assert (
-            g.value[2] is not f.value[2]
-        )  # should have been copied because it is mutable.
-        assert not (g.value[2] != f.value[2]).any()  # its contents should be identical
-
-        assert f(2, 1) == g(
-            2
-        )  # they should be in sync, default value should be copied.
-        assert f(2, 1) == g(
-            2
-        )  # they should be in sync, default value should be copied.
-        f(1, 2)  # put them out of sync
-        assert f(1, 2) != g(1, 2)  # they should not be equal anymore.
+        assert g._finder[1].value is None and f._finder[1].value is None
+        assert g._finder[2].value is None and f._finder[2].value is None
+        assert f(2, 1, 0) == g(2, 1, 0)
 
     def test_optimizations_preserved(self):
         a = dvector()  # the a is for 'anonymous' (un-named).
@@ -1144,42 +900,38 @@ class TestPicklefunction:
         # some derived thing, whose inputs aren't all in the list
         list_of_things.append(a * x + s)
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f1 = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=0.0, update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        f1 = function(
+            [
+                x,
+                In(a, name="a"),
+                In(
+                    s,
+                    value=Container(s, storage=[np.array(0.0)]),
+                    update=s + a * x,
+                    mutable=True,
+                ),
+            ],
+            s + a * x,
+        )
         list_of_things.append(f1)
 
         # now put in a function sharing container with the previous one
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f2 = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=f1.container[s], update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        f2 = function(
+            [
+                x,
+                In(a, name="a"),
+                In(s, value=f1._finder[s], update=s + a * x, mutable=True),
+            ],
+            s + a * x,
+        )
         list_of_things.append(f2)
 
-        assert isinstance(f2.container[s].storage, list)
-        assert f2.container[s].storage is f1.container[s].storage
+        assert isinstance(f2._finder[s].storage, list)
+        assert f2._finder[s].storage is f1._finder[s].storage
 
         # now put in a function with non-scalar
-        v_value = np.asarray([2, 3, 4.0], dtype=config.floatX)
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            f3 = function([x, In(v, value=v_value)], x + v)
+        value = Container(v, storage=[np.asarray([2, 3, 4.0], dtype=config.floatX)])
+        f3 = function([x, In(v, value=value)], x + v)
         list_of_things.append(f3)
 
         # try to pickle the entire things
@@ -1214,18 +966,18 @@ class TestPicklefunction:
             assert nl[i] != ol[i]
 
         # looking at function number 1, input 's'
-        assert nl[4][nl[0]] is not ol[4][ol[0]]
-        assert nl[4][nl[0]] == ol[4][ol[0]]
-        assert nl[4](3) == ol[4](3)
+        assert nl[4]._finder[nl[0]].value is not ol[4]._finder[ol[0]].value
+        assert nl[4]._finder[nl[0]].value == ol[4]._finder[ol[0]].value
+        assert nl[4](3, 1) == ol[4](3, 1)
 
         # looking at function number 2, input 's'
         # make sure it's shared with the first function
-        assert ol[4].container[ol[0]].storage is ol[5].container[ol[0]].storage
-        assert nl[4].container[nl[0]].storage is nl[5].container[nl[0]].storage
-        assert nl[5](3) == ol[5](3)
-        assert nl[4].value[nl[0]] == 6
+        assert ol[4]._finder[ol[0]].storage is ol[5]._finder[ol[0]].storage
+        assert nl[4]._finder[nl[0]].storage is nl[5]._finder[nl[0]].storage
+        assert nl[5](3, 1) == ol[5](3, 1)
+        assert nl[4]._finder[nl[0]].value == 6
 
-        assert np.all(nl[6][nl[2]] == np.asarray([2, 3.0, 4]))
+        assert np.all(nl[6]._finder[nl[2]].value == np.array([2, 3.0, 4]))
 
     def test_broken_pickle_with_shared(self):
         saves = []
@@ -1279,7 +1031,7 @@ class TestPicklefunction:
 
     def test_pickle_class_with_functions(self):
         blah = SomethingToPickle()
-        assert blah.f2.container[blah.s].storage is blah.f1.container[blah.s].storage
+        assert blah.f2._finder[blah.s].storage is blah.f1._finder[blah.s].storage
 
         try:
             blah2 = copy.deepcopy(blah)
@@ -1289,14 +1041,12 @@ class TestPicklefunction:
             else:
                 raise
 
-        assert (
-            blah2.f2.container[blah2.s].storage is blah2.f1.container[blah2.s].storage
-        )
+        assert blah2.f2._finder[blah2.s].storage is blah2.f1._finder[blah2.s].storage
 
-        assert blah.f1[blah.s] == blah2.f1[blah2.s]
+        assert blah.f1._finder[blah.s].value == blah2.f1._finder[blah2.s].value
 
-        blah.f2(5)
-        assert blah.f1[blah.s] != blah2.f1[blah2.s]
+        blah.f2(5, 1)
+        assert blah.f1._finder[blah.s].value != blah2.f1._finder[blah2.s].value
 
 
 class SomethingToPickle:
@@ -1311,29 +1061,28 @@ class SomethingToPickle:
 
         self.e = a * x + s
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            self.f1 = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=0.0, update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        self.f1 = function(
+            [
+                x,
+                In(a, name="a"),
+                In(
+                    s,
+                    value=Container(s, storage=[np.array(0.0)]),
+                    update=s + a * x,
+                    mutable=True,
+                ),
+            ],
+            s + a * x,
+        )
 
-        with pytest.warns(
-            FutureWarning, match="Inputs with default values are deprecated."
-        ):
-            self.f2 = function(
-                [
-                    x,
-                    In(a, value=1.0, name="a"),
-                    In(s, value=self.f1.container[s], update=s + a * x, mutable=True),
-                ],
-                s + a * x,
-            )
+        self.f2 = function(
+            [
+                x,
+                In(a, name="a"),
+                In(s, value=self.f1._finder[s], update=s + a * x, mutable=True),
+            ],
+            s + a * x,
+        )
 
 
 def test_empty_givens_updates():
@@ -1347,7 +1096,7 @@ def test_empty_givens_updates():
     function([In(x)], y, updates={})
 
 
-@pytest.mark.parametrize("trust_input", [True, False])
+@pytest.mark.parametrize("trust_input", [True, False], ids=lambda x: f"trust_input={x}")
 def test_minimal_random_function_call_benchmark(trust_input, benchmark):
     rng = random_generator_type()
     x = normal(rng=rng, size=(100,))
@@ -1357,3 +1106,17 @@ def test_minimal_random_function_call_benchmark(trust_input, benchmark):
 
     rng_val = np.random.default_rng()
     benchmark(f, rng_val)
+
+
+@pytest.mark.parametrize("trust_input", [True, False], ids=lambda x: f"trust_input={x}")
+@pytest.mark.parametrize("linker", ["c", "cvm", "cvm_nogc"])
+def test_overhead_benchmark(trust_input, linker, benchmark):
+    x = pt.vector("x")
+    fn = function(
+        [In(x, borrow=True)],
+        Out(x, borrow=True),
+        trust_input=trust_input,
+        mode=Mode(linker=linker, optimizer=None),
+    )
+    x_test = np.zeros(10)
+    benchmark(fn, x_test)

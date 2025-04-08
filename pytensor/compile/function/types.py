@@ -331,22 +331,34 @@ class Function:
     ``False``. When ``True``, the `Function` will skip all checks on the
     inputs.
 
-    Attributes
-    ----------
-    finder
-        Dictionary mapping several kinds of things to containers.
-
-        We set an entry in finder for:
-        - the index of the input
-        - the variable instance the input is based on
-        - the name of the input
-
-        All entries map to the container or to DUPLICATE if an ambiguity
-        is detected.
-    inv_finder
-        Reverse lookup of `finder`.  It maps containers to `SymbolicInput`\s.
-
     """
+
+    __slots__ = (
+        "vm",
+        "input_storage",
+        "output_storage",
+        "indices",
+        "outputs",
+        "unpack_single",
+        "return_none",
+        "maker",
+        "profile",
+        "trust_input",
+        "name",
+        # Created inside __init__
+        "_potential_aliased_input_groups",
+        "_named_inputs",
+        "_n_unnamed_inputs",
+        "_finder",
+        "_inv_finder",
+        "_has_updates",
+        "_n_returned_outputs",
+        "_input_storage_data",
+        "_update_input_storage",
+        "_clear_input_storage_data",
+        "_clear_output_storage_data",
+        "_nodes_with_inner_function",
+    )
 
     pickle_aliased_memory_strategy = "warn"
     """
@@ -368,10 +380,8 @@ class Function:
         output_storage: list[Container],
         indices,
         outputs,
-        defaults,
         unpack_single: bool,
         return_none: bool,
-        output_keys,
         maker: "FunctionMaker",
         trust_input: bool = False,
         name: str | None = None,
@@ -392,20 +402,11 @@ class Function:
             tuple elements are used only by Kits, which are deprecated.
         outputs
             TODO
-        defaults
-            List of 3-tuples, one 3-tuple for each input.
-            Tuple element 0: ``bool``.  Is this input required at each function
-            call?
-            Tuple element 1: ``bool``.  Should this inputs value be reverted
-            after each call?
-            Tuple element 2: ``Any``.  The value associated with this input.
         unpack_single
             For outputs lists of length 1, should the 0'th element be
             returned directly?
         return_none
             Whether the function should return ``None`` or not.
-        output_keys
-            TODO
         maker
             The `FunctionMaker` that created this instance.
         trust_input : bool, default False
@@ -422,23 +423,15 @@ class Function:
         self.output_storage = output_storage
         self.indices = indices
         self.outputs = outputs
-        self.defaults = defaults
         self.unpack_single = unpack_single
         self.return_none = return_none
         self.maker = maker
         self.profile = None  # reassigned in FunctionMaker.create
         self.trust_input = trust_input  # If True, we don't check the input parameter
         self.name = name
-        self.nodes_with_inner_function = []
-        self.output_keys = output_keys
-
-        if self.output_keys is not None:
-            warnings.warn("output_keys is deprecated.", FutureWarning)
 
         assert len(self.input_storage) == len(self.maker.fgraph.inputs)
         assert len(self.output_storage) == len(self.maker.fgraph.outputs)
-
-        self.has_defaults = any(refeed for _, refeed, _ in self.defaults)
 
         # Group indexes of inputs that are potentially aliased to each other
         # Note: Historically, we only worried about aliasing inputs if they belonged to the same type,
@@ -475,41 +468,20 @@ class Function:
             if len(group) > 1
         )
 
-        # We will be popping stuff off this `containers` object.  It is a copy.
-        containers = list(self.input_storage)
-        finder = {}
-        inv_finder = {}
-
-        # Store the list of names of named inputs.
-        named_inputs = []
-        # Count the number of un-named inputs.
-        n_unnamed_inputs = 0
-
+        self._finder = finder = {}
+        self._inv_finder = inv_finder = {}
+        self._named_inputs = named_inputs = []
+        self._n_unnamed_inputs = 0
         # Initialize the storage
         # this loop works by modifying the elements (as variable c) of
         # self.input_storage inplace.
-        for i, ((input, indices, sinputs), (required, refeed, value)) in enumerate(
-            zip(self.indices, defaults, strict=True)
-        ):
+        remaining_containers = self.input_storage.copy()
+        for i, (input, indices, sinputs) in enumerate(self.indices):
             if indices is None:
-                # containers is being used as a stack. Here we pop off
-                # the next one.
-                c = containers[0]
+                c = remaining_containers.pop(0)
                 c.strict = getattr(input, "strict", False)
                 c.allow_downcast = getattr(input, "allow_downcast", None)
-
-                if value is not None:
-                    # Always initialize the storage.
-                    if isinstance(value, Container):
-                        # There is no point in obtaining the current value
-                        # stored in the container, since the container is
-                        # shared.
-                        # For safety, we make sure 'refeed' is False, since
-                        # there is no need to refeed the default value.
-                        assert not refeed
-                    else:
-                        c.value = value
-                c.required = required
+                c.required = input.value is None
                 c.implicit = input.implicit
                 # this is a count of how many times the input has been
                 # provided (reinitialized to 0 on __call__)
@@ -521,71 +493,10 @@ class Function:
                 else:
                     finder[input.name] = DUPLICATE
                 if input.name is None:
-                    n_unnamed_inputs += 1
+                    self._n_unnamed_inputs += 1
                 else:
                     named_inputs.append(input.name)
                 inv_finder[c] = input
-                containers[:1] = []
-
-        self.finder = finder
-        self.inv_finder = inv_finder
-
-        # this class is important in overriding the square-bracket notation:
-        #     fn.value[x]
-        # self reference is available via the closure on the class
-        class ValueAttribute:
-            def __getitem__(self, item):
-                try:
-                    s = finder[item]
-                except KeyError:
-                    raise TypeError(f"Unknown input or state: {item}")
-                if s is DUPLICATE:
-                    raise TypeError(
-                        f"Ambiguous name: {item} - please check the "
-                        "names of the inputs of your function "
-                        "for duplicates."
-                    )
-                if isinstance(s, Container):
-                    return s.value
-                else:
-                    raise NotImplementedError
-
-            def __setitem__(self, item, value):
-                try:
-                    s = finder[item]
-                except KeyError:
-                    # Print informative error message.
-                    msg = get_info_on_inputs(named_inputs, n_unnamed_inputs)
-                    raise TypeError(f"Unknown input or state: {item}. {msg}")
-                if s is DUPLICATE:
-                    raise TypeError(
-                        f"Ambiguous name: {item} - please check the "
-                        "names of the inputs of your function "
-                        "for duplicates."
-                    )
-                if isinstance(s, Container):
-                    s.value = value
-                    s.provided += 1
-                else:
-                    s(value)
-
-            def __contains__(self, item):
-                return finder.__contains__(item)
-
-        # this class is important in overriding the square-bracket notation:
-        #     fn.container[x]
-        # self reference is available via the closure on the class
-        class ContainerAttribute:
-            def __getitem__(self, item):
-                return finder[item]
-
-            def __contains__(self, item):
-                return finder.__contains__(item)
-
-            # You cannot set the container
-
-        self._value = ValueAttribute()
-        self._container = ContainerAttribute()
 
         update_storage = [
             container
@@ -595,27 +506,31 @@ class Function:
             if inp.update is not None
         ]
         # Updates are the last inner outputs that are not returned by Function.__call__
-        self.n_returned_outputs = len(self.output_storage) - len(update_storage)
+        self._has_updates = len(update_storage) > 0
+        self._n_returned_outputs = len(self.output_storage) - len(update_storage)
 
         # Function.__call__ is responsible for updating the inputs, unless the vm promises to do it itself
-        self.update_input_storage: tuple[int, Container] = ()
+        self._update_input_storage: tuple[int, Container] = ()
         if getattr(vm, "need_update_inputs", True):
-            self.update_input_storage = tuple(
+            self._update_input_storage = tuple(
                 zip(
-                    range(self.n_returned_outputs, len(output_storage)),
+                    range(self._n_returned_outputs, len(output_storage)),
                     update_storage,
                     strict=True,
                 )
             )
 
+        self._input_storage_data = tuple(
+            container.storage for container in input_storage
+        )
+
         # In every function call we place inputs in the input_storage, and the vm places outputs in the output_storage
         # After the call, we want to erase (some of) these references, to allow Python to GC them if unused
-        # Required input containers are the non-default inputs, must always be provided again, so we GC them
-        self.clear_input_storage_data = tuple(
+        self._clear_input_storage_data = tuple(
             container.storage for container in input_storage if container.required
         )
         # This is only done when `vm.allow_gc` is True, which can change at runtime.
-        self.clear_output_storage_data = tuple(
+        self._clear_output_storage_data = tuple(
             container.storage
             for container, variable in zip(
                 self.output_storage, self.maker.fgraph.outputs, strict=True
@@ -623,18 +538,11 @@ class Function:
             if variable.owner is not None  # Not a constant output
         )
 
-        for node in self.maker.fgraph.apply_nodes:
-            if isinstance(node.op, HasInnerGraph):
-                self.nodes_with_inner_function.append(node.op)
-
-    def __contains__(self, item):
-        return self.value.__contains__(item)
-
-    def __getitem__(self, item):
-        return self.value[item]
-
-    def __setitem__(self, item, value):
-        self.value[item] = value
+        self._nodes_with_inner_function = [
+            node
+            for node in self.maker.fgraph.apply_nodes
+            if isinstance(node.op, HasInnerGraph)
+        ]
 
     def __copy__(self):
         """
@@ -838,7 +746,6 @@ class Function:
             # check that.
             accept_inplace=True,
             no_fgraph_prep=True,
-            output_keys=maker.output_keys,
             name=name,
         ).create(input_storage, storage_map=new_storage_map)
 
@@ -862,26 +769,126 @@ class Function:
             # to container, to make Function.value and Function.data work well.
             # Replace variable in new maker.inputs by the original ones.
             # So that user can swap SharedVariable in a swapped function
-            container = f_cpy.finder.pop(in_cpy.variable)
+            container = f_cpy._finder.pop(in_cpy.variable)
             if not swapped:
-                f_cpy.finder[in_ori.variable] = container
+                f_cpy._finder[in_ori.variable] = container
                 in_cpy.variable = in_ori.variable
             else:
-                f_cpy.finder[swap[in_ori.variable]] = container
+                f_cpy._finder[swap[in_ori.variable]] = container
                 in_cpy.variable = swap[in_ori.variable]
 
         f_cpy.trust_input = self.trust_input
         f_cpy.unpack_single = self.unpack_single
         return f_cpy
 
-    def _restore_defaults(self):
-        for i, (required, refeed, value) in enumerate(self.defaults):
-            if refeed:
-                if isinstance(value, Container):
-                    value = value.storage[0]
-                self[i] = value
+    def _validate_inputs(self, args, kwargs):
+        input_storage = self.input_storage
 
-    def __call__(self, *args, output_subset=None, **kwargs):
+        if len(args) + len(kwargs) > len(input_storage):
+            raise TypeError("Too many parameter passed to pytensor function")
+
+        for arg_container in input_storage:
+            arg_container.provided = 0
+
+        # Set positional arguments
+        for arg_container, arg in zip(input_storage, args):
+            try:
+                arg_container.storage[0] = arg_container.type.filter(
+                    arg,
+                    strict=arg_container.strict,
+                    allow_downcast=arg_container.allow_downcast,
+                )
+
+            except Exception as e:
+                i = input_storage.index(arg_container)
+                function_name = "pytensor function"
+                argument_name = "argument"
+                if self.name:
+                    function_name += ' with name "' + self.name + '"'
+                if hasattr(arg, "name") and arg.name:
+                    argument_name += ' with name "' + arg.name + '"'
+                where = get_variable_trace_string(self.maker.inputs[i].variable)
+                if len(e.args) == 1:
+                    e.args = (
+                        "Bad input "
+                        + argument_name
+                        + " to "
+                        + function_name
+                        + f" at index {int(i)} (0-based). {where}"
+                        + e.args[0],
+                    )
+                else:
+                    e.args = (
+                        "Bad input "
+                        + argument_name
+                        + " to "
+                        + function_name
+                        + f" at index {int(i)} (0-based). {where}"
+                    ) + e.args
+                raise
+            arg_container.provided += 1
+
+        # Set keyword arguments
+        if kwargs:  # for speed, skip the items for empty kwargs
+            for key, arg in kwargs.items():
+                try:
+                    kwarg_container = self._finder[key]
+                except KeyError:
+                    # Print informative error message.
+                    msg = get_info_on_inputs(self._named_inputs, self._n_unnamed_inputs)
+                    raise TypeError(f"Unknown input: {key}. {msg}")
+                if kwarg_container is DUPLICATE:
+                    raise TypeError(
+                        f"Ambiguous name: {key} - please check the names of the inputs of your function for duplicates."
+                    )
+                kwarg_container.value = arg
+                kwarg_container.provided += 1
+
+        # Collect aliased inputs among the storage space
+        for potential_group in self._potential_aliased_input_groups:
+            args_share_memory: list[list[int]] = []
+            for i in potential_group:
+                i_type = self.maker.inputs[i].variable.type
+                i_val = input_storage[i].storage[0]
+
+                # Check if value is aliased with any of the values in one of the groups
+                for j_group in args_share_memory:
+                    if any(
+                        i_type.may_share_memory(input_storage[j].storage[0], i_val)
+                        for j in j_group
+                    ):
+                        j_group.append(i)
+                        break
+                else:  # no break
+                    # Create a new group
+                    args_share_memory.append([i])
+
+            # Check for groups of more than one argument that share memory
+            for group in args_share_memory:
+                if len(group) > 1:
+                    # copy all but the first
+                    for i in group[1:]:
+                        input_storage[i].storage[0] = copy.copy(
+                            input_storage[i].storage[0]
+                        )
+
+        # Check if inputs are missing, or if inputs were set more than once, or
+        # if we tried to provide inputs that are supposed to be implicit.
+        for arg_container in input_storage:
+            if arg_container.required and not arg_container.provided:
+                raise TypeError(
+                    f"Missing input: {getattr(self._inv_finder[arg_container], 'variable', self._inv_finder[arg_container])}"
+                )
+            if arg_container.provided > 1:
+                raise TypeError(
+                    f"Multiple values for input: {getattr(self._inv_finder[arg_container], 'variable', self._inv_finder[arg_container])}"
+                )
+            if arg_container.implicit and arg_container.provided > 0:
+                raise TypeError(
+                    f"Tried to provide value for implicit input: {getattr(self._inv_finder[arg_container], 'variable', self._inv_finder[arg_container])}"
+                )
+
+    def __call__(self, *args, **kwargs):
         """
         Evaluates value of a function on given arguments.
 
@@ -909,134 +916,30 @@ class Function:
             List of outputs on indices/keys from ``output_subset`` or all of them,
             if ``output_subset`` is not passed.
         """
-        trust_input = self.trust_input
-        input_storage = self.input_storage
-        vm = self.vm
-        profile = self.profile
-
-        if profile:
+        if self.profile:
             t0 = time.perf_counter()
 
-        if output_subset is not None:
-            warnings.warn("output_subset is deprecated.", FutureWarning)
-            if self.output_keys is not None:
-                output_subset = [self.output_keys.index(key) for key in output_subset]
-
         # Reinitialize each container's 'provided' counter
-        if trust_input:
-            for arg_container, arg in zip(input_storage, args, strict=False):
-                arg_container.storage[0] = arg
+        if self.trust_input:
+            for storage_data, arg in zip(self._input_storage_data, args):
+                storage_data[0] = arg
+            if kwargs:  # for speed, skip the items for empty kwargs
+                for k, arg in kwargs.items():
+                    self._finder[k].storage[0] = arg
         else:
-            for arg_container in input_storage:
-                arg_container.provided = 0
-
-            if len(args) + len(kwargs) > len(input_storage):
-                raise TypeError("Too many parameter passed to pytensor function")
-
-            # Set positional arguments
-            for arg_container, arg in zip(input_storage, args, strict=False):
-                # See discussion about None as input
-                # https://groups.google.com/group/theano-dev/browse_thread/thread/920a5e904e8a8525/4f1b311a28fc27e5
-                if arg is None:
-                    arg_container.storage[0] = arg
-                else:
-                    try:
-                        arg_container.storage[0] = arg_container.type.filter(
-                            arg,
-                            strict=arg_container.strict,
-                            allow_downcast=arg_container.allow_downcast,
-                        )
-
-                    except Exception as e:
-                        i = input_storage.index(arg_container)
-                        function_name = "pytensor function"
-                        argument_name = "argument"
-                        if self.name:
-                            function_name += ' with name "' + self.name + '"'
-                        if hasattr(arg, "name") and arg.name:
-                            argument_name += ' with name "' + arg.name + '"'
-                        where = get_variable_trace_string(self.maker.inputs[i].variable)
-                        if len(e.args) == 1:
-                            e.args = (
-                                "Bad input "
-                                + argument_name
-                                + " to "
-                                + function_name
-                                + f" at index {int(i)} (0-based). {where}"
-                                + e.args[0],
-                            )
-                        else:
-                            e.args = (
-                                "Bad input "
-                                + argument_name
-                                + " to "
-                                + function_name
-                                + f" at index {int(i)} (0-based). {where}"
-                            ) + e.args
-                        self._restore_defaults()
-                        raise
-                arg_container.provided += 1
-
-        # Set keyword arguments
-        if kwargs:  # for speed, skip the items for empty kwargs
-            for k, arg in kwargs.items():
-                self[k] = arg
-
-        if not trust_input:
-            # Collect aliased inputs among the storage space
-            for potential_group in self._potential_aliased_input_groups:
-                args_share_memory: list[list[int]] = []
-                for i in potential_group:
-                    i_type = self.maker.inputs[i].variable.type
-                    i_val = input_storage[i].storage[0]
-
-                    # Check if value is aliased with any of the values in one of the groups
-                    for j_group in args_share_memory:
-                        if any(
-                            i_type.may_share_memory(input_storage[j].storage[0], i_val)
-                            for j in j_group
-                        ):
-                            j_group.append(i)
-                            break
-                    else:  # no break
-                        # Create a new group
-                        args_share_memory.append([i])
-
-                # Check for groups of more than one argument that share memory
-                for group in args_share_memory:
-                    if len(group) > 1:
-                        # copy all but the first
-                        for i in group[1:]:
-                            input_storage[i].storage[0] = copy.copy(
-                                input_storage[i].storage[0]
-                            )
-
-            # Check if inputs are missing, or if inputs were set more than once, or
-            # if we tried to provide inputs that are supposed to be implicit.
-            for arg_container in input_storage:
-                if arg_container.required and not arg_container.provided:
-                    self._restore_defaults()
-                    raise TypeError(
-                        f"Missing required input: {getattr(self.inv_finder[arg_container], 'variable', self.inv_finder[arg_container])}"
-                    )
-                if arg_container.provided > 1:
-                    self._restore_defaults()
-                    raise TypeError(
-                        f"Multiple values for input: {getattr(self.inv_finder[arg_container], 'variable', self.inv_finder[arg_container])}"
-                    )
-                if arg_container.implicit and arg_container.provided > 0:
-                    self._restore_defaults()
-                    raise TypeError(
-                        f"Tried to provide value for implicit input: {getattr(self.inv_finder[arg_container], 'variable', self.inv_finder[arg_container])}"
-                    )
+            self._validate_inputs(args, kwargs)
 
         # Do the actual work
-        if profile:
-            t0_fn = time.perf_counter()
         try:
-            outputs = vm() if output_subset is None else vm(output_subset=output_subset)
+            if self.profile:
+                t0_fn = time.perf_counter()
+                outputs = self.vm()
+                dt_fn = time.perf_counter() - t0_fn
+                self.maker.mode.fn_time += dt_fn
+                self.profile.vm_call_time += dt_fn
+            else:
+                outputs = self.vm()
         except Exception:
-            self._restore_defaults()
             if hasattr(self.vm, "position_of_error"):
                 # this is a new vm-provided function or c linker
                 # they need this because the exception manipulation
@@ -1054,71 +957,39 @@ class Function:
                 # old-style linkers raise their own exceptions
                 raise
 
-        if profile:
-            dt_fn = time.perf_counter() - t0_fn
-            self.maker.mode.fn_time += dt_fn
-            profile.vm_call_time += dt_fn
-
-        # Retrieve the values that were computed
         if outputs is None:
+            # Not all VMs can return outputs directly (mainly CLinker?)
             outputs = [x.storage[0] for x in self.output_storage]
 
         # Set updates and filter them out from the returned outputs
-        for i, input_storage in self.update_input_storage:
-            input_storage.storage[0] = outputs[i]
-        outputs = outputs[: self.n_returned_outputs]
+        if self._has_updates:
+            for i, input_storage in self._update_input_storage:
+                input_storage.storage[0] = outputs[i]
+            outputs = outputs[: self._n_returned_outputs]
 
         # Remove input and output values from storage data
-        for storage_data in self.clear_input_storage_data:
-            storage_data[0] = None
-        if getattr(vm, "allow_gc", False):
-            for storage_data in self.clear_output_storage_data:
+        if self.vm.allow_gc:
+            for storage_data in self._clear_input_storage_data:
+                storage_data[0] = None
+            for storage_data in self._clear_output_storage_data:
                 storage_data[0] = None
 
-        # Put default values back in the storage
-        if self.has_defaults:
-            self._restore_defaults()
-
-        if profile:
+        if self.profile:
+            profile = self.profile
             dt_call = time.perf_counter() - t0
             pytensor.compile.profiling.total_fct_exec_time += dt_call
             self.maker.mode.call_time += dt_call
             profile.fct_callcount += 1
             profile.fct_call_time += dt_call
-            if hasattr(vm, "update_profile"):
-                vm.update_profile(profile)
+            if hasattr(self.vm, "update_profile"):
+                self.vm.update_profile(profile)
             if profile.ignore_first_call:
                 profile.reset()
                 profile.ignore_first_call = False
 
-        if self.return_none:
-            return None
-
-        if output_subset is not None:
-            outputs = [outputs[i] for i in output_subset]
-
-        if self.output_keys is None:
-            if self.unpack_single:
-                [out] = outputs
-                return out
-            else:
-                return outputs
-        else:
-            output_keys = self.output_keys
-            if output_subset is not None:
-                output_keys = [output_keys[i] for i in output_subset]
-            return dict(zip(output_keys, outputs, strict=True))
-
-    value = property(
-        lambda self: self._value,
-        None,  # this property itself is not settable
-        doc="dictionary-like access to the values associated with Variables",
-    )
-    container = property(
-        lambda self: self._container,
-        None,  # this property itself is not settable
-        doc=("dictionary-like access to the containers associated with Variables"),
-    )
+        return (
+            outputs[0] if self.unpack_single else None if self.return_none else outputs
+        )
 
     def free(self):
         """
@@ -1126,13 +997,16 @@ class Function:
         """
         # 1.no allow_gc return False
         # 2.has allow_gc, if allow_gc is False, return True
-        if not getattr(self.vm, "allow_gc", True):
+        if not self.vm.allow_gc:
+            for inp_storage in self._clear_input_storage_data:
+                inp_storage[0] = None
+
             storage_map = self.vm.storage_map
             for key, value in storage_map.items():
                 if key.owner is not None:  # Not a constant
                     value[0] = None
 
-            for node in self.nodes_with_inner_function:
+            for node in self._nodes_with_inner_function:
                 if hasattr(node.fn, "free"):
                     node.fn.free()
 
@@ -1157,17 +1031,7 @@ class Function:
 
 # pickling/deepcopy support for Function
 def _pickle_Function(f):
-    # copy of the input storage list
-    ins = list(f.input_storage)
-    input_storage = []
-
-    # strict=False because we are in a hot loop
-    for (input, indices, inputs), (required, refeed, default) in zip(
-        f.indices, f.defaults, strict=False
-    ):
-        input_storage.append(ins[0])
-        del ins[0]
-
+    input_storage = f.input_storage.copy()
     inputs_data = [x.data for x in f.input_storage]
 
     # HACK to detect aliased storage.
@@ -1521,6 +1385,9 @@ class FunctionMaker:
         no_fgraph_prep=False,
         trust_input=False,
     ):
+        if output_keys is not None:
+            raise ValueError("output_keys was deprecated")
+
         # Save the provided mode, not the instantiated mode.
         # The instantiated mode don't pickle and if we unpickle an PyTensor
         # function and it get re-compiled, we want the current rewriter to be
@@ -1561,6 +1428,20 @@ class FunctionMaker:
 
         # Wrap them in In or Out instances if needed.
         inputs = [self.wrap_in(i) for i in inputs]
+
+        # Remove this after a while
+        if any(
+            (
+                i.value is not None
+                and not isinstance(i.value, Container)
+                and i.update is None
+            )
+            for i in inputs
+        ):
+            raise ValueError(
+                "Inputs with default values were deprecated. Use `functools.partial` instead."
+            )
+
         outputs = [self.wrap_out(o) for o in outputs]
 
         # Check if some input variables are unused
@@ -1620,21 +1501,9 @@ class FunctionMaker:
         self.accept_inplace = accept_inplace
         self.function_builder = function_builder
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
-        self.output_keys = output_keys
         self.name = name
         self.trust_input = trust_input
-
         self.required = [(i.value is None) for i in self.inputs]
-        self.refeed = [
-            (
-                i.value is not None
-                and not isinstance(i.value, Container)
-                and i.update is None
-            )
-            for i in self.inputs
-        ]
-        if any(self.refeed):
-            warnings.warn("Inputs with default values are deprecated.", FutureWarning)
 
     def create(self, input_storage=None, storage_map=None):
         """
@@ -1652,7 +1521,6 @@ class FunctionMaker:
             input_storage = [None] * len(self.inputs)
         # list of independent one-element lists, will be passed to the linker
         input_storage_lists = []
-        defaults = []
 
         # The following loop is to fill in the input_storage_lists and
         # defaults lists.
@@ -1679,35 +1547,15 @@ class FunctionMaker:
                     )
                 input_storage_lists.append(input_storage_i.storage)
 
-                storage = input_storage[i].storage[0]
-
             else:
                 # Normal case: one new, independent storage unit
                 input_storage_lists.append([input_storage_i])
 
-                storage = input_storage_i
-
             required = self.required[i]
-            refeed = self.refeed[i]
-            # sanity check-- if an input is required it should not
-            # need to be refed
-            assert not (required and refeed)
 
             # shared variables need neither be input by the user nor refed
             if input.shared:
                 assert not required
-                assert not refeed
-                storage = None
-
-            # if an input is required, it never need be refed
-            if required:
-                storage = None
-
-            # make sure that we only store a value if we actually need it
-            if storage is not None:
-                assert refeed or not required
-
-            defaults.append((required, refeed, storage))
 
         # Get a function instance
         start_linker = time.perf_counter()
@@ -1730,16 +1578,14 @@ class FunctionMaker:
             self.profile.import_time += import_time
 
         fn = self.function_builder(
-            _fn,
-            _i,
-            _o,
-            self.indices,
-            self.outputs,
-            defaults,
-            self.unpack_single,
-            self.return_none,
-            self.output_keys,
-            self,
+            vm=_fn,
+            input_storage=_i,
+            output_storage=_o,
+            indices=self.indices,
+            outputs=self.outputs,
+            unpack_single=self.unpack_single,
+            return_none=self.return_none,
+            maker=self,
             trust_input=self.trust_input,
             name=self.name,
         )
@@ -1809,7 +1655,7 @@ def orig_function(
         else:
             outputs = FunctionMaker.wrap_out(outputs)
 
-    defaults = [getattr(input, "value", None) for input in inputs]
+    shared_variable_containers = [getattr(input, "value", None) for input in inputs]
 
     if isinstance(mode, list | tuple):
         raise ValueError("We do not support the passing of multiple modes")
@@ -1830,7 +1676,7 @@ def orig_function(
             trust_input=trust_input,
         )
         with config.change_flags(compute_test_value="off"):
-            fn = m.create(defaults)
+            fn = m.create(shared_variable_containers)
     finally:
         if profile and fn:
             t2 = time.perf_counter()

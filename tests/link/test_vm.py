@@ -6,7 +6,6 @@ import pytest
 from pytensor.compile.function import function
 from pytensor.compile.io import In
 from pytensor.compile.mode import Mode, get_mode
-from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
@@ -17,9 +16,8 @@ from pytensor.link.c.exceptions import MissingGXX
 from pytensor.link.utils import map_storage
 from pytensor.link.vm import VM, Loop, Stack, VMLinker
 from pytensor.tensor.math import cosh, tanh
-from pytensor.tensor.type import lscalar, scalar, scalars, vector, vectors
+from pytensor.tensor.type import scalar, scalars, vector, vectors
 from pytensor.tensor.variable import TensorConstant
-from tests import unittest_tools as utt
 
 
 class SomeOp(Op):
@@ -200,71 +198,6 @@ def test_speed_lazy(linker):
     # t_b = t3 - t2
 
     # print(f"{linker} takes {1000 * (t_b - t_a) / (steps_b - steps_a):f} s/Kop")
-
-
-@pytest.mark.parametrize(
-    "linker", [VMLinker(allow_partial_eval=True, use_cloop=False), "cvm"]
-)
-def test_partial_function(linker):
-    x = scalar("input")
-    y = x**2
-    f = function(
-        [x], [y + 7, y - 9, y / 14.0], mode=Mode(optimizer=None, linker=linker)
-    )
-
-    if linker == "cvm":
-        from pytensor.link.c.cvm import CVM
-
-        assert isinstance(f.vm, CVM)
-    else:
-        assert isinstance(f.vm, Stack)
-
-    assert f(3, output_subset=[0, 1, 2]) == f(3)
-    assert f(4, output_subset=[0, 2]) == [f(4)[0], f(4)[2]]
-
-    utt.assert_allclose(f(5), np.array([32.0, 16.0, 1.7857142857142858]))
-
-
-@pytest.mark.parametrize(
-    "linker", [VMLinker(allow_partial_eval=True, use_cloop=False), "cvm"]
-)
-def test_partial_function_with_output_keys(linker):
-    x = scalar("input")
-    y = 3 * x
-    f = function(
-        [x], {"a": y * 5, "b": y - 7}, mode=Mode(optimizer=None, linker=linker)
-    )
-
-    assert f(5, output_subset=["a"])["a"] == f(5)["a"]
-
-
-@pytest.mark.parametrize(
-    "linker", [VMLinker(allow_partial_eval=True, use_cloop=False), "cvm"]
-)
-def test_partial_function_with_updates(linker):
-    x = lscalar("input")
-    y = shared(np.asarray(1, "int64"), name="global")
-
-    mode = Mode(optimizer=None, linker=linker)
-
-    f = function(
-        [x],
-        [x, x + 34],
-        updates=[(y, x + 1)],
-        mode=mode,
-    )
-    g = function(
-        [x],
-        [x - 6],
-        updates=[(y, y + 3)],
-        mode=mode,
-    )
-
-    assert f(3, output_subset=[]) == []
-    assert y.get_value() == 4
-    assert g(30, output_subset=[0]) == [24]
-    assert g(40, output_subset=[]) == []
-    assert y.get_value() == 10
 
 
 def test_allow_gc_cvm():

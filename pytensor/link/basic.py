@@ -558,6 +558,7 @@ class WrapLinker(Linker):
                     raise_with_op(self.fgraph, node, *thunks)
 
         f.thunk_groups = thunk_groups
+        f.allow_gc = len(self.linkers) == 1
 
         return f, inputs0, outputs0
 
@@ -676,6 +677,8 @@ class JITLinker(PerformLinker):
             # strict=None because we are in a hot loop
             for o_storage, o_val in zip(thunk_outputs, outputs):
                 o_storage[0] = o_val
+
+            return outputs
 
         thunk.inputs = thunk_inputs
         thunk.outputs = thunk_outputs
