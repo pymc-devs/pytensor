@@ -182,9 +182,6 @@ class In(SymbolicInput):
         borrow=None,
         shared=False,
     ):
-        # if shared, an input's value comes from its persistent
-        # storage, not from a default stored in the function or from
-        # the caller
         self.shared = shared
 
         if borrow is None:
@@ -203,6 +200,13 @@ class In(SymbolicInput):
                 "input variable may be both aliased (borrow=True) and "
                 "overwritten.",
             )
+
+        if value is not None and not isinstance(value, Container):
+            from pytensor.compile.sharedvalue import SharedVariable
+
+            if not isinstance(value, SharedVariable):
+                # This is to catch use of old API to pass default values
+                raise ValueError("Inputs with default values are deprecated")
 
         if implicit is None:
             from pytensor.compile.sharedvalue import SharedVariable

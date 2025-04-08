@@ -196,8 +196,8 @@ class ScalarLoop(ScalarInnerGraphOp):
             for i in range(n_steps):
                 carry = inner_fn(*carry, *constant)
 
-        # strict=False because we are in a hot loop
-        for storage, out_val in zip(output_storage, carry, strict=False):
+        # strict=None because we are in a hot loop
+        for storage, out_val in zip(output_storage, carry):  # noqa: B905
             storage[0] = out_val
 
     @property

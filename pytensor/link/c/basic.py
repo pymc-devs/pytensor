@@ -1878,6 +1878,7 @@ class OpWiseCLinker(LocalLinker):
             post_thunk_old_storage,
             no_recycling=no_recycling,
             nice_errors=self.nice_errors,
+            output_storage=output_storage,
         )
 
         f.allow_gc = self.allow_gc
@@ -1988,26 +1989,25 @@ class DualLinker(Linker):
         )
 
         def f():
-            # strict=False because we are in a hot loop
-            for input1, input2 in zip(i1, i2, strict=False):
+            for input1, input2 in zip(i1, i2, strict=True):
                 # Set the inputs to be the same in both branches.
                 # The copy is necessary in order for inplace ops not to
                 # interfere.
                 input2.storage[0] = copy(input1.storage[0])
             for thunk1, thunk2, node1, node2 in zip(
-                thunks1, thunks2, order1, order2, strict=False
+                thunks1, thunks2, order1, order2, strict=True
             ):
-                for output, storage in zip(node1.outputs, thunk1.outputs, strict=False):
+                for output, storage in zip(node1.outputs, thunk1.outputs, strict=True):
                     if output in no_recycling:
                         storage[0] = None
-                for output, storage in zip(node2.outputs, thunk2.outputs, strict=False):
+                for output, storage in zip(node2.outputs, thunk2.outputs, strict=True):
                     if output in no_recycling:
                         storage[0] = None
                 try:
                     thunk1()
                     thunk2()
                     for output1, output2 in zip(
-                        thunk1.outputs, thunk2.outputs, strict=False
+                        thunk1.outputs, thunk2.outputs, strict=True
                     ):
                         self.checker(output1, output2)
                 except Exception:

@@ -873,7 +873,5 @@ class OpFromGraph(Op, HasInnerGraph):
 
     def perform(self, node, inputs, outputs):
         variables = self.fn(*inputs)
-        assert len(variables) == len(outputs)
-        # strict=False because asserted above
-        for output, variable in zip(outputs, variables, strict=False):
+        for output, variable in zip(outputs, variables, strict=True):
             output[0] = variable

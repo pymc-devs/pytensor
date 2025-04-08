@@ -1353,20 +1353,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
                         preallocated_mitmot_outs.append(output_idx)
 
-                        # Make it so that the input is automatically updated to
-                        # the output value, possibly inplace, at the end of the
-                        # function execution. Also, since an update is defined,
-                        # a default value must also be (this is verified by
-                        # DebugMode).
-                        # TODO FIXME: Why do we need a "default value" here?
-                        # This sounds like a serious design issue.
-                        default_shape = tuple(
-                            s if s is not None else 0 for s in inp.type.shape
-                        )
-                        default_val = np.empty(default_shape, dtype=inp.type.dtype)
                         wrapped_inp = In(
                             variable=inp,
-                            value=default_val,
                             update=fgraph.outputs[output_idx],
                         )
                         update_mapping[output_idx] = input_idx
