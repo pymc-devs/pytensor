@@ -264,9 +264,13 @@ def test_blockwise_infer_core_shape():
         def make_node(self, a, b):
             assert a.type.ndim == 1
             assert b.type.ndim == 1
+            # Simulate make_node that introduces operations on inputs
+            a_identity = a.copy()
+            b_identity = b.copy()
+
             c = tensor(shape=(None,))
             d = tensor(shape=(None,))
-            return Apply(self, [a, b], [c, d])
+            return Apply(self, [a_identity, b_identity], [c, d])
 
         def perform(self, node, inputs, outputs):
             a, b = inputs
@@ -277,9 +281,12 @@ def test_blockwise_infer_core_shape():
         def infer_shape(self, fgraph, node, input_shapes):
             # First output shape depends only on input_shapes
             # Second output shape depends on input values
-            x, y = node.inputs
-            [(x_shape,), (y_shape,)] = input_shapes
-            return (x_shape + y_shape,), (x.sum() + y.sum(),)
+            a_identity, b_identity = node.inputs
+            # Simulate shape depending on original inputs, not the ones that go directly into the node
+            a = a_identity.owner.inputs[0]
+            b = b_identity.owner.inputs[0]
+            [(a_shape,), (b_shape,)] = input_shapes
+            return (a_shape + b_shape,), (a.sum() + b.sum(),)
 
     blockwise_op = Blockwise(
         core_op=TestOpWithInferShape(), signature="(a),(b)->(c),(d)"
