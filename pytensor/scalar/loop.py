@@ -212,15 +212,13 @@ class ScalarLoop(ScalarInnerGraphOp):
         # The first input is `n_steps` so we skip it in the mapping dictionary
         n_update = len(self.outputs) - (1 if self.is_while else 0)
         carry_subd = {
-            c: f"%(i{int(i)})s" for i, c in enumerate(fgraph.inputs[:n_update], start=1)
+            c: f"%(i{i})s" for i, c in enumerate(fgraph.inputs[:n_update], start=1)
         }
         constant_subd = {
-            c: f"%(i{int(i)})s"
+            c: f"%(i{i})s"
             for i, c in enumerate(fgraph.inputs[n_update:], start=n_update + 1)
         }
-        out_subd = {
-            u: f"%(o{int(i)})s" for i, u in enumerate(fgraph.outputs[:n_update])
-        }
+        out_subd = {u: f"%(o{i})s" for i, u in enumerate(fgraph.outputs[:n_update])}
         until_subd = {u: "until" for u in fgraph.outputs[n_update:]}
         subd = {**carry_subd, **constant_subd, **until_subd}
 
@@ -267,11 +265,11 @@ class ScalarLoop(ScalarInnerGraphOp):
             for output in node.outputs:
                 if output not in subd:
                     i += 1
-                    name = f"V%(id)s_tmp{int(i)}"
+                    name = f"V%(id)s_tmp{i}"
                     subd[output] = name
                     _c_code += f"{output.type.dtype_specs()[1]} {name};\n"
 
-            nodename = f"%(nodename)s_subnode{int(j)}"
+            nodename = f"%(nodename)s_subnode{j}"
             nodenames.append(nodename)
 
             s = node.op.c_code(
@@ -281,7 +279,7 @@ class ScalarLoop(ScalarInnerGraphOp):
                 # The initial value of `update` was set to `init` before the loop
                 [subd[input] for input in node.inputs],
                 [subd[output] for output in node.outputs],
-                dict(fail="%(fail)s", id=f"%(id)s_{int(j)}"),
+                dict(fail="%(fail)s", id=f"%(id)s_{j}"),
             )
             _c_code += s
             _c_code += "\n"
@@ -320,8 +318,8 @@ class ScalarLoop(ScalarInnerGraphOp):
     def c_code(self, node, nodename, inames, onames, sub):
         d = dict(
             chain(
-                zip((f"i{int(i)}" for i in range(len(inames))), inames, strict=True),
-                zip((f"o{int(i)}" for i in range(len(onames))), onames, strict=True),
+                zip((f"i{i}" for i in range(len(inames))), inames, strict=True),
+                zip((f"o{i}" for i in range(len(onames))), onames, strict=True),
             ),
             **sub,
         )

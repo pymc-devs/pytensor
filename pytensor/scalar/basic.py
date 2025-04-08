@@ -4333,9 +4333,9 @@ class Composite(ScalarInnerGraphOp):
 
         # Rename internal variables
         for i, r in enumerate(self.fgraph.inputs):
-            r.name = f"i{int(i)}"
+            r.name = f"i{i}"
         for i, r in enumerate(self.fgraph.outputs):
-            r.name = f"o{int(i)}"
+            r.name = f"o{i}"
         io = set(self.fgraph.inputs + self.fgraph.outputs)
         for i, r in enumerate(self.fgraph.variables):
             if (
@@ -4343,7 +4343,7 @@ class Composite(ScalarInnerGraphOp):
                 and r not in io
                 and len(self.fgraph.clients[r]) > 1
             ):
-                r.name = f"t{int(i)}"
+                r.name = f"t{i}"
 
         if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
             self._name = "Composite{...}"
@@ -4431,7 +4431,7 @@ class Composite(ScalarInnerGraphOp):
             return self._c_code
 
         fg = self.fgraph
-        subd = {e: f"%(i{int(i)})s" for i, e in enumerate(fg.inputs)}
+        subd = {e: f"%(i{i})s" for i, e in enumerate(fg.inputs)}
 
         for var in fg.variables:
             if var.owner is None:
@@ -4458,11 +4458,11 @@ class Composite(ScalarInnerGraphOp):
             for output in node.outputs:
                 if output not in subd:
                     i += 1
-                    name = f"V%(id)s_tmp{int(i)}"
+                    name = f"V%(id)s_tmp{i}"
                     subd[output] = name
                     _c_code += f"{output.type.dtype_specs()[1]} {name};\n"
 
-            nodename = f"%(nodename)s_subnode{int(j)}"
+            nodename = f"%(nodename)s_subnode{j}"
             nodenames.append(nodename)
 
             s = node.op.c_code(
@@ -4470,14 +4470,14 @@ class Composite(ScalarInnerGraphOp):
                 nodename,
                 [subd[input] for input in node.inputs],
                 [subd[output] for output in node.outputs],
-                dict(fail="%(fail)s", id=f"%(id)s_{int(j)}"),
+                dict(fail="%(fail)s", id=f"%(id)s_{j}"),
             )
             _c_code += s
             _c_code += "\n"
 
         # Copy the temporary outputs to the real outputs
         for i, output in enumerate(fg.outputs):
-            _c_code += f"%(o{int(i)})s = {subd[output]};\n"
+            _c_code += f"%(o{i})s = {subd[output]};\n"
 
         _c_code += "}\n"
 
@@ -4488,8 +4488,8 @@ class Composite(ScalarInnerGraphOp):
     def c_code(self, node, nodename, inames, onames, sub):
         d = dict(
             chain(
-                zip((f"i{int(i)}" for i in range(len(inames))), inames, strict=True),
-                zip((f"o{int(i)}" for i in range(len(onames))), onames, strict=True),
+                zip((f"i{i}" for i in range(len(inames))), inames, strict=True),
+                zip((f"o{i}" for i in range(len(onames))), onames, strict=True),
             ),
             **sub,
         )
