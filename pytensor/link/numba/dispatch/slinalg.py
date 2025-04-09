@@ -4,6 +4,13 @@ import numpy as np
 
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
+from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
+    _lu_1,
+    _lu_2,
+    _lu_3,
+    _pivot_to_permutation,
+)
+from pytensor.link.numba.dispatch.linalg.decomposition.lu_factor import _lu_factor
 from pytensor.link.numba.dispatch.linalg.solve.cholesky import _cho_solve
 from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
 from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
@@ -11,9 +18,12 @@ from pytensor.link.numba.dispatch.linalg.solve.symmetric import _solve_symmetric
 from pytensor.link.numba.dispatch.linalg.solve.triangular import _solve_triangular
 from pytensor.link.numba.dispatch.linalg.solve.tridiagonal import _solve_tridiagonal
 from pytensor.tensor.slinalg import (
+    LU,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
+    LUFactor,
+    PivotToPermutations,
     Solve,
     SolveTriangular,
 )
@@ -68,6 +78,96 @@ def numba_funcify_Cholesky(op, node, **kwargs):
         return res
 
     return cholesky
+
+
+@numba_funcify.register(PivotToPermutations)
+def pivot_to_permutation(op, node, **kwargs):
+    inverse = op.inverse
+    dtype = node.inputs[0].dtype
+
+    @numba_njit
+    def numba_pivot_to_permutation(piv):
+        p_inv = _pivot_to_permutation(piv, dtype)
+
+        if inverse:
+            return p_inv
+
+        return np.argsort(p_inv)
+
+    return numba_pivot_to_permutation
+
+
+@numba_funcify.register(LU)
+def numba_funcify_LU(op, node, **kwargs):
+    permute_l = op.permute_l
+    check_finite = op.check_finite
+    p_indices = op.p_indices
+    overwrite_a = op.overwrite_a
+
+    dtype = node.inputs[0].dtype
+    if dtype in complex_dtypes:
+        NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+
+    @numba_njit(inline="always")
+    def lu(a):
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) found in input to lu"
+                )
+
+        if p_indices:
+            res = _lu_1(
+                a,
+                permute_l=permute_l,
+                check_finite=check_finite,
+                p_indices=p_indices,
+                overwrite_a=overwrite_a,
+            )
+        elif permute_l:
+            res = _lu_2(
+                a,
+                permute_l=permute_l,
+                check_finite=check_finite,
+                p_indices=p_indices,
+                overwrite_a=overwrite_a,
+            )
+        else:
+            res = _lu_3(
+                a,
+                permute_l=permute_l,
+                check_finite=check_finite,
+                p_indices=p_indices,
+                overwrite_a=overwrite_a,
+            )
+
+        return res
+
+    return lu
+
+
+@numba_funcify.register(LUFactor)
+def numba_funcify_LUFactor(op, node, **kwargs):
+    dtype = node.inputs[0].dtype
+    check_finite = op.check_finite
+    overwrite_a = op.overwrite_a
+
+    if dtype in complex_dtypes:
+        NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+
+    @numba_njit
+    def lu_factor(a):
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) found in input to cholesky"
+                )
+
+        LU, piv = _lu_factor(a, overwrite_a)
+
+        return LU, piv
+
+    return lu_factor
 
 
 @numba_funcify.register(BlockDiagonal)
@@ -141,6 +241,30 @@ def numba_funcify_Solve(op, node, **kwargs):
         return res
 
     return solve
+
+
+# @numba_funcify.register(LUSolve)
+# def numba_funcify_LUSolve(op, node, **kwargs):
+#     overwrite_b = op.overwrite_b
+#     check_finite = op.check_finite
+#     trans = op.trans
+#
+#     dtype = node.inputs[0].dtype
+#     if dtype in complex_dtypes:
+#         raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+#
+#     @numba_njit
+#     def lu_solve(lu_and_piv, b):
+#         if check_finite:
+#             if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
+#                 raise np.linalg.LinAlgError(
+#                     "Non-numeric values (nan or inf) in input b to lu_solve"
+#                 )
+#
+#         x = _lu_solve(lu_and_piv, b, trans=trans, overwrite_b=overwrite_b, check_finite=check_finite)
+#         return x
+#
+#     return lu_solve
 
 
 @numba_funcify.register(SolveTriangular)

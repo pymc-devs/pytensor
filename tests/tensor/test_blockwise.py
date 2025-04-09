@@ -12,7 +12,7 @@ from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
 from pytensor.graph.replace import vectorize_node
 from pytensor.raise_op import assert_op
-from pytensor.tensor import diagonal, log, tensor
+from pytensor.tensor import diagonal, log, ones_like, scalar, tensor, vector
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.nlinalg import MatrixInverse
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
@@ -603,3 +603,25 @@ class TestInplace:
         # Confirm input was destroyed
         assert (A_val == A_val_copy).all() == (op.destroy_map.get(0, None) != [0])
         assert (b_val == b_val_copy).all() == (op.destroy_map.get(0, None) != [1])
+
+
+def test_gradient_mixed_discrete_output_core_op():
+    class MixedDtypeCoreOp(Op):
+        gufunc_signature = "()->(),()"
+        itypes = [scalar().type]
+        otypes = [scalar().type, scalar(dtype=int).type]
+
+        def perform(self, node, inputs, outputs):
+            raise NotImplementedError()
+
+        def L_op(self, inputs, outputs, output_gradients):
+            return [ones_like(inputs[0]) * output_gradients[0]]
+
+    op = Blockwise(MixedDtypeCoreOp())
+    x = vector("x")
+    y, _ = op(x)
+    np.testing.assert_array_equal(
+        grad(y.sum(), x).eval({x: np.full((12,), np.nan)}),
+        np.ones((12,)),
+        strict=True,
+    )

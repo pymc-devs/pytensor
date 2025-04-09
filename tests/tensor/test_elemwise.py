@@ -11,7 +11,7 @@ import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
-from pytensor import In, Out
+from pytensor import In, Out, grad
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
@@ -21,6 +21,7 @@ from pytensor.graph.replace import vectorize_node
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.npy_2_compat import numpy_maxdims
+from pytensor.scalar import ScalarOp, float64, int64
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import get_scalar_constant_value, second
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -1067,4 +1068,27 @@ def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
 def test_c_careduce_benchmark(axis, c_contiguous, benchmark):
     return careduce_benchmark_tester(
         axis, c_contiguous, mode="FAST_RUN", benchmark=benchmark
+    )
+
+
+def test_gradient_mixed_discrete_output_scalar_op():
+    class MixedDtypeScalarOp(ScalarOp):
+        def make_node(self, *inputs):
+            inputs = [float64()]
+            outputs = [float64(), int64()]
+            return Apply(self, inputs, outputs)
+
+        def perform(self, node, inputs, outputs):
+            raise NotImplementedError()
+
+        def L_op(self, inputs, outputs, output_gradients):
+            return [inputs[0].ones_like() * output_gradients[0]]
+
+    op = Elemwise(MixedDtypeScalarOp())
+    x = vector("x")
+    y, _ = op(x)
+    np.testing.assert_array_equal(
+        grad(y.sum(), x).eval({x: np.full((12,), np.nan)}),
+        np.ones((12,)),
+        strict=True,
     )
