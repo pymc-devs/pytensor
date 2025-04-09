@@ -948,9 +948,9 @@ class BaseTestConv2d(BaseTestConv):
         )
 
 
-@pytest.mark.skipif(
-    config.cxx == "",
-    reason="SciPy and cxx needed",
+@pytest.mark.skipif(config.cxx == "", reason="cxx needed")
+@pytest.mark.xfail(
+    reason="Involves Ops with no Python implementation for numba to use as fallback"
 )
 class TestAbstractConvNoOptim(BaseTestConv2d):
     @classmethod
@@ -1884,9 +1884,9 @@ class TestConv2dGrads:
                         )
 
 
-@pytest.mark.skipif(
-    config.cxx == "",
-    reason="SciPy and cxx needed",
+@pytest.mark.skipif(config.cxx == "", reason="cxx needed")
+@pytest.mark.xfail(
+    reason="Involves Ops with no Python implementation for numba to use as fallback"
 )
 class TestGroupedConvNoOptim:
     conv = abstract_conv.AbstractConv2d
@@ -2096,9 +2096,9 @@ class TestGroupedConvNoOptim:
             utt.verify_grad(conv_gradinputs, [kern, top], mode=self.mode, eps=1)
 
 
-@pytest.mark.skipif(
-    config.cxx == "",
-    reason="SciPy and cxx needed",
+@pytest.mark.skipif(config.cxx == "", reason="cxx needed")
+@pytest.mark.xfail(
+    reason="Involves Ops with no Python implementation for numba to use as fallback"
 )
 class TestGroupedConv3dNoOptim(TestGroupedConvNoOptim):
     conv = abstract_conv.AbstractConv3d
