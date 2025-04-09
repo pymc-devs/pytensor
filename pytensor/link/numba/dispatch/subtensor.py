@@ -287,11 +287,11 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
     inplace = op.inplace
     set_instead_of_inc = op.set_instead_of_inc
     x, vals, idxs = node.inputs
-    # TODO: Add explicit expand_dims in make_node so we don't need to worry about this here
-    broadcast = vals.type.ndim < x.type.ndim or vals.type.broadcastable[0]
+    broadcast_with_index = vals.type.ndim < x.type.ndim or vals.type.broadcastable[0]
+    # TODO: Add runtime_broadcast check
 
     if set_instead_of_inc:
-        if broadcast:
+        if broadcast_with_index:
 
             @numba_njit(boundscheck=True)
             def advancedincsubtensor1_inplace(x, val, idxs):
@@ -318,7 +318,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
                     x[idx] = val
                 return x
     else:
-        if broadcast:
+        if broadcast_with_index:
 
             @numba_njit(boundscheck=True)
             def advancedincsubtensor1_inplace(x, val, idxs):
