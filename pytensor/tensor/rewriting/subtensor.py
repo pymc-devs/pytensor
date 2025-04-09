@@ -562,6 +562,22 @@ def local_subtensor_merge(fgraph, node):
             # Do not call make_node for test_value
             out = subtens(x, *sl_ins)
 
+            # Eagerly clean up merged subtensor graph, which can be a mess
+            # rewriter = EquilibriumGraphRewriter(
+            #     [
+            #         local_extremum_plus_x,
+            #         local_add_canonizer,
+            #         local_mul_canonizer,
+            #         local_intdiv_by_one,
+            #         local_useless_extremum_branches,
+            #         local_flatten_extremum,
+            #     ],
+            #     max_use_ratio=10.0,
+            # )
+            # fg = FunctionGraph(outputs=[out], clone=False)
+            # rewriter.rewrite(fg)
+            # [out] = fg.outputs
+
             # Copy over previous output stacktrace
             # and stacktrace from previous slicing operation.
             # Why? Because, the merged slicing operation could have failed

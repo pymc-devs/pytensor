@@ -1056,11 +1056,8 @@ def local_merge_switch_same_cond(fgraph, node):
     condition, to enable further simplification of their branches
     Example: switch(c, a, b) + switch(c, x, y) -> switch(c, a+x, b+y)
     """
-    # node must be binary elemwise or add or mul
-    if not (
-        isinstance(node.op, Elemwise)
-        and isinstance(node.op.scalar_op, ps.BinaryScalarOp | ps.Add | ps.Mul)
-    ):
+    # node must be binary elemwise with at least 2 inputs
+    if len(node.inputs) < 2:
         return
     # all inputs must be switch
     if not all(

@@ -1450,7 +1450,7 @@ def local_useless_elemwise_comparison(fgraph, node):
 
     # Elemwise[{minimum,maximum}](X, X) -> X
     if (
-        isinstance(node.op.scalar_op, ps.ScalarMinimum | ps.ScalarMaximum)
+        isinstance(node.op.scalar_op, ps.Minimum | ps.Maximum)
         and node.inputs[0] is node.inputs[1]
     ):
         res = node.inputs[0]
@@ -1493,7 +1493,7 @@ def local_useless_elemwise_comparison(fgraph, node):
         return [res]
 
     # Elemwise[maximum](X.shape[i], 0) -> X.shape[i]
-    if isinstance(node.op.scalar_op, ps.ScalarMaximum):
+    if isinstance(node.op.scalar_op, ps.Maximum):
         for idx in range(2):
             if (
                 node.inputs[idx].owner
@@ -1512,7 +1512,7 @@ def local_useless_elemwise_comparison(fgraph, node):
                 return [res]
 
     # Elemwise[minimum](X.shape[i], 0) -> 0
-    if isinstance(node.op.scalar_op, ps.ScalarMinimum):
+    if isinstance(node.op.scalar_op, ps.Minimum):
         for idx in range(2):
             if (
                 node.inputs[idx].owner

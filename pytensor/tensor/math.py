@@ -406,7 +406,7 @@ class Max(NonZeroDimsCAReduce):
     nfunc_spec = ("max", 1, 1)
 
     def __init__(self, axis):
-        super().__init__(ps.scalar_maximum, axis)
+        super().__init__(ps.maximum, axis)
 
     def clone(self, **kwargs):
         axis = kwargs.get("axis", self.axis)
@@ -464,7 +464,7 @@ class Min(NonZeroDimsCAReduce):
     nfunc_spec = ("min", 1, 1)
 
     def __init__(self, axis):
-        super().__init__(ps.scalar_minimum, axis)
+        super().__init__(ps.minimum, axis)
 
     def clone(self, **kwargs):
         axis = kwargs.get("axis", self.axis)
@@ -2762,7 +2762,7 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
     return ifelse(even_k, even_median, odd_median, name="median")
 
 
-@scalar_elemwise(symbolname="scalar_maximum")
+@scalar_elemwise
 def maximum(x, y):
     """elemwise maximum. See max for the maximum in one tensor
 
@@ -2798,7 +2798,7 @@ def maximum(x, y):
     # see decorator for function body
 
 
-@scalar_elemwise(symbolname="scalar_minimum")
+@scalar_elemwise
 def minimum(x, y):
     """elemwise minimum. See min for the minimum in one tensor
 
