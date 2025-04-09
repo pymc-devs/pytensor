@@ -123,6 +123,18 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         self.name = name
         self.numpy_dtype = np.dtype(self.dtype)
 
+    def __call__(self, *args, shape=None, **kwargs):
+        if shape is not None:
+            # Check if shape is compatible with the original type
+            new_type = self.clone(shape=shape)
+            if self.is_super(new_type):
+                return new_type(*args, **kwargs)
+            else:
+                raise ValueError(
+                    f"{shape=} is incompatible with original type shape {self.shape=}"
+                )
+        return super().__call__(*args, **kwargs)
+
     def clone(
         self, dtype=None, shape=None, broadcastable=None, **kwargs
     ) -> "TensorType":
