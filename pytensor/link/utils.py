@@ -148,6 +148,7 @@ def streamline(
     post_thunk_old_storage: list["StorageCellType"] | None = None,
     no_recycling: list["StorageCellType"] | None = None,
     nice_errors: bool = True,
+    output_storage=list["StorageCellType"],
 ) -> "BasicThunkType":
     """Construct a single thunk that runs a list of thunks.
 
@@ -199,6 +200,7 @@ def streamline(
                         old_s[0] = None
             except Exception:
                 raise_with_op(fgraph, node, thunk)
+            return [out[0] for out in output_storage]
 
         f = streamline_default_f
     elif nice_errors:
@@ -207,11 +209,12 @@ def streamline(
             for x in no_recycling:
                 x[0] = None
             try:
-                # strict=False because we are in a hot loop
-                for thunk, node in zip(thunks, order, strict=False):
+                # strict=None because we are in a hot loop
+                for thunk, node in zip(thunks, order):  # noqa: B905
                     thunk()
             except Exception:
                 raise_with_op(fgraph, node, thunk)
+            return [out[0] for out in output_storage]
 
         f = streamline_nice_errors_f
     else:
@@ -222,6 +225,7 @@ def streamline(
                 x[0] = None
             for thunk in thunks:
                 thunk()
+            return [out[0] for out in output_storage]
 
         f = streamline_fast_f
     return f

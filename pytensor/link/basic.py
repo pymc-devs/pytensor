@@ -539,14 +539,12 @@ class WrapLinker(Linker):
 
         def f():
             for inputs in input_lists[1:]:
-                # strict=False because we are in a hot loop
-                for input1, input2 in zip(inputs0, inputs, strict=False):
+                for input1, input2 in zip(inputs0, inputs, strict=True):
                     input2.storage[0] = copy(input1.storage[0])
             for x in to_reset:
                 x[0] = None
             pre(self, [input.data for input in input_lists[0]], order, thunk_groups)
-            # strict=False because we are in a hot loop
-            for i, (thunks, node) in enumerate(zip(thunk_groups, order, strict=False)):
+            for i, (thunks, node) in enumerate(zip(thunk_groups, order, strict=True)):
                 try:
                     wrapper(self.fgraph, i, node, *thunks)
                 except Exception:
@@ -668,9 +666,11 @@ class JITLinker(PerformLinker):
                 #  since the error may come from any of them?
                 raise_with_op(self.fgraph, output_nodes[0], thunk)
 
-            # strict=False because we are in a hot loop
-            for o_storage, o_val in zip(thunk_outputs, outputs, strict=False):
+            # strict=None because we are in a hot loop
+            for o_storage, o_val in zip(thunk_outputs, outputs):  # noqa: B905
                 o_storage[0] = o_val
+
+            return outputs
 
         thunk.inputs = thunk_inputs
         thunk.outputs = thunk_outputs

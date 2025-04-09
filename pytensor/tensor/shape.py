@@ -447,10 +447,8 @@ class SpecifyShape(COp):
             raise AssertionError(
                 f"SpecifyShape: Got {x.ndim} dimensions (shape {x.shape}), expected {ndim} dimensions with shape {tuple(shape)}."
             )
-        # strict=False because we are in a hot loop
-        if not all(
-            xs == s for xs, s in zip(x.shape, shape, strict=False) if s is not None
-        ):
+        # strict=None because we are in a hot loop
+        if not all(xs == s for xs, s in zip(x.shape, shape) if s is not None):  # noqa: B905
             raise AssertionError(
                 f"SpecifyShape: Got shape {x.shape}, expected {tuple(int(s) if s is not None else None for s in shape)}."
             )

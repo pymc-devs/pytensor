@@ -59,7 +59,7 @@ class TestPfunc:
         a = lscalar()
         b = shared(1)
         f1 = pfunc([a], (a + b))
-        f2 = pfunc([In(a, value=44)], a + b, updates={b: b + 1})
+        f2 = pfunc([In(a)], a + b, updates={b: b + 1})
         assert b.get_value() == 1
         assert f1(3) == 4
         assert f2(3) == 4
