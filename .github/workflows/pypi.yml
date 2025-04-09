@@ -113,7 +113,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install numpy versioneer wheel
+        run: pip install --upgrade setuptools numpy versioneer wheel
 
       - name: Build universal wheel
         run: |
