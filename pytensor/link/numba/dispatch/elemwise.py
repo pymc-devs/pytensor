@@ -264,6 +264,12 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 
 @numba_funcify.register(Elemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
+    # op = getattr(np, str(op.scalar_op).lower())
+    # @numba_njit
+    # def elemwise_is_numpy(x):
+    #     return op(x)
+    # return elemwise_is_numpy
+
     scalar_inputs = [get_scalar_type(dtype=input.dtype)() for input in node.inputs]
     scalar_node = op.scalar_op.make_node(*scalar_inputs)
 
@@ -276,7 +282,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
 
     nin = len(node.inputs)
     nout = len(node.outputs)
-    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
+    core_op_fn = store_core_outputs(scalar_op_fn, op.scalar_op, nin=nin, nout=nout)
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
     output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
