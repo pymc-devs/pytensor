@@ -1735,7 +1735,7 @@ def batched_dot(a, b):
     """
     warnings.warn(
         "batched_dot is deprecated. "
-        "Use `dot` in conjution with `tensor.vectorize` or `graph.replace.vectorize_graph`",
+        "Use `dot` in conjunction with `tensor.vectorize` or `graph.replace.vectorize_graph`",
         FutureWarning,
     )
     a, b = as_tensor_variable(a), as_tensor_variable(b)
