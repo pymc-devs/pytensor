@@ -45,8 +45,6 @@ class MLXLinker(JITLinker):
         # just the subgraph
         generator = unique_name_generator(["mlx_linker"])
 
-        # Ensure that torch is aware of the generated
-        # code so we can compile without graph breaks
         def conversion_func_register(*args, **kwargs):
             functor = mlx_funcify(*args, **kwargs)
             name = kwargs["unique_name"](functor)
@@ -85,14 +83,12 @@ class MLXLinker(JITLinker):
                 # MLX doesn't support np.ndarray as input
                 outs = self.fn(*(mlx_typify(inp) for inp in inputs), **kwargs)
 
-                return outs
-
                 # unset attrs
                 for n, _ in self.gen_functors:
                     if getattr(pytensor.link.utils, n[1:], False):
                         delattr(pytensor.link.utils, n[1:])
 
-                return tuple(out.cpu().numpy() for out in outs)
+                return outs
 
             def __del__(self):
                 del self.gen_functors
