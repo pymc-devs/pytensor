@@ -27,6 +27,7 @@ from pytensor.graph.rewriting.db import (
 from pytensor.link.basic import Linker, PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.jax.linker import JAXLinker
+from pytensor.link.mlx.linker import MLXLinker
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.link.pytorch.linker import PytorchLinker
 from pytensor.link.vm import VMLinker
@@ -50,6 +51,7 @@ predefined_linkers = {
     "jax": JAXLinker(),
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
+    "mlx": MLXLinker(),
 }
 
 
@@ -494,6 +496,20 @@ PYTORCH = Mode(
     ),
 )
 
+MLX = Mode(
+    MLXLinker(),
+    RewriteDatabaseQuery(
+        include=["fast_run"],
+        exclude=[
+            "cxx_only",
+            "BlasOpt",
+            "fusion",
+            "inplace",
+            "scan_save_mem_prealloc",
+        ],
+    ),
+)
+
 
 predefined_modes = {
     "FAST_COMPILE": FAST_COMPILE,
@@ -501,6 +517,7 @@ predefined_modes = {
     "JAX": JAX,
     "NUMBA": NUMBA,
     "PYTORCH": PYTORCH,
+    "MLX": MLX,
 }
 
 _CACHED_RUNTIME_MODES: dict[str, Mode] = {}
@@ -585,6 +602,8 @@ def get_target_language(mode=None) -> tuple[Literal["py", "c", "numba", "jax"], 
         return ("py",)
     if isinstance(linker, CLinker):
         return ("c",)
+    if isinstance(linker, MLXLinker):
+        return ("py",)
 
     if isinstance(linker, VMLinker | OpWiseCLinker):
         return ("c", "py") if config.cxx else ("py",)
