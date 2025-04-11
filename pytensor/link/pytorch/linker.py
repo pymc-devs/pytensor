@@ -38,9 +38,11 @@ class PytorchLinker(JITLinker):
         )
 
     def jit_compile(self, fn):
-        import mlx.core as mx
+        import torch
 
-        from pytensor.link.mlx.dispatch import mlx_typify
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+        from pytensor.link.pytorch.dispatch import pytorch_typify
 
         class wrapper:
             """
@@ -54,7 +56,7 @@ class PytorchLinker(JITLinker):
             """
 
             def __init__(self, fn, gen_functors):
-                self.fn = mx.compile(fn)
+                self.fn = torch.compile(fn)
                 self.gen_functors = gen_functors.copy()
 
             def __call__(self, *inputs, **kwargs):
@@ -65,7 +67,7 @@ class PytorchLinker(JITLinker):
                     setattr(pytensor.link.utils, n[1:], fn)
 
                 # Torch does not accept numpy inputs and may return GPU objects
-                outs = self.fn(*(mlx_typify(inp) for inp in inputs), **kwargs)
+                outs = self.fn(*(pytorch_typify(inp) for inp in inputs), **kwargs)
 
                 # unset attrs
                 for n, _ in self.gen_functors:
