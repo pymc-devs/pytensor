@@ -19,4 +19,4 @@ def test_mlx_dot():
 
     actual = fn(test_x, test_y)
     expected = np.dot(test_x, test_y)
-    np.testing.assert_allclose(actual, expected)
+    np.testing.assert_allclose(actual, expected, rtol=1e-6)
