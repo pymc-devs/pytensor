@@ -1,6 +1,7 @@
 import numpy as np
 
 import pytensor
+import tests.link.mlx.test_basic  # noqa: F401
 from pytensor.tensor.type import matrix
 
 
