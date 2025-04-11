@@ -31,16 +31,16 @@ class PytorchLinker(JITLinker):
             **kwargs,
         }
         return pytorch_funcify(
-            fgraph, input_storage=input_storage, storage_map=storage_map, **built_kwargs
+            fgraph,
+            input_storage=input_storage,
+            storage_map=storage_map,
+            **built_kwargs,
         )
 
     def jit_compile(self, fn):
-        import torch
+        import mlx.core as mx
 
-        # flag that tend to help our graphs
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
-
-        from pytensor.link.pytorch.dispatch import pytorch_typify
+        from pytensor.link.mlx.dispatch import mlx_typify
 
         class wrapper:
             """
@@ -54,7 +54,7 @@ class PytorchLinker(JITLinker):
             """
 
             def __init__(self, fn, gen_functors):
-                self.fn = torch.compile(fn)
+                self.fn = mx.compile(fn)
                 self.gen_functors = gen_functors.copy()
 
             def __call__(self, *inputs, **kwargs):
@@ -65,7 +65,7 @@ class PytorchLinker(JITLinker):
                     setattr(pytensor.link.utils, n[1:], fn)
 
                 # Torch does not accept numpy inputs and may return GPU objects
-                outs = self.fn(*(pytorch_typify(inp) for inp in inputs), **kwargs)
+                outs = self.fn(*(mlx_typify(inp) for inp in inputs), **kwargs)
 
                 # unset attrs
                 for n, _ in self.gen_functors:
