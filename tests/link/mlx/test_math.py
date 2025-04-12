@@ -1,8 +1,8 @@
 import numpy as np
 
 import pytensor
-import tests.link.mlx.test_basic  # noqa: F401
 from pytensor.tensor.type import matrix
+from tests.link.mlx.test_basic import mx
 
 
 def test_mlx_dot():
@@ -19,5 +19,6 @@ def test_mlx_dot():
     test_y = rng.normal(size=(2, 4))
 
     actual = fn(test_x, test_y)
+    assert isinstance(actual, mx.array)
     expected = np.dot(test_x, test_y)
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
