@@ -1,5 +1,4 @@
 from pytensor.link.basic import JITLinker
-from pytensor.link.utils import unique_name_generator
 
 
 class MLXLinker(JITLinker):
@@ -9,29 +8,13 @@ class MLXLinker(JITLinker):
         super().__init__(*args, **kwargs)
         self.gen_functors = []
 
-    def fgraph_convert(
-        self,
-        fgraph,
-        order,
-        input_storage,
-        output_storage,
-        storage_map,
-        **kwargs,
-    ):
+    def fgraph_convert(self, fgraph, **kwargs):
         """Convert a PyTensor FunctionGraph to an MLX-compatible function.
 
         Parameters
         ----------
         fgraph : FunctionGraph
             The function graph to convert
-        order : list
-            The order in which to compute the nodes
-        input_storage : list
-            Storage for the input variables
-        output_storage : list
-            Storage for the output variables
-        storage_map : dict
-            Map from variables to their storage
 
         Returns
         -------
@@ -40,27 +23,9 @@ class MLXLinker(JITLinker):
         """
         from pytensor.link.mlx.dispatch import mlx_funcify
 
-        # We want to have globally unique names
-        # across the entire pytensor graph, not
-        # just the subgraph
-        generator = unique_name_generator(["mlx_linker"])
-
-        def conversion_func_register(*args, **kwargs):
-            functor = mlx_funcify(*args, **kwargs)
-            name = kwargs["unique_name"](functor)
-            self.gen_functors.append((f"_{name}", functor))
-            return functor
-
-        built_kwargs = {
-            "unique_name": generator,
-            "conversion_func": conversion_func_register,
-            **kwargs,
-        }
         return mlx_funcify(
             fgraph,
-            input_storage=input_storage,
-            storage_map=storage_map,
-            **built_kwargs,
+            **kwargs,
         )
 
     def jit_compile(self, fn):
