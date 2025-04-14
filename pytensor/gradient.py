@@ -1904,7 +1904,11 @@ def verify_grad(
             )
 
     _type_tol = dict(  # relative error tolerances for different types
-        float16=5e-2, float32=1e-2, float64=1e-4
+        float16=5e-2,
+        float32=1e-2,
+        float64=1e-4,
+        complex64=1e-2,
+        complex128=1e-4,
     )
 
     if abs_tol is None:
