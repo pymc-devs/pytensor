@@ -1,7 +1,7 @@
+import mlx.core as mx
+
 from pytensor.link.mlx.dispatch import mlx_funcify
 from pytensor.tensor.signal.conv import Conv1d
-
-import mlx.core as mx
 
 
 @mlx_funcify.register(Conv1d)
