@@ -5,7 +5,7 @@ from pytensor.tensor.type import matrix
 from tests.link.mlx.test_basic import mx
 
 
-def test_mlx_dot():
+def test_dot():
     x = matrix("x")
     y = matrix("y")
 
