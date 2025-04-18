@@ -199,7 +199,7 @@ def mlx_funcify_Elemwise(op, **kwargs):
     elif isinstance(op.scalar_op, AND):
 
         def all(x):
-            return mx.all(x)
+            return mx.all(a=x, axis=op.axis)
 
         return all
     elif isinstance(op.scalar_op, OR):
