@@ -1,7 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.scalar.basic import AND, OR, Add, Mul, ScalarMaximum, ScalarMinimum, Switch
+from pytensor.scalar.basic import AND, OR, Add, Mul, ScalarMaximum, ScalarMinimum
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
 from pytensor.tensor.special import Softmax, SoftmaxGrad
 

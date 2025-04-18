@@ -1,5 +1,6 @@
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.tensor.shape import SpecifyShape
+
 
 @mlx_funcify.register(SpecifyShape)
 def mlx_funcify_SpecifyShape(op, node, **kwargs):
