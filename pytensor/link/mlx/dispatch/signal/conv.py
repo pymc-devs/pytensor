@@ -5,7 +5,7 @@ from pytensor.tensor.signal.conv import Conv1d
 
 
 @mlx_funcify.register(Conv1d)
-def mlx_funcify_Conv1d(op, node, **kwargs):
+def mlx_funcify_Conv1d(op, node=None, **kwargs):
     mode = op.mode
 
     def conv1d(data, kernel):
