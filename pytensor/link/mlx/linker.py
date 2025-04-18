@@ -33,35 +33,12 @@ class MLXLinker(JITLinker):
 
         from pytensor.link.mlx.dispatch import mlx_typify
 
-        class wrapper:
-            def __init__(self, fn, gen_functors):
-                self.fn = mx.compile(fn)
-                self.gen_functors = gen_functors.copy()
+        inner_fn = mx.compile(fn)
 
-            def __call__(self, *inputs, **kwargs):
-                import pytensor.link.utils
+        def fn(*inputs, inner_fn=inner_fn):
+            return inner_fn(*(mlx_typify(inp) for inp in inputs))
 
-                # set attrs
-                for n, fn in self.gen_functors:
-                    setattr(pytensor.link.utils, n[1:], fn)
-
-                # MLX doesn't support np.ndarray as input
-                outs = self.fn(*(mlx_typify(inp) for inp in inputs), **kwargs)
-
-                # unset attrs
-                for n, _ in self.gen_functors:
-                    if getattr(pytensor.link.utils, n[1:], False):
-                        delattr(pytensor.link.utils, n[1:])
-
-                return outs
-
-            def __del__(self):
-                del self.gen_functors
-
-        inner_fn = wrapper(fn, self.gen_functors)
-        self.gen_functors = []
-
-        return inner_fn
+        return fn
 
     def create_thunk_inputs(self, storage_map):
         """Create inputs for the MLX thunk.
