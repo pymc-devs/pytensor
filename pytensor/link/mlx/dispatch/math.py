@@ -8,6 +8,7 @@ from pytensor.scalar.basic import (
     LE,
     LT,
     NEQ,
+    Abs,
     Add,
     Cos,
     Exp,
@@ -15,14 +16,21 @@ from pytensor.scalar.basic import (
     Mul,
     Pow,
     Sin,
+    Sqr,
+    Sqrt,
     Sub,
     Switch,
     TrueDiv,
+    Neg,
+    AND,
+    OR,
+    ScalarMaximum,
+    ScalarMinimum,
 )
 from pytensor.scalar.math import Sigmoid
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot
-
+from pytensor.scalar import Softplus
 
 @mlx_funcify.register(Dot)
 def mlx_funcify_Dot(op, **kwargs):
@@ -142,5 +150,70 @@ def mlx_funcify_Elemwise(op, **kwargs):
             return mx.divide(x, y)
 
         return true_div
+    elif isinstance(op.scalar_op, Sqr):
+
+        def sqr(x):
+            return mx.square(x)
+
+        return sqr
+    elif isinstance(op.scalar_op, Sqrt):
+
+        def sqrt(x):
+            return mx.sqrt(x)
+
+        return sqrt
+    elif isinstance(op.scalar_op, Abs):
+
+        def abs(x):
+            return mx.abs(x)
+
+        return abs
+    elif isinstance(op.scalar_op, Softplus):
+        def softplus(x):
+            return mx.where(
+                x < -37.0,
+                mx.exp(x),
+                mx.where(
+                    x < 18.0,
+                    mx.log1p(mx.exp(x)),
+                    mx.where(
+                        x < 33.3,
+                        x + mx.exp(-x),
+                        x,
+                    ),
+                ),
+            )
+
+        return softplus
+    elif isinstance(op.scalar_op, Neg):
+
+        def neg(x):
+            return mx.negative(x)
+
+        return neg
+    elif isinstance(op.scalar_op, AND):
+
+        def all(x):
+            return mx.all(x, axis=op.axis)
+
+        return all
+    elif isinstance(op.scalar_op, OR):
+
+        def any(x):
+            return mx.any(x, axis=op.axis)
+
+        return any
+    elif isinstance(op.scalar_op, ScalarMaximum):
+
+        def max(x):
+            return mx.max(x, axis=op.axis)
+
+        return max
+    elif isinstance(op.scalar_op, ScalarMinimum):
+
+        def min(x):
+            return mx.min(x, axis=op.axis)
+
+        return min
     else:
         raise NotImplementedError(f"MLX does not support {op.scalar_op}")

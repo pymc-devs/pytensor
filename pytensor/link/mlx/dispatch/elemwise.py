@@ -1,6 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.scalar import Softplus
 from pytensor.scalar.basic import AND, OR, Add, Mul, ScalarMaximum, ScalarMinimum
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
 from pytensor.tensor.special import Softmax, SoftmaxGrad
@@ -59,9 +60,8 @@ def mlx_funcify_CAReduce(op, **kwargs):
             return mx.min(x, axis=op.axis)
 
         return min
-
     else:
-        raise NotImplementedError(f"MLX does not support {op.scalar_op}")
+        raise NotImplementedError(f"MLX does not support Elemwise {op.scalar_op}")
 
 
 @mlx_funcify.register(Softmax)
@@ -83,3 +83,23 @@ def mlx_funcify_SoftmaxGrad(op, **kwargs):
         return dy_times_sm - mx.sum(dy_times_sm, axis=axis, keepdims=True) * sm
 
     return softmax_grad
+
+
+@mlx_funcify.register(Softplus)
+def mlx_funcify_Softplus(op, **kwargs):
+    def softplus(x):
+        return mx.where(
+            x < -37.0,
+            mx.exp(x),
+            mx.where(
+                x < 18.0,
+                mx.log1p(mx.exp(x)),
+                mx.where(
+                    x < 33.3,
+                    x + mx.exp(-x),
+                    x,
+                ),
+            ),
+        )
+
+    return softplus
