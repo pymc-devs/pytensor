@@ -1,3 +1,4 @@
+import warnings
 from functools import singledispatch
 from types import NoneType
 
@@ -7,6 +8,7 @@ import numpy as np
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.utils import fgraph_to_python
+from pytensor.raise_op import Assert, CheckAndRaise
 
 
 @singledispatch
@@ -59,3 +61,17 @@ def mlx_funcify_DeepCopyOp(op, **kwargs):
         return x.copy()
 
     return deepcopyop
+
+
+@mlx_funcify.register(Assert)
+@mlx_funcify.register(CheckAndRaise)
+def mlx_funcify_CheckAndRaise(op, **kwargs):
+    warnings.warn(
+        f"""Skipping `CheckAndRaise` Op (assertion: {op.msg}) as MLX tracing would remove it.""",
+        stacklevel=2,
+    )
+
+    def assert_fn(x, *inputs):
+        return x
+
+    return assert_fn
