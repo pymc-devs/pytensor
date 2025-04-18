@@ -54,6 +54,16 @@ def test_switch() -> None:
     compare_mlx_and_py([x, y], out, [x_test, y_test])
 
 
+@pytest.mark.parametrize("op", [pt.sum, pt.prod])
+def test_input(op) -> None:
+    x = pt.vector("x")
+    y = pt.vector("y")
+    out = op([x, y, x + y])
+    x_test = mx.array([1.0, 2.0, 3.0])
+    y_test = mx.array([4.0, 5.0, 6.0])
+    compare_mlx_and_py([x, y], out, [x_test, y_test])
+
+
 @pytest.mark.parametrize(
     "op",
     [
