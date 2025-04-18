@@ -27,8 +27,13 @@ def test_dot():
 
 @pytest.mark.parametrize(
     "op",
-    [pt.exp, pt.log, pt.sin, pt.cos],
-    ids=["exp", "log", "sin", "cos"],
+    [
+        pytest.param(pt.exp, id="exp"),
+        pytest.param(pt.log, id="log"),
+        pytest.param(pt.sin, id="sin"),
+        pytest.param(pt.cos, id="cos"),
+        pytest.param(pt.sigmoid, id="sigmoid"),
+    ],
 )
 def test_elemwise_one_input(op) -> None:
     x = pt.vector("x")
@@ -39,8 +44,16 @@ def test_elemwise_one_input(op) -> None:
 
 @pytest.mark.parametrize(
     "op",
-    [pt.add, pt.sub, pt.mul],
-    ids=["add", "sub", "mul"],
+    [
+        pytest.param(pt.add, id="add"),
+        pytest.param(pt.sub, id="sub"),
+        pytest.param(pt.mul, id="mul"),
+        pytest.param(pt.power, id="power"),
+        pytest.param(pt.le, id="le"),
+        pytest.param(pt.lt, id="lt"),
+        pytest.param(pt.ge, id="ge"),
+        pytest.param(pt.gt, id="gt"),
+    ],
 )
 def test_elemwise_two_inputs(op) -> None:
     x = pt.vector("x")
