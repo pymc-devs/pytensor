@@ -1,9 +1,10 @@
-from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor.elemwise import CAReduce, DimShuffle
-from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
-from pytensor.scalar.basic import Add, Mul, Any, AND, OR, ScalarMaximum, ScalarMinimum
-
 import mlx.core as mx
+
+from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.scalar.basic import AND, OR, Add, Mul, ScalarMaximum, ScalarMinimum
+from pytensor.tensor.elemwise import CAReduce, DimShuffle
+from pytensor.tensor.special import Softmax, SoftmaxGrad
+
 
 @mlx_funcify.register(DimShuffle)
 def mlx_funcify_DimShuffle(op, **kwargs):
@@ -19,42 +20,49 @@ def mlx_funcify_DimShuffle(op, **kwargs):
 
     return dimshuffle
 
+
 @mlx_funcify.register(CAReduce)
 def mlx_funcify_CAReduce(op, **kwargs):
     if isinstance(op.scalar_op, Add):
+
         def sum(x):
             return mx.sum(x, axis=op.axis)
 
         return sum
     elif isinstance(op.scalar_op, Mul):
+
         def prod(x):
             return mx.prod(x, axis=op.axis)
 
         return prod
     elif isinstance(op.scalar_op, AND):
+
         def all(x):
             return mx.all(x, axis=op.axis)
 
         return all
     elif isinstance(op.scalar_op, OR):
+
         def any(x):
             return mx.any(x, axis=op.axis)
 
         return any
     elif isinstance(op.scalar_op, ScalarMaximum):
+
         def max(x):
             return mx.max(x, axis=op.axis)
 
         return max
     elif isinstance(op.scalar_op, ScalarMinimum):
+
         def min(x):
             return mx.min(x, axis=op.axis)
 
         return min
-    
+
     else:
         raise NotImplementedError(f"MLX does not support {op.scalar_op}")
-    
+
 
 @mlx_funcify.register(Softmax)
 def mlx_funcify_Softmax(op, **kwargs):
