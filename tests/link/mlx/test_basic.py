@@ -5,14 +5,16 @@ import numpy as np
 import pytest
 
 from pytensor.compile.function import function
-from pytensor.compile.mode import Mode
+from pytensor.compile.mode import MLX, Mode
+from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Variable
 from pytensor.link.mlx import MLXLinker
 
 
 mx = pytest.importorskip("mlx.core")
 
-mlx_mode = Mode(linker=MLXLinker())
+optimizer = RewriteDatabaseQuery(include=["mlx"], exclude=MLX._optimizer.exclude)
+mlx_mode = Mode(linker=MLXLinker(), optimizer=optimizer)
 py_mode = Mode(linker="py", optimizer=None)
 
 

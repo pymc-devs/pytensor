@@ -42,6 +42,18 @@ def test_elemwise_one_input(op) -> None:
     compare_mlx_and_py([x], out, [x_test])
 
 
+def test_switch() -> None:
+    x = pt.vector("x")
+    y = pt.vector("y")
+
+    out = pt.switch(x > 0, y, x)
+
+    x_test = mx.array([-1.0, 2.0, 3.0])
+    y_test = mx.array([4.0, 5.0, 6.0])
+
+    compare_mlx_and_py([x, y], out, [x_test, y_test])
+
+
 @pytest.mark.parametrize(
     "op",
     [
