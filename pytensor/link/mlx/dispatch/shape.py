@@ -1,5 +1,5 @@
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor.shape import SpecifyShape
+from pytensor.tensor.shape import Shape_i, SpecifyShape
 
 
 @mlx_funcify.register(SpecifyShape)
@@ -14,3 +14,11 @@ def mlx_funcify_SpecifyShape(op, node, **kwargs):
         return x
 
     return specifyshape
+
+
+@mlx_funcify.register(Shape_i)
+def mlx_funcify_Shape_i(op, node, **kwargs):
+    def shape_i(x, i):
+        return x.shape[op.i]
+
+    return shape_i
