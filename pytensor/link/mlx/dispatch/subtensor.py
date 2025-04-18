@@ -11,40 +11,32 @@ from pytensor.tensor.subtensor import (
 from pytensor.tensor.type_other import MakeSlice
 
 
-BOOLEAN_MASK_ERROR = """MLX does not support resizing arrays with boolean
-masks. In some cases, however, it is possible to re-express your model
-in a form that MLX can compile:
-
->>> import pytensor.tensor as pt
->>> x_pt = pt.vector('x')
->>> y_pt = x_pt[x_pt > 0].sum()
-
-can be re-expressed as:
-
->>> import pytensor.tensor as pt
->>> x_pt = pt.vector('x')
->>> y_pt = pt.where(x_pt > 0, x_pt, 0).sum()
-"""
-
-DYNAMIC_SLICE_LENGTH_ERROR = """MLX does not support slicing arrays with a dynamic
-slice length.
-"""
-
-
 @mlx_funcify.register(Subtensor)
-@mlx_funcify.register(AdvancedSubtensor)
-@mlx_funcify.register(AdvancedSubtensor1)
 def mlx_funcify_Subtensor(op, node, **kwargs):
     idx_list = getattr(op, "idx_list", None)
 
     def subtensor(x, *ilists):
-        indices = indices_from_subtensor(ilists, idx_list)
+        indices = indices_from_subtensor([int(element) for element in ilists], idx_list)
         if len(indices) == 1:
             indices = indices[0]
 
         return x.__getitem__(indices)
 
     return subtensor
+
+@mlx_funcify.register(AdvancedSubtensor)
+@mlx_funcify.register(AdvancedSubtensor1)
+def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
+    idx_list = getattr(op, "idx_list", None)
+
+    def advanced_subtensor(x, *ilists):
+        indices = indices_from_subtensor(ilists, idx_list)
+        if len(indices) == 1:
+            indices = indices[0]
+
+        return x.__getitem__(indices)
+
+    return advanced_subtensor
 
 
 @mlx_funcify.register(IncSubtensor)

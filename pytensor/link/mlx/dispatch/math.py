@@ -1,36 +1,40 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch import mlx_funcify
+from pytensor.scalar import Softplus
 from pytensor.scalar.basic import (
+    AND,
     EQ,
     GE,
     GT,
     LE,
     LT,
     NEQ,
+    OR,
     Abs,
     Add,
+    Cast,
     Cos,
     Exp,
     Log,
     Mul,
+    Neg,
     Pow,
+    ScalarMaximum,
+    ScalarMinimum,
+    Sign,
     Sin,
     Sqr,
     Sqrt,
     Sub,
     Switch,
     TrueDiv,
-    Neg,
-    AND,
-    OR,
-    ScalarMaximum,
-    ScalarMinimum,
+    Log1p
 )
 from pytensor.scalar.math import Sigmoid
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot
-from pytensor.scalar import Softplus
+
 
 @mlx_funcify.register(Dot)
 def mlx_funcify_Dot(op, **kwargs):
@@ -169,6 +173,7 @@ def mlx_funcify_Elemwise(op, **kwargs):
 
         return abs
     elif isinstance(op.scalar_op, Softplus):
+
         def softplus(x):
             return mx.where(
                 x < -37.0,
@@ -194,7 +199,7 @@ def mlx_funcify_Elemwise(op, **kwargs):
     elif isinstance(op.scalar_op, AND):
 
         def all(x):
-            return mx.all(x, axis=op.axis)
+            return mx.all(x)
 
         return all
     elif isinstance(op.scalar_op, OR):
@@ -215,5 +220,23 @@ def mlx_funcify_Elemwise(op, **kwargs):
             return mx.min(x, axis=op.axis)
 
         return min
+    elif isinstance(op.scalar_op, Cast):
+
+        def cast(x):
+            return mx.cast(x, op.dtype)
+
+        return cast
+    elif isinstance(op.scalar_op, Sign):
+
+        def sign(x):
+            return mx.sign(x)
+
+        return sign
+    elif isinstance(op.scalar_op, Log1p):
+
+        def log1p(x):
+            return mx.log1p(x)
+
+        return log1p
     else:
         raise NotImplementedError(f"MLX does not support {op.scalar_op}")

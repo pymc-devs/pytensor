@@ -18,7 +18,7 @@ def mlx_funcify_SpecifyShape(op, node, **kwargs):
 
 @mlx_funcify.register(Shape_i)
 def mlx_funcify_Shape_i(op, node, **kwargs):
-    def shape_i(x, i):
+    def shape_i(x):
         return x.shape[op.i]
 
     return shape_i
