@@ -17,6 +17,7 @@ from pytensor.scalar.basic import (
     Cos,
     Exp,
     Log,
+    Log1p,
     Mul,
     Neg,
     Pow,
@@ -29,7 +30,6 @@ from pytensor.scalar.basic import (
     Sub,
     Switch,
     TrueDiv,
-    Log1p
 )
 from pytensor.scalar.math import Sigmoid
 from pytensor.tensor.elemwise import Elemwise
@@ -199,7 +199,7 @@ def mlx_funcify_Elemwise(op, **kwargs):
     elif isinstance(op.scalar_op, AND):
 
         def all(x):
-            return mx.all(a=x, axis=op.axis)
+            return x.all(axis=op.axis)
 
         return all
     elif isinstance(op.scalar_op, OR):

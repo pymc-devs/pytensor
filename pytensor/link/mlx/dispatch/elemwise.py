@@ -39,7 +39,7 @@ def mlx_funcify_CAReduce(op, **kwargs):
     elif isinstance(op.scalar_op, AND):
 
         def all(x):
-            return mx.all(a=x, axis=op.axis)
+            return x.all(axis=op.axis)
 
         return all
     elif isinstance(op.scalar_op, OR):
