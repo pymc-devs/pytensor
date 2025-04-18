@@ -53,6 +53,9 @@ def test_elemwise_one_input(op) -> None:
         pytest.param(pt.lt, id="lt"),
         pytest.param(pt.ge, id="ge"),
         pytest.param(pt.gt, id="gt"),
+        pytest.param(pt.eq, id="eq"),
+        pytest.param(pt.neq, id="neq"),
+        pytest.param(pt.true_div, id="true_div"),
     ],
 )
 def test_elemwise_two_inputs(op) -> None:
