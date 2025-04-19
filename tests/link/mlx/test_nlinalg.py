@@ -41,3 +41,21 @@ def test_mlx_kron():
         [A_val, B_val],
         mlx_mode=mlx_linalg_mode,
     )
+
+
+@pytest.mark.parametrize("op", [pt.linalg.inv, pt.linalg.pinv], ids=["inv", "pinv"])
+def test_mlx_inv(op):
+    rng = np.random.default_rng()
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(3, 3)).astype(config.floatX)
+    A_val = A_val @ A_val.T
+
+    out = op(A)
+
+    compare_mlx_and_py(
+        [A],
+        [out],
+        [A_val],
+        mlx_mode=mlx_linalg_mode,
+    )
