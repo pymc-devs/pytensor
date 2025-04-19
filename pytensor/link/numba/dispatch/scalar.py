@@ -9,6 +9,7 @@ from pytensor.link.numba.dispatch.basic import (
     create_numba_signature,
     generate_fallback_impl,
     numba_funcify,
+    numba_njit,
 )
 from pytensor.link.numba.dispatch.cython_support import wrap_cython_function
 from pytensor.link.utils import (
@@ -16,12 +17,15 @@ from pytensor.link.utils import (
     get_name_for_object,
     unique_name_generator,
 )
+from pytensor.scalar import discrete_dtypes
 from pytensor.scalar.basic import (
     Add,
     Cast,
     Clip,
     Composite,
     Identity,
+    Maximum,
+    Minimum,
     Mul,
     Reciprocal,
     ScalarOp,
@@ -184,6 +188,37 @@ def numba_funcify_Mul(op, node, **kwargs):
     nary_add_fn = binary_to_nary_func(node.inputs, "mul", "*")
 
     return numba_basic.numba_njit(signature)(nary_add_fn)
+
+
+@numba_funcify.register(Maximum)
+@numba_funcify.register(Minimum)
+def numba_funcify_Extremum(op, node, **kwargs):
+    input_names = [f"x{i}" for i in range(len(node.inputs))]
+    input_signature = ", ".join(input_names)
+    assert len(input_names) > 0
+
+    inner_code = f"res = {input_names[0]}\n"
+
+    if isinstance(op, Maximum):
+        op = ">"
+        func_name = "maximum"
+    else:
+        op = "<"
+        func_name = "minimum"
+
+    if all(inp.dtype in discrete_dtypes for inp in node.inputs):
+        for x in input_names[1:]:
+            inner_code += f"    res = {x} if {x} {op} res else res\n"
+    else:
+        for x in input_names[1:]:
+            inner_code += f"    res = {x} if {x} {op} res else (res if res {op}= {x} else np.nan)\n"
+    inner_code += "    return res"
+
+    src = f"""
+def {func_name}({input_signature}):
+    {inner_code}
+"""
+    return numba_njit(compile_function_src(src, func_name, globals() | {"np": np}))
 
 
 @numba_funcify.register(Cast)

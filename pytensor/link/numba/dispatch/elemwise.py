@@ -26,13 +26,13 @@ from pytensor.scalar.basic import (
     XOR,
     Add,
     IntDiv,
+    Maximum,
+    Minimum,
     Mul,
-    ScalarMaximum,
-    ScalarMinimum,
     Sub,
     TrueDiv,
     get_scalar_type,
-    scalar_maximum,
+    maximum,
 )
 from pytensor.scalar.basic import add as add_as
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -103,16 +103,16 @@ def scalar_in_place_fn_IntDiv(op, idx, res, arr):
     return f"{res}[{idx}] //= {arr}"
 
 
-@scalar_in_place_fn.register(ScalarMaximum)
-def scalar_in_place_fn_ScalarMaximum(op, idx, res, arr):
+@scalar_in_place_fn.register(Maximum)
+def scalar_in_place_fn_Maximum(op, idx, res, arr):
     return f"""
 if {res}[{idx}] < {arr}:
     {res}[{idx}] = {arr}
 """
 
 
-@scalar_in_place_fn.register(ScalarMinimum)
-def scalar_in_place_fn_ScalarMinimum(op, idx, res, arr):
+@scalar_in_place_fn.register(Minimum)
+def scalar_in_place_fn_Minimum(op, idx, res, arr):
     return f"""
 if {res}[{idx}] > {arr}:
     {res}[{idx}] = {arr}
@@ -458,7 +458,7 @@ def numba_funcify_Softmax(op, node, **kwargs):
     if axis is not None:
         axis = normalize_axis_index(axis, x_at.ndim)
         reduce_max_py = create_multiaxis_reducer(
-            scalar_maximum, -np.inf, axis, x_at.ndim, x_dtype, keepdims=True
+            maximum, -np.inf, axis, x_at.ndim, x_dtype, keepdims=True
         )
         reduce_sum_py = create_multiaxis_reducer(
             add_as, 0.0, (axis,), x_at.ndim, x_dtype, keepdims=True
@@ -522,7 +522,7 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
     if axis is not None:
         axis = normalize_axis_index(axis, x_at.ndim)
         reduce_max_py = create_multiaxis_reducer(
-            scalar_maximum,
+            maximum,
             -np.inf,
             (axis,),
             x_at.ndim,

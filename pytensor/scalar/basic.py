@@ -14,6 +14,7 @@ import builtins
 import math
 from collections.abc import Callable
 from copy import copy
+from functools import reduce
 from itertools import chain
 from textwrap import dedent
 from typing import Any, TypeAlias
@@ -1856,89 +1857,119 @@ invert = Invert()
 ##############
 # Arithmetic
 ##############
-class ScalarMaximum(BinaryScalarOp):
+class AtLeastUnaryScalarOp(ScalarOp):
+    def make_node(self, *inputs):
+        if len(inputs) == 0:
+            raise TypeError(f"{self} requires at least 1 input: got 0")
+        return super().make_node(*inputs)
+
+
+class Maximum(AtLeastUnaryScalarOp):
     commutative = True
     associative = True
-    nfunc_spec = ("maximum", 2, 1)
-    nfunc_variadic = "maximum"
+    nfunc_variadic = "max"
     identity = -np.inf
 
     def impl(self, *inputs):
         # The built-in max function don't support complex type
-        return np.maximum(*inputs)
+        return reduce(np.maximum, inputs)
 
     def c_code(self, node, name, inputs, outputs, sub):
-        (x, y) = inputs
-        (z,) = outputs
         if any(i.type in complex_types for i in node.inputs):
             raise NotImplementedError()
-        # Test for both y>x and x>=y to detect NaN
-        return f'{z} = (({y})>({x})? ({y}): (({x})>=({y})? ({x}): nan("")));'
+
+        x, *ys = inputs
+        [z] = outputs
+
+        # We need an intermediate variable in case we are working inplace
+        tmp = f"{z}_tmp"
+        res = f"{node.outputs[0].type.dtype_specs()[1]} {tmp} = ({x});"
+        if all(i.dtype in discrete_dtypes for i in node.inputs):
+            for y in ys:
+                res += f"\n{tmp} = (({y}) > {tmp})? ({y}): {tmp};"
+        else:
+            # Need to check for nans
+            for y in ys:
+                res += (
+                    f"\n{tmp} = (({y}) > {tmp})? ({y}): (({tmp} >= ({y}))? {tmp}: NAN);"
+                )
+        res += f"\n{z} = {tmp};"
+        return res
+
+    def c_code_cache_version(self):
+        return (2,)
 
     def L_op(self, inputs, outputs, gout):
-        (x, y) = inputs
-        (gz,) = gout
+        [gz] = gout
         if gz.type in complex_types:
             # max is currently defined for complex_types,
             # but the gradient for complex is not.
             raise NotImplementedError()
 
-        if outputs[0].type in discrete_types:
-            return [
-                x.zeros_like(dtype=config.floatX),
-                y.zeros_like(dtype=config.floatX),
-            ]
-        # This form handle the case when both value are the same.
-        # In that case, gx will be gz, gy will be 0.
-        e = eq(outputs[0], x)
-        gx = e * gz
-        gy = (constant(1, dtype=gz.dtype) - e) * gz
-        return (gx, gy)
+        [out] = outputs
+
+        if out.type in discrete_types:
+            return [inp.zeros_like(dtype=config.floatX) for inp in inputs]
+
+        # We propagate the gradient to the maximum value(s) in the input
+        return [eq(inp, out) * gz for inp in inputs]
 
 
-scalar_maximum = ScalarMaximum(upcast_out, name="maximum")
+maximum = Maximum(upcast_out, name="maximum")
 
 
-class ScalarMinimum(BinaryScalarOp):
+class Minimum(AtLeastUnaryScalarOp):
     commutative = True
     associative = True
-    nfunc_spec = ("minimum", 2, 1)
-    nfunc_variadic = "minimum"
+    nfunc_variadic = "min"
     identity = np.inf
 
     def impl(self, *inputs):
         # The built-in min function don't support complex type
-        return np.minimum(*inputs)
+        return reduce(np.minimum, inputs)
 
     def c_code(self, node, name, inputs, outputs, sub):
-        (x, y) = inputs
-        (z,) = outputs
         if any(i.type in complex_types for i in node.inputs):
             raise NotImplementedError()
-        return f'{z} = (({y})<({x})? ({y}): (({x})<=({y})? ({x}): nan("")));'
+
+        x, *ys = inputs
+        [z] = outputs
+
+        # We need an intermediate variable in case we are working inplace
+        tmp = f"{z}_tmp"
+        res = f"{node.outputs[0].type.dtype_specs()[1]} {tmp} = ({x});"
+        if all(i.dtype in discrete_dtypes for i in node.inputs):
+            for y in ys:
+                res += f"\n{tmp} = (({y}) < {tmp})? ({y}): {tmp};"
+        else:
+            # Need to check for nans
+            for y in ys:
+                res += (
+                    f"\n{tmp} = (({y}) < {tmp})? ({y}): (({tmp} <= ({y}))? {tmp}: NAN);"
+                )
+        res += f"\n{z} = {tmp};"
+        return res
+
+    def c_code_cache_version(self):
+        return (2,)
 
     def L_op(self, inputs, outputs, gout):
-        (x, y) = inputs
-        (gz,) = gout
+        [gz] = gout
         if gz.type in complex_types:
-            # min is currently defined for complex_types,
+            # max is currently defined for complex_types,
             # but the gradient for complex is not.
             raise NotImplementedError()
 
-        if outputs[0].type in discrete_types:
-            return [
-                x.zeros_like(dtype=config.floatX),
-                y.zeros_like(dtype=config.floatX),
-            ]
-        # This form handle the case when both value are the same.
-        # In that case, gx will be gz, gy will be 0.
-        e = eq(outputs[0], x)
-        gx = e * gz
-        gy = (constant(1, dtype=gz.dtype) - e) * gz
-        return (gx, gy)
+        [out] = outputs
+
+        if out.type in discrete_types:
+            return [inp.zeros_like(dtype=config.floatX) for inp in inputs]
+
+        # We propagate the gradient to the minimum value(s) in the input
+        return [eq(inp, out) * gz for inp in inputs]
 
 
-scalar_minimum = ScalarMinimum(upcast_out, name="minimum")
+minimum = Minimum(upcast_out, name="minimum")
 
 
 class Add(ScalarOp):
