@@ -2,7 +2,6 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.scalar import Softplus
-from pytensor.scalar.basic import AND, OR, Add, Mul, ScalarMaximum, ScalarMinimum
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
 from pytensor.tensor.special import Softmax, SoftmaxGrad
 
@@ -24,44 +23,53 @@ def mlx_funcify_DimShuffle(op, **kwargs):
 
 @mlx_funcify.register(CAReduce)
 def mlx_funcify_CAReduce(op, **kwargs):
-    if isinstance(op.scalar_op, Add):
+    axis = op.axis
+    op_nfunc_spec = getattr(op, "nfunc_spec", None)
+    scalar_nfunc_spec = getattr(op.scalar_op, "nfunc_spec", None)
+    scalar_op_name = getattr(op.scalar_op, "name", None)
+    scalar_op_identity = getattr(op.scalar_op, "identity", None)
+    acc_dtype = getattr(op, "acc_dtype", None)
 
-        def sum(x):
-            return mx.sum(x, axis=op.axis)
+    def careduce(x):
+        nonlocal \
+            axis, \
+            op_nfunc_spec, \
+            scalar_nfunc_spec, \
+            scalar_op_name, \
+            scalar_op_identity, \
+            acc_dtype
 
-        return sum
-    elif isinstance(op.scalar_op, Mul):
+        if axis is None:
+            axis = list(range(x.ndim))
 
-        def prod(x):
-            return mx.prod(x, axis=op.axis)
+        if acc_dtype is None:
+            acc_dtype = x.dtype.type
 
-        return prod
-    elif isinstance(op.scalar_op, AND):
+        if op_nfunc_spec:
+            mlx_op = getattr(mx, op_nfunc_spec[0])
+            return mlx_op(x, axis=axis)
+            return mlx_op(x, axis=axis).astype(acc_dtype)
 
-        def all(x):
-            return x.all(axis=op.axis)
+        # The PyTensor `Op` didn't tell us which NumPy equivalent to use (or
+        # there isn't one), so we use this fallback approach
+        if scalar_nfunc_spec:
+            scalar_fn_name = scalar_nfunc_spec[0]
+        elif scalar_op_name:
+            scalar_fn_name = scalar_op_name
 
-        return all
-    elif isinstance(op.scalar_op, OR):
+        to_reduce = sorted(axis, reverse=True)
 
-        def any(x):
-            return mx.any(x, axis=op.axis)
+        if to_reduce:
+            raise NotImplementedError("Not implemented yet")
+            # In this case, we need to use the `jax.lax` function (if there
+            # is one), and not the `jnp` version.
+            mlx_op = getattr(mx, scalar_fn_name)
+            init_value = mx.array(scalar_op_identity, dtype=acc_dtype)
+            return mx.reduce(x, init_value, mlx_op, to_reduce).astype(acc_dtype)
+        else:
+            return x
 
-        return any
-    elif isinstance(op.scalar_op, ScalarMaximum):
-
-        def max(x):
-            return mx.max(x, axis=op.axis)
-
-        return max
-    elif isinstance(op.scalar_op, ScalarMinimum):
-
-        def min(x):
-            return mx.min(x, axis=op.axis)
-
-        return min
-    else:
-        raise NotImplementedError(f"MLX does not support Elemwise {op.scalar_op}")
+    return careduce
 
 
 @mlx_funcify.register(Softmax)
