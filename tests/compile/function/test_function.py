@@ -1,5 +1,4 @@
 import pickle
-import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -50,8 +49,7 @@ def test_function_name():
     x = vector("x")
     func = function([x], x + 1.0)
 
-    regex = re.compile(f".*{__file__}c?")
-    assert regex.match(func.name) is not None
+    assert __file__ in func.name
 
 
 def test_trust_input():
