@@ -1,4 +1,5 @@
 import warnings
+from copy import deepcopy
 from functools import singledispatch
 from types import NoneType
 
@@ -58,7 +59,7 @@ def mlx_funcify_FunctionGraph(
 @mlx_funcify.register(DeepCopyOp)
 def mlx_funcify_DeepCopyOp(op, **kwargs):
     def deepcopyop(x):
-        return x.copy()
+        return deepcopy(x)
 
     return deepcopyop
 
