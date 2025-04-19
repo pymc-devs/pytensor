@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+from pytensor import scan
 from pytensor.compile import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -740,3 +741,59 @@ OpFromGraph{inline=False} [id A]
 
     for truth, out in zip(exp_res.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
+
+
+@pytest.mark.parametrize("kind", ("ofg", "inlined", "scan"))
+@pytest.mark.parametrize("mode", ("fast_compile", "fast_run"))
+@pytest.mark.parametrize("c_op", (True, False), ids=lambda x: f"c_op={x}")
+def test_benchmark(c_op, mode, kind, benchmark):
+    n = 25
+
+    if c_op:
+
+        def _f(x):
+            if isinstance(x, np.ndarray):
+                y = np.exp(x)
+            else:
+                y = pt.exp(x)
+            y /= y.sum()
+            return y
+    else:
+
+        def _f(x):
+            if isinstance(x, np.ndarray):
+                return np.sort(x)
+            else:
+                return pt.sort(x)
+
+    x = pt.vector("x")
+
+    if kind == "ofg":
+        f = OpFromGraph([x], [_f(x)])
+    else:
+        f = _f
+
+    if kind == "scan":
+        # Scan is included for a reference of how bad the overhead can be
+        outs, _ = scan(fn=f, outputs_info=[x], n_steps=n)
+        out = outs[-1]
+    else:
+        out = x
+        for i in range(n):
+            out = f(out)
+
+    compiled_fn = function([x], out, trust_input=True, mode=mode)
+    compiled_fn.dprint(print_memory_map=True)
+    compiled_fn.vm.allow_gc = (
+        False  # For fairness to the default VM, since OFG inner VM does not do GC
+    )
+
+    rng = np.random.default_rng(1)
+    x_test = rng.normal(size=(10,))
+
+    res = benchmark(compiled_fn, x_test)
+
+    expected_res = x_test
+    for i in range(n):
+        expected_res = _f(expected_res)
+    np.testing.assert_allclose(res, expected_res)

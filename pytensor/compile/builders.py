@@ -871,6 +871,52 @@ class OpFromGraph(Op, HasInnerGraph):
         res.fgraph = res.fgraph.clone()
         return res
 
+    def make_thunk(self, node, storage_map, compute_map, no_recycling, impl=None):
+        from pytensor.link.c.basic import CLinker
+        from pytensor.link.vm import VMLinker
+
+        # FIXME: Don't call self.fn just to get the optimized fgraph
+        fg = self.fn.maker.fgraph
+        # fg = self.fgraph
+        # rewriter = get_default_mode().optimizer
+        # rewriter(fg)
+        fg_no_recycling = [
+            new_o
+            for (new_o, old_o) in zip(fg.outputs, node.outputs, strict=True)
+            if old_o in no_recycling
+        ]
+
+        node_input_storage = [storage_map[r] for r in node.inputs]
+        node_output_storage = [storage_map[r] for r in node.outputs]
+
+        def create_thunk(linker):
+            linker.accept(fg, no_recycling=fg_no_recycling)
+            thunk, _, _ = linker.make_thunk(
+                input_storage=node_input_storage, output_storage=node_output_storage
+            )
+
+            if isinstance(linker, VMLinker):
+                # VMs will complain if a non-lazy thunk returns anything
+                # We wrap it in a function that returns None
+                def thunk_without_returns():
+                    thunk()
+
+                return thunk_without_returns
+
+            return thunk
+
+        if impl != "py":
+            try:
+                # We default to CLinker because it generates code for the whole graph that the compiler can reason about.
+                # Whereas the VMLinker will compile each node separately and call them in a pre-defined VM.
+                # It also has less overhead
+                return create_thunk(linker=CLinker())
+            except NotImplementedError:
+                # Some Op doesn't have a C implementation, VM it is
+                return create_thunk(linker=VMLinker(use_cloop=True, c_thunks=True))
+        else:
+            return create_thunk(VMLinker(use_cloop=False, c_thunks=False))
+
     def perform(self, node, inputs, outputs):
         variables = self.fn(*inputs)
         assert len(variables) == len(outputs)
