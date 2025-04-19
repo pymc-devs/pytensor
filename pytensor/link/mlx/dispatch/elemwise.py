@@ -43,12 +43,12 @@ def mlx_funcify_CAReduce(op, **kwargs):
             axis = list(range(x.ndim))
 
         if acc_dtype is None:
-            acc_dtype = x.dtype.type
+            acc_dtype = x.dtype
 
         if op_nfunc_spec:
             mlx_op = getattr(mx, op_nfunc_spec[0])
             return mlx_op(x, axis=axis)
-            return mlx_op(x, axis=axis).astype(acc_dtype)
+            # return mlx_op(x, axis=axis).astype(acc_dtype)
 
         # The PyTensor `Op` didn't tell us which NumPy equivalent to use (or
         # there isn't one), so we use this fallback approach
