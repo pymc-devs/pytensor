@@ -3,6 +3,7 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.tensor.math import Argmax, Max
 from tests.link.mlx.test_basic import compare_mlx_and_py, mx
 
 
@@ -87,3 +88,14 @@ def test_elemwise_two_inputs(op) -> None:
     x_test = mx.array([1.0, 2.0, 3.0])
     y_test = mx.array([4.0, 5.0, 6.0])
     compare_mlx_and_py([x, y], out, [x_test, y_test])
+
+
+@pytest.mark.xfail(reason="Argmax not implemented yet")
+def test_mlx_max_and_argmax():
+    # Test that a single output of a multi-output `Op` can be used as input to
+    # another `Op`
+    x = pt.dvector()
+    mx = Max([0])(x)
+    amx = Argmax([0])(x)
+    out = mx * amx
+    compare_mlx_and_py([x], [out], [np.r_[1, 2]])
