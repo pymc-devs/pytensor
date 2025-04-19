@@ -35,12 +35,11 @@ The ``inputs`` argument to ``pytensor.function`` is a list, containing the ``Var
       can be set by ``kwarg``, and its value can be accessed by
       ``self.<name>``. The default value is ``None``.
 
-      ``value``: literal or ``Container``. The initial/default value for this
+      ``value``: ``Container``. The initial value for this
         input. If update is ``None``, this input acts just like
         an argument with a default value in Python. If update is not ``None``,
-        changes to this
-        value will "stick around", whether due to an update or a user's
-        explicit action.
+        changes to this value will "stick around", whether due to an update
+        or a user's explicit action.
 
       ``update``: Variable instance. This expression Variable will
       replace ``value`` after each function call. The default value is
@@ -73,18 +72,16 @@ The ``inputs`` argument to ``pytensor.function`` is a list, containing the ``Var
             overwriting its content without being aware of it).
 
 
-Value: initial and default values
----------------------------------
+Update
+------
 
-A non-None `value` argument makes an In() instance an optional parameter
-of the compiled function.  For example, in the following code we are
-defining an arity-2 function ``inc``.
+We can define an update to modify the value
 
 >>> import pytensor.tensor as pt
 >>> from pytensor import function
 >>> from pytensor.compile.io import In
 >>> u, x, s = pt.scalars('u', 'x', 's')
->>> inc = function([u, In(x, value=3), In(s, update=(s+x*u), value=10.0)], [])
+>>> inc = function([u, In(x), In(s, update=(s+x*u)], [])
 
 Since we provided a ``value`` for ``s`` and ``x``, we can call it with just a value for ``u`` like this:
 
