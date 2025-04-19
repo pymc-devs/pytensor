@@ -18,29 +18,30 @@ def blockwise_conv1d(op, node, **kwargs):
     #     raise NotImplementedError("Only 1D batches are supported for conv1d")
     
     def inner_f(x, kernel):
-        # 1) Validate shapes
         B, T = x.shape
         Bk, K = kernel.shape
         if B != Bk:
             raise ValueError(f"Batch mismatch: x has {B}, kernels has {Bk}")
 
-        # 2) Reshape x so that 'channels' = B, batch size = 1
-        #    → input shape (N=1, H=T, C_in=B)
-        x_in = x.T[None, :, :]  # shape (1, T, B)
+        # 1) Flip each kernel for true convolution
+        kernels_flipped = kernel[:, ::-1]  # shape (B, K)
 
-        # 3) Build weight array of shape (C_out=B, H_f=K, C_in=1)
-        #    groups = B will slice C_in into B single-channel groups
-        w = kernel[:, :, None]  # shape (B, K, 1)
+        # 2) Reshape input into (N=1, H=T, C_in=B)
+        x_in = x.T[None, :, :]              
 
-        # 4) Convolve with one group per sequence
-        y = mx.conv1d(x_in, w,
-                    stride=1,
-                    padding=0,
-                    dilation=1,
-                    groups=B)
+        # 3) Build weight tensor of shape (C_out=B, H_f=K, C_in=1)
+        w = kernels_flipped[:, :, None]     
 
-        # 5) y has shape (1, T - K + 1, B); drop the batch axis and transpose
-        return y[0].T  # final shape (B, T - K + 1)
+        # 4) Convolve with one group per channel → valid mode
+        y = mx.conv1d(
+            x_in, w,
+            stride=1,
+            padding=0,
+            dilation=1,
+            groups=B
+        )
+        # y: (1, T-K+1, B) → drop batch and transpose to (B, T-K+1)
+        return y[0].T
     return inner_f
 
 @mlx_funcify.register(Blockwise)
