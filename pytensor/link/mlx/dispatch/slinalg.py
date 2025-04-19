@@ -3,7 +3,20 @@ import warnings
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor.slinalg import Solve, SolveTriangular
+from pytensor.tensor.slinalg import Cholesky, Solve, SolveTriangular
+
+
+@mlx_funcify.register(Cholesky)
+def mlx_funcify_Cholesky(op, node, **kwargs):
+    lower = op.lower
+    out_dtype = getattr(mx, node.outputs[0].dtype)
+
+    def cholesky(a):
+        return mx.linalg.cholesky(a, upper=not lower, stream=mx.cpu).astype(
+            out_dtype, stream=mx.cpu
+        )
+
+    return cholesky
 
 
 @mlx_funcify.register(Solve)
