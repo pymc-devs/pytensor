@@ -172,24 +172,6 @@ def test_Join(vals, axis):
     )
 
 
-def test_Join_view():
-    vals, vals_test = zip(
-        *(
-            (pt.matrix(), rng.normal(size=(2, 2)).astype(config.floatX)),
-            (pt.matrix(), rng.normal(size=(2, 2)).astype(config.floatX)),
-        ),
-        strict=True,
-    )
-    g = ptb.Join(view=1)(1, *vals)
-
-    with pytest.raises(NotImplementedError):
-        compare_numba_and_py(
-            vals,
-            g,
-            vals_test,
-        )
-
-
 @pytest.mark.parametrize(
     "n_splits, axis, values, sizes",
     [
