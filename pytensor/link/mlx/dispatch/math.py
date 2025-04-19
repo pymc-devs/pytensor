@@ -198,14 +198,14 @@ def mlx_funcify_Elemwise(op, **kwargs):
         return neg
     elif isinstance(op.scalar_op, AND):
 
-        def all(x):
-            return x.all(axis=op.axis)
+        def all(x, y):
+            return mx.bitwise_and(x, y)
 
         return all
     elif isinstance(op.scalar_op, OR):
 
-        def any(x):
-            return mx.any(x, axis=op.axis)
+        def any(x, y):
+            return mx.bitwise_or(x, y)
 
         return any
     elif isinstance(op.scalar_op, ScalarMaximum):
