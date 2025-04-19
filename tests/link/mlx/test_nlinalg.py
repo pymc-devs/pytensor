@@ -25,3 +25,19 @@ def test_mlx_svd(compute_uv):
         [A_val],
         mlx_mode=mlx_linalg_mode,
     )
+
+
+def test_mlx_kron():
+    rng = np.random.default_rng()
+
+    A = pt.matrix(name="A")
+    B = pt.matrix(name="B")
+    A_val, B_val = rng.normal(size=(2, 3, 3)).astype(config.floatX)
+    out = pt.linalg.kron(A, B)
+
+    compare_mlx_and_py(
+        [A, B],
+        [out],
+        [A_val, B_val],
+        mlx_mode=mlx_linalg_mode,
+    )
