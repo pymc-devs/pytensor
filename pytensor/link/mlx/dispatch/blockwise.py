@@ -105,20 +105,24 @@ def blockwise_conv1d(op, node, **kwargs):
 
 @mlx_funcify.register(Blockwise)
 def funcify_Blockwise(op: Blockwise, node, **kwargs):
+    # 1) If it's a Conv1d Blockwise, use the custom implementation
     if isinstance(op.core_op, Conv1d):
         return blockwise_conv1d(op, node, **kwargs)
-    
-    core_f = mlx_funcify(op.core_op, node)
 
-    def blockwise_f(*inputs):
-        return blockwise_f(*inputs)
+    # 2) Otherwise, get the core python function for this Blockwise
     core_node = op._create_dummy_core_node(node.inputs)
-    
     core_f = mlx_funcify(op.core_op, core_node)
-    blockwise_f = core_f
-    for i in range(op.batch_ndim(node)):
-        blockwise_f = mx.vmap(blockwise_f)
 
+    # 3) Determine how many inputs correspond to batch dimensions
+    n_batch = op.batch_ndim(node)
+
+    # 4) Build in_axes: map only the first n_batch args, keep the rest static
+    in_axes = tuple(0 if i < n_batch else None for i in range(len(node.inputs)))
+
+    # 5) Vectorize (vmap) with in_axes
+    blockwise_f = mx.vmap(core_f, in_axes=in_axes)
+
+    # 6) Return the mapped function
     def blockwise_fun(*inputs):
         return blockwise_f(*inputs)
 
