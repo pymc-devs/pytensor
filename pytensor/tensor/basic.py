@@ -1060,6 +1060,65 @@ def flatnonzero(a):
     return nonzero(_a.flatten(), return_matrix=False)[0]
 
 
+def iota(shape: TensorVariable, axis: int) -> TensorVariable:
+    """
+    Create an array with values increasing along the specified axis.
+
+    Iota is a multidimensional generalization of the `arange` function. The returned array is filled with whole numbers
+    increasing along the specified axis.
+
+    Parameters
+    ----------
+    shape: TensorVariable
+        The shape of the array to be created.
+    axis: int
+        The axis along which to fill the array with increasing values.
+
+    Returns
+    -------
+    TensorVariable
+        An array with values increasing along the specified axis.
+
+    Examples
+    --------
+    In the simplest case where ``shape`` is 1d, the output will be equivalent to ``pt.arange``:
+
+    .. testcode::
+
+        import pytensor.tensor as pt
+
+        shape = pt.as_tensor((5,))
+        print(pt.basic.iota(shape, 0).eval())
+
+    .. testoutput::
+
+         [0 1 2 3 4]
+
+    In higher dimensions, it will look like many concatenated `arange`:
+
+    .. testcode::
+
+        shape = pt.as_tensor((5, 5))
+        print(pt.basic.iota(shape, 1).eval())
+
+    .. testoutput::
+
+        [[0 1 2 3 4]
+         [0 1 2 3 4]
+         [0 1 2 3 4]
+         [0 1 2 3 4]
+         [0 1 2 3 4]]
+
+    Setting ``axis=0`` above would result in the transpose of the output.
+    """
+    len_shape = get_vector_length(shape)
+    axis = normalize_axis_index(axis, len_shape)
+    values = arange(shape[axis])
+    return pytensor.tensor.extra_ops.broadcast_to(
+        shape_padright(values, len_shape - axis - 1), shape
+    )
+
+
 def nonzero_values(a):
     """Return a vector of non-zero elements contained in the input array.
 
@@ -1084,35 +1143,10 @@ def nonzero_values(a):
     return _a.flatten()[flatnonzero(_a)]
 
 
-class Tri(Op):
-    __props__ = ("dtype",)
-
-    def __init__(self, dtype=None):
-        if dtype is None:
-            dtype = config.floatX
-        self.dtype = dtype
-
-    def make_node(self, N, M, k):
-        N = as_tensor_variable(N)
-        M = as_tensor_variable(M)
-        k = as_tensor_variable(k)
-        return Apply(
-            self,
-            [N, M, k],
-            [TensorType(dtype=self.dtype, shape=(None, None))()],
-        )
-
-    def perform(self, node, inp, out_):
-        N, M, k = inp
-        (out,) = out_
-        out[0] = np.tri(N, M, k, dtype=self.dtype)
-
-    def infer_shape(self, fgraph, node, in_shapes):
-        out_shape = [node.inputs[0], node.inputs[1]]
-        return [out_shape]
-
-    def grad(self, inp, grads):
-        return [grad_undefined(self, i, inp[i]) for i in range(3)]
+class Tri(OpFromGraph):
+    """
+    Wrapper Op for np.tri graphs
+    """
 
 
 def tri(N, M=None, k=0, dtype=None):
@@ -1142,10 +1176,19 @@ def tri(N, M=None, k=0, dtype=None):
     """
     if dtype is None:
         dtype = config.floatX
+    dtype = np.dtype(dtype)
+
     if M is None:
         M = N
-    op = Tri(dtype)
-    return op(N, M, k)
+
+    N = as_tensor_variable(N)
+    M = as_tensor_variable(M)
+    k = as_tensor_variable(k)
+
+    output = ((iota(as_tensor((N, 1)), 0) + k + 1) > iota(as_tensor((1, M)), 1)).astype(
+        dtype
+    )
+    return Tri(inputs=[N, M, k], outputs=[output])(N, M, k)
 
 
 def tril(m, k=0):
@@ -1225,7 +1268,7 @@ def triu(m, k=0):
            [ 0,  8,  9],
            [ 0,  0, 12]])
 
-    >>> pt.triu(np.arange(3 * 4 * 5).reshape((3, 4, 5))).eval()
+    >>> pt.triu(pt.arange(3 * 4 * 5).reshape((3, 4, 5))).eval()
     array([[[ 0,  1,  2,  3,  4],
             [ 0,  6,  7,  8,  9],
             [ 0,  0, 12, 13, 14],
