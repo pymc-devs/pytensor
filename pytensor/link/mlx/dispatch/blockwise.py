@@ -36,7 +36,7 @@ def blockwise_conv1d(op, node, **kwargs):
         kernel_reshaped = mx.broadcast_to(kernel_squeeze[:, :, None], shape=(b_prod, h, b_prod))
         conv_result = mx.conv1d(x_reshaped[None, :, :], kernel_reshaped, stride=1, padding=0, dilation=1)
         _, conv_shape, _ = conv_result.shape
-        mx.moveaxis(conv_result, source=-1, destination=0).reshape(b + (conv_shape,))
+        return mx.moveaxis(conv_result, source=-1, destination=0).reshape(b + (conv_shape,))
     return inner_f
 
 @mlx_funcify.register(Blockwise)
