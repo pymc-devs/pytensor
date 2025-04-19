@@ -411,7 +411,15 @@ def numba_funcify_CAReduce(op, node, **kwargs):
 
 
 @numba_funcify.register(DimShuffle)
-def numba_funcify_DimShuffle(op, node, **kwargs):
+def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
+    if op.is_left_expand_dims and op.new_order.count("x") == 1:
+        # Most common case, numba compiles it more quickly
+        @numba_njit
+        def left_expand_dims(x):
+            return np.expand_dims(x, 0)
+
+        return left_expand_dims
+
     # We use `as_strided` to achieve the DimShuffle behavior of transposing and expanding/squezing dimensions in one call
     # Numba doesn't currently support multiple expand/squeeze, and reshape is limited to contiguous arrays.
     new_order = tuple(op._new_order)

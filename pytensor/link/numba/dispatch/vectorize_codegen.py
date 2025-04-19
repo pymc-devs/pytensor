@@ -35,6 +35,97 @@ def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
         on[...] = ton
 
     """
+    # Hardcode some cases for numba caching
+    match (nin, nout):
+        case (1, 1):
+
+            def func(i0, o0):
+                t0 = core_op_fn(i0)
+                o0[...] = t0
+        case (1, 2):
+
+            def func(i0, o0, o1):
+                t0, t1 = core_op_fn(i0)
+                o0[...] = t0
+                o1[...] = t1
+        case (1, 3):
+
+            def func(i0, o0, o1, o2):
+                t0, t1, t2 = core_op_fn(i0)
+                o0[...] = t0
+                o1[...] = t1
+                o2[...] = t2
+
+        case (2, 1):
+
+            def func(i0, i1, o0):
+                t0 = core_op_fn(i0, i1)
+                o0[...] = t0
+        case (2, 2):
+
+            def func(i0, i1, o0, o1):
+                t0, t1 = core_op_fn(i0, i1)
+                o0[...] = t0
+                o1[...] = t1
+        case (2, 3):
+
+            def func(i0, i1, o0, o1, o2):
+                t0, t1, t2 = core_op_fn(i0, i1)
+                o0[...] = t0
+                o1[...] = t1
+                o2[...] = t2
+
+        case (3, 1):
+
+            def func(i0, i1, i2, o0):
+                t0 = core_op_fn(i0, i1, i2)
+                o0[...] = t0
+
+        case (3, 2):
+
+            def func(i0, i1, i2, o0, o1):
+                t0, t1 = core_op_fn(i0, i1, i2)
+                o0[...] = t0
+                o1[...] = t1
+        case (3, 3):
+
+            def func(i0, i1, i2, o0, o1, o2):
+                t0, t1, t2 = core_op_fn(i0, i1, i2)
+                o0[...] = t0
+                o1[...] = t1
+                o2[...] = t2
+
+        case (4, 1):
+
+            def func(i0, i1, i2, i3, o0):
+                t0 = core_op_fn(i0, i1, i2, i3)
+                o0[...] = t0
+
+        case (4, 2):
+
+            def func(i0, i1, i2, i3, o0, o1):
+                t0, t1 = core_op_fn(i0, i1, i2, i3)
+                o0[...] = t0
+                o1[...] = t1
+
+        case (5, 1):
+
+            def func(i0, i1, i2, i3, i4, o0):
+                t0 = core_op_fn(i0, i1, i2, i3, i4)
+                o0[...] = t0
+
+        case (5, 2):
+
+            def func(i0, i1, i2, i3, i4, o0, o1):
+                t0, t1 = core_op_fn(i0, i1, i2, i3, i4)
+                o0[...] = t0
+                o1[...] = t1
+        case _:
+            func = None
+
+    if func is not None:
+        return numba_basic.numba_njit(func)
+
     inputs = [f"i{i}" for i in range(nin)]
     outputs = [f"o{i}" for i in range(nout)]
     inner_outputs = [f"t{output}" for output in outputs]
@@ -55,7 +146,7 @@ def store_core_outputs({inp_signature}, {out_signature}):
     func = compile_function_src(
         func_src, "store_core_outputs", {**globals(), **global_env}
     )
-    return cast(Callable, numba_basic.numba_njit(func))
+    return cast(Callable, numba_basic.numba_njit(func, cache=False))
 
 
 _jit_options = {
