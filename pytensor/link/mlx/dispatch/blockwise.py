@@ -23,17 +23,20 @@ def blockwise_conv1d(op, node, **kwargs):
 
         b = np.broadcast_shapes(bx, bk)
 
-        x = x.reshape(b + (t,))
-        kernel = kernel.reshape(b + (h,))
+        x = mx.broadcast_to(x, b + (t,))
+        kernel = mx.broadcast_to(kernel, b + (h,))
 
         x_reshaped = x.reshape(-1, t).T # shape equals to (N, B) -> N Time as batches all together
         kernel_squeeze = kernel.reshape(-1, h)
         b_prod = kernel_squeeze.shape[0]
 
-        kernel_reshaped = mx.broadcast_to(a=kernel_squeeze[None, :, None], shape=(b_prod, h, b_prod))
+        print(kernel_squeeze.shape)
+
+        print(b_prod, h, b_prod)
+        kernel_reshaped = mx.broadcast_to(kernel_squeeze[:, :, None], shape=(b_prod, h, b_prod))
         conv_result = mx.conv1d(x_reshaped[None, :, :], kernel_reshaped, stride=1, padding=0, dilation=1)
         _, conv_shape, _ = conv_result.shape
-        return mx.moveaxis(a=conv_result, source=-1, destination=0).reshape(b + (conv_shape,))
+        mx.moveaxis(conv_result, source=-1, destination=0).reshape(b + (conv_shape,))
     return inner_f
 
 @mlx_funcify.register(Blockwise)
