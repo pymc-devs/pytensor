@@ -55,3 +55,23 @@ def test_mlx_solve(assume_a):
 
     with context:
         compare_mlx_and_py([A, b], [out], [A_val, b_val], mlx_mode=mlx_linalg_mode)
+
+
+@pytest.mark.parametrize("lower, trans", [(False, False), (True, True)])
+def test_mlx_SolveTriangular(lower, trans):
+    rng = np.random.default_rng()
+
+    A = pt.tensor("A", shape=(5, 5))
+    b = pt.tensor("B", shape=(5, 5))
+
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    b_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    out = pt.linalg.solve_triangular(
+        A,
+        b,
+        trans=0,
+        lower=lower,
+        unit_diagonal=False,
+    )
+    compare_mlx_and_py([A, b], [out], [A_val, b_val], mlx_mode=mlx_linalg_mode)
