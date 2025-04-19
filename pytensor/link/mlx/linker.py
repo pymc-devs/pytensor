@@ -35,8 +35,6 @@ class MLXLinker(JITLinker):
 
         inner_fn = mx.compile(fn)
 
-        return inner_fn
-
         def fn(*inputs, inner_fn=inner_fn):
             return inner_fn(*(mlx_typify(inp) for inp in inputs))
 
