@@ -211,13 +211,13 @@ def mlx_funcify_Elemwise(op, **kwargs):
     elif isinstance(op.scalar_op, ScalarMaximum):
 
         def max(x):
-            return mx.max(x, axis=op.axis)
+            return x.max(axis=op.axis)
 
         return max
     elif isinstance(op.scalar_op, ScalarMinimum):
 
         def min(x):
-            return mx.min(x, axis=op.axis)
+            return x.min(axis=op.axis)
 
         return min
     elif isinstance(op.scalar_op, Cast):
