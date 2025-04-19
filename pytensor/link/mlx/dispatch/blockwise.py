@@ -18,25 +18,29 @@ def blockwise_conv1d(op, node, **kwargs):
     #     raise NotImplementedError("Only 1D batches are supported for conv1d")
     
     def inner_f(x, kernel):
-        *bx, t = x.shape
-        *bk, h = kernel.shape
+        # 1) Validate shapes
+        B, T = x.shape
+        Bk, K = kernel.shape
+        if B != Bk:
+            raise ValueError(f"Batch mismatch: x has {B}, kernels has {Bk}")
 
-        b = np.broadcast_shapes(bx, bk)
+        # 2) Reshape x so that 'channels' = B, batch size = 1
+        #    → input shape (N=1, H=T, C_in=B)
+        x_in = x.T[None, :, :]  # shape (1, T, B)
 
-        x = mx.broadcast_to(x, b + (t,))
-        kernel = mx.broadcast_to(kernel, b + (h,))
+        # 3) Build weight array of shape (C_out=B, H_f=K, C_in=1)
+        #    groups = B will slice C_in into B single-channel groups
+        w = kernel[:, :, None]  # shape (B, K, 1)
 
-        x_reshaped = x.reshape(-1, t).T # shape equals to (N, B) -> N Time as batches all together
-        kernel_squeeze = kernel.reshape(-1, h)
-        b_prod = kernel_squeeze.shape[0]
+        # 4) Convolve with one group per sequence
+        y = mx.conv1d(x_in, w,
+                    stride=1,
+                    padding=0,
+                    dilation=1,
+                    groups=B)
 
-        print(kernel_squeeze.shape)
-
-        print(b_prod, h, b_prod)
-        kernel_reshaped = mx.broadcast_to(kernel_squeeze[:, :, None], shape=(b_prod, h, b_prod))
-        conv_result = mx.conv1d(x_reshaped[None, :, :], kernel_reshaped, stride=1, padding=0, dilation=1)
-        _, conv_shape, _ = conv_result.shape
-        return mx.moveaxis(conv_result, source=-1, destination=0).reshape(b + (conv_shape,))
+        # 5) y has shape (1, T - K + 1, B); drop the batch axis and transpose
+        return y[0].T  # final shape (B, T - K + 1)
     return inner_f
 
 @mlx_funcify.register(Blockwise)
