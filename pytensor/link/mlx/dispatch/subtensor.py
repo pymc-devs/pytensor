@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -24,6 +26,7 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
 
     return subtensor
 
+
 @mlx_funcify.register(AdvancedSubtensor)
 @mlx_funcify.register(AdvancedSubtensor1)
 def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
@@ -48,7 +51,7 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
 
         def mlx_fn(x, indices, y):
             if not op.inplace:
-                x = x.copy()
+                x = deepcopy(x)
             x[indices] = y
             return x
 
@@ -56,7 +59,7 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
 
         def mlx_fn(x, indices, y):
             if not op.inplace:
-                x = x.copy()
+                x = deepcopy(x)
             x[indices] += y
             return x
 
@@ -76,7 +79,7 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
 
         def mlx_fn(x, indices, y):
             if not op.inplace:
-                x = x.copy()
+                x = deepcopy(x)
             x[indices] = y
             return x
 
@@ -84,7 +87,7 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
 
         def mlx_fn(x, indices, y):
             if not op.inplace:
-                x = x.copy()
+                x = deepcopy(x)
             x[indices] += y
             return x
 
