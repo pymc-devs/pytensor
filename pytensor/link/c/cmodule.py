@@ -2111,7 +2111,6 @@ class GCC_compiler(Compiler):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.PIPE,
-                shell=True,
             )
             # For mingw64 with GCC >= 4.7, passing os.devnull
             # as stdin (which is the default) results in the process
@@ -2786,7 +2785,6 @@ def default_blas_ldflags() -> str:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
-            shell=True,
         )
         (stdout, stderr) = p.communicate(input=b"")
         if p.returncode != 0:
