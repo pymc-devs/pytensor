@@ -228,23 +228,19 @@ def cxx_search_dirs(blas_libs, mock_system):
         )
 
 
-@pytest.fixture(
-    scope="function", params=[True, False], ids=["Working_CXX", "Broken_CXX"]
+@pytest.mark.parametrize(
+    "working_cxx", [True, False], ids=["Working_CXX", "Broken_CXX"]
 )
-def cxx_search_dirs_status(request):
-    return request.param
-
-
 @patch("pytensor.link.c.cmodule.std_lib_dirs", return_value=[])
 @patch("pytensor.link.c.cmodule.check_mkl_openmp", return_value=None)
 def test_default_blas_ldflags(
-    mock_std_lib_dirs, mock_check_mkl_openmp, cxx_search_dirs, cxx_search_dirs_status
+    mock_std_lib_dirs, mock_check_mkl_openmp, cxx_search_dirs, working_cxx
 ):
     cxx_search_dirs, expected_blas_ldflags, enabled_accelerate_framework = (
         cxx_search_dirs
     )
     mock_process = MagicMock()
-    if cxx_search_dirs_status:
+    if working_cxx:
         error_message = ""
         mock_process.communicate = lambda *args, **kwargs: (cxx_search_dirs, b"")
         mock_process.returncode = 0
@@ -273,7 +269,7 @@ def test_default_blas_ldflags(
             "try_compile_tmp",
             new_callable=patched_compile_tmp,
         ):
-            if cxx_search_dirs_status:
+            if working_cxx:
                 assert set(default_blas_ldflags().split(" ")) == set(
                     expected_blas_ldflags.split(" ")
                 )
