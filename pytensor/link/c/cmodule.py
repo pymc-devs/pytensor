@@ -10,6 +10,7 @@ import os
 import pickle
 import platform
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -2610,7 +2611,7 @@ class GCC_compiler(Compiler):
         cmd.append(f"{path_wrapper}{cppfilename}{path_wrapper}")
         cmd.extend(GCC_compiler.linking_patch(lib_dirs, libs))
         # print >> sys.stderr, 'COMPILING W CMD', cmd
-        _logger.debug(f"Running cmd: {' '.join(cmd)}")
+        _logger.debug(f"Running cmd: {shlex.join(cmd)}")
 
         def print_command_line_error():
             # Print command line when a problem occurred.
@@ -2618,7 +2619,7 @@ class GCC_compiler(Compiler):
                 ("Problem occurred during compilation with the command line below:"),
                 file=sys.stderr,
             )
-            print(" ".join(cmd), file=sys.stderr)
+            print(shlex.join(cmd), file=sys.stderr)
 
         try:
             p_out = output_subprocess_Popen(cmd)
