@@ -2105,7 +2105,7 @@ class GCC_compiler(Compiler):
             )
             detect_march = False
 
-        def get_lines(cmd: list[str] | str, parse: bool = True) -> list[str] | None:
+        def get_lines(cmd: list[str], parse: bool = True) -> list[str] | None:
             p = subprocess_Popen(
                 cmd,
                 stdout=subprocess.PIPE,

@@ -123,7 +123,7 @@ def maybe_add_to_os_environ_pathlist(var: str, newpath: Path | str) -> None:
         pass
 
 
-def subprocess_Popen(command: str | list[str], **params):
+def subprocess_Popen(command: list[str], **params) -> subprocess.Popen:
     """
     Utility function to work around windows behavior that open windows.
 
@@ -142,12 +142,12 @@ def subprocess_Popen(command: str | list[str], **params):
         # in "The filename, directory name, or volume label syntax is incorrect" error message.
         # Passing the command as a single string solves this problem.
         if isinstance(command, list):
-            command = " ".join(command)
+            command = " ".join(command)  # type: ignore[assignment]
 
     return subprocess.Popen(command, startupinfo=startupinfo, **params)
 
 
-def call_subprocess_Popen(command, **params):
+def call_subprocess_Popen(command: list[str], **params) -> int:
     """
     Calls subprocess_Popen and discards the output, returning only the
     exit code.
@@ -165,13 +165,17 @@ def call_subprocess_Popen(command, **params):
     return returncode
 
 
-def output_subprocess_Popen(command, **params):
+def output_subprocess_Popen(command: list[str], **params) -> tuple[bytes, bytes, int]:
     """
     Calls subprocess_Popen, returning the output, error and exit code
     in a tuple.
     """
     if "stdout" in params or "stderr" in params:
         raise TypeError("don't use stderr or stdout with output_subprocess_Popen")
+    if "encoding" in params:
+        raise TypeError(
+            "adjust the output_subprocess_Popen type annotation to support str"
+        )
     params["stdout"] = subprocess.PIPE
     params["stderr"] = subprocess.PIPE
     p = subprocess_Popen(command, **params)
