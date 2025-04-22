@@ -128,7 +128,7 @@ def test_cache_versioning():
     z = my_add(x)
     z_v = my_add_ver(x)
 
-    with tempfile.TemporaryDirectory() as dir_name:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as dir_name:
         cache = ModuleCache(dir_name)
 
         lnk = CLinker().accept(FunctionGraph(outputs=[z]))
