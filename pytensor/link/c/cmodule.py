@@ -2147,7 +2147,7 @@ class GCC_compiler(Compiler):
 
             # The '-' at the end is needed. Otherwise, g++ do not output
             # enough information.
-            native_lines = get_lines(f"{config.cxx} -march=native -E -v -")
+            native_lines = get_lines([config.cxx, "-march=native", "-E", "-v", "-"])
             if native_lines is None:
                 _logger.info(
                     "Call to 'g++ -march=native' failed, not setting -march flag"
@@ -2162,7 +2162,7 @@ class GCC_compiler(Compiler):
                     # That means we did not select the right lines, so
                     # we have to report all the lines instead
                     reported_lines = get_lines(
-                        f"{config.cxx} -march=native -E -v -", parse=False
+                        [config.cxx, "-march=native", "-E", "-v", "-"], parse=False
                     )
                 else:
                     reported_lines = native_lines
@@ -2175,10 +2175,12 @@ class GCC_compiler(Compiler):
                     f" problem:\n {reported_lines}"
                 )
             else:
-                default_lines = get_lines(f"{config.cxx} -E -v -")
+                default_lines = get_lines([config.cxx, "-E", "-v", "-"])
                 _logger.info(f"g++ default lines: {default_lines}")
                 if len(default_lines) < 1:
-                    reported_lines = get_lines(f"{config.cxx} -E -v -", parse=False)
+                    reported_lines = get_lines(
+                        [config.cxx, "-E", "-v", "-"], parse=False
+                    )
                     warnings.warn(
                         "PyTensor was not able to find the "
                         "default g++ parameters. This is needed to tune "
@@ -2778,7 +2780,7 @@ def default_blas_ldflags() -> str:
         return libs
 
     def get_cxx_library_dirs():
-        cmd = f"{config.cxx} -print-search-dirs"
+        cmd = [config.cxx, "-print-search-dirs"]
         p = subprocess_Popen(
             cmd,
             stdout=subprocess.PIPE,
