@@ -2120,10 +2120,10 @@ class GCC_compiler(Compiler):
             if p.returncode != 0:
                 return None
 
-            lines = BytesIO(stdout + stderr).readlines()
-            lines = (l.decode() for l in lines)
+            lines_bytes = BytesIO(stdout + stderr).readlines()
+            lines = [l.decode() for l in lines_bytes]
             if parse:
-                selected_lines = []
+                selected_lines: list[str] = []
                 for line in lines:
                     if (
                         "COLLECT_GCC_OPTIONS=" in line
