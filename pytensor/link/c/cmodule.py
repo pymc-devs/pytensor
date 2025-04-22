@@ -2104,45 +2104,45 @@ class GCC_compiler(Compiler):
             )
             detect_march = False
 
+        def get_lines(cmd, parse=True):
+            p = subprocess_Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE,
+                shell=True,
+            )
+            # For mingw64 with GCC >= 4.7, passing os.devnull
+            # as stdin (which is the default) results in the process
+            # waiting forever without returning. For that reason,
+            # we use a pipe, and use the empty string as input.
+            (stdout, stderr) = p.communicate(input=b"")
+            if p.returncode != 0:
+                return None
+
+            lines = BytesIO(stdout + stderr).readlines()
+            lines = (l.decode() for l in lines)
+            if parse:
+                selected_lines = []
+                for line in lines:
+                    if (
+                        "COLLECT_GCC_OPTIONS=" in line
+                        or "CFLAGS=" in line
+                        or "CXXFLAGS=" in line
+                        or "-march=native" in line
+                    ):
+                        continue
+                    selected_lines.extend(
+                        line.strip()
+                        for reg in ("-march=", "-mtune=", "-target-cpu", "-mabi=")
+                        if reg in line
+                    )
+                lines = list(set(selected_lines))  # to remove duplicate
+
+            return lines
+
         if detect_march:
             GCC_compiler.march_flags = []
-
-            def get_lines(cmd, parse=True):
-                p = subprocess_Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.PIPE,
-                    shell=True,
-                )
-                # For mingw64 with GCC >= 4.7, passing os.devnull
-                # as stdin (which is the default) results in the process
-                # waiting forever without returning. For that reason,
-                # we use a pipe, and use the empty string as input.
-                (stdout, stderr) = p.communicate(input=b"")
-                if p.returncode != 0:
-                    return None
-
-                lines = BytesIO(stdout + stderr).readlines()
-                lines = (l.decode() for l in lines)
-                if parse:
-                    selected_lines = []
-                    for line in lines:
-                        if (
-                            "COLLECT_GCC_OPTIONS=" in line
-                            or "CFLAGS=" in line
-                            or "CXXFLAGS=" in line
-                            or "-march=native" in line
-                        ):
-                            continue
-                        selected_lines.extend(
-                            line.strip()
-                            for reg in ("-march=", "-mtune=", "-target-cpu", "-mabi=")
-                            if reg in line
-                        )
-                    lines = list(set(selected_lines))  # to remove duplicate
-
-                return lines
 
             # The '-' at the end is needed. Otherwise, g++ do not output
             # enough information.
