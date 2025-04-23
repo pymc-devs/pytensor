@@ -1,6 +1,7 @@
 import mlx.core as mx
 
-from pytensor.link.mlx.dispatch import mlx_funcify
+from pytensor.link.mlx.dispatch import mlx_funcify, mlx_typify
+from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
 from pytensor.scalar import Softplus
 from pytensor.scalar.basic import (
     AND,
@@ -34,6 +35,12 @@ from pytensor.scalar.basic import (
 from pytensor.scalar.math import Sigmoid
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot
+
+
+@mlx_typify.register(int)
+@mlx_typify.register(float)
+def mlx_typify_python_scalar(data, **kwargs):
+    return mx.array(data)
 
 
 @mlx_funcify.register(Dot)
@@ -210,20 +217,21 @@ def mlx_funcify_Elemwise(op, **kwargs):
         return any
     elif isinstance(op.scalar_op, ScalarMaximum):
 
-        def max(x):
-            return x.max(axis=op.axis)
+        def max(x, y):
+            return mx.maximum(x, y)
 
         return max
     elif isinstance(op.scalar_op, ScalarMinimum):
 
-        def min(x):
-            return x.min(axis=op.axis)
+        def min(x, y):
+            return mx.minimum(x, y)
 
         return min
     elif isinstance(op.scalar_op, Cast):
 
         def cast(x):
-            return mx.cast(x, op.dtype)
+            dtype = convert_dtype_to_mlx(op.scalar_op.o_type.dtype)
+            return x.astype(dtype)
 
         return cast
     elif isinstance(op.scalar_op, Sign):

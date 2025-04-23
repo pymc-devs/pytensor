@@ -127,7 +127,7 @@ def mlx_funcify_ExtractDiag(op, **kwargs):
 # ------------------------------------------------------------------
 @mlx_funcify.register(Eye)  # MLX
 def mlx_funcify_Eye(op, **kwargs):
-    dtype = op.dtype
+    dtype = convert_dtype_to_mlx(op.dtype)
 
     def eye(N, M, k):
         return mx.eye(int(N), int(M), int(k), dtype=dtype)  # MLX
@@ -135,13 +135,56 @@ def mlx_funcify_Eye(op, **kwargs):
     return eye
 
 
+def convert_dtype_to_mlx(dtype_str):
+    """Convert PyTensor dtype strings to MLX dtype objects.
+
+    MLX expects dtype objects rather than string literals for type conversion.
+    This function maps common dtype strings to their MLX equivalents.
+    """
+    if isinstance(dtype_str, str):
+        if dtype_str == "bool":
+            return mx.bool_
+        elif dtype_str == "int8":
+            return mx.int8
+        elif dtype_str == "int16":
+            return mx.int16
+        elif dtype_str == "int32":
+            return mx.int32
+        elif dtype_str == "int64":
+            return mx.int64
+        elif dtype_str == "uint8":
+            return mx.uint8
+        elif dtype_str == "uint16":
+            return mx.uint16
+        elif dtype_str == "uint32":
+            return mx.uint32
+        elif dtype_str == "uint64":
+            return mx.uint64
+        elif dtype_str == "float16":
+            return mx.float16
+        elif dtype_str == "float32":
+            return mx.float32
+        elif dtype_str == "float64":
+            return mx.float64
+        elif dtype_str == "bfloat16":
+            return mx.bfloat16
+        elif dtype_str == "complex64":
+            return mx.complex64
+        elif dtype_str == "complex128":
+            return mx.complex128
+    # Return as is if it's already an MLX dtype or not a recognized string
+    return dtype_str
+
+
 # ------------------------------------------------------------------
 # MakeVector
 # ------------------------------------------------------------------
 @mlx_funcify.register(MakeVector)  # MLX
 def mlx_funcify_MakeVector(op, **kwargs):
+    dtype = convert_dtype_to_mlx(op.dtype)
+
     def makevector(*x):
-        return mx.array(x, dtype=op.dtype)  # MLX
+        return mx.array(x, dtype=dtype)  # MLX
 
     return makevector
 
@@ -175,6 +218,7 @@ def mlx_funcify_ScalarFromTensor(op, **kwargs):
 def mlx_funcify_Tri(op, node, **kwargs):
     # node.inputs  ->  N, M, k
     const_args = [getattr(inp, "data", None) for inp in node.inputs]
+    dtype = convert_dtype_to_mlx(op.dtype)
 
     def tri(*args):
         # Replace args with compile-time constants when available
@@ -182,15 +226,17 @@ def mlx_funcify_Tri(op, node, **kwargs):
             arg if const_a is None else const_a
             for arg, const_a in zip(args, const_args, strict=True)
         ]
-        return mx.tri(*args, dtype=op.dtype)  # MLX
+        return mx.tri(*args, dtype=dtype)  # MLX
 
     return tri
 
 
 @mlx_funcify.register(AllocEmpty)
 def mlx_funcify_AllocEmpty(op, **kwargs):
+    dtype = convert_dtype_to_mlx(op.dtype)
+
     def allocempty(*shape):
-        return mx.zeros(shape, dtype=op.dtype)
+        return mx.zeros(shape, dtype=dtype)
 
     return allocempty
 
@@ -198,8 +244,10 @@ def mlx_funcify_AllocEmpty(op, **kwargs):
 @mlx_funcify.register(Alloc)
 def mlx_funcify_Alloc(op, node, **kwargs):
     def alloc(x, *shape):
-        res = mx.broadcast_to(x, shape)
-        Alloc._check_runtime_broadcast(node, mx.array(x), res.shape)
+        # Convert x to an MLX array with the correct dtype if it's a scalar
+        x_array = mx.array(x)
+        res = mx.broadcast_to(x_array, shape)
+        Alloc._check_runtime_broadcast(node, x_array, res.shape)
         return res
 
     return alloc
