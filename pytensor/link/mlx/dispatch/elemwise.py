@@ -1,64 +1,36 @@
 import mlx.core as mx
+import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
 from pytensor.scalar import Softplus
+from pytensor.scalar.basic import (
+    AND,
+    OR,
+    Add,
+    Cast,
+    Mul,
+)
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
 from pytensor.tensor.special import Softmax, SoftmaxGrad
 
-from pytensor.scalar.basic import (
-    AND,
-    EQ,
-    GE,
-    GT,
-    LE,
-    LT,
-    NEQ,
-    OR,
-    Abs,
-    Add,
-    Cast,
-    Cos,
-    Exp,
-    Log,
-    Log1p,
-    Mul,
-    Neg,
-    Pow,
-    ScalarMaximum,
-    ScalarMinimum,
-    Sign,
-    Sin,
-    Sqr,
-    Sqrt,
-    Sub,
-    Switch,
-    TrueDiv,
-)
 
 @mlx_funcify.register(DimShuffle)
 def mlx_funcify_DimShuffle(op, **kwargs):
     def dimshuffle(x):
-        res = mx.transpose(x, op.transposition)
-
-        shape = list(res.shape[: len(op.shuffle)])
-
-        for augm in op.augment:
-            shape.insert(augm, 1)
-
-        return mx.reshape(res, shape)
-
-    return dimshuffle
-
-
-@mlx_funcify.register(DimShuffle)
-def mlx_funcify_DimShuffle(op, **kwargs):
-    def dimshuffle(x):
+        # Convert scalar to array if needed
+        if isinstance(x, int | float) or (
+            isinstance(x, np.number) and not isinstance(x, np.ndarray)
+        ):
+            x = mx.array(x)
         res = mx.transpose(x, op.transposition)
         shape = list(res.shape[: len(op.shuffle)])
         for augm in op.augment:
             shape.insert(augm, 1)
         return mx.reshape(res, shape)
+
     return dimshuffle
+
 
 @mlx_funcify.register(CAReduce)
 def mlx_funcify_CAReduce(op, **kwargs):
@@ -86,21 +58,8 @@ def mlx_funcify_CAReduce(op, **kwargs):
             return mx.any(x, axis=op.axis)
 
         return any
-    elif isinstance(op.scalar_op, ScalarMaximum):
-
-        def max(x):
-            return x.max(axis=op.axis)
-
-        return max
-    elif isinstance(op.scalar_op, ScalarMinimum):
-
-        def min(x):
-            return x.min(axis=op.axis)
-
-        return min
     else:
         raise NotImplementedError(f"MLX does not support Elemwise {op.scalar_op}")
-
 
 
 @mlx_funcify.register(Softmax)
@@ -142,3 +101,12 @@ def mlx_funcify_Softplus(op, **kwargs):
         )
 
     return softplus
+
+
+@mlx_funcify.register(Cast)
+def mlx_funcify_Cast(op, **kwargs):
+    def cast(x):
+        dtype = convert_dtype_to_mlx(op.scalar_op.o_type.dtype)
+        return x.astype(dtype)
+
+    return cast
