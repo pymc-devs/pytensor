@@ -368,7 +368,6 @@ def pfunc(
     allow_input_downcast=None,
     profile=None,
     on_unused_input=None,
-    output_keys=None,
     fgraph: FunctionGraph | None = None,
     trust_input: bool = False,
 ) -> Function:
@@ -469,7 +468,6 @@ def pfunc(
         name=name,
         profile=profile,
         on_unused_input=on_unused_input,
-        output_keys=output_keys,
         fgraph=fgraph,
         trust_input=trust_input,
     )

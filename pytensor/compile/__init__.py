@@ -6,7 +6,6 @@ from pytensor.compile.function.types import (
     Supervisor,
     UnusedInputError,
     alias_root,
-    convert_function_input,
     fgraph_updated_vars,
     get_info_on_inputs,
     infer_reuse_pattern,

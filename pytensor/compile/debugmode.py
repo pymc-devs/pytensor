@@ -1967,10 +1967,6 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
     on_unused_input
         What to do if a variable in the 'inputs' list is not used in the
         graph. Possible values are 'raise', 'warn' and 'ignore'.
-    output_keys
-        If the outputs argument for pytensor.function was a list, then
-        output_keys is None. If the outputs argument was a dict, then
-        output_keys is a sorted list of the keys from that dict.
     trust_input : bool, default False
         If True, no input validation checks are performed when the function is
         called. This includes checking the number of inputs, their types and
@@ -2001,7 +1997,6 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         profile=None,
         on_unused_input=None,
         fgraph=None,  # If present the optimized graph. we ignore it.
-        output_keys=None,
         name=None,
         no_fgraph_prep=False,
         trust_input=False,
@@ -2030,8 +2025,6 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
 
         # Check if some input variables are unused
         self.check_unused_inputs(inputs, outputs, on_unused_input)
-
-        indices = [[input, None, [input]] for input in inputs]
 
         # make the fgraph
         for i in range(mode.stability_patience):
@@ -2140,7 +2133,6 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         else:
             self.linker = linker.accept(fgraph)
         fgraph.name = name
-        self.indices = indices
         self.inputs = inputs
         # TODO: Get rid of all this `expanded_inputs` nonsense
         self.expanded_inputs = inputs
@@ -2150,7 +2142,6 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         self.accept_inplace = accept_inplace
         self.function_builder = function_builder
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
-        self.output_keys = output_keys
         self.name = name
         self.trust_input = trust_input
 
