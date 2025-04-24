@@ -8,7 +8,7 @@ from pytensor import config, function, grad
 from pytensor.graph import ancestors, rewrite_graph
 from pytensor.tensor import matrix, vector
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.signal.conv import Conv1d, convolve1d
+from pytensor.tensor.signal.conv import Convolve1d, convolve1d
 from tests import unittest_tools as utt
 
 
@@ -81,4 +81,4 @@ def test_convolve1d_batch_graph(mode):
         if var.owner is not None and isinstance(var.owner.op, Blockwise)
     ]
     # Check any Blockwise are just Conv1d
-    assert all(isinstance(node.op.core_op, Conv1d) for node in blockwise_nodes)
+    assert all(isinstance(node.op.core_op, Convolve1d) for node in blockwise_nodes)

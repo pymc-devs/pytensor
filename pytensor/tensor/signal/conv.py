@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from pytensor.tensor import TensorLike
 
 
-class Conv1d(Op):
+class Convolve1d(Op):
     __props__ = ("mode",)
     gufunc_signature = "(n),(k)->(o)"
 
@@ -129,4 +129,4 @@ def convolve1d(
         )
         mode = "valid"
 
-    return cast(TensorVariable, Blockwise(Conv1d(mode=mode))(in1, in2))
+    return cast(TensorVariable, Blockwise(Convolve1d(mode=mode))(in1, in2))
