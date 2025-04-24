@@ -379,7 +379,12 @@ class PerformLinker(LocalLinker):
 
         # The function that actually runs your program is one of the f's in streamline.
         f = streamline(
-            fgraph, thunks, order, post_thunk_old_storage, no_recycling=no_recycling
+            fgraph,
+            thunks,
+            order,
+            post_thunk_old_storage=post_thunk_old_storage,
+            no_recycling=no_recycling,
+            output_storage=output_storage,
         )
 
         f.allow_gc = (
@@ -559,6 +564,7 @@ class WrapLinker(Linker):
                     raise_with_op(self.fgraph, node, *thunks)
 
         f.thunk_groups = thunk_groups
+        f.allow_gc = len(self.linkers) == 1
 
         return f, inputs0, outputs0
 

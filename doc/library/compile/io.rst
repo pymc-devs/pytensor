@@ -35,12 +35,11 @@ The ``inputs`` argument to ``pytensor.function`` is a list, containing the ``Var
       can be set by ``kwarg``, and its value can be accessed by
       ``self.<name>``. The default value is ``None``.
 
-      ``value``: literal or ``Container``. The initial/default value for this
+      ``value``: ``Container``. The initial value for this
         input. If update is ``None``, this input acts just like
         an argument with a default value in Python. If update is not ``None``,
-        changes to this
-        value will "stick around", whether due to an update or a user's
-        explicit action.
+        changes to this value will "stick around", whether due to an update
+        or a user's explicit action.
 
       ``update``: Variable instance. This expression Variable will
       replace ``value`` after each function call. The default value is
@@ -73,52 +72,25 @@ The ``inputs`` argument to ``pytensor.function`` is a list, containing the ``Var
             overwriting its content without being aware of it).
 
 
-Value: initial and default values
----------------------------------
+Update
+------
 
-A non-None `value` argument makes an In() instance an optional parameter
-of the compiled function.  For example, in the following code we are
-defining an arity-2 function ``inc``.
+We can define an update to modify the value of a shared variable after each function call.
 
 >>> import pytensor.tensor as pt
->>> from pytensor import function
->>> from pytensor.compile.io import In
->>> u, x, s = pt.scalars('u', 'x', 's')
->>> inc = function([u, In(x, value=3), In(s, update=(s+x*u), value=10.0)], [])
+>>> from pytensor import function, shared
+>>> s = shared(0.0, name='s')
+>>> x = pt.scalar('x')
+>>> inc = function([x], s, updates={s: s + x})
 
-Since we provided a ``value`` for ``s`` and ``x``, we can call it with just a value for ``u`` like this:
+Each call to ``inc`` returns the current value of ``s`` and then updates it:
 
->>> inc(5)         # update s with 10+3*5
-[]
->>> print(inc[s])
-25.0
-
-The effect of this call is to increment the storage associated to ``s`` in ``inc`` by 15.
-
-If we pass two arguments to ``inc``, then we override the value associated to
-``x``, but only for this one function call.
-
->>> inc(3, 4)      # update s with 25 + 3*4
-[]
->>> print(inc[s])
-37.0
->>> print(inc[x])   # the override value of 4 was only temporary
-3.0
-
-If we pass three arguments to ``inc``, then we override the value associated
-with ``x`` and ``u`` and ``s``.
-Since ``s``'s value is updated on every call, the old value of ``s`` will be ignored and then replaced.
-
->>> inc(3, 4, 7)      # update s with 7 + 3*4
-[]
->>> print(inc[s])
-19.0
-
-We can also assign to ``inc[s]`` directly:
-
->>> inc[s] = 10
->>> inc[s]
-array(10.0)
+>>> inc(5)         # returns 0, then s becomes 0 + 5
+array(0.0)
+>>> inc(3)         # returns 5, then s becomes 5 + 3
+array(5.0)
+>>> s.get_value()
+array(8.0)
 
 Input Argument Restrictions
 ---------------------------
@@ -149,72 +121,13 @@ This automatic naming feature can be disabled by instantiating an In
 instance explicitly with the ``autoname`` flag set to False.
 
 
-Access to function values and containers
-----------------------------------------
+Shared variables and updates
+----------------------------
 
-For each input, ``pytensor.function`` will create a ``Container`` if
-``value`` was not already a ``Container`` (or if ``implicit`` was ``False``). At the time of a function call,
-each of these containers must be filled with a value. Each input (but
-especially ones with a default value or an update expression) may have a
-value between calls. The function interface defines a way to get at
-both the current value associated with an input, as well as the container
-which will contain all future values:
-
-  - The ``value`` property accesses the current values. It is both readable
-    and writable, but assignments (writes) may be implemented by an internal
-    copy and/or casts.
-
-  - The ``container`` property accesses the corresponding container.
-    This property accesses is a read-only dictionary-like interface. It is
-    useful for fetching the container associated with a particular input to
-    share containers between functions, or to have a sort of pointer to an
-    always up-to-date value.
-
-Both ``value`` and ``container`` properties provide dictionary-like access based on three types of keys:
-
-- integer keys: you can look up a value/container by its position in the input list;
-- name keys: you can look up a value/container by its name;
-- Variable keys: you can look up a value/container by the Variable it corresponds to.
-
-In addition to these access mechanisms, there is an even more convenient
-method to access values by indexing a Function directly by typing
-``fn[<name>]``, as in the examples above.
-
-To show some examples of these access methods...
-
-
->>> from pytensor import tensor as pt, function
->>> a, b, c = pt.scalars('xys') # set the internal names of graph nodes
->>> # Note that the name of c is 's', not 'c'!
->>> fn = function([a, b, ((c, c+a+b), 10.0)], [])
-
->>> # the value associated with c is accessible in 3 ways
->>> fn['s'] is fn.value[c]
-True
->>> fn['s'] is fn.container[c].value
-True
-
->>> fn['s']
-array(10.0)
->>> fn(1, 2)
-[]
->>> fn['s']
-array(13.0)
->>> fn['s'] = 99.0
->>> fn(1, 0)
-[]
->>> fn['s']
-array(100.0)
->>> fn.value[c] = 99.0
->>> fn(1,0)
-[]
->>> fn['s']
-array(100.0)
->>> fn['s'] == fn.value[c]
-True
->>> fn['s'] == fn.container[c].value
-True
-
+Shared variables maintain persistent state across function calls. Use the
+``updates`` argument to ``pytensor.function`` to specify how shared variables
+should be modified after each call. The current value of a shared variable
+can be accessed with ``get_value()`` and set with ``set_value()``.
 
 Input Shortcuts
 ---------------
@@ -222,58 +135,6 @@ Input Shortcuts
 Every element of the inputs list will be upgraded to an In instance if necessary.
 
 - a Variable instance ``r`` will be upgraded like ``In(r)``
-
-- a tuple ``(name, r)`` will be ``In(r, name=name)``
-
-- a tuple ``(r, val)`` will be ``In(r, value=value, autoname=True)``
-
-- a tuple ``((r,up), val)`` will be ``In(r, value=value, update=up, autoname=True)``
-
-- a tuple ``(name, r, val)`` will be ``In(r, name=name, value=value)``
-
-- a tuple ``(name, (r,up), val)`` will be ``In(r, name=name, value=val, update=up, autoname=True)``
-
-Example:
-
->>> import pytensor
->>> from pytensor import tensor as pt
->>> from pytensor.compile.io import In
->>> x = pt.scalar()
->>> y = pt.scalar('y')
->>> z = pt.scalar('z')
->>> w = pt.scalar('w')
-
->>> fn = pytensor.function(inputs=[x, y, In(z, value=42), ((w, w+x), 0)],
-...                      outputs=x + y + z)
->>> # the first two arguments are required and the last two are
->>> # optional and initialized to 42 and 0, respectively.
->>> # The last argument, w, is updated with w + x each time the
->>> # function is called.
-
->>> fn(1)               # illegal because there are two required arguments # doctest: +ELLIPSIS
-Traceback (most recent call last):
-  ...
-TypeError: Missing required input: y
->>> fn(1, 2)            # legal, z is 42, w goes 0 -> 1 (because w <- w + x)
-array(45.0)
->>> fn(1, y=2)        # legal, z is 42, w goes 1 -> 2
-array(45.0)
->>> fn(x=1, y=2)    # illegal because x was not named # doctest: +ELLIPSIS
-Traceback (most recent call last):
-  ...
-TypeError: Unknown input or state: x. The function has 3 named inputs (y, z, w), and 1 unnamed input which thus cannot be accessed through keyword argument (use 'name=...' in a variable's constructor to give it a name).
->>> fn(1, 2, 3)         # legal, z is 3, w goes 2 -> 3
-array(6.0)
->>> fn(1, z=3, y=2) # legal, z is 3, w goes 3 -> 4
-array(6.0)
->>> fn(1, 2, w=400)   # legal, z is 42 again, w goes 400 -> 401
-array(45.0)
->>> fn(1, 2)            # legal, z is 42, w goes 401 -> 402
-array(45.0)
-
-In the example above, ``z`` has value 42 when no value is explicitly given.
-This default value is potentially used at every function invocation, because
-``z`` has no ``update`` or storage associated with it.
 
 .. _function_outputs:
 

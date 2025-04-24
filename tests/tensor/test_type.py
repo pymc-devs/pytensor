@@ -120,10 +120,6 @@ def test_filter_variable():
         test_val.flags.aligned = False
         test_type.filter(test_val)
 
-    with pytest.raises(ValueError, match="Non-finite"):
-        test_type.filter_checks_isfinite = True
-        test_type.filter(np.full((1, 2), np.inf, dtype=config.floatX))
-
     test_type2 = TensorType(config.floatX, shape=(None, None))
     test_var = test_type()
     test_var2 = test_type2()

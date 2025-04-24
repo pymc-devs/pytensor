@@ -267,13 +267,10 @@ def function(
 
     """
     if isinstance(outputs, dict):
-        assert all(isinstance(k, str) for k in outputs)
-
-        output_keys = sorted(outputs)
-        outputs = [outputs[key] for key in output_keys]
-
-    else:
-        output_keys = None
+        raise TypeError(
+            "Passing outputs as a dict is no longer supported. "
+            "Pass a list of outputs instead and use the keys to index the results."
+        )
 
     if name is None:
         # Determine possible file names
@@ -304,45 +301,19 @@ def function(
             "input."
         )
 
-    # compute some features of the arguments:
-    uses_tuple = any(isinstance(i, list | tuple) for i in inputs)
-    uses_updates = bool(updates)
-    uses_givens = bool(givens)
-
-    if uses_tuple:
-        # we must use old semantics in this case.
-        if profile:
-            raise NotImplementedError("profiling not supported in old-style function")
-        if uses_updates or uses_givens:
-            raise NotImplementedError(
-                "In() instances and tuple inputs trigger the old "
-                "semantics, which disallow using updates and givens"
-            )
-        fn = orig_function(
-            inputs,
-            outputs,
-            mode=mode,
-            accept_inplace=accept_inplace,
-            name=name,
-            trust_input=trust_input,
-        )
-    else:
-        # note: pfunc will also call orig_function -- orig_function is
-        #      a choke point that all compilation must pass through
-        fn = pfunc(
-            params=inputs,
-            outputs=outputs,
-            mode=mode,
-            updates=updates,
-            givens=givens,
-            no_default_updates=no_default_updates,
-            accept_inplace=accept_inplace,
-            name=name,
-            rebuild_strict=rebuild_strict,
-            allow_input_downcast=allow_input_downcast,
-            on_unused_input=on_unused_input,
-            profile=profile,
-            output_keys=output_keys,
-            trust_input=trust_input,
-        )
+    fn = pfunc(
+        params=inputs,
+        outputs=outputs,
+        mode=mode,
+        updates=updates,
+        givens=givens,
+        no_default_updates=no_default_updates,
+        accept_inplace=accept_inplace,
+        name=name,
+        rebuild_strict=rebuild_strict,
+        allow_input_downcast=allow_input_downcast,
+        on_unused_input=on_unused_input,
+        profile=profile,
+        trust_input=trust_input,
+    )
     return fn
