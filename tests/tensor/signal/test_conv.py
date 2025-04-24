@@ -5,7 +5,8 @@ import pytest
 from scipy.signal import convolve as scipy_convolve
 
 from pytensor import config, function, grad
-from pytensor.graph import ancestors, rewrite_graph
+from pytensor.graph.basic import ancestors, io_toposort
+from pytensor.graph.rewriting import rewrite_graph
 from pytensor.tensor import matrix, vector
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.signal.conv import Convolve1d, convolve1d
@@ -82,3 +83,29 @@ def test_convolve1d_batch_graph(mode):
     ]
     # Check any Blockwise are just Conv1d
     assert all(isinstance(node.op.core_op, Convolve1d) for node in blockwise_nodes)
+
+
+@pytest.mark.parametrize("static_shape", [False, True])
+def test_convolve1d_valid_grad_rewrite(static_shape):
+    """Test that we don't do a useless full convolve1d when taking the gradient of a valid convolve wrt to the smallest input.
+
+    This can only be achieved when the two inputs have static shapes, so we know which one is larger
+    """
+    larger = vector("larger", shape=(128 if static_shape else None,))
+    smaller = vector("smaller", shape=(64 if static_shape else None,))
+    out = convolve1d(larger, smaller, mode="valid")
+    grad_out = rewrite_graph(
+        grad(out.sum(), wrt=smaller),
+        include=(
+            "ShapeOpt",
+            "canonicalize",
+            "stabilize",
+            "local_useless_unbatched_blockwise",
+        ),
+    )
+    [conv_op] = [
+        node.op
+        for node in io_toposort([larger, smaller], [grad_out])
+        if isinstance(node.op, Convolve1d)
+    ]
+    assert conv_op.mode == ("valid" if static_shape else "full")
