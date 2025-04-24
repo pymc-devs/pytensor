@@ -219,7 +219,7 @@ def numba_funcify_multiple_integer_vector_indexing(
             shape_aft = x_shape[after_last_axis:]
             out_shape = (*shape_bef, *idx_shape, *shape_aft)
             out_buffer = np.empty(out_shape, dtype=x.dtype)
-            for i, scalar_idxs in enumerate(zip(*vec_idxs)):  # noqa: B905
+            for i, scalar_idxs in enumerate(zip(*vec_idxs)):
                 out_buffer[(*none_slices, i)] = x[(*none_slices, *scalar_idxs)]
             return out_buffer
 
@@ -253,7 +253,7 @@ def numba_funcify_multiple_integer_vector_indexing(
                     y = np.broadcast_to(y, x_shape[:first_axis] + x_shape[last_axis:])
 
                 for outer in np.ndindex(x_shape[:first_axis]):
-                    for i, scalar_idxs in enumerate(zip(*vec_idxs)):  # noqa: B905
+                    for i, scalar_idxs in enumerate(zip(*vec_idxs)):
                         out[(*outer, *scalar_idxs)] = y[(*outer, i)]
                 return out
 
@@ -275,7 +275,7 @@ def numba_funcify_multiple_integer_vector_indexing(
                     y = np.broadcast_to(y, x_shape[:first_axis] + x_shape[last_axis:])
 
                 for outer in np.ndindex(x_shape[:first_axis]):
-                    for i, scalar_idxs in enumerate(zip(*vec_idxs)):  # noqa: B905
+                    for i, scalar_idxs in enumerate(zip(*vec_idxs)):
                         out[(*outer, *scalar_idxs)] += y[(*outer, i)]
                 return out
 
@@ -314,7 +314,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
                 if not len(idxs) == len(vals):
                     raise ValueError("The number of indices and values must match.")
                 # no strict argument because incompatible with numba
-                for idx, val in zip(idxs, vals):  # noqa: B905
+                for idx, val in zip(idxs, vals):
                     x[idx] = val
                 return x
     else:
@@ -342,7 +342,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
                     raise ValueError("The number of indices and values must match.")
                 # no strict argument because unsupported by numba
                 # TODO: this doesn't come up in tests
-                for idx, val in zip(idxs, vals):  # noqa: B905
+                for idx, val in zip(idxs, vals):
                     x[idx] += val
                 return x
 

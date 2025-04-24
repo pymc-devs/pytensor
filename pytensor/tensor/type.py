@@ -261,10 +261,10 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 " PyTensor C code does not support that.",
             )
 
-        # strict=False because we are in a hot loop
+        # strict=None because we are in a hot loop
         if not all(
             ds == ts if ts is not None else True
-            for ds, ts in zip(data.shape, self.shape, strict=False)
+            for ds, ts in zip(data.shape, self.shape)
         ):
             raise TypeError(
                 f"The type's shape ({self.shape}) is not compatible with the data's ({data.shape})"
