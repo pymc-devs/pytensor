@@ -23,6 +23,60 @@ from pytensor.tensor.type_other import NoneTypeT, SliceType
 def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
+    if isinstance(op, Subtensor) and len(op.idx_list) == 1:
+        # Hard code indices along first dimension to allow caching
+        [idx] = op.idx_list
+
+        if isinstance(idx, slice):
+            slice_info = (
+                idx.start is not None,
+                idx.stop is not None,
+                idx.step is not None,
+            )
+            match slice_info:
+                case (False, False, False):
+
+                    def subtensor(x):
+                        return x
+
+                case (True, False, False):
+
+                    def subtensor(x, start):
+                        return x[start:]
+                case (False, True, False):
+
+                    def subtensor(x, stop):
+                        return x[:stop]
+                case (False, False, True):
+
+                    def subtensor(x, step):
+                        return x[::step]
+
+                case (True, True, False):
+
+                    def subtensor(x, start, stop):
+                        return x[start:stop]
+                case (True, False, True):
+
+                    def subtensor(x, start, step):
+                        return x[start::step]
+                case (False, True, True):
+
+                    def subtensor(x, stop, step):
+                        return x[:stop:step]
+
+                case (True, True, True):
+
+                    def subtensor(x, start, stop, step):
+                        return x[start:stop:step]
+
+        else:
+
+            def subtensor(x, i):
+                return np.asarray(x[i])
+
+        return numba_njit(subtensor)
+
     unique_names = unique_name_generator(
         ["subtensor", "incsubtensor", "z"], suffix_sep="_"
     )
@@ -100,7 +154,7 @@ def {function_name}({", ".join(input_names)}):
         function_name=function_name,
         global_env=globals() | {"np": np},
     )
-    return numba_njit(func, boundscheck=True)
+    return numba_njit(func, boundscheck=True, cache=False)
 
 
 @numba_funcify.register(AdvancedSubtensor)
@@ -294,7 +348,9 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
         if broadcast_with_index:
 
             @numba_njit(boundscheck=True)
-            def advancedincsubtensor1_inplace(x, val, idxs):
+            def advanced_incsubtensor1(x, val, idxs):
+                out = x if inplace else x.copy()
+
                 if val.ndim == x.ndim:
                     core_val = val[0]
                 elif val.ndim == 0:
@@ -304,24 +360,28 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
                     core_val = val
 
                 for idx in idxs:
-                    x[idx] = core_val
-                return x
+                    out[idx] = core_val
+                return out
 
         else:
 
             @numba_njit(boundscheck=True)
-            def advancedincsubtensor1_inplace(x, vals, idxs):
+            def advanced_incsubtensor1(x, vals, idxs):
+                out = x if inplace else x.copy()
+
                 if not len(idxs) == len(vals):
                     raise ValueError("The number of indices and values must match.")
                 # no strict argument because incompatible with numba
                 for idx, val in zip(idxs, vals):  # noqa: B905
-                    x[idx] = val
-                return x
+                    out[idx] = val
+                return out
     else:
         if broadcast_with_index:
 
             @numba_njit(boundscheck=True)
-            def advancedincsubtensor1_inplace(x, val, idxs):
+            def advanced_incsubtensor1(x, val, idxs):
+                out = x if inplace else x.copy()
+
                 if val.ndim == x.ndim:
                     core_val = val[0]
                 elif val.ndim == 0:
@@ -331,29 +391,21 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
                     core_val = val
 
                 for idx in idxs:
-                    x[idx] += core_val
-                return x
+                    out[idx] += core_val
+                return out
 
         else:
 
             @numba_njit(boundscheck=True)
-            def advancedincsubtensor1_inplace(x, vals, idxs):
+            def advanced_incsubtensor1(x, vals, idxs):
+                out = x if inplace else x.copy()
+
                 if not len(idxs) == len(vals):
                     raise ValueError("The number of indices and values must match.")
                 # no strict argument because unsupported by numba
                 # TODO: this doesn't come up in tests
                 for idx, val in zip(idxs, vals):  # noqa: B905
-                    x[idx] += val
-                return x
+                    out[idx] += val
+                return out
 
-    if inplace:
-        return advancedincsubtensor1_inplace
-
-    else:
-
-        @numba_njit
-        def advancedincsubtensor1(x, vals, idxs):
-            x = x.copy()
-            return advancedincsubtensor1_inplace(x, vals, idxs)
-
-        return advancedincsubtensor1
+    return advanced_incsubtensor1
