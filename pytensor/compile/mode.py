@@ -477,6 +477,9 @@ JAX = Mode(
             "fusion",
             "inplace",
             "scan_save_mem_prealloc",
+            # There are specific variants for the LU decompositions supported by JAX
+            "reuse_lu_decomposition_multiple_solves",
+            "scan_split_non_sequence_lu_decomposition_solve",
         ],
     ),
 )

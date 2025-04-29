@@ -9,6 +9,10 @@ from pytensor.tensor._linalg.solve.rewriting import (
     reuse_lu_decomposition_multiple_solves,
     scan_split_non_sequence_lu_decomposition_solve,
 )
+from pytensor.tensor._linalg.solve.tridiagonal import (
+    LUFactorTridiagonal,
+    SolveLUFactorTridiagonal,
+)
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg import solve
 from pytensor.tensor.slinalg import LUFactor, Solve, SolveTriangular
@@ -28,9 +32,10 @@ def count_vanilla_solve_nodes(nodes) -> int:
 def count_lu_decom_nodes(nodes) -> int:
     return sum(
         (
-            isinstance(node.op, LUFactor)
+            isinstance(node.op, LUFactor | LUFactorTridiagonal)
             or (
-                isinstance(node.op, Blockwise) and isinstance(node.op.core_op, LUFactor)
+                isinstance(node.op, Blockwise)
+                and isinstance(node.op.core_op, LUFactor | LUFactorTridiagonal)
             )
         )
         for node in nodes
@@ -40,27 +45,38 @@ def count_lu_decom_nodes(nodes) -> int:
 def count_lu_solve_nodes(nodes) -> int:
     count = sum(
         (
-            isinstance(node.op, SolveTriangular)
+            # LUFactor uses 2 SolveTriangular nodes, so we count each as 0.5
+            0.5
+            * (
+                isinstance(node.op, SolveTriangular)
+                or (
+                    isinstance(node.op, Blockwise)
+                    and isinstance(node.op.core_op, SolveTriangular)
+                )
+            )
             or (
-                isinstance(node.op, Blockwise)
-                and isinstance(node.op.core_op, SolveTriangular)
+                isinstance(node.op, SolveLUFactorTridiagonal)
+                or (
+                    isinstance(node.op, Blockwise)
+                    and isinstance(node.op.core_op, SolveLUFactorTridiagonal)
+                )
             )
         )
         for node in nodes
     )
-    # Each LU solve uses two Triangular solves
-    return count // 2
+    return int(count)
 
 
 @pytest.mark.parametrize("transposed", (False, True))
-def test_lu_decomposition_reused_forward_and_gradient(transposed):
+@pytest.mark.parametrize("assume_a", ("gen", "tridiagonal"))
+def test_lu_decomposition_reused_forward_and_gradient(assume_a, transposed):
     rewrite_name = reuse_lu_decomposition_multiple_solves.__name__
     mode = get_default_mode()
 
-    A = tensor("A", shape=(2, 2))
-    b = tensor("b", shape=(2, 3))
+    A = tensor("A", shape=(3, 3))
+    b = tensor("b", shape=(3, 4))
 
-    x = solve(A, b, assume_a="gen", transposed=transposed)
+    x = solve(A, b, assume_a=assume_a, transposed=transposed)
     grad_x_wrt_A = grad(x.sum(), A)
     fn_no_opt = function([A, b], [x, grad_x_wrt_A], mode=mode.excluding(rewrite_name))
     no_opt_nodes = fn_no_opt.maker.fgraph.apply_nodes
@@ -80,20 +96,21 @@ def test_lu_decomposition_reused_forward_and_gradient(transposed):
     b_test = rng.random(b.type.shape, dtype=b.type.dtype)
     resx0, resg0 = fn_no_opt(A_test, b_test)
     resx1, resg1 = fn_opt(A_test, b_test)
-    rtol = 1e-7 if config.floatX == "float64" else 1e-6
+    rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
     np.testing.assert_allclose(resg0, resg1, rtol=rtol)
 
 
 @pytest.mark.parametrize("transposed", (False, True))
-def test_lu_decomposition_reused_blockwise(transposed):
+@pytest.mark.parametrize("assume_a", ("gen", "tridiagonal"))
+def test_lu_decomposition_reused_blockwise(assume_a, transposed):
     rewrite_name = reuse_lu_decomposition_multiple_solves.__name__
     mode = get_default_mode()
 
-    A = tensor("A", shape=(2, 2))
-    b = tensor("b", shape=(2, 2, 3))
+    A = tensor("A", shape=(3, 3))
+    b = tensor("b", shape=(2, 3, 4))
 
-    x = solve(A, b, transposed=transposed)
+    x = solve(A, b, assume_a=assume_a, transposed=transposed)
     fn_no_opt = function([A, b], [x], mode=mode.excluding(rewrite_name))
     no_opt_nodes = fn_no_opt.maker.fgraph.apply_nodes
     assert count_vanilla_solve_nodes(no_opt_nodes) == 1
@@ -112,19 +129,21 @@ def test_lu_decomposition_reused_blockwise(transposed):
     b_test = rng.random(b.type.shape, dtype=b.type.dtype)
     resx0 = fn_no_opt(A_test, b_test)
     resx1 = fn_opt(A_test, b_test)
-    np.testing.assert_allclose(resx0, resx1)
+    rtol = rtol = 1e-7 if config.floatX == "float64" else 1e-4
+    np.testing.assert_allclose(resx0, resx1, rtol=rtol)
 
 
 @pytest.mark.parametrize("transposed", (False, True))
-def test_lu_decomposition_reused_scan(transposed):
+@pytest.mark.parametrize("assume_a", ("gen", "tridiagonal"))
+def test_lu_decomposition_reused_scan(assume_a, transposed):
     rewrite_name = scan_split_non_sequence_lu_decomposition_solve.__name__
     mode = get_default_mode()
 
-    A = tensor("A", shape=(2, 2))
-    x0 = tensor("b", shape=(2, 3))
+    A = tensor("A", shape=(3, 3))
+    x0 = tensor("b", shape=(3, 4))
 
     xs, _ = scan(
-        lambda xtm1, A: solve(A, xtm1, assume_a="general", transposed=transposed),
+        lambda xtm1, A: solve(A, xtm1, assume_a=assume_a, transposed=transposed),
         outputs_info=[x0],
         non_sequences=[A],
         n_steps=10,
@@ -159,7 +178,7 @@ def test_lu_decomposition_reused_scan(transposed):
     x0_test = rng.random(x0.type.shape, dtype=x0.type.dtype)
     resx0 = fn_no_opt(A_test, x0_test)
     resx1 = fn_opt(A_test, x0_test)
-    rtol = 1e-7 if config.floatX == "float64" else 1e-6
+    rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
 
 
