@@ -490,6 +490,8 @@ PYTORCH = Mode(
             "fusion",
             "inplace",
             "scan_save_mem_prealloc",
+            "reuse_lu_decomposition_multiple_solves",
+            "scan_split_non_sequence_lu_decomposition_solve",
         ],
     ),
 )

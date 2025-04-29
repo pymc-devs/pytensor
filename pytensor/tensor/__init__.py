@@ -114,6 +114,7 @@ from pytensor.tensor import (
 
 
 # isort: off
+import pytensor.tensor._linalg
 from pytensor.tensor import linalg
 from pytensor.tensor import special
 from pytensor.tensor import signal
