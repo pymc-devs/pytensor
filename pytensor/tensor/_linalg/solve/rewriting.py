@@ -1,10 +1,15 @@
 from collections.abc import Container
 from copy import copy
 
+from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
 from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, node_rewriter
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
+from pytensor.tensor._linalg.solve.tridiagonal import (
+    tridiagonal_lu_factor,
+    tridiagonal_lu_solve,
+)
 from pytensor.tensor.basic import atleast_Nd
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -17,18 +22,32 @@ from pytensor.tensor.variable import TensorVariable
 def decompose_A(A, assume_a, check_finite):
     if assume_a == "gen":
         return lu_factor(A, check_finite=check_finite)
+    elif assume_a == "tridiagonal":
+        # We didn't implement check_finite for tridiagonal LU factorization
+        return tridiagonal_lu_factor(A)
     else:
         raise NotImplementedError
 
 
 def solve_lu_decomposed_system(A_decomp, b, transposed=False, *, core_solve_op: Solve):
-    if core_solve_op.assume_a == "gen":
+    b_ndim = core_solve_op.b_ndim
+    check_finite = core_solve_op.check_finite
+    assume_a = core_solve_op.assume_a
+    if assume_a == "gen":
         return lu_solve(
             A_decomp,
             b,
+            b_ndim=b_ndim,
             trans=transposed,
-            b_ndim=core_solve_op.b_ndim,
-            check_finite=core_solve_op.check_finite,
+            check_finite=check_finite,
+        )
+    elif assume_a == "tridiagonal":
+        # We didn't implement check_finite for tridiagonal LU solve
+        return tridiagonal_lu_solve(
+            A_decomp,
+            b,
+            b_ndim=b_ndim,
+            transposed=transposed,
         )
     else:
         raise NotImplementedError
@@ -189,13 +208,15 @@ def _scan_split_non_sequence_lu_decomposition_solve(
 @register_specialize
 @node_rewriter([Blockwise])
 def reuse_lu_decomposition_multiple_solves(fgraph, node):
-    return _split_lu_solve_steps(fgraph, node, eager=False, allowed_assume_a={"gen"})
+    return _split_lu_solve_steps(
+        fgraph, node, eager=False, allowed_assume_a={"gen", "tridiagonal"}
+    )
 
 
 @node_rewriter([Scan])
 def scan_split_non_sequence_lu_decomposition_solve(fgraph, node):
     return _scan_split_non_sequence_lu_decomposition_solve(
-        fgraph, node, allowed_assume_a={"gen"}
+        fgraph, node, allowed_assume_a={"gen", "tridiagonal"}
     )
 
 
@@ -205,5 +226,34 @@ scan_seqopt1.register(
     "fast_run",
     "scan",
     "scan_pushout",
+    position=2,
+)
+
+
+@node_rewriter([Blockwise])
+def reuse_lu_decomposition_multiple_solves_jax(fgraph, node):
+    return _split_lu_solve_steps(fgraph, node, eager=False, allowed_assume_a={"gen"})
+
+
+optdb["specialize"].register(
+    reuse_lu_decomposition_multiple_solves_jax.__name__,
+    in2out(reuse_lu_decomposition_multiple_solves_jax, ignore_newtrees=True),
+    "jax",
+    use_db_name_as_tag=False,
+)
+
+
+@node_rewriter([Scan])
+def scan_split_non_sequence_lu_decomposition_solve_jax(fgraph, node):
+    return _scan_split_non_sequence_lu_decomposition_solve(
+        fgraph, node, allowed_assume_a={"gen"}
+    )
+
+
+scan_seqopt1.register(
+    scan_split_non_sequence_lu_decomposition_solve_jax.__name__,
+    in2out(scan_split_non_sequence_lu_decomposition_solve_jax, ignore_newtrees=True),
+    "jax",
+    use_db_name_as_tag=False,
     position=2,
 )
