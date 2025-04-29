@@ -2561,7 +2561,6 @@ scan_seqopt1.register(
     position=1,
 )
 
-
 scan_seqopt1.register(
     "scan_push_out_non_seq",
     in2out(scan_push_out_non_seq, ignore_newtrees=True),
@@ -2569,9 +2568,8 @@ scan_seqopt1.register(
     "fast_run",
     "scan",
     "scan_pushout",
-    position=2,
+    position=3,
 )
-
 
 scan_seqopt1.register(
     "scan_push_out_seq",
@@ -2580,7 +2578,7 @@ scan_seqopt1.register(
     "fast_run",
     "scan",
     "scan_pushout",
-    position=3,
+    position=4,
 )
 
 
@@ -2592,7 +2590,7 @@ scan_seqopt1.register(
     "more_mem",
     "scan",
     "scan_pushout",
-    position=4,
+    position=5,
 )
 
 
@@ -2605,7 +2603,7 @@ scan_seqopt1.register(
     "more_mem",
     "scan",
     "scan_pushout",
-    position=5,
+    position=6,
 )
 
 scan_eqopt2.register(
