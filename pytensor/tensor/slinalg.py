@@ -928,7 +928,7 @@ class Solve(SolveBase):
 
     def __init__(self, *, assume_a="gen", **kwargs):
         # Triangular and diagonal are handled outside of Solve
-        valid_options = ["gen", "sym", "her", "pos", "tridiagonal", "banded"]
+        valid_options = ["gen", "sym", "her", "pos", "banded", "tridiagonal"]
 
         assume_a = assume_a.lower()
         # We use the old names as the different dispatches are more likely to support them
@@ -960,15 +960,24 @@ class Solve(SolveBase):
 
     def perform(self, node, inputs, outputs):
         a, b = inputs
-        outputs[0][0] = scipy_linalg.solve(
-            a=a,
-            b=b,
-            lower=self.lower,
-            check_finite=self.check_finite,
-            assume_a=self.assume_a,
-            overwrite_a=self.overwrite_a,
-            overwrite_b=self.overwrite_b,
-        )
+        if self.assume_a == "tridiagonal":
+            [dl, d, du] = (a.diagonal(offset=o) for o in (-1, 0, 1))
+            _gttrf, _gttrs = scipy_linalg.get_lapack_funcs(
+                ("gttrf", "gttrs"), dtype=node.outputs[0].type.dtype
+            )
+            dl, d, du, du2, ipiv, _ = _gttrf(dl, d, du)
+            x, _ = _gttrs(dl, d, du, du2, ipiv, b, overwrite_b=self.overwrite_b)
+            outputs[0][0] = x
+        else:
+            outputs[0][0] = scipy_linalg.solve(
+                a=a,
+                b=b,
+                lower=self.lower,
+                check_finite=self.check_finite,
+                assume_a=self.assume_a,
+                overwrite_a=self.overwrite_a,
+                overwrite_b=self.overwrite_b,
+            )
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if not allowed_inplace_inputs:
@@ -981,7 +990,7 @@ class Solve(SolveBase):
             # Give preference to overwrite_b
             new_props["overwrite_b"] = True
         # We can't overwrite_a if we're assuming tridiagonal
-        elif not self.assume_a == "tridiagonal":  # allowed inputs == [0]
+        else:  # allowed inputs == [0]
             new_props["overwrite_a"] = True
         return type(self)(**new_props)
 
@@ -1053,6 +1062,7 @@ def solve(
         By default, we assume b_ndim = b.ndim is 2 if b.ndim > 1, else 1.
     """
     assume_a = assume_a.lower()
+    b_ndim = _default_b_ndim(b, b_ndim)
 
     if assume_a in ("lower triangular", "upper triangular"):
         lower = "lower" in assume_a
@@ -1065,9 +1075,16 @@ def solve(
             b_ndim=b_ndim,
         )
 
-    b_ndim = _default_b_ndim(b, b_ndim)
+    # elif assume_a == "tridiagonal":
+    #     from pytensor.tensor._linalg.solve.tridiagonal import (
+    #         solve_tridiagonal_from_full_A_b,
+    #     )
+    #
+    #     return solve_tridiagonal_from_full_A_b(
+    #         a, b, b_ndim=b_ndim, transposed=transposed
+    #     )
 
-    if assume_a == "diagonal":
+    elif assume_a == "diagonal":
         a_diagonal = diagonal(a, axis1=-2, axis2=-1)
         b_transposed = b[None, :] if b_ndim == 1 else b.mT
         x = (b_transposed / pt.expand_dims(a_diagonal, -2)).mT
