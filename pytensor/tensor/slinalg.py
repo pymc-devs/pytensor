@@ -604,7 +604,7 @@ class PivotToPermutations(Op):
 
     def perform(self, node, inputs, outputs):
         [pivots] = inputs
-        p_inv = np.arange(len(pivots), dtype=pivots.dtype)
+        p_inv = np.arange(len(pivots), dtype="int64")
 
         for i in range(len(pivots)):
             p_inv[i], p_inv[pivots[i]] = p_inv[pivots[i]], p_inv[i]
@@ -639,7 +639,7 @@ class LUFactor(Op):
             )
 
         LU = matrix(shape=A.type.shape, dtype=A.type.dtype)
-        pivots = vector(shape=(A.type.shape[0],), dtype="int64")
+        pivots = vector(shape=(A.type.shape[0],), dtype="int32")
 
         return Apply(self, [A], [LU, pivots])
 
