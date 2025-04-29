@@ -83,7 +83,7 @@ def numba_funcify_Cholesky(op, node, **kwargs):
 @numba_funcify.register(PivotToPermutations)
 def pivot_to_permutation(op, node, **kwargs):
     inverse = op.inverse
-    dtype = node.inputs[0].dtype
+    dtype = node.outputs[0].dtype
 
     @numba_njit
     def numba_pivot_to_permutation(piv):
