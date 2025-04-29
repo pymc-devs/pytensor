@@ -4,6 +4,10 @@ from pytensor.graph import Constant, graph_inputs
 from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, node_rewriter
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
+from pytensor.tensor._linalg.solve.tridiagonal import (
+    tridiagonal_lu_factor,
+    tridiagonal_lu_solve,
+)
 from pytensor.tensor.basic import atleast_Nd
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -16,6 +20,8 @@ from pytensor.tensor.variable import TensorVariable
 def decompose_A(A, assume_a):
     if assume_a == "gen":
         return lu_factor(A, check_finite=False)
+    elif assume_a == "tridiagonal":
+        return tridiagonal_lu_factor(A)
     else:
         raise NotImplementedError
 
@@ -23,6 +29,8 @@ def decompose_A(A, assume_a):
 def solve_lu_decomposed_system(A_decomp, b, b_ndim, assume_a, transposed=False):
     if assume_a == "gen":
         return lu_solve(A_decomp, b, b_ndim=b_ndim, trans=transposed)
+    elif assume_a == "tridiagonal":
+        return tridiagonal_lu_solve(A_decomp, b, b_ndim=b_ndim, transposed=transposed)
     else:
         raise NotImplementedError
 
@@ -58,7 +66,7 @@ def _split_lu_solve_steps(fgraph, node, *, eager: bool):
 
     assume_a = node.op.core_op.assume_a
 
-    if assume_a != "gen":
+    if assume_a not in {"gen", "tridiagonal"}:
         return None
 
     A, _ = get_root_A(node.inputs[0])
@@ -139,7 +147,7 @@ def scan_pushout_solve_lu_decomposition(fgraph, node):
             if (
                 isinstance(inner_node.op, Blockwise)
                 and isinstance(inner_node.op.core_op, Solve)
-                and inner_node.op.core_op.assume_a == "gen"
+                and inner_node.op.core_op.assume_a not in {"gen", "tridiagonal"}
             ):
                 # TODO: Move transpose from graph to Low level solve Op
                 A, _ = inner_node.inputs
