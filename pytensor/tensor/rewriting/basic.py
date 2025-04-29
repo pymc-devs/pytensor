@@ -1120,15 +1120,11 @@ def unconditional_constant_folding(fgraph, node):
         compute_map[o] = [False]
 
     thunk = node.op.make_thunk(node, storage_map, compute_map, no_recycling=[])
-    required = thunk()
-
-    # A node whose inputs are all provided should always return successfully
-    assert not required
+    thunk()
 
     rval = []
     for output in node.outputs:
         data = storage_map[output][0]
-        assert compute_map[output][0], (output, data)
 
         # TODO: `Type` itself should provide an interface for constructing
         # instances appropriate for a given constant.

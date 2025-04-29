@@ -676,20 +676,7 @@ static int lazy_rec_eval(CLazyLinker *self, Py_ssize_t var_idx, PyObject *one,
       // rval is new ref
       if (rval) // pycall returned normally (no exception)
       {
-        if (rval == Py_None) {
-          Py_DECREF(rval); // ignore a return of None
-        } else if (PyList_Check(rval)) {
-          PyErr_SetString(PyExc_TypeError,
-                          "non-lazy thunk should return None, not list");
-          err = 1;
-          goto pyfail;
-        } else // don't know what it returned, but it wasn't right.
-        {
-          PyErr_SetObject(PyExc_TypeError, rval);
-          err = 1;
-          // We don't release rval since we put it in the error above
-          goto fail;
-        }
+        Py_DECREF(rval); // ignore whatever was returned
       } else // pycall returned NULL (internal error)
       {
         err = 1;
@@ -981,7 +968,7 @@ static PyTypeObject lazylinker_ext_CLazyLinkerType = {
 };
 
 static PyObject *get_version(PyObject *dummy, PyObject *args) {
-  PyObject *result = PyFloat_FromDouble(0.3);
+  PyObject *result = PyFloat_FromDouble(0.4);
   return result;
 }
 

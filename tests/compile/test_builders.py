@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+from pytensor import scan
 from pytensor.compile import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -15,9 +16,10 @@ from pytensor.gradient import (
     grad,
     verify_grad,
 )
-from pytensor.graph.basic import equal_computations
+from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.null_type import NullType, null_type
+from pytensor.graph.op import Op
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
@@ -622,14 +624,15 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         """Make sure that `OpFromGraph.fn` doesn't change the value of `OpFromGraph.inner_outputs`."""
 
         x = scalar("x")
-        op = OpFromGraph([x], [x**2 / x], mode="FAST_RUN")
+        op = OpFromGraph([x], [x**2 / x])
 
         # Confirm that the inner-graph is as expected
         assert equal_computations(op.inner_outputs, [x**2 / x], op.inner_inputs, [x])
 
         # These outputs of the compiled `op.fgraph` should differ from the
         # original, uncompiled `op.fgraph` outputs
-        fn = op.fn
+        with config.change_flags(mode="FAST_RUN"):
+            fn = op.fn
         new_inputs = fn.maker.fgraph.inputs
         new_outputs = fn.maker.fgraph.outputs
         assert not equal_computations(new_outputs, [x**2 / x], new_inputs, [x])
@@ -740,3 +743,58 @@ OpFromGraph{inline=False} [id A]
 
     for truth, out in zip(exp_res.split("\n"), lines, strict=True):
         assert truth.strip() == out.strip()
+
+
+@pytest.mark.parametrize("kind", ("ofg", "inlined", "scan"))
+@pytest.mark.parametrize("c_op", (True, False), ids=lambda x: f"c_op={x}")
+def test_benchmark(c_op, kind, benchmark):
+    class ExpWithoutC(Op):
+        def make_node(self, x):
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, output_storage):
+            output_storage[0][0] = np.exp(inputs[0])
+
+    exp_without_c = ExpWithoutC()
+
+    n = 25
+
+    def _f(x):
+        if isinstance(x, np.ndarray):
+            y = np.exp(x)
+        else:
+            if c_op:
+                y = pt.exp(x)
+            else:
+                y = exp_without_c(x)
+        y /= y.sum()
+        return y
+
+    x = pt.vector("x")
+
+    if kind == "ofg":
+        f = OpFromGraph([x], [_f(x)])
+    else:
+        f = _f
+
+    if kind == "scan":
+        # Scan is included for a reference of how bad the overhead can be
+        outs, _ = scan(fn=f, outputs_info=[x], n_steps=n)
+        out = outs[-1]
+    else:
+        out = x
+        for i in range(n):
+            out = f(out)
+
+    compiled_fn = function([x], out, trust_input=True, mode="FAST_RUN")
+    compiled_fn.vm.allow_gc = False
+
+    rng = np.random.default_rng(1)
+    x_test = rng.normal(size=(10,))
+
+    res = benchmark(compiled_fn, x_test)
+
+    expected_res = x_test
+    for i in range(n):
+        expected_res = _f(expected_res)
+    np.testing.assert_allclose(res, expected_res)

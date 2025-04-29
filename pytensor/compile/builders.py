@@ -6,8 +6,11 @@ from copy import copy
 from functools import partial
 from typing import Union, cast
 
-from pytensor.compile.function import function
-from pytensor.compile.function.pfunc import rebuild_collect_shared
+from pytensor.compile import get_default_mode, insert_deepcopy
+from pytensor.compile.function.pfunc import pfunc, rebuild_collect_shared
+from pytensor.compile.function.types import add_supervisor_to_fgraph
+from pytensor.compile.io import In, Out
+from pytensor.compile.mode import Mode
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, Rop, grad
@@ -21,7 +24,7 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.null_type import NullType
-from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.utils import MissingInputError
 
@@ -433,6 +436,9 @@ class OpFromGraph(Op, HasInnerGraph):
             assert isinstance(name, str), "name must be None or string object"
         self.name = name
         self.destroy_map = destroy_map if destroy_map is not None else {}
+        self._rewritten_fgraph = {}
+        self._wrapped_inputs = {}
+        self._wrapped_outputs = {}
 
     def __eq__(self, other):
         # TODO: recognize a copy
@@ -847,14 +853,58 @@ class OpFromGraph(Op, HasInnerGraph):
 
         return ret
 
+    def _rewrite_fgraph(self, impl):
+        if self._rewritten_fgraph.get(impl, None) is None:
+            mode = get_default_mode()
+            if impl == "py":
+                mode = mode.excluding("cxx")
+            rewriter = mode.optimizer
+
+            # We are cloning fgraph too many times, but one of the existing tests checks for this
+            # TestOpFromGraph.test_outputs_consistency
+            fgraph = self.fgraph.clone()
+            self._wrapped_inputs[impl] = temp_wrapped_inputs = [
+                In(inp, borrow=False, mutable=False) for inp in fgraph.inputs
+            ]
+            # These are just temporary because the graph rewirite may change them
+            temp_wrapped_outputs = [
+                Out(out, borrow=True) for out in self.fgraph.outputs
+            ]
+            add_supervisor_to_fgraph(
+                fgraph,
+                temp_wrapped_inputs,
+                accept_inplace=False,
+            )
+            with config.change_flags(compute_test_value="off"):
+                rewriter(fgraph)
+            insert_deepcopy(fgraph, temp_wrapped_inputs, temp_wrapped_outputs)
+            self._wrapped_outputs[impl] = [
+                Out(out, borrow=True) for out in fgraph.outputs
+            ]
+            self._rewritten_fgraph[impl] = fgraph
+
+        return (
+            self._rewritten_fgraph[impl],
+            self._wrapped_inputs[impl],
+            self._wrapped_outputs[impl],
+        )
+
     @property
     def fn(self):
-        """Lazily compile the inner function graph."""
         if getattr(self, "_fn", None) is not None:
             return self._fn
 
-        self._fn = function(self.inner_inputs, self.inner_outputs, **self.kwargs)
-        self._fn.trust_input = True
+        fgraph, wrapped_inputs, wrapped_outputs = self._rewrite_fgraph(impl=None)
+
+        self._fn = pfunc(
+            wrapped_inputs,
+            wrapped_outputs,
+            mode=Mode(linker=get_default_mode().linker, optimizer=None),
+            accept_inplace=True,
+            on_unused_input="ignore",
+            fgraph=fgraph,
+            trust_input=True,
+        )
 
         return self._fn
 
@@ -870,6 +920,58 @@ class OpFromGraph(Op, HasInnerGraph):
         res = copy(self)
         res.fgraph = res.fgraph.clone()
         return res
+
+    def prepare_node(
+        self,
+        node: Apply,
+        storage_map: StorageMapType | None,
+        compute_map: ComputeMapType | None,
+        impl: str | None,
+    ) -> None:
+        self._rewrite_fgraph(impl)
+        self.fn
+
+    def make_thunk(self, node, storage_map, compute_map, no_recycling, impl=None):
+        from pytensor.link.vm import VMLinker
+
+        self.prepare_node(node, storage_map, compute_map, impl)
+        fg, _, _ = self._rewrite_fgraph(impl)
+        fg_no_recycling = [
+            new_o
+            for (new_o, old_o) in zip(fg.outputs, node.outputs, strict=True)
+            if old_o in no_recycling
+        ]
+
+        node_input_storage = [storage_map[r] for r in node.inputs]
+        node_output_storage = [storage_map[r] for r in node.outputs]
+        node_compute_map = [compute_map[r] for r in node.outputs]
+
+        def create_thunk(linker):
+            linker.accept(fg, no_recycling=fg_no_recycling)
+            thunk, _, _ = linker.make_thunk(
+                input_storage=node_input_storage,
+                output_storage=node_output_storage,
+            )
+            return thunk
+
+            def thunk_wrapper(thunk=thunk, node_compute_map=node_compute_map):
+                thunk()
+                for cm in node_compute_map:
+                    cm[0] = True
+
+            return thunk_wrapper
+
+        if impl != "py":
+            # try:
+            #     # We default to CLinker because it generates code for the whole graph that the compiler can reason about.
+            #     # Whereas the VMLinker will compile each node separately and call them in a pre-defined VM.
+            #     # It also has less overhead
+            #     return create_thunk(linker=CLinker())
+            # except NotImplementedError:
+            #     # Some Op doesn't have a C implementation, VM it is
+            return create_thunk(VMLinker(use_cloop=True, c_thunks=True))
+        else:
+            return create_thunk(VMLinker(use_cloop=False, c_thunks=False))
 
     def perform(self, node, inputs, outputs):
         variables = self.fn(*inputs)
