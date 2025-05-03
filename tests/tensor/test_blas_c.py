@@ -2,9 +2,11 @@ from warnings import warn
 
 import numpy as np
 import pytest
+from numpy.lib.stride_tricks import as_strided
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor import config
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.blas import Ger
 from pytensor.tensor.blas_c import CGemv, CGer, check_force_gemv_init
@@ -199,53 +201,77 @@ class TestCGemv(OptimizationTestMixin):
                 " degradation in performance for such calls."
             )
 
-    def t_gemv1(self, m_shp):
-        """test vector2 + dot(matrix, vector1)"""
+    @pytest.mark.skipif(config.blas__ldflags == "", reason="No blas")
+    @pytest.mark.parametrize(
+        "A_shape",
+        [(3, 2), (1, 2), (0, 2), (3, 1), (3, 0), (1, 0), (1, 1), (0, 1), (0, 0)],
+        ids=str,
+    )
+    @pytest.mark.parametrize("inplace", [True, False])
+    def test_gemv1(self, A_shape, inplace: bool):
+        """test y + dot(A, x)"""
         rng = np.random.default_rng(unittest_tools.fetch_seed())
-        v1 = pytensor.shared(np.array(rng.uniform(size=(m_shp[1],)), dtype="float32"))
-        v2_orig = np.array(rng.uniform(size=(m_shp[0],)), dtype="float32")
-        v2 = pytensor.shared(v2_orig)
-        m = pytensor.shared(np.array(rng.uniform(size=m_shp), dtype="float32"))
 
-        f = pytensor.function([], v2 + pt.dot(m, v1), mode=self.mode)
+        y = pt.vector("y", dtype="float32")
+        x = pt.vector("x", dtype="float32")
+        A = pt.matrix("A", dtype="float32")
+        alpha = beta = 1.0
 
-        # Assert they produce the same output
-        assert np.allclose(f(), np.dot(m.get_value(), v1.get_value()) + v2_orig)
-        topo = [n.op for n in f.maker.fgraph.toposort()]
-        assert topo == [CGemv(inplace=False)], topo
+        out = CGemv(inplace=inplace)(y, alpha, A, x, beta)
+        f = pytensor.function([y, A, x], out, mode=self.mode, accept_inplace=inplace)
+        f.dprint()
+        assert [node.op for node in f.maker.fgraph.toposort()] == [
+            CGemv(inplace=inplace)
+        ]
 
-        # test the inplace version
-        g = pytensor.function(
-            [], [], updates=[(v2, v2 + pt.dot(m, v1))], mode=self.mode
+        def assert_expected_output(inplace, f, y_test, A_test, x_test):
+            # Copy y with the same strides as the original one
+            y_test_copy = y_test.copy()
+            y_test_copy = as_strided(
+                y_test_copy, shape=y_test.shape, strides=y_test.strides
+            )
+            res = f(y_test_copy, A_test, x_test)
+            if inplace:
+                res = y_test_copy
+            else:
+                np.testing.assert_array_equal(y_test, y_test_copy)
+            np.testing.assert_allclose(res, y_test + A_test @ x_test)
+
+        y_test = rng.uniform(size=A_shape[0]).astype("float32")
+        A_test = rng.uniform(size=A_shape).astype("float32")
+        x_test = rng.uniform(size=A_shape[1]).astype("float32")
+        assert_expected_output(inplace, f, y_test, A_test, x_test)
+
+        ## Fortran order
+        y_test_fortran = np.asfortranarray(y_test)
+        A_test_fortran = np.asfortranarray(A_test)
+        x_test_fortran = np.asfortranarray(x_test)
+        assert_expected_output(
+            inplace, f, y_test_fortran, A_test_fortran, x_test_fortran
         )
 
-        # Assert they produce the same output
-        g()
-        assert np.allclose(
-            v2.get_value(), np.dot(m.get_value(), v1.get_value()) + v2_orig
-        )
-        topo = [n.op for n in g.maker.fgraph.toposort()]
-        assert topo == [CGemv(inplace=True)]
+        ## Negative strides (or zero when size is zero)
+        y_test_neg_strides = y_test[::-1]
+        assert y_test_neg_strides.strides[0] in (-4, 0)
+        A_test_neg_strides = A_test[::-1, ::-1]
+        assert A_test_neg_strides.strides[1] in (-4, 0)
+        x_test_neg_strides = x_test[::-1]
+        assert x_test_neg_strides.strides[0] in (-4, 0)
+        # assert_expected_output(inplace, f, y_test_neg_strides, A_test_neg_strides, x_test_neg_strides)
 
-        # Do the same tests with a matrix with strides in both dimensions
-        m.set_value(m.get_value(borrow=True)[::-1, ::-1], borrow=True)
-        v2.set_value(v2_orig)
-        assert np.allclose(f(), np.dot(m.get_value(), v1.get_value()) + v2_orig)
-        g()
-        assert np.allclose(
-            v2.get_value(), np.dot(m.get_value(), v1.get_value()) + v2_orig
+        # Zero strides (by broadcasting)
+        y_test_0_strides = np.broadcast_to(np.array(np.pi, dtype="float32"), A_shape[0])
+        assert y_test_0_strides.strides == (0,)
+        A_test_0_strides = np.broadcast_to(np.array(np.e, dtype="float32"), A_shape)
+        assert A_test_0_strides.strides == (0, 0)
+        x_test_0_strides = np.broadcast_to(
+            np.array(np.euler_gamma, dtype="float32"), A_shape[1]
         )
-
-    def test_gemv1(self):
-        skip_if_blas_ldflags_empty()
-        self.t_gemv1((3, 2))
-        self.t_gemv1((1, 2))
-        self.t_gemv1((0, 2))
-        self.t_gemv1((3, 1))
-        self.t_gemv1((3, 0))
-        self.t_gemv1((1, 0))
-        self.t_gemv1((0, 1))
-        self.t_gemv1((0, 0))
+        assert x_test_0_strides.strides == (0,)
+        # Test one input at a time so the outputs are unique
+        assert_expected_output(inplace, f, y_test, A_test, x_test_0_strides)
+        assert_expected_output(inplace, f, y_test, A_test_0_strides, x_test)
+        # assert_expected_output(inplace, f, y_test_0_strides, A_test, x_test)
 
     def test_gemv_dimensions(self, dtype="float32"):
         alpha = pytensor.shared(np.asarray(1.0, dtype=dtype), name="alpha")

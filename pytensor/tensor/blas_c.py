@@ -413,15 +413,15 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, force_init_beta=False, params=Non
         char NOTRANS = 'N';
         int NA0 = PyArray_DIMS(%(A)s)[0];
         int NA1 = PyArray_DIMS(%(A)s)[1];
-        /* This formula is needed in the case where A is actually a row or
-         * column matrix, because BLAS sometimes insists that the strides:
-         *  - are not smaller than the number of elements in the array
-         *  - are not 0.
+        int Nx = PyArray_DIMS(%(x)s)[0];
+        /* If A or x have length 1 dimensions, the respective strides don't matter
+         * However, BLAS often insists that the strides be not zero nor smaller than
+         * the number of elements in the array. We set them to 1 arbitrarily;
          */
-        int SA0 = (NA0 > 1) ? (PyArray_STRIDES(%(A)s)[0] / elemsize) : (NA1 + 1);
-        int SA1 = (NA1 > 1) ? (PyArray_STRIDES(%(A)s)[1] / elemsize) : (NA0 + 1);
+        int SA0 = (NA0 > 1) ? (PyArray_STRIDES(%(A)s)[0] / elemsize) : 1;
+        int SA1 = (NA1 > 1) ? (PyArray_STRIDES(%(A)s)[1] / elemsize) : 1;
+        int Sx = (Nx > 1) ? PyArray_STRIDES(%(x)s)[0] / elemsize: 1;
         int Sz = PyArray_STRIDES(%(z)s)[0] / elemsize;
-        int Sx = PyArray_STRIDES(%(x)s)[0] / elemsize;
 
         dtype_%(x)s* x_data = (dtype_%(x)s*) PyArray_DATA(%(x)s);
         dtype_%(z)s* z_data = (dtype_%(z)s*) PyArray_DATA(%(z)s);
@@ -435,62 +435,49 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, force_init_beta=False, params=Non
 
         if (NA0 * NA1)
         {
-            // If A is neither C- nor F-contiguous, we make a copy.
-            // TODO:
-            // - if one stride is equal to "- elemsize", we can still call
-            //   gemv on reversed matrix and vectors
-            // - if the copy is too long, maybe call vector/vector dot on
-            //   each row instead
-            if ((PyArray_STRIDES(%(A)s)[0] < 0)
-                || (PyArray_STRIDES(%(A)s)[1] < 0)
-                || ((PyArray_STRIDES(%(A)s)[0] != elemsize)
-                    && (PyArray_STRIDES(%(A)s)[1] != elemsize)))
-            {
-                npy_intp dims[2];
-                dims[0] = NA0;
-                dims[1] = NA1;
+            // Non-empty branch
 
-                PyArrayObject * A_copy = (PyArrayObject *) PyArray_Copy(
-                                                                   %(A)s);
+            if (Sx == 0)
+            {
+                // This is a broadcasted vector with length > 1 and a stride of 0.
+                // We need to make a full copy of it.
+
+                PyArrayObject * x_copy = (PyArrayObject *) PyArray_Copy(%(x)s);
+                if (!x_copy)
+                    %(fail)s
+                Py_XDECREF(%(x)s);
+                %(x)s = x_copy;
+                x_data = (dtype_%(x)s*) PyArray_DATA(%(x)s);
+                Sx = PyArray_STRIDES(%(x)s)[0] / elemsize;
+            }
+
+            if (
+                (PyArray_STRIDES(%(A)s)[0] < 0) || (PyArray_STRIDES(%(A)s)[1] < 0)
+                || ((PyArray_STRIDES(%(A)s)[0] != elemsize) && (PyArray_STRIDES(%(A)s)[1] != elemsize))
+            )
+            {
+                // If A is neither C- nor F-contiguous, we make a copy.
+                // TODO:
+                // - if one stride is equal to "- elemsize", we can still call
+                //   gemv on reversed matrix and vectors
+                // - if the copy is too long, maybe call vector/vector dot on
+                //   each row instead
+                PyArrayObject * A_copy = (PyArrayObject *) PyArray_Copy(%(A)s);
                 if (!A_copy)
                     %(fail)s
                 Py_XDECREF(%(A)s);
                 %(A)s = A_copy;
-                SA0 = (NA0 > 1) ? (PyArray_STRIDES(%(A)s)[0] / elemsize) : (NA1 + 1);
-                SA1 = (NA1 > 1) ? (PyArray_STRIDES(%(A)s)[1] / elemsize) : (NA0 + 1);
+                SA0 = (NA0 > 1) ? (PyArray_STRIDES(%(A)s)[0] / elemsize) : 1;
+                SA1 = (NA1 > 1) ? (PyArray_STRIDES(%(A)s)[1] / elemsize) : 1;
             }
 
-            if (PyArray_STRIDES(%(A)s)[0] == elemsize)
+
+            if (PyArray_STRIDES(%(A)s)[1] == elemsize)
             {
-                if (PyArray_DESCR(%(A)s)->type_num == NPY_FLOAT)
-                {
-                    float alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
-                    sgemv_(&NOTRANS, &NA0, &NA1,
-                        &alpha,
-                        (float*)(PyArray_DATA(%(A)s)), &SA1,
-                        (float*)x_data, &Sx,
-                        &fbeta,
-                        (float*)z_data, &Sz);
-                }
-                else if (PyArray_DESCR(%(A)s)->type_num == NPY_DOUBLE)
-                {
-                    double alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
-                    dgemv_(&NOTRANS, &NA0, &NA1,
-                        &alpha,
-                        (double*)(PyArray_DATA(%(A)s)), &SA1,
-                        (double*)x_data, &Sx,
-                        &dbeta,
-                        (double*)z_data, &Sz);
-                }
-                else
-                {
-                    PyErr_SetString(PyExc_AssertionError,
-                                    "neither float nor double dtype");
-                    %(fail)s
-                }
-            }
-            else if (PyArray_STRIDES(%(A)s)[1] == elemsize)
-            {
+                // C-contiguous branch
+                // May also be F-contiguous, but we give preference to it,
+                // because it has special handling for the A row/col matrix
+
                 if (PyArray_DESCR(%(A)s)->type_num == NPY_FLOAT)
                 {
                     float alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
@@ -554,10 +541,40 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, force_init_beta=False, params=Non
                     %(fail)s
                 }
             }
+            else if (PyArray_STRIDES(%(A)s)[0] == elemsize)
+            {
+                // Fortran order branch
+                if (PyArray_DESCR(%(A)s)->type_num == NPY_FLOAT)
+                {
+                    float alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
+                    sgemv_(&NOTRANS, &NA0, &NA1,
+                        &alpha,
+                        (float*)(PyArray_DATA(%(A)s)), &SA1,
+                        (float*)x_data, &Sx,
+                        &fbeta,
+                        (float*)z_data, &Sz);
+                }
+                else if (PyArray_DESCR(%(A)s)->type_num == NPY_DOUBLE)
+                {
+                    double alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
+                    dgemv_(&NOTRANS, &NA0, &NA1,
+                        &alpha,
+                        (double*)(PyArray_DATA(%(A)s)), &SA1,
+                        (double*)x_data, &Sx,
+                        &dbeta,
+                        (double*)z_data, &Sz);
+                }
+                else
+                {
+                    PyErr_SetString(PyExc_AssertionError,
+                                    "neither float nor double dtype");
+                    %(fail)s
+                }
+            }
             else
             {
                 PyErr_SetString(PyExc_AssertionError,
-                    "xx is a double-strided matrix, and should have been "
+                    "A is a double-strided matrix, and should have been "
                     "copied into a memory-contiguous one.");
                 %(fail)s
             }
@@ -603,6 +620,7 @@ class CGemv(BaseBLAS, Gemv):
         return code
 
     def c_code_cache_version(self):
+        return None
         return (14, blas_header_version(), check_force_gemv_init())
 
 
