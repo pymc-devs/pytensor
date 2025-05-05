@@ -411,3 +411,45 @@ class TestSdotNoFlags(TestCGemvNoFlags):
 
 class TestBlasStridesC(TestBlasStrides):
     mode = mode_blas_opt
+
+
+@pytest.mark.parametrize(
+    "neg_stride1", (True, False), ids=["neg_stride1", "pos_stride1"]
+)
+@pytest.mark.parametrize(
+    "neg_stride0", (True, False), ids=["neg_stride0", "pos_stride0"]
+)
+@pytest.mark.parametrize("F_layout", (True, False), ids=["F_layout", "C_layout"])
+def test_gemv_negative_strides_perf(neg_stride0, neg_stride1, F_layout, benchmark):
+    A = pt.matrix("A", shape=(512, 512))
+    x = pt.vector("x", shape=(A.type.shape[-1],))
+    y = pt.vector("y", shape=(A.type.shape[0],))
+
+    out = CGemv(inplace=False)(
+        y,
+        1.0,
+        A,
+        x,
+        1.0,
+    )
+    fn = pytensor.function([A, x, y], out, trust_input=True)
+
+    rng = np.random.default_rng(430)
+    test_A = rng.normal(size=A.type.shape)
+    test_x = rng.normal(size=x.type.shape)
+    test_y = rng.normal(size=y.type.shape)
+
+    if F_layout:
+        test_A = test_A.T
+    if neg_stride0:
+        test_A = test_A[::-1]
+    if neg_stride1:
+        test_A = test_A[:, ::-1]
+    assert (test_A.strides[0] < 0) == neg_stride0
+    assert (test_A.strides[1] < 0) == neg_stride1
+
+    # Check result is correct by using a copy of A with positive strides
+    res = fn(test_A, test_x, test_y)
+    np.testing.assert_allclose(res, fn(test_A.copy(), test_x, test_y))
+
+    benchmark(fn, test_A, test_x, test_y)
