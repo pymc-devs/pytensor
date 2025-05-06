@@ -333,13 +333,15 @@ def _split_inputs(args, kwargs):
     """Split inputs into pytensor variables, static values and wrapped functions."""
 
     pt_vars, static_tmp = eqx.partition(
-        (args, kwargs), _filter_ptvars, is_leaf=callable
+        (args, kwargs),
+        _filter_ptvars,  # is_leaf=callable
     )
     # is_leaf=callable is used, as libraries like diffrax or equinox might return
     # functions that are still seen as a nested pytree structure. We consider them
     # as wrappable functions, that will be wrapped with _WrappedFunc.
     func_vars, static_vars = eqx.partition(
-        static_tmp, lambda x: isinstance(x, _WrappedFunc), is_leaf=callable
+        static_tmp,
+        lambda x: isinstance(x, _WrappedFunc),  # is_leaf=callable
     )
     return pt_vars, func_vars, static_vars
 
@@ -407,10 +409,12 @@ def _partition_jaxfunc(jaxfunc, static_vars, func_vars):
             lambda f, v: f.get_func_with_vars(v), func_vars, func_vars_input
         )
         args, kwargs = eqx.combine(
-            dyn_vars, static_vars, evaluated_funcs, is_leaf=callable
+            dyn_vars,
+            static_vars,
+            evaluated_funcs,  # is_leaf=callable
         )
         output = jaxfunc(*args, **kwargs)
-        out_dyn, static_out = eqx.partition(output, eqx.is_array, is_leaf=callable)
+        out_dyn, static_out = eqx.partition(output, eqx.is_array)  # , is_leaf=callable)
         static_out_dic["out"] = static_out
         return out_dyn
 
