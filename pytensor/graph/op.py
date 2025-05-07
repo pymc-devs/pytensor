@@ -502,7 +502,7 @@ class Op(MetaObject):
         self,
         node: Apply,
         storage_map: StorageMapType,
-        compute_map: ComputeMapType,
+        compute_map: ComputeMapType | None,
         no_recycling: list[Variable],
         debug: bool = False,
     ) -> ThunkType:
@@ -513,25 +513,38 @@ class Op(MetaObject):
         """
         node_input_storage = [storage_map[r] for r in node.inputs]
         node_output_storage = [storage_map[r] for r in node.outputs]
-        node_compute_map = [compute_map[r] for r in node.outputs]
 
         if debug and hasattr(self, "debug_perform"):
             p = node.op.debug_perform
         else:
             p = node.op.perform
 
-        @is_thunk_type
-        def rval(
-            p=p,
-            i=node_input_storage,
-            o=node_output_storage,
-            n=node,
-            cm=node_compute_map,
-        ):
-            r = p(n, [x[0] for x in i], o)
-            for entry in cm:
-                entry[0] = True
-            return r
+        if compute_map is None:
+
+            @is_thunk_type
+            def rval(
+                p=p,
+                i=node_input_storage,
+                o=node_output_storage,
+                n=node,
+            ):
+                return p(n, [x[0] for x in i], o)
+
+        else:
+            node_compute_map = [compute_map[r] for r in node.outputs]
+
+            @is_thunk_type
+            def rval(
+                p=p,
+                i=node_input_storage,
+                o=node_output_storage,
+                n=node,
+                cm=node_compute_map,
+            ):
+                r = p(n, [x[0] for x in i], o)
+                for entry in cm:
+                    entry[0] = True
+                return r
 
         rval.inputs = node_input_storage
         rval.outputs = node_output_storage

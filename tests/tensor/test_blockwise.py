@@ -12,10 +12,11 @@ from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
 from pytensor.graph.replace import vectorize_node
 from pytensor.raise_op import assert_op
-from pytensor.tensor import diagonal, log, ones_like, scalar, tensor, vector
+from pytensor.tensor import diagonal, dmatrix, log, ones_like, scalar, tensor, vector
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.nlinalg import MatrixInverse
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
+from pytensor.tensor.signal import convolve1d
 from pytensor.tensor.slinalg import (
     Cholesky,
     Solve,
@@ -482,6 +483,26 @@ def test_batched_mvnormal_logp_and_dlogp(mu_batch_shape, cov_batch_shape, benchm
 
     fn = pytensor.function([value, mu, cov], [logp, *dlogp])
     benchmark(fn, *test_values)
+
+
+def test_small_blockwise_performance(benchmark):
+    a = dmatrix(shape=(7, 128))
+    b = dmatrix(shape=(7, 20))
+    out = convolve1d(a, b, mode="valid")
+    fn = pytensor.function([a, b], out, trust_input=True)
+    assert isinstance(fn.maker.fgraph.outputs[0].owner.op, Blockwise)
+
+    rng = np.random.default_rng(495)
+    a_test = rng.normal(size=a.type.shape)
+    b_test = rng.normal(size=b.type.shape)
+    np.testing.assert_allclose(
+        fn(a_test, b_test),
+        [
+            np.convolve(a_test[i], b_test[i], mode="valid")
+            for i in range(a_test.shape[0])
+        ],
+    )
+    benchmark(fn, a_test, b_test)
 
 
 def test_cop_with_params():
