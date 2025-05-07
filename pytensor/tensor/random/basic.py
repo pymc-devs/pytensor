@@ -18,6 +18,7 @@ from pytensor.tensor.random.utils import (
     broadcast_params,
     normalize_size_param,
 )
+from pytensor.tensor.utils import faster_broadcast_to, faster_ndindex
 
 
 # Scipy.stats is considerably slow to import
@@ -976,19 +977,13 @@ class DirichletRV(RandomVariable):
     @classmethod
     def rng_fn(cls, rng, alphas, size):
         if alphas.ndim > 1:
-            if size is None:
-                size = ()
-
-            size = tuple(np.atleast_1d(size))
-
-            if size:
-                alphas = np.broadcast_to(alphas, size + alphas.shape[-1:])
+            if size is not None:
+                alphas = faster_broadcast_to(alphas, size + alphas.shape[-1:])
 
             samples_shape = alphas.shape
             samples = np.empty(samples_shape)
-            for index in np.ndindex(*samples_shape[:-1]):
+            for index in faster_ndindex(samples_shape[:-1]):
                 samples[index] = rng.dirichlet(alphas[index])
-
             return samples
         else:
             return rng.dirichlet(alphas, size=size)
@@ -1800,11 +1795,11 @@ class MultinomialRV(RandomVariable):
             if size is None:
                 n, p = broadcast_params([n, p], [0, 1])
             else:
-                n = np.broadcast_to(n, size)
-                p = np.broadcast_to(p, size + p.shape[-1:])
+                n = faster_broadcast_to(n, size)
+                p = faster_broadcast_to(p, size + p.shape[-1:])
 
             res = np.empty(p.shape, dtype=cls.dtype)
-            for idx in np.ndindex(p.shape[:-1]):
+            for idx in faster_ndindex(p.shape[:-1]):
                 res[idx] = rng.multinomial(n[idx], p[idx])
             return res
         else:
@@ -1978,13 +1973,13 @@ class ChoiceWithoutReplacement(RandomVariable):
                     p.shape[:batch_ndim],
                 )
 
-        a = np.broadcast_to(a, size + a.shape[batch_ndim:])
+        a = faster_broadcast_to(a, size + a.shape[batch_ndim:])
         if p is not None:
-            p = np.broadcast_to(p, size + p.shape[batch_ndim:])
+            p = faster_broadcast_to(p, size + p.shape[batch_ndim:])
 
         a_indexed_shape = a.shape[len(size) + 1 :]
         out = np.empty(size + core_shape + a_indexed_shape, dtype=a.dtype)
-        for idx in np.ndindex(size):
+        for idx in faster_ndindex(size):
             out[idx] = rng.choice(
                 a[idx], p=None if p is None else p[idx], size=core_shape, replace=False
             )
@@ -2097,10 +2092,10 @@ class PermutationRV(RandomVariable):
             if size is None:
                 size = x.shape[:batch_ndim]
             else:
-                x = np.broadcast_to(x, size + x.shape[batch_ndim:])
+                x = faster_broadcast_to(x, size + x.shape[batch_ndim:])
 
             out = np.empty(size + x.shape[batch_ndim:], dtype=x.dtype)
-            for idx in np.ndindex(size):
+            for idx in faster_ndindex(size):
                 out[idx] = rng.permutation(x[idx])
             return out
 

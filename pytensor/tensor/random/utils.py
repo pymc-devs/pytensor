@@ -15,6 +15,7 @@ from pytensor.tensor.extra_ops import broadcast_arrays, broadcast_to
 from pytensor.tensor.math import maximum
 from pytensor.tensor.shape import shape_padleft, specify_shape
 from pytensor.tensor.type import int_dtypes
+from pytensor.tensor.utils import faster_broadcast_to
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -125,7 +126,7 @@ def broadcast_params(
     shapes = params_broadcast_shapes(
         param_shapes, ndims_params, use_pytensor=use_pytensor
     )
-    broadcast_to_fn = broadcast_to if use_pytensor else np.broadcast_to
+    broadcast_to_fn = broadcast_to if use_pytensor else faster_broadcast_to
 
     # zip strict not specified because we are in a hot loop
     bcast_params = [
