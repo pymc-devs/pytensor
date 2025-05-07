@@ -312,10 +312,10 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
     else:
 
         def py_perform_return(inputs):
-            # strict=False because we are in a hot loop
+            # zip strict not specified because we are in a hot loop
             return tuple(
                 out_type.filter(out[0])
-                for out_type, out in zip(output_types, py_perform(inputs), strict=False)
+                for out_type, out in zip(output_types, py_perform(inputs))
             )
 
     @numba_njit

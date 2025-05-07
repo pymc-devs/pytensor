@@ -3589,8 +3589,8 @@ class PermuteRowElements(Op):
 
         # Make sure the output is big enough
         out_s = []
-        # strict=False because we are in a hot loop
-        for xdim, ydim in zip(x_s, y_s, strict=False):
+        # zip strict not specified because we are in a hot loop
+        for xdim, ydim in zip(x_s, y_s):
             if xdim == ydim:
                 outdim = xdim
             elif xdim == 1:

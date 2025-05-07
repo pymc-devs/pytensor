@@ -166,10 +166,7 @@ class _CythonWrapper(numba.types.WrapperAddressProtocol):
     def __call__(self, *args, **kwargs):
         # no strict argument because of the JIT
         # TODO: check
-        args = [
-            dtype(arg)
-            for arg, dtype in zip(args, self._signature.arg_dtypes)  # noqa: B905
-        ]
+        args = [dtype(arg) for arg, dtype in zip(args, self._signature.arg_dtypes)]
         if self.has_pyx_skip_dispatch():
             output = self._pyfunc(*args[:-1], **kwargs)
         else:

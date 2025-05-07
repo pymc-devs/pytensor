@@ -183,7 +183,7 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
 
         r, c = 0, 0
         # no strict argument because it is incompatible with numba
-        for arr, shape in zip(arrs, shapes):  # noqa: B905
+        for arr, shape in zip(arrs, shapes):
             rr, cc = shape
             out[r : r + rr, c : c + cc] = arr
             r += rr

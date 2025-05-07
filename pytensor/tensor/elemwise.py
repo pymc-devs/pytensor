@@ -712,9 +712,9 @@ class Elemwise(OpenMPOp):
         if nout == 1:
             variables = [variables]
 
-        # strict=False because we are in a hot loop
+        # zip strict not specified because we are in a hot loop
         for i, (variable, storage, nout) in enumerate(
-            zip(variables, output_storage, node.outputs, strict=False)
+            zip(variables, output_storage, node.outputs)
         ):
             storage[0] = variable = np.asarray(variable, dtype=nout.dtype)
 
@@ -729,11 +729,11 @@ class Elemwise(OpenMPOp):
 
     @staticmethod
     def _check_runtime_broadcast(node, inputs):
-        # strict=False because we are in a hot loop
+        # zip strict not specified because we are in a hot loop
         for dims_and_bcast in zip(
             *[
-                zip(input.shape, sinput.type.broadcastable, strict=False)
-                for input, sinput in zip(inputs, node.inputs, strict=False)
+                zip(input.shape, sinput.type.broadcastable)
+                for input, sinput in zip(inputs, node.inputs)
             ],
             strict=False,
         ):

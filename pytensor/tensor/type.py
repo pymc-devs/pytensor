@@ -261,10 +261,10 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 " PyTensor C code does not support that.",
             )
 
-        # strict=False because we are in a hot loop
+        # zip strict not specified because we are in a hot loop
         if not all(
             ds == ts if ts is not None else True
-            for ds, ts in zip(data.shape, self.shape, strict=False)
+            for ds, ts in zip(data.shape, self.shape)
         ):
             raise TypeError(
                 f"The type's shape ({self.shape}) is not compatible with the data's ({data.shape})"
@@ -333,17 +333,14 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         return False
 
     def is_super(self, otype):
-        # strict=False because we are in a hot loop
+        # zip strict not specified because we are in a hot loop
         if (
             isinstance(otype, type(self))
             and otype.dtype == self.dtype
             and otype.ndim == self.ndim
             # `otype` is allowed to be as or more shape-specific than `self`,
             # but not less
-            and all(
-                sb == ob or sb is None
-                for sb, ob in zip(self.shape, otype.shape, strict=False)
-            )
+            and all(sb == ob or sb is None for sb, ob in zip(self.shape, otype.shape))
         ):
             return True
 
