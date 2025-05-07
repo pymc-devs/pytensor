@@ -924,7 +924,8 @@ class Function:
 
         # Reinitialize each container's 'provided' counter
         if trust_input:
-            for arg_container, arg in zip(input_storage, args, strict=False):
+            # zip strict not specified because we are in a hot loop
+            for arg_container, arg in zip(input_storage, args):
                 arg_container.storage[0] = arg
         else:
             for arg_container in input_storage:
@@ -934,7 +935,8 @@ class Function:
                 raise TypeError("Too many parameter passed to pytensor function")
 
             # Set positional arguments
-            for arg_container, arg in zip(input_storage, args, strict=False):
+            # zip strict not specified because we are in a hot loop
+            for arg_container, arg in zip(input_storage, args):
                 # See discussion about None as input
                 # https://groups.google.com/group/theano-dev/browse_thread/thread/920a5e904e8a8525/4f1b311a28fc27e5
                 if arg is None:
