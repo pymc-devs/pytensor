@@ -75,3 +75,19 @@ def test_mlx_SolveTriangular(lower, trans):
         unit_diagonal=False,
     )
     compare_mlx_and_py([A, b], [out], [A_val, b_val], mlx_mode=mlx_linalg_mode)
+
+
+def test_mlx_LU():
+    rng = np.random.default_rng()
+
+    A = pt.tensor("A", shape=(5, 5))
+    out = pt.linalg.lu(A, permute_l=False, p_indices=True)
+
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    compare_mlx_and_py(
+        [A],
+        out,
+        [A_val],
+        mlx_mode=mlx_linalg_mode,
+    )
