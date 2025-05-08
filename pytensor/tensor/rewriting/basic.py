@@ -96,9 +96,11 @@ def broadcasted_by(x: TensorVariable, y: TensorVariable) -> bool:
     """
     bx = x.type.broadcastable
     by = y.type.broadcastable
-    if len(bx) < len(by):
+    bx_len = len(bx)
+    by_len = len(by)
+    if bx_len < by_len:
         return True
-    bx = bx[-len(by) :]
+    bx = bx[bx_len - by_len :]
     return any(bx_dim and not by_dim for bx_dim, by_dim in zip(bx, by, strict=True))
 
 
