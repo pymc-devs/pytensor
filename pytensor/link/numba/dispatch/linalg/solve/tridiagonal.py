@@ -4,7 +4,6 @@ import numpy as np
 from numba.core.extending import overload
 from numba.np.linalg import ensure_lapack
 from numpy import ndarray
-from scipy import linalg
 
 from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -13,11 +12,9 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.solve.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
     _check_scipy_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
-    _solve_check,
     _trans_char_to_int,
 )
 
@@ -227,72 +224,42 @@ def gtcon_impl(
 
 
 def _solve_tridiagonal(
-    a: ndarray,
-    b: ndarray,
-    lower: bool,
-    overwrite_a: bool,
+    dl: ndarray,
+    d: ndarray,
+    ul: ndarray,
+    B: ndarray,
     overwrite_b: bool,
-    check_finite: bool,
-    transposed: bool,
 ):
     """
-    Solve a positive-definite linear system using the Cholesky decomposition.
+    Solve a tridiagonal linear system.
     """
-    return linalg.solve(
-        a=a,
-        b=b,
-        lower=lower,
-        overwrite_a=overwrite_a,
-        overwrite_b=overwrite_b,
-        check_finite=check_finite,
-        transposed=transposed,
-        assume_a="tridiagonal",
-    )
+    return
 
 
 @overload(_solve_tridiagonal)
-def _tridiagonal_solve_impl(
-    A: ndarray,
+def _solve_tridiagonal_impl(
+    dl: ndarray,
+    d: ndarray,
+    du: ndarray,
     B: ndarray,
-    lower: bool,
-    overwrite_a: bool,
     overwrite_b: bool,
-    check_finite: bool,
-    transposed: bool,
-) -> Callable[[ndarray, ndarray, bool, bool, bool, bool, bool], ndarray]:
+) -> Callable[[ndarray, ndarray, ndarray, ndarray, bool], ndarray]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "solve")
+    _check_scipy_linalg_matrix(dl, "solve_")
+    _check_scipy_linalg_matrix(dl, "solve")
+    _check_scipy_linalg_matrix(dl, "solve")
     _check_scipy_linalg_matrix(B, "solve")
 
     def impl(
-        A: ndarray,
+        dl: ndarray,
+        d: ndarray,
+        du: ndarray,
         B: ndarray,
-        lower: bool,
-        overwrite_a: bool,
         overwrite_b: bool,
-        check_finite: bool,
-        transposed: bool,
     ) -> ndarray:
-        n = np.int32(A.shape[-1])
-        _solve_check_input_shapes(A, B)
-        norm = "1"
+        dl, d, du, du2, IPIV, _ = _gttrf(dl, d, du)
 
-        if transposed:
-            A = A.T
-        dl, d, du = np.diag(A, -1), np.diag(A, 0), np.diag(A, 1)
-
-        anorm = tridiagonal_norm(du, d, dl)
-
-        dl, d, du, du2, IPIV, INFO = _gttrf(dl, d, du)
-        _solve_check(n, INFO)
-
-        X, INFO = _gttrs(
-            dl, d, du, du2, IPIV, B, trans=transposed, overwrite_b=overwrite_b
-        )
-        _solve_check(n, INFO)
-
-        RCOND, INFO = _gtcon(dl, d, du, du2, IPIV, anorm, norm)
-        _solve_check(n, INFO, True, RCOND)
+        X, _ = _gttrs(dl, d, du, du2, IPIV, B, trans=0, overwrite_b=overwrite_b)
 
         return X
 

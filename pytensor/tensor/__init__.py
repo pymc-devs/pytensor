@@ -114,6 +114,7 @@ from pytensor.tensor import (
 
 
 # isort: off
+import pytensor.tensor._linalg
 from pytensor.tensor import linalg
 from pytensor.tensor import special
 from pytensor.tensor import signal
@@ -142,6 +143,7 @@ from pytensor.tensor.shape import (
     specify_broadcastable,
     specify_shape,
 )
+
 
 # We import as `_shared` instead of `shared` to avoid confusion between
 # `pytensor.shared` and `tensor._shared`.

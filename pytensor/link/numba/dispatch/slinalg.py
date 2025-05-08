@@ -17,6 +17,7 @@ from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
 from pytensor.link.numba.dispatch.linalg.solve.symmetric import _solve_symmetric
 from pytensor.link.numba.dispatch.linalg.solve.triangular import _solve_triangular
 from pytensor.link.numba.dispatch.linalg.solve.tridiagonal import _solve_tridiagonal
+from pytensor.tensor._linalg.solve.tridiagonal import SolveTridiagonal
 from pytensor.tensor.slinalg import (
     LU,
     BlockDiagonal,
@@ -215,8 +216,6 @@ def numba_funcify_Solve(op, node, **kwargs):
         solve_fn = _solve_symmetric
     elif assume_a == "pos":
         solve_fn = _solve_psd
-    elif assume_a == "tridiagonal":
-        solve_fn = _solve_tridiagonal
     else:
         warnings.warn(
             f"Numba assume_a={assume_a} not implemented. Falling back to general solve.\n"
@@ -277,6 +276,32 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
             unit_diagonal=unit_diagonal,
             overwrite_b=overwrite_b,
             b_ndim=b_ndim,
+        )
+
+        return res
+
+    return solve_triangular
+
+
+@numba_funcify.register(SolveTridiagonal)
+def numba_funcify_SolveTridiagonal(op, node, **kwargs):
+    overwrite_b = op.overwrite_b
+    b_ndim = op.b_ndim
+
+    dtype = node.inputs[0].dtype
+    if dtype in complex_dtypes:
+        raise NotImplementedError(
+            _COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op="Solve Triangular")
+        )
+
+    @numba_njit
+    def solve_triangular(dl, d, du, b):
+        res = _solve_tridiagonal(
+            dl,
+            d,
+            du,
+            b,
+            overwrite_b=overwrite_b,
         )
 
         return res
