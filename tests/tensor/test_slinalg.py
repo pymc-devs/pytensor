@@ -737,6 +737,22 @@ class TestLUSolve(utt.InferShapeTester):
         test_fn = functools.partial(self.factor_and_solve, sum=True, trans=trans)
         utt.verify_grad(test_fn, [A_val, b_val], 3, rng)
 
+    def test_lu_solve_batch_dims(self):
+        A = pt.tensor("A", shape=(3, 1, 5, 5))
+        b = pt.tensor("b", shape=(1, 4, 5))
+        lu_and_pivots = lu_factor(A)
+        x = lu_solve(lu_and_pivots, b, b_ndim=1)
+        assert x.type.shape in {(3, 4, None), (3, 4, 5)}
+
+        rng = np.random.default_rng(748)
+        A_test = rng.random(A.type.shape).astype(A.type.dtype)
+        b_test = rng.random(b.type.shape).astype(b.type.dtype)
+        np.testing.assert_allclose(
+            x.eval({A: A_test, b: b_test}),
+            solve(A, b, b_ndim=1).eval({A: A_test, b: b_test}),
+            rtol=1e-9 if config.floatX == "float64" else 1e-5,
+        )
+
 
 def test_lu_factor():
     rng = np.random.default_rng(utt.fetch_seed())

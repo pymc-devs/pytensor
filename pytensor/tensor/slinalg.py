@@ -1,7 +1,7 @@
 import logging
 import warnings
 from collections.abc import Sequence
-from functools import reduce
+from functools import partial, reduce
 from typing import Literal, cast
 
 import numpy as np
@@ -589,6 +589,7 @@ def lu(
 
 
 class PivotToPermutations(Op):
+    gufunc_signature = "(x)->(x)"
     __props__ = ("inverse",)
 
     def __init__(self, inverse=True):
@@ -723,6 +724,50 @@ def lu_factor(
     )
 
 
+def _lu_solve(
+    LU: TensorLike,
+    pivots: TensorLike,
+    b: TensorLike,
+    trans: bool = False,
+    b_ndim: int | None = None,
+    check_finite: bool = True,
+):
+    b_ndim = _default_b_ndim(b, b_ndim)
+
+    LU, pivots, b = map(pt.as_tensor_variable, [LU, pivots, b])
+
+    inv_permutation = pivot_to_permutation(pivots, inverse=True)
+    x = b[inv_permutation] if not trans else b
+    # TODO: Use PermuteRows on b
+    # x = permute_rows(b, pivots) if not trans else b
+
+    x = solve_triangular(
+        LU,
+        x,
+        lower=not trans,
+        unit_diagonal=not trans,
+        trans=trans,
+        b_ndim=b_ndim,
+        check_finite=check_finite,
+    )
+
+    x = solve_triangular(
+        LU,
+        x,
+        lower=trans,
+        unit_diagonal=trans,
+        trans=trans,
+        b_ndim=b_ndim,
+        check_finite=check_finite,
+    )
+
+    # TODO: Use PermuteRows(inverse=True) on x
+    # if trans:
+    #     x = permute_rows(x, pivots, inverse=True)
+    x = x[pt.argsort(inv_permutation)] if trans else x
+    return x
+
+
 def lu_solve(
     LU_and_pivots: tuple[TensorLike, TensorLike],
     b: TensorLike,
@@ -751,35 +796,14 @@ def lu_solve(
         Ignored by Pytensor. Pytensor will always compute inplace when possible.
     """
     b_ndim = _default_b_ndim(b, b_ndim)
-    LU, pivots = LU_and_pivots
-
-    LU, pivots, b = map(pt.as_tensor_variable, [LU, pivots, b])
-    inv_permutation = pivot_to_permutation(pivots, inverse=True)
-
-    x = b[inv_permutation] if not trans else b
-
-    x = solve_triangular(
-        LU,
-        x,
-        lower=not trans,
-        unit_diagonal=not trans,
-        trans=trans,
-        b_ndim=b_ndim,
-        check_finite=check_finite,
+    if b_ndim == 1:
+        signature = "(m,m),(m),(m)->(m)"
+    else:
+        signature = "(m,m),(m),(m,n)->(m,n)"
+    partialled_func = partial(
+        _lu_solve, trans=trans, b_ndim=b_ndim, check_finite=check_finite
     )
-
-    x = solve_triangular(
-        LU,
-        x,
-        lower=trans,
-        unit_diagonal=trans,
-        trans=trans,
-        b_ndim=b_ndim,
-        check_finite=check_finite,
-    )
-    x = x[pt.argsort(inv_permutation)] if trans else x
-
-    return x
+    return pt.vectorize(partialled_func, signature=signature)(*LU_and_pivots, b)
 
 
 class SolveTriangular(SolveBase):
