@@ -579,7 +579,10 @@ class TestInplace:
         else:
             x = solve_fn(A, b, b_ndim=1)
 
-        mode = get_default_mode().excluding("batched_vector_b_solve_to_matrix_b_solve")
+        mode = get_default_mode().excluding(
+            "batched_vector_b_solve_to_matrix_b_solve",
+            "reuse_lu_decomposition_multiple_solves",
+        )
         fn = function([In(A, mutable=True), In(b, mutable=True)], x, mode=mode)
 
         op = fn.maker.fgraph.outputs[0].owner.op
