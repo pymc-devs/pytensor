@@ -3,13 +3,14 @@ from functools import partial
 import numpy as np
 import pytest
 from scipy.signal import convolve as scipy_convolve
+from scipy.signal import convolve2d as scipy_convolve2d
 
 from pytensor import config, function, grad
 from pytensor.graph.rewriting import rewrite_graph
 from pytensor.graph.traversal import ancestors, io_toposort
 from pytensor.tensor import matrix, tensor, vector
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.signal.conv import Convolve1d, convolve1d
+from pytensor.tensor.signal.conv import Convolve1d, convolve1d, convolve2d
 from tests import unittest_tools as utt
 
 
@@ -137,3 +138,30 @@ def convolve1d_grad_benchmarker(convolve_mode, mode, benchmark):
 @pytest.mark.parametrize("convolve_mode", ["full", "valid"])
 def test_convolve1d_grad_benchmark_c(convolve_mode, benchmark):
     convolve1d_grad_benchmarker(convolve_mode, "FAST_RUN", benchmark)
+
+
+@pytest.mark.parametrize(
+    "kernel_shape", [(3, 3), (5, 3), (5, 8)], ids=lambda x: f"kernel_shape={x}"
+)
+@pytest.mark.parametrize(
+    "data_shape", [(3, 3), (5, 5), (8, 8)], ids=lambda x: f"data_shape={x}"
+)
+@pytest.mark.parametrize("mode", ["full", "valid", "same"])
+@pytest.mark.parametrize("boundary", ["fill", "wrap", "symm"])
+def test_convolve2d(kernel_shape, data_shape, mode, boundary):
+    data = matrix("data")
+    kernel = matrix("kernel")
+    op = partial(convolve2d, mode=mode, boundary=boundary, fillvalue=0)
+
+    rng = np.random.default_rng((26, kernel_shape, data_shape, sum(map(ord, mode))))
+    data_val = rng.normal(size=data_shape).astype(data.dtype)
+    kernel_val = rng.normal(size=kernel_shape).astype(kernel.dtype)
+
+    fn = function([data, kernel], op(data, kernel))
+    np.testing.assert_allclose(
+        fn(data_val, kernel_val),
+        scipy_convolve2d(
+            data_val, kernel_val, mode=mode, boundary=boundary, fillvalue=0
+        ),
+        rtol=1e-6 if config.floatX == "float32" else 1e-15,
+    )
