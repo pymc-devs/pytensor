@@ -117,17 +117,9 @@ def numba_funcify_ARange(op, **kwargs):
 
 @numba_funcify.register(Join)
 def numba_funcify_Join(op, **kwargs):
-    view = op.view
-
-    if view != -1:
-        # TODO: Where (and why) is this `Join.view` even being used?  From a
-        # quick search, the answer appears to be "nowhere", so we should
-        # probably just remove it.
-        raise NotImplementedError("The `view` parameter to `Join` is not supported")
-
     @numba_basic.numba_njit
     def join(axis, *tensors):
-        return np.concatenate(tensors, numba_basic.to_scalar(axis))
+        return np.concatenate(tensors, axis.item())
 
     return join
 
