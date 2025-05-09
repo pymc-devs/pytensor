@@ -27,7 +27,6 @@ __pycache__
 \#*\#
 build
 compiled/*.cpp
-core.*
 cutils_ext.cpp
 dist
 doc/.build/
