@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 from numpy import convolve as numpy_convolve
+from scipy.signal import convolve2d as scipy_convolve2d
 
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Constant
@@ -11,7 +12,7 @@ from pytensor.scalar.basic import upcast
 from pytensor.tensor.basic import as_tensor_variable, join, zeros
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.math import maximum, minimum, switch
-from pytensor.tensor.type import vector
+from pytensor.tensor.type import matrix, vector
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -211,3 +212,116 @@ def convolve1d(
 
     full_mode = as_scalar(np.bool_(mode == "full"))
     return cast(TensorVariable, blockwise_convolve_1d(in1, in2, full_mode))
+
+
+class Convolve2D(Op):
+    __props__ = ("mode", "boundary", "fillvalue")
+    gufunc_signature = "(n,m),(k,l)->(o,p)"
+
+    def __init__(
+        self,
+        mode: Literal["full", "valid", "same"] = "full",
+        boundary: Literal["fill", "wrap", "symm"] = "fill",
+        fillvalue: float | int = 0,
+    ):
+        if mode not in ("full", "valid", "same"):
+            raise ValueError(f"Invalid mode: {mode}")
+        if boundary not in ("fill", "wrap", "symm"):
+            raise ValueError(f"Invalid boundary: {boundary}")
+
+        self.mode = mode
+        self.boundary = boundary
+        self.fillvalue = fillvalue
+
+    def make_node(self, in1, in2):
+        in1, in2 = map(as_tensor_variable, (in1, in2))
+
+        assert in1.ndim == 2
+        assert in2.ndim == 2
+
+        dtype = upcast(in1.dtype, in2.dtype)
+
+        n, m = in1.type.shape
+        k, l = in2.type.shape
+
+        if any(x is None for x in (n, m, k, l)):
+            out_shape = (None, None)
+        elif self.mode == "full":
+            out_shape = (n + k - 1, m + l - 1)
+        elif self.mode == "valid":
+            out_shape = (n - k + 1, m - l + 1)
+        else:  # mode == "same"
+            out_shape = (n, m)
+
+        out = matrix(dtype=dtype, shape=out_shape)
+        return Apply(self, [in1, in2], [out])
+
+    def perform(self, node, inputs, outputs):
+        in1, in2 = inputs
+        outputs[0][0] = scipy_convolve2d(
+            in1, in2, mode=self.mode, boundary=self.boundary, fillvalue=self.fillvalue
+        )
+
+    def infer_shape(self, fgraph, node, shapes):
+        in1_shape, in2_shape = shapes
+        n, m = in1_shape
+        k, l = in2_shape
+
+        if self.mode == "full":
+            shape = (n + k - 1, m + l - 1)
+        elif self.mode == "valid":
+            shape = (
+                maximum(n, k) - minimum(n, k) + 1,
+                maximum(m, l) - minimum(m, l) + 1,
+            )
+        else:  # self.mode == 'same':
+            shape = (n, m)
+
+        return [shape]
+
+    def L_op(self, inputs, outputs, output_grads):
+        raise NotImplementedError
+
+
+def convolve2d(
+    in1: "TensorLike",
+    in2: "TensorLike",
+    mode: Literal["full", "valid", "same"] = "full",
+    boundary: Literal["fill", "wrap", "symm"] = "fill",
+    fillvalue: float | int = 0,
+) -> TensorVariable:
+    """Convolve two two-dimensional arrays.
+
+    Convolve in1 and in2, with the output size determined by the mode argument.
+
+    Parameters
+    ----------
+    in1 : (..., N, M) tensor_like
+        First input.
+    in2 : (..., K, L) tensor_like
+        Second input.
+    mode : {'full', 'valid', 'same'}, optional
+        A string indicating the size of the output:
+        - 'full': The output is the full discrete linear convolution of the inputs, with shape (..., N+K-1, M+L-1).
+        - 'valid': The output consists only of elements that do not rely on zero-padding, with shape (..., max(N, K) - min(N, K) + 1, max(M, L) - min(M, L) + 1).
+        - 'same': The output is the same size as in1, centered with respect to the 'full' output.
+    boundary : {'fill', 'wrap', 'symm'}, optional
+        A string indicating how to handle boundaries:
+        - 'fill': Pads the input arrays with fillvalue.
+        - 'wrap': Circularly wraps the input arrays.
+        - 'symm': Symmetrically reflects the input arrays.
+    fillvalue : float or int, optional
+        The value to use for padding when boundary is 'fill'. Default is 0.
+    Returns
+    -------
+    out: tensor_variable
+        The discrete linear convolution of in1 with in2.
+
+    """
+    in1 = as_tensor_variable(in1)
+    in2 = as_tensor_variable(in2)
+
+    blockwise_convolve = Blockwise(
+        Convolve2D(mode=mode, boundary=boundary, fillvalue=fillvalue)
+    )
+    return cast(TensorVariable, blockwise_convolve(in1, in2))
