@@ -32,8 +32,8 @@ from pytensor.scalar.basic import (
     isinf,
     log,
     log1p,
+    maximum,
     reciprocal,
-    scalar_maximum,
     sqrt,
     switch,
     true_div,
@@ -1305,7 +1305,7 @@ class Softplus(UnaryScalarOp):
             return v
 
 
-softplus = Softplus(upgrade_to_float, name="scalar_softplus")
+softplus = Softplus(upgrade_to_float, name="softplus")
 
 
 class Log1mexp(UnaryScalarOp):
@@ -1575,9 +1575,7 @@ def betainc_grad(p, q, x, wrtp: bool):
             derivative_new = K * (F1 * dK + F2)
 
             errapx = scalar_abs(derivative - derivative_new)
-            d_errapx = errapx / scalar_maximum(
-                err_threshold, scalar_abs(derivative_new)
-            )
+            d_errapx = errapx / maximum(err_threshold, scalar_abs(derivative_new))
 
             min_iters_cond = n > (min_iters - 1)
             derivative = switch(
@@ -1823,7 +1821,7 @@ def _grad_2f1_loop(a, b, c, z, *, skip_loop, wrt, dtype):
         if len(grad_incs) == 1:
             [max_abs_grad_inc] = grad_incs
         else:
-            max_abs_grad_inc = reduce(scalar_maximum, abs_grad_incs)
+            max_abs_grad_inc = reduce(maximum, abs_grad_incs)
 
         return (
             (*grads, *log_gs, *log_gs_signs, log_t, log_t_sign, sign_zk, k),

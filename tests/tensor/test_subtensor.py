@@ -16,10 +16,10 @@ from pytensor.compile.io import In
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
-from pytensor.graph import Constant
+from pytensor.graph import Constant, FunctionGraph
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.op import get_test_value
-from pytensor.graph.rewriting.utils import is_same_graph
+from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
 from pytensor.tensor import as_tensor, get_vector_length, vectorize
@@ -72,6 +72,7 @@ from pytensor.tensor.type import (
     lscalar,
     lvector,
     matrix,
+    scalar,
     tensor,
     tensor3,
     tensor4,
@@ -1056,26 +1057,8 @@ class TestSubtensor(utt.OptimizationTestMixin):
         assert np.allclose(g_0[0], 1)
         assert np.allclose(g_0[1:], 0)
 
-    @pytest.mark.slow
-    def test_shape_i_const(self):
-        # Each axis is treated independently by shape_i/shape operators
-
-        mode_opt = self.mode
-        data = self.shared(np.array(np.arange(5), dtype=self.dtype))
-        for start in [None, -8, -5, -1, 0, 1, 5, 8]:
-            outs = []
-            shapes = []
-            for stop in [None, -8, -5, -1, 0, 1, 5, 8]:
-                for step in [None, -3, -1, 2]:
-                    outs += [data[start:stop:step].shape]
-                    shapes += [data.get_value(borrow=True)[start:stop:step].shape]
-            f = self.function([], outs, mode=mode_opt, op=subtensor_ops, N=0)
-            t_shapes = f()
-            for t_shape, shape in zip(t_shapes, shapes, strict=True):
-                assert np.all(t_shape == shape)
-            assert Subtensor not in [x.op for x in f.maker.fgraph.toposort()]
-
     def test_shape_i_scalar(self):
+        # TODO: Move this to infer_shape
         # Each axis is treated independently by shape_i/shape operators
 
         mode_opt = self.mode
@@ -1495,6 +1478,70 @@ class TestSubtensor(utt.OptimizationTestMixin):
 
             assert np.allclose(m1_val, m1_ref), (m1_val, m1_ref)
             assert np.allclose(m2_val, m2_ref), (m2_val, m2_ref)
+
+
+class TestSubtensorInferShape:
+    _NO_OPT_MODE = Mode(linker="py", optimizer=None)
+
+    @pytest.mark.parametrize(
+        "b", [None, 0, 1, 7, 13, -1, -7, -13], ids=lambda x: f"b={x}"
+    )
+    @pytest.mark.parametrize(
+        "a", [None, 0, 1, 7, 13, -1, -7, -13], ids=lambda x: f"a={x}"
+    )
+    @pytest.mark.parametrize("step", [None, 1, 3, -1, -4], ids=lambda x: f"step={x}")
+    def test_constant_params(self, a, b, step):
+        x = vector("x", dtype="int64")
+        y = x[a:b:step].shape[0]
+
+        fg = FunctionGraph(outputs=[y], clone=False)
+        rewrite_graph(fg, include=("ShapeOpt", "canonicalize"), clone=False)
+        assert not any(isinstance(node.op, Subtensor) for node in fg.apply_nodes)
+        assert len(fg.apply_nodes) <= 7
+
+        fn = pytensor.function(
+            [x],
+            fg.outputs[0],
+            trust_input=True,
+            mode=self._NO_OPT_MODE,
+            on_unused_input="ignore",
+        )
+        x_full = np.arange(20)
+        for n in range(0, 20):
+            x_test = x_full[:n]
+            assert fn(x_test) == x_test[a:b:step].shape[0], f"failed with {n=}"
+
+    @pytest.mark.parametrize("a_dtype", (None, "int64", "uint64"))
+    @pytest.mark.parametrize("b_dtype", (None, "int64", "uint64"))
+    @pytest.mark.parametrize("step_dtype", (None, "int64", "uint64"))
+    def test_uint(self, a_dtype, b_dtype, step_dtype):
+        a = None if a_dtype is None else scalar(dtype=a_dtype)
+        b = None if b_dtype is None else scalar(dtype=b_dtype)
+        step = None if step_dtype is None else scalar(dtype=step_dtype)
+        x = vector("x", dtype="int64")
+
+        y = x[a:b:step].shape[0]
+
+        final_y = rewrite_graph(y, include=("ShapeOpt", "canonicalize"), clone=False)
+        assert final_y.dtype == "int64"
+
+        test_a = None if a is None else 1 if a_dtype.startswith("u") else -1
+        test_b = None if b is None else 10 if b_dtype.startswith("u") else -2
+        test_step = None if step is None else 2 if step_dtype.startswith("u") else -2
+        test_x = np.arange(20)
+
+        test_dict = {x: test_x}
+        if a is not None:
+            test_dict[a] = test_a
+        if b is not None:
+            test_dict[b] = test_b
+        if step is not None:
+            test_dict[step] = test_step
+
+        final_y_eval = final_y.eval(
+            test_dict, mode=self._NO_OPT_MODE, on_unused_input="ignore"
+        )
+        assert final_y_eval == test_x[test_a:test_b:test_step].shape[0]
 
 
 def test_take_basic():
