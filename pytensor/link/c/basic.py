@@ -1188,6 +1188,7 @@ class CLinker(Linker):
 
         res = _CThunk(cthunk, init_tasks, tasks, error_storage, module)
         res.nodes = self.node_order
+        res.allow_gc = False
         return res, in_storage, out_storage
 
     def cmodule_key(self):
@@ -1875,9 +1876,10 @@ class OpWiseCLinker(LocalLinker):
             fgraph,
             thunks,
             order,
-            post_thunk_old_storage,
+            post_thunk_old_storage=post_thunk_old_storage,
             no_recycling=no_recycling,
             nice_errors=self.nice_errors,
+            output_storage=output_storage,
         )
 
         f.allow_gc = self.allow_gc

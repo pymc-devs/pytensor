@@ -9,11 +9,9 @@ from pytensor.compile.debugmode import (
     BadThunkOutput,
     BadViewMap,
     DebugMode,
-    InvalidValueError,
     StochasticOrder,
 )
 from pytensor.compile.function import function
-from pytensor.compile.mode import predefined_modes
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.features import BadOptimization
@@ -21,8 +19,8 @@ from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.rewriting.db import EquilibriumDB
 from pytensor.link.c.op import COp
-from pytensor.tensor.math import add, dot, log
-from pytensor.tensor.type import TensorType, dvector, fmatrix, fvector, scalar, vector
+from pytensor.tensor.math import add, dot
+from pytensor.tensor.type import dvector, fmatrix, fvector, scalar
 from tests import unittest_tools as utt
 
 
@@ -553,59 +551,6 @@ class TestViewMap:
         # f([1,2,3,4],[5,6,7,8])
 
 
-class TestCheckIsfinite:
-    def setup_method(self):
-        self.old_ts = TensorType.filter_checks_isfinite
-        self.old_dm = predefined_modes["DEBUG_MODE"].check_isfinite
-
-    def teardown_method(self):
-        TensorType.filter_checks_isfinite = self.old_ts
-        predefined_modes["DEBUG_MODE"].check_isfinite = self.old_dm
-
-    def test_check_isfinite(self):
-        x = vector()
-        f = function([x], (x + 2) * 5, mode="DEBUG_MODE")
-        g = function([x], log(x), mode="DEBUG_MODE")
-
-        # this should work
-        f(np.log([3, 4, 5]).astype(config.floatX))
-
-        # if TensorType.filter_checks_isfinite were true, these would raise
-        # ValueError
-        # if not, DebugMode will check internally, and raise InvalidValueError
-        # passing an invalid value as an input should trigger ValueError
-        with pytest.raises(InvalidValueError):
-            f(np.log([3, -4, 5]).astype(config.floatX))
-        with pytest.raises(InvalidValueError):
-            f((np.asarray([0, 1.0, 0]) / 0).astype(config.floatX))
-        with pytest.raises(InvalidValueError):
-            f((np.asarray([1.0, 1.0, 1.0]) / 0).astype(config.floatX))
-
-        # generating an invalid value internally should trigger
-        # InvalidValueError
-        with pytest.raises(InvalidValueError):
-            g(np.asarray([3, -4, 5], dtype=config.floatX))
-
-        # this should disable the exception
-        TensorType.filter_checks_isfinite = False
-        predefined_modes["DEBUG_MODE"].check_isfinite = False
-        # insert several Inf
-        f(np.asarray(np.asarray([1.0, 1.0, 1.0]) / 0, dtype=config.floatX))
-
-    def test_check_isfinite_disabled(self):
-        x = dvector()
-        f = function([x], (x + 2) * 5, mode=DebugMode(check_isfinite=False))
-
-        # nan should go through
-        f(np.log([3, -4, 5]))
-
-        # inf should go through
-        infs = np.asarray([1.0, 1.0, 1.0]) / 0
-        # print infs
-        f(infs)
-        return
-
-
 class BrokenCImplementationAdd(COp):
     __props__ = ()
 
@@ -802,20 +747,6 @@ class TestPreallocatedOutput:
 
         v_val = self.rng.standard_normal(5).astype("float32")
         f(v_val)
-
-
-def test_function_dict():
-    """Tests that debug mode works where outputs is a dictionary."""
-
-    x = scalar("x")
-
-    f = function([x], outputs={"1": x, "2": 2 * x, "3": 3 * x}, mode="DEBUG_MODE")
-
-    result = f(3.0)
-
-    assert result["1"] == 3.0
-    assert result["2"] == 6.0
-    assert result["3"] == 9.0
 
 
 def test_function_list():

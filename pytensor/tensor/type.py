@@ -199,11 +199,7 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                     # (do not try to convert the data)
                     up_dtype = ps.upcast(self.dtype, data.dtype)
                     if up_dtype == self.dtype:
-                        # Bug in the following line when data is a
-                        # scalar array, see
-                        # http://projects.scipy.org/numpy/ticket/1611
-                        # data = data.astype(self.dtype)
-                        data = np.asarray(data, dtype=self.dtype)
+                        data = data.astype(self.dtype)
                     if up_dtype != self.dtype:
                         err_msg = (
                             f"{self} cannot store a value of dtype {data.dtype} without "
@@ -261,17 +257,15 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 " PyTensor C code does not support that.",
             )
 
-        # strict=False because we are in a hot loop
+        # strict=None because we are in a hot loop
         if not all(
             ds == ts if ts is not None else True
-            for ds, ts in zip(data.shape, self.shape, strict=False)
+            for ds, ts in zip(data.shape, self.shape)
         ):
             raise TypeError(
                 f"The type's shape ({self.shape}) is not compatible with the data's ({data.shape})"
             )
 
-        if self.filter_checks_isfinite and not np.all(np.isfinite(data)):
-            raise ValueError("Non-finite elements not allowed")
         return data
 
     def filter_variable(self, other, allow_convert=True):

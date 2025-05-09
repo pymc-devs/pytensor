@@ -145,9 +145,11 @@ def streamline(
     fgraph: FunctionGraph,
     thunks: Sequence[Callable[[], None]],
     order: Sequence[Apply],
+    *,
     post_thunk_old_storage: list["StorageCellType"] | None = None,
     no_recycling: list["StorageCellType"] | None = None,
     nice_errors: bool = True,
+    output_storage: list["StorageCellType"],
 ) -> "BasicThunkType":
     """Construct a single thunk that runs a list of thunks.
 
@@ -190,13 +192,14 @@ def streamline(
             for x in no_recycling:
                 x[0] = None
             try:
-                # strict=False because we are in a hot loop
+                # strict=None because we are in a hot loop
                 for thunk, node, old_storage in zip(
-                    thunks, order, post_thunk_old_storage, strict=False
+                    thunks, order, post_thunk_old_storage
                 ):
                     thunk()
                     for old_s in old_storage:
                         old_s[0] = None
+                return [out[0] for out in output_storage]
             except Exception:
                 raise_with_op(fgraph, node, thunk)
 
@@ -207,11 +210,12 @@ def streamline(
             for x in no_recycling:
                 x[0] = None
             try:
-                # strict=False because we are in a hot loop
-                for thunk, node in zip(thunks, order, strict=False):
+                # strict=None because we are in a hot loop
+                for thunk, node in zip(thunks, order):
                     thunk()
             except Exception:
                 raise_with_op(fgraph, node, thunk)
+            return [out[0] for out in output_storage]
 
         f = streamline_nice_errors_f
     else:
@@ -222,6 +226,7 @@ def streamline(
                 x[0] = None
             for thunk in thunks:
                 thunk()
+            return [out[0] for out in output_storage]
 
         f = streamline_fast_f
     return f
