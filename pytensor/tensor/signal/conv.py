@@ -244,15 +244,19 @@ class Convolve2D(Op):
         n, m = in1.type.shape
         k, l = in2.type.shape
 
-        if any(x is None for x in (n, m, k, l)):
-            out_shape = (None, None)
-        elif self.mode == "full":
-            out_shape = (n + k - 1, m + l - 1)
-        elif self.mode == "valid":
-            out_shape = (n - k + 1, m - l + 1)
-        else:  # mode == "same"
-            out_shape = (n, m)
+        if self.mode == "full":
+            shape_1 = None if (n is None or k is None) else n + k - 1
+            shape_2 = None if (m is None or l is None) else m + l - 1
 
+        elif self.mode == "valid":
+            shape_1 = None if (n is None or k is None) else max(n, k) - max(n, k) + 1
+            shape_2 = None if (m is None or l is None) else max(m, l) - min(m, l) + 1
+
+        else:  # mode == "same"
+            shape_1 = n
+            shape_2 = m
+
+        out_shape = (shape_1, shape_2)
         out = matrix(dtype=dtype, shape=out_shape)
         return Apply(self, [in1, in2], [out])
 
