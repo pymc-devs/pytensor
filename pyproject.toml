@@ -51,7 +51,7 @@ dependencies = [
     "scipy>=1,<2",
     "numpy>=1.17.0",
     "filelock>=3.15",
-    "libgcc<15",
+    "libgcc<15 ; platform_system == 'Windows'",
     "etuples",
     "logical-unification",
     "miniKanren",
