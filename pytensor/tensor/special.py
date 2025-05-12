@@ -294,7 +294,7 @@ class Softmax(COp):
         return shape
 
     def c_headers(self, **kwargs):
-        return ["<iostream>", "<cmath>"]
+        return ["<cmath>"]
 
     def c_support_code_apply(self, node: Apply, name: str) -> str:
         """Needed to define NPY_RAVEL_AXIS"""

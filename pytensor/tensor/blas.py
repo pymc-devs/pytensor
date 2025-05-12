@@ -472,9 +472,7 @@ class GemmRelated(COp):
         return blas_header_text() + mod_str
 
     def c_headers(self, **kwargs):
-        # std.cout doesn't require the '%' symbol to print stuff...
-        # so it works much better with python's string-substitution stuff.
-        return ["<iostream>"]
+        return []
 
     def c_libraries(self, **kwargs):
         return ldflags()
