@@ -157,7 +157,7 @@ class DynamicModule:
 
         self.support_code = []
         self.functions = []
-        self.includes = ["<Python.h>", "<iostream>", '"pytensor_mod_helper.h"']
+        self.includes = ["<Python.h>", '"pytensor_mod_helper.h"']
         self.init_blocks = []
 
     def print_methoddef(self, stream):
