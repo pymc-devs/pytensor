@@ -592,6 +592,23 @@ def test_aligned_RandomVariable(rv_op, dist_args, size):
             "gumbel_r",
             lambda *args: args,
         ),
+        (
+            ptr.t,
+            [
+                (pt.scalar(), np.array(np.e, dtype=np.float64)),
+                (
+                    pt.dvector(),
+                    np.array([1.0, 2.0], dtype=np.float64),
+                ),
+                (
+                    pt.dscalar(),
+                    np.array(np.pi, dtype=np.float64),
+                ),
+            ],
+            (2,),
+            "t",
+            lambda *args: args,
+        ),
     ],
 )
 def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_conv):
