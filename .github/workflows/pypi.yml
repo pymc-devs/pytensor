@@ -17,9 +17,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.filter.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            any_changed:
+              - '.github/workflows/pypi.yml'
+              - 'pyproject.toml'
+              - 'setup.py'
+              - 'pytensor/_version.py'
+              - 'pytensor/scan_perform.pyx'
+              - 'pytensor/scan_perform_ext.py'
+
   # The job to build precompiled pypi wheels.
   make_sdist:
     name: Make SDist
+    needs: check_changes
+    # Run if it's a release, auto-release branch, or if relevant files changed on main
+    if: |
+      github.event_name == 'release' || 
+      github.ref == 'refs/heads/auto-release' || 
+      (github.ref == 'refs/heads/main' && needs.check_changes.outputs.should_run == 'true') ||
+      (github.event_name == 'pull_request' && needs.check_changes.outputs.should_run == 'true')
     runs-on: ubuntu-latest
     permissions:
       # write id-token and attestations are required to attest build provenance
@@ -49,6 +74,13 @@ jobs:
 
   run_checks:
     name: Build & inspect our package.
+    needs: check_changes
+    # Run if it's a release, auto-release branch, or if relevant files changed on main
+    if: |
+      github.event_name == 'release' || 
+      github.ref == 'refs/heads/auto-release' || 
+      (github.ref == 'refs/heads/main' && needs.check_changes.outputs.should_run == 'true') ||
+      (github.event_name == 'pull_request' && needs.check_changes.outputs.should_run == 'true')
     # Note: the resulting builds are not actually published.
     # This is purely for additional testing and diagnostic purposes.
     runs-on: ubuntu-latest
@@ -62,6 +94,13 @@ jobs:
 
   build_wheels:
     name: Build wheels for ${{ matrix.platform }}
+    needs: check_changes
+    # Run if it's a release, auto-release branch, or if relevant files changed on main
+    if: |
+      github.event_name == 'release' || 
+      github.ref == 'refs/heads/auto-release' || 
+      (github.ref == 'refs/heads/main' && needs.check_changes.outputs.should_run == 'true') ||
+      (github.event_name == 'pull_request' && needs.check_changes.outputs.should_run == 'true')
     runs-on: ${{ matrix.platform }}
     permissions:
       # write id-token and attestations are required to attest build provenance
@@ -96,6 +135,13 @@ jobs:
 
   build_universal_wheel:
     name: Build universal wheel for Pyodide
+    needs: check_changes
+    # Run if it's a release, auto-release branch, or if relevant files changed on main
+    if: |
+      github.event_name == 'release' || 
+      github.ref == 'refs/heads/auto-release' || 
+      (github.ref == 'refs/heads/main' && needs.check_changes.outputs.should_run == 'true') ||
+      (github.event_name == 'pull_request' && needs.check_changes.outputs.should_run == 'true')
     runs-on: ubuntu-latest
     permissions:
       # write id-token and attestations are required to attest build provenance
@@ -133,7 +179,12 @@ jobs:
 
   check_dist:
     name: Check dist
-    needs: [make_sdist,build_wheels]
+    needs: [check_changes, make_sdist, build_wheels]
+    if: |
+      github.event_name == 'release' || 
+      github.ref == 'refs/heads/auto-release' || 
+      (github.ref == 'refs/heads/main' && needs.check_changes.outputs.should_run == 'true') ||
+      (github.event_name == 'pull_request' && needs.check_changes.outputs.should_run == 'true')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v4
