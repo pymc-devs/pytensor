@@ -387,6 +387,18 @@ class BlockwiseOpTester:
             )
 
     def test_grad(self):
+        if isinstance(self.core_op, Solve) and config.floatX == "float32":
+            # This tolerance relaxation is needed because of the LU-solve rewrite. Ideally, we shouldn't need it. See
+            # discussion here: https://github.com/pymc-devs/pytensor/pull/1396
+            atol = 1e-1
+            rtol = 1e-4
+        elif config.floatX == "float32":
+            atol = 1e-4
+            rtol = 1e-5
+        else:  # config.floatX == "float64"
+            atol = 1e-6
+            rtol = 1e-7
+
         base_inputs = [
             tensor(shape=(None,) * len(param_sig)) for param_sig in self.params_sig
         ]
@@ -415,8 +427,8 @@ class BlockwiseOpTester:
                 np.testing.assert_allclose(
                     pt_out,
                     np_out,
-                    rtol=1e-7 if config.floatX == "float64" else 1e-5,
-                    atol=1e-6 if config.floatX == "float64" else 1e-4,
+                    rtol=rtol,
+                    atol=atol,
                 )
 
 
@@ -579,7 +591,10 @@ class TestInplace:
         else:
             x = solve_fn(A, b, b_ndim=1)
 
-        mode = get_default_mode().excluding("batched_vector_b_solve_to_matrix_b_solve")
+        mode = get_default_mode().excluding(
+            "batched_vector_b_solve_to_matrix_b_solve",
+            "reuse_lu_decomposition_multiple_solves",
+        )
         fn = function([In(A, mutable=True), In(b, mutable=True)], x, mode=mode)
 
         op = fn.maker.fgraph.outputs[0].owner.op

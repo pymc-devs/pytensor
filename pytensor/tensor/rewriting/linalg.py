@@ -75,6 +75,13 @@ def is_matrix_transpose(x: TensorVariable) -> bool:
         if ndims < 2:
             return False
         transpose_order = (*range(ndims - 2), ndims - 1, ndims - 2)
+
+        # Allow expand_dims on the left of the transpose
+        if (diff := len(transpose_order) - len(node.op.new_order)) > 0:
+            transpose_order = (
+                *(["x"] * diff),
+                *transpose_order,
+            )
         return node.op.new_order == transpose_order
     return False
 
