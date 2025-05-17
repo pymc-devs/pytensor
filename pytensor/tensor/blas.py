@@ -460,13 +460,6 @@ class GemmRelated(COp):
         #ifndef MOD
         #define MOD %
         #endif
-        static double time_time() // a time function like time.perf_counter()
-        {
-            struct timeval tv;
-            gettimeofday(&tv, 0);
-            return (double) tv.tv_sec + (double) tv.tv_usec / 1000000.0;
-        }
-
         void compute_strides(npy_intp *shape, int N_shape, int type_size, npy_intp *res) {
             int s;
             res[N_shape - 1] = type_size;
@@ -481,7 +474,7 @@ class GemmRelated(COp):
     def c_headers(self, **kwargs):
         # std.cout doesn't require the '%' symbol to print stuff...
         # so it works much better with python's string-substitution stuff.
-        return ["<iostream>", "<time.h>", "<sys/time.h>"]
+        return ["<iostream>"]
 
     def c_libraries(self, **kwargs):
         return ldflags()
@@ -690,8 +683,6 @@ class GemmRelated(COp):
                 char N = 'N';
                 char T = 'T';
                 int Nz0 = Nz[0], Nz1 = Nz[1], Nx1 = Nx[1];
-                //std::cerr << (unit/256) MOD 16 << (unit / 16) MOD 16 << unit MOD 16<< '\\n';
-                //double t0 = time_time();
                 switch(unit)
                 {
                     case 0x000: sgemm_(&N, &N, &Nz1, &Nz0, &Nx1, &a, y, &sy_0, x, &sx_0, &b, z, &sz_0); break;
@@ -704,7 +695,6 @@ class GemmRelated(COp):
                     case 0x111: sgemm_(&N, &N, &Nz0, &Nz1, &Nx1, &a, x, &sx_1, y, &sy_1, &b, z, &sz_1); break;
                     default: PyErr_SetString(PyExc_ValueError, "some matrix has no unit stride"); %(fail)s;
                 };
-                //fprintf(stderr, "Calling sgemm %%i %%i %%i %%i took %%f\\n", unit, Nz1, Nz0, Nx1, time_time() - t0);
         """
 
     case_double = """
@@ -723,14 +713,6 @@ class GemmRelated(COp):
                 char N = 'N';
                 char T = 'T';
                 int Nz0 = Nz[0], Nz1 = Nz[1], Nx1 = Nx[1];
-                //std::cerr << (unit/256) MOD 16 << (unit / 16) MOD 16 << unit MOD 16<< '\\n';
-                //double t0 = time_time();
-                //fprintf(stderr, "unit=%%x N= %%i %%i %%i S = %%i %%i %%i %%i %%i %%i\\n", unit,
-                //Nz1, Nz0, Nx1,
-                //sy_0, sy_1,
-                //sx_0, sx_1,
-                //sz_0, sz_1
-                //);
                 switch(unit)
                 {
                     case 0x000: dgemm_(&N, &N, &Nz1, &Nz0, &Nx1, &a, y,
@@ -753,8 +735,6 @@ class GemmRelated(COp):
                                              "some matrix has no unit stride");
                              %(fail)s;
                 };
-                //fprintf(stderr, "Calling dgemm %%i %%i %%i %%i took %%f\\n",
-                //        unit, Nz1, Nz0, Nx1, time_time()- t0);
         """
 
     end_switch_typenum = """
