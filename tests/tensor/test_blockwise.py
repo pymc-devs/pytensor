@@ -328,7 +328,7 @@ class BlockwiseOpTester:
 
     @classmethod
     def setup_class(cls):
-        seed = sum(map(ord, str(cls.core_op)))
+        seed = sum(map(ord, str(cls.core_op) + cls.signature))
         cls.rng = np.random.default_rng(seed)
         cls.params_sig, cls.outputs_sig = _parse_gufunc_signature(cls.signature)
         if cls.batcheable_axes is None:
