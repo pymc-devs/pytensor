@@ -25,6 +25,7 @@ from pytensor.tensor.basic import (
     alloc,
     cast,
     concatenate,
+    expand_dims,
     get_scalar_constant_value,
     get_underlying_scalar_constant_value,
     register_infer_shape,
@@ -1576,7 +1577,15 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
         x = alloc(x, *batch_shape, *core_shape)
 
     new_idxs = [slice(None)] * batch_ndim + new_idxs
-    symbolic_idxs = x[tuple(new_idxs)].owner.inputs[1:]
+    x_view = x[tuple(new_idxs)]
+
+    # We need to introduce any implicit expand_dims on core dimension of y
+    y_core_ndim = y.type.ndim - batch_ndim
+    if (missing_y_core_ndim := x_view.type.ndim - batch_ndim - y_core_ndim) > 0:
+        missing_axes = tuple(range(batch_ndim, batch_ndim + missing_y_core_ndim))
+        y = expand_dims(y, missing_axes)
+
+    symbolic_idxs = x_view.owner.inputs[1:]
     new_out = op.core_op.make_node(x, y, *symbolic_idxs).outputs
     copy_stack_trace(node.outputs, new_out)
     return new_out
