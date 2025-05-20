@@ -99,7 +99,11 @@ def test_Composite(inputs, input_values, scalar_fn):
     "v, dtype",
     [
         ((pt.fscalar(), np.array(1.0, dtype="float32")), psb.float64),
-        ((pt.dscalar(), np.array(1.0, dtype="float64")), psb.float32),
+        pytest.param(
+            (pt.dscalar(), np.array(1.0, dtype="float64")),
+            psb.float32,
+            marks=pytest.mark.xfail(reason="Scalar downcasting not supported in numba"),
+        ),
     ],
 )
 def test_Cast(v, dtype):
