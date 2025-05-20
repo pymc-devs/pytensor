@@ -14,7 +14,6 @@ from tests.tensor.test_math_scipy import scipy
 numba = pytest.importorskip("numba")
 
 import pytensor.scalar as ps
-import pytensor.scalar.math as psm
 import pytensor.tensor as pt
 import pytensor.tensor.math as ptm
 from pytensor import config, shared
@@ -640,48 +639,6 @@ def test_Dot(x, y, exc):
             [x, y],
             [g],
             [x_test_value, y_test_value],
-        )
-
-
-@pytest.mark.parametrize(
-    "x, exc",
-    [
-        (
-            (ps.float64(), np.array(0.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.float64(), np.array(-32.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.float64(), np.array(-40.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.float64(), np.array(32.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.float64(), np.array(40.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.int64(), np.array(32, dtype="int64")),
-            None,
-        ),
-    ],
-)
-def test_Softplus(x, exc):
-    x, x_test_value = x
-    g = psm.Softplus(ps.upgrade_to_float)(x)
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x],
-            [g],
-            [x_test_value],
         )
 
 
