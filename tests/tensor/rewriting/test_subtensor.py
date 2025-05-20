@@ -1788,10 +1788,24 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
 
+@pytest.mark.parametrize("core_y_implicitly_batched", (False, True))
 @pytest.mark.parametrize("set_instead_of_inc", (True, False))
-def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
+def test_local_blockwise_advanced_inc_subtensor(
+    set_instead_of_inc, core_y_implicitly_batched
+):
+    rng = np.random.default_rng([1764, set_instead_of_inc, core_y_implicitly_batched])
+
+    def np_inplace_f(x, idx, y):
+        if core_y_implicitly_batched:
+            y = y[..., None]
+        if set_instead_of_inc:
+            x[idx] = y
+        else:
+            x[idx] += y
+
+    core_y_shape = () if core_y_implicitly_batched else (3,)
     core_x = tensor("x", shape=(6,))
-    core_y = tensor("y", shape=(3,))
+    core_y = tensor("y", shape=core_y_shape, dtype=int)
     core_idxs = [0, 2, 4]
     if set_instead_of_inc:
         core_graph = set_subtensor(core_x[core_idxs], core_y)
@@ -1800,7 +1814,7 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
 
     # Only x is batched
     x = tensor("x", shape=(5, 2, 6))
-    y = tensor("y", shape=(3,))
+    y = tensor("y", shape=core_y_shape, dtype=int)
     out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
     assert isinstance(out.owner.op, Blockwise)
 
@@ -1810,17 +1824,14 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
     )
 
     test_x = np.ones(x.type.shape, dtype=x.type.dtype)
-    test_y = np.array([5, 6, 7]).astype(dtype=core_y.type.dtype)
+    test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
     expected_out = test_x.copy()
-    if set_instead_of_inc:
-        expected_out[:, :, core_idxs] = test_y
-    else:
-        expected_out[:, :, core_idxs] += test_y
+    np_inplace_f(expected_out, np.s_[:, :, core_idxs], test_y)
     np.testing.assert_allclose(fn(test_x, test_y), expected_out)
 
     # Only y is batched
     x = tensor("y", shape=(6,))
-    y = tensor("y", shape=(2, 3))
+    y = tensor("y", shape=(2, *core_y_shape), dtype=int)
     out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
     assert isinstance(out.owner.op, Blockwise)
 
@@ -1830,17 +1841,14 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
     )
 
     test_x = np.ones(x.type.shape, dtype=x.type.dtype)
-    test_y = np.array([[3, 3, 3], [5, 6, 7]]).astype(dtype=core_y.type.dtype)
+    test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
     expected_out = np.ones((2, *x.type.shape))
-    if set_instead_of_inc:
-        expected_out[:, core_idxs] = test_y
-    else:
-        expected_out[:, core_idxs] += test_y
+    np_inplace_f(expected_out, np.s_[:, core_idxs], test_y)
     np.testing.assert_allclose(fn(test_x, test_y), expected_out)
 
     # Both x and y are batched, and do not need to be broadcasted
     x = tensor("y", shape=(2, 6))
-    y = tensor("y", shape=(2, 3))
+    y = tensor("y", shape=(2, *core_y_shape), dtype=int)
     out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
     assert isinstance(out.owner.op, Blockwise)
 
@@ -1850,17 +1858,14 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
     )
 
     test_x = np.ones(x.type.shape, dtype=x.type.dtype)
-    test_y = np.array([[5, 6, 7], [3, 3, 3]]).astype(dtype=core_y.type.dtype)
+    test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
     expected_out = test_x.copy()
-    if set_instead_of_inc:
-        expected_out[:, core_idxs] = test_y
-    else:
-        expected_out[:, core_idxs] += test_y
+    np_inplace_f(expected_out, np.s_[:, core_idxs], test_y)
     np.testing.assert_allclose(fn(test_x, test_y), expected_out)
 
     # Both x and y are batched, but must be broadcasted
     x = tensor("y", shape=(5, 1, 6))
-    y = tensor("y", shape=(1, 2, 3))
+    y = tensor("y", shape=(1, 2, *core_y_shape), dtype=int)
     out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
     assert isinstance(out.owner.op, Blockwise)
 
@@ -1870,16 +1875,13 @@ def test_local_blockwise_advanced_inc_subtensor(set_instead_of_inc):
     )
 
     test_x = np.ones(x.type.shape, dtype=x.type.dtype)
-    test_y = np.array([[[5, 6, 7], [3, 3, 3]]]).astype(dtype=core_y.type.dtype)
+    test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
     final_shape = (
-        *np.broadcast_shapes(x.type.shape[:-1], y.type.shape[:-1]),
+        *np.broadcast_shapes(x.type.shape[:2], y.type.shape[:2]),
         x.type.shape[-1],
     )
     expected_out = np.broadcast_to(test_x, final_shape).copy()
-    if set_instead_of_inc:
-        expected_out[:, :, core_idxs] = test_y
-    else:
-        expected_out[:, :, core_idxs] += test_y
+    np_inplace_f(expected_out, np.s_[:, :, core_idxs], test_y)
     np.testing.assert_allclose(fn(test_x, test_y), expected_out)
 
 
