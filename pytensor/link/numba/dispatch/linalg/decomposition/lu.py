@@ -30,7 +30,7 @@ def _lu_factor_to_lu(a, dtype, overwrite_a):
     # Fortran is 1 indexed, so we need to subtract 1 from the IPIV array
     IPIV = IPIV - 1
     p_inv = _pivot_to_permutation(IPIV, dtype=dtype)
-    perm = np.argsort(p_inv)
+    perm = np.argsort(p_inv).astype("int32")
 
     return perm, L, U
 
