@@ -3,12 +3,13 @@ import pytest
 
 import pytensor.scalar as ps
 import pytensor.scalar.basic as psb
+import pytensor.scalar.math as psm
 import pytensor.tensor as pt
-from pytensor import config
+from pytensor import config, function
 from pytensor.scalar.basic import Composite
 from pytensor.tensor import tensor
 from pytensor.tensor.elemwise import Elemwise
-from tests.link.numba.test_basic import compare_numba_and_py
+from tests.link.numba.test_basic import compare_numba_and_py, numba_mode, py_mode
 
 
 rng = np.random.default_rng(42849)
@@ -149,3 +150,37 @@ def test_isnan(composite):
         [out],
         [np.array([1, 0], dtype="float64")],
     )
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pytest.param(
+            "float32",
+            marks=pytest.mark.xfail(reason="Scalar downcasting not supported in numba"),
+        ),
+        "float64",
+        pytest.param(
+            "int16",
+            marks=pytest.mark.xfail(reason="Scalar downcasting not supported in numba"),
+        ),
+        "int64",
+        "uint32",
+    ],
+)
+def test_Softplus(dtype):
+    x = ps.get_scalar_type(dtype)("x")
+    g = psm.softplus(x)
+
+    py_fn = function([x], g, mode=py_mode)
+    numba_fn = function([x], g, mode=numba_mode)
+    for value in (-40, -32, 0, 32, 40):
+        if value < 0 and dtype.startswith("u"):
+            continue
+        test_x = np.dtype(dtype).type(value)
+        np.testing.assert_allclose(
+            py_fn(test_x),
+            numba_fn(test_x),
+            strict=True,
+            err_msg=f"Failed for value {value}",
+        )

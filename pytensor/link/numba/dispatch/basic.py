@@ -31,7 +31,6 @@ from pytensor.link.utils import (
     fgraph_to_python,
 )
 from pytensor.scalar.basic import ScalarType
-from pytensor.scalar.math import Softplus
 from pytensor.sparse import SparseTensorType
 from pytensor.tensor.basic import Nonzero
 from pytensor.tensor.blas import BatchedDot
@@ -607,25 +606,6 @@ def numba_funcify_Dot(op, node, **kwargs):
     return dot
 
 
-@numba_funcify.register(Softplus)
-def numba_funcify_Softplus(op, node, **kwargs):
-    x_dtype = np.dtype(node.inputs[0].dtype)
-
-    @numba_njit
-    def softplus(x):
-        if x < -37.0:
-            value = np.exp(x)
-        elif x < 18.0:
-            value = np.log1p(np.exp(x))
-        elif x < 33.3:
-            value = x + np.exp(-x)
-        else:
-            value = x
-        return direct_cast(value, x_dtype)
-
-    return softplus
-
-
 @numba_funcify.register(Solve)
 def numba_funcify_Solve(op, node, **kwargs):
     assume_a = op.assume_a
@@ -687,11 +667,6 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
         return z0
 
     return batched_dot
-
-
-# NOTE: The remaining `pytensor.tensor.blas` `Op`s appear unnecessary, because
-# they're only used to optimize basic `Dot` nodes, and those GEMV and GEMM
-# optimizations are apparently already performed by Numba
 
 
 @numba_funcify.register(IfElse)
