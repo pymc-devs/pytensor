@@ -466,7 +466,7 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
             axis = axis.item()
 
             Y = np.swapaxes(X, axis, 0)
-            result = np.empty_like(Y)
+            result = np.empty_like(Y, dtype="int64")
 
             indices = list(np.ndindex(Y.shape[1:]))
 
