@@ -11,68 +11,18 @@ from tests.link.numba.test_basic import compare_numba_and_py
 rng = np.random.default_rng(42849)
 
 
-@pytest.mark.parametrize(
-    "x, exc",
-    [
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            None,
-        ),
-        (
-            (
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
-            ),
-            None,
-        ),
-    ],
-)
-def test_Det(x, exc):
-    x, test_x = x
-    g = nlinalg.Det()(x)
+@pytest.mark.parametrize("dtype", ("float64", "int64"))
+@pytest.mark.parametrize("op", (nlinalg.Det(), nlinalg.SLogDet()))
+def test_Det_SLogDet(op, dtype):
+    x = pt.matrix(dtype=dtype)
 
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x],
-            g,
-            [test_x],
-        )
+    rng = np.random.default_rng([50, sum(map(ord, dtype))])
+    x_ = rng.random(size=(3, 3)).astype(dtype)
+    test_x = x_.T.dot(x_)
 
+    g = op(x)
 
-@pytest.mark.parametrize(
-    "x, exc",
-    [
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            None,
-        ),
-        (
-            (
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(rng.poisson(size=(3, 3)).astype("int64")),
-            ),
-            None,
-        ),
-    ],
-)
-def test_SLogDet(x, exc):
-    x, test_x = x
-    g = nlinalg.SLogDet()(x)
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x],
-            g,
-            [test_x],
-        )
+    compare_numba_and_py([x], g, [test_x])
 
 
 # We were seeing some weird results in CI where the following two almost
