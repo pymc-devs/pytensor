@@ -12,7 +12,7 @@ class XOp(Op):
 
     def perform(self, node, inputs, outputs):
         raise NotImplementedError(
-            "xtensor operations must be rewritten as tensor operations"
+            f"xtensor operation {self} must be lowered to equivalent tensor operations"
         )
 
 

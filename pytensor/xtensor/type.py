@@ -1,3 +1,6 @@
+import warnings
+
+
 try:
     import xarray as xr
 
@@ -6,13 +9,13 @@ except ModuleNotFoundError:
     XARRAY_AVAILABLE = False
 
 from collections.abc import Sequence
-from typing import TypeVar
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 
 from pytensor import _as_symbolic, config
 from pytensor.graph import Apply, Constant
-from pytensor.graph.basic import Variable, OptionalApplyType
+from pytensor.graph.basic import OptionalApplyType, Variable
 from pytensor.graph.type import HasDataType, HasShape, Type
 from pytensor.tensor.utils import hash_from_ndarray
 from pytensor.utils import hash_from_code
@@ -141,17 +144,69 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         if isinstance(idx, dict):
             return self.isel(idx)
 
+        # Check for ellipsis not in the last position (last one is useless anyway)
+        if any(idx_item is Ellipsis for idx_item in idx):
+            if idx.count(Ellipsis) > 1:
+                raise IndexError("an index can only have a single ellipsis ('...')")
+            # Convert intermediate Ellipsis to slice(None)
+            ellipsis_loc = idx.index(Ellipsis)
+            n_implied_none_slices = self.type.ndim - (len(idx) - 1)
+            idx = (
+                *idx[:ellipsis_loc],
+                *((slice(None),) * n_implied_none_slices),
+                *idx[ellipsis_loc + 1 :],
+            )
+
         return index(self, *idx)
 
+    def sel(self, *args, **kwargs):
+        raise NotImplementedError(
+            "sel not implemented for XTensorVariable, use isel instead"
+        )
 
-class XTensorVariable(Variable):
-    pass
+    def isel(
+        self,
+        indexers: dict[str, Any] | None = None,
+        drop: bool = False,  # Unused by PyTensor
+        missing_dims: Literal["raise", "warn", "ignore"] = "raise",
+        **indexers_kwargs,
+    ):
+        from pytensor.xtensor.indexing import index
 
-    # def __str__(self):
-    #     return f"{self.__class__.__name__}{{{self.format},{self.dtype}}}"
+        if indexers_kwargs:
+            if indexers is not None:
+                raise ValueError(
+                    "Cannot pass both indexers and indexers_kwargs to isel"
+                )
+            indexers = indexers_kwargs
 
-    # def __repr__(self):
-    #     return str(self)
+        if missing_dims not in {"raise", "warn", "ignore"}:
+            raise ValueError(
+                f"Unrecognized options {missing_dims} for missing_dims argument"
+            )
+
+        # Sort indices and pass them to index
+        dims = self.type.dims
+        indices = [slice(None)] * self.type.ndim
+        for key, idx in indexers.items():
+            if idx is Ellipsis:
+                # Xarray raises a less informative error, suggesting indices must be integer
+                # But slices are also fine
+                raise TypeError("Ellipsis (...) is an invalid labeled index")
+            try:
+                indices[dims.index(key)] = idx
+            except IndexError:
+                if missing_dims == "raise":
+                    raise ValueError(
+                        f"Dimension {key} does not exist. Expected one of {dims}"
+                    )
+                elif missing_dims == "warn":
+                    warnings.warn(
+                        UserWarning,
+                        f"Dimension {key} does not exist. Expected one of {dims}",
+                    )
+
+        return index(self, *indices)
 
 
 class XTensorConstantSignature(tuple):
