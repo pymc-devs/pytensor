@@ -7,7 +7,6 @@ from pytensor.xtensor import (
 )
 from pytensor.xtensor.shape import concat
 from pytensor.xtensor.type import (
-    XTensorType,
     as_xtensor,
     xtensor,
     xtensor_constant,
