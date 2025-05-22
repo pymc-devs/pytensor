@@ -171,6 +171,9 @@ def test_unstack_simple():
     x_np = np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape)
     x_test = DataArray(x_np, dims=x.type.dims)
     res = fn(x_test)
-    np.testing.assert_allclose(
-        res.values, x_np.reshape(2, 3, 5, 7).transpose(0, 3, 1, 2)
+    expected = (
+        DataArray(x_np.reshape(2, 3, 5, 7), dims=("a", "b", "c", "d"))
+        .stack(bc=("b", "c"))
+        .unstack("bc")
     )
+    xr_assert_allclose(res, expected)
