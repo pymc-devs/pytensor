@@ -4539,7 +4539,7 @@ def ix_(*args):
         new = as_tensor(new)
         if new.ndim != 1:
             raise ValueError("Cross index must be 1 dimensional")
-        new = new.reshape((1,) * k + (new.size,) + (1,) * (nd - k - 1))
+        new = new.dimshuffle(*(("x",) * k), 0, *(("x",) * (nd - k - 1)))
         out.append(new)
     return tuple(out)
 
