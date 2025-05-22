@@ -8,9 +8,10 @@ import re
 from itertools import chain, combinations
 
 import numpy as np
+from xarray import DataArray
 from xarray import concat as xr_concat
 
-from pytensor.xtensor.shape import concat, stack, transpose
+from pytensor.xtensor.shape import concat, stack, transpose, unstack
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     xr_arange_like,
@@ -152,6 +153,49 @@ def test_multiple_stacks():
     res = fn(x_test)
     expected_res = x_test.stack(new_dim1=("a", "b"), new_dim2=("c", "d"))
     xr_assert_allclose(res[0], expected_res)
+
+
+def test_unstack_constant_size():
+    x = xtensor("x", dims=("a", "bc", "d"), shape=(2, 3 * 5, 7))
+    y = unstack(x, bc=dict(b=3, c=5))
+    assert y.type.dims == ("a", "d", "b", "c")
+    assert y.type.shape == (2, 7, 3, 5)
+
+    fn = xr_function([x], y)
+
+    x_test = xr_arange_like(x)
+    x_np = x_test.values
+    res = fn(x_test)
+    expected = (
+        DataArray(x_np.reshape(2, 3, 5, 7), dims=("a", "b", "c", "d"))
+        .stack(bc=("b", "c"))
+        .unstack("bc")
+    )
+    xr_assert_allclose(res, expected)
+
+
+def test_unstack_symbolic_size():
+    x = xtensor(dims=("a", "b", "c"))
+    y = stack(x, bc=("b", "c"))
+    y = y / y.sum("bc")
+    z = unstack(y, bc={"b": x.sizes["b"], "c": x.sizes["c"]})
+    x_test = xr_arange_like(xtensor(dims=x.dims, shape=(2, 3, 5)))
+    fn = xr_function([x], z)
+    res = fn(x_test)
+    expected_res = x_test / x_test.sum(["b", "c"])
+    xr_assert_allclose(res, expected_res)
+
+
+def test_stack_unstack():
+    x = xtensor("x", dims=("a", "b", "c", "d"), shape=(2, 3, 5, 7))
+    stack_x = stack(x, bd=("b", "d"))
+    unstack_x = unstack(stack_x, bd=dict(b=3, d=7))
+
+    x_test = xr_arange_like(x)
+    fn = xr_function([x], unstack_x)
+    res = fn(x_test)
+    expected_res = x_test.transpose("a", "c", "b", "d")
+    xr_assert_allclose(res, expected_res)
 
 
 @pytest.mark.parametrize("dim", ("a", "b", "new"))
