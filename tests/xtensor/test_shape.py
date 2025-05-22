@@ -11,7 +11,7 @@ from xarray import DataArray
 
 from pytensor.xtensor.shape import stack, unstack
 from pytensor.xtensor.type import xtensor
-from tests.xtensor.util import xr_assert_allclose, xr_function
+from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
 
 
 def powerset(iterable, min_group_size=0):
@@ -41,10 +41,7 @@ def test_transpose():
     outs = [transpose(x, *perm) for perm in permutations]
 
     fn = xr_function([x], outs)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     res = fn(x_test)
     expected_res = [x_test.transpose(*perm) for perm in permutations]
     for outs_i, res_i, expected_res_i in zip(outs, res, expected_res):
@@ -60,10 +57,7 @@ def test_stack():
     ]
 
     fn = xr_function([x], outs)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     res = fn(x_test)
 
     expected_res = [
@@ -80,10 +74,7 @@ def test_stack_single_dim():
     assert out.type.dims == ("b", "c", "d")
 
     fn = xr_function([x], out)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     fn.fn.dprint(print_type=True)
     res = fn(x_test)
     expected_res = x_test.stack(d=["a"])
@@ -168,8 +159,8 @@ def test_unstack_simple():
 
     fn = xr_function([x], y)
 
-    x_np = np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape)
-    x_test = DataArray(x_np, dims=x.type.dims)
+    x_test = xr_arange_like(x)
+    x_np = x_test.values
     res = fn(x_test)
     expected = (
         DataArray(x_np.reshape(2, 3, 5, 7), dims=("a", "b", "c", "d"))
@@ -177,3 +168,15 @@ def test_unstack_simple():
         .unstack("bc")
     )
     xr_assert_allclose(res, expected)
+
+
+def test_stack_unstack():
+    x = xtensor("x", dims=("a", "b", "c", "d"), shape=(2, 3, 5, 7))
+    stack_x = stack(x, bd=("b", "d"))
+    unstack_x = unstack(stack_x, bd=dict(b=3, d=7))
+
+    x_test = xr_arange_like(x)
+    fn = xr_function([x], unstack_x)
+    res = fn(x_test)
+    expected_res = x_test.transpose("a", "c", "b", "d")
+    xr_assert_allclose(res, expected_res)
