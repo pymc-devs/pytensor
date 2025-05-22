@@ -1,5 +1,7 @@
 import warnings
 
+from pytensor.tensor import TensorVariable, mul
+
 
 try:
     import xarray as xr
@@ -133,10 +135,99 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             "Call `.astype(complex)` for the symbolic equivalent."
         )
 
+    # DataArray-like attributes
+    # https://docs.xarray.dev/en/latest/api.html#id1
+    @property
+    def values(self) -> TensorVariable:
+        from pytensor.xtensor.basic import tensor_from_xtensor
+
+        return tensor_from_xtensor(self)
+
+    data = values
+
+    @property
+    def coords(self):
+        raise NotImplementedError("coords not implemented for XTensorVariable")
+
+    @property
+    def dims(self) -> tuple[str]:
+        return self.type.dims
+
+    @property
+    def sizes(self) -> dict[str, TensorVariable]:
+        return dict(zip(self.dims, self.shape))
+
+    @property
+    def as_numpy(self):
+        # No-op, since the underlying data is always a numpy array
+        return self
+
+    # ndarray attributes
+    # https://docs.xarray.dev/en/latest/api.html#ndarray-attributes
+    @property
+    def ndim(self) -> int:
+        return self.type.ndim
+
+    @property
+    def shape(self) -> tuple[TensorVariable]:
+        from pytensor.xtensor.basic import tensor_from_xtensor
+
+        return tuple(tensor_from_xtensor(self).shape)
+
+    @property
+    def size(self):
+        return mul(*self.shape)
+
+    @property
+    def dtype(self):
+        return self.type.dtype
+
+    # DataArray contents
+    # https://docs.xarray.dev/en/latest/api.html#dataarray-contents
+    def rename(self, new_name_or_name_dict, **names):
+        from pytensor.xtensor.basic import rename
+
+        if isinstance(new_name_or_name_dict, str):
+            # TODO: Should we make a symbolic copy?
+            self.name = new_name_or_name_dict
+            name_dict = None
+        else:
+            name_dict = new_name_or_name_dict
+        return rename(name_dict, **names)
+
+    # def swap_dims(self, *args, **kwargs):
+    #     ...
+    #
+    # def expand_dims(self, *args, **kwargs):
+    #     ...
+    #
+    # def squeeze(self):
+    #     ...
+
+    def copy(self):
+        from pytensor.xtensor.math import identity
+
+        return identity(self)
+
+    def astype(self, dtype):
+        from pytensor.xtensor.math import cast
+
+        return cast(self, dtype)
+
+    def item(self):
+        raise NotImplementedError("item not implemented for XTensorVariable")
+
+    # Indexing
+    # https://docs.xarray.dev/en/latest/api.html#id2
     def __setitem__(self, key, value):
-        raise TypeError(
-            "XTensorVariable does not support item assignment. Use the output of `x[idx].set` or `x[idx].inc` instead."
-        )
+        raise TypeError("XTensorVariable does not support item assignment.")
+
+    @property
+    def loc(self):
+        raise NotImplementedError("loc not implemented for XTensorVariable")
+
+    def sel(self, *args, **kwargs):
+        raise NotImplementedError("sel not implemented for XTensorVariable")
 
     def __getitem__(self, idx):
         from pytensor.xtensor.indexing import index
@@ -158,11 +249,6 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             )
 
         return index(self, *idx)
-
-    def sel(self, *args, **kwargs):
-        raise NotImplementedError(
-            "sel not implemented for XTensorVariable, use isel instead"
-        )
 
     def isel(
         self,
@@ -207,6 +293,81 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                     )
 
         return index(self, *indices)
+
+    def _head_tail_or_thin(
+        self,
+        indexers: dict[str, Any] | int | None,
+        indexers_kwargs: dict[str, Any],
+        *,
+        kind: Literal["head", "tail", "thin"],
+    ):
+        if indexers_kwargs:
+            if indexers is not None:
+                raise ValueError(
+                    "Cannot pass both indexers and indexers_kwargs to head"
+                )
+            indexers = indexers_kwargs
+
+        if indexers is None:
+            if kind == "thin":
+                raise TypeError(
+                    "thin() indexers must be either dict-like or a single integer"
+                )
+            else:
+                # Default to 5 for head and tail
+                indexers = {dim: 5 for dim in self.type.dims}
+
+        elif not isinstance(indexers, dict):
+            indexers = {dim: indexers for dim in self.type.dims}
+
+        if kind == "head":
+            indices = {dim: slice(None, value) for dim, value in indexers.items()}
+        elif kind == "tail":
+            sizes = self.sizes
+            # Can't use slice(-value, None), in case value is zero
+            indices = {
+                dim: slice(sizes[dim] - value, None) for dim, value in indexers.items()
+            }
+        elif kind == "thin":
+            indices = {dim: slice(None, None, value) for dim, value in indexers.items()}
+        return self.isel(indices)
+
+    def head(self, indexers: dict[str, Any] | int | None = None, **indexers_kwargs):
+        return self._head_tail_or_thin(indexers, indexers_kwargs, kind="head")
+
+    def tail(self, indexers: dict[str, Any] | int | None = None, **indexers_kwargs):
+        return self._head_tail_or_thin(indexers, indexers_kwargs, kind="tail")
+
+    def thin(self, indexers: dict[str, Any] | int | None = None, **indexers_kwargs):
+        return self._head_tail_or_thin(indexers, indexers_kwargs, kind="thin")
+
+    # ndarray methods
+    # https://docs.xarray.dev/en/latest/api.html#id7
+    def clip(self, min, max):
+        from pytensor.xtensor.math import clip
+
+        return clip(self, min, max)
+
+    def conj(self):
+        from pytensor.xtensor.math import conj
+
+        return conj(self)
+
+    @property
+    def imag(self):
+        from pytensor.xtensor.math import imag
+
+        return imag(self)
+
+    @property
+    def real(self):
+        from pytensor.xtensor.math import real
+
+        return real(self)
+
+    # @property
+    # def T(self):
+    #     ...
 
 
 class XTensorConstantSignature(tuple):
