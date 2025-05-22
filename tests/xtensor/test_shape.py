@@ -158,3 +158,19 @@ def test_unstack():
         # the shapes are right but the "other" one has the elements in different order
         # I think it is an issue with the test not the function but not sure
         # xr_assert_allclose(res_i, expected_res_i)
+
+
+def test_unstack_simple():
+    x = xtensor("x", dims=("a", "bc", "d"), shape=(2, 3 * 5, 7))
+    y = unstack(x, bc=dict(b=3, c=5))
+    assert y.type.dims == ("a", "d", "b", "c")
+    assert y.type.shape == (2, 7, 3, 5)
+
+    fn = xr_function([x], y)
+
+    x_np = np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape)
+    x_test = DataArray(x_np, dims=x.type.dims)
+    res = fn(x_test)
+    np.testing.assert_allclose(
+        res.values, x_np.reshape(2, 3, 5, 7).transpose(0, 3, 1, 2)
+    )
