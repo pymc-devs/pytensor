@@ -446,6 +446,9 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def stack(self, dim, **dims):
         return px.shape.stack(self, dim, **dims)
 
+    def unstack(self, dim, **dims):
+        return px.shape.unstack(self, dim, **dims)
+
 
 class XTensorConstantSignature(TensorConstantSignature):
     pass
