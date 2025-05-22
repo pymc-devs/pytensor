@@ -1,3 +1,4 @@
+import numpy as np
 from xarray import DataArray
 from xarray.testing import assert_allclose
 
@@ -35,3 +36,10 @@ def xr_assert_allclose(x, y, *args, **kwargs):
     x = x.drop_vars(x.coords)
     y = y.drop_vars(y.coords)
     assert_allclose(x, y, *args, **kwargs)
+
+
+def xr_arange_like(x):
+    return DataArray(
+        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
+        dims=x.type.dims,
+    )
