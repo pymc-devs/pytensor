@@ -336,11 +336,12 @@ cger_no_inplace = CGer(False)
 # ##### ####### #######
 
 
-def gemv_c_code(y, A, x, z, alpha, beta, fail, force_init_beta=False, params=None):
+def gemv_c_code(y, A, x, z, alpha, beta, fail, must_initialize_y=False, params=None):
     """
     z <- beta * y + alpha * dot(A, x)
 
     where A is a matrix, y and x are vectors (ergo z is vector)
+    z = y if inplace else y.copy()
     """
     code = """
 
@@ -400,16 +401,10 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, force_init_beta=False, params=Non
         }
         if (dbeta != 0)
         {
+            // If dbeta is zero, we avoid doing the copy
             if (PyArray_CopyInto(%(z)s, %(y)s) != 0) {
                 %(fail)s
             }
-        }
-        else if (%(force_init_beta)d)
-        {
-            PyObject *zero = PyFloat_FromDouble(0.);
-            if (zero == NULL) %(fail)s;
-            if (PyArray_FillWithScalar(%(z)s, zero) != 0) %(fail)s;
-            Py_DECREF(zero);
         }
     }
     else
@@ -420,6 +415,20 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, force_init_beta=False, params=Non
             %(z)s = %(y)s;
             Py_INCREF(%(z)s);
         }
+    }
+
+    if (%(must_initialize_y)d && dbeta == 0)
+    {
+        // Most BLAS implementations of GEMV ignore y=nan when beta=0
+        // PyTensor considers that the correct behavior,
+        // and even exploits it to avoid copying or initializing outputs.
+        // By deciding to exploit this, however, it becomes our responsibility
+        // to ensure the behavior even in the rare cases BLAS deviates,
+        // or users will get errors, even for graphs that had no nan to begin with.
+        PyObject *zero = PyFloat_FromDouble(0.);
+        if (zero == NULL) %(fail)s;
+        if (PyArray_FillWithScalar(%(z)s, zero) != 0) %(fail)s;
+        Py_DECREF(zero);
     }
 
     {
@@ -491,13 +500,13 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, force_init_beta=False, params=Non
 
                 if (is_float)
                 {
-                    z_data[0] *= fbeta;
+                    z_data[0] = dbeta != 0 ? dbeta * z_data[0] : 0.f;
                     z_data[0] += alpha * sdot_(&NA1,  (float*)(A_data), &SA1,
                                               (float*)x_data, &Sx);
                 }
                 else
                 {
-                    z_data[0] *= dbeta;
+                    z_data[0] = dbeta != 0 ? dbeta * z_data[0] : 0.;
                     z_data[0] += alpha * ddot_(&NA1,  (double*)(A_data), &SA1,
                                               (double*)x_data, &Sx);
                 }
@@ -583,21 +592,21 @@ class CGemv(BaseBLAS, Gemv):
             alpha,
             beta,
             fail=sub["fail"],
-            force_init_beta=check_force_gemv_init(),
+            must_initialize_y=must_initialize_y_gemv(),
             params=sub["params"],
         )
         return code
 
     def c_code_cache_version(self):
-        return (16, blas_header_version(), check_force_gemv_init())
+        return (17, blas_header_version(), must_initialize_y_gemv())
 
 
 cgemv_inplace = CGemv(inplace=True)
 cgemv_no_inplace = CGemv(inplace=False)
 
 
-def check_force_gemv_init():
-    if check_force_gemv_init._force_init_beta is None:
+def must_initialize_y_gemv():
+    if must_initialize_y_gemv._force_init_beta is None:
         from pytensor.link.c.cmodule import GCC_compiler
 
         """
@@ -643,13 +652,13 @@ int main() {
         )
         if res:
             if res[0]:
-                check_force_gemv_init._force_init_beta = res[1]
+                must_initialize_y_gemv._force_init_beta = res[1]
             else:
-                check_force_gemv_init._force_init_beta = False
+                must_initialize_y_gemv._force_init_beta = False
         else:
-            check_force_gemv_init._force_init_beta = False
+            must_initialize_y_gemv._force_init_beta = False
 
-    return check_force_gemv_init._force_init_beta
+    return must_initialize_y_gemv._force_init_beta
 
 
-check_force_gemv_init._force_init_beta = None
+must_initialize_y_gemv._force_init_beta = None

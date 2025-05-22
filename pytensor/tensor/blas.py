@@ -113,23 +113,22 @@ from pytensor.tensor.type import DenseTensorType, tensor
 _logger = logging.getLogger("pytensor.tensor.blas")
 
 
-# If check_init_y() == True we need to initialize y when beta == 0.
-def check_init_y():
-    # TODO: What is going on here?
+def must_initialize_y_gemv():
+    # Check whether Scipy GEMV could output nan if y in not initialized
     from scipy.linalg.blas import get_blas_funcs
 
-    if check_init_y._result is None:
-        y = float("NaN") * np.ones((2,))
+    if must_initialize_y_gemv._result is None:
+        y = np.full((2,), np.nan)
         x = np.ones((2,))
         A = np.ones((2, 2))
         gemv = get_blas_funcs("gemv", dtype=y.dtype)
         gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
-        check_init_y._result = np.isnan(y).any()
+        must_initialize_y_gemv._result = np.isnan(y).any()
 
-    return check_init_y._result
+    return must_initialize_y_gemv._result
 
 
-check_init_y._result = None  # type: ignore
+must_initialize_y_gemv._result = None  # type: ignore
 
 
 class Gemv(Op):
@@ -197,7 +196,13 @@ class Gemv(Op):
                     f"(beta * y + alpha * dot(A, x)). y: {y.shape}, A: {A.shape}, x: {x.shape}"
                 )
 
-            if beta == 0 and check_init_y():
+            if beta == 0 and must_initialize_y_gemv():
+                # Most BLAS implementations of GEMV ignore y=nan when beta=0
+                # PyTensor considers that the correct behavior,
+                # and even exploits it to avoid copying or initializing outputs.
+                # By deciding to exploit this, however, it becomes our responsibility
+                # to ensure the behavior even in the rare cases BLAS deviates,
+                # or users will get errors, even for graphs that had no nan to begin with.
                 y.fill(0)
 
             # Here I suppose that A is in c order. If we don't make it
