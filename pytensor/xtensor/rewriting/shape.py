@@ -1,8 +1,8 @@
 from pytensor.graph import node_rewriter
-from pytensor.tensor import broadcast_to, join, moveaxis
+from pytensor.tensor import broadcast_to, join, moveaxis, specify_shape
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, Stack, Transpose
+from pytensor.xtensor.shape import Concat, Stack, Transpose, UnStack
 
 
 @register_xcanonicalize
@@ -24,6 +24,25 @@ def lower_stack(fgraph, node):
     else:
         final_shape = (*tuple(x_tensor_transposed.shape)[:batch_ndim], -1)
         final_tensor = x_tensor_transposed.reshape(final_shape)
+
+    new_out = xtensor_from_tensor(final_tensor, dims=node.outputs[0].type.dims)
+    return [new_out]
+
+
+@register_xcanonicalize
+@node_rewriter(tracks=[UnStack])
+def lower_unstack(fgraph, node):
+    x = node.inputs[0]
+    unstacked_lengths = node.inputs[1:]
+    axis_to_unstack = x.type.dims.index(node.op.old_dim_name)
+
+    x_tensor = tensor_from_xtensor(x)
+    x_tensor_transposed = moveaxis(x_tensor, source=[axis_to_unstack], destination=[-1])
+    final_tensor = x_tensor_transposed.reshape(
+        (*x_tensor_transposed.shape[:-1], *unstacked_lengths)
+    )
+    # Reintroduce any static shape information that was lost during the reshape
+    final_tensor = specify_shape(final_tensor, node.outputs[0].type.shape)
 
     new_out = xtensor_from_tensor(final_tensor, dims=node.outputs[0].type.dims)
     return [new_out]

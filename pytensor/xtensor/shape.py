@@ -4,7 +4,9 @@ from typing import Literal
 
 from pytensor import Variable
 from pytensor.graph import Apply
-from pytensor.scalar import upcast
+from pytensor.scalar import discrete_dtypes, upcast
+from pytensor.tensor import as_tensor, get_scalar_constant_value
+from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
 
@@ -72,6 +74,89 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
                 f"Stacking dims must be a sequence of strings, got a single string: {stacked_dims}"
             )
         y = Stack(new_dim_name, tuple(stacked_dims))(y)
+    return y
+
+
+class UnStack(XOp):
+    __props__ = ("old_dim_name", "unstacked_dims")
+
+    def __init__(
+        self,
+        old_dim_name: str,
+        unstacked_dims: tuple[str, ...],
+    ):
+        super().__init__()
+        if old_dim_name in unstacked_dims:
+            raise ValueError(
+                f"Dim to be unstacked {old_dim_name} can't be in {unstacked_dims}"
+            )
+        if not unstacked_dims:
+            raise ValueError("Dims to unstack into can't be empty.")
+        if len(unstacked_dims) == 1:
+            raise ValueError("Only one dimension to unstack into, use rename instead")
+        self.old_dim_name = old_dim_name
+        self.unstacked_dims = unstacked_dims
+
+    def make_node(self, x, *unstacked_length):
+        x = as_xtensor(x)
+        if self.old_dim_name not in x.type.dims:
+            raise ValueError(
+                f"Dim to unstack {self.old_dim_name} must be in {x.type.dims}"
+            )
+        if not set(self.unstacked_dims).isdisjoint(x.type.dims):
+            raise ValueError(
+                f"Dims to unstack into {self.unstacked_dims} must not be in {x.type.dims}"
+            )
+
+        if len(unstacked_length) != len(self.unstacked_dims):
+            raise ValueError(
+                f"Number of unstacked lengths {len(unstacked_length)} must match number of unstacked dims {len(self.unstacked_dims)}"
+            )
+        unstacked_lengths = [as_tensor(length, ndim=0) for length in unstacked_length]
+        if not all(length.dtype in discrete_dtypes for length in unstacked_lengths):
+            raise TypeError("Unstacked lengths must be discrete dtypes.")
+
+        if x.type.ndim == 1:
+            batch_dims, batch_shape = (), ()
+        else:
+            batch_dims, batch_shape = zip(
+                *(
+                    (dim, shape)
+                    for dim, shape in zip(x.type.dims, x.type.shape)
+                    if dim != self.old_dim_name
+                )
+            )
+
+        static_unstacked_lengths = [None] * len(unstacked_lengths)
+        for i, length in enumerate(unstacked_lengths):
+            try:
+                static_length = get_scalar_constant_value(length)
+            except NotScalarConstantError:
+                pass
+            else:
+                static_unstacked_lengths[i] = int(static_length)
+
+        output = xtensor(
+            dtype=x.type.dtype,
+            shape=(*batch_shape, *static_unstacked_lengths),
+            dims=(*batch_dims, *self.unstacked_dims),
+        )
+        return Apply(self, [x, *unstacked_lengths], [output])
+
+
+def unstack(x, dim: dict[str, dict[str, int]] | None = None, **dims: dict[str, int]):
+    if dim is not None:
+        if dims:
+            raise ValueError(
+                "Cannot use both positional dim and keyword dims in unstack"
+            )
+        dims = dim
+
+    y = x
+    for old_dim_name, unstacked_dict in dims.items():
+        y = UnStack(old_dim_name, tuple(unstacked_dict.keys()))(
+            y, *tuple(unstacked_dict.values())
+        )
     return y
 
 
