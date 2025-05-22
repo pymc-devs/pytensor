@@ -12,7 +12,9 @@ rng = np.random.default_rng(42849)
 
 
 @pytest.mark.parametrize("dtype", ("float64", "int64"))
-@pytest.mark.parametrize("op", (nlinalg.Det(), nlinalg.SLogDet()))
+@pytest.mark.parametrize(
+    "op", (nlinalg.Det(), nlinalg.SLogDet()), ids=["det", "slogdet"]
+)
 def test_Det_SLogDet(op, dtype):
     x = pt.matrix(dtype=dtype)
 
