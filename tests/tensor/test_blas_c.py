@@ -7,7 +7,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.blas import Ger
-from pytensor.tensor.blas_c import CGemv, CGer, check_force_gemv_init
+from pytensor.tensor.blas_c import CGemv, CGer, must_initialize_y_gemv
 from pytensor.tensor.blas_scipy import ScipyGer
 from pytensor.tensor.type import dmatrix, dvector, matrix, scalar, tensor, vector
 from tests import unittest_tools
@@ -130,31 +130,35 @@ class TestCGemv(OptimizationTestMixin):
         self.dtype = dtype
         self.mode = pytensor.compile.get_default_mode().including("fast_run")
         # matrix
-        self.A = tensor(dtype=dtype, shape=(None, None))
+        self.A = tensor("A", dtype=dtype, shape=(None, None))
         self.Aval = np.ones((2, 3), dtype=dtype)
 
         # vector
-        self.x = tensor(dtype=dtype, shape=(None,))
-        self.y = tensor(dtype=dtype, shape=(None,))
+        self.x = tensor("x", dtype=dtype, shape=(None,))
+        self.y = tensor("y", dtype=dtype, shape=(None,))
         self.xval = np.asarray([1, 2], dtype=dtype)
         self.yval = np.asarray([1.5, 2.7, 3.9], dtype=dtype)
 
         # scalar
-        self.a = tensor(dtype=dtype, shape=())
+        self.a = tensor("a", dtype=dtype, shape=())
 
-    def test_nan_beta_0(self):
+    @pytest.mark.parametrize("inplace", [True, False])
+    def test_nan_beta_0(self, inplace):
         mode = self.mode.including()
         mode.check_isfinite = False
         f = pytensor.function(
-            [self.A, self.x, self.y, self.a],
+            [self.A, self.x, pytensor.In(self.y, mutable=inplace), self.a],
             self.a * self.y + pt.dot(self.A, self.x),
             mode=mode,
         )
-        Aval = np.ones((3, 1), dtype=self.dtype)
-        xval = np.ones((1,), dtype=self.dtype)
-        yval = float("NaN") * np.ones((3,), dtype=self.dtype)
-        zval = f(Aval, xval, yval, 0)
-        assert not np.isnan(zval).any()
+        [node] = f.maker.fgraph.apply_nodes
+        assert isinstance(node.op, CGemv) and node.op.inplace == inplace
+        for rows in (3, 1):
+            Aval = np.ones((rows, 1), dtype=self.dtype)
+            xval = np.ones((1,), dtype=self.dtype)
+            yval = np.full((rows,), np.nan, dtype=self.dtype)
+            zval = f(Aval, xval, yval, 0)
+            assert not np.isnan(zval).any()
 
     def test_optimizations_vm(self):
         skip_if_blas_ldflags_empty()
@@ -191,8 +195,10 @@ class TestCGemv(OptimizationTestMixin):
             np.dot(self.Aval[::-1, ::-1], self.yval),
         )
 
-    def test_force_gemv_init(self):
-        if check_force_gemv_init():
+    def test_must_initialize_y_gemv(self):
+        if must_initialize_y_gemv():
+            # FIME: This warn should be emitted by the function if we find it relevant
+            # Not in a test that doesn't care about the outcome either way
             warn(
                 "WARNING: The current BLAS requires PyTensor to initialize"
                 " memory for some GEMV calls which will result in a minor"
