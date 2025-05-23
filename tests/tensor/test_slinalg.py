@@ -1091,15 +1091,14 @@ def test_banded_dot(A_shape, kl, ku):
 
 @pytest.mark.parametrize("op", ["dot", "banded_dot"], ids=str)
 @pytest.mark.parametrize(
-    "A_shape", [(10, 10), (100, 100), (1000, 1000)], ids=["10", "100", "1000"]
+    "A_shape",
+    [(10, 10), (100, 100), (1000, 1000), (10_000, 10_000)],
+    ids=["10", "100", "1000", "10_000"],
 )
-@pytest.mark.parametrize(
-    "kl, ku", [(1, 1), (0, 1), (2, 2)], ids=["tridiag", "upper-only", "banded"]
-)
-def test_banded_dot_perf(op, A_shape, kl, ku, benchmark):
+def test_banded_dot_perf(op, A_shape, benchmark):
     rng = np.random.default_rng()
 
-    A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku)
+    A_val = _make_banded_A(rng.normal(size=A_shape), kl=1, ku=1)
     b_val = rng.normal(size=(A_shape[-1],))
 
     A = pt.tensor("A", shape=A_val.shape)
@@ -1108,7 +1107,7 @@ def test_banded_dot_perf(op, A_shape, kl, ku, benchmark):
     if op == "dot":
         f = pt.dot
     elif op == "banded_dot":
-        f = functools.partial(banded_dot, lower_diags=kl, upper_diags=ku)
+        f = functools.partial(banded_dot, lower_diags=1, upper_diags=1)
 
     res = f(A, b)
     fn = function([A, b], res, trust_input=True)
