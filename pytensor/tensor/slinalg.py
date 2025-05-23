@@ -1715,7 +1715,7 @@ class BandedDot(Op):
         B = as_tensor_variable(b)
 
         out_dtype = pytensor.scalar.upcast(A.dtype, B.dtype)
-        output = b.type().astype(out_dtype)
+        output = b.type.clone(dtype=out_dtype)()
 
         return pytensor.graph.basic.Apply(self, [A, B], [output])
 
