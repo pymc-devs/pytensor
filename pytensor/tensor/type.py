@@ -793,7 +793,7 @@ def tensor(
         try:
             # Help catching errors with the new tensor API
             # Many single letter strings are valid sctypes
-            if str(name) == "floatX" or (len(str(name)) > 1 and np.dtype(name).type):
+            if str(name) == "floatX" or (len(str(name)) > 2 and np.dtype(name).type):
                 raise ValueError(
                     f"The first and only positional argument of tensor is now `name`. Got {name}.\n"
                     "This name looks like a dtype, which you should pass as a keyword argument only."
