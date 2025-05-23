@@ -57,7 +57,7 @@ def jax_funcify_Solve(op, **kwargs):
             # jax requires dl and du to have the same shape as d
             dl = jax.numpy.pad(dl, (1, 0))
             du = jax.numpy.pad(du, (0, 1))
-            # if b is a vector, broadcast it to be a matrix
+            # jax also requires b to be a matrix; reshape it to be a column vector if necessary
             b_is_vec = len(b.shape) == 1
             if b_is_vec:
                 b = jax.numpy.expand_dims(b, -1)
