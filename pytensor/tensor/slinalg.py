@@ -6,6 +6,7 @@ from typing import Literal, cast
 
 import numpy as np
 import scipy.linalg as scipy_linalg
+from numpy import diag, zeros
 from numpy.exceptions import ComplexWarning
 
 import pytensor
@@ -1669,39 +1670,6 @@ def block_diag(*matrices: TensorVariable):
     return _block_diagonal_matrix(*matrices)
 
 
-def _to_banded_form(A, kl, ku):
-    """
-    Convert a full matrix A to LAPACK banded form for gbmv.
-
-    Parameters
-    ----------
-    A: np.ndarray
-        (m, n) banded matrix with nonzero values on the diagonals
-    kl: int
-        Number of nonzero lower diagonals of A
-    ku: int
-        Number of nonzero upper diagonals of A
-
-    Returns
-    -------
-    ab: np.ndarray
-        (kl + ku + 1, n) banded matrix suitable for LAPACK
-    """
-    A = np.asarray(A)
-    m, n = A.shape
-    ab = np.zeros((kl + ku + 1, n), dtype=A.dtype, order="C")
-
-    for i, k in enumerate(range(ku, -kl - 1, -1)):
-        col_slice = slice(k, None) if k >= 0 else slice(None, n + k)
-        ab[i, col_slice] = np.diag(A, k=k)
-
-    return ab
-
-
-_dgbmv = scipy_linalg.get_blas_funcs("gbmv", dtype="float64")
-_sgbmv = scipy_linalg.get_blas_funcs("gbmv", dtype="float32")
-
-
 class BandedDot(Op):
     __props__ = ("lower_diags", "upper_diags")
     gufunc_signature = "(m,n),(n)->(m)"
@@ -1725,15 +1693,17 @@ class BandedDot(Op):
     def perform(self, node, inputs, outputs_storage):
         A, b = inputs
         m, n = A.shape
-        alpha = 1
 
         kl = self.lower_diags
         ku = self.upper_diags
 
-        A_banded = _to_banded_form(A, kl, ku)
+        A_banded = zeros((kl + ku + 1, n), dtype=A.dtype, order="C")
 
-        fn = _dgbmv if A.dtype == "float64" else _sgbmv
-        outputs_storage[0][0] = fn(m, n, kl, ku, alpha, A_banded, b)
+        for i, k in enumerate(range(ku, -kl - 1, -1)):
+            A_banded[i, slice(k, None) if k >= 0 else slice(None, n + k)] = diag(A, k=k)
+
+        fn = scipy_linalg.get_blas_funcs("gbmv", dtype=A.dtype)
+        outputs_storage[0][0] = fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=b)
 
 
 def banded_dot(A: TensorLike, b: TensorLike, lower_diags: int, upper_diags: int):
