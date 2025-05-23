@@ -14,16 +14,22 @@ from pytensor.tensor.slinalg import Solve, lu_factor, lu_solve
 from pytensor.tensor.variable import TensorVariable
 
 
-def decompose_A(A, assume_a):
+def decompose_A(A, assume_a, check_finite):
     if assume_a == "gen":
-        return lu_factor(A, check_finite=False)
+        return lu_factor(A, check_finite=check_finite)
     else:
         raise NotImplementedError
 
 
-def solve_lu_decomposed_system(A_decomp, b, b_ndim, assume_a, transposed=False):
-    if assume_a == "gen":
-        return lu_solve(A_decomp, b, b_ndim=b_ndim, trans=transposed)
+def solve_lu_decomposed_system(A_decomp, b, transposed=False, *, core_solve_op: Solve):
+    if core_solve_op.assume_a == "gen":
+        return lu_solve(
+            A_decomp,
+            b,
+            trans=transposed,
+            b_ndim=core_solve_op.b_ndim,
+            check_finite=core_solve_op.check_finite,
+        )
     else:
         raise NotImplementedError
 
@@ -102,14 +108,19 @@ def _split_lu_solve_steps(
         ):
             return None
 
-    A_decomp = decompose_A(A, assume_a=assume_a)
+    # If any Op had check_finite=True, we also do it for the LU decomposition
+    check_finite_decomp = False
+    for client, _ in A_solve_clients_and_transpose:
+        if client.op.core_op.check_finite:
+            check_finite_decomp = True
+            break
+    A_decomp = decompose_A(A, assume_a=assume_a, check_finite=check_finite_decomp)
 
     replacements = {}
     for client, transposed in A_solve_clients_and_transpose:
         _, b = client.inputs
-        b_ndim = client.op.core_op.b_ndim
         new_x = solve_lu_decomposed_system(
-            A_decomp, b, b_ndim=b_ndim, assume_a=assume_a, transposed=transposed
+            A_decomp, b, transposed=transposed, core_solve_op=client.op.core_op
         )
         [old_x] = client.outputs
         new_x = atleast_Nd(new_x, n=old_x.type.ndim).astype(old_x.type.dtype)

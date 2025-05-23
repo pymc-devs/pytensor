@@ -161,3 +161,36 @@ def test_lu_decomposition_reused_scan(transposed):
     resx1 = fn_opt(A_test, x0_test)
     rtol = 1e-7 if config.floatX == "float64" else 1e-6
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+def test_lu_decomposition_reused_preserves_check_finite():
+    # Check that the LU decomposition rewrite preserves the check_finite flag
+    rewrite_name = reuse_lu_decomposition_multiple_solves.__name__
+
+    A = tensor("A", shape=(2, 2))
+    b1 = tensor("b1", shape=(2,))
+    b2 = tensor("b2", shape=(2,))
+
+    x1 = solve(A, b1, assume_a="gen", check_finite=True)
+    x2 = solve(A, b2, assume_a="gen", check_finite=False)
+    fn_opt = function(
+        [A, b1, b2], [x1, x2], mode=get_default_mode().including(rewrite_name)
+    )
+    opt_nodes = fn_opt.maker.fgraph.apply_nodes
+    assert count_vanilla_solve_nodes(opt_nodes) == 0
+    assert count_lu_decom_nodes(opt_nodes) == 1
+    assert count_lu_solve_nodes(opt_nodes) == 2
+
+    # We should get an error if A or b1 is non finite
+    A_valid = np.array([[1, 0], [0, 1]], dtype=A.type.dtype)
+    b1_valid = np.array([1, 1], dtype=b1.type.dtype)
+    b2_valid = np.array([1, 1], dtype=b2.type.dtype)
+
+    assert fn_opt(A_valid, b1_valid, b2_valid)  # Fine
+    assert fn_opt(
+        A_valid, b1_valid, b2_valid * np.nan
+    )  # Should not raise (also fine on most LAPACK implementations?)
+    with pytest.raises(ValueError, match="array must not contain infs or NaNs"):
+        assert fn_opt(A_valid, b1_valid * np.nan, b2_valid)
+    with pytest.raises(ValueError, match="array must not contain infs or NaNs"):
+        assert fn_opt(A_valid * np.nan, b1_valid, b2_valid)
