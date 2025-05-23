@@ -1692,9 +1692,8 @@ def _to_banded_form(A, kl, ku):
     ab = np.zeros((kl + ku + 1, n), dtype=A.dtype, order="C")
 
     for i, k in enumerate(range(ku, -kl - 1, -1)):
-        padding = (k, 0) if k >= 0 else (0, -k)
-        diag = np.pad(np.diag(A, k=k), padding)
-        ab[i, :] = diag
+        col_slice = slice(k, None) if k >= 0 else slice(None, n + k)
+        ab[i, col_slice] = np.diag(A, k=k)
 
     return ab
 
