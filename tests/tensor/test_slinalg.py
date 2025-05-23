@@ -1081,7 +1081,7 @@ def test_banded_dot(A_shape, kl, ku):
     res = banded_dot(A, b, kl, ku)
     res_2 = A @ b
 
-    fn = function([A, b], [res, res_2])
+    fn = function([A, b], [res, res_2], trust_input=True)
     assert any(isinstance(node.op, BandedDot) for node in fn.maker.fgraph.apply_nodes)
 
     x_val, x2_val = fn(A_val, b_val)
@@ -1089,34 +1089,14 @@ def test_banded_dot(A_shape, kl, ku):
     np.testing.assert_allclose(x_val, x2_val)
 
 
+@pytest.mark.parametrize("op", ["dot", "banded_dot"], ids=str)
 @pytest.mark.parametrize(
     "A_shape", [(10, 10), (100, 100), (1000, 1000)], ids=["10", "100", "1000"]
 )
 @pytest.mark.parametrize(
     "kl, ku", [(1, 1), (0, 1), (2, 2)], ids=["tridiag", "upper-only", "banded"]
 )
-def test_banded_dot_perf(A_shape, kl, ku, benchmark):
-    rng = np.random.default_rng()
-
-    A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku)
-    b_val = rng.normal(size=(A_shape[-1],))
-
-    A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
-    b = pt.tensor("b", shape=b_val.shape, dtype=b_val.dtype)
-
-    res = banded_dot(A, b, kl, ku)
-    fn = function([A, b], res, trust_input=True)
-
-    benchmark(fn, A_val, b_val)
-
-
-@pytest.mark.parametrize(
-    "A_shape", [(10, 10), (100, 100), (1000, 1000)], ids=["10", "100", "1000"]
-)
-@pytest.mark.parametrize(
-    "kl, ku", [(1, 1), (0, 1), (2, 2)], ids=["tridiag", "upper-only", "banded"]
-)
-def test_dot_perf(A_shape, kl, ku, benchmark):
+def test_banded_dot_perf(op, A_shape, kl, ku, benchmark):
     rng = np.random.default_rng()
 
     A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku)
@@ -1125,7 +1105,12 @@ def test_dot_perf(A_shape, kl, ku, benchmark):
     A = pt.tensor("A", shape=A_val.shape)
     b = pt.tensor("b", shape=b_val.shape)
 
-    res = A @ b
-    fn = function([A, b], res)
+    if op == "dot":
+        f = pt.dot
+    elif op == "banded_dot":
+        f = functools.partial(banded_dot, lower_diags=kl, upper_diags=ku)
+
+    res = f(A, b)
+    fn = function([A, b], res, trust_input=True)
 
     benchmark(fn, A_val, b_val)

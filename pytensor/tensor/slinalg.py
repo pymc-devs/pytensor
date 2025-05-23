@@ -1699,6 +1699,10 @@ def _to_banded_form(A, kl, ku):
     return ab
 
 
+_dgbmv = scipy_linalg.get_blas_funcs("gbmv", dtype="float64")
+_sgbmv = scipy_linalg.get_blas_funcs("gbmv", dtype="float32")
+
+
 class BandedDot(Op):
     __props__ = ("lower_diags", "upper_diags")
     gufunc_signature = "(m,n),(n)->(n)"
@@ -1726,7 +1730,7 @@ class BandedDot(Op):
 
         A_banded = _to_banded_form(A, kl, ku)
 
-        fn = scipy_linalg.get_blas_funcs("gbmv", (A, b))
+        fn = _dgbmv if A.dtype == "float64" else _sgbmv
         outputs_storage[0][0] = fn(m, n, kl, ku, alpha, A_banded, b)
 
 
