@@ -1669,6 +1669,95 @@ def block_diag(*matrices: TensorVariable):
     return _block_diagonal_matrix(*matrices)
 
 
+def _to_banded_form(A, kl, ku):
+    """
+    Convert a full matrix A to LAPACK banded form for gbmv.
+
+    Parameters
+    ----------
+    A: np.ndarray
+        (m, n) banded matrix with nonzero values on the diagonals
+    kl: int
+        Number of nonzero lower diagonals of A
+    ku: int
+        Number of nonzero upper diagonals of A
+
+    Returns
+    -------
+    ab: np.ndarray
+        (kl + ku + 1, n) banded matrix suitable for LAPACK
+    """
+    A = np.asarray(A)
+    m, n = A.shape
+    ab = np.zeros((kl + ku + 1, n), dtype=A.dtype, order="C")
+
+    for i, k in enumerate(range(ku, -kl - 1, -1)):
+        padding = (k, 0) if k >= 0 else (0, -k)
+        diag = np.pad(np.diag(A, k=k), padding)
+        ab[i, :] = diag
+
+    return ab
+
+
+class BandedDot(Op):
+    __props__ = ("lower_diags", "upper_diags")
+    gufunc_signature = "(m,n),(n)->(n)"
+
+    def __init__(self, lower_diags, upper_diags):
+        self.lower_diags = lower_diags
+        self.upper_diags = upper_diags
+
+    def make_node(self, A, b):
+        A = as_tensor_variable(A)
+        B = as_tensor_variable(b)
+
+        out_dtype = pytensor.scalar.upcast(A.dtype, B.dtype)
+        output = b.type().astype(out_dtype)
+
+        return pytensor.graph.basic.Apply(self, [A, B], [output])
+
+    def perform(self, node, inputs, outputs_storage):
+        A, b = inputs
+        m, n = A.shape
+        alpha = 1
+
+        kl = self.lower_diags
+        ku = self.upper_diags
+
+        A_banded = _to_banded_form(A, kl, ku)
+
+        fn = scipy_linalg.get_blas_funcs("gbmv", (A, b))
+        outputs_storage[0][0] = fn(m, n, kl, ku, alpha, A_banded, b)
+
+
+def banded_dot(A: TensorLike, b: TensorLike, lower_diags: int, upper_diags: int):
+    """
+    Specialized matrix-vector multiplication for cases when A is a banded matrix
+
+    No type-checking is done on A at runtime, so all data in A off the banded diagonals will be ignored. This will lead
+    to incorrect results if A is not actually a banded matrix.
+
+    Unlike dot, this function is only valid if b is a vector.
+
+    Parameters
+    ----------
+    A: Tensorlike
+        Matrix to perform banded dot on.
+    b: Tensorlike
+        Vector to perform banded dot on.
+    lower_diags: int
+        Number of nonzero lower diagonals of A
+    upper_diags: int
+        Number of nonzero upper diagonals of A
+
+    Returns
+    -------
+    out: Tensor
+        The matrix multiplication result
+    """
+    return Blockwise(BandedDot(lower_diags, upper_diags))(A, b)
+
+
 __all__ = [
     "cholesky",
     "solve",
@@ -1683,4 +1772,5 @@ __all__ = [
     "lu",
     "lu_factor",
     "lu_solve",
+    "banded_dot",
 ]
