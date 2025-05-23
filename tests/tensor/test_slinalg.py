@@ -1073,11 +1073,11 @@ def _make_banded_A(A, kl, ku):
 def test_banded_dot(A_shape, kl, ku):
     rng = np.random.default_rng()
 
-    A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku)
-    b_val = rng.normal(size=(A_shape[-1],))
+    A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku).astype(config.floatX)
+    b_val = rng.normal(size=(A_shape[-1],)).astype(config.floatX)
 
-    A = pt.tensor("A", shape=A_val.shape)
-    b = pt.tensor("b", shape=b_val.shape)
+    A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
+    b = pt.tensor("b", shape=b_val.shape, dtype=b_val.dtype)
     res = banded_dot(A, b, kl, ku)
     res_2 = A @ b
 
@@ -1098,11 +1098,11 @@ def test_banded_dot(A_shape, kl, ku):
 def test_banded_dot_perf(op, A_shape, benchmark):
     rng = np.random.default_rng()
 
-    A_val = _make_banded_A(rng.normal(size=A_shape), kl=1, ku=1)
-    b_val = rng.normal(size=(A_shape[-1],))
+    A_val = _make_banded_A(rng.normal(size=A_shape), kl=1, ku=1).astype(config.floatX)
+    b_val = rng.normal(size=(A_shape[-1],)).astype(config.floatX)
 
-    A = pt.tensor("A", shape=A_val.shape)
-    b = pt.tensor("b", shape=b_val.shape)
+    A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
+    b = pt.tensor("b", shape=b_val.shape, dtype=A_val.dtype)
 
     if op == "dot":
         f = pt.dot
