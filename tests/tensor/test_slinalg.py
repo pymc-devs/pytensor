@@ -12,11 +12,13 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.slinalg import (
+    BandedDot,
     Cholesky,
     CholeskySolve,
     Solve,
     SolveBase,
     SolveTriangular,
+    banded_dot,
     block_diag,
     cho_solve,
     cholesky,
@@ -1051,3 +1053,79 @@ def test_block_diagonal_blockwise():
     B = np.random.normal(size=(1, batch_size, 4, 4)).astype(config.floatX)
     result = block_diag(A, B).eval()
     assert result.shape == (10, batch_size, 6, 6)
+
+
+def _make_banded_A(A, kl, ku):
+    diag_idxs = range(-kl, ku + 1)
+    diags = (np.diag(A, k=k) for k in diag_idxs)
+    return sum(np.diag(d, k=k) for k, d in zip(diag_idxs, diags))
+
+
+@pytest.mark.parametrize(
+    "A_shape",
+    [
+        (10, 10),
+    ],
+)
+@pytest.mark.parametrize(
+    "kl, ku", [(1, 1), (0, 1), (2, 2)], ids=["tridiag", "upper-only", "banded"]
+)
+def test_banded_dot(A_shape, kl, ku):
+    rng = np.random.default_rng()
+
+    A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku)
+    b_val = rng.normal(size=(A_shape[-1],))
+
+    A = pt.tensor("A", shape=A_val.shape)
+    b = pt.tensor("b", shape=b_val.shape)
+    res = banded_dot(A, b, kl, ku)
+    res_2 = A @ b
+
+    fn = function([A, b], [res, res_2])
+    assert any(isinstance(node.op, BandedDot) for node in fn.maker.fgraph.apply_nodes)
+
+    x_val, x2_val = fn(A_val, b_val)
+
+    np.testing.assert_allclose(x_val, x2_val)
+
+
+@pytest.mark.parametrize(
+    "A_shape", [(10, 10), (100, 100), (1000, 1000)], ids=["10", "100", "1000"]
+)
+@pytest.mark.parametrize(
+    "kl, ku", [(1, 1), (0, 1), (2, 2)], ids=["tridiag", "upper-only", "banded"]
+)
+def test_banded_dot_perf(A_shape, kl, ku, benchmark):
+    rng = np.random.default_rng()
+
+    A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku)
+    b_val = rng.normal(size=(A_shape[-1],))
+
+    A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
+    b = pt.tensor("b", shape=b_val.shape, dtype=b_val.dtype)
+
+    res = banded_dot(A, b, kl, ku)
+    fn = function([A, b], res, trust_input=True)
+
+    benchmark(fn, A_val, b_val)
+
+
+@pytest.mark.parametrize(
+    "A_shape", [(10, 10), (100, 100), (1000, 1000)], ids=["10", "100", "1000"]
+)
+@pytest.mark.parametrize(
+    "kl, ku", [(1, 1), (0, 1), (2, 2)], ids=["tridiag", "upper-only", "banded"]
+)
+def test_dot_perf(A_shape, kl, ku, benchmark):
+    rng = np.random.default_rng()
+
+    A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku)
+    b_val = rng.normal(size=(A_shape[-1],))
+
+    A = pt.tensor("A", shape=A_val.shape)
+    b = pt.tensor("b", shape=b_val.shape)
+
+    res = A @ b
+    fn = function([A, b], res)
+
+    benchmark(fn, A_val, b_val)
