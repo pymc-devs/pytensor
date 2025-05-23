@@ -1704,7 +1704,7 @@ _sgbmv = scipy_linalg.get_blas_funcs("gbmv", dtype="float32")
 
 class BandedDot(Op):
     __props__ = ("lower_diags", "upper_diags")
-    gufunc_signature = "(m,n),(n)->(n)"
+    gufunc_signature = "(m,n),(n)->(m)"
 
     def __init__(self, lower_diags, upper_diags):
         self.lower_diags = lower_diags
@@ -1718,6 +1718,9 @@ class BandedDot(Op):
         output = b.type.clone(dtype=out_dtype)()
 
         return pytensor.graph.basic.Apply(self, [A, B], [output])
+
+    def infer_shape(self, fgraph, nodes, shapes):
+        return [shapes[0][:-1]]
 
     def perform(self, node, inputs, outputs_storage):
         A, b = inputs
