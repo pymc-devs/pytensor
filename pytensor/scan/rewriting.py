@@ -1186,7 +1186,7 @@ def while_scan_merge_subtensor_last_element(fgraph, scan_node):
     return subtensor_merge_replacements
 
 
-def _is_default_scan_buffer(x: TensorVariable) -> bool:
+def _is_default_scan_buffer(x: TensorVariable, taps: int) -> bool:
     node = x.owner
 
     if node is None:
@@ -1218,7 +1218,7 @@ def _is_default_scan_buffer(x: TensorVariable) -> bool:
     #   1. alloc_empty(2 + nsteps)[:2].broadcastable == x.broadcastable
     # But due to laziness we use the slightly more conservative check:
     #   2. alloc_empty(2 + nsteps).broadcastable == x.broadcastable
-    if broadcasted_by(y, x):
+    if (taps > 1) and broadcasted_by(y, x):
         return False
 
     return True
@@ -1574,15 +1574,16 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                 # If the memory for this output has been pre-allocated
                 # before going into the scan op (by an alloc node)
                 if idx < op_info.n_mit_sot + op_info.n_sit_sot:
+                    taps = init_l[i]
                     nw_input = nw_inputs[offset + idx]
 
                     # Recreate default buffers with new size
-                    if _is_default_scan_buffer(nw_input):
-                        extra_size = 1 if required_orphan else val - init_l[i]
+                    if _is_default_scan_buffer(nw_input, taps):
+                        extra_size = 1 if required_orphan else val - taps
                         nw_input = expand_empty(nw_input.owner.inputs[1], extra_size)
                     # Otherwise, just trim with a slice
                     else:
-                        stop = init_l[i] if required_orphan else val
+                        stop = taps if required_orphan else val
                         nw_input = nw_input[:stop]
 
                     nw_inputs[offset + idx] = nw_input
@@ -1626,14 +1627,13 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                     # val == 0 means that we want to keep all intermediate
                     # results for that state, including the initial values.
                     if idx < op_info.n_mit_sot + op_info.n_sit_sot:
+                        taps = init_l[op_info.n_mit_mot + idx]
                         in_idx = offset + idx
                         nw_input = nw_inputs[in_idx]
-                        if _is_default_scan_buffer(nw_input):
+                        if _is_default_scan_buffer(nw_input, taps):
                             nw_input = expand_empty(nw_input.owner.inputs[1], nw_steps)
                         else:
-                            # Number of steps in the initial state
-                            init_l_pt = pt.as_tensor(init_l[op_info.n_mit_mot + idx])
-                            nw_input = nw_input[: (init_l_pt + nw_steps)]
+                            nw_input = nw_input[: (taps + nw_steps)]
                         nw_inputs[in_idx] = nw_input
 
                     elif (
