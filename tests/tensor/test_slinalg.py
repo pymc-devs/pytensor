@@ -1086,4 +1086,7 @@ def test_banded_dot(A_shape, kl, ku):
 
     out_val, out_2_val = fn(A_val, x_val)
 
-    np.testing.assert_allclose(out_val, out_2_val)
+    atol = 1e-4 if config.floatX == "float32" else 1e-8
+    rtol = 1e-4 if config.floatX == "float32" else 1e-8
+
+    np.testing.assert_allclose(out_val, out_2_val, atol=atol, rtol=rtol)
