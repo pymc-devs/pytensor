@@ -3,7 +3,7 @@ from collections.abc import Callable
 import numpy as np
 from numba import njit as numba_njit
 from numba.core.extending import overload
-from numba.np.linalg import _copy_to_fortran_order, ensure_blas, ensure_lapack
+from numba.np.linalg import ensure_blas, ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._BLAS import _BLAS
@@ -15,9 +15,12 @@ from pytensor.link.numba.dispatch.linalg.utils import _check_scipy_linalg_matrix
 
 
 @numba_njit(inline="always")
-def A_to_banded(A: np.ndarray, kl: int, ku: int) -> np.ndarray:
+def A_to_banded(A: np.ndarray, kl: int, ku: int, order="C") -> np.ndarray:
     m, n = A.shape
-    A_banded = np.zeros((kl + ku + 1, n), dtype=A.dtype)
+    if order == "C":
+        A_banded = np.zeros((kl + ku + 1, n), dtype=A.dtype)
+    else:
+        A_banded = np.zeros((n, kl + ku + 1), dtype=A.dtype).T
 
     for i, k in enumerate(range(ku, -kl - 1, -1)):
         if k >= 0:
@@ -35,7 +38,7 @@ def _dot_banded(A: np.ndarray, x: np.ndarray, kl: int, ku: int) -> np.ndarray:
     """
     fn = linalg.get_blas_funcs("gbmv", (A, x))
     m, n = A.shape
-    A_banded = A_to_banded(A, kl=kl, ku=ku)
+    A_banded = A_to_banded(A, kl=kl, ku=ku, order="C")
 
     return fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=x)
 
@@ -54,9 +57,7 @@ def dot_banded_impl(
     def impl(A: np.ndarray, x: np.ndarray, kl: int, ku: int) -> np.ndarray:
         m, n = A.shape
 
-        # TODO: Can we avoid this copy?
-        A_banded = A_to_banded(A, kl=kl, ku=ku)
-        A_banded = _copy_to_fortran_order(A_banded)
+        A_banded = A_to_banded(A, kl=kl, ku=ku, order="F")
 
         TRANS = val_to_int_ptr(ord("N"))
         M = val_to_int_ptr(m)
