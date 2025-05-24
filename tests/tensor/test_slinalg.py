@@ -1074,19 +1074,19 @@ def test_banded_dot(A_shape, kl, ku):
     rng = np.random.default_rng()
 
     A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku).astype(config.floatX)
-    b_val = rng.normal(size=(A_shape[-1],)).astype(config.floatX)
+    x_val = rng.normal(size=(A_shape[-1],)).astype(config.floatX)
 
     A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
-    b = pt.tensor("b", shape=b_val.shape, dtype=b_val.dtype)
-    res = banded_dot(A, b, kl, ku)
-    res_2 = A @ b
+    x = pt.tensor("x", shape=x_val.shape, dtype=x_val.dtype)
+    res = banded_dot(A, x, kl, ku)
+    res_2 = A @ x
 
-    fn = function([A, b], [res, res_2], trust_input=True)
+    fn = function([A, x], [res, res_2], trust_input=True)
     assert any(isinstance(node.op, BandedDot) for node in fn.maker.fgraph.apply_nodes)
 
-    x_val, x2_val = fn(A_val, b_val)
+    out_val, out_2_val = fn(A_val, x_val)
 
-    np.testing.assert_allclose(x_val, x2_val)
+    np.testing.assert_allclose(out_val, out_2_val)
 
 
 @pytest.mark.parametrize("op", ["dot", "banded_dot"], ids=str)
@@ -1099,17 +1099,17 @@ def test_banded_dot_perf(op, A_shape, benchmark):
     rng = np.random.default_rng()
 
     A_val = _make_banded_A(rng.normal(size=A_shape), kl=1, ku=1).astype(config.floatX)
-    b_val = rng.normal(size=(A_shape[-1],)).astype(config.floatX)
+    x_val = rng.normal(size=(A_shape[-1],)).astype(config.floatX)
 
     A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
-    b = pt.tensor("b", shape=b_val.shape, dtype=A_val.dtype)
+    x = pt.tensor("x", shape=x_val.shape, dtype=x_val.dtype)
 
     if op == "dot":
         f = pt.dot
     elif op == "banded_dot":
         f = functools.partial(banded_dot, lower_diags=1, upper_diags=1)
 
-    res = f(A, b)
-    fn = function([A, b], res, trust_input=True)
+    res = f(A, x)
+    fn = function([A, x], res, trust_input=True)
 
-    benchmark(fn, A_val, b_val)
+    benchmark(fn, A_val, x_val)

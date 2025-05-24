@@ -1678,20 +1678,20 @@ class BandedDot(Op):
         self.lower_diags = lower_diags
         self.upper_diags = upper_diags
 
-    def make_node(self, A, b):
+    def make_node(self, A, x):
         A = as_tensor_variable(A)
-        B = as_tensor_variable(b)
+        x = as_tensor_variable(x)
 
-        out_dtype = pytensor.scalar.upcast(A.dtype, B.dtype)
-        output = b.type.clone(dtype=out_dtype)()
+        out_dtype = pytensor.scalar.upcast(A.dtype, x.dtype)
+        output = x.type.clone(dtype=out_dtype)()
 
-        return pytensor.graph.basic.Apply(self, [A, B], [output])
+        return pytensor.graph.basic.Apply(self, [A, x], [output])
 
     def infer_shape(self, fgraph, nodes, shapes):
         return [shapes[0][:-1]]
 
     def perform(self, node, inputs, outputs_storage):
-        A, b = inputs
+        A, x = inputs
         m, n = A.shape
 
         kl = self.lower_diags
@@ -1703,10 +1703,10 @@ class BandedDot(Op):
             A_banded[i, slice(k, None) if k >= 0 else slice(None, n + k)] = diag(A, k=k)
 
         fn = scipy_linalg.get_blas_funcs("gbmv", dtype=A.dtype)
-        outputs_storage[0][0] = fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=b)
+        outputs_storage[0][0] = fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=x)
 
 
-def banded_dot(A: TensorLike, b: TensorLike, lower_diags: int, upper_diags: int):
+def banded_dot(A: TensorLike, x: TensorLike, lower_diags: int, upper_diags: int):
     """
     Specialized matrix-vector multiplication for cases when A is a banded matrix
 
@@ -1719,7 +1719,7 @@ def banded_dot(A: TensorLike, b: TensorLike, lower_diags: int, upper_diags: int)
     ----------
     A: Tensorlike
         Matrix to perform banded dot on.
-    b: Tensorlike
+    x: Tensorlike
         Vector to perform banded dot on.
     lower_diags: int
         Number of nonzero lower diagonals of A
@@ -1731,7 +1731,7 @@ def banded_dot(A: TensorLike, b: TensorLike, lower_diags: int, upper_diags: int)
     out: Tensor
         The matrix multiplication result
     """
-    return Blockwise(BandedDot(lower_diags, upper_diags))(A, b)
+    return Blockwise(BandedDot(lower_diags, upper_diags))(A, x)
 
 
 __all__ = [
