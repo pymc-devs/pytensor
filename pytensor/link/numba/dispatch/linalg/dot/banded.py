@@ -69,7 +69,7 @@ def dot_banded_impl(
         KU = val_to_int_ptr(ku)
 
         ALPHA = np.array(1.0, dtype=dtype)
-        INCX = val_to_int_ptr(1)
+        INCX = val_to_int_ptr(x.strides[0] // x.itemsize)
         BETA = np.array(0.0, dtype=dtype)
         Y = np.empty(m, dtype=dtype)
         INCY = val_to_int_ptr(1)

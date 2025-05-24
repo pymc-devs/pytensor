@@ -743,3 +743,15 @@ def test_banded_dot():
         numba_mode=numba_inplace_mode,
         eval_obj_mode=False,
     )
+
+    # Test non-contiguous x input
+    x_val = rng.normal(size=(20,))[::2]
+
+    compare_numba_and_py(
+        [A, x],
+        output,
+        test_inputs=[A_val, x_val],
+        inplace=True,
+        numba_mode=numba_inplace_mode,
+        eval_obj_mode=False,
+    )
