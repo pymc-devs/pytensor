@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 from numba import njit as numba_njit
@@ -31,7 +32,7 @@ def A_to_banded(A: np.ndarray, kl: int, ku: int, order="C") -> np.ndarray:
     return A_banded
 
 
-def _dot_banded(A: np.ndarray, x: np.ndarray, kl: int, ku: int) -> np.ndarray:
+def _dot_banded(A: np.ndarray, x: np.ndarray, kl: int, ku: int) -> Any:
     """
     Thin wrapper around gmbv. This code will only be called if njit is disabled globally
     (e.g. during testing)
