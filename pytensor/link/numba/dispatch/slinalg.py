@@ -324,7 +324,7 @@ def numba_funcify_BandedDot(op, node, **kwargs):
     if dtype in complex_dtypes:
         raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
-    @numba_njit
+    @numba_njit(cache=False)
     def banded_dot(A, x):
         return _dot_banded(A, x, kl=kl, ku=ku)
 
