@@ -6,6 +6,7 @@ from numba.np.linalg import ensure_lapack
 from numpy import ndarray
 from scipy import linalg
 
+from pytensor.link.numba.dispatch import numba_funcify
 from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
@@ -19,6 +20,10 @@ from pytensor.link.numba.dispatch.linalg.utils import (
     _copy_to_fortran_order_even_if_1d,
     _solve_check,
     _trans_char_to_int,
+)
+from pytensor.tensor._linalg.solve.tridiagonal import (
+    LUFactorTridiagonal,
+    SolveLUFactorTridiagonal,
 )
 
 
@@ -297,3 +302,48 @@ def _tridiagonal_solve_impl(
         return X
 
     return impl
+
+
+@numba_funcify.register(LUFactorTridiagonal)
+def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
+    overwrite_dl = op.overwrite_dl
+    overwrite_d = op.overwrite_d
+    overwrite_du = op.overwrite_du
+
+    @numba_njit(cache=False)
+    def lu_factor_tridiagonal(dl, d, du):
+        if not overwrite_dl:
+            dl = dl.copy()
+        if not overwrite_d:
+            d = d.copy()
+        if not overwrite_du:
+            du = du.copy()
+
+        dl, d, du, du2, ipiv, _ = _gttrf(dl, d, du)
+        return dl, d, du, du2, ipiv
+
+    return lu_factor_tridiagonal
+
+
+@numba_funcify.register(SolveLUFactorTridiagonal)
+def numba_funcify_SolveLUFactorTridiagonal(
+    op: SolveLUFactorTridiagonal, node, **kwargs
+):
+    overwrite_b = op.overwrite_b
+    transposed = op.transposed
+
+    @numba_njit(cache=False)
+    def solve_lu_factor_tridiagonal(dl, d, du, du2, ipiv, b):
+        x, _ = _gttrs(
+            dl,
+            d,
+            du,
+            du2,
+            ipiv,
+            b,
+            overwrite_b=overwrite_b,
+            trans=transposed,
+        )
+        return x
+
+    return solve_lu_factor_tridiagonal
