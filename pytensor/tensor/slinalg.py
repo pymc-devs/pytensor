@@ -6,7 +6,7 @@ from typing import Literal, cast
 
 import numpy as np
 import scipy.linalg as scipy_linalg
-from numpy import diag, zeros
+from numpy import zeros
 from numpy.exceptions import ComplexWarning
 
 import pytensor
@@ -1697,10 +1697,13 @@ class BandedDot(Op):
         kl = self.lower_diags
         ku = self.upper_diags
 
-        A_banded = zeros((kl + ku + 1, n), dtype=A.dtype, order="C")
+        A_banded = zeros((kl + ku + 1, n), dtype=A.dtype, order="F")
 
         for i, k in enumerate(range(ku, -kl - 1, -1)):
-            A_banded[i, slice(k, None) if k >= 0 else slice(None, n + k)] = diag(A, k=k)
+            if k >= 0:
+                A_banded[i, k:] = np.diag(A, k=k)
+            else:
+                A_banded[i, : n + k] = np.diag(A, k=k)
 
         fn = scipy_linalg.get_blas_funcs("gbmv", dtype=A.dtype)
         outputs_storage[0][0] = fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=x)

@@ -38,7 +38,7 @@ def _dot_banded(A: np.ndarray, x: np.ndarray, kl: int, ku: int) -> np.ndarray:
     """
     fn = linalg.get_blas_funcs("gbmv", (A, x))
     m, n = A.shape
-    A_banded = A_to_banded(A, kl=kl, ku=ku, order="C")
+    A_banded = A_to_banded(A, kl=kl, ku=ku, order="F")
 
     return fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=x)
 
