@@ -11,6 +11,7 @@ from numpy.exceptions import ComplexWarning
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor import Variable
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
@@ -1713,6 +1714,24 @@ class BandedDot(Op):
 
         fn = scipy_linalg.get_blas_funcs("gbmv", dtype=A.dtype)
         outputs_storage[0][0] = fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=x)
+
+    def L_op(
+        self,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+        output_grads: Sequence[Variable],
+    ) -> list[Variable]:
+        # This is exactly the same as the usual gradient of a matrix-vector product, except that the banded structure
+        # is exploited.
+        A, x = inputs
+        (G_bar,) = output_grads
+
+        A_bar = pt.outer(G_bar, x.T)
+        x_bar = banded_dot(
+            A.T, G_bar, lower_diags=self.lower_diags, upper_diags=self.upper_diags
+        )
+
+        return [A_bar, x_bar]
 
 
 def banded_dot(A: TensorLike, x: TensorLike, lower_diags: int, upper_diags: int):
