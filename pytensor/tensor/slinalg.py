@@ -1715,12 +1715,7 @@ class BandedDot(Op):
         fn = scipy_linalg.get_blas_funcs("gbmv", dtype=A.dtype)
         outputs_storage[0][0] = fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=x)
 
-    def L_op(
-        self,
-        inputs: Sequence[Variable],
-        outputs: Sequence[Variable],
-        output_grads: Sequence[Variable],
-    ) -> list[Variable]:
+    def L_op(self, inputs, outputs, output_grads) -> list[Variable]:
         # This is exactly the same as the usual gradient of a matrix-vector product, except that the banded structure
         # is exploited.
         A, x = inputs
