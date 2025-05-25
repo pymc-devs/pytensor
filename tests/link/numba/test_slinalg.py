@@ -724,7 +724,7 @@ def test_lu_solve(b_func, b_shape: tuple[int, ...], trans: bool, overwrite_b: bo
     np.testing.assert_allclose(b_val_not_contig, b_val)
 
 
-@pytest.mark.parametrize("stride", [1, 2, -1], ids=lambda x: f"stride={x}")
+@pytest.mark.parametrize("stride", [1, 2, -1, -2], ids=lambda x: f"stride={x}")
 def test_banded_dot(stride):
     rng = np.random.default_rng()
 
@@ -743,19 +743,6 @@ def test_banded_dot(stride):
         [A, x],
         output,
         test_inputs=[A_val, x_val],
-        inplace=True,
-        numba_mode=numba_inplace_mode,
-        eval_obj_mode=False,
-    )
-
-    # Test non-contiguous x input
-    x_val = rng.normal(size=(20,))[::2]
-
-    compare_numba_and_py(
-        [A, x],
-        output,
-        test_inputs=[A_val, x_val],
-        inplace=True,
         numba_mode=numba_inplace_mode,
         eval_obj_mode=False,
     )
