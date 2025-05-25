@@ -1090,3 +1090,32 @@ def test_banded_dot(kl, ku, stride):
     rtol = 1e-4 if config.floatX == "float32" else 1e-8
 
     np.testing.assert_allclose(out_val, out_2_val, atol=atol, rtol=rtol)
+
+
+def test_banded_dot_grad():
+    rng = np.random.default_rng()
+    size = 10
+
+    A_val = _make_banded_A(rng.normal(size=(size, size)), kl=1, ku=1).astype(
+        config.floatX
+    )
+    x_val = rng.normal(size=(size,)).astype(config.floatX)
+
+    def make_banded_pt(A):
+        # Like structured solve Ops, we have to incldue the transformation from an unconstrained matrix A to a banded
+        # matrix on the compute graph. Otherwise, the random perturbations used by verify_grad will result in invalid
+        # input matrices.
+
+        diag_idxs = range(-1, 2)
+        diags = (pt.diag(A, k=k) for k in diag_idxs)
+        return sum(pt.diag(d, k=k) for k, d in zip(diag_idxs, diags))
+
+    def test_fn(A, x):
+        return banded_dot(make_banded_pt(A), x, lower_diags=1, upper_diags=1).sum()
+
+    utt.verify_grad(
+        test_fn,
+        [A_val, x_val],
+        rng=rng,
+        eps=1e-4 if config.floatX == "float32" else 1e-8,
+    )
