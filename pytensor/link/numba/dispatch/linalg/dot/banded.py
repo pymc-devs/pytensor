@@ -16,12 +16,12 @@ from pytensor.link.numba.dispatch.linalg.utils import _check_scipy_linalg_matrix
 
 
 @numba_njit(inline="always")
-def A_to_banded(A: np.ndarray, kl: int, ku: int, order="C") -> np.ndarray:
+def A_to_banded(A: np.ndarray, kl: int, ku: int) -> np.ndarray:
     m, n = A.shape
-    if order == "C":
-        A_banded = np.zeros((kl + ku + 1, n), dtype=A.dtype)
-    else:
-        A_banded = np.zeros((n, kl + ku + 1), dtype=A.dtype).T
+
+    # This matrix is build backwards then transposed to get it into Fortran order
+    # (order="F" is not allowed in Numba land)
+    A_banded = np.zeros((n, kl + ku + 1), dtype=A.dtype).T
 
     for i, k in enumerate(range(ku, -kl - 1, -1)):
         if k >= 0:
@@ -39,7 +39,7 @@ def _dot_banded(A: np.ndarray, x: np.ndarray, kl: int, ku: int) -> Any:
     """
     fn = linalg.get_blas_funcs("gbmv", (A, x))
     m, n = A.shape
-    A_banded = A_to_banded(A, kl=kl, ku=ku, order="F")
+    A_banded = A_to_banded(A, kl=kl, ku=ku)
 
     return fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=x)
 
@@ -58,7 +58,7 @@ def dot_banded_impl(
     def impl(A: np.ndarray, x: np.ndarray, kl: int, ku: int) -> np.ndarray:
         m, n = A.shape
 
-        A_banded = A_to_banded(A, kl=kl, ku=ku, order="F")
+        A_banded = A_to_banded(A, kl=kl, ku=ku)
 
         TRANS = val_to_int_ptr(ord("N"))
         M = val_to_int_ptr(m)
