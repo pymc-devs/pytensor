@@ -1679,6 +1679,11 @@ class BandedDot(Op):
         self.upper_diags = upper_diags
 
     def make_node(self, A, x):
+        if A.ndim != 2:
+            raise TypeError("A must be a 2D tensor")
+        if x.ndim != 1:
+            raise TypeError("x must be a 1D tensor")
+
         A = as_tensor_variable(A)
         x = as_tensor_variable(x)
 
@@ -1688,7 +1693,8 @@ class BandedDot(Op):
         return pytensor.graph.basic.Apply(self, [A, x], [output])
 
     def infer_shape(self, fgraph, nodes, shapes):
-        return [shapes[0][:-1]]
+        A_shape, _ = shapes
+        return [(A_shape[0],)]
 
     def perform(self, node, inputs, outputs_storage):
         A, x = inputs
