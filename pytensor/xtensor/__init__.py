@@ -3,6 +3,7 @@ import warnings
 import pytensor.xtensor.rewriting
 from pytensor.xtensor import (
     linalg,
+    special,
 )
 from pytensor.xtensor.type import (
     XTensorType,

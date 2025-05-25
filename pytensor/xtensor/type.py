@@ -357,9 +357,40 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def real(self):
         return px.math.real(self)
 
-    # @property
-    # def T(self):
-    #     ...
+    # Aggregation
+    # https://docs.xarray.dev/en/latest/api.html#id6
+    def all(self, dim):
+        return px.reduction.all(self, dim)
+
+    def any(self, dim):
+        return px.reduction.any(self, dim)
+
+    def max(self, dim):
+        return px.reduction.max(self, dim)
+
+    def min(self, dim):
+        return px.reduction.min(self, dim)
+
+    def mean(self, dim):
+        return px.reduction.mean(self, dim)
+
+    def prod(self, dim):
+        return px.reduction.prod(self, dim)
+
+    def sum(self, dim):
+        return px.reduction.sum(self, dim)
+
+    def std(self, dim):
+        return px.reduction.std(self, dim)
+
+    def var(self, dim):
+        return px.reduction.var(self, dim)
+
+    def cumsum(self, dim):
+        return px.reduction.cumsum(self, dim)
+
+    def cumprod(self, dim):
+        return px.reduction.cumprod(self, dim)
 
 
 class XTensorConstantSignature(tuple):
