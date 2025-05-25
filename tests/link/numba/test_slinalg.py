@@ -724,11 +724,15 @@ def test_lu_solve(b_func, b_shape: tuple[int, ...], trans: bool, overwrite_b: bo
     np.testing.assert_allclose(b_val_not_contig, b_val)
 
 
-def test_banded_dot():
+@pytest.mark.parametrize("stride", [1, 2, -1], ids=lambda x: f"stride={x}")
+def test_banded_dot(stride):
     rng = np.random.default_rng()
 
     A_val = _make_banded_A(rng.normal(size=(10, 10)), kl=1, ku=1).astype(config.floatX)
-    x_val = rng.normal(size=(10,)).astype(config.floatX)
+
+    x_shape = (10 * abs(stride),)
+    x_val = rng.normal(size=x_shape).astype(config.floatX)
+    x_val = x_val[::stride]
 
     A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
     x = pt.tensor("x", shape=x_val.shape, dtype=x_val.dtype)

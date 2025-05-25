@@ -1062,19 +1062,19 @@ def _make_banded_A(A, kl, ku):
 
 
 @pytest.mark.parametrize(
-    "A_shape",
-    [
-        (10, 10),
-    ],
-)
-@pytest.mark.parametrize(
     "kl, ku", [(1, 1), (0, 1), (2, 2)], ids=["tridiag", "upper-only", "banded"]
 )
-def test_banded_dot(A_shape, kl, ku):
+@pytest.mark.parametrize("stride", [1, 2, -1], ids=lambda x: f"stride={x}")
+def test_banded_dot(kl, ku, stride):
     rng = np.random.default_rng()
 
-    A_val = _make_banded_A(rng.normal(size=A_shape), kl=kl, ku=ku).astype(config.floatX)
-    x_val = rng.normal(size=(A_shape[-1],)).astype(config.floatX)
+    size = 10
+
+    A_val = _make_banded_A(rng.normal(size=(size, size)), kl=kl, ku=ku).astype(
+        config.floatX
+    )
+    x_val = rng.normal(size=(size * abs(stride),)).astype(config.floatX)
+    x_val = x_val[::stride]
 
     A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
     x = pt.tensor("x", shape=x_val.shape, dtype=x_val.dtype)
