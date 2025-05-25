@@ -15,8 +15,10 @@ from pytensor.tensor.slinalg import (
     LUFactor,
     Solve,
     SolveTriangular,
+    banded_dot,
 )
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
+from tests.tensor.test_slinalg import _make_banded_A
 
 
 pytestmark = pytest.mark.filterwarnings("error")
@@ -720,3 +722,40 @@ def test_lu_solve(b_func, b_shape: tuple[int, ...], trans: bool, overwrite_b: bo
 
     # Can never destroy non-contiguous inputs
     np.testing.assert_allclose(b_val_not_contig, b_val)
+
+
+@pytest.mark.parametrize("stride", [1, 2, -1], ids=lambda x: f"stride={x}")
+def test_banded_dot(stride):
+    rng = np.random.default_rng()
+
+    A_val = _make_banded_A(rng.normal(size=(10, 10)), kl=1, ku=1).astype(config.floatX)
+
+    x_shape = (10 * abs(stride),)
+    x_val = rng.normal(size=x_shape).astype(config.floatX)
+    x_val = x_val[::stride]
+
+    A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
+    x = pt.tensor("x", shape=x_val.shape, dtype=x_val.dtype)
+
+    output = banded_dot(A, x, upper_diags=1, lower_diags=1)
+
+    compare_numba_and_py(
+        [A, x],
+        output,
+        test_inputs=[A_val, x_val],
+        inplace=True,
+        numba_mode=numba_inplace_mode,
+        eval_obj_mode=False,
+    )
+
+    # Test non-contiguous x input
+    x_val = rng.normal(size=(20,))[::2]
+
+    compare_numba_and_py(
+        [A, x],
+        output,
+        test_inputs=[A_val, x_val],
+        inplace=True,
+        numba_mode=numba_inplace_mode,
+        eval_obj_mode=False,
+    )
