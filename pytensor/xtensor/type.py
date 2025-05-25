@@ -438,6 +438,41 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def real(self):
         return px.math.real(self)
 
+    # Aggregation
+    # https://docs.xarray.dev/en/latest/api.html#id6
+    def all(self, dim=None):
+        return px.reduction.all(self, dim)
+
+    def any(self, dim=None):
+        return px.reduction.any(self, dim)
+
+    def max(self, dim=None):
+        return px.reduction.max(self, dim)
+
+    def min(self, dim=None):
+        return px.reduction.min(self, dim)
+
+    def mean(self, dim=None):
+        return px.reduction.mean(self, dim)
+
+    def prod(self, dim=None):
+        return px.reduction.prod(self, dim)
+
+    def sum(self, dim=None):
+        return px.reduction.sum(self, dim)
+
+    def std(self, dim=None):
+        return px.reduction.std(self, dim)
+
+    def var(self, dim=None):
+        return px.reduction.var(self, dim)
+
+    def cumsum(self, dim=None):
+        return px.reduction.cumsum(self, dim)
+
+    def cumprod(self, dim=None):
+        return px.reduction.cumprod(self, dim)
+
     # Reshaping and reorganizing
     # https://docs.xarray.dev/en/latest/api.html#id8
     def stack(self, dim, **dims):
