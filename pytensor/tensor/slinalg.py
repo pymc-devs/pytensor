@@ -1722,9 +1722,7 @@ class BandedDot(Op):
         (G_bar,) = output_grads
 
         A_bar = pt.outer(G_bar, x.T)
-        x_bar = banded_dot(
-            A.T, G_bar, lower_diags=self.lower_diags, upper_diags=self.upper_diags
-        )
+        x_bar = self(A.T, G_bar)
 
         return [A_bar, x_bar]
 
