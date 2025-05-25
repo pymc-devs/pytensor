@@ -609,6 +609,16 @@ class Op(MetaObject):
         # By default, do nothing
         return self
 
+    def infer_shape(self, fgraph, node, input_shapes):
+        if hasattr(self, "gufunc_signature"):
+            from pytensor.tensor.utils import _gufunc_to_out_shape
+
+            return _gufunc_to_out_shape(self.gufunc_signature, input_shapes)
+        else:
+            from pytensor.tensor.exceptions import ShapeError
+
+            raise ShapeError(f"Op {self} does not implement infer_shape")
+
     def __str__(self):
         return getattr(type(self), "__name__", super().__str__())
 

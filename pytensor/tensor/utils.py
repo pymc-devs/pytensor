@@ -9,6 +9,7 @@ from numpy import nditer
 import pytensor
 from pytensor.graph import FunctionGraph, Variable
 from pytensor.npy_2_compat import normalize_axis_tuple
+from pytensor.tensor import Any, Constant
 from pytensor.utils import hash_from_code
 
 
@@ -202,6 +203,58 @@ def _parse_gufunc_signature(
         else []
         for arg_list in signature.split("->")
     )
+
+
+def _gufunc_to_out_shape(
+    signature: str, shapes: list[tuple[Any, ...]]
+) -> list[tuple[Any, ...]]:
+    """
+    Compute the shape of the output of an Op given its gufunc signature and the
+    shapes of its inputs.
+
+    Parameters
+    ----------
+    signature : str
+        The gufunc signature of the Op.
+        eg: "(m,n),(n,p)->(m,p)".
+
+    shapes : list of tuple of Any
+        The list of shapes of the inputs.
+
+    Returns
+    -------
+    out_shape : list of tuple of Any
+        The list of shapes of the outputs.
+
+    Raises
+    ------
+    ValueError
+        If the signature is invalid for the shapes of the inputs.
+    """
+    input_sig, output_sig = _parse_gufunc_signature(signature)
+    dim_to_size: dict[str, Any] = {}
+    for input_shape, sig in zip(shapes, input_sig, strict=True):
+        for size, dim_name in zip(input_shape, sig, strict=True):
+            prev_size = dim_to_size.get(dim_name)
+            if prev_size is None:
+                dim_to_size[dim_name] = size
+            # Prefer constants
+            elif not isinstance(prev_size, Constant):
+                dim_to_size[dim_name] = size
+
+    out_shapes = []
+    for output_shape in output_sig:
+        temp_list = []
+        for dim in output_shape:
+            if dim not in dim_to_size:
+                raise ValueError(
+                    f"Invalid signature {signature} for shapes {shapes}. "
+                    f"Dimension {dim} not in input dimensions."
+                )
+            else:
+                temp_list.append(dim_to_size[dim])
+        out_shapes.append((*temp_list,))
+    return out_shapes
 
 
 def safe_signature(
