@@ -1,9 +1,7 @@
 import warnings
 
 import pytensor.xtensor.rewriting
-from pytensor.xtensor import (
-    linalg,
-)
+from pytensor.xtensor import linalg
 from pytensor.xtensor.type import (
     XTensorType,
     as_xtensor,

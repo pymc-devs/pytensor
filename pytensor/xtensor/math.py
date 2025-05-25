@@ -134,3 +134,8 @@ def cast(x, dtype):
     if dtype not in _xelemwise_cast_op:
         _xelemwise_cast_op[dtype] = XElemwise(scalar_op=_cast_mapping[dtype])
     return _xelemwise_cast_op[dtype](x)
+
+
+def softmax(x, dim=None):
+    exp_x = exp(x)
+    return exp_x / exp_x.sum(dim=dim)  # type: ignore
