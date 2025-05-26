@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 
 from pytensor.graph import Apply
+from pytensor.scalar import upcast
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import as_xtensor, xtensor
 
@@ -69,3 +70,55 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
             )
         y = Stack(new_dim_name, tuple(stacked_dims))(y)
     return y
+
+
+class Concat(XOp):
+    __props__ = ("dim",)
+
+    def __init__(self, dim: str):
+        self.dim = dim
+        super().__init__()
+
+    def make_node(self, *inputs):
+        inputs = [as_xtensor(inp) for inp in inputs]
+        concat_dim = self.dim
+
+        dims_and_shape: dict[str, int | None] = {}
+        for inp in inputs:
+            for dim, dim_length in zip(inp.type.dims, inp.type.shape):
+                if dim not in dims_and_shape:
+                    dims_and_shape[dim] = dim_length
+                else:
+                    if dim == concat_dim:
+                        if dim_length is None:
+                            dims_and_shape[dim] = None
+                        elif dims_and_shape[dim] is not None:
+                            dims_and_shape[dim] += dim_length
+                    elif dim_length is not None:
+                        # Check for conflicting in non-concatenated shapes
+                        if (dims_and_shape[dim] is not None) and (
+                            dims_and_shape[dim] != dim_length
+                        ):
+                            raise ValueError(
+                                f"Non-concatenated dimension {dim} has conflicting shapes"
+                            )
+                        # Keep the non-None shape
+                        dims_and_shape[dim] = dim_length
+
+        if concat_dim not in dims_and_shape:
+            # It's a new dim, that should be located at the start
+            dims_and_shape = {concat_dim: len(inputs)} | dims_and_shape
+        elif dims_and_shape[concat_dim] is not None:
+            # We need to add +1 for every input that doesn't have this dimension
+            for inp in inputs:
+                if concat_dim not in inp.type.dims:
+                    dims_and_shape[concat_dim] += 1
+
+        dims, shape = zip(*dims_and_shape.items())
+        dtype = upcast(*[x.type.dtype for x in inputs])
+        output = xtensor(dtype=dtype, dims=dims, shape=shape)
+        return Apply(self, inputs, [output])
+
+
+def concat(xtensors, dim: str):
+    return Concat(dim=dim)(*xtensors)
