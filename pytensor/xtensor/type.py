@@ -534,6 +534,15 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def cumprod(self, dim):
         return px.reduction.cumprod(self, dim)
 
+    def diff(self, dim, n=1):
+        """Compute the n-th discrete difference along the given dimension."""
+        slice1 = {dim: slice(1, None)}
+        slice2 = {dim: slice(None, -1)}
+        x = self
+        for _ in range(n):
+            x = x[slice1] - x[slice2]
+        return x
+
     # Reshaping and reorganizing
     # https://docs.xarray.dev/en/latest/api.html#id8
     def transpose(
