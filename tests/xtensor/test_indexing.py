@@ -491,3 +491,22 @@ def test_indexing_renames_into_update_variable():
     expected_result = x_test.copy()
     expected_result[idx_test] = y_test
     xr_assert_allclose(result, expected_result)
+
+
+@pytest.mark.parametrize("n", ["implicit", 1, 2])
+@pytest.mark.parametrize("dim", ["a", "b"])
+def test_diff(dim, n):
+    x = xtensor(dims=("a", "b"), shape=(7, 11))
+    if n == "implicit":
+        out = x.diff(dim)
+    else:
+        out = x.diff(dim, n=n)
+
+    fn = xr_function([x], out)
+    x_test = xr_arange_like(x)
+    res = fn(x_test)
+    if n == "implicit":
+        expected_res = x_test.diff(dim)
+    else:
+        expected_res = x_test.diff(dim, n=n)
+    xr_assert_allclose(res, expected_res)
