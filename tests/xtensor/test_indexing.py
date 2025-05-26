@@ -117,3 +117,22 @@ def test_single_vector_indexing_interacting_with_exisiting_dim():
     res = fn(x_test, xidx_test)
     expected_res = x_test[xidx_test.rename(a="b"), 1:]
     xr_assert_allclose(res, expected_res)
+
+
+@pytest.mark.parametrize("n", ["implicit", 1, 2])
+@pytest.mark.parametrize("dim", ["a", "b"])
+def test_diff(dim, n):
+    x = xtensor(dims=("a", "b"), shape=(7, 11))
+    if n == "implicit":
+        out = x.diff(dim)
+    else:
+        out = x.diff(dim, n=n)
+
+    fn = xr_function([x], out)
+    x_test = xr_arange_like(x)
+    res = fn(x_test)
+    if n == "implicit":
+        expected_res = x_test.diff(dim)
+    else:
+        expected_res = x_test.diff(dim, n=n)
+    xr_assert_allclose(res, expected_res)

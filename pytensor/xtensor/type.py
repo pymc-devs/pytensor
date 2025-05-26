@@ -502,6 +502,15 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def cumprod(self, dim):
         return px.reduction.cumprod(self, dim)
 
+    def diff(self, dim, n=1):
+        """Compute the n-th discrete difference along the given dimension."""
+        slice1 = {dim: slice(1, None)}
+        slice2 = {dim: slice(None, -1)}
+        x = self
+        for _ in range(n):
+            x = x[slice1] - x[slice2]
+        return x
+
 
 class XTensorConstantSignature(tuple):
     def __eq__(self, other):
