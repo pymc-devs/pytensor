@@ -146,6 +146,109 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             "Call `.astype(complex)` for the symbolic equivalent."
         )
 
+    # Python valid overloads
+    def __abs__(self):
+        return px.math.abs(self)
+
+    def __neg__(self):
+        return px.math.neg(self)
+
+    def __lt__(self, other):
+        return px.math.lt(self, other)
+
+    def __le__(self, other):
+        return px.math.le(self, other)
+
+    def __gt__(self, other):
+        return px.math.gt(self, other)
+
+    def __ge__(self, other):
+        return px.math.ge(self, other)
+
+    def __invert__(self):
+        return px.math.invert(self)
+
+    def __and__(self, other):
+        return px.math.and_(self, other)
+
+    def __or__(self, other):
+        return px.math.or_(self, other)
+
+    def __xor__(self, other):
+        return px.math.xor(self, other)
+
+    def __rand__(self, other):
+        return px.math.and_(other, self)
+
+    def __ror__(self, other):
+        return px.math.or_(other, self)
+
+    def __rxor__(self, other):
+        return px.math.xor(other, self)
+
+    def __add__(self, other):
+        return px.math.add(self, other)
+
+    def __sub__(self, other):
+        return px.math.sub(self, other)
+
+    def __mul__(self, other):
+        return px.math.mul(self, other)
+
+    def __div__(self, other):
+        return px.math.div(self, other)
+
+    def __pow__(self, other):
+        return px.math.pow(self, other)
+
+    def __mod__(self, other):
+        return px.math.mod(self, other)
+
+    def __divmod__(self, other):
+        return px.math.divmod(self, other)
+
+    def __truediv__(self, other):
+        return px.math.true_div(self, other)
+
+    def __floordiv__(self, other):
+        return px.math.floor_div(self, other)
+
+    def __rtruediv__(self, other):
+        return px.math.true_div(other, self)
+
+    def __rfloordiv__(self, other):
+        return px.math.floor_div(other, self)
+
+    def __radd__(self, other):
+        return px.math.add(other, self)
+
+    def __rsub__(self, other):
+        return px.math.sub(other, self)
+
+    def __rmul__(self, other):
+        return px.math.mul(other, self)
+
+    def __rdiv__(self, other):
+        return px.math.div_proxy(other, self)
+
+    def __rmod__(self, other):
+        return px.math.mod(other, self)
+
+    def __rdivmod__(self, other):
+        return px.math.divmod(other, self)
+
+    def __rpow__(self, other):
+        return px.math.pow(other, self)
+
+    def __ceil__(self):
+        return px.math.ceil(self)
+
+    def __floor__(self):
+        return px.math.floor(self)
+
+    def __trunc__(self):
+        return px.math.trunc(self)
+
     # DataArray-like attributes
     # https://docs.xarray.dev/en/latest/api.html#id1
     @property
@@ -192,14 +295,33 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     # DataArray contents
     # https://docs.xarray.dev/en/latest/api.html#dataarray-contents
-    def rename(self, new_name_or_name_dict, **names):
+    def rename(self, new_name_or_name_dict=None, **names):
         if isinstance(new_name_or_name_dict, str):
-            # TODO: Should we make a symbolic copy?
-            self.name = new_name_or_name_dict
+            new_name = new_name_or_name_dict
             name_dict = None
         else:
+            new_name = None
             name_dict = new_name_or_name_dict
-        return px.basic.rename(name_dict, **names)
+        new_out = px.basic.rename(self, name_dict, **names)
+        new_out.name = new_name
+        return new_out
+
+    # def swap_dims(self, *args, **kwargs):
+    #     ...
+    #
+    # def expand_dims(self, *args, **kwargs):
+    #     ...
+    #
+    # def squeeze(self):
+    #     ...
+
+    def copy(self, name: str | None = None):
+        out = px.math.identity(self)
+        out.name = name
+        return out
+
+    def astype(self, dtype):
+        return px.math.cast(self, dtype)
 
     def item(self):
         raise NotImplementedError("item not implemented for XTensorVariable")
@@ -218,6 +340,26 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     def __getitem__(self, idx):
         raise NotImplementedError("Indexing not yet implemnented")
+
+    # ndarray methods
+    # https://docs.xarray.dev/en/latest/api.html#id7
+    def clip(self, min, max):
+        return px.math.clip(self, min, max)
+
+    def conj(self):
+        return px.math.conj(self)
+
+    @property
+    def imag(self):
+        return px.math.imag(self)
+
+    @property
+    def real(self):
+        return px.math.real(self)
+
+    # @property
+    # def T(self):
+    #     ...
 
 
 class XTensorConstantSignature(tuple):
