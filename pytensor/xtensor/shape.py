@@ -73,6 +73,49 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
     return y
 
 
+class Transpose(XOp):
+    __props__ = ("dims",)
+
+    def __init__(self, dims: tuple[str, ...]):
+        super().__init__()
+        self.dims = dims
+
+    def make_node(self, x):
+        x = as_xtensor(x)
+        # Allow ellipsis for full transpose
+        if self.dims == () or self.dims == (...,):
+            dims = tuple(reversed(x.type.dims))
+        else:
+            # Expand ellipsis if present
+            if ... in self.dims:
+                pre = []
+                post = []
+                found = False
+                for d in self.dims:
+                    if d is ...:
+                        found = True
+                    elif not found:
+                        pre.append(d)
+                    else:
+                        post.append(d)
+                middle = [d for d in x.type.dims if d not in pre + post]
+                dims = tuple(pre + middle + post)
+            else:
+                dims = self.dims
+        if set(dims) != set(x.type.dims):
+            raise ValueError(f"Transpose dims {dims} must match {x.type.dims}")
+        output = xtensor(
+            dtype=x.type.dtype,
+            shape=tuple(x.type.shape[x.type.dims.index(d)] for d in dims),
+            dims=dims,
+        )
+        return Apply(self, [x], [output])
+
+
+def transpose(x, *dims):
+    return Transpose(dims)(x)
+
+
 class Concat(XOp):
     __props__ = ("dim",)
 

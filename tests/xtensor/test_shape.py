@@ -10,7 +10,7 @@ import numpy as np
 from xarray import DataArray
 from xarray import concat as xr_concat
 
-from pytensor.xtensor.shape import concat, stack
+from pytensor.xtensor.shape import concat, stack, transpose
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import xr_assert_allclose, xr_function, xr_random_like
 
@@ -24,9 +24,8 @@ def powerset(iterable, min_group_size=0):
     )
 
 
-@pytest.mark.xfail(reason="Not yet implemented")
+# @pytest.mark.xfail(reason="Not yet implemented")
 def test_transpose():
-    transpose = None
     a, b, c, d, e = "abcde"
 
     x = xtensor("x", dims=(a, b, c, d, e), shape=(2, 3, 5, 7, 11))
