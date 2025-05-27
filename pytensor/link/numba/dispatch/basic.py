@@ -565,18 +565,19 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
 def int_to_float_fn(inputs, out_dtype):
     """Create a Numba function that converts integer and boolean ``ndarray``s to floats."""
 
-    if all(
-        input.type.numpy_dtype == np.dtype(out_dtype) for input in inputs
-    ) and isinstance(np.dtype(out_dtype), np.floating):
+    if (
+        all(inp.type.dtype == out_dtype for inp in inputs)
+        and np.dtype(out_dtype).kind == "f"
+    ):
 
-        @numba_njit
+        @numba_njit(inline="always")
         def inputs_cast(x):
             return x
 
-    elif any(i.type.numpy_dtype.kind in "ib" for i in inputs):
+    elif any(i.type.numpy_dtype.kind in "uib" for i in inputs):
         args_dtype = np.dtype(f"f{out_dtype.itemsize}")
 
-        @numba_njit
+        @numba_njit(inline="always")
         def inputs_cast(x):
             return x.astype(args_dtype)
 
@@ -584,7 +585,7 @@ def int_to_float_fn(inputs, out_dtype):
         args_dtype_sz = max(_arg.type.numpy_dtype.itemsize for _arg in inputs)
         args_dtype = np.dtype(f"f{args_dtype_sz}")
 
-        @numba_njit
+        @numba_njit(inline="always")
         def inputs_cast(x):
             return x.astype(args_dtype)
 
@@ -593,17 +594,49 @@ def int_to_float_fn(inputs, out_dtype):
 
 @numba_funcify.register(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
-    # Numba's `np.dot` does not support integer dtypes, so we need to cast to
-    # float.
+    # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
+    x, y = node.inputs
+    [out] = node.outputs
 
-    out_dtype = node.outputs[0].type.numpy_dtype
-    inputs_cast = int_to_float_fn(node.inputs, out_dtype)
+    x_dtype = x.type.dtype
+    y_dtype = y.type.dtype
+    dot_dtype = f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
+    out_dtype = out.type.dtype
 
-    @numba_njit
-    def dot(x, y):
-        return np.asarray(np.dot(inputs_cast(x), inputs_cast(y))).astype(out_dtype)
+    if x_dtype == dot_dtype and y_dtype == dot_dtype:
 
-    return dot
+        @numba_njit
+        def dot(x, y):
+            return np.asarray(np.dot(x, y))
+
+    elif x_dtype == dot_dtype and y_dtype != dot_dtype:
+
+        @numba_njit
+        def dot(x, y):
+            return np.asarray(np.dot(x, y.astype(dot_dtype)))
+
+    elif x_dtype != dot_dtype and y_dtype == dot_dtype:
+
+        @numba_njit
+        def dot(x, y):
+            return np.asarray(np.dot(x.astype(dot_dtype), y))
+
+    else:
+
+        @numba_njit()
+        def dot(x, y):
+            return np.asarray(np.dot(x.astype(dot_dtype), y.astype(dot_dtype)))
+
+    if out_dtype == dot_dtype:
+        return dot
+
+    else:
+
+        @numba_njit
+        def dot_with_cast(x, y):
+            return dot(x, y).astype(out_dtype)
+
+    return dot_with_cast
 
 
 @numba_funcify.register(Solve)
