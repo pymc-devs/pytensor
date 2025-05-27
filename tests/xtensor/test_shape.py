@@ -24,7 +24,6 @@ def powerset(iterable, min_group_size=0):
     )
 
 
-# @pytest.mark.xfail(reason="Not yet implemented")
 def test_transpose():
     a, b, c, d, e = "abcde"
 
