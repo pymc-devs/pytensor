@@ -73,7 +73,9 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
     return y
 
 
-def expand_ellipsis(dims: tuple[str, ...], all_dims: tuple[str, ...]) -> tuple[str, ...]:
+def expand_ellipsis(
+    dims: tuple[str, ...], all_dims: tuple[str, ...]
+) -> tuple[str, ...]:
     """Expand ellipsis in dimension permutation.
 
     Parameters
