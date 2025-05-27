@@ -238,6 +238,7 @@ class TestFusion:
         include=[
             "canonicalize",
             "fusion",
+            "add_mul_fusion",
             "inplace",
         ],
         exclude=["cxx_only", "BlasOpt"],
@@ -1507,3 +1508,24 @@ def test_local_useless_dimshuffle_makevector():
     )
 
     assert y_rewritten_fg.outputs[0] == a
+
+
+@pytest.mark.parametrize("op", (add, mul))
+def test_constant_fold_branches_add_mul(op):
+    rng = np.random.default_rng()
+    py_op = np.add if op is add else np.multiply
+
+    x = pt.vector("x")
+    a = rng.normal(size=(1, 512, 5))
+    b = rng.normal(size=(1, 512, 1))
+    out = op(op(a, x), b)
+    new_out = rewrite_graph(out, include=("add_mul_fusion",))
+    assert len(new_out.owner.inputs) == 2
+    assert equal_computations([new_out], [op(py_op(a, b), x)])
+
+    # c shouldn't be folded as it would increase the memory usage
+    c = rng.normal(size=(1024, 1, 1))
+    out = op(op(op(a, x), c), b)
+    new_out = rewrite_graph(out, include=("add_mul_fusion",))
+    assert len(new_out.owner.inputs) == 3
+    assert equal_computations([new_out], [op(py_op(a, b), c, x)])
