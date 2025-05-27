@@ -75,14 +75,14 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
 
 def expand_ellipsis(dims: tuple[str, ...], all_dims: tuple[str, ...]) -> tuple[str, ...]:
     """Expand ellipsis in dimension permutation.
-    
+
     Parameters
     ----------
     dims : tuple[str, ...]
         The dimension permutation, which may contain ellipsis
     all_dims : tuple[str, ...]
         All available dimensions
-        
+
     Returns
     -------
     tuple[str, ...]
@@ -90,10 +90,10 @@ def expand_ellipsis(dims: tuple[str, ...], all_dims: tuple[str, ...]) -> tuple[s
     """
     if dims == () or dims == (...,):
         return tuple(reversed(all_dims))
-    
+
     if ... not in dims:
         return dims
-        
+
     pre = []
     post = []
     found = False
