@@ -2,7 +2,7 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor import broadcast_to, join, moveaxis
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, Stack, Transpose
+from pytensor.xtensor.shape import Concat, Stack, Transpose, expand_ellipsis
 
 
 @register_xcanonicalize
@@ -79,24 +79,7 @@ def lower_transpose(fgraph, node):
     # Determine the permutation of axes
     out_dims = node.op.dims
     in_dims = x.type.dims
-    # Expand ellipsis if present
-    if out_dims == () or out_dims == (...,):
-        expanded_dims = tuple(reversed(in_dims))
-    elif ... in out_dims:
-        pre = []
-        post = []
-        found = False
-        for d in out_dims:
-            if d is ...:
-                found = True
-            elif not found:
-                pre.append(d)
-            else:
-                post.append(d)
-        middle = [d for d in in_dims if d not in pre + post]
-        expanded_dims = tuple(pre + middle + post)
-    else:
-        expanded_dims = out_dims
+    expanded_dims = expand_ellipsis(out_dims, in_dims)
     perm = tuple(in_dims.index(d) for d in expanded_dims)
     x_tensor = tensor_from_xtensor(x)
     x_tensor_transposed = x_tensor.transpose(perm)

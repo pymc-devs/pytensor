@@ -73,6 +73,41 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
     return y
 
 
+def expand_ellipsis(dims: tuple[str, ...], all_dims: tuple[str, ...]) -> tuple[str, ...]:
+    """Expand ellipsis in dimension permutation.
+    
+    Parameters
+    ----------
+    dims : tuple[str, ...]
+        The dimension permutation, which may contain ellipsis
+    all_dims : tuple[str, ...]
+        All available dimensions
+        
+    Returns
+    -------
+    tuple[str, ...]
+        The expanded dimension permutation
+    """
+    if dims == () or dims == (...,):
+        return tuple(reversed(all_dims))
+    
+    if ... not in dims:
+        return dims
+        
+    pre = []
+    post = []
+    found = False
+    for d in dims:
+        if d is ...:
+            found = True
+        elif not found:
+            pre.append(d)
+        else:
+            post.append(d)
+    middle = [d for d in all_dims if d not in pre + post]
+    return tuple(pre + middle + post)
+
+
 class Transpose(XOp):
     __props__ = ("dims",)
 
@@ -82,26 +117,7 @@ class Transpose(XOp):
 
     def make_node(self, x):
         x = as_xtensor(x)
-        # Allow ellipsis for full transpose
-        if self.dims == () or self.dims == (...,):
-            dims = tuple(reversed(x.type.dims))
-        else:
-            # Expand ellipsis if present
-            if ... in self.dims:
-                pre = []
-                post = []
-                found = False
-                for d in self.dims:
-                    if d is ...:
-                        found = True
-                    elif not found:
-                        pre.append(d)
-                    else:
-                        post.append(d)
-                middle = [d for d in x.type.dims if d not in pre + post]
-                dims = tuple(pre + middle + post)
-            else:
-                dims = self.dims
+        dims = expand_ellipsis(self.dims, x.type.dims)
         if set(dims) != set(x.type.dims):
             raise ValueError(f"Transpose dims {dims} must match {x.type.dims}")
         output = xtensor(
