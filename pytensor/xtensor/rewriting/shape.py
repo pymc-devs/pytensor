@@ -2,7 +2,7 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor import broadcast_to, join, moveaxis
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_lower_xtensor
-from pytensor.xtensor.shape import Concat, Stack
+from pytensor.xtensor.shape import Concat, Stack, Transpose
 
 
 @register_lower_xtensor
@@ -69,4 +69,20 @@ def lower_concat(fgraph, node):
 
     joined_tensor = join(concat_axis, *bcast_tensor_inputs)
     new_out = xtensor_from_tensor(joined_tensor, dims=out_dims)
+    return [new_out]
+
+
+@register_lower_xtensor
+@node_rewriter(tracks=[Transpose])
+def lower_transpose(fgraph, node):
+    [x] = node.inputs
+    # Use the final dimensions that were already computed in make_node
+    out_dims = node.outputs[0].type.dims
+    in_dims = x.type.dims
+
+    # Compute the permutation based on the final dimensions
+    perm = tuple(in_dims.index(d) for d in out_dims)
+    x_tensor = tensor_from_xtensor(x)
+    x_tensor_transposed = x_tensor.transpose(perm)
+    new_out = xtensor_from_tensor(x_tensor_transposed, dims=out_dims)
     return [new_out]
