@@ -4,12 +4,13 @@ import pytest
 
 pytest.importorskip("xarray")
 
+import re
 from itertools import chain, combinations
 
 import numpy as np
 from xarray import concat as xr_concat
 
-from pytensor.xtensor.shape import concat, stack
+from pytensor.xtensor.shape import concat, stack, transpose
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     xr_arange_like,
@@ -26,6 +27,85 @@ def powerset(iterable, min_group_size=0):
     return chain.from_iterable(
         combinations(s, r) for r in range(min_group_size, len(s) + 1)
     )
+
+
+def test_transpose():
+    a, b, c, d, e = "abcde"
+
+    x = xtensor("x", dims=(a, b, c, d, e), shape=(2, 3, 5, 7, 11))
+    permutations = [
+        (a, b, c, d, e),  # identity
+        (e, d, c, b, a),  # full tranpose
+        (),  # eqivalent to full transpose
+        (a, b, c, e, d),  # swap last two dims
+        (..., d, c),  # equivalent to (a, b, e, d, c)
+        (b, a, ..., e, d),  # equivalent to (b, a, c, d, e)
+        (c, a, ...),  # equivalent to (c, a, b, d, e)
+    ]
+    outs = [transpose(x, *perm) for perm in permutations]
+
+    fn = xr_function([x], outs)
+    x_test = xr_arange_like(x)
+    res = fn(x_test)
+    expected_res = [x_test.transpose(*perm) for perm in permutations]
+    for outs_i, res_i, expected_res_i in zip(outs, res, expected_res):
+        xr_assert_allclose(res_i, expected_res_i)
+
+
+def test_xtensor_variable_transpose():
+    """Test the transpose() method of XTensorVariable."""
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
+
+    # Test basic transpose
+    out = x.transpose()
+    fn = xr_function([x], out)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test.transpose())
+
+    # Test transpose with specific dimensions
+    out = x.transpose("c", "a", "b")
+    fn = xr_function([x], out)
+    xr_assert_allclose(fn(x_test), x_test.transpose("c", "a", "b"))
+
+    # Test transpose with ellipsis
+    out = x.transpose("c", ...)
+    fn = xr_function([x], out)
+    xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
+
+    # Test error cases
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "Dimensions {'d'} do not exist. Expected one or more of: ('a', 'b', 'c')"
+        ),
+    ):
+        x.transpose("d")
+
+    with pytest.raises(ValueError, match="an index can only have a single ellipsis"):
+        x.transpose("a", ..., "b", ...)
+
+    # Test missing_dims parameter
+    # Test ignore
+    out = x.transpose("c", ..., "d", missing_dims="ignore")
+    fn = xr_function([x], out)
+    xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
+
+    # Test warn
+    with pytest.warns(UserWarning, match="Dimensions {'d'} do not exist"):
+        out = x.transpose("c", ..., "d", missing_dims="warn")
+    fn = xr_function([x], out)
+    xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
+
+
+def test_xtensor_variable_T():
+    """Test the T property of XTensorVariable."""
+    # Test T property with 3D tensor
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
+    out = x.T
+
+    fn = xr_function([x], out)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test.T)
 
 
 def test_stack():
