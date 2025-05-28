@@ -103,12 +103,7 @@ def lower_expand_dims(fgraph, node):
 def lower_squeeze(fgraph, node):
     [x] = node.inputs
     x_tensor = tensor_from_xtensor(x)
-    if node.op.dim is not None:
-        dim_idx = x.type.dims.index(node.op.dim)
-        x_tensor_squeezed = x_tensor.reshape(
-            tuple(s for i, s in enumerate(x_tensor.shape) if i != dim_idx)
-        )
-    else:
-        x_tensor_squeezed = x_tensor.reshape(tuple(s for s in x_tensor.shape if s != 1))
+    expected_shape = tuple(node.outputs[0].type.shape)
+    x_tensor_squeezed = x_tensor.reshape(expected_shape)
     new_out = xtensor_from_tensor(x_tensor_squeezed, dims=node.outputs[0].type.dims)
     return [new_out]

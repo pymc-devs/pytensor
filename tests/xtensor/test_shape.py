@@ -8,7 +8,7 @@ pytest.importorskip("xarray")
 
 from itertools import chain, combinations
 
-from pytensor.xtensor.shape import concat, expand_dims, stack, transpose
+from pytensor.xtensor.shape import concat, expand_dims, squeeze, stack, transpose
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     xr_arange_like,
@@ -242,3 +242,73 @@ def test_expand_dims():
     z = expand_dims(x, None)
     assert z.type.dims == ("city", None)
     assert z.type.shape == (3, 1)
+
+
+def test_squeeze():
+    # Test 1D tensor with no squeezable dimensions
+    x = xtensor("x", dims=("city",), shape=(3,))
+    with pytest.raises(ValueError, match="No dimensions of size 1 to remove"):
+        squeeze(x)
+
+    # Test 2D tensor with one squeezable dimension
+    x2d = xtensor("x2d", dims=("row", "col"), shape=(2, 1))
+    y2d = squeeze(x2d)
+    assert y2d.type.dims == ("row",)
+    assert y2d.type.shape == (2,)
+
+    # Test 3D tensor with multiple squeezable dimensions
+    x3d = xtensor("x3d", dims=("batch", "row", "col"), shape=(1, 2, 1))
+    y3d = squeeze(x3d)
+    assert y3d.type.dims == ("row",)
+    assert y3d.type.shape == (2,)
+
+    # Test squeezing specific dimension
+    x3d = xtensor("x3d", dims=("batch", "row", "col"), shape=(1, 2, 1))
+    y3d = squeeze(x3d, dim="batch")
+    assert y3d.type.dims == ("row", "col")
+    assert y3d.type.shape == (2, 1)
+
+    # Test squeezing non-existent dimension
+    with pytest.raises(ValueError, match="Dimension time not found"):
+        squeeze(x3d, dim="time")
+
+    # Test squeezing dimension with size > 1
+    x3d = xtensor("x3d", dims=("batch", "row", "col"), shape=(2, 2, 1))
+    with pytest.raises(ValueError, match="Dimension batch has size 2, not 1"):
+        squeeze(x3d, dim="batch")
+
+    # Test functional interface
+    fn = xr_function([x2d], y2d)
+    x_test = xr_arange_like(x2d)
+    res = fn(x_test)
+    expected_res = x_test.squeeze()
+    xr_assert_allclose(res, expected_res)
+
+    # Test squeezing a tensor with multiple squeezable dimensions
+    x_multi = xtensor("x_multi", dims=("batch", "row", "col"), shape=(1, 2, 1))
+    y_multi = squeeze(x_multi)
+    assert y_multi.type.dims == ("row",)
+    assert y_multi.type.shape == (2,)
+    fn_multi = xr_function([x_multi], y_multi)
+    x_multi_test = xr_arange_like(x_multi)
+    res_multi = fn_multi(x_multi_test)
+    expected_res_multi = x_multi_test.squeeze()
+    xr_assert_allclose(res_multi, expected_res_multi)
+
+
+def test_lower_squeeze():
+    from pytensor.xtensor.rewriting.shape import lower_squeeze
+    from pytensor.xtensor.shape import squeeze
+    from pytensor.xtensor.type import xtensor
+
+    # Create a tensor with a squeezable dimension
+    x = xtensor("x", dims=("row", "col"), shape=(2, 1))
+    y = squeeze(x)
+
+    class DummyFGraph:
+        pass
+
+    node = type("Node", (), {"inputs": [x], "op": y.owner.op, "outputs": [y]})()
+    [out] = lower_squeeze.transform(DummyFGraph(), node)
+    assert out.type.dims == ("row",)
+    assert out.type.shape == (2,)
