@@ -12,7 +12,7 @@ except ModuleNotFoundError:
     XARRAY_AVAILABLE = False
 
 from collections.abc import Sequence
-from typing import Any, Literal, TypeVar, Union
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 
@@ -422,10 +422,10 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                 )
             else:
                 # Default to 5 for head and tail
-                indexers = {dim: 5 for dim in self.type.dims}
+                indexers = dict.fromkeys(self.type.dims, 5)
 
         elif not isinstance(indexers, dict):
-            indexers = {dim: indexers for dim in self.type.dims}
+            indexers = dict.fromkeys(self.type.dims, indexers)
 
         if kind == "head":
             indices = {dim: slice(None, value) for dim, value in indexers.items()}
@@ -464,43 +464,41 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def real(self):
         return px.math.real(self)
 
-    def transpose(self, *dims: Union[str, type(Ellipsis)], missing_dims: Literal["raise", "warn", "ignore"] = "raise"):
+    def transpose(self, *dims, missing_dims: Literal["raise", "warn", "ignore"] = "raise"):
         """Transpose dimensions of the tensor.
-        
+
         Parameters
         ----------
-        *dims : str | Ellipsis
-            Dimensions to transpose. If empty, performs a full transpose.
-            Can use ellipsis (...) to represent remaining dimensions.
-        missing_dims : {"raise", "warn", "ignore"}, default="raise"
-            How to handle dimensions that don't exist in the tensor:
-            - "raise": Raise an error if any dimensions don't exist
+        *dims : str
+            Dimensions to transpose to. Can include ellipsis (...) to represent
+            remaining dimensions in their original order.
+        missing_dims : {"raise", "warn", "ignore"}, optional
+            How to handle dimensions that don't exist in the input tensor:
+            - "raise": Raise an error if any dimensions don't exist (default)
             - "warn": Warn if any dimensions don't exist
             - "ignore": Silently ignore any dimensions that don't exist
-        
+
         Returns
         -------
         XTensorVariable
             Transposed tensor with reordered dimensions.
-        
+
         Raises
         ------
         ValueError
-            If missing_dims="raise" and any dimensions don't exist.
-            If multiple ellipsis are provided.
+            If any dimension in dims doesn't exist in the input tensor and missing_dims is "raise".
         """
-        return px.shape.transpose(self, *dims, missing_dims=missing_dims)
+        from pytensor.xtensor.shape import transpose
+        return transpose(self, *dims, missing_dims=missing_dims)
 
     @property
-    def T(self) -> "XTensorVariable":
-        """Return the full transpose of the tensor.
-        
-        This is equivalent to calling transpose() with no arguments.
-        
+    def T(self):
+        """Transpose all dimensions of the tensor, reversing their order.
+
         Returns
         -------
         XTensorVariable
-            Fully transposed tensor.
+            Transposed tensor with reversed dimensions.
         """
         return self.transpose()
 

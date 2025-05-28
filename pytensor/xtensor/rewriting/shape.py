@@ -2,8 +2,7 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor import broadcast_to, join, moveaxis
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, Stack, Transpose, expand_ellipsis
-import warnings
+from pytensor.xtensor.shape import Concat, Stack, Transpose
 
 
 @register_xcanonicalize
@@ -77,29 +76,13 @@ def lower_concat(fgraph, node):
 @node_rewriter(tracks=[Transpose])
 def lower_transpose(fgraph, node):
     [x] = node.inputs
-    # Determine the permutation of axes
-    out_dims = node.op.dims
+    # Use the final dimensions that were already computed in make_node
+    out_dims = node.outputs[0].type.dims
     in_dims = x.type.dims
-    expanded_dims = expand_ellipsis(out_dims, in_dims)
-    
-    # Handle missing dimensions based on missing_dims setting
-    if node.op.missing_dims == "ignore":
-        # Filter out dimensions that don't exist in in_dims
-        expanded_dims = tuple(d for d in expanded_dims if d in in_dims)
-        # Add remaining dimensions in their original order
-        remaining_dims = tuple(d for d in in_dims if d not in expanded_dims)
-        expanded_dims = expanded_dims + remaining_dims
-    elif node.op.missing_dims == "warn":
-        missing = set(expanded_dims) - set(in_dims)
-        if missing:
-            warnings.warn(f"Dimensions {missing} do not exist in {in_dims}")
-        # Filter out missing dimensions and add remaining ones
-        expanded_dims = tuple(d for d in expanded_dims if d in in_dims)
-        remaining_dims = tuple(d for d in in_dims if d not in expanded_dims)
-        expanded_dims = expanded_dims + remaining_dims
-    
-    perm = tuple(in_dims.index(d) for d in expanded_dims)
+
+    # Compute the permutation based on the final dimensions
+    perm = tuple(in_dims.index(d) for d in out_dims)
     x_tensor = tensor_from_xtensor(x)
     x_tensor_transposed = x_tensor.transpose(perm)
-    new_out = xtensor_from_tensor(x_tensor_transposed, dims=expanded_dims)
+    new_out = xtensor_from_tensor(x_tensor_transposed, dims=out_dims)
     return [new_out]
