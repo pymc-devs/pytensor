@@ -33,15 +33,12 @@ def test_xtensortype_filter_variable():
     assert x.type.filter_variable(y1) is y1
 
     y2 = xtensor("y2", dims=("b", "a"), shape=(3, 2))
-    expected_y2 = as_xtensor(y2.values.transpose(), dims=("a", "b"))
+    expected_y2 = y2.transpose()
     assert equal_computations([x.type.filter_variable(y2)], [expected_y2])
 
     y3 = xtensor("y3", dims=("b", "a"), shape=(3, None))
     expected_y3 = as_xtensor(
-        specify_shape(
-            as_xtensor(y3.values.transpose(), dims=("a", "b")).values, (2, 3)
-        ),
-        dims=("a", "b"),
+        specify_shape(y3.transpose().values, (2, 3)), dims=("a", "b")
     )
     assert equal_computations([x.type.filter_variable(y3)], [expected_y3])
 
@@ -116,7 +113,7 @@ def test_minimum_compile():
     from pytensor.compile.mode import Mode
 
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = as_xtensor(x.values.transpose(), dims=("b", "a"))
+    y = x.transpose()
     minimum_mode = Mode(linker="py", optimizer="minimum_compile")
     result = y.eval({"x": np.ones((2, 3))}, mode=minimum_mode)
     np.testing.assert_array_equal(result, np.ones((3, 2)))

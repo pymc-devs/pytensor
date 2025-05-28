@@ -1,4 +1,8 @@
+import typing
+import warnings
 from collections.abc import Sequence
+from types import EllipsisType
+from typing import Literal
 
 from pytensor.graph import Apply
 from pytensor.scalar import upcast
@@ -70,6 +74,92 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
             )
         y = Stack(new_dim_name, tuple(stacked_dims))(y)
     return y
+
+
+class Transpose(XOp):
+    __props__ = ("dims",)
+
+    def __init__(
+        self,
+        dims: Sequence[str],
+    ):
+        super().__init__()
+        self.dims = tuple(dims)
+
+    def make_node(self, x):
+        x = as_xtensor(x)
+
+        transpose_dims = self.dims
+        x_shape = x.type.shape
+        x_dims = x.type.dims
+        if set(transpose_dims) != set(x_dims):
+            raise ValueError(f"{transpose_dims} must be a permuted list of {x_dims}")
+
+        output = xtensor(
+            dtype=x.type.dtype,
+            shape=tuple(x_shape[x_dims.index(d)] for d in transpose_dims),
+            dims=transpose_dims,
+        )
+        return Apply(self, [x], [output])
+
+
+def transpose(
+    x,
+    *dims: str | EllipsisType,
+    missing_dims: Literal["raise", "warn", "ignore"] = "raise",
+):
+    """Transpose dimensions of the tensor.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        Input tensor to transpose.
+    *dims : str
+        Dimensions to transpose to. Can include ellipsis (...) to represent
+        remaining dimensions in their original order.
+    missing_dims : {"raise", "warn", "ignore"}, optional
+        How to handle dimensions that don't exist in the input tensor:
+        - "raise": Raise an error if any dimensions don't exist (default)
+        - "warn": Warn if any dimensions don't exist
+        - "ignore": Silently ignore any dimensions that don't exist
+
+    Returns
+    -------
+    XTensorVariable
+        Transposed tensor with reordered dimensions.
+
+    Raises
+    ------
+    ValueError
+        If any dimension in dims doesn't exist in the input tensor and missing_dims is "raise".
+    """
+    # Validate dimensions
+    x = as_xtensor(x)
+    x_dims = x.type.dims
+    invalid_dims = set(dims) - {..., *x_dims}
+    if invalid_dims:
+        if missing_dims != "ignore":
+            msg = f"Dimensions {invalid_dims} do not exist. Expected one or more of: {x_dims}"
+            if missing_dims == "raise":
+                raise ValueError(msg)
+            else:
+                warnings.warn(msg)
+        # Handle missing dimensions if not raising
+        dims = tuple(d for d in dims if d in x_dims or d is ...)
+
+    if dims == () or dims == (...,):
+        dims = tuple(reversed(x_dims))
+    elif ... in dims:
+        if dims.count(...) > 1:
+            raise ValueError("Ellipsis (...) can only appear once in the dimensions")
+        # Handle ellipsis expansion
+        ellipsis_idx = dims.index(...)
+        pre = dims[:ellipsis_idx]
+        post = dims[ellipsis_idx + 1 :]
+        middle = [d for d in x_dims if d not in pre + post]
+        dims = (*pre, *middle, *post)
+
+    return Transpose(typing.cast(tuple[str], dims))(x)
 
 
 class Concat(XOp):
