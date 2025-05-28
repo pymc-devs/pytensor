@@ -1,6 +1,6 @@
+import warnings
 from collections.abc import Sequence
 from typing import Literal
-import warnings
 
 from pytensor import Variable
 from pytensor.graph import Apply
@@ -76,7 +76,7 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
 
 
 def expand_ellipsis(
-    dims: tuple[str, ...], all_dims: tuple[str, ...]
+    dims: tuple[str, ...], all_dims: tuple[str, ...], validate: bool = True
 ) -> tuple[str, ...]:
     """Expand ellipsis in dimension permutation.
 
@@ -86,6 +86,8 @@ def expand_ellipsis(
         The dimension permutation, which may contain ellipsis
     all_dims : tuple[str, ...]
         All available dimensions
+    validate : bool, default True
+        Whether to check that all non-ellipsis elements in dims are valid dimension names.
 
     Returns
     -------
@@ -96,11 +98,16 @@ def expand_ellipsis(
     ------
     ValueError
         If more than one ellipsis is present in dims.
+        If any non-ellipsis element in dims is not a valid dimension name and validate is True.
     """
     if dims == () or dims == (...,):
         return tuple(reversed(all_dims))
 
     if ... not in dims:
+        if validate:
+            invalid_dims = set(dims) - set(all_dims)
+            if invalid_dims:
+                raise ValueError(f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}")
         return dims
 
     if sum(d is ... for d in dims) > 1:
@@ -116,6 +123,10 @@ def expand_ellipsis(
             pre.append(d)
         else:
             post.append(d)
+    if validate:
+        invalid_dims = set(pre + post) - set(all_dims)
+        if invalid_dims:
+            raise ValueError(f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}")
     middle = [d for d in all_dims if d not in pre + post]
     return tuple(pre + middle + post)
 
@@ -130,8 +141,8 @@ class Transpose(XOp):
 
     def make_node(self, x):
         x = as_xtensor(x)
-        dims = expand_ellipsis(self.dims, x.type.dims)
-        
+        dims = expand_ellipsis(self.dims, x.type.dims, validate=(self.missing_dims == "raise"))
+
         # Handle missing dimensions based on missing_dims setting
         if self.missing_dims == "ignore":
             # Filter out dimensions that don't exist in x.type.dims
@@ -150,7 +161,7 @@ class Transpose(XOp):
         else:  # "raise"
             if set(dims) != set(x.type.dims):
                 raise ValueError(f"Transpose dims {dims} must match {x.type.dims}")
-        
+
         output = xtensor(
             dtype=x.type.dtype,
             shape=tuple(x.type.shape[x.type.dims.index(d)] for d in dims),
@@ -161,30 +172,29 @@ class Transpose(XOp):
 
 def transpose(x, *dims, missing_dims: Literal["raise", "warn", "ignore"] = "raise"):
     """Transpose dimensions of the tensor.
-    
+
     Parameters
     ----------
     x : XTensorVariable
-        The tensor to transpose
-    *dims : str | Ellipsis
-        Dimensions to transpose. If empty, performs a full transpose.
-        Can use ellipsis (...) to represent remaining dimensions.
-    missing_dims : {"raise", "warn", "ignore"}, default="raise"
-        How to handle dimensions that don't exist in the tensor:
-        - "raise": Raise an error if any dimensions don't exist
+        Input tensor to transpose.
+    *dims : str
+        Dimensions to transpose to. Can include ellipsis (...) to represent
+        remaining dimensions in their original order.
+    missing_dims : {"raise", "warn", "ignore"}, optional
+        How to handle dimensions that don't exist in the input tensor:
+        - "raise": Raise an error if any dimensions don't exist (default)
         - "warn": Warn if any dimensions don't exist
         - "ignore": Silently ignore any dimensions that don't exist
-    
+
     Returns
     -------
     XTensorVariable
         Transposed tensor with reordered dimensions.
-    
+
     Raises
     ------
     ValueError
-        If missing_dims="raise" and any dimensions don't exist.
-        If multiple ellipsis are provided.
+        If any dimension in dims doesn't exist in the input tensor and missing_dims is "raise".
     """
     return Transpose(dims, missing_dims=missing_dims)(x)
 

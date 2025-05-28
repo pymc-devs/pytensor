@@ -166,7 +166,7 @@ def test_concat_scalar():
 def test_xtensor_variable_transpose():
     """Test the transpose() method of XTensorVariable."""
     x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
-    
+
     # Test basic transpose
     out = x.transpose()
     fn = xr_function([x], out)
@@ -175,30 +175,30 @@ def test_xtensor_variable_transpose():
         dims=x.type.dims,
     )
     xr_assert_allclose(fn(x_test), x_test.transpose())
-    
+
     # Test transpose with specific dimensions
     out = x.transpose("c", "a", "b")
     fn = xr_function([x], out)
     xr_assert_allclose(fn(x_test), x_test.transpose("c", "a", "b"))
-    
+
     # Test transpose with ellipsis
     out = x.transpose("c", ...)
     fn = xr_function([x], out)
     xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
-    
+
     # Test error cases
-    with pytest.raises(ValueError, match="Transpose dims.*must match"):
+    with pytest.raises(ValueError, match="Invalid dimensions: {'d'}. Available dimensions: \\('a', 'b', 'c'\\)"):
         x.transpose("d")
-    
+
     with pytest.raises(ValueError, match="an index can only have a single ellipsis"):
         x.transpose("a", ..., "b", ...)
-    
+
     # Test missing_dims parameter
     # Test ignore
     out = x.transpose("c", ..., "d", missing_dims="ignore")
     fn = xr_function([x], out)
     xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
-    
+
     # Test warn
     with pytest.warns(UserWarning, match="Dimensions {'d'} do not exist"):
         out = x.transpose("c", ..., "d", missing_dims="warn")
@@ -211,18 +211,18 @@ def test_xtensor_variable_T():
     # Test T property with 3D tensor
     x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
     out = x.T
-    
+
     fn = xr_function([x], out)
     x_test = DataArray(
         np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
         dims=x.type.dims,
     )
     xr_assert_allclose(fn(x_test), x_test.transpose())
-    
+
     # Test T property with 2D tensor
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     out = x.T
-    
+
     fn = xr_function([x], out)
     x_test = DataArray(
         np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
