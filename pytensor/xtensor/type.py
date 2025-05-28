@@ -626,8 +626,7 @@ def as_xtensor(x, name=None, dims: Sequence[str] | None = None):
     if isinstance(x, Apply):
         if len(x.outputs) != 1:
             raise ValueError(
-                "It is ambiguous which output of a "
-                "multi-output Op has to be fetched.",
+                "It is ambiguous which output of a multi-output Op has to be fetched.",
                 x,
             )
         else:
