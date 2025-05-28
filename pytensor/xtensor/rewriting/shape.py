@@ -2,7 +2,7 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor import broadcast_to, join, moveaxis
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, Stack, Transpose
+from pytensor.xtensor.shape import Concat, ExpandDims, Squeeze, Stack, Transpose
 
 
 @register_xcanonicalize
@@ -85,4 +85,30 @@ def lower_transpose(fgraph, node):
     x_tensor = tensor_from_xtensor(x)
     x_tensor_transposed = x_tensor.transpose(perm)
     new_out = xtensor_from_tensor(x_tensor_transposed, dims=out_dims)
+    return [new_out]
+
+
+@register_xcanonicalize
+@node_rewriter(tracks=[ExpandDims])
+def lower_expand_dims(fgraph, node):
+    [x] = node.inputs
+    x_tensor = tensor_from_xtensor(x)
+    x_tensor_expanded = x_tensor.reshape((*x_tensor.shape, 1))
+    new_out = xtensor_from_tensor(x_tensor_expanded, dims=node.outputs[0].type.dims)
+    return [new_out]
+
+
+@register_xcanonicalize
+@node_rewriter(tracks=[Squeeze])
+def lower_squeeze(fgraph, node):
+    [x] = node.inputs
+    x_tensor = tensor_from_xtensor(x)
+    if node.op.dim is not None:
+        dim_idx = x.type.dims.index(node.op.dim)
+        x_tensor_squeezed = x_tensor.reshape(
+            tuple(s for i, s in enumerate(x_tensor.shape) if i != dim_idx)
+        )
+    else:
+        x_tensor_squeezed = x_tensor.reshape(tuple(s for s in x_tensor.shape if s != 1))
+    new_out = xtensor_from_tensor(x_tensor_squeezed, dims=node.outputs[0].type.dims)
     return [new_out]

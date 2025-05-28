@@ -1,15 +1,14 @@
 # ruff: noqa: E402
+import numpy as np
 import pytest
+from xarray import concat as xr_concat
 
 
 pytest.importorskip("xarray")
 
 from itertools import chain, combinations
 
-import numpy as np
-from xarray import concat as xr_concat
-
-from pytensor.xtensor.shape import concat, stack, transpose
+from pytensor.xtensor.shape import concat, expand_dims, stack, transpose
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     xr_arange_like,
@@ -215,3 +214,31 @@ def test_xtensor_variable_T():
     fn = xr_function([x], out)
     x_test = xr_arange_like(x)
     xr_assert_allclose(fn(x_test), x_test.transpose())
+
+
+def test_expand_dims():
+    # Test 1D tensor expansion
+    x = xtensor("x", dims=("city",), shape=(3,))
+    y = expand_dims(x, "country")
+    assert y.type.dims == ("city", "country")
+    assert y.type.shape == (3, 1)
+
+    # Test 2D tensor expansion
+    x2d = xtensor("x2d", dims=("row", "col"), shape=(2, 3))
+    y2d = expand_dims(x2d, "batch")
+    assert y2d.type.dims == ("row", "col", "batch")
+    assert y2d.type.shape == (2, 3, 1)
+
+    # Test expansion with different dimension name
+    z = expand_dims(x, "time")
+    assert z.type.dims == ("city", "time")
+    assert z.type.shape == (3, 1)
+
+    # Test that expanding with an existing dimension raises an error
+    with pytest.raises(ValueError):
+        expand_dims(y, "city")
+
+    # Test that expanding with None dimension works
+    z = expand_dims(x, None)
+    assert z.type.dims == ("city", None)
+    assert z.type.shape == (3, 1)
