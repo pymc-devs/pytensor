@@ -7,12 +7,16 @@ pytest.importorskip("xarray")
 from itertools import chain, combinations
 
 import numpy as np
-from xarray import DataArray
 from xarray import concat as xr_concat
 
 from pytensor.xtensor.shape import concat, stack, transpose
 from pytensor.xtensor.type import xtensor
-from tests.xtensor.util import xr_assert_allclose, xr_function, xr_random_like
+from tests.xtensor.util import (
+    xr_arange_like,
+    xr_assert_allclose,
+    xr_function,
+    xr_random_like,
+)
 
 
 def powerset(iterable, min_group_size=0):
@@ -40,10 +44,7 @@ def test_transpose():
     outs = [transpose(x, *perm) for perm in permutations]
 
     fn = xr_function([x], outs)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     res = fn(x_test)
     expected_res = [x_test.transpose(*perm) for perm in permutations]
     for outs_i, res_i, expected_res_i in zip(outs, res, expected_res):
@@ -59,10 +60,7 @@ def test_stack():
     ]
 
     fn = xr_function([x], outs)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     res = fn(x_test)
 
     expected_res = [
@@ -79,10 +77,7 @@ def test_stack_single_dim():
     assert out.type.dims == ("b", "c", "d")
 
     fn = xr_function([x], out)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     fn.fn.dprint(print_type=True)
     res = fn(x_test)
     expected_res = x_test.stack(d=["a"])
@@ -94,10 +89,7 @@ def test_multiple_stacks():
     out = stack(x, new_dim1=("a", "b"), new_dim2=("c", "d"))
 
     fn = xr_function([x], [out])
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     res = fn(x_test)
     expected_res = x_test.stack(new_dim1=("a", "b"), new_dim2=("c", "d"))
     xr_assert_allclose(res[0], expected_res)
@@ -170,10 +162,7 @@ def test_xtensor_variable_transpose():
     # Test basic transpose
     out = x.transpose()
     fn = xr_function([x], out)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     xr_assert_allclose(fn(x_test), x_test.transpose())
 
     # Test transpose with specific dimensions
@@ -216,10 +205,7 @@ def test_xtensor_variable_T():
     out = x.T
 
     fn = xr_function([x], out)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     xr_assert_allclose(fn(x_test), x_test.transpose())
 
     # Test T property with 2D tensor
@@ -227,8 +213,5 @@ def test_xtensor_variable_T():
     out = x.T
 
     fn = xr_function([x], out)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     xr_assert_allclose(fn(x_test), x_test.transpose())

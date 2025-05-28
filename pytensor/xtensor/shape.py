@@ -76,7 +76,10 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
 
 
 def expand_ellipsis(
-    dims: tuple[str, ...], all_dims: tuple[str, ...], validate: bool = True
+    dims: tuple[str, ...],
+    all_dims: tuple[str, ...],
+    validate: bool = True,
+    missing_dims: Literal["raise", "warn", "ignore"] = "raise",
 ) -> tuple[str, ...]:
     """Expand ellipsis in dimension permutation.
 
@@ -88,6 +91,11 @@ def expand_ellipsis(
         All available dimensions
     validate : bool, default True
         Whether to check that all non-ellipsis elements in dims are valid dimension names.
+    missing_dims : {"raise", "warn", "ignore"}, optional
+        How to handle dimensions that don't exist in all_dims:
+        - "raise": Raise an error if any dimensions don't exist (default)
+        - "warn": Warn if any dimensions don't exist
+        - "ignore": Silently ignore any dimensions that don't exist
 
     Returns
     -------
@@ -99,38 +107,39 @@ def expand_ellipsis(
     ValueError
         If more than one ellipsis is present in dims.
         If any non-ellipsis element in dims is not a valid dimension name and validate is True.
+        If missing_dims is "raise" and any dimension in dims doesn't exist in all_dims.
     """
+    # Handle empty or full ellipsis case
     if dims == () or dims == (...,):
         return tuple(reversed(all_dims))
 
-    if ... not in dims:
-        if validate:
-            invalid_dims = set(dims) - set(all_dims)
-            if invalid_dims:
+    # Check for multiple ellipses
+    if dims.count(...) > 1:
+        raise ValueError("an index can only have a single ellipsis ('...')")
+
+    # Validate dimensions if requested
+    if validate:
+        invalid_dims = set(dims) - {..., *all_dims}
+        if invalid_dims:
+            if missing_dims == "raise":
                 raise ValueError(
                     f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}"
                 )
+            elif missing_dims == "warn":
+                warnings.warn(f"Dimensions {invalid_dims} do not exist in {all_dims}")
+
+    # Handle missing dimensions if not raising
+    if missing_dims in ("ignore", "warn"):
+        dims = tuple(d for d in dims if d in all_dims or d is ...)
+
+    # If no ellipsis, just return the dimensions
+    if ... not in dims:
         return dims
 
-    if sum(d is ... for d in dims) > 1:
-        raise ValueError("an index can only have a single ellipsis ('...')")
-
-    pre = []
-    post = []
-    found = False
-    for d in dims:
-        if d is ...:
-            found = True
-        elif not found:
-            pre.append(d)
-        else:
-            post.append(d)
-    if validate:
-        invalid_dims = set(pre + post) - set(all_dims)
-        if invalid_dims:
-            raise ValueError(
-                f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}"
-            )
+    # Handle ellipsis expansion
+    ellipsis_idx = dims.index(...)
+    pre = list(dims[:ellipsis_idx])
+    post = list(dims[ellipsis_idx + 1 :])
     middle = [d for d in all_dims if d not in pre + post]
     return tuple(pre + middle + post)
 
@@ -140,7 +149,7 @@ class Transpose(XOp):
 
     def __init__(
         self,
-        dims: tuple[str, ...],
+        dims: tuple[str | Literal[...], ...],
         missing_dims: Literal["raise", "warn", "ignore"] = "raise",
     ):
         super().__init__()
@@ -150,22 +159,8 @@ class Transpose(XOp):
     def make_node(self, x):
         x = as_xtensor(x)
         dims = expand_ellipsis(
-            self.dims, x.type.dims, validate=(self.missing_dims == "raise")
+            self.dims, x.type.dims, validate=True, missing_dims=self.missing_dims
         )
-
-        # Handle missing dimensions based on missing_dims setting
-        if self.missing_dims in ("ignore", "warn"):
-            if self.missing_dims == "warn":
-                missing = set(dims) - set(x.type.dims)
-                if missing:
-                    warnings.warn(f"Dimensions {missing} do not exist in {x.type.dims}")
-            # Filter out dimensions that don't exist and add remaining ones
-            dims = tuple(d for d in dims if d in x.type.dims)
-            remaining_dims = tuple(d for d in x.type.dims if d not in dims)
-            dims = dims + remaining_dims
-        else:  # "raise"
-            if set(dims) != set(x.type.dims):
-                raise ValueError(f"Transpose dims {dims} must match {x.type.dims}")
 
         output = xtensor(
             dtype=x.type.dtype,
