@@ -1,4 +1,6 @@
+import warnings
 from collections.abc import Sequence
+from typing import Literal
 
 from pytensor import Variable
 from pytensor.graph import Apply
@@ -73,6 +75,130 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
     return y
 
 
+def expand_ellipsis(
+    dims: tuple[str, ...],
+    all_dims: tuple[str, ...],
+    validate: bool = True,
+    missing_dims: Literal["raise", "warn", "ignore"] = "raise",
+) -> tuple[str, ...]:
+    """Expand ellipsis in dimension permutation.
+
+    Parameters
+    ----------
+    dims : tuple[str, ...]
+        The dimension permutation, which may contain ellipsis
+    all_dims : tuple[str, ...]
+        All available dimensions
+    validate : bool, default True
+        Whether to check that all non-ellipsis elements in dims are valid dimension names.
+    missing_dims : {"raise", "warn", "ignore"}, optional
+        How to handle dimensions that don't exist in all_dims:
+        - "raise": Raise an error if any dimensions don't exist (default)
+        - "warn": Warn if any dimensions don't exist
+        - "ignore": Silently ignore any dimensions that don't exist
+
+    Returns
+    -------
+    tuple[str, ...]
+        The expanded dimension permutation
+
+    Raises
+    ------
+    ValueError
+        If more than one ellipsis is present in dims.
+        If any non-ellipsis element in dims is not a valid dimension name and validate is True.
+        If missing_dims is "raise" and any dimension in dims doesn't exist in all_dims.
+    """
+    # Handle empty or full ellipsis case
+    if dims == () or dims == (...,):
+        return tuple(reversed(all_dims))
+
+    # Check for multiple ellipses
+    if dims.count(...) > 1:
+        raise ValueError("an index can only have a single ellipsis ('...')")
+
+    # Validate dimensions if requested
+    if validate:
+        invalid_dims = set(dims) - {..., *all_dims}
+        if invalid_dims:
+            if missing_dims == "raise":
+                raise ValueError(
+                    f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}"
+                )
+            elif missing_dims == "warn":
+                warnings.warn(f"Dimensions {invalid_dims} do not exist in {all_dims}")
+
+    # Handle missing dimensions if not raising
+    if missing_dims in ("ignore", "warn"):
+        dims = tuple(d for d in dims if d in all_dims or d is ...)
+
+    # If no ellipsis, just return the dimensions
+    if ... not in dims:
+        return dims
+
+    # Handle ellipsis expansion
+    ellipsis_idx = dims.index(...)
+    pre = list(dims[:ellipsis_idx])
+    post = list(dims[ellipsis_idx + 1 :])
+    middle = [d for d in all_dims if d not in pre + post]
+    return tuple(pre + middle + post)
+
+
+class Transpose(XOp):
+    __props__ = ("dims", "missing_dims")
+
+    def __init__(
+        self,
+        dims: tuple[str | Literal[...], ...],
+        missing_dims: Literal["raise", "warn", "ignore"] = "raise",
+    ):
+        super().__init__()
+        self.dims = dims
+        self.missing_dims = missing_dims
+
+    def make_node(self, x):
+        x = as_xtensor(x)
+        dims = expand_ellipsis(
+            self.dims, x.type.dims, validate=True, missing_dims=self.missing_dims
+        )
+
+        output = xtensor(
+            dtype=x.type.dtype,
+            shape=tuple(x.type.shape[x.type.dims.index(d)] for d in dims),
+            dims=dims,
+        )
+        return Apply(self, [x], [output])
+
+
+def transpose(x, *dims, missing_dims: Literal["raise", "warn", "ignore"] = "raise"):
+    """Transpose dimensions of the tensor.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        Input tensor to transpose.
+    *dims : str
+        Dimensions to transpose to. Can include ellipsis (...) to represent
+        remaining dimensions in their original order.
+    missing_dims : {"raise", "warn", "ignore"}, optional
+        How to handle dimensions that don't exist in the input tensor:
+        - "raise": Raise an error if any dimensions don't exist (default)
+        - "warn": Warn if any dimensions don't exist
+        - "ignore": Silently ignore any dimensions that don't exist
+
+    Returns
+    -------
+    XTensorVariable
+        Transposed tensor with reordered dimensions.
+
+    Raises
+    ------
+    ValueError
+        If any dimension in dims doesn't exist in the input tensor and missing_dims is "raise".
+    """
+    return Transpose(dims, missing_dims=missing_dims)(x)
+
+
 class Concat(XOp):
     __props__ = ("dim",)
 
@@ -123,3 +249,119 @@ class Concat(XOp):
 
 def concat(xtensors, dim: str):
     return Concat(dim=dim)(*xtensors)
+
+
+class ExpandDims(XOp):
+    """Add a new dimension to an XTensorVariable.
+
+    Parameters
+    ----------
+    dim : str or None
+        The name of the new dimension. If None, the dimension will be unnamed.
+    """
+
+    def __init__(self, dim):
+        self.dim = dim
+
+    def make_node(self, x):
+        x = as_xtensor(x)
+
+        # Check if dimension already exists
+        if self.dim is not None and self.dim in x.type.dims:
+            raise ValueError(f"Dimension {self.dim} already exists")
+
+        # Create new dimensions list with the new dimension
+        new_dims = list(x.type.dims)
+        new_dims.append(self.dim)
+
+        # Create new shape with the new dimension
+        new_shape = list(x.type.shape)
+        new_shape.append(1)
+
+        output = xtensor(
+            dtype=x.type.dtype, shape=tuple(new_shape), dims=tuple(new_dims)
+        )
+        return Apply(self, [x], [output])
+
+
+def expand_dims(x, dim: str):
+    """Add a new dimension to an XTensorVariable.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        The input tensor
+    dim : str
+        The name of the new dimension
+
+    Returns
+    -------
+    XTensorVariable
+        A new tensor with the expanded dimension
+    """
+    return ExpandDims(dim=dim)(x)
+
+
+class Squeeze(XOp):
+    """Remove a dimension of size 1 from an XTensorVariable.
+
+    Parameters
+    ----------
+    dim : str or None
+        The name of the dimension to remove. If None, all dimensions of size 1 will be removed.
+    """
+
+    def __init__(self, dim=None):
+        self.dim = dim
+
+    def make_node(self, x):
+        x = as_xtensor(x)
+
+        # Get the index of the dimension to remove
+        if self.dim is not None:
+            if self.dim not in x.type.dims:
+                raise ValueError(f"Dimension {self.dim} not found")
+            dim_idx = x.type.dims.index(self.dim)
+            if x.type.shape[dim_idx] != 1:
+                raise ValueError(
+                    f"Dimension {self.dim} has size {x.type.shape[dim_idx]}, not 1"
+                )
+        else:
+            # Find all dimensions of size 1
+            dim_idx = [i for i, s in enumerate(x.type.shape) if s == 1]
+            if not dim_idx:
+                raise ValueError("No dimensions of size 1 to remove")
+
+        # Create new dimensions and shape lists
+        new_dims = list(x.type.dims)
+        new_shape = list(x.type.shape)
+        if self.dim is not None:
+            new_dims.pop(dim_idx)
+            new_shape.pop(dim_idx)
+        else:
+            # Remove all dimensions of size 1
+            new_dims = [d for i, d in enumerate(new_dims) if i not in dim_idx]
+            new_shape = [s for i, s in enumerate(new_shape) if i not in dim_idx]
+
+        output = xtensor(
+            dtype=x.type.dtype, shape=tuple(new_shape), dims=tuple(new_dims)
+        )
+        return Apply(self, [x], [output])
+
+
+def squeeze(x, dim=None):
+    """Remove a dimension of size 1 from an XTensorVariable.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        The input tensor
+    dim : str or None, optional
+        The name of the dimension to remove. If None, all dimensions of size 1 will be removed.
+
+    Returns
+    -------
+    XTensorVariable
+        A new tensor with the specified dimension removed
+    """
+    return Squeeze(dim=dim)(x)

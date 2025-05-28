@@ -1,18 +1,21 @@
 # ruff: noqa: E402
+import numpy as np
 import pytest
+from xarray import concat as xr_concat
 
 
 pytest.importorskip("xarray")
 
 from itertools import chain, combinations
 
-import numpy as np
-from xarray import DataArray
-from xarray import concat as xr_concat
-
-from pytensor.xtensor.shape import concat, stack
+from pytensor.xtensor.shape import concat, expand_dims, squeeze, stack, transpose
 from pytensor.xtensor.type import xtensor
-from tests.xtensor.util import xr_assert_allclose, xr_function, xr_random_like
+from tests.xtensor.util import (
+    xr_arange_like,
+    xr_assert_allclose,
+    xr_function,
+    xr_random_like,
+)
 
 
 def powerset(iterable, min_group_size=0):
@@ -24,9 +27,7 @@ def powerset(iterable, min_group_size=0):
     )
 
 
-@pytest.mark.xfail(reason="Not yet implemented")
 def test_transpose():
-    transpose = None
     a, b, c, d, e = "abcde"
 
     x = xtensor("x", dims=(a, b, c, d, e), shape=(2, 3, 5, 7, 11))
@@ -42,10 +43,7 @@ def test_transpose():
     outs = [transpose(x, *perm) for perm in permutations]
 
     fn = xr_function([x], outs)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     res = fn(x_test)
     expected_res = [x_test.transpose(*perm) for perm in permutations]
     for outs_i, res_i, expected_res_i in zip(outs, res, expected_res):
@@ -61,10 +59,7 @@ def test_stack():
     ]
 
     fn = xr_function([x], outs)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     res = fn(x_test)
 
     expected_res = [
@@ -81,10 +76,7 @@ def test_stack_single_dim():
     assert out.type.dims == ("b", "c", "d")
 
     fn = xr_function([x], out)
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     fn.fn.dprint(print_type=True)
     res = fn(x_test)
     expected_res = x_test.stack(d=["a"])
@@ -96,10 +88,7 @@ def test_multiple_stacks():
     out = stack(x, new_dim1=("a", "b"), new_dim2=("c", "d"))
 
     fn = xr_function([x], [out])
-    x_test = DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
-    )
+    x_test = xr_arange_like(x)
     res = fn(x_test)
     expected_res = x_test.stack(new_dim1=("a", "b"), new_dim2=("c", "d"))
     xr_assert_allclose(res[0], expected_res)
@@ -163,3 +152,163 @@ def test_concat_scalar():
     res = fn(x1_test, x2_test)
     expected_res = xr_concat([x1_test, x2_test], dim="new_dim")
     xr_assert_allclose(res, expected_res)
+
+
+def test_xtensor_variable_transpose():
+    """Test the transpose() method of XTensorVariable."""
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
+
+    # Test basic transpose
+    out = x.transpose()
+    fn = xr_function([x], out)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test.transpose())
+
+    # Test transpose with specific dimensions
+    out = x.transpose("c", "a", "b")
+    fn = xr_function([x], out)
+    xr_assert_allclose(fn(x_test), x_test.transpose("c", "a", "b"))
+
+    # Test transpose with ellipsis
+    out = x.transpose("c", ...)
+    fn = xr_function([x], out)
+    xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
+
+    # Test error cases
+    with pytest.raises(
+        ValueError,
+        match="Invalid dimensions: {'d'}. Available dimensions: \\('a', 'b', 'c'\\)",
+    ):
+        x.transpose("d")
+
+    with pytest.raises(ValueError, match="an index can only have a single ellipsis"):
+        x.transpose("a", ..., "b", ...)
+
+    # Test missing_dims parameter
+    # Test ignore
+    out = x.transpose("c", ..., "d", missing_dims="ignore")
+    fn = xr_function([x], out)
+    xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
+
+    # Test warn
+    with pytest.warns(UserWarning, match="Dimensions {'d'} do not exist"):
+        out = x.transpose("c", ..., "d", missing_dims="warn")
+        fn = xr_function([x], out)
+        xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
+
+
+def test_xtensor_variable_T():
+    """Test the T property of XTensorVariable."""
+    # Test T property with 3D tensor
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
+    out = x.T
+
+    fn = xr_function([x], out)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test.transpose())
+
+    # Test T property with 2D tensor
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    out = x.T
+
+    fn = xr_function([x], out)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test.transpose())
+
+
+def test_expand_dims():
+    # Test 1D tensor expansion
+    x = xtensor("x", dims=("city",), shape=(3,))
+    y = expand_dims(x, "country")
+    assert y.type.dims == ("city", "country")
+    assert y.type.shape == (3, 1)
+
+    # Test 2D tensor expansion
+    x2d = xtensor("x2d", dims=("row", "col"), shape=(2, 3))
+    y2d = expand_dims(x2d, "batch")
+    assert y2d.type.dims == ("row", "col", "batch")
+    assert y2d.type.shape == (2, 3, 1)
+
+    # Test expansion with different dimension name
+    z = expand_dims(x, "time")
+    assert z.type.dims == ("city", "time")
+    assert z.type.shape == (3, 1)
+
+    # Test that expanding with an existing dimension raises an error
+    with pytest.raises(ValueError):
+        expand_dims(y, "city")
+
+    # Test that expanding with None dimension works
+    z = expand_dims(x, None)
+    assert z.type.dims == ("city", None)
+    assert z.type.shape == (3, 1)
+
+
+def test_squeeze():
+    # Test 1D tensor with no squeezable dimensions
+    x = xtensor("x", dims=("city",), shape=(3,))
+    with pytest.raises(ValueError, match="No dimensions of size 1 to remove"):
+        squeeze(x)
+
+    # Test 2D tensor with one squeezable dimension
+    x2d = xtensor("x2d", dims=("row", "col"), shape=(2, 1))
+    y2d = squeeze(x2d)
+    assert y2d.type.dims == ("row",)
+    assert y2d.type.shape == (2,)
+
+    # Test 3D tensor with multiple squeezable dimensions
+    x3d = xtensor("x3d", dims=("batch", "row", "col"), shape=(1, 2, 1))
+    y3d = squeeze(x3d)
+    assert y3d.type.dims == ("row",)
+    assert y3d.type.shape == (2,)
+
+    # Test squeezing specific dimension
+    x3d = xtensor("x3d", dims=("batch", "row", "col"), shape=(1, 2, 1))
+    y3d = squeeze(x3d, dim="batch")
+    assert y3d.type.dims == ("row", "col")
+    assert y3d.type.shape == (2, 1)
+
+    # Test squeezing non-existent dimension
+    with pytest.raises(ValueError, match="Dimension time not found"):
+        squeeze(x3d, dim="time")
+
+    # Test squeezing dimension with size > 1
+    x3d = xtensor("x3d", dims=("batch", "row", "col"), shape=(2, 2, 1))
+    with pytest.raises(ValueError, match="Dimension batch has size 2, not 1"):
+        squeeze(x3d, dim="batch")
+
+    # Test functional interface
+    fn = xr_function([x2d], y2d)
+    x_test = xr_arange_like(x2d)
+    res = fn(x_test)
+    expected_res = x_test.squeeze()
+    xr_assert_allclose(res, expected_res)
+
+    # Test squeezing a tensor with multiple squeezable dimensions
+    x_multi = xtensor("x_multi", dims=("batch", "row", "col"), shape=(1, 2, 1))
+    y_multi = squeeze(x_multi)
+    assert y_multi.type.dims == ("row",)
+    assert y_multi.type.shape == (2,)
+    fn_multi = xr_function([x_multi], y_multi)
+    x_multi_test = xr_arange_like(x_multi)
+    res_multi = fn_multi(x_multi_test)
+    expected_res_multi = x_multi_test.squeeze()
+    xr_assert_allclose(res_multi, expected_res_multi)
+
+
+def test_lower_squeeze():
+    from pytensor.xtensor.rewriting.shape import lower_squeeze
+    from pytensor.xtensor.shape import squeeze
+    from pytensor.xtensor.type import xtensor
+
+    # Create a tensor with a squeezable dimension
+    x = xtensor("x", dims=("row", "col"), shape=(2, 1))
+    y = squeeze(x)
+
+    class DummyFGraph:
+        pass
+
+    node = type("Node", (), {"inputs": [x], "op": y.owner.op, "outputs": [y]})()
+    [out] = lower_squeeze.transform(DummyFGraph(), node)
+    assert out.type.dims == ("row",)
+    assert out.type.shape == (2,)
