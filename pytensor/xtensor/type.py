@@ -10,7 +10,7 @@ except ModuleNotFoundError:
     XARRAY_AVAILABLE = False
 
 from collections.abc import Sequence
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 import numpy as np
 
@@ -356,6 +356,50 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     @property
     def real(self):
         return px.math.real(self)
+
+    def transpose(
+        self,
+        *dims: str | Literal[...],
+        missing_dims: Literal["raise", "warn", "ignore"] = "raise",
+    ) -> "XTensorVariable":
+        """Transpose dimensions of the tensor.
+
+        Parameters
+        ----------
+        *dims : str | Ellipsis
+            Dimensions to transpose. If empty, performs a full transpose.
+            Can use ellipsis (...) to represent remaining dimensions.
+        missing_dims : {"raise", "warn", "ignore"}, default="raise"
+            How to handle dimensions that don't exist in the tensor:
+            - "raise": Raise an error if any dimensions don't exist
+            - "warn": Warn if any dimensions don't exist
+            - "ignore": Silently ignore any dimensions that don't exist
+
+        Returns
+        -------
+        XTensorVariable
+            Transposed tensor with reordered dimensions.
+
+        Raises
+        ------
+        ValueError
+            If missing_dims="raise" and any dimensions don't exist.
+            If multiple ellipsis are provided.
+        """
+        return px.shape.transpose(self, *dims, missing_dims=missing_dims)
+
+    @property
+    def T(self) -> "XTensorVariable":
+        """Return the full transpose of the tensor.
+
+        This is equivalent to calling transpose() with no arguments.
+
+        Returns
+        -------
+        XTensorVariable
+            Fully transposed tensor.
+        """
+        return self.transpose()
 
     # Aggregation
     # https://docs.xarray.dev/en/latest/api.html#id6
