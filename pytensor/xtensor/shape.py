@@ -149,22 +149,15 @@ class Transpose(XOp):
 
     def make_node(self, x):
         x = as_xtensor(x)
-        dims = expand_ellipsis(
-            self.dims, x.type.dims, validate=(self.missing_dims == "raise")
-        )
+        dims = expand_ellipsis(self.dims, x.type.dims, validate=(self.missing_dims == "raise"))
 
         # Handle missing dimensions based on missing_dims setting
-        if self.missing_dims == "ignore":
-            # Filter out dimensions that don't exist in x.type.dims
-            dims = tuple(d for d in dims if d in x.type.dims)
-            # Add remaining dimensions in their original order
-            remaining_dims = tuple(d for d in x.type.dims if d not in dims)
-            dims = dims + remaining_dims
-        elif self.missing_dims == "warn":
-            missing = set(dims) - set(x.type.dims)
-            if missing:
-                warnings.warn(f"Dimensions {missing} do not exist in {x.type.dims}")
-            # Filter out missing dimensions and add remaining ones
+        if self.missing_dims in ("ignore", "warn"):
+            if self.missing_dims == "warn":
+                missing = set(dims) - set(x.type.dims)
+                if missing:
+                    warnings.warn(f"Dimensions {missing} do not exist in {x.type.dims}")
+            # Filter out dimensions that don't exist and add remaining ones
             dims = tuple(d for d in dims if d in x.type.dims)
             remaining_dims = tuple(d for d in x.type.dims if d not in dims)
             dims = dims + remaining_dims
