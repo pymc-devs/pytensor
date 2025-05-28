@@ -1,4 +1,6 @@
 from collections.abc import Sequence
+from typing import Literal
+import warnings
 
 from pytensor import Variable
 from pytensor.graph import Apply
@@ -71,6 +73,120 @@ def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str])
             )
         y = Stack(new_dim_name, tuple(stacked_dims))(y)
     return y
+
+
+def expand_ellipsis(
+    dims: tuple[str, ...], all_dims: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Expand ellipsis in dimension permutation.
+
+    Parameters
+    ----------
+    dims : tuple[str, ...]
+        The dimension permutation, which may contain ellipsis
+    all_dims : tuple[str, ...]
+        All available dimensions
+
+    Returns
+    -------
+    tuple[str, ...]
+        The expanded dimension permutation
+
+    Raises
+    ------
+    ValueError
+        If more than one ellipsis is present in dims.
+    """
+    if dims == () or dims == (...,):
+        return tuple(reversed(all_dims))
+
+    if ... not in dims:
+        return dims
+
+    if sum(d is ... for d in dims) > 1:
+        raise ValueError("an index can only have a single ellipsis ('...')")
+
+    pre = []
+    post = []
+    found = False
+    for d in dims:
+        if d is ...:
+            found = True
+        elif not found:
+            pre.append(d)
+        else:
+            post.append(d)
+    middle = [d for d in all_dims if d not in pre + post]
+    return tuple(pre + middle + post)
+
+
+class Transpose(XOp):
+    __props__ = ("dims", "missing_dims")
+
+    def __init__(self, dims: tuple[str, ...], missing_dims: Literal["raise", "warn", "ignore"] = "raise"):
+        super().__init__()
+        self.dims = dims
+        self.missing_dims = missing_dims
+
+    def make_node(self, x):
+        x = as_xtensor(x)
+        dims = expand_ellipsis(self.dims, x.type.dims)
+        
+        # Handle missing dimensions based on missing_dims setting
+        if self.missing_dims == "ignore":
+            # Filter out dimensions that don't exist in x.type.dims
+            dims = tuple(d for d in dims if d in x.type.dims)
+            # Add remaining dimensions in their original order
+            remaining_dims = tuple(d for d in x.type.dims if d not in dims)
+            dims = dims + remaining_dims
+        elif self.missing_dims == "warn":
+            missing = set(dims) - set(x.type.dims)
+            if missing:
+                warnings.warn(f"Dimensions {missing} do not exist in {x.type.dims}")
+            # Filter out missing dimensions and add remaining ones
+            dims = tuple(d for d in dims if d in x.type.dims)
+            remaining_dims = tuple(d for d in x.type.dims if d not in dims)
+            dims = dims + remaining_dims
+        else:  # "raise"
+            if set(dims) != set(x.type.dims):
+                raise ValueError(f"Transpose dims {dims} must match {x.type.dims}")
+        
+        output = xtensor(
+            dtype=x.type.dtype,
+            shape=tuple(x.type.shape[x.type.dims.index(d)] for d in dims),
+            dims=dims,
+        )
+        return Apply(self, [x], [output])
+
+
+def transpose(x, *dims, missing_dims: Literal["raise", "warn", "ignore"] = "raise"):
+    """Transpose dimensions of the tensor.
+    
+    Parameters
+    ----------
+    x : XTensorVariable
+        The tensor to transpose
+    *dims : str | Ellipsis
+        Dimensions to transpose. If empty, performs a full transpose.
+        Can use ellipsis (...) to represent remaining dimensions.
+    missing_dims : {"raise", "warn", "ignore"}, default="raise"
+        How to handle dimensions that don't exist in the tensor:
+        - "raise": Raise an error if any dimensions don't exist
+        - "warn": Warn if any dimensions don't exist
+        - "ignore": Silently ignore any dimensions that don't exist
+    
+    Returns
+    -------
+    XTensorVariable
+        Transposed tensor with reordered dimensions.
+    
+    Raises
+    ------
+    ValueError
+        If missing_dims="raise" and any dimensions don't exist.
+        If multiple ellipsis are provided.
+    """
+    return Transpose(dims, missing_dims=missing_dims)(x)
 
 
 class Concat(XOp):

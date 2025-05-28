@@ -2,7 +2,8 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor import broadcast_to, join, moveaxis
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, Stack
+from pytensor.xtensor.shape import Concat, Stack, Transpose, expand_ellipsis
+import warnings
 
 
 @register_xcanonicalize
@@ -69,4 +70,36 @@ def lower_concat(fgraph, node):
 
     joined_tensor = join(concat_axis, *bcast_tensor_inputs)
     new_out = xtensor_from_tensor(joined_tensor, dims=out_dims)
+    return [new_out]
+
+
+@register_xcanonicalize
+@node_rewriter(tracks=[Transpose])
+def lower_transpose(fgraph, node):
+    [x] = node.inputs
+    # Determine the permutation of axes
+    out_dims = node.op.dims
+    in_dims = x.type.dims
+    expanded_dims = expand_ellipsis(out_dims, in_dims)
+    
+    # Handle missing dimensions based on missing_dims setting
+    if node.op.missing_dims == "ignore":
+        # Filter out dimensions that don't exist in in_dims
+        expanded_dims = tuple(d for d in expanded_dims if d in in_dims)
+        # Add remaining dimensions in their original order
+        remaining_dims = tuple(d for d in in_dims if d not in expanded_dims)
+        expanded_dims = expanded_dims + remaining_dims
+    elif node.op.missing_dims == "warn":
+        missing = set(expanded_dims) - set(in_dims)
+        if missing:
+            warnings.warn(f"Dimensions {missing} do not exist in {in_dims}")
+        # Filter out missing dimensions and add remaining ones
+        expanded_dims = tuple(d for d in expanded_dims if d in in_dims)
+        remaining_dims = tuple(d for d in in_dims if d not in expanded_dims)
+        expanded_dims = expanded_dims + remaining_dims
+    
+    perm = tuple(in_dims.index(d) for d in expanded_dims)
+    x_tensor = tensor_from_xtensor(x)
+    x_tensor_transposed = x_tensor.transpose(perm)
+    new_out = xtensor_from_tensor(x_tensor_transposed, dims=expanded_dims)
     return [new_out]
