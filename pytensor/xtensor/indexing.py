@@ -7,9 +7,10 @@
 
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.scalar.basic import discrete_dtypes
+from pytensor.tensor import TensorType
 from pytensor.tensor.basic import as_tensor
 from pytensor.tensor.type_other import NoneTypeT, SliceType, make_slice
-from pytensor.xtensor.basic import XOp
+from pytensor.xtensor.basic import XOp, xtensor_from_tensor
 from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
 
 
@@ -22,12 +23,17 @@ def as_idx_variable(idx):
         idx = make_slice(idx)
     elif isinstance(idx, Variable) and isinstance(idx.type, SliceType):
         pass
+    elif isinstance(idx, tuple) and len(idx) == 2 and isinstance(idx[0], str):
+        # Special case for ("x", array) that xarray supports
+        # TODO: Check if this can be used to rename existing xarray dimensions or only for numpy
+        dim, idx = idx
+        idx = xtensor_from_tensor(as_tensor(idx), dims=(dim,))
     else:
         # Must be integer indices, we already counted for None and slices
         try:
-            idx = as_tensor(idx)
-        except TypeError:
             idx = as_xtensor(idx)
+        except TypeError:
+            idx = as_tensor(idx)
         if idx.type.dtype == "bool":
             raise NotImplementedError("Boolean indexing not yet supported")
         if idx.type.dtype not in discrete_dtypes:
@@ -77,20 +83,29 @@ class Index(XOp):
         x_shape = x.type.shape
         out_dims = []
         out_shape = []
-        has_unlabeled_vector_idx = False
-        has_labeled_vector_idx = False
         for i, idx in enumerate(idxs):
             if i == x_ndim:
                 raise IndexError("Too many indices")
             if isinstance(idx.type, SliceType):
                 out_dims.append(x_dims[i])
                 out_shape.append(get_static_slice_length(idx, x_shape[i]))
-            elif isinstance(idx.type, XTensorType):
-                if has_unlabeled_vector_idx:
-                    raise NotImplementedError(
-                        "Mixing of labeled and unlabeled vector indexing not implemented"
-                    )
-                has_labeled_vector_idx = True
+            else:
+                if idx.type.ndim == 0:
+                    # Scalar index, dimension is dropped
+                    continue
+
+                if isinstance(idx.type, TensorType):
+                    if idx.type.ndim > 1:
+                        # Same error that xarray raises
+                        raise IndexError(
+                            "Unlabeled multi-dimensional array cannot be used for indexing"
+                        )
+
+                    # This is implicitly an XTensorVariable with dim matching the indexed one
+                    idx = idxs[i] = xtensor_from_tensor(idx, dims=(x_dims[i],))
+
+                assert isinstance(idx.type, XTensorType)
+
                 idx_dims = idx.type.dims
                 for dim in idx_dims:
                     idx_dim_shape = idx.type.shape[idx_dims.index(dim)]
@@ -113,27 +128,12 @@ class Index(XOp):
                         out_dims.append(dim)
                         out_shape.append(idx_dim_shape)
 
-            else:  # TensorType
-                if idx.type.ndim == 0:
-                    # Scalar, dimension is dropped
-                    pass
-                elif idx.type.ndim == 1:
-                    if has_labeled_vector_idx:
-                        raise NotImplementedError(
-                            "Mixing of labeled and unlabeled vector indexing not implemented"
-                        )
-                    has_unlabeled_vector_idx = True
-                    out_dims.append(x_dims[i])
-                    out_shape.append(idx.type.shape[0])
-                else:
-                    # Same error that xarray raises
-                    raise IndexError(
-                        "Unlabeled multi-dimensional array cannot be used for indexing"
-                    )
-        for j in range(i + 1, x_ndim):
-            # Add any unindexed dimensions
-            out_dims.append(x_dims[j])
-            out_shape.append(x_shape[j])
+        for dim_i, shape_i in zip(x_dims[i + 1 :], x_shape[i + 1 :]):
+            # Add back any unindexed dimensions
+            if dim_i not in out_dims:
+                # If the dimension was not indexed, we keep it as is
+                out_dims.append(dim_i)
+                out_shape.append(shape_i)
 
         output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
         return Apply(self, [x, *idxs], [output])

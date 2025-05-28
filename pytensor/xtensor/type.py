@@ -344,6 +344,9 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         if isinstance(idx, dict):
             return self.isel(idx)
 
+        if not isinstance(idx, tuple):
+            idx = (idx,)
+
         # Check for ellipsis not in the last position (last one is useless anyway)
         if any(idx_item is Ellipsis for idx_item in idx):
             if idx.count(Ellipsis) > 1:
@@ -422,10 +425,10 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                 )
             else:
                 # Default to 5 for head and tail
-                indexers = dict.fromkeys(self.type.dims, 5)
+                indexers = {dim: 5 for dim in self.type.dims}
 
         elif not isinstance(indexers, dict):
-            indexers = dict.fromkeys(self.type.dims, indexers)
+            indexers = {dim: indexers for dim in self.type.dims}
 
         if kind == "head":
             indices = {dim: slice(None, value) for dim, value in indexers.items()}
