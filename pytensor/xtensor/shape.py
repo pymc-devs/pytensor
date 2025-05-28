@@ -107,7 +107,9 @@ def expand_ellipsis(
         if validate:
             invalid_dims = set(dims) - set(all_dims)
             if invalid_dims:
-                raise ValueError(f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}")
+                raise ValueError(
+                    f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}"
+                )
         return dims
 
     if sum(d is ... for d in dims) > 1:
@@ -126,7 +128,9 @@ def expand_ellipsis(
     if validate:
         invalid_dims = set(pre + post) - set(all_dims)
         if invalid_dims:
-            raise ValueError(f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}")
+            raise ValueError(
+                f"Invalid dimensions: {invalid_dims}. Available dimensions: {all_dims}"
+            )
     middle = [d for d in all_dims if d not in pre + post]
     return tuple(pre + middle + post)
 
@@ -134,14 +138,20 @@ def expand_ellipsis(
 class Transpose(XOp):
     __props__ = ("dims", "missing_dims")
 
-    def __init__(self, dims: tuple[str, ...], missing_dims: Literal["raise", "warn", "ignore"] = "raise"):
+    def __init__(
+        self,
+        dims: tuple[str, ...],
+        missing_dims: Literal["raise", "warn", "ignore"] = "raise",
+    ):
         super().__init__()
         self.dims = dims
         self.missing_dims = missing_dims
 
     def make_node(self, x):
         x = as_xtensor(x)
-        dims = expand_ellipsis(self.dims, x.type.dims, validate=(self.missing_dims == "raise"))
+        dims = expand_ellipsis(
+            self.dims, x.type.dims, validate=(self.missing_dims == "raise")
+        )
 
         # Handle missing dimensions based on missing_dims setting
         if self.missing_dims == "ignore":

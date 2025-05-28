@@ -464,7 +464,9 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def real(self):
         return px.math.real(self)
 
-    def transpose(self, *dims, missing_dims: Literal["raise", "warn", "ignore"] = "raise"):
+    def transpose(
+        self, *dims, missing_dims: Literal["raise", "warn", "ignore"] = "raise"
+    ):
         """Transpose dimensions of the tensor.
 
         Parameters
@@ -489,6 +491,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             If any dimension in dims doesn't exist in the input tensor and missing_dims is "raise".
         """
         from pytensor.xtensor.shape import transpose
+
         return transpose(self, *dims, missing_dims=missing_dims)
 
     @property

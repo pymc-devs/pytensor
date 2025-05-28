@@ -187,7 +187,10 @@ def test_xtensor_variable_transpose():
     xr_assert_allclose(fn(x_test), x_test.transpose("c", ...))
 
     # Test error cases
-    with pytest.raises(ValueError, match="Invalid dimensions: {'d'}. Available dimensions: \\('a', 'b', 'c'\\)"):
+    with pytest.raises(
+        ValueError,
+        match="Invalid dimensions: {'d'}. Available dimensions: \\('a', 'b', 'c'\\)",
+    ):
         x.transpose("d")
 
     with pytest.raises(ValueError, match="an index can only have a single ellipsis"):
