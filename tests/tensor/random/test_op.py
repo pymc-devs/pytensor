@@ -40,6 +40,10 @@ def test_RandomVariable_basics(strict_test_value_flags):
             config.floatX,
             inplace=True,
         )
+    
+    # New test: Ensure an integer value for ndims_params is handled properly
+    with pytest.raises(TypeError, match="Parameter ndims_params must be sequence type."):
+        RandomVariable("normal", ndims_params=2, signature="(),()->()", dtype="float32")
 
     # `size` should be a `Sequence` type
     with pytest.raises(TypeError, match="^Parameter size*"):
@@ -112,7 +116,7 @@ def test_RandomVariable_bcast(strict_test_value_flags):
     res = rv(0, 1, size=pt.as_tensor(1, dtype=np.int64))
     assert res.broadcastable == (True,)
 
-    res = rv(0, 1, size=(pt.as_tensor(1, dtype=np.int32), s3))
+    res = rv(0, 1, size=pt.as_tensor([1, s3], dtype=np.int64))
     assert res.broadcastable == (True, False)
 
 
@@ -126,7 +130,7 @@ def test_RandomVariable_bcast_specify_shape(strict_test_value_flags):
     s3.tag.test_value = 3
     s3 = Assert("testing")(s3, eq(s1, 1))
 
-    size = specify_shape(pt.as_tensor([s1, s3, s2, s2, s1]), (5,))
+    size = specify_shape(pt.as_tensor([1, s3, s2, s2, 1], dtype=np.int64), (5,))
     mu = tensor(dtype=config.floatX, shape=(None, None, 1))
     mu.tag.test_value = np.random.normal(size=(2, 2, 1)).astype(config.floatX)
 
@@ -184,6 +188,18 @@ def test_RandomVariable_incompatible_size(strict_test_value_flags):
         ValueError, match="Size length is incompatible with batched dimensions"
     ):
         rv_op(np.zeros((1, 3)), 1, size=(3,))
+    
+    # New test: Explicitly check handling of empty size
+    with pytest.raises(ValueError, match="Size length is incompatible with batched dimensions"):
+        rv_op(np.zeros((2, 4, 3)), 1, size=())
+
+    # New test: Passing a size length shorter than batch dims
+    with pytest.raises(ValueError, match="Size length is incompatible with batched dimensions"):
+        rv_op(np.zeros((2, 4, 3)), 1, size=(2,))
+
+    # New test: Passing a size length longer than batch dims
+    with pytest.raises(ValueError, match="Size length is incompatible with batched dimensions"):
+        rv_op(np.zeros((2, 4, 3)), 1, size=(2, 4, 5))
 
     rv_op = RandomVariable("dirichlet", 0, [1], config.floatX, inplace=True)
     with pytest.raises(
@@ -294,6 +310,20 @@ def test_vectorize():
     vect_node = vectorize_graph(out, {mu: new_mu, sigma: new_sigma}).owner
     assert isinstance(vect_node.op, NormalRV)
     assert vect_node.default_output().type.shape == (10, 2, 5)
+    
+    # Test broadcasting from scalar to vector
+    scalar_mu = pt.scalar("scalar_mu")
+    vector_mu = pt.vector("vector_mu", shape=(5,))
+    scalar_x = normal(scalar_mu)
+    vector_x = vectorize_graph(scalar_x, {scalar_mu: vector_mu})
+    assert vector_x.type.shape == (5,)
+
+    # Test broadcasting from vector to matrix
+    vector_mu = pt.vector("vector_mu", shape=(5,))
+    matrix_mu = pt.matrix("matrix_mu", shape=(5, 5))
+    vector_x = normal(vector_mu)
+    matrix_x = vectorize_graph(vector_x, {vector_mu: matrix_mu})
+    assert matrix_x.type.shape == (5, 5)
 
 
 def test_vectorize_empty_size():
@@ -312,6 +342,9 @@ def test_size_none_vs_empty():
         signature="(),()->()",
     )
     assert rv([0], [1], size=None).type.shape == (1,)
+    
+    # New test: Ensure `size=None` correctly returns an empty tuple shape
+    assert rv(0, 1, size=None).type.shape == ()
 
     with pytest.raises(
         ValueError, match="Size length is incompatible with batched dimensions"
