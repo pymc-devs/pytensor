@@ -36,7 +36,10 @@ class XElemwise(XOp):
                     # Keep the non-None shape
                     dims_and_shape[dim] = dim_length
 
-        output_dims, output_shape = zip(*dims_and_shape.items())
+        if dims_and_shape:
+            output_dims, output_shape = zip(*dims_and_shape.items())
+        else:
+            output_dims, output_shape = (), ()
 
         dummy_scalars = [ps.get_scalar_type(inp.type.dtype)() for inp in inputs]
         output_dtypes = [
