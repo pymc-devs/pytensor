@@ -14,6 +14,18 @@ from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import xr_assert_allclose, xr_function
 
 
+def test_scalar_case():
+    x = xtensor("x", dims=(), shape=())
+    y = xtensor("y", dims=(), shape=())
+    out = add(x, y)
+
+    fn = function([x, y], out)
+
+    x_test = DataArray(2.0, dims=())
+    y_test = DataArray(3.0, dims=())
+    np.testing.assert_allclose(fn(x_test.values, y_test.values), 5.0)
+
+
 def test_dimension_alignment():
     x = xtensor("x", dims=("city", "country", "planet"), shape=(2, 3, 4))
     y = xtensor(
