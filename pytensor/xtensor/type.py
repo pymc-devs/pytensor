@@ -49,6 +49,10 @@ class XTensorType(Type, HasDataType, HasShape):
             self.shape = (None,) * len(self.dims)
         else:
             self.shape = tuple(shape)
+            if len(self.shape) != len(self.dims):
+                raise ValueError(
+                    f"Shape {self.shape} must have the same length as dims {self.dims}"
+                )
         self.ndim = len(self.dims)
         self.name = name
 
