@@ -23,11 +23,28 @@ def as_idx_variable(idx):
         idx = make_slice(idx)
     elif isinstance(idx, Variable) and isinstance(idx.type, SliceType):
         pass
-    elif isinstance(idx, tuple) and len(idx) == 2 and isinstance(idx[0], str):
+    elif (
+        isinstance(idx, tuple)
+        and len(idx) == 2
+        and (
+            isinstance(idx[0], str)
+            or (
+                isinstance(idx[0], tuple | list)
+                and all(isinstance(d, str) for d in idx[0])
+            )
+        )
+    ):
         # Special case for ("x", array) that xarray supports
-        # TODO: Check if this can be used to rename existing xarray dimensions or only for numpy
         dim, idx = idx
-        idx = xtensor_from_tensor(as_tensor(idx), dims=(dim,))
+        if isinstance(idx.type, XTensorType):
+            raise TypeError(
+                "Giving a dimension name to an XTensorVariable indexer is not supported"
+            )
+        if isinstance(dim, str):
+            dims = (dim,)
+        else:
+            dims = tuple(dim)
+        idx = xtensor_from_tensor(as_tensor(idx), dims=dims)
     else:
         # Must be integer indices, we already counted for None and slices
         try:

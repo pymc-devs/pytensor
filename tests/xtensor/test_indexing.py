@@ -52,7 +52,7 @@ def test_single_adv_indexing_on_existing_dim():
     idx_test = np.array([0, 1, 0, 2], dtype=int)
     xidx_test = DataArray(idx_test, dims=("a",))
 
-    # Three equivalent ways of indexing a->a
+    # Equivalent ways of indexing a->a
     y = x[idx]
     fn = xr_function([x, idx], y)
     res = fn(x_test, idx_test)
@@ -63,6 +63,12 @@ def test_single_adv_indexing_on_existing_dim():
     fn = xr_function([x, idx], y)
     res = fn(x_test, idx_test)
     expected_res = x_test[(("a", idx_test),)]
+    xr_assert_allclose(res, expected_res)
+
+    y = x[((("a",), idx),)]
+    fn = xr_function([x, idx], y)
+    res = fn(x_test, idx_test)
+    expected_res = x_test[((("a",), idx_test),)]
     xr_assert_allclose(res, expected_res)
 
     y = x[xidx]
@@ -81,11 +87,17 @@ def test_single_vector_indexing_on_new_dim():
     idx_test = np.array([0, 1, 0, 2], dtype=int)
     xidx_test = DataArray(idx_test, dims=("a",))
 
-    # Two equivalent ways of indexing a->new_a
+    # Equivalent ways of indexing a->new_a
     y = x[(("new_a", idx),)]
     fn = xr_function([x, idx], y)
     res = fn(x_test, idx_test)
     expected_res = x_test[(("new_a", idx_test),)]
+    xr_assert_allclose(res, expected_res)
+
+    y = x[((["new_a"], idx),)]
+    fn = xr_function([x, idx], y)
+    res = fn(x_test, idx_test)
+    expected_res = x_test[((["new_a"], idx_test),)]
     xr_assert_allclose(res, expected_res)
 
     y = x[xidx.rename(a="new_a")]
@@ -174,6 +186,34 @@ def test_matrix_indexing():
     res = fn(x_test, idx_ab_test, idx_cd_test)
     expected_res = x_test[idx_ab_test, slice(1, 3), idx_cd_test]
     xr_assert_allclose(res, expected_res)
+
+
+def test_assign_multiple_out_dims():
+    x = xtensor("x", shape=(5, 7), dims=("a", "b"))
+    idx1 = tensor("idx1", dtype=int, shape=(4, 3))
+    idx2 = tensor("idx2", dtype=int, shape=(3, 2))
+    out = x[(("out1", "out2"), idx1), (["out2", "out3"], idx2)]
+
+    fn = xr_function([x, idx1, idx2], out)
+
+    rng = np.random.default_rng()
+    x_test = xr_arange_like(x)
+    idx1_test = rng.binomial(n=4, p=0.5, size=(4, 3))
+    idx2_test = rng.binomial(n=4, p=0.5, size=(3, 2))
+    res = fn(x_test, idx1_test, idx2_test)
+    expected_res = x_test[(("out1", "out2"), idx1_test), (["out2", "out3"], idx2_test)]
+    xr_assert_allclose(res, expected_res)
+
+
+def test_assign_dims_xtensor_fails():
+    x = xtensor("x", shape=(5, 7), dims=("a", "b"))
+    idx1 = xtensor("idx1", dtype=int, shape=(4,), dims=("c",))
+
+    with pytest.raises(
+        TypeError,
+        match="Giving a dimension name to an XTensorVariable indexer is not supported",
+    ):
+        x[("d", idx1),]
 
 
 class TestVectorizedIndexingNotAllowedToBroadcast:
