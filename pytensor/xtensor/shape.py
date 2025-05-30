@@ -309,26 +309,28 @@ class ExpandDims(XOp):
     Parameters
     ----------
     dim : str or None
-        The name of the new dimension. If None, the dimension will be unnamed.
+        The name of the new dimension. If None, no new dimension is added.
+    size : int or symbolic, optional
+        The size of the new dimension (default 1).
     """
-
-    def __init__(self, dim):
+    def __init__(self, dim, size=1):
         self.dim = dim
+        self.size = size
 
     def make_node(self, x):
         x = as_xtensor(x)
 
+        # If dim is None, don't add a new dimension (matching xarray behavior)
+        if self.dim is None:
+            return Apply(self, [x], [x])
+
         # Check if dimension already exists
-        if self.dim is not None and self.dim in x.type.dims:
+        if self.dim in x.type.dims:
             raise ValueError(f"Dimension {self.dim} already exists")
 
-        # Create new dimensions list with the new dimension
-        new_dims = list(x.type.dims)
-        new_dims.append(self.dim)
-
-        # Create new shape with the new dimension
-        new_shape = list(x.type.shape)
-        new_shape.append(1)
+        # Add new dimension at the beginning
+        new_dims = [self.dim] + list(x.type.dims)
+        new_shape = [self.size] + list(x.type.shape)
 
         output = xtensor(
             dtype=x.type.dtype, shape=tuple(new_shape), dims=tuple(new_dims)

@@ -1,5 +1,5 @@
 from pytensor.graph import node_rewriter
-from pytensor.tensor import broadcast_to, join, moveaxis, specify_shape
+from pytensor.tensor import broadcast_to, join, moveaxis, specify_shape, squeeze, expand_dims
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
 from pytensor.xtensor.shape import Concat, ExpandDims, Squeeze, Stack, Transpose, UnStack
@@ -110,31 +110,37 @@ def lower_transpose(fgraph, node):
 @register_xcanonicalize
 @node_rewriter([ExpandDims])
 def local_expand_dims_reshape(fgraph, node):
-    """Rewrite rule to convert expand_dims to reshape."""
+    """Rewrite rule to convert expand_dims to pytensor.tensor.expand_dims and broadcast_to if needed."""
     if not isinstance(node.op, ExpandDims):
         return False
 
     x = node.inputs[0]
     dim = node.op.dim
+    size = getattr(node.op, 'size', 1)
 
-    # Create new dimensions list with the new dimension
-    new_dims = list(x.type.dims)
-    new_dims.append(dim)
+    # If dim is None, don't add a new dimension (matching xarray behavior)
+    if dim is None:
+        return [x]
 
-    # Create new shape with the new dimension
-    new_shape = list(x.type.shape)
-    new_shape.append(1)
+    # Create new dimensions list with the new dimension at the beginning
+    new_dims = [dim] + list(x.type.dims)
 
-    # Create a new reshape operation
-    from pytensor.xtensor.shape import reshape
+    # Create new shape with the new dimension at the beginning
+    new_shape = [1] + list(x.type.shape)
 
-    return [reshape(x, new_shape, new_dims)]
+    # Convert to tensor and use pytensor.tensor.expand_dims
+    x_tensor = tensor_from_xtensor(x)
+    x_tensor_expanded = expand_dims(x_tensor, axis=0)
+    if size != 1:
+        x_tensor_expanded = broadcast_to(x_tensor_expanded, new_shape)
+    new_out = xtensor_from_tensor(x_tensor_expanded, dims=tuple(new_dims))
+    return [new_out]
 
 
 @register_xcanonicalize
 @node_rewriter([Squeeze])
 def local_squeeze_reshape(fgraph, node):
-    """Rewrite rule to convert squeeze to reshape."""
+    """Rewrite rule to convert squeeze to pytensor.tensor.squeeze."""
     if not isinstance(node.op, Squeeze):
         return False
 
@@ -165,7 +171,8 @@ def local_squeeze_reshape(fgraph, node):
         new_dims = [d for i, d in enumerate(new_dims) if i not in dim_idx]
         new_shape = [s for i, s in enumerate(new_shape) if i not in dim_idx]
 
-    # Create a new reshape operation
-    from pytensor.xtensor.shape import reshape
-
-    return [reshape(x, new_shape, new_dims)]
+    # Convert to tensor and use pytensor.tensor.squeeze
+    x_tensor = tensor_from_xtensor(x)
+    x_tensor_squeezed = squeeze(x_tensor, axis=dim_idx if dim is None else dim_idx)
+    new_out = xtensor_from_tensor(x_tensor_squeezed, dims=tuple(new_dims))
+    return [new_out]

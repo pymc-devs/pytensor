@@ -259,31 +259,64 @@ def test_concat_scalar():
 
 
 def test_expand_dims():
-    # Test 1D tensor expansion
+    import xarray as xr
+    # 1D case
+    x_xr = xr.DataArray([0, 1, 2], dims=["city"])
+    y_xr = x_xr.expand_dims("country")
     x = xtensor("x", dims=("city",), shape=(3,))
     y = expand_dims(x, "country")
-    assert y.type.dims == ("city", "country")
-    assert y.type.shape == (3, 1)
+    assert y.type.dims == y_xr.dims
+    assert y.type.shape == y_xr.shape
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    res = fn(x_test)
+    expected_res = x_test.expand_dims("country")
+    xr_assert_allclose(res, expected_res)
 
-    # Test 2D tensor expansion
+    # 2D case
+    x2d_xr = xr.DataArray([[0, 1, 2], [3, 4, 5]], dims=["row", "col"])
+    y2d_xr = x2d_xr.expand_dims("batch")
     x2d = xtensor("x2d", dims=("row", "col"), shape=(2, 3))
     y2d = expand_dims(x2d, "batch")
-    assert y2d.type.dims == ("row", "col", "batch")
-    assert y2d.type.shape == (2, 3, 1)
+    assert y2d.type.dims == y2d_xr.dims
+    assert y2d.type.shape == y2d_xr.shape
+    fn = xr_function([x2d], y2d)
+    x2d_test = xr_arange_like(x2d)
+    res = fn(x2d_test)
+    expected_res = x2d_test.expand_dims("batch")
+    xr_assert_allclose(res, expected_res)
 
-    # Test expansion with different dimension name
+    # Expansion with different dimension name
+    z_xr = x_xr.expand_dims("time")
     z = expand_dims(x, "time")
-    assert z.type.dims == ("city", "time")
-    assert z.type.shape == (3, 1)
+    assert z.type.dims == z_xr.dims
+    assert z.type.shape == z_xr.shape
+    fn = xr_function([x], z)
+    res = fn(x_test)
+    expected_res = x_test.expand_dims("time")
+    xr_assert_allclose(res, expected_res)
 
-    # Test that expanding with an existing dimension raises an error
+    # Expanding with an existing dimension raises an error
     with pytest.raises(ValueError):
         expand_dims(y, "city")
 
-    # Test that expanding with None dimension works
+    # Expanding with None dimension
+    print("\nTesting expand_dims with None:")
+    print("Input xarray dims:", x_xr.dims)
+    print("Input xarray shape:", x_xr.shape)
+    z_xr = x_xr.expand_dims(None)
+    print("Output xarray dims:", z_xr.dims)
+    print("Output xarray shape:", z_xr.shape)
+    print("Output xarray data:\n", z_xr.data)
     z = expand_dims(x, None)
-    assert z.type.dims == ("city", None)
-    assert z.type.shape == (3, 1)
+    print("Our output dims:", z.type.dims)
+    print("Our output shape:", z.type.shape)
+    assert z.type.dims == z_xr.dims
+    assert z.type.shape == z_xr.shape
+    fn = xr_function([x], z)
+    res = fn(x_test)
+    expected_res = x_test.expand_dims(None)
+    xr_assert_allclose(res, expected_res)
 
 
 def test_squeeze():
@@ -293,11 +326,25 @@ def test_squeeze():
     assert y.type.dims == ("city",)
     assert y.type.shape == (3,)
 
+    # Test with xarray
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    res = fn(x_test)
+    expected_res = x_test.squeeze("country")
+    xr_assert_allclose(res, expected_res)
+
     # Test squeezing all dimensions of size 1
     x2d = xtensor("x2d", dims=("row", "col", "batch"), shape=(2, 1, 1))
     y2d = squeeze(x2d)
     assert y2d.type.dims == ("row",)
     assert y2d.type.shape == (2,)
+
+    # Test with xarray
+    fn = xr_function([x2d], y2d)
+    x2d_test = xr_arange_like(x2d)
+    res = fn(x2d_test)
+    expected_res = x2d_test.squeeze()
+    xr_assert_allclose(res, expected_res)
 
     # Test that squeezing a non-existent dimension raises an error
     with pytest.raises(ValueError):
