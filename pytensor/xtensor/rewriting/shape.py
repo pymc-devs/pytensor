@@ -2,7 +2,14 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor import broadcast_to, join, moveaxis, specify_shape
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, ExpandDims, Squeeze, Stack, Transpose, UnStack
+from pytensor.xtensor.shape import (
+    Concat,
+    ExpandDims,
+    Squeeze,
+    Stack,
+    Transpose,
+    UnStack,
+)
 
 
 @register_xcanonicalize
@@ -143,11 +150,7 @@ def local_squeeze_reshape(fgraph, node):
 
     # Get the index of the dimension to remove
     if dim is not None:
-        if dim not in x.type.dims:
-            return False
         dim_idx = x.type.dims.index(dim)
-        if x.type.shape[dim_idx] != 1:
-            return False
     else:
         # Find all dimensions of size 1
         dim_idx = [i for i, s in enumerate(x.type.shape) if s == 1]
