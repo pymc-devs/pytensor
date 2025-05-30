@@ -137,7 +137,7 @@ def lower_index(fgraph, node):
         if basic_idx_axis and _non_consecutive_adv_indexing(aligned_idxs):
             # Numpy moves advanced indexing dimensions to the front when they are not consecutive
             # We need to transpose them back to the expected output order
-            x_tensor_indexed_basic_dims = [out_dims[idx] for idx in basic_idx_axis]
+            x_tensor_indexed_basic_dims = [out_dims[axis] for axis in basic_idx_axis]
             x_tensor_indexed_dims = [
                 dim for dim in out_dims if dim not in x_tensor_indexed_basic_dims
             ] + x_tensor_indexed_basic_dims
