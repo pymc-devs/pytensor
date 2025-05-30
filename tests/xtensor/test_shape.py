@@ -12,7 +12,14 @@ import numpy as np
 from xarray import DataArray
 from xarray import concat as xr_concat
 
-from pytensor.xtensor.shape import concat, expand_dims, squeeze, stack, transpose, unstack
+from pytensor.xtensor.shape import (
+    concat,
+    expand_dims,
+    squeeze,
+    stack,
+    transpose,
+    unstack,
+)
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     xr_arange_like,
