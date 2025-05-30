@@ -2,7 +2,7 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor import broadcast_to, join, moveaxis, specify_shape
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, Stack, Transpose, UnStack
+from pytensor.xtensor.shape import Concat, ExpandDims, Squeeze, Stack, Transpose, UnStack
 
 
 @register_xcanonicalize
@@ -105,3 +105,67 @@ def lower_transpose(fgraph, node):
     x_tensor_transposed = x_tensor.transpose(perm)
     new_out = xtensor_from_tensor(x_tensor_transposed, dims=out_dims)
     return [new_out]
+
+
+@register_xcanonicalize
+@node_rewriter([ExpandDims])
+def local_expand_dims_reshape(fgraph, node):
+    """Rewrite rule to convert expand_dims to reshape."""
+    if not isinstance(node.op, ExpandDims):
+        return False
+
+    x = node.inputs[0]
+    dim = node.op.dim
+
+    # Create new dimensions list with the new dimension
+    new_dims = list(x.type.dims)
+    new_dims.append(dim)
+
+    # Create new shape with the new dimension
+    new_shape = list(x.type.shape)
+    new_shape.append(1)
+
+    # Create a new reshape operation
+    from pytensor.xtensor.shape import reshape
+
+    return [reshape(x, new_shape, new_dims)]
+
+
+@register_xcanonicalize
+@node_rewriter([Squeeze])
+def local_squeeze_reshape(fgraph, node):
+    """Rewrite rule to convert squeeze to reshape."""
+    if not isinstance(node.op, Squeeze):
+        return False
+
+    x = node.inputs[0]
+    dim = node.op.dim
+
+    # Get the index of the dimension to remove
+    if dim is not None:
+        if dim not in x.type.dims:
+            return False
+        dim_idx = x.type.dims.index(dim)
+        if x.type.shape[dim_idx] != 1:
+            return False
+    else:
+        # Find all dimensions of size 1
+        dim_idx = [i for i, s in enumerate(x.type.shape) if s == 1]
+        if not dim_idx:
+            return False
+
+    # Create new dimensions and shape lists
+    new_dims = list(x.type.dims)
+    new_shape = list(x.type.shape)
+    if dim is not None:
+        new_dims.pop(dim_idx)
+        new_shape.pop(dim_idx)
+    else:
+        # Remove all dimensions of size 1
+        new_dims = [d for i, d in enumerate(new_dims) if i not in dim_idx]
+        new_shape = [s for i, s in enumerate(new_shape) if i not in dim_idx]
+
+    # Create a new reshape operation
+    from pytensor.xtensor.shape import reshape
+
+    return [reshape(x, new_shape, new_dims)]

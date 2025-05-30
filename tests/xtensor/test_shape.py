@@ -12,7 +12,7 @@ import numpy as np
 from xarray import DataArray
 from xarray import concat as xr_concat
 
-from pytensor.xtensor.shape import concat, stack, transpose, unstack
+from pytensor.xtensor.shape import concat, expand_dims, squeeze, stack, transpose, unstack
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     xr_arange_like,
@@ -256,3 +256,58 @@ def test_concat_scalar():
     res = fn(x1_test, x2_test)
     expected_res = xr_concat([x1_test, x2_test], dim="new_dim")
     xr_assert_allclose(res, expected_res)
+
+
+def test_expand_dims():
+    # Test 1D tensor expansion
+    x = xtensor("x", dims=("city",), shape=(3,))
+    y = expand_dims(x, "country")
+    assert y.type.dims == ("city", "country")
+    assert y.type.shape == (3, 1)
+
+    # Test 2D tensor expansion
+    x2d = xtensor("x2d", dims=("row", "col"), shape=(2, 3))
+    y2d = expand_dims(x2d, "batch")
+    assert y2d.type.dims == ("row", "col", "batch")
+    assert y2d.type.shape == (2, 3, 1)
+
+    # Test expansion with different dimension name
+    z = expand_dims(x, "time")
+    assert z.type.dims == ("city", "time")
+    assert z.type.shape == (3, 1)
+
+    # Test that expanding with an existing dimension raises an error
+    with pytest.raises(ValueError):
+        expand_dims(y, "city")
+
+    # Test that expanding with None dimension works
+    z = expand_dims(x, None)
+    assert z.type.dims == ("city", None)
+    assert z.type.shape == (3, 1)
+
+
+def test_squeeze():
+    # Test squeezing a specific dimension
+    x = xtensor("x", dims=("city", "country"), shape=(3, 1))
+    y = squeeze(x, "country")
+    assert y.type.dims == ("city",)
+    assert y.type.shape == (3,)
+
+    # Test squeezing all dimensions of size 1
+    x2d = xtensor("x2d", dims=("row", "col", "batch"), shape=(2, 1, 1))
+    y2d = squeeze(x2d)
+    assert y2d.type.dims == ("row",)
+    assert y2d.type.shape == (2,)
+
+    # Test that squeezing a non-existent dimension raises an error
+    with pytest.raises(ValueError):
+        squeeze(x, "time")
+
+    # Test that squeezing a dimension of size > 1 raises an error
+    with pytest.raises(ValueError):
+        squeeze(x, "city")
+
+    # Test that squeezing when no dimensions are of size 1 raises an error
+    x3d = xtensor("x3d", dims=("row", "col", "batch"), shape=(2, 3, 4))
+    with pytest.raises(ValueError):
+        squeeze(x3d)
