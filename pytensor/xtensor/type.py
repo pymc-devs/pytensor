@@ -306,6 +306,9 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         new_out.name = new_name
         return new_out
 
+    def stack(self, dim, **dims):
+        return px.shape.stack(self, dim, **dims)
+
     # def swap_dims(self, *args, **kwargs):
     #     ...
     #
