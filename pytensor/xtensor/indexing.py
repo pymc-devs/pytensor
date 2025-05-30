@@ -44,7 +44,7 @@ def as_idx_variable(idx):
             dims = (dim,)
         else:
             dims = tuple(dim)
-        idx = xtensor_from_tensor(as_tensor(idx), dims=dims)
+        idx = as_xtensor(as_tensor(idx), dims=dims)
     else:
         # Must be integer indices, we already counted for None and slices
         try:
@@ -52,12 +52,19 @@ def as_idx_variable(idx):
         except TypeError:
             idx = as_tensor(idx)
         if idx.type.dtype == "bool":
-            raise NotImplementedError("Boolean indexing not yet supported")
-        if idx.type.dtype not in discrete_dtypes:
+            if idx.type.ndim != 1:
+                # xarray allaws `x[True]`, but I think it is a bug: https://github.com/pydata/xarray/issues/10379
+                # Otherwise, it is always restricted to 1d boolean indexing arrays
+                raise NotImplementedError(
+                    "Only 1d boolean indexing arrays are supported"
+                )
+            # Convert to nonzero indices
+            if isinstance(idx.type, XTensorType):
+                idx = as_xtensor(idx.values.nonzero()[0], dims=idx.type.dims)
+            else:
+                idx = idx.nonzero()[0]
+        elif idx.type.dtype not in discrete_dtypes:
             raise TypeError("Numerical indices must be integers or boolean")
-        if idx.type.dtype == "bool" and idx.type.ndim == 0:
-            # This can't be triggered right now, but will once we lift the boolean restriction
-            raise NotImplementedError("Scalar boolean indices not supported")
     return idx
 
 

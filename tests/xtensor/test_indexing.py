@@ -295,3 +295,39 @@ def test_scalar_integer_indexing(dims_order):
     expected_res2 = x_test[tuple(idxs)]
     xr_assert_allclose(res1, expected_res1)
     xr_assert_allclose(res2, expected_res2)
+
+
+def test_unsupported_boolean_indexing():
+    x = xtensor(dims=("a", "b"), shape=(3, 5))
+
+    mat_idx = xtensor("idx", dtype=bool, shape=(4, 2), dims=("a", "b"))
+    scalar_idx = mat_idx.isel(a=0, b=1)
+
+    for idx in (mat_idx, mat_idx.values, scalar_idx, scalar_idx.values):
+        with pytest.raises(
+            NotImplementedError,
+            match="Only 1d boolean indexing arrays are supported",
+        ):
+            x[idx]
+
+
+def test_boolean_indexing():
+    x = xtensor("x", shape=(8, 7), dims=("a", "b"))
+    bool_idx = xtensor("bool_idx", dtype=bool, shape=(8,), dims=("a",))
+    int_idx = xtensor("int_idx", dtype=int, shape=(4, 3), dims=("a", "new_dim"))
+
+    out_vectorized = x[bool_idx, int_idx]
+    out_orthogonal = x[bool_idx, int_idx.rename(a="b")]
+    fn = xr_function([x, bool_idx, int_idx], [out_vectorized, out_orthogonal])
+
+    x_test = xr_arange_like(x)
+    bool_idx_test = DataArray(np.array([True, False] * 4, dtype=bool), dims=("a",))
+    int_idx_test = DataArray(
+        np.random.binomial(n=4, p=0.5, size=(4, 3)),
+        dims=("a", "new_dim"),
+    )
+    res1, res2 = fn(x_test, bool_idx_test, int_idx_test)
+    expected_res1 = x_test[bool_idx_test, int_idx_test]
+    expected_res2 = x_test[bool_idx_test, int_idx_test.rename(a="b")]
+    xr_assert_allclose(res1, expected_res1)
+    xr_assert_allclose(res2, expected_res2)
