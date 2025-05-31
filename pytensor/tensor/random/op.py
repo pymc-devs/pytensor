@@ -112,6 +112,8 @@ class RandomVariable(Op):
             else:
                 self.signature = safe_signature(self.ndims_params, [self.ndim_supp])
 
+        if dtype is not None:
+            dtype = np.dtype(dtype).name
         self.dtype = dtype or getattr(self, "dtype", None)
 
         self.inplace = (

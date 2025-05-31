@@ -1090,6 +1090,8 @@ class Tri(Op):
     def __init__(self, dtype=None):
         if dtype is None:
             dtype = config.floatX
+        else:
+            dtype = np.dtype(dtype).name
         self.dtype = dtype
 
     def make_node(self, N, M, k):
@@ -1368,6 +1370,8 @@ class Eye(Op):
     def __init__(self, dtype=None):
         if dtype is None:
             dtype = config.floatX
+        else:
+            dtype = np.dtype(dtype).name
         self.dtype = dtype
 
     def make_node(self, n, m, k):
@@ -3225,7 +3229,7 @@ class ARange(COp):
     __props__ = ("dtype",)
 
     def __init__(self, dtype):
-        self.dtype = dtype
+        self.dtype = np.dtype(dtype).name
 
     def make_node(self, start, stop, step):
         from math import ceil
@@ -3407,7 +3411,8 @@ def arange(start, stop=None, step=1, dtype=None):
                     # We use the same dtype as numpy instead of the result of
                     # the upcast.
                     dtype = str(numpy_dtype)
-
+    else:
+        dtype = np.dtype(dtype).name
     if dtype not in _arange:
         _arange[dtype] = ARange(dtype)
     return _arange[dtype](start, stop, step)
