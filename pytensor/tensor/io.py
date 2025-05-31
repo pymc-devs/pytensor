@@ -25,7 +25,7 @@ class LoadFromDisk(Op):
     __props__ = ("dtype", "shape", "mmap_mode")
 
     def __init__(self, dtype, shape, mmap_mode=None):
-        self.dtype = np.dtype(dtype)  # turn "float64" into np.float64
+        self.dtype = np.dtype(dtype).name
         self.shape = shape
         if mmap_mode not in (None, "c"):
             raise ValueError(
