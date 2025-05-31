@@ -96,7 +96,7 @@ class Binomial(Op):
 
     def __init__(self, format, dtype):
         self.format = format
-        self.dtype = dtype
+        self.dtype = np.dtype(dtype).name
 
     def make_node(self, n, p, shape):
         n = pt.as_tensor_variable(n)

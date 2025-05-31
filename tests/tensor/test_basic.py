@@ -2869,6 +2869,18 @@ class TestARange:
         assert np.arange(1.3, 17.48, 2.67).shape == arange(1.3, 17.48, 2.67).type.shape
         assert np.arange(-64, 64).shape == arange(-64, 64).type.shape
 
+    def test_c_cache_bug(self):
+        # Regression test for bug caused by issues in hash of `np.dtype()` objects
+        # https://github.com/numpy/numpy/issues/17864
+        end = iscalar("end")
+        arange1 = ARange(np.dtype("float64"))(0, end, 1)
+        arange2 = ARange("float64")(0, end + 1, 1)
+        assert arange1.owner.op == arange2.owner.op
+        assert hash(arange1.owner.op) == hash(arange2.owner.op)
+        fn = function([end], [arange1, arange2])
+        res1, res2 = fn(10)
+        np.testing.assert_array_equal(res1, res2[:-1], strict=True)
+
 
 class TestNdGrid:
     def setup_method(self):

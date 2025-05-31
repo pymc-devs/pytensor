@@ -1234,8 +1234,8 @@ class CAReduce(COp):
             else:
                 self.axis = tuple(axis)
 
-        self.dtype = dtype
-        self.acc_dtype = acc_dtype
+        self.dtype = np.dtype(dtype).name
+        self.acc_dtype = np.dytpe(acc_dtype).name
         self.upcast_discrete_output = upcast_discrete_output
 
     @property
