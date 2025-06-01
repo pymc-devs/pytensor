@@ -1020,3 +1020,47 @@ def slogdet_specialization(fgraph, node):
             k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
         }
         return replacements
+
+
+def _find_triangular_from_cholesky(potential_triangular):
+    if not (
+        potential_triangular.owner is not None
+        and isinstance(potential_triangular.owner.op, Blockwise)
+        and isinstance(potential_triangular.owner.op.core_op, Cholesky)
+    ):
+        return None
+
+    return potential_triangular
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([det])
+def det_triangular_to_prod_diag(fgraph, node):
+    inputs = node.inputs[0]
+    triangular_check = _find_triangular_from_cholesky(inputs)
+
+    if triangular_check:
+        det_val = inputs.diagonal().prod()
+        return [det_val]
+
+    return None
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_inv_triangular_to_solve_triangular(fgraph, node):
+    core_op = node.op.core_op
+    if not (isinstance(core_op, ALL_INVERSE_OPS)):
+        return None
+
+    inputs = node.inputs[0]
+    triangular_check = _find_triangular_from_cholesky(inputs)
+
+    if triangular_check:
+        valid_eye = pt.eye(inputs.shape[-1])
+        inv_val = solve_triangular(inputs, valid_eye, lower=True)
+        return [inv_val]
+
+    return None
