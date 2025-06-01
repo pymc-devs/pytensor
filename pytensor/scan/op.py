@@ -1500,10 +1500,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         node_input_storage = [storage_map[r] for r in node.inputs]
         node_output_storage = [storage_map[r] for r in node.outputs]
 
-        # HACK: Here to handle Blockwise Scans
-        if compute_map is None:
-            compute_map = {out: [False] for out in node.outputs}
-
         # Analyse the compile inner function to determine which inputs and
         # outputs are on the gpu and speed up some checks during the execution
         outs_is_tensor = [
@@ -1651,8 +1647,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             p=p, i=node_input_storage, o=node_output_storage, n=node, allow_gc=allow_gc
         ):
             r = p(n, [x[0] for x in i], o)
-            for o in node.outputs:
-                compute_map[o][0] = True
+            if compute_map is not None:
+                for o in node.outputs:
+                    compute_map[o][0] = True
             if allow_gc:
                 self.fn.free()
             return r
