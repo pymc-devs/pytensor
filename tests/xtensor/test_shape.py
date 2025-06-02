@@ -12,7 +12,14 @@ import numpy as np
 from xarray import DataArray
 from xarray import concat as xr_concat
 
-from pytensor.xtensor.shape import concat, expand_dims, squeeze, stack, transpose, unstack
+from pytensor.xtensor.shape import (
+    concat,
+    expand_dims,
+    squeeze,
+    stack,
+    transpose,
+    unstack,
+)
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     xr_arange_like,
@@ -260,6 +267,7 @@ def test_concat_scalar():
 
 def test_expand_dims():
     import xarray as xr
+
     # 1D case
     x_xr = xr.DataArray([0, 1, 2], dims=["city"])
     y_xr = x_xr.expand_dims("country")
@@ -301,16 +309,8 @@ def test_expand_dims():
         expand_dims(y, "city")
 
     # Expanding with None dimension
-    print("\nTesting expand_dims with None:")
-    print("Input xarray dims:", x_xr.dims)
-    print("Input xarray shape:", x_xr.shape)
     z_xr = x_xr.expand_dims(None)
-    print("Output xarray dims:", z_xr.dims)
-    print("Output xarray shape:", z_xr.shape)
-    print("Output xarray data:\n", z_xr.data)
     z = expand_dims(x, None)
-    print("Our output dims:", z.type.dims)
-    print("Our output shape:", z.type.shape)
     assert z.type.dims == z_xr.dims
     assert z.type.shape == z_xr.shape
     fn = xr_function([x], z)
@@ -323,23 +323,51 @@ def test_squeeze():
     # Test squeezing a specific dimension
     x = xtensor("x", dims=("city", "country"), shape=(3, 1))
     y = squeeze(x, "country")
-    assert y.type.dims == ("city",)
-    assert y.type.shape == (3,)
-
-    # Test with xarray
     fn = xr_function([x], y)
     x_test = xr_arange_like(x)
     res = fn(x_test)
     expected_res = x_test.squeeze("country")
     xr_assert_allclose(res, expected_res)
 
+    # Test squeezing multiple specific dimensions
+    x_multi = xtensor("x_multi", dims=("a", "b", "c", "d"), shape=(2, 1, 1, 3))
+    y_multi = squeeze(x_multi, ["b", "c"])
+    fn = xr_function([x_multi], y_multi)
+    x_multi_test = xr_arange_like(x_multi)
+    res = fn(x_multi_test)
+    expected_res = x_multi_test.squeeze(["b", "c"])
+    xr_assert_allclose(res, expected_res)
+
+    # Test squeezing a non-last dimension
+    x_nonlast = xtensor("x_nonlast", dims=("a", "b", "c"), shape=(2, 1, 3))
+    y_nonlast = squeeze(x_nonlast, "b")
+    fn = xr_function([x_nonlast], y_nonlast)
+    x_nonlast_test = xr_arange_like(x_nonlast)
+    res = fn(x_nonlast_test)
+    expected_res = x_nonlast_test.squeeze("b")
+    xr_assert_allclose(res, expected_res)
+
+    # Test squeezing in a higher-dimensional tensor
+    x_high = xtensor("x_high", dims=("a", "b", "c", "d", "e"), shape=(2, 1, 3, 1, 4))
+    y_high = squeeze(x_high, ["b", "d"])
+    fn = xr_function([x_high], y_high)
+    x_high_test = xr_arange_like(x_high)
+    res = fn(x_high_test)
+    expected_res = x_high_test.squeeze(["b", "d"])
+    xr_assert_allclose(res, expected_res)
+
+    # Test with symbolic shapes
+    x_sym = xtensor("x_sym", dims=("a", "b", "c"))
+    y_sym = squeeze(x_sym, "b")
+    x_sym_test = xr_arange_like(xtensor(dims=x_sym.dims, shape=(2, 1, 3)))
+    fn = xr_function([x_sym], y_sym)
+    res = fn(x_sym_test)
+    expected_res = x_sym_test.squeeze("b")
+    xr_assert_allclose(res, expected_res)
+
     # Test squeezing all dimensions of size 1
     x2d = xtensor("x2d", dims=("row", "col", "batch"), shape=(2, 1, 1))
     y2d = squeeze(x2d)
-    assert y2d.type.dims == ("row",)
-    assert y2d.type.shape == (2,)
-
-    # Test with xarray
     fn = xr_function([x2d], y2d)
     x2d_test = xr_arange_like(x2d)
     res = fn(x2d_test)

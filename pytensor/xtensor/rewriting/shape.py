@@ -1,8 +1,22 @@
 from pytensor.graph import node_rewriter
-from pytensor.tensor import broadcast_to, join, moveaxis, specify_shape, squeeze, expand_dims
+from pytensor.tensor import (
+    broadcast_to,
+    expand_dims,
+    join,
+    moveaxis,
+    specify_shape,
+    squeeze,
+)
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, ExpandDims, Squeeze, Stack, Transpose, UnStack
+from pytensor.xtensor.shape import (
+    Concat,
+    ExpandDims,
+    Squeeze,
+    Stack,
+    Transpose,
+    UnStack,
+)
 
 
 @register_xcanonicalize
@@ -116,17 +130,17 @@ def local_expand_dims_reshape(fgraph, node):
 
     x = node.inputs[0]
     dim = node.op.dim
-    size = getattr(node.op, 'size', 1)
+    size = getattr(node.op, "size", 1)
 
     # If dim is None, don't add a new dimension (matching xarray behavior)
     if dim is None:
         return [x]
 
     # Create new dimensions list with the new dimension at the beginning
-    new_dims = [dim] + list(x.type.dims)
+    new_dims = [dim, *list(x.type.dims)]
 
     # Create new shape with the new dimension at the beginning
-    new_shape = [1] + list(x.type.shape)
+    new_shape = [1, *list(x.type.shape)]
 
     # Convert to tensor and use pytensor.tensor.expand_dims
     x_tensor = tensor_from_xtensor(x)
@@ -147,32 +161,31 @@ def local_squeeze_reshape(fgraph, node):
     x = node.inputs[0]
     dim = node.op.dim
 
-    # Get the index of the dimension to remove
-    if dim is not None:
-        if dim not in x.type.dims:
-            return False
-        dim_idx = x.type.dims.index(dim)
-        if x.type.shape[dim_idx] != 1:
-            return False
+    # Convert single dimension to iterable for consistent handling
+    dims_to_remove = [dim] if isinstance(dim, str) else dim
+
+    if dims_to_remove is not None:
+        # Validate dimensions exist and have size 1
+        dim_indices = []
+        for d in dims_to_remove:
+            if d not in x.type.dims:
+                return False
+            dim_idx = x.type.dims.index(d)
+            # Only check shape != 1 if the shape is not None (symbolic)
+            if x.type.shape[dim_idx] is not None and x.type.shape[dim_idx] != 1:
+                return False
+            dim_indices.append(dim_idx)
     else:
         # Find all dimensions of size 1
-        dim_idx = [i for i, s in enumerate(x.type.shape) if s == 1]
-        if not dim_idx:
+        dim_indices = [i for i, s in enumerate(x.type.shape) if s == 1]
+        if not dim_indices:
             return False
 
-    # Create new dimensions and shape lists
-    new_dims = list(x.type.dims)
-    new_shape = list(x.type.shape)
-    if dim is not None:
-        new_dims.pop(dim_idx)
-        new_shape.pop(dim_idx)
-    else:
-        # Remove all dimensions of size 1
-        new_dims = [d for i, d in enumerate(new_dims) if i not in dim_idx]
-        new_shape = [s for i, s in enumerate(new_shape) if i not in dim_idx]
+    # Create new dimensions list
+    new_dims = [d for i, d in enumerate(x.type.dims) if i not in dim_indices]
 
     # Convert to tensor and use pytensor.tensor.squeeze
     x_tensor = tensor_from_xtensor(x)
-    x_tensor_squeezed = squeeze(x_tensor, axis=dim_idx if dim is None else dim_idx)
+    x_tensor_squeezed = squeeze(x_tensor, axis=tuple(dim_indices))
     new_out = xtensor_from_tensor(x_tensor_squeezed, dims=tuple(new_dims))
     return [new_out]

@@ -313,6 +313,7 @@ class ExpandDims(XOp):
     size : int or symbolic, optional
         The size of the new dimension (default 1).
     """
+
     def __init__(self, dim, size=1):
         self.dim = dim
         self.size = size
@@ -329,11 +330,13 @@ class ExpandDims(XOp):
             raise ValueError(f"Dimension {self.dim} already exists")
 
         # Add new dimension at the beginning
-        new_dims = [self.dim] + list(x.type.dims)
-        new_shape = [self.size] + list(x.type.shape)
+        new_dims = [self.dim, *list(x.type.dims)]
+        new_shape = [self.size, *list(x.type.shape)]
 
         output = xtensor(
-            dtype=x.type.dtype, shape=tuple(new_shape), dims=tuple(new_dims)
+            dtype=x.type.dtype,
+            dims=tuple(new_dims),
+            shape=tuple(new_shape),
         )
         return Apply(self, [x], [output])
 
@@ -357,12 +360,12 @@ def expand_dims(x, dim: str):
 
 
 class Squeeze(XOp):
-    """Remove a dimension of size 1 from an XTensorVariable.
+    """Remove dimensions of size 1 from an XTensorVariable.
 
     Parameters
     ----------
-    dim : str or None
-        The name of the dimension to remove. If None, all dimensions of size 1 will be removed.
+    dim : str or None or iterable of str
+        The name(s) of the dimension(s) to remove. If None, all dimensions of size 1 will be removed.
     """
 
     def __init__(self, dim=None):
@@ -371,31 +374,32 @@ class Squeeze(XOp):
     def make_node(self, x):
         x = as_xtensor(x)
 
-        # Get the index of the dimension to remove
-        if self.dim is not None:
-            if self.dim not in x.type.dims:
-                raise ValueError(f"Dimension {self.dim} not found")
-            dim_idx = x.type.dims.index(self.dim)
-            if x.type.shape[dim_idx] != 1:
-                raise ValueError(
-                    f"Dimension {self.dim} has size {x.type.shape[dim_idx]}, not 1"
-                )
+        # Convert single dimension to iterable for consistent handling
+        dims_to_remove = [self.dim] if isinstance(self.dim, str) else self.dim
+
+        if dims_to_remove is not None:
+            # Validate dimensions exist and have size 1
+            for dim in dims_to_remove:
+                if dim not in x.type.dims:
+                    raise ValueError(f"Dimension {dim} not found")
+                dim_idx = x.type.dims.index(dim)
+                # Only raise an error if the shape is statically known and not 1.
+                # If the shape is None (symbolic), defer the error to runtime.
+                if x.type.shape[dim_idx] is not None and x.type.shape[dim_idx] != 1:
+                    raise ValueError(
+                        f"Dimension {dim} has size {x.type.shape[dim_idx]}, not 1"
+                    )
+            # Get indices of dimensions to remove
+            dim_indices = [x.type.dims.index(dim) for dim in dims_to_remove]
         else:
             # Find all dimensions of size 1
-            dim_idx = [i for i, s in enumerate(x.type.shape) if s == 1]
-            if not dim_idx:
+            dim_indices = [i for i, s in enumerate(x.type.shape) if s == 1]
+            if not dim_indices:
                 raise ValueError("No dimensions of size 1 to remove")
 
         # Create new dimensions and shape lists
-        new_dims = list(x.type.dims)
-        new_shape = list(x.type.shape)
-        if self.dim is not None:
-            new_dims.pop(dim_idx)
-            new_shape.pop(dim_idx)
-        else:
-            # Remove all dimensions of size 1
-            new_dims = [d for i, d in enumerate(new_dims) if i not in dim_idx]
-            new_shape = [s for i, s in enumerate(new_shape) if i not in dim_idx]
+        new_dims = [d for i, d in enumerate(x.type.dims) if i not in dim_indices]
+        new_shape = [s for i, s in enumerate(x.type.shape) if i not in dim_indices]
 
         output = xtensor(
             dtype=x.type.dtype, shape=tuple(new_shape), dims=tuple(new_dims)
@@ -404,18 +408,18 @@ class Squeeze(XOp):
 
 
 def squeeze(x, dim=None):
-    """Remove a dimension of size 1 from an XTensorVariable.
+    """Remove dimensions of size 1 from an XTensorVariable.
 
     Parameters
     ----------
     x : XTensorVariable
         The input tensor
-    dim : str or None, optional
-        The name of the dimension to remove. If None, all dimensions of size 1 will be removed.
+    dim : str or None or iterable of str, optional
+        The name(s) of the dimension(s) to remove. If None, all dimensions of size 1 will be removed.
 
     Returns
     -------
     XTensorVariable
-        A new tensor with the specified dimension removed
+        A new tensor with the specified dimension(s) removed
     """
     return Squeeze(dim=dim)(x)
