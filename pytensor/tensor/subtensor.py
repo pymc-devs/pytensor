@@ -3021,12 +3021,7 @@ class AdvancedIncSubtensor(Op):
         return Apply(
             self,
             (x, y, *new_inputs),
-            [
-                tensor(
-                    dtype=x.type.dtype,
-                    shape=tuple(1 if s == 1 else None for s in x.type.shape),
-                )
-            ],
+            [x.type()],
         )
 
     def perform(self, node, inputs, out_):
