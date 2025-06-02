@@ -504,7 +504,9 @@ def xtensor_constant(x, name=None, dims: None | Sequence[str] = None):
             if x_data.ndim == 0:
                 x_dims = ()
             else:
-                "Cannot convert TensorLike constant to XTensorConstant without specifying dims."
+                raise TypeError(
+                    "Cannot convert TensorLike constant to XTensorConstant without specifying dims."
+                )
     try:
         return XTensorConstant(
             XTensorType(dtype=x_data.dtype, dims=x_dims, shape=x_data.shape),
