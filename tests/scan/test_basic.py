@@ -27,6 +27,7 @@ from pytensor.compile.monitormode import MonitorMode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, Rop, disconnected_grad, grad, hessian
+from pytensor.graph import vectorize_graph
 from pytensor.graph.basic import Apply, ancestors, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
@@ -1177,6 +1178,17 @@ class TestScan:
         ]
 
         utt.verify_grad(get_sum_of_grad, inputs_test_values, rng=rng)
+
+    def test_blockwise_scan(self):
+        x = pt.tensor("x", shape=())
+        out, _ = scan(lambda x: x + 1, outputs_info=[x], n_steps=10)
+        x_vec = pt.tensor("x_vec", shape=(None,))
+        out_vec = vectorize_graph(out, {x: x_vec})
+
+        fn = function([x_vec], out_vec)
+        o1 = fn([1, 2, 3])
+        o2 = np.arange(2, 12) + np.arange(3).reshape(-1, 1)
+        assert np.allclose(o1, o2)
 
     def test_connection_pattern(self):
         """Test `Scan.connection_pattern` in the presence of recurrent outputs with multiple taps."""

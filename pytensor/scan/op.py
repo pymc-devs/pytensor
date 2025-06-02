@@ -1647,8 +1647,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             p=p, i=node_input_storage, o=node_output_storage, n=node, allow_gc=allow_gc
         ):
             r = p(n, [x[0] for x in i], o)
-            for o in node.outputs:
-                compute_map[o][0] = True
+            if compute_map is not None:
+                for o in node.outputs:
+                    compute_map[o][0] = True
             if allow_gc:
                 self.fn.free()
             return r
