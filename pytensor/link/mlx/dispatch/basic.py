@@ -18,7 +18,6 @@ def mlx_typify(data, **kwargs):
 
 
 @mlx_typify.register(np.ndarray)
-@mlx_typify.register(mx.array)
 def mlx_typify_tensor(data, dtype=None, **kwargs):
     return mx.array(data, dtype=dtype)
 
@@ -26,6 +25,7 @@ def mlx_typify_tensor(data, dtype=None, **kwargs):
 @mlx_typify.register(slice)
 @mlx_typify.register(NoneType)
 @mlx_typify.register(np.number)
+@mlx_typify.register(mx.array)
 def mlx_typify_no_conversion_needed(data, **kwargs):
     return data
 

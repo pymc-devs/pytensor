@@ -1,5 +1,6 @@
 import mlx.core as mx
 import numpy as np
+from functools import singledispatch
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
@@ -10,6 +11,8 @@ from pytensor.scalar.basic import (
     Add,
     Cast,
     Mul,
+    ScalarMaximum,
+    ScalarMinimum,
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
 from pytensor.tensor.special import Softmax, SoftmaxGrad
@@ -32,34 +35,64 @@ def mlx_funcify_DimShuffle(op, **kwargs):
     return dimshuffle
 
 
+# Second-level dispatch for scalar operations in CAReduce
+@singledispatch
+def mlx_funcify_CAReduce_scalar_op(scalar_op):
+    raise NotImplementedError(f"MLX does not support CAReduce with scalar op {scalar_op}")
+
+
+@mlx_funcify_CAReduce_scalar_op.register(Add)
+def _(scalar_op):
+    def sum_reduce(x, axis):
+        return mx.sum(x, axis=axis)
+    return sum_reduce
+
+
+@mlx_funcify_CAReduce_scalar_op.register(Mul)
+def _(scalar_op):
+    def prod_reduce(x, axis):
+        return mx.prod(x, axis=axis)
+    return prod_reduce
+
+
+@mlx_funcify_CAReduce_scalar_op.register(AND)
+def _(scalar_op):
+    def all_reduce(x, axis):
+        return x.all(axis=axis)
+    return all_reduce
+
+
+@mlx_funcify_CAReduce_scalar_op.register(OR)
+def _(scalar_op):
+    def any_reduce(x, axis):
+        return mx.any(x, axis=axis)
+    return any_reduce
+
+
+@mlx_funcify_CAReduce_scalar_op.register(ScalarMaximum)
+def _(scalar_op):
+    def max_reduce(x, axis):
+        return mx.max(x, axis=axis)
+    return max_reduce
+
+
+@mlx_funcify_CAReduce_scalar_op.register(ScalarMinimum)
+def _(scalar_op):
+    def min_reduce(x, axis):
+        return mx.min(x, axis=axis)
+    return min_reduce
+
+
 @mlx_funcify.register(CAReduce)
 def mlx_funcify_CAReduce(op, **kwargs):
-    if isinstance(op.scalar_op, Add):
-
-        def sum(x):
-            return mx.sum(x, axis=op.axis)
-
-        return sum
-    elif isinstance(op.scalar_op, Mul):
-
-        def prod(x):
-            return mx.prod(x, axis=op.axis)
-
-        return prod
-    elif isinstance(op.scalar_op, AND):
-
-        def all(x):
-            return x.all(axis=op.axis)
-
-        return all
-    elif isinstance(op.scalar_op, OR):
-
-        def any(x):
-            return mx.any(x, axis=op.axis)
-
-        return any
-    else:
-        raise NotImplementedError(f"MLX does not support Elemwise {op.scalar_op}")
+    # Dispatch to the appropriate scalar op handler
+    scalar_reduce_fn = mlx_funcify_CAReduce_scalar_op(op.scalar_op)
+    axis = op.axis
+    
+    def reduce(x):
+        return scalar_reduce_fn(x, axis)
+    
+    return reduce
 
 
 @mlx_funcify.register(Softmax)

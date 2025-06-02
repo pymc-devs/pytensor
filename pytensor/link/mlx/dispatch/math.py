@@ -1,4 +1,5 @@
 import mlx.core as mx
+from functools import singledispatch
 
 from pytensor.link.mlx.dispatch import mlx_funcify, mlx_typify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
@@ -17,6 +18,7 @@ from pytensor.scalar.basic import (
     Cast,
     Cos,
     Exp,
+    Invert,
     Log,
     Log1p,
     Mul,
@@ -51,200 +53,283 @@ def mlx_funcify_Dot(op, **kwargs):
     return dot
 
 
-@mlx_funcify.register(Elemwise)
-def mlx_funcify_Elemwise(op, **kwargs):
-    if isinstance(op.scalar_op, Add):
+# Second-level dispatch for scalar operations in Elemwise
+@singledispatch
+def mlx_funcify_Elemwise_scalar_op(scalar_op):
+    """Default implementation that tries to use getattr(mx, func_name) similar to JAX."""
+    
+    # Try to get the function name from nfunc_spec (like JAX does)
+    nfunc_spec = getattr(scalar_op, "nfunc_spec", None)
+    if nfunc_spec is not None:
+        func_name = nfunc_spec[0]
+        try:
+            mlx_func = getattr(mx, func_name)
+            # Handle variadic functions
+            if len(scalar_op.inputs) > nfunc_spec[1]:
+                # For operations like Add that can take multiple inputs
+                def variadic_func(*args):
+                    result = args[0]
+                    for arg in args[1:]:
+                        result = mlx_func(result, arg)
+                    return result
+                return variadic_func
+            else:
+                return mlx_func
+        except AttributeError:
+            pass
+    
+    # Try using the operation name directly
+    op_name = getattr(scalar_op, "name", None)
+    if op_name is not None:
+        try:
+            return getattr(mx, op_name)
+        except AttributeError:
+            pass
+    
+    raise NotImplementedError(f"MLX does not support Elemwise scalar op {scalar_op}")
 
-        def add(*args):
-            result = args[0]
-            for arg in args[1:]:
-                result = mx.add(result, arg)
-            return result
 
-        return add
-    elif isinstance(op.scalar_op, Sub):
+@mlx_funcify_Elemwise_scalar_op.register(Add)
+def _(scalar_op):
+    def add(*args):
+        result = args[0]
+        for arg in args[1:]:
+            result = mx.add(result, arg)
+        return result
+    return add
 
-        def sub(x, y):
-            return mx.subtract(x, y)
 
-        return sub
-    elif isinstance(op.scalar_op, Mul):
+@mlx_funcify_Elemwise_scalar_op.register(Sub)
+def _(scalar_op):
+    def sub(x, y):
+        return mx.subtract(x, y)
+    return sub
 
-        def mul(*args):
-            result = args[0]
-            for arg in args[1:]:
-                result = mx.multiply(result, arg)
-            return result
 
-        return mul
-    elif isinstance(op.scalar_op, Exp):
+@mlx_funcify_Elemwise_scalar_op.register(Mul)
+def _(scalar_op):
+    def mul(*args):
+        result = args[0]
+        for arg in args[1:]:
+            result = mx.multiply(result, arg)
+        return result
+    return mul
 
-        def exp(x):
-            return mx.exp(x)
 
-        return exp
-    elif isinstance(op.scalar_op, Log):
+@mlx_funcify_Elemwise_scalar_op.register(TrueDiv)
+def _(scalar_op):
+    def true_div(x, y):
+        return mx.divide(x, y)
+    return true_div
 
-        def log(x):
-            return mx.log(x)
 
-        return log
-    elif isinstance(op.scalar_op, Sin):
+@mlx_funcify_Elemwise_scalar_op.register(Pow)
+def _(scalar_op):
+    def pow(x, y):
+        return mx.power(x, y)
+    return pow
 
-        def sin(x):
-            return mx.sin(x)
 
-        return sin
-    elif isinstance(op.scalar_op, Cos):
+@mlx_funcify_Elemwise_scalar_op.register(Exp)
+def _(scalar_op):
+    def exp(x):
+        return mx.exp(x)
+    return exp
 
-        def cos(x):
-            return mx.cos(x)
 
-        return cos
-    elif isinstance(op.scalar_op, Sigmoid):
+@mlx_funcify_Elemwise_scalar_op.register(Log)
+def _(scalar_op):
+    def log(x):
+        return mx.log(x)
+    return log
 
-        def sigmoid(x):
-            return mx.sigmoid(x)
 
-        return sigmoid
-    elif isinstance(op.scalar_op, LE):
+@mlx_funcify_Elemwise_scalar_op.register(Log1p)
+def _(scalar_op):
+    def log1p(x):
+        return mx.log1p(x)
+    return log1p
 
-        def le(x, y):
-            return mx.less_equal(x, y)
 
-        return le
-    elif isinstance(op.scalar_op, LT):
+@mlx_funcify_Elemwise_scalar_op.register(Sin)
+def _(scalar_op):
+    def sin(x):
+        return mx.sin(x)
+    return sin
 
-        def lt(x, y):
-            return mx.less(x, y)
 
-        return lt
-    elif isinstance(op.scalar_op, GE):
+@mlx_funcify_Elemwise_scalar_op.register(Cos)
+def _(scalar_op):
+    def cos(x):
+        return mx.cos(x)
+    return cos
 
-        def ge(x, y):
-            return mx.greater_equal(x, y)
 
-        return ge
-    elif isinstance(op.scalar_op, GT):
+@mlx_funcify_Elemwise_scalar_op.register(Sqrt)
+def _(scalar_op):
+    def sqrt(x):
+        return mx.sqrt(x)
+    return sqrt
 
-        def gt(x, y):
-            return mx.greater(x, y)
 
-        return gt
-    elif isinstance(op.scalar_op, EQ):
+@mlx_funcify_Elemwise_scalar_op.register(Sqr)
+def _(scalar_op):
+    def sqr(x):
+        return mx.square(x)
+    return sqr
 
-        def eq(x, y):
-            return mx.equal(x, y)
 
-        return eq
-    elif isinstance(op.scalar_op, NEQ):
+@mlx_funcify_Elemwise_scalar_op.register(Abs)
+def _(scalar_op):
+    def abs(x):
+        return mx.abs(x)
+    return abs
 
-        def neq(x, y):
-            return mx.not_equal(x, y)
 
-        return neq
-    elif isinstance(op.scalar_op, Switch):
+@mlx_funcify_Elemwise_scalar_op.register(Neg)
+def _(scalar_op):
+    def neg(x):
+        return mx.negative(x)
+    return neg
 
-        def switch(cond, x, y):
-            return mx.where(cond, x, y)
 
-        return switch
-    elif isinstance(op.scalar_op, Pow):
+@mlx_funcify_Elemwise_scalar_op.register(Sign)
+def _(scalar_op):
+    def sign(x):
+        return mx.sign(x)
+    return sign
 
-        def pow(x, y):
-            return mx.power(x, y)
 
-        return pow
-    elif isinstance(op.scalar_op, TrueDiv):
+@mlx_funcify_Elemwise_scalar_op.register(LE)
+def _(scalar_op):
+    def le(x, y):
+        return mx.less_equal(x, y)
+    return le
 
-        def true_div(x, y):
-            return mx.divide(x, y)
 
-        return true_div
-    elif isinstance(op.scalar_op, Sqr):
+@mlx_funcify_Elemwise_scalar_op.register(LT)
+def _(scalar_op):
+    def lt(x, y):
+        return mx.less(x, y)
+    return lt
 
-        def sqr(x):
-            return mx.square(x)
 
-        return sqr
-    elif isinstance(op.scalar_op, Sqrt):
+@mlx_funcify_Elemwise_scalar_op.register(GE)
+def _(scalar_op):
+    def ge(x, y):
+        return mx.greater_equal(x, y)
+    return ge
 
-        def sqrt(x):
-            return mx.sqrt(x)
 
-        return sqrt
-    elif isinstance(op.scalar_op, Abs):
+@mlx_funcify_Elemwise_scalar_op.register(GT)
+def _(scalar_op):
+    def gt(x, y):
+        return mx.greater(x, y)
+    return gt
 
-        def abs(x):
-            return mx.abs(x)
 
-        return abs
-    elif isinstance(op.scalar_op, Softplus):
+@mlx_funcify_Elemwise_scalar_op.register(EQ)
+def _(scalar_op):
+    def eq(x, y):
+        return mx.equal(x, y)
+    return eq
 
-        def softplus(x):
-            return mx.where(
-                x < -37.0,
-                mx.exp(x),
+
+@mlx_funcify_Elemwise_scalar_op.register(NEQ)
+def _(scalar_op):
+    def neq(x, y):
+        return mx.not_equal(x, y)
+    return neq
+
+
+@mlx_funcify_Elemwise_scalar_op.register(Switch)
+def _(scalar_op):
+    def switch(cond, x, y):
+        return mx.where(cond, x, y)
+    return switch
+
+
+@mlx_funcify_Elemwise_scalar_op.register(AND)
+def _(scalar_op):
+    def bitwise_and(x, y):
+        return mx.bitwise_and(x, y)
+    return bitwise_and
+
+
+@mlx_funcify_Elemwise_scalar_op.register(OR)
+def _(scalar_op):
+    def bitwise_or(x, y):
+        return mx.bitwise_or(x, y)
+    return bitwise_or
+
+
+@mlx_funcify_Elemwise_scalar_op.register(ScalarMaximum)
+def _(scalar_op):
+    def maximum(x, y):
+        return mx.maximum(x, y)
+    return maximum
+
+
+@mlx_funcify_Elemwise_scalar_op.register(ScalarMinimum)
+def _(scalar_op):
+    def minimum(x, y):
+        return mx.minimum(x, y)
+    return minimum
+
+
+@mlx_funcify_Elemwise_scalar_op.register(Cast)
+def _(scalar_op):
+    def cast(x):
+        dtype = convert_dtype_to_mlx(scalar_op.o_type.dtype)
+        return x.astype(dtype)
+    return cast
+
+
+@mlx_funcify_Elemwise_scalar_op.register(Sigmoid)
+def _(scalar_op):
+    def sigmoid(x):
+        return mx.sigmoid(x)
+    return sigmoid
+
+
+@mlx_funcify_Elemwise_scalar_op.register(Softplus)
+def _(scalar_op):
+    def softplus(x):
+        return mx.where(
+            x < -37.0,
+            mx.exp(x),
+            mx.where(
+                x < 18.0,
+                mx.log1p(mx.exp(x)),
                 mx.where(
-                    x < 18.0,
-                    mx.log1p(mx.exp(x)),
-                    mx.where(
-                        x < 33.3,
-                        x + mx.exp(-x),
-                        x,
-                    ),
+                    x < 33.3,
+                    x + mx.exp(-x),
+                    x,
                 ),
-            )
+            ),
+        )
+    return softplus
 
-        return softplus
-    elif isinstance(op.scalar_op, Neg):
 
-        def neg(x):
-            return mx.negative(x)
+@mlx_funcify_Elemwise_scalar_op.register(Invert)
+def _(scalar_op):
+    def invert(x):
+        return ~x
+    return invert
 
-        return neg
-    elif isinstance(op.scalar_op, AND):
 
-        def all(x, y):
-            return mx.bitwise_and(x, y)
-
-        return all
-    elif isinstance(op.scalar_op, OR):
-
-        def any(x, y):
-            return mx.bitwise_or(x, y)
-
-        return any
-    elif isinstance(op.scalar_op, ScalarMaximum):
-
-        def max(x, y):
-            return mx.maximum(x, y)
-
-        return max
-    elif isinstance(op.scalar_op, ScalarMinimum):
-
-        def min(x, y):
-            return mx.minimum(x, y)
-
-        return min
-    elif isinstance(op.scalar_op, Cast):
-
-        def cast(x):
-            dtype = convert_dtype_to_mlx(op.scalar_op.o_type.dtype)
-            return x.astype(dtype)
-
-        return cast
-    elif isinstance(op.scalar_op, Sign):
-
-        def sign(x):
-            return mx.sign(x)
-
-        return sign
-    elif isinstance(op.scalar_op, Log1p):
-
-        def log1p(x):
-            return mx.log1p(x)
-
-        return log1p
-    else:
-        raise NotImplementedError(f"MLX does not support {op.scalar_op}")
+@mlx_funcify.register(Elemwise)
+def mlx_funcify_Elemwise(op, node=None, **kwargs):
+    # Dispatch to the appropriate scalar op handler
+    scalar_func = mlx_funcify_Elemwise_scalar_op(op.scalar_op)
+    
+    def elemwise(*inputs):
+        # Enforce runtime broadcast checks (same as JAX and PyTorch implementations)
+        if node is not None:
+            # Convert inputs to MLX arrays for broadcast checking
+            mlx_inputs = tuple(mx.array(inp) if not hasattr(inp, 'shape') else inp for inp in inputs)
+            Elemwise._check_runtime_broadcast(node, mlx_inputs)
+        
+        return scalar_func(*inputs)
+    
+    return elemwise
