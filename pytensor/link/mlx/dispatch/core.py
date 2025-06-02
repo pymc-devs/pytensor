@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import warnings
 
-import mlx.core as mx  
+import mlx.core as mx
 import numpy as np
 
-from pytensor.link.mlx.dispatch.basic import mlx_funcify  
+from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
     Alloc,
@@ -34,22 +34,22 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.exceptions import NotScalarConstantError
 
 
-@mlx_funcify.register(Join)  
+@mlx_funcify.register(Join)
 def mlx_funcify_Join(op, **kwargs):
     def join(axis, *tensors):
         view = op.view
         if (view != -1) and all(
-            tensors[i].shape[axis] == 0  
+            tensors[i].shape[axis] == 0
             for i in list(range(view)) + list(range(view + 1, len(tensors)))
         ):
             return tensors[view]
 
-        return mx.concatenate(tensors, axis=axis)  
+        return mx.concatenate(tensors, axis=axis)
 
     return join
 
 
-@mlx_funcify.register(Split)  
+@mlx_funcify.register(Split)
 def mlx_funcify_Split(op: Split, node, **kwargs):
     _, axis_sym, splits_sym = node.inputs
 
@@ -84,7 +84,7 @@ def mlx_funcify_Split(op: Split, node, **kwargs):
             cumsum_splits = np.cumsum(splits[:-1])
         else:
             # dynamic - keep in graph
-            splits_arr = mx.array(splits)  
+            splits_arr = mx.array(splits)
             cumsum_splits = mx.cumsum(
                 splits_arr[:-1]
             ).tolist()  # python list for mx.split
@@ -98,29 +98,27 @@ def mlx_funcify_Split(op: Split, node, **kwargs):
         if np.any(np.asarray(splits) < 0):
             raise ValueError("Split sizes cannot be negative.")
 
-        return mx.split(x, cumsum_splits, axis=axis)  
+        return mx.split(x, cumsum_splits, axis=axis)
 
     return split
 
 
-
-@mlx_funcify.register(ExtractDiag)  
+@mlx_funcify.register(ExtractDiag)
 def mlx_funcify_ExtractDiag(op, **kwargs):
     offset, axis1, axis2 = op.offset, op.axis1, op.axis2
 
     def extract_diag(x, offset=offset, axis1=axis1, axis2=axis2):
-        return mx.diagonal(x, offset=offset, axis1=axis1, axis2=axis2)  
+        return mx.diagonal(x, offset=offset, axis1=axis1, axis2=axis2)
 
     return extract_diag
 
 
-
-@mlx_funcify.register(Eye)  
+@mlx_funcify.register(Eye)
 def mlx_funcify_Eye(op, **kwargs):
     dtype = convert_dtype_to_mlx(op.dtype)
 
     def eye(N, M, k):
-        return mx.eye(int(N), int(M), int(k), dtype=dtype)  
+        return mx.eye(int(N), int(M), int(k), dtype=dtype)
 
     return eye
 
@@ -166,19 +164,17 @@ def convert_dtype_to_mlx(dtype_str):
     return dtype_str
 
 
-
-@mlx_funcify.register(MakeVector)  
+@mlx_funcify.register(MakeVector)
 def mlx_funcify_MakeVector(op, **kwargs):
     dtype = convert_dtype_to_mlx(op.dtype)
 
     def makevector(*x):
-        return mx.array(x, dtype=dtype)  
+        return mx.array(x, dtype=dtype)
 
     return makevector
 
 
-
-@mlx_funcify.register(TensorFromScalar)  
+@mlx_funcify.register(TensorFromScalar)
 def mlx_funcify_TensorFromScalar(op, **kwargs):
     def tensor_from_scalar(x):
         return x  # already an MLX array / scalar
@@ -186,17 +182,15 @@ def mlx_funcify_TensorFromScalar(op, **kwargs):
     return tensor_from_scalar
 
 
-
-@mlx_funcify.register(ScalarFromTensor)  
+@mlx_funcify.register(ScalarFromTensor)
 def mlx_funcify_ScalarFromTensor(op, **kwargs):
     def scalar_from_tensor(x):
-        return mx.array(x).reshape(-1)[0]  
+        return mx.array(x).reshape(-1)[0]
 
     return scalar_from_tensor
 
 
-
-@mlx_funcify.register(Tri)  
+@mlx_funcify.register(Tri)
 def mlx_funcify_Tri(op, node, **kwargs):
     # node.inputs  ->  N, M, k
     const_args = [getattr(inp, "data", None) for inp in node.inputs]
@@ -208,7 +202,7 @@ def mlx_funcify_Tri(op, node, **kwargs):
             arg if const_a is None else const_a
             for arg, const_a in zip(args, const_args, strict=True)
         ]
-        return mx.tri(*args, dtype=dtype)  
+        return mx.tri(*args, dtype=dtype)
 
     return tri
 

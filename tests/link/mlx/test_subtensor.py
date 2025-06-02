@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
+from test_basic import compare_mlx_and_py
 
 import pytensor.tensor as pt
-from pytensor.configdefaults import config
 from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor import tensor
-from test_basic import compare_mlx_and_py
+
 
 mx = pytest.importorskip("mlx.core")
 
@@ -93,8 +93,6 @@ def test_mlx_AdvancedSubtensor_boolean():
 @pytest.mark.xfail(reason="MLX indexing with tuples not yet supported")
 def test_mlx_IncSubtensor_set():
     """Test set operations using IncSubtensor (set_instead_of_inc=True)."""
-    rng = np.random.default_rng(213234)
-    
     # Test data
     x_np = np.arange(3 * 4 * 5, dtype=np.float32).reshape((3, 4, 5))
     x_pt = pt.constant(x_np)
@@ -103,15 +101,13 @@ def test_mlx_IncSubtensor_set():
     st_pt = pt.as_tensor_variable(np.array(-10.0, dtype=np.float32))
     out_pt = pt_subtensor.set_subtensor(x_pt[1, 2, 3], st_pt)
     assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
-    assert out_pt.owner.op.set_instead_of_inc == True
+    assert out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
 
 
 @pytest.mark.xfail(reason="MLX indexing with tuples not yet supported")
 def test_mlx_IncSubtensor_increment():
     """Test increment operations using IncSubtensor (set_instead_of_inc=False)."""
-    rng = np.random.default_rng(213234)
-    
     # Test data
     x_np = np.arange(3 * 4 * 5, dtype=np.float32).reshape((3, 4, 5))
     x_pt = pt.constant(x_np)
@@ -120,72 +116,64 @@ def test_mlx_IncSubtensor_increment():
     st_pt = pt.as_tensor_variable(np.array(-10.0, dtype=np.float32))
     out_pt = pt_subtensor.inc_subtensor(x_pt[1, 2, 3], st_pt)
     assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
-    assert out_pt.owner.op.set_instead_of_inc == False
+    assert not out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
 
 
 def test_mlx_AdvancedIncSubtensor_set():
     """Test advanced set operations using AdvancedIncSubtensor."""
     rng = np.random.default_rng(213234)
-    
+
     # Test data
     x_np = np.arange(3 * 4 * 5, dtype=np.float32).reshape((3, 4, 5))
     x_pt = pt.constant(x_np)
 
     # Set with advanced indexing - this actually works in MLX!
-    st_pt = pt.as_tensor_variable(
-        rng.uniform(-1, 1, size=(2, 4, 5)).astype(np.float32)
-    )
+    st_pt = pt.as_tensor_variable(rng.uniform(-1, 1, size=(2, 4, 5)).astype(np.float32))
     out_pt = pt_subtensor.set_subtensor(x_pt[np.r_[0, 2]], st_pt)
     assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
-    assert out_pt.owner.op.set_instead_of_inc == True
+    assert out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
 
 
 def test_mlx_AdvancedIncSubtensor_increment():
     """Test advanced increment operations using AdvancedIncSubtensor."""
     rng = np.random.default_rng(213234)
-    
+
     # Test data
     x_np = np.arange(3 * 4 * 5, dtype=np.float32).reshape((3, 4, 5))
     x_pt = pt.constant(x_np)
 
     # Increment with advanced indexing - this actually works in MLX!
-    st_pt = pt.as_tensor_variable(
-        rng.uniform(-1, 1, size=(2, 4, 5)).astype(np.float32)
-    )
+    st_pt = pt.as_tensor_variable(rng.uniform(-1, 1, size=(2, 4, 5)).astype(np.float32))
     out_pt = pt_subtensor.inc_subtensor(x_pt[np.r_[0, 2]], st_pt)
     assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor)
-    assert out_pt.owner.op.set_instead_of_inc == False
+    assert not out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
 
 
 def test_mlx_AdvancedIncSubtensor1_operations():
     """Test AdvancedIncSubtensor1 operations (handled by IncSubtensor dispatcher)."""
     rng = np.random.default_rng(213234)
-    
+
     # Test data
     x_np = np.arange(3 * 4 * 5, dtype=np.float32).reshape((3, 4, 5))
     x_pt = pt.constant(x_np)
 
     # Test set operation - this actually works in MLX!
-    st_pt = pt.as_tensor_variable(
-        rng.uniform(-1, 1, size=(2, 4, 5)).astype(np.float32)
-    )
+    st_pt = pt.as_tensor_variable(rng.uniform(-1, 1, size=(2, 4, 5)).astype(np.float32))
     indices = [1, 2]
-    
+
     # Create AdvancedIncSubtensor1 manually for set operation
     out_pt = pt_subtensor.advanced_set_subtensor1(x_pt, st_pt, indices)
     assert isinstance(out_pt.owner.op, pt_subtensor.AdvancedIncSubtensor1)
-    assert out_pt.owner.op.set_instead_of_inc == True
+    assert out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
 
 
 @pytest.mark.xfail(reason="Inplace operations not yet supported in MLX mode")
 def test_mlx_inplace_variants():
     """Test inplace variants of all subtensor operations."""
-    rng = np.random.default_rng(213234)
-    
     # Test data
     x_np = np.arange(12, dtype=np.float32).reshape((3, 4))
     x_pt = pt.constant(x_np)
@@ -194,27 +182,29 @@ def test_mlx_inplace_variants():
     st_pt = pt.as_tensor_variable(np.array([-1.0, -2.0], dtype=np.float32))
     out_pt = pt_subtensor.set_subtensor(x_pt[0, :2], st_pt, inplace=True)
     assert isinstance(out_pt.owner.op, pt_subtensor.IncSubtensor)
-    assert out_pt.owner.op.inplace == True
-    assert out_pt.owner.op.set_instead_of_inc == True
+    assert out_pt.owner.op.inplace
+    assert out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
 
 
-@pytest.mark.xfail(reason="MLX slice indices must be integers or None, dynamic slices not supported")
+@pytest.mark.xfail(
+    reason="MLX slice indices must be integers or None, dynamic slices not supported"
+)
 def test_mlx_MakeSlice():
     """Test MakeSlice operation."""
     # Test slice creation
     start = pt.iscalar("start")
     stop = pt.iscalar("stop")
     step = pt.iscalar("step")
-    
+
     # Create a slice using MakeSlice
     slice_op = pt_subtensor.MakeSlice()
     slice_pt = slice_op(start, stop, step)
-    
+
     # Use simple constant array instead of arange
     x_pt = pt.constant(np.arange(10, dtype=np.float32))
     out_pt = x_pt[slice_pt]
-    
+
     compare_mlx_and_py([start, stop, step], [out_pt], [1, 8, 2])
 
 
@@ -248,29 +238,10 @@ def test_mlx_subtensor_with_variables():
     # Test with variable arrays (not constants)
     x_pt = pt.matrix("x", dtype="float32")
     y_pt = pt.vector("y", dtype="float32")
-    
+
     x_np = np.arange(12, dtype=np.float32).reshape((3, 4))
     y_np = np.array([-1.0, -2.0], dtype=np.float32)
 
     # Set operation with variables
     out_pt = pt_subtensor.set_subtensor(x_pt[0, :2], y_pt)
     compare_mlx_and_py([x_pt, y_pt], [out_pt], [x_np, y_np])
-
-
-def test_mlx_subtensor_working_operations_summary():
-    """Summary test showing which subtensor operations currently work in MLX."""
-    
-    # Operations that work:
-    # 1. Basic Subtensor with constant indices ✅
-    # 2. Advanced Subtensor with array indices ✅ 
-    # 3. MakeSlice ✅
-    # 4. Edge cases with constant arrays ✅
-    
-    # Operations that don't work yet:
-    # 1. Boolean indexing ❌ ("boolean indices are not yet supported")
-    # 2. IncSubtensor/AdvancedIncSubtensor ❌ ("Cannot index mlx array using the given type yet")
-    # 3. Inplace operations ❌ (require special MLX handling)
-    # 4. Variable indexing ❌ (tuples not supported in MLX indexing)
-    
-    # This test documents the current state
-    assert True  # Just a documentation test 

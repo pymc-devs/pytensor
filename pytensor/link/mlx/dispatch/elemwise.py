@@ -1,6 +1,7 @@
+from functools import singledispatch
+
 import mlx.core as mx
 import numpy as np
-from functools import singledispatch
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
@@ -38,13 +39,16 @@ def mlx_funcify_DimShuffle(op, **kwargs):
 # Second-level dispatch for scalar operations in CAReduce
 @singledispatch
 def mlx_funcify_CAReduce_scalar_op(scalar_op):
-    raise NotImplementedError(f"MLX does not support CAReduce with scalar op {scalar_op}")
+    raise NotImplementedError(
+        f"MLX does not support CAReduce with scalar op {scalar_op}"
+    )
 
 
 @mlx_funcify_CAReduce_scalar_op.register(Add)
 def _(scalar_op):
     def sum_reduce(x, axis):
         return mx.sum(x, axis=axis)
+
     return sum_reduce
 
 
@@ -52,6 +56,7 @@ def _(scalar_op):
 def _(scalar_op):
     def prod_reduce(x, axis):
         return mx.prod(x, axis=axis)
+
     return prod_reduce
 
 
@@ -59,6 +64,7 @@ def _(scalar_op):
 def _(scalar_op):
     def all_reduce(x, axis):
         return x.all(axis=axis)
+
     return all_reduce
 
 
@@ -66,6 +72,7 @@ def _(scalar_op):
 def _(scalar_op):
     def any_reduce(x, axis):
         return mx.any(x, axis=axis)
+
     return any_reduce
 
 
@@ -73,6 +80,7 @@ def _(scalar_op):
 def _(scalar_op):
     def max_reduce(x, axis):
         return mx.max(x, axis=axis)
+
     return max_reduce
 
 
@@ -80,6 +88,7 @@ def _(scalar_op):
 def _(scalar_op):
     def min_reduce(x, axis):
         return mx.min(x, axis=axis)
+
     return min_reduce
 
 
@@ -88,10 +97,10 @@ def mlx_funcify_CAReduce(op, **kwargs):
     # Dispatch to the appropriate scalar op handler
     scalar_reduce_fn = mlx_funcify_CAReduce_scalar_op(op.scalar_op)
     axis = op.axis
-    
+
     def reduce(x):
         return scalar_reduce_fn(x, axis)
-    
+
     return reduce
 
 

@@ -1,5 +1,6 @@
-import mlx.core as mx
 from functools import singledispatch
+
+import mlx.core as mx
 
 from pytensor.link.mlx.dispatch import mlx_funcify, mlx_typify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
@@ -57,7 +58,7 @@ def mlx_funcify_Dot(op, **kwargs):
 @singledispatch
 def mlx_funcify_Elemwise_scalar_op(scalar_op):
     """Default implementation that tries to use getattr(mx, func_name) similar to JAX."""
-    
+
     # Try to get the function name from nfunc_spec (like JAX does)
     nfunc_spec = getattr(scalar_op, "nfunc_spec", None)
     if nfunc_spec is not None:
@@ -72,12 +73,13 @@ def mlx_funcify_Elemwise_scalar_op(scalar_op):
                     for arg in args[1:]:
                         result = mlx_func(result, arg)
                     return result
+
                 return variadic_func
             else:
                 return mlx_func
         except AttributeError:
             pass
-    
+
     # Try using the operation name directly
     op_name = getattr(scalar_op, "name", None)
     if op_name is not None:
@@ -85,7 +87,7 @@ def mlx_funcify_Elemwise_scalar_op(scalar_op):
             return getattr(mx, op_name)
         except AttributeError:
             pass
-    
+
     raise NotImplementedError(f"MLX does not support Elemwise scalar op {scalar_op}")
 
 
@@ -96,6 +98,7 @@ def _(scalar_op):
         for arg in args[1:]:
             result = mx.add(result, arg)
         return result
+
     return add
 
 
@@ -103,6 +106,7 @@ def _(scalar_op):
 def _(scalar_op):
     def sub(x, y):
         return mx.subtract(x, y)
+
     return sub
 
 
@@ -113,6 +117,7 @@ def _(scalar_op):
         for arg in args[1:]:
             result = mx.multiply(result, arg)
         return result
+
     return mul
 
 
@@ -120,6 +125,7 @@ def _(scalar_op):
 def _(scalar_op):
     def true_div(x, y):
         return mx.divide(x, y)
+
     return true_div
 
 
@@ -127,6 +133,7 @@ def _(scalar_op):
 def _(scalar_op):
     def pow(x, y):
         return mx.power(x, y)
+
     return pow
 
 
@@ -134,6 +141,7 @@ def _(scalar_op):
 def _(scalar_op):
     def exp(x):
         return mx.exp(x)
+
     return exp
 
 
@@ -141,6 +149,7 @@ def _(scalar_op):
 def _(scalar_op):
     def log(x):
         return mx.log(x)
+
     return log
 
 
@@ -148,6 +157,7 @@ def _(scalar_op):
 def _(scalar_op):
     def log1p(x):
         return mx.log1p(x)
+
     return log1p
 
 
@@ -155,6 +165,7 @@ def _(scalar_op):
 def _(scalar_op):
     def sin(x):
         return mx.sin(x)
+
     return sin
 
 
@@ -162,6 +173,7 @@ def _(scalar_op):
 def _(scalar_op):
     def cos(x):
         return mx.cos(x)
+
     return cos
 
 
@@ -169,6 +181,7 @@ def _(scalar_op):
 def _(scalar_op):
     def sqrt(x):
         return mx.sqrt(x)
+
     return sqrt
 
 
@@ -176,6 +189,7 @@ def _(scalar_op):
 def _(scalar_op):
     def sqr(x):
         return mx.square(x)
+
     return sqr
 
 
@@ -183,6 +197,7 @@ def _(scalar_op):
 def _(scalar_op):
     def abs(x):
         return mx.abs(x)
+
     return abs
 
 
@@ -190,6 +205,7 @@ def _(scalar_op):
 def _(scalar_op):
     def neg(x):
         return mx.negative(x)
+
     return neg
 
 
@@ -197,6 +213,7 @@ def _(scalar_op):
 def _(scalar_op):
     def sign(x):
         return mx.sign(x)
+
     return sign
 
 
@@ -204,6 +221,7 @@ def _(scalar_op):
 def _(scalar_op):
     def le(x, y):
         return mx.less_equal(x, y)
+
     return le
 
 
@@ -211,6 +229,7 @@ def _(scalar_op):
 def _(scalar_op):
     def lt(x, y):
         return mx.less(x, y)
+
     return lt
 
 
@@ -218,6 +237,7 @@ def _(scalar_op):
 def _(scalar_op):
     def ge(x, y):
         return mx.greater_equal(x, y)
+
     return ge
 
 
@@ -225,6 +245,7 @@ def _(scalar_op):
 def _(scalar_op):
     def gt(x, y):
         return mx.greater(x, y)
+
     return gt
 
 
@@ -232,6 +253,7 @@ def _(scalar_op):
 def _(scalar_op):
     def eq(x, y):
         return mx.equal(x, y)
+
     return eq
 
 
@@ -239,6 +261,7 @@ def _(scalar_op):
 def _(scalar_op):
     def neq(x, y):
         return mx.not_equal(x, y)
+
     return neq
 
 
@@ -246,6 +269,7 @@ def _(scalar_op):
 def _(scalar_op):
     def switch(cond, x, y):
         return mx.where(cond, x, y)
+
     return switch
 
 
@@ -253,6 +277,7 @@ def _(scalar_op):
 def _(scalar_op):
     def bitwise_and(x, y):
         return mx.bitwise_and(x, y)
+
     return bitwise_and
 
 
@@ -260,6 +285,7 @@ def _(scalar_op):
 def _(scalar_op):
     def bitwise_or(x, y):
         return mx.bitwise_or(x, y)
+
     return bitwise_or
 
 
@@ -267,6 +293,7 @@ def _(scalar_op):
 def _(scalar_op):
     def maximum(x, y):
         return mx.maximum(x, y)
+
     return maximum
 
 
@@ -274,6 +301,7 @@ def _(scalar_op):
 def _(scalar_op):
     def minimum(x, y):
         return mx.minimum(x, y)
+
     return minimum
 
 
@@ -282,6 +310,7 @@ def _(scalar_op):
     def cast(x):
         dtype = convert_dtype_to_mlx(scalar_op.o_type.dtype)
         return x.astype(dtype)
+
     return cast
 
 
@@ -289,6 +318,7 @@ def _(scalar_op):
 def _(scalar_op):
     def sigmoid(x):
         return mx.sigmoid(x)
+
     return sigmoid
 
 
@@ -308,6 +338,7 @@ def _(scalar_op):
                 ),
             ),
         )
+
     return softplus
 
 
@@ -315,6 +346,7 @@ def _(scalar_op):
 def _(scalar_op):
     def invert(x):
         return ~x
+
     return invert
 
 
@@ -322,14 +354,16 @@ def _(scalar_op):
 def mlx_funcify_Elemwise(op, node=None, **kwargs):
     # Dispatch to the appropriate scalar op handler
     scalar_func = mlx_funcify_Elemwise_scalar_op(op.scalar_op)
-    
+
     def elemwise(*inputs):
         # Enforce runtime broadcast checks (same as JAX and PyTorch implementations)
         if node is not None:
             # Convert inputs to MLX arrays for broadcast checking
-            mlx_inputs = tuple(mx.array(inp) if not hasattr(inp, 'shape') else inp for inp in inputs)
+            mlx_inputs = tuple(
+                mx.array(inp) if not hasattr(inp, "shape") else inp for inp in inputs
+            )
             Elemwise._check_runtime_broadcast(node, mlx_inputs)
-        
+
         return scalar_func(*inputs)
-    
+
     return elemwise
