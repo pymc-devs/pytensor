@@ -1,7 +1,7 @@
+# ruff: noqa: E402
 import pytest
 
 
-# ruff: noqa: E402
 pytest.importorskip("xarray")  #
 
 import numpy as np

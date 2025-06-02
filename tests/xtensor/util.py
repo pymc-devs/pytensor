@@ -1,3 +1,9 @@
+# ruff: noqa: E402
+import pytest
+
+
+pytest.importorskip("xarray")
+
 import numpy as np
 from xarray import DataArray
 from xarray.testing import assert_allclose

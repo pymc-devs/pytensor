@@ -1,11 +1,10 @@
 # ruff: noqa: E402
-import re
-
 import pytest
 
 
 pytest.importorskip("xarray")
 
+import re
 from itertools import chain, combinations
 
 import numpy as np

@@ -1,4 +1,8 @@
+# ruff: noqa: E402
 import pytest
+
+
+pytest.importorskip("xarray")
 
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
