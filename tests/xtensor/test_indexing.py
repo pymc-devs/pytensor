@@ -11,7 +11,12 @@ from xarray import DataArray
 
 from pytensor.tensor import tensor
 from pytensor.xtensor import xtensor
-from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
+from tests.xtensor.util import (
+    xr_arange_like,
+    xr_assert_allclose,
+    xr_function,
+    xr_random_like,
+)
 
 
 @pytest.mark.parametrize(
@@ -351,3 +356,138 @@ def test_boolean_indexing():
     expected_res2 = x_test[bool_idx_test, int_idx_test.rename(a="b")]
     xr_assert_allclose(res1, expected_res1)
     xr_assert_allclose(res2, expected_res2)
+
+
+@pytest.mark.parametrize("mode", ("set", "inc"))
+def test_basic_index_update(mode):
+    x = xtensor("x", shape=(11, 7), dims=("a", "b"))
+    y = xtensor("y", shape=(7, 5), dims=("a", "b"))
+    x_indexed = x[2:-2, 2:]
+    update_method = getattr(x_indexed, mode)
+
+    x_updated = [
+        update_method(y),
+        update_method(y.T),
+        update_method(y.isel(a=-1)),
+        update_method(y.isel(b=-1)),
+        update_method(y.isel(a=-2, b=-2)),
+    ]
+
+    fn = xr_function([x, y], x_updated)
+    x_test = xr_random_like(x)
+    y_test = xr_random_like(y)
+    results = fn(x_test, y_test)
+
+    def update_fn(y):
+        x = x_test.copy()
+        if mode == "set":
+            x[2:-2, 2:] = y
+        elif mode == "inc":
+            x[2:-2, 2:] += y
+        return x
+
+    expected_results = [
+        update_fn(y_test),
+        update_fn(y_test.T),
+        update_fn(y_test.isel(a=-1)),
+        update_fn(y_test.isel(b=-1)),
+        update_fn(y_test.isel(a=-2, b=-2)),
+    ]
+    for result, expected_result in zip(results, expected_results):
+        xr_assert_allclose(result, expected_result)
+
+
+@pytest.mark.parametrize("mode", ("set", "inc"))
+@pytest.mark.parametrize("idx_dtype", (int, bool))
+def test_adv_index_update(mode, idx_dtype):
+    x = xtensor("x", shape=(5, 5), dims=("a", "b"))
+    y = xtensor("y", shape=(3,), dims=("b",))
+    idx = xtensor("idx", dtype=idx_dtype, shape=(None,), dims=("a",))
+
+    orthogonal_update1 = getattr(x[idx, -3:], mode)(y)
+    orthogonal_update2 = getattr(x[idx, -3:], mode)(y.rename(b="a"))
+    if idx_dtype is not bool:
+        # Vectorized booling indexing/update is not allowed
+        vectorized_update = getattr(x[idx.rename(a="b"), :3], mode)(y)
+    else:
+        with pytest.raises(
+            IndexError,
+            match="Boolean indexer should be unlabeled or on the same dimension to the indexed array.",
+        ):
+            getattr(x[idx.rename(a="b"), :3], mode)(y)
+        vectorized_update = x
+
+    outs = [orthogonal_update1, orthogonal_update2, vectorized_update]
+
+    fn = xr_function([x, idx, y], outs)
+    x_test = xr_random_like(x)
+    y_test = xr_random_like(y)
+    if idx_dtype is int:
+        idx_test = DataArray([0, 1, 2], dims=("a",))
+    else:
+        idx_test = DataArray([True, False, True, True, False], dims=("a",))
+    results = fn(x_test, idx_test, y_test)
+
+    def update_fn(x, idx, y):
+        x = x.copy()
+        if mode == "set":
+            x[idx] = y
+        else:
+            x[idx] += y
+        return x
+
+    expected_results = [
+        update_fn(x_test, (idx_test, slice(-3, None)), y_test),
+        update_fn(
+            x_test,
+            (idx_test, slice(-3, None)),
+            y_test.rename(b="a"),
+        ),
+        update_fn(x_test, (idx_test.rename(a="b"), slice(None, 3)), y_test)
+        if idx_dtype is not bool
+        else x_test,
+    ]
+    for result, expected_result in zip(results, expected_results):
+        xr_assert_allclose(result, expected_result)
+
+
+@pytest.mark.parametrize("mode", ("set", "inc"))
+def test_non_consecutive_idx_update(mode):
+    x = xtensor("x", shape=(2, 3, 5, 7), dims=("a", "b", "c", "d"))
+    y = xtensor("y", shape=(5, 4), dims=("c", "b"))
+    x_indexed = x[:, [0, 1, 2, 2], :, ("b", [0, 1, 1, 2])]
+    out = getattr(x_indexed, mode)(y)
+
+    fn = xr_function([x, y], out)
+    x_test = xr_random_like(x)
+    y_test = xr_random_like(y)
+
+    result = fn(x_test, y_test)
+    expected_result = x_test.copy()
+    # xarray fails inplace operation with the "tuple trick"
+    # https://github.com/pydata/xarray/issues/10387
+    d_indexer = DataArray([0, 1, 1, 2], dims=("b",))
+    if mode == "set":
+        expected_result[:, [0, 1, 2, 2], :, d_indexer] = y_test
+    else:
+        expected_result[:, [0, 1, 2, 2], :, d_indexer] += y_test
+    xr_assert_allclose(result, expected_result)
+
+
+def test_indexing_renames_into_update_variable():
+    x = xtensor("x", shape=(5, 5), dims=("a", "b"))
+    y = xtensor("y", shape=(3,), dims=("d",))
+    idx = xtensor("idx", dtype=int, shape=(None,), dims=("d",))
+
+    # define "d" dimension by slicing the "a" dimension so we can set y into x
+    orthogonal_update1 = x[idx].set(y)
+    fn = xr_function([x, idx, y], orthogonal_update1)
+
+    x_test = np.abs(xr_random_like(x))
+    y_test = -np.abs(xr_random_like(y))
+    idx_test = DataArray([0, 2, 3], dims=("d",))
+
+    result = fn(x_test, idx_test, y_test)
+    expected_result = x_test.copy()
+    expected_result[idx_test] = y_test
+    xr_assert_allclose(result, expected_result)
