@@ -386,3 +386,71 @@ def test_squeeze():
     x3d = xtensor("x3d", dims=("row", "col", "batch"), shape=(2, 3, 4))
     with pytest.raises(ValueError):
         squeeze(x3d)
+
+
+def test_squeeze_additional_cases():
+    # Redundant dimensions: squeeze(["b", "b"]) should behave like squeeze(["b"])
+    x1 = xtensor("x1", dims=("a", "b", "c"), shape=(2, 1, 1))
+    y1 = squeeze(x1, ["b", "b"])
+    fn1 = xr_function([x1], y1)
+    x1_test = xr_arange_like(x1)
+    expected1 = x1_test.squeeze(["b"])
+    xr_assert_allclose(fn1(x1_test), expected1)
+
+    # Symbolic shape: dim is 1 at runtime → should squeeze successfully
+    x2 = xtensor("x2", dims=("a", "b", "c"))  # shape unknown
+    y2 = squeeze(x2, "b")
+    fn2 = xr_function([x2], y2)
+    x2_test = xr_arange_like(xtensor(dims=x2.dims, shape=(2, 1, 3)))
+    expected2 = x2_test.squeeze("b")
+    xr_assert_allclose(fn2(x2_test), expected2)
+
+    # Symbolic shape: dim is not 1 at runtime → should raise
+    x3 = xtensor("x3", dims=("a", "b", "c"))  # shape unknown
+    y3 = squeeze(x3, "b")
+    fn3 = xr_function([x3], y3)
+    x3_test = xr_arange_like(xtensor(dims=x3.dims, shape=(2, 2, 3)))
+    with pytest.raises(Exception):
+        fn3(x3_test)
+
+    # Reversibility: squeeze then expand_dims should restore original
+    # TODO: uncomment when we have expand_dims
+    # x4 = xtensor("x4", dims=("batch", "time", "feature"), shape=(2, 1, 3))
+    # y4 = squeeze(x4, "time")
+    # z4 = expand_dims(y4, "time")
+    # fn4 = xr_function([x4], z4)
+    # x4_test = xr_arange_like(x4)
+    # xr_assert_allclose(fn4(x4_test), x4_test)
+
+
+def test_squeeze_extra_cases():
+    # 1. Order of dims shouldn't affect result
+    x1 = xtensor("x1", dims=("a", "b", "c"), shape=(2, 1, 1))
+    y1 = squeeze(x1, ["b", "c"])
+    y2 = squeeze(x1, ["c", "b"])
+    fn1 = xr_function([x1], y1)
+    fn2 = xr_function([x1], y2)
+    x1_test = xr_arange_like(x1)
+    xr_assert_allclose(fn1(x1_test), fn2(x1_test))
+
+    # 2. Empty list of dims = no-op
+    x2 = xtensor("x2", dims=("a", "b", "c"), shape=(2, 1, 1))
+    y2 = squeeze(x2, [])
+    fn2 = xr_function([x2], y2)
+    x2_test = xr_arange_like(x2)
+    xr_assert_allclose(fn2(x2_test), x2_test)
+
+    # 3. Explicit squeeze of all size-1 dims via dim=None
+    x3 = xtensor("x3", dims=("a", "b"), shape=(1, 1))
+    y3 = squeeze(x3)
+    fn3 = xr_function([x3], y3)
+    x3_test = xr_arange_like(x3)
+    xr_assert_allclose(fn3(x3_test), x3_test.squeeze())
+
+    # 4. Static + symbolic shape mix: squeeze symbolic 1-sized dim
+    x4 = xtensor("x4", dims=("a", "b", "c"), shape=(None, 1, 3))
+    y4 = squeeze(x4, "b")
+    x4_test = xr_arange_like(xtensor(dims=x4.dims, shape=(4, 1, 3)))
+    fn4 = xr_function([x4], y4)
+    expected4 = x4_test.squeeze("b")
+    xr_assert_allclose(fn4(x4_test), expected4)

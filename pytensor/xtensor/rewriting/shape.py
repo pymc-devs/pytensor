@@ -154,38 +154,28 @@ def local_expand_dims_reshape(fgraph, node):
 @register_xcanonicalize
 @node_rewriter([Squeeze])
 def local_squeeze_reshape(fgraph, node):
-    """Rewrite rule to convert squeeze to pytensor.tensor.squeeze."""
+    """Rewrite rule to convert Squeeze to pytensor.tensor.squeeze."""
     if not isinstance(node.op, Squeeze):
         return False
 
-    x = node.inputs[0]
+    [x] = node.inputs
+    in_dims = x.type.dims
     dim = node.op.dim
 
-    # Convert single dimension to iterable for consistent handling
-    dims_to_remove = [dim] if isinstance(dim, str) else dim
-
-    if dims_to_remove is not None:
-        # Validate dimensions exist and have size 1
-        dim_indices = []
-        for d in dims_to_remove:
-            if d not in x.type.dims:
-                return False
-            dim_idx = x.type.dims.index(d)
-            # Only check shape != 1 if the shape is not None (symbolic)
-            if x.type.shape[dim_idx] is not None and x.type.shape[dim_idx] != 1:
-                return False
-            dim_indices.append(dim_idx)
+    # Determine which axes to squeeze
+    if dim is None:
+        # Infer axes by comparing input and output dims
+        out_dims = node.outputs[0].type.dims
+        axes_to_squeeze = tuple(i for i, d in enumerate(in_dims) if d not in out_dims)
     else:
-        # Find all dimensions of size 1
-        dim_indices = [i for i, s in enumerate(x.type.shape) if s == 1]
-        if not dim_indices:
-            return False
+        dims_to_remove = [dim] if isinstance(dim, str) else dim
+        axes_to_squeeze = tuple(in_dims.index(d) for d in dims_to_remove)
 
-    # Create new dimensions list
-    new_dims = [d for i, d in enumerate(x.type.dims) if i not in dim_indices]
+    # Nothing to squeeze? Just return input unchanged
+    if not axes_to_squeeze:
+        return [x]
 
-    # Convert to tensor and use pytensor.tensor.squeeze
     x_tensor = tensor_from_xtensor(x)
-    x_tensor_squeezed = squeeze(x_tensor, axis=tuple(dim_indices))
-    new_out = xtensor_from_tensor(x_tensor_squeezed, dims=tuple(new_dims))
+    x_tensor_squeezed = squeeze(x_tensor, axis=axes_to_squeeze)
+    new_out = xtensor_from_tensor(x_tensor_squeezed, dims=node.outputs[0].type.dims)
     return [new_out]

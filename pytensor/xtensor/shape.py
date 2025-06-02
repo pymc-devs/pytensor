@@ -364,45 +364,62 @@ class Squeeze(XOp):
 
     Parameters
     ----------
-    dim : str or None or iterable of str
-        The name(s) of the dimension(s) to remove. If None, all dimensions of size 1 will be removed.
+    dim : str, None, or iterable of str
+        The name(s) of the dimension(s) to remove. If None, all dimensions
+        that are statically known to have size 1 will be removed.
+        Dimensions with symbolic shape will not be removed unless explicitly named.
+
+        Note: Unlike NumPy/xarray, if dim is None, only dimensions known to
+        be size 1 at graph construction time will be removed, even if they happen
+        to be size 1 at runtime.
     """
 
+    __props__ = ("dim",)
+
     def __init__(self, dim=None):
-        self.dim = dim
+        if dim is None:
+            self.dim = None
+        else:
+            dims = [dim] if isinstance(dim, str) else dim
+            if not all(isinstance(d, str) for d in dims):
+                raise TypeError(f"All dimension names must be strings: got {dims}")
+            # Deduplicate and sort to make __props__ deterministic and hashable
+            self.dim = tuple(sorted(set(dims)))
+
+            if not self.dim:
+                warnings.warn(
+                    "Squeeze received an empty dim list — no dimensions will be removed."
+                )
 
     def make_node(self, x):
         x = as_xtensor(x)
 
-        # Convert single dimension to iterable for consistent handling
-        dims_to_remove = [self.dim] if isinstance(self.dim, str) else self.dim
+        if self.dim is None:
+            # Auto-detect static size-1 dimensions
+            dims_to_remove = [d for d, s in zip(x.type.dims, x.type.shape) if s == 1]
+            if not dims_to_remove:
+                raise ValueError("No dimensions of size 1 to remove")
+        else:
+            dims_to_remove = list(self.dim)
 
-        if dims_to_remove is not None:
-            # Validate dimensions exist and have size 1
+            # Validate existence and static shape (when possible)
             for dim in dims_to_remove:
                 if dim not in x.type.dims:
                     raise ValueError(f"Dimension {dim} not found")
                 dim_idx = x.type.dims.index(dim)
-                # Only raise an error if the shape is statically known and not 1.
-                # If the shape is None (symbolic), defer the error to runtime.
-                if x.type.shape[dim_idx] is not None and x.type.shape[dim_idx] != 1:
-                    raise ValueError(
-                        f"Dimension {dim} has size {x.type.shape[dim_idx]}, not 1"
-                    )
-            # Get indices of dimensions to remove
-            dim_indices = [x.type.dims.index(dim) for dim in dims_to_remove]
-        else:
-            # Find all dimensions of size 1
-            dim_indices = [i for i, s in enumerate(x.type.shape) if s == 1]
-            if not dim_indices:
-                raise ValueError("No dimensions of size 1 to remove")
+                shape = x.type.shape[dim_idx]
+                if shape is not None and shape != 1:
+                    raise ValueError(f"Dimension {dim} has size {shape}, not 1")
 
-        # Create new dimensions and shape lists
+        dim_indices = [x.type.dims.index(dim) for dim in dims_to_remove]
+
         new_dims = [d for i, d in enumerate(x.type.dims) if i not in dim_indices]
         new_shape = [s for i, s in enumerate(x.type.shape) if i not in dim_indices]
 
         output = xtensor(
-            dtype=x.type.dtype, shape=tuple(new_shape), dims=tuple(new_dims)
+            dtype=x.type.dtype,
+            shape=tuple(new_shape),
+            dims=tuple(new_dims),
         )
         return Apply(self, [x], [output])
 
