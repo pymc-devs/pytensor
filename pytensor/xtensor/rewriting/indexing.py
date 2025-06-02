@@ -3,10 +3,10 @@ from itertools import zip_longest
 from pytensor import as_symbolic
 from pytensor.graph import Constant, node_rewriter
 from pytensor.tensor import TensorType, arange, specify_shape
-from pytensor.tensor.subtensor import _non_consecutive_adv_indexing
+from pytensor.tensor.subtensor import _non_consecutive_adv_indexing, inc_subtensor
 from pytensor.tensor.type_other import NoneTypeT, SliceType
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
-from pytensor.xtensor.indexing import Index
+from pytensor.xtensor.indexing import Index, IndexUpdate, index
 from pytensor.xtensor.rewriting.utils import register_xcanonicalize
 from pytensor.xtensor.type import XTensorType
 
@@ -35,9 +35,7 @@ def to_basic_idx(idx):
     raise TypeError("Cannot convert idx to basic idx")
 
 
-@register_xcanonicalize
-@node_rewriter(tracks=[Index])
-def lower_index(fgraph, node):
+def _lower_index(node):
     """Lower XTensorVariable indexing to regular TensorVariable indexing.
 
     xarray-like indexing has two modes:
@@ -59,12 +57,18 @@ def lower_index(fgraph, node):
     We do this by creating an `arange` tensor that matches the shape of the dimension being indexed,
     and then indexing it with the original slice. This index is then handled as a regular advanced index.
 
-    Note: The IndexOp has only 2 types of indices: Slices and XTensorVariables. Regular array indices
-    are converted to the appropriate XTensorVariable by `Index.make_node`
+    Finally, the location of views resulting from advanced indices follows two distinct behaviors in numpy.
+    When all advanced indices are consecutive, the respective view is located in the "original" location.
+    However, if advanced indices are separated by basic indices (slices in our case), the output views
+    always show up at the front of the array. This information is returned as the second output of this function,
+    which labels the final position of the indexed dimensions under this rule.
     """
+
+    assert isinstance(node.op, Index)
 
     x, *idxs = node.inputs
     [out] = node.outputs
+    x_tensor_indexed_dims = out.type.dims
     x_tensor = tensor_from_xtensor(x)
 
     if all(
@@ -141,10 +145,68 @@ def lower_index(fgraph, node):
             x_tensor_indexed_dims = [
                 dim for dim in out_dims if dim not in x_tensor_indexed_basic_dims
             ] + x_tensor_indexed_basic_dims
-            transpose_order = [x_tensor_indexed_dims.index(dim) for dim in out_dims]
-            x_tensor_indexed = x_tensor_indexed.transpose(transpose_order)
+
+    return x_tensor_indexed, x_tensor_indexed_dims
+
+
+@register_xcanonicalize
+@node_rewriter(tracks=[Index])
+def lower_index(fgraph, node):
+    """Lower XTensorVariable indexing to regular TensorVariable indexing.
+
+    The bulk of the work is done by `_lower_index`, except for special logic to control the
+    location of non-consecutive advanced indices, and to preserve static shape information.
+    """
+
+    [out] = node.outputs
+    out_dims = out.type.dims
+
+    x_tensor_indexed, x_tensor_indexed_dims = _lower_index(node)
+    if x_tensor_indexed_dims != out_dims:
+        # Numpy moves advanced indexing dimensions to the front when they are not consecutive
+        # We need to transpose them back to the expected output order
+        transpose_order = [x_tensor_indexed_dims.index(dim) for dim in out_dims]
+        x_tensor_indexed = x_tensor_indexed.transpose(transpose_order)
 
     # Add lost shape information
     x_tensor_indexed = specify_shape(x_tensor_indexed, out.type.shape)
-    new_out = xtensor_from_tensor(x_tensor_indexed, dims=out.type.dims)
+
+    new_out = xtensor_from_tensor(x_tensor_indexed, dims=out.dims)
+    return [new_out]
+
+
+@register_xcanonicalize
+@node_rewriter(tracks=[IndexUpdate])
+def lower_index_update(fgraph, node):
+    """Lower XTensorVariable index update to regular TensorVariable indexing update.
+
+    This rewrite requires converting the index view to a tensor-based equivalent expression,
+    just like `lower_index`. It then requires aligning the dimensions of y with the
+    dimensions of the index view, with special care for non-consecutive dimensions being
+    pulled to the front axis according to numpy rules.
+    """
+    x, y, *idxs = node.inputs
+
+    # Lower the indexing part first
+    indexed_node = index.make_node(x, *idxs)
+    x_tensor_indexed, x_tensor_indexed_dims = _lower_index(indexed_node)
+    y_tensor = tensor_from_xtensor(y)
+
+    # Align dimensions of y with those of the indexed tensor x
+    y_dims = y.type.dims
+    y_dims_set = set(y_dims)
+    y_order = tuple(
+        y_dims.index(x_dim) if x_dim in y_dims_set else "x"
+        for x_dim in x_tensor_indexed_dims
+    )
+    # Remove useless left expand_dims
+    while len(y_order) > 0 and y_order[0] == "x":
+        y_order = y_order[1:]
+    if y_order != tuple(range(y_tensor.type.ndim)):
+        y_tensor = y_tensor.dimshuffle(y_order)
+
+    x_tensor_updated = inc_subtensor(
+        x_tensor_indexed, y_tensor, set_instead_of_inc=node.op.mode == "set"
+    )
+    new_out = xtensor_from_tensor(x_tensor_updated, dims=x.type.dims)
     return [new_out]
