@@ -342,8 +342,10 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     # Indexing
     # https://docs.xarray.dev/en/latest/api.html#id2
-    def __setitem__(self, key, value):
-        raise TypeError("XTensorVariable does not support item assignment.")
+    def __setitem__(self, idx, value):
+        raise TypeError(
+            "XTensorVariable does not support item assignment. Use the output of `x[idx].set` or `x[idx].inc` instead."
+        )
 
     @property
     def loc(self):
@@ -402,6 +404,28 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                     )
 
         return px.indexing.index(self, *indices)
+
+    def set(self, value):
+        if not (
+            self.owner is not None and isinstance(self.owner.op, px.indexing.Index)
+        ):
+            raise ValueError(
+                f"set can only be called on the output of an index (or isel) operation. Self is the result of {self.owner}"
+            )
+
+        x, *idxs = self.owner.inputs
+        return px.indexing.index_assignment(x, value, *idxs)
+
+    def inc(self, value):
+        if not (
+            self.owner is not None and isinstance(self.owner.op, px.indexing.Index)
+        ):
+            raise ValueError(
+                f"inc can only be called on the output of an index (or isel) operation. Self is the result of {self.owner}"
+            )
+
+        x, *idxs = self.owner.inputs
+        return px.indexing.index_increment(x, value, *idxs)
 
     def _head_tail_or_thin(
         self,
