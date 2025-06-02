@@ -2,6 +2,8 @@ import warnings
 from collections.abc import Sequence
 from typing import Literal
 
+import numpy as np
+
 from pytensor import Variable
 from pytensor.graph import Apply
 from pytensor.scalar import discrete_dtypes, upcast
@@ -314,49 +316,70 @@ class ExpandDims(XOp):
         The size of the new dimension (default 1).
     """
 
+    __props__ = ("dim", "size")
+
     def __init__(self, dim, size=1):
+        if dim is not None and not isinstance(dim, str):
+            raise TypeError(f"`dim` must be a string or None, got: {type(dim)}")
+        if isinstance(size, int | np.integer) and size <= 0:
+            raise ValueError(f"size must be positive, got: {size}")
         self.dim = dim
         self.size = size
 
     def make_node(self, x):
         x = as_xtensor(x)
 
-        # If dim is None, don't add a new dimension (matching xarray behavior)
         if self.dim is None:
             return Apply(self, [x], [x])
 
-        # Check if dimension already exists
         if self.dim in x.type.dims:
-            raise ValueError(f"Dimension {self.dim} already exists")
+            raise ValueError(f"Dimension {self.dim} already exists in {x.type.dims}")
 
-        # Add new dimension at the beginning
-        new_dims = [self.dim, *list(x.type.dims)]
-        new_shape = [self.size, *list(x.type.shape)]
+        # Handle scalar case
+        if not x.type.dims:
+            new_dims = (self.dim,)
+            new_shape = (self.size,)
+        else:
+            # Use symbolic shape
+            new_dims = (self.dim, *x.type.dims)
+            if isinstance(self.size, int | np.integer):
+                new_shape = (self.size, *x.type.shape)
+            else:
+                # For symbolic size, we need to use a symbolic shape
+                new_shape = (None, *x.type.shape)
 
-        output = xtensor(
+        out = xtensor(
             dtype=x.type.dtype,
-            dims=tuple(new_dims),
-            shape=tuple(new_shape),
+            shape=new_shape,
+            dims=new_dims,
         )
-        return Apply(self, [x], [output])
+        return Apply(self, [x], [out])
+
+    def infer_shape(self, fgraph, node, input_shapes):
+        (input_shape,) = input_shapes
+        if self.dim is None:
+            return [input_shape]
+        return [(self.size, *list(input_shape))]
 
 
-def expand_dims(x, dim: str):
+def expand_dims(x, dim: str | None, size=1):
     """Add a new dimension to an XTensorVariable.
 
     Parameters
     ----------
     x : XTensorVariable
         The input tensor
-    dim : str
+    dim : str or None
         The name of the new dimension
+    size : int or symbolic, optional
+        The size of the new dimension (default 1)
 
     Returns
     -------
     XTensorVariable
         A new tensor with the expanded dimension
     """
-    return ExpandDims(dim=dim)(x)
+    return ExpandDims(dim=dim, size=size)(x)
 
 
 class Squeeze(XOp):

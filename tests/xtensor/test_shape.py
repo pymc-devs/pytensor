@@ -1,17 +1,14 @@
 # ruff: noqa: E402
 import re
-
-import pytest
-
-
-pytest.importorskip("xarray")
-
 from itertools import chain, combinations
 
 import numpy as np
+import pytest
+import xarray as xr
 from xarray import DataArray
 from xarray import concat as xr_concat
 
+from pytensor.tensor import scalar
 from pytensor.xtensor.shape import (
     concat,
     expand_dims,
@@ -27,6 +24,9 @@ from tests.xtensor.util import (
     xr_function,
     xr_random_like,
 )
+
+
+pytest.importorskip("xarray")
 
 
 def powerset(iterable, min_group_size=0):
@@ -265,58 +265,131 @@ def test_concat_scalar():
     xr_assert_allclose(res, expected_res)
 
 
-def test_expand_dims():
-    import xarray as xr
+def assert_dims_and_shape(actual, expected):
+    assert actual.type.dims == expected.dims
+    assert actual.type.shape == expected.shape
 
+
+def test_expand_dims():
     # 1D case
     x_xr = xr.DataArray([0, 1, 2], dims=["city"])
     y_xr = x_xr.expand_dims("country")
     x = xtensor("x", dims=("city",), shape=(3,))
     y = expand_dims(x, "country")
-    assert y.type.dims == y_xr.dims
-    assert y.type.shape == y_xr.shape
+    assert_dims_and_shape(y, y_xr)
     fn = xr_function([x], y)
     x_test = xr_arange_like(x)
-    res = fn(x_test)
-    expected_res = x_test.expand_dims("country")
-    xr_assert_allclose(res, expected_res)
+    xr_assert_allclose(fn(x_test), y_xr)
 
     # 2D case
     x2d_xr = xr.DataArray([[0, 1, 2], [3, 4, 5]], dims=["row", "col"])
     y2d_xr = x2d_xr.expand_dims("batch")
     x2d = xtensor("x2d", dims=("row", "col"), shape=(2, 3))
     y2d = expand_dims(x2d, "batch")
-    assert y2d.type.dims == y2d_xr.dims
-    assert y2d.type.shape == y2d_xr.shape
+    assert_dims_and_shape(y2d, y2d_xr)
     fn = xr_function([x2d], y2d)
     x2d_test = xr_arange_like(x2d)
-    res = fn(x2d_test)
-    expected_res = x2d_test.expand_dims("batch")
-    xr_assert_allclose(res, expected_res)
+    xr_assert_allclose(fn(x2d_test), y2d_xr)
 
     # Expansion with different dimension name
     z_xr = x_xr.expand_dims("time")
     z = expand_dims(x, "time")
-    assert z.type.dims == z_xr.dims
-    assert z.type.shape == z_xr.shape
+    assert_dims_and_shape(z, z_xr)
     fn = xr_function([x], z)
-    res = fn(x_test)
-    expected_res = x_test.expand_dims("time")
-    xr_assert_allclose(res, expected_res)
+    xr_assert_allclose(fn(x_test), z_xr)
 
     # Expanding with an existing dimension raises an error
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="already exists"):
         expand_dims(y, "city")
 
-    # Expanding with None dimension
-    z_xr = x_xr.expand_dims(None)
+    # Expanding with None dimension should return the same variable (no-op)
     z = expand_dims(x, None)
-    assert z.type.dims == z_xr.dims
-    assert z.type.shape == z_xr.shape
+    assert z is x
+
+    # Test prepending different dimension names
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    for new_dim in ("x", "y", "z"):
+        y = expand_dims(x, new_dim)
+        expected_dims = (new_dim, *x.type.dims)
+        expected_shape = (1, *x.type.shape)
+        assert y.type.dims == expected_dims
+        assert y.type.shape == expected_shape
+
+    # Explicit size=1 behaves like implicit broadcast
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    x_test = xr_arange_like(x)
+    y1 = expand_dims(x, "batch", size=1)
+    y2 = expand_dims(x, "batch")
+    fn1 = xr_function([x], y1)
+    fn2 = xr_function([x], y2)
+    xr_assert_allclose(fn1(x_test), fn2(x_test))
+
+    # Expanding with size=0 raises
+    with pytest.raises(ValueError, match="size must be.*positive"):
+        expand_dims(x, "batch", size=0)
+
+
+def test_expand_dims_additional_cases():
+    # Expanding a scalar
+    x = xtensor("x", dims=(), shape=())
+    y = expand_dims(x, "batch")
+    assert y.type.dims == ("batch",)
+    assert y.type.shape == (1,)
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    expected = x_test.expand_dims("batch")
+    xr_assert_allclose(fn(x_test), expected)
+
+    # Expanding with a specified static size > 1
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "batch", size=4)
+    assert y.type.dims == ("batch", "a", "b")
+    assert y.type.shape == (4, 2, 3)
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    expected = xr.DataArray(
+        np.broadcast_to(x_test.data, (4, 2, 3)),
+        dims=("batch", "a", "b"),
+        coords={"a": x_test.coords["a"], "b": x_test.coords["b"]},
+    )
+    xr_assert_allclose(fn(x_test), expected)
+
+    # Expanding with symbolic size = 1 (no broadcast)
+    size_sym_1 = scalar("size_sym_1", dtype="int64")
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "batch", size=size_sym_1)
+    fn = xr_function([x, size_sym_1], y, on_unused_input="ignore")
+    x_test = xr_arange_like(x)
+    expected = x_test.expand_dims("batch")
+    xr_assert_allclose(fn(x_test, 1), expected)
+
+    # Expanding with symbolic size > 1 (but no broadcast expected)
+    size_sym_4 = scalar("size_sym_4", dtype="int64")
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "batch", size=size_sym_4)
+    fn = xr_function([x, size_sym_4], y, on_unused_input="ignore")
+    x_test = xr_arange_like(x)
+
+    # Even if symbolic size is 4, expand_dims will only insert dim=1
+    expected = x_test.expand_dims("batch")
+    xr_assert_allclose(fn(x_test, 4), expected)
+
+    # Reversibility: expand_dims then squeeze
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "batch")
+    z = squeeze(y, "batch")
     fn = xr_function([x], z)
-    res = fn(x_test)
-    expected_res = x_test.expand_dims(None)
-    xr_assert_allclose(res, expected_res)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test)
+
+    # Expand with dim=None is a no-op
+    x = xtensor("x", dims=("a",), shape=(3,))
+    y = expand_dims(x, None)
+    assert y.type.dims == x.type.dims
+    assert y.type.shape == x.type.shape
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test)
 
 
 def test_squeeze():
@@ -414,13 +487,13 @@ def test_squeeze_additional_cases():
         fn3(x3_test)
 
     # Reversibility: squeeze then expand_dims should restore original
-    # TODO: uncomment when we have expand_dims
-    # x4 = xtensor("x4", dims=("batch", "time", "feature"), shape=(2, 1, 3))
-    # y4 = squeeze(x4, "time")
-    # z4 = expand_dims(y4, "time")
-    # fn4 = xr_function([x4], z4)
-    # x4_test = xr_arange_like(x4)
-    # xr_assert_allclose(fn4(x4_test), x4_test)
+    x4 = xtensor("x4", dims=("batch", "time", "feature"), shape=(2, 1, 3))
+    y4 = squeeze(x4, "time")
+    z4 = expand_dims(y4, "time")
+    fn4 = xr_function([x4], z4)
+    x4_test = xr_arange_like(x4)
+    # Adjust dimension order for comparison
+    xr_assert_allclose(fn4(x4_test).transpose(*x4_test.dims), x4_test)
 
 
 def test_squeeze_extra_cases():

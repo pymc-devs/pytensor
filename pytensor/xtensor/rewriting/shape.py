@@ -1,3 +1,5 @@
+import numpy as np
+
 from pytensor.graph import node_rewriter
 from pytensor.tensor import (
     broadcast_to,
@@ -124,7 +126,7 @@ def lower_transpose(fgraph, node):
 @register_xcanonicalize
 @node_rewriter([ExpandDims])
 def local_expand_dims_reshape(fgraph, node):
-    """Rewrite rule to convert expand_dims to pytensor.tensor.expand_dims and broadcast_to if needed."""
+    """Rewrite ExpandDims to tensor.expand_dims and optionally broadcast_to or specify_shape."""
     if not isinstance(node.op, ExpandDims):
         return False
 
@@ -132,22 +134,22 @@ def local_expand_dims_reshape(fgraph, node):
     dim = node.op.dim
     size = getattr(node.op, "size", 1)
 
-    # If dim is None, don't add a new dimension (matching xarray behavior)
     if dim is None:
         return [x]
 
-    # Create new dimensions list with the new dimension at the beginning
-    new_dims = [dim, *list(x.type.dims)]
-
-    # Create new shape with the new dimension at the beginning
-    new_shape = [1, *list(x.type.shape)]
-
-    # Convert to tensor and use pytensor.tensor.expand_dims
     x_tensor = tensor_from_xtensor(x)
     x_tensor_expanded = expand_dims(x_tensor, axis=0)
-    if size != 1:
-        x_tensor_expanded = broadcast_to(x_tensor_expanded, new_shape)
-    new_out = xtensor_from_tensor(x_tensor_expanded, dims=tuple(new_dims))
+
+    target_shape = node.outputs[0].type.shape
+
+    if isinstance(size, int | np.integer):
+        if size != 1 and None not in target_shape:
+            x_tensor_expanded = broadcast_to(x_tensor_expanded, target_shape)
+    else:
+        # Symbolic size: enforce shape so broadcast happens downstream correctly
+        x_tensor_expanded = specify_shape(x_tensor_expanded, target_shape)
+
+    new_out = xtensor_from_tensor(x_tensor_expanded, dims=node.outputs[0].type.dims)
     return [new_out]
 
 
