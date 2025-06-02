@@ -19,6 +19,7 @@ from pytensor.tensor.math import (
     erfinv,
     gammainccinv,
     gammaincinv,
+    hyp2f1,
     iv,
     kve,
     log,
@@ -322,5 +323,24 @@ def test_jax_logp():
             tau_test_value,
             sigma_test_value,
             value_test_value,
+        ],
+    )
+
+
+def test_jax_hyp2f1():
+    a = vector("a")
+    b = vector("b")
+    c = vector("c")
+    x = vector("x")
+    out = hyp2f1(a, b, c, x)
+
+    compare_jax_and_py(
+        [a, b, c, x],
+        [out],
+        [
+            np.array([0.0, 0.0]),
+            np.array([0.0, 0.0]),
+            np.array([0.0, 0.0]),
+            np.array([0.0, 0.0]),
         ],
     )
