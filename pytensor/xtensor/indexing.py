@@ -4,6 +4,7 @@
 # https://numpy.org/neps/nep-0021-advanced-indexing.html
 # https://docs.xarray.dev/en/latest/user-guide/indexing.html
 # https://tutorial.xarray.dev/intermediate/indexing/advanced-indexing.html
+from typing import Literal
 
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.scalar.basic import discrete_dtypes
@@ -184,3 +185,35 @@ class Index(XOp):
 
 
 index = Index()
+
+
+class IndexUpdate(XOp):
+    __props__ = ("mode",)
+
+    def __init__(self, mode: Literal["set", "inc"]):
+        if mode not in ("set", "inc"):
+            raise ValueError("mode must be 'set' or 'inc'")
+        self.mode = mode
+
+    def make_node(self, x, y, *idxs):
+        # Call Index on (x, *idxs) to process inputs and infer output type
+        x_view_node = index.make_node(x, *idxs)
+        x, *idxs = x_view_node.inputs
+        [x_view] = x_view_node.outputs
+
+        try:
+            y = as_xtensor(y)
+        except TypeError:
+            y = as_xtensor(as_tensor(y), dims=x_view.type.dims)
+
+        if not set(y.type.dims).issubset(x_view.type.dims):
+            raise ValueError(
+                f"Value dimensions {y.type.dims} must be a subset of the indexed dimensions {x_view.type.dims}"
+            )
+
+        out = x.type()
+        return Apply(self, [x, y, *idxs], [out])
+
+
+index_assignment = IndexUpdate("set")
+index_increment = IndexUpdate("inc")
