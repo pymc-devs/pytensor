@@ -29,6 +29,7 @@ from pytensor.scalar.math import (
     Erfinv,
     GammaIncCInv,
     GammaIncInv,
+    Hyp2F1,
     Iv,
     Ive,
     Kve,
@@ -341,3 +342,11 @@ def jax_funcify_Softplus(op, **kwargs):
         )
 
     return softplus
+
+
+@jax_funcify.register(Hyp2F1)
+def jax_funcify_Hyp2F1(op, **kwargs):
+    def hyp2f1(a, b, c, x):
+        return jax.scipy.special.hyp2f1(a, b, c, x)
+
+    return hyp2f1
