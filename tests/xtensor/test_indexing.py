@@ -45,7 +45,7 @@ def test_basic_indexing(labeled, indices):
     xr_assert_allclose(res, expected_res)
 
 
-def test_single_adv_indexing_on_existing_dim():
+def test_single_vector_indexing_on_existing_dim():
     x = xtensor(dims=("a", "b"), shape=(3, 5))
     idx = tensor("idx", dtype=int, shape=(4,))
     xidx = xtensor("idx", dtype=int, shape=(4,), dims=("a",))
