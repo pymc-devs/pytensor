@@ -43,6 +43,8 @@ class XTensorType(Type, HasDataType, HasShape):
             self.dtype = np.dtype(dtype).name
 
         self.dims = tuple(dims)
+        if len(set(dims)) < len(dims):
+            raise ValueError(f"Dimensions must be unique. Found duplicates in {dims}: ")
         if shape is None:
             self.shape = (None,) * len(self.dims)
         else:
