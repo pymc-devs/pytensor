@@ -316,32 +316,32 @@ class ExpandDims(XOp):
         The size of the new dimension (default 1).
     """
 
-    __props__ = ("dim", "size")
+    __props__ = ("dims", "size")
 
     def __init__(self, dim, size=1):
         if dim is not None and not isinstance(dim, str):
             raise TypeError(f"`dim` must be a string or None, got: {type(dim)}")
         if isinstance(size, int | np.integer) and size <= 0:
             raise ValueError(f"size must be positive, got: {size}")
-        self.dim = dim
+        self.dims = dim
         self.size = size
 
     def make_node(self, x):
         x = as_xtensor(x)
 
-        if self.dim is None:
+        if self.dims is None:
             return Apply(self, [x], [x])
 
-        if self.dim in x.type.dims:
-            raise ValueError(f"Dimension {self.dim} already exists in {x.type.dims}")
+        if self.dims in x.type.dims:
+            raise ValueError(f"Dimension {self.dims} already exists in {x.type.dims}")
 
         # Handle scalar case
         if not x.type.dims:
-            new_dims = (self.dim,)
+            new_dims = (self.dims,)
             new_shape = (self.size,)
         else:
             # Use symbolic shape
-            new_dims = (self.dim, *x.type.dims)
+            new_dims = (self.dims, *x.type.dims)
             if isinstance(self.size, int | np.integer):
                 new_shape = (self.size, *x.type.shape)
             else:
@@ -357,7 +357,7 @@ class ExpandDims(XOp):
 
     def infer_shape(self, fgraph, node, input_shapes):
         (input_shape,) = input_shapes
-        if self.dim is None:
+        if self.dims is None:
             return [input_shape]
         return [(self.size, *list(input_shape))]
 
@@ -383,68 +383,49 @@ def expand_dims(x, dim: str | None, size=1):
 
 
 class Squeeze(XOp):
-    """Remove dimensions of size 1 from an XTensorVariable.
+    """Remove specified dimensions from an XTensorVariable.
+
+    Only dimensions that are known statically to be size 1 will be removed.
+    Symbolic dimensions must be explicitly specified, and are assumed safe.
 
     Parameters
     ----------
-    dim : str, None, or iterable of str
-        The name(s) of the dimension(s) to remove. If None, all dimensions
-        that are statically known to have size 1 will be removed.
-        Dimensions with symbolic shape will not be removed unless explicitly named.
-
-        Note: Unlike NumPy/xarray, if dim is None, only dimensions known to
-        be size 1 at graph construction time will be removed, even if they happen
-        to be size 1 at runtime.
+    dim : tuple of str
+        The names of the dimensions to remove.
     """
 
-    __props__ = ("dim",)
+    __props__ = ("dims",)
 
-    def __init__(self, dim=None):
-        if dim is None:
-            self.dim = None
-        else:
-            dims = [dim] if isinstance(dim, str) else dim
-            if not all(isinstance(d, str) for d in dims):
-                raise TypeError(f"All dimension names must be strings: got {dims}")
-            # Deduplicate and sort to make __props__ deterministic and hashable
-            self.dim = tuple(sorted(set(dims)))
-
-            if not self.dim:
-                warnings.warn(
-                    "Squeeze received an empty dim list — no dimensions will be removed."
-                )
+    def __init__(self, dim):
+        self.dims = dim
 
     def make_node(self, x):
         x = as_xtensor(x)
 
-        if self.dim is None:
-            # Auto-detect static size-1 dimensions
-            dims_to_remove = [d for d, s in zip(x.type.dims, x.type.shape) if s == 1]
-            if not dims_to_remove:
-                raise ValueError("No dimensions of size 1 to remove")
-        else:
-            dims_to_remove = list(self.dim)
+        # Validate that dims exist and are size-1 if statically known
+        dims_to_remove = []
+        for d in self.dims:
+            if d not in x.type.dims:
+                raise ValueError(f"Dimension {d} not found in {x.type.dims}")
+            idx = x.type.dims.index(d)
+            dim_size = x.type.shape[idx]
+            if dim_size is not None and dim_size != 1:
+                raise ValueError(f"Dimension {d} has static size {dim_size}, not 1")
+            dims_to_remove.append(idx)
 
-            # Validate existence and static shape (when possible)
-            for dim in dims_to_remove:
-                if dim not in x.type.dims:
-                    raise ValueError(f"Dimension {dim} not found")
-                dim_idx = x.type.dims.index(dim)
-                shape = x.type.shape[dim_idx]
-                if shape is not None and shape != 1:
-                    raise ValueError(f"Dimension {dim} has size {shape}, not 1")
-
-        dim_indices = [x.type.dims.index(dim) for dim in dims_to_remove]
-
-        new_dims = [d for i, d in enumerate(x.type.dims) if i not in dim_indices]
-        new_shape = [s for i, s in enumerate(x.type.shape) if i not in dim_indices]
-
-        output = xtensor(
-            dtype=x.type.dtype,
-            shape=tuple(new_shape),
-            dims=tuple(new_dims),
+        new_dims = tuple(
+            d for i, d in enumerate(x.type.dims) if i not in dims_to_remove
         )
-        return Apply(self, [x], [output])
+        new_shape = tuple(
+            s for i, s in enumerate(x.type.shape) if i not in dims_to_remove
+        )
+
+        out = xtensor(
+            dtype=x.type.dtype,
+            shape=new_shape,
+            dims=new_dims,
+        )
+        return Apply(self, [x], [out])
 
 
 def squeeze(x, dim=None):
@@ -455,11 +436,27 @@ def squeeze(x, dim=None):
     x : XTensorVariable
         The input tensor
     dim : str or None or iterable of str, optional
-        The name(s) of the dimension(s) to remove. If None, all dimensions of size 1 will be removed.
+        The name(s) of the dimension(s) to remove. If None, all dimensions of size 1
+        (known statically) will be removed. Dimensions with symbolic shape will be retained.
 
     Returns
     -------
     XTensorVariable
-        A new tensor with the specified dimension(s) removed
+        A new tensor with the specified dimension(s) removed.
     """
-    return Squeeze(dim=dim)(x)
+    x = as_xtensor(x)
+
+    if dim is None:
+        dims = tuple(d for d, s in zip(x.type.dims, x.type.shape) if s == 1)
+    elif isinstance(dim, str):
+        dims = (dim,)
+    else:
+        dims = tuple(dim)
+
+    # Normalize: deduplicate and sort
+    dims = tuple(sorted(set(dims)))
+
+    if not dims:
+        return x  # no-op if nothing to squeeze
+
+    return Squeeze(dim=dims)(x)

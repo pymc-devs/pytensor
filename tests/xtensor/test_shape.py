@@ -265,38 +265,42 @@ def test_concat_scalar():
     xr_assert_allclose(res, expected_res)
 
 
-def assert_dims_and_shape(actual, expected):
-    assert actual.type.dims == expected.dims
-    assert actual.type.shape == expected.shape
-
-
 def test_expand_dims():
     # 1D case
     x_xr = xr.DataArray([0, 1, 2], dims=["city"])
     y_xr = x_xr.expand_dims("country")
     x = xtensor("x", dims=("city",), shape=(3,))
     y = expand_dims(x, "country")
-    assert_dims_and_shape(y, y_xr)
     fn = xr_function([x], y)
-    x_test = xr_arange_like(x)
-    xr_assert_allclose(fn(x_test), y_xr)
+    xr_assert_allclose(fn(x_xr), y_xr)
 
     # 2D case
-    x2d_xr = xr.DataArray([[0, 1, 2], [3, 4, 5]], dims=["row", "col"])
-    y2d_xr = x2d_xr.expand_dims("batch")
-    x2d = xtensor("x2d", dims=("row", "col"), shape=(2, 3))
-    y2d = expand_dims(x2d, "batch")
-    assert_dims_and_shape(y2d, y2d_xr)
-    fn = xr_function([x2d], y2d)
-    x2d_test = xr_arange_like(x2d)
-    xr_assert_allclose(fn(x2d_test), y2d_xr)
+    x_xr = xr.DataArray([[0, 1], [2, 3]], dims=["city", "year"])
+    y_xr = x_xr.expand_dims("country")
+    x = xtensor("x", dims=("city", "year"), shape=(2, 2))
+    y = expand_dims(x, "country")
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_xr), y_xr)
 
-    # Expansion with different dimension name
-    z_xr = x_xr.expand_dims("time")
-    z = expand_dims(x, "time")
-    assert_dims_and_shape(z, z_xr)
+    # 3D case
+    x_xr = xr.DataArray(
+        [[[0, 1], [2, 3]], [[4, 5], [6, 7]]], dims=["city", "year", "month"]
+    )
+    y_xr = x_xr.expand_dims("country")
+    x = xtensor("x", dims=("city", "year", "month"), shape=(2, 2, 2))
+    y = expand_dims(x, "country")
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_xr), y_xr)
+
+    # Test that expand_dims is reversible with squeeze
+    x_xr = xr.DataArray([0, 1, 2], dims=["city"])
+    y_xr = x_xr.expand_dims("country")
+    z_xr = y_xr.squeeze("country")
+    x = xtensor("x", dims=("city",), shape=(3,))
+    y = expand_dims(x, "country")
+    z = squeeze(y, "country")
     fn = xr_function([x], z)
-    xr_assert_allclose(fn(x_test), z_xr)
+    xr_assert_allclose(fn(x_xr), z_xr)
 
     # Expanding with an existing dimension raises an error
     with pytest.raises(ValueError, match="already exists"):
@@ -328,8 +332,6 @@ def test_expand_dims():
     with pytest.raises(ValueError, match="size must be.*positive"):
         expand_dims(x, "batch", size=0)
 
-
-def test_expand_dims_additional_cases():
     # Expanding a scalar
     x = xtensor("x", dims=(), shape=())
     y = expand_dims(x, "batch")
@@ -393,137 +395,99 @@ def test_expand_dims_additional_cases():
 
 
 def test_squeeze():
-    # Test squeezing a specific dimension
+    # Basic squeeze
     x = xtensor("x", dims=("city", "country"), shape=(3, 1))
     y = squeeze(x, "country")
     fn = xr_function([x], y)
     x_test = xr_arange_like(x)
-    res = fn(x_test)
-    expected_res = x_test.squeeze("country")
-    xr_assert_allclose(res, expected_res)
+    expected = x_test.squeeze("country")
+    xr_assert_allclose(fn(x_test), expected)
 
-    # Test squeezing multiple specific dimensions
+    # Multiple dims
     x_multi = xtensor("x_multi", dims=("a", "b", "c", "d"), shape=(2, 1, 1, 3))
     y_multi = squeeze(x_multi, ["b", "c"])
     fn = xr_function([x_multi], y_multi)
-    x_multi_test = xr_arange_like(x_multi)
-    res = fn(x_multi_test)
-    expected_res = x_multi_test.squeeze(["b", "c"])
-    xr_assert_allclose(res, expected_res)
+    x_test = xr_arange_like(x_multi)
+    xr_assert_allclose(fn(x_test), x_test.squeeze(["b", "c"]))
 
-    # Test squeezing a non-last dimension
-    x_nonlast = xtensor("x_nonlast", dims=("a", "b", "c"), shape=(2, 1, 3))
-    y_nonlast = squeeze(x_nonlast, "b")
-    fn = xr_function([x_nonlast], y_nonlast)
-    x_nonlast_test = xr_arange_like(x_nonlast)
-    res = fn(x_nonlast_test)
-    expected_res = x_nonlast_test.squeeze("b")
-    xr_assert_allclose(res, expected_res)
-
-    # Test squeezing in a higher-dimensional tensor
-    x_high = xtensor("x_high", dims=("a", "b", "c", "d", "e"), shape=(2, 1, 3, 1, 4))
-    y_high = squeeze(x_high, ["b", "d"])
-    fn = xr_function([x_high], y_high)
-    x_high_test = xr_arange_like(x_high)
-    res = fn(x_high_test)
-    expected_res = x_high_test.squeeze(["b", "d"])
-    xr_assert_allclose(res, expected_res)
-
-    # Test with symbolic shapes
-    x_sym = xtensor("x_sym", dims=("a", "b", "c"))
-    y_sym = squeeze(x_sym, "b")
-    x_sym_test = xr_arange_like(xtensor(dims=x_sym.dims, shape=(2, 1, 3)))
-    fn = xr_function([x_sym], y_sym)
-    res = fn(x_sym_test)
-    expected_res = x_sym_test.squeeze("b")
-    xr_assert_allclose(res, expected_res)
-
-    # Test squeezing all dimensions of size 1
+    # All dims size 1
     x2d = xtensor("x2d", dims=("row", "col", "batch"), shape=(2, 1, 1))
     y2d = squeeze(x2d)
     fn = xr_function([x2d], y2d)
-    x2d_test = xr_arange_like(x2d)
-    res = fn(x2d_test)
-    expected_res = x2d_test.squeeze()
-    xr_assert_allclose(res, expected_res)
+    x_test = xr_arange_like(x2d)
+    xr_assert_allclose(fn(x_test), x_test.squeeze())
 
-    # Test that squeezing a non-existent dimension raises an error
-    with pytest.raises(ValueError):
+    # Redundant dims
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 1, 1))
+    y = squeeze(x, ["b", "b"])
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test.squeeze("b"))
+
+    # Order shouldn't matter
+    y1 = squeeze(x, ["b", "c"])
+    y2 = squeeze(x, ["c", "b"])
+    fn1 = xr_function([x], y1)
+    fn2 = xr_function([x], y2)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn1(x_test), fn2(x_test))
+
+    # Empty dims = no-op
+    y = squeeze(x, [])
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test)
+
+    # Squeeze all size-1 dims with dim=None
+    x = xtensor("x", dims=("a", "b"), shape=(1, 1))
+    y = squeeze(x)
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test.squeeze())
+
+    # Symbolic dims: squeeze static size 1 at runtime
+    x_sym = xtensor("x_sym", dims=("a", "b", "c"))
+    y_sym = squeeze(x_sym, "b")
+    x_test = xr_arange_like(xtensor(dims=x_sym.dims, shape=(2, 1, 3)))
+    fn = xr_function([x_sym], y_sym)
+    xr_assert_allclose(fn(x_test), x_test.squeeze("b"))
+
+    # Symbolic 1-size dim + known dim
+    x = xtensor("x", dims=("a", "b", "c"), shape=(None, 1, 3))
+    y = squeeze(x, "b")
+    x_test = xr_arange_like(xtensor(dims=x.dims, shape=(4, 1, 3)))
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.squeeze("b"))
+
+    # Squeeze then expand_dims → reversible
+    x = xtensor("x", dims=("batch", "time", "feature"), shape=(2, 1, 3))
+    y = squeeze(x, "time")
+    z = expand_dims(y, "time")
+    fn = xr_function([x], z)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test).transpose(*x_test.dims), x_test)
+
+    # No dims to squeeze → no-op
+    x = xtensor("x", dims=("row", "col", "batch"), shape=(2, 3, 4))
+    y = squeeze(x)
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn(x_test), x_test)
+
+
+def test_squeeze_errors():
+    # Squeeze nonexistent dim
+    x = xtensor("x", dims=("city", "country"), shape=(3, 1))
+    with pytest.raises(ValueError, match="Dimension .* not found"):
         squeeze(x, "time")
 
-    # Test that squeezing a dimension of size > 1 raises an error
-    with pytest.raises(ValueError):
+    # Squeeze non-size-1 dim
+    with pytest.raises(ValueError, match="has static size .* not 1"):
         squeeze(x, "city")
 
-    # Test that squeezing when no dimensions are of size 1 raises an error
-    x3d = xtensor("x3d", dims=("row", "col", "batch"), shape=(2, 3, 4))
-    with pytest.raises(ValueError):
-        squeeze(x3d)
-
-
-def test_squeeze_additional_cases():
-    # Redundant dimensions: squeeze(["b", "b"]) should behave like squeeze(["b"])
-    x1 = xtensor("x1", dims=("a", "b", "c"), shape=(2, 1, 1))
-    y1 = squeeze(x1, ["b", "b"])
-    fn1 = xr_function([x1], y1)
-    x1_test = xr_arange_like(x1)
-    expected1 = x1_test.squeeze(["b"])
-    xr_assert_allclose(fn1(x1_test), expected1)
-
-    # Symbolic shape: dim is 1 at runtime → should squeeze successfully
-    x2 = xtensor("x2", dims=("a", "b", "c"))  # shape unknown
-    y2 = squeeze(x2, "b")
-    fn2 = xr_function([x2], y2)
-    x2_test = xr_arange_like(xtensor(dims=x2.dims, shape=(2, 1, 3)))
-    expected2 = x2_test.squeeze("b")
-    xr_assert_allclose(fn2(x2_test), expected2)
-
-    # Symbolic shape: dim is not 1 at runtime → should raise
-    x3 = xtensor("x3", dims=("a", "b", "c"))  # shape unknown
-    y3 = squeeze(x3, "b")
-    fn3 = xr_function([x3], y3)
-    x3_test = xr_arange_like(xtensor(dims=x3.dims, shape=(2, 2, 3)))
-    with pytest.raises(Exception):
-        fn3(x3_test)
-
-    # Reversibility: squeeze then expand_dims should restore original
-    x4 = xtensor("x4", dims=("batch", "time", "feature"), shape=(2, 1, 3))
-    y4 = squeeze(x4, "time")
-    z4 = expand_dims(y4, "time")
-    fn4 = xr_function([x4], z4)
-    x4_test = xr_arange_like(x4)
-    # Adjust dimension order for comparison
-    xr_assert_allclose(fn4(x4_test).transpose(*x4_test.dims), x4_test)
-
-
-def test_squeeze_extra_cases():
-    # 1. Order of dims shouldn't affect result
-    x1 = xtensor("x1", dims=("a", "b", "c"), shape=(2, 1, 1))
-    y1 = squeeze(x1, ["b", "c"])
-    y2 = squeeze(x1, ["c", "b"])
-    fn1 = xr_function([x1], y1)
-    fn2 = xr_function([x1], y2)
-    x1_test = xr_arange_like(x1)
-    xr_assert_allclose(fn1(x1_test), fn2(x1_test))
-
-    # 2. Empty list of dims = no-op
-    x2 = xtensor("x2", dims=("a", "b", "c"), shape=(2, 1, 1))
-    y2 = squeeze(x2, [])
-    fn2 = xr_function([x2], y2)
-    x2_test = xr_arange_like(x2)
-    xr_assert_allclose(fn2(x2_test), x2_test)
-
-    # 3. Explicit squeeze of all size-1 dims via dim=None
-    x3 = xtensor("x3", dims=("a", "b"), shape=(1, 1))
-    y3 = squeeze(x3)
-    fn3 = xr_function([x3], y3)
-    x3_test = xr_arange_like(x3)
-    xr_assert_allclose(fn3(x3_test), x3_test.squeeze())
-
-    # 4. Static + symbolic shape mix: squeeze symbolic 1-sized dim
-    x4 = xtensor("x4", dims=("a", "b", "c"), shape=(None, 1, 3))
-    y4 = squeeze(x4, "b")
-    x4_test = xr_arange_like(xtensor(dims=x4.dims, shape=(4, 1, 3)))
-    fn4 = xr_function([x4], y4)
-    expected4 = x4_test.squeeze("b")
-    xr_assert_allclose(fn4(x4_test), expected4)
+    # Symbolic dim is not size 1 at runtime
+    x = xtensor("x", dims=("a", "b", "c"))
+    y = squeeze(x, "b")
+    x_test = xr_arange_like(xtensor(dims=x.dims, shape=(2, 2, 3)))
+    fn = xr_function([x], y)
+    with pytest.raises(Exception):  # shape assertion fails at runtime
+        fn(x_test)

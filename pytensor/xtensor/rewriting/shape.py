@@ -131,7 +131,7 @@ def local_expand_dims_reshape(fgraph, node):
         return False
 
     x = node.inputs[0]
-    dim = node.op.dim
+    dim = node.op.dims
     size = getattr(node.op, "size", 1)
 
     if dim is None:
@@ -162,7 +162,7 @@ def local_squeeze_reshape(fgraph, node):
 
     [x] = node.inputs
     in_dims = x.type.dims
-    dim = node.op.dim
+    dim = node.op.dims
 
     # Determine which axes to squeeze
     if dim is None:
