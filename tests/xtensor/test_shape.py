@@ -1,4 +1,8 @@
 # ruff: noqa: E402
+import pytest
+
+pytest.importorskip("xarray")
+
 import re
 from itertools import chain, combinations
 
@@ -144,7 +148,6 @@ def test_stack_single_dim():
 
     fn = xr_function([x], out)
     x_test = xr_arange_like(x)
-    fn.fn.dprint(print_type=True)
     res = fn(x_test)
     expected_res = x_test.stack(d=["a"])
     xr_assert_allclose(res, expected_res)

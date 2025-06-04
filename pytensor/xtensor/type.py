@@ -1,3 +1,5 @@
+import warnings
+
 from pytensor.tensor import TensorType
 from pytensor.tensor.math import variadic_mul
 
@@ -10,7 +12,7 @@ except ModuleNotFoundError:
     XARRAY_AVAILABLE = False
 
 from collections.abc import Sequence
-from typing import Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 
@@ -43,10 +45,16 @@ class XTensorType(Type, HasDataType, HasShape):
             self.dtype = np.dtype(dtype).name
 
         self.dims = tuple(dims)
+        if len(set(dims)) < len(dims):
+            raise ValueError(f"Dimensions must be unique. Found duplicates in {dims}: ")
         if shape is None:
             self.shape = (None,) * len(self.dims)
         else:
             self.shape = tuple(shape)
+            if len(self.shape) != len(self.dims):
+                raise ValueError(
+                    f"Shape {self.shape} must have the same length as dims {self.dims}"
+                )
         self.ndim = len(self.dims)
         self.name = name
 
@@ -334,8 +342,10 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     # Indexing
     # https://docs.xarray.dev/en/latest/api.html#id2
-    def __setitem__(self, key, value):
-        raise TypeError("XTensorVariable does not support item assignment.")
+    def __setitem__(self, idx, value):
+        raise TypeError(
+            "XTensorVariable does not support item assignment. Use the output of `x[idx].set` or `x[idx].inc` instead."
+        )
 
     @property
     def loc(self):
@@ -345,7 +355,124 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         raise NotImplementedError("sel not implemented for XTensorVariable")
 
     def __getitem__(self, idx):
-        raise NotImplementedError("Indexing not yet implemnented")
+        if isinstance(idx, dict):
+            return self.isel(idx)
+
+        if not isinstance(idx, tuple):
+            idx = (idx,)
+
+        return px.indexing.index(self, *idx)
+
+    def isel(
+        self,
+        indexers: dict[str, Any] | None = None,
+        drop: bool = False,  # Unused by PyTensor
+        missing_dims: Literal["raise", "warn", "ignore"] = "raise",
+        **indexers_kwargs,
+    ):
+        if indexers_kwargs:
+            if indexers is not None:
+                raise ValueError(
+                    "Cannot pass both indexers and indexers_kwargs to isel"
+                )
+            indexers = indexers_kwargs
+
+        if missing_dims not in {"raise", "warn", "ignore"}:
+            raise ValueError(
+                f"Unrecognized options {missing_dims} for missing_dims argument"
+            )
+
+        # Sort indices and pass them to index
+        dims = self.type.dims
+        indices = [slice(None)] * self.type.ndim
+        for key, idx in indexers.items():
+            if idx is Ellipsis:
+                # Xarray raises a less informative error, suggesting indices must be integer
+                # But slices are also fine
+                raise TypeError("Ellipsis (...) is an invalid labeled index")
+            try:
+                indices[dims.index(key)] = idx
+            except IndexError:
+                if missing_dims == "raise":
+                    raise ValueError(
+                        f"Dimension {key} does not exist. Expected one of {dims}"
+                    )
+                elif missing_dims == "warn":
+                    warnings.warn(
+                        f"Dimension {key} does not exist. Expected one of {dims}",
+                        UserWarning,
+                    )
+
+        return px.indexing.index(self, *indices)
+
+    def set(self, value):
+        if not (
+            self.owner is not None and isinstance(self.owner.op, px.indexing.Index)
+        ):
+            raise ValueError(
+                f"set can only be called on the output of an index (or isel) operation. Self is the result of {self.owner}"
+            )
+
+        x, *idxs = self.owner.inputs
+        return px.indexing.index_assignment(x, value, *idxs)
+
+    def inc(self, value):
+        if not (
+            self.owner is not None and isinstance(self.owner.op, px.indexing.Index)
+        ):
+            raise ValueError(
+                f"inc can only be called on the output of an index (or isel) operation. Self is the result of {self.owner}"
+            )
+
+        x, *idxs = self.owner.inputs
+        return px.indexing.index_increment(x, value, *idxs)
+
+    def _head_tail_or_thin(
+        self,
+        indexers: dict[str, Any] | int | None,
+        indexers_kwargs: dict[str, Any],
+        *,
+        kind: Literal["head", "tail", "thin"],
+    ):
+        if indexers_kwargs:
+            if indexers is not None:
+                raise ValueError(
+                    "Cannot pass both indexers and indexers_kwargs to head"
+                )
+            indexers = indexers_kwargs
+
+        if indexers is None:
+            if kind == "thin":
+                raise TypeError(
+                    "thin() indexers must be either dict-like or a single integer"
+                )
+            else:
+                # Default to 5 for head and tail
+                indexers = {dim: 5 for dim in self.type.dims}
+
+        elif not isinstance(indexers, dict):
+            indexers = {dim: indexers for dim in self.type.dims}
+
+        if kind == "head":
+            indices = {dim: slice(None, value) for dim, value in indexers.items()}
+        elif kind == "tail":
+            sizes = self.sizes
+            # Can't use slice(-value, None), in case value is zero
+            indices = {
+                dim: slice(sizes[dim] - value, None) for dim, value in indexers.items()
+            }
+        elif kind == "thin":
+            indices = {dim: slice(None, None, value) for dim, value in indexers.items()}
+        return self.isel(indices)
+
+    def head(self, indexers: dict[str, Any] | int | None = None, **indexers_kwargs):
+        return self._head_tail_or_thin(indexers, indexers_kwargs, kind="head")
+
+    def tail(self, indexers: dict[str, Any] | int | None = None, **indexers_kwargs):
+        return self._head_tail_or_thin(indexers, indexers_kwargs, kind="tail")
+
+    def thin(self, indexers: dict[str, Any] | int | None = None, **indexers_kwargs):
+        return self._head_tail_or_thin(indexers, indexers_kwargs, kind="thin")
 
     # ndarray methods
     # https://docs.xarray.dev/en/latest/api.html#id7
@@ -498,7 +625,9 @@ def xtensor_constant(x, name=None, dims: None | Sequence[str] = None):
             if x_data.ndim == 0:
                 x_dims = ()
             else:
-                "Cannot convert TensorLike constant to XTensorConstant without specifying dims."
+                raise TypeError(
+                    "Cannot convert TensorLike constant to XTensorConstant without specifying dims."
+                )
     try:
         return XTensorConstant(
             XTensorType(dtype=x_data.dtype, dims=x_dims, shape=x_data.shape),
