@@ -306,23 +306,11 @@ def concat(xtensors, dim: str):
 
 
 class ExpandDims(XOp):
-    """Add a new dimension to an XTensorVariable.
-
-    Parameters
-    ----------
-    dim : str or None
-        The name of the new dimension. If None, no new dimension is added.
-    size : int or symbolic, optional
-        The size of the new dimension (default 1).
-    """
+    """Add a new dimension to an XTensorVariable."""
 
     __props__ = ("dims", "size")
 
     def __init__(self, dim, size=1):
-        if dim is not None and not isinstance(dim, str):
-            raise TypeError(f"`dim` must be a string or None, got: {type(dim)}")
-        if isinstance(size, int | np.integer) and size <= 0:
-            raise ValueError(f"size must be positive, got: {size}")
         self.dims = dim
         self.size = size
 
@@ -330,23 +318,17 @@ class ExpandDims(XOp):
         x = as_xtensor(x)
 
         if self.dims is None:
+            # No-op: return same variable
             return Apply(self, [x], [x])
 
-        if self.dims in x.type.dims:
-            raise ValueError(f"Dimension {self.dims} already exists in {x.type.dims}")
+        # Insert new dim at front
+        new_dims = (self.dims, *x.type.dims)
 
-        # Handle scalar case
-        if not x.type.dims:
-            new_dims = (self.dims,)
-            new_shape = (self.size,)
+        # Determine shape
+        if isinstance(self.size, int | np.integer):
+            new_shape = (self.size, *x.type.shape)
         else:
-            # Use symbolic shape
-            new_dims = (self.dims, *x.type.dims)
-            if isinstance(self.size, int | np.integer):
-                new_shape = (self.size, *x.type.shape)
-            else:
-                # For symbolic size, we need to use a symbolic shape
-                new_shape = (None, *x.type.shape)
+            new_shape = (None, *x.type.shape)  # symbolic size
 
         out = xtensor(
             dtype=x.type.dtype,
@@ -368,17 +350,36 @@ def expand_dims(x, dim: str | None, size=1):
     Parameters
     ----------
     x : XTensorVariable
-        The input tensor
+        Input tensor
     dim : str or None
-        The name of the new dimension
+        Name of new dimension. If None, returns x unchanged.
     size : int or symbolic, optional
-        The size of the new dimension (default 1)
+        Size of the new dimension (default 1)
 
     Returns
     -------
     XTensorVariable
-        A new tensor with the expanded dimension
+        Tensor with the new dimension inserted
     """
+    x = as_xtensor(x)
+
+    if dim is None:
+        return x  # No-op
+
+    if not isinstance(dim, str):
+        raise TypeError(f"`dim` must be a string or None, got: {type(dim)}")
+
+    if dim in x.type.dims:
+        raise ValueError(f"Dimension {dim} already exists in {x.type.dims}")
+
+    if isinstance(size, int | np.integer):
+        if size <= 0:
+            raise ValueError(f"size must be positive, got: {size}")
+    elif not (
+        hasattr(size, "ndim") and getattr(size, "ndim", None) == 0  # symbolic scalar
+    ):
+        raise TypeError(f"size must be an int or scalar variable, got: {type(size)}")
+
     return ExpandDims(dim=dim, size=size)(x)
 
 

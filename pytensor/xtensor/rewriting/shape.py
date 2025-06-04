@@ -1,9 +1,11 @@
 import numpy as np
 
 from pytensor.graph import node_rewriter
+from pytensor.raise_op import Assert
 from pytensor.tensor import (
     broadcast_to,
     expand_dims,
+    gt,
     join,
     moveaxis,
     specify_shape,
@@ -147,6 +149,10 @@ def local_expand_dims_reshape(fgraph, node):
             x_tensor_expanded = broadcast_to(x_tensor_expanded, target_shape)
     else:
         # Symbolic size: enforce shape so broadcast happens downstream correctly
+        # Also validate that size is positive
+        x_tensor_expanded = Assert(msg="size must be positive")(
+            x_tensor_expanded, gt(size, 0)
+        )
         x_tensor_expanded = specify_shape(x_tensor_expanded, target_shape)
 
     new_out = xtensor_from_tensor(x_tensor_expanded, dims=node.outputs[0].type.dims)
