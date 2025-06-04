@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 import pytest
 
+
 pytest.importorskip("xarray")
 
 import re
