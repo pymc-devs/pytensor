@@ -360,7 +360,7 @@ def squeeze(x, dim=None):
         The input tensor
     dim : str or None or iterable of str, optional
         The name(s) of the dimension(s) to remove. If None, all dimensions of size 1
-        (known statically) will be removed. Dimensions with symbolic shape will be retained.
+        (known statically) will be removed. Dimensions with unknown static shape will be retained, even if they have size 1 at runtime.
 
     Returns
     -------
