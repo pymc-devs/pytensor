@@ -124,11 +124,9 @@ def lower_transpose(fgraph, node):
 def local_squeeze_reshape(fgraph, node):
     """Rewrite Squeeze to tensor.squeeze."""
     x = node.inputs[0]
-    dim = node.op.dims
-
     x_tensor = tensor_from_xtensor(x)
     x_dims = x.type.dims
-    dims_to_remove = [dim] if isinstance(dim, str) else dim
+    dims_to_remove = node.op.dims
     axes_to_squeeze = tuple(x_dims.index(d) for d in dims_to_remove)
     x_tensor_squeezed = squeeze(x_tensor, axis=axes_to_squeeze)
 
