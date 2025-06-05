@@ -606,6 +606,9 @@ def test_scalar_loop():
     )
 
 
+@pytest.mark.xfail(
+    reason="Numba fails due to https://github.com/numba/numba/issues/10098"
+)
 def test_gammainc_wrt_k_grad():
     x = pt.vector("x", dtype="float64")
     k = pt.vector("k", dtype="float64")

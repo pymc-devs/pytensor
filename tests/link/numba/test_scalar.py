@@ -245,3 +245,15 @@ class TestScalarLoop:
         np.testing.assert_allclose(fn(n_steps=20, x0=1), [10, True])
         np.testing.assert_allclose(fn(n_steps=5, x0=1), [6, False])
         np.testing.assert_allclose(fn(n_steps=0, x0=1), [1, False])
+
+    @pytest.mark.xfail("Fails due to https://github.com/numba/numba/issues/10098")
+    def test_loop_with_cython_wrapped_op(self):
+        x = ps.float64("x")
+        op = ScalarLoop(init=[x], update=[ps.psi(x)])
+        out = op(1, x)
+
+        fn = function([x], out, mode=numba_mode)
+        x_test = np.float64(0.5)
+        res = fn(x_test)
+        expected_res = ps.psi(x).eval({x: x_test})
+        np.testing.assert_allclose(res, expected_res)
