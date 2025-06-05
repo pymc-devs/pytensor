@@ -126,9 +126,6 @@ def local_squeeze_reshape(fgraph, node):
     x = node.inputs[0]
     dim = node.op.dims
 
-    if dim is None:
-        return [x]
-
     x_tensor = tensor_from_xtensor(x)
     x_dims = x.type.dims
     dims_to_remove = [dim] if isinstance(dim, str) else dim
