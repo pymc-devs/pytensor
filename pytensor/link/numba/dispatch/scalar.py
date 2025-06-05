@@ -15,6 +15,7 @@ from pytensor.link.numba.dispatch.cython_support import wrap_cython_function
 from pytensor.link.utils import (
     get_name_for_object,
 )
+from pytensor.scalar import ScalarLoop
 from pytensor.scalar.basic import (
     Add,
     Cast,
@@ -364,3 +365,52 @@ def numba_funcify_Softplus(op, node, **kwargs):
         return numba_basic.direct_cast(value, out_dtype)
 
     return softplus, scalar_op_cache_key(op, cache_version=1)
+
+
+@register_funcify_and_cache_key(ScalarLoop)
+def numba_funcify_ScalarLoop(op, node, **kwargs):
+    inner_fn, inner_fn_cache_key = numba_funcify_and_cache_key(op.fgraph)
+    if inner_fn_cache_key is None:
+        loop_cache_key = None
+    else:
+        loop_cache_key = sha256(
+            str((type(op), op.is_while, inner_fn_cache_key)).encode()
+        ).hexdigest()
+
+    if op.is_while:
+        n_update = len(op.outputs) - 1
+
+        @numba_basic.numba_njit
+        def while_loop(n_steps, *inputs):
+            carry, constant = inputs[:n_update], inputs[n_update:]
+
+            until = False
+            for i in range(n_steps):
+                outputs = inner_fn(*carry, *constant)
+                carry, until = outputs[:-1], outputs[-1]
+                if until:
+                    break
+
+            return *carry, until
+
+        return while_loop, loop_cache_key
+
+    else:
+        n_update = len(op.outputs)
+
+        @numba_basic.numba_njit
+        def for_loop(n_steps, *inputs):
+            carry, constant = inputs[:n_update], inputs[n_update:]
+
+            if n_steps < 0:
+                raise ValueError("ScalarLoop does not have a termination condition.")
+
+            for i in range(n_steps):
+                carry = inner_fn(*carry, *constant)
+
+            if n_update == 1:
+                return carry[0]
+            else:
+                return carry
+
+        return for_loop, loop_cache_key
