@@ -2,6 +2,7 @@ import itertools
 
 import numpy as np
 import pytest
+import scipy
 import scipy.special as sp
 
 import pytensor.tensor as pt
@@ -19,6 +20,7 @@ from pytensor.scalar.math import (
     gammal,
     gammau,
     hyp2f1,
+    psi,
 )
 from tests.link.test_link import make_function
 
@@ -149,3 +151,35 @@ def test_scalarloop_grad_mixed_dtypes(op, scalar_loop_grads):
             (var.owner and isinstance(var.owner.op, ScalarLoop))
             for var in ancestors(grad)
         )
+
+
+@pytest.mark.parametrize(
+    "linker",
+    [
+        "py",
+        pytest.param(
+            "c",
+            marks=pytest.mark.xfail(
+                reason="C implementation does not support negative inputs"
+            ),
+        ),
+    ],
+)
+def test_psi(linker):
+    x = float64("x")
+    out = psi(x)
+
+    fn = function([x], out, mode=Mode(linker=linker, optimizer="fast_run"))
+    fn.dprint()
+
+    x_test = np.float64(0.5)
+    np.testing.assert_allclose(
+        fn(x_test),
+        scipy.special.psi(x_test),
+        strict=True,
+    )
+    np.testing.assert_allclose(
+        fn(-x_test),
+        scipy.special.psi(-x_test),
+        strict=True,
+    )
