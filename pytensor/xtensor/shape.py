@@ -379,4 +379,4 @@ def squeeze(x, dim=None):
     if not dims:
         return x  # no-op if nothing to squeeze
 
-    return Squeeze(dim=dims)(x)
+    return Squeeze(dims=dims)(x)
