@@ -317,8 +317,8 @@ class Squeeze(XOp):
 
     __props__ = ("dims",)
 
-    def __init__(self, dim):
-        self.dims = tuple(sorted(set(dim)))
+    def __init__(self, dims):
+        self.dims = tuple(sorted(set(dims)))
 
     def make_node(self, x):
         x = as_xtensor(x)
