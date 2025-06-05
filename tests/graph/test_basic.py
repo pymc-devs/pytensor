@@ -628,6 +628,31 @@ def test_get_var_by_name():
     assert res == exp_res
 
 
+def test_get_var_by_name_include_inner_graphs_flag():
+    r1, r2, r3 = MyVariable(1), MyVariable(2), MyVariable(3)
+    o1 = MyOp(r1, r2)
+    o1.name = "o1"
+
+    # Inner graph
+    igo_in_1 = MyVariable(4)
+    igo_in_2 = MyVariable(5)
+    igo_out_1 = MyOp(igo_in_1, igo_in_2)
+    igo_out_1.name = "igo1"
+
+    igo = MyInnerGraphOp([igo_in_1, igo_in_2], [igo_out_1])
+    o2 = igo(r3, o1)
+
+    res = get_var_by_name([o1, o2], "igo1", include_inner_graphs=False)
+    assert (
+        res == ()
+    ), "Should not return inner graph variable when include_inner_graphs is False"
+
+    res = get_var_by_name([o1, o2], "igo1", include_inner_graphs=True)
+    assert any(
+        v.name == "igo1" for v in res
+    ), "Should return inner graph variable when include_inner_graphs is True"
+
+
 def test_clone_new_inputs():
     """Make sure that `Apply.clone_with_new_inputs` properly handles `Type` changes."""
 
