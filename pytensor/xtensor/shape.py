@@ -397,19 +397,21 @@ class Squeeze(XOp):
 
     __props__ = ("dims",)
 
-    def __init__(self, dims):
-        self.dims = dims
+    def __init__(self, dim):
+        self.dims = tuple(sorted(set(dim)))
 
     def make_node(self, x):
         x = as_xtensor(x)
 
         # Validate that dims exist and are size-1 if statically known
         dims_to_remove = []
+        x_dims = x.type.dims
+        x_shape = x.type.shape
         for d in self.dims:
-            if d not in x.type.dims:
+            if d not in x_dims:
                 raise ValueError(f"Dimension {d} not found in {x.type.dims}")
-            idx = x.type.dims.index(d)
-            dim_size = x.type.shape[idx]
+            idx = x_dims.index(d)
+            dim_size = x_shape[idx]
             if dim_size is not None and dim_size != 1:
                 raise ValueError(f"Dimension {d} has static size {dim_size}, not 1")
             dims_to_remove.append(idx)
@@ -453,9 +455,6 @@ def squeeze(x, dim=None):
         dims = (dim,)
     else:
         dims = tuple(dim)
-
-    # Normalize: deduplicate and sort
-    dims = tuple(sorted(set(dims)))
 
     if not dims:
         return x  # no-op if nothing to squeeze

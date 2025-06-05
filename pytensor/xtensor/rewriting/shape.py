@@ -162,28 +162,18 @@ def local_expand_dims_reshape(fgraph, node):
 @register_xcanonicalize
 @node_rewriter([Squeeze])
 def local_squeeze_reshape(fgraph, node):
-    """Rewrite rule to convert Squeeze to pytensor.tensor.squeeze."""
-    if not isinstance(node.op, Squeeze):
-        return False
-
-    [x] = node.inputs
-    in_dims = x.type.dims
+    """Rewrite Squeeze to tensor.squeeze."""
+    x = node.inputs[0]
     dim = node.op.dims
 
-    # Determine which axes to squeeze
     if dim is None:
-        # Infer axes by comparing input and output dims
-        out_dims = node.outputs[0].type.dims
-        axes_to_squeeze = tuple(i for i, d in enumerate(in_dims) if d not in out_dims)
-    else:
-        dims_to_remove = [dim] if isinstance(dim, str) else dim
-        axes_to_squeeze = tuple(in_dims.index(d) for d in dims_to_remove)
-
-    # Nothing to squeeze? Just return input unchanged
-    if not axes_to_squeeze:
         return [x]
 
     x_tensor = tensor_from_xtensor(x)
+    x_dims = x.type.dims
+    dims_to_remove = [dim] if isinstance(dim, str) else dim
+    axes_to_squeeze = tuple(x_dims.index(d) for d in dims_to_remove)
     x_tensor_squeezed = squeeze(x_tensor, axis=axes_to_squeeze)
+
     new_out = xtensor_from_tensor(x_tensor_squeezed, dims=node.outputs[0].type.dims)
     return [new_out]

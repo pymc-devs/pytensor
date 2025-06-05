@@ -448,7 +448,7 @@ def test_squeeze_explicit_dims():
     # Redundant dimensions
     y3c = squeeze(x3, ["b", "b"])
     fn3c = xr_function([x3], y3c)
-    xr_assert_allclose(fn3c(x3_test), x3_test.squeeze("b"))
+    xr_assert_allclose(fn3c(x3_test), x3_test.squeeze(["b", "b"]))
 
     # Empty list = no-op
     y3d = squeeze(x3, [])
@@ -494,6 +494,22 @@ def test_squeeze_implicit_dims():
     fn5 = xr_function([x5], z5)
     x5_test = xr_arange_like(x5)
     xr_assert_allclose(fn5(x5_test).transpose(*x5_test.dims), x5_test)
+
+    """
+    This test documents that we intentionally don't squeeze dimensions with symbolic shapes
+    (static_shape=None) even when they are 1 at runtime, while xarray does squeeze them.
+    """
+    # Create a tensor with a symbolic dimension that will be 1 at runtime
+    x = xtensor("x", dims=("a", "b", "c"))  # shape unknown
+    y = squeeze(x)  # implicit dim=None should not squeeze symbolic dimensions
+    x_test = xr_arange_like(xtensor(dims=x.dims, shape=(2, 1, 3)))
+    fn = xr_function([x], y)
+    res = fn(x_test)
+
+    # Our implementation should not squeeze the symbolic dimension
+    assert "b" in res.dims
+    # While xarray would squeeze it
+    assert "b" not in x_test.squeeze().dims
 
 
 def test_squeeze_errors():
