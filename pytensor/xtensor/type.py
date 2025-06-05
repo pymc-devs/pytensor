@@ -65,6 +65,8 @@ class XTensorType(Type, HasDataType, HasShape):
                 )
         self.ndim = len(self.dims)
         self.name = name
+        self.numpy_dtype = np.dtype(self.dtype)
+        self.filter_checks_isfinite = False
 
     def clone(
         self,
@@ -82,8 +84,9 @@ class XTensorType(Type, HasDataType, HasShape):
         return type(self)(dtype=dtype, shape=shape, dims=dims, **kwargs)
 
     def filter(self, value, strict=False, allow_downcast=None):
-        # TODO implement this
-        return value
+        return TensorType.filter(
+            self, value, strict=strict, allow_downcast=allow_downcast
+        )
 
     def convert_variable(self, var):
         # TODO: Implement this
@@ -750,17 +753,20 @@ def as_xtensor(x, name=None, dims: Sequence[str] | None = None):
         if isinstance(x.type, XTensorType):
             return x
         if isinstance(x.type, TensorType):
-            if x.type.ndim > 0 and dims is None:
-                raise TypeError(
-                    "non-scalar TensorVariable cannot be converted to XTensorVariable without dims."
-                )
-            return px.basic.xtensor_from_tensor(x, dims)
+            if dims is None:
+                if x.type.ndim == 0:
+                    dims = ()
+                else:
+                    raise TypeError(
+                        "non-scalar TensorVariable cannot be converted to XTensorVariable without dims."
+                    )
+            return px.basic.xtensor_from_tensor(x, dims=dims, name=name)
         else:
             raise TypeError(
                 "Variable with type {x.type} cannot be converted to XTensorVariable."
             )
     try:
-        return xtensor_constant(x, name=name, dims=dims)
+        return xtensor_constant(x, dims=dims, name=name)
     except TypeError as err:
         raise TypeError(f"Cannot convert {x} to XTensorType {type(x)}") from err
 
