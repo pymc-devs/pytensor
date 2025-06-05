@@ -334,14 +334,6 @@ def test_squeeze_implicit_dims():
     fn4 = xr_function([x4], y4)
     xr_assert_allclose(fn4(x4_test), x4_test.squeeze("b"))
 
-    # Reversibility with expand_dims (restore when expand_dims is implemented)
-    # x5 = xtensor("x5", dims=("batch", "time", "feature"), shape=(2, 1, 3))
-    # y5 = squeeze(x5, "time")
-    # z5 = expand_dims(y5, "time")
-    # fn5 = xr_function([x5], z5)
-    # x5_test = xr_arange_like(x5)
-    # xr_assert_allclose(fn5(x5_test).transpose(*x5_test.dims), x5_test)
-
     """
     This test documents that we intentionally don't squeeze dimensions with symbolic shapes
     (static_shape=None) even when they are 1 at runtime, while xarray does squeeze them.
