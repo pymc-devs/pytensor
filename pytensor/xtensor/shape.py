@@ -397,8 +397,8 @@ class Squeeze(XOp):
 
     __props__ = ("dims",)
 
-    def __init__(self, dim):
-        self.dims = dim
+    def __init__(self, dims):
+        self.dims = dims
 
     def make_node(self, x):
         x = as_xtensor(x)
