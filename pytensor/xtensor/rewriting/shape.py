@@ -144,21 +144,13 @@ def local_squeeze_reshape(fgraph, node):
 @node_rewriter([ExpandDims])
 def local_expand_dims_reshape(fgraph, node):
     """Rewrite ExpandDims to tensor.expand_dims and optionally broadcast_to or specify_shape."""
-    if not isinstance(node.op, ExpandDims):
-        return False
-
-    x = node.inputs[0]
-    dim = node.op.dims
-    size = getattr(node.op, "size", 1)
-
-    if dim is None:
-        return [x]
-
+    [x] = node.inputs
     x_tensor = tensor_from_xtensor(x)
     x_tensor_expanded = expand_dims(x_tensor, axis=0)
 
     target_shape = node.outputs[0].type.shape
 
+    size = getattr(node.op, "size", 1)
     if isinstance(size, int | np.integer):
         if size != 1 and None not in target_shape:
             x_tensor_expanded = broadcast_to(x_tensor_expanded, target_shape)

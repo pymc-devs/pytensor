@@ -416,12 +416,6 @@ class ExpandDims(XOp):
         )
         return Apply(self, [x], [out])
 
-    def infer_shape(self, fgraph, node, input_shapes):
-        (input_shape,) = input_shapes
-        if self.dims is None:
-            return [input_shape]
-        return [(self.size, *list(input_shape))]
-
 
 def expand_dims(x, dim: str | None, size=1):
     """Add a new dimension to an XTensorVariable.
