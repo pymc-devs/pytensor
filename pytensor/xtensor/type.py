@@ -401,6 +401,9 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         out.name = name  # type: ignore
         return out
 
+    def astype(self, dtype):
+        return px.math.cast(self, dtype)
+
     def item(self):
         raise NotImplementedError("item not implemented for XTensorVariable")
 
