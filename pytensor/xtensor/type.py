@@ -465,6 +465,16 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def thin(self, indexers: dict[str, Any] | int | None = None, **indexers_kwargs):
         return self._head_tail_or_thin(indexers, indexers_kwargs, kind="thin")
 
+    def squeeze(
+        self,
+        dim: Sequence[str] | str | None = None,
+        drop: bool = False,
+        axis: int | Sequence[int] | None = None,
+    ):
+        if axis is not None:
+            raise NotImplementedError("Squeeze with axis not Implemented")
+        return px.shape.squeeze(self, dim)
+
     # ndarray methods
     # https://docs.xarray.dev/en/latest/api.html#id7
     def clip(self, min, max):

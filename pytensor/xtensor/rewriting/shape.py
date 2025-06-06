@@ -1,8 +1,20 @@
 from pytensor.graph import node_rewriter
-from pytensor.tensor import broadcast_to, join, moveaxis, specify_shape
+from pytensor.tensor import (
+    broadcast_to,
+    join,
+    moveaxis,
+    specify_shape,
+    squeeze,
+)
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_xcanonicalize
-from pytensor.xtensor.shape import Concat, Stack, Transpose, UnStack
+from pytensor.xtensor.shape import (
+    Concat,
+    Squeeze,
+    Stack,
+    Transpose,
+    UnStack,
+)
 
 
 @register_xcanonicalize
@@ -104,4 +116,19 @@ def lower_transpose(fgraph, node):
     x_tensor = tensor_from_xtensor(x)
     x_tensor_transposed = x_tensor.transpose(perm)
     new_out = xtensor_from_tensor(x_tensor_transposed, dims=out_dims)
+    return [new_out]
+
+
+@register_xcanonicalize
+@node_rewriter([Squeeze])
+def local_squeeze_reshape(fgraph, node):
+    """Rewrite Squeeze to tensor.squeeze."""
+    [x] = node.inputs
+    x_tensor = tensor_from_xtensor(x)
+    x_dims = x.type.dims
+    dims_to_remove = node.op.dims
+    axes_to_squeeze = tuple(x_dims.index(d) for d in dims_to_remove)
+    x_tensor_squeezed = squeeze(x_tensor, axis=axes_to_squeeze)
+
+    new_out = xtensor_from_tensor(x_tensor_squeezed, dims=node.outputs[0].type.dims)
     return [new_out]
