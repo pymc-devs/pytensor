@@ -4,6 +4,7 @@ from typing import cast
 
 import numpy as np
 from scipy.optimize import minimize as scipy_minimize
+from scipy.optimize import minimize_scalar as scipy_minimize_scalar
 from scipy.optimize import root as scipy_root
 
 from pytensor import Variable, function, graph_replace
@@ -88,6 +89,104 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         return Apply(
             self, inputs, [self.inner_inputs[0].type(), scalar_bool("success")]
         )
+
+
+class MinimizeScalarOp(ScipyWrapperOp):
+    __props__ = ("method",)
+
+    def __init__(
+        self,
+        x: Variable,
+        *args: Variable,
+        objective: Variable,
+        method: str = "brent",
+        optimizer_kwargs: dict | None = None,
+    ):
+        self.fgraph = FunctionGraph([x, *args], [objective])
+
+        self.method = method
+        self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
+        self._fn = None
+        self._fn_wrapped = None
+
+    def perform(self, node, inputs, outputs):
+        f = self.fn_wrapped
+        x0, *args = inputs
+
+        res = scipy_minimize_scalar(
+            fun=f,
+            args=tuple(args),
+            method=self.method,
+            **self.optimizer_kwargs,
+        )
+
+        outputs[0][0] = np.array(res.x)
+        outputs[1][0] = np.bool_(res.success)
+
+    def L_op(self, inputs, outputs, output_grads):
+        x, *args = inputs
+        x_star, _ = outputs
+        output_grad, _ = output_grads
+
+        inner_x, *inner_args = self.fgraph.inputs
+        inner_fx = self.fgraph.outputs[0]
+
+        implicit_f = grad(inner_fx, inner_x)
+        df_dx = grad(implicit_f, inner_x)
+
+        df_dthetas = [
+            grad(implicit_f, arg, disconnected_inputs="ignore") for arg in inner_args
+        ]
+
+        replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
+        df_dx_star, *df_dthetas_stars = graph_replace(
+            [df_dx, *df_dthetas], replace=replace
+        )
+
+        grad_wrt_args = [
+            (-df_dtheta_star / df_dx_star) * output_grad
+            for df_dtheta_star in df_dthetas_stars
+        ]
+
+        return [zeros_like(x), *grad_wrt_args]
+
+
+def minimize_scalar(
+    objective: TensorVariable,
+    x: TensorVariable,
+    method: str = "brent",
+    optimizer_kwargs: dict | None = None,
+):
+    """
+    Minimize a scalar objective function using scipy.optimize.minimize_scalar.
+    """
+
+    args = [
+        arg
+        for arg in graph_inputs([objective], [x])
+        if (arg is not x and not isinstance(arg, Constant))
+    ]
+
+    minimize_scalar_op = MinimizeScalarOp(
+        x,
+        *args,
+        objective=objective,
+        method=method,
+        optimizer_kwargs=optimizer_kwargs,
+    )
+
+    input_core_ndim = [var.ndim for var in minimize_scalar_op.inner_inputs]
+    input_signatures = [
+        f'({",".join(f"i{i}{n}" for n in range(ndim))})'
+        for i, ndim in enumerate(input_core_ndim)
+    ]
+
+    # Output dimensions are always the same as the first input (the initial values for the optimizer),
+    # then a scalar for the success flag
+    output_signatures = [input_signatures[0], "()"]
+
+    signature = f"{','.join(input_signatures)}->{','.join(output_signatures)}"
+    return Blockwise(minimize_scalar_op, signature=signature)(x, *args)
 
 
 class MinimizeOp(ScipyWrapperOp):
