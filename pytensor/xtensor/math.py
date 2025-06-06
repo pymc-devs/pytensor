@@ -1,7 +1,12 @@
 import sys
 
+import numpy as np
+
 import pytensor.scalar as ps
+from pytensor import config
 from pytensor.scalar import ScalarOp
+from pytensor.scalar.basic import _cast_mapping
+from pytensor.xtensor.basic import as_xtensor
 from pytensor.xtensor.vectorization import XElemwise
 
 
@@ -107,3 +112,25 @@ tri_gamma = _as_xelemwise(ps.tri_gamma)
 true_divide = true_div = _as_xelemwise(ps.true_div)
 trunc = _as_xelemwise(ps.trunc)
 logical_xor = bitwise_xor = xor = _as_xelemwise(ps.xor)
+
+_xelemwise_cast_op: dict[str, XElemwise] = {}
+
+
+def cast(x, dtype):
+    if dtype == "floatX":
+        dtype = config.floatX
+    else:
+        dtype = np.dtype(dtype).name
+
+    x = as_xtensor(x)
+    if x.type.dtype == dtype:
+        return x
+    if x.type.dtype.startswith("complex") and not dtype.startswith("complex"):
+        raise TypeError(
+            "Casting from complex to real is ambiguous: consider"
+            " real(), imag(), angle() or abs()"
+        )
+
+    if dtype not in _xelemwise_cast_op:
+        _xelemwise_cast_op[dtype] = XElemwise(scalar_op=_cast_mapping[dtype])
+    return _xelemwise_cast_op[dtype](x)
