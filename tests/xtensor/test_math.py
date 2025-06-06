@@ -11,7 +11,7 @@ from pytensor import function
 from pytensor.xtensor.basic import rename
 from pytensor.xtensor.math import add, exp
 from pytensor.xtensor.type import xtensor
-from tests.xtensor.util import xr_assert_allclose, xr_function
+from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
 
 
 def test_scalar_case():
@@ -107,3 +107,21 @@ def test_multiple_constant():
     res = fn(x_test)
     expected_res = np.exp(x_test * 2) + 2
     np.testing.assert_allclose(res, expected_res)
+
+
+def test_cast():
+    x = xtensor("x", shape=(2, 3), dims=("a", "b"), dtype="float32")
+    yf64 = x.astype("float64")
+    yi16 = x.astype("int16")
+    ybool = x.astype("bool")
+
+    fn = xr_function([x], [yf64, yi16, ybool])
+    x_test = xr_arange_like(x)
+    res_f64, res_i16, res_bool = fn(x_test)
+    xr_assert_allclose(res_f64, x_test.astype("float64"))
+    xr_assert_allclose(res_i16, x_test.astype("int16"))
+    xr_assert_allclose(res_bool, x_test.astype("bool"))
+
+    yc64 = x.astype("complex64")
+    with pytest.raises(TypeError, match="Casting from complex to real is ambiguous"):
+        yc64.astype("float64")
