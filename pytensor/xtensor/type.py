@@ -547,6 +547,32 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def thin(self, indexers: dict[str, Any] | int | None = None, **indexers_kwargs):
         return self._head_tail_or_thin(indexers, indexers_kwargs, kind="thin")
 
+    def squeeze(
+        self,
+        dim: Sequence[str] | str | None = None,
+        drop=None,
+        axis: int | Sequence[int] | None = None,
+    ):
+        """Remove dimensions of size 1 from an XTensorVariable.
+
+        Parameters
+        ----------
+        x : XTensorVariable
+            The input tensor
+        dim : str or None or iterable of str, optional
+            The name(s) of the dimension(s) to remove. If None, all dimensions of size 1
+            (known statically) will be removed. Dimensions with unknown static shape will be retained, even if they have size 1 at runtime.
+        drop : bool, optional
+            If drop=True, drop squeezed coordinates instead of making them scalar.
+        axis : int or iterable of int, optional
+            The axis(es) to remove. If None, all dimensions of size 1 will be removed.
+        Returns
+        -------
+        XTensorVariable
+            A new tensor with the specified dimension(s) removed.
+        """
+        return px.shape.squeeze(self, dim, drop, axis)
+
     # ndarray methods
     # https://docs.xarray.dev/en/latest/api.html#id7
     def clip(self, min, max):
