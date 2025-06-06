@@ -233,6 +233,11 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def __getitem__(self, idx):
         raise NotImplementedError("Indexing not yet implemnented")
 
+    # Reshaping and reorganizing
+    # https://docs.xarray.dev/en/latest/api.html#id8
+    def stack(self, dim, **dims):
+        return px.shape.stack(self, dim, **dims)
+
 
 class XTensorConstantSignature(tuple):
     def __eq__(self, other):
