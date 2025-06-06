@@ -2,7 +2,7 @@ import numpy as np
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor import config
+from pytensor import config, function
 from pytensor.tensor.optimize import minimize, root
 from tests import unittest_tools as utt
 
@@ -24,8 +24,12 @@ def test_simple_minimize():
     a_val = 2.0
     c_val = 3.0
 
-    assert success
-    assert minimized_x.eval({a: a_val, c: c_val, x: 0.0}) == (2 * a_val * c_val)
+    f = function([a, c, x], [minimized_x, success])
+
+    minimized_x_val, success_val = f(a_val, c_val, 0.0)
+
+    assert success_val
+    assert minimized_x_val == (2 * a_val * c_val)
 
     def f(x, a, b):
         objective = (x - a * b) ** 2
@@ -51,7 +55,8 @@ def test_minimize_vector_x():
     x0 = np.zeros(5).astype(floatX)
     x_star_val = minimized_x.eval({a: a_val, b: b_val, x: x0})
 
-    assert success
+    assert success.eval({a: a_val, b: b_val, x: x0})
+
     np.testing.assert_allclose(
         x_star_val, np.ones_like(x_star_val), atol=1e-6, rtol=1e-6
     )

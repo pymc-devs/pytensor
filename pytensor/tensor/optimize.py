@@ -2,16 +2,19 @@ from collections.abc import Sequence
 from copy import copy
 from typing import cast
 
+import numpy as np
 from scipy.optimize import minimize as scipy_minimize
 from scipy.optimize import root as scipy_root
 
 from pytensor import Variable, function, graph_replace
-from pytensor.gradient import DisconnectedType, grad, jacobian
+from pytensor.gradient import grad, jacobian
 from pytensor.graph import Apply, Constant, FunctionGraph
-from pytensor.graph.basic import truncated_graph_inputs
+from pytensor.graph.basic import graph_inputs, truncated_graph_inputs
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.scalar import bool as scalar_bool
+from pytensor.tensor import dot
 from pytensor.tensor.basic import atleast_2d, concatenate, zeros_like
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable
 
@@ -33,7 +36,7 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         self._fn = fn = function(self.inner_inputs, outputs)
 
         # Do this reassignment to see the compiled graph in the dprint
-        self.fgraph = fn.maker.fgraph
+        # self.fgraph = fn.maker.fgraph
 
         if self.inner_inputs[0].type.shape == ():
 
@@ -128,11 +131,11 @@ class MinimizeOp(ScipyWrapperOp):
             x0=x0,
             args=tuple(args),
             method=self.method,
-            **self.options,
+            **self.optimizer_kwargs,
         )
 
         outputs[0][0] = res.x
-        outputs[1][0] = res.success
+        outputs[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
         x, *args = inputs
@@ -158,26 +161,22 @@ class MinimizeOp(ScipyWrapperOp):
 
         df_dx_star, df_dtheta_star = graph_replace([df_dx, df_dtheta], replace=replace)
 
-        grad_wrt_args_vector = solve(-df_dtheta_star, df_dx_star)
+        grad_wrt_args_vector = solve(-df_dx_star, df_dtheta_star)
 
         cursor = 0
         grad_wrt_args = []
 
-        for output_grad, arg in zip(output_grads, args, strict=True):
+        for arg in args:
             arg_shape = arg.shape
             arg_size = arg_shape.prod()
-            arg_grad = grad_wrt_args_vector[cursor : cursor + arg_size].reshape(
-                arg_shape
+            arg_grad = grad_wrt_args_vector[:, cursor : cursor + arg_size].reshape(
+                (*x_star.shape, *arg_shape)
             )
 
-            grad_wrt_args.append(
-                arg_grad * output_grad
-                if not isinstance(output_grad.type, DisconnectedType)
-                else DisconnectedType()
-            )
+            grad_wrt_args.append(dot(output_grad, arg_grad))
             cursor += arg_size
 
-        return [x.zeros_like(), *grad_wrt_args]
+        return [zeros_like(x), *grad_wrt_args]
 
 
 def minimize(
@@ -217,7 +216,7 @@ def minimize(
     """
     args = [
         arg
-        for arg in truncated_graph_inputs([objective], [x])
+        for arg in graph_inputs([objective], [x])
         if (arg is not x and not isinstance(arg, Constant))
     ]
 
@@ -230,7 +229,18 @@ def minimize(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    return minimize_op(x, *args)
+    input_core_ndim = [var.ndim for var in minimize_op.inner_inputs]
+    input_signatures = [
+        f'({",".join(f"i{i}{n}" for n in range(ndim))})'
+        for i, ndim in enumerate(input_core_ndim)
+    ]
+
+    # Output dimensions are always the same as the first input (the initial values for the optimizer),
+    # then a scalar for the success flag
+    output_signatures = [input_signatures[0], "()"]
+
+    signature = f"{','.join(input_signatures)}->{','.join(output_signatures)}"
+    return Blockwise(minimize_op, signature=signature)(x, *args)
 
 
 class RootOp(ScipyWrapperOp):
