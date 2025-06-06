@@ -301,3 +301,87 @@ class Concat(XOp):
 
 def concat(xtensors, dim: str):
     return Concat(dim=dim)(*xtensors)
+
+
+class Squeeze(XOp):
+    """Remove specified dimensions from an XTensorVariable.
+
+    Only dimensions that are known statically to be size 1 will be removed.
+    Symbolic dimensions must be explicitly specified, and are assumed safe.
+
+    Parameters
+    ----------
+    dim : tuple of str
+        The names of the dimensions to remove.
+    """
+
+    __props__ = ("dims",)
+
+    def __init__(self, dims):
+        self.dims = tuple(sorted(set(dims)))
+
+    def make_node(self, x):
+        x = as_xtensor(x)
+
+        # Validate that dims exist and are size-1 if statically known
+        dims_to_remove = []
+        x_dims = x.type.dims
+        x_shape = x.type.shape
+        for d in self.dims:
+            if d not in x_dims:
+                raise ValueError(f"Dimension {d} not found in {x.type.dims}")
+            idx = x_dims.index(d)
+            dim_size = x_shape[idx]
+            if dim_size is not None and dim_size != 1:
+                raise ValueError(f"Dimension {d} has static size {dim_size}, not 1")
+            dims_to_remove.append(idx)
+
+        new_dims = tuple(
+            d for i, d in enumerate(x.type.dims) if i not in dims_to_remove
+        )
+        new_shape = tuple(
+            s for i, s in enumerate(x.type.shape) if i not in dims_to_remove
+        )
+
+        out = xtensor(
+            dtype=x.type.dtype,
+            shape=new_shape,
+            dims=new_dims,
+        )
+        return Apply(self, [x], [out])
+
+
+def squeeze(x, dim=None, drop=False, axis=None):
+    """Remove dimensions of size 1 from an XTensorVariable."""
+    x = as_xtensor(x)
+
+    # drop parameter is ignored in pytensor.xtensor
+    if drop is not None:
+        warnings.warn("drop parameter has no effect in pytensor.xtensor", UserWarning)
+
+    # dim and axis are mutually exclusive
+    if dim is not None and axis is not None:
+        raise ValueError("Cannot specify both `dim` and `axis`")
+
+    # if axis is specified, it must be a sequence of ints
+    if axis is not None:
+        if not isinstance(axis, Sequence):
+            axis = [axis]
+        if not all(isinstance(a, int) for a in axis):
+            raise ValueError("axis must be an integer or a sequence of integers")
+
+        # convert axis to dims
+        dims = tuple(x.type.dims[i] for i in axis)
+
+    # if dim is specified, it must be a string or a sequence of strings
+    if dim is None:
+        dims = tuple(d for d, s in zip(x.type.dims, x.type.shape) if s == 1)
+    elif isinstance(dim, str):
+        dims = (dim,)
+    else:
+        dims = tuple(dim)
+
+    if not dims:
+        return x  # no-op if nothing to squeeze
+
+    return Squeeze(dims=dims)(x)

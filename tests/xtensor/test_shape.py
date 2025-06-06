@@ -8,10 +8,16 @@ import re
 from itertools import chain, combinations
 
 import numpy as np
+import pytest
 from xarray import DataArray
 from xarray import concat as xr_concat
 
-from pytensor.xtensor.shape import concat, stack, transpose, unstack
+from pytensor.xtensor.shape import (
+    concat,
+    stack,
+    transpose,
+    unstack,
+)
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import (
     xr_arange_like,
@@ -19,6 +25,9 @@ from tests.xtensor.util import (
     xr_function,
     xr_random_like,
 )
+
+
+pytest.importorskip("xarray")
 
 
 def powerset(iterable, min_group_size=0):
@@ -253,3 +262,94 @@ def test_concat_scalar():
     res = fn(x1_test, x2_test)
     expected_res = xr_concat([x1_test, x2_test], dim="new_dim")
     xr_assert_allclose(res, expected_res)
+
+
+def test_squeeze():
+    """Test squeeze."""
+
+    # Single dimension
+    x1 = xtensor("x1", dims=("city", "country"), shape=(3, 1))
+    y1 = x1.squeeze("country")
+    fn1 = xr_function([x1], y1)
+    x1_test = xr_arange_like(x1)
+    xr_assert_allclose(fn1(x1_test), x1_test.squeeze("country"))
+
+    # Multiple dimensions and order independence
+    x2 = xtensor("x2", dims=("a", "b", "c", "d"), shape=(2, 1, 1, 3))
+    y2a = x2.squeeze(["b", "c"])
+    y2b = x2.squeeze(["c", "b"])  # Test order independence
+    y2c = x2.squeeze(["b", "b"])  # Test redundant dimensions
+    y2d = x2.squeeze([])  # Test empty list (no-op)
+    fn2a = xr_function([x2], y2a)
+    fn2b = xr_function([x2], y2b)
+    fn2c = xr_function([x2], y2c)
+    fn2d = xr_function([x2], y2d)
+    x2_test = xr_arange_like(x2)
+    xr_assert_allclose(fn2a(x2_test), x2_test.squeeze(["b", "c"]))
+    xr_assert_allclose(fn2b(x2_test), x2_test.squeeze(["c", "b"]))
+    xr_assert_allclose(fn2c(x2_test), x2_test.squeeze(["b", "b"]))
+    xr_assert_allclose(fn2d(x2_test), x2_test)
+
+    # Unknown shapes
+    x3 = xtensor("x3", dims=("a", "b", "c"))  # shape unknown
+    y3 = x3.squeeze("b")
+    x3_test = xr_arange_like(xtensor(dims=x3.dims, shape=(2, 1, 3)))
+    fn3 = xr_function([x3], y3)
+    xr_assert_allclose(fn3(x3_test), x3_test.squeeze("b"))
+
+    # Mixed known + unknown shapes
+    x4 = xtensor("x4", dims=("a", "b", "c"), shape=(None, 1, 3))
+    y4 = x4.squeeze("b")
+    x4_test = xr_arange_like(xtensor(dims=x4.dims, shape=(4, 1, 3)))
+    fn4 = xr_function([x4], y4)
+    xr_assert_allclose(fn4(x4_test), x4_test.squeeze("b"))
+
+    # Test axis parameter
+    x5 = xtensor("x5", dims=("a", "b", "c"), shape=(2, 1, 3))
+    y5 = x5.squeeze(axis=1)  # squeeze dimension at index 1 (b)
+    fn5 = xr_function([x5], y5)
+    x5_test = xr_arange_like(x5)
+    xr_assert_allclose(fn5(x5_test), x5_test.squeeze(axis=1))
+
+    # Test axis parameter with negative index
+    y5 = x5.squeeze(axis=-1)  # squeeze dimension at index -2 (b)
+    fn5 = xr_function([x5], y5)
+    x5_test = xr_arange_like(x5)
+    xr_assert_allclose(fn5(x5_test), x5_test.squeeze(axis=-2))
+
+    # Test axis parameter with sequence of ints
+    y6 = x2.squeeze(axis=[1, 2])
+    fn6 = xr_function([x2], y6)
+    x2_test = xr_arange_like(x2)
+    xr_assert_allclose(fn6(x2_test), x2_test.squeeze(axis=[1, 2]))
+
+    # Test drop parameter warning
+    x7 = xtensor("x7", dims=("a", "b"), shape=(2, 1))
+    with pytest.warns(
+        UserWarning, match="drop parameter has no effect in pytensor.xtensor"
+    ):
+        y7 = x7.squeeze("b", drop=True)  # squeeze and drop coordinate
+    fn7 = xr_function([x7], y7)
+    x7_test = xr_arange_like(x7)
+    xr_assert_allclose(fn7(x7_test), x7_test.squeeze("b", drop=True))
+
+
+def test_squeeze_errors():
+    """Test error cases for squeeze."""
+
+    # Non-existent dimension
+    x1 = xtensor("x1", dims=("city", "country"), shape=(3, 1))
+    with pytest.raises(ValueError, match="Dimension .* not found"):
+        x1.squeeze("time")
+
+    # Dimension size > 1
+    with pytest.raises(ValueError, match="has static size .* not 1"):
+        x1.squeeze("city")
+
+    # Symbolic shape: dim is not 1 at runtime → should raise
+    x2 = xtensor("x2", dims=("a", "b", "c"))  # shape unknown
+    y2 = x2.squeeze("b")
+    x2_test = xr_arange_like(xtensor(dims=x2.dims, shape=(2, 2, 3)))
+    fn2 = xr_function([x2], y2)
+    with pytest.raises(Exception):
+        fn2(x2_test)
