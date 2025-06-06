@@ -151,3 +151,34 @@ def test_cast():
     yc64 = x.astype("complex64")
     with pytest.raises(TypeError, match="Casting from complex to real is ambiguous"):
         yc64.astype("float64")
+
+
+def test_dot():
+    """Test basic dot product operations."""
+    # Test matrix-matrix dot product
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+    z = x.dot(y)
+    assert z.type.dims == ("a", "c")
+    assert z.type.shape == (2, 4)
+
+    fn = xr_function([x, y], z)
+    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+    y_test = DataArray(np.ones((3, 4)), dims=("b", "c"))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Test matrix-vector dot product
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b",), shape=(3,))
+    z = x.dot(y)
+    assert z.type.dims == ("a",)
+    assert z.type.shape == (2,)
+
+    fn = xr_function([x, y], z)
+    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+    y_test = DataArray(np.ones(3), dims=("b",))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
