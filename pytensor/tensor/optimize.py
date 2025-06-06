@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import copy
+from typing import cast
 
 from scipy.optimize import minimize as scipy_minimize
 from scipy.optimize import root as scipy_root
@@ -10,15 +11,13 @@ from pytensor.graph import Apply, Constant, FunctionGraph
 from pytensor.graph.basic import truncated_graph_inputs
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.scalar import bool as scalar_bool
-from pytensor.tensor.basic import atleast_2d, concatenate
+from pytensor.tensor.basic import atleast_2d, concatenate, zeros_like
 from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable
 
 
 class ScipyWrapperOp(Op, HasInnerGraph):
     """Shared logic for scipy optimization ops"""
-
-    __props__ = ("method", "debug")
 
     def build_fn(self):
         """
@@ -93,20 +92,22 @@ class MinimizeOp(ScipyWrapperOp):
 
     def __init__(
         self,
-        x,
-        *args,
-        objective,
-        method="BFGS",
-        jac=True,
-        hess=False,
-        hessp=False,
-        options: dict | None = None,
+        x: Variable,
+        *args: Variable,
+        objective: Variable,
+        method: str = "BFGS",
+        jac: bool = True,
+        hess: bool = False,
+        hessp: bool = False,
+        optimizer_kwargs: dict | None = None,
         debug: bool = False,
     ):
         self.fgraph = FunctionGraph([x, *args], [objective])
 
         if jac:
-            grad_wrt_x = grad(self.fgraph.outputs[0], self.fgraph.inputs[0])
+            grad_wrt_x = cast(
+                Variable, grad(self.fgraph.outputs[0], self.fgraph.inputs[0])
+            )
             self.fgraph.add_output(grad_wrt_x)
 
         self.jac = jac
@@ -114,7 +115,7 @@ class MinimizeOp(ScipyWrapperOp):
         self.hessp = hessp
 
         self.method = method
-        self.options = options if options is not None else {}
+        self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self.debug = debug
         self._fn = None
         self._fn_wrapped = None
@@ -131,9 +132,6 @@ class MinimizeOp(ScipyWrapperOp):
             method=self.method,
             **self.options,
         )
-
-        if self.debug:
-            print(res)
 
         outputs[0][0] = res.x
         outputs[1][0] = res.success
@@ -185,12 +183,12 @@ class MinimizeOp(ScipyWrapperOp):
 
 
 def minimize(
-    objective,
-    x,
+    objective: TensorVariable,
+    x: TensorVariable,
     method: str = "BFGS",
     jac: bool = True,
     debug: bool = False,
-    options: dict | None = None,
+    optimizer_kwargs: dict | None = None,
 ):
     """
     Minimize a scalar objective function using scipy.optimize.minimize.
@@ -214,7 +212,7 @@ def minimize(
     debug : bool, optional
         If True, prints raw scipy result after optimization. Default is False.
 
-    **optimizer_kwargs
+    optimizer_kwargs
         Additional keyword arguments to pass to scipy.optimize.minimize
 
     Returns
@@ -236,7 +234,7 @@ def minimize(
         method=method,
         jac=jac,
         debug=debug,
-        options=options,
+        optimizer_kwargs=optimizer_kwargs,
     )
 
     return minimize_op(x, *args)
@@ -247,12 +245,12 @@ class RootOp(ScipyWrapperOp):
 
     def __init__(
         self,
-        variables,
-        *args,
-        equations,
-        method="hybr",
-        jac=True,
-        options: dict | None = None,
+        variables: Variable,
+        *args: Variable,
+        equations: Variable,
+        method: str = "hybr",
+        jac: bool = True,
+        optimizer_kwargs: dict | None = None,
         debug: bool = False,
     ):
         self.fgraph = FunctionGraph([variables, *args], [equations])
@@ -264,7 +262,7 @@ class RootOp(ScipyWrapperOp):
         self.jac = jac
 
         self.method = method
-        self.options = options if options is not None else {}
+        self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self.debug = debug
         self._fn = None
         self._fn_wrapped = None
@@ -279,11 +277,8 @@ class RootOp(ScipyWrapperOp):
             x0=variables,
             args=tuple(args),
             method=self.method,
-            **self.options,
+            **self.optimizer_kwargs,
         )
-
-        if self.debug:
-            print(res)
 
         outputs[0][0] = res.x
         outputs[1][0] = res.success
@@ -309,7 +304,7 @@ class RootOp(ScipyWrapperOp):
 
         jac_wrt_args = solve(-jac_f_wrt_x_star, output_grad)
 
-        return [x.zeros_like(), jac_wrt_args]
+        return [zeros_like(x), jac_wrt_args]
 
 
 def root(
