@@ -8,12 +8,14 @@ import re
 from itertools import chain, combinations
 
 import numpy as np
-import pytest
+import xarray as xr
 from xarray import DataArray
 from xarray import concat as xr_concat
 
+from pytensor.tensor import scalar
 from pytensor.xtensor.shape import (
     concat,
+    expand_dims,
     squeeze,
     stack,
     transpose,
@@ -369,3 +371,153 @@ def test_squeeze_errors():
     fn2 = xr_function([x2], y2)
     with pytest.raises(Exception):
         fn2(x2_test)
+
+
+def test_expand_dims_explicit():
+    """Test expand_dims with explicitly named dimensions and sizes."""
+
+    # 1D case
+    x = xtensor("x", dims=("city",), shape=(3,))
+    y = expand_dims(x, "country")
+    fn = xr_function([x], y)
+    x_xr = xr_arange_like(x)
+    xr_assert_allclose(fn(x_xr), x_xr.expand_dims("country"))
+
+    # 2D case
+    x = xtensor("x", dims=("city", "year"), shape=(2, 2))
+    y = expand_dims(x, "country")
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(xr_arange_like(x)), xr_arange_like(x).expand_dims("country"))
+
+    # 3D case
+    x = xtensor("x", dims=("city", "year", "month"), shape=(2, 2, 2))
+    y = expand_dims(x, "country")
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(xr_arange_like(x)), xr_arange_like(x).expand_dims("country"))
+
+    # Prepending various dims
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    for new_dim in ("x", "y", "z"):
+        y = expand_dims(x, new_dim)
+        assert y.type.dims == (new_dim, "a", "b")
+        assert y.type.shape == (1, 2, 3)
+
+    # Explicit size=1 behaves like default
+    y1 = expand_dims(x, "batch", size=1)
+    y2 = expand_dims(x, "batch")
+    fn1 = xr_function([x], y1)
+    fn2 = xr_function([x], y2)
+    x_test = xr_arange_like(x)
+    xr_assert_allclose(fn1(x_test), fn2(x_test))
+
+    # Scalar expansion
+    x = xtensor("x", dims=(), shape=())
+    y = expand_dims(x, "batch")
+    assert y.type.dims == ("batch",)
+    assert y.type.shape == (1,)
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(xr_arange_like(x)), xr_arange_like(x).expand_dims("batch"))
+
+    # Static size > 1: broadcast
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "batch", size=4)
+    fn = xr_function([x], y)
+    expected = xr.DataArray(
+        np.broadcast_to(xr_arange_like(x).data, (4, 2, 3)),
+        dims=("batch", "a", "b"),
+        coords={"a": xr_arange_like(x).coords["a"], "b": xr_arange_like(x).coords["b"]},
+    )
+    xr_assert_allclose(fn(xr_arange_like(x)), expected)
+
+    # Insert new dim between existing dims
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "new")
+    # Insert new dim between a and b: ("a", "new", "b")
+    y = transpose(y, "a", "new", "b")
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(x)
+    expected = x_test.expand_dims("new").transpose("a", "new", "b")
+    xr_assert_allclose(fn(x_test), expected)
+
+    # Expand with multiple dims
+    x = xtensor("x", dims=(), shape=())
+    y = expand_dims(expand_dims(x, "a"), "b")
+    fn = xr_function([x], y)
+    expected = xr_arange_like(x).expand_dims("a").expand_dims("b")
+    xr_assert_allclose(fn(xr_arange_like(x)), expected)
+
+
+def test_expand_dims_implicit():
+    """Test expand_dims with default or symbolic sizes and dim=None."""
+
+    # Symbolic size=1: same as default
+    size_sym_1 = scalar("size_sym_1", dtype="int64")
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "batch", size=size_sym_1)
+    fn = xr_function([x, size_sym_1], y, on_unused_input="ignore")
+    expected = xr_arange_like(x).expand_dims("batch")
+    xr_assert_allclose(fn(xr_arange_like(x), 1), expected)
+
+    # Symbolic size > 1 (but expand only adds dim=1)
+    size_sym_4 = scalar("size_sym_4", dtype="int64")
+    y = expand_dims(x, "batch", size=size_sym_4)
+    fn = xr_function([x, size_sym_4], y, on_unused_input="ignore")
+    xr_assert_allclose(fn(xr_arange_like(x), 4), expected)
+
+    # Reversibility: expand then squeeze
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "batch")
+    z = squeeze(y, "batch")
+    fn = xr_function([x], z)
+    xr_assert_allclose(fn(xr_arange_like(x)), xr_arange_like(x))
+
+    # expand_dims with dim=None = no-op
+    x = xtensor("x", dims=("a",), shape=(3,))
+    y = expand_dims(x, None)
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(xr_arange_like(x)), xr_arange_like(x))
+
+    # broadcast after symbolic size
+    size_sym = scalar("size_sym", dtype="int64")
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = expand_dims(x, "batch", size=size_sym)
+    z = y + y  # triggers shape alignment
+    fn = xr_function([x, size_sym], z, on_unused_input="ignore")
+    x_test = xr_arange_like(x)
+    out = fn(x_test, 1)
+    expected = x_test.expand_dims("batch") + x_test.expand_dims("batch")
+    xr_assert_allclose(out, expected)
+
+
+def test_expand_dims_errors():
+    """Test error handling in expand_dims."""
+
+    # Expanding existing dim
+    x = xtensor("x", dims=("city",), shape=(3,))
+    y = expand_dims(x, "country")
+    with pytest.raises(ValueError, match="already exists"):
+        expand_dims(y, "city")
+
+    # Size = 0 is invalid
+    with pytest.raises(ValueError, match="size must be.*positive"):
+        expand_dims(x, "batch", size=0)
+
+    # Invalid dim type
+    with pytest.raises(TypeError):
+        expand_dims(x, 123)
+
+    # Invalid size type
+    with pytest.raises(TypeError):
+        expand_dims(x, "new", size=[1])
+
+    # Duplicate dimension creation
+    y = expand_dims(x, "new")
+    with pytest.raises(ValueError):
+        expand_dims(y, "new")
+
+    # Symbolic size with invalid runtime value
+    size_sym = scalar("size_sym", dtype="int64")
+    y = expand_dims(x, "batch", size=size_sym)
+    fn = xr_function([x, size_sym], y, on_unused_input="ignore")
+    with pytest.raises(Exception):
+        fn(xr_arange_like(x), 0)
