@@ -88,7 +88,7 @@ class ScipyWrapperOp(Op, HasInnerGraph):
 
 
 class MinimizeOp(ScipyWrapperOp):
-    __props__ = ("method", "jac", "hess", "hessp", "debug")
+    __props__ = ("method", "jac", "hess", "hessp")
 
     def __init__(
         self,
@@ -100,7 +100,6 @@ class MinimizeOp(ScipyWrapperOp):
         hess: bool = False,
         hessp: bool = False,
         optimizer_kwargs: dict | None = None,
-        debug: bool = False,
     ):
         self.fgraph = FunctionGraph([x, *args], [objective])
 
@@ -116,7 +115,6 @@ class MinimizeOp(ScipyWrapperOp):
 
         self.method = method
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
-        self.debug = debug
         self._fn = None
         self._fn_wrapped = None
 
@@ -187,7 +185,6 @@ def minimize(
     x: TensorVariable,
     method: str = "BFGS",
     jac: bool = True,
-    debug: bool = False,
     optimizer_kwargs: dict | None = None,
 ):
     """
@@ -208,9 +205,6 @@ def minimize(
     jac : bool, optional
         Whether to compute and use the gradient of teh objective function with respect to x for optimization.
         Default is True.
-
-    debug : bool, optional
-        If True, prints raw scipy result after optimization. Default is False.
 
     optimizer_kwargs
         Additional keyword arguments to pass to scipy.optimize.minimize
@@ -233,7 +227,6 @@ def minimize(
         objective=objective,
         method=method,
         jac=jac,
-        debug=debug,
         optimizer_kwargs=optimizer_kwargs,
     )
 
@@ -241,7 +234,7 @@ def minimize(
 
 
 class RootOp(ScipyWrapperOp):
-    __props__ = ("method", "jac", "debug")
+    __props__ = ("method", "jac")
 
     def __init__(
         self,
@@ -251,7 +244,6 @@ class RootOp(ScipyWrapperOp):
         method: str = "hybr",
         jac: bool = True,
         optimizer_kwargs: dict | None = None,
-        debug: bool = False,
     ):
         self.fgraph = FunctionGraph([variables, *args], [equations])
 
@@ -263,7 +255,6 @@ class RootOp(ScipyWrapperOp):
 
         self.method = method
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
-        self.debug = debug
         self._fn = None
         self._fn_wrapped = None
 
@@ -312,7 +303,6 @@ def root(
     variables: TensorVariable,
     method: str = "hybr",
     jac: bool = True,
-    debug: bool = False,
 ):
     """Find roots of a system of equations using scipy.optimize.root."""
 
@@ -322,9 +312,7 @@ def root(
         if (arg is not variables and not isinstance(arg, Constant))
     ]
 
-    root_op = RootOp(
-        variables, *args, equations=equations, method=method, jac=jac, debug=debug
-    )
+    root_op = RootOp(variables, *args, equations=equations, method=method, jac=jac)
 
     return root_op(variables, *args)
 
