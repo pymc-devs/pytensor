@@ -3,6 +3,8 @@ from collections.abc import Sequence
 from types import EllipsisType
 from typing import Literal
 
+import numpy as np
+
 from pytensor.graph import Apply
 from pytensor.scalar import discrete_dtypes, upcast
 from pytensor.tensor import as_tensor, get_scalar_constant_value
@@ -380,3 +382,75 @@ def squeeze(x, dim=None):
         return x  # no-op if nothing to squeeze
 
     return Squeeze(dims=dims)(x)
+
+
+class ExpandDims(XOp):
+    """Add a new dimension to an XTensorVariable."""
+
+    __props__ = ("dims", "size")
+
+    def __init__(self, dim, size=1):
+        self.dims = dim
+        self.size = size
+
+    def make_node(self, x):
+        x = as_xtensor(x)
+
+        if self.dims is None:
+            # No-op: return same variable
+            return Apply(self, [x], [x])
+
+        # Insert new dim at front
+        new_dims = (self.dims, *x.type.dims)
+
+        # Determine shape
+        if isinstance(self.size, int | np.integer):
+            new_shape = (self.size, *x.type.shape)
+        else:
+            new_shape = (None, *x.type.shape)  # symbolic size
+
+        out = xtensor(
+            dtype=x.type.dtype,
+            shape=new_shape,
+            dims=new_dims,
+        )
+        return Apply(self, [x], [out])
+
+
+def expand_dims(x, dim: str | None, size=1):
+    """Add a new dimension to an XTensorVariable.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        Input tensor
+    dim : str or None
+        Name of new dimension. If None, returns x unchanged.
+    size : int or symbolic, optional
+        Size of the new dimension (default 1)
+
+    Returns
+    -------
+    XTensorVariable
+        Tensor with the new dimension inserted
+    """
+    x = as_xtensor(x)
+
+    if dim is None:
+        return x  # No-op
+
+    if not isinstance(dim, str):
+        raise TypeError(f"`dim` must be a string or None, got: {type(dim)}")
+
+    if dim in x.type.dims:
+        raise ValueError(f"Dimension {dim} already exists in {x.type.dims}")
+
+    if isinstance(size, int | np.integer):
+        if size <= 0:
+            raise ValueError(f"size must be positive, got: {size}")
+    elif not (
+        hasattr(size, "ndim") and getattr(size, "ndim", None) == 0  # symbolic scalar
+    ):
+        raise TypeError(f"size must be an int or scalar variable, got: {type(size)}")
+
+    return ExpandDims(dim=dim, size=size)(x)

@@ -1,6 +1,11 @@
+import numpy as np
+
 from pytensor.graph import node_rewriter
+from pytensor.raise_op import Assert
 from pytensor.tensor import (
     broadcast_to,
+    expand_dims,
+    gt,
     join,
     moveaxis,
     specify_shape,
@@ -10,6 +15,7 @@ from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_lower_xtensor
 from pytensor.xtensor.shape import (
     Concat,
+    ExpandDims,
     Squeeze,
     Stack,
     Transpose,
@@ -131,4 +137,30 @@ def local_squeeze_reshape(fgraph, node):
     x_tensor_squeezed = squeeze(x_tensor, axis=axes_to_squeeze)
 
     new_out = xtensor_from_tensor(x_tensor_squeezed, dims=node.outputs[0].type.dims)
+    return [new_out]
+
+
+@register_lower_xtensor
+@node_rewriter([ExpandDims])
+def local_expand_dims_reshape(fgraph, node):
+    """Rewrite ExpandDims to tensor.expand_dims and optionally broadcast_to or specify_shape."""
+    [x] = node.inputs
+    x_tensor = tensor_from_xtensor(x)
+    x_tensor_expanded = expand_dims(x_tensor, axis=0)
+
+    target_shape = node.outputs[0].type.shape
+
+    size = getattr(node.op, "size", 1)
+    if isinstance(size, int | np.integer):
+        if size != 1 and None not in target_shape:
+            x_tensor_expanded = broadcast_to(x_tensor_expanded, target_shape)
+    else:
+        # Symbolic size: enforce shape so broadcast happens downstream correctly
+        # Also validate that size is positive
+        x_tensor_expanded = Assert(msg="size must be positive")(
+            x_tensor_expanded, gt(size, 0)
+        )
+        x_tensor_expanded = specify_shape(x_tensor_expanded, target_shape)
+
+    new_out = xtensor_from_tensor(x_tensor_expanded, dims=node.outputs[0].type.dims)
     return [new_out]
