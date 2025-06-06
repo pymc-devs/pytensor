@@ -3,11 +3,40 @@ import numpy as np
 import pytensor
 import pytensor.tensor as pt
 from pytensor import config, function
-from pytensor.tensor.optimize import minimize, root
+from pytensor.tensor.optimize import minimize, minimize_scalar, root
 from tests import unittest_tools as utt
 
 
 floatX = config.floatX
+
+
+def test_minimize_scalar():
+    x = pt.scalar("x")
+    a = pt.scalar("a")
+    c = pt.scalar("c")
+
+    b = a * 2
+    b.name = "b"
+    out = (x - b * c) ** 2
+
+    minimized_x, success = minimize_scalar(out, x)
+
+    a_val = 2.0
+    c_val = 3.0
+
+    f = function([a, c, x], [minimized_x, success])
+
+    minimized_x_val, success_val = f(a_val, c_val, 0.0)
+
+    assert success_val
+    np.testing.assert_allclose(minimized_x_val, (2 * a_val * c_val))
+
+    def f(x, a, b):
+        objective = (x - a * b) ** 2
+        out = minimize_scalar(objective, x)[0]
+        return out
+
+    utt.verify_grad(f, [0.0, a_val, c_val], eps=1e-6)
 
 
 def test_simple_minimize():
