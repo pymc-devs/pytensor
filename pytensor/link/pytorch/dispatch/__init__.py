@@ -1,5 +1,5 @@
 # isort: off
-from pytensor.link.pytorch.dispatch.basic import pytorch_funcify, pytorch_typify
+from pytensor.link.pytorch.linker import pytorch_funcify, pytorch_typify
 
 # # Load dispatch specializations
 import pytensor.link.pytorch.dispatch.blas

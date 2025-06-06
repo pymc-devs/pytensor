@@ -1,5 +1,5 @@
 # isort: off
-from pytensor.link.jax.dispatch.basic import jax_funcify, jax_typify
+from pytensor.link.jax.linker import jax_funcify, jax_typify
 
 # Load dispatch specializations
 import pytensor.link.jax.dispatch.blas

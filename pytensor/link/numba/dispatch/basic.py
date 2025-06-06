@@ -2,7 +2,6 @@ import operator
 import sys
 import warnings
 from copy import copy
-from functools import singledispatch
 from textwrap import dedent
 
 import numba
@@ -21,11 +20,13 @@ from pytensor.compile import NUMBA
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.ops import DeepCopyOp
+from pytensor.graph import Op
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
+from pytensor.link.numba.linker import numba_funcify, numba_typify
 from pytensor.link.utils import (
     compile_function_src,
     fgraph_to_python,
@@ -276,11 +277,6 @@ def create_arg_string(x):
     return args
 
 
-@singledispatch
-def numba_typify(data, dtype=None, **kwargs):
-    return data
-
-
 def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
     """Create a Numba compatible function from a Pytensor `Op`."""
 
@@ -326,14 +322,8 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
     return perform
 
 
-@singledispatch
-def numba_funcify(op, node=None, storage_map=None, **kwargs):
-    """Generate a numba function for a given op and apply node.
-
-    The resulting function will usually use the `no_cpython_wrapper`
-    argument in numba, so it can not be called directly from python,
-    but only from other jit functions.
-    """
+@numba_funcify.register(Op)
+def numba_funcify_op(op, node=None, storage_map=None, **kwargs):
     return generate_fallback_impl(op, node, storage_map, **kwargs)
 
 

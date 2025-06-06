@@ -1,6 +1,5 @@
 import warnings
 from collections.abc import Callable
-from functools import singledispatch
 
 import jax
 import jax.numpy as jnp
@@ -10,8 +9,10 @@ from pytensor.compile import JAX
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.configdefaults import config
+from pytensor.graph import Op
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
+from pytensor.link.jax.linker import jax_funcify, jax_typify
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import Assert, CheckAndRaise
 
@@ -22,15 +23,6 @@ else:
     jax.config.update("jax_enable_x64", False)
 
 
-@singledispatch
-def jax_typify(data, dtype=None, **kwargs):
-    r"""Convert instances of PyTensor `Type`\s to JAX types."""
-    if dtype is None:
-        return data
-    else:
-        return jnp.array(data, dtype=dtype)
-
-
 @jax_typify.register(np.ndarray)
 def jax_typify_ndarray(data, dtype=None, **kwargs):
     if len(data.shape) == 0:
@@ -38,8 +30,8 @@ def jax_typify_ndarray(data, dtype=None, **kwargs):
     return jnp.array(data, dtype=dtype)
 
 
-@singledispatch
-def jax_funcify(op, node=None, storage_map=None, **kwargs):
+@jax_funcify.register(Op)
+def jax_funcify_op(op, node=None, storage_map=None, **kwargs):
     """Create a JAX compatible function from an PyTensor `Op`."""
     raise NotImplementedError(f"No JAX conversion for the given `Op`: {op}")
 

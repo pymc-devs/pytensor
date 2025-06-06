@@ -1,5 +1,17 @@
+from functools import singledispatch
+
 from pytensor.link.basic import JITLinker
 from pytensor.link.utils import unique_name_generator
+
+
+@singledispatch
+def pytorch_typify(data, **kwargs):
+    raise NotImplementedError(f"pytorch_typify is not implemented for {type(data)}")
+
+
+@singledispatch
+def pytorch_funcify(obj, *args, **kwargs):
+    raise NotImplementedError(f"pytorch_funcify is not implemented for {type(obj)}")
 
 
 class PytorchLinker(JITLinker):
@@ -10,8 +22,6 @@ class PytorchLinker(JITLinker):
         self.gen_functors = []
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
-        from pytensor.link.pytorch.dispatch import pytorch_funcify
-
         # We want to have globally unique names
         # across the entire pytensor graph, not
         # just the subgraph
@@ -39,8 +49,6 @@ class PytorchLinker(JITLinker):
 
         # flag that tend to help our graphs
         torch._dynamo.config.capture_dynamic_output_shape_ops = True
-
-        from pytensor.link.pytorch.dispatch import pytorch_typify
 
         class wrapper:
             """

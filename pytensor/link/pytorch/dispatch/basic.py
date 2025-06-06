@@ -1,4 +1,3 @@
-from functools import singledispatch
 from types import NoneType
 
 import numpy as np
@@ -10,9 +9,11 @@ from pytensor.compile import PYTORCH
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.ops import DeepCopyOp
+from pytensor.graph import Op
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
+from pytensor.link.pytorch.linker import pytorch_funcify, pytorch_typify
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.basic import (
@@ -25,11 +26,6 @@ from pytensor.tensor.basic import (
     Split,
     TensorFromScalar,
 )
-
-
-@singledispatch
-def pytorch_typify(data, **kwargs):
-    raise NotImplementedError(f"pytorch_typify is not implemented for {type(data)}")
 
 
 @pytorch_typify.register(np.ndarray)
@@ -45,8 +41,8 @@ def pytorch_typify_no_conversion_needed(data, **kwargs):
     return data
 
 
-@singledispatch
-def pytorch_funcify(op, node=None, storage_map=None, **kwargs):
+@pytorch_funcify.register(Op)
+def pytorch_funcify_op(op, node=None, storage_map=None, **kwargs):
     """Create a PyTorch compatible function from an PyTensor `Op`."""
     raise NotImplementedError(
         f"No PyTorch conversion for the given `Op`: {op}.\nCheck out `https://github.com/pymc-devs/pytensor/issues/821` for progress or to request we prioritize this operation"

@@ -1,9 +1,27 @@
 import warnings
+from functools import singledispatch
 
 from numpy.random import Generator
 
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.link.basic import JITLinker
+
+
+@singledispatch
+def jax_typify(data, dtype=None, **kwargs):
+    r"""Convert instances of PyTensor `Type`\s to JAX types."""
+    import jax.numpy as jnp
+
+    if dtype is None:
+        return data
+    else:
+        return jnp.array(data, dtype=dtype)
+
+
+@singledispatch
+def jax_funcify(obj, *args, **kwargs):
+    """Create a JAX compatible function from an PyTensor `Op`."""
+    raise NotImplementedError(f"No JAX conversion for the given type: {type(obj)}")
 
 
 class JAXLinker(JITLinker):
@@ -14,7 +32,6 @@ class JAXLinker(JITLinker):
         super().__init__(*args, **kwargs)
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
-        from pytensor.link.jax.dispatch import jax_funcify
         from pytensor.link.jax.dispatch.shape import JAXShapeTuple
         from pytensor.tensor.random.type import RandomType
 
@@ -111,8 +128,6 @@ class JAXLinker(JITLinker):
         return convert_scalar_shape_inputs
 
     def create_thunk_inputs(self, storage_map):
-        from pytensor.link.jax.dispatch import jax_typify
-
         thunk_inputs = []
         for n in self.fgraph.inputs:
             sinput = storage_map[n]

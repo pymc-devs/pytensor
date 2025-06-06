@@ -1,5 +1,5 @@
 # isort: off
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_typify
+from pytensor.link.numba.linker import numba_funcify, numba_typify
 
 # Load dispatch specializations
 import pytensor.link.numba.dispatch.blockwise
