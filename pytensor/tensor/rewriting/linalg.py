@@ -47,8 +47,10 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
+    CholeskySolve,
     Solve,
     SolveBase,
+    SolveTriangular,
     _bilinear_solve_discrete_lyapunov,
     block_diag,
     cholesky,
@@ -908,6 +910,11 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
         return None
 
     [input] = node.inputs
+
+    # Check if input is a (1, 1) matrix
+    if all(input.type.broadcastable[:-2]):
+        return [pt.sqrt(input)]
+
     # Check for use of pt.diag first
     if (
         input.owner
@@ -1031,7 +1038,7 @@ def scalar_solve_to_divison(fgraph, node):
     """
 
     core_op = node.op.core_op
-    if not isinstance(core_op, Solve):
+    if not isinstance(core_op, SolveBase):
         return None
 
     a, b = node.inputs
@@ -1039,7 +1046,20 @@ def scalar_solve_to_divison(fgraph, node):
     if not all(a.broadcastable[-2:]):
         return None
 
-    new_out = b / a
+    # Special handling for different types of solve
+    match core_op:
+        case SolveTriangular():
+            # Corner case: if user asked for a triangular solve with a unit diagonal, a is taken to be 1
+            new_out = b / a if not core_op.unit_diagonal else b
+        case CholeskySolve():
+            new_out = b / a**2
+        case Solve():
+            new_out = b / a
+        case _:
+            raise NotImplementedError(
+                f"Unsupported core_op type: {type(core_op)} in scalar_solve_to_divison"
+            )
+
     if core_op.b_ndim == 1:
         new_out = new_out.squeeze(-1)
 

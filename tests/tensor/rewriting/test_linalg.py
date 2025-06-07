@@ -29,6 +29,7 @@ from pytensor.tensor.rewriting.linalg import inv_as_solve
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
+    CholeskySolve,
     Solve,
     SolveBase,
     SolveTriangular,
@@ -995,18 +996,30 @@ def test_slogdet_specialization():
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
 
 
-def test_scalar_solve_to_division_rewrite():
+@pytest.mark.parametrize(
+    "Op, fn",
+    [
+        (Solve, pt.linalg.solve),
+        (SolveTriangular, pt.linalg.solve_triangular),
+        (CholeskySolve, pt.linalg.cho_solve),
+    ],
+)
+def test_scalar_solve_to_division_rewrite(Op, fn):
     rng = np.random.default_rng(sum(map(ord, "scalar_solve_to_division_rewrite")))
 
     a = pt.dmatrix("a", shape=(1, 1))
     b = pt.dvector("b")
 
-    c = pt.linalg.solve(a, b, b_ndim=1)
+    if Op is CholeskySolve:
+        # cho_solve expects a tuple (c, lower) as the first input
+        c = fn((pt.linalg.cholesky(a), True), b, b_ndim=1)
+    else:
+        c = fn(a, b, b_ndim=1)
 
     f = function([a, b], c, mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
 
-    assert not any(isinstance(node.op, Solve) for node in nodes)
+    assert not any(isinstance(node.op, Op) for node in nodes)
 
     a_val = rng.normal(size=(1, 1)).astype(pytensor.config.floatX)
     b_val = rng.normal(size=(1,)).astype(pytensor.config.floatX)
