@@ -47,8 +47,10 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
+    CholeskySolve,
     Solve,
     SolveBase,
+    SolveTriangular,
     _bilinear_solve_discrete_lyapunov,
     block_diag,
     cholesky,
@@ -908,6 +910,11 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
         return None
 
     [input] = node.inputs
+
+    # Check if input is a (1, 1) matrix
+    if all(input.type.broadcastable[-2:]):
+        return [pt.sqrt(input)]
+
     # Check for use of pt.diag first
     if (
         input.owner
@@ -1020,3 +1027,42 @@ def slogdet_specialization(fgraph, node):
             k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
         }
         return replacements
+
+
+@register_stabilize
+@register_canonicalize
+@node_rewriter([Blockwise])
+def scalar_solve_to_division(fgraph, node):
+    """
+    Replace solve(a, b) with b / a if a is a (1, 1) matrix
+    """
+
+    core_op = node.op.core_op
+    if not isinstance(core_op, SolveBase):
+        return None
+
+    a, b = node.inputs
+    old_out = node.outputs[0]
+    if not all(a.broadcastable[-2:]):
+        return None
+
+    # Special handling for different types of solve
+    match core_op:
+        case SolveTriangular():
+            # Corner case: if user asked for a triangular solve with a unit diagonal, a is taken to be 1
+            new_out = b / a if not core_op.unit_diagonal else b
+        case CholeskySolve():
+            new_out = b / a**2
+        case Solve():
+            new_out = b / a
+        case _:
+            raise NotImplementedError(
+                f"Unsupported core_op type: {type(core_op)} in scalar_solve_to_divison"
+            )
+
+    if core_op.b_ndim == 1:
+        new_out = new_out.squeeze(-1)
+
+    copy_stack_trace(old_out, new_out)
+
+    return [new_out]
