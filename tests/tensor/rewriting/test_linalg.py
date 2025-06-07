@@ -29,6 +29,7 @@ from pytensor.tensor.rewriting.linalg import inv_as_solve
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
+    CholeskySolve,
     Solve,
     SolveBase,
     SolveTriangular,
@@ -920,14 +921,6 @@ def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
     nodes = f_rewritten.maker.fgraph.apply_nodes
     assert any(isinstance(node.op, Cholesky) for node in nodes)
 
-    # Case 2 : eye is degenerate
-    x = pt.scalar("x")
-    y = pt.eye(1) * x
-    z_cholesky = pt.linalg.cholesky(y)
-    f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
-    nodes = f_rewritten.maker.fgraph.apply_nodes
-    assert any(isinstance(node.op, Cholesky) for node in nodes)
-
 
 def test_slogdet_specialization():
     x, a = pt.dmatrix("x"), np.random.rand(20, 20)
@@ -993,3 +986,37 @@ def test_slogdet_specialization():
     f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
+
+
+@pytest.mark.parametrize(
+    "Op, fn",
+    [
+        (Solve, pt.linalg.solve),
+        (SolveTriangular, pt.linalg.solve_triangular),
+        (CholeskySolve, pt.linalg.cho_solve),
+    ],
+)
+def test_scalar_solve_to_division_rewrite(Op, fn):
+    rng = np.random.default_rng(sum(map(ord, "scalar_solve_to_division_rewrite")))
+
+    a = pt.dmatrix("a", shape=(1, 1))
+    b = pt.dvector("b")
+
+    if Op is CholeskySolve:
+        # cho_solve expects a tuple (c, lower) as the first input
+        c = fn((pt.linalg.cholesky(a), True), b, b_ndim=1)
+    else:
+        c = fn(a, b, b_ndim=1)
+
+    f = function([a, b], c, mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+
+    assert not any(isinstance(node.op, Op) for node in nodes)
+
+    a_val = rng.normal(size=(1, 1)).astype(pytensor.config.floatX)
+    b_val = rng.normal(size=(1,)).astype(pytensor.config.floatX)
+
+    c_val = np.linalg.solve(a_val, b_val)
+    np.testing.assert_allclose(
+        f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
