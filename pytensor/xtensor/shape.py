@@ -387,25 +387,23 @@ def squeeze(x, dim=None):
 class ExpandDims(XOp):
     """Add a new dimension to an XTensorVariable."""
 
-    __props__ = ("dims", "size")
+    __props__ = ("dims",)
 
-    def __init__(self, dim, size=1):
+    def __init__(self, dim):
         self.dims = dim
-        self.size = size
 
-    def make_node(self, x):
+    def make_node(self, x, size):
         x = as_xtensor(x)
-
-        if self.dims is None:
-            # No-op: return same variable
-            return Apply(self, [x], [x])
-
         # Insert new dim at front
         new_dims = (self.dims, *x.type.dims)
 
         # Determine shape
-        if isinstance(self.size, int | np.integer):
-            new_shape = (self.size, *x.type.shape)
+        try:
+            static_size = get_scalar_constant_value(size)
+        except NotScalarConstantError:
+            static_size = None
+        if static_size is not None:
+            new_shape = (int(static_size), *x.type.shape)
         else:
             new_shape = (None, *x.type.shape)  # symbolic size
 
@@ -414,7 +412,7 @@ class ExpandDims(XOp):
             shape=new_shape,
             dims=new_dims,
         )
-        return Apply(self, [x], [out])
+        return Apply(self, [x, size], [out])
 
 
 def expand_dims(x, dim: str | None, size=1):
@@ -453,4 +451,6 @@ def expand_dims(x, dim: str | None, size=1):
     ):
         raise TypeError(f"size must be an int or scalar variable, got: {type(size)}")
 
-    return ExpandDims(dim=dim, size=size)(x)
+    # Always convert size to a PyTensor scalar variable
+    size_var = as_tensor(size, ndim=0)
+    return ExpandDims(dim)(x, size_var)

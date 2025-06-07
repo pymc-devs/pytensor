@@ -1,15 +1,16 @@
-import numpy as np
-
 from pytensor.graph import node_rewriter
 from pytensor.raise_op import Assert
 from pytensor.tensor import (
     broadcast_to,
-    expand_dims,
+    get_scalar_constant_value,
     gt,
     join,
     moveaxis,
     specify_shape,
     squeeze,
+)
+from pytensor.tensor import (
+    shape as tensor_shape,
 )
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_lower_xtensor
@@ -143,24 +144,27 @@ def local_squeeze_reshape(fgraph, node):
 @register_lower_xtensor
 @node_rewriter([ExpandDims])
 def local_expand_dims_reshape(fgraph, node):
-    """Rewrite ExpandDims to tensor.expand_dims and optionally broadcast_to or specify_shape."""
-    [x] = node.inputs
-    x_tensor = tensor_from_xtensor(x)
-    x_tensor_expanded = expand_dims(x_tensor, axis=0)
+    """Rewrite ExpandDims to tensor.expand_dims and optionally broadcast_to or specify shape."""
+    x, size = node.inputs
+    out = node.outputs[0]
+    # Lower to tensor.expand_dims(x, axis=0)
+    from pytensor.tensor import expand_dims as tensor_expand_dims
 
-    target_shape = node.outputs[0].type.shape
+    expanded = tensor_expand_dims(tensor_from_xtensor(x), 0)
+    # Optionally broadcast to the correct shape if size is not 1
+    from pytensor.tensor import broadcast_to
 
-    size = getattr(node.op, "size", 1)
-    if isinstance(size, int | np.integer):
-        if size != 1 and None not in target_shape:
-            x_tensor_expanded = broadcast_to(x_tensor_expanded, target_shape)
+    # Ensure size is positive
+    expanded = Assert(msg="size must be positive")(expanded, gt(size, 0))
+    # If size is not 1, broadcast
+    try:
+        static_size = get_scalar_constant_value(size)
+    except Exception:
+        static_size = None
+    if static_size is not None and static_size == 1:
+        result = expanded
     else:
-        # Symbolic size: enforce shape so broadcast happens downstream correctly
-        # Also validate that size is positive
-        x_tensor_expanded = Assert(msg="size must be positive")(
-            x_tensor_expanded, gt(size, 0)
-        )
-        x_tensor_expanded = specify_shape(x_tensor_expanded, target_shape)
-
-    new_out = xtensor_from_tensor(x_tensor_expanded, dims=node.outputs[0].type.dims)
-    return [new_out]
+        # Broadcast to (size, ...)
+        new_shape = (size,) + tuple(tensor_shape(expanded))[1:]
+        result = broadcast_to(expanded, new_shape)
+    return [xtensor_from_tensor(result, out.type.dims)]

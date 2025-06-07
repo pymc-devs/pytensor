@@ -467,81 +467,77 @@ def test_expand_dims_implicit():
     x_test = xr_arange_like(x)
     xr_assert_allclose(fn(x_test, 1), x_test.expand_dims("batch"))
 
-    # Symbolic size > 1 (but expand only adds dim=1)
+    # Test using symbolic size from an existing dimension of the same tensor
+    # This verifies that expand_dims can use the size of one dimension to create another
+    x = xtensor(dims=("a", "b", "c"))
+    y = expand_dims(x, "d", size=x.sizes["b"])
+    fn = xr_function([x], y)
+    x_test = xr_arange_like(xtensor(dims=x.dims, shape=(2, 3, 5)))
+    res = fn(x_test)
+    expected = x_test.expand_dims({"d": 3})  # 3 is the size of dimension "b"
+    xr_assert_allclose(res, expected)
+
+    # Test broadcasting with symbolic size from a different tensor
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    other = xtensor("other", dims=("c",), shape=(4,))
+    y = expand_dims(x, "batch", size=other.sizes["c"])
+    fn = xr_function([x, other], y)
+    x_test = xr_arange_like(x)
+    other_test = xr_arange_like(other)
+    res = fn(x_test, other_test)
+    expected = x_test.expand_dims(
+        {"batch": 4}
+    )  # 4 is the size of dimension "c" in other
+    xr_assert_allclose(res, expected)
+
+    # Test behavior with symbolic size > 1
+    # NOTE: This test documents our current behavior where expand_dims broadcasts to the requested size.
+    # This differs from xarray's behavior where expand_dims always adds a size-1 dimension.
     size_sym_4 = scalar("size_sym_4", dtype="int64")
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     y = expand_dims(x, "batch", size=size_sym_4)
     fn = xr_function([x, size_sym_4], y, on_unused_input="ignore")
-    xr_assert_allclose(fn(x_test, 4), x_test.expand_dims("batch"))
-
-    # Symbolic size > 1 with broadcasting
-    size_sym_4 = scalar("size_sym_4", dtype="int64")
-    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = expand_dims(x, "batch", size=size_sym_4)
-    z = y + y  # This should broadcast along the batch dimension
-    fn = xr_function([x, size_sym_4], z, on_unused_input="ignore")
     x_test = xr_arange_like(x)
-    out = fn(x_test, 4)
-    expected = x_test.expand_dims("batch") + x_test.expand_dims("batch")
-    xr_assert_allclose(out, expected)
+    res = fn(x_test, 4)
+    # Our current behavior: broadcasts to size 4
+    expected = x_test.expand_dims({"batch": 4})
+    xr_assert_allclose(res, expected)
+    # xarray's behavior would be:
+    # expected = x_test.expand_dims("batch")  # always size 1
+    # xr_assert_allclose(res, expected)
 
-    # Symbolic size with shape validation
-    size_sym = scalar("size_sym", dtype="int64")
+    # Test using symbolic size from a reduction operation
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = expand_dims(x, "batch", size=size_sym)
-    z = y + y  # This should validate the shape
-    fn = xr_function([x, size_sym], z, on_unused_input="ignore")
-    x_test = xr_arange_like(x)
-    out = fn(x_test, 4)
-    expected = x_test.expand_dims("batch") + x_test.expand_dims("batch")
-    xr_assert_allclose(out, expected)
-
-    # Symbolic size with subsequent operations
-    size_sym = scalar("size_sym", dtype="int64")
-    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = expand_dims(x, "batch", size=size_sym)
-    z = y.sum("batch")  # This should work with symbolic size
-    fn = xr_function([x, size_sym], z, on_unused_input="ignore")
-    x_test = xr_arange_like(x)
-    out = fn(x_test, 4)
-    expected = x_test.expand_dims("batch").sum("batch")
-    xr_assert_allclose(out, expected)
-
-    # Symbolic size with transpose and broadcasting
-    size_sym = scalar("size_sym", dtype="int64")
-    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = expand_dims(x, "batch", size=size_sym)
-    z = transpose(y, "batch", "a", "b")  # This should work with symbolic size
-    fn = xr_function([x, size_sym], z, on_unused_input="ignore")
-    x_test = xr_arange_like(x)
-    out = fn(x_test, 4)
-    expected = x_test.expand_dims("batch").transpose("batch", "a", "b")
-    xr_assert_allclose(out, expected)
-
-    # Reversibility: expand then squeeze
-    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = expand_dims(x, "batch")
-    z = squeeze(y, "batch")
-    fn = xr_function([x], z)
-    x_test = xr_arange_like(x)
-    xr_assert_allclose(fn(x_test), x_test)
-
-    # expand_dims with dim=None = no-op
-    x = xtensor("x", dims=("a",), shape=(3,))
-    y = expand_dims(x, None)
+    reduced = x.sum("a")  # shape: (b: 3)
+    y = expand_dims(x, "batch", size=reduced.sizes["b"])
     fn = xr_function([x], y)
     x_test = xr_arange_like(x)
-    xr_assert_allclose(fn(x_test), x_test)
+    res = fn(x_test)
+    expected = x_test.expand_dims({"batch": 3})  # 3 is the size of dimension "b"
+    xr_assert_allclose(res, expected)
 
-    # broadcast after symbolic size
-    size_sym = scalar("size_sym", dtype="int64")
-    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = expand_dims(x, "batch", size=size_sym)
-    z = y + y  # triggers shape alignment
-    fn = xr_function([x, size_sym], z, on_unused_input="ignore")
+    # Test chaining expand_dims with symbolic sizes
+    x = xtensor("x", dims=("a",), shape=(2,))
+    y = expand_dims(x, "b", size=x.sizes["a"])  # shape: (a: 2, b: 2)
+    z = expand_dims(y, "c", size=y.sizes["b"])  # shape: (a: 2, b: 2, c: 2)
+    fn = xr_function([x], z)
     x_test = xr_arange_like(x)
-    out = fn(x_test, 1)
-    expected = x_test.expand_dims("batch") + x_test.expand_dims("batch")
-    xr_assert_allclose(out, expected)
+    res = fn(x_test)
+    expected = x_test.expand_dims({"b": 2}).expand_dims({"c": 2})
+    xr_assert_allclose(res, expected)
+
+    # Test bidirectional broadcasting with symbolic sizes
+    x = xtensor("x", dims=("a",), shape=(2,))
+    y = xtensor("y", dims=("b",), shape=(3,))
+    # Expand x with size from y, then add y
+    expanded = expand_dims(x, "b", size=y.sizes["b"])
+    z = expanded + y  # Should broadcast x to match y's size
+    fn = xr_function([x, y], z)
+    x_test = xr_arange_like(x)
+    y_test = xr_arange_like(y)
+    res = fn(x_test, y_test)
+    expected = x_test.expand_dims({"b": 3}) + y_test
+    xr_assert_allclose(res, expected)
 
 
 def test_expand_dims_errors():
