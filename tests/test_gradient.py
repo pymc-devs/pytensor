@@ -30,6 +30,7 @@ from pytensor.gradient import (
 from pytensor.graph.basic import Apply, graph_inputs
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
+from pytensor.scan.op import Scan
 from pytensor.tensor.math import add, dot, exp, sigmoid, sqr, tanh
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random import RandomStream
@@ -1033,6 +1034,17 @@ def test_jacobian_scalar():
     # test when the jacobian is called with a tensor as wrt
     Jx = jacobian(y, x)
     f = pytensor.function([x], Jx)
+    vx = np.asarray(rng.uniform(), dtype=pytensor.config.floatX)
+    assert np.allclose(f(vx), 2)
+
+    # test when input is a shape (1,) vector -- should still be treated as a scalar
+    Jx = jacobian(y[None], x)
+    f = pytensor.function([x], Jx)
+
+    # Ensure we hit the scalar grad case (doesn't use scan)
+    nodes = f.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Scan) for node in nodes)
+
     vx = np.asarray(rng.uniform(), dtype=pytensor.config.floatX)
     assert np.allclose(f(vx), 2)
 
