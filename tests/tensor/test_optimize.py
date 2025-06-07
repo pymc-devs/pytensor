@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import pytensor
 import pytensor.tensor as pt
@@ -68,7 +69,16 @@ def test_simple_minimize():
     utt.verify_grad(f, [0.0, a_val, c_val], eps=1e-6)
 
 
-def test_minimize_vector_x():
+@pytest.mark.parametrize(
+    "method, jac, hess",
+    [
+        ("Newton-CG", True, True),
+        ("L-BFGS-B", True, False),
+        ("powell", False, False),
+    ],
+    ids=["Newton-CG", "L-BFGS-B", "powell"],
+)
+def test_minimize_vector_x(method, jac, hess):
     def rosenbrock_shifted_scaled(x, a, b):
         return (a * (x[1:] - x[:-1] ** 2) ** 2 + (1 - x[:-1]) ** 2).sum() + b
 
@@ -77,7 +87,9 @@ def test_minimize_vector_x():
     b = pt.scalar("b")
 
     objective = rosenbrock_shifted_scaled(x, a, b)
-    minimized_x, success = minimize(objective, x, method="BFGS")
+    minimized_x, success = minimize(
+        objective, x, method=method, jac=jac, hess=hess, optimizer_kwargs={"tol": 1e-16}
+    )
 
     a_val = 0.5
     b_val = 1.0

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from copy import copy
 from typing import cast
@@ -8,7 +9,7 @@ from scipy.optimize import minimize_scalar as scipy_minimize_scalar
 from scipy.optimize import root as scipy_root
 
 from pytensor import Variable, function, graph_replace
-from pytensor.gradient import grad, jacobian
+from pytensor.gradient import grad, hessian, jacobian
 from pytensor.graph import Apply, Constant, FunctionGraph
 from pytensor.graph.basic import graph_inputs, truncated_graph_inputs
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
@@ -18,6 +19,87 @@ from pytensor.tensor.basic import atleast_2d, concatenate, zeros_like
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable
+
+
+_log = logging.getLogger(__name__)
+
+
+class LRUCache1:
+    """
+    Simple LRU cache with a memory size of 1.
+
+    This cache is only usable for a function that takes a single input `x` and returns a single output. The
+    function can also take any number of additional arguments `*args`, but these are assumed to be constant
+    between function calls.
+
+    The purpose of this cache is to allow for Hessian computation to be reused when calling scipy.optimize functions.
+    It is very often the case that some sub-computations are repeated between the objective, gradient, and hessian
+    functions, but by default scipy only allows for the objective and gradient to be fused.
+
+    By using this cache, all 3 functions can be fused, which can significantly speed up the optimization process for
+    expensive functions.
+    """
+
+    def __init__(self, fn):
+        self.fn = fn
+        self.last_x = None
+        self.last_result = None
+
+        self.cache_hits = 0
+        self.cache_misses = 0
+
+        self.value_and_grad_calls = 0
+        self.hess_calls = 0
+
+    def __call__(self, x, *args):
+        """
+        Call the cached function with the given input `x` and additional arguments `*args`.
+
+        If the input `x` is the same as the last input, return the cached result. Otherwise update the cache with the
+        new input and result.
+        """
+        cache_hit = np.all(x == self.last_x)
+
+        if self.last_x is None or not cache_hit:
+            self.cache_misses += 1
+            result = self.fn(x, *args)
+            self.last_x = x
+            self.last_result = result
+            return result
+
+        else:
+            self.cache_hits += 1
+            return self.last_result
+
+    def value(self, x, *args):
+        self.value_and_grad_calls += 1
+        res = self(x, *args)
+        if isinstance(res, tuple):
+            return res[0]
+        else:
+            return res
+
+    def value_and_grad(self, x, *args):
+        self.value_and_grad_calls += 1
+        return self(x, *args)[:2]
+
+    def hess(self, x, *args):
+        self.hess_calls += 1
+        return self(x, *args)[-1]
+
+    def report(self):
+        _log.info(f"Value and Grad calls: {self.value_and_grad_calls}")
+        _log.info(f"Hess Calls: {self.hess_calls}")
+        _log.info(f"Hits: {self.cache_hits}")
+        _log.info(f"Misses: {self.cache_misses}")
+
+    def clear_cache(self):
+        self.last_x = None
+        self.last_result = None
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.value_and_grad_calls = 0
+        self.hess_calls = 0
 
 
 class ScipyWrapperOp(Op, HasInnerGraph):
@@ -44,9 +126,9 @@ class ScipyWrapperOp(Op, HasInnerGraph):
             def fn_wrapper(x, *args):
                 return fn(x.squeeze(), *args)
 
-            self._fn_wrapped = fn_wrapper
+            self._fn_wrapped = LRUCache1(fn_wrapper)
         else:
-            self._fn_wrapped = fn
+            self._fn_wrapped = LRUCache1(fn)
 
     @property
     def fn(self):
@@ -120,6 +202,7 @@ class MinimizeScalarOp(ScipyWrapperOp):
             **self.optimizer_kwargs,
         )
 
+        f.clear_cache()
         outputs[0][0] = np.array(res.x)
         outputs[1][0] = np.bool_(res.success)
 
@@ -211,6 +294,12 @@ class MinimizeOp(ScipyWrapperOp):
             )
             self.fgraph.add_output(grad_wrt_x)
 
+        if hess:
+            hess_wrt_x = cast(
+                Variable, hessian(self.fgraph.outputs[0], self.fgraph.inputs[0])
+            )
+            self.fgraph.add_output(hess_wrt_x)
+
         self.jac = jac
         self.hess = hess
         self.hessp = hessp
@@ -225,13 +314,16 @@ class MinimizeOp(ScipyWrapperOp):
         x0, *args = inputs
 
         res = scipy_minimize(
-            fun=f,
+            fun=f.value_and_grad if self.jac else f.value,
             jac=self.jac,
             x0=x0,
             args=tuple(args),
+            hess=f.hess if self.hess else None,
             method=self.method,
             **self.optimizer_kwargs,
         )
+
+        f.clear_cache()
 
         outputs[0][0] = res.x
         outputs[1][0] = np.bool_(res.success)
@@ -283,6 +375,7 @@ def minimize(
     x: TensorVariable,
     method: str = "BFGS",
     jac: bool = True,
+    hess: bool = False,
     optimizer_kwargs: dict | None = None,
 ):
     """
@@ -325,6 +418,7 @@ def minimize(
         objective=objective,
         method=method,
         jac=jac,
+        hess=hess,
         optimizer_kwargs=optimizer_kwargs,
     )
 
