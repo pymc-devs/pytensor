@@ -1020,3 +1020,29 @@ def slogdet_specialization(fgraph, node):
             k: slogdet_specialization_map[v] for k, v in dummy_replacements.items()
         }
         return replacements
+
+
+@register_stabilize
+@register_canonicalize
+@node_rewriter([Blockwise])
+def scalar_solve_to_divison(fgraph, node):
+    """
+    Replace solve(a, b) with b / a if a is a (1, 1) matrix
+    """
+
+    core_op = node.op.core_op
+    if not isinstance(core_op, Solve):
+        return None
+
+    a, b = node.inputs
+    old_out = node.outputs[0]
+    if not all(a.broadcastable[-2:]):
+        return None
+
+    new_out = b / a
+    if core_op.b_ndim == 1:
+        new_out = new_out.squeeze(-1)
+
+    copy_stack_trace(old_out, new_out)
+
+    return [new_out]

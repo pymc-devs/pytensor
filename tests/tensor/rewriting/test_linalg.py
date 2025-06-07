@@ -993,3 +993,25 @@ def test_slogdet_specialization():
     f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
+
+
+def test_scalar_solve_to_division_rewrite():
+    rng = np.random.default_rng(sum(map(ord, "scalar_solve_to_division_rewrite")))
+
+    a = pt.dmatrix("a", shape=(1, 1))
+    b = pt.dvector("b")
+
+    c = pt.linalg.solve(a, b, b_ndim=1)
+
+    f = function([a, b], c, mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+
+    assert not any(isinstance(node.op, Solve) for node in nodes)
+
+    a_val = rng.normal(size=(1, 1)).astype(pytensor.config.floatX)
+    b_val = rng.normal(size=(1,)).astype(pytensor.config.floatX)
+
+    c_val = np.linalg.solve(a_val, b_val)
+    np.testing.assert_allclose(
+        f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
