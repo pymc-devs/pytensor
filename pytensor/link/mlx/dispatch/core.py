@@ -177,7 +177,7 @@ def mlx_funcify_TensorFromScalar(op, **kwargs):
 @mlx_funcify.register(ScalarFromTensor)
 def mlx_funcify_ScalarFromTensor(op, **kwargs):
     def scalar_from_tensor(x):
-        return x.reshape(-1)[0]
+        return mx.array(x).reshape(-1)[0]
 
     return scalar_from_tensor
 

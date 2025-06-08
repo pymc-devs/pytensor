@@ -18,7 +18,9 @@ from pytensor.scalar.basic import (
     Cast,
     Cos,
     Exp,
+    IntDiv,
     Invert,
+    IsNan,
     Log,
     Log1p,
     Mul,
@@ -34,7 +36,7 @@ from pytensor.scalar.basic import (
     Switch,
     TrueDiv,
 )
-from pytensor.scalar.math import Sigmoid
+from pytensor.scalar.math import Erfc, Erfcx, Sigmoid, Softplus
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot
 
@@ -111,6 +113,14 @@ def _(scalar_op):
         return mx.divide(x, y)
 
     return true_div
+
+
+@mlx_funcify_Elemwise_scalar_op.register(IntDiv)
+def _(scalar_op):
+    def int_div(x, y):
+        return mx.floor_divide(x, y)
+
+    return int_div
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Pow)
@@ -309,9 +319,49 @@ def _(scalar_op):
 @mlx_funcify_Elemwise_scalar_op.register(Invert)
 def _(scalar_op):
     def invert(x):
-        return ~x
+        return mx.bitwise_invert(x)
 
     return invert
+
+
+@mlx_funcify_Elemwise_scalar_op.register(IsNan)
+def _(scalar_op):
+    def isnan(x):
+        return mx.isnan(x)
+
+    return isnan
+
+
+@mlx_funcify_Elemwise_scalar_op.register(Erfc)
+def _(scalar_op):
+    def erfc(x):
+        return 1.0 - mx.erf(x)
+
+    return erfc
+
+
+@mlx_funcify_Elemwise_scalar_op.register(Erfcx)
+def _(scalar_op):
+    def erfcx(x):
+        return mx.exp(x * x) * (1.0 - mx.erf(x))
+
+    return erfcx
+
+
+@mlx_funcify_Elemwise_scalar_op.register(Softplus)
+def _(scalar_op):
+    def softplus(x):
+        # Numerically stable implementation of log(1 + exp(x))
+        # Following the same logic as the original PyTensor implementation
+        return mx.where(
+            x < -37.0,
+            mx.exp(x),
+            mx.where(
+                x < 18.0, mx.log1p(mx.exp(x)), mx.where(x < 33.3, x + mx.exp(-x), x)
+            ),
+        )
+
+    return softplus
 
 
 @mlx_funcify.register(Elemwise)
