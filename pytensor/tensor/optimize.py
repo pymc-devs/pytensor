@@ -11,7 +11,7 @@ from scipy.optimize import root as scipy_root
 from pytensor import Variable, function, graph_replace
 from pytensor.gradient import grad, hessian, jacobian
 from pytensor.graph import Apply, Constant, FunctionGraph
-from pytensor.graph.basic import graph_inputs, truncated_graph_inputs
+from pytensor.graph.basic import truncated_graph_inputs
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.scalar import bool as scalar_bool
 from pytensor.tensor import dot
@@ -106,6 +106,19 @@ class LRUCache1:
         self.hess_calls = 0
 
 
+def _find_optimization_parameters(objective: TensorVariable, x: TensorVariable):
+    """
+    Find the parameters of the optimization problem that are not the variable `x`.
+
+    This is used to determine the additional arguments that need to be passed to the objective function.
+    """
+    return [
+        arg
+        for arg in truncated_graph_inputs([objective], [x])
+        if (arg is not x and not isinstance(arg, Constant))
+    ]
+
+
 class ScipyWrapperOp(Op, HasInnerGraph):
     """Shared logic for scipy optimization ops"""
 
@@ -197,7 +210,9 @@ class MinimizeScalarOp(ScipyWrapperOp):
         f = self.fn_wrapped
         f.clear_cache()
 
-        x0, *args = inputs
+        # minimize_scalar doesn't take x0 as an argument. The Op still needs this input (to symbolically determine
+        # the args of the objective function), but it is not used in the optimization.
+        _, *args = inputs
 
         res = scipy_minimize_scalar(
             fun=f.value,
@@ -219,7 +234,7 @@ class MinimizeScalarOp(ScipyWrapperOp):
 
         implicit_f = grad(inner_fx, inner_x)
         df_dx, *df_dthetas = grad(
-            implicit_f, [inner_x, *inner_args], disconnect_inputs="ignore"
+            implicit_f, [inner_x, *inner_args], disconnected_inputs="ignore"
         )
 
         replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
@@ -245,11 +260,7 @@ def minimize_scalar(
     Minimize a scalar objective function using scipy.optimize.minimize_scalar.
     """
 
-    args = [
-        arg
-        for arg in graph_inputs([objective], [x])
-        if (arg is not x and not isinstance(arg, Constant))
-    ]
+    args = _find_optimization_parameters(objective, x)
 
     minimize_scalar_op = MinimizeScalarOp(
         x,
@@ -396,11 +407,7 @@ def minimize(
         The optimized value of x that minimizes the objective function.
 
     """
-    args = [
-        arg
-        for arg in graph_inputs([objective], [x])
-        if (arg is not x and not isinstance(arg, Constant))
-    ]
+    args = _find_optimization_parameters(objective, x)
 
     minimize_op = MinimizeOp(
         x,
