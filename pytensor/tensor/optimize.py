@@ -47,6 +47,8 @@ class LRUCache1:
         self.cache_hits = 0
         self.cache_misses = 0
 
+        self.value_calls = 0
+        self.grad_calls = 0
         self.value_and_grad_calls = 0
         self.hess_calls = 0
 
@@ -57,13 +59,14 @@ class LRUCache1:
         If the input `x` is the same as the last input, return the cached result. Otherwise update the cache with the
         new input and result.
         """
-        cache_hit = np.all(x == self.last_x)
 
-        if self.last_x is None or not cache_hit:
+        if self.last_result is None or not (x == self.last_x).all():
             self.cache_misses += 1
-            result = self.fn(x, *args)
             self.last_x = x
+
+            result = self.fn(x, *args)
             self.last_result = result
+
             return result
 
         else:
@@ -71,12 +74,12 @@ class LRUCache1:
             return self.last_result
 
     def value(self, x, *args):
-        self.value_and_grad_calls += 1
-        res = self(x, *args)
-        if isinstance(res, tuple):
-            return res[0]
-        else:
-            return res
+        self.value_calls += 1
+        return self(x, *args)[0]
+
+    def grad(self, x, *args):
+        self.grad_calls += 1
+        return self(x, *args)[1]
 
     def value_and_grad(self, x, *args):
         self.value_and_grad_calls += 1
@@ -97,6 +100,8 @@ class LRUCache1:
         self.last_result = None
         self.cache_hits = 0
         self.cache_misses = 0
+        self.value_calls = 0
+        self.grad_calls = 0
         self.value_and_grad_calls = 0
         self.hess_calls = 0
 
@@ -109,14 +114,8 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         This is overloaded because scipy converts scalar inputs to lists, changing the return type. The
         wrapper function logic is there to handle this.
         """
-        # TODO: Introduce rewrites to change MinimizeOp to MinimizeScalarOp and RootOp to RootScalarOp
-        #  when x is scalar. That will remove the need for the wrapper.
-
         outputs = self.inner_outputs
-        if len(outputs) == 1:
-            outputs = outputs[0]
-        self._fn = fn = function(self.inner_inputs, outputs)
-
+        self._fn = fn = function(self.inner_inputs, outputs, trust_input=True)
         # Do this reassignment to see the compiled graph in the dprint
         # self.fgraph = fn.maker.fgraph
 
@@ -166,6 +165,10 @@ class ScipyWrapperOp(Op, HasInnerGraph):
 
     def make_node(self, *inputs):
         assert len(inputs) == len(self.inner_inputs)
+        for input, inner_input in zip(inputs, self.inner_inputs):
+            assert (
+                input.type == inner_input.type
+            ), f"Input {input} does not match expected type {inner_input.type}"
 
         return Apply(
             self, inputs, [self.inner_inputs[0].type(), scalar_bool("success")]
@@ -192,16 +195,17 @@ class MinimizeScalarOp(ScipyWrapperOp):
 
     def perform(self, node, inputs, outputs):
         f = self.fn_wrapped
+        f.clear_cache()
+
         x0, *args = inputs
 
         res = scipy_minimize_scalar(
-            fun=f,
+            fun=f.value,
             args=tuple(args),
             method=self.method,
             **self.optimizer_kwargs,
         )
 
-        f.clear_cache()
         outputs[0][0] = np.array(res.x)
         outputs[1][0] = np.bool_(res.success)
 
@@ -214,11 +218,9 @@ class MinimizeScalarOp(ScipyWrapperOp):
         inner_fx = self.fgraph.outputs[0]
 
         implicit_f = grad(inner_fx, inner_x)
-        df_dx = grad(implicit_f, inner_x)
-
-        df_dthetas = [
-            grad(implicit_f, arg, disconnected_inputs="ignore") for arg in inner_args
-        ]
+        df_dx, *df_dthetas = grad(
+            implicit_f, [inner_x, *inner_args], disconnect_inputs="ignore"
+        )
 
         replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
         df_dx_star, *df_dthetas_stars = graph_replace(
