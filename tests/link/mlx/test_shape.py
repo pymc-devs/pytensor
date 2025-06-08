@@ -9,7 +9,6 @@ from pytensor.tensor.type import iscalar, vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
 
-@pytest.mark.xfail(reason="Shape Op is not supported yet")
 def test_mlx_shape_ops():
     x_np = np.zeros((20, 3))
     x = Shape()(pt.as_tensor_variable(x_np))
@@ -21,7 +20,6 @@ def test_mlx_shape_ops():
     compare_mlx_and_py([], [x], [], must_be_device_array=False)
 
 
-@pytest.mark.xfail(reason="Shape Op is not supported yet")
 def test_mlx_specify_shape():
     in_pt = pt.matrix("in")
     x = pt.specify_shape(in_pt, (4, None))

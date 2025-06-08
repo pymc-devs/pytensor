@@ -30,6 +30,12 @@ def mlx_typify_no_conversion_needed(data, **kwargs):
     return data
 
 
+@mlx_typify.register(int)
+@mlx_typify.register(float)
+def mlx_typify_python_scalar(data, **kwargs):
+    return mx.array(data)
+
+
 @singledispatch
 def mlx_funcify(op, node=None, storage_map=None, **kwargs):
     """Create a MLX compatible function from an PyTensor `Op`."""
