@@ -2,9 +2,8 @@ from functools import singledispatch
 
 import mlx.core as mx
 
-from pytensor.link.mlx.dispatch import mlx_funcify, mlx_typify
+from pytensor.link.mlx.dispatch import mlx_funcify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
-from pytensor.scalar import Softplus
 from pytensor.scalar.basic import (
     AND,
     EQ,
@@ -52,7 +51,7 @@ def mlx_funcify_Dot(op, **kwargs):
 @singledispatch
 def mlx_funcify_Elemwise_scalar_op(scalar_op):
     """Simplified implementation for MLX scalar operations."""
-    
+
     # Try using the operation name directly (most common case)
     op_name = getattr(scalar_op, "name", None)
     if op_name is not None:
@@ -60,11 +59,13 @@ def mlx_funcify_Elemwise_scalar_op(scalar_op):
             mlx_func = getattr(mx, op_name)
             # Handle variadic functions like Add
             if hasattr(scalar_op, "inputs") and len(scalar_op.inputs) > 2:
+
                 def variadic_func(*args):
                     result = args[0]
                     for arg in args[1:]:
                         result = mlx_func(result, arg)
                     return result
+
                 return variadic_func
             else:
                 return mlx_func

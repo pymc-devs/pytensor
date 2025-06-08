@@ -11,8 +11,6 @@ element-wise graphs, adding in-place updates, RNG thinning, etc.).
 
 from __future__ import annotations
 
-import warnings
-
 import mlx.core as mx
 import numpy as np
 
