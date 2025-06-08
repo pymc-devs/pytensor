@@ -1,17 +1,18 @@
 from collections.abc import Callable, Iterable
 from functools import partial
 
+import mlx.core as mx
 import numpy as np
-import pytest
 
+import pytensor
+from pytensor import tensor as pt
 from pytensor.compile.function import function
 from pytensor.compile.mode import MLX, Mode
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Variable
 from pytensor.link.mlx import MLXLinker
+from pytensor.link.mlx.dispatch.core import mlx_funcify_ScalarFromTensor
 
-
-mx = pytest.importorskip("mlx.core")
 
 optimizer = RewriteDatabaseQuery(include=["mlx"], exclude=MLX._optimizer.exclude)
 mlx_mode = Mode(linker=MLXLinker(), optimizer=optimizer)
@@ -78,3 +79,52 @@ def compare_mlx_and_py(
         assert_fn(mlx_res, py_res)
 
     return pytensor_mlx_fn, mlx_res
+
+
+def test_scalar_from_tensor_with_scalars():
+    """Test ScalarFromTensor works with both MLX arrays and Python/NumPy scalars.
+
+    This addresses the AttributeError that occurred when Python integers were
+    passed to ScalarFromTensor instead of MLX arrays.
+    """
+    scalar_from_tensor_func = mlx_funcify_ScalarFromTensor(None)
+
+    # Test with MLX array
+    mlx_array = mx.array([42])
+    result = scalar_from_tensor_func(mlx_array)
+    assert result == 42
+
+    # Test with Python int (this used to fail)
+    python_int = 42
+    result = scalar_from_tensor_func(python_int)
+    assert result == 42
+
+    # Test with Python float
+    python_float = 3.14
+    result = scalar_from_tensor_func(python_float)
+    assert abs(result - 3.14) < 1e-6
+
+    # Test with NumPy scalar
+    numpy_scalar = np.int32(123)
+    result = scalar_from_tensor_func(numpy_scalar)
+    assert result == 123
+
+    # Test with NumPy float scalar
+    numpy_float = np.float32(2.71)
+    result = scalar_from_tensor_func(numpy_float)
+    assert abs(result - 2.71) < 1e-6
+
+
+def test_scalar_from_tensor_pytensor_integration():
+    """Test ScalarFromTensor in a PyTensor graph context."""
+    # Create a 0-d tensor (scalar tensor)
+    x = pt.as_tensor_variable(42)
+
+    # Apply ScalarFromTensor
+    scalar_result = pt.scalar_from_tensor(x)
+
+    # Create function and test
+    f = pytensor.function([], scalar_result, mode="MLX")
+    result = f()
+
+    assert result == 42

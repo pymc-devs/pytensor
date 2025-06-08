@@ -1,5 +1,7 @@
+import mlx.core as mx
+
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
 @mlx_funcify.register(Shape)
@@ -30,3 +32,11 @@ def mlx_funcify_Shape_i(op, node, **kwargs):
         return x.shape[op.i]
 
     return shape_i
+
+
+@mlx_funcify.register(Reshape)
+def mlx_funcify_Reshape(op, **kwargs):
+    def reshape(x, shp):
+        return mx.reshape(x, shp)
+
+    return reshape
