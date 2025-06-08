@@ -16,7 +16,6 @@ from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.scalar import bool as scalar_bool
 from pytensor.tensor import dot
 from pytensor.tensor.basic import atleast_2d, concatenate, zeros_like
-from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable
 
@@ -258,18 +257,7 @@ def minimize_scalar(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    input_core_ndim = [var.ndim for var in minimize_scalar_op.inner_inputs]
-    input_signatures = [
-        f'({",".join(f"i{i}{n}" for n in range(ndim))})'
-        for i, ndim in enumerate(input_core_ndim)
-    ]
-
-    # Output dimensions are always the same as the first input (the initial values for the optimizer),
-    # then a scalar for the success flag
-    output_signatures = [input_signatures[0], "()"]
-
-    signature = f"{','.join(input_signatures)}->{','.join(output_signatures)}"
-    return Blockwise(minimize_scalar_op, signature=signature)(x, *args)
+    return minimize_scalar_op(x, *args)
 
 
 class MinimizeOp(ScipyWrapperOp):
@@ -422,18 +410,7 @@ def minimize(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    input_core_ndim = [var.ndim for var in minimize_op.inner_inputs]
-    input_signatures = [
-        f'({",".join(f"i{i}{n}" for n in range(ndim))})'
-        for i, ndim in enumerate(input_core_ndim)
-    ]
-
-    # Output dimensions are always the same as the first input (the initial values for the optimizer),
-    # then a scalar for the success flag
-    output_signatures = [input_signatures[0], "()"]
-
-    signature = f"{','.join(input_signatures)}->{','.join(output_signatures)}"
-    return Blockwise(minimize_op, signature=signature)(x, *args)
+    return minimize_op(x, *args)
 
 
 class RootOp(ScipyWrapperOp):
