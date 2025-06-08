@@ -44,6 +44,18 @@ def mlx_funcify_CAReduce_scalar_op(scalar_op):
     )
 
 
+@mlx_funcify.register(CAReduce)
+def mlx_funcify_CAReduce(op, **kwargs):
+    # Dispatch to the appropriate scalar op handler
+    scalar_reduce_fn = mlx_funcify_CAReduce_scalar_op(op.scalar_op)
+    axis = op.axis
+
+    def reduce(x):
+        return scalar_reduce_fn(x, axis)
+
+    return reduce
+
+
 @mlx_funcify_CAReduce_scalar_op.register(Add)
 def _(scalar_op):
     def sum_reduce(x, axis):
@@ -90,18 +102,6 @@ def _(scalar_op):
         return mx.min(x, axis=axis)
 
     return min_reduce
-
-
-@mlx_funcify.register(CAReduce)
-def mlx_funcify_CAReduce(op, **kwargs):
-    # Dispatch to the appropriate scalar op handler
-    scalar_reduce_fn = mlx_funcify_CAReduce_scalar_op(op.scalar_op)
-    axis = op.axis
-
-    def reduce(x):
-        return scalar_reduce_fn(x, axis)
-
-    return reduce
 
 
 @mlx_funcify.register(Softmax)

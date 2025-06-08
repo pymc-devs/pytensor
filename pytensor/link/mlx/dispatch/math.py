@@ -40,12 +40,6 @@ from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot
 
 
-@mlx_typify.register(int)
-@mlx_typify.register(float)
-def mlx_typify_python_scalar(data, **kwargs):
-    return mx.array(data)
-
-
 @mlx_funcify.register(Dot)
 def mlx_funcify_Dot(op, **kwargs):
     def dot(x, y):
@@ -57,34 +51,23 @@ def mlx_funcify_Dot(op, **kwargs):
 # Second-level dispatch for scalar operations in Elemwise
 @singledispatch
 def mlx_funcify_Elemwise_scalar_op(scalar_op):
-    """Default implementation that tries to use getattr(mx, func_name) similar to JAX."""
-
-    # Try to get the function name from nfunc_spec (like JAX does)
-    nfunc_spec = getattr(scalar_op, "nfunc_spec", None)
-    if nfunc_spec is not None:
-        func_name = nfunc_spec[0]
+    """Simplified implementation for MLX scalar operations."""
+    
+    # Try using the operation name directly (most common case)
+    op_name = getattr(scalar_op, "name", None)
+    if op_name is not None:
         try:
-            mlx_func = getattr(mx, func_name)
-            # Handle variadic functions
-            if len(scalar_op.inputs) > nfunc_spec[1]:
-                # For operations like Add that can take multiple inputs
+            mlx_func = getattr(mx, op_name)
+            # Handle variadic functions like Add
+            if hasattr(scalar_op, "inputs") and len(scalar_op.inputs) > 2:
                 def variadic_func(*args):
                     result = args[0]
                     for arg in args[1:]:
                         result = mlx_func(result, arg)
                     return result
-
                 return variadic_func
             else:
                 return mlx_func
-        except AttributeError:
-            pass
-
-    # Try using the operation name directly
-    op_name = getattr(scalar_op, "name", None)
-    if op_name is not None:
-        try:
-            return getattr(mx, op_name)
         except AttributeError:
             pass
 
@@ -322,26 +305,6 @@ def _(scalar_op):
     return sigmoid
 
 
-@mlx_funcify_Elemwise_scalar_op.register(Softplus)
-def _(scalar_op):
-    def softplus(x):
-        return mx.where(
-            x < -37.0,
-            mx.exp(x),
-            mx.where(
-                x < 18.0,
-                mx.log1p(mx.exp(x)),
-                mx.where(
-                    x < 33.3,
-                    x + mx.exp(-x),
-                    x,
-                ),
-            ),
-        )
-
-    return softplus
-
-
 @mlx_funcify_Elemwise_scalar_op.register(Invert)
 def _(scalar_op):
     def invert(x):
@@ -351,19 +314,11 @@ def _(scalar_op):
 
 
 @mlx_funcify.register(Elemwise)
-def mlx_funcify_Elemwise(op, node=None, **kwargs):
+def mlx_funcify_Elemwise(op, node, **kwargs):
     # Dispatch to the appropriate scalar op handler
     scalar_func = mlx_funcify_Elemwise_scalar_op(op.scalar_op)
 
     def elemwise(*inputs):
-        # Enforce runtime broadcast checks (same as JAX and PyTorch implementations)
-        if node is not None:
-            # Convert inputs to MLX arrays for broadcast checking
-            mlx_inputs = tuple(
-                mx.array(inp) if not hasattr(inp, "shape") else inp for inp in inputs
-            )
-            Elemwise._check_runtime_broadcast(node, mlx_inputs)
-
         return scalar_func(*inputs)
 
     return elemwise
