@@ -139,10 +139,14 @@ def _get_parameter_grads_from_vector(
     Given a single concatenated vector of objective function gradients with respect to raveled optimization parameters,
     returns the contribution of each parameter to the total loss function, with the unraveled shape of the parameter.
     """
+    grad_wrt_args_vector = cast(TensorVariable, grad_wrt_args_vector)
+    x_star = cast(TensorVariable, x_star)
+
     cursor = 0
     grad_wrt_args = []
 
     for arg in args:
+        arg = cast(TensorVariable, arg)
         arg_shape = arg.shape
         arg_size = arg_shape.prod()
         arg_grad = grad_wrt_args_vector[:, cursor : cursor + arg_size].reshape(
@@ -233,8 +237,9 @@ def scalar_implict_optimization_grads(
     output_grad: Variable,
     fgraph: FunctionGraph,
 ) -> list[Variable]:
-    df_dx, *df_dthetas = grad(
-        inner_fx, [inner_x, *inner_args], disconnected_inputs="ignore"
+    df_dx, *df_dthetas = cast(
+        list[Variable],
+        grad(inner_fx, [inner_x, *inner_args], disconnected_inputs="ignore"),
     )
 
     replace = dict(zip(fgraph.inputs, (x_star, *args), strict=True))
@@ -242,7 +247,7 @@ def scalar_implict_optimization_grads(
 
     grad_wrt_args = [
         (-df_dtheta_star / df_dx_star) * output_grad
-        for df_dtheta_star in df_dthetas_stars
+        for df_dtheta_star in cast(list[TensorVariable], df_dthetas_stars)
     ]
 
     return grad_wrt_args
@@ -297,15 +302,21 @@ def implict_optimization_grads(
     fgraph : FunctionGraph
         The function graph that contains the inputs and outputs of the optimization problem.
     """
+    df_dx = cast(TensorVariable, df_dx)
+
     df_dtheta = concatenate(
-        [atleast_2d(jac_col, left=False) for jac_col in df_dtheta_columns],
+        [
+            atleast_2d(jac_col, left=False)
+            for jac_col in cast(list[TensorVariable], df_dtheta_columns)
+        ],
         axis=-1,
     )
 
     replace = dict(zip(fgraph.inputs, (x_star, *args), strict=True))
 
-    df_dx_star, df_dtheta_star = graph_replace(
-        [atleast_2d(df_dx), df_dtheta], replace=replace
+    df_dx_star, df_dtheta_star = cast(
+        list[TensorVariable],
+        graph_replace([atleast_2d(df_dx), df_dtheta], replace=replace),
     )
 
     grad_wrt_args_vector = solve(-df_dx_star, df_dtheta_star)
@@ -546,7 +557,9 @@ class RootScalarOp(ScipyWrapperOp):
         self.fgraph = FunctionGraph([variables, *args], [equation])
 
         if jac:
-            f_prime = grad(self.fgraph.outputs[0], self.fgraph.inputs[0])
+            f_prime = cast(
+                Variable, grad(self.fgraph.outputs[0], self.fgraph.inputs[0])
+            )
             self.fgraph.add_output(f_prime)
 
         if hess:
@@ -555,7 +568,9 @@ class RootScalarOp(ScipyWrapperOp):
                     "Cannot set `hess=True` without `jac=True`. No methods use second derivatives without also"
                     " using first derivatives."
                 )
-            f_double_prime = grad(self.fgraph.outputs[-1], self.fgraph.inputs[0])
+            f_double_prime = cast(
+                Variable, grad(self.fgraph.outputs[-1], self.fgraph.inputs[0])
+            )
             self.fgraph.add_output(f_double_prime)
 
         self.method = method
