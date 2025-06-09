@@ -128,6 +128,32 @@ def _find_optimization_parameters(objective: TensorVariable, x: TensorVariable):
     ]
 
 
+def _get_parameter_grads_from_vector(
+    grad_wrt_args_vector: Variable,
+    x_star: Variable,
+    args: Sequence[Variable],
+    output_grad: Variable,
+):
+    """
+    Given a single concatenated vector of objective function gradients with respect to raveled optimization parameters,
+    returns the contribution of each parameter to the total loss function, with the unraveled shape of the parameter.
+    """
+    cursor = 0
+    grad_wrt_args = []
+
+    for arg in args:
+        arg_shape = arg.shape
+        arg_size = arg_shape.prod()
+        arg_grad = grad_wrt_args_vector[:, cursor : cursor + arg_size].reshape(
+            (*x_star.shape, *arg_shape)
+        )
+
+        grad_wrt_args.append(dot(output_grad, arg_grad))
+        cursor += arg_size
+
+    return grad_wrt_args
+
+
 class ScipyWrapperOp(Op, HasInnerGraph):
     """Shared logic for scipy optimization ops"""
 
@@ -197,6 +223,98 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         )
 
 
+def scalar_implict_optimization_grads(
+    inner_fx: Variable,
+    inner_x: Variable,
+    inner_args: Sequence[Variable],
+    args: Sequence[Variable],
+    x_star: Variable,
+    output_grad: Variable,
+    fgraph: FunctionGraph,
+) -> list[Variable]:
+    df_dx, *df_dthetas = grad(
+        inner_fx, [inner_x, *inner_args], disconnected_inputs="ignore"
+    )
+
+    replace = dict(zip(fgraph.inputs, (x_star, *args), strict=True))
+    df_dx_star, *df_dthetas_stars = graph_replace([df_dx, *df_dthetas], replace=replace)
+
+    grad_wrt_args = [
+        (-df_dtheta_star / df_dx_star) * output_grad
+        for df_dtheta_star in df_dthetas_stars
+    ]
+
+    return grad_wrt_args
+
+
+def implict_optimization_grads(
+    df_dx: Variable,
+    df_dtheta_columns: Sequence[Variable],
+    args: Sequence[Variable],
+    x_star: Variable,
+    output_grad: Variable,
+    fgraph: FunctionGraph,
+):
+    r"""
+    Compute gradients of an optimization problem with respect to its parameters.
+
+    The gradents are computed using the implicit function theorem. Given a fuction `f(x, theta) =`, and a function
+    `x_star(theta)` that, given input parameters theta returns `x` such that `f(x_star(theta), theta) = 0`, we can
+    compute the gradients of `x_star` with respect to `theta` as follows:
+
+    .. math::
+
+        \underbrace{\frac{\partial f}{\partial x}\left(x^*(\theta), \theta\right)}_{\text{Jacobian wrt } x}
+        \frac{d x^*(\theta)}{d \theta}
+        +
+        \underbrace{\frac{\partial f}{\partial \theta}\left(x^*(\theta), \theta\right)}_{\text{Jacobian wrt } \theta}
+        = 0
+
+    Which, after rearranging, gives us:
+
+    .. math::
+
+        \frac{d x^*(\theta)}{d \theta} = - \left(\frac{\partial f}{\partial x}\left(x^*(\theta), \theta\right)\right)^{-1} \frac{\partial f}{\partial \theta}\left(x^*(\theta), \theta\right)
+
+    Note that this method assumes `f(x_star(theta), theta) = 0`; so it is not immediately applicable to a minimization
+    problem, where `f` is the objective function. In this case, we instead take `f` to be the gradient of the objective
+    function, which *is* indeed zero at the minimum.
+
+    Parameters
+    ----------
+    df_dx : Variable
+        The Jacobian of the objective function with respect to the variable `x`.
+    df_dtheta_columns : Sequence[Variable]
+        The Jacobians of the objective function with respect to the optimization parameters `theta`.
+        Each column (or columns) corresponds to a different parameter. Should be returned by pytensor.gradient.jacobian.
+    args : Sequence[Variable]
+        The optimization parameters `theta`.
+    x_star : Variable
+        Symbolic graph representing the value of the variable `x` such that `f(x_star, theta) = 0 `.
+    output_grad : Variable
+        The gradient of the output with respect to the objective function.
+    fgraph : FunctionGraph
+        The function graph that contains the inputs and outputs of the optimization problem.
+    """
+    df_dtheta = concatenate(
+        [atleast_2d(jac_col, left=False) for jac_col in df_dtheta_columns],
+        axis=-1,
+    )
+
+    replace = dict(zip(fgraph.inputs, (x_star, *args), strict=True))
+
+    df_dx_star, df_dtheta_star = graph_replace(
+        [atleast_2d(df_dx), df_dtheta], replace=replace
+    )
+
+    grad_wrt_args_vector = solve(-df_dx_star, df_dtheta_star)
+    grad_wrt_args = _get_parameter_grads_from_vector(
+        grad_wrt_args_vector, x_star, args, output_grad
+    )
+
+    return grad_wrt_args
+
+
 class MinimizeScalarOp(ScipyWrapperOp):
     __props__ = ("method",)
 
@@ -242,19 +360,16 @@ class MinimizeScalarOp(ScipyWrapperOp):
         inner_fx = self.fgraph.outputs[0]
 
         implicit_f = grad(inner_fx, inner_x)
-        df_dx, *df_dthetas = grad(
-            implicit_f, [inner_x, *inner_args], disconnected_inputs="ignore"
-        )
 
-        replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
-        df_dx_star, *df_dthetas_stars = graph_replace(
-            [df_dx, *df_dthetas], replace=replace
+        grad_wrt_args = scalar_implict_optimization_grads(
+            inner_fx=implicit_f,
+            inner_x=inner_x,
+            inner_args=inner_args,
+            args=args,
+            x_star=x_star,
+            output_grad=output_grad,
+            fgraph=self.fgraph,
         )
-
-        grad_wrt_args = [
-            (-df_dtheta_star / df_dx_star) * output_grad
-            for df_dtheta_star in df_dthetas_stars
-        ]
 
         return [zeros_like(x), *grad_wrt_args]
 
@@ -348,34 +463,17 @@ class MinimizeOp(ScipyWrapperOp):
 
         implicit_f = grad(inner_fx, inner_x)
 
-        df_dx = atleast_2d(concatenate(jacobian(implicit_f, [inner_x]), axis=-1))
-
-        df_dtheta = concatenate(
-            [
-                atleast_2d(x, left=False)
-                for x in jacobian(implicit_f, inner_args, disconnected_inputs="ignore")
-            ],
-            axis=-1,
+        df_dx, *df_dtheta_columns = jacobian(
+            implicit_f, [inner_x, *inner_args], disconnected_inputs="ignore"
         )
-
-        replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
-
-        df_dx_star, df_dtheta_star = graph_replace([df_dx, df_dtheta], replace=replace)
-
-        grad_wrt_args_vector = solve(-df_dx_star, df_dtheta_star)
-
-        cursor = 0
-        grad_wrt_args = []
-
-        for arg in args:
-            arg_shape = arg.shape
-            arg_size = arg_shape.prod()
-            arg_grad = grad_wrt_args_vector[:, cursor : cursor + arg_size].reshape(
-                (*x_star.shape, *arg_shape)
-            )
-
-            grad_wrt_args.append(dot(output_grad, arg_grad))
-            cursor += arg_size
+        grad_wrt_args = implict_optimization_grads(
+            df_dx=df_dx,
+            df_dtheta_columns=df_dtheta_columns,
+            args=args,
+            x_star=x_star,
+            output_grad=output_grad,
+            fgraph=self.fgraph,
+        )
 
         return [zeros_like(x), *grad_wrt_args]
 
@@ -432,7 +530,7 @@ def minimize(
 
 
 class RootOp(ScipyWrapperOp):
-    __props__ = ("method", "jac")
+    __props__ = ("method", "jac", "optimizer_kwargs")
 
     def __init__(
         self,
@@ -489,34 +587,16 @@ class RootOp(ScipyWrapperOp):
         inner_fx = self.fgraph.outputs[0]
 
         df_dx = jacobian(inner_fx, inner_x) if not self.jac else self.fgraph.outputs[1]
+        df_dtheta_columns = jacobian(inner_fx, inner_args, disconnected_inputs="ignore")
 
-        df_dtheta = concatenate(
-            [
-                atleast_2d(jac_column, left=False)
-                for jac_column in jacobian(
-                    inner_fx, inner_args, disconnected_inputs="ignore"
-                )
-            ],
-            axis=-1,
+        grad_wrt_args = implict_optimization_grads(
+            df_dx=df_dx,
+            df_dtheta_columns=df_dtheta_columns,
+            args=args,
+            x_star=x_star,
+            output_grad=output_grad,
+            fgraph=self.fgraph,
         )
-
-        replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
-        df_dx_star, df_dtheta_star = graph_replace([df_dx, df_dtheta], replace=replace)
-
-        grad_wrt_args_vector = solve(-df_dx_star, df_dtheta_star)
-
-        cursor = 0
-        grad_wrt_args = []
-
-        for arg in args:
-            arg_shape = arg.shape
-            arg_size = arg_shape.prod()
-            arg_grad = grad_wrt_args_vector[:, cursor : cursor + arg_size].reshape(
-                (*x_star.shape, *arg_shape)
-            )
-
-            grad_wrt_args.append(dot(output_grad, arg_grad))
-            cursor += arg_size
 
         return [zeros_like(x), *grad_wrt_args]
 
@@ -529,11 +609,7 @@ def root(
 ):
     """Find roots of a system of equations using scipy.optimize.root."""
 
-    args = [
-        arg
-        for arg in truncated_graph_inputs([equations], [variables])
-        if (arg is not variables and not isinstance(arg, Constant))
-    ]
+    args = _find_optimization_parameters(equations, variables)
 
     root_op = RootOp(variables, *args, equations=equations, method=method, jac=jac)
 
