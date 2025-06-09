@@ -19,6 +19,7 @@ from pytensor.scalar import Add, ScalarConstant, ScalarType
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
+    ExtractDiag,
     Join,
     ScalarFromTensor,
     TensorFromScalar,
@@ -26,6 +27,7 @@ from pytensor.tensor.basic import (
     cast,
     concatenate,
     expand_dims,
+    full,
     get_scalar_constant_value,
     get_underlying_scalar_constant_value,
     register_infer_shape,
@@ -1793,3 +1795,96 @@ optdb["specialize"].register(
     "numba",
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([ExtractDiag])
+def extract_diag_of_diagonal_set_subtensor(fgraph, node):
+    """Undo extract diagonal from a set diagonal
+
+    This rewrites the following pattern:
+        y = write_diagonal*(x, x_diag, offset=k1)
+        z = extract_diag(y, offset=k2)
+
+    as:
+        z = diag_x, if k1 == k2
+        z = x if k1 != k2
+
+    * write_diagonal is not an atomic operation, but a sequence of Arange/SetSubtensor operations.
+
+    """
+
+    def is_cosntant_arange(var) -> bool:
+        if not (isinstance(var, TensorConstant) and var.type.ndim == 1):
+            return False
+
+        data = var.data
+        start, stop = data[0], data[-1] + 1
+        return data.size == (stop - start) and (data == np.arange(start, stop)).all()  # type: ignore
+
+    [diag_x] = node.inputs
+    if not (
+        diag_x.owner is not None
+        and isinstance(diag_x.owner.op, AdvancedIncSubtensor)
+        and diag_x.owner.op.set_instead_of_inc
+    ):
+        return None
+
+    x, y, *idxs = diag_x.owner.inputs
+
+    if not (
+        x.type.ndim >= 2
+        and None not in x.type.shape[-2:]
+        and x.type.shape[-2] == x.type.shape[-1]
+    ):
+        # TODO: for now we only support rewrite with static square shape for x
+        return None
+
+    op = node.op
+    if op.axis2 > len(idxs):
+        return None
+
+    # Check all non-axis indices are full slices
+    axis = {op.axis1, op.axis2}
+    if not all(is_full_slice(idx) for i, idx in enumerate(idxs) if i not in axis):
+        return None
+
+    # Check axis indices are arange we would expect from setting on the diagonal
+    axis1_idx = idxs[op.axis1]
+    axis2_idx = idxs[op.axis2]
+    if not (is_cosntant_arange(axis1_idx) and is_cosntant_arange(axis2_idx)):
+        return None
+
+    dim_length = x.type.shape[-1]
+    offset = op.offset
+    start_stop1 = (axis1_idx.data[0], axis1_idx.data[-1] + 1)
+    start_stop2 = (axis2_idx.data[0], axis2_idx.data[-1] + 1)
+    orig_start1, orig_start2 = start_stop1[0], start_stop2[0]
+
+    if offset < 0:
+        # The logic for checking if we are selecting or not a diagonal for negative offset is the same
+        # as the one with positive offset but swapped axis
+        start_stop1, start_stop2 = start_stop2, start_stop1
+        offset = -offset
+
+    start1, stop1 = start_stop1
+    start2, stop2 = start_stop2
+    if (
+        start1 == 0
+        and start2 == offset
+        and stop1 == dim_length - offset
+        and stop2 == dim_length
+    ):
+        # We are extracting the just written diagonal
+        if y.type.ndim == 0 or y.type.shape[-1] == 1:
+            # We may need to broadcast y
+            y = full((*x.shape[:-2], dim_length - offset), y, dtype=x.type.dtype)
+        return [y]
+    elif (orig_start2 - orig_start1) != op.offset:
+        # Some other diagonal was written, ignore it
+        return [op(x)]
+    else:
+        # A portion, but no the whole diagonal was written, don't do anything
+        return None

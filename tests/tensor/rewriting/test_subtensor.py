@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import pytest
 
@@ -9,7 +11,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
-from pytensor.graph import vectorize_graph
+from pytensor.graph import rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, ancestors, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.raise_op import Assert
@@ -1956,3 +1958,37 @@ class TestUselessSlice:
             f(test_x, -2),
             test_x[0:3:-2, -1:-6:2, ::],
         )
+
+
+def test_extract_diag_of_diagonal_set_subtensor():
+    A = pt.full((2, 6, 6), np.nan)
+    rows = pt.arange(A.shape[-2])
+    cols = pt.arange(A.shape[-1])
+    write_offsets = [-2, -1, 0, 1, 2]
+    # Randomize order of write operations, to make sure rewrite is not sensitive to it
+    random.shuffle(write_offsets)
+    for offset in write_offsets:
+        value = offset + 0.1 * offset
+        if offset == 0:
+            A = A[..., rows, cols].set(value)
+        elif offset > 0:
+            A = A[..., rows[:-offset], cols[offset:]].set(value)
+        else:
+            offset = -offset
+            A = A[..., rows[offset:], cols[:-offset]].set(value)
+    # Add a partial diagonal along offset 3
+    A = A[..., rows[1:-3], cols[4:]].set(np.pi)
+
+    read_offsets = [-2, -1, 0, 1, 2, 3]
+    outs = [A.diagonal(offset=offset, axis1=-2, axis2=-1) for offset in read_offsets]
+    rewritten_outs = rewrite_graph(outs, include=("ShapeOpt", "canonicalize"))
+
+    # Every output should just be an Alloc with value
+    expected_outs = []
+    for offset in read_offsets[:-1]:
+        value = np.asarray(offset + 0.1 * offset, dtype=A.type.dtype)
+        expected_outs.append(pt.full((np.int64(2), np.int8(6 - abs(offset))), value))
+    # The partial diagonal shouldn't be rewritten
+    expected_outs.append(outs[-1])
+
+    assert equal_computations(rewritten_outs, expected_outs)
