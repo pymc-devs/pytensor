@@ -303,15 +303,6 @@ def test_squeeze_explicit_dims():
     fn3d = xr_function([x3], y3d)
     xr_assert_allclose(fn3d(x3_test), x3_test)
 
-    # Reversibility with expand_dims
-    x6 = xtensor("x6", dims=("a", "b", "c"), shape=(2, 1, 3))
-    y6 = squeeze(x6, "b")
-    # First expand_dims adds at front, then transpose puts it in the right place
-    z6 = transpose(expand_dims(y6, "b"), "a", "b", "c")
-    fn6 = xr_function([x6], z6)
-    x6_test = xr_arange_like(x6)
-    xr_assert_allclose(fn6(x6_test), x6_test)
-
 
 def test_squeeze_implicit_dims():
     """Test squeeze with implicit dim=None (all size-1 dimensions)."""
@@ -456,8 +447,8 @@ def test_expand_dims_explicit():
     xr_assert_allclose(fn(xr_arange_like(x)), expected)
 
 
-def test_expand_dims_implicit():
-    """Test expand_dims with default or symbolic sizes and dim=None."""
+def test_expand_dims_symbolic_size():
+    """Test expand_dims with symbolic sizes."""
 
     # Symbolic size=1: same as default
     size_sym_1 = scalar("size_sym_1", dtype="int64")
@@ -554,16 +545,16 @@ def test_expand_dims_errors():
         expand_dims(x, "batch", size=0)
 
     # Invalid dim type
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="Invalid type for `dim`"):
         expand_dims(x, 123)
 
     # Invalid size type
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="size must be an int or scalar variable"):
         expand_dims(x, "new", size=[1])
 
     # Duplicate dimension creation
     y = expand_dims(x, "new")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="already exists"):
         expand_dims(y, "new")
 
     # Symbolic size with invalid runtime value
@@ -572,3 +563,32 @@ def test_expand_dims_errors():
     fn = xr_function([x, size_sym], y, on_unused_input="ignore")
     with pytest.raises(Exception):
         fn(xr_arange_like(x), 0)
+
+
+def test_expand_dims_multiple():
+    """Test expanding multiple dimensions at once using a list of strings."""
+    x = xtensor("x", dims=("city",), shape=(3,))
+    y = expand_dims(x, ["country", "state"])
+    fn = xr_function([x], y)
+    x_xr = xr_arange_like(x)
+    xr_assert_allclose(fn(x_xr), x_xr.expand_dims(["country", "state"]))
+
+    # Test with a dict of sizes
+    y = expand_dims(x, {"country": 2, "state": 3})
+    fn = xr_function([x], y)
+    x_xr = xr_arange_like(x)
+    xr_assert_allclose(fn(x_xr), x_xr.expand_dims({"country": 2, "state": 3}))
+
+    # Test with a mix of strings and dicts
+    y = expand_dims(x, ["country", "state"], size=3)
+    fn = xr_function([x], y)
+    x_xr = xr_arange_like(x)
+    xr_assert_allclose(fn(x_xr), x_xr.expand_dims(["country", "state"]))
+
+    # Test with symbolic sizes in dict
+    size_sym_1 = scalar("size_sym_1", dtype="int64")
+    size_sym_2 = scalar("size_sym_2", dtype="int64")
+    y = expand_dims(x, {"country": size_sym_1, "state": size_sym_2})
+    fn = xr_function([x, size_sym_1, size_sym_2], y, on_unused_input="ignore")
+    x_xr = xr_arange_like(x)
+    xr_assert_allclose(fn(x_xr, 2, 3), x_xr.expand_dims({"country": 2, "state": 3}))

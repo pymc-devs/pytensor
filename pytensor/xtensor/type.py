@@ -481,6 +481,27 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             raise NotImplementedError("Squeeze with axis not Implemented")
         return px.shape.squeeze(self, dim)
 
+    def expand_dims(
+        self,
+        dim: str | None = None,
+        size: int | Variable = 1,
+    ):
+        """Add a new dimension to the tensor.
+
+        Parameters
+        ----------
+        dim : str or None
+            Name of new dimension. If None, returns self unchanged.
+        size : int or symbolic, optional
+            Size of the new dimension (default 1)
+
+        Returns
+        -------
+        XTensorVariable
+            Tensor with the new dimension inserted
+        """
+        return px.shape.expand_dims(self, dim, size=size)
+
     # ndarray methods
     # https://docs.xarray.dev/en/latest/api.html#id7
     def clip(self, min, max):

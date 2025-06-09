@@ -9,6 +9,7 @@ from pytensor.graph import Apply
 from pytensor.scalar import discrete_dtypes, upcast
 from pytensor.tensor import as_tensor, get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.variable import TensorVariable
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import as_xtensor, xtensor
 
@@ -387,15 +388,35 @@ def squeeze(x, dim=None):
 class ExpandDims(XOp):
     """Add a new dimension to an XTensorVariable."""
 
-    __props__ = ("dims",)
+    __props__ = ("dim",)
 
     def __init__(self, dim):
-        self.dims = dim
+        self.dim = dim
 
     def make_node(self, x, size):
         x = as_xtensor(x)
+
+        if not isinstance(self.dim, str):
+            raise TypeError(f"`dim` must be a string or None, got: {type(self.dim)}")
+
+        if self.dim in x.type.dims:
+            raise ValueError(f"Dimension {self.dim} already exists in {x.type.dims}")
+        if isinstance(size, int | np.integer):
+            if size <= 0:
+                raise ValueError(f"size must be positive, got: {size}")
+        elif not (
+            hasattr(size, "ndim")
+            and getattr(size, "ndim", None) == 0  # symbolic scalar
+        ):
+            raise TypeError(
+                f"size must be an int or scalar variable, got: {type(size)}"
+            )
+
+        # Convert size to tensor
+        size = as_tensor(size, ndim=0)
+
         # Insert new dim at front
-        new_dims = (self.dims, *x.type.dims)
+        new_dims = (self.dim, *x.type.dims)
 
         # Determine shape
         try:
@@ -415,42 +436,62 @@ class ExpandDims(XOp):
         return Apply(self, [x, size], [out])
 
 
-def expand_dims(x, dim: str | None, size=1):
-    """Add a new dimension to an XTensorVariable.
+def expand_dims(x, dim=None, create_index_for_new_dim=True, **dim_kwargs):
+    """Add one or more new dimensions to an XTensorVariable.
 
     Parameters
     ----------
     x : XTensorVariable
-        Input tensor
-    dim : str or None
-        Name of new dimension. If None, returns x unchanged.
-    size : int or symbolic, optional
-        Size of the new dimension (default 1)
+        Input tensor.
+    dim : str | Sequence[str] | dict[str, int | Sequence] | None
+        If str or sequence of str, new dimensions with size 1.
+        If dict, keys are dimension names and values are either:
+            - int: the new size
+            - sequence: coordinates (length determines size)
+    create_index_for_new_dim : bool, default: True
+        (Ignored for now) Matches xarray API, reserved for future use.
+    **dim_kwargs : int | Sequence
+        Alternative to `dim` dict. Only used if `dim` is None.
 
     Returns
     -------
     XTensorVariable
-        Tensor with the new dimension inserted
+        A tensor with additional dimensions inserted at the front.
     """
     x = as_xtensor(x)
 
+    # Extract size from dim_kwargs if present
+    size = dim_kwargs.pop("size", 1) if dim_kwargs else 1
+
     if dim is None:
-        return x  # No-op
+        dim = dim_kwargs
+    elif dim_kwargs:
+        raise ValueError("Cannot specify both `dim` and `**dim_kwargs`")
 
-    if not isinstance(dim, str):
-        raise TypeError(f"`dim` must be a string or None, got: {type(dim)}")
+    # Normalize to a dimension-size mapping
+    if isinstance(dim, str):
+        dims_dict = {dim: size}
+    elif isinstance(dim, Sequence) and not isinstance(dim, dict):
+        dims_dict = {d: 1 for d in dim}
+    elif isinstance(dim, dict):
+        dims_dict = {}
+        for name, val in dim.items():
+            if isinstance(val, Sequence | np.ndarray) and not isinstance(val, str):
+                dims_dict[name] = len(val)
+            elif isinstance(val, int):
+                dims_dict[name] = val
+            else:
+                dims_dict[name] = val  # symbolic/int scalar allowed
+    else:
+        raise TypeError(f"Invalid type for `dim`: {type(dim)}")
 
-    if dim in x.type.dims:
-        raise ValueError(f"Dimension {dim} already exists in {x.type.dims}")
+    # Convert to canonical form: list of (dim_name, size)
+    canonical_dims: list[tuple[str, int | np.integer | TensorVariable]] = []
+    for name, size in dims_dict.items():
+        canonical_dims.append((name, size))
 
-    if isinstance(size, int | np.integer):
-        if size <= 0:
-            raise ValueError(f"size must be positive, got: {size}")
-    elif not (
-        hasattr(size, "ndim") and getattr(size, "ndim", None) == 0  # symbolic scalar
-    ):
-        raise TypeError(f"size must be an int or scalar variable, got: {type(size)}")
+    # Insert each new dim at the front (reverse order preserves user intent)
+    for name, size in reversed(canonical_dims):
+        x = ExpandDims(dim=name)(x, size)
 
-    # Always convert size to a PyTensor scalar variable
-    size_var = as_tensor(size, ndim=0)
-    return ExpandDims(dim)(x, size_var)
+    return x
