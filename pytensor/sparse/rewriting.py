@@ -193,7 +193,7 @@ class AddSD_ccode(_NoPythonCOp):
 def local_inplace_addsd_ccode(fgraph, node):
     """Rewrite to insert inplace versions of `AddSD`."""
     if isinstance(node.op, sparse.AddSD) and config.cxx:
-        out_dtype = ps.upcast(*node.inputs)
+        out_dtype = ps.upcast(*[inp.type.dtype for inp in node.inputs])
         if out_dtype != node.inputs[1].dtype:
             return
         new_node = AddSD_ccode(format=node.inputs[0].type.format, inplace=True)(
