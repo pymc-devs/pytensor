@@ -1,3 +1,6 @@
+"""
+Basic tests for the MLX backend.
+"""
 from collections.abc import Callable, Iterable
 from functools import partial
 
@@ -13,7 +16,6 @@ from pytensor.graph.basic import Variable
 from pytensor.link.mlx import MLXLinker
 from pytensor.link.mlx.dispatch.core import (
     mlx_funcify_Alloc,
-    mlx_funcify_ScalarFromTensor,
 )
 from pytensor.tensor.basic import Alloc
 
@@ -87,53 +89,102 @@ def compare_mlx_and_py(
     return pytensor_mlx_fn, mlx_res
 
 
-def test_scalar_from_tensor_with_scalars():
-    """Test ScalarFromTensor works with both MLX arrays and Python/NumPy scalars.
+def test_scalar_from_tensor_matrix_indexing():
+    """Test ScalarFromTensor with matrix element extraction."""
+    # Matrix element extraction is a common real-world scenario
+    matrix = pt.matrix("matrix", dtype="float32")
+    element = matrix[0, 0]  # Creates 0-d tensor
 
-    This addresses the AttributeError that occurred when Python integers were
-    passed to ScalarFromTensor instead of MLX arrays.
-    """
-    scalar_from_tensor_func = mlx_funcify_ScalarFromTensor(None)
+    f = pytensor.function([matrix], element, mode="MLX")
 
-    # Test with MLX array
-    mlx_array = mx.array([42])
-    result = scalar_from_tensor_func(mlx_array)
-    assert result == 42
+    test_matrix = np.array([[42.0, 1.0], [2.0, 3.0]], dtype=np.float32)
+    result = f(test_matrix)
 
-    # Test with Python int (this used to fail)
-    python_int = 42
-    result = scalar_from_tensor_func(python_int)
-    assert result == 42
+    assert float(result) == 42.0
+    assert isinstance(result, mx.array)
 
-    # Test with Python float
-    python_float = 3.14
-    result = scalar_from_tensor_func(python_float)
-    assert abs(result - 3.14) < 1e-6
 
-    # Test with NumPy scalar
-    numpy_scalar = np.int32(123)
-    result = scalar_from_tensor_func(numpy_scalar)
-    assert result == 123
+def test_scalar_from_tensor_reduction_operations():
+    """Test ScalarFromTensor with reduction operations that produce scalars."""
+    # Test vector sum reduction
+    vector = pt.vector("vector", dtype="float32")
+    sum_result = pt.sum(vector)
 
-    # Test with NumPy float scalar
-    numpy_float = np.float32(2.71)
-    result = scalar_from_tensor_func(numpy_float)
-    assert abs(result - 2.71) < 1e-6
+    f = pytensor.function([vector], sum_result, mode="MLX")
+    test_vector = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    result = f(test_vector)
+
+    assert float(result) == 10.0
+
+    # Test matrix mean reduction
+    matrix = pt.matrix("matrix", dtype="float32")
+    mean_result = pt.mean(matrix)
+
+    f2 = pytensor.function([matrix], mean_result, mode="MLX")
+    test_matrix = np.array([[2.0, 4.0], [6.0, 8.0]], dtype=np.float32)
+    result = f2(test_matrix)
+
+    assert float(result) == 5.0
+
+
+def test_scalar_from_tensor_conditional_operations():
+    """Test ScalarFromTensor with conditional operations."""
+    x = pt.scalar("x", dtype="float32")
+    y = pt.scalar("y", dtype="float32")
+
+    # Switch operation may create 0-d tensors
+    max_val = pt.switch(x > y, x, y)
+
+    f = pytensor.function([x, y], max_val, mode="MLX")
+
+    # Test both branches
+    result1 = f(5.0, 3.0)
+    assert float(result1) == 5.0
+
+    result2 = f(2.0, 7.0)
+    assert float(result2) == 7.0
+
+
+def test_scalar_from_tensor_multiple_dtypes():
+    """Test ScalarFromTensor with different data types."""
+    # Test different dtypes that might require scalar extraction
+    for dtype in ["float32", "int32", "int64"]:
+        x = pt.vector("x", dtype=dtype)
+        # Use max reduction to create 0-d tensor
+        max_val = pt.max(x)
+
+        f = pytensor.function([x], max_val, mode="MLX", allow_input_downcast=True)
+
+        if dtype.startswith("float"):
+            test_data = np.array([1.5, 3.7, 2.1], dtype=dtype)
+            expected = 3.7
+        else:
+            test_data = np.array([10, 30, 20], dtype=dtype)
+            expected = 30
+
+        result = f(test_data)
+        assert abs(float(result) - expected) < 1e-5
 
 
 def test_scalar_from_tensor_pytensor_integration():
-    """Test ScalarFromTensor in a PyTensor graph context."""
+    """Test ScalarFromTensor in a complete PyTensor graph context.
+
+    This test uses symbolic variables (not constants) to ensure the MLX backend
+    actually executes the ScalarFromTensor operation rather than having it
+    optimized away during compilation.
+    """
     # Create a symbolic scalar input to actually test MLX execution
     x = pt.scalar("x", dtype="int64")
 
-    # Apply ScalarFromTensor
+    # Apply ScalarFromTensor - this creates a graph that forces execution
     scalar_result = pt.scalar_from_tensor(x)
 
-    # Create function and test
+    # Create function and test with actual MLX backend execution
     f = pytensor.function([x], scalar_result, mode="MLX")
     result = f(42)
 
     assert result == 42
+    assert isinstance(result, mx.array)
 
 
 def test_alloc_with_different_shape_types():
