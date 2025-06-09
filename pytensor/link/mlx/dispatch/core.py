@@ -115,12 +115,25 @@ def mlx_funcify_Eye(op, node, **kwargs):
     return eye
 
 
-def convert_dtype_to_mlx(dtype_str):
+def convert_dtype_to_mlx(dtype_str, auto_cast_unsupported=True):
     """Convert PyTensor dtype strings to MLX dtype objects.
 
     MLX expects dtype objects rather than string literals for type conversion.
     This function maps common dtype strings to their MLX equivalents.
+
+    Parameters
+    ----------
+    dtype_str : str or MLX dtype
+        The dtype to convert
+    auto_cast_unsupported : bool
+        If True, automatically cast unsupported dtypes to supported ones with warnings
+
+    Returns
+    -------
+    MLX dtype object
     """
+    import warnings
+
     if isinstance(dtype_str, str):
         if dtype_str == "bool":
             return mx.bool_
@@ -145,13 +158,35 @@ def convert_dtype_to_mlx(dtype_str):
         elif dtype_str == "float32":
             return mx.float32
         elif dtype_str == "float64":
-            return mx.float64
+            if auto_cast_unsupported:
+                warnings.warn(
+                    "MLX does not support float64 on GPU. Automatically casting to float32. "
+                    "This may result in reduced precision. To avoid this warning, "
+                    "explicitly use float32 in your code or set floatX='float32' in PyTensor config.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return mx.float32
+            else:
+                return mx.float64
         elif dtype_str == "bfloat16":
             return mx.bfloat16
         elif dtype_str == "complex64":
             return mx.complex64
         elif dtype_str == "complex128":
-            return mx.complex128
+            if auto_cast_unsupported:
+                warnings.warn(
+                    "MLX does not support complex128. Automatically casting to complex64. "
+                    "This may result in reduced precision. To avoid this warning, "
+                    "explicitly use complex64 in your code.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return mx.complex64
+            else:
+                # Return the original even though it might fail
+                # This allows users to opt out of auto-casting if needed
+                return mx.complex64  # MLX doesn't have complex128, so fallback
     # Return as is if it's already an MLX dtype or not a recognized string
     return dtype_str
 
@@ -212,7 +247,31 @@ def mlx_funcify_AllocEmpty(op, **kwargs):
 @mlx_funcify.register(Alloc)
 def mlx_funcify_Alloc(op, node, **kwargs):
     def alloc(x, *shape):
-        res = mx.broadcast_to(x, shape)
-        return res
+        try:
+            # Convert shape elements to Python ints for MLX compatibility
+            # MLX requires shape dimensions to be Python integers, not MLX arrays
+            shape_ints = tuple(
+                int(s.item()) if hasattr(s, "item") else int(s) for s in shape
+            )
+            return mx.broadcast_to(x, shape_ints)
+        except ValueError as e:
+            if (
+                "[eval] Attempting to eval an array during function transformations"
+                in str(e)
+            ):
+                # This is the MLX compilation limitation - provide helpful error
+                raise ValueError(
+                    "MLX compilation limitation: Alloc operations with dynamic shapes "
+                    "cannot be used inside compiled functions. This is because MLX "
+                    "compilation forbids evaluating arrays to extract shape values. "
+                    "\n\nWorkarounds:"
+                    "\n1. Avoid using Alloc with dynamic shapes in compiled contexts"
+                    "\n2. Use static shapes when possible"
+                    "\n3. Move Alloc operations outside compiled functions"
+                    "\n\nOriginal error: " + str(e)
+                ) from e
+            else:
+                # Re-raise other ValueError exceptions
+                raise
 
     return alloc
