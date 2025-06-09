@@ -212,7 +212,17 @@ def mlx_funcify_TensorFromScalar(op, **kwargs):
 @mlx_funcify.register(ScalarFromTensor)
 def mlx_funcify_ScalarFromTensor(op, **kwargs):
     def scalar_from_tensor(x):
-        return mx.array(x).reshape(-1)[0]
+        arr = mx.array(x)
+        try:
+            # Try .item() first (cleaner and faster when possible)
+            return arr.item()
+        except ValueError as e:
+            if "eval" in str(e):
+                # Fall back to reshape approach for compiled contexts
+                return arr.reshape(-1)[0]
+            else:
+                # Re-raise if it's a different error
+                raise
 
     return scalar_from_tensor
 
