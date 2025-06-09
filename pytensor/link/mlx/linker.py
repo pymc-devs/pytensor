@@ -4,9 +4,10 @@ from pytensor.link.basic import JITLinker
 class MLXLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using Apple's MLX."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, use_compile=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.gen_functors = []
+        self.use_compile = use_compile
 
     def fgraph_convert(self, fgraph, **kwargs):
         """Convert a PyTensor FunctionGraph to an MLX-compatible function.
@@ -32,6 +33,13 @@ class MLXLinker(JITLinker):
         import mlx.core as mx
 
         from pytensor.link.mlx.dispatch import mlx_typify
+
+        if not self.use_compile:
+            # Skip compilation and just return the function with MLX typification
+            def fn_no_compile(*inputs):
+                return fn(*(mlx_typify(inp) for inp in inputs))
+
+            return fn_no_compile
 
         inner_fn = mx.compile(fn)
 

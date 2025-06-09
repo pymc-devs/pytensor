@@ -303,7 +303,26 @@ def _(scalar_op):
 def _(scalar_op):
     def cast(x):
         dtype = convert_dtype_to_mlx(scalar_op.o_type.dtype)
-        return x.astype(dtype)
+        try:
+            return x.astype(dtype)
+        except ValueError as e:
+            if "is not supported on the GPU" in str(e):
+                # MLX GPU limitation - try auto-casting with warning
+                import warnings
+
+                warnings.warn(
+                    f"MLX GPU limitation: {e}. Attempting automatic fallback casting.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                # Get the auto-cast version
+                fallback_dtype = convert_dtype_to_mlx(
+                    scalar_op.o_type.dtype, auto_cast_unsupported=True
+                )
+                return x.astype(fallback_dtype)
+            else:
+                # Re-raise other ValueError exceptions
+                raise
 
     return cast
 
