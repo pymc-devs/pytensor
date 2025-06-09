@@ -142,7 +142,7 @@ def test_root_system_of_equations():
 
     f = pt.stack([a[0] * x[0] * pt.cos(x[1]) - b[0], x[0] * x[1] - a[1] * x[1] - b[1]])
 
-    root_f, success = root(f, x, debug=True)
+    root_f, success = root(f, x)
     func = pytensor.function([x, a, b], [root_f, success])
 
     x0 = np.array([1.0, 1.0])

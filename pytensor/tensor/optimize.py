@@ -39,10 +39,11 @@ class LRUCache1:
     expensive functions.
     """
 
-    def __init__(self, fn):
+    def __init__(self, fn, copy_x: bool = False):
         self.fn = fn
         self.last_x = None
         self.last_result = None
+        self.copy_x = copy_x
 
         self.cache_hits = 0
         self.cache_misses = 0
@@ -59,9 +60,17 @@ class LRUCache1:
         If the input `x` is the same as the last input, return the cached result. Otherwise update the cache with the
         new input and result.
         """
+        # scipy.optimize.scalar_minimize and scalar_root don't take initial values as an argument, so we can't control
+        # the first input to the inner function. Of course, they use a scalar, but we need a 0d numpy array.
+        x = np.asarray(x)
 
         if self.last_result is None or not (x == self.last_x).all():
             self.cache_misses += 1
+
+            # scipy.optimize.root changes x in place, so the cache has to copy it, otherwise we get false
+            # cache hits and optimization always fails.
+            if self.copy_x:
+                x = x.copy()
             self.last_x = x
 
             result = self.fn(x, *args)
@@ -449,6 +458,9 @@ class RootOp(ScipyWrapperOp):
 
     def perform(self, node, inputs, outputs):
         f = self.fn_wrapped
+        f.clear_cache()
+        f.copy_x = True
+
         variables, *args = inputs
 
         res = scipy_root(
@@ -460,8 +472,8 @@ class RootOp(ScipyWrapperOp):
             **self.optimizer_kwargs,
         )
 
-        outputs[0][0] = res.x
-        outputs[1][0] = res.success
+        outputs[0][0] = res.x.reshape(variables.shape)
+        outputs[1][0] = np.bool_(res.success)
 
     def L_op(
         self,
@@ -469,22 +481,44 @@ class RootOp(ScipyWrapperOp):
         outputs: Sequence[Variable],
         output_grads: Sequence[Variable],
     ) -> list[Variable]:
-        # TODO: Broken
         x, *args = inputs
-        x_star, success = outputs
+        x_star, _ = outputs
         output_grad, _ = output_grads
 
         inner_x, *inner_args = self.fgraph.inputs
         inner_fx = self.fgraph.outputs[0]
 
-        inner_jac = jacobian(inner_fx, [inner_x, *inner_args])
+        df_dx = jacobian(inner_fx, inner_x) if not self.jac else self.fgraph.outputs[1]
+
+        df_dtheta = concatenate(
+            [
+                atleast_2d(jac_column, left=False)
+                for jac_column in jacobian(
+                    inner_fx, inner_args, disconnected_inputs="ignore"
+                )
+            ],
+            axis=-1,
+        )
 
         replace = dict(zip(self.fgraph.inputs, (x_star, *args), strict=True))
-        jac_f_wrt_x_star, *jac_f_wrt_args = graph_replace(inner_jac, replace=replace)
+        df_dx_star, df_dtheta_star = graph_replace([df_dx, df_dtheta], replace=replace)
 
-        jac_wrt_args = solve(-jac_f_wrt_x_star, output_grad)
+        grad_wrt_args_vector = solve(-df_dx_star, df_dtheta_star)
 
-        return [zeros_like(x), jac_wrt_args]
+        cursor = 0
+        grad_wrt_args = []
+
+        for arg in args:
+            arg_shape = arg.shape
+            arg_size = arg_shape.prod()
+            arg_grad = grad_wrt_args_vector[:, cursor : cursor + arg_size].reshape(
+                (*x_star.shape, *arg_shape)
+            )
+
+            grad_wrt_args.append(dot(output_grad, arg_grad))
+            cursor += arg_size
+
+        return [zeros_like(x), *grad_wrt_args]
 
 
 def root(
