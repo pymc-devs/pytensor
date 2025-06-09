@@ -14,8 +14,8 @@ def test_input(op) -> None:
     compare_mlx_and_py([x], out, [x_test])
 
 
-def test_new_elemwise_operations() -> None:
-    """Test new elemwise operations (IntDiv, IsNan, Erfc, Erfcx, Softplus) in elemwise context"""
+def test_elemwise_operations() -> None:
+    """Test elemwise operations (IntDiv, IsNan, Erfc, Erfcx, Softplus) in elemwise context"""
     x = pt.vector("x")
     y = pt.vector("y")
 
