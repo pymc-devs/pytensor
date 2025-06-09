@@ -42,7 +42,7 @@ from pytensor.tensor.math import Dot
 
 
 @mlx_funcify.register(Dot)
-def mlx_funcify_Dot(op, **kwargs):
+def mlx_funcify_Dot(op, node=None, **kwargs):
     def dot(x, y):
         return mx.matmul(x, y)
 

@@ -89,10 +89,18 @@ def funcify_Blockwise(op: Blockwise, node, **kwargs):
     # 4) Build in_axes: map only the first n_batch args, keep the rest static
     in_axes = tuple(0 if i < n_batch else None for i in range(len(node.inputs)))
 
-    # 5) Vectorize (vmap) with in_axes
+    # 5) Handle case where no vectorization is needed
+    if n_batch == 0 or all(axis is None for axis in in_axes):
+        # No batch dimensions, just return the core function
+        def blockwise_fun(*inputs):
+            return core_f(*inputs)
+
+        return blockwise_fun
+
+    # 6) Vectorize (vmap) with in_axes
     blockwise_f = mx.vmap(core_f, in_axes=in_axes)
 
-    # 6) Return the mapped function
+    # 7) Return the mapped function
     def blockwise_fun(*inputs):
         return blockwise_f(*inputs)
 
