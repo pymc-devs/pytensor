@@ -274,6 +274,7 @@ def mlx_funcify_Alloc(op, node, **kwargs):
                     "MLX compilation limitation: Alloc operations with dynamic shapes "
                     "cannot be used inside compiled functions. This is because MLX "
                     "compilation forbids evaluating arrays to extract shape values. "
+                    # Just a note! TODO: remove this once we have a better solution
                     "\n\nWorkarounds:"
                     "\n1. Avoid using Alloc with dynamic shapes in compiled contexts"
                     "\n2. Use static shapes when possible"
