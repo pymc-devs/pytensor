@@ -4,7 +4,7 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import config, function
-from pytensor.tensor.optimize import minimize, minimize_scalar, root
+from pytensor.tensor.optimize import minimize, minimize_scalar, root, root_scalar
 from tests import unittest_tools as utt
 
 
@@ -108,6 +108,35 @@ def test_minimize_vector_x(method, jac, hess):
         return out
 
     utt.verify_grad(f, [x0, a_val, b_val], eps=1e-6)
+
+
+@pytest.mark.parametrize(
+    "method, jac, hess",
+    [("secant", False, False), ("newton", True, False), ("halley", True, True)],
+)
+def test_root_scalar(method, jac, hess):
+    x = pt.scalar("x")
+    a = pt.scalar("a")
+
+    def fn(x, a):
+        return x + 2 * a * pt.cos(x)
+
+    f = fn(x, a)
+    root_f, success = root_scalar(f, x, method=method, jac=jac, hess=hess)
+    func = pytensor.function([x, a], [root_f, success])
+
+    x0 = 0.0
+    a_val = 1.0
+    solution, success = func(x0, a_val)
+
+    assert success
+    np.testing.assert_allclose(solution, -1.02986653, atol=1e-6, rtol=1e-6)
+
+    def root_fn(x, a):
+        f = fn(x, a)
+        return root_scalar(f, x, method=method, jac=jac, hess=hess)[0]
+
+    utt.verify_grad(root_fn, [x0, a_val], eps=1e-6)
 
 
 def test_root_simple():

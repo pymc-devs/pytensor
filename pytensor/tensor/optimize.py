@@ -7,6 +7,7 @@ import numpy as np
 from scipy.optimize import minimize as scipy_minimize
 from scipy.optimize import minimize_scalar as scipy_minimize_scalar
 from scipy.optimize import root as scipy_root
+from scipy.optimize import root_scalar as scipy_root_scalar
 
 from pytensor import Variable, function, graph_replace
 from pytensor.gradient import grad, hessian, jacobian
@@ -529,8 +530,111 @@ def minimize(
     return minimize_op(x, *args)
 
 
+class RootScalarOp(ScipyWrapperOp):
+    __props__ = ("method", "jac", "hess")
+
+    def __init__(
+        self,
+        variables,
+        *args,
+        equation,
+        method,
+        jac: bool = False,
+        hess: bool = False,
+        optimizer_kwargs=None,
+    ):
+        self.fgraph = FunctionGraph([variables, *args], [equation])
+
+        if jac:
+            f_prime = grad(self.fgraph.outputs[0], self.fgraph.inputs[0])
+            self.fgraph.add_output(f_prime)
+
+        if hess:
+            if not jac:
+                raise ValueError(
+                    "Cannot set `hess=True` without `jac=True`. No methods use second derivatives without also"
+                    " using first derivatives."
+                )
+            f_double_prime = grad(self.fgraph.outputs[-1], self.fgraph.inputs[0])
+            self.fgraph.add_output(f_double_prime)
+
+        self.method = method
+        self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
+        self.jac = jac
+        self.hess = hess
+
+        self._fn = None
+        self._fn_wrapped = None
+
+    def perform(self, node, inputs, outputs):
+        f = self.fn_wrapped
+        f.clear_cache()
+        # f.copy_x = True
+
+        variables, *args = inputs
+
+        res = scipy_root_scalar(
+            f=f.value,
+            fprime=f.grad if self.jac else None,
+            fprime2=f.hess if self.hess else None,
+            x0=variables,
+            args=tuple(args),
+            method=self.method,
+            **self.optimizer_kwargs,
+        )
+
+        outputs[0][0] = np.array(res.root)
+        outputs[1][0] = np.bool_(res.converged)
+
+    def L_op(self, inputs, outputs, output_grads):
+        x, *args = inputs
+        x_star, _ = outputs
+        output_grad, _ = output_grads
+
+        inner_x, *inner_args = self.fgraph.inputs
+        inner_fx = self.fgraph.outputs[0]
+
+        grad_wrt_args = scalar_implict_optimization_grads(
+            inner_fx=inner_fx,
+            inner_x=inner_x,
+            inner_args=inner_args,
+            args=args,
+            x_star=x_star,
+            output_grad=output_grad,
+            fgraph=self.fgraph,
+        )
+
+        return [zeros_like(x), *grad_wrt_args]
+
+
+def root_scalar(
+    equation: TensorVariable,
+    variables: TensorVariable,
+    method: str = "secant",
+    jac: bool = False,
+    hess: bool = False,
+    optimizer_kwargs: dict | None = None,
+):
+    """
+    Find roots of a scalar equation using scipy.optimize.root_scalar.
+    """
+    args = _find_optimization_parameters(equation, variables)
+
+    root_scalar_op = RootScalarOp(
+        variables,
+        *args,
+        equation=equation,
+        method=method,
+        jac=jac,
+        hess=hess,
+        optimizer_kwargs=optimizer_kwargs,
+    )
+
+    return root_scalar_op(variables, *args)
+
+
 class RootOp(ScipyWrapperOp):
-    __props__ = ("method", "jac", "optimizer_kwargs")
+    __props__ = ("method", "jac")
 
     def __init__(
         self,
@@ -616,4 +720,4 @@ def root(
     return root_op(variables, *args)
 
 
-__all__ = ["minimize", "root"]
+__all__ = ["minimize_scalar", "minimize", "root_scalar", "root"]
