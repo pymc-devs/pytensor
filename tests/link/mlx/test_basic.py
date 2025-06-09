@@ -123,15 +123,15 @@ def test_scalar_from_tensor_with_scalars():
 
 def test_scalar_from_tensor_pytensor_integration():
     """Test ScalarFromTensor in a PyTensor graph context."""
-    # Create a 0-d tensor (scalar tensor)
-    x = pt.as_tensor_variable(42)
+    # Create a symbolic scalar input to actually test MLX execution
+    x = pt.scalar("x", dtype="int64")
 
     # Apply ScalarFromTensor
     scalar_result = pt.scalar_from_tensor(x)
 
     # Create function and test
-    f = pytensor.function([], scalar_result, mode="MLX")
-    result = f()
+    f = pytensor.function([x], scalar_result, mode="MLX")
+    result = f(42)
 
     assert result == 42
 
