@@ -503,7 +503,7 @@ class MinimizeOp(ScipyWrapperOp):
 
         f.clear_cache()
 
-        outputs[0][0] = res.x.astype(x0.dtype)
+        outputs[0][0] = res.x.reshape(x0.shape).astype(x0.dtype)
         outputs[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
