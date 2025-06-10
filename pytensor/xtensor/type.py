@@ -697,7 +697,7 @@ XTensorType.constant_type = XTensorConstant  # type: ignore
 
 def xtensor_constant(x, name=None, dims: None | Sequence[str] = None):
     x_dims: tuple[str, ...]
-    if isinstance(x, xr.DataArray):
+    if XARRAY_AVAILABLE and isinstance(x, xr.DataArray):
         xarray_dims = x.dims
         if not all(isinstance(dim, str) for dim in xarray_dims):
             raise NotImplementedError(
