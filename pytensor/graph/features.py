@@ -532,11 +532,12 @@ class FullHistory(Feature):
 
     """
 
-    def __init__(self):
+    def __init__(self, callback=None):
         self.fw = []
         self.bw = []
         self.pointer = -1
         self.fg = None
+        self.callback = callback
 
     def on_attach(self, fgraph):
         if self.fg is not None:
@@ -547,6 +548,8 @@ class FullHistory(Feature):
         self.bw.append(LambdaExtract(fgraph, node, i, r, reason))
         self.fw.append(LambdaExtract(fgraph, node, i, new_r, reason))
         self.pointer += 1
+        if self.callback:
+            self.callback()
 
     def goto(self, checkpoint):
         """
