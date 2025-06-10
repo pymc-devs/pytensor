@@ -1,6 +1,7 @@
 """
 Basic tests for the MLX backend.
 """
+import pytest
 
 from collections.abc import Callable, Iterable
 from functools import partial
@@ -224,12 +225,7 @@ def test_alloc_pytensor_integration():
     x = pt.scalar("x", dtype="float32")
     result = pt.alloc(x, 3, 4)
 
-    # Use MLX mode
-    from pytensor.compile import mode
-
-    mlx_mode = mode.get_mode("MLX")
-
-    f = pytensor.function([x], result, mode=mlx_mode)
+    f = pytensor.function([x], result, mode="MLX")
     output = f(5.0)
 
     assert output.shape == (3, 4)
@@ -238,7 +234,6 @@ def test_alloc_pytensor_integration():
 
 def test_alloc_compilation_limitation():
     """Test that Alloc operations with dynamic shapes provide helpful error in compiled contexts."""
-    import pytest
 
     # Create variables
     x = pt.scalar("x", dtype="float32")

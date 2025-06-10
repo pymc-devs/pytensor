@@ -212,17 +212,8 @@ def mlx_funcify_TensorFromScalar(op, **kwargs):
 @mlx_funcify.register(ScalarFromTensor)
 def mlx_funcify_ScalarFromTensor(op, **kwargs):
     def scalar_from_tensor(x):
-        arr = mx.array(x)
-        try:
-            # Try .item() first (cleaner and faster when possible)
-            return arr.item()
-        except ValueError as e:
-            if "eval" in str(e):
-                # Fall back to reshape approach for compiled contexts
-                return arr.reshape(-1)[0]
-            else:
-                # Re-raise if it's a different error
-                raise
+        "We can't not return a scalar in MLX without trigger evaluation"
+        return x
 
     return scalar_from_tensor
 
