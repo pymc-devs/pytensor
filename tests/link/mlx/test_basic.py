@@ -1,13 +1,13 @@
 """
 Basic tests for the MLX backend.
 """
-import pytest
 
 from collections.abc import Callable, Iterable
 from functools import partial
 
 import mlx.core as mx
 import numpy as np
+import pytest
 
 import pytensor
 from pytensor import tensor as pt
