@@ -85,7 +85,10 @@ def dot_banded_impl(
             ALPHA.view(w_type).ctypes,
             A_banded.view(w_type).ctypes,
             LDA,
-            x.view(w_type).ctypes,
+            # x.view().ctypes is creating a pointer to the beginning of the memory where the array is. When we have
+            # a negative stride, we need to trick BLAS by pointing to the last element of the array.
+            # The [-1:] slice is a workaround to make sure x remains an array (otherwise it has no .ctypes)
+            (x if stride >= 0 else x[-1:]).view(w_type).ctypes,
             INCX,
             BETA.view(w_type).ctypes,
             Y.view(w_type).ctypes,
