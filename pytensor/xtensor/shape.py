@@ -6,6 +6,7 @@ from typing import Literal
 import numpy as np
 
 from pytensor.graph import Apply
+from pytensor.graph.basic import Constant
 from pytensor.scalar import discrete_dtypes, upcast
 from pytensor.tensor import as_tensor, get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -391,42 +392,46 @@ class ExpandDims(XOp):
     __props__ = ("dim",)
 
     def __init__(self, dim):
+        if not isinstance(dim, str):
+            raise TypeError(f"`dim` must be a string, got: {type(self.dim)}")
+
         self.dim = dim
 
     def make_node(self, x, size):
         x = as_xtensor(x)
 
-        if not isinstance(self.dim, str):
-            raise TypeError(f"`dim` must be a string or None, got: {type(self.dim)}")
-
         if self.dim in x.type.dims:
             raise ValueError(f"Dimension {self.dim} already exists in {x.type.dims}")
-        if isinstance(size, int | np.integer):
-            if size <= 0:
-                raise ValueError(f"size must be positive, got: {size}")
-        elif not (
-            hasattr(size, "ndim")
-            and getattr(size, "ndim", None) == 0  # symbolic scalar
+
+        # Check if size is a valid type before converting
+        if not (
+            isinstance(size, int | np.integer)
+            or (hasattr(size, "ndim") and getattr(size, "ndim", None) == 0)
         ):
             raise TypeError(
                 f"size must be an int or scalar variable, got: {type(size)}"
             )
-
-        # Convert size to tensor
-        size = as_tensor(size, ndim=0)
-
-        # Insert new dim at front
-        new_dims = (self.dim, *x.type.dims)
 
         # Determine shape
         try:
             static_size = get_scalar_constant_value(size)
         except NotScalarConstantError:
             static_size = None
+
         if static_size is not None:
             new_shape = (int(static_size), *x.type.shape)
         else:
             new_shape = (None, *x.type.shape)  # symbolic size
+
+        # Convert size to tensor
+        size = as_xtensor(size, dims=())
+
+        # Check if size is a constant and validate it
+        if isinstance(size, Constant) and size.data < 0:
+            raise ValueError(f"size must be 0 or positive, got: {size.data}")
+
+        # Insert new dim at front
+        new_dims = (self.dim, *x.type.dims)
 
         out = xtensor(
             dtype=x.type.dtype,

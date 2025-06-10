@@ -1,16 +1,11 @@
 from pytensor.graph import node_rewriter
-from pytensor.raise_op import Assert
 from pytensor.tensor import (
     broadcast_to,
-    get_scalar_constant_value,
-    gt,
+    expand_dims,
     join,
     moveaxis,
     specify_shape,
     squeeze,
-)
-from pytensor.tensor import (
-    shape as tensor_shape,
 )
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_lower_xtensor
@@ -144,27 +139,30 @@ def local_squeeze_reshape(fgraph, node):
 @register_lower_xtensor
 @node_rewriter([ExpandDims])
 def local_expand_dims_reshape(fgraph, node):
-    """Rewrite ExpandDims to tensor.expand_dims and optionally broadcast_to or specify shape."""
+    """Rewrite ExpandDims using tensor operations."""
     x, size = node.inputs
     out = node.outputs[0]
-    # Lower to tensor.expand_dims(x, axis=0)
-    from pytensor.tensor import expand_dims as tensor_expand_dims
 
-    expanded = tensor_expand_dims(tensor_from_xtensor(x), 0)
-    # Optionally broadcast to the correct shape if size is not 1
-    from pytensor.tensor import broadcast_to
+    # Convert inputs to tensors
+    x_tensor = tensor_from_xtensor(x)
+    size_tensor = tensor_from_xtensor(size)
 
-    # Ensure size is positive
-    expanded = Assert(msg="size must be positive")(expanded, gt(size, 0))
-    # If size is not 1, broadcast
-    try:
-        static_size = get_scalar_constant_value(size)
-    except Exception:
-        static_size = None
-    if static_size is not None and static_size == 1:
-        result = expanded
+    # Get the new dimension name and position
+    new_axis = 0  # Always insert at front
+
+    # Use tensor operations
+    if out.type.shape[0] == 1:
+        # Simple case: just expand with size 1
+        result_tensor = expand_dims(x_tensor, new_axis)
     else:
-        # Broadcast to (size, ...)
-        new_shape = (size,) + tuple(tensor_shape(expanded))[1:]
-        result = broadcast_to(expanded, new_shape)
-    return [xtensor_from_tensor(result, out.type.dims)]
+        # First expand with size 1
+        expanded = expand_dims(x_tensor, new_axis)
+        # Then broadcast to the requested size
+        result_tensor = broadcast_to(expanded, (size_tensor, *x_tensor.shape))
+
+    # Preserve static shape information
+    result_tensor = specify_shape(result_tensor, out.type.shape)
+
+    # Convert result back to xtensor
+    result = xtensor_from_tensor(result_tensor, dims=out.type.dims)
+    return [result]

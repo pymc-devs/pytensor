@@ -540,10 +540,6 @@ def test_expand_dims_errors():
     with pytest.raises(ValueError, match="already exists"):
         expand_dims(y, "city")
 
-    # Size = 0 is invalid
-    with pytest.raises(ValueError, match="size must be.*positive"):
-        expand_dims(x, "batch", size=0)
-
     # Invalid dim type
     with pytest.raises(TypeError, match="Invalid type for `dim`"):
         expand_dims(x, 123)
@@ -556,13 +552,6 @@ def test_expand_dims_errors():
     y = expand_dims(x, "new")
     with pytest.raises(ValueError, match="already exists"):
         expand_dims(y, "new")
-
-    # Symbolic size with invalid runtime value
-    size_sym = scalar("size_sym", dtype="int64")
-    y = expand_dims(x, "batch", size=size_sym)
-    fn = xr_function([x, size_sym], y, on_unused_input="ignore")
-    with pytest.raises(Exception):
-        fn(xr_arange_like(x), 0)
 
 
 def test_expand_dims_multiple():
