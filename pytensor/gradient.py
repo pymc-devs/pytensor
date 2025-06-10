@@ -624,8 +624,7 @@ def grad(
 
     if cost is not None and isinstance(cost.type, NullType):
         raise ValueError(
-            "Can't differentiate a NaN cost. "
-            f"Cost is NaN because {cost.type.why_null}"
+            f"Can't differentiate a NaN cost. Cost is NaN because {cost.type.why_null}"
         )
 
     if cost is not None and cost.type.ndim != 0:
@@ -2181,9 +2180,9 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
             sequences=pytensor.tensor.arange(expr.shape[0]),
             non_sequences=[expr, input],
         )
-        assert (
-            not updates
-        ), "Scan has returned a list of updates; this should not happen."
+        assert not updates, (
+            "Scan has returned a list of updates; this should not happen."
+        )
         hessians.append(hess)
     return as_list_or_tuple(using_list, using_tuple, hessians)
 

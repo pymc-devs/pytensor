@@ -515,13 +515,10 @@ class ProfileStats:
             # that it is way more readable than the previous output of the
             # profiler
         print(
-            "   ... (remaining %i Classes account for %6.2f%%(%.2fs) of "
-            "the runtime)"
-            % (
-                max(0, len(otimes) - N),
-                sum(f for f, t, a, ci, nb_call, nb_op in otimes[N:]),
-                sum(t for f, t, a, ci, nb_call, nb_op in otimes[N:]),
-            ),
+            f"   ... (remaining {max(0, len(otimes) - N)} Classes account for "
+            f"{sum(f for f, t, a, ci, nb_call, nb_op in otimes[N:]):6.2f}%"
+            f"({sum(t for f, t, a, ci, nb_call, nb_op in otimes[N:]):.2f}s) of "
+            "the runtime)",
             file=file,
         )
         print("", file=file)
@@ -608,13 +605,10 @@ class ProfileStats:
             # that it is way more readable than the previous output of the
             # profiler
         print(
-            "   ... (remaining %i Ops account for %6.2f%%(%.2fs) of "
-            "the runtime)"
-            % (
-                max(0, len(otimes) - N),
-                sum(f for f, t, a, ci, nb_call, nb_op in otimes[N:]),
-                sum(t for f, t, a, ci, nb_call, nb_op in otimes[N:]),
-            ),
+            f"   ... (remaining {max(0, len(otimes) - N)} Ops account for "
+            f"{sum(f for f, t, a, ci, nb_call, nb_op in otimes[N:]):6.2f}%"
+            f"({sum(t for f, t, a, ci, nb_call, nb_op in otimes[N:]):.2f}s) of "
+            "the runtime)",
             file=file,
         )
         print("", file=file)
@@ -935,18 +929,14 @@ class ProfileStats:
                     if dmap and idx2 in dmap:
                         vidx = dmap[idx2]
                         assert len(vidx) == 1, (
-                            "Here we only support the "
-                            "possibility to destroy one "
-                            "input"
+                            "Here we only support the possibility to destroy one input"
                         )
                         ins = node.inputs[vidx[0]]
                     if vmap and idx2 in vmap:
                         assert ins is None
                         vidx = vmap[idx2]
                         assert len(vidx) == 1, (
-                            "Here we only support the "
-                            "possibility to view one "
-                            "input"
+                            "Here we only support the possibility to view one input"
                         )
                         ins = node.inputs[vidx[0]]
                     if ins is not None:
@@ -1093,9 +1083,7 @@ class ProfileStats:
                             assert ins is None
                             vidx = vmap[idx]
                             assert len(vidx) == 1, (
-                                "Here we only support "
-                                "the possibility to "
-                                "view one input"
+                                "Here we only support the possibility to view one input"
                             )
                             ins = node.inputs[vidx[0]]
                         if ins is not None:
@@ -1304,22 +1292,22 @@ class ProfileStats:
 
             print(
                 (
-                    f"        CPU: {int(round(new_max_running_max_memory_size[1] / 1024.0))}KB "
-                    f"({int(round(max_running_max_memory_size[1] / 1024.0))}KB)"
+                    f"        CPU: {round(new_max_running_max_memory_size[1] / 1024.0)}KB "
+                    f"({round(max_running_max_memory_size[1] / 1024.0)}KB)"
                 ),
                 file=file,
             )
             print(
                 (
-                    f"        GPU: {int(round(new_max_running_max_memory_size[2] / 1024.0))}KB "
-                    f"({int(round(max_running_max_memory_size[2] / 1024.0))}KB)"
+                    f"        GPU: {round(new_max_running_max_memory_size[2] / 1024.0)}KB "
+                    f"({round(max_running_max_memory_size[2] / 1024.0)}KB)"
                 ),
                 file=file,
             )
             print(
                 (
-                    f"        CPU + GPU: {int(round(new_max_running_max_memory_size[0] / 1024.0))}KB "
-                    f"({int(round(max_running_max_memory_size[0] / 1024.0))}KB)"
+                    f"        CPU + GPU: {round(new_max_running_max_memory_size[0] / 1024.0)}KB "
+                    f"({round(max_running_max_memory_size[0] / 1024.0)}KB)"
                 ),
                 file=file,
             )
@@ -1340,15 +1328,15 @@ class ProfileStats:
             file=file,
         )
         print(
-            f"        CPU: {int(round(new_max_node_memory_size[1] / 1024.0))}KB",
+            f"        CPU: {round(new_max_node_memory_size[1] / 1024.0)}KB",
             file=file,
         )
         print(
-            f"        GPU: {int(round(new_max_node_memory_size[2] / 1024.0))}KB",
+            f"        GPU: {round(new_max_node_memory_size[2] / 1024.0)}KB",
             file=file,
         )
         print(
-            f"        CPU + GPU: {int(round(new_max_node_memory_size[0] / 1024.0))}KB",
+            f"        CPU + GPU: {round(new_max_node_memory_size[0] / 1024.0)}KB",
             file=file,
         )
         print("---", file=file)
@@ -1356,7 +1344,7 @@ class ProfileStats:
         if min_max_peak:
             print(
                 "    Minimum peak from all valid apply node order is "
-                f"{int(round(min_max_peak / 1024.0))}KB(took {min_peak_time:3f}s to compute)",
+                f"{round(min_max_peak / 1024.0)}KB(took {min_peak_time:3f}s to compute)",
                 file=file,
             )
 
@@ -1405,7 +1393,7 @@ class ProfileStats:
         print(
             (
                 f"   ... (remaining {max(0, len(node_mem) - N)} Apply account for "
-                f"{sum_remaining:4d}B/{size_sum_dense :d}B ({p}) of the"
+                f"{sum_remaining:4d}B/{size_sum_dense:d}B ({p}) of the"
                 " Apply with dense outputs sizes)"
             ),
             file=file,
@@ -1545,8 +1533,7 @@ class ProfileStats:
                         return True
                     elif s_op.__class__ not in scalar_op_amdlibm_no_speed_up:
                         print(
-                            "We don't know if amdlibm will accelerate "
-                            "this scalar op.",
+                            "We don't know if amdlibm will accelerate this scalar op.",
                             s_op,
                             file=file,
                         )

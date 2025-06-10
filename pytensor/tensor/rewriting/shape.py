@@ -447,8 +447,7 @@ class ShapeFeature(Feature):
         assert all(
             (
                 not hasattr(r.type, "shape")
-                or r.type.shape[i] != 1
-                and other_r.type.shape[i] != 1
+                or (r.type.shape[i] != 1 and other_r.type.shape[i] != 1)
             )
             or self.lscalar_one.equals(merged_shape[i])
             or self.lscalar_one.equals(

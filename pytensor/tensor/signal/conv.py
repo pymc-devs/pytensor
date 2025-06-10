@@ -110,7 +110,7 @@ class Convolve1d(COp):
 
             if (PyArray_NDIM({in1}) != 1 || PyArray_NDIM({in2}) != 1) {{
                 PyErr_SetString(PyExc_ValueError, "Convolve1d C code expects 1D arrays.");
-                {sub['fail']};
+                {sub["fail"]};
             }}
 
             npy_intp n_in2 = PyArray_DIM({in2}, 0);
@@ -118,7 +118,7 @@ class Convolve1d(COp):
             // Create a reversed view of in2
             if (n_in2 == 0) {{
                 PyErr_SetString(PyExc_ValueError, "Convolve1d: second input (kernel) cannot be empty.");
-                {sub['fail']};
+                {sub["fail"]};
             }} else {{
                 npy_intp view_dims[1];
                 view_dims[0] = n_in2;
@@ -142,7 +142,7 @@ class Convolve1d(COp):
 
                 if (!in2_flipped_view) {{
                     PyErr_SetString(PyExc_RuntimeError, "Failed to create flipped kernel view for Convolve1d.");
-                    {sub['fail']};
+                    {sub["fail"]};
                 }}
 
                 Py_INCREF({in2});
@@ -151,7 +151,7 @@ class Convolve1d(COp):
                     Py_DECREF(in2_flipped_view);
                     in2_flipped_view = NULL;
                     PyErr_SetString(PyExc_RuntimeError, "Failed to set base object for flipped kernel view in Convolve1d.");
-                    {sub['fail']};
+                    {sub["fail"]};
                 }}
                 PyArray_UpdateFlags(in2_flipped_view, (NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_F_CONTIGUOUS));
             }}
@@ -162,7 +162,7 @@ class Convolve1d(COp):
             Py_XDECREF(in2_flipped_view); // Clean up the view if correlate fails
             if (!{out}) {{
                 // PyArray_Correlate already set an error
-                {sub['fail']};
+                {sub["fail"]};
             }}
         }}
         """

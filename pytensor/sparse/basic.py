@@ -174,8 +174,7 @@ def as_sparse_variable(x, name=None, ndim=None, **kwargs):
     if isinstance(x, Apply):
         if len(x.outputs) != 1:
             raise ValueError(
-                "It is ambiguous which output of a "
-                "multi-output Op has to be fetched.",
+                "It is ambiguous which output of a multi-output Op has to be fetched.",
                 x,
             )
         else:
@@ -1333,8 +1332,7 @@ class GetItem2d(Op):
                 # of dimension 1 and int/uint dtype.
                 if scipy_ver < [0, 14] and ind.step is not None:
                     raise ValueError(
-                        "Slice with step is not support with current"
-                        " version of Scipy."
+                        "Slice with step is not support with current version of Scipy."
                     )
                 if ind.step is None or ind.step == 1:
                     step = generic_None

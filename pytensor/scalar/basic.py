@@ -992,8 +992,7 @@ def as_scalar(x: Any, name: str | None = None) -> ScalarVariable:
     if isinstance(x, Apply):
         if len(x.outputs) != 1:
             raise ValueError(
-                "It is ambiguous which output of a multi-output"
-                " Op has to be fetched.",
+                "It is ambiguous which output of a multi-output Op has to be fetched.",
                 x,
             )
         else:

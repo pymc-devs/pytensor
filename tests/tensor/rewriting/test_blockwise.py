@@ -109,7 +109,7 @@ def test_blockwise_alloc():
     expected_out = alloc(vector_add(alloc(x, 5), alloc(y, 5)), 3, 7, 5)
     assert equal(
         [rewrite(out)], [expected_out]
-    ), None  # pytensor.dprint([expected_out, rewrite(out)], print_type=True)
+    )  # pytensor.dprint([expected_out, rewrite(out)], print_type=True)
 
     x = tensor("x", shape=(5,))
     y = tensor("y", shape=())

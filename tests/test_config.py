@@ -233,9 +233,9 @@ def test_config_pickling():
     for name in root._config_var_dict:
         v_original = getattr(root, name)
         v_restored = getattr(restored, name)
-        assert (
-            v_restored == v_original
-        ), f"{name} did not survive pickling ({v_restored} != {v_original})"
+        assert v_restored == v_original, (
+            f"{name} did not survive pickling ({v_restored} != {v_original})"
+        )
 
     # and validate that the test would catch typical problems
     root = _create_test_config()

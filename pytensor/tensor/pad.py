@@ -689,4 +689,4 @@ def pad(
     return cast(TensorVariable, op)
 
 
-__all__ = ["pad", "flip"]
+__all__ = ["flip", "pad"]

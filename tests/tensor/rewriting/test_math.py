@@ -1809,9 +1809,9 @@ class TestFuncInverse:
 
         assert len(topo) in acceptable_topo_lens
         assert delta_condition
-        assert (
-            isinstance(topo[0].op, DeepCopyOp) == should_copy
-        ), "Inverse functions not removed!"
+        assert isinstance(topo[0].op, DeepCopyOp) == should_copy, (
+            "Inverse functions not removed!"
+        )
 
     def test(self):
         """Test rewrites for consecutive functional inverses."""

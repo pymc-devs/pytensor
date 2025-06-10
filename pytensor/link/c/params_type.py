@@ -116,7 +116,8 @@ for more info about enumeration aliases).
 .. code-block:: python
 
     wrapper = ParamsType(
-        enum1=EnumList("A", ("B", "beta"), "C"), enum2=EnumList(("D", "delta"), "E", "F")
+        enum1=EnumList("A", ("B", "beta"), "C"),
+        enum2=EnumList(("D", "delta"), "E", "F"),
     )
     b1 = wrapper.B
     b2 = wrapper.get_enum("B")
@@ -540,7 +541,9 @@ class ParamsType(CType):
             wrapper = ParamsType(
                 scalar=ScalarType("int32"),
                 letters=EnumType(A=(1, "alpha"), B=(2, "beta"), C=3),
-                digits=EnumList(("ZERO", "nothing"), ("ONE", "unit"), ("TWO", "couple")),
+                digits=EnumList(
+                    ("ZERO", "nothing"), ("ONE", "unit"), ("TWO", "couple")
+                ),
             )
             print(wrapper.get_enum("C"))  # 3
             print(wrapper.get_enum("TWO"))  # 2
@@ -593,7 +596,9 @@ class ParamsType(CType):
                     self.b = numpy.asarray([[1, 2, 3], [4, 5, 6]])
 
 
-            params_type = ParamsType(a=ScalarType("int32"), b=dmatrix, c=ScalarType("bool"))
+            params_type = ParamsType(
+                a=ScalarType("int32"), b=dmatrix, c=ScalarType("bool")
+            )
 
             o = MyObject()
             value_for_c = False
@@ -852,20 +857,20 @@ class ParamsType(CType):
         const char* fields[] = {{{fields_list}}};
         if (py_{name} == Py_None) {{
             PyErr_SetString(PyExc_ValueError, "ParamsType: expected an object, not None.");
-            {sub['fail']}
+            {sub["fail"]}
         }}
         for (int i = 0; i < {self.length}; ++i) {{
             PyObject* o = PyDict_GetItemString(py_{name}, fields[i]);
             if (o == NULL) {{
                 PyErr_Format(PyExc_TypeError, "ParamsType: missing expected attribute \\"%s\\" in object.", fields[i]);
-                {sub['fail']}
+                {sub["fail"]}
             }}
             {name}->extract(o, i);
             if ({name}->errorOccurred()) {{
                 /* The extract code from attribute type should have already raised a Python exception,
                  * so we just print the attribute name in stderr. */
                 fprintf(stderr, "\\nParamsType: error when extracting value for attribute \\"%s\\".\\n", fields[i]);
-                {sub['fail']}
+                {sub["fail"]}
             }}
         }}
         }}

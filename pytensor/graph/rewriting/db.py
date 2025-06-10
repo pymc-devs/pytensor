@@ -460,7 +460,7 @@ class SequenceDB(RewriteDatabase):
         return ret
 
     def print_summary(self, stream=sys.stdout):
-        print(f"{self.__class__.__name__ } (id {id(self)})", file=stream)
+        print(f"{self.__class__.__name__} (id {id(self)})", file=stream)
         positions = list(self.__position__.items())
 
         def c(a, b):

@@ -1,5 +1,6 @@
 import logging
 import os
+import pathlib
 import sys
 
 
@@ -24,7 +25,7 @@ _logger = logging.getLogger("pytensor.bin.pytensor-cache")
 
 def print_help(exit_status):
     if exit_status:
-        print(f"command \"{' '.join(sys.argv)}\" not recognized")
+        print(f'command "{" ".join(sys.argv)}" not recognized')
     print('Type "pytensor-cache" to print the cache location')
     print('Type "pytensor-cache help" to print this help')
     print('Type "pytensor-cache clear" to erase the cache')
@@ -66,9 +67,9 @@ def main():
             # user knows he should manually delete them, or call
             # pytensor-cache purge, # to properly clear the cache.
             items = [
-                item
-                for item in sorted(os.listdir(cache.dirname))
-                if item.startswith("tmp")
+                item.name
+                for item in sorted(pathlib.Path(cache.dirname).iterdir())
+                if item.name.startswith("tmp")
             ]
             if items:
                 _logger.warning(

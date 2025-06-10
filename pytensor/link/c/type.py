@@ -350,7 +350,11 @@ class EnumType(CType, dict):
         .. code-block:: python
 
             enum = EnumType(
-                CONSTANT_1=0, CONSTANT_2=1, CONSTANT_3=2, ctype="size_t", cname="MyEnumName"
+                CONSTANT_1=0,
+                CONSTANT_2=1,
+                CONSTANT_3=2,
+                ctype="size_t",
+                cname="MyEnumName",
             )
 
     **Example with aliases**
@@ -477,7 +481,7 @@ class EnumType(CType, dict):
         return tuple(sorted(self.aliases))
 
     def __repr__(self):
-        names_to_aliases = {constant_name: "" for constant_name in self}
+        names_to_aliases = dict.fromkeys(self, "")
         for alias in self.aliases:
             names_to_aliases[self.aliases[alias]] = f"({alias})"
         args = ", ".join(f"{k}{names_to_aliases[k]}:{self[k]}" for k in sorted(self))
@@ -674,7 +678,9 @@ class EnumList(EnumType):
 
     .. code-block:: python
 
-        enum = EnumList(("A", "alpha"), ("B", "beta"), "C", "D", "E", "F", ("G", "gamma"))
+        enum = EnumList(
+            ("A", "alpha"), ("B", "beta"), "C", "D", "E", "F", ("G", "gamma")
+        )
 
     See test class :class:`tests.graph.test_types.TestOpEnumList` for a working example.
 

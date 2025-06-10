@@ -77,7 +77,6 @@ Optimizations associated with these BLAS Ops are in tensor.rewriting.blas
 
 import functools
 import logging
-import os
 import shlex
 import warnings
 from pathlib import Path
@@ -383,7 +382,7 @@ def _ldflags(
             include_dir=False,
         )
         for d in dirs:
-            for f in os.listdir(d.strip('"')):
+            for f in Path(d.strip('"')).iterdir():
                 if f.endswith(".so") or f.endswith(".dylib") or f.endswith(".dll"):
                     if any(f.find(ll) >= 0 for ll in l):
                         found_dyn = True
@@ -1642,8 +1641,7 @@ class BatchedDot(COp):
                     ev0 = pytensor.graph.op.get_test_value(eval_points[0])
                 except TestValueError:
                     pytensor.graph.op.missing_test_message(
-                        "first eval point passed to BatchedDot.R_op "
-                        "has no test value"
+                        "first eval point passed to BatchedDot.R_op has no test value"
                     )
                     test_values_enabled = False
             if eval_points[1]:
@@ -1651,8 +1649,7 @@ class BatchedDot(COp):
                     ev1 = pytensor.graph.op.get_test_value(eval_points[1])
                 except TestValueError:
                     pytensor.graph.op.missing_test_message(
-                        "second eval point passed to BatchedDot.R_op "
-                        "has no test value"
+                        "second eval point passed to BatchedDot.R_op has no test value"
                     )
                     test_values_enabled = False
 
