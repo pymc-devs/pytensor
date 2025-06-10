@@ -362,11 +362,11 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         method: str = "brent",
         optimizer_kwargs: dict | None = None,
     ):
-        if not x.ndim == 0:
+        if not cast(TensorVariable, x).ndim == 0:
             raise ValueError(
                 "The variable `x` must be a scalar (0-dimensional) tensor for minimize_scalar."
             )
-        if not objective.ndim == 0:
+        if not cast(TensorVariable, objective).ndim == 0:
             raise ValueError(
                 "The objective function must be a scalar (0-dimensional) tensor for minimize_scalar."
             )
@@ -455,11 +455,11 @@ class MinimizeOp(ScipyWrapperOp):
         hessp: bool = False,
         optimizer_kwargs: dict | None = None,
     ):
-        if not objective.ndim == 0:
+        if not cast(TensorVariable, objective).ndim == 0:
             raise ValueError(
                 "The objective function must be a scalar (0-dimensional) tensor for minimize."
             )
-        if not isinstance(x, Variable) and x not in ancestors([objective]):
+        if x not in ancestors([objective]):
             raise ValueError(
                 "The variable `x` must be an input to the computational graph of the objective function."
             )
@@ -712,7 +712,7 @@ class RootOp(ScipyWrapperOp):
         jac: bool = True,
         optimizer_kwargs: dict | None = None,
     ):
-        if variables.ndim != equations.ndim:
+        if cast(TensorVariable, variables).ndim != cast(TensorVariable, equations).ndim:
             raise ValueError(
                 "The variable `variables` must have the same number of dimensions as the equations."
             )
