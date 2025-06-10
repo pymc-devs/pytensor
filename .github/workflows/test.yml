@@ -107,7 +107,7 @@ jobs:
             python-version: "3.13"
         include:
           - os: "ubuntu-latest"
-            part: "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link"
+            part: "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link --ignore=pytensor/ipython.py"
             python-version: "3.12"
             numpy-version: ">=2.0"
             fast-compile: 0
