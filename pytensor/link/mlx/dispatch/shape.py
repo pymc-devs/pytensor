@@ -7,7 +7,7 @@ from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 @mlx_funcify.register(Shape)
 def mlx_funcify_Shape(op, **kwargs):
     def shape(x):
-        return x.shape
+        return mx.array(x.shape, dtype=mx.int64)
 
     return shape
 
