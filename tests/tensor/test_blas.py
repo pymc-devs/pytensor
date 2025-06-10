@@ -585,9 +585,9 @@ def just_gemm(i, o, ishapes=None, max_graphlen=0, expected_nb_gemm=1):
     )
     nb_gemm = 0
     for node in f.maker.fgraph.apply_nodes:
-        assert not isinstance(
-            node.op, Dot
-        ), "_dot22 not changed to gemm_inplace in graph"
+        assert not isinstance(node.op, Dot), (
+            "_dot22 not changed to gemm_inplace in graph"
+        )
         assert node.op != _dot22
         if node.op == gemm_inplace:
             nb_gemm += 1
@@ -603,9 +603,9 @@ def just_gemm(i, o, ishapes=None, max_graphlen=0, expected_nb_gemm=1):
         assert node.op != gemm_inplace, "gemm_inplace in original graph"
 
     graphlen = len(f.maker.fgraph.toposort())
-    assert not (
-        max_graphlen and (graphlen <= max_graphlen)
-    ), f"graphlen={graphlen}>{max_graphlen}"
+    assert not (max_graphlen and (graphlen <= max_graphlen)), (
+        f"graphlen={graphlen}>{max_graphlen}"
+    )
 
     rng = np.random.default_rng(unittest_tools.fetch_seed(234))
     r0 = f(*[np.asarray(rng.standard_normal(sh), config.floatX) for sh in ishapes])

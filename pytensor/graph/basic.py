@@ -408,7 +408,9 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
             [b], [c]
         )  # this works because a has a value associated with it already
 
-        assert 4.0 == f(2.5)  # bind 2.5 to an internal copy of b and evaluate an internal c
+        assert 4.0 == f(
+            2.5
+        )  # bind 2.5 to an internal copy of b and evaluate an internal c
 
         pytensor.function(
             [a], [c]

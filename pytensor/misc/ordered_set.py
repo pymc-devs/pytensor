@@ -9,7 +9,7 @@ class OrderedSet(MutableSet):
         if iterable is None:
             self.values = {}
         else:
-            self.values = {value: None for value in iterable}
+            self.values = dict.fromkeys(iterable)
 
     def __contains__(self, value) -> bool:
         return value in self.values

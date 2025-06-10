@@ -2477,14 +2477,12 @@ class AbstractConv(BaseAbstractConv):
         img = assert_shape(
             img,
             self.imshp,
-            "AbstractConv shape mismatch: shape of "
-            "image does not match given imshp.",
+            "AbstractConv shape mismatch: shape of image does not match given imshp.",
         )
         kern = assert_shape(
             kern,
             self.kshp,
-            "AbstractConv shape mismatch: shape of "
-            "filters does not match given kshp.",
+            "AbstractConv shape mismatch: shape of filters does not match given kshp.",
         )
 
         out_shape = (

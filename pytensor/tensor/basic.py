@@ -2210,7 +2210,7 @@ class Split(COp):
         self.view_map = {i: [0] for i in range(self.len_splits)}
 
     def __str__(self):
-        return f"{self.__class__.__name__ }{{{self.len_splits}}}"
+        return f"{self.__class__.__name__}{{{self.len_splits}}}"
 
     def make_node(self, x, axis, splits):
         """WRITEME"""
@@ -2583,7 +2583,7 @@ class Join(COp):
 
         code = f"""
         int axis = {axis_def}
-        PyArrayObject* arrays[{n}] = {{{','.join(arrays)}}};
+        PyArrayObject* arrays[{n}] = {{{",".join(arrays)}}};
         int out_is_valid = {out} != NULL;
 
         {axis_check}
@@ -3854,7 +3854,7 @@ class ExtractDiag(COp):
             PyArrayObject *{out_name}_copy = (PyArrayObject*) PyArray_Copy({out_name});
             Py_DECREF({out_name});
             if (!{out_name}_copy) {{
-                {sub['fail']};  // Error already set by Numpy
+                {sub["fail"]};  // Error already set by Numpy
             }}
             {out_name} = {out_name}_copy;
         }}
@@ -4557,72 +4557,72 @@ def ix_(*args):
 
 
 __all__ = [
-    "take_along_axis",
-    "expand_dims",
-    "atleast_Nd",
+    "alloc",
+    "arange",
+    "as_tensor",
+    "as_tensor_variable",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
+    "atleast_Nd",
+    "cast",
     "choose",
-    "swapaxes",
-    "moveaxis",
-    "stacklists",
+    "concatenate",
+    "constant",
+    "default",
     "diag",
     "diagonal",
-    "inverse_permutation",
-    "permute_row_elements",
-    "mgrid",
-    "ogrid",
-    "arange",
-    "tile",
-    "flatten",
-    "is_flat",
-    "vertical_stack",
-    "horizontal_stack",
-    "get_vector_length",
-    "concatenate",
-    "stack",
-    "roll",
-    "join",
-    "split",
-    "transpose",
-    "matrix_transpose",
-    "default",
-    "tensor_copy",
-    "transfer",
-    "alloc",
-    "identity_like",
-    "eye",
-    "triu",
-    "tril",
-    "tri",
-    "nonzero_values",
-    "flatnonzero",
-    "nonzero",
-    "ones",
-    "zeros",
-    "zeros_like",
-    "ones_like",
-    "fill",
-    "second",
-    "where",
-    "switch",
-    "cast",
-    "scalar_from_tensor",
-    "tensor_from_scalar",
-    "get_scalar_constant_value",
-    "get_underlying_scalar_constant_value",
-    "constant",
-    "as_tensor_variable",
-    "as_tensor",
-    "extract_diag",
-    "full",
-    "full_like",
     "empty",
     "empty_like",
+    "expand_dims",
+    "extract_diag",
+    "eye",
+    "fill",
+    "flatnonzero",
+    "flatten",
+    "full",
+    "full_like",
+    "get_scalar_constant_value",
+    "get_underlying_scalar_constant_value",
+    "get_vector_length",
+    "horizontal_stack",
+    "identity_like",
+    "inverse_permutation",
+    "is_flat",
+    "join",
+    "matrix_transpose",
+    "mgrid",
+    "moveaxis",
+    "nonzero",
+    "nonzero_values",
+    "ogrid",
+    "ones",
+    "ones_like",
+    "permute_row_elements",
+    "roll",
+    "scalar_from_tensor",
+    "second",
+    "split",
+    "stack",
+    "stacklists",
+    "swapaxes",
+    "switch",
+    "take_along_axis",
+    "tensor_copy",
+    "tensor_from_scalar",
+    "tile",
     "trace",
+    "transfer",
+    "transpose",
+    "tri",
+    "tril",
     "tril_indices",
     "tril_indices_from",
+    "triu",
     "triu_indices",
     "triu_indices_from",
+    "vertical_stack",
+    "where",
+    "zeros",
+    "zeros_like",
 ]

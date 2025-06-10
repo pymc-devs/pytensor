@@ -119,12 +119,12 @@ def {scalar_op_fn_name}({input_names}):
         )
         if not has_pyx_skip_dispatch:
             scalar_op_src = f"""
-def {scalar_op_fn_name}({', '.join(input_names)}):
+def {scalar_op_fn_name}({", ".join(input_names)}):
     return direct_cast(scalar_func_numba({converted_call_args}), output_dtype)
             """
         else:
             scalar_op_src = f"""
-def {scalar_op_fn_name}({', '.join(input_names)}):
+def {scalar_op_fn_name}({", ".join(input_names)}):
     return direct_cast(scalar_func_numba({converted_call_args}, np.intc(1)), output_dtype)
             """
 

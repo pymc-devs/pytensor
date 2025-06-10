@@ -2666,9 +2666,8 @@ class TestArithmeticCast:
                     # behavior.
                     return
 
-            if (
-                {a_type, b_type} == {"complex128", "float32"}
-                or {a_type, b_type} == {"complex128", "float16"}
+            if {a_type, b_type} == {"complex128", "float32"} or (
+                {a_type, b_type} == {"complex128", "float16"}
                 and set(combo) == {"scalar", "array"}
                 and pytensor_dtype == "complex128"
                 and numpy_dtype == "complex64"

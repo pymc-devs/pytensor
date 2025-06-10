@@ -390,8 +390,7 @@ class History(Feature):
     def on_attach(self, fgraph):
         if hasattr(fgraph, "checkpoint") or hasattr(fgraph, "revert"):
             raise AlreadyThere(
-                "History feature is already present or in"
-                " conflict with another plugin."
+                "History feature is already present or in conflict with another plugin."
             )
         self.history[fgraph] = []
         # Don't call unpickle here, as ReplaceValidate.on_attach()

@@ -282,8 +282,7 @@ def blockwise_inplace(fgraph, node):
     allowed_inplace_inputs = [
         idx
         for idx, inp in enumerate(node.inputs)
-        if
-        (
+        if (
             # Constants would need to be recreated every time if inplaced
             not isinstance(inp, Constant)
             # We can only inplace on inputs that are not being broadcasted

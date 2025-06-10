@@ -668,9 +668,9 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
     einsum_operands = list(tensor_operands)  # So we can pop
     for operand_indices, contracted_names, einstr, _, _ in contraction_list:
         contracted_names = sorted(contracted_names)
-        assert len(contracted_names) == len(
-            set(contracted_names)
-        ), "The set was needed!"
+        assert len(contracted_names) == len(set(contracted_names)), (
+            "The set was needed!"
+        )
 
         input_str, result_names = einstr.split("->")
         input_names = input_str.split(",")
