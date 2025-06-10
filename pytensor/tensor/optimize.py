@@ -712,6 +712,15 @@ class RootOp(ScipyWrapperOp):
         jac: bool = True,
         optimizer_kwargs: dict | None = None,
     ):
+        if variables.ndim != equations.ndim:
+            raise ValueError(
+                "The variable `variables` must have the same number of dimensions as the equations."
+            )
+        if variables not in ancestors([equations]):
+            raise ValueError(
+                "The variable `variables` must be an input to the computational graph of the equations."
+            )
+
         self.fgraph = FunctionGraph([variables, *args], [equations])
 
         if jac:
