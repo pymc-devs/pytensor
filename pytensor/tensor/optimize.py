@@ -9,14 +9,20 @@ from scipy.optimize import minimize_scalar as scipy_minimize_scalar
 from scipy.optimize import root as scipy_root
 from scipy.optimize import root_scalar as scipy_root_scalar
 
+import pytensor.scalar as ps
 from pytensor import Variable, function, graph_replace
 from pytensor.gradient import grad, hessian, jacobian
 from pytensor.graph import Apply, Constant, FunctionGraph
-from pytensor.graph.basic import truncated_graph_inputs
+from pytensor.graph.basic import ancestors, truncated_graph_inputs
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
-from pytensor.scalar import bool as scalar_bool
-from pytensor.tensor import dot
-from pytensor.tensor.basic import atleast_2d, concatenate, zeros_like
+from pytensor.tensor.basic import (
+    atleast_2d,
+    concatenate,
+    tensor,
+    tensor_from_scalar,
+    zeros_like,
+)
+from pytensor.tensor.math import dot
 from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable
 
@@ -223,9 +229,31 @@ class ScipyWrapperOp(Op, HasInnerGraph):
                 input.type == inner_input.type
             ), f"Input {input} does not match expected type {inner_input.type}"
 
-        return Apply(
-            self, inputs, [self.inner_inputs[0].type(), scalar_bool("success")]
-        )
+        return Apply(self, inputs, [self.inner_inputs[0].type(), ps.bool("success")])
+
+
+class ScipyScalarWrapperOp(ScipyWrapperOp):
+    def build_fn(self):
+        """
+        This is overloaded because scipy converts scalar inputs to lists, changing the return type. The
+        wrapper function logic is there to handle this.
+        """
+
+        # We have no control over the inputs to the scipy inner function for scalar_minimize. As a result,
+        # we need to adjust the graph to work with what scipy will be passing into the inner function --
+        # always scalar, and always float64
+        x, *args = self.inner_inputs
+        new_root_x = ps.float64(name="x_scalar")
+        new_x = tensor_from_scalar(new_root_x.astype(x.type.dtype))
+
+        new_outputs = graph_replace(self.inner_outputs, {x: new_x})
+
+        self._fn = fn = function([new_root_x, *args], new_outputs, trust_input=True)
+
+        # Do this reassignment to see the compiled graph in the dprint
+        # self.fgraph = fn.maker.fgraph
+
+        self._fn_wrapped = LRUCache1(fn)
 
 
 def scalar_implict_optimization_grads(
@@ -327,7 +355,7 @@ def implict_optimization_grads(
     return grad_wrt_args
 
 
-class MinimizeScalarOp(ScipyWrapperOp):
+class MinimizeScalarOp(ScipyScalarWrapperOp):
     __props__ = ("method",)
 
     def __init__(
@@ -338,6 +366,14 @@ class MinimizeScalarOp(ScipyWrapperOp):
         method: str = "brent",
         optimizer_kwargs: dict | None = None,
     ):
+        if not x.ndim == 0:
+            raise ValueError(
+                "The variable `x` must be a scalar (0-dimensional) tensor for minimize_scalar."
+            )
+        if not objective.ndim == 0:
+            raise ValueError(
+                "The objective function must be a scalar (0-dimensional) tensor for minimize_scalar."
+            )
         self.fgraph = FunctionGraph([x, *args], [objective])
 
         self.method = method
@@ -351,7 +387,7 @@ class MinimizeScalarOp(ScipyWrapperOp):
 
         # minimize_scalar doesn't take x0 as an argument. The Op still needs this input (to symbolically determine
         # the args of the objective function), but it is not used in the optimization.
-        _, *args = inputs
+        x0, *args = inputs
 
         res = scipy_minimize_scalar(
             fun=f.value,
@@ -360,7 +396,7 @@ class MinimizeScalarOp(ScipyWrapperOp):
             **self.optimizer_kwargs,
         )
 
-        outputs[0][0] = np.array(res.x)
+        outputs[0][0] = np.array(res.x, dtype=x0.dtype)
         outputs[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
@@ -423,6 +459,15 @@ class MinimizeOp(ScipyWrapperOp):
         hessp: bool = False,
         optimizer_kwargs: dict | None = None,
     ):
+        if not objective.ndim == 0:
+            raise ValueError(
+                "The objective function must be a scalar (0-dimensional) tensor for minimize."
+            )
+        if not isinstance(x, Variable) and x not in ancestors([objective]):
+            raise ValueError(
+                "The variable `x` must be an input to the computational graph of the objective function."
+            )
+
         self.fgraph = FunctionGraph([x, *args], [objective])
 
         if jac:
@@ -462,7 +507,7 @@ class MinimizeOp(ScipyWrapperOp):
 
         f.clear_cache()
 
-        outputs[0][0] = res.x
+        outputs[0][0] = res.x.astype(x0.dtype)
         outputs[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
@@ -541,7 +586,7 @@ def minimize(
     return minimize_op(x, *args)
 
 
-class RootScalarOp(ScipyWrapperOp):
+class RootScalarOp(ScipyScalarWrapperOp):
     __props__ = ("method", "jac", "hess")
 
     def __init__(
@@ -554,6 +599,17 @@ class RootScalarOp(ScipyWrapperOp):
         hess: bool = False,
         optimizer_kwargs=None,
     ):
+        if not equation.ndim == 0:
+            raise ValueError(
+                "The equation must be a scalar (0-dimensional) tensor for root_scalar."
+            )
+        if not isinstance(variables, Variable) or variables not in ancestors(
+            [equation]
+        ):
+            raise ValueError(
+                "The variable `variables` must be an input to the computational graph of the equation."
+            )
+
         self.fgraph = FunctionGraph([variables, *args], [equation])
 
         if jac:
@@ -672,6 +728,32 @@ class RootOp(ScipyWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
+
+    def build_fn(self):
+        outputs = self.inner_outputs
+        variables, *args = self.inner_inputs
+
+        if variables.ndim > 0:
+            new_root_variables = variables
+            new_outputs = outputs
+        else:
+            # If the user passes a scalar optimization problem to root, scipy will automatically upcast it to
+            # a 1d array. The inner function needs to be adjusted to handle this.
+            new_root_variables = tensor(
+                name="variables_vector", shape=(1,), dtype=variables.type.dtype
+            )
+            new_variables = new_root_variables.squeeze()
+
+            new_outputs = graph_replace(outputs, {variables: new_variables})
+
+        self._fn = fn = function(
+            [new_root_variables, *args], new_outputs, trust_input=True
+        )
+
+        # Do this reassignment to see the compiled graph in the dprint
+        # self.fgraph = fn.maker.fgraph
+
+        self._fn_wrapped = LRUCache1(fn)
 
     def perform(self, node, inputs, outputs):
         f = self.fn_wrapped
