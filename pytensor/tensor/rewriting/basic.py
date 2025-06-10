@@ -759,6 +759,7 @@ def local_remove_useless_assert(fgraph, node):
         return [new_var]
 
 
+@register_infer_shape
 @node_rewriter([Assert])
 def local_remove_all_assert(fgraph, node):
     r"""A rewrite that removes all `Assert`\s from a graph.
@@ -768,9 +769,6 @@ def local_remove_all_assert(fgraph, node):
     See the :ref:`unsafe` section.
 
     """
-    if not isinstance(node.op, Assert):
-        return
-
     return [node.inputs[0]]
 
 
