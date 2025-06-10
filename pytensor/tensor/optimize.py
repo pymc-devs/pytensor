@@ -52,6 +52,9 @@ class LRUCache1:
         self.last_result = None
         self.copy_x = copy_x
 
+        # Scipy does not respect dtypes *at all*, so we have to force it ourselves.
+        self.dtype = fn.maker.fgraph.inputs[0].type.dtype
+
         self.cache_hits = 0
         self.cache_misses = 0
 
@@ -67,9 +70,7 @@ class LRUCache1:
         If the input `x` is the same as the last input, return the cached result. Otherwise update the cache with the
         new input and result.
         """
-        # scipy.optimize.scalar_minimize and scalar_root don't take initial values as an argument, so we can't control
-        # the first input to the inner function. Of course, they use a scalar, but we need a 0d numpy array.
-        x = np.asarray(x)
+        x = x.astype(self.dtype)
 
         if self.last_result is None or not (x == self.last_x).all():
             self.cache_misses += 1
@@ -160,6 +161,7 @@ def _get_parameter_grads_from_vector(
         )
 
         grad_wrt_args.append(dot(output_grad, arg_grad))
+
         cursor += arg_size
 
     return grad_wrt_args
@@ -175,17 +177,11 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         """
         outputs = self.inner_outputs
         self._fn = fn = function(self.inner_inputs, outputs, trust_input=True)
+
         # Do this reassignment to see the compiled graph in the dprint
         # self.fgraph = fn.maker.fgraph
 
-        if self.inner_inputs[0].type.shape == ():
-
-            def fn_wrapper(x, *args):
-                return fn(x.squeeze(), *args)
-
-            self._fn_wrapped = LRUCache1(fn_wrapper)
-        else:
-            self._fn_wrapped = LRUCache1(fn)
+        self._fn_wrapped = LRUCache1(fn)
 
     @property
     def fn(self):
@@ -771,7 +767,9 @@ class RootOp(ScipyWrapperOp):
             **self.optimizer_kwargs,
         )
 
-        outputs[0][0] = res.x.reshape(variables.shape)
+        # There's a reshape here to cover the case where variables is a scalar. Scipy will still return a
+        # (1, 1) matrix in in this case, which causes errors downstream (since pytensor expects a scalar).
+        outputs[0][0] = res.x.reshape(variables.shape).astype(variables.dtype)
         outputs[1][0] = np.bool_(res.success)
 
     def L_op(
@@ -807,12 +805,20 @@ def root(
     variables: TensorVariable,
     method: str = "hybr",
     jac: bool = True,
+    optimizer_kwargs: dict | None = None,
 ):
     """Find roots of a system of equations using scipy.optimize.root."""
 
     args = _find_optimization_parameters(equations, variables)
 
-    root_op = RootOp(variables, *args, equations=equations, method=method, jac=jac)
+    root_op = RootOp(
+        variables,
+        *args,
+        equations=equations,
+        method=method,
+        jac=jac,
+        optimizer_kwargs=optimizer_kwargs,
+    )
 
     return root_op(variables, *args)
 

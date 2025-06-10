@@ -59,7 +59,12 @@ def test_simple_minimize():
     minimized_x_val, success_val = f(a_val, c_val, 0.0)
 
     assert success_val
-    assert minimized_x_val == (2 * a_val * c_val)
+    np.testing.assert_allclose(
+        minimized_x_val,
+        2 * a_val * c_val,
+        atol=1e-8 if config.floatX == "float64" else 1e-6,
+        rtol=1e-8 if config.floatX == "float64" else 1e-6,
+    )
 
     def f(x, a, b):
         objective = (x - a * b) ** 2
@@ -82,7 +87,7 @@ def test_minimize_vector_x(method, jac, hess):
     def rosenbrock_shifted_scaled(x, a, b):
         return (a * (x[1:] - x[:-1] ** 2) ** 2 + (1 - x[:-1]) ** 2).sum() + b
 
-    x = pt.dvector("x")
+    x = pt.tensor("x", shape=(None,))
     a = pt.scalar("a")
     b = pt.scalar("b")
 
@@ -91,23 +96,30 @@ def test_minimize_vector_x(method, jac, hess):
         objective, x, method=method, jac=jac, hess=hess, optimizer_kwargs={"tol": 1e-16}
     )
 
-    a_val = 0.5
-    b_val = 1.0
-    x0 = np.zeros(5).astype(floatX)
-    x_star_val = minimized_x.eval({a: a_val, b: b_val, x: x0})
+    fn = pytensor.function([x, a, b], [minimized_x, success])
 
-    assert success.eval({a: a_val, b: b_val, x: x0})
+    a_val = np.array(0.5, dtype=floatX)
+    b_val = np.array(1.0, dtype=floatX)
+    x0 = np.zeros((5,)).astype(floatX)
+    x_star_val, success = fn(x0, a_val, b_val)
+
+    assert success
 
     np.testing.assert_allclose(
-        x_star_val, np.ones_like(x_star_val), atol=1e-6, rtol=1e-6
+        x_star_val,
+        np.ones_like(x_star_val),
+        atol=1e-8 if config.floatX == "float64" else 1e-3,
+        rtol=1e-8 if config.floatX == "float64" else 1e-3,
     )
+
+    assert x_star_val.dtype == floatX
 
     def f(x, a, b):
         objective = rosenbrock_shifted_scaled(x, a, b)
         out = minimize(objective, x)[0]
         return out
 
-    utt.verify_grad(f, [x0, a_val, b_val], eps=1e-6)
+    utt.verify_grad(f, [x0, a_val, b_val], eps=1e-3 if floatX == "float32" else 1e-6)
 
 
 @pytest.mark.parametrize(
@@ -130,7 +142,12 @@ def test_root_scalar(method, jac, hess):
     solution, success = func(x0, a_val)
 
     assert success
-    np.testing.assert_allclose(solution, -1.02986653, atol=1e-6, rtol=1e-6)
+    np.testing.assert_allclose(
+        solution,
+        -1.02986653,
+        atol=1e-8 if config.floatX == "float64" else 1e-6,
+        rtol=1e-8 if config.floatX == "float64" else 1e-6,
+    )
 
     def root_fn(x, a):
         f = fn(x, a)
@@ -147,7 +164,7 @@ def test_root_simple():
         return x + 2 * a * pt.cos(x)
 
     f = fn(x, a)
-    root_f, success = root(f, x)
+    root_f, success = root(f, x, method="lm", optimizer_kwargs={"tol": 1e-8})
     func = pytensor.function([x, a], [root_f, success])
 
     x0 = 0.0
@@ -155,7 +172,12 @@ def test_root_simple():
     solution, success = func(x0, a_val)
 
     assert success
-    np.testing.assert_allclose(solution, -1.02986653, atol=1e-6, rtol=1e-6)
+    np.testing.assert_allclose(
+        solution,
+        -1.02986653,
+        atol=1e-8 if config.floatX == "float64" else 1e-6,
+        rtol=1e-8 if config.floatX == "float64" else 1e-6,
+    )
 
     def root_fn(x, a):
         f = fn(x, a)
@@ -165,24 +187,27 @@ def test_root_simple():
 
 
 def test_root_system_of_equations():
-    x = pt.dvector("x")
-    a = pt.dvector("a")
-    b = pt.dvector("b")
+    x = pt.tensor("x", shape=(None,))
+    a = pt.tensor("a", shape=(None,))
+    b = pt.tensor("b", shape=(None,))
 
     f = pt.stack([a[0] * x[0] * pt.cos(x[1]) - b[0], x[0] * x[1] - a[1] * x[1] - b[1]])
 
-    root_f, success = root(f, x)
+    root_f, success = root(f, x, method="lm", optimizer_kwargs={"tol": 1e-8})
     func = pytensor.function([x, a, b], [root_f, success])
 
-    x0 = np.array([1.0, 1.0])
-    a_val = np.array([1.0, 1.0])
-    b_val = np.array([4.0, 5.0])
+    x0 = np.array([1.0, 1.0], dtype=floatX)
+    a_val = np.array([1.0, 1.0], dtype=floatX)
+    b_val = np.array([4.0, 5.0], dtype=floatX)
     solution, success = func(x0, a_val, b_val)
 
     assert success
 
     np.testing.assert_allclose(
-        solution, np.array([6.50409711, 0.90841421]), atol=1e-6, rtol=1e-6
+        solution,
+        np.array([6.50409711, 0.90841421]),
+        atol=1e-8 if config.floatX == "float64" else 1e-6,
+        rtol=1e-8 if config.floatX == "float64" else 1e-6,
     )
 
     def root_fn(x, a, b):
@@ -191,4 +216,6 @@ def test_root_system_of_equations():
         )
         return root(f, x)[0]
 
-    utt.verify_grad(root_fn, [x0, a_val, b_val], eps=1e-6)
+    utt.verify_grad(
+        root_fn, [x0, a_val, b_val], eps=1e-6 if floatX == "float64" else 1e-3
+    )
