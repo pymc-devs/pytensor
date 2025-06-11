@@ -118,6 +118,7 @@ import pytensor.tensor._linalg
 from pytensor.tensor import linalg
 from pytensor.tensor import special
 from pytensor.tensor import signal
+from pytensor.tensor import optimize
 
 # For backward compatibility
 from pytensor.tensor import nlinalg
