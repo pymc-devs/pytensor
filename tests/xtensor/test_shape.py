@@ -437,6 +437,18 @@ def test_expand_dims():
     fn = xr_function([x, size_sym_1, size_sym_2], y)
     xr_assert_allclose(fn(x_test, 2, 3), x_test.expand_dims({"country": 2, "state": 3}))
 
+    # Test with axis parameter
+    y = x.expand_dims("country", axis=1)
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.expand_dims("country", axis=1))
+
+    # Add two new dims at axis=[1, 2]
+    y = x.expand_dims(["country", "state"], axis=[1, 2])
+    fn = xr_function([x], y)
+    xr_assert_allclose(
+        fn(x_test), x_test.expand_dims(["country", "state"], axis=[1, 2])
+    )
+
 
 def test_expand_dims_errors():
     """Test error handling in expand_dims."""
