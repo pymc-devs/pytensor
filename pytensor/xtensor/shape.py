@@ -505,6 +505,6 @@ def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwa
             zip(new_dim_names, axis), key=lambda x: x[1]
         ):
             target_dims.insert(insert_axis, insert_dim)
-        x = transpose(x, *target_dims)
+        x = Transpose(dims=tuple(target_dims))(x)
 
     return x
