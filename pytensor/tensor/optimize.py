@@ -10,11 +10,12 @@ from scipy.optimize import root as scipy_root
 from scipy.optimize import root_scalar as scipy_root_scalar
 
 import pytensor.scalar as ps
-from pytensor import Variable, function, graph_replace
+from pytensor.compile.function import function
 from pytensor.gradient import grad, hessian, jacobian
 from pytensor.graph import Apply, Constant, FunctionGraph
 from pytensor.graph.basic import ancestors, truncated_graph_inputs
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
+from pytensor.graph.replace import graph_replace
 from pytensor.tensor.basic import (
     atleast_2d,
     concatenate,
@@ -24,7 +25,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.math import dot
 from pytensor.tensor.slinalg import solve
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.variable import TensorVariable, Variable
 
 
 _log = logging.getLogger(__name__)
