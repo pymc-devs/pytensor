@@ -3081,6 +3081,10 @@ def flatten(x, ndim=1):
     else:
         dims = (-1,)
 
+    if len(dims) == _x.ndim:
+        # Nothing to ravel
+        return _x
+
     x_reshaped = _x.reshape(dims)
     shape_kept_dims = _x.type.shape[: ndim - 1]
     bcast_new_dim = builtins.all(s == 1 for s in _x.type.shape[ndim - 1 :])
