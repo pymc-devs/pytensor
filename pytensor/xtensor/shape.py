@@ -6,10 +6,10 @@ from typing import Literal
 import numpy as np
 
 from pytensor.graph import Apply
-from pytensor.graph.basic import Constant
 from pytensor.scalar import discrete_dtypes, upcast
 from pytensor.tensor import as_tensor, get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.type import integer_dtypes
 from pytensor.tensor.variable import TensorVariable
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import as_xtensor, xtensor
@@ -403,32 +403,17 @@ class ExpandDims(XOp):
         if self.dim in x.type.dims:
             raise ValueError(f"Dimension {self.dim} already exists in {x.type.dims}")
 
-        # Check if size is a valid type before converting
-        if not (
-            isinstance(size, int | np.integer)
-            or (hasattr(size, "ndim") and getattr(size, "ndim", None) == 0)
-        ):
-            raise TypeError(
-                f"size must be an int or scalar variable, got: {type(size)}"
-            )
-
-        # Determine shape
+        size = as_xtensor(size, dims=())
+        if not (size.dtype in integer_dtypes and size.ndim == 0):
+            raise ValueError(f"size should be an integer scalar, got {size.type}")
         try:
-            static_size = get_scalar_constant_value(size)
+            static_size = int(get_scalar_constant_value(size))
         except NotScalarConstantError:
             static_size = None
-
-        if static_size is not None:
-            new_shape = (int(static_size), *x.type.shape)
-        else:
-            new_shape = (None, *x.type.shape)  # symbolic size
-
-        # Convert size to tensor
-        size = as_xtensor(size, dims=())
-
-        # Check if size is a constant and validate it
-        if isinstance(size, Constant) and size.data < 0:
-            raise ValueError(f"size must be 0 or positive, got: {size.data}")
+        # If size is a constant, validate it
+        if static_size is not None and static_size < 0:
+            raise ValueError(f"size must be 0 or positive, got: {static_size}")
+        new_shape = (static_size, *x.type.shape)
 
         # Insert new dim at front
         new_dims = (self.dim, *x.type.dims)

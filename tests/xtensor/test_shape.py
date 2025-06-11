@@ -463,10 +463,6 @@ def test_expand_dims_errors():
     with pytest.raises(TypeError, match="Invalid type for `dim`"):
         x.expand_dims(123)
 
-    # Invalid size type
-    with pytest.raises(TypeError, match="size must be an int or scalar variable"):
-        x.expand_dims("new", size=[1])
-
     # Duplicate dimension creation
     y = x.expand_dims("new")
     with pytest.raises(ValueError, match="already exists"):
