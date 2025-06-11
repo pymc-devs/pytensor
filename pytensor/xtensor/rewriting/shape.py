@@ -123,7 +123,7 @@ def lower_transpose(fgraph, node):
 
 @register_lower_xtensor
 @node_rewriter([Squeeze])
-def local_squeeze_reshape(fgraph, node):
+def lower_squeeze(fgraph, node):
     """Rewrite Squeeze to tensor.squeeze."""
     [x] = node.inputs
     x_tensor = tensor_from_xtensor(x)
@@ -138,7 +138,7 @@ def local_squeeze_reshape(fgraph, node):
 
 @register_lower_xtensor
 @node_rewriter([ExpandDims])
-def local_expand_dims_reshape(fgraph, node):
+def lower_expand_dims(fgraph, node):
     """Rewrite ExpandDims using tensor operations."""
     x, size = node.inputs
     out = node.outputs[0]
@@ -155,10 +155,8 @@ def local_expand_dims_reshape(fgraph, node):
         # Simple case: just expand with size 1
         result_tensor = expand_dims(x_tensor, new_axis)
     else:
-        # First expand with size 1
-        expanded = expand_dims(x_tensor, new_axis)
-        # Then broadcast to the requested size
-        result_tensor = broadcast_to(expanded, (size_tensor, *x_tensor.shape))
+        # Otherwise broadcast to the requested size
+        result_tensor = broadcast_to(x_tensor, (size_tensor, *x_tensor.shape))
 
     # Preserve static shape information
     result_tensor = specify_shape(result_tensor, out.type.shape)

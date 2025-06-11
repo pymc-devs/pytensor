@@ -442,31 +442,15 @@ class ExpandDims(XOp):
 
 
 def expand_dims(x, dim=None, create_index_for_new_dim=True, **dim_kwargs):
-    """Add one or more new dimensions to an XTensorVariable.
-
-    Parameters
-    ----------
-    x : XTensorVariable
-        Input tensor.
-    dim : str | Sequence[str] | dict[str, int | Sequence] | None
-        If str or sequence of str, new dimensions with size 1.
-        If dict, keys are dimension names and values are either:
-            - int: the new size
-            - sequence: coordinates (length determines size)
-    create_index_for_new_dim : bool, default: True
-        (Ignored for now) Matches xarray API, reserved for future use.
-    **dim_kwargs : int | Sequence
-        Alternative to `dim` dict. Only used if `dim` is None.
-
-    Returns
-    -------
-    XTensorVariable
-        A tensor with additional dimensions inserted at the front.
-    """
+    """Add one or more new dimensions to an XTensorVariable."""
     x = as_xtensor(x)
 
     # Extract size from dim_kwargs if present
     size = dim_kwargs.pop("size", 1) if dim_kwargs else 1
+
+    # xarray compatibility: error if a sequence (list/tuple) of dims and size are given
+    if (isinstance(dim, list | tuple)) and ("size" in locals() and size != 1):
+        raise ValueError("cannot specify both keyword and positional arguments")
 
     if dim is None:
         dim = dim_kwargs

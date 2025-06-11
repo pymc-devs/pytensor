@@ -483,24 +483,32 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     def expand_dims(
         self,
-        dim: str | None = None,
-        size: int | Variable = 1,
+        dim: str | Sequence[str] | dict[str, int | Sequence] | None = None,
+        create_index_for_new_dim: bool = True,
+        **dim_kwargs,
     ):
-        """Add a new dimension to the tensor.
+        """Add one or more new dimensions to the tensor.
 
         Parameters
         ----------
-        dim : str or None
-            Name of new dimension. If None, returns self unchanged.
-        size : int or symbolic, optional
-            Size of the new dimension (default 1)
+        dim : str | Sequence[str] | dict[str, int | Sequence] | None
+            If str or sequence of str, new dimensions with size 1.
+            If dict, keys are dimension names and values are either:
+                - int: the new size
+                - sequence: coordinates (length determines size)
+        create_index_for_new_dim : bool, default: True
+            (Ignored for now) Matches xarray API, reserved for future use.
+        **dim_kwargs : int | Sequence
+            Alternative to `dim` dict. Only used if `dim` is None.
 
         Returns
         -------
         XTensorVariable
-            Tensor with the new dimension inserted
+            A tensor with additional dimensions inserted at the front.
         """
-        return px.shape.expand_dims(self, dim, size=size)
+        return px.shape.expand_dims(
+            self, dim, create_index_for_new_dim=create_index_for_new_dim, **dim_kwargs
+        )
 
     # ndarray methods
     # https://docs.xarray.dev/en/latest/api.html#id7
