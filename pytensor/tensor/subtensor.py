@@ -1524,7 +1524,7 @@ def inc_subtensor(
         r = ivector("r")
         new_r = inc_subtensor(r[[0, 1, 0]], 5, ignore_duplicates=True)
 
-    Consider using :func:`pytensor.tensor.variable.TensorVariable.inc` instead.
+    Consider using :meth:`pytensor.tensor.variable.TensorVariable.inc` instead.
 
     """
     # First of all, y cannot have a higher dimension than x,
