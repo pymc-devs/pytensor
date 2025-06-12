@@ -20,6 +20,7 @@ from pytensor.tensor.basic import (
     join,
     register_infer_shape,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
@@ -169,8 +170,8 @@ def local_subtensor_of_dot(fgraph, node):
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
 @node_rewriter([Subtensor])
-def local_subtensor_of_elemwise(fgraph, node):
-    """Lift a Subtensor through an Elemwise and its implicit broadcasting behavior.
+def local_subtensor_of_batch_dims(fgraph, node):
+    """Lift a Subtensor through the batch dims of an (Elemwise or Blockwise) operation and its implicit broadcasting behavior.
 
     exp(x)[:, 0] -> exp(x[:, 0])
     add(x, y)[0] -> add(x[0], y[0])
@@ -178,7 +179,7 @@ def local_subtensor_of_elemwise(fgraph, node):
     """
     elem, *idx = node.inputs
 
-    if not (elem.owner and isinstance(elem.owner.op, Elemwise)):
+    if not (elem.owner and isinstance(elem.owner.op, Elemwise | Blockwise)):
         return None
 
     if len(fgraph.clients[elem]) > 1:
@@ -188,9 +189,34 @@ def local_subtensor_of_elemwise(fgraph, node):
 
     idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
 
+    batch_ndim = (
+        elem.owner.op.batch_ndim(elem.owner)
+        if isinstance(elem.owner.op, Blockwise)
+        else elem.ndim
+    )
+
+    if len(idx_tuple) > batch_ndim:
+        # Indexing on core dimensions of Blockwise. We split the indices and lift the batch ones only
+        batch_indices, core_indices = idx_tuple[:batch_ndim], idx_tuple[batch_ndim:]
+        if all(is_full_slice(idx) for idx in batch_indices):
+            # No batch indices, nothing to do
+            return None
+        elem_with_batch_indices = elem[batch_indices]
+        [elem_with_batch_indices_lifted] = local_subtensor_of_batch_dims.transform(
+            fgraph, elem_with_batch_indices.owner
+        )
+        # Reapply the core_indices
+        core_ndim = elem.type.ndim - batch_ndim
+        # Number of batch dims may have changed with the lifting of indices, so we recompute
+        new_batch_ndim = elem_with_batch_indices_lifted.type.ndim - core_ndim
+        new_indices = (*(slice(None),) * new_batch_ndim, *core_indices)
+        new_elem = elem_with_batch_indices_lifted[new_indices]
+        copy_stack_trace(node.outputs[0], new_elem)
+        return [new_elem]
+
     elem_inputs = elem.owner.inputs
-    elem_bcast = elem.type.broadcastable
-    if all(inp.type.broadcastable == elem_bcast for inp in elem_inputs):
+    elem_bcast = elem.type.broadcastable[:batch_ndim]
+    if all(inp.type.broadcastable[:batch_ndim] == elem_bcast for inp in elem_inputs):
         # No need to worry about implicit broadcasting.
         indexed_inputs = [inp[idx_tuple] for inp in elem_inputs]
 
@@ -201,7 +227,7 @@ def local_subtensor_of_elemwise(fgraph, node):
             zip(
                 idx_tuple,
                 elem_bcast,
-                *(inp.type.broadcastable for inp in elem_inputs),
+                *(inp.type.broadcastable[:batch_ndim] for inp in elem_inputs),
                 # Indices can be shorter than input ndims
                 strict=False,
             )
