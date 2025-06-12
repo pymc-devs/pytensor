@@ -4,10 +4,6 @@ from copy import copy
 from typing import cast
 
 import numpy as np
-from scipy.optimize import minimize as scipy_minimize
-from scipy.optimize import minimize_scalar as scipy_minimize_scalar
-from scipy.optimize import root as scipy_root
-from scipy.optimize import root_scalar as scipy_root_scalar
 
 import pytensor.scalar as ps
 from pytensor.compile.function import function
@@ -379,6 +375,8 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         self._fn_wrapped = None
 
     def perform(self, node, inputs, outputs):
+        from scipy.optimize import minimize_scalar as scipy_minimize_scalar
+
         f = self.fn_wrapped
         f.clear_cache()
 
@@ -514,6 +512,8 @@ class MinimizeOp(ScipyWrapperOp):
         self._fn_wrapped = None
 
     def perform(self, node, inputs, outputs):
+        from scipy.optimize import minimize as scipy_minimize
+
         f = self.fn_wrapped
         x0, *args = inputs
 
@@ -668,6 +668,8 @@ class RootScalarOp(ScipyScalarWrapperOp):
         self._fn_wrapped = None
 
     def perform(self, node, inputs, outputs):
+        from scipy.optimize import root_scalar as scipy_root_scalar
+
         f = self.fn_wrapped
         f.clear_cache()
         # f.copy_x = True
@@ -828,6 +830,8 @@ class RootOp(ScipyWrapperOp):
         self._fn_wrapped = LRUCache1(fn)
 
     def perform(self, node, inputs, outputs):
+        from scipy.optimize import root as scipy_root
+
         f = self.fn_wrapped
         f.clear_cache()
         f.copy_x = True
