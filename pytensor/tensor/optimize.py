@@ -427,6 +427,27 @@ def minimize_scalar(
 ):
     """
     Minimize a scalar objective function using scipy.optimize.minimize_scalar.
+
+    Parameters
+    ----------
+    objective : TensorVariable
+        The objective function to minimize. This should be a PyTensor variable representing a scalar value.
+    x : TensorVariable
+        The variable with respect to which the objective function is minimized. It must be a scalar and an
+        input to the computational graph of `objective`.
+    method : str, optional
+        The optimization method to use. Default is "brent". See `scipy.optimize.minimize_scalar` for other options.
+    optimizer_kwargs : dict, optional
+        Additional keyword arguments to pass to `scipy.optimize.minimize_scalar`.
+
+    Returns
+    -------
+    solution: TensorVariable
+        Value of `x` that minimizes `objective(x, *args)`. If the success flag is False, this will be the
+        final state returned by the minimization routine, not necessarily a minimum.
+    success : TensorVariable
+        Symbolic boolean flag indicating whether the minimization routine reported convergence to a minimum
+        value, based on the requested convergence criteria.
     """
 
     args = _find_optimization_parameters(objective, x)
@@ -439,7 +460,11 @@ def minimize_scalar(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    return minimize_scalar_op(x, *args)
+    solution, success = cast(
+        tuple[TensorVariable, TensorVariable], minimize_scalar_op(x, *args)
+    )
+
+    return solution, success
 
 
 class MinimizeOp(ScipyWrapperOp):
@@ -539,7 +564,7 @@ def minimize(
     jac: bool = True,
     hess: bool = False,
     optimizer_kwargs: dict | None = None,
-):
+) -> tuple[TensorVariable, TensorVariable]:
     """
     Minimize a scalar objective function using scipy.optimize.minimize.
 
@@ -564,9 +589,13 @@ def minimize(
 
     Returns
     -------
-    TensorVariable
-        The optimized value of x that minimizes the objective function.
+    solution: TensorVariable
+        The optimized value of the vector of inputs `x` that minimizes `objective(x, *args)`. If the success flag
+        is False, this will be the final state of the minimization routine, but not necessarily a minimum.
 
+    success: TensorVariable
+        Symbolic boolean flag indicating whether the minimization routine reported convergence to a minimum
+        value, based on the requested convergence criteria.
     """
     args = _find_optimization_parameters(objective, x)
 
@@ -580,7 +609,11 @@ def minimize(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    return minimize_op(x, *args)
+    solution, success = cast(
+        tuple[TensorVariable, TensorVariable], minimize_op(x, *args)
+    )
+
+    return solution, success
 
 
 class RootScalarOp(ScipyScalarWrapperOp):
@@ -677,19 +710,48 @@ class RootScalarOp(ScipyScalarWrapperOp):
 
 def root_scalar(
     equation: TensorVariable,
-    variables: TensorVariable,
+    variable: TensorVariable,
     method: str = "secant",
     jac: bool = False,
     hess: bool = False,
     optimizer_kwargs: dict | None = None,
-):
+) -> tuple[TensorVariable, TensorVariable]:
     """
     Find roots of a scalar equation using scipy.optimize.root_scalar.
+
+    Parameters
+    ----------
+    equation : TensorVariable
+        The equation for which to find roots. This should be a PyTensor variable representing a single equation in one
+        variable. The function will find `variables` such that `equation(variables, *args) = 0`.
+    variable : TensorVariable
+        The variable with respect to which the equation is solved. It must be a scalar and an input to the
+        computational graph of `equation`.
+    method : str, optional
+        The root-finding method to use. Default is "secant". See `scipy.optimize.root_scalar` for other options.
+    jac : bool, optional
+        Whether to compute and use the first derivative of the equation with respect to `variables`.
+        Default is False. Some methods require this.
+    hess : bool, optional
+        Whether to compute and use the second derivative of the equation with respect to `variables`.
+        Default is False. Some methods require this.
+    optimizer_kwargs : dict, optional
+        Additional keyword arguments to pass to `scipy.optimize.root_scalar`.
+
+    Returns
+    -------
+    solution: TensorVariable
+        The final state of the root-finding routine. When `success` is True, this is the value of `variables` that
+        causes `equation` to evaluate to zero. Otherwise it is the final state returned by the root-finding
+        routine, but not necessarily a root.
+
+    success: TensorVariable
+        Boolean indicating whether the root-finding was successful. If True, the solution is a root of the equation
     """
-    args = _find_optimization_parameters(equation, variables)
+    args = _find_optimization_parameters(equation, variable)
 
     root_scalar_op = RootScalarOp(
-        variables,
+        variable,
         *args,
         equation=equation,
         method=method,
@@ -698,7 +760,11 @@ def root_scalar(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    return root_scalar_op(variables, *args)
+    solution, success = cast(
+        tuple[TensorVariable, TensorVariable], root_scalar_op(variable, *args)
+    )
+
+    return solution, success
 
 
 class RootOp(ScipyWrapperOp):
@@ -816,8 +882,36 @@ def root(
     method: str = "hybr",
     jac: bool = True,
     optimizer_kwargs: dict | None = None,
-):
-    """Find roots of a system of equations using scipy.optimize.root."""
+) -> tuple[TensorVariable, TensorVariable]:
+    """
+    Find roots of a system of equations using scipy.optimize.root.
+
+    Parameters
+    ----------
+    equations : TensorVariable
+        The system of equations for which to find roots. This should be a PyTensor variable representing a
+        vector (or scalar) value. The function will find `variables` such that `equations(variables, *args) = 0`.
+    variables : TensorVariable
+        The variable(s) with respect to which the system of equations is solved. It must be an input to the
+        computational graph of `equations` and have the same number of dimensions as `equations`.
+    method : str, optional
+        The root-finding method to use. Default is "hybr". See `scipy.optimize.root` for other options.
+    jac : bool, optional
+        Whether to compute and use the Jacobian of the `equations` with respect to `variables`.
+        Default is True. Most methods require this.
+    optimizer_kwargs : dict, optional
+        Additional keyword arguments to pass to `scipy.optimize.root`.
+
+    Returns
+    -------
+    solution: TensorVariable
+        The final state of the root-finding routine. When `success` is True, this is the value of `variables` that
+        causes all `equations` to evaluate to zero. Otherwise it is the final state returned by the root-finding
+        routine, but not necessarily a root.
+
+    success: TensorVariable
+        Boolean indicating whether the root-finding was successful. If True, the solution is a root of the equation
+    """
 
     args = _find_optimization_parameters(equations, variables)
 
@@ -830,7 +924,11 @@ def root(
         optimizer_kwargs=optimizer_kwargs,
     )
 
-    return root_op(variables, *args)
+    solution, success = cast(
+        tuple[TensorVariable, TensorVariable], root_op(variables, *args)
+    )
+
+    return solution, success
 
 
 __all__ = ["minimize_scalar", "minimize", "root_scalar", "root"]
