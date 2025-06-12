@@ -31,3 +31,4 @@ symbolic expressions using calls that look just like numpy calls, such as
     math_opt
     basic_opt
     functional
+    optimize
