@@ -44,6 +44,7 @@ from pytensor.tensor.math import (
     Prod,
     Sum,
     _conj,
+    _dot,
     _inner_prod,
     _matrix_matrix_matmul,
     _matrix_vec_prod,
@@ -98,6 +99,7 @@ from pytensor.tensor.rewriting.basic import (
     register_useless,
 )
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
+from pytensor.tensor.rewriting.linalg import is_matrix_transpose
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
@@ -175,21 +177,20 @@ def local_lift_transpose_through_dot(fgraph, node):
     These rewrites "lift" (propagate towards the inputs) `DimShuffle`
     through dot product.  It allows to put the graph in a more standard shape,
     and to later merge consecutive `DimShuffle`\s.
-
-    The transformation should be apply whether or not the transpose is
-    inplace.  The newly-introduced transpositions are not inplace, this will
-    be taken care of in a later rewrite phase.
-
     """
-    if not (isinstance(node.op, DimShuffle) and node.op.new_order == (1, 0)):
+
+    if not (
+        is_matrix_transpose(node.outputs[0])
+        and node.inputs[0].owner
+        and ((dot_op := node.inputs[0].owner.op) in (_dot, _matrix_matrix_matmul))
+    ):
         return False
-    if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Dot)):
-        return False
+
     x, y = node.inputs[0].owner.inputs
 
-    if x.ndim == y.ndim == 2:
+    if x.ndim >= y.ndim >= 2:
         # Output is dot product of transposed inputs in reverse order
-        ret = [dot(y.T, x.T)]
+        ret = [dot_op(y.mT, x.mT)]
 
         # Copy over stack trace to output from result of dot-product
         copy_stack_trace(node.inputs[0], ret)
