@@ -31,6 +31,7 @@ from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant
+from pytensor.graph.op import _NoPythonOp
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
@@ -1108,7 +1109,12 @@ def unconditional_constant_folding(fgraph, node):
         storage_map[o] = [None]
         compute_map[o] = [False]
 
-    thunk = node.op.make_thunk(node, storage_map, compute_map, no_recycling=[])
+    if isinstance(node.op, _NoPythonOp):
+        thunk = node.op.make_thunk(node, storage_map, compute_map, no_recycling=[])
+    else:
+        thunk = node.op.make_thunk(
+            node, storage_map, compute_map, no_recycling=[], impl="py"
+        )
     required = thunk()
 
     # A node whose inputs are all provided should always return successfully
