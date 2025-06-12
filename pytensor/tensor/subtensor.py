@@ -1462,7 +1462,7 @@ def set_subtensor(x, y, inplace=False, tolerate_inplace_aliasing=False):
         r = vector("r")
         new_r = set_subtensor(r[10:], 5)
 
-    Consider using :func:`pytensor.tensor.variable.TensorVariable.set` instead.
+    Consider using :meth:`pytensor.tensor.variable.TensorVariable.set` instead.
 
     """
     return inc_subtensor(
