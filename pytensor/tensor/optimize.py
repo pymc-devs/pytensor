@@ -354,8 +354,6 @@ def implict_optimization_grads(
 
 
 class MinimizeScalarOp(ScipyScalarWrapperOp):
-    __props__ = ("method",)
-
     def __init__(
         self,
         x: Variable,
@@ -378,6 +376,9 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
+
+    def __str__(self):
+        return f"{self.__class__.__name__}(method={self.method})"
 
     def perform(self, node, inputs, outputs):
         global optimize
@@ -473,8 +474,6 @@ def minimize_scalar(
 
 
 class MinimizeOp(ScipyWrapperOp):
-    __props__ = ("method", "jac", "hess", "hessp")
-
     def __init__(
         self,
         x: Variable,
@@ -517,6 +516,15 @@ class MinimizeOp(ScipyWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
+
+    def __str__(self):
+        str_args = ", ".join(
+            [
+                f"{arg}={getattr(self, arg)}"
+                for arg in ["method", "jac", "hess", "hessp"]
+            ]
+        )
+        return f"{self.__class__.__name__}({str_args})"
 
     def perform(self, node, inputs, outputs):
         global optimize
@@ -626,8 +634,6 @@ def minimize(
 
 
 class RootScalarOp(ScipyScalarWrapperOp):
-    __props__ = ("method", "jac", "hess")
-
     def __init__(
         self,
         variables,
@@ -675,6 +681,12 @@ class RootScalarOp(ScipyScalarWrapperOp):
 
         self._fn = None
         self._fn_wrapped = None
+
+    def __str__(self):
+        str_args = ", ".join(
+            [f"{arg}={getattr(self, arg)}" for arg in ["method", "jac", "hess"]]
+        )
+        return f"{self.__class__.__name__}({str_args})"
 
     def perform(self, node, inputs, outputs):
         global optimize
@@ -813,6 +825,12 @@ class RootOp(ScipyWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
+
+    def __str__(self):
+        str_args = ", ".join(
+            [f"{arg}={getattr(self, arg)}" for arg in ["method", "jac"]]
+        )
+        return f"{self.__class__.__name__}({str_args})"
 
     def build_fn(self):
         outputs = self.inner_outputs
