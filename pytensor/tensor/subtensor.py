@@ -1462,6 +1462,8 @@ def set_subtensor(x, y, inplace=False, tolerate_inplace_aliasing=False):
         r = vector("r")
         new_r = set_subtensor(r[10:], 5)
 
+    Consider using :func:`pytensor.tensor.variable.TensorVariable.set` instead.
+
     """
     return inc_subtensor(
         x,
@@ -1520,7 +1522,9 @@ def inc_subtensor(
     .. code-block:: python
 
         r = ivector("r")
-        new_r = inc_subtensor(r[10:], 5, ignore_duplicates=True)
+        new_r = inc_subtensor(r[[0, 1, 0]], 5, ignore_duplicates=True)
+
+    Consider using :func:`pytensor.tensor.variable.TensorVariable.inc` instead.
 
     """
     # First of all, y cannot have a higher dimension than x,
