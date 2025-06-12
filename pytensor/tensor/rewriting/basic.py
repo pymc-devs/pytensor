@@ -1101,8 +1101,15 @@ def unconditional_constant_folding(fgraph, node):
         storage_map[o] = [None]
         compute_map[o] = [False]
 
-    thunk = node.op.make_thunk(node, storage_map, compute_map, no_recycling=[])
-    required = thunk()
+    try:
+        thunk = node.op.make_thunk(
+            node, storage_map, compute_map, no_recycling=[], impl="py"
+        )
+        required = thunk()
+    except NotImplementedError:
+        # Not all Ops have a python implementation
+        thunk = node.op.make_thunk(node, storage_map, compute_map, no_recycling=[])
+        required = thunk()
 
     # A node whose inputs are all provided should always return successfully
     assert not required
