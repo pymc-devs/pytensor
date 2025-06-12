@@ -6,8 +6,8 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.gradient import grad
 from pytensor.scan.op import Scan
 from pytensor.tensor._linalg.solve.rewriting import (
-    reuse_lu_decomposition_multiple_solves,
-    scan_split_non_sequence_lu_decomposition_solve,
+    reuse_decomposition_multiple_solves,
+    scan_split_non_sequence_decomposition_and_solve,
 )
 from pytensor.tensor._linalg.solve.tridiagonal import (
     LUFactorTridiagonal,
@@ -15,7 +15,13 @@ from pytensor.tensor._linalg.solve.tridiagonal import (
 )
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg import solve
-from pytensor.tensor.slinalg import LUFactor, Solve, SolveTriangular
+from pytensor.tensor.slinalg import (
+    Cholesky,
+    CholeskySolve,
+    LUFactor,
+    Solve,
+    SolveTriangular,
+)
 from pytensor.tensor.type import tensor
 
 
@@ -36,6 +42,18 @@ def count_lu_decom_nodes(nodes) -> int:
             or (
                 isinstance(node.op, Blockwise)
                 and isinstance(node.op.core_op, LUFactor | LUFactorTridiagonal)
+            )
+        )
+        for node in nodes
+    )
+
+
+def count_cholesky_decom_nodes(nodes) -> int:
+    return sum(
+        (
+            isinstance(node.op, Cholesky)
+            or (
+                isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Cholesky)
             )
         )
         for node in nodes
@@ -67,10 +85,23 @@ def count_lu_solve_nodes(nodes) -> int:
     return int(count)
 
 
+def count_cholesky_solve_nodes(nodes) -> int:
+    return sum(
+        (
+            isinstance(node.op, CholeskySolve)
+            or (
+                isinstance(node.op, Blockwise)
+                and isinstance(node.op.core_op, CholeskySolve)
+            )
+        )
+        for node in nodes
+    )
+
+
 @pytest.mark.parametrize("transposed", (False, True))
 @pytest.mark.parametrize("assume_a", ("gen", "tridiagonal"))
 def test_lu_decomposition_reused_forward_and_gradient(assume_a, transposed):
-    rewrite_name = reuse_lu_decomposition_multiple_solves.__name__
+    rewrite_name = reuse_decomposition_multiple_solves.__name__
     mode = get_default_mode()
 
     A = tensor("A", shape=(3, 3))
@@ -101,10 +132,46 @@ def test_lu_decomposition_reused_forward_and_gradient(assume_a, transposed):
     np.testing.assert_allclose(resg0, resg1, rtol=rtol)
 
 
+def test_cholesky_reused_forward_and_gradient():
+    rewrite_name = reuse_decomposition_multiple_solves.__name__
+    mode = get_default_mode()
+
+    A = tensor("A", shape=(3, 3))
+    b = tensor("b", shape=(3, 4))
+
+    x = solve(A, b, assume_a="pos")
+    grad_x_wrt_A = grad(x.sum(), A)
+    fn_no_opt = function([A, b], [x, grad_x_wrt_A], mode=mode.excluding(rewrite_name))
+    no_opt_nodes = fn_no_opt.maker.fgraph.apply_nodes
+
+    assert count_vanilla_solve_nodes(no_opt_nodes) == 2
+    assert count_cholesky_decom_nodes(no_opt_nodes) == 0
+    assert count_cholesky_solve_nodes(no_opt_nodes) == 0
+
+    fn_opt = function([A, b], [x, grad_x_wrt_A], mode=mode.including(rewrite_name))
+    opt_nodes = fn_opt.maker.fgraph.apply_nodes
+    assert count_vanilla_solve_nodes(opt_nodes) == 0
+    assert count_cholesky_decom_nodes(opt_nodes) == 1
+    assert count_cholesky_solve_nodes(opt_nodes) == 2
+
+    # Make sure results are correct
+    # A has to actually be positive definite, or else fn_opt and fn_no_opt won't agree
+    rng = np.random.default_rng(31)
+    L = rng.random(A.type.shape, dtype=A.type.dtype)
+    A_test = L @ L.T
+    b_test = rng.random(b.type.shape, dtype=b.type.dtype)
+
+    resx0, resg0 = fn_no_opt(A_test, b_test)
+    resx1, resg1 = fn_opt(A_test, b_test)
+    rtol = 1e-7 if config.floatX == "float64" else 1e-4
+    np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+    np.testing.assert_allclose(resg0, resg1, rtol=rtol)
+
+
 @pytest.mark.parametrize("transposed", (False, True))
 @pytest.mark.parametrize("assume_a", ("gen", "tridiagonal"))
 def test_lu_decomposition_reused_blockwise(assume_a, transposed):
-    rewrite_name = reuse_lu_decomposition_multiple_solves.__name__
+    rewrite_name = reuse_decomposition_multiple_solves.__name__
     mode = get_default_mode()
 
     A = tensor("A", shape=(3, 3))
@@ -129,14 +196,46 @@ def test_lu_decomposition_reused_blockwise(assume_a, transposed):
     b_test = rng.random(b.type.shape, dtype=b.type.dtype)
     resx0 = fn_no_opt(A_test, b_test)
     resx1 = fn_opt(A_test, b_test)
-    rtol = rtol = 1e-7 if config.floatX == "float64" else 1e-4
+    rtol = 1e-7 if config.floatX == "float64" else 1e-4
+    np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+def test_cholesky_decomposition_reused_blockwise():
+    rewrite_name = reuse_decomposition_multiple_solves.__name__
+    mode = get_default_mode()
+
+    A = tensor("A", shape=(3, 3))
+    b = tensor("b", shape=(2, 3, 4))
+
+    x = solve(A, b, assume_a="pos")
+    fn_no_opt = function([A, b], [x], mode=mode.excluding(rewrite_name))
+    no_opt_nodes = fn_no_opt.maker.fgraph.apply_nodes
+    assert count_vanilla_solve_nodes(no_opt_nodes) == 1
+    assert count_cholesky_decom_nodes(no_opt_nodes) == 0
+    assert count_cholesky_solve_nodes(no_opt_nodes) == 0
+
+    fn_opt = function([A, b], [x], mode=mode.including(rewrite_name))
+    opt_nodes = fn_opt.maker.fgraph.apply_nodes
+    assert count_vanilla_solve_nodes(opt_nodes) == 0
+    assert count_cholesky_decom_nodes(opt_nodes) == 1
+    assert count_cholesky_solve_nodes(opt_nodes) == 1
+
+    # Make sure results are correct
+    rng = np.random.default_rng(31)
+    L = rng.random(A.type.shape, dtype=A.type.dtype)
+    A_test = L @ L.T
+
+    b_test = rng.random(b.type.shape, dtype=b.type.dtype)
+    resx0 = fn_no_opt(A_test, b_test)
+    resx1 = fn_opt(A_test, b_test)
+    rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
 
 
 @pytest.mark.parametrize("transposed", (False, True))
 @pytest.mark.parametrize("assume_a", ("gen", "tridiagonal"))
 def test_lu_decomposition_reused_scan(assume_a, transposed):
-    rewrite_name = scan_split_non_sequence_lu_decomposition_solve.__name__
+    rewrite_name = scan_split_non_sequence_decomposition_and_solve.__name__
     mode = get_default_mode()
 
     A = tensor("A", shape=(3, 3))
@@ -182,23 +281,81 @@ def test_lu_decomposition_reused_scan(assume_a, transposed):
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
 
 
-def test_lu_decomposition_reused_preserves_check_finite():
+def test_cholesky_decomposition_reused_scan():
+    rewrite_name = scan_split_non_sequence_decomposition_and_solve.__name__
+    mode = get_default_mode()
+
+    A = tensor("A", shape=(3, 3))
+    x0 = tensor("b", shape=(3, 4))
+
+    xs, _ = scan(
+        lambda xtm1, A: solve(A, xtm1, assume_a="pos"),
+        outputs_info=[x0],
+        non_sequences=[A],
+        n_steps=10,
+    )
+
+    fn_no_opt = function(
+        [A, x0],
+        [xs],
+        mode=mode.excluding(rewrite_name),
+    )
+    [no_opt_scan_node] = [
+        node for node in fn_no_opt.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+    ]
+    no_opt_nodes = no_opt_scan_node.op.fgraph.apply_nodes
+    assert count_vanilla_solve_nodes(no_opt_nodes) == 1
+    assert count_cholesky_decom_nodes(no_opt_nodes) == 0
+    assert count_cholesky_solve_nodes(no_opt_nodes) == 0
+
+    fn_opt = function([A, x0], [xs], mode=mode.including("scan", rewrite_name))
+    [opt_scan_node] = [
+        node for node in fn_opt.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+    ]
+    opt_nodes = opt_scan_node.op.fgraph.apply_nodes
+    assert count_vanilla_solve_nodes(opt_nodes) == 0
+    # The cholesky decomposition is outside of the scan!
+    assert count_cholesky_decom_nodes(opt_nodes) == 0
+    assert count_cholesky_solve_nodes(opt_nodes) == 1
+
+    # Make sure results are correct
+    rng = np.random.default_rng(170)
+    L = rng.random(A.type.shape, dtype=A.type.dtype)
+    A_test = L @ L.T
+
+    x0_test = rng.random(x0.type.shape, dtype=x0.type.dtype)
+    resx0 = fn_no_opt(A_test, x0_test)
+    resx1 = fn_opt(A_test, x0_test)
+    rtol = 1e-7 if config.floatX == "float64" else 1e-4
+    np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+@pytest.mark.parametrize(
+    "assume_a, count_decomp_fn, count_solve_fn",
+    (
+        ("gen", count_lu_decom_nodes, count_lu_solve_nodes),
+        ("pos", count_cholesky_decom_nodes, count_cholesky_solve_nodes),
+    ),
+)
+def test_decomposition_reused_preserves_check_finite(
+    assume_a, count_decomp_fn, count_solve_fn
+):
     # Check that the LU decomposition rewrite preserves the check_finite flag
-    rewrite_name = reuse_lu_decomposition_multiple_solves.__name__
+    rewrite_name = reuse_decomposition_multiple_solves.__name__
 
     A = tensor("A", shape=(2, 2))
     b1 = tensor("b1", shape=(2,))
     b2 = tensor("b2", shape=(2,))
 
-    x1 = solve(A, b1, assume_a="gen", check_finite=True)
-    x2 = solve(A, b2, assume_a="gen", check_finite=False)
+    x1 = solve(A, b1, assume_a=assume_a, check_finite=True)
+    x2 = solve(A, b2, assume_a=assume_a, check_finite=False)
     fn_opt = function(
         [A, b1, b2], [x1, x2], mode=get_default_mode().including(rewrite_name)
     )
     opt_nodes = fn_opt.maker.fgraph.apply_nodes
     assert count_vanilla_solve_nodes(opt_nodes) == 0
-    assert count_lu_decom_nodes(opt_nodes) == 1
-    assert count_lu_solve_nodes(opt_nodes) == 2
+    assert count_decomp_fn(opt_nodes) == 1
+    assert count_solve_fn(opt_nodes) == 2
 
     # We should get an error if A or b1 is non finite
     A_valid = np.array([[1, 0], [0, 1]], dtype=A.type.dtype)
