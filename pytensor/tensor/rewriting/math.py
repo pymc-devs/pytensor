@@ -28,6 +28,7 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     cast,
     constant,
+    expand_dims,
     get_underlying_scalar_constant_value,
     moveaxis,
     ones_like,
@@ -35,7 +36,6 @@ from pytensor.tensor.basic import (
     switch,
     zeros_like,
 )
-from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
@@ -45,10 +45,7 @@ from pytensor.tensor.math import (
     Sum,
     _conj,
     _dot,
-    _inner_prod,
-    _matrix_matrix_matmul,
-    _matrix_vec_prod,
-    _vec_matrix_prod,
+    _matmul,
     add,
     digamma,
     dot,
@@ -182,7 +179,7 @@ def local_lift_transpose_through_dot(fgraph, node):
     if not (
         is_matrix_transpose(node.outputs[0])
         and node.inputs[0].owner
-        and ((dot_op := node.inputs[0].owner.op) in (_dot, _matrix_matrix_matmul))
+        and ((dot_op := node.inputs[0].owner.op) in (_dot, _matmul))
     ):
         return False
 
@@ -197,60 +194,157 @@ def local_lift_transpose_through_dot(fgraph, node):
         return ret
 
 
-@register_stabilize
-@register_specialize
-@node_rewriter(tracks=[Blockwise])
-def local_batched_matmul_to_core_matmul(fgraph, node):
-    """Rewrite matmul where only one of the inputs has batch dimensions to a reshaped core matmul.
+def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
+    """Move batch dimensions of matmul operands to core matmul
 
-    Example, if x has batch dimensions, but y not:
+    Example, if x has batch dimensions that don't overlap with batch dimensions of y
     x @ y -> (x.reshape(-1, x.shape[-1]) @ y).reshape(*x.shape[:-1], y.shape[-1])
 
-    It also works when y has batch dimensions, but x not.
-    """
+    It also works for batch dimensions of y that don't overlap with batch dimensions of x
 
-    # Check whether we have a matmul operation in this node
-    if not (
-        isinstance(node.op.core_op, Dot)
-        and len(node.op.inputs_sig[0]) == 2
-        and len(node.op.inputs_sig[1]) == 2
-    ):
-        return None
+    The rewrite only uses reshape when mixing dimensions, and it can refuse to apply if `allow_reshape=False`
+    """
 
     x, y = node.inputs
     batch_ndim = node.op.batch_ndim(node)
 
-    # Check if x has batch dimensions, but y not (or only broadcastable dimensions)
-    if any(not b_dim for b_dim in x.type.broadcastable[:-2]) and all(
-        y.type.broadcastable[:-2]
-    ):
-        x_stacked = x.reshape((-1, x.shape[-1]))
-        out_stacked = x_stacked @ y.squeeze(tuple(range(batch_ndim)))
-        out = out_stacked.reshape((*x.shape[:-1], y.shape[-1]))
-        return [out]
+    x_axis_to_merge = [
+        i
+        for i, (bcast_x, bcast_y) in enumerate(
+            zip(x.type.broadcastable[:-2], y.type.broadcastable[:-2])
+        )
+        if bcast_y and not bcast_x
+    ]
 
-    # Otherwise, check if y has batch dimension, but x not
-    elif any(not b_dim for b_dim in y.type.broadcastable[:-2]) and all(
-        x.type.broadcastable[:-2]
-    ):
-        # For the y batch case we need to first move the batch axes and then reshape
-        # y.shape == (*b, k, n)
-        y_tr = moveaxis(y, -2, 0)  # (k, *b, n)
-        y_stacked = y_tr.reshape((y.shape[-2], -1))  # (k, *b * n)
-        out_stacked = x.squeeze(tuple(range(batch_ndim))) @ y_stacked  # (m, *b * n)
-        out_stacked_tr = out_stacked.reshape(
-            (x.shape[-2], *y.shape[:-2], y.shape[-1])
-        )  # (m, *b, n)
-        out = moveaxis(out_stacked_tr, 0, -2)  # (*b, m, n)
-        return [out]
+    y_axis_to_merge = [
+        i
+        for i, (bcast_x, bcast_y) in enumerate(
+            zip(x.type.broadcastable[:-2], y.type.broadcastable[:-2])
+        )
+        if bcast_x and not bcast_y
+    ]
 
-    # Both x and y have batch dimensions, nothing to do here
-    return None
+    if not (x_axis_to_merge or y_axis_to_merge):
+        return None
+
+    x_shape = tuple(x.shape)
+    y_shape = tuple(y.shape)
+    x_is_row = x.type.broadcastable[-2]
+    y_is_col = y.type.broadcastable[-1]
+    n_x_axis_to_merge = len(x_axis_to_merge)
+    n_y_axis_to_merge = len(y_axis_to_merge)
+    n_axis_to_merge = n_x_axis_to_merge + n_y_axis_to_merge
+
+    x_stacked, y_stacked = x, y
+    dims_were_merged = False
+
+    if n_x_axis_to_merge:
+        # ravel batch dimensions of x on the core (m) axis
+        x_axis_destination = tuple(range(-n_x_axis_to_merge - 2, -2))
+        x_stacked = moveaxis(x, x_axis_to_merge, x_axis_destination)
+        if x_is_row:
+            # x was a row matrix, squeeze it to clean up the graph
+            x_stacked = x_stacked.squeeze(-2)
+        if n_x_axis_to_merge > 1 or not x_is_row:
+            if not allow_reshape:
+                # TODO: We could allow the y rewrite to go on
+                # Or just move one axis (the largest) if x is row
+                return None
+
+            # Ravel moved batch dims together with (m) if needed
+            x_stacked_shape = tuple(x_stacked.shape)
+            x_stacked = x_stacked.reshape(
+                (*x_stacked_shape[: batch_ndim - n_x_axis_to_merge], -1, x_shape[-1])
+            )
+            dims_were_merged = True
+
+    if n_y_axis_to_merge:
+        # ravel batch dimensions of y on the core (n) axis
+        y_axis_destination = tuple(range(-n_y_axis_to_merge - 1, -1))
+        y_stacked = moveaxis(y, y_axis_to_merge, y_axis_destination)
+        if y_is_col:
+            # y was a column matrix, squeeze it to clean up the graph
+            y_stacked = y_stacked.squeeze(-1)
+        if n_y_axis_to_merge > 1 or not y_is_col:
+            if not allow_reshape:
+                # TODO: We could allow the x rewrite to go on
+                # Or just move one axis (the largest) if y is col
+                return None
+            # Ravel moved batch dims together with (n) if needed
+            y_stacked_shape = tuple(y_stacked.shape)
+            y_stacked = y_stacked.reshape(
+                (*y_stacked_shape[: batch_ndim - n_y_axis_to_merge], y_shape[-2], -1)
+            )
+            dims_were_merged = True
+
+    # Squeeze x_dims corresponding to merged dimensions of y
+    x_axis_to_squeeze = np.array(y_axis_to_merge)
+    for i in reversed(x_axis_to_merge):
+        # The corresponding dimensions of y may have shifted when we merged dimensions of x
+        x_axis_to_squeeze[x_axis_to_squeeze > i] -= 1
+    x_stacked = x_stacked.squeeze(tuple(x_axis_to_squeeze))
+
+    # Same for y
+    y_axis_to_squeeze = np.array(x_axis_to_merge)
+    for i in reversed(y_axis_to_merge):
+        y_axis_to_squeeze[y_axis_to_squeeze > i] -= 1
+    y_stacked = y_stacked.squeeze(tuple(y_axis_to_squeeze))
+
+    out_stacked = x_stacked @ y_stacked
+
+    # Split back any merged dimensions
+    if dims_were_merged:
+        x_merged_shapes = [x_shape[i] for i in x_axis_to_merge]
+        if not x_is_row:
+            # Otherwise we handle that later with expand_dims, which is cleaner
+            x_merged_shapes.append(x_shape[-2])
+        y_merged_shapes = [y_shape[i] for i in y_axis_to_merge]
+        if not y_is_col:
+            # Otherwise we handle that later with expand_dims, which is cleaner
+            y_merged_shapes.append(y_shape[-1])
+        out_stacked_shape = tuple(out_stacked.shape)
+        out_unstacked = out_stacked.reshape(
+            (
+                *out_stacked_shape[: batch_ndim - n_axis_to_merge],
+                *x_merged_shapes,
+                *y_merged_shapes,
+            )
+        )
+    else:
+        out_unstacked = out_stacked
+
+    # Add back dummy row, col axis
+    # We do this separately to avoid the reshape as much as we can
+    if y_is_col and (n_y_axis_to_merge or dims_were_merged):
+        out_unstacked = expand_dims(out_unstacked, -1)
+    if x_is_row and (n_x_axis_to_merge or dims_were_merged):
+        out_unstacked = expand_dims(out_unstacked, -n_y_axis_to_merge - 2)
+
+    # Move batch axis back to their original location
+    source = range(-n_axis_to_merge - 2, 0)
+    destination = (*x_axis_to_merge, -2, *y_axis_to_merge, -1)
+    out = moveaxis(out_unstacked, source, destination)
+    return [out]
+
+
+@register_canonicalize
+@node_rewriter(tracks=[_matmul])
+def local_batched_matmul_to_core_matmul(fgraph, node):
+    # Allow passing batch dimensions of matmul to core vector / column matrices
+    return _batched_matmul_to_core_matmul(fgraph, node, allow_reshape=False)
+
+
+@register_specialize
+@node_rewriter(tracks=[_matmul])
+def local_batched_matmul_to_core_matmul_with_reshape(fgraph, node):
+    # Allow stacking batch dimensions of matmul with core dimensions, with a reshape operation
+    # We only apply this in specialize, because grahs with reshape are hard to work with
+    return _batched_matmul_to_core_matmul(fgraph, node, allow_reshape=True)
 
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([_inner_prod, _matrix_vec_prod, _vec_matrix_prod, _matrix_matrix_matmul])
+@node_rewriter([_matmul])
 def local_blockwise_dot_to_mul(fgraph, node):
     """Rewrite blockwise dots that correspond to multiplication without summation.
 
