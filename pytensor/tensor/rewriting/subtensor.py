@@ -351,7 +351,8 @@ def local_useless_slice(fgraph, node):
         new_idxs[dim] = slice(start, stop, step)
 
     if change_flag or ((last_useful_idx + 1) < len(idxs)):
-        out = x[tuple(new_idxs[: last_useful_idx + 1])]
+        new_idxs = tuple(new_idxs[: last_useful_idx + 1])
+        out = x[new_idxs] if new_idxs else x
         # Copy over previous output stacktrace
         copy_stack_trace(node.outputs, out)
         return [out]
