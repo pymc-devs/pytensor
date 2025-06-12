@@ -24,6 +24,11 @@ from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable, Variable
 
 
+# scipy.optimize can be slow to import, and will not be used by most users
+# We import scipy.optimize lazily inside optimization perform methods to avoid this.
+optimize = None
+
+
 _log = logging.getLogger(__name__)
 
 
@@ -375,7 +380,9 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         self._fn_wrapped = None
 
     def perform(self, node, inputs, outputs):
-        from scipy.optimize import minimize_scalar as scipy_minimize_scalar
+        global optimize
+        if optimize is None:
+            import scipy.optimize as optimize
 
         f = self.fn_wrapped
         f.clear_cache()
@@ -384,7 +391,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         # the args of the objective function), but it is not used in the optimization.
         x0, *args = inputs
 
-        res = scipy_minimize_scalar(
+        res = optimize.minimize_scalar(
             fun=f.value,
             args=tuple(args),
             method=self.method,
@@ -512,12 +519,14 @@ class MinimizeOp(ScipyWrapperOp):
         self._fn_wrapped = None
 
     def perform(self, node, inputs, outputs):
-        from scipy.optimize import minimize as scipy_minimize
+        global optimize
+        if optimize is None:
+            import scipy.optimize as optimize
 
         f = self.fn_wrapped
         x0, *args = inputs
 
-        res = scipy_minimize(
+        res = optimize.minimize(
             fun=f.value_and_grad if self.jac else f.value,
             jac=self.jac,
             x0=x0,
@@ -668,7 +677,9 @@ class RootScalarOp(ScipyScalarWrapperOp):
         self._fn_wrapped = None
 
     def perform(self, node, inputs, outputs):
-        from scipy.optimize import root_scalar as scipy_root_scalar
+        global optimize
+        if optimize is None:
+            import scipy.optimize as optimize
 
         f = self.fn_wrapped
         f.clear_cache()
@@ -676,7 +687,7 @@ class RootScalarOp(ScipyScalarWrapperOp):
 
         variables, *args = inputs
 
-        res = scipy_root_scalar(
+        res = optimize.root_scalar(
             f=f.value,
             fprime=f.grad if self.jac else None,
             fprime2=f.hess if self.hess else None,
@@ -830,7 +841,9 @@ class RootOp(ScipyWrapperOp):
         self._fn_wrapped = LRUCache1(fn)
 
     def perform(self, node, inputs, outputs):
-        from scipy.optimize import root as scipy_root
+        global optimize
+        if optimize is None:
+            import scipy.optimize as optimize
 
         f = self.fn_wrapped
         f.clear_cache()
@@ -838,7 +851,7 @@ class RootOp(ScipyWrapperOp):
 
         variables, *args = inputs
 
-        res = scipy_root(
+        res = optimize.root(
             fun=f,
             jac=self.jac,
             x0=variables,
