@@ -430,6 +430,9 @@ def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwa
     """Add one or more new dimensions to an XTensorVariable."""
     x = as_xtensor(x)
 
+    # Store original dimensions for axis handling
+    original_dims = x.type.dims
+
     # Warn if create_index_for_new_dim is used (not supported)
     if not create_index_for_new_dim:
         warnings.warn(
@@ -473,27 +476,23 @@ def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwa
     else:
         raise TypeError(f"Invalid type for `dim`: {type(dim)}")
 
-    # Store original dimensions for axis handling
-    original_dims = list(x.type.dims)
-
     # Insert each new dim at the front (reverse order preserves user intent)
     for name, size in reversed(dims_dict.items()):
         x = ExpandDims(dim=name)(x, size)
 
     # If axis is specified, transpose to put new dimensions in the right place
     if axis is not None:
-        new_dim_names = list(dims_dict.keys())
         # Wrap non-sequence axis in a list
         if not isinstance(axis, Sequence):
             axis = [axis]
 
-        # xarray requires len(axis) == len(new_dim_names)
-        if len(axis) != len(new_dim_names):
+        # require len(axis) == len(dims_dict)
+        if len(axis) != len(dims_dict):
             raise ValueError("lengths of dim and axis should be identical.")
 
         # Insert new dimensions at their specified positions
-        target_dims = original_dims.copy()
-        for name, pos in zip(new_dim_names, axis):
+        target_dims = list(original_dims)
+        for name, pos in zip(dims_dict, axis):
             # Convert negative axis to positive position relative to current dims
             if pos < 0:
                 pos = len(target_dims) + pos + 1
