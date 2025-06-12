@@ -10,7 +10,6 @@ from pytensor.scalar import discrete_dtypes, upcast
 from pytensor.tensor import as_tensor, get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import integer_dtypes
-from pytensor.tensor.variable import TensorVariable
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import as_xtensor, xtensor
 
@@ -410,6 +409,7 @@ class ExpandDims(XOp):
             static_size = int(get_scalar_constant_value(size))
         except NotScalarConstantError:
             static_size = None
+
         # If size is a constant, validate it
         if static_size is not None and static_size < 0:
             raise ValueError(f"size must be 0 or positive, got: {static_size}")
@@ -429,6 +429,14 @@ class ExpandDims(XOp):
 def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwargs):
     """Add one or more new dimensions to an XTensorVariable."""
     x = as_xtensor(x)
+
+    # Warn if create_index_for_new_dim is used (not supported)
+    if not create_index_for_new_dim:
+        warnings.warn(
+            "create_index_for_new_dim=False has no effect in pytensor.xtensor",
+            UserWarning,
+            stacklevel=2,
+        )
 
     # Extract size from dim_kwargs if present
     size = dim_kwargs.pop("size", 1) if dim_kwargs else 1
@@ -451,6 +459,12 @@ def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwa
         dims_dict = {}
         for name, val in dim.items():
             if isinstance(val, Sequence | np.ndarray) and not isinstance(val, str):
+                warnings.warn(
+                    "When a sequence is provided as a dimension size, only its length is used. "
+                    "The actual values (which would be coordinates in xarray) are ignored.",
+                    UserWarning,
+                    stacklevel=2,
+                )
                 dims_dict[name] = len(val)
             elif isinstance(val, int):
                 dims_dict[name] = val
@@ -459,21 +473,16 @@ def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwa
     else:
         raise TypeError(f"Invalid type for `dim`: {type(dim)}")
 
-    # Convert to canonical form: list of (dim_name, size)
-    canonical_dims: list[tuple[str, int | np.integer | TensorVariable]] = []
-    for name, size in dims_dict.items():
-        canonical_dims.append((name, size))
-
-    # Store original dimensions for later use with axis
+    # Store original dimensions for axis handling
     original_dims = list(x.type.dims)
 
     # Insert each new dim at the front (reverse order preserves user intent)
-    for name, size in reversed(canonical_dims):
+    for name, size in reversed(dims_dict.items()):
         x = ExpandDims(dim=name)(x, size)
 
     # If axis is specified, transpose to put new dimensions in the right place
     if axis is not None:
-        new_dim_names = [name for name, _ in canonical_dims]
+        new_dim_names = list(dims_dict.keys())
         # Wrap non-sequence axis in a list
         if not isinstance(axis, Sequence):
             axis = [axis]
@@ -482,14 +491,13 @@ def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwa
         if len(axis) != len(new_dim_names):
             raise ValueError("lengths of dim and axis should be identical.")
 
-        # Insert each new dim at the specified axis position
-        # Start with original dims, then insert each new dim at its axis
-        target_dims = list(original_dims)
-        # axis values are relative to the result after each insertion
-        for insert_dim, insert_axis in sorted(
-            zip(new_dim_names, axis), key=lambda x: x[1]
-        ):
-            target_dims.insert(insert_axis, insert_dim)
+        # Insert new dimensions at their specified positions
+        target_dims = original_dims.copy()
+        for name, pos in zip(new_dim_names, axis):
+            # Convert negative axis to positive position relative to current dims
+            if pos < 0:
+                pos = len(target_dims) + pos + 1
+            target_dims.insert(pos, name)
         x = Transpose(dims=tuple(target_dims))(x)
 
     return x

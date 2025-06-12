@@ -381,15 +381,6 @@ def test_expand_dims():
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims("country"))
 
-    # Explicit size=1
-    y = x.expand_dims("country", size=1)
-    xr_assert_allclose(fn(x_test), x_test.expand_dims("country"))
-
-    # Explicit size > 1
-    y = x.expand_dims("country", size=4)
-    fn = xr_function([x], y)
-    xr_assert_allclose(fn(x_test), x_test.expand_dims({"country": 4}))
-
     # Test with multiple dimensions
     y = x.expand_dims(["country", "state"])
     fn = xr_function([x], y)
@@ -407,26 +398,11 @@ def test_expand_dims():
 
     # Symbolic size=1
     size_sym_1 = scalar("size_sym_1", dtype="int64")
-    y = x.expand_dims("country", size=size_sym_1)
+    y = x.expand_dims({"country": size_sym_1})
     fn = xr_function([x, size_sym_1], y)
-    xr_assert_allclose(fn(x_test, 1), x_test.expand_dims("country"))
-
-    # Test behavior with symbolic size > 1
-    # NOTE: This test documents our current behavior where expand_dims broadcasts to the requested size.
-    # This differs from xarray's behavior where expand_dims always adds a size-1 dimension.
-    size_sym_4 = scalar("size_sym_4", dtype="int64")
-    y = x.expand_dims("country", size=size_sym_4)
-    fn = xr_function([x, size_sym_4], y)
-    res = fn(x_test, 4)
-    # Our current behavior: broadcasts to size 4
-    expected = x_test.expand_dims({"country": 4})
-    xr_assert_allclose(res, expected)
-    # xarray's behavior would be:
-    # expected = x_test.expand_dims("country")  # always size 1
-    # xr_assert_allclose(res, expected)
+    xr_assert_allclose(fn(x_test, 1), x_test.expand_dims({"country": 1}))
 
     # Test with symbolic sizes in dict
-    size_sym_1 = scalar("size_sym_1", dtype="int64")
     size_sym_2 = scalar("size_sym_2", dtype="int64")
     y = x.expand_dims({"country": size_sym_1, "state": size_sym_2})
     fn = xr_function([x, size_sym_1, size_sym_2], y)
@@ -442,11 +418,30 @@ def test_expand_dims():
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims("country", axis=1))
 
-    # Add two new dims at axis=[1, 2]
+    # Test with negative axis parameter
+    y = x.expand_dims("country", axis=-1)
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.expand_dims("country", axis=-1))
+
+    # Add two new dims with axis parameters
     y = x.expand_dims(["country", "state"], axis=[1, 2])
     fn = xr_function([x], y)
     xr_assert_allclose(
         fn(x_test), x_test.expand_dims(["country", "state"], axis=[1, 2])
+    )
+
+    # Add two dims with negative axis parameters
+    y = x.expand_dims(["country", "state"], axis=[-1, -2])
+    fn = xr_function([x], y)
+    xr_assert_allclose(
+        fn(x_test), x_test.expand_dims(["country", "state"], axis=[-1, -2])
+    )
+
+    # Add two dims with positive and negative axis parameters
+    y = x.expand_dims(["country", "state"], axis=[-2, 1])
+    fn = xr_function([x], y)
+    xr_assert_allclose(
+        fn(x_test), x_test.expand_dims(["country", "state"], axis=[-2, 1])
     )
 
 
@@ -467,9 +462,3 @@ def test_expand_dims_errors():
     y = x.expand_dims("new")
     with pytest.raises(ValueError, match="already exists"):
         y.expand_dims("new")
-
-    # Test for error when both positional and size are given
-    with pytest.raises(
-        ValueError, match="cannot specify both keyword and positional arguments"
-    ):
-        x.expand_dims(["country", "state"], size=3)

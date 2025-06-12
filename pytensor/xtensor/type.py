@@ -485,7 +485,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         self,
         dim: str | Sequence[str] | dict[str, int | Sequence] | None = None,
         create_index_for_new_dim: bool = True,
-        axis: int | None = None,
+        axis: int | Sequence[int] | None = None,
         **dim_kwargs,
     ):
         """Add one or more new dimensions to the tensor.
@@ -501,7 +501,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             Currently ignored. Reserved for future coordinate support.
             In xarray, when True (default), creates a coordinate index for the new dimension
             with values from 0 to size-1. When False, no coordinate index is created.
-        axis : int | None, default: None
+        axis : int | Sequence[int] | None, default: None
             Not implemented yet. In xarray, specifies where to insert the new dimension(s).
             By default (None), new dimensions are inserted at the beginning (axis=0).
             Symbolic axis is not supported yet.
