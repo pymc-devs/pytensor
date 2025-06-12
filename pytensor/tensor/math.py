@@ -3921,23 +3921,7 @@ def logsumexp(x, axis=None, keepdims=False):
     return log(sum(exp(x), axis=axis, keepdims=keepdims))
 
 
-# Predefine all batched variations of Dot
-_inner_prod = Blockwise(
-    _dot,
-    signature="(n),(n)->()",
-)
-
-_matrix_vec_prod = Blockwise(
-    _dot,
-    signature="(m,k),(k)->(m)",
-)
-
-_vec_matrix_prod = Blockwise(
-    _dot,
-    signature="(k),(k,n)->(n)",
-)
-
-_matrix_matrix_matmul = Blockwise(
+_matmul = Blockwise(
     _dot,
     signature="(m,k),(k,n)->(m,n)",
     gufunc_spec=("numpy.matmul", 2, 1),
@@ -3993,11 +3977,11 @@ def matmul(x1: "ArrayLike", x2: "ArrayLike", dtype: Optional["DTypeLike"] = None
     if x1.type.ndim == 1 and x2.type.ndim == 1:
         out = _dot(x1, x2)
     elif x1.type.ndim == 1:
-        out = _matrix_matrix_matmul(x1[None], x2).squeeze(-2)
+        out = vecmat(x1, x2)
     elif x2.type.ndim == 1:
-        out = _matrix_matrix_matmul(x1, x2[:, None]).squeeze(-1)
+        out = matvec(x1, x2)
     else:
-        out = _matrix_matrix_matmul(x1, x2)
+        out = _matmul(x1, x2)
 
     if dtype is not None:
         out = out.astype(dtype)
@@ -4047,7 +4031,7 @@ def vecdot(
     >>> z_batch = pt.vecdot(x_batch, y_batch)  # shape (3,)
     >>> # Equivalent to numpy.vecdot(x_batch, y_batch)
     """
-    out = _inner_prod(x1, x2)
+    out = matmul(x1[..., None, :], x2[..., :, None]).squeeze((-2, -1))
 
     if dtype is not None:
         out = out.astype(dtype)
@@ -4096,7 +4080,7 @@ def matvec(
     >>> result = pt.matvec(batched_A, batched_v)  # shape (2, 3)
     >>> # Equivalent to numpy.matvec(batched_A, batched_v)
     """
-    out = _matrix_vec_prod(x1, x2)
+    out = matmul(x1, x2[..., None]).squeeze(-1)
 
     if dtype is not None:
         out = out.astype(dtype)
@@ -4134,18 +4118,18 @@ def vecmat(
     --------
     >>> import pytensor.tensor as pt
     >>> # Vector-matrix product
-    >>> v = pt.vector("v", shape=(3,))  # shape (3,)
-    >>> A = pt.matrix("A", shape=(3, 4))  # shape (3, 4)
+    >>> v = pt.vector("v", shape=(3,))
+    >>> A = pt.matrix("A", shape=(3, 4))
     >>> result = pt.vecmat(v, A)  # shape (4,)
     >>> # Equivalent to numpy.vecmat(v, A)
     >>>
     >>> # Batched vector-matrix product
-    >>> batched_v = pt.matrix("v", shape=(2, 3))  # shape (2, 3)
-    >>> batched_A = pt.tensor3("A", shape=(2, 3, 4))  # shape (2, 3, 4)
+    >>> batched_v = pt.matrix("v", shape=(2, 3))
+    >>> batched_A = pt.tensor3("A", shape=(2, 3, 4))
     >>> result = pt.vecmat(batched_v, batched_A)  # shape (2, 4)
     >>> # Equivalent to numpy.vecmat(batched_v, batched_A)
     """
-    out = _vec_matrix_prod(x1, x2)
+    out = matmul(x2.mT, x1[..., None]).squeeze(-1)
 
     if dtype is not None:
         out = out.astype(dtype)
@@ -4160,18 +4144,18 @@ def vectorize_node_dot(op, node, batched_x, batched_y):
     old_y_ndim = old_y.type.ndim
     match (old_x_ndim, old_y_ndim):
         case (1, 1):
-            batch_op = _inner_prod
+            batch_fn = vecdot
         case (2, 1):
-            batch_op = _matrix_vec_prod
+            batch_fn = matvec
         case (1, 2):
-            batch_op = _vec_matrix_prod
+            batch_fn = vecmat
         case (2, 2):
-            batch_op = _matrix_matrix_matmul
+            batch_fn = matmul
         case _:
             raise ValueError(
                 f"Core dot Op should have 1D or 2D inputs, got {old_x_ndim}D and {old_y_ndim}D."
             )
-    return batch_op(batched_x, batched_y).owner
+    return batch_fn(batched_x, batched_y).owner
 
 
 def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
