@@ -42,6 +42,7 @@ from pytensor.tensor.math import (
     Prod,
     Sum,
     _conj,
+    _matmul,
     add,
     arccosh,
     arcsinh,
@@ -4566,6 +4567,88 @@ def test_local_batched_matmul_to_core_matmul():
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
 
 
+@pytest.mark.parametrize(
+    "mat_shape, vec_shape",
+    [
+        [(1, 2, 2), (5, 2)],
+        [(5, 2, 2), (1, 2)],
+        [(1, 1, 2, 2), (7, 5, 2)],
+        [(7, 5, 2, 2), (1, 1, 5, 2)],
+        [(1, 5, 1, 2, 2), (7, 5, 7, 2)],
+        [(7, 5, 7, 2, 2), (1, 5, 1, 2)],
+        [(5, 1, 3, 1, 2, 2), (1, 7, 3, 7, 2)],
+        [(1, 7, 3, 7, 2, 2), (5, 1, 3, 1, 2)],
+    ],
+    ids=str,
+)
+@pytest.mark.parametrize("func", ("matvec", "vecmat", "vecdot"))
+def test_batch_matvec_to_matmul(func, mat_shape, vec_shape):
+    def count_matvec_nodes(graph):
+        # Counts how many matmul nodes actually correspond to matvec or vecmat
+        return len(
+            [
+                var
+                for var in ancestors([graph])
+                if (
+                    var.owner is not None
+                    and var.owner.op == _matmul
+                    and (
+                        (var.owner.inputs[0].type.shape[-2] == 1)
+                        or (var.owner.inputs[1].type.shape[-1] == 1)
+                    )
+                )
+            ]
+        )
+
+    mat = pt.tensor("mat", shape=mat_shape, dtype="float64")
+    vec = pt.tensor("vec", shape=vec_shape, dtype="float64")
+
+    if func == "matvec":
+        out = pt.matvec(mat, vec)
+    elif func == "vecmat":
+        out = pt.vecmat(vec, mat)
+    elif func == "vecdot":
+        out = pt.vecdot(mat[..., 0], vec)
+    else:
+        raise NotImplementedError(func)
+
+    assert count_matvec_nodes(out) == 1
+
+    rewritten_out = rewrite_graph(
+        out,
+        include=(
+            "canonicalize",
+            "specialize",
+        ),
+        exclude=(
+            "local_eager_useless_unbatched_blockwise",
+            "specialize_matmul_to_batched_dot",
+        ),
+    )
+    # No `matvec` in the rewritten out if one of the vector can be treated as a matrix
+    expected = not any(
+        mat_dim == 1 and vec_dim != 1
+        for vec_dim, mat_dim in zip(vec_shape[:-1], mat_shape[:-2])
+    )
+    if not expected and func == "vecdot":
+        # In this case there are two vectors, so we may still end up with a `matvec` unless the second vec can also be treated as matrix
+        expected = not any(
+            mat_dim != 1 and vec_dim == 1
+            for vec_dim, mat_dim in zip(vec_shape[:-1], mat_shape[:-2])
+        )
+
+    assert count_matvec_nodes(rewritten_out) == expected
+
+    rng = np.random.default_rng(mat_shape + vec_shape)
+    eval_dict = {mat: rng.random(mat.type.shape), vec: rng.random(vec.type.shape)}
+    # Evaluate results are correct without further rewrites
+    no_optimization = Mode(linker="py", optimizer=None)
+    np.testing.assert_allclose(
+        rewritten_out.eval(eval_dict, mode=no_optimization),
+        out.eval(eval_dict, mode=no_optimization),
+    )
+
+
 def test_log_kv_stabilization():
     x = pt.scalar("x")
     out = log(kv(4.5, x))
@@ -4616,8 +4699,8 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
 
     out = dot(a, b)
     if batched:
-        batch_a = tensor("batch_a", shape=(1, 5, *a_shape))
-        batch_b = tensor("batch_b", shape=(7, 1, *b_shape))
+        batch_a = tensor("batch_a", shape=(2, 1, 5, *a_shape))
+        batch_b = tensor("batch_b", shape=(2, 7, 1, *b_shape))
         out = vectorize_graph(out, {a: batch_a, b: batch_b})
         a = batch_a
         b = batch_b

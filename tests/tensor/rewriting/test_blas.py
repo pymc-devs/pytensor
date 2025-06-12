@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from pytensor import function
+from pytensor import config, function
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
-from pytensor.graph import FunctionGraph
+from pytensor.graph import FunctionGraph, ancestors
 from pytensor.tensor import (
     col,
     dscalar,
@@ -21,7 +21,6 @@ from pytensor.tensor import (
     vectorize,
 )
 from pytensor.tensor.blas import BatchedDot
-from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.rewriting.blas import (
     _as_scalar,
@@ -37,8 +36,11 @@ def XYZab():
     return matrix(), matrix(), matrix(), scalar(), scalar()
 
 
-@pytest.mark.parametrize("valid_case", (True, False))
-def test_specialize_matmul_to_batched_dot(valid_case):
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE", reason="Test requires specialization rewrites"
+)
+@pytest.mark.parametrize("aligned", (True, False))
+def test_specialize_matmul_to_batched_dot(aligned):
     signature = BatchedDot.gufunc_signature
     rewrite = specialize_matmul_to_batched_dot.__name__
 
@@ -49,23 +51,36 @@ def test_specialize_matmul_to_batched_dot(valid_case):
         return np.matmul(x, y)
 
     x = tensor(shape=(7, 5, 3, 3))
-    if valid_case:
+    if aligned:
         y = tensor(shape=(7, 5, 3, 3))
     else:
         y = tensor(shape=(5, 3, 3))
 
+    out = vectorize(core_pt, signature=signature)(x, y)
+
+    assert (
+        sum(
+            isinstance(var.owner.op, BatchedDot)
+            for var in ancestors([out])
+            if var.owner
+        )
+        == 0
+    )
+
     vectorize_pt = function(
         [x, y],
-        vectorize(core_pt, signature=signature)(x, y),
+        out,
         mode=get_default_mode().including(rewrite),
     )
-    blocwkise_node = any(
-        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+
+    assert (
+        sum(
+            isinstance(var.owner.op, BatchedDot)
+            for var in ancestors(vectorize_pt.maker.fgraph.outputs)
+            if var.owner
+        )
+        == 1
     )
-    if valid_case:
-        assert not blocwkise_node
-    else:
-        assert blocwkise_node
 
     x_test = np.random.normal(size=x.type.shape).astype(x.type.dtype)
     y_test = np.random.normal(size=y.type.shape).astype(y.type.dtype)

@@ -39,6 +39,7 @@ from pytensor.tensor.rewriting.basic import (
     broadcasted_by,
     register_canonicalize,
     register_specialize,
+    register_stabilize,
 )
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
@@ -341,6 +342,7 @@ def is_dimshuffle_useless(new_order, input):
 
 
 @register_canonicalize
+@register_stabilize
 @register_specialize
 @node_rewriter([DimShuffle])
 def local_dimshuffle_lift(fgraph, node):
