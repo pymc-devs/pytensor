@@ -98,7 +98,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import (
     Dot,
-    _matrix_matrix_matmul,
+    _matmul,
     add,
     mul,
     neg,
@@ -908,7 +908,7 @@ blas_optdb.register(
 
 
 @register_specialize
-@node_rewriter([_matrix_matrix_matmul])
+@node_rewriter([_matmul])
 def specialize_matmul_to_batched_dot(fgraph, node):
     """Rewrite Matmul (Blockwise matrix-matrix) without implicit broadcasted batched dimension as BatchedDot.
 
