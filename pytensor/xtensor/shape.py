@@ -354,24 +354,29 @@ class Squeeze(XOp):
         return Apply(self, [x], [out])
 
 
-def squeeze(x, dim=None):
-    """Remove dimensions of size 1 from an XTensorVariable.
-
-    Parameters
-    ----------
-    x : XTensorVariable
-        The input tensor
-    dim : str or None or iterable of str, optional
-        The name(s) of the dimension(s) to remove. If None, all dimensions of size 1
-        (known statically) will be removed. Dimensions with unknown static shape will be retained, even if they have size 1 at runtime.
-
-    Returns
-    -------
-    XTensorVariable
-        A new tensor with the specified dimension(s) removed.
-    """
+def squeeze(x, dim=None, drop=False, axis=None):
+    """Remove dimensions of size 1 from an XTensorVariable."""
     x = as_xtensor(x)
 
+    # drop parameter is ignored in pytensor.xtensor
+    if drop is not None:
+        warnings.warn("drop parameter has no effect in pytensor.xtensor", UserWarning)
+
+    # dim and axis are mutually exclusive
+    if dim is not None and axis is not None:
+        raise ValueError("Cannot specify both `dim` and `axis`")
+
+    # if axis is specified, it must be a sequence of ints
+    if axis is not None:
+        if not isinstance(axis, Sequence):
+            axis = [axis]
+        if not all(isinstance(a, int) for a in axis):
+            raise ValueError("axis must be an integer or a sequence of integers")
+
+        # convert axis to dims
+        dims = tuple(x.type.dims[i] for i in axis)
+
+    # if dim is specified, it must be a string or a sequence of strings
     if dim is None:
         dims = tuple(d for d, s in zip(x.type.dims, x.type.shape) if s == 1)
     elif isinstance(dim, str):
