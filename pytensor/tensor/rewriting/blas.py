@@ -758,7 +758,7 @@ blas_optdb.register(
         ignore_newtrees=False,
     ),
     "fast_run",
-    position=15,
+    position=11,
 )
 
 
@@ -903,7 +903,7 @@ blas_optdb.register(
     "local_dot22_to_dot22scalar",
     in2out(local_dot22_to_dot22scalar),
     "fast_run",
-    position=11,
+    position=12,
 )
 
 
