@@ -1,6 +1,7 @@
 from pytensor.graph import node_rewriter
 from pytensor.tensor import (
     broadcast_to,
+    expand_dims,
     join,
     moveaxis,
     specify_shape,
@@ -10,6 +11,7 @@ from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_lower_xtensor
 from pytensor.xtensor.shape import (
     Concat,
+    ExpandDims,
     Squeeze,
     Stack,
     Transpose,
@@ -121,7 +123,7 @@ def lower_transpose(fgraph, node):
 
 @register_lower_xtensor
 @node_rewriter([Squeeze])
-def local_squeeze_reshape(fgraph, node):
+def lower_squeeze(fgraph, node):
     """Rewrite Squeeze to tensor.squeeze."""
     [x] = node.inputs
     x_tensor = tensor_from_xtensor(x)
@@ -132,3 +134,33 @@ def local_squeeze_reshape(fgraph, node):
 
     new_out = xtensor_from_tensor(x_tensor_squeezed, dims=node.outputs[0].type.dims)
     return [new_out]
+
+
+@register_lower_xtensor
+@node_rewriter([ExpandDims])
+def lower_expand_dims(fgraph, node):
+    """Rewrite ExpandDims using tensor operations."""
+    x, size = node.inputs
+    out = node.outputs[0]
+
+    # Convert inputs to tensors
+    x_tensor = tensor_from_xtensor(x)
+    size_tensor = tensor_from_xtensor(size)
+
+    # Get the new dimension name and position
+    new_axis = 0  # Always insert at front
+
+    # Use tensor operations
+    if out.type.shape[0] == 1:
+        # Simple case: just expand with size 1
+        result_tensor = expand_dims(x_tensor, new_axis)
+    else:
+        # Otherwise broadcast to the requested size
+        result_tensor = broadcast_to(x_tensor, (size_tensor, *x_tensor.shape))
+
+    # Preserve static shape information
+    result_tensor = specify_shape(result_tensor, out.type.shape)
+
+    # Convert result back to xtensor
+    result = xtensor_from_tensor(result_tensor, dims=out.type.dims)
+    return [result]

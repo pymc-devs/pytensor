@@ -8,10 +8,10 @@ import re
 from itertools import chain, combinations
 
 import numpy as np
-import pytest
 from xarray import DataArray
 from xarray import concat as xr_concat
 
+from pytensor.tensor import scalar
 from pytensor.xtensor.shape import (
     concat,
     stack,
@@ -356,3 +356,113 @@ def test_squeeze_errors():
     fn2 = xr_function([x2], y2)
     with pytest.raises(Exception):
         fn2(x2_test)
+
+
+def test_expand_dims():
+    """Test expand_dims."""
+    x = xtensor("x", dims=("city", "year"), shape=(2, 2))
+    x_test = xr_arange_like(x)
+
+    # Implicit size 1
+    y = x.expand_dims("country")
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.expand_dims("country"))
+
+    # Test with multiple dimensions
+    y = x.expand_dims(["country", "state"])
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.expand_dims(["country", "state"]))
+
+    # Test with a dict of name-size pairs
+    y = x.expand_dims({"country": 2, "state": 3})
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.expand_dims({"country": 2, "state": 3}))
+
+    # Test with kwargs (equivalent to dict)
+    y = x.expand_dims(country=2, state=3)
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.expand_dims(country=2, state=3))
+
+    # Test with a dict of name-coord array pairs
+    y = x.expand_dims({"country": np.array([1, 2]), "state": np.array([3, 4, 5])})
+    fn = xr_function([x], y)
+    xr_assert_allclose(
+        fn(x_test),
+        x_test.expand_dims({"country": np.array([1, 2]), "state": np.array([3, 4, 5])}),
+    )
+
+    # Symbolic size 1
+    size_sym_1 = scalar("size_sym_1", dtype="int64")
+    y = x.expand_dims({"country": size_sym_1})
+    fn = xr_function([x, size_sym_1], y)
+    xr_assert_allclose(fn(x_test, 1), x_test.expand_dims({"country": 1}))
+
+    # Test with symbolic sizes in dict
+    size_sym_2 = scalar("size_sym_2", dtype="int64")
+    y = x.expand_dims({"country": size_sym_1, "state": size_sym_2})
+    fn = xr_function([x, size_sym_1, size_sym_2], y)
+    xr_assert_allclose(fn(x_test, 2, 3), x_test.expand_dims({"country": 2, "state": 3}))
+
+    # Test with symbolic sizes in kwargs
+    y = x.expand_dims(country=size_sym_1, state=size_sym_2)
+    fn = xr_function([x, size_sym_1, size_sym_2], y)
+    xr_assert_allclose(fn(x_test, 2, 3), x_test.expand_dims({"country": 2, "state": 3}))
+
+    # Test with axis parameter
+    y = x.expand_dims("country", axis=1)
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.expand_dims("country", axis=1))
+
+    # Test with negative axis parameter
+    y = x.expand_dims("country", axis=-1)
+    fn = xr_function([x], y)
+    xr_assert_allclose(fn(x_test), x_test.expand_dims("country", axis=-1))
+
+    # Add two new dims with axis parameters
+    y = x.expand_dims(["country", "state"], axis=[1, 2])
+    fn = xr_function([x], y)
+    xr_assert_allclose(
+        fn(x_test), x_test.expand_dims(["country", "state"], axis=[1, 2])
+    )
+
+    # Add two dims with negative axis parameters
+    y = x.expand_dims(["country", "state"], axis=[-1, -2])
+    fn = xr_function([x], y)
+    xr_assert_allclose(
+        fn(x_test), x_test.expand_dims(["country", "state"], axis=[-1, -2])
+    )
+
+    # Add two dims with positive and negative axis parameters
+    y = x.expand_dims(["country", "state"], axis=[-2, 1])
+    fn = xr_function([x], y)
+    xr_assert_allclose(
+        fn(x_test), x_test.expand_dims(["country", "state"], axis=[-2, 1])
+    )
+
+
+def test_expand_dims_errors():
+    """Test error handling in expand_dims."""
+
+    # Expanding existing dim
+    x = xtensor("x", dims=("city",), shape=(3,))
+    y = x.expand_dims("country")
+    with pytest.raises(ValueError, match="already exists"):
+        y.expand_dims("city")
+
+    # Invalid dim type
+    with pytest.raises(TypeError, match="Invalid type for `dim`"):
+        x.expand_dims(123)
+
+    # Duplicate dimension creation
+    y = x.expand_dims("new")
+    with pytest.raises(ValueError, match="already exists"):
+        y.expand_dims("new")
+
+    # Find out what xarray does with a numpy array as dim
+    # x_test = xr_arange_like(x)
+    # x_test.expand_dims(np.array([1, 2]))
+    # TypeError: unhashable type: 'numpy.ndarray'
+
+    # Test with a numpy array as dim (not supported)
+    with pytest.raises(TypeError, match="unhashable type"):
+        y.expand_dims(np.array([1, 2]))
