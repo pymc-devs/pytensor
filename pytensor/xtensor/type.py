@@ -474,17 +474,33 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def squeeze(
         self,
         dim: Sequence[str] | str | None = None,
-        drop: bool = False,
+        drop=None,
         axis: int | Sequence[int] | None = None,
     ):
-        if axis is not None:
-            raise NotImplementedError("Squeeze with axis not Implemented")
-        return px.shape.squeeze(self, dim)
+        """Remove dimensions of size 1 from an XTensorVariable.
+
+        Parameters
+        ----------
+        x : XTensorVariable
+            The input tensor
+        dim : str or None or iterable of str, optional
+            The name(s) of the dimension(s) to remove. If None, all dimensions of size 1
+            (known statically) will be removed. Dimensions with unknown static shape will be retained, even if they have size 1 at runtime.
+        drop : bool, optional
+            If drop=True, drop squeezed coordinates instead of making them scalar.
+        axis : int or iterable of int, optional
+            The axis(es) to remove. If None, all dimensions of size 1 will be removed.
+        Returns
+        -------
+        XTensorVariable
+            A new tensor with the specified dimension(s) removed.
+        """
+        return px.shape.squeeze(self, dim, drop, axis)
 
     def expand_dims(
         self,
         dim: str | Sequence[str] | dict[str, int | Sequence] | None = None,
-        create_index_for_new_dim: bool = True,
+        create_index_for_new_dim=None,
         axis: int | Sequence[int] | None = None,
         **dim_kwargs,
     ):
