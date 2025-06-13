@@ -581,7 +581,7 @@ class TestInplace:
 
         mode = get_default_mode().excluding(
             "batched_vector_b_solve_to_matrix_b_solve",
-            "reuse_lu_decomposition_multiple_solves",
+            "reuse_decomposition_multiple_solves",
         )
         fn = function([In(A, mutable=True), In(b, mutable=True)], x, mode=mode)
 
