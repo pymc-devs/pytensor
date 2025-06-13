@@ -1,5 +1,5 @@
 import warnings
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 from types import EllipsisType
 from typing import Literal
 
@@ -426,7 +426,7 @@ class ExpandDims(XOp):
         return Apply(self, [x, size], [out])
 
 
-def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwargs):
+def expand_dims(x, dim=None, create_index_for_new_dim=None, axis=None, **dim_kwargs):
     """Add one or more new dimensions to an XTensorVariable."""
     x = as_xtensor(x)
 
@@ -434,34 +434,36 @@ def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwa
     original_dims = x.type.dims
 
     # Warn if create_index_for_new_dim is used (not supported)
-    if not create_index_for_new_dim:
+    if create_index_for_new_dim is not None:
         warnings.warn(
             "create_index_for_new_dim=False has no effect in pytensor.xtensor",
             UserWarning,
             stacklevel=2,
         )
 
-    # Extract size from dim_kwargs if present
-    size = dim_kwargs.pop("size", 1) if dim_kwargs else 1
-
-    # xarray compatibility: error if a sequence (list/tuple) of dims and size are given
-    if (isinstance(dim, list | tuple)) and ("size" in locals() and size != 1):
-        raise ValueError("cannot specify both keyword and positional arguments")
-
     if dim is None:
         dim = dim_kwargs
     elif dim_kwargs:
         raise ValueError("Cannot specify both `dim` and `**dim_kwargs`")
 
+    # Check that dim is Hashable or a sequence of Hashable or dict
+    if not isinstance(dim, Hashable):
+        if not isinstance(dim, Sequence | dict):
+            raise TypeError(f"unhashable type: {type(dim).__name__}")
+        if not all(isinstance(d, Hashable) for d in dim):
+            raise TypeError(f"unhashable type in {type(dim).__name__}")
+
     # Normalize to a dimension-size mapping
     if isinstance(dim, str):
-        dims_dict = {dim: size}
+        dims_dict = {dim: 1}
     elif isinstance(dim, Sequence) and not isinstance(dim, dict):
         dims_dict = {d: 1 for d in dim}
     elif isinstance(dim, dict):
         dims_dict = {}
         for name, val in dim.items():
-            if isinstance(val, Sequence | np.ndarray) and not isinstance(val, str):
+            if isinstance(val, str):
+                raise TypeError(f"Dimension size cannot be a string: {val}")
+            if isinstance(val, Sequence | np.ndarray):
                 warnings.warn(
                     "When a sequence is provided as a dimension size, only its length is used. "
                     "The actual values (which would be coordinates in xarray) are ignored.",
@@ -469,10 +471,9 @@ def expand_dims(x, dim=None, create_index_for_new_dim=True, axis=None, **dim_kwa
                     stacklevel=2,
                 )
                 dims_dict[name] = len(val)
-            elif isinstance(val, int):
-                dims_dict[name] = val
             else:
-                dims_dict[name] = val  # symbolic/int scalar allowed
+                # should be int or symbolic scalar
+                dims_dict[name] = val
     else:
         raise TypeError(f"Invalid type for `dim`: {type(dim)}")
 

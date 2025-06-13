@@ -376,7 +376,7 @@ def test_expand_dims():
     x = xtensor("x", dims=("city", "year"), shape=(2, 2))
     x_test = xr_arange_like(x)
 
-    # Implicit size=1
+    # Implicit size 1
     y = x.expand_dims("country")
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims("country"))
@@ -386,7 +386,7 @@ def test_expand_dims():
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims(["country", "state"]))
 
-    # Test with a dict of sizes
+    # Test with a dict of name-size pairs
     y = x.expand_dims({"country": 2, "state": 3})
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims({"country": 2, "state": 3}))
@@ -396,7 +396,15 @@ def test_expand_dims():
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims(country=2, state=3))
 
-    # Symbolic size=1
+    # Test with a dict of name-coord array pairs
+    y = x.expand_dims({"country": np.array([1, 2]), "state": np.array([3, 4, 5])})
+    fn = xr_function([x], y)
+    xr_assert_allclose(
+        fn(x_test),
+        x_test.expand_dims({"country": np.array([1, 2]), "state": np.array([3, 4, 5])}),
+    )
+
+    # Symbolic size 1
     size_sym_1 = scalar("size_sym_1", dtype="int64")
     y = x.expand_dims({"country": size_sym_1})
     fn = xr_function([x, size_sym_1], y)
@@ -462,3 +470,12 @@ def test_expand_dims_errors():
     y = x.expand_dims("new")
     with pytest.raises(ValueError, match="already exists"):
         y.expand_dims("new")
+
+    # Find out what xarray does with a numpy array as dim
+    # x_test = xr_arange_like(x)
+    # x_test.expand_dims(np.array([1, 2]))
+    # TypeError: unhashable type: 'numpy.ndarray'
+
+    # Test with a numpy array as dim (not supported)
+    with pytest.raises(TypeError, match="unhashable type"):
+        y.expand_dims(np.array([1, 2]))
