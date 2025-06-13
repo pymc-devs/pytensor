@@ -3310,9 +3310,9 @@ def flip(
 
 
 __all__ = [
-    "take",
     "flip",
-    "slice_at_axis",
     "inc_subtensor",
     "set_subtensor",
+    "slice_at_axis",
+    "take",
 ]

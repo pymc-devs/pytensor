@@ -294,8 +294,10 @@ N.B.:
         if hasattr(var.owner, "op"):
             if (
                 isinstance(var.owner.op, HasInnerGraph)
-                or hasattr(var.owner.op, "scalar_op")
-                and isinstance(var.owner.op.scalar_op, HasInnerGraph)
+                or (
+                    hasattr(var.owner.op, "scalar_op")
+                    and isinstance(var.owner.op.scalar_op, HasInnerGraph)
+                )
             ) and var not in inner_graph_vars:
                 inner_graph_vars.append(var)
             if print_op_info:
@@ -674,8 +676,10 @@ def _debugprint(
                 if hasattr(in_var, "owner") and hasattr(in_var.owner, "op"):
                     if (
                         isinstance(in_var.owner.op, HasInnerGraph)
-                        or hasattr(in_var.owner.op, "scalar_op")
-                        and isinstance(in_var.owner.op.scalar_op, HasInnerGraph)
+                        or (
+                            hasattr(in_var.owner.op, "scalar_op")
+                            and isinstance(in_var.owner.op.scalar_op, HasInnerGraph)
+                        )
                     ) and in_var not in inner_graph_ops:
                         inner_graph_ops.append(in_var)
 
@@ -881,7 +885,9 @@ class OperatorPrinter(Printer):
         max_i = len(node.inputs) - 1
         for i, input in enumerate(node.inputs):
             new_precedence = self.precedence
-            if self.assoc == "left" and i != 0 or self.assoc == "right" and i != max_i:
+            if (self.assoc == "left" and i != 0) or (
+                self.assoc == "right" and i != max_i
+            ):
                 new_precedence += 1e-6
 
             with set_precedence(pstate, new_precedence):

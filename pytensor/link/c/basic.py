@@ -821,9 +821,9 @@ class CLinker(Linker):
 
             behavior = op.c_code(node, name, isyms, osyms, sub)
 
-            assert isinstance(
-                behavior, str
-            ), f"{node.op} didn't return a string for c_code"
+            assert isinstance(behavior, str), (
+                f"{node.op} didn't return a string for c_code"
+            )
             # To help understand what is following. It help read the c code.
             # This prevent different op that generate the same c code
             # to be merged, I suppose this won't happen...
@@ -1752,10 +1752,7 @@ class _CThunk:
                 exc_value.__thunk_trace__ = trace
             except Exception:
                 print(  # noqa: T201
-                    (
-                        "ERROR retrieving error_storage."
-                        "Was the error set in the c code?"
-                    ),
+                    ("ERROR retrieving error_storage.Was the error set in the c code?"),
                     end=" ",
                     file=sys.stderr,
                 )

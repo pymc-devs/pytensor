@@ -201,7 +201,7 @@ class MyOpCEnumType(COp):
     def c_code(self, node, name, inputs, outputs, sub):
         # params in C code will already contains expected C constant value.
         return f"""
-        {outputs[0]} = {sub['params']};
+        {outputs[0]} = {sub["params"]};
         """
 
 

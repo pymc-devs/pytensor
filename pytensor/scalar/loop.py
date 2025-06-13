@@ -219,7 +219,7 @@ class ScalarLoop(ScalarInnerGraphOp):
             for i, c in enumerate(fgraph.inputs[n_update:], start=n_update + 1)
         }
         out_subd = {u: f"%(o{i})s" for i, u in enumerate(fgraph.outputs[:n_update])}
-        until_subd = {u: "until" for u in fgraph.outputs[n_update:]}
+        until_subd = dict.fromkeys(fgraph.outputs[n_update:], "until")
         subd = {**carry_subd, **constant_subd, **until_subd}
 
         for var in fgraph.variables:
@@ -307,7 +307,7 @@ class ScalarLoop(ScalarInnerGraphOp):
 
         # Output until flag
         if self.is_while:
-            _c_code += f"%(o{len(fgraph.outputs)-1})s = until;\n"
+            _c_code += f"%(o{len(fgraph.outputs) - 1})s = until;\n"
 
         _c_code += "}\n"
 

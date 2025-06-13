@@ -384,8 +384,10 @@ def local_lift_through_linalg(
     outer_op = node.op
 
     if y.owner and (
-        isinstance(y.owner.op, Blockwise)
-        and isinstance(y.owner.op.core_op, BlockDiagonal)
+        (
+            isinstance(y.owner.op, Blockwise)
+            and isinstance(y.owner.op.core_op, BlockDiagonal)
+        )
         or isinstance(y.owner.op, KroneckerProduct)
     ):
         input_matrices = y.owner.inputs

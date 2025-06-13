@@ -1284,20 +1284,20 @@ def kron(a, b):
 
 
 __all__ = [
-    "pinv",
-    "inv",
-    "trace",
-    "matrix_dot",
     "det",
     "eig",
     "eigh",
-    "qr",
-    "svd",
+    "inv",
+    "kron",
     "lstsq",
+    "matrix_dot",
     "matrix_power",
     "norm",
+    "pinv",
+    "qr",
     "slogdet",
+    "svd",
     "tensorinv",
     "tensorsolve",
-    "kron",
+    "trace",
 ]

@@ -12,14 +12,14 @@ from pathlib import Path
 
 
 __all__ = [
-    "get_unbound_function",
-    "maybe_add_to_os_environ_pathlist",
-    "subprocess_Popen",
-    "call_subprocess_Popen",
-    "output_subprocess_Popen",
     "LOCAL_BITWIDTH",
     "PYTHON_INT_BITWIDTH",
     "NoDuplicateOptWarningFilter",
+    "call_subprocess_Popen",
+    "get_unbound_function",
+    "maybe_add_to_os_environ_pathlist",
+    "output_subprocess_Popen",
+    "subprocess_Popen",
 ]
 
 

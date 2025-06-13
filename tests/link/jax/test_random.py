@@ -90,9 +90,9 @@ def test_replaced_shared_rng_storage_order(noise_first):
 
     # The bug was found when noise used to be the first input of the fgraph
     # If this changes, the test may need to be tweaked to keep the save coverage
-    assert isinstance(
-        f.input_storage[1 - noise_first].type, RandomType
-    ), "Test may need to be tweaked"
+    assert isinstance(f.input_storage[1 - noise_first].type, RandomType), (
+        "Test may need to be tweaked"
+    )
 
     # Confirm that input_storage type and fgraph input order are aligned
     for storage, fgrapn_input in zip(

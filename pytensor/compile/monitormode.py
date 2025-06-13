@@ -45,8 +45,7 @@ class MonitorMode(Mode):
             optimizer = config.optimizer
         if linker is not None and not isinstance(linker.mode, MonitorMode):
             raise Exception(
-                "MonitorMode can only use its own linker! You "
-                "should not provide one.",
+                "MonitorMode can only use its own linker! You should not provide one.",
                 linker,
             )
 
