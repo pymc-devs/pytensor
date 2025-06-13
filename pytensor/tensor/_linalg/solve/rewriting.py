@@ -19,19 +19,21 @@ from pytensor.tensor.slinalg import Solve, cho_solve, cholesky, lu_factor, lu_so
 from pytensor.tensor.variable import TensorVariable
 
 
-def decompose_A(A, assume_a, check_finite):
+def decompose_A(A, assume_a, check_finite, lower):
     if assume_a == "gen":
         return lu_factor(A, check_finite=check_finite)
     elif assume_a == "tridiagonal":
         # We didn't implement check_finite for tridiagonal LU factorization
         return tridiagonal_lu_factor(A)
     elif assume_a == "pos":
-        return cholesky(A, lower=True, check_finite=check_finite)
+        return cholesky(A, lower=lower, check_finite=check_finite)
     else:
         raise NotImplementedError
 
 
-def solve_decomposed_system(A_decomp, b, transposed=False, *, core_solve_op: Solve):
+def solve_decomposed_system(
+    A_decomp, b, transposed=False, lower=False, *, core_solve_op: Solve
+):
     b_ndim = core_solve_op.b_ndim
     check_finite = core_solve_op.check_finite
     assume_a = core_solve_op.assume_a
@@ -53,8 +55,9 @@ def solve_decomposed_system(A_decomp, b, transposed=False, *, core_solve_op: Sol
             transposed=transposed,
         )
     elif assume_a == "pos":
+        # We can ignore the transposed argument here because A is symmetric by assumption
         return cho_solve(
-            (A_decomp, True),
+            (A_decomp, lower),
             b,
             b_ndim=b_ndim,
             check_finite=check_finite,
@@ -143,13 +146,21 @@ def _split_decomp_and_solve_steps(
         if client.op.core_op.check_finite:
             check_finite_decomp = True
             break
-    A_decomp = decompose_A(A, assume_a=assume_a, check_finite=check_finite_decomp)
+
+    lower = node.op.core_op.lower
+    A_decomp = decompose_A(
+        A, assume_a=assume_a, check_finite=check_finite_decomp, lower=lower
+    )
 
     replacements = {}
     for client, transposed in A_solve_clients_and_transpose:
         _, b = client.inputs
         new_x = solve_decomposed_system(
-            A_decomp, b, transposed=transposed, core_solve_op=client.op.core_op
+            A_decomp,
+            b,
+            transposed=transposed,
+            lower=lower,
+            core_solve_op=client.op.core_op,
         )
         [old_x] = client.outputs
         new_x = atleast_Nd(new_x, n=old_x.type.ndim).astype(old_x.type.dtype)
