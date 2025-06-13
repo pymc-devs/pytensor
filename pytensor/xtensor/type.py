@@ -481,6 +481,47 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             raise NotImplementedError("Squeeze with axis not Implemented")
         return px.shape.squeeze(self, dim)
 
+    def expand_dims(
+        self,
+        dim: str | Sequence[str] | dict[str, int | Sequence] | None = None,
+        create_index_for_new_dim: bool = True,
+        axis: int | Sequence[int] | None = None,
+        **dim_kwargs,
+    ):
+        """Add one or more new dimensions to the tensor.
+
+        Parameters
+        ----------
+        dim : str | Sequence[str] | dict[str, int | Sequence] | None
+            If str or sequence of str, new dimensions with size 1.
+            If dict, keys are dimension names and values are either:
+                - int: the new size
+                - sequence: coordinates (length determines size)
+        create_index_for_new_dim : bool, default: True
+            Currently ignored. Reserved for future coordinate support.
+            In xarray, when True (default), creates a coordinate index for the new dimension
+            with values from 0 to size-1. When False, no coordinate index is created.
+        axis : int | Sequence[int] | None, default: None
+            Not implemented yet. In xarray, specifies where to insert the new dimension(s).
+            By default (None), new dimensions are inserted at the beginning (axis=0).
+            Symbolic axis is not supported yet.
+            Negative values count from the end.
+        **dim_kwargs : int | Sequence
+            Alternative to `dim` dict. Only used if `dim` is None.
+
+        Returns
+        -------
+        XTensorVariable
+            A tensor with additional dimensions inserted at the front.
+        """
+        return px.shape.expand_dims(
+            self,
+            dim,
+            create_index_for_new_dim=create_index_for_new_dim,
+            axis=axis,
+            **dim_kwargs,
+        )
+
     # ndarray methods
     # https://docs.xarray.dev/en/latest/api.html#id7
     def clip(self, min, max):
