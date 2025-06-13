@@ -1,12 +1,15 @@
 import warnings
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 from types import EllipsisType
 from typing import Literal
+
+import numpy as np
 
 from pytensor.graph import Apply
 from pytensor.scalar import discrete_dtypes, upcast
 from pytensor.tensor import as_tensor, get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.type import integer_dtypes
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import as_xtensor, xtensor
 
@@ -385,3 +388,121 @@ def squeeze(x, dim=None, drop=False, axis=None):
         return x  # no-op if nothing to squeeze
 
     return Squeeze(dims=dims)(x)
+
+
+class ExpandDims(XOp):
+    """Add a new dimension to an XTensorVariable."""
+
+    __props__ = ("dim",)
+
+    def __init__(self, dim):
+        if not isinstance(dim, str):
+            raise TypeError(f"`dim` must be a string, got: {type(self.dim)}")
+
+        self.dim = dim
+
+    def make_node(self, x, size):
+        x = as_xtensor(x)
+
+        if self.dim in x.type.dims:
+            raise ValueError(f"Dimension {self.dim} already exists in {x.type.dims}")
+
+        size = as_xtensor(size, dims=())
+        if not (size.dtype in integer_dtypes and size.ndim == 0):
+            raise ValueError(f"size should be an integer scalar, got {size.type}")
+        try:
+            static_size = int(get_scalar_constant_value(size))
+        except NotScalarConstantError:
+            static_size = None
+
+        # If size is a constant, validate it
+        if static_size is not None and static_size < 0:
+            raise ValueError(f"size must be 0 or positive, got: {static_size}")
+        new_shape = (static_size, *x.type.shape)
+
+        # Insert new dim at front
+        new_dims = (self.dim, *x.type.dims)
+
+        out = xtensor(
+            dtype=x.type.dtype,
+            shape=new_shape,
+            dims=new_dims,
+        )
+        return Apply(self, [x, size], [out])
+
+
+def expand_dims(x, dim=None, create_index_for_new_dim=None, axis=None, **dim_kwargs):
+    """Add one or more new dimensions to an XTensorVariable."""
+    x = as_xtensor(x)
+
+    # Store original dimensions for axis handling
+    original_dims = x.type.dims
+
+    # Warn if create_index_for_new_dim is used (not supported)
+    if create_index_for_new_dim is not None:
+        warnings.warn(
+            "create_index_for_new_dim=False has no effect in pytensor.xtensor",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    if dim is None:
+        dim = dim_kwargs
+    elif dim_kwargs:
+        raise ValueError("Cannot specify both `dim` and `**dim_kwargs`")
+
+    # Check that dim is Hashable or a sequence of Hashable or dict
+    if not isinstance(dim, Hashable):
+        if not isinstance(dim, Sequence | dict):
+            raise TypeError(f"unhashable type: {type(dim).__name__}")
+        if not all(isinstance(d, Hashable) for d in dim):
+            raise TypeError(f"unhashable type in {type(dim).__name__}")
+
+    # Normalize to a dimension-size mapping
+    if isinstance(dim, str):
+        dims_dict = {dim: 1}
+    elif isinstance(dim, Sequence) and not isinstance(dim, dict):
+        dims_dict = {d: 1 for d in dim}
+    elif isinstance(dim, dict):
+        dims_dict = {}
+        for name, val in dim.items():
+            if isinstance(val, str):
+                raise TypeError(f"Dimension size cannot be a string: {val}")
+            if isinstance(val, Sequence | np.ndarray):
+                warnings.warn(
+                    "When a sequence is provided as a dimension size, only its length is used. "
+                    "The actual values (which would be coordinates in xarray) are ignored.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                dims_dict[name] = len(val)
+            else:
+                # should be int or symbolic scalar
+                dims_dict[name] = val
+    else:
+        raise TypeError(f"Invalid type for `dim`: {type(dim)}")
+
+    # Insert each new dim at the front (reverse order preserves user intent)
+    for name, size in reversed(dims_dict.items()):
+        x = ExpandDims(dim=name)(x, size)
+
+    # If axis is specified, transpose to put new dimensions in the right place
+    if axis is not None:
+        # Wrap non-sequence axis in a list
+        if not isinstance(axis, Sequence):
+            axis = [axis]
+
+        # require len(axis) == len(dims_dict)
+        if len(axis) != len(dims_dict):
+            raise ValueError("lengths of dim and axis should be identical.")
+
+        # Insert new dimensions at their specified positions
+        target_dims = list(original_dims)
+        for name, pos in zip(dims_dict, axis):
+            # Convert negative axis to positive position relative to current dims
+            if pos < 0:
+                pos = len(target_dims) + pos + 1
+            target_dims.insert(pos, name)
+        x = Transpose(dims=tuple(target_dims))(x)
+
+    return x
