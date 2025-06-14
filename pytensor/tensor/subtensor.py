@@ -1453,10 +1453,16 @@ def set_subtensor(x, y, inplace=False, tolerate_inplace_aliasing=False):
 
     Examples
     --------
-    To replicate the numpy expression "r[10:] = 5", type
-    >>> from pytensor.tensor import vector
-    >>> r = vector("r")
-    >>> new_r = set_subtensor(r[10:], 5)
+    To replicate the numpy expression ``r[10:] = 5``, type
+
+    .. code-block:: python
+
+        from pytensor.tensor import set_subtensor, vector
+
+        r = vector("r")
+        new_r = set_subtensor(r[10:], 5)
+
+    Consider using :meth:`pytensor.tensor.variable.TensorVariable.set` instead.
 
     """
     return inc_subtensor(
@@ -1504,17 +1510,21 @@ def inc_subtensor(
     --------
     To replicate the expression ``r[10:] += 5``:
 
-    ..code-block:: python
+    .. code-block:: python
 
-        r = ivector()
+        from pytensor.tensor import ivector, inc_subtensor
+
+        r = ivector("r")
         new_r = inc_subtensor(r[10:], 5)
 
     To replicate the expression ``r[[0, 1, 0]] += 5``:
 
-    ..code-block:: python
+    .. code-block:: python
 
-        r = ivector()
-        new_r = inc_subtensor(r[10:], 5, ignore_duplicates=True)
+        r = ivector("r")
+        new_r = inc_subtensor(r[[0, 1, 0]], 5, ignore_duplicates=True)
+
+    Consider using :meth:`pytensor.tensor.variable.TensorVariable.inc` instead.
 
     """
     # First of all, y cannot have a higher dimension than x,
