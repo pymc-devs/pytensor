@@ -37,14 +37,16 @@ from pytensor.tensor import (
     vector,
 )
 from pytensor.tensor.basic import MakeVector, concatenate, expand_dims, make_vector
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.subtensor_lift import (
     local_subtensor_make_vector,
-    local_subtensor_of_elemwise,
+    local_subtensor_of_batch_dims,
     local_subtensor_shape_constant,
 )
 from pytensor.tensor.shape import SpecifyShape, _shape
+from pytensor.tensor.signal import convolve1d
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
 
@@ -58,7 +60,7 @@ mode_opt = get_mode(mode_opt)
 NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
 
 
-class TestLocalSubtensorOfElemwise:
+class TestLocalSubtensorOfBatchDims:
     def test_unary_multiple_clients(self):
         # as test0, but we reuse the output of the elemwise
         # So we should not lift the subtensor
@@ -144,7 +146,7 @@ class TestLocalSubtensorOfElemwise:
             ),
         ],
     )
-    def test_local_subtensor_of_elemwise(self, original_fn, expected_fn):
+    def test_elemwise(self, original_fn, expected_fn):
         rng = np.random.default_rng(257)
         x = pt.matrix("x", shape=(5, 3))
         y = pt.matrix("y", shape=(5, 3))
@@ -163,7 +165,7 @@ class TestLocalSubtensorOfElemwise:
             out.eval({x: x_test, y: y_test}, **eval_kwargs),
         )
 
-    def test_local_subtensor_of_elemwise_multiple_clients(self):
+    def test_elemwise_multiple_clients(self):
         x = pt.matrix("x", shape=(5, 3))
         y = pt.matrix("y", shape=(5, 3))
         out1 = add(x, y)
@@ -171,11 +173,42 @@ class TestLocalSubtensorOfElemwise:
 
         # Rewrite should fail when another node uses out1 directly (in this case it's an extra output)
         fgraph = FunctionGraph([x, y], [out1, out2], clone=False)
-        assert local_subtensor_of_elemwise.transform(fgraph, out2.owner) is None
+        assert local_subtensor_of_batch_dims.transform(fgraph, out2.owner) is None
 
         # Otherwise it should work
         fgraph.remove_output(0)
-        assert local_subtensor_of_elemwise.transform(fgraph, out2.owner) is not None
+        assert local_subtensor_of_batch_dims.transform(fgraph, out2.owner) is not None
+
+    def test_blockwise(self):
+        x = tensor3("x", shape=(7, 5, 11))
+        y = tensor("y", shape=(7, 33))
+        out = convolve1d(x, y[:, None, :])
+        assert isinstance(out.owner.op, Blockwise)
+
+        out_sliced = out[2:][:, 3:]
+        rewritten_out_sliced = rewrite_graph(out_sliced)
+        assert equal_computations(
+            [rewritten_out_sliced], [convolve1d(x[2:, 3:], y[2:][:, None, :])]
+        )
+
+        rng = np.random.default_rng(191)
+        x_test = rng.normal(size=x.type.shape).astype(x.type.dtype)
+        y_test = rng.normal(size=y.type.shape).astype(y.type.dtype)
+        np.testing.assert_allclose(
+            rewritten_out_sliced.eval(
+                {x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE
+            ),
+            out_sliced.eval({x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE),
+        )
+
+        # Check slice on core dims
+        # Note: if we implement a rewrite on the core dims, this test should be changed for another Blockwise
+        # that has no such rewrite or one created just for testing purposes
+        out_sliced = out[2:][:, 0][:, 4:]
+        rewritten_out_sliced = rewrite_graph(out_sliced)
+        assert equal_computations(
+            [rewritten_out_sliced], [convolve1d(x[2:, 0], y[2:])[:, 4:]]
+        )
 
 
 @pytest.mark.parametrize(
