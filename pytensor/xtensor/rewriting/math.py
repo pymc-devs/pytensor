@@ -20,21 +20,17 @@ def lower_dot(fgraph, node):
     x_tensor = tensor_from_xtensor(x)
     y_tensor = tensor_from_xtensor(y)
 
-    # Get dimensions to contract
-    if node.op.dims is None:
-        # Contract over all matching dimensions
-        x_dims = set(x.type.dims)
-        y_dims = set(y.type.dims)
-        contract_dims = tuple(x_dims & y_dims)
-    else:
-        contract_dims = node.op.dims
-
     # Get axes to contract for each input
-    x_axes = [x.type.dims.index(dim) for dim in contract_dims]
-    y_axes = [y.type.dims.index(dim) for dim in contract_dims]
+    x_axes = [x.type.dims.index(dim) for dim in node.op.dims]
+    y_axes = [y.type.dims.index(dim) for dim in node.op.dims]
 
     # Perform dot product
     out_tensor = tensordot(x_tensor, y_tensor, axes=(x_axes, y_axes))
+
+    # Sum over all remaining axes if needed
+    if node.op.sum_result:
+        # Sum over all remaining dimensions
+        out_tensor = out_tensor.sum(axis=None)
 
     # Convert back to xtensor
     return [xtensor_from_tensor(out_tensor, out.type.dims)]

@@ -1,4 +1,6 @@
 import sys
+from types import EllipsisType
+from typing import Hashable, Iterable
 
 import numpy as np
 
@@ -148,45 +150,36 @@ class XDot(XOp):
     ----------
     dims : tuple of str
         The dimensions to contract over. If None, will contract over all matching dimensions.
+    sum_result : bool
+        If True, sum over all remaining axes after contraction (for full contraction, e.g. dims=...).
     """
 
-    __props__ = ("dims",)
+    __props__ = ("dims", "sum_result")
 
-    def __init__(self, dims: tuple[str, ...] | None = None):
+    def __init__(self, dims: Iterable[str], sum_result: bool = False):
         self.dims = dims
+        self.sum_result = sum_result
         super().__init__()
 
     def make_node(self, x, y):
         x = as_xtensor(x)
         y = as_xtensor(y)
 
-        # Get dimensions to contract
-        if self.dims is None:
-            # Contract over all matching dimensions
-            x_dims = set(x.type.dims)
-            y_dims = set(y.type.dims)
-            contract_dims = tuple(x_dims & y_dims)
-        else:
-            contract_dims = self.dims
-
-        # Determine output dimensions and shapes
-        x_dims = list(x.type.dims)
-        y_dims = list(y.type.dims)
-        x_shape = list(x.type.shape)
-        y_shape = list(y.type.shape)
-
-        # Remove contracted dimensions
-        for dim in contract_dims:
-            x_idx = x_dims.index(dim)
-            y_idx = y_dims.index(dim)
-            x_dims.pop(x_idx)
-            y_dims.pop(y_idx)
-            x_shape.pop(x_idx)
-            y_shape.pop(y_idx)
+        # Filter out contracted dimensions
+        x_dims = [dim for dim in x.type.dims if dim not in self.dims]
+        y_dims = [dim for dim in y.type.dims if dim not in self.dims]
+        x_shape = [size for dim, size in zip(x.type.dims, x.type.shape) 
+                   if dim not in self.dims]
+        y_shape = [size for dim, size in zip(y.type.dims, y.type.shape) 
+                   if dim not in self.dims]
 
         # Combine remaining dimensions
-        out_dims = tuple(x_dims + y_dims)
-        out_shape = tuple(x_shape + y_shape)
+        if self.sum_result:
+            out_dims = ()
+            out_shape = ()
+        else:
+            out_dims = tuple(x_dims + y_dims)
+            out_shape = tuple(x_shape + y_shape)
 
         # Determine output dtype
         out_dtype = upcast(x.type.dtype, y.type.dtype)
@@ -195,7 +188,7 @@ class XDot(XOp):
         return Apply(self, [x, y], [out])
 
 
-def dot(x, y, dims: tuple[str, ...] | None = None):
+def dot(x, y, dims: str | Iterable[Hashable] | EllipsisType | None = None):
     """Matrix multiplication between two XTensorVariables.
 
     This operation performs matrix multiplication between two tensors, automatically
@@ -207,8 +200,9 @@ def dot(x, y, dims: tuple[str, ...] | None = None):
         First input tensor
     y : XTensorVariable
         Second input tensor
-    dims : tuple of str, optional
+    dims : str, Iterable[Hashable], EllipsisType, or None, optional
         The dimensions to contract over. If None, will contract over all matching dimensions.
+        If Ellipsis (...), will contract over all dimensions.
 
     Returns
     -------
@@ -220,31 +214,33 @@ def dot(x, y, dims: tuple[str, ...] | None = None):
     >>> x = xtensor(dtype="float64", dims=("a", "b"), shape=(2, 3))
     >>> y = xtensor(dtype="float64", dims=("b", "c"), shape=(3, 4))
     >>> z = dot(x, y)  # Result has dimensions ("a", "c")
+    >>> z = dot(x, y, dim=...)  # Contract over all dimensions
     """
     x = as_xtensor(x)
     y = as_xtensor(y)
 
-    # Validate dimensions if specified
-    if dims is not None:
-        if not isinstance(dims, tuple):
-            dims = tuple(dims)
+    # Canonicalize dims
+    if isinstance(dims, str):
+        dims = (dims,)
+    elif isinstance(dims, Iterable):
+        dims = tuple(dims)
+
+    # Validate provided dims
+    if isinstance(dims, Iterable):
         for dim in dims:
             if dim not in x.type.dims:
-                raise ValueError(
-                    f"Dimension {dim} not found in first input {x.type.dims}"
-                )
+                raise ValueError(f"Dimension {dim} not found in first input {x.type.dims}")
             if dim not in y.type.dims:
-                raise ValueError(
-                    f"Dimension {dim} not found in second input {y.type.dims}"
-                )
-            # Check for compatible shapes in contracted dimensions
-            x_idx = x.type.dims.index(dim)
-            y_idx = y.type.dims.index(dim)
-            x_size = x.type.shape[x_idx]
-            y_size = y.type.shape[y_idx]
-            if x_size is not None and y_size is not None and x_size != y_size:
-                raise ValueError(
-                    f"Dimension {dim} has incompatible shapes: {x_size} and {y_size}"
-                )
+                raise ValueError(f"Dimension {dim} not found in second input {y.type.dims}")
 
-    return XDot(dims=dims)(x, y)
+    # If dims is ... , we have to sum over all remaining axes
+    sum_result = dims is ...
+    
+    # Handle None and ... cases
+    if dims is None or dims is ...:
+        # Contract over all matching dimensions
+        x_dims = set(x.type.dims)
+        y_dims = set(y.type.dims)
+        dims = tuple(x_dims & y_dims)
+    
+    return XDot(dims=dims, sum_result=sum_result)(x, y)

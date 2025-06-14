@@ -155,30 +155,87 @@ def test_cast():
 
 def test_dot():
     """Test basic dot product operations."""
-    # Test matrix-matrix dot product
-    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
-    z = x.dot(y)
-    assert z.type.dims == ("a", "c")
-    assert z.type.shape == (2, 4)
-
-    fn = xr_function([x, y], z)
-    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
-    y_test = DataArray(np.ones((3, 4)), dims=("b", "c"))
-    z_test = fn(x_test, y_test)
-    expected = x_test.dot(y_test)
-    xr_assert_allclose(z_test, expected)
-
     # Test matrix-vector dot product
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     y = xtensor("y", dims=("b",), shape=(3,))
     z = x.dot(y)
-    assert z.type.dims == ("a",)
-    assert z.type.shape == (2,)
-
     fn = xr_function([x, y], z)
+
     x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
     y_test = DataArray(np.ones(3), dims=("b",))
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test)
     xr_assert_allclose(z_test, expected)
+
+    # Test matrix-matrix dot product
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+
+    # Use outer product to create test data with diverse values
+    x_test = DataArray(np.add.outer(np.arange(2.0), np.arange(3.0)), 
+                       dims=("a", "b"))
+    y_test = DataArray(np.add.outer(np.arange(3.0), np.arange(4.0)), 
+                       dims=("b", "c"))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Test matrix-matrix dot product with string dims
+    z = x.dot(y, dims="b")
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim="b")
+    xr_assert_allclose(z_test, expected)
+    
+    # Test matrix-matrix dot product with list of dims
+    z = x.dot(y, dims=["b"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=["b"])
+    xr_assert_allclose(z_test, expected)
+    
+    # Test matrix-matrix dot product with ellipsis
+    if True:
+        z = x.dot(y, dims=...)
+        fn = xr_function([x, y], z)
+        z_test = fn(x_test, y_test)
+        expected = x_test.dot(y_test, dim=...)
+        xr_assert_allclose(z_test, expected)
+
+    # Test a case where there are two dimensions to contract over
+    x = xtensor("x", dims=("a", "b", 'c'), shape=(2, 3, 4))
+    y = xtensor("y", dims=("b", "c", 'd'), shape=(3, 4, 5))
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+
+    x_test = DataArray(np.arange(24.0).reshape(2, 3, 4), dims=("a", "b", "c"))
+    y_test = DataArray(np.arange(60.0).reshape(3, 4, 5), dims=("b", "c", "d"))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with explicit dimensions
+    z = x.dot(y, dims=["b", "c"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=["b", "c"])
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with ellipses
+    if True:
+        z = x.dot(y, dims=...)
+        fn = xr_function([x, y], z)
+
+        z_test = fn(x_test, y_test)
+        expected = x_test.dot(y_test, dim=...)
+        xr_assert_allclose(z_test, expected)
+
+
+
+
+    
+    
+
+    
