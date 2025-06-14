@@ -1,6 +1,6 @@
 import sys
+from collections.abc import Hashable, Iterable
 from types import EllipsisType
-from typing import Hashable, Iterable
 
 import numpy as np
 
@@ -168,10 +168,12 @@ class XDot(XOp):
         # Filter out contracted dimensions
         x_dims = [dim for dim in x.type.dims if dim not in self.dims]
         y_dims = [dim for dim in y.type.dims if dim not in self.dims]
-        x_shape = [size for dim, size in zip(x.type.dims, x.type.shape) 
-                   if dim not in self.dims]
-        y_shape = [size for dim, size in zip(y.type.dims, y.type.shape) 
-                   if dim not in self.dims]
+        x_shape = [
+            size for dim, size in zip(x.type.dims, x.type.shape) if dim not in self.dims
+        ]
+        y_shape = [
+            size for dim, size in zip(y.type.dims, y.type.shape) if dim not in self.dims
+        ]
 
         # Combine remaining dimensions
         if self.sum_result:
@@ -229,18 +231,22 @@ def dot(x, y, dims: str | Iterable[Hashable] | EllipsisType | None = None):
     if isinstance(dims, Iterable):
         for dim in dims:
             if dim not in x.type.dims:
-                raise ValueError(f"Dimension {dim} not found in first input {x.type.dims}")
+                raise ValueError(
+                    f"Dimension {dim} not found in first input {x.type.dims}"
+                )
             if dim not in y.type.dims:
-                raise ValueError(f"Dimension {dim} not found in second input {y.type.dims}")
+                raise ValueError(
+                    f"Dimension {dim} not found in second input {y.type.dims}"
+                )
 
     # If dims is ... , we have to sum over all remaining axes
     sum_result = dims is ...
-    
+
     # Handle None and ... cases
     if dims is None or dims is ...:
         # Contract over all matching dimensions
         x_dims = set(x.type.dims)
         y_dims = set(y.type.dims)
         dims = tuple(x_dims & y_dims)
-    
+
     return XDot(dims=dims, sum_result=sum_result)(x, y)
