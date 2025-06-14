@@ -232,13 +232,13 @@ def vectorize_graph(
 def vectorize_graph(
     outputs: Sequence[Variable],
     replace: Mapping[Variable, Variable],
-) -> Sequence[Variable]: ...
+) -> list[Variable]: ...
 
 
 def vectorize_graph(
     outputs: Variable | Sequence[Variable],
     replace: Mapping[Variable, Variable],
-) -> Variable | Sequence[Variable]:
+) -> Variable | list[Variable]:
     """Vectorize outputs graph given mapping from old variables to expanded counterparts version.
 
     Expanded dimensions must be on the left. Behavior is similar to the functional `numpy.vectorize`.
