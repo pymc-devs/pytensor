@@ -167,6 +167,18 @@ from pytensor.scan.basic import scan
 from pytensor.scan.views import foldl, foldr, map, reduce
 from pytensor.compile.builders import OpFromGraph
 
+try:
+    import pytensor.link.jax.ops
+    from pytensor.link.jax.ops import as_jax_op
+except ImportError as e:
+    import_error_as_jax_op = e
+
+    def as_jax_op(*args, **kwargs):
+        raise ImportError(
+            "JAX and/or equinox are not installed. Install them"
+            " to use this function: pip install pytensor[jax]"
+        ) from import_error_as_jax_op
+
 # isort: on
 
 
