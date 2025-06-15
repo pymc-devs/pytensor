@@ -162,19 +162,15 @@ class XDot(XOp):
         x = as_xtensor(x)
         y = as_xtensor(y)
 
-        # Filter out contracted dimensions
-        x_dims = [dim for dim in x.type.dims if dim not in self.dims]
-        y_dims = [dim for dim in y.type.dims if dim not in self.dims]
-        x_shape = [
-            size for dim, size in zip(x.type.dims, x.type.shape) if dim not in self.dims
-        ]
-        y_shape = [
-            size for dim, size in zip(y.type.dims, y.type.shape) if dim not in self.dims
-        ]
+        x_shape_dict = dict(zip(x.type.dims, x.type.shape))
+        y_shape_dict = dict(zip(y.type.dims, y.type.shape))
+        shape_dict = {**x_shape_dict, **y_shape_dict}
 
-        # Combine remaining dimensions
-        out_dims = tuple(x_dims + y_dims)
-        out_shape = tuple(x_shape + y_shape)
+        # Determine output dimensions
+        out_dims = tuple(d for d in shape_dict if d not in self.dims)
+
+        # Determine output shape
+        out_shape = tuple(shape_dict[d] for d in out_dims)
 
         # Determine output dtype
         out_dtype = upcast(x.type.dtype, y.type.dtype)
@@ -183,7 +179,7 @@ class XDot(XOp):
         return Apply(self, [x, y], [out])
 
 
-def dot(x, y, dims: str | Iterable[str] | EllipsisType | None = None):
+def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
     """Matrix multiplication between two XTensorVariables.
 
     This operation performs matrix multiplication between two tensors, automatically
@@ -195,7 +191,7 @@ def dot(x, y, dims: str | Iterable[str] | EllipsisType | None = None):
         First input tensor
     y : XTensorVariable
         Second input tensor
-    dims : str, Iterable[Hashable], EllipsisType, or None, optional
+    dim : str, Iterable[Hashable], EllipsisType, or None, optional
         The dimensions to contract over. If None, will contract over all matching dimensions.
         If Ellipsis (...), will contract over all dimensions.
 
@@ -214,40 +210,34 @@ def dot(x, y, dims: str | Iterable[str] | EllipsisType | None = None):
     x = as_xtensor(x)
     y = as_xtensor(y)
 
+    x_dims = set(x.type.dims)
+    y_dims = set(y.type.dims)
+    intersection = x_dims & y_dims
+    union = x_dims | y_dims
+
     # Canonicalize dims
-    if isinstance(dims, str):
-        dims = (dims,)
-    elif isinstance(dims, Iterable):
-        dims = tuple(dims)
+    if dim is None:
+        dim_set = intersection
+    elif dim is ...:
+        dim_set = union
+    elif isinstance(dim, str):
+        dim_set = {dim}
+    elif isinstance(dim, Iterable):
+        dim_set = set(dim)
 
     # Validate provided dims
-    if isinstance(dims, Iterable):
-        for dim in dims:
-            if dim not in x.type.dims:
-                raise ValueError(
-                    f"Dimension {dim} not found in first input {x.type.dims}"
-                )
-            if dim not in y.type.dims:
-                raise ValueError(
-                    f"Dimension {dim} not found in second input {y.type.dims}"
-                )
+    # Check if any dimension is not found in either input
+    for d in dim_set:
+        if d not in union:
+            raise ValueError(f"Dimension {d} not found in either input {y.type.dims}")
 
-    # If dims is ... , we have to sum over all remaining axes
-    sum_result = dims is ...
+    dotted_dims = tuple(dim_set & intersection)
+    summed_dims = tuple(dim_set.difference(dotted_dims))
 
-    # Handle None and ... cases
-    if dims is None or dims is ...:
-        # Contract over all matching dimensions
-        x_dims = set(x.type.dims)
-        y_dims = set(y.type.dims)
-        dims = tuple(x_dims & y_dims)
+    result = XDot(dims=dotted_dims)(x, y)
 
-    result = XDot(dims=dims)(x, y)
-
-    if sum_result:
-        from pytensor.xtensor.reduction import sum as xtensor_sum
-
+    if summed_dims:
         # Sum over all remaining axes
-        result = xtensor_sum(result, dim=...)
+        result = result.sum(dim=summed_dims)
 
     return result

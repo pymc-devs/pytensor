@@ -168,7 +168,7 @@ def test_dot():
     xr_assert_allclose(z_test, expected)
 
     # Test matrix-vector dot product with ellipsis
-    z = x.dot(y, dims=...)
+    z = x.dot(y, dim=...)
     fn = xr_function([x, y], z)
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test, dim=...)
@@ -186,22 +186,22 @@ def test_dot():
     expected = x_test.dot(y_test)
     xr_assert_allclose(z_test, expected)
 
-    # Test matrix-matrix dot product with string dims
-    z = x.dot(y, dims="b")
+    # Test matrix-matrix dot product with string dim
+    z = x.dot(y, dim="b")
     fn = xr_function([x, y], z)
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test, dim="b")
     xr_assert_allclose(z_test, expected)
 
     # Test matrix-matrix dot product with list of dims
-    z = x.dot(y, dims=["b"])
+    z = x.dot(y, dim=["b"])
     fn = xr_function([x, y], z)
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test, dim=["b"])
     xr_assert_allclose(z_test, expected)
 
     # Test matrix-matrix dot product with ellipsis
-    z = x.dot(y, dims=...)
+    z = x.dot(y, dim=...)
     fn = xr_function([x, y], z)
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test, dim=...)
@@ -220,28 +220,49 @@ def test_dot():
     xr_assert_allclose(z_test, expected)
 
     # Same but with explicit dimensions
-    z = x.dot(y, dims=["b", "c"])
+    z = x.dot(y, dim=["b", "c"])
     fn = xr_function([x, y], z)
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test, dim=["b", "c"])
     xr_assert_allclose(z_test, expected)
 
     # Same but with ellipses
-    z = x.dot(y, dims=...)
+    z = x.dot(y, dim=...)
     fn = xr_function([x, y], z)
 
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test, dim=...)
     xr_assert_allclose(z_test, expected)
 
+    # Dot product with sum
+    x_test = DataArray(np.arange(24.0).reshape(2, 3, 4), dims=("a", "b", "c"))
+    y_test = DataArray(np.arange(60.0).reshape(3, 4, 5), dims=("b", "c", "d"))
+    expected = x_test.dot(y_test, dim=("a", "b", "c"))
+
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
+    y = xtensor("y", dims=("b", "c", "d"), shape=(3, 4, 5))
+    z = x.dot(y, dim=("a", "b", "c"))
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    return
+    # Dot product with sum in the middle
+    # This is not supported yet
+    x_test = DataArray(np.arange(120).reshape(2, 3, 4, 5), dims=("a", "b", "c", "d"))
+    y_test = DataArray(np.arange(360).reshape(3, 4, 5, 6), dims=("b", "c", "d", "e"))
+    expected = x_test.dot(y_test, dim=("b", "d"))
+    x = xtensor("x", dims=("a", "b", "c", "d"), shape=(2, 3, 4, 5))
+    y = xtensor("y", dims=("b", "c", "d", "e"), shape=(3, 4, 5, 6))
+    z = x.dot(y, dim=("b", "d"))
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
 
 def test_dot_errors():
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     y = xtensor("y", dims=("b", "c"), shape=(3, 4))
-    with pytest.raises(ValueError, match="Dimension c not found in first input"):
-        x.dot(y, dims=["c"])
-    with pytest.raises(ValueError, match="Dimension a not found in second input"):
-        x.dot(y, dims=["a"])
 
     # Test a case where there are no matching dimensions
     x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
