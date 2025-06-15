@@ -155,14 +155,14 @@ def test_cast():
 
 def test_dot():
     """Test basic dot product operations."""
-    # Test matrix-vector dot product
-    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
-    y = xtensor("y", dims=("b",), shape=(3,))
+    # Test matrix-vector dot product (with multiple-letter dim names)
+    x = xtensor("x", dims=("aa", "bb"), shape=(2, 3))
+    y = xtensor("y", dims=("bb",), shape=(3,))
     z = x.dot(y)
     fn = xr_function([x, y], z)
 
-    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
-    y_test = DataArray(np.ones(3), dims=("b",))
+    x_test = DataArray(np.ones((2, 3)), dims=("aa", "bb"))
+    y_test = DataArray(np.ones(3), dims=("bb",))
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test)
     xr_assert_allclose(z_test, expected)
@@ -229,7 +229,6 @@ def test_dot():
     # Same but with ellipses
     z = x.dot(y, dim=...)
     fn = xr_function([x, y], z)
-
     z_test = fn(x_test, y_test)
     expected = x_test.dot(y_test, dim=...)
     xr_assert_allclose(z_test, expected)
@@ -247,7 +246,6 @@ def test_dot():
     xr_assert_allclose(z_test, expected)
 
     # Dot product with sum in the middle
-    # This is not supported yet
     x_test = DataArray(np.arange(120.0).reshape(2, 3, 4, 5), dims=("a", "b", "c", "d"))
     y_test = DataArray(np.arange(360.0).reshape(3, 4, 5, 6), dims=("b", "c", "d", "e"))
     expected = x_test.dot(y_test, dim=("b", "d"))
