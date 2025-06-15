@@ -231,13 +231,6 @@ def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
         if d not in union:
             raise ValueError(f"Dimension {d} not found in either input {y.type.dims}")
 
-    dotted_dims = tuple(dim_set & intersection)
-    summed_dims = tuple(dim_set.difference(dotted_dims))
-
-    result = XDot(dims=dotted_dims)(x, y)
-
-    if summed_dims:
-        # Sum over all remaining axes
-        result = result.sum(dim=summed_dims)
+    result = XDot(dims=tuple(dim_set))(x, y)
 
     return result

@@ -246,15 +246,35 @@ def test_dot():
     z_test = fn(x_test, y_test)
     xr_assert_allclose(z_test, expected)
 
-    return
     # Dot product with sum in the middle
     # This is not supported yet
-    x_test = DataArray(np.arange(120).reshape(2, 3, 4, 5), dims=("a", "b", "c", "d"))
-    y_test = DataArray(np.arange(360).reshape(3, 4, 5, 6), dims=("b", "c", "d", "e"))
+    x_test = DataArray(np.arange(120.0).reshape(2, 3, 4, 5), dims=("a", "b", "c", "d"))
+    y_test = DataArray(np.arange(360.0).reshape(3, 4, 5, 6), dims=("b", "c", "d", "e"))
     expected = x_test.dot(y_test, dim=("b", "d"))
     x = xtensor("x", dims=("a", "b", "c", "d"), shape=(2, 3, 4, 5))
     y = xtensor("y", dims=("b", "c", "d", "e"), shape=(3, 4, 5, 6))
     z = x.dot(y, dim=("b", "d"))
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with first two dims
+    expected = x_test.dot(y_test, dim=["a", "b"])
+    z = x.dot(y, dim=["a", "b"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with last two
+    expected = x_test.dot(y_test, dim=["d", "e"])
+    z = x.dot(y, dim=["d", "e"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with every other dim
+    expected = x_test.dot(y_test, dim=["a", "c", "e"])
+    z = x.dot(y, dim=["a", "c", "e"])
     fn = xr_function([x, y], z)
     z_test = fn(x_test, y_test)
     xr_assert_allclose(z_test, expected)
@@ -273,7 +293,8 @@ def test_dot_errors():
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     y = xtensor("y", dims=("b", "c"), shape=(4, 5))
     with pytest.raises(
-        ValueError, match="Input arrays have inconsistent type shape along the axes"
+        ValueError,
+        match="Size of label 'b' for operand 1.*does not match previous terms",
     ):
         z = x.dot(y)
         fn = function([x, y], z)

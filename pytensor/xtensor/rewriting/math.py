@@ -1,5 +1,8 @@
+from string import ascii_lowercase
+
 from pytensor.graph import node_rewriter
-from pytensor.tensor import tensordot
+from pytensor.tensor import einsum
+from pytensor.tensor.shape import reshape
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.math import XDot
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
@@ -20,22 +23,29 @@ def lower_dot(fgraph, node):
     x_tensor = tensor_from_xtensor(x)
     y_tensor = tensor_from_xtensor(y)
 
-    # Get the axes for contraction
-    x_axes = [x.type.dims.index(dim) for dim in node.op.dims]
-    y_axes = [y.type.dims.index(dim) for dim in node.op.dims]
+    # Collect all dimension names across inputs and output
+    all_dims = list(
+        dict.fromkeys(x.type.dims + y.type.dims + out.type.dims)
+    )  # preserve order
+    if len(all_dims) > len(ascii_lowercase):
+        raise ValueError("Too many dimensions to map to einsum subscripts")
 
-    # Check that shapes match along contracted dimensions
-    for dim in node.op.dims:
-        x_idx = x.type.dims.index(dim)
-        y_idx = y.type.dims.index(dim)
-        if x.type.shape[x_idx] != y.type.shape[y_idx]:
-            raise ValueError(
-                "Input arrays have inconsistent type shape along the axes "
-                f"that are to be reduced with tensordot: {x.type.shape[x_idx]} != {y.type.shape[y_idx]}"
-            )
+    dim_to_char = dict(zip(all_dims, ascii_lowercase))
 
-    # Perform the tensordot operation
-    out_tensor = tensordot(x_tensor, y_tensor, axes=(x_axes, y_axes))
+    # Build einsum string
+    x_subs = "".join(dim_to_char[d] for d in x.type.dims)
+    y_subs = "".join(dim_to_char[d] for d in y.type.dims)
+    out_subs = "".join(dim_to_char[d] for d in out.type.dims)
+    einsum_str = f"{x_subs},{y_subs}->{out_subs}"
 
-    # Convert back to xtensor
+    # Perform the einsum operation
+    out_tensor = einsum(einsum_str, x_tensor, y_tensor)
+
+    # Reshape to match the expected output shape
+    try:
+        out_tensor = reshape(out_tensor, out.type.shape)
+    except (TypeError, ValueError):
+        # Skip reshaping if symbolic shapes are present
+        pass
+
     return [xtensor_from_tensor(out_tensor, out.type.dims)]
