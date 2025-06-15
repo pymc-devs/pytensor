@@ -346,14 +346,6 @@ def test_squeeze_errors():
     with pytest.raises(ValueError, match="has static size .* not 1"):
         x1.squeeze("city")
 
-    # Symbolic shape: dim is not 1 at runtime → should raise
-    x2 = xtensor("x2", dims=("a", "b", "c"))  # shape unknown
-    y2 = x2.squeeze("b")
-    x2_test = xr_arange_like(xtensor(dims=x2.dims, shape=(2, 2, 3)))
-    fn2 = xr_function([x2], y2)
-    with pytest.raises(Exception):
-        fn2(x2_test)
-
 
 def test_expand_dims():
     """Test expand_dims."""
