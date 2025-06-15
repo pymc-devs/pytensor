@@ -1,12 +1,16 @@
 import sys
+from collections.abc import Iterable
+from types import EllipsisType
 
 import numpy as np
 
 import pytensor.scalar as ps
 from pytensor import config
+from pytensor.graph.basic import Apply
 from pytensor.scalar import ScalarOp
-from pytensor.scalar.basic import _cast_mapping
-from pytensor.xtensor.basic import as_xtensor
+from pytensor.scalar.basic import _cast_mapping, upcast
+from pytensor.xtensor.basic import XOp, as_xtensor
+from pytensor.xtensor.type import xtensor
 from pytensor.xtensor.vectorization import XElemwise
 
 
@@ -134,3 +138,115 @@ def cast(x, dtype):
     if dtype not in _xelemwise_cast_op:
         _xelemwise_cast_op[dtype] = XElemwise(scalar_op=_cast_mapping[dtype])
     return _xelemwise_cast_op[dtype](x)
+
+
+class XDot(XOp):
+    """Matrix multiplication between two XTensorVariables.
+
+    This operation performs matrix multiplication between two tensors, automatically
+    aligning and contracting dimensions. The behavior matches xarray's dot operation.
+
+    Parameters
+    ----------
+    dims : tuple of str
+        The dimensions to contract over. If None, will contract over all matching dimensions.
+    sum_result : bool
+        If True, sum over all remaining axes after contraction (for full contraction, e.g. dims=...).
+    """
+
+    __props__ = ("dims", "sum_result")
+
+    def __init__(self, dims: Iterable[str], sum_result: bool = False):
+        self.dims = dims
+        self.sum_result = sum_result
+        super().__init__()
+
+    def make_node(self, x, y):
+        x = as_xtensor(x)
+        y = as_xtensor(y)
+
+        # Filter out contracted dimensions
+        x_dims = [dim for dim in x.type.dims if dim not in self.dims]
+        y_dims = [dim for dim in y.type.dims if dim not in self.dims]
+        x_shape = [
+            size for dim, size in zip(x.type.dims, x.type.shape) if dim not in self.dims
+        ]
+        y_shape = [
+            size for dim, size in zip(y.type.dims, y.type.shape) if dim not in self.dims
+        ]
+
+        # Combine remaining dimensions
+        if self.sum_result:
+            out_dims = ()
+            out_shape = ()
+        else:
+            out_dims = tuple(x_dims + y_dims)
+            out_shape = tuple(x_shape + y_shape)
+
+        # Determine output dtype
+        out_dtype = upcast(x.type.dtype, y.type.dtype)
+
+        out = xtensor(dtype=out_dtype, shape=out_shape, dims=out_dims)
+        return Apply(self, [x, y], [out])
+
+
+def dot(x, y, dims: str | Iterable[str] | EllipsisType | None = None):
+    """Matrix multiplication between two XTensorVariables.
+
+    This operation performs matrix multiplication between two tensors, automatically
+    aligning and contracting dimensions. The behavior matches xarray's dot operation.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        First input tensor
+    y : XTensorVariable
+        Second input tensor
+    dims : str, Iterable[Hashable], EllipsisType, or None, optional
+        The dimensions to contract over. If None, will contract over all matching dimensions.
+        If Ellipsis (...), will contract over all dimensions.
+
+    Returns
+    -------
+    XTensorVariable
+        The result of the matrix multiplication.
+
+    Examples
+    --------
+    >>> x = xtensor(dtype="float64", dims=("a", "b"), shape=(2, 3))
+    >>> y = xtensor(dtype="float64", dims=("b", "c"), shape=(3, 4))
+    >>> z = dot(x, y)  # Result has dimensions ("a", "c")
+    >>> z = dot(x, y, dim=...)  # Contract over all dimensions
+    """
+    x = as_xtensor(x)
+    y = as_xtensor(y)
+
+    # Canonicalize dims
+    if isinstance(dims, str):
+        dims = (dims,)
+    elif isinstance(dims, Iterable):
+        dims = tuple(dims)
+
+    # Validate provided dims
+    if isinstance(dims, Iterable):
+        for dim in dims:
+            if dim not in x.type.dims:
+                raise ValueError(
+                    f"Dimension {dim} not found in first input {x.type.dims}"
+                )
+            if dim not in y.type.dims:
+                raise ValueError(
+                    f"Dimension {dim} not found in second input {y.type.dims}"
+                )
+
+    # If dims is ... , we have to sum over all remaining axes
+    sum_result = dims is ...
+
+    # Handle None and ... cases
+    if dims is None or dims is ...:
+        # Contract over all matching dimensions
+        x_dims = set(x.type.dims)
+        y_dims = set(y.type.dims)
+        dims = tuple(x_dims & y_dims)
+
+    return XDot(dims=dims, sum_result=sum_result)(x, y)
