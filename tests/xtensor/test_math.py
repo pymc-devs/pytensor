@@ -167,13 +167,19 @@ def test_dot():
     expected = x_test.dot(y_test)
     xr_assert_allclose(z_test, expected)
 
+    # Test matrix-vector dot product with ellipsis
+    z = x.dot(y, dims=...)
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=...)
+    xr_assert_allclose(z_test, expected)
+
     # Test matrix-matrix dot product
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     y = xtensor("y", dims=("b", "c"), shape=(3, 4))
     z = x.dot(y)
     fn = xr_function([x, y], z)
 
-    # Use outer product to create test data with diverse values
     x_test = DataArray(np.add.outer(np.arange(2.0), np.arange(3.0)), dims=("a", "b"))
     y_test = DataArray(np.add.outer(np.arange(3.0), np.arange(4.0)), dims=("b", "c"))
     z_test = fn(x_test, y_test)
@@ -195,14 +201,13 @@ def test_dot():
     xr_assert_allclose(z_test, expected)
 
     # Test matrix-matrix dot product with ellipsis
-    if True:
-        z = x.dot(y, dims=...)
-        fn = xr_function([x, y], z)
-        z_test = fn(x_test, y_test)
-        expected = x_test.dot(y_test, dim=...)
-        xr_assert_allclose(z_test, expected)
+    z = x.dot(y, dims=...)
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=...)
+    xr_assert_allclose(z_test, expected)
 
-    # Test a case where there are two dimensions to contract over
+    # Test a case where there are two dimensions to sum over
     x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
     y = xtensor("y", dims=("b", "c", "d"), shape=(3, 4, 5))
     z = x.dot(y)
@@ -222,13 +227,12 @@ def test_dot():
     xr_assert_allclose(z_test, expected)
 
     # Same but with ellipses
-    if True:
-        z = x.dot(y, dims=...)
-        fn = xr_function([x, y], z)
+    z = x.dot(y, dims=...)
+    fn = xr_function([x, y], z)
 
-        z_test = fn(x_test, y_test)
-        expected = x_test.dot(y_test, dim=...)
-        xr_assert_allclose(z_test, expected)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=...)
+    xr_assert_allclose(z_test, expected)
 
 
 def test_dot_errors():
