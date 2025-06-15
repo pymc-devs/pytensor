@@ -67,8 +67,8 @@ class XTensorFromTensor(XTypeCastOp):
         return Apply(self, [x], [output])
 
 
-def xtensor_from_tensor(x, dims):
-    return XTensorFromTensor(dims=dims)(x)
+def xtensor_from_tensor(x, dims, name=None):
+    return XTensorFromTensor(dims=dims)(x, name=name)
 
 
 class Rename(XTypeCastOp):
