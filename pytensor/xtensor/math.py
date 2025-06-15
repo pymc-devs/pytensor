@@ -1,5 +1,5 @@
 import sys
-from collections.abc import Hashable, Iterable
+from collections.abc import Iterable
 from types import EllipsisType
 
 import numpy as np
@@ -190,7 +190,7 @@ class XDot(XOp):
         return Apply(self, [x, y], [out])
 
 
-def dot(x, y, dims: str | Iterable[Hashable] | EllipsisType | None = None):
+def dot(x, y, dims: str | Iterable[str] | EllipsisType | None = None):
     """Matrix multiplication between two XTensorVariables.
 
     This operation performs matrix multiplication between two tensors, automatically

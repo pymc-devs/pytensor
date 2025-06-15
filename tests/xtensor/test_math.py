@@ -229,3 +229,29 @@ def test_dot():
         z_test = fn(x_test, y_test)
         expected = x_test.dot(y_test, dim=...)
         xr_assert_allclose(z_test, expected)
+
+
+def test_dot_errors():
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+    with pytest.raises(ValueError, match="Dimension c not found in first input"):
+        x.dot(y, dims=["c"])
+    with pytest.raises(ValueError, match="Dimension a not found in second input"):
+        x.dot(y, dims=["a"])
+
+    # Test a case where there are no matching dimensions
+    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+    y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
+    with pytest.raises(ValueError, match="cannot reindex or align along dimension"):
+        x_test.dot(y_test)
+
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(4, 5))
+    with pytest.raises(
+        ValueError, match="Input arrays have inconsistent type shape along the axes"
+    ):
+        z = x.dot(y)
+        fn = function([x, y], z)
+        x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+        y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
+        fn(x_test, y_test)

@@ -20,11 +20,21 @@ def lower_dot(fgraph, node):
     x_tensor = tensor_from_xtensor(x)
     y_tensor = tensor_from_xtensor(y)
 
-    # Get axes to contract for each input
+    # Get the axes for contraction
     x_axes = [x.type.dims.index(dim) for dim in node.op.dims]
     y_axes = [y.type.dims.index(dim) for dim in node.op.dims]
 
-    # Perform dot product
+    # Check that shapes match along contracted dimensions
+    for dim in node.op.dims:
+        x_idx = x.type.dims.index(dim)
+        y_idx = y.type.dims.index(dim)
+        if x.type.shape[x_idx] != y.type.shape[y_idx]:
+            raise ValueError(
+                "Input arrays have inconsistent type shape along the axes "
+                f"that are to be reduced with tensordot: {x.type.shape[x_idx]} != {y.type.shape[y_idx]}"
+            )
+
+    # Perform the tensordot operation
     out_tensor = tensordot(x_tensor, y_tensor, axes=(x_axes, y_axes))
 
     # Sum over all remaining axes if needed
