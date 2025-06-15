@@ -150,15 +150,12 @@ class XDot(XOp):
     ----------
     dims : tuple of str
         The dimensions to contract over. If None, will contract over all matching dimensions.
-    sum_result : bool
-        If True, sum over all remaining axes after contraction (for full contraction, e.g. dims=...).
     """
 
-    __props__ = ("dims", "sum_result")
+    __props__ = ("dims",)
 
-    def __init__(self, dims: Iterable[str], sum_result: bool = False):
+    def __init__(self, dims: Iterable[str]):
         self.dims = dims
-        self.sum_result = sum_result
         super().__init__()
 
     def make_node(self, x, y):
@@ -176,12 +173,8 @@ class XDot(XOp):
         ]
 
         # Combine remaining dimensions
-        if self.sum_result:
-            out_dims = ()
-            out_shape = ()
-        else:
-            out_dims = tuple(x_dims + y_dims)
-            out_shape = tuple(x_shape + y_shape)
+        out_dims = tuple(x_dims + y_dims)
+        out_shape = tuple(x_shape + y_shape)
 
         # Determine output dtype
         out_dtype = upcast(x.type.dtype, y.type.dtype)
@@ -249,4 +242,12 @@ def dot(x, y, dims: str | Iterable[str] | EllipsisType | None = None):
         y_dims = set(y.type.dims)
         dims = tuple(x_dims & y_dims)
 
-    return XDot(dims=dims, sum_result=sum_result)(x, y)
+    result = XDot(dims=dims)(x, y)
+
+    if sum_result:
+        from pytensor.xtensor.reduction import sum as xtensor_sum
+
+        # Sum over all remaining axes
+        result = xtensor_sum(result, dim=...)
+
+    return result

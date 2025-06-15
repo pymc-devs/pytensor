@@ -37,10 +37,5 @@ def lower_dot(fgraph, node):
     # Perform the tensordot operation
     out_tensor = tensordot(x_tensor, y_tensor, axes=(x_axes, y_axes))
 
-    # Sum over all remaining axes if needed
-    if node.op.sum_result:
-        # Sum over all remaining dimensions
-        out_tensor = out_tensor.sum(axis=None)
-
     # Convert back to xtensor
     return [xtensor_from_tensor(out_tensor, out.type.dims)]
