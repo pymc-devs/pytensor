@@ -162,13 +162,13 @@ class MyTestOp(Op):
         raise NotImplementedError("Test Op should not be present in final graph")
 
 
-test_op = MyTestOp()
+my_test_op = MyTestOp()
 
 
 def test_vectorize_node_default_signature():
     vec = tensor(shape=(None,))
     mat = tensor(shape=(5, None))
-    node = test_op.make_node(vec, mat)
+    node = my_test_op.make_node(vec, mat)
 
     vect_node = vectorize_node(node, mat, mat)
     assert isinstance(vect_node.op, Blockwise) and isinstance(
@@ -179,9 +179,9 @@ def test_vectorize_node_default_signature():
     with pytest.raises(
         ValueError, match="Signature not provided nor found in core_op MyTestOp"
     ):
-        Blockwise(test_op)
+        Blockwise(my_test_op)
 
-    vect_node = Blockwise(test_op, signature="(m),(n)->(m),(n)").make_node(vec, mat)
+    vect_node = Blockwise(my_test_op, signature="(m),(n)->(m),(n)").make_node(vec, mat)
     assert vect_node.outputs[0].type.shape == (
         5,
         None,
@@ -198,7 +198,7 @@ def test_blockwise_shape():
     inp_test = np.zeros((5, 4, 3), dtype=config.floatX)
 
     # Shape can be inferred from inputs
-    op = Blockwise(test_op, signature="(m, n) -> (n, m)")
+    op = Blockwise(my_test_op, signature="(m, n) -> (n, m)")
     out = op(inp)
     assert out.type.shape == (5, None, None)
 
@@ -210,7 +210,7 @@ def test_blockwise_shape():
     assert tuple(shape_fn(inp_test)) == (5, 3, 4)
 
     # Shape can only be partially inferred from inputs
-    op = Blockwise(test_op, signature="(m, n) -> (m, k)")
+    op = Blockwise(my_test_op, signature="(m, n) -> (m, k)")
     out = op(inp)
     assert out.type.shape == (5, None, None)
 
@@ -233,7 +233,7 @@ def test_blockwise_shape():
     inp1_test = np.zeros((7, 1, 4, 3), dtype=config.floatX)
     inp2_test = np.zeros((1, 5, 4, 3), dtype=config.floatX)
 
-    op = Blockwise(test_op, signature="(m, n), (m, n) -> (n, m), (m, k)")
+    op = Blockwise(my_test_op, signature="(m, n), (m, n) -> (n, m), (m, k)")
     outs = op(inp1, inp2)
     assert outs[0].type.shape == (7, 5, None, None)
     assert outs[1].type.shape == (7, 5, None, None)
