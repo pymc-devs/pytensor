@@ -344,81 +344,66 @@ class Blockwise(COp):
 
         return [[True for _ in node.outputs] for _ in node.inputs]
 
-    def _bgrad(self, inputs, outputs, ograds):
-        # Grad, with respect to broadcasted versions of inputs
+    def L_op(self, inputs, outputs, output_gradients):
+        batch_ndim = self.batch_ndim(outputs[0].owner)
 
-        def as_core(t, core_t):
-            # Inputs could be NullType or DisconnectedType
-            if isinstance(t.type, NullType | DisconnectedType):
-                return t
-            return core_t.type()
-
+        # Obtain core_op gradients
         with config.change_flags(compute_test_value="off"):
-            safe_inputs = [
-                tensor(dtype=inp.type.dtype, shape=(None,) * len(sig))
-                for inp, sig in zip(inputs, self.inputs_sig, strict=True)
-            ]
-            core_node = self._create_dummy_core_node(safe_inputs)
-
             core_inputs = [
-                as_core(inp, core_inp)
-                for inp, core_inp in zip(inputs, core_node.inputs, strict=True)
-            ]
-            core_ograds = [
-                as_core(ograd, core_ograd)
-                for ograd, core_ograd in zip(ograds, core_node.outputs, strict=True)
-            ]
-            # FIXME: These core_outputs do not depend on core_inputs, not pretty
-            # It's not neccessarily a problem because if they are referenced by the gradient,
-            # they get replaced later in vectorize. But if the Op was to make any decision
-            # by introspecting the dependencies of output on inputs it would fail badly!
-            core_outputs = core_node.outputs
-
-            core_igrads = self.core_op.L_op(core_inputs, core_outputs, core_ograds)
-
-        igrads = vectorize_graph(
-            [core_igrad for core_igrad in core_igrads if core_igrad is not None],
-            replace=dict(
-                zip(
-                    core_inputs + core_outputs + core_ograds,
-                    inputs + outputs + ograds,
-                    strict=True,
+                tensor(
+                    dtype=inp.type.dtype,
+                    shape=inp.type.shape[batch_ndim:],
                 )
-            ),
+                for inp in inputs
+            ]
+            core_outputs = self._create_dummy_core_node(core_inputs).outputs
+
+            # Define core output_gradients, but keep original disconnected/null output_gradients (if any)
+            core_output_gradients = [
+                output_grad
+                if isinstance(output_grad.type, NullType | DisconnectedType)
+                else core_output.type()
+                for output_grad, core_output in zip(
+                    output_gradients, core_outputs, strict=True
+                )
+            ]
+
+            core_input_gradients = self.core_op.L_op(
+                core_inputs, core_outputs, core_output_gradients
+            )
+
+        # Vectorize core gradients to original inputs
+        input_gradients = list(
+            vectorize_graph(
+                core_input_gradients,
+                replace=dict(
+                    zip(
+                        core_inputs + core_outputs + core_output_gradients,
+                        inputs + outputs + output_gradients,
+                        strict=True,
+                    )
+                ),
+            )
         )
 
-        igrads_iter = iter(igrads)
-        return [
-            None if core_igrad is None else next(igrads_iter)
-            for core_igrad in core_igrads
-        ]
-
-    def L_op(self, inputs, outs, ograds):
-        from pytensor.tensor.math import sum as pt_sum
-
-        # Compute grad with respect to broadcasted input
-        rval = self._bgrad(inputs, outs, ograds)
-
-        # Sum out the broadcasted dimensions
-        batch_ndims = self.batch_ndim(outs[0].owner)
-        batch_shape = outs[0].type.shape[:batch_ndims]
+        # Sum out the broadcasted batch dimensions
+        batch_shape = outputs[0].type.shape[:batch_ndim]
         for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig, strict=True)):
-            if isinstance(rval[i].type, NullType | DisconnectedType):
+            if isinstance(input_gradients[i].type, NullType | DisconnectedType):
                 continue
 
-            assert inp.type.ndim == batch_ndims + len(sig)
+            assert inp.type.ndim == batch_ndim + len(sig)
 
-            to_sum = [
+            if to_sum := [
                 j
                 for j, (inp_s, out_s) in enumerate(
                     zip(inp.type.shape, batch_shape, strict=False)
                 )
                 if inp_s == 1 and out_s != 1
-            ]
-            if to_sum:
-                rval[i] = pt_sum(rval[i], axis=to_sum, keepdims=True)
+            ]:
+                input_gradients[i] = input_gradients[i].sum(axis=to_sum, keepdims=True)
 
-        return rval
+        return input_gradients
 
     def _create_node_gufunc(self, node: Apply, impl) -> Callable:
         """Define (or retrieve) the node gufunc used in `perform`.

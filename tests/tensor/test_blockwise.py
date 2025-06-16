@@ -6,11 +6,11 @@ import pytest
 import scipy.linalg
 
 import pytensor
-from pytensor import In, config, function
+from pytensor import In, config, function, scan
 from pytensor.compile import get_default_mode, get_mode
 from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
-from pytensor.graph.replace import vectorize_node
+from pytensor.graph.replace import vectorize_graph, vectorize_node
 from pytensor.raise_op import assert_op
 from pytensor.tensor import diagonal, dmatrix, log, ones_like, scalar, tensor, vector
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
@@ -162,13 +162,13 @@ class MyTestOp(Op):
         raise NotImplementedError("Test Op should not be present in final graph")
 
 
-test_op = MyTestOp()
+my_test_op = MyTestOp()
 
 
 def test_vectorize_node_default_signature():
     vec = tensor(shape=(None,))
     mat = tensor(shape=(5, None))
-    node = test_op.make_node(vec, mat)
+    node = my_test_op.make_node(vec, mat)
 
     vect_node = vectorize_node(node, mat, mat)
     assert isinstance(vect_node.op, Blockwise) and isinstance(
@@ -179,9 +179,9 @@ def test_vectorize_node_default_signature():
     with pytest.raises(
         ValueError, match="Signature not provided nor found in core_op MyTestOp"
     ):
-        Blockwise(test_op)
+        Blockwise(my_test_op)
 
-    vect_node = Blockwise(test_op, signature="(m),(n)->(m),(n)").make_node(vec, mat)
+    vect_node = Blockwise(my_test_op, signature="(m),(n)->(m),(n)").make_node(vec, mat)
     assert vect_node.outputs[0].type.shape == (
         5,
         None,
@@ -198,7 +198,7 @@ def test_blockwise_shape():
     inp_test = np.zeros((5, 4, 3), dtype=config.floatX)
 
     # Shape can be inferred from inputs
-    op = Blockwise(test_op, signature="(m, n) -> (n, m)")
+    op = Blockwise(my_test_op, signature="(m, n) -> (n, m)")
     out = op(inp)
     assert out.type.shape == (5, None, None)
 
@@ -210,7 +210,7 @@ def test_blockwise_shape():
     assert tuple(shape_fn(inp_test)) == (5, 3, 4)
 
     # Shape can only be partially inferred from inputs
-    op = Blockwise(test_op, signature="(m, n) -> (m, k)")
+    op = Blockwise(my_test_op, signature="(m, n) -> (m, k)")
     out = op(inp)
     assert out.type.shape == (5, None, None)
 
@@ -233,7 +233,7 @@ def test_blockwise_shape():
     inp1_test = np.zeros((7, 1, 4, 3), dtype=config.floatX)
     inp2_test = np.zeros((1, 5, 4, 3), dtype=config.floatX)
 
-    op = Blockwise(test_op, signature="(m, n), (m, n) -> (n, m), (m, k)")
+    op = Blockwise(my_test_op, signature="(m, n), (m, n) -> (n, m), (m, k)")
     outs = op(inp1, inp2)
     assert outs[0].type.shape == (7, 5, None, None)
     assert outs[1].type.shape == (7, 5, None, None)
@@ -649,4 +649,52 @@ def test_gradient_mixed_discrete_output_core_op():
         grad(y.sum(), x).eval({x: np.full(12, np.nan, dtype=config.floatX)}),
         np.ones(12, dtype=config.floatX),
         strict=True,
+    )
+
+
+def test_blockwise_grad_core_type():
+    class StrictCoreTypeOp(Op):
+        def make_node(self, x):
+            assert x.type.shape[-1] == 2
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, output_storage):
+            output_storage[0][0] = inputs[0] + 1
+
+        def L_op(self, inputs, outputs, output_grads):
+            [x] = inputs
+            assert x.type.shape == (2,)
+            return [x.zeros_like()]
+
+    strict_core_type_op = StrictCoreTypeOp()
+    block_strict_core_type_op = Blockwise(strict_core_type_op, signature="(a)->(a)")
+
+    x = tensor("x", shape=(5, 2), dtype="float64")
+    y = block_strict_core_type_op(x)
+    assert y.type.shape == (5, 2)
+
+    grad_y = grad(y.sum(), x)
+    assert grad_y.type.shape == (5, 2)
+    np.testing.assert_allclose(
+        grad_y.eval({x: np.ones((5, 2))}),
+        np.zeros((5, 2)),
+    )
+
+
+def test_scan_gradient_core_type():
+    n_steps = 3
+    seq = tensor("seq", shape=(n_steps, 1), dtype="float64")
+    out, _ = scan(
+        lambda s: s,
+        sequences=[seq],
+        n_steps=n_steps,
+    )
+
+    vec_seq = tensor("vec_seq", shape=(None, n_steps, 1), dtype="float64")
+    vec_out = vectorize_graph(out, replace={seq: vec_seq})
+    grad_sit_sot0 = grad(vec_out.sum(), vec_seq)
+
+    np.testing.assert_allclose(
+        grad_sit_sot0.eval({vec_seq: np.ones((4, n_steps, 1))}),
+        np.ones((4, n_steps, 1)),
     )
