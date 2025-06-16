@@ -41,11 +41,11 @@ def lower_dot(fgraph, node):
     # Perform the einsum operation
     out_tensor = einsum(einsum_str, x_tensor, y_tensor)
 
-    # Reshape to match the expected output shape
-    try:
+    # Check if we have symbolic shapes
+    sym_shape = any(not isinstance(s, int) for s in out.type.shape)
+
+    # If we have concrete shapes, reshape to match them
+    if not sym_shape:
         out_tensor = reshape(out_tensor, out.type.shape)
-    except (TypeError, ValueError):
-        # Skip reshaping if symbolic shapes are present
-        pass
 
     return [xtensor_from_tensor(out_tensor, out.type.dims)]

@@ -277,6 +277,17 @@ def test_dot():
     z_test = fn(x_test, y_test)
     xr_assert_allclose(z_test, expected)
 
+    # Test symbolic shapes
+    x = xtensor("x", dims=("a", "b"), shape=(None, 3))  # First dimension is symbolic
+    y = xtensor("y", dims=("b", "c"), shape=(3, None))  # Second dimension is symbolic
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+    y_test = DataArray(np.ones((3, 4)), dims=("b", "c"))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
 
 def test_dot_errors():
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
