@@ -2,7 +2,7 @@ from string import ascii_lowercase
 
 from pytensor.graph import node_rewriter
 from pytensor.tensor import einsum
-from pytensor.tensor.shape import reshape
+from pytensor.tensor.shape import specify_shape
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.math import XDot
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
@@ -41,11 +41,7 @@ def lower_dot(fgraph, node):
     # Perform the einsum operation
     out_tensor = einsum(einsum_str, x_tensor, y_tensor)
 
-    # Check if we have symbolic shapes
-    sym_shape = any(not isinstance(s, int) for s in out.type.shape)
-
-    # If we have concrete shapes, reshape to match them
-    if not sym_shape:
-        out_tensor = reshape(out_tensor, out.type.shape)
+    # Reshape to match the output shape
+    out_tensor = specify_shape(out_tensor, out.type.shape)
 
     return [xtensor_from_tensor(out_tensor, out.type.dims)]

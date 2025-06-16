@@ -229,7 +229,18 @@ def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
     # Check if any dimension is not found in either input
     for d in dim_set:
         if d not in union:
-            raise ValueError(f"Dimension {d} not found in either input {y.type.dims}")
+            raise ValueError(f"Dimension {d} not found in either input")
+
+    # Check for dimension size mismatches (concrete only)
+    for dim in intersection:
+        x_idx = x.type.dims.index(dim)
+        y_idx = y.type.dims.index(dim)
+        if (
+            isinstance(x.type.shape[x_idx], int)
+            and isinstance(y.type.shape[y_idx], int)
+            and x.type.shape[x_idx] != y.type.shape[y_idx]
+        ):
+            raise ValueError(f"Size of dim '{dim}' does not match")
 
     result = XDot(dims=tuple(dim_set))(x, y)
 

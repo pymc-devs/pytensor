@@ -290,23 +290,28 @@ def test_dot():
 
 
 def test_dot_errors():
+    # No matching dimensions
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+    with pytest.raises(ValueError, match="Dimension e not found in either input"):
+        x.dot(y, dim="e")
 
-    # Test a case where there are no matching dimensions
-    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
-    y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
-    with pytest.raises(ValueError, match="cannot reindex or align along dimension"):
-        x_test.dot(y_test)
-
+    # Concrete dimension size mismatches
     x = xtensor("x", dims=("a", "b"), shape=(2, 3))
     y = xtensor("y", dims=("b", "c"), shape=(4, 5))
     with pytest.raises(
         ValueError,
-        match="Size of label 'b' for operand 1.*does not match previous terms",
+        match="Size of dim 'b' does not match",
     ):
-        z = x.dot(y)
-        fn = function([x, y], z)
-        x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
-        y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
+        x.dot(y)
+
+    # Symbolic dimension size mismatches
+    x = xtensor("x", dims=("a", "b"), shape=(2, None))
+    y = xtensor("y", dims=("b", "c"), shape=(None, 3))
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+    y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
+    # Doesn't fail until the rewrite
+    with pytest.raises(ValueError, match="not aligned"):
         fn(x_test, y_test)
