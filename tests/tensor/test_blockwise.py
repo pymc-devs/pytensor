@@ -683,14 +683,14 @@ def test_blockwise_grad_core_type():
 
 def test_scan_gradient_core_type():
     n_steps = 3
-    seq = tensor("seq", shape=(n_steps, 1))
+    seq = tensor("seq", shape=(n_steps, 1), dtype="float64")
     out, _ = scan(
         lambda s: s,
         sequences=[seq],
         n_steps=n_steps,
     )
 
-    vec_seq = tensor("vec_seq", shape=(None, n_steps, 1))
+    vec_seq = tensor("vec_seq", shape=(None, n_steps, 1), dtype="float64")
     vec_out = vectorize_graph(out, replace={seq: vec_seq})
     grad_sit_sot0 = grad(vec_out.sum(), vec_seq)
 
