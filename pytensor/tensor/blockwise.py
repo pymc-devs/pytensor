@@ -355,7 +355,10 @@ class Blockwise(COp):
 
         with config.change_flags(compute_test_value="off"):
             safe_inputs = [
-                tensor(dtype=inp.type.dtype, shape=(None,) * len(sig))
+                tensor(
+                    dtype=inp.type.dtype,
+                    shape=inp.type.shape[inp.type.ndim - len(sig) :],
+                )
                 for inp, sig in zip(inputs, self.inputs_sig, strict=True)
             ]
             core_node = self._create_dummy_core_node(safe_inputs)

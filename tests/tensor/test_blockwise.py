@@ -6,11 +6,11 @@ import pytest
 import scipy.linalg
 
 import pytensor
-from pytensor import In, config, function
+from pytensor import In, config, function, scan
 from pytensor.compile import get_default_mode, get_mode
 from pytensor.gradient import grad
 from pytensor.graph import Apply, Op
-from pytensor.graph.replace import vectorize_node
+from pytensor.graph.replace import vectorize_graph, vectorize_node
 from pytensor.raise_op import assert_op
 from pytensor.tensor import diagonal, dmatrix, log, ones_like, scalar, tensor, vector
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
@@ -649,4 +649,52 @@ def test_gradient_mixed_discrete_output_core_op():
         grad(y.sum(), x).eval({x: np.full(12, np.nan, dtype=config.floatX)}),
         np.ones(12, dtype=config.floatX),
         strict=True,
+    )
+
+
+def test_blockwise_grad_core_type():
+    class StrictCoreTypeOp(Op):
+        def make_node(self, x):
+            assert x.type.shape[-1] == 2
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, output_storage):
+            output_storage[0][0] = inputs[0] + 1
+
+        def L_op(self, inputs, outputs, output_grads):
+            [x] = inputs
+            assert x.type.shape == (2,)
+            return [x.zeros_like()]
+
+    strict_core_type_op = StrictCoreTypeOp()
+    block_strict_core_type_op = Blockwise(strict_core_type_op, signature="(a)->(a)")
+
+    x = tensor("x", shape=(5, 2), dtype="float64")
+    y = block_strict_core_type_op(x)
+    assert y.type.shape == (5, 2)
+
+    grad_y = grad(y.sum(), x)
+    assert grad_y.type.shape == (5, 2)
+    np.testing.assert_allclose(
+        grad_y.eval({x: np.ones((5, 2))}),
+        np.zeros((5, 2)),
+    )
+
+
+def test_scan_gradient_core_type():
+    n_steps = 3
+    seq = tensor("seq", shape=(n_steps, 1))
+    out, _ = scan(
+        lambda s: s,
+        sequences=[seq],
+        n_steps=n_steps,
+    )
+
+    vec_seq = tensor("vec_seq", shape=(None, n_steps, 1))
+    vec_out = vectorize_graph(out, replace={seq: vec_seq})
+    grad_sit_sot0 = grad(vec_out.sum(), vec_seq)
+
+    np.testing.assert_allclose(
+        grad_sit_sot0.eval({vec_seq: np.ones((4, n_steps, 1))}),
+        np.ones((4, n_steps, 1)),
     )
