@@ -3599,17 +3599,20 @@ def log1pmexp_to_log1mexp(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([log])
+@node_rewriter([expm1])
 def logmexpm1_to_log1mexp(fgraph, node):
-    """``log(-expm1(x)) -> log1mexp(x)``"""
-    (log_arg,) = node.inputs
-    if log_arg.owner and any(  #    ⬐ additional match to less-frequent expm1
-        i.owner and i.owner.op == expm1 for i in log_arg.owner.inputs
-    ):
-        neg_arg = is_neg(log_arg)
-        if neg_arg.owner and neg_arg.owner.op == expm1:
-            (expm1_arg,) = neg_arg.owner.inputs
-            return [log1mexp(expm1_arg)]
+    """``log(-expm1(x)) -> log1mexp(x)``
+    where "-" can be "neg" or any other expression detected by "is_neg"
+    """
+    rewrites = {}
+    for node in get_clients_at_depth(fgraph, node, depth=2):
+        if node.op == log:
+            (log_arg,) = node.inputs
+            neg_arg = is_neg(log_arg)
+            if neg_arg.owner and neg_arg.owner.op == expm1:
+                (expm1_arg,) = neg_arg.owner.inputs
+                rewrites[node.outputs[0]] = log1mexp(expm1_arg)
+    return rewrites
 
 
 # log(exp(a) - exp(b)) -> a + log1mexp(b - a)
