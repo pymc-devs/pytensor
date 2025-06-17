@@ -4438,11 +4438,22 @@ def test_local_add_neg_to_sub(first_negative):
     assert np.allclose(f(x_test, y_test), exp)
 
 
-def test_log1mexp_stabilization():
+@pytest.mark.parametrize(
+    "op_name",
+    ["log_1_minus_exp", "log1p_minus_exp", "log_minus_expm1", "log_minus_exp_minus_1"],
+)
+def test_log1mexp_stabilization(op_name):
     mode = Mode("py").including("stabilize")
 
     x = vector()
-    f = function([x], log(1 - exp(x)), mode=mode)
+    if op_name == "log_1_minus_exp":
+        f = function([x], log(1 - exp(x)), mode=mode)
+    elif op_name == "log1p_minus_exp":
+        f = function([x], log1p(-exp(x)), mode=mode)
+    elif op_name == "log_minus_expm1":
+        f = function([x], log(-expm1(x)), mode=mode)
+    elif op_name == "log_minus_exp_minus_1":
+        f = function([x], log(-(exp(x) - 1)), mode=mode)
 
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert nodes == [pt.log1mexp]
