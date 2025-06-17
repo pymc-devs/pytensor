@@ -164,9 +164,20 @@ class XDot(XOp):
 
         x_shape_dict = dict(zip(x.type.dims, x.type.shape))
         y_shape_dict = dict(zip(y.type.dims, y.type.shape))
-        shape_dict = {**x_shape_dict, **y_shape_dict}
+
+        # Check for dimension size mismatches (concrete only)
+        for dim in self.dims:
+            x_shape = x_shape_dict.get(dim, None)
+            y_shape = y_shape_dict.get(dim, None)
+            if (
+                isinstance(x_shape, int)
+                and isinstance(y_shape, int)
+                and x_shape != y_shape
+            ):
+                raise ValueError(f"Size of dim '{dim}' does not match")
 
         # Determine output dimensions
+        shape_dict = {**x_shape_dict, **y_shape_dict}
         out_dims = tuple(d for d in shape_dict if d not in self.dims)
 
         # Determine output shape
@@ -230,17 +241,6 @@ def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
     for d in dim_set:
         if d not in union:
             raise ValueError(f"Dimension {d} not found in either input")
-
-    # Check for dimension size mismatches (concrete only)
-    for dim in intersection:
-        x_idx = x.type.dims.index(dim)
-        y_idx = y.type.dims.index(dim)
-        if (
-            isinstance(x.type.shape[x_idx], int)
-            and isinstance(y.type.shape[y_idx], int)
-            and x.type.shape[x_idx] != y.type.shape[y_idx]
-        ):
-            raise ValueError(f"Size of dim '{dim}' does not match")
 
     result = XDot(dims=tuple(dim_set))(x, y)
 
