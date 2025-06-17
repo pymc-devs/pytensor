@@ -3582,12 +3582,35 @@ register_stabilize(local_1msigmoid)
 register_specialize(local_1msigmoid)
 
 
-log1pmexp_to_log1mexp = PatternNodeRewriter(
-    (log1p, (neg, (exp, "x"))),
-    (log1mexp, "x"),
-    allow_multiple_clients=True,
-)
-register_stabilize(log1pmexp_to_log1mexp, name="log1pmexp_to_log1mexp")
+@register_stabilize
+@node_rewriter([log1p])
+def log1pmexp_to_log1mexp(fgraph, node):
+    """``log1p(-exp(x)) -> log1mexp(x)``
+    where "-" can be "neg" or any other expression detected by "is_neg"
+    """
+    (log1p_arg,) = node.inputs
+    exp_info = is_exp(log1p_arg)
+    if exp_info is not None:
+        exp_neg, exp_arg = exp_info
+        if exp_neg:
+            return [log1mexp(exp_arg)]
+        else:
+            return  # We could return [log1pexp(exp_arg)] here but that would conflict with log1pexp_to_softplus
+
+
+@register_stabilize
+@node_rewriter([log])
+def logmexpm1_to_log1mexp(fgraph, node):
+    """``log(-expm1(x)) -> log1mexp(x)``"""
+    (log_arg,) = node.inputs
+    if log_arg.owner and any(  #    ⬐ additional match to less-frequent expm1
+        i.owner and i.owner.op == expm1 for i in log_arg.owner.inputs
+    ):
+        neg_arg = is_neg(log_arg)
+        if neg_arg.owner and neg_arg.owner.op == expm1:
+            (expm1_arg,) = neg_arg.owner.inputs
+            return [log1mexp(expm1_arg)]
+
 
 # log(exp(a) - exp(b)) -> a + log1mexp(b - a)
 logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
