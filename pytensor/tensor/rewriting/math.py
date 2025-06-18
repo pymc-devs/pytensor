@@ -64,6 +64,7 @@ from pytensor.tensor.math import (
     log,
     log1mexp,
     log1p,
+    log1pexp,
     makeKeepDims,
     maximum,
     mul,
@@ -2999,12 +3000,6 @@ log1msigm_to_softplus = PatternNodeRewriter(
     tracks=[sigmoid],
     get_nodes=get_clients_at_depth2,
 )
-log1pexp_to_softplus = PatternNodeRewriter(
-    (log1p, (exp, "x")),
-    (softplus, "x"),
-    values_eq_approx=values_eq_approx_remove_inf,
-    allow_multiple_clients=True,
-)
 log1p_neg_sigmoid = PatternNodeRewriter(
     (log1p, (neg, (sigmoid, "x"))),
     (neg, (softplus, "x")),
@@ -3016,7 +3011,6 @@ log1p_neg_sigmoid = PatternNodeRewriter(
 
 register_stabilize(logsigm_to_softplus, name="logsigm_to_softplus")
 register_stabilize(log1msigm_to_softplus, name="log1msigm_to_softplus")
-register_stabilize(log1pexp_to_softplus, name="log1pexp_to_softplus")
 register_stabilize(log1p_neg_sigmoid, name="log1p_neg_sigmoid")
 register_specialize(log1p_neg_sigmoid, name="log1p_neg_sigmoid")
 
@@ -3584,8 +3578,10 @@ register_specialize(local_1msigmoid)
 
 @register_stabilize
 @node_rewriter([log1p])
-def log1pmexp_to_log1mexp(fgraph, node):
-    """``log1p(-exp(x)) -> log1mexp(x)``
+def local_log1p_plusminus_exp(fgraph, node):
+    """Transforms log1p of ±exp(x) into log1pexp (aka softplus) / log1mexp
+    ``log1p(exp(x))  -> log1pexp(x)``
+    ``log1p(-exp(x)) -> log1mexp(x)``
     where "-" can be "neg" or any other expression detected by "is_neg"
     """
     (log1p_arg,) = node.inputs
@@ -3595,7 +3591,7 @@ def log1pmexp_to_log1mexp(fgraph, node):
         if exp_neg:
             return [log1mexp(exp_arg)]
         else:
-            return  # We could return [log1pexp(exp_arg)] here but that would conflict with log1pexp_to_softplus
+            return [log1pexp(exp_arg)]  # aka softplus
 
 
 @register_stabilize
