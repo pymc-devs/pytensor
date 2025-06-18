@@ -3605,7 +3605,7 @@ def logmexpm1_to_log1mexp(fgraph, node):
         if node.op == log:
             (log_arg,) = node.inputs
             neg_arg = is_neg(log_arg)
-            if neg_arg.owner and neg_arg.owner.op == expm1:
+            if neg_arg is not None and neg_arg.owner and neg_arg.owner.op == expm1:
                 (expm1_arg,) = neg_arg.owner.inputs
                 rewrites[node.outputs[0]] = log1mexp(expm1_arg)
     return rewrites
