@@ -751,7 +751,12 @@ def as_xtensor(x, name=None, dims: Sequence[str] | None = None):
 
     if isinstance(x, Variable):
         if isinstance(x.type, XTensorType):
-            return x
+            if (dims is None) or (x.type.dims == dims):
+                return x
+            else:
+                raise ValueError(
+                    f"Variable {x} has dims {x.type.dims}, but requested dims are {dims}."
+                )
         if isinstance(x.type, TensorType):
             if dims is None:
                 if x.type.ndim == 0:
