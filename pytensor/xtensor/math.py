@@ -1,12 +1,16 @@
 import sys
+from collections.abc import Iterable
+from types import EllipsisType
 
 import numpy as np
 
 import pytensor.scalar as ps
 from pytensor import config
+from pytensor.graph.basic import Apply
 from pytensor.scalar import ScalarOp
-from pytensor.scalar.basic import _cast_mapping
-from pytensor.xtensor.basic import as_xtensor
+from pytensor.scalar.basic import _cast_mapping, upcast
+from pytensor.xtensor.basic import XOp, as_xtensor
+from pytensor.xtensor.type import xtensor
 from pytensor.xtensor.vectorization import XElemwise
 
 
@@ -139,3 +143,110 @@ def cast(x, dtype):
 def softmax(x, dim=None):
     exp_x = exp(x)
     return exp_x / exp_x.sum(dim=dim)
+
+
+class XDot(XOp):
+    """Matrix multiplication between two XTensorVariables.
+
+    This operation performs matrix multiplication between two tensors, automatically
+    aligning and contracting dimensions. The behavior matches xarray's dot operation.
+
+    Parameters
+    ----------
+    dims : tuple of str
+        The dimensions to contract over. If None, will contract over all matching dimensions.
+    """
+
+    __props__ = ("dims",)
+
+    def __init__(self, dims: Iterable[str]):
+        self.dims = dims
+        super().__init__()
+
+    def make_node(self, x, y):
+        x = as_xtensor(x)
+        y = as_xtensor(y)
+
+        x_shape_dict = dict(zip(x.type.dims, x.type.shape))
+        y_shape_dict = dict(zip(y.type.dims, y.type.shape))
+
+        # Check for dimension size mismatches (concrete only)
+        for dim in self.dims:
+            x_shape = x_shape_dict.get(dim, None)
+            y_shape = y_shape_dict.get(dim, None)
+            if (
+                isinstance(x_shape, int)
+                and isinstance(y_shape, int)
+                and x_shape != y_shape
+            ):
+                raise ValueError(f"Size of dim '{dim}' does not match")
+
+        # Determine output dimensions
+        shape_dict = {**x_shape_dict, **y_shape_dict}
+        out_dims = tuple(d for d in shape_dict if d not in self.dims)
+
+        # Determine output shape
+        out_shape = tuple(shape_dict[d] for d in out_dims)
+
+        # Determine output dtype
+        out_dtype = upcast(x.type.dtype, y.type.dtype)
+
+        out = xtensor(dtype=out_dtype, shape=out_shape, dims=out_dims)
+        return Apply(self, [x, y], [out])
+
+
+def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
+    """Matrix multiplication between two XTensorVariables.
+
+    This operation performs matrix multiplication between two tensors, automatically
+    aligning and contracting dimensions. The behavior matches xarray's dot operation.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        First input tensor
+    y : XTensorVariable
+        Second input tensor
+    dim : str, Iterable[Hashable], EllipsisType, or None, optional
+        The dimensions to contract over. If None, will contract over all matching dimensions.
+        If Ellipsis (...), will contract over all dimensions.
+
+    Returns
+    -------
+    XTensorVariable
+        The result of the matrix multiplication.
+
+    Examples
+    --------
+    >>> x = xtensor(dtype="float64", dims=("a", "b"), shape=(2, 3))
+    >>> y = xtensor(dtype="float64", dims=("b", "c"), shape=(3, 4))
+    >>> z = dot(x, y)  # Result has dimensions ("a", "c")
+    >>> z = dot(x, y, dim=...)  # Contract over all dimensions
+    """
+    x = as_xtensor(x)
+    y = as_xtensor(y)
+
+    x_dims = set(x.type.dims)
+    y_dims = set(y.type.dims)
+    intersection = x_dims & y_dims
+    union = x_dims | y_dims
+
+    # Canonicalize dims
+    if dim is None:
+        dim_set = intersection
+    elif dim is ...:
+        dim_set = union
+    elif isinstance(dim, str):
+        dim_set = {dim}
+    elif isinstance(dim, Iterable):
+        dim_set = set(dim)
+
+    # Validate provided dims
+    # Check if any dimension is not found in either input
+    for d in dim_set:
+        if d not in union:
+            raise ValueError(f"Dimension {d} not found in either input")
+
+    result = XDot(dims=tuple(dim_set))(x, y)
+
+    return result

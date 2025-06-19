@@ -150,3 +150,167 @@ def test_cast():
     yc64 = x.astype("complex64")
     with pytest.raises(TypeError, match="Casting from complex to real is ambiguous"):
         yc64.astype("float64")
+
+
+def test_dot():
+    """Test basic dot product operations."""
+    # Test matrix-vector dot product (with multiple-letter dim names)
+    x = xtensor("x", dims=("aa", "bb"), shape=(2, 3))
+    y = xtensor("y", dims=("bb",), shape=(3,))
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+
+    x_test = DataArray(np.ones((2, 3)), dims=("aa", "bb"))
+    y_test = DataArray(np.ones(3), dims=("bb",))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Test matrix-vector dot product with ellipsis
+    z = x.dot(y, dim=...)
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=...)
+    xr_assert_allclose(z_test, expected)
+
+    # Test matrix-matrix dot product
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+
+    x_test = DataArray(np.add.outer(np.arange(2.0), np.arange(3.0)), dims=("a", "b"))
+    y_test = DataArray(np.add.outer(np.arange(3.0), np.arange(4.0)), dims=("b", "c"))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Test matrix-matrix dot product with string dim
+    z = x.dot(y, dim="b")
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim="b")
+    xr_assert_allclose(z_test, expected)
+
+    # Test matrix-matrix dot product with list of dims
+    z = x.dot(y, dim=["b"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=["b"])
+    xr_assert_allclose(z_test, expected)
+
+    # Test matrix-matrix dot product with ellipsis
+    z = x.dot(y, dim=...)
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=...)
+    xr_assert_allclose(z_test, expected)
+
+    # Test a case where there are two dimensions to sum over
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
+    y = xtensor("y", dims=("b", "c", "d"), shape=(3, 4, 5))
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+
+    x_test = DataArray(np.arange(24.0).reshape(2, 3, 4), dims=("a", "b", "c"))
+    y_test = DataArray(np.arange(60.0).reshape(3, 4, 5), dims=("b", "c", "d"))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with explicit dimensions
+    z = x.dot(y, dim=["b", "c"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=["b", "c"])
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with ellipses
+    z = x.dot(y, dim=...)
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test, dim=...)
+    xr_assert_allclose(z_test, expected)
+
+    # Dot product with sum
+    x_test = DataArray(np.arange(24.0).reshape(2, 3, 4), dims=("a", "b", "c"))
+    y_test = DataArray(np.arange(60.0).reshape(3, 4, 5), dims=("b", "c", "d"))
+    expected = x_test.dot(y_test, dim=("a", "b", "c"))
+
+    x = xtensor("x", dims=("a", "b", "c"), shape=(2, 3, 4))
+    y = xtensor("y", dims=("b", "c", "d"), shape=(3, 4, 5))
+    z = x.dot(y, dim=("a", "b", "c"))
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Dot product with sum in the middle
+    x_test = DataArray(np.arange(120.0).reshape(2, 3, 4, 5), dims=("a", "b", "c", "d"))
+    y_test = DataArray(np.arange(360.0).reshape(3, 4, 5, 6), dims=("b", "c", "d", "e"))
+    expected = x_test.dot(y_test, dim=("b", "d"))
+    x = xtensor("x", dims=("a", "b", "c", "d"), shape=(2, 3, 4, 5))
+    y = xtensor("y", dims=("b", "c", "d", "e"), shape=(3, 4, 5, 6))
+    z = x.dot(y, dim=("b", "d"))
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with first two dims
+    expected = x_test.dot(y_test, dim=["a", "b"])
+    z = x.dot(y, dim=["a", "b"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with last two
+    expected = x_test.dot(y_test, dim=["d", "e"])
+    z = x.dot(y, dim=["d", "e"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Same but with every other dim
+    expected = x_test.dot(y_test, dim=["a", "c", "e"])
+    z = x.dot(y, dim=["a", "c", "e"])
+    fn = xr_function([x, y], z)
+    z_test = fn(x_test, y_test)
+    xr_assert_allclose(z_test, expected)
+
+    # Test symbolic shapes
+    x = xtensor("x", dims=("a", "b"), shape=(None, 3))  # First dimension is symbolic
+    y = xtensor("y", dims=("b", "c"), shape=(3, None))  # Second dimension is symbolic
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+    y_test = DataArray(np.ones((3, 4)), dims=("b", "c"))
+    z_test = fn(x_test, y_test)
+    expected = x_test.dot(y_test)
+    xr_assert_allclose(z_test, expected)
+
+
+def test_dot_errors():
+    # No matching dimensions
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+    with pytest.raises(ValueError, match="Dimension e not found in either input"):
+        x.dot(y, dim="e")
+
+    # Concrete dimension size mismatches
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(4, 5))
+    with pytest.raises(
+        ValueError,
+        match="Size of dim 'b' does not match",
+    ):
+        x.dot(y)
+
+    # Symbolic dimension size mismatches
+    x = xtensor("x", dims=("a", "b"), shape=(2, None))
+    y = xtensor("y", dims=("b", "c"), shape=(None, 5))
+    z = x.dot(y)
+    fn = xr_function([x, y], z)
+    x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
+    y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
+    # Doesn't fail until the rewrite
+    with pytest.raises(ValueError, match="not aligned"):
+        fn(x_test, y_test)
