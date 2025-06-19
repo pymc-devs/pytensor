@@ -650,6 +650,10 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def unstack(self, dim, **dims):
         return px.shape.unstack(self, dim, **dims)
 
+    def dot(self, other, dim=None):
+        """Matrix multiplication with another XTensorVariable, contracting over matching or specified dims."""
+        return px.math.dot(self, other, dim=dim)
+
 
 class XTensorConstantSignature(tuple):
     def __eq__(self, other):
