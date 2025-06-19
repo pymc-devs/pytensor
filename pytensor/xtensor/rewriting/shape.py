@@ -16,6 +16,7 @@ from pytensor.xtensor.shape import (
     Stack,
     Transpose,
     UnStack,
+    XBroadcast,
 )
 
 
@@ -164,3 +165,19 @@ def lower_expand_dims(fgraph, node):
     # Convert result back to xtensor
     result = xtensor_from_tensor(result_tensor, dims=out.type.dims)
     return [result]
+
+
+@register_lower_xtensor
+@node_rewriter(tracks=[XBroadcast])
+def lower_broadcast(fgraph, node):
+    """Rewrite XBroadcast to tensor operations."""
+    inputs = node.inputs
+
+    result_tensors = []
+
+    for x in inputs:
+        x_tensor = tensor_from_xtensor(x)
+        result = xtensor_from_tensor(x_tensor, dims=x.type.dims)
+        result_tensors.append(result)
+
+    return result_tensors

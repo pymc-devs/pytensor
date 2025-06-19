@@ -506,3 +506,56 @@ def expand_dims(x, dim=None, create_index_for_new_dim=None, axis=None, **dim_kwa
         x = Transpose(dims=tuple(target_dims))(x)
 
     return x
+
+
+class XBroadcast(XOp):
+    """Broadcast multiple XTensorVariables against each other."""
+
+    __props__ = ("exclude",)
+
+    def __init__(self, exclude=None):
+        self.exclude = exclude
+
+    def make_node(self, inputs):
+        # Get the union of all dims in order of first appearance
+        all_dims = []
+        for x in inputs:
+            for d in x.type.dims:
+                if d not in all_dims:
+                    all_dims.append(d)
+
+        # Remove excluded dims
+        if self.exclude:
+            all_dims = [d for d in all_dims if d not in self.exclude]
+
+        # Create a shape map from dim to shape
+        shape_map = {}
+        for dim in all_dims:
+            for x in inputs:
+                if dim in x.type.dims:
+                    shape_map[dim] = x.type.shape[x.type.dims.index(dim)]
+                    break
+            else:
+                shape_map[dim] = 1
+
+        # Create the output tensors
+        dtype = upcast(*[x.type.dtype for x in inputs])
+        shape = tuple(shape_map.values())
+        dims = tuple(all_dims)
+
+        outputs = []
+        for x in inputs:
+            output = xtensor(
+                dtype=dtype,
+                shape=shape,
+                dims=dims,
+            )
+            outputs.append(output)
+
+        return Apply(self, inputs, outputs)
+
+
+def broadcast(*args, exclude=None):
+    """Broadcast any number of XTensorVariables against each other."""
+
+    return XBroadcast(exclude=exclude)(args)

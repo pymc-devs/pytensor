@@ -654,6 +654,10 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         """Matrix multiplication with another XTensorVariable, contracting over matching or specified dims."""
         return px.math.dot(self, other, dim=dim)
 
+    def broadcast(self, *others, exclude=None):
+        """Broadcast this tensor against other XTensorVariables."""
+        return px.shape.broadcast(self, *others, exclude=exclude)
+
 
 class XTensorConstantSignature(tuple):
     def __eq__(self, other):
