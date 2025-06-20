@@ -2,10 +2,8 @@ import warnings
 
 import pytensor.xtensor.rewriting
 from pytensor.xtensor import linalg
-from pytensor.xtensor import special
 from pytensor.xtensor.math import dot
-from pytensor.xtensor.shape import broadcast
-from pytensor.xtensor.shape import concat
+from pytensor.xtensor.shape import broadcast, concat
 from pytensor.xtensor.type import (
     as_xtensor,
     xtensor,
