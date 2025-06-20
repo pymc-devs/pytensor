@@ -502,3 +502,87 @@ def expand_dims(x, dim=None, create_index_for_new_dim=None, axis=None, **dim_kwa
         x = Transpose(dims=tuple(target_dims))(x)
 
     return x
+
+
+# TODO: import this when it's available
+def combine_dims_and_shape(inputs):
+    """
+    Combine the dimensions and shapes of multiple XTensorVariables into a single
+    dictionary.
+
+    Parameters
+    ----------
+    inputs : list of XTensorVariables
+        The XTensorVariables to combine.
+
+    Returns
+    -------
+    dict of str to int or None
+        A dictionary mapping dimension names to their lengths.
+    """
+    dims_and_shape: dict[str, int | None] = {}
+    for inp in inputs:
+        for dim, dim_length in zip(inp.type.dims, inp.type.shape):
+            if dim not in dims_and_shape:
+                dims_and_shape[dim] = dim_length
+            elif dim_length is not None:
+                # Check for conflicting shapes
+                if (dims_and_shape[dim] is not None) and (
+                    dims_and_shape[dim] != dim_length
+                ):
+                    raise ValueError(f"Dimension {dim} has conflicting shapes")
+                # Keep the non-None shape
+                dims_and_shape[dim] = dim_length
+    return dims_and_shape
+
+
+class XBroadcast(XOp):
+    """Broadcast multiple XTensorVariables against each other."""
+
+    __props__ = ("exclude",)
+
+    def __init__(self, exclude: tuple[Hashable, ...] = ()):
+        if not all(isinstance(dim, Hashable) for dim in exclude):
+            raise TypeError("All items in `exclude` must be hashable dimension names.")
+
+        self.exclude = exclude
+
+    def make_node(self, *inputs):
+        inputs = [as_xtensor(x) for x in inputs]
+
+        # Get the union shape for included dims,
+        # preserving order of first appearance
+        dims_and_shape = combine_dims_and_shape(inputs)
+
+        broadcast_dims = tuple(d for d in dims_and_shape if d not in self.exclude)
+        broadcast_shape = tuple(dims_and_shape[d] for d in broadcast_dims)
+        dtype = upcast(*[x.type.dtype for x in inputs])
+
+        outputs = []
+        for x in inputs:
+            # Preserve excluded dims from this input
+            excluded_dims = [d for d in x.type.dims if d in self.exclude]
+            excluded_shapes = [dims_and_shape[d] for d in excluded_dims]
+
+            output = xtensor(
+                dtype=dtype,
+                shape=broadcast_shape + tuple(excluded_shapes),
+                dims=broadcast_dims + tuple(excluded_dims),
+            )
+            outputs.append(output)
+
+        return Apply(self, inputs, outputs)
+
+
+def broadcast(*args, exclude: str | Sequence[str] | None = None):
+    """Broadcast any number of XTensorVariables against each other."""
+
+    # Normalize exclude
+    if exclude is None:
+        exclude = ()
+    elif isinstance(exclude, str):
+        exclude = (exclude,)
+    elif isinstance(exclude, Sequence):
+        exclude = tuple(exclude)
+
+    return XBroadcast(exclude=exclude)(*args)
