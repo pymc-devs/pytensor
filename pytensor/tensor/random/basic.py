@@ -1625,8 +1625,7 @@ class NegBinomialRV(ScipyRandomVariable):
         return stats.nbinom.rvs(n, p, size=size, random_state=rng)
 
 
-nbinom = NegBinomialRV()
-negative_binomial = NegBinomialRV()
+nbinom = negative_binomial = NegBinomialRV()
 
 
 class BetaBinomialRV(ScipyRandomVariable):
@@ -1807,6 +1806,7 @@ class MultinomialRV(RandomVariable):
 
 
 multinomial = MultinomialRV()
+
 
 vsearchsorted = np.vectorize(np.searchsorted, otypes=[int], signature="(n),()->()")
 
