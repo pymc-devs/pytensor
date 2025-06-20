@@ -307,7 +307,7 @@ def test_dot_errors():
 
     # Symbolic dimension size mismatches
     x = xtensor("x", dims=("a", "b"), shape=(2, None))
-    y = xtensor("y", dims=("b", "c"), shape=(None, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(None, 5))
     z = x.dot(y)
     fn = xr_function([x, y], z)
     x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
