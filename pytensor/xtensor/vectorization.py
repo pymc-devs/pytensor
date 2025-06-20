@@ -3,9 +3,25 @@ from itertools import chain
 from pytensor import scalar as ps
 from pytensor.graph import Apply, Op
 from pytensor.tensor import tensor
-from pytensor.tensor.utils import _parse_gufunc_signature
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import as_xtensor, xtensor
+
+
+def combine_dims_and_shape(inputs):
+    dims_and_shape: dict[str, int | None] = {}
+    for inp in inputs:
+        for dim, dim_length in zip(inp.type.dims, inp.type.shape):
+            if dim not in dims_and_shape:
+                dims_and_shape[dim] = dim_length
+            elif dim_length is not None:
+                # Check for conflicting shapes
+                if (dims_and_shape[dim] is not None) and (
+                    dims_and_shape[dim] != dim_length
+                ):
+                    raise ValueError(f"Dimension {dim} has conflicting shapes")
+                # Keep the non-None shape
+                dims_and_shape[dim] = dim_length
+    return dims_and_shape
 
 
 class XElemwise(XOp):
@@ -22,20 +38,7 @@ class XElemwise(XOp):
                 f"Wrong number of inputs, expected {self.scalar_op.nin}, got {len(inputs)}"
             )
 
-        dims_and_shape: dict[str, int | None] = {}
-        for inp in inputs:
-            for dim, dim_length in zip(inp.type.dims, inp.type.shape):
-                if dim not in dims_and_shape:
-                    dims_and_shape[dim] = dim_length
-                elif dim_length is not None:
-                    # Check for conflicting shapes
-                    if (dims_and_shape[dim] is not None) and (
-                        dims_and_shape[dim] != dim_length
-                    ):
-                        raise ValueError(f"Dimension {dim} has conflicting shapes")
-                    # Keep the non-None shape
-                    dims_and_shape[dim] = dim_length
-
+        dims_and_shape = combine_dims_and_shape(inputs)
         if dims_and_shape:
             output_dims, output_shape = zip(*dims_and_shape.items())
         else:
@@ -53,48 +56,33 @@ class XElemwise(XOp):
 
 
 class XBlockwise(XOp):
-    __props__ = ("core_op", "signature", "core_dims")
+    __props__ = ("core_op", "core_dims")
 
     def __init__(
         self,
         core_op: Op,
-        signature: str,
         core_dims: tuple[tuple[tuple[str, ...], ...], tuple[tuple[str, ...], ...]],
+        signature: str | None = None,
     ):
         super().__init__()
         self.core_op = core_op
-        self.signature = signature
-        self.inputs_sig, self.outputs_sig = _parse_gufunc_signature(signature)
         self.core_dims = core_dims
+        self.signature = signature  # Only used for lowering, not for validation
 
     def make_node(self, *inputs):
         inputs = [as_xtensor(i) for i in inputs]
-        if len(inputs) != len(self.inputs_sig):
+        if len(inputs) != len(self.core_dims[0]):
             raise ValueError(
-                f"Wrong number of inputs, expected {len(self.inputs_sig)}, got {len(inputs)}"
+                f"Wrong number of inputs, expected {len(self.core_dims[0])}, got {len(inputs)}"
             )
 
-        dims_and_shape: dict[str, int | None] = {}
-        for inp in inputs:
-            for dim, dim_length in zip(inp.type.dims, inp.type.shape):
-                if dim not in dims_and_shape:
-                    dims_and_shape[dim] = dim_length
-                elif dim_length is not None:
-                    # Check for conflicting shapes
-                    if (dims_and_shape[dim] is not None) and (
-                        dims_and_shape[dim] != dim_length
-                    ):
-                        raise ValueError(f"Dimension {dim} has conflicting shapes")
-                    # Keep the non-None shape
-                    dims_and_shape[dim] = dim_length
+        dims_and_shape = combine_dims_and_shape(inputs)
 
         core_inputs_dims, core_outputs_dims = self.core_dims
-        # TODO: Avoid intermediate dict
-        core_dims = set(chain.from_iterable(core_inputs_dims))
-        batched_dims_and_shape = {
-            k: v for k, v in dims_and_shape.items() if k not in core_dims
-        }
-        batch_dims, batch_shape = zip(*batched_dims_and_shape.items())
+        core_input_dims_set = set(chain.from_iterable(core_inputs_dims))
+        batch_dims, batch_shape = zip(
+            *((k, v) for k, v in dims_and_shape.items() if k not in core_input_dims_set)
+        )
 
         dummy_core_inputs = []
         for inp, core_inp_dims in zip(inputs, core_inputs_dims):
