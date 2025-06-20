@@ -10,6 +10,7 @@ from pytensor.scalar import discrete_dtypes, upcast
 from pytensor.tensor import as_tensor, get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import integer_dtypes
+from pytensor.tensor.utils import get_static_shape_from_size_variables
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import as_xtensor, xtensor
 
@@ -130,14 +131,9 @@ class UnStack(XOp):
                 )
             )
 
-        static_unstacked_lengths = [None] * len(unstacked_lengths)
-        for i, length in enumerate(unstacked_lengths):
-            try:
-                static_length = get_scalar_constant_value(length)
-            except NotScalarConstantError:
-                pass
-            else:
-                static_unstacked_lengths[i] = int(static_length)
+        static_unstacked_lengths = get_static_shape_from_size_variables(
+            unstacked_lengths
+        )
 
         output = xtensor(
             dtype=x.type.dtype,
