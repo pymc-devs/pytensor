@@ -35,7 +35,7 @@ def function_to_mermaid(fn):
             fillcolor = _color_to_hex(fillcolor)
             mermaid_lines.append(f"style {name} fill:{fillcolor}")
 
-    mermaid_lines.append("%% Edges:")
+    mermaid_lines.append("\n%% Edges:")
     for edge in edges:
         source = edge.get_source()
         target = edge.get_destination()
