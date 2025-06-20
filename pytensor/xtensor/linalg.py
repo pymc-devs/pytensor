@@ -28,7 +28,7 @@ def cholesky(
         ((dims[0], dims[1]),),
         ((dims[0], dims[1]),),
     )
-    x_op = XBlockwise(core_op, signature=core_op.gufunc_signature, core_dims=core_dims)
+    x_op = XBlockwise(core_op, core_dims=core_dims)
     return x_op(x)
 
 
@@ -48,18 +48,15 @@ def solve(
         [m1_dim] = [dim for dim in dims if dim not in b.type.dims]
         m2_dim = dims[0] if dims[0] != m1_dim else dims[1]
         input_core_dims = ((m1_dim, m2_dim), (m2_dim,))
-        output_core_dims = ((m2_dim,),)
+        # The shared dim disappears in the output
+        output_core_dims = ((m1_dim,),)
     elif len(dims) == 3:
         b_ndim = 2
         [n_dim] = [dim for dim in dims if dim not in a.type.dims]
         [m1_dim, m2_dim] = [dim for dim in dims if dim != n_dim]
         input_core_dims = ((m1_dim, m2_dim), (m2_dim, n_dim))
-        output_core_dims = (
-            (
-                m2_dim,
-                n_dim,
-            ),
-        )
+        # The shared dim disappears in the output
+        output_core_dims = ((m1_dim, n_dim),)
     else:
         raise ValueError("Solve dims must have length 2 or 3")
 
@@ -68,7 +65,6 @@ def solve(
     )
     x_op = XBlockwise(
         core_op,
-        signature=core_op.gufunc_signature,
         core_dims=(input_core_dims, output_core_dims),
     )
     return x_op(a, b)
