@@ -349,6 +349,9 @@ class _tensor_py_operators:
         if (len(pattern) == 1) and (isinstance(pattern[0], list | tuple | np.ndarray)):
             pattern = pattern[0]
         ds_op = pt.elemwise.DimShuffle(input_ndim=self.type.ndim, new_order=pattern)
+        if ds_op.new_order == tuple(range(self.type.ndim)):
+            # No-op
+            return self
         return ds_op(self)
 
     def flatten(self, ndim=1):
