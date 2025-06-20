@@ -148,7 +148,7 @@ class TestDimshuffleLift:
 
     def test_useless_dimshuffle(self):
         x, *_ = inputs()
-        e = ds(x, (0, 1))
+        e = DimShuffle(new_order=(0, 1), input_ndim=2)(x)
         g = FunctionGraph([x], [e], clone=False)
         assert isinstance(g.outputs[0].owner.op, DimShuffle)
         dimshuffle_lift.rewrite(g)

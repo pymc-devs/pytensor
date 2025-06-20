@@ -950,7 +950,7 @@ def test_Dimshuffle_lift_restrictions():
             1e-7,
         ),
         (
-            (0, 1, 2),
+            (0, 2, 1),
             True,
             normal,
             (np.array(0).astype(config.floatX), np.array(1e-6).astype(config.floatX)),
