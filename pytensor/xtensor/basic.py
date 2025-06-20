@@ -96,7 +96,7 @@ def rename(x, name_dict: dict[str, str] | None = None, **names: str):
     for old_name, new_name in names.items():
         try:
             new_names[old_names.index(old_name)] = new_name
-        except IndexError:
+        except ValueError:
             raise ValueError(
                 f"Cannot rename {old_name} to {new_name}: {old_name} not in {old_names}"
             )
