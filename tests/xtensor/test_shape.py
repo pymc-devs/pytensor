@@ -463,25 +463,53 @@ def test_expand_dims_errors():
 
 
 def test_broadcast():
-    """Test basic broadcasting functionality."""
-    # Create xtensors matching the xarray example
-    x = xtensor("x", dims=("a",), shape=(3,))
-    y = xtensor("y", dims=("b",), shape=(2,))
-
-    # Test broadcasting
-    x2, y2 = broadcast(x, y)
-
+    """Test broadcasting."""
     # Create test data
-    x_test = DataArray([1, 2, 3], dims="a")
-    y_test = DataArray([5, 6], dims="b")
+    x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+    z = xtensor("z", dims=("b", "d"), shape=(4, 6))
 
-    # Test the function
-    fn = xr_function([x, y], [x2, y2])
-    x2_result, y2_result = fn(x_test, y_test)
+    x_test = xr_arange_like(x)
+    y_test = xr_arange_like(y)
+    z_test = xr_arange_like(z)
 
-    # Compute expected results using xarray's broadcast method
-    x2_expected, y2_expected = xr.broadcast(x_test, y_test)
+    # Basic broadcasting
+    x2_expected, y2_expected, z2_expected = xr.broadcast(x_test, y_test, z_test)
+    x2, y2, z2 = broadcast(x, y, z)
+    fn = xr_function([x, y, z], [x2, y2, z2])
+    x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
 
-    # Compare results
     xr_assert_allclose(x2_result, x2_expected)
     xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+
+    # Test with excluded dims
+    def test_broadcast_exclude(exclude):
+        x2_expected, y2_expected, z2_expected = xr.broadcast(
+            x_test, y_test, z_test, exclude=exclude
+        )
+
+        x2, y2, z2 = broadcast(x, y, z, exclude=exclude)
+        fn = xr_function([x, y, z], [x2, y2, z2])
+        x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
+
+        xr_assert_allclose(x2_result, x2_expected)
+        xr_assert_allclose(y2_result, y2_expected)
+        xr_assert_allclose(z2_result, z2_expected)
+
+    test_broadcast_exclude([])
+    test_broadcast_exclude(["b"])
+    test_broadcast_exclude(["b", "d"])
+    test_broadcast_exclude(["a", "d"])
+    test_broadcast_exclude(["b", "c", "d"])
+    test_broadcast_exclude(["a", "b", "c", "d"])
+
+
+def test_broadcast_errors():
+    """Test error handling in broadcast."""
+    x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+    z = xtensor("z", dims=("b", "d"), shape=(4, 6))
+
+    with pytest.raises(TypeError, match="not iterable"):
+        broadcast(x, y, z, exclude=1)

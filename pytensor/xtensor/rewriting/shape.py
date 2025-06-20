@@ -172,12 +172,21 @@ def lower_expand_dims(fgraph, node):
 def lower_broadcast(fgraph, node):
     """Rewrite XBroadcast to tensor operations."""
     inputs = node.inputs
+    outputs = node.outputs
 
     result_tensors = []
-
-    for x in inputs:
+    for x, out in zip(inputs, outputs):
         x_tensor = tensor_from_xtensor(x)
-        result = xtensor_from_tensor(x_tensor, dims=x.type.dims)
+
+        # Prepare dimshuffle pattern with 'x' for missing dims
+        x_dims_dict = {d: i for i, d in enumerate(x.type.dims)}
+        shuffle_pattern = [x_dims_dict.get(d, "x") for d in out.type.dims]
+        x_tensor = x_tensor.dimshuffle(shuffle_pattern)
+
+        # Now we are aligned with target dims and correct ndim
+        x_tensor = broadcast_to(x_tensor, out.type.shape)
+
+        result = xtensor_from_tensor(x_tensor, dims=out.type.dims)
         result_tensors.append(result)
 
     return result_tensors
