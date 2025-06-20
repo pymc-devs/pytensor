@@ -9,6 +9,7 @@ from numpy import nditer
 import pytensor
 from pytensor.graph import FunctionGraph, Variable
 from pytensor.npy_2_compat import normalize_axis_tuple
+from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.utils import hash_from_code
 
 
@@ -256,3 +257,31 @@ def faster_ndindex(shape: Sequence[int]):
     https://github.com/numpy/numpy/issues/28921
     """
     return product(*(range(s) for s in shape))
+
+
+def get_static_shape_from_size_variables(
+    size_vars: Sequence[Variable],
+) -> tuple[int | None, ...]:
+    """Get static shape from size variables.
+
+    Parameters
+    ----------
+    size_vars : Sequence[Variable]
+        A sequence of variables representing the size of each dimension.
+    Returns
+    -------
+    tuple[int | None, ...]
+        A tuple containing the static lengths of each dimension, or None if
+        the length is not statically known.
+    """
+    from pytensor.tensor.basic import get_scalar_constant_value
+
+    static_lengths: list[None | int] = [None] * len(size_vars)
+    for i, length in enumerate(size_vars):
+        try:
+            static_length = get_scalar_constant_value(length)
+        except NotScalarConstantError:
+            pass
+        else:
+            static_lengths[i] = int(static_length)
+    return tuple(static_lengths)

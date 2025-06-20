@@ -1,3 +1,4 @@
+import abc
 import warnings
 from collections.abc import Sequence
 from copy import deepcopy
@@ -32,7 +33,20 @@ from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
 
 
-class RandomVariable(Op):
+class RNGConsumerOp(Op):
+    """Baseclass for Ops that consume RNGs."""
+
+    @abc.abstractmethod
+    def update(self, node: Apply) -> dict[Variable, Variable]:
+        """Symbolic update expression for input RNG variables.
+
+        Returns a dictionary with the symbolic expressions required for correct updating
+        of RNG variables in repeated function evaluations.
+        """
+        pass
+
+
+class RandomVariable(RNGConsumerOp):
     """An `Op` that produces a sample from a random variable.
 
     This is essentially `RandomFunction`, except that it removes the
@@ -122,6 +136,9 @@ class RandomVariable(Op):
 
         if self.inplace:
             self.destroy_map = {0: [0]}
+
+    def update(self, node: Apply) -> dict[Variable, Variable]:
+        return {node.inputs[0]: node.outputs[0]}
 
     def _supp_shape_from_params(self, dist_params, param_shapes=None):
         """Determine the support shape of a multivariate `RandomVariable`'s output given its parameters.

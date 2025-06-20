@@ -1,9 +1,10 @@
 from pytensor.graph import node_rewriter
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.random.utils import compute_batch_shape
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
-from pytensor.xtensor.vectorization import XBlockwise, XElemwise
+from pytensor.xtensor.vectorization import XRV, XBlockwise, XElemwise
 
 
 @register_lower_xtensor
@@ -74,3 +75,49 @@ def lower_blockwise(fgraph, node):
         for (tensor_out, old_out) in zip(tensor_outs, node.outputs, strict=True)
     ]
     return new_outs
+
+
+@register_lower_xtensor
+@node_rewriter(tracks=[XRV])
+def lower_rv(fgraph, node):
+    op: XRV = node.op
+    core_op = op.core_op
+
+    _, old_out = node.outputs
+    rng, *extra_dim_lengths_and_params = node.inputs
+    extra_dim_lengths = extra_dim_lengths_and_params[: len(op.extra_dims)]
+    params = extra_dim_lengths_and_params[len(op.extra_dims) :]
+
+    batch_ndim = old_out.type.ndim - len(op.core_dims[1])
+    param_batch_dims = old_out.type.dims[len(op.extra_dims) : batch_ndim]
+
+    # Convert params Tensors to XTensors, align batch dimensions and place core dimension at the end
+    tensor_params = []
+    for inp, core_dims in zip(params, op.core_dims[0]):
+        inp_dims = inp.type.dims
+        # Align the batch dims of the input, and place the core dims on the right
+        batch_order = [
+            inp_dims.index(batch_dim) if batch_dim in inp_dims else "x"
+            for batch_dim in param_batch_dims
+        ]
+        core_order = [inp_dims.index(core_dim) for core_dim in core_dims]
+        tensor_inp = tensor_from_xtensor(inp).dimshuffle(batch_order + core_order)
+        tensor_params.append(tensor_inp)
+
+    size = None
+    if op.extra_dims:
+        # RV size contains the lengths of all batch dimensions, including those coming from the parameters
+        if tensor_params:
+            param_batch_shape = tuple(
+                compute_batch_shape(tensor_params, ndims_params=core_op.ndims_params)
+            )
+        else:
+            param_batch_shape = ()
+        size = [*extra_dim_lengths, *param_batch_shape]
+
+    # RVs are their own core Op
+    new_next_rng, tensor_out = core_op(*tensor_params, rng=rng, size=size).owner.outputs
+
+    # Convert output Tensors to XTensors
+    new_out = xtensor_from_tensor(tensor_out, dims=old_out.type.dims)
+    return [new_next_rng, new_out]
