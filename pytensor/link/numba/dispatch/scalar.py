@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-from pytensor.compile.ops import ViewOp
+from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -198,14 +198,14 @@ def numba_funcify_Cast(op, node, **kwargs):
 
 
 @numba_basic.numba_njit
-def viewop(x):
+def identity(x):
     return x
 
 
 @numba_funcify.register(Identity)
-@numba_funcify.register(ViewOp)
-def numba_funcify_ViewOp(op, **kwargs):
-    return numba_basic.global_numba_func(viewop)
+@numba_funcify.register(TypeCastingOp)
+def numba_funcify_type_casting(op, **kwargs):
+    return numba_basic.global_numba_func(identity)
 
 
 @numba_basic.numba_njit
