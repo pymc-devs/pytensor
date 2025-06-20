@@ -7,7 +7,6 @@ from typing import Literal, cast
 import numpy as np
 import scipy.linalg as scipy_linalg
 from numpy.exceptions import ComplexWarning
-from scipy.linalg._misc import _datacopied
 
 import pytensor
 import pytensor.tensor as pt
@@ -65,63 +64,55 @@ class Cholesky(Op):
         dtype = scipy_linalg.cholesky(np.eye(1, dtype=x.type.dtype)).dtype
         return Apply(self, [x], [tensor(shape=x.type.shape, dtype=dtype)])
 
-    def _cholesky(
-        self, a, lower=False, overwrite_a=False, clean=True, check_finite=False
-    ):
-        a1 = np.asarray_chkfinite(a) if check_finite else np.asarray(a)
-
-        # Squareness check
-        if a1.shape[0] != a1.shape[1]:
-            raise ValueError(
-                "Input array is expected to be square but has "
-                f"the shape: {a1.shape}."
-            )
-
-        # Quick return for square empty array
-        if a1.size == 0:
-            dt = self._cholesky(np.eye(1, dtype=a1.dtype)).dtype
-            return np.empty_like(a1, dtype=dt), lower
-
-        overwrite_a = overwrite_a or _datacopied(a1, a)
-        (potrf,) = scipy_linalg.get_lapack_funcs(("potrf",), (a1,))
-        c, info = potrf(a1, lower=lower, overwrite_a=overwrite_a, clean=clean)
-        if info > 0:
-            raise scipy_linalg.LinAlgError(
-                f"{info}-th leading minor of the array is not positive definite"
-            )
-        if info < 0:
-            raise ValueError(
-                f"LAPACK reported an illegal value in {-info}-th argument "
-                f'on entry to "POTRF".'
-            )
-        return c
-
     def perform(self, node, inputs, outputs):
         [x] = inputs
         [out] = outputs
-        try:
-            # Scipy cholesky only makes use of overwrite_a when it is F_CONTIGUOUS
-            # If we have a `C_CONTIGUOUS` array we transpose to benefit from it
-            if self.overwrite_a and x.flags["C_CONTIGUOUS"]:
-                out[0] = self._cholesky(
-                    x.T,
-                    lower=not self.lower,
-                    check_finite=self.check_finite,
-                    overwrite_a=True,
-                ).T
-            else:
-                out[0] = self._cholesky(
-                    x,
-                    lower=self.lower,
-                    check_finite=self.check_finite,
-                    overwrite_a=self.overwrite_a,
-                )
 
-        except scipy_linalg.LinAlgError:
-            if self.on_error == "raise":
-                raise
-            else:
+        # Quick return for square empty array
+        if x.size == 0:
+            eye = np.eye(1, dtype=x.dtype)
+            (potrf,) = scipy_linalg.get_lapack_funcs(("potrf",), (eye,))
+            c, _ = potrf(eye, lower=False, overwrite_a=False, clean=True)
+            out[0] = np.empty_like(x, dtype=c.dtype)
+            return
+
+        x1 = np.asarray_chkfinite(x) if self.check_finite else x
+
+        # Squareness check
+        if x1.shape[0] != x1.shape[1]:
+            raise ValueError(
+                "Input array is expected to be square but has "
+                f"the shape: {x1.shape}."
+            )
+
+        # Scipy cholesky only makes use of overwrite_a when it is F_CONTIGUOUS
+        # If we have a `C_CONTIGUOUS` array we transpose to benefit from it
+        if self.overwrite_a and x.flags["C_CONTIGUOUS"]:
+            x1 = x1.T
+            lower = not self.lower
+            overwrite_a = True
+        else:
+            lower = self.lower
+            overwrite_a = self.overwrite_a
+
+        (potrf,) = scipy_linalg.get_lapack_funcs(("potrf",), (x1,))
+        c, info = potrf(x1, lower=lower, overwrite_a=overwrite_a, clean=True)
+
+        if info != 0:
+            if self.on_error == "nan":
                 out[0] = np.full(x.shape, np.nan, dtype=node.outputs[0].type.dtype)
+            elif info > 0:
+                raise scipy_linalg.LinAlgError(
+                    f"{info}-th leading minor of the array is not positive definite"
+                )
+            elif info < 0:
+                raise ValueError(
+                    f"LAPACK reported an illegal value in {-info}-th argument "
+                    f'on entry to "POTRF".'
+                )
+        else:
+            # Transpose result if input was transposed
+            out[0] = c.T if (self.overwrite_a and x.flags["C_CONTIGUOUS"]) else c
 
     def L_op(self, inputs, outputs, gradients):
         """

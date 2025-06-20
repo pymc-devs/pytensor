@@ -84,6 +84,16 @@ def test_cholesky_performance(benchmark):
     benchmark(ch_f, pd)
 
 
+def test_cholesky_empty():
+    empty = np.empty([0, 0], dtype=config.floatX)
+    x = matrix()
+    chol = cholesky(x)
+    ch_f = function([x], chol)
+    ch = ch_f(empty)
+    assert ch.size == 0
+    assert ch.dtype == config.floatX
+
+
 def test_cholesky_indef():
     x = matrix()
     mat = np.array([[1, 0.2], [0.2, -2]]).astype(config.floatX)
