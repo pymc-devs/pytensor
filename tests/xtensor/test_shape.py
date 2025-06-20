@@ -8,11 +8,13 @@ import re
 from itertools import chain, combinations
 
 import numpy as np
+import xarray as xr
 from xarray import DataArray
 from xarray import concat as xr_concat
 
 from pytensor.tensor import scalar
 from pytensor.xtensor.shape import (
+    broadcast,
     concat,
     stack,
     transpose,
@@ -458,3 +460,28 @@ def test_expand_dims_errors():
     # Test with a numpy array as dim (not supported)
     with pytest.raises(TypeError, match="unhashable type"):
         y.expand_dims(np.array([1, 2]))
+
+
+def test_broadcast():
+    """Test basic broadcasting functionality."""
+    # Create xtensors matching the xarray example
+    x = xtensor("x", dims=("a",), shape=(3,))
+    y = xtensor("y", dims=("b",), shape=(2,))
+
+    # Test broadcasting
+    x2, y2 = broadcast(x, y)
+
+    # Create test data
+    x_test = DataArray([1, 2, 3], dims="a")
+    y_test = DataArray([5, 6], dims="b")
+
+    # Test the function
+    fn = xr_function([x, y], [x2, y2])
+    x2_result, y2_result = fn(x_test, y_test)
+
+    # Compute expected results using xarray's broadcast method
+    x2_expected, y2_expected = xr.broadcast(x_test, y_test)
+
+    # Compare results
+    xr_assert_allclose(x2_result, x2_expected)
+    xr_assert_allclose(y2_result, y2_expected)
