@@ -9,7 +9,7 @@ from pytensor import In
 from pytensor.compile import PYTORCH
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function.types import add_supervisor_to_fgraph
-from pytensor.compile.ops import DeepCopyOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
@@ -69,6 +69,14 @@ def pytorch_funcify_FunctionGraph(
         fgraph_name=fgraph_name,
         **built_kwargs,
     )
+
+
+@pytorch_funcify.register(TypeCastingOp)
+def pytorch_funcify_CastingOp(op, node, **kwargs):
+    def type_cast(x):
+        return x
+
+    return type_cast
 
 
 @pytorch_funcify.register(CheckAndRaise)

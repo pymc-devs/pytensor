@@ -8,7 +8,7 @@ import numpy as np
 
 from pytensor.compile import JAX
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.ops import DeepCopyOp, ViewOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
@@ -111,12 +111,12 @@ def jax_funcify_DeepCopyOp(op, **kwargs):
     return deepcopyop
 
 
-@jax_funcify.register(ViewOp)
-def jax_funcify_ViewOp(op, **kwargs):
-    def viewop(x):
+@jax_funcify.register(TypeCastingOp)
+def jax_funcify_TypeCastingOp(op, **kwargs):
+    def type_cast(x):
         return x
 
-    return viewop
+    return type_cast
 
 
 @jax_funcify.register(OpFromGraph)

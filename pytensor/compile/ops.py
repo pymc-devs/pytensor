@@ -33,11 +33,8 @@ def register_view_op_c_code(type, code, version=()):
     ViewOp.c_code_and_version[type] = (code, version)
 
 
-class ViewOp(COp):
-    """
-    Returns an inplace view of the input. Used internally by PyTensor.
-
-    """
+class TypeCastingOp(COp):
+    """Op that performs a graph-level type cast operation, but has no effect computation-wise (identity function)."""
 
     view_map = {0: [0]}
     # Mapping from Type to C code (and version) to use.
@@ -47,13 +44,8 @@ class ViewOp(COp):
     __props__: tuple = ()
     _f16_ok: bool = True
 
-    def make_node(self, x):
-        return Apply(self, [x], [x.type()])
-
-    def perform(self, node, inp, out):
-        (x,) = inp
-        (z,) = out
-        z[0] = x
+    def perform(self, node, inputs, outputs_storage):
+        outputs_storage[0][0] = inputs[0]
 
     def __str__(self):
         return f"{self.__class__.__name__}"
@@ -95,6 +87,13 @@ class ViewOp(COp):
 
     def grad(self, args, g_outs):
         return g_outs
+
+
+class ViewOp(TypeCastingOp):
+    """Returns an inplace view of the input. Used internally by PyTensor."""
+
+    def make_node(self, x):
+        return Apply(self, [x], [x.type()])
 
 
 view_op = ViewOp()
