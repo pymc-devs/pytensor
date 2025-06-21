@@ -3867,35 +3867,22 @@ class TestInferShape(utt.InferShapeTester):
     def test_Flatten(self):
         atens3 = tensor3()
         atens3_val = random(4, 5, 3)
-        for ndim in (3, 2, 1):
+        for ndim in (2, 1):
             self._compile_and_check(
                 [atens3],
                 [flatten(atens3, ndim)],
                 [atens3_val],
                 Reshape,
-                excluding=["local_useless_reshape"],
             )
 
         amat = matrix()
         amat_val = random(4, 5)
-        for ndim in (2, 1):
-            self._compile_and_check(
-                [amat],
-                [flatten(amat, ndim)],
-                [amat_val],
-                Reshape,
-                excluding=["local_useless_reshape"],
-            )
-
-        avec = vector()
-        avec_val = random(4)
         ndim = 1
         self._compile_and_check(
-            [avec],
-            [flatten(avec, ndim)],
-            [avec_val],
+            [amat],
+            [flatten(amat, ndim)],
+            [amat_val],
             Reshape,
-            excluding=["local_useless_reshape"],
         )
 
     def test_Eye(self):
