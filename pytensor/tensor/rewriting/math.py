@@ -29,9 +29,11 @@ from pytensor.tensor.basic import (
     cast,
     constant,
     get_underlying_scalar_constant_value,
+    join,
     moveaxis,
     ones_like,
     register_infer_shape,
+    split,
     switch,
     zeros_like,
 )
@@ -99,6 +101,7 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     complex_dtypes,
@@ -165,6 +168,72 @@ def local_0_dot_x(fgraph, node):
         elif x.ndim == 1 and y.ndim == 1:
             constant_zero = assert_op(constant_zero, eq(x.shape[0], y.shape[0]))
             return [constant_zero]
+
+
+@register_canonicalize
+@register_specialize
+@register_stabilize
+@node_rewriter([Dot])
+def local_block_diag_dot_to_dot_block_diag(fgraph, node):
+    r"""
+    Perform the rewrite ``dot(block_diag(A, B), C) -> block_diag(dot(A, C), dot(B, C))``
+
+    BlockDiag results in the creation of a matrix of shape ``(n1 * n2, m1 * m2)``. Because dot has complexity
+    of approximately O(n^3), it's always better to perform two dot products on the smaller matrices, rather than
+    a single dot on the larger matrix.
+    """
+    x, y = node.inputs
+    op = node.op
+
+    def check_for_block_diag(x):
+        return x.owner and (
+            isinstance(x.owner.op, BlockDiagonal)
+            or isinstance(x.owner.op, Blockwise)
+            and isinstance(x.owner.op.core_op, BlockDiagonal)
+        )
+
+    if not (check_for_block_diag(x) or check_for_block_diag(y)):
+        return None
+
+    # Case 1: Only one input is BlockDiagonal. In this case, multiply all components of the block-diagonal with the
+    # non-block diagonal, and return a new block diagonal
+    if check_for_block_diag(x) and not check_for_block_diag(y):
+        components = x.owner.inputs
+        y_splits = split(
+            y,
+            splits_size=[component.shape[-1] for component in components],
+            n_splits=len(components),
+        )
+        new_components = [
+            op(component, y_split) for component, y_split in zip(components, y_splits)
+        ]
+        new_output = join(0, *new_components)
+    elif not check_for_block_diag(x) and check_for_block_diag(y):
+        components = y.owner.inputs
+        new_components = [op(x, component) for component in components]
+        new_output = join(0, *new_components)
+
+    # Case 2: Both inputs are BlockDiagonal. Here we can proceed only if the static shapes are known and identical. In
+    # that case, blockdiag(a,b) @ blockdiag(c, d) = blockdiag(a @ c, b @ d), but this is not true in the general case
+    elif any(shape is None for shape in (*x.type.shape, *y.type.shape)):
+        return None
+    elif x.ndim == y.ndim and all(
+        x_shape == y_shape for x_shape, y_shape in zip(x.type.shape, y.type.shape)
+    ):
+        x_components = x.owner.inputs
+        y_components = y.owner.inputs
+
+        if len(x_components) != len(y_components):
+            return None
+
+        new_output = BlockDiagonal(len(x_components))(
+            *[op(x_comp, y_comp) for x_comp, y_comp in zip(x_components, y_components)]
+        )
+    else:
+        return None
+
+    copy_stack_trace(node.outputs[0], new_output)
+    return [new_output]
 
 
 @register_canonicalize
@@ -2496,7 +2565,6 @@ add_canonizer = in2out(
     name="add_canonizer_group",
 )
 
-
 register_canonicalize(local_add_canonizer, "shape_unsafe", name="local_add_canonizer")
 
 
@@ -3619,7 +3687,6 @@ logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
 )
 register_stabilize(logdiffexp_to_log1mexpdiff, name="logdiffexp_to_log1mexpdiff")
 
-
 # log(sigmoid(x) / (1 - sigmoid(x))) -> x
 # i.e logit(sigmoid(x)) -> x
 local_logit_sigmoid = PatternNodeRewriter(
@@ -3632,7 +3699,6 @@ local_logit_sigmoid = PatternNodeRewriter(
 )
 register_canonicalize(local_logit_sigmoid)
 register_specialize(local_logit_sigmoid)
-
 
 # sigmoid(log(x / (1-x)) -> x
 # i.e., sigmoid(logit(x)) -> x
@@ -3673,7 +3739,6 @@ local_polygamma_to_tri_gamma = PatternNodeRewriter(
 )
 
 register_specialize(local_polygamma_to_tri_gamma)
-
 
 local_log_kv = PatternNodeRewriter(
     # Rewrite log(kv(v, x)) = log(kve(v, x) * exp(-x)) -> log(kve(v, x)) - x
