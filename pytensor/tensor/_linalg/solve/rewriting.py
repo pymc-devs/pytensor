@@ -100,6 +100,7 @@ def _split_decomp_and_solve_steps(
             elif isinstance(cl.op, DimShuffle) and cl.op.is_left_expand_dims:
                 # If it's a left expand_dims, recurse on the output
                 clients.extend(find_solve_clients(cl.outputs[0], assume_a))
+
         return clients
 
     assume_a = node.op.core_op.assume_a
@@ -107,33 +108,35 @@ def _split_decomp_and_solve_steps(
     if assume_a not in allowed_assume_a:
         return None
 
-    A, _ = get_root_A(node.inputs[0])
+    root_A, root_A_transposed = get_root_A(node.inputs[0])
 
     # Find Solve using A (or left expand_dims of A)
     # TODO: We could handle arbitrary shuffle of the batch dimensions, just need to propagate
     #  that to the A_decomp outputs
-    A_solve_clients_and_transpose = [
-        (client, False) for client in find_solve_clients(A, assume_a)
+    root_A_solve_clients_and_transpose = [
+        (client, False) for client in find_solve_clients(root_A, assume_a)
     ]
 
     # Find Solves using A.T
-    for cl, _ in fgraph.clients[A]:
+    for cl, _ in fgraph.clients[root_A]:
         if isinstance(cl.op, DimShuffle) and is_matrix_transpose(cl.out):
             A_T = cl.out
-            A_solve_clients_and_transpose.extend(
+            root_A_solve_clients_and_transpose.extend(
                 (client, True) for client in find_solve_clients(A_T, assume_a)
             )
 
-    if not eager and len(A_solve_clients_and_transpose) == 1:
+    if not eager and len(root_A_solve_clients_and_transpose) == 1:
         # If theres' a single use don't do it... unless it's being broadcast in a Blockwise (or we're eager)
         # That's a "reuse" inside the inner vectorized loop
         batch_ndim = node.op.batch_ndim(node)
-        (client, _) = A_solve_clients_and_transpose[0]
-        original_A, b = client.inputs
+        (client, _) = root_A_solve_clients_and_transpose[0]
+
+        A, b = client.inputs
+
         if not any(
             a_bcast and not b_bcast
             for a_bcast, b_bcast in zip(
-                original_A.type.broadcastable[:batch_ndim],
+                A.type.broadcastable[:batch_ndim],
                 b.type.broadcastable[:batch_ndim],
                 strict=True,
             )
@@ -142,19 +145,27 @@ def _split_decomp_and_solve_steps(
 
     # If any Op had check_finite=True, we also do it for the LU decomposition
     check_finite_decomp = False
-    for client, _ in A_solve_clients_and_transpose:
+    for client, _ in root_A_solve_clients_and_transpose:
         if client.op.core_op.check_finite:
             check_finite_decomp = True
             break
 
-    lower = node.op.core_op.lower
+    (first_solve, transposed) = root_A_solve_clients_and_transpose[0]
+    lower = first_solve.op.core_op.lower
+    if transposed:
+        lower = not lower
+
     A_decomp = decompose_A(
-        A, assume_a=assume_a, check_finite=check_finite_decomp, lower=lower
+        root_A, assume_a=assume_a, check_finite=check_finite_decomp, lower=lower
     )
 
     replacements = {}
-    for client, transposed in A_solve_clients_and_transpose:
+    for client, transposed in root_A_solve_clients_and_transpose:
         _, b = client.inputs
+        lower = client.op.core_op.lower
+        if transposed:
+            lower = not lower
+
         new_x = solve_decomposed_system(
             A_decomp,
             b,
