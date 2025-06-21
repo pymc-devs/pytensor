@@ -376,14 +376,20 @@ class CholeskySolve(SolveBase):
             return self
 
 
-def cho_solve(c_and_lower, b, *, check_finite=True, b_ndim: int | None = None):
+def cho_solve(
+    c_and_lower: tuple[TensorLike, bool],
+    b: TensorLike,
+    *,
+    check_finite: bool = True,
+    b_ndim: int | None = None,
+):
     """Solve the linear equations A x = b, given the Cholesky factorization of A.
 
     Parameters
     ----------
-    (c, lower) : tuple, (array, bool)
+    c_and_lower : tuple of (TensorLike, bool)
         Cholesky factorization of a, as given by cho_factor
-    b : array
+    b : TensorLike
         Right-hand side
     check_finite : bool, optional
         Whether to check that the input matrices contain only finite numbers.

@@ -7,6 +7,7 @@ from pytensor.tensor.slinalg import (
     LU,
     BlockDiagonal,
     Cholesky,
+    CholeskySolve,
     Eigvalsh,
     LUFactor,
     PivotToPermutations,
@@ -153,3 +154,17 @@ def jax_funcify_LUFactor(op, **kwargs):
         )
 
     return lu_factor
+
+
+@jax_funcify.register(CholeskySolve)
+def jax_funcify_ChoSolve(op, **kwargs):
+    lower = op.lower
+    check_finite = op.check_finite
+    overwrite_b = op.overwrite_b
+
+    def cho_solve(c, b):
+        return jax.scipy.linalg.cho_solve(
+            (c, lower), b, check_finite=check_finite, overwrite_b=overwrite_b
+        )
+
+    return cho_solve
