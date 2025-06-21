@@ -336,7 +336,7 @@ def test_jax_lu_solve(b_shape):
 
 
 @pytest.mark.parametrize("b_shape, lower", [((5,), True), ((5, 5), False)])
-def test_jax_chosolve(b_shape, lower):
+def test_jax_cho_solve(b_shape, lower):
     rng = np.random.default_rng(utt.fetch_seed())
     L_val = rng.normal(size=(5, 5)).astype(config.floatX)
     A_val = (L_val @ L_val.T).astype(config.floatX)
