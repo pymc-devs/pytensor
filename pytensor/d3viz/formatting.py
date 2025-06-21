@@ -13,6 +13,7 @@ from pytensor.compile import Function, builders
 from pytensor.graph.basic import Apply, Constant, Variable, graph_inputs
 from pytensor.graph.fg import FunctionGraph
 from pytensor.printing import _try_pydot_import
+from pytensor.tensor.elemwise import Elemwise
 
 
 class PyDotFormatter:
@@ -291,6 +292,9 @@ def var_tag(var):
 
 def apply_label(node):
     """Return label of apply node."""
+    if isinstance(node.op, Elemwise):
+        return node.op.scalar_op.__class__.__name__
+
     return node.op.__class__.__name__
 
 
