@@ -51,9 +51,6 @@ class Cholesky(Op):
         if self.overwrite_a:
             self.destroy_map = {0: [0]}
 
-    def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
-
     def make_node(self, x):
         x = as_tensor_variable(x)
         if x.type.ndim != 2:
@@ -269,15 +266,6 @@ class SolveBase(Op):
         ).dtype
         x = tensor(dtype=o_dtype, shape=b.type.shape)
         return Apply(self, [A, b], [x])
-
-    def infer_shape(self, fgraph, node, shapes):
-        Ashape, Bshape = shapes
-        rows = Ashape[1]
-        if len(Bshape) == 1:
-            return [(rows,)]
-        else:
-            cols = Bshape[1]
-            return [(rows, cols)]
 
     def L_op(self, inputs, outputs, output_gradients):
         r"""Reverse-mode gradient updates for matrix solve operation :math:`c = A^{-1} b`.
@@ -1306,9 +1294,6 @@ class SolveContinuousLyapunov(Op):
         out_dtype = node.outputs[0].type.dtype
         X[0] = scipy_linalg.solve_continuous_lyapunov(A, B).astype(out_dtype)
 
-    def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
-
     def grad(self, inputs, output_grads):
         # Gradient computations come from Kao and Hennequin (2020), https://arxiv.org/pdf/2011.11430.pdf
         # Note that they write the equation as AX + XA.H + Q = 0, while scipy uses AX + XA^H = Q,
@@ -1377,9 +1362,6 @@ class BilinearSolveDiscreteLyapunov(Op):
         X[0] = scipy_linalg.solve_discrete_lyapunov(A, B, method="bilinear").astype(
             out_dtype
         )
-
-    def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
 
     def grad(self, inputs, output_grads):
         # Gradient computations come from Kao and Hennequin (2020), https://arxiv.org/pdf/2011.11430.pdf
@@ -1497,9 +1479,6 @@ class SolveDiscreteARE(Op):
 
         out_dtype = node.outputs[0].type.dtype
         X[0] = scipy_linalg.solve_discrete_are(A, B, Q, R).astype(out_dtype)
-
-    def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
 
     def grad(self, inputs, output_grads):
         # Gradient computations come from Kao and Hennequin (2020), https://arxiv.org/pdf/2011.11430.pdf
