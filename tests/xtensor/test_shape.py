@@ -509,6 +509,24 @@ def test_broadcast():
     test_broadcast_exclude(["b", "c", "d"])
     test_broadcast_exclude(["a", "b", "c", "d"])
 
+    # Test with symbolic sizes
+    x = xtensor("x", dims=("a", "b"), shape=(None, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, None))
+    z = xtensor("z", dims=("b", "d"), shape=(None, 6))
+
+    x_test = xr_arange_like(xtensor(dims=x.dims, shape=(3, 4)))
+    y_test = xr_arange_like(xtensor(dims=y.dims, shape=(5, 6)))
+    z_test = xr_arange_like(xtensor(dims=z.dims, shape=(4, 6)))
+
+    x2_expected, y2_expected, z2_expected = xr.broadcast(x_test, y_test, z_test)
+    x2, y2, z2 = broadcast(x, y, z)
+    fn = xr_function([x, y, z], [x2, y2, z2])
+    x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
+
+    xr_assert_allclose(x2_result, x2_expected)
+    xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+
 
 def test_broadcast_errors():
     """Test error handling in broadcast."""
@@ -518,3 +536,11 @@ def test_broadcast_errors():
 
     with pytest.raises(TypeError, match="not iterable"):
         broadcast(x, y, z, exclude=1)
+
+    # Test with conflicting shapes
+    x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+    z = xtensor("z", dims=("b", "d"), shape=(4, 7))
+
+    with pytest.raises(ValueError, match="Dimension .* has conflicting shapes"):
+        broadcast(x, y, z)
