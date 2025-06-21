@@ -333,3 +333,19 @@ def test_jax_lu_solve(b_shape):
     out = pt_slinalg.lu_solve(lu_and_pivots, b)
 
     compare_jax_and_py([A, b], [out], [A_val, b_val])
+
+
+@pytest.mark.parametrize("b_shape, lower", [((5,), True), ((5, 5), False)])
+def test_jax_chosolve(b_shape, lower):
+    rng = np.random.default_rng(utt.fetch_seed())
+    L_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    A_val = (L_val @ L_val.T).astype(config.floatX)
+
+    b_val = rng.normal(size=b_shape).astype(config.floatX)
+
+    A = pt.tensor(name="A", shape=(5, 5))
+    b = pt.tensor(name="b", shape=b_shape)
+    c = pt_slinalg.cholesky(A, lower=lower)
+    out = pt_slinalg.cho_solve((c, lower), b, b_ndim=len(b_shape))
+
+    compare_jax_and_py([A, b], [out], [A_val, b_val])
