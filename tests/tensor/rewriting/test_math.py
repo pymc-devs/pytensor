@@ -113,6 +113,7 @@ from pytensor.tensor.rewriting.math import (
     simplify_mul,
 )
 from pytensor.tensor.shape import Reshape, Shape_i, SpecifyShape, specify_shape
+from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.type import (
     TensorType,
     cmatrix,
@@ -4653,4 +4654,81 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
     np.testing.assert_allclose(
         out.eval({a: a_test, b: b_test}, mode=test_mode),
         rewritten_out.eval({a: a_test, b: b_test}, mode=test_mode),
+    )
+
+
+@pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
+def test_local_block_diag_dot_to_dot_block_diag(left_multiply):
+    """
+    Test that dot(block_diag(x, y,), z) is rewritten to concat(dot(x, z[:n]), dot(y, z[n:]))
+    """
+    a = tensor("a", shape=(4, 2))
+    b = tensor("b", shape=(2, 4))
+    c = tensor("c", shape=(4, 4))
+    d = tensor("d", shape=(10, 10))
+
+    x = pt.linalg.block_diag(a, b, c)
+
+    if left_multiply:
+        out = x @ d
+    else:
+        out = d @ x
+
+    fn = pytensor.function([a, b, c, d], out)
+    assert not any(
+        isinstance(node.op, BlockDiagonal) for node in fn.maker.fgraph.toposort()
+    )
+
+    fn_expected = pytensor.function(
+        [a, b, c, d],
+        out,
+        mode=get_default_mode().excluding("local_block_diag_dot_to_dot_block_diag"),
+    )
+
+    rng = np.random.default_rng()
+    a_val = rng.normal(size=a.type.shape).astype(a.type.dtype)
+    b_val = rng.normal(size=b.type.shape).astype(b.type.dtype)
+    c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)
+    d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)
+
+    np.testing.assert_allclose(
+        fn(a_val, b_val, c_val, d_val),
+        fn_expected(a_val, b_val, c_val, d_val),
+        atol=1e-6 if config.floatX == "float32" else 1e-12,
+        rtol=1e-6 if config.floatX == "float32" else 1e-12,
+    )
+
+
+@pytest.mark.parametrize("rewrite", [True, False], ids=["rewrite", "no_rewrite"])
+@pytest.mark.parametrize("size", [10, 100, 1000], ids=["small", "medium", "large"])
+def test_block_diag_dot_to_dot_concat_benchmark(benchmark, size, rewrite):
+    rng = np.random.default_rng()
+    a_size = int(rng.uniform(0, size))
+    b_size = int(rng.uniform(0, size - a_size))
+    c_size = size - a_size - b_size
+
+    a = tensor("a", shape=(a_size, a_size))
+    b = tensor("b", shape=(b_size, b_size))
+    c = tensor("c", shape=(c_size, c_size))
+    d = tensor("d", shape=(size,))
+
+    x = pt.linalg.block_diag(a, b, c)
+    out = x @ d
+
+    mode = get_default_mode()
+    if not rewrite:
+        mode = mode.excluding("local_block_diag_dot_to_dot_block_diag")
+    fn = pytensor.function([a, b, c, d], out, mode=mode)
+
+    a_val = rng.normal(size=a.type.shape).astype(a.type.dtype)
+    b_val = rng.normal(size=b.type.shape).astype(b.type.dtype)
+    c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)
+    d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)
+
+    benchmark(
+        fn,
+        a_val,
+        b_val,
+        c_val,
+        d_val,
     )
