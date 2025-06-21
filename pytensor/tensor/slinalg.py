@@ -201,7 +201,9 @@ def cholesky(
 
     """
 
-    return Blockwise(Cholesky(lower=lower, on_error=on_error))(x)
+    return Blockwise(
+        Cholesky(lower=lower, on_error=on_error, check_finite=check_finite)
+    )(x)
 
 
 class SolveBase(Op):
