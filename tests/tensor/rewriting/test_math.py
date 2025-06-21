@@ -2010,6 +2010,27 @@ class TestExpLog:
             decimal=6,
         )
 
+    def test_softplus_log(self):
+        # softplus(log(x)) -> log1p(x)
+        data_valid = np.random.random((4, 3)).astype("float32") * 2
+        data_valid[0, 0] = 0  # edge case
+        data_invalid = data_valid - 2
+
+        x = fmatrix()
+        f = function([x], softplus(log(x)), mode=self.mode)
+        graph = f.maker.fgraph.toposort()
+        ops_graph = [
+            node
+            for node in graph
+            if isinstance(node.op, Elemwise)
+            and isinstance(node.op.scalar_op, ps.Log | ps.Exp | ps.Softplus)
+        ]
+        assert len(ops_graph) == 0
+
+        expected = np.log1p(data_valid)
+        np.testing.assert_almost_equal(f(data_valid), expected)
+        assert np.all(np.isnan(f(data_invalid)))
+
     @pytest.mark.parametrize(
         ["nested_expression", "expected_switches"],
         [
