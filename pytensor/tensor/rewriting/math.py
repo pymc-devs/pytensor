@@ -176,7 +176,7 @@ def local_0_dot_x(fgraph, node):
 @node_rewriter([Dot])
 def local_block_diag_dot_to_dot_block_diag(fgraph, node):
     r"""
-    Perform the rewrite ``dot(block_diag(A, B), C) -> block_diag(dot(A, C), dot(B, C))``
+    Perform the rewrite ``dot(block_diag(A, B), C) -> concat(dot(A, C), dot(B, C))``
 
     BlockDiag results in the creation of a matrix of shape ``(n1 * n2, m1 * m2)``. Because dot has complexity
     of approximately O(n^3), it's always better to perform two dot products on the smaller matrices, rather than
@@ -210,25 +210,18 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
         new_output = join(0, *new_components)
     elif not check_for_block_diag(x) and check_for_block_diag(y):
         components = y.owner.inputs
-        new_components = [op(x, component) for component in components]
-        new_output = join(0, *new_components)
-
-    # Case 2: Both inputs are BlockDiagonal. Here we can proceed only if the static shapes are known and identical. In
-    # that case, blockdiag(a,b) @ blockdiag(c, d) = blockdiag(a @ c, b @ d), but this is not true in the general case
-    elif any(shape is None for shape in (*x.type.shape, *y.type.shape)):
-        return None
-    elif x.ndim == y.ndim and all(
-        x_shape == y_shape for x_shape, y_shape in zip(x.type.shape, y.type.shape)
-    ):
-        x_components = x.owner.inputs
-        y_components = y.owner.inputs
-
-        if len(x_components) != len(y_components):
-            return None
-
-        new_output = BlockDiagonal(len(x_components))(
-            *[op(x_comp, y_comp) for x_comp, y_comp in zip(x_components, y_components)]
+        x_splits = split(
+            x,
+            splits_size=[component.shape[0] for component in components],
+            n_splits=len(components),
+            axis=1,
         )
+
+        new_components = [
+            op(x_split, component) for component, x_split in zip(components, x_splits)
+        ]
+        new_output = join(1, *new_components)
+
     else:
         return None
 

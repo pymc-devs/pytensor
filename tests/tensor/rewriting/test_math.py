@@ -4657,17 +4657,22 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
     )
 
 
-def test_local_block_diag_dot_to_dot_block_diag():
+@pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
+def test_local_block_diag_dot_to_dot_block_diag(left_multiply):
     """
     Test that dot(block_diag(x, y,), z) is rewritten to concat(dot(x, z[:n]), dot(y, z[n:]))
     """
     a = tensor("a", shape=(4, 2))
     b = tensor("b", shape=(2, 4))
     c = tensor("c", shape=(4, 4))
-    d = tensor("d", shape=(10,))
+    d = tensor("d", shape=(10, 10))
 
     x = pt.linalg.block_diag(a, b, c)
-    out = x @ d
+
+    if left_multiply:
+        out = x @ d
+    else:
+        out = d @ x
 
     fn = pytensor.function([a, b, c, d], out)
     assert not any(
