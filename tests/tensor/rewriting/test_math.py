@@ -4676,7 +4676,7 @@ def test_local_block_diag_dot_to_dot_block_diag(left_multiply):
 
     fn = pytensor.function([a, b, c, d], out)
     assert not any(
-        isinstance(node, BlockDiagonal) for node in fn.maker.fgraph.toposort()
+        isinstance(node.op, BlockDiagonal) for node in fn.maker.fgraph.toposort()
     )
 
     fn_expected = pytensor.function(
