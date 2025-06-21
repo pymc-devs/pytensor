@@ -20,6 +20,7 @@ from pytensor.xtensor.shape import (
     Transpose,
     UnStack,
     XBroadcast,
+    XBroadcastLike,
 )
 
 
@@ -170,51 +171,53 @@ def lower_expand_dims(fgraph, node):
     return [result]
 
 
+def build_dimension_shapes(nodes):
+    """Precompute the best available shape for each dimension."""
+    dim_shapes = {}
+    all_dims = set().union(*(x.type.dims for x in nodes))
+
+    for dim in all_dims:
+        concrete_shape = None
+        runtime_shape = None
+
+        for x in nodes:
+            if dim in x.type.dims:
+                idx = x.type.dims.index(dim)
+                if x.type.shape[idx] is not None:
+                    concrete_shape = as_tensor(x.type.shape[idx], dtype="int64")
+                    break  # Found concrete shape, stop looking
+                elif runtime_shape is None:
+                    # Remember first runtime shape as fallback
+                    x_tensor = tensor_from_xtensor(x)
+                    runtime_shape = shape(x_tensor)[idx]
+
+        # Store the best available shape
+        if concrete_shape is not None:
+            dim_shapes[dim] = concrete_shape
+        elif runtime_shape is not None:
+            dim_shapes[dim] = runtime_shape
+        else:
+            dim_shapes[dim] = pt.constant(1, dtype="int64")
+
+    return dim_shapes
+
+
+def get_broadcast_shape_for_dim(dim_shapes, dim, out_shape):
+    """Get the broadcast shape for a single dimension."""
+    if out_shape is not None:
+        broadcast_shape = as_tensor(out_shape, dtype="int64")
+    else:
+        broadcast_shape = dim_shapes[dim]
+    return broadcast_shape
+
+
 @register_lower_xtensor
 @node_rewriter(tracks=[XBroadcast])
 def lower_broadcast(fgraph, node):
     """Rewrite XBroadcast to tensor operations with symbolic shape support."""
 
-    def build_dimension_shapes():
-        """Precompute the best available shape for each dimension."""
-        dim_shapes = {}
-        all_dims = set().union(*(x.type.dims for x in node.inputs))
-
-        for dim in all_dims:
-            concrete_shape = None
-            runtime_shape = None
-
-            for x in node.inputs:
-                if dim in x.type.dims:
-                    idx = x.type.dims.index(dim)
-                    if x.type.shape[idx] is not None:
-                        concrete_shape = as_tensor(x.type.shape[idx], dtype="int64")
-                        break  # Found concrete shape, stop looking
-                    elif runtime_shape is None:
-                        # Remember first runtime shape as fallback
-                        x_tensor = tensor_from_xtensor(x)
-                        runtime_shape = shape(x_tensor)[idx]
-
-            # Store the best available shape
-            if concrete_shape is not None:
-                dim_shapes[dim] = concrete_shape
-            elif runtime_shape is not None:
-                dim_shapes[dim] = runtime_shape
-            else:
-                dim_shapes[dim] = pt.constant(1, dtype="int64")
-
-        return dim_shapes
-
-    # Precompute all dimension shapes once
-    dim_shapes = build_dimension_shapes()
-
-    def get_broadcast_shape_for_dim(dim, out_shape):
-        """Get the broadcast shape for a single dimension."""
-        if out_shape is not None:
-            broadcast_shape = as_tensor(out_shape, dtype="int64")
-        else:
-            broadcast_shape = dim_shapes[dim]
-        return broadcast_shape
+    # Precompute all dimension shapes
+    dim_shapes = build_dimension_shapes(node.inputs)
 
     result_tensors = []
     for x, out in zip(node.inputs, node.outputs):
@@ -227,7 +230,7 @@ def lower_broadcast(fgraph, node):
 
         # Get the broadcast shape for each dimension
         broadcast_shape = [
-            get_broadcast_shape_for_dim(dim, out_shape)
+            get_broadcast_shape_for_dim(dim_shapes, dim, out_shape)
             for dim, out_shape in zip(out.type.dims, out.type.shape)
         ]
 
@@ -238,3 +241,32 @@ def lower_broadcast(fgraph, node):
         result_tensors.append(result)
 
     return result_tensors
+
+
+@register_lower_xtensor
+@node_rewriter(tracks=[XBroadcastLike])
+def lower_broadcast_like(fgraph, node):
+    """Rewrite XBroadcastLike to tensor operations with symbolic shape support."""
+
+    # Precompute all dimension shapes
+    dim_shapes = build_dimension_shapes(node.inputs)
+
+    [x, _] = node.inputs
+    [out] = node.outputs
+    x_tensor = tensor_from_xtensor(x)
+
+    # Dimshuffle the tensor to the output dimensions
+    x_dim_to_idx = {d: i for i, d in enumerate(x.type.dims)}
+    shuffle_pattern = [x_dim_to_idx.get(d, "x") for d in out.type.dims]
+    x_tensor = x_tensor.dimshuffle(shuffle_pattern)
+
+    # Get the broadcast shape for each dimension
+    broadcast_shape = [
+        get_broadcast_shape_for_dim(dim_shapes, dim, out_shape)
+        for dim, out_shape in zip(out.type.dims, out.type.shape)
+    ]
+
+    x_tensor = broadcast_to(x_tensor, broadcast_shape)
+
+    result = xtensor_from_tensor(x_tensor, dims=out.type.dims)
+    return [result]

@@ -534,7 +534,7 @@ def test_broadcast_errors():
     y = xtensor("y", dims=("c", "d"), shape=(5, 6))
     z = xtensor("z", dims=("b", "d"), shape=(4, 6))
 
-    with pytest.raises(TypeError, match="not iterable"):
+    with pytest.raises(TypeError, match="exclude must be None, str, or Sequence"):
         broadcast(x, y, z, exclude=1)
 
     # Test with conflicting shapes
@@ -544,3 +544,84 @@ def test_broadcast_errors():
 
     with pytest.raises(ValueError, match="Dimension .* has conflicting shapes"):
         broadcast(x, y, z)
+
+
+def test_broadcast_like():
+    """Test broadcast_like method"""
+    # Create test data
+    x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+    z = xtensor("z", dims=("b", "d"), shape=(4, 6))
+
+    x_test = xr_arange_like(x)
+    y_test = xr_arange_like(y)
+    z_test = xr_arange_like(z)
+
+    # Basic broadcasting
+    x2_expected = x_test.broadcast_like(y_test)
+    x2 = x.broadcast_like(y)
+    fn = xr_function([x, y], x2)
+    x2_result = fn(x_test, y_test)
+    xr_assert_allclose(x2_result, x2_expected)
+
+    y2_expected = y_test.broadcast_like(z_test)
+    y2 = y.broadcast_like(z)
+    fn = xr_function([y, z], y2)
+    y2_result = fn(y_test, z_test)
+    xr_assert_allclose(y2_result, y2_expected)
+
+    # Test with excluded dims
+    x2_expected = x_test.broadcast_like(y_test, exclude=["b"])
+    x2 = x.broadcast_like(y, exclude=["b"])
+    fn = xr_function([x, y], x2)
+    x2_result = fn(x_test, y_test)
+    xr_assert_allclose(x2_result, x2_expected)
+
+    y2_expected = y_test.broadcast_like(z_test, exclude=["b", "c"])
+    y2 = y.broadcast_like(z, exclude=["b"])
+    fn = xr_function([y, z], y2)
+    y2_result = fn(y_test, z_test)
+    xr_assert_allclose(y2_result, y2_expected)
+
+    # Test with symbolic sizes
+    x = xtensor("x", dims=("a", "b"), shape=(None, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, None))
+    z = xtensor("z", dims=("b", "d"), shape=(None, 6))
+
+    x_test = xr_arange_like(xtensor(dims=x.dims, shape=(3, 4)))
+    y_test = xr_arange_like(xtensor(dims=y.dims, shape=(5, 6)))
+    z_test = xr_arange_like(xtensor(dims=z.dims, shape=(4, 6)))
+
+    x2_expected = x_test.broadcast_like(y_test)
+    x2 = x.broadcast_like(y)
+    fn = xr_function([x, y], x2)
+    x2_result = fn(x_test, y_test)
+    xr_assert_allclose(x2_result, x2_expected)
+
+    y2_expected = y_test.broadcast_like(z_test, exclude=["b", "c"])
+    y2 = y.broadcast_like(z, exclude=["b"])
+    fn = xr_function([y, z], y2)
+    y2_result = fn(y_test, z_test)
+    xr_assert_allclose(y2_result, y2_expected)
+
+
+def test_broadcast_like_errors():
+    """Test error handling in broadcast_like."""
+    x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+
+    with pytest.raises(TypeError, match="exclude must be None, str, or Sequence"):
+        x.broadcast_like(y, exclude=1)
+
+    with pytest.raises(
+        TypeError, match="All items in `exclude` must be hashable dimension names."
+    ):
+        x.broadcast_like(y, exclude=[np.array([1, 2])])
+
+    # Test with conflicting shapes
+    x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+    z = xtensor("z", dims=("b", "d"), shape=(4, 7))
+
+    with pytest.raises(ValueError, match="Dimension .* has conflicting shapes"):
+        y.broadcast_like(z)

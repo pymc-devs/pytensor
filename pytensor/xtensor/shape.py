@@ -574,15 +574,61 @@ class XBroadcast(XOp):
         return Apply(self, inputs, outputs)
 
 
+def _normalize_exclude(exclude):
+    """Normalize the exclude parameter to a tuple of hashable dimension names."""
+    if exclude is None:
+        return ()
+    elif isinstance(exclude, str):
+        return (exclude,)
+    elif isinstance(exclude, Sequence):
+        return tuple(exclude)
+    else:
+        raise TypeError(f"exclude must be None, str, or Sequence, got {type(exclude)}")
+
+
 def broadcast(*args, exclude: str | Sequence[str] | None = None):
     """Broadcast any number of XTensorVariables against each other."""
-
-    # Normalize exclude
-    if exclude is None:
-        exclude = ()
-    elif isinstance(exclude, str):
-        exclude = (exclude,)
-    elif isinstance(exclude, Sequence):
-        exclude = tuple(exclude)
-
+    exclude = _normalize_exclude(exclude)
     return XBroadcast(exclude=exclude)(*args)
+
+
+class XBroadcastLike(XOp):
+    """Broadcast this tensor against another XTensorVariable."""
+
+    __props__ = ("exclude",)
+
+    def __init__(self, exclude: tuple[Hashable, ...] = ()):
+        if not all(isinstance(dim, Hashable) for dim in exclude):
+            raise TypeError("All items in `exclude` must be hashable dimension names.")
+
+        self.exclude = exclude
+
+    def make_node(self, x, other):
+        x = as_xtensor(x)
+        other = as_xtensor(other)
+
+        # Get the union shape for included dims,
+        # preserving order from other first, then x
+        dims_and_shape = combine_dims_and_shape([other, x])
+
+        broadcast_dims = tuple(d for d in dims_and_shape if d not in self.exclude)
+
+        broadcast_shape = tuple(dims_and_shape[d] for d in broadcast_dims)
+        dtype = upcast(*[x.type.dtype, other.type.dtype])
+
+        # Preserve excluded dims from this input
+        excluded_dims = [d for d in x.type.dims if d in self.exclude]
+        excluded_shapes = [dims_and_shape[d] for d in excluded_dims]
+
+        output = xtensor(
+            dtype=dtype,
+            shape=broadcast_shape + tuple(excluded_shapes),
+            dims=broadcast_dims + tuple(excluded_dims),
+        )
+        return Apply(self, [x, other], [output])
+
+
+def broadcast_like(x, other, exclude=None):
+    """Broadcast this tensor against another XTensorVariable."""
+    exclude = _normalize_exclude(exclude)
+    return XBroadcastLike(exclude=exclude)(x, other)
