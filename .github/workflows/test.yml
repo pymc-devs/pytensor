@@ -82,6 +82,7 @@ jobs:
         install-numba: [0]
         install-jax: [0]
         install-torch: [0]
+        install-mlx: [0]
         part:
           - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/sparse"
           - "tests/scan"
@@ -115,6 +116,7 @@ jobs:
             install-numba: 0
             install-jax: 0
             install-torch: 0
+            install-mlx: 0
           - install-numba: 1
             os: "ubuntu-latest"
             python-version: "3.10"
@@ -150,6 +152,13 @@ jobs:
             fast-compile: 0
             float32: 0
             part: "tests/link/pytorch"
+          - install-mlx: 1
+            os: "ubuntu-latest"
+            python-version: "3.10"
+            numpy-version: ">=2.0"
+            fast-compile: 0
+            float32: 0
+            part: "tests/link/mlx"
           - os: macos-15
             python-version: "3.13"
             numpy-version: ">=2.0"
@@ -196,6 +205,7 @@ jobs:
           if [[ $INSTALL_NUMBA == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" "numba>=0.57"; fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" jax jaxlib numpyro && pip install tensorflow-probability; fi
           if [[ $INSTALL_TORCH == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" pytorch pytorch-cuda=12.1 "mkl<=2024.0" -c pytorch -c nvidia; fi
+          if [[ $INSTALL_MLX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" mlx; fi
           pip install pytest-sphinx
           
           pip install -e ./
@@ -212,6 +222,7 @@ jobs:
           INSTALL_NUMBA: ${{ matrix.install-numba }}
           INSTALL_JAX: ${{ matrix.install-jax }}
           INSTALL_TORCH: ${{ matrix.install-torch}}
+          INSTALL_MLX: ${{ matrix.install-mlx }}
           OS: ${{ matrix.os}}
 
       - name: Run tests
