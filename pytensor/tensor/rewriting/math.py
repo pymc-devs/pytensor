@@ -170,10 +170,8 @@ def local_0_dot_x(fgraph, node):
             return [constant_zero]
 
 
-@register_canonicalize
-@register_specialize
 @register_stabilize
-@node_rewriter([Dot])
+@node_rewriter([Blockwise])
 def local_block_diag_dot_to_dot_block_diag(fgraph, node):
     r"""
     Perform the rewrite ``dot(block_diag(A, B), C) -> concat(dot(A, C), dot(B, C))``
@@ -182,8 +180,8 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
     of approximately O(n^3), it's always better to perform two dot products on the smaller matrices, rather than
     a single dot on the larger matrix.
     """
-    x, y = node.inputs
-    op = node.op
+    if not isinstance(node.op.core_op, BlockDiagonal):
+        return
 
     def check_for_block_diag(x):
         return x.owner and (
@@ -191,6 +189,15 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
             or isinstance(x.owner.op, Blockwise)
             and isinstance(x.owner.op.core_op, BlockDiagonal)
         )
+
+    # Check that the BlockDiagonal is an input to a Dot node:
+    clients = list(get_clients_at_depth(fgraph, node, depth=1))
+    if not clients or len(clients) > 1 or not isinstance(clients[0].op, Dot):
+        return
+
+    [dot_node] = clients
+    op = dot_node.op
+    x, y = dot_node.inputs
 
     if not (check_for_block_diag(x) or check_for_block_diag(y)):
         return None
@@ -208,6 +215,7 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
             op(component, y_split) for component, y_split in zip(components, y_splits)
         ]
         new_output = join(0, *new_components)
+
     elif not check_for_block_diag(x) and check_for_block_diag(y):
         components = y.owner.inputs
         x_splits = split(
@@ -222,11 +230,14 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
         ]
         new_output = join(1, *new_components)
 
+    # Case 2: Both inputs are BlockDiagonal. Do nothing
     else:
+        # TODO: If shapes are statically known and all components have equal shapes, we could rewrite
+        #  this case to block_diag(*[dot(comp_1, comp_2) for comp_1, comp_2 in zip(x.owner.inputs, y.owner.inputs)])
         return None
 
     copy_stack_trace(node.outputs[0], new_output)
-    return [new_output]
+    return {dot_node.outputs[0]: new_output}
 
 
 @register_canonicalize
