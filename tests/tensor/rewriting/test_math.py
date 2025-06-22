@@ -4674,7 +4674,7 @@ def test_local_block_diag_dot_to_dot_block_diag(left_multiply):
     else:
         out = d @ x
 
-    fn = pytensor.function([a, b, c, d], out)
+    fn = pytensor.function([a, b, c, d], out, mode=rewrite_mode)
     assert not any(
         isinstance(node.op, BlockDiagonal) for node in fn.maker.fgraph.toposort()
     )
@@ -4682,7 +4682,7 @@ def test_local_block_diag_dot_to_dot_block_diag(left_multiply):
     fn_expected = pytensor.function(
         [a, b, c, d],
         out,
-        mode=get_default_mode().excluding("local_block_diag_dot_to_dot_block_diag"),
+        mode=rewrite_mode.excluding("local_block_diag_dot_to_dot_block_diag"),
     )
 
     rng = np.random.default_rng()
