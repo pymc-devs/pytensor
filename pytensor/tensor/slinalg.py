@@ -77,7 +77,7 @@ class Cholesky(Op):
 
         if self.check_finite and not np.isfinite(x).all():
             if self.on_error == "nan":
-                out[0] = np.full(x.shape, np.nan, dtype=node.outputs[0].type.dtype)
+                out[0] = np.full(x.shape, np.nan, dtype=potrf.dtype)
                 return
             else:
                 raise ValueError("array must not contain infs or NaNs")

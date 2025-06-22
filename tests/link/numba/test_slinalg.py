@@ -465,7 +465,7 @@ def test_cholesky_raises_on_nan_input():
 
     x = pt.tensor(dtype=floatX, shape=(3, 3))
     x = x.T.dot(x)
-    g = pt.linalg.cholesky(x)
+    g = pt.linalg.cholesky(x, check_finite=True)
     f = pytensor.function([x], g, mode="NUMBA")
 
     with pytest.raises(np.linalg.LinAlgError, match=r"Non-numeric values"):
