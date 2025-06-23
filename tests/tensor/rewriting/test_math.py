@@ -69,6 +69,7 @@ from pytensor.tensor.math import (
     log,
     log1mexp,
     log1p,
+    log1pexp,
     lt,
     maximum,
     minimum,
@@ -1968,24 +1969,50 @@ class TestExpLog:
             decimal=6,
         )
 
-    def test_softplus_log(self):
-        # softplus(log(x)) -> log1p(x)
+    def test_log1pexp_log(self):
+        # log1pexp(log(x)) -> log1p(x)
         data_valid = np.random.random((4, 3)).astype("float32") * 2
         data_valid[0, 0] = 0  # edge case
         data_invalid = data_valid - 2
 
         x = fmatrix()
-        f = function([x], softplus(log(x)), mode=self.mode)
-        graph = f.maker.fgraph.toposort()
-        ops_graph = [
-            node
-            for node in graph
-            if isinstance(node.op, Elemwise)
-            and isinstance(node.op.scalar_op, ps.Log | ps.Exp | ps.Softplus)
-        ]
-        assert len(ops_graph) == 0
+        f = function([x], log1pexp(log(x)), mode=self.mode.excluding("inplace"))
+        assert equal_computations(
+            f.maker.fgraph.outputs,
+            [
+                pt.switch(
+                    x >= np.array([[0]], dtype=np.int8),
+                    pt.log1p(x),
+                    np.array([[np.nan]], dtype=np.float32),
+                )
+            ],
+        )
 
         expected = np.log1p(data_valid)
+        np.testing.assert_almost_equal(f(data_valid), expected)
+        assert np.all(np.isnan(f(data_invalid)))
+
+    def test_log1mexp_log(self):
+        # log1mexp(log(x)) -> log1p(-x)
+        data_valid = np.random.random((4, 3)).astype("float32")
+        data_valid[0, 0] = 0  # edge case
+        data_valid[0, 1] = 1  # another edge case
+        data_invalid = np.concatenate([data_valid + 1.1, data_valid - 1.1])
+
+        x = fmatrix()
+        f = function([x], log1mexp(log(x)), mode=self.mode.excluding("inplace"))
+        assert equal_computations(
+            f.maker.fgraph.outputs,
+            [
+                pt.switch(
+                    x >= np.array([[0]], dtype=np.int8),
+                    pt.log1p(-x),
+                    np.array([[np.nan]], dtype=np.float32),
+                )
+            ],
+        )
+
+        expected = np.log1p(-data_valid)
         np.testing.assert_almost_equal(f(data_valid), expected)
         assert np.all(np.isnan(f(data_invalid)))
 
