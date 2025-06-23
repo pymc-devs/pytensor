@@ -64,6 +64,7 @@ from pytensor.tensor.math import (
     log,
     log1mexp,
     log1p,
+    log1pexp,
     makeKeepDims,
     maximum,
     mul,
@@ -400,7 +401,7 @@ def local_exp_log(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([exp, expm1, softplus])
+@node_rewriter([exp, expm1, log1pexp, log1mexp])
 def local_exp_log_nan_switch(fgraph, node):
     # Rewrites of the kind exp(log...(x)) that require a `nan` switch
     x = node.inputs[0]
@@ -453,11 +454,18 @@ def local_exp_log_nan_switch(fgraph, node):
         new_out = switch(le(x, 0), neg(exp(x)), np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
-    # Case for softplus(log(x)) -> log1p(x)
+    # Case for log1pexp(log(x)) -> log1p(x)   (log1pexp aka softplus)
     if isinstance(prev_op, ps.Log) and isinstance(node_op, ps_math.Softplus):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(ge(x, 0), log1p(x), np.asarray(np.nan, old_out.dtype))
+        return [new_out]
+
+    # Case for log1mexp(log(x)) -> log1p(-x)
+    if isinstance(prev_op, ps.Log) and isinstance(node_op, ps_math.Log1mexp):
+        x = x.owner.inputs[0]
+        old_out = node.outputs[0]
+        new_out = switch(ge(x, 0), log1p(-x), np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
 
