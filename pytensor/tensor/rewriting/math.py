@@ -400,6 +400,37 @@ def local_exp_log(fgraph, node):
         return [exp(x)]
 
 
+@register_canonicalize
+@register_specialize
+@node_rewriter([sqrt, sqr])
+def local_sqrt_sqr(fgraph, node):
+    x = node.inputs[0]
+
+    if not (x.owner and isinstance(x.owner.op, Elemwise)):
+        return
+
+    prev_op = x.owner.op.scalar_op
+    node_op = node.op.scalar_op
+
+    # Case for sqrt(sqr(x)) -> |x|
+    if isinstance(prev_op, ps.Sqrt) and isinstance(node_op, ps.Sqr):
+        new_out = pt_abs(x.owner.inputs[0])
+        old_out = node.outputs[0]
+
+        # Handle potential integer to float cast by sqr
+        if new_out.dtype != old_out.dtype:
+            new_out = cast(new_out, old_out.dtype)
+        return [new_out]
+
+    # Case for sqr(sqrt(x)) -> x
+    if isinstance(prev_op, ps.Sqr) and isinstance(node_op, ps.Sqrt):
+        x = x.owner.inputs[0]
+        old_out = node.outputs[0]
+        new_out = switch(ge(x, 0), x, np.asarray(np.nan, old_out.dtype))
+
+        return [new_out]
+
+
 @register_specialize
 @node_rewriter([exp, expm1])
 def local_exp_log_nan_switch(fgraph, node):
