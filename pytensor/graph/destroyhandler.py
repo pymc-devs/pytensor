@@ -244,17 +244,38 @@ def inplace_candidates(fgraph, inputs, protected_inputs=None):
         protected_inputs.update(fgraph.outputs)
 
     has_destroyers = fgraph.has_destroyers
+    view_i = fgraph.destroy_handler.view_i
+    candidate_roots = {}
+    candidate_inputs = []
+    for inp in inputs:
+        if isinstance(inp, Constant):
+            # Can't inplace on constants.
+            continue
 
-    return [
-        inp
-        # Remove duplicates, while preserving order by using dict.fromkeys
-        for inp in dict.fromkeys(inputs)
-        if (
-            not isinstance(inp, Constant)
-            and inp not in protected_inputs
-            and not has_destroyers([inp])
-        )
-    ]
+        # Find the root of the view chain, and while traversing check if it passes on any protected inputs.
+        view_of_protected = False
+        root = inp
+        try:
+            while True:
+                if root in protected_inputs:
+                    view_of_protected = True
+                root = view_i[root]
+        except KeyError:
+            pass
+
+        if root in candidate_roots:
+            # Another input views on the same root, we can't destroy either
+            if (invalid_candidate := candidate_roots[root]) is not None:
+                # Invalidate the previous candidate
+                candidate_inputs.remove(invalid_candidate)
+            candidate_roots[root] = None
+        elif not view_of_protected and not has_destroyers([inp]):
+            candidate_inputs.append(inp)
+            candidate_roots[root] = inp
+        else:
+            candidate_roots[root] = None
+
+    return candidate_inputs
 
 
 class DestroyHandler(Bookkeeper):
