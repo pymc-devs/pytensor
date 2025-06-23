@@ -8,6 +8,7 @@ from pytensor import In, shared
 from pytensor import scalar as ps
 from pytensor import tensor as pt
 from pytensor.compile.function import function
+from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
@@ -1529,3 +1530,31 @@ def test_constant_fold_branches_add_mul(op):
     new_out = rewrite_graph(out, include=("add_mul_fusion",))
     assert len(new_out.owner.inputs) == 3
     assert equal_computations([new_out], [op(py_op(a, b), c, x)])
+
+
+def test_InplaceElemwiseOptimizer_bug():
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/1420
+
+    # This graph fails if InplaceElemwiseOptimizer were to try to skip `fgraph.validate`
+    # in between two invalid inplace rewrites.
+    z = pt.matrix("z")
+
+    z1 = ps.float64("z1")
+    z2 = ps.float64("z2")
+    out1, out2 = Elemwise(ps.Composite([z1, z2], [z1 + z2, z2 - z1]))(z[1:], z[:-1])
+    out = pt.exp(z[1:-1]).sum() + out1.sum() + out2.sum()
+
+    # Add 500 unrelated nodes to trigger the old special behavior
+    irrelevant_outs = [pt.specify_shape(z, (4, 4)) for _ in range(500)]
+
+    fgraph = FunctionGraph(inputs=[z], outputs=[out, *irrelevant_outs], clone=False)
+    add_supervisor_to_fgraph(fgraph, [In(z)])
+    # with config.change_flags(tensor__insert_inplace_optimizer_validate_nb=10):
+    rewrite_graph(fgraph, include=("inplace",))
+
+    pytensor.config.tensor__insert_inplace_optimizer_validate_nb = 1
+    with pytest.warns(
+        FutureWarning,
+        match="tensor__insert_inplace_optimizer_validate_nb config is deprecated",
+    ):
+        rewrite_graph(fgraph, include=("inplace",))
