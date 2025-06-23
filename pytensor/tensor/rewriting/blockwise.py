@@ -1,8 +1,6 @@
-import itertools
-
-from pytensor.compile import Supervisor
 from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, node_rewriter
+from pytensor.graph.destroyhandler import inplace_candidates
 from pytensor.graph.replace import vectorize_node
 from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, out2in
 from pytensor.tensor.basic import Alloc, ARange, alloc, shape_padleft
@@ -274,25 +272,19 @@ def blockwise_inplace(fgraph, node):
     batch_ndim = blockwise_op.batch_ndim(node)
     out_batch_bcast = node.outputs[0].type.broadcastable[:batch_ndim]
 
-    protected_inputs = [
-        f.protected for f in fgraph._features if isinstance(f, Supervisor)
-    ]
-    protected_inputs = list(itertools.chain.from_iterable(protected_inputs))
-    protected_inputs.extend(fgraph.outputs)
-    allowed_inplace_inputs = [
-        idx
-        for idx, inp in enumerate(node.inputs)
-        if
-        (
-            # Constants would need to be recreated every time if inplaced
-            not isinstance(inp, Constant)
-            # We can only inplace on inputs that are not being broadcasted
-            # As those are reused across iterations of Blockwise
-            and node.inputs[idx].type.broadcastable[:batch_ndim] == out_batch_bcast
-            # Inputs that are marked as protected or destroyed can't be inplaced
-            and not fgraph.has_destroyers([inp])
-            and inp not in protected_inputs
+    inputs = node.inputs
+    candidate_inputs = set(
+        inplace_candidates(
+            fgraph,
+            [
+                inp
+                for inp in inputs
+                if inp.type.broadcastable[:batch_ndim] == out_batch_bcast
+            ],
         )
+    )
+    allowed_inplace_inputs = [
+        i for i, inp in enumerate(inputs) if inp in candidate_inputs
     ]
 
     if not allowed_inplace_inputs:

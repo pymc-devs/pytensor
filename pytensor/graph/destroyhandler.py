@@ -7,7 +7,6 @@ and inplace operations.
 import itertools
 from collections import deque
 
-import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant
 from pytensor.graph.features import AlreadyThere, Bookkeeper
@@ -223,7 +222,7 @@ def _build_droot_impact(destroy_handler):
     return droot, impact, root_destroyer
 
 
-def fast_inplace_check(fgraph, inputs):
+def inplace_candidates(fgraph, inputs, protected_inputs=None):
     """
     Return the variables in inputs that are possible candidate for as inputs of
     inplace operation.
@@ -234,22 +233,28 @@ def fast_inplace_check(fgraph, inputs):
         Inputs Variable that you want to use as inplace destination.
 
     """
-    Supervisor = pytensor.compile.function.types.Supervisor
-    protected_inputs = list(
-        itertools.chain.from_iterable(
-            f.protected for f in fgraph._features if isinstance(f, Supervisor)
-        )
-    )
-    protected_inputs.extend(fgraph.outputs)
+    if protected_inputs is None:
+        from pytensor.compile.function.types import Supervisor
 
-    inputs = [
-        i
-        for i in inputs
-        if not isinstance(i, Constant)
-        and not fgraph.has_destroyers([i])
-        and i not in protected_inputs
+        protected_inputs = set(
+            itertools.chain.from_iterable(
+                f.protected for f in fgraph._features if isinstance(f, Supervisor)
+            )
+        )
+        protected_inputs.update(fgraph.outputs)
+
+    has_destroyers = fgraph.has_destroyers
+
+    return [
+        inp
+        # Remove duplicates, while preserving order by using dict.fromkeys
+        for inp in dict.fromkeys(inputs)
+        if (
+            not isinstance(inp, Constant)
+            and inp not in protected_inputs
+            and not has_destroyers([inp])
+        )
     ]
-    return inputs
 
 
 class DestroyHandler(Bookkeeper):
