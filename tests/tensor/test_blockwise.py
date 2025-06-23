@@ -8,11 +8,21 @@ import scipy.linalg
 import pytensor
 from pytensor import In, config, function, scan
 from pytensor.compile import get_default_mode, get_mode
+from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.gradient import grad
-from pytensor.graph import Apply, Op
+from pytensor.graph import Apply, FunctionGraph, Op, rewrite_graph
 from pytensor.graph.replace import vectorize_graph, vectorize_node
 from pytensor.raise_op import assert_op
-from pytensor.tensor import diagonal, dmatrix, log, ones_like, scalar, tensor, vector
+from pytensor.tensor import (
+    diagonal,
+    dmatrix,
+    log,
+    matrices,
+    ones_like,
+    scalar,
+    tensor,
+    vector,
+)
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
 from pytensor.tensor.nlinalg import MatrixInverse
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
@@ -698,3 +708,57 @@ def test_scan_gradient_core_type():
         grad_sit_sot0.eval({vec_seq: np.ones((4, n_steps, 1))}),
         np.ones((4, n_steps, 1)),
     )
+
+
+def test_partial_inplace():
+    class CoreOp(Op):
+        __props__ = ("inplace",)
+
+        def __init__(self, inplace):
+            self.inplace = tuple(inplace)
+            self.destroy_map = {i: [i] for i in inplace}
+
+        def inplace_on_inputs(self, allowed_inplace_inputs):
+            return type(self)(inplace=allowed_inplace_inputs)
+
+        def make_node(self, x, y, z):
+            return Apply(self, [x, y, z], [x.type(), y.type(), z.type()])
+
+        def perform(self, node, inputs, outputs):
+            [x, y, z] = inputs
+            if 0 not in self.inplace:
+                x = x.copy()
+            if 1 not in self.inplace:
+                y = y.copy()
+            if 2 not in self.inplace:
+                z = z.copy()
+            outputs[0][0] = x
+            outputs[1][0] = y
+            outputs[2][0] = z
+
+    core_op = CoreOp(inplace=())
+    blockwise_op = Blockwise(core_op, signature="(),(),()->(),(),()")
+    x, y, z = matrices("xyz")
+
+    # All can be inplaced
+    out = blockwise_op(x.T, y.T, z.T)
+    fgraph = FunctionGraph([x, y, z], out)
+    add_supervisor_to_fgraph(fgraph, [In(inp, mutable=True) for inp in fgraph.inputs])
+    rewrite_graph(fgraph, include=("inplace",))
+    assert fgraph.outputs[0].owner.op.destroy_map == {0: [0], 1: [1], 2: [2]}
+
+    # Only x, z can be inplaced, y is protected
+    out = blockwise_op(x.T, y.T, z.T)
+    fgraph = FunctionGraph([x, y, z], out)
+    add_supervisor_to_fgraph(
+        fgraph, [In(inp, mutable=(i % 2) == 0) for i, inp in enumerate(fgraph.inputs)]
+    )
+    rewrite_graph(fgraph, include=("inplace",))
+    assert fgraph.outputs[0].owner.op.destroy_map == {0: [0], 2: [2]}
+
+    # Only y can be inplaced, x is reused for first and third outputs
+    out = blockwise_op(x.T, y.T, x.T)
+    fgraph = FunctionGraph([x, y, z], out)
+    add_supervisor_to_fgraph(fgraph, [In(inp, mutable=True) for inp in fgraph.inputs])
+    rewrite_graph(fgraph, include=("inplace",))
+    assert fgraph.outputs[0].owner.op.destroy_map == {1: [1]}
