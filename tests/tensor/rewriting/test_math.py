@@ -2031,6 +2031,45 @@ class TestExpLog:
         assert len(ops_graph) == expected_switches
 
 
+class TestSqrSqrt:
+    def setup_method(self):
+        mode = get_default_mode()
+        self.mode = mode.including(
+            "local_sqrt_sqr",
+        ).excluding("fusion")
+        self.rng = np.random.default_rng()
+
+    def test_sqr_sqrt(self):
+        # sqrt(x) ** 2 -> x
+        x = pt.tensor("x", shape=(None, None))
+        out = sqr(sqrt(x))
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        assert equal_computations([out], [pt_abs(x)])
+
+    def test_sqrt_sqr(self):
+        x = pt.tensor("x", shape=(None, None))
+        out = sqrt(sqr(x))
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        expected = switch(
+            ge(x, np.zeros((1, 1), dtype="int8")),
+            x,
+            np.full((1, 1), np.nan, dtype=x.type.dtype),
+        )
+
+        assert equal_computations([out], [expected])
+
+    def test_sqr_sqrt_integer_upcast(self):
+        x = ivector("x")
+        out = sqr(sqrt(x))
+        dtype = out.type.dtype
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        expected = pt.cast(pt_abs(x), dtype=dtype)
+        assert equal_computations([out], [expected])
+
+
 class TestLocalSwitchSink:
     def setup_method(self):
         # condition values
