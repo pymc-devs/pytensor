@@ -1,8 +1,9 @@
+import abc
 import itertools
 import operator
 import sys
 from collections import defaultdict, deque
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from functools import cache, reduce
 from typing import TypeVar
 from warnings import warn
@@ -12,7 +13,7 @@ from pytensor import clone_replace, compile
 from pytensor.compile.function.types import Supervisor
 from pytensor.compile.mode import get_target_language
 from pytensor.configdefaults import config
-from pytensor.graph import FunctionGraph
+from pytensor.graph import FunctionGraph, Op
 from pytensor.graph.basic import Apply, Variable, ancestors
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
@@ -47,22 +48,31 @@ from pytensor.tensor.shape import shape_padleft
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
-class InplaceElemwiseOptimizer(GraphRewriter):
-    r"""
-    This is parameterized so that it works for `Elemwise` `Op`\s.
-    """
+class InplaceGraphOptimizer(GraphRewriter):
+    op: type[Op]
 
     def add_requirements(self, fgraph):
         fgraph.attach_feature(DestroyHandler())
 
+    @abc.abstractmethod
+    def filter_candidate_pairs(
+        self, fgraph: FunctionGraph, node: Apply, protected_inputs: Sequence[Variable]
+    ) -> Sequence[tuple[tuple[int, Variable], tuple[int, Variable]]]:
+        pass
+
+    @abc.abstractmethod
+    def create_inplace_node(
+        self, node: Apply, inplace_pattern: dict[int, Sequence[int]]
+    ) -> Apply:
+        pass
+
     def apply(self, fgraph):
         r"""
 
-        Attempts to replace all `Elemwise`\s by versions of them that operate
-        inplace. It operates greedily: for each `Elemwise` that is encountered,
-        for each output, it tries each input to see if it can operate inplace
-        on that input. If so, it makes the change and goes to the next output
-        or `Elemwise`.
+        Attempts to replace all `Op`\s by versions of them that operate
+        inplace. It operates greedily: for each `Op` that is encountered,
+        it tries to inplace all the valid inputs at once (if the Op supports it),
+        if that fails, it tries to inplace one input at a time.
 
         Examples
         --------
@@ -93,36 +103,13 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         # tackle them in a more general way. The whole try/except approach is probably suboptimal.
         # We can consider restricting inputs with static shapes that are large enough.
 
-        def create_inplace_node(node, inplace_pattern):
-            op = node.op
-            scalar_op = op.scalar_op
-            inplace_pattern = {i: o for i, [o] in inplace_pattern.items()}
-            if hasattr(scalar_op, "make_new_inplace"):
-                new_scalar_op = scalar_op.make_new_inplace(
-                    ps.transfer_type(
-                        *[
-                            inplace_pattern.get(i, o.dtype)
-                            for i, o in enumerate(node.outputs)
-                        ]
-                    )
-                )
-            else:
-                new_scalar_op = type(scalar_op)(
-                    ps.transfer_type(
-                        *[
-                            inplace_pattern.get(i, None)
-                            for i in range(len(node.outputs))
-                        ]
-                    )
-                )
-            return type(op)(new_scalar_op, inplace_pattern).make_node(*node.inputs)
-
         if config.tensor__insert_inplace_optimizer_validate_nb != -1:
             warn(
                 "tensor__insert_inplace_optimizer_validate_nb config is deprecated. Setting it will fail in a future release.",
                 FutureWarning,
             )
 
+        reason = f"{self.op}_inplace_optimizer"
         prof = {
             "opt": self,
             "node_before": len(fgraph.apply_nodes),
@@ -140,6 +127,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
         protected_inputs.update(fgraph.outputs)
         root_destroyer = fgraph.destroy_handler.root_destroyer
 
+        self_op = self.op
         update_mapping = fgraph.update_mapping or {}
         op_updates: dict[TensorVariable, TensorVariable] = {
             out: fgraph.inputs[update_mapping[out_idx]]
@@ -147,36 +135,22 @@ class InplaceElemwiseOptimizer(GraphRewriter):
             if (
                 out_idx in update_mapping
                 and out.owner
-                and isinstance(out.owner.op, Elemwise)
+                and isinstance(out.owner.op, self_op)
             )
         }
         set_op_updates = set(op_updates.keys())
 
         for node in fgraph.toposort():
-            if not isinstance(node.op, Elemwise) or node.op.destroy_map:
+            if not isinstance(node.op, self_op) or node.op.destroy_map:
                 continue
 
             # If big graph and the outputs are scalar, do not make it inplace.
             if large_graph and all(node.outputs[0].type.broadcastable):
                 continue
 
-            candidate_inputs = [
-                (node.inputs.index(inp), inp)
-                for inp in inplace_candidates(
-                    fgraph,
-                    node.inputs,
-                    protected_inputs=protected_inputs,
-                )
-            ]
-            if not candidate_inputs:
-                return []
-
-            candidate_pairs = [
-                ((o, out), (i, inp))
-                for o, out in enumerate(node.outputs)
-                for i, inp in candidate_inputs
-                if inp.type == out.type
-            ]
+            candidate_pairs = self.filter_candidate_pairs(
+                fgraph, node, protected_inputs
+            )
 
             if not candidate_pairs:
                 continue
@@ -216,13 +190,11 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                     inplace_pattern[o] = [i]
                     tried_inputs.add(i)
 
-            inplace_node = create_inplace_node(node, inplace_pattern)
+            inplace_node = self.create_inplace_node(node, inplace_pattern)
             if inplace_node.op.destroy_map == inplace_pattern:
                 replacements = tuple(zip(node.outputs, inplace_node.outputs))
                 try:
-                    fgraph.replace_all_validate(
-                        replacements, reason="inplace_elemwise_optimizer"
-                    )
+                    fgraph.replace_all_validate(replacements, reason=reason)
                 except InconsistencyError:
                     prof["nb_eager_inconsistent"] += 1
                 else:
@@ -238,7 +210,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                     inplace_pattern[o] = [i]
                     tried_inputs.add(i)
 
-                    inplace_node = create_inplace_node(node, inplace_pattern)
+                    inplace_node = self.create_inplace_node(node, inplace_pattern)
                     if inplace_node.op.destroy_map != inplace_pattern:
                         # This Op can't respect this partial inplace pattern,
                         # We assume it can't support any other cases
@@ -246,9 +218,7 @@ class InplaceElemwiseOptimizer(GraphRewriter):
                     else:
                         replacements = tuple(zip(node.outputs, inplace_node.outputs))
                         try:
-                            fgraph.replace_all_validate(
-                                replacements, reason="inplace_elemwise_optimizer"
-                            )
+                            fgraph.replace_all_validate(replacements, reason=reason)
                             node = inplace_node
                             replaced = True
                         except InconsistencyError:
@@ -276,6 +246,50 @@ class InplaceElemwiseOptimizer(GraphRewriter):
             f"{' ' * level}{self.__class__.__name__}",
             file=stream,
         )
+
+
+class InplaceElemwiseOptimizer(InplaceGraphOptimizer):
+    op = Elemwise
+
+    def filter_candidate_pairs(self, fgraph, node, protected_inputs):
+        candidate_inputs = [
+            (node.inputs.index(inp), inp)
+            for inp in inplace_candidates(
+                fgraph,
+                node.inputs,
+                protected_inputs=protected_inputs,
+            )
+        ]
+        if not candidate_inputs:
+            return []
+
+        return [
+            ((o, out), (i, inp))
+            for o, out in enumerate(node.outputs)
+            for i, inp in candidate_inputs
+            if inp.type == out.type
+        ]
+
+    def create_inplace_node(self, node, inplace_pattern):
+        op = node.op
+        scalar_op = op.scalar_op
+        inplace_pattern = {i: o for i, [o] in inplace_pattern.items()}
+        if hasattr(scalar_op, "make_new_inplace"):
+            new_scalar_op = scalar_op.make_new_inplace(
+                ps.transfer_type(
+                    *[
+                        inplace_pattern.get(i, o.dtype)
+                        for i, o in enumerate(node.outputs)
+                    ]
+                )
+            )
+        else:
+            new_scalar_op = type(scalar_op)(
+                ps.transfer_type(
+                    *[inplace_pattern.get(i, None) for i in range(len(node.outputs))]
+                )
+            )
+        return type(op)(new_scalar_op, inplace_pattern).make_node(*node.inputs)
 
 
 compile.optdb.register(
