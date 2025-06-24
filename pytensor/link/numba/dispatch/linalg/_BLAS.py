@@ -32,6 +32,35 @@ class _BLAS:
         ensure_blas()
 
     @classmethod
+    def numba_xgemv(cls, dtype):
+        """
+        xGEMV performs one of the following matrix operations:
+
+            y = alpha * A @ x + beta * y,   or   y = alpha * A.T @ x + beta * y
+
+        Where alpha and beta are scalars, x and y are vectors, and A is a general matrix.
+        """
+
+        blas_ptr, float_pointer = _get_blas_ptr_and_ptr_type(dtype, "gemv")
+
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # TRANS
+            _ptr_int,  # M
+            _ptr_int,  # N
+            float_pointer,  # ALPHA
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            float_pointer,  # X
+            _ptr_int,  # INCX
+            float_pointer,  # BETA
+            float_pointer,  # Y
+            _ptr_int,  # INCY
+        )
+
+        return functype(blas_ptr)
+
+    @classmethod
     def numba_xgbmv(cls, dtype):
         """
         xGBMV performs one of the following matrix operations:
