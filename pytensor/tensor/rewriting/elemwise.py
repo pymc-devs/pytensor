@@ -199,12 +199,14 @@ class InplaceGraphOptimizer(GraphRewriter):
                     prof["nb_eager_inconsistent"] += 1
                 else:
                     prof["nb_replaced"] += 1
+                    copy_stack_trace(node.outputs, inplace_node.outputs)
                     continue
 
             # If it fails or doesn't match the desired inplace pattern, try one output/input at a time
             tried_inputs = set()
             inplace_pattern = {}
             replaced = False
+            original_node = node
             for (o, _), (i, _) in sorted_candidate_pairs:
                 if o not in inplace_pattern and i not in tried_inputs:
                     inplace_pattern[o] = [i]
@@ -225,7 +227,9 @@ class InplaceGraphOptimizer(GraphRewriter):
                             prof["nb_inconsistent"] += 1
                             # The input, not the output caused inconsistencies
                             inplace_pattern.pop(o)
-            prof["nb_replaced"] += replaced
+            if replaced:
+                copy_stack_trace(original_node.outputs, node.outputs)
+                prof["nb_replaced"] += replaced
 
         return prof
 
