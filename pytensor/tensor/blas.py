@@ -83,9 +83,15 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+from numpy import zeros
+from scipy import linalg as scipy_linalg
 
-from pytensor.graph import vectorize_graph
+import pytensor
+from pytensor import tensor as pt
+from pytensor.graph import Op, vectorize_graph
 from pytensor.npy_2_compat import normalize_axis_tuple
+from pytensor.tensor import TensorLike, as_tensor_variable
+from pytensor.tensor.blockwise import Blockwise
 
 
 try:
@@ -97,13 +103,12 @@ except ImportError:
 import pytensor.scalar
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, view_roots
-from pytensor.graph.op import Op
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import FunctionPrinter, pprint
 from pytensor.scalar import bool as bool_t
-from pytensor.tensor.basic import as_tensor_variable, cast
+from pytensor.tensor.basic import cast
 from pytensor.tensor.blas_headers import blas_header_text, blas_header_version
 from pytensor.tensor.math import dot, tensordot
 from pytensor.tensor.shape import specify_broadcastable
@@ -1788,3 +1793,161 @@ def batched_tensordot(x, y, axes=2):
     core_tensordot = tensordot(core_x, core_y, axes=core_axes)
 
     return vectorize_graph(core_tensordot, replace={core_x: x, core_y: y})
+
+
+class BandedGEMV(Op):
+    __props__ = ("lower_diags", "upper_diags", "transpose", "overwrite_y")
+    gufunc_signature = "(m,n),(n),(n),(),()->(m)"
+
+    def __init__(
+        self,
+        lower_diags: int,
+        upper_diags: int,
+        transpose: bool = False,
+        overwrite_y: bool = False,
+    ):
+        self.lower_diags = lower_diags
+        self.upper_diags = upper_diags
+        self.overwrite_y = overwrite_y
+        self.transpose = transpose
+
+        self.destroy_map = {}
+
+        if self.overwrite_y:
+            self.destroy_map = {0: [2]}
+
+    def make_node(self, A, x, y, alpha, beta):
+        if A.ndim != 2:
+            raise TypeError("A must be a 2D tensor")
+        if x.ndim != 1:
+            raise TypeError("x must be a 1D tensor")
+
+        A = as_tensor_variable(A)
+        x = as_tensor_variable(x)
+        y = as_tensor_variable(y)
+        alpha = as_tensor_variable(alpha)
+        beta = as_tensor_variable(beta)
+
+        out_dtype = pytensor.scalar.upcast(A.dtype, x.dtype)
+        output = x.type.clone(dtype=out_dtype)()
+
+        return pytensor.graph.basic.Apply(self, [A, x, y, alpha, beta], [output])
+
+    def infer_shape(self, fgraph, nodes, shapes):
+        A_shape, _ = shapes
+        return [(A_shape[0],)]
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> Op:
+        if 2 in allowed_inplace_inputs:
+            new_props = self._props_dict()  # type: ignore
+            new_props["overwrite_y"] = True
+            return type(self)(**new_props)
+        else:
+            return self
+
+    def perform(self, node, inputs, outputs_storage):
+        A, x, y, alpha, beta = inputs
+        m, n = A.shape
+
+        x_stride = x.strides[0] // x.itemsize
+        y_stride = y.strides[0] // y.itemsize if y is not None else 1
+
+        offx = 0 if x_stride >= 0 else -x.size + 1
+        offy = 0 if y_stride >= 0 else -y.size + 1
+
+        kl = self.lower_diags
+        ku = self.upper_diags
+
+        A_banded = zeros((kl + ku + 1, n), dtype=A.dtype, order="F")
+
+        for i, k in enumerate(range(ku, -kl - 1, -1)):
+            if k >= 0:
+                A_banded[i, k:] = np.diag(A, k=k)
+            else:
+                A_banded[i, : n + k] = np.diag(A, k=k)
+
+        (fn,) = scipy_linalg.get_blas_funcs(("gbmv",), dtype=A.dtype)
+        outputs_storage[0][0] = fn(
+            m=m,
+            n=n,
+            kl=kl,
+            ku=ku,
+            a=A_banded,
+            alpha=alpha,
+            x=x,
+            incx=x_stride,
+            offx=offx,
+            beta=beta,
+            y=y,
+            overwrite_y=self.overwrite_y,
+            incy=y_stride,
+            offy=offy,
+            trans=int(self.transpose),
+        )
+
+    def L_op(self, inputs, outputs, output_grads):
+        # This is exactly the same as the usual gradient of a matrix-vector product, except that the banded structure
+        # is exploited.
+        A, x = inputs
+        (G_bar,) = output_grads
+
+        A_bar = pt.outer(G_bar, x.T)
+        x_bar = self(A.T, G_bar)
+
+        return [A_bar, x_bar]
+
+
+def banded_gemv(
+    A: TensorLike,
+    x: TensorLike,
+    lower_diags: int,
+    upper_diags: int,
+    y: TensorLike | None = None,
+    alpha: TensorLike | None = None,
+    beta: TensorLike | None = None,
+):
+    """
+    Specialized matrix-vector multiplication for cases when A is a banded matrix.
+
+    In BLAS, matrix-vector multiplication is done by the GEMV family of routines, and computes alpha * A @ x + beta * y
+
+    Unlike other dot functions in Pytensor, banded_dot uses a low-level API. No rewrites (yet!) exist to try to infer
+    the values of alpha, beta, or y from a compute graph surrounding a Dot22 Op. To get the most out of this Op, the
+    user will thus have to explicitly declare each argument.
+
+    In addition, no type-checking is done on A at runtime, so all data in A off the banded diagonals will be ignored.
+    This will lead to incorrect results if A is not actually a banded matrix.
+
+    Parameters
+    ----------
+    A: TensorLike
+        Matrix to perform banded dot on.
+    x: TensorLike
+        Vector to perform banded dot on.
+    lower_diags: int
+        Number of nonzero lower diagonals of A
+    upper_diags: int
+        Number of nonzero upper diagonals of A
+    y: TensorLike, optional
+        Vector to be added into the dot-product A @ x. This often called a "rank-one update" term. If not provided,
+        no rank-one update is performed on the dot product. Ignored if beta is zero.
+    alpha: TensorLike, optional
+        Scalar factor multiplying the dot-product A @ x. Default is 1.0
+    beta: TensorLike, optional
+        Scalar factor multiplying the rank-one update vector y. Ignored if y is None. Default is 0.0
+
+    Returns
+    -------
+    out: Tensor
+        The matrix multiplication result
+    """
+    if alpha is None:
+        alpha = pt.ones((), dtype=A.type.dtype)
+    if beta is None:
+        beta = pt.zeros((), dtype=A.type.dtype)
+    if y is None:
+        y = pt.empty(A.shape[:-1], dtype=A.type.dtype)
+
+    return Blockwise(BandedGEMV(lower_diags, upper_diags, overwrite_y=False))(
+        A, x, y, alpha, beta
+    )

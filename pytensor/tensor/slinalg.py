@@ -6,7 +6,6 @@ from typing import Literal, cast
 
 import numpy as np
 import scipy.linalg as scipy_linalg
-from numpy import zeros
 from numpy.exceptions import ComplexWarning
 
 import pytensor
@@ -1670,90 +1669,6 @@ def block_diag(*matrices: TensorVariable):
     return _block_diagonal_matrix(*matrices)
 
 
-class BandedDot(Op):
-    __props__ = ("lower_diags", "upper_diags")
-    gufunc_signature = "(m,n),(n)->(m)"
-
-    def __init__(self, lower_diags, upper_diags):
-        self.lower_diags = lower_diags
-        self.upper_diags = upper_diags
-
-    def make_node(self, A, x):
-        if A.ndim != 2:
-            raise TypeError("A must be a 2D tensor")
-        if x.ndim != 1:
-            raise TypeError("x must be a 1D tensor")
-
-        A = as_tensor_variable(A)
-        x = as_tensor_variable(x)
-
-        out_dtype = pytensor.scalar.upcast(A.dtype, x.dtype)
-        output = x.type.clone(dtype=out_dtype)()
-
-        return pytensor.graph.basic.Apply(self, [A, x], [output])
-
-    def infer_shape(self, fgraph, nodes, shapes):
-        A_shape, _ = shapes
-        return [(A_shape[0],)]
-
-    def perform(self, node, inputs, outputs_storage):
-        A, x = inputs
-        m, n = A.shape
-
-        kl = self.lower_diags
-        ku = self.upper_diags
-
-        A_banded = zeros((kl + ku + 1, n), dtype=A.dtype, order="F")
-
-        for i, k in enumerate(range(ku, -kl - 1, -1)):
-            if k >= 0:
-                A_banded[i, k:] = np.diag(A, k=k)
-            else:
-                A_banded[i, : n + k] = np.diag(A, k=k)
-
-        fn = scipy_linalg.get_blas_funcs("gbmv", dtype=A.dtype)
-        outputs_storage[0][0] = fn(m=m, n=n, kl=kl, ku=ku, alpha=1, a=A_banded, x=x)
-
-    def L_op(self, inputs, outputs, output_grads):
-        # This is exactly the same as the usual gradient of a matrix-vector product, except that the banded structure
-        # is exploited.
-        A, x = inputs
-        (G_bar,) = output_grads
-
-        A_bar = pt.outer(G_bar, x.T)
-        x_bar = self(A.T, G_bar)
-
-        return [A_bar, x_bar]
-
-
-def banded_dot(A: TensorLike, x: TensorLike, lower_diags: int, upper_diags: int):
-    """
-    Specialized matrix-vector multiplication for cases when A is a banded matrix
-
-    No type-checking is done on A at runtime, so all data in A off the banded diagonals will be ignored. This will lead
-    to incorrect results if A is not actually a banded matrix.
-
-    Unlike dot, this function is only valid if b is a vector.
-
-    Parameters
-    ----------
-    A: Tensorlike
-        Matrix to perform banded dot on.
-    x: Tensorlike
-        Vector to perform banded dot on.
-    lower_diags: int
-        Number of nonzero lower diagonals of A
-    upper_diags: int
-        Number of nonzero upper diagonals of A
-
-    Returns
-    -------
-    out: Tensor
-        The matrix multiplication result
-    """
-    return Blockwise(BandedDot(lower_diags, upper_diags))(A, x)
-
-
 __all__ = [
     "cholesky",
     "solve",
@@ -1768,5 +1683,4 @@ __all__ = [
     "lu",
     "lu_factor",
     "lu_solve",
-    "banded_dot",
 ]

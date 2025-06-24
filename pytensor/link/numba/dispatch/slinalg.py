@@ -11,7 +11,6 @@ from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
     _pivot_to_permutation,
 )
 from pytensor.link.numba.dispatch.linalg.decomposition.lu_factor import _lu_factor
-from pytensor.link.numba.dispatch.linalg.dot.banded import _dot_banded
 from pytensor.link.numba.dispatch.linalg.solve.cholesky import _cho_solve
 from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
 from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
@@ -20,7 +19,6 @@ from pytensor.link.numba.dispatch.linalg.solve.triangular import _solve_triangul
 from pytensor.link.numba.dispatch.linalg.solve.tridiagonal import _solve_tridiagonal
 from pytensor.tensor.slinalg import (
     LU,
-    BandedDot,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
@@ -313,19 +311,3 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
         )
 
     return cho_solve
-
-
-@numba_funcify.register(BandedDot)
-def numba_funcify_BandedDot(op, node, **kwargs):
-    kl = op.lower_diags
-    ku = op.upper_diags
-    dtype = node.inputs[0].dtype
-
-    if dtype in complex_dtypes:
-        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
-
-    @numba_njit(cache=False)
-    def banded_dot(A, x):
-        return _dot_banded(A, x, kl=kl, ku=ku)
-
-    return banded_dot

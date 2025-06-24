@@ -11,14 +11,13 @@ from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor import TensorVariable
+from pytensor.tensor.blas import BandedGEMV, banded_gemv
 from pytensor.tensor.slinalg import (
-    BandedDot,
     Cholesky,
     CholeskySolve,
     Solve,
     SolveBase,
     SolveTriangular,
-    banded_dot,
     block_diag,
     cho_solve,
     cholesky,
@@ -1078,11 +1077,11 @@ def test_banded_dot(kl, ku, stride):
 
     A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
     x = pt.tensor("x", shape=x_val.shape, dtype=x_val.dtype)
-    res = banded_dot(A, x, kl, ku)
+    res = banded_gemv(A, x, kl, ku)
     res_2 = A @ x
 
     fn = function([A, x], [res, res_2], trust_input=True)
-    assert any(isinstance(node.op, BandedDot) for node in fn.maker.fgraph.apply_nodes)
+    assert any(isinstance(node.op, BandedGEMV) for node in fn.maker.fgraph.apply_nodes)
 
     out_val, out_2_val = fn(A_val, x_val)
 
@@ -1111,7 +1110,7 @@ def test_banded_dot_grad():
         return sum(pt.diag(d, k=k) for k, d in zip(diag_idxs, diags))
 
     def test_fn(A, x):
-        return banded_dot(make_banded_pt(A), x, lower_diags=1, upper_diags=1).sum()
+        return banded_gemv(make_banded_pt(A), x, lower_diags=1, upper_diags=1).sum()
 
     utt.verify_grad(
         test_fn,

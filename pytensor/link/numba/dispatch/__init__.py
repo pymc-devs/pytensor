@@ -14,6 +14,6 @@ import pytensor.link.numba.dispatch.slinalg
 import pytensor.link.numba.dispatch.sparse
 import pytensor.link.numba.dispatch.subtensor
 import pytensor.link.numba.dispatch.tensor_basic
-
+import pytensor.link.numba.dispatch.blas
 
 # isort: on
