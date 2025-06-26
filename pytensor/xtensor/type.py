@@ -691,14 +691,14 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     # https://docs.xarray.dev/en/latest/api.html#id8
     def transpose(
         self,
-        *dims: str | EllipsisType,
+        *dim: str | EllipsisType,
         missing_dims: Literal["raise", "warn", "ignore"] = "raise",
     ):
         """Transpose dimensions of the tensor.
 
         Parameters
         ----------
-        *dims : str | Ellipsis
+        *dim : str | Ellipsis
             Dimensions to transpose. If empty, performs a full transpose.
             Can use ellipsis (...) to represent remaining dimensions.
         missing_dims : {"raise", "warn", "ignore"}, default="raise"
@@ -718,7 +718,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             If missing_dims="raise" and any dimensions don't exist.
             If multiple ellipsis are provided.
         """
-        return px.shape.transpose(self, *dims, missing_dims=missing_dims)
+        return px.shape.transpose(self, *dim, missing_dims=missing_dims)
 
     def stack(self, dim, **dims):
         return px.shape.stack(self, dim, **dims)
