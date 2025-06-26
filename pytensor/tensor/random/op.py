@@ -392,6 +392,13 @@ class RandomVariable(RNGConsumerOp):
         out_type = TensorType(dtype=self.dtype, shape=static_shape)
         outputs = (rng.type(), out_type())
 
+        if self.dtype == "floatX":
+            # Commit to a specific float type if the Op is still using "floatX"
+            dtype = config.floatX
+            props = self._props_dict()
+            props["dtype"] = dtype
+            self = type(self)(**props)
+
         return Apply(self, inputs, outputs)
 
     def batch_ndim(self, node: Apply) -> int:

@@ -5,8 +5,8 @@ from typing import Literal
 import pytensor.tensor.random.basic as ptr
 from pytensor.graph.basic import Variable
 from pytensor.tensor.random.op import RandomVariable
-from pytensor.xtensor import as_xtensor
 from pytensor.xtensor.math import sqrt
+from pytensor.xtensor.type import as_xtensor
 from pytensor.xtensor.vectorization import XRV
 
 
@@ -14,6 +14,7 @@ def _as_xrv(
     core_op: RandomVariable,
     core_inps_dims_map: Sequence[Sequence[int]] | None = None,
     core_out_dims_map: Sequence[int] | None = None,
+    name: str | None = None,
 ):
     """Helper function to define an XRV constructor.
 
@@ -41,7 +42,14 @@ def _as_xrv(
         core_out_dims_map = tuple(range(core_op.ndim_supp))
 
     core_dims_needed = max(
-        (*(len(i) for i in core_inps_dims_map), len(core_out_dims_map)), default=0
+        max(
+            (
+                max((entry + 1 for entry in dims_map), default=0)
+                for dims_map in core_inps_dims_map
+            ),
+            default=0,
+        ),
+        max((entry + 1 for entry in core_out_dims_map), default=0),
     )
 
     @wraps(core_op)
@@ -76,7 +84,10 @@ def _as_xrv(
             extra_dims = {}
 
         return XRV(
-            core_op, core_dims=full_core_dims, extra_dims=tuple(extra_dims.keys())
+            core_op,
+            core_dims=full_core_dims,
+            extra_dims=tuple(extra_dims.keys()),
+            name=name,
         )(rng, *extra_dims.values(), *params)
 
     return xrv_constructor
