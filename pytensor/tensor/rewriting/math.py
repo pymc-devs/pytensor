@@ -191,53 +191,54 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
         )
 
     # Check that the BlockDiagonal is an input to a Dot node:
-    clients = list(get_clients_at_depth(fgraph, node, depth=1))
-    if not clients or len(clients) > 1 or not isinstance(clients[0].op, Dot):
-        return
+    for client in get_clients_at_depth(fgraph, node, depth=1):
+        if not isinstance(client.op, Dot):
+            return
 
-    [dot_node] = clients
-    op = dot_node.op
-    x, y = dot_node.inputs
+        op = client.op
+        x, y = client.inputs
 
-    if not (check_for_block_diag(x) or check_for_block_diag(y)):
-        return None
+        if not (check_for_block_diag(x) or check_for_block_diag(y)):
+            return None
 
-    # Case 1: Only one input is BlockDiagonal. In this case, multiply all components of the block-diagonal with the
-    # non-block diagonal, and return a new block diagonal
-    if check_for_block_diag(x) and not check_for_block_diag(y):
-        components = x.owner.inputs
-        y_splits = split(
-            y,
-            splits_size=[component.shape[-1] for component in components],
-            n_splits=len(components),
-        )
-        new_components = [
-            op(component, y_split) for component, y_split in zip(components, y_splits)
-        ]
-        new_output = join(0, *new_components)
+        # Case 1: Only one input is BlockDiagonal. In this case, multiply all components of the block-diagonal with the
+        # non-block diagonal, and return a new block diagonal
+        if check_for_block_diag(x) and not check_for_block_diag(y):
+            components = x.owner.inputs
+            y_splits = split(
+                y,
+                splits_size=[component.shape[-1] for component in components],
+                n_splits=len(components),
+            )
+            new_components = [
+                op(component, y_split)
+                for component, y_split in zip(components, y_splits)
+            ]
+            new_output = join(0, *new_components)
 
-    elif not check_for_block_diag(x) and check_for_block_diag(y):
-        components = y.owner.inputs
-        x_splits = split(
-            x,
-            splits_size=[component.shape[0] for component in components],
-            n_splits=len(components),
-            axis=1,
-        )
+        elif not check_for_block_diag(x) and check_for_block_diag(y):
+            components = y.owner.inputs
+            x_splits = split(
+                x,
+                splits_size=[component.shape[0] for component in components],
+                n_splits=len(components),
+                axis=1,
+            )
 
-        new_components = [
-            op(x_split, component) for component, x_split in zip(components, x_splits)
-        ]
-        new_output = join(1, *new_components)
+            new_components = [
+                op(x_split, component)
+                for component, x_split in zip(components, x_splits)
+            ]
+            new_output = join(1, *new_components)
 
-    # Case 2: Both inputs are BlockDiagonal. Do nothing
-    else:
-        # TODO: If shapes are statically known and all components have equal shapes, we could rewrite
-        #  this case to block_diag(*[dot(comp_1, comp_2) for comp_1, comp_2 in zip(x.owner.inputs, y.owner.inputs)])
-        return None
+        # Case 2: Both inputs are BlockDiagonal. Do nothing
+        else:
+            # TODO: If shapes are statically known and all components have equal shapes, we could rewrite
+            #  this case to block_diag(*[dot(comp_1, comp_2) for comp_1, comp_2 in zip(x.owner.inputs, y.owner.inputs)])
+            return None
 
-    copy_stack_trace(node.outputs[0], new_output)
-    return {dot_node.outputs[0]: new_output}
+        copy_stack_trace(node.outputs[0], new_output)
+        return {client.outputs[0]: new_output}
 
 
 @register_canonicalize

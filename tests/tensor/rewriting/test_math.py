@@ -4666,21 +4666,23 @@ def test_local_block_diag_dot_to_dot_block_diag(left_multiply):
     b = tensor("b", shape=(2, 4))
     c = tensor("c", shape=(4, 4))
     d = tensor("d", shape=(10, 10))
+    e = tensor("e", shape=(10, 10))
 
     x = pt.linalg.block_diag(a, b, c)
 
+    # Test multiple clients are all rewritten
     if left_multiply:
-        out = x @ d
+        out = [x @ d, x @ e]
     else:
-        out = d @ x
+        out = [d @ x, e @ x]
 
-    fn = pytensor.function([a, b, c, d], out, mode=rewrite_mode)
+    fn = pytensor.function([a, b, c, d, e], out, mode=rewrite_mode)
     assert not any(
         isinstance(node.op, BlockDiagonal) for node in fn.maker.fgraph.toposort()
     )
 
     fn_expected = pytensor.function(
-        [a, b, c, d],
+        [a, b, c, d, e],
         out,
         mode=rewrite_mode.excluding("local_block_diag_dot_to_dot_block_diag"),
     )
@@ -4690,10 +4692,11 @@ def test_local_block_diag_dot_to_dot_block_diag(left_multiply):
     b_val = rng.normal(size=b.type.shape).astype(b.type.dtype)
     c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)
     d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)
+    e_val = rng.normal(size=e.type.shape).astype(e.type.dtype)
 
     np.testing.assert_allclose(
-        fn(a_val, b_val, c_val, d_val),
-        fn_expected(a_val, b_val, c_val, d_val),
+        fn(a_val, b_val, c_val, d_val, e_val),
+        fn_expected(a_val, b_val, c_val, d_val, e_val),
         atol=1e-6 if config.floatX == "float32" else 1e-12,
         rtol=1e-6 if config.floatX == "float32" else 1e-12,
     )
