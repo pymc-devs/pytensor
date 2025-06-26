@@ -7,7 +7,7 @@ import pytest
 
 import pytensor.tensor.random as ptr
 import pytensor.xtensor.random as pxr
-from pytensor import function, shared
+from pytensor import config, function, shared
 from pytensor.graph import rewrite_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor import broadcast_arrays, tensor
@@ -110,6 +110,19 @@ def test_output_dim_does_not_map_from_input_dims():
     np.testing.assert_allclose(
         rv.eval({a_size: a_size_val}), np.broadcast_to((1, 2), (a_size_val, 2))
     )
+
+
+def test_dtype():
+    x = normal(0, 1)
+    assert x.type.dtype == config.floatX
+
+    with config.change_flags(floatX="float64"):
+        x = normal(0, 1)
+    assert x.type.dtype == "float64"
+
+    with config.change_flags(floatX="float32"):
+        x = normal(0, 1)
+    assert x.type.dtype == "float32"
 
 
 def test_normal():

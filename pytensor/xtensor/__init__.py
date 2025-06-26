@@ -1,7 +1,7 @@
 import warnings
 
 import pytensor.xtensor.rewriting
-from pytensor.xtensor import linalg
+from pytensor.xtensor import linalg, random
 from pytensor.xtensor.math import dot
 from pytensor.xtensor.shape import concat
 from pytensor.xtensor.type import (

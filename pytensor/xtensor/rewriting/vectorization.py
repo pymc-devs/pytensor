@@ -116,7 +116,7 @@ def lower_rv(fgraph, node):
         size = [*extra_dim_lengths, *param_batch_shape]
 
     # RVs are their own core Op
-    new_next_rng, tensor_out = core_op(*tensor_params, rng=rng, size=size).owner.outputs
+    new_next_rng, tensor_out = core_op.make_node(rng, size, *tensor_params).outputs
 
     # Convert output Tensors to XTensors
     new_out = xtensor_from_tensor(tensor_out, dims=old_out.type.dims)
