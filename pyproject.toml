@@ -53,7 +53,7 @@ dependencies = [
     "filelock>=3.15",
     "etuples",
     "logical-unification",
-    "miniKanren!=1.0.4",
+    "miniKanren",
     "cons",
 ]
 
