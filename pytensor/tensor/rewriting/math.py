@@ -193,13 +193,13 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
     # Check that the BlockDiagonal is an input to a Dot node:
     for client in get_clients_at_depth(fgraph, node, depth=1):
         if not isinstance(client.op, Dot):
-            return
+            continue
 
         op = client.op
         x, y = client.inputs
 
         if not (check_for_block_diag(x) or check_for_block_diag(y)):
-            return None
+            continue
 
         # Case 1: Only one input is BlockDiagonal. In this case, multiply all components of the block-diagonal with the
         # non-block diagonal, and return a new block diagonal
@@ -235,7 +235,7 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
         else:
             # TODO: If shapes are statically known and all components have equal shapes, we could rewrite
             #  this case to block_diag(*[dot(comp_1, comp_2) for comp_1, comp_2 in zip(x.owner.inputs, y.owner.inputs)])
-            return None
+            continue
 
         copy_stack_trace(node.outputs[0], new_output)
         return {client.outputs[0]: new_output}
