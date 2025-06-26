@@ -993,3 +993,64 @@ def test_slogdet_specialization():
     f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
+
+
+def test_det_triangular():
+    x = pt.matrix("x")
+    x_triangular = pt.linalg.cholesky(x)
+    z = pt.linalg.det(x_triangular)
+
+    # Rewrite Test
+    f_rewritten = function([x], z, mode="FAST_RUN")
+
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Det) for node in nodes)
+
+    # Numeric Test
+    x_test = np.random.rand(10, 10).astype(config.floatX)
+    x_psd = np.dot(x_test, x_test.T)
+    x_triangular = np.linalg.cholesky(x_psd)
+    det_val = np.linalg.det(x_triangular)
+    rewritten_val = f_rewritten(x_psd)
+    assert_allclose(
+        det_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+    # Case where rewrite should not be applied
+    y = pt.matrix("y")
+    z = pt.linalg.det(y)
+
+    f_rewritten = function([y], z, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert any(isinstance(node.op, Det) for node in nodes)
+
+
+@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
+def test_inv_triangular(inv_op):
+    x = pt.matrix("x")
+    x_triangular = pt.linalg.cholesky(x)
+    z = get_pt_function(x_triangular, inv_op)
+
+    # Rewrite Test
+    f_rewritten = function([x], z, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    valid_inverses = (MatrixInverse, MatrixPinv)
+    assert not any(isinstance(node.op, valid_inverses) for node in nodes)
+
+    # Numeric Test
+    x_test = np.random.rand(10, 10).astype(config.floatX)
+    x_psd = np.dot(x_test, x_test.T)
+    x_triangular = np.linalg.cholesky(x_psd)
+    inv_val = np.linalg.inv(x_triangular)
+    rewritten_val = f_rewritten(x_psd)
+
+    assert_allclose(
+        inv_val,
+        rewritten_val,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
