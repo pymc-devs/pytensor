@@ -389,6 +389,10 @@ class Psi(UnaryScalarOp):
             #define ga_double double
             #endif
 
+            #ifndef M_PI
+            #define M_PI 3.14159265358979323846
+            #endif
+
             #ifndef _PSIFUNCDEFINED
             #define _PSIFUNCDEFINED
             DEVICE double _psi(ga_double x) {
@@ -396,7 +400,8 @@ class Psi(UnaryScalarOp):
             /*taken from
             Bernardo, J. M. (1976). Algorithm AS 103:
             Psi (Digamma) Function. Applied Statistics. 25 (3), 315-317.
-            http://www.uv.es/~bernardo/1976AppStatist.pdf */
+            http://www.uv.es/~bernardo/1976AppStatist.pdf
+            */
 
             ga_double y, R, psi_ = 0;
             ga_double S  = 1.0e-5;
@@ -406,10 +411,22 @@ class Psi(UnaryScalarOp):
             ga_double S5 = 3.968253968e-3;
             ga_double D1 = -0.5772156649;
 
+            if (x <= 0) {
+                // the digamma function approaches infinity from one side and -infinity from the other, around negative integers and zero
+                if (x == floor(x)) {
+                    return INFINITY; // note that scipy returns -INF for 0 and NaN for negative integers
+                }
+
+                // Use reflection formula
+                ga_double pi_x = M_PI * x;
+                ga_double cot_pi_x = cos(pi_x) / sin(pi_x);
+                return _psi(1.0 - x) + M_PI * cot_pi_x;
+            }
+
             y = x;
 
-            if (y <= 0.0)
-               return psi_;
+            if (y <= 0)
+            return psi_;
 
             if (y <= S)
                 return D1 - 1.0/y;
