@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import cast as type_cast
 
 import numpy as np
 from numba.core.extending import overload
@@ -33,12 +34,16 @@ def _matrix_vector_product(
     (fn,) = linalg.get_blas_funcs(("gemv",), (A, x))
 
     incx = x.strides[0] // x.itemsize
-    incy = y.strides[0] // y.itemsize if y is not None else 1
-
     offx = 0 if incx >= 0 else -x.size + 1
-    offy = 0 if incy >= 0 else -y.size + 1
 
-    return fn(
+    if y is not None:
+        incy = y.strides[0] // y.itemsize if y is not None else 1
+        offy = 0 if incy >= 0 else -y.size + 1
+    else:
+        incy = 1
+        offy = 0
+
+    res = fn(
         alpha=alpha,
         a=A,
         x=x,
@@ -52,6 +57,8 @@ def _matrix_vector_product(
         trans=trans,
     )
 
+    return type_cast(np.ndarray, res)
+
 
 @overload(_matrix_vector_product)
 def matrix_vector_product_impl(
@@ -63,7 +70,15 @@ def matrix_vector_product_impl(
     overwrite_y: bool = False,
     trans: int = 1,
 ) -> Callable[
-    [float, np.ndarray, np.ndarray, float, np.ndarray, int, int, int, int, int],
+    [
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray | None,
+        np.ndarray | None,
+        bool,
+        int,
+    ],
     np.ndarray,
 ]:
     ensure_lapack()

@@ -1941,12 +1941,23 @@ def banded_gemv(
     out: Tensor
         The matrix multiplication result
     """
+    A = as_tensor_variable(A)
+    x = as_tensor_variable(x)
+
     if alpha is None:
         alpha = pt.ones((), dtype=A.type.dtype)
+    else:
+        alpha = as_tensor_variable(alpha)
+
     if beta is None:
         beta = pt.zeros((), dtype=A.type.dtype)
+    else:
+        beta = as_tensor_variable(beta)
+
     if y is None:
         y = pt.empty(A.shape[:-1], dtype=A.type.dtype)
+    else:
+        y = as_tensor_variable(y)
 
     return Blockwise(BandedGEMV(lower_diags, upper_diags, overwrite_y=False))(
         A, x, y, alpha, beta

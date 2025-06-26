@@ -56,10 +56,14 @@ def _gbmv(
     A_banded = A_to_banded(A, kl=kl, ku=ku)
 
     incx = x.strides[0] // x.itemsize
-    incy = y.strides[0] // y.itemsize if y is not None else 1
-
     offx = 0 if incx >= 0 else -x.size + 1
-    offy = 0 if incy >= 0 else -y.size + 1
+
+    if y is not None:
+        incy = y.strides[0] // y.itemsize
+        offy = 0 if incy >= 0 else -y.size + 1
+    else:
+        incy = 1
+        offy = 0
 
     return fn(
         m=m,
