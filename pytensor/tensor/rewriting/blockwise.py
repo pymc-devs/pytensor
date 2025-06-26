@@ -1,10 +1,8 @@
-import itertools
-
-from pytensor.compile import Supervisor
 from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, node_rewriter
+from pytensor.graph.destroyhandler import inplace_candidates
 from pytensor.graph.replace import vectorize_node
-from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, out2in
+from pytensor.graph.rewriting.basic import copy_stack_trace, out2in
 from pytensor.tensor.basic import Alloc, ARange, alloc, shape_padleft
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.math import Dot
@@ -13,6 +11,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
+from pytensor.tensor.rewriting.elemwise import InplaceGraphOptimizer
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -262,74 +261,76 @@ def local_blockwise_of_subtensor(fgraph, node):
     return [x[(*none_slices, *core_idxs)]]
 
 
-@node_rewriter(tracks=[Blockwise], inplace=True)
-def blockwise_inplace(fgraph, node):
-    blockwise_op = node.op
+class InplaceBlockwiseOptimizer(InplaceGraphOptimizer):
+    op = Blockwise
 
-    if blockwise_op.destroy_map:
-        # Op already has inplace
-        return
+    def filter_candidate_pairs(self, fgraph, node, protected_inputs):
+        blockwise_op = node.op
+        batch_ndim = blockwise_op.batch_ndim(node)
+        out_batch_bcast = node.outputs[0].type.broadcastable[:batch_ndim]
+        inputs = node.inputs
 
-    # Find out valid inputs for inplacing
-    batch_ndim = blockwise_op.batch_ndim(node)
-    out_batch_bcast = node.outputs[0].type.broadcastable[:batch_ndim]
-
-    protected_inputs = [
-        f.protected for f in fgraph._features if isinstance(f, Supervisor)
-    ]
-    protected_inputs = list(itertools.chain.from_iterable(protected_inputs))
-    protected_inputs.extend(fgraph.outputs)
-    allowed_inplace_inputs = [
-        idx
-        for idx, inp in enumerate(node.inputs)
-        if
-        (
-            # Constants would need to be recreated every time if inplaced
-            not isinstance(inp, Constant)
-            # We can only inplace on inputs that are not being broadcasted
-            # As those are reused across iterations of Blockwise
-            and node.inputs[idx].type.broadcastable[:batch_ndim] == out_batch_bcast
-            # Inputs that are marked as protected or destroyed can't be inplaced
-            and not fgraph.has_destroyers([inp])
-            and inp not in protected_inputs
+        candidate_inputs = set(
+            inplace_candidates(
+                fgraph,
+                [
+                    inp
+                    for inp in inputs
+                    if inp.type.broadcastable[:batch_ndim] == out_batch_bcast
+                ],
+            )
         )
-    ]
 
-    if not allowed_inplace_inputs:
-        return None
+        allowed_inplace_inputs = [
+            i for i, inp in enumerate(inputs) if inp in candidate_inputs
+        ]
+        destroy_map = blockwise_op.core_op.inplace_on_inputs(
+            allowed_inplace_inputs=allowed_inplace_inputs
+        ).destroy_map
 
-    inplace_core_op = blockwise_op.core_op.inplace_on_inputs(
-        allowed_inplace_inputs=allowed_inplace_inputs
-    )
+        if not destroy_map:
+            return []
 
-    if not inplace_core_op.destroy_map:
-        return None
+        outputs = node.outputs
+        return [
+            ((out_idx, outputs[out_idx]), (inp_idx, inputs[inp_idx]))
+            for out_idx, inp_idxs in destroy_map.items()
+            for inp_idx in inp_idxs
+        ]
 
-    # Check Op is not trying to inplace on non-candidate inputs
-    for destroyed_inputs in inplace_core_op.destroy_map.values():
-        for destroyed_input in destroyed_inputs:
-            if destroyed_input not in allowed_inplace_inputs:
-                raise ValueError(
-                    f"Op {blockwise_op.core_op} destroy_map does not respect allowed_inplace_inputs {allowed_inplace_inputs}"
-                )
+    def create_inplace_node(self, node, inplace_pattern):
+        blockwise_op = node.op
+        allowed_inplace_inputs = tuple(v[0] for v in inplace_pattern.values())
+        inplace_core_op = blockwise_op.core_op.inplace_on_inputs(
+            allowed_inplace_inputs=allowed_inplace_inputs
+        )
 
-    # Recreate core_op with inplace
-    inplace_blockwise_op = Blockwise(
-        core_op=inplace_core_op,
-        signature=blockwise_op.signature,
-        name=blockwise_op.name,
-        gufunc_spec=blockwise_op.gufunc_spec,
-        destroy_map=inplace_core_op.destroy_map,
-    )
+        if not inplace_core_op.destroy_map:
+            return node
 
-    out = inplace_blockwise_op.make_node(*node.inputs).outputs
-    copy_stack_trace(node.outputs, out)
-    return out
+        # Check Op is not trying to inplace on non-candidate inputs
+        for destroyed_inputs in inplace_core_op.destroy_map.values():
+            for destroyed_input in destroyed_inputs:
+                if destroyed_input not in allowed_inplace_inputs:
+                    raise ValueError(
+                        f"Op {blockwise_op.core_op} destroy_map does not respect allowed_inplace_inputs {allowed_inplace_inputs}"
+                    )
+
+        # Recreate core_op with inplace
+        inplace_blockwise_op = type(blockwise_op)(
+            core_op=inplace_core_op,
+            signature=blockwise_op.signature,
+            name=blockwise_op.name,
+            gufunc_spec=blockwise_op.gufunc_spec,
+            destroy_map=inplace_core_op.destroy_map,
+        )
+
+        return inplace_blockwise_op.make_node(*node.inputs)
 
 
 optdb.register(
     "blockwise_inplace",
-    in2out(blockwise_inplace),
+    InplaceBlockwiseOptimizer(),
     "fast_run",
     "inplace",
     position=50.1,
