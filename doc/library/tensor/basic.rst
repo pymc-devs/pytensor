@@ -287,10 +287,10 @@ precise) is by calling :func:`pytensor.shared`
 
     x = pytensor.shared(np.random.standard_normal((3, 4)))
 
-This will return a :term:`shared variable <shared variable>` whose ``.value`` is
+This will return a :term:`shared variable <shared variable>` whose ``.data`` is
 a NumPy `ndarray`.  The number of dimensions and dtype of the `Variable` are
 inferred from the `ndarray` argument.  The argument to `shared` *will not be
-copied*, and subsequent changes will be reflected in ``x.value``.
+copied*, and subsequent changes will be reflected in ``x.data``.
 
 For additional information, see the :func:`shared() <shared.shared>` documentation.
 

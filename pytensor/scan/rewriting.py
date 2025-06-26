@@ -1442,7 +1442,7 @@ def scan_save_mem(fgraph, node):
                 if (
                     i <= op.info.n_mit_mot
                     and isinstance(this_slice[0], ScalarConstant)
-                    and this_slice[0].value == -1
+                    and this_slice[0].data == -1
                 ):
                     start = nw_steps - 1
                 else:
@@ -1728,7 +1728,7 @@ def scan_save_mem(fgraph, node):
                         # Special case when only last value is requested
                         if (
                             isinstance(old_slices[0], ScalarConstant)
-                            and old_slices[0].value == -1
+                            and old_slices[0].data == -1
                         ):
                             position = old_slices[0]
                         else:

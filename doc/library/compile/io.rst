@@ -189,9 +189,9 @@ To show some examples of these access methods...
 >>> fn = function([a, b, ((c, c+a+b), 10.0)], [])
 
 >>> # the value associated with c is accessible in 3 ways
->>> fn['s'] is fn.value[c]
+>>> fn['s'] is fn.data[c]
 True
->>> fn['s'] is fn.container[c].value
+>>> fn['s'] is fn.container[c].data
 True
 
 >>> fn['s']
@@ -205,14 +205,14 @@ array(13.0)
 []
 >>> fn['s']
 array(100.0)
->>> fn.value[c] = 99.0
+>>> fn.data[c] = 99.0
 >>> fn(1,0)
 []
 >>> fn['s']
 array(100.0)
->>> fn['s'] == fn.value[c]
+>>> fn['s'] == fn.data[c]
 True
->>> fn['s'] == fn.container[c].value
+>>> fn['s'] == fn.container[c].data
 True
 
 
