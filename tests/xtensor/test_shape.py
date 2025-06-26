@@ -15,7 +15,6 @@ from pytensor.tensor import scalar
 from pytensor.xtensor.shape import (
     concat,
     stack,
-    transpose,
     unstack,
 )
 from pytensor.xtensor.type import xtensor
@@ -46,13 +45,14 @@ def test_transpose():
     permutations = [
         (a, b, c, d, e),  # identity
         (e, d, c, b, a),  # full tranpose
-        (),  # eqivalent to full transpose
+        (),  # equivalent to full transpose
         (a, b, c, e, d),  # swap last two dims
         (..., d, c),  # equivalent to (a, b, e, d, c)
         (b, a, ..., e, d),  # equivalent to (b, a, c, d, e)
         (c, a, ...),  # equivalent to (c, a, b, d, e)
+        (...,),  # no op
     ]
-    outs = [transpose(x, *perm) for perm in permutations]
+    outs = [x.transpose(*perm) for perm in permutations]
 
     fn = xr_function([x], outs)
     x_test = xr_arange_like(x)
