@@ -1045,7 +1045,7 @@ def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
 
     x = pytensor.shared(x_test, name="x", shape=x_test.shape)
     out = x.transpose(transpose_axis).sum(axis=axis)
-    fn = pytensor.function([], out, mode=mode)
+    fn = pytensor.function([], out, mode=mode, trust_input=True)
 
     np.testing.assert_allclose(
         fn(),
@@ -1063,6 +1063,9 @@ def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
     "c_contiguous",
     (True, False),
     ids=lambda x: f"c_contiguous={x}",
+)
+@pytensor.config.change_flags(
+    gcc__cxxflags="-freciprocal-math -ffp-contract=fast -funsafe-math-optimizations -fassociative-math -fno-signed-zeros -ftree-loop-distribution -funroll-loops -ftracer"
 )
 def test_c_careduce_benchmark(axis, c_contiguous, benchmark):
     return careduce_benchmark_tester(
