@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from itertools import chain
 
 import numpy as np
@@ -13,13 +14,22 @@ from pytensor.tensor.utils import (
     get_static_shape_from_size_variables,
 )
 from pytensor.xtensor.basic import XOp
-from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
 
 
-def combine_dims_and_shape(inputs):
+def combine_dims_and_shape(
+    inputs: Sequence[XTensorVariable], exclude: Sequence[str] | None = None
+) -> dict[str, int | None]:
+    """Combine information of static dimensions and shapes from multiple xtensor inputs.
+
+    Exclude
+    """
+    exclude_set: set[str] = set() if exclude is None else set(exclude)
     dims_and_shape: dict[str, int | None] = {}
     for inp in inputs:
         for dim, dim_length in zip(inp.type.dims, inp.type.shape):
+            if dim in exclude_set:
+                continue
             if dim not in dims_and_shape:
                 dims_and_shape[dim] = dim_length
             elif dim_length is not None:

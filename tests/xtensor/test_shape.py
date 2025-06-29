@@ -9,10 +9,12 @@ from itertools import chain, combinations
 
 import numpy as np
 from xarray import DataArray
+from xarray import broadcast as xr_broadcast
 from xarray import concat as xr_concat
 
 from pytensor.tensor import scalar
 from pytensor.xtensor.shape import (
+    broadcast,
     concat,
     stack,
     unstack,
@@ -466,3 +468,168 @@ def test_expand_dims_errors():
     # Test with a numpy array as dim (not supported)
     with pytest.raises(TypeError, match="unhashable type"):
         y.expand_dims(np.array([1, 2]))
+
+
+class TestBroadcast:
+    @pytest.mark.parametrize(
+        "exclude",
+        [
+            None,
+            [],
+            ["b"],
+            ["b", "d"],
+            ["a", "d"],
+            ["b", "c", "d"],
+            ["a", "b", "c", "d"],
+        ],
+    )
+    def test_compatible_excluded_shapes(self, exclude):
+        # Create test data
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 6))
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        z_test = xr_arange_like(z)
+
+        # Test with excluded dims
+        x2_expected, y2_expected, z2_expected = xr_broadcast(
+            x_test, y_test, z_test, exclude=exclude
+        )
+        x2, y2, z2 = broadcast(x, y, z, exclude=exclude)
+        fn = xr_function([x, y, z], [x2, y2, z2])
+        x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
+
+        xr_assert_allclose(x2_result, x2_expected)
+        xr_assert_allclose(y2_result, y2_expected)
+        xr_assert_allclose(z2_result, z2_expected)
+
+    def test_incompatible_excluded_shapes(self):
+        # Test that excluded dims are allowed to be different sizes
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 7))
+        out = broadcast(x, y, z, exclude=["d"])
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        z_test = xr_arange_like(z)
+        fn = xr_function([x, y, z], out)
+        results = fn(x_test, y_test, z_test)
+        expected_results = xr_broadcast(x_test, y_test, z_test, exclude=["d"])
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+    @pytest.mark.parametrize("exclude", [[], ["b"], ["b", "c"], ["a", "b", "d"]])
+    def test_runtime_shapes(self, exclude):
+        x = xtensor("x", dims=("a", "b"), shape=(None, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, None))
+        z = xtensor("z", dims=("b", "d"), shape=(None, None))
+        out = broadcast(x, y, z, exclude=exclude)
+
+        x_test = xr_arange_like(xtensor(dims=x.dims, shape=(3, 4)))
+        y_test = xr_arange_like(xtensor(dims=y.dims, shape=(5, 6)))
+        z_test = xr_arange_like(xtensor(dims=z.dims, shape=(4, 6)))
+        fn = xr_function([x, y, z], out)
+        results = fn(x_test, y_test, z_test)
+        expected_results = xr_broadcast(x_test, y_test, z_test, exclude=exclude)
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+        # Test invalid shape raises an error
+        # Note: We might decide not to raise an error in the lowered graphs for performance reasons
+        if "d" not in exclude:
+            z_test_bad = xr_arange_like(xtensor(dims=z.dims, shape=(4, 7)))
+            with pytest.raises(Exception):
+                fn(x_test, y_test, z_test_bad)
+
+    def test_broadcast_excluded_dims_in_different_order(self):
+        """Test broadcasting excluded dims are aligned with user input."""
+        x = xtensor("x", dims=("a", "c", "b"), shape=(3, 4, 5))
+        y = xtensor("y", dims=("a", "b", "c"), shape=(3, 5, 4))
+        out = (out_x, out_y) = broadcast(x, y, exclude=["c", "b"])
+        assert out_x.type.dims == ("a", "c", "b")
+        assert out_y.type.dims == ("a", "c", "b")
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        fn = xr_function([x, y], out)
+        results = fn(x_test, y_test)
+        expected_results = xr_broadcast(x_test, y_test, exclude=["c", "b"])
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+    def test_broadcast_errors(self):
+        """Test error handling in broadcast."""
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 6))
+
+        with pytest.raises(TypeError, match="exclude must be None, str, or Sequence"):
+            broadcast(x, y, z, exclude=1)
+
+        # Test with conflicting shapes
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 7))
+
+        with pytest.raises(ValueError, match="Dimension .* has conflicting shapes"):
+            broadcast(x, y, z)
+
+    def test_broadcast_no_input(self):
+        assert broadcast() == xr_broadcast()
+        assert broadcast(exclude=("a",)) == xr_broadcast(exclude=("a",))
+
+    def test_broadcast_single_input(self):
+        """Test broadcasting a single input."""
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        # Broadcast with a single input can still imply a transpose via the exclude parameter
+        outs = [
+            *broadcast(x),
+            *broadcast(x, exclude=("a", "b")),
+            *broadcast(x, exclude=("b", "a")),
+            *broadcast(x, exclude=("b",)),
+        ]
+
+        fn = xr_function([x], outs)
+        x_test = xr_arange_like(x)
+        results = fn(x_test)
+        expected_results = [
+            *xr_broadcast(x_test),
+            *xr_broadcast(x_test, exclude=("a", "b")),
+            *xr_broadcast(x_test, exclude=("b", "a")),
+            *xr_broadcast(x_test, exclude=("b",)),
+        ]
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+    @pytest.mark.parametrize("exclude", [None, ["b"], ["b", "c"]])
+    def test_broadcast_like(self, exclude):
+        """Test broadcast_like method"""
+        # Create test data
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 6))
+
+        # Order matters so we test both orders
+        outs = [
+            x.broadcast_like(y, exclude=exclude),
+            y.broadcast_like(x, exclude=exclude),
+            y.broadcast_like(z, exclude=exclude),
+            z.broadcast_like(y, exclude=exclude),
+        ]
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        z_test = xr_arange_like(z)
+        fn = xr_function([x, y, z], outs)
+        results = fn(x_test, y_test, z_test)
+        expected_results = [
+            x_test.broadcast_like(y_test, exclude=exclude),
+            y_test.broadcast_like(x_test, exclude=exclude),
+            y_test.broadcast_like(z_test, exclude=exclude),
+            z_test.broadcast_like(y_test, exclude=exclude),
+        ]
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
