@@ -478,7 +478,16 @@ def test_broadcast():
     y_test = xr_arange_like(y)
     z_test = xr_arange_like(z)
 
-    # Basic broadcasting
+    # Basic broadcasting, two tensors, no excluded dims
+    x2_expected, y2_expected = xr.broadcast(x_test, y_test)
+    x2, y2 = broadcast(x, y)
+    fn = xr_function([x, y], [x2, y2])
+    x2_result, y2_result = fn(x_test, y_test)
+
+    xr_assert_allclose(x2_result, x2_expected)
+    xr_assert_allclose(y2_result, y2_expected)
+
+    # Basic broadcasting, three tensors, no excluded dims
     x2_expected, y2_expected, z2_expected = xr.broadcast(x_test, y_test, z_test)
     x2, y2, z2 = broadcast(x, y, z)
     fn = xr_function([x, y, z], [x2, y2, z2])
@@ -493,7 +502,6 @@ def test_broadcast():
         x2_expected, y2_expected, z2_expected = xr.broadcast(
             x_test, y_test, z_test, exclude=exclude
         )
-
         x2, y2, z2 = broadcast(x, y, z, exclude=exclude)
         fn = xr_function([x, y, z], [x2, y2, z2])
         x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
@@ -509,7 +517,80 @@ def test_broadcast():
     test_broadcast_exclude(["b", "c", "d"])
     test_broadcast_exclude(["a", "b", "c", "d"])
 
-    # Test with symbolic sizes
+    # Test that excluded dims are allowed to be different sizes
+    x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+    z = xtensor("z", dims=("b", "d"), shape=(4, 7))
+
+    x_test = xr_arange_like(x)
+    y_test = xr_arange_like(y)
+    z_test = xr_arange_like(z)
+
+    x2_expected, y2_expected, z2_expected = xr.broadcast(
+        x_test, y_test, z_test, exclude=["d"]
+    )
+    x2, y2, z2 = broadcast(x, y, z, exclude=["d"])
+    fn = xr_function([x, y, z], [x2, y2, z2])
+    x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
+
+    xr_assert_allclose(x2_result, x2_expected)
+    xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+
+    # Test with symbolic shapes but no excluded dims
+    x = xtensor("x", dims=("a", "b"), shape=(None, 4))
+    y = xtensor("y", dims=("c", "d"), shape=(5, None))
+    z = xtensor("z", dims=("b", "d"), shape=(None, None))
+
+    x_test = xr_arange_like(xtensor(dims=x.dims, shape=(3, 4)))
+    y_test = xr_arange_like(xtensor(dims=y.dims, shape=(5, 6)))
+    z_test = xr_arange_like(xtensor(dims=z.dims, shape=(4, 6)))
+
+    # Test with two tensors
+    y2_expected, z2_expected = xr.broadcast(y_test, z_test)
+    y2, z2 = broadcast(y, z)
+    fn = xr_function([y, z], [y2, z2])
+    y2_result, z2_result = fn(y_test, z_test)
+
+    xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+
+    # Test with three tensors
+    x2_expected, y2_expected, z2_expected = xr.broadcast(x_test, y_test, z_test)
+    x2, y2, z2 = broadcast(x, y, z)
+    fn = xr_function([x, y, z], [x2, y2, z2])
+    x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
+
+    xr_assert_allclose(x2_result, x2_expected)
+    xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+
+
+def test_broadcast_excluded_dims_in_different_order():
+    """Test broadcasting with weird case."""
+    x = xtensor("x", dims=("a", "c", "b"), shape=(3, 4, 5))
+    y = xtensor("y", dims=("a", "b", "c"), shape=(3, 5, 4))
+
+    x_test = xr_arange_like(x)
+    y_test = xr_arange_like(y)
+
+    x2_expected, y2_expected = xr.broadcast(x_test, y_test, exclude=["c", "b"])
+    print("weird case")
+    print(f"Expected dims: {x2_expected.dims}, shape: {x2_expected.shape}")
+    print(f"Expected dims: {y2_expected.dims}, shape: {y2_expected.shape}")
+
+    x2, y2 = broadcast(x, y, exclude=["c", "b"])
+    fn = xr_function([x, y], [x2, y2])
+    x2_result, y2_result = fn(x_test, y_test)
+
+    print(f"Actual dims: {x2_result.dims}, shape: {x2_result.shape}")
+    print(f"Actual dims: {y2_result.dims}, shape: {y2_result.shape}")
+    xr_assert_allclose(x2_result, x2_expected)
+    xr_assert_allclose(y2_result, y2_expected)
+
+
+def test_broadcast_with_symbols_and_exclude():
+    # Create test data
     x = xtensor("x", dims=("a", "b"), shape=(None, 4))
     y = xtensor("y", dims=("c", "d"), shape=(5, None))
     z = xtensor("z", dims=("b", "d"), shape=(None, 6))
@@ -518,6 +599,52 @@ def test_broadcast():
     y_test = xr_arange_like(xtensor(dims=y.dims, shape=(5, 6)))
     z_test = xr_arange_like(xtensor(dims=z.dims, shape=(4, 6)))
 
+    # Test with two tensors and excluded dims
+    y2_expected, z2_expected = xr.broadcast(y_test, z_test, exclude=["b"])
+    print(f"Expected shape y: {y2_expected.shape}, dims: {y2_expected.dims}")
+    print(f"Expected shape z: {z2_expected.shape}, dims: {z2_expected.dims}")
+
+    y2, z2 = broadcast(y, z, exclude=["b"])
+    fn = xr_function([y, z], [y2, z2])
+
+    y2_result, z2_result = fn(y_test, z_test)
+    print(f"Actual shape y: {y2_result.shape}, dims: {y2_result.dims}")
+    print(f"Actual shape z: {z2_result.shape}, dims: {z2_result.dims}")
+    xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+
+    # Test with three tensors and excluded dims
+    x2_expected, y2_expected, z2_expected = xr.broadcast(
+        x_test, y_test, z_test, exclude=["b"]
+    )
+    print(f"Expected shape x: {x2_expected.shape}, dims: {x2_expected.dims}")
+    print(f"Expected shape y: {y2_expected.shape}, dims: {y2_expected.dims}")
+    print(f"Expected shape z: {z2_expected.shape}, dims: {z2_expected.dims}")
+    x2, y2, z2 = broadcast(x, y, z, exclude=["b"])
+    fn = xr_function([x, y, z], [x2, y2, z2])
+    x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
+    print(f"Actual shape x: {x2_result.shape}, dims: {x2_result.dims}")
+    print(f"Actual shape y: {y2_result.shape}, dims: {y2_result.dims}")
+    print(f"Actual shape z: {z2_result.shape}, dims: {z2_result.dims}")
+
+    xr_assert_allclose(x2_result, x2_expected)
+    xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+    # Test with two tensors
+    y2_expected, z2_expected = xr.broadcast(y_test, z_test)
+    print(f"Expected shape y: {y2_expected.shape}, dims: {y2_expected.dims}")
+    print(f"Expected shape z: {z2_expected.shape}, dims: {z2_expected.dims}")
+
+    y2, z2 = broadcast(y, z)
+    fn = xr_function([y, z], [y2, z2])
+
+    y2_result, z2_result = fn(y_test, z_test)
+    print(f"Actual shape y: {y2_result.shape}, dims: {y2_result.dims}")
+    print(f"Actual shape z: {z2_result.shape}, dims: {z2_result.dims}")
+    xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+
+    # Test with three tensors
     x2_expected, y2_expected, z2_expected = xr.broadcast(x_test, y_test, z_test)
     x2, y2, z2 = broadcast(x, y, z)
     fn = xr_function([x, y, z], [x2, y2, z2])
@@ -583,7 +710,8 @@ def test_broadcast_like():
     y2_result = fn(y_test, z_test)
     xr_assert_allclose(y2_result, y2_expected)
 
-    # Test with symbolic sizes
+
+def test_broadcast_like_symbolic():
     x = xtensor("x", dims=("a", "b"), shape=(None, 4))
     y = xtensor("y", dims=("c", "d"), shape=(5, None))
     z = xtensor("z", dims=("b", "d"), shape=(None, 6))
@@ -592,17 +720,34 @@ def test_broadcast_like():
     y_test = xr_arange_like(xtensor(dims=y.dims, shape=(5, 6)))
     z_test = xr_arange_like(xtensor(dims=z.dims, shape=(4, 6)))
 
+    # Broadcast y and z
+    y2_expected, z2_expected = xr.broadcast(y_test, z_test)
+    print(f"Expected shape: {y2_expected.shape}, dims: {y2_expected.dims}")
+
+    y2, z2 = broadcast(y, z)
+    fn = xr_function([y, z], [y2, z2])
+
+    y2_result, z2_result = fn(y_test, z_test)
+    print(f"Actual shape: {y2_result.shape}, dims: {y2_result.dims}")
+    xr_assert_allclose(y2_result, y2_expected)
+    xr_assert_allclose(z2_result, z2_expected)
+
+    # Broadcast_like
+    y2_expected = y_test.broadcast_like(z_test, exclude=["b"])
+    print(f"Expected shape: {y2_expected.shape}, dims: {y2_expected.dims}")
+
+    y2 = y.broadcast_like(z, exclude=["b"])
+    fn = xr_function([y, z], y2)
+
+    y2_result = fn(y_test, z_test)
+    print(f"Actual shape: {y2_result.shape}, dims: {y2_result.dims}")
+    xr_assert_allclose(y2_result, y2_expected)
+
     x2_expected = x_test.broadcast_like(y_test)
     x2 = x.broadcast_like(y)
     fn = xr_function([x, y], x2)
     x2_result = fn(x_test, y_test)
     xr_assert_allclose(x2_result, x2_expected)
-
-    y2_expected = y_test.broadcast_like(z_test, exclude=["b", "c"])
-    y2 = y.broadcast_like(z, exclude=["b"])
-    fn = xr_function([y, z], y2)
-    y2_result = fn(y_test, z_test)
-    xr_assert_allclose(y2_result, y2_expected)
 
 
 def test_broadcast_like_errors():

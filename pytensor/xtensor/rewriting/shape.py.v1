@@ -181,7 +181,7 @@ def lower_broadcast(fgraph, node):
         broadcast_dims = tuple(
             dim for dim in node.outputs[0].type.dims if dim not in excluded_dims
         )
-        print("  No excluded dims - using broadcast_arrays")
+        print(f"  No excluded dims - using broadcast_arrays")
         print(f"  broadcast_dims: {broadcast_dims}")
 
         inp_tensors = []
@@ -195,7 +195,7 @@ def lower_broadcast(fgraph, node):
             print(f"    Input {inp.name}: dims={inp_dims}, order={order}")
             inp_tensor = inp_tensor.dimshuffle(order)
             print(f"    After dimshuffle: shape={inp_tensor.type.shape}")
-
+            
             inp_tensors.append(inp_tensor)
 
         out_tensors = pt.broadcast_arrays(*inp_tensors)
@@ -205,45 +205,87 @@ def lower_broadcast(fgraph, node):
 
     else:
         # complex case: broadcast only the dimensions that are not excluded
-        print("  Has excluded dims - processing each tensor individually")
+        print(f"  Has excluded dims - processing each tensor individually")
         print(f"  Excluded dims: {excluded_dims}")
-
+        
         # Debug: show what make_node produced
-        print("  Outputs from make_node:")
+        print(f"  Outputs from make_node:")
         for i, out in enumerate(node.outputs):
             print(f"    Output {i}: dims={out.type.dims}, shape={out.type.shape}")
+        
 
-        # Process each input-output pair individually
+        # Get the broadcast shape for non-excluded dimensions
+        broadcast_shapes = []
+        print(f"  Extracting non-excluded shapes from inputs:")
+        
+        # First, collect all non-excluded dimensions across all inputs
+        all_non_excluded_dims = set()
+        for x in node.inputs:
+            non_excluded_dims = [d for d in x.type.dims if d not in excluded_dims]
+            all_non_excluded_dims.update(non_excluded_dims)
+        
+        # Sort to ensure consistent ordering
+        all_non_excluded_dims = sorted(all_non_excluded_dims)
+        print(f"  All non-excluded dims: {all_non_excluded_dims}")
+        
+        for i, x in enumerate(node.inputs):
+            # Get non-excluded dimensions and their shapes
+            non_excluded_dims = [d for d in x.type.dims if d not in excluded_dims]
+            non_excluded_shapes = [s for d, s in zip(x.type.dims, x.type.shape) if d not in excluded_dims]
+            print(f"    Input {i}: dims={x.type.dims}, shape={x.type.shape}")
+            print(f"    Non-excluded dims: {non_excluded_dims}")
+            print(f"    Non-excluded shapes: {non_excluded_shapes}")
+            
+            # Create aligned shape with 1s for missing dimensions
+            aligned_shape = []
+            for dim in all_non_excluded_dims:
+                if dim in non_excluded_dims:
+                    idx = non_excluded_dims.index(dim)
+                    aligned_shape.append(non_excluded_shapes[idx])
+                else:
+                    aligned_shape.append(1)  # Broadcastable dimension
+            
+            print(f"    Aligned shape: {aligned_shape}")
+            broadcast_shapes.append(aligned_shape)
+        
+        print(f"  All aligned shapes: {broadcast_shapes}")
+        
+        # Compute the broadcast shape for non-excluded dims
+        target_shape = pt.broadcast_shape(*broadcast_shapes, arrays_are_shapes=True)
+        print(f"  Target shape for non-excluded dims: {target_shape}")
+        
         out_tensors = []
         for inp, out in zip(node.inputs, node.outputs, strict=True):
             inp_tensor = tensor_from_xtensor(inp)
             inp_dims = inp.type.dims
             out_dims = out.type.dims
-            out_shape = out.type.shape
+            print(f"    Input {inp.name}: dims={inp_dims}, shape={inp.type.shape}")
+            print(f"    Output: dims={out_dims}, shape={out.type.shape}")
 
-            print(f"    Processing input {inp.name}: dims={inp_dims}")
-            print(f"    Target output: dims={out_dims}, shape={out_shape}")
-
-            # Create the dimshuffle order to align input to output dimensions
+            # Align input tensor to output dims
             order = tuple(
                 inp_dims.index(dim) if dim in inp_dims else "x" for dim in out_dims
             )
             print(f"    dimshuffle order: {order}")
-
-            # Apply dimshuffle to align dimensions
             inp_tensor = inp_tensor.dimshuffle(order)
             print(f"    After dimshuffle: shape={inp_tensor.type.shape}")
-
-            # Apply broadcast_to or specify_shape based on whether we have None values
-            if None in out_shape:
-                print("    Using specify_shape due to None values")
-                result_tensor = pt.specify_shape(inp_tensor, out_shape)
-            else:
-                print("    Using broadcast_to for concrete shapes")
-                result_tensor = pt.broadcast_to(inp_tensor, out_shape)
-
-            print(f"    After broadcast: shape={result_tensor.type.shape}")
-            out_tensors.append(result_tensor)
+            
+            # Get excluded dims from this output
+            excluded_dims_in_output = [d for d in out.type.dims if d in excluded_dims]
+            excluded_shapes = [s for d, s in zip(out.type.dims, out.type.shape) if d in excluded_dims]
+            print(f"    Excluded dims in output: {excluded_dims_in_output}")
+            print(f"    Excluded shapes: {excluded_shapes}")
+            
+            # Combine target shape (for non-excluded) with excluded shapes
+            final_shape = target_shape + tuple(excluded_shapes)
+            print(f"    Final shape: {final_shape}")
+            print(f"    Target shape: {target_shape}")
+            print(f"    Excluded shapes: {excluded_shapes}")
+            
+            out_tensor = pt.broadcast_to(inp_tensor, final_shape)
+            out_tensors.append(out_tensor)
+            print(f"    After broadcast_to: shape={out_tensor.type.shape}")
+            print(f"    ---")
 
     new_outs = [
         xtensor_from_tensor(out_tensor, dims=out.type.dims)

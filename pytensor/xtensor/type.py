@@ -659,7 +659,8 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     def broadcast_like(self, other, exclude=None):
         """Broadcast this tensor against another XTensorVariable."""
-        return px.shape.broadcast_like(self, other, exclude=exclude)
+        result = px.shape.broadcast(other, self, exclude=exclude)[1]
+        return result
 
 
 class XTensorConstantSignature(TensorConstantSignature):

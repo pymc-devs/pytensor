@@ -505,7 +505,7 @@ def expand_dims(x, dim=None, create_index_for_new_dim=None, axis=None, **dim_kwa
 
 
 # TODO: import this when it's available
-def combine_dims_and_shape(inputs):
+def combine_dims_and_shape(inputs, exclude):
     """
     Combine the dimensions and shapes of multiple XTensorVariables into a single
     dictionary.
@@ -526,9 +526,11 @@ def combine_dims_and_shape(inputs):
             if dim not in dims_and_shape:
                 dims_and_shape[dim] = dim_length
             elif dim_length is not None:
-                # Check for conflicting shapes
-                if (dims_and_shape[dim] is not None) and (
-                    dims_and_shape[dim] != dim_length
+                # Check for conflicting shapes (unless dim is in exclude)
+                if (
+                    dim not in exclude
+                    and dims_and_shape[dim] is not None
+                    and dims_and_shape[dim] != dim_length
                 ):
                     raise ValueError(f"Dimension {dim} has conflicting shapes")
                 # Keep the non-None shape
@@ -552,7 +554,7 @@ class XBroadcast(XOp):
 
         # Get the union shape for included dims,
         # preserving order of first appearance
-        dims_and_shape = combine_dims_and_shape(inputs)
+        dims_and_shape = combine_dims_and_shape(inputs, self.exclude)
 
         broadcast_dims = tuple(d for d in dims_and_shape if d not in self.exclude)
         broadcast_shape = tuple(dims_and_shape[d] for d in broadcast_dims)
@@ -560,9 +562,12 @@ class XBroadcast(XOp):
 
         outputs = []
         for x in inputs:
-            # Preserve excluded dims from this input
+            # For excluded dimensions, use the shape from this specific input
             excluded_dims = [d for d in x.type.dims if d in self.exclude]
-            excluded_shapes = [dims_and_shape[d] for d in excluded_dims]
+            excluded_shapes = []
+            for dim in excluded_dims:
+                dim_idx = x.type.dims.index(dim)
+                excluded_shapes.append(x.type.shape[dim_idx])
 
             output = xtensor(
                 dtype=dtype,
@@ -590,45 +595,3 @@ def broadcast(*args, exclude: str | Sequence[str] | None = None):
     """Broadcast any number of XTensorVariables against each other."""
     exclude = _normalize_exclude(exclude)
     return XBroadcast(exclude=exclude)(*args)
-
-
-class XBroadcastLike(XOp):
-    """Broadcast this tensor against another XTensorVariable."""
-
-    __props__ = ("exclude",)
-
-    def __init__(self, exclude: tuple[Hashable, ...] = ()):
-        if not all(isinstance(dim, Hashable) for dim in exclude):
-            raise TypeError("All items in `exclude` must be hashable dimension names.")
-
-        self.exclude = exclude
-
-    def make_node(self, x, other):
-        x = as_xtensor(x)
-        other = as_xtensor(other)
-
-        # Get the union shape for included dims,
-        # preserving order from other first, then x
-        dims_and_shape = combine_dims_and_shape([other, x])
-
-        broadcast_dims = tuple(d for d in dims_and_shape if d not in self.exclude)
-
-        broadcast_shape = tuple(dims_and_shape[d] for d in broadcast_dims)
-        dtype = upcast(*[x.type.dtype, other.type.dtype])
-
-        # Preserve excluded dims from this input
-        excluded_dims = [d for d in x.type.dims if d in self.exclude]
-        excluded_shapes = [dims_and_shape[d] for d in excluded_dims]
-
-        output = xtensor(
-            dtype=dtype,
-            shape=broadcast_shape + tuple(excluded_shapes),
-            dims=broadcast_dims + tuple(excluded_dims),
-        )
-        return Apply(self, [x, other], [output])
-
-
-def broadcast_like(x, other, exclude=None):
-    """Broadcast this tensor against another XTensorVariable."""
-    exclude = _normalize_exclude(exclude)
-    return XBroadcastLike(exclude=exclude)(x, other)
