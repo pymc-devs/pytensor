@@ -1,3 +1,4 @@
+import pytensor.tensor as pt
 from pytensor.graph import node_rewriter
 from pytensor.tensor import (
     broadcast_to,
@@ -11,6 +12,7 @@ from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_lower_xtensor
 from pytensor.xtensor.rewriting.utils import lower_aligned
 from pytensor.xtensor.shape import (
+    Broadcast,
     Concat,
     ExpandDims,
     Squeeze,
@@ -157,3 +159,61 @@ def lower_expand_dims(fgraph, node):
     # Convert result back to xtensor
     result = xtensor_from_tensor(result_tensor, dims=out.type.dims)
     return [result]
+
+
+@register_lower_xtensor
+@node_rewriter(tracks=[Broadcast])
+def lower_broadcast(fgraph, node):
+    """Rewrite XBroadcast using tensor operations."""
+
+    excluded_dims = node.op.exclude
+
+    tensor_inputs = [
+        lower_aligned(inp, out.type.dims)
+        for inp, out in zip(node.inputs, node.outputs, strict=True)
+    ]
+
+    if not excluded_dims:
+        # Simple case: All dimensions are broadcasted
+        tensor_outputs = pt.broadcast_arrays(*tensor_inputs)
+
+    else:
+        # Complex case: Some dimensions are excluded from broadcasting
+        # Pick the first dimension_length for each dim
+        broadcast_dims = {
+            d: None for d in node.outputs[0].type.dims if d not in excluded_dims
+        }
+        for xtensor_inp in node.inputs:
+            for dim, dim_length in xtensor_inp.sizes.items():
+                if dim in broadcast_dims and broadcast_dims[dim] is None:
+                    # If the dimension is not excluded, set its shape
+                    broadcast_dims[dim] = dim_length
+        assert not any(
+            value is None for value in broadcast_dims.values()
+        ), "All dimensions must have a length"
+
+        # Create zeros with the broadcast dimensions, to then broadcast each input against
+        # PyTensor will rewrite into using only the shapes of the zeros tensor
+        broadcast_dims = pt.zeros(
+            tuple(broadcast_dims.values()),
+            dtype=node.outputs[0].type.dtype,
+        )
+        n_broadcast_dims = broadcast_dims.ndim
+
+        tensor_outputs = []
+        for tensor_inp, xtensor_out in zip(tensor_inputs, node.outputs, strict=True):
+            n_excluded_dims = tensor_inp.type.ndim - n_broadcast_dims
+            # Excluded dimensions are on the right side of the output tensor so we padright the broadcast_dims
+            # second is equivalent to `np.broadcast_arrays(x, y)[1]` in PyTensor
+            tensor_outputs.append(
+                pt.second(
+                    pt.shape_padright(broadcast_dims, n_excluded_dims),
+                    tensor_inp,
+                )
+            )
+
+    new_outs = [
+        xtensor_from_tensor(out_tensor, dims=out.type.dims)
+        for out_tensor, out in zip(tensor_outputs, node.outputs)
+    ]
+    return new_outs

@@ -736,6 +736,15 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         """Matrix multiplication with another XTensorVariable, contracting over matching or specified dims."""
         return px.math.dot(self, other, dim=dim)
 
+    def broadcast(self, *others, exclude=None):
+        """Broadcast this tensor against other XTensorVariables."""
+        return px.shape.broadcast(self, *others, exclude=exclude)
+
+    def broadcast_like(self, other, exclude=None):
+        """Broadcast this tensor against another XTensorVariable."""
+        _, self_bcast = px.shape.broadcast(other, self, exclude=exclude)
+        return self_bcast
+
 
 class XTensorConstantSignature(TensorConstantSignature):
     pass

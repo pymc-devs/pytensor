@@ -13,7 +13,8 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import integer_dtypes
 from pytensor.tensor.utils import get_static_shape_from_size_variables
 from pytensor.xtensor.basic import XOp
-from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
+from pytensor.xtensor.vectorization import combine_dims_and_shape
 
 
 class Stack(XOp):
@@ -504,3 +505,63 @@ def expand_dims(x, dim=None, create_index_for_new_dim=None, axis=None, **dim_kwa
         x = Transpose(dims=tuple(target_dims))(x)
 
     return x
+
+
+class Broadcast(XOp):
+    """Broadcast multiple XTensorVariables against each other."""
+
+    __props__ = ("exclude",)
+
+    def __init__(self, exclude: Sequence[str] = ()):
+        self.exclude = tuple(exclude)
+
+    def make_node(self, *inputs):
+        inputs = [as_xtensor(x) for x in inputs]
+
+        exclude = self.exclude
+        dims_and_shape = combine_dims_and_shape(inputs, exclude=exclude)
+
+        broadcast_dims = tuple(dims_and_shape.keys())
+        broadcast_shape = tuple(dims_and_shape.values())
+        dtype = upcast(*[x.type.dtype for x in inputs])
+
+        outputs = []
+        for x in inputs:
+            x_dims = x.type.dims
+            x_shape = x.type.shape
+            # The output has excluded dimensions in the order they appear in the op argument
+            excluded_dims = tuple(d for d in exclude if d in x_dims)
+            excluded_shape = tuple(x_shape[x_dims.index(d)] for d in excluded_dims)
+
+            output = xtensor(
+                dtype=dtype,
+                shape=broadcast_shape + excluded_shape,
+                dims=broadcast_dims + excluded_dims,
+            )
+            outputs.append(output)
+
+        return Apply(self, inputs, outputs)
+
+
+def broadcast(
+    *args, exclude: str | Sequence[str] | None = None
+) -> tuple[XTensorVariable, ...]:
+    """Broadcast any number of XTensorVariables against each other.
+
+    Parameters
+    ----------
+    *args : XTensorVariable
+        The tensors to broadcast against each other.
+    exclude : str or Sequence[str] or None, optional
+    """
+    if not args:
+        return ()
+
+    if exclude is None:
+        exclude = ()
+    elif isinstance(exclude, str):
+        exclude = (exclude,)
+    elif not isinstance(exclude, Sequence):
+        raise TypeError(f"exclude must be None, str, or Sequence, got {type(exclude)}")
+    # xarray broadcast always returns a tuple, even if there's only one tensor
+    return tuple(Broadcast(exclude=exclude)(*args, return_list=True))  # type: ignore
