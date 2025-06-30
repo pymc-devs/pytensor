@@ -71,6 +71,8 @@ class XTensorType(Type, HasDataType, HasShape):
         self.name = name
         self.numpy_dtype = np.dtype(self.dtype)
         self.filter_checks_isfinite = False
+        # broadcastable is here just for code that would work fine with XTensorType but checks for it
+        self.broadcastable = (False,) * self.ndim
 
     def clone(
         self,
@@ -92,6 +94,10 @@ class XTensorType(Type, HasDataType, HasShape):
         return TensorType.filter(
             self, value, strict=strict, allow_downcast=allow_downcast
         )
+
+    @staticmethod
+    def may_share_memory(a, b):
+        return TensorType.may_share_memory(a, b)
 
     def filter_variable(self, other, allow_convert=True):
         if not isinstance(other, Variable):
@@ -160,7 +166,7 @@ class XTensorType(Type, HasDataType, HasShape):
         return None
 
     def __repr__(self):
-        return f"XTensorType({self.dtype}, {self.dims}, {self.shape})"
+        return f"XTensorType({self.dtype}, shape={self.shape}, dims={self.dims})"
 
     def __hash__(self):
         return hash((type(self), self.dtype, self.shape, self.dims))
