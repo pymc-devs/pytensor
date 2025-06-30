@@ -1,6 +1,7 @@
 from pytensor.compile import optdb
-from pytensor.graph.rewriting.basic import NodeRewriter
+from pytensor.graph.rewriting.basic import NodeRewriter, in2out
 from pytensor.graph.rewriting.db import EquilibriumDB, RewriteDatabase
+from pytensor.tensor.rewriting.ofg import inline_ofg_expansion
 
 
 lower_xtensor_db = EquilibriumDB(ignore_newtrees=False)
@@ -12,6 +13,15 @@ optdb.register(
     "fast_compile",
     "minimum_compile",
     position=0.1,
+)
+
+# Register OFG inline again after lowering xtensor
+optdb.register(
+    "inline_ofg_expansion_xtensor",
+    in2out(inline_ofg_expansion),
+    "fast_run",
+    "fast_compile",
+    position=0.11,
 )
 
 
