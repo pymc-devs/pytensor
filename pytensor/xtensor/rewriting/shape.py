@@ -9,6 +9,7 @@ from pytensor.tensor import (
 )
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.rewriting.basic import register_lower_xtensor
+from pytensor.xtensor.rewriting.utils import lower_aligned
 from pytensor.xtensor.shape import (
     Concat,
     ExpandDims,
@@ -70,15 +71,7 @@ def lower_concat(fgraph, node):
     concat_axis = out_dims.index(concat_dim)
 
     # Convert input XTensors to Tensors and align batch dimensions
-    tensor_inputs = []
-    for inp in node.inputs:
-        inp_dims = inp.type.dims
-        order = [
-            inp_dims.index(out_dim) if out_dim in inp_dims else "x"
-            for out_dim in out_dims
-        ]
-        tensor_inp = tensor_from_xtensor(inp).dimshuffle(order)
-        tensor_inputs.append(tensor_inp)
+    tensor_inputs = [lower_aligned(inp, out_dims) for inp in node.inputs]
 
     # Broadcast non-concatenated dimensions of each input
     non_concat_shape = [None] * len(out_dims)
