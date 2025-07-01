@@ -7,6 +7,7 @@ pytest.importorskip("xarray")
 import inspect
 
 import numpy as np
+import xarray as xr
 from xarray import DataArray
 
 import pytensor.scalar as ps
@@ -314,3 +315,109 @@ def test_dot_errors():
     # Doesn't fail until the rewrite
     with pytest.raises(ValueError, match="not aligned"):
         fn(x_test, y_test)
+
+
+def test_full_like():
+    """Test full_like function, comparing with xarray's full_like."""
+
+    # Basic functionality with scalar fill_value
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_test = xr_arange_like(x)
+
+    y1 = pxm.full_like(x, 5.0)
+    fn1 = xr_function([x], y1)
+    result1 = fn1(x_test)
+    expected1 = xr.full_like(x_test, 5.0)
+    xr_assert_allclose(result1, expected1)
+
+    # Different dtypes
+    y3 = pxm.full_like(x, 5.0, dtype="int32")
+    fn3 = xr_function([x], y3)
+    result3 = fn3(x_test)
+    expected3 = xr.full_like(x_test, 5.0, dtype="int32")
+    xr_assert_allclose(result3, expected3)
+
+    # Different fill_value types
+    y4 = pxm.full_like(x, np.array(3.14))
+    fn4 = xr_function([x], y4)
+    result4 = fn4(x_test)
+    expected4 = xr.full_like(x_test, 3.14)
+    xr_assert_allclose(result4, expected4)
+
+    # Integer input with float fill_value
+    x_int = xtensor("x_int", dims=("a", "b"), shape=(2, 3), dtype="int32")
+    x_int_test = DataArray(np.arange(6, dtype="int32").reshape(2, 3), dims=("a", "b"))
+
+    y5 = pxm.full_like(x_int, 2.5)
+    fn5 = xr_function([x_int], y5)
+    result5 = fn5(x_int_test)
+    expected5 = xr.full_like(x_int_test, 2.5)
+    xr_assert_allclose(result5, expected5)
+
+    # Symbolic shapes
+    x_sym = xtensor("x_sym", dims=("a", "b"), shape=(None, 3))
+    x_sym_test = DataArray(np.arange(6).reshape(2, 3), dims=("a", "b"))
+
+    y6 = pxm.full_like(x_sym, 7.0)
+    fn6 = xr_function([x_sym], y6)
+    result6 = fn6(x_sym_test)
+    expected6 = xr.full_like(x_sym_test, 7.0)
+    xr_assert_allclose(result6, expected6)
+
+    # Higher dimensional tensor
+    x_3d = xtensor("x_3d", dims=("a", "b", "c"), shape=(2, 3, 4), dtype="float32")
+    x_3d_test = xr_arange_like(x_3d)
+
+    y7 = pxm.full_like(x_3d, -1.0)
+    fn7 = xr_function([x_3d], y7)
+    result7 = fn7(x_3d_test)
+    expected7 = xr.full_like(x_3d_test, -1.0)
+    xr_assert_allclose(result7, expected7)
+
+    # Boolean dtype
+    x_bool = xtensor("x_bool", dims=("a", "b"), shape=(2, 3), dtype="bool")
+    x_bool_test = DataArray(
+        np.array([[True, False, True], [False, True, False]]), dims=("a", "b")
+    )
+
+    y8 = pxm.full_like(x_bool, True)
+    fn8 = xr_function([x_bool], y8)
+    result8 = fn8(x_bool_test)
+    expected8 = xr.full_like(x_bool_test, True)
+    xr_assert_allclose(result8, expected8)
+
+    # Complex dtype
+    x_complex = xtensor("x_complex", dims=("a", "b"), shape=(2, 3), dtype="complex64")
+    x_complex_test = DataArray(
+        np.arange(6, dtype="complex64").reshape(2, 3), dims=("a", "b")
+    )
+
+    y9 = pxm.full_like(x_complex, 1 + 2j)
+    fn9 = xr_function([x_complex], y9)
+    result9 = fn9(x_complex_test)
+    expected9 = xr.full_like(x_complex_test, 1 + 2j)
+    xr_assert_allclose(result9, expected9)
+
+
+def test_ones_like():
+    """Test ones_like function, comparing with xarray's ones_like."""
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_test = xr_arange_like(x)
+
+    y1 = pxm.ones_like(x)
+    fn1 = xr_function([x], y1)
+    result1 = fn1(x_test)
+    expected1 = xr.ones_like(x_test)
+    xr_assert_allclose(result1, expected1)
+
+
+def test_zeros_like():
+    """Test zeros_like function, comparing with xarray's zeros_like."""
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_test = xr_arange_like(x)
+
+    y1 = pxm.zeros_like(x)
+    fn1 = xr_function([x], y1)
+    result1 = fn1(x_test)
+    expected1 = xr.zeros_like(x_test)
+    xr_assert_allclose(result1, expected1)
