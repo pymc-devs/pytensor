@@ -1,7 +1,12 @@
+import typing
+from collections.abc import Sequence
+
 from pytensor.compile import optdb
 from pytensor.graph.rewriting.basic import NodeRewriter, in2out
 from pytensor.graph.rewriting.db import EquilibriumDB, RewriteDatabase
 from pytensor.tensor.rewriting.ofg import inline_ofg_expansion
+from pytensor.tensor.variable import TensorVariable
+from pytensor.xtensor.type import XTensorVariable
 
 
 lower_xtensor_db = EquilibriumDB(ignore_newtrees=False)
@@ -49,3 +54,10 @@ def register_lower_xtensor(
             **kwargs,
         )
         return node_rewriter
+
+
+def lower_aligned(x: XTensorVariable, out_dims: Sequence[str]) -> TensorVariable:
+    """Lower an XTensorVariable to a TensorVariable so that it's dimensions are aligned with "out_dims"."""
+    inp_dims = {d: i for i, d in enumerate(x.type.dims)}
+    ds_order = tuple(inp_dims.get(dim, "x") for dim in out_dims)
+    return typing.cast(TensorVariable, x.values.dimshuffle(ds_order))
