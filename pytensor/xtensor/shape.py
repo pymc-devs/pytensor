@@ -303,6 +303,35 @@ class Concat(XOp):
 
 
 def concat(xtensors, dim: str):
+    """Concatenate a sequence of XTensorVariables along a specified dimension.
+
+    Parameters
+    ----------
+    xtensors : Sequence of XTensorVariable
+        The tensors to concatenate.
+    dim : str
+        The dimension along which to concatenate the tensors.
+
+    Returns
+    -------
+    XTensorVariable
+
+
+    Example
+    -------
+
+    .. testcode::
+
+        from pytensor.xtensor import as_xtensor, xtensor, concat
+
+        x = xtensor("x", shape=(2, 3), dims=("a", "b"))
+        zero = as_xtensor([0], dims=("a"))
+
+        out = concat([zero, x, zero], dim="a")
+        assert out.type.dims == ("a", "b")
+        assert out.type.shape == (4, 3)
+
+    """
     return Concat(dim=dim)(*xtensors)
 
 

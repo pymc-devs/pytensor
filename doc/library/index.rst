@@ -25,6 +25,7 @@ Modules
    sparse/index
    tensor/index
    typed_list
+   xtensor/index
 
 .. module:: pytensor
    :platform: Unix, Windows
