@@ -5,15 +5,12 @@ from typing import Literal, cast
 
 import numpy as np
 
-import pytensor.tensor as pt
 from pytensor import scalar as ps
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
-from pytensor.ifelse import ifelse
 from pytensor.npy_2_compat import normalize_axis_tuple
-from pytensor.raise_op import Assert
 from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
@@ -466,173 +463,6 @@ class EighGrad(Op):
 
 def eigh(a, UPLO="L"):
     return Eigh(UPLO)(a)
-
-
-class QRFull(Op):
-    """
-    Full QR Decomposition.
-
-    Computes the QR decomposition of a matrix.
-    Factor the matrix a as qr, where q is orthonormal
-    and r is upper-triangular.
-
-    """
-
-    __props__ = ("mode",)
-
-    def __init__(self, mode):
-        self.mode = mode
-
-    def make_node(self, x):
-        x = as_tensor_variable(x)
-
-        assert x.ndim == 2, "The input of qr function should be a matrix."
-
-        in_dtype = x.type.numpy_dtype
-        out_dtype = np.dtype(f"f{in_dtype.itemsize}")
-
-        q = matrix(dtype=out_dtype)
-
-        if self.mode != "raw":
-            r = matrix(dtype=out_dtype)
-        else:
-            r = vector(dtype=out_dtype)
-
-        if self.mode != "r":
-            q = matrix(dtype=out_dtype)
-            outputs = [q, r]
-        else:
-            outputs = [r]
-
-        return Apply(self, [x], outputs)
-
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        assert x.ndim == 2, "The input of qr function should be a matrix."
-        res = np.linalg.qr(x, self.mode)
-        if self.mode != "r":
-            outputs[0][0], outputs[1][0] = res
-        else:
-            outputs[0][0] = res
-
-    def L_op(self, inputs, outputs, output_grads):
-        """
-        Reverse-mode gradient of the QR function.
-
-        References
-        ----------
-        .. [1] Jinguo Liu. "Linear Algebra Autodiff (complex valued)", blog post https://giggleliu.github.io/posts/2019-04-02-einsumbp/
-        .. [2] Hai-Jun Liao, Jin-Guo Liu, Lei Wang, Tao Xiang. "Differentiable Programming Tensor Networks", arXiv:1903.09650v2
-        """
-
-        from pytensor.tensor.slinalg import solve_triangular
-
-        (A,) = (cast(ptb.TensorVariable, x) for x in inputs)
-        m, n = A.shape
-
-        def _H(x: ptb.TensorVariable):
-            return x.conj().mT
-
-        def _copyltu(x: ptb.TensorVariable):
-            return ptb.tril(x, k=0) + _H(ptb.tril(x, k=-1))
-
-        if self.mode == "raw":
-            raise NotImplementedError("Gradient of qr not implemented for mode=raw")
-
-        elif self.mode == "r":
-            # We need all the components of the QR to compute the gradient of A even if we only
-            # use the upper triangular component in the cost function.
-            Q, R = qr(A, mode="reduced")
-            dQ = Q.zeros_like()
-            dR = cast(ptb.TensorVariable, output_grads[0])
-
-        else:
-            Q, R = (cast(ptb.TensorVariable, x) for x in outputs)
-            if self.mode == "complete":
-                qr_assert_op = Assert(
-                    "Gradient of qr not implemented for m x n matrices with m > n and mode=complete"
-                )
-                R = qr_assert_op(R, ptm.le(m, n))
-
-            new_output_grads = []
-            is_disconnected = [
-                isinstance(x.type, DisconnectedType) for x in output_grads
-            ]
-            if all(is_disconnected):
-                # This should never be reached by Pytensor
-                return [DisconnectedType()()]  # pragma: no cover
-
-            for disconnected, output_grad, output in zip(
-                is_disconnected, output_grads, [Q, R], strict=True
-            ):
-                if disconnected:
-                    new_output_grads.append(output.zeros_like())
-                else:
-                    new_output_grads.append(output_grad)
-
-            (dQ, dR) = (cast(ptb.TensorVariable, x) for x in new_output_grads)
-
-        # gradient expression when m >= n
-        M = R @ _H(dR) - _H(dQ) @ Q
-        K = dQ + Q @ _copyltu(M)
-        A_bar_m_ge_n = _H(solve_triangular(R, _H(K)))
-
-        # gradient expression when m < n
-        Y = A[:, m:]
-        U = R[:, :m]
-        dU, dV = dR[:, :m], dR[:, m:]
-        dQ_Yt_dV = dQ + Y @ _H(dV)
-        M = U @ _H(dU) - _H(dQ_Yt_dV) @ Q
-        X_bar = _H(solve_triangular(U, _H(dQ_Yt_dV + Q @ _copyltu(M))))
-        Y_bar = Q @ dV
-        A_bar_m_lt_n = pt.concatenate([X_bar, Y_bar], axis=1)
-
-        return [ifelse(ptm.ge(m, n), A_bar_m_ge_n, A_bar_m_lt_n)]
-
-
-def qr(a, mode="reduced"):
-    """
-    Computes the QR decomposition of a matrix.
-    Factor the matrix a as qr, where q
-    is orthonormal and r is upper-triangular.
-
-    Parameters
-    ----------
-    a : array_like, shape (M, N)
-        Matrix to be factored.
-
-    mode : {'reduced', 'complete', 'r', 'raw'}, optional
-        If K = min(M, N), then
-
-        'reduced'
-          returns q, r with dimensions (M, K), (K, N)
-
-        'complete'
-           returns q, r with dimensions (M, M), (M, N)
-
-        'r'
-          returns r only with dimensions (K, N)
-
-        'raw'
-          returns h, tau with dimensions (N, M), (K,)
-
-        Note that array h returned in 'raw' mode is
-        transposed for calling Fortran.
-
-        Default mode is 'reduced'
-
-    Returns
-    -------
-    q : matrix of float or complex, optional
-        A matrix with orthonormal columns. When mode = 'complete' the
-        result is an orthogonal/unitary matrix depending on whether or
-        not a is real/complex. The determinant may be either +/- 1 in
-        that case.
-    r : matrix of float or complex, optional
-        The upper-triangular matrix.
-
-    """
-    return QRFull(mode)(a)
 
 
 class SVD(Op):
@@ -1291,7 +1121,6 @@ __all__ = [
     "det",
     "eig",
     "eigh",
-    "qr",
     "svd",
     "lstsq",
     "matrix_power",
