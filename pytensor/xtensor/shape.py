@@ -13,6 +13,7 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import integer_dtypes
 from pytensor.tensor.utils import get_static_shape_from_size_variables
 from pytensor.xtensor.basic import XOp
+from pytensor.xtensor.math import cast, second
 from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
 from pytensor.xtensor.vectorization import combine_dims_and_shape
 
@@ -565,3 +566,100 @@ def broadcast(
         raise TypeError(f"exclude must be None, str, or Sequence, got {type(exclude)}")
     # xarray broadcast always returns a tuple, even if there's only one tensor
     return tuple(Broadcast(exclude=exclude)(*args, return_list=True))  # type: ignore
+
+
+def full_like(x, fill_value, dtype=None):
+    """Create a new XTensorVariable with the same shape and dimensions, filled with a specified value.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        The tensor to fill.
+    fill_value : scalar or XTensorVariable
+        The value to fill the new tensor with.
+    dtype : str or np.dtype, optional
+        The data type of the new tensor. If None, uses the dtype of the input tensor.
+
+    Returns
+    -------
+    XTensorVariable
+        A new tensor with the same shape and dimensions as self, filled with fill_value.
+
+    Examples
+    --------
+    >>> from pytensor.xtensor import xtensor, full_like
+    >>> x = xtensor(dtype="float64", dims=("a", "b"), shape=(2, 3))
+    >>> y = full_like(x, 5.0)
+    >>> assert y.dims == ("a", "b")
+    >>> assert y.type.shape == (2, 3)
+    """
+    x = as_xtensor(x)
+    fill_value = as_xtensor(fill_value)
+
+    # Check that fill_value is a scalar (ndim=0)
+    if fill_value.type.ndim != 0:
+        raise ValueError(
+            f"fill_value must be a scalar, got ndim={fill_value.type.ndim}"
+        )
+
+    # Handle dtype conversion
+    if dtype is not None:
+        # If dtype is specified, cast the fill_value to that dtype
+        fill_value = cast(fill_value, dtype)
+    else:
+        # If dtype is None, cast the fill_value to the input tensor's dtype
+        # This matches xarray's behavior where it preserves the original dtype
+        fill_value = cast(fill_value, x.type.dtype)
+
+    # Use the xtensor second function
+    return second(x, fill_value)
+
+
+def ones_like(x, dtype=None):
+    """Create a new XTensorVariable with the same shape and dimensions, filled with ones.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        The tensor to fill.
+    dtype : str or np.dtype, optional
+        The data type of the new tensor. If None, uses the dtype of the input tensor.
+
+    Returns:
+    XTensorVariable
+        A new tensor with the same shape and dimensions as self, filled with ones.
+
+    Examples
+    --------
+    >>> from pytensor.xtensor import xtensor, full_like
+    >>> x = xtensor(dtype="float64", dims=("a", "b"), shape=(2, 3))
+    >>> y = ones_like(x)
+    >>> assert y.dims == ("a", "b")
+    >>> assert y.type.shape == (2, 3)
+    """
+    return full_like(x, 1.0, dtype=dtype)
+
+
+def zeros_like(x, dtype=None):
+    """Create a new XTensorVariable with the same shape and dimensions, filled with zeros.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        The tensor to fill.
+    dtype : str or np.dtype, optional
+        The data type of the new tensor. If None, uses the dtype of the input tensor.
+
+    Returns:
+    XTensorVariable
+        A new tensor with the same shape and dimensions as self, filled with zeros.
+
+    Examples
+    --------
+    >>> from pytensor.xtensor import xtensor, full_like
+    >>> x = xtensor(dtype="float64", dims=("a", "b"), shape=(2, 3))
+    >>> y = zeros_like(x)
+    >>> assert y.dims == ("a", "b")
+    >>> assert y.type.shape == (2, 3)
+    """
+    return full_like(x, 0.0, dtype=dtype)
