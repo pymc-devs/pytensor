@@ -145,7 +145,7 @@ def softmax(x, dim=None):
     return exp_x / exp_x.sum(dim=dim)
 
 
-class XDot(XOp):
+class Dot(XOp):
     """Matrix multiplication between two XTensorVariables.
 
     This operation performs matrix multiplication between two tensors, automatically
@@ -247,6 +247,6 @@ def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
         if d not in union:
             raise ValueError(f"Dimension {d} not found in either input")
 
-    result = XDot(dims=tuple(dim_set))(x, y)
+    result = Dot(dims=tuple(dim_set))(x, y)
 
     return result
