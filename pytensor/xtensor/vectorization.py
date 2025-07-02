@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from itertools import chain
 
 import numpy as np
@@ -13,24 +14,26 @@ from pytensor.tensor.utils import (
     get_static_shape_from_size_variables,
 )
 from pytensor.xtensor.basic import XOp
-from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.type import Dim, DimVariable, XTensorVariable, as_xtensor, xtensor
 
 
-def combine_dims_and_shape(inputs):
-    dims_and_shape: dict[str, int | None] = {}
+def broadcast_xtensors(inputs: Sequence[XTensorVariable]) -> list[DimVariable]:
+    dims_and_shape: dict[Dim, int | None] = {}
+    dim_to_dimvar: dict[Dim, DimVariable] = {}
     for inp in inputs:
-        for dim, dim_length in zip(inp.type.dims, inp.type.shape):
-            if dim not in dims_and_shape:
-                dims_and_shape[dim] = dim_length
-            elif dim_length is not None:
+        for dim, dim_length in zip(inp.dims, inp.type.shape):
+            if dim.type.dim not in dims_and_shape:
+                dims_and_shape[dim.type.dim] = dim_length
+            if dim.type.dim not in dim_to_dimvar:
+                dim_to_dimvar[dim.type.dim] = dim
+
+            if dim_length is not None:
                 # Check for conflicting shapes
-                if (dims_and_shape[dim] is not None) and (
-                    dims_and_shape[dim] != dim_length
+                if (dims_and_shape[dim.type.dim] is not None) and (
+                    dims_and_shape[dim.type.dim] != dim_length
                 ):
                     raise ValueError(f"Dimension {dim} has conflicting shapes")
-                # Keep the non-None shape
-                dims_and_shape[dim] = dim_length
-    return dims_and_shape
+    return list(dim_to_dimvar.values())
 
 
 class XElemwise(XOp):
@@ -47,18 +50,14 @@ class XElemwise(XOp):
                 f"Wrong number of inputs, expected {self.scalar_op.nin}, got {len(inputs)}"
             )
 
-        dims_and_shape = combine_dims_and_shape(inputs)
-        if dims_and_shape:
-            output_dims, output_shape = zip(*dims_and_shape.items())
-        else:
-            output_dims, output_shape = (), ()
+        output_dims = broadcast_xtensors(inputs)
 
         dummy_scalars = [ps.get_scalar_type(inp.type.dtype)() for inp in inputs]
         output_dtypes = [
             out.type.dtype for out in self.scalar_op.make_node(*dummy_scalars).outputs
         ]
         outputs = [
-            xtensor(dtype=output_dtype, dims=output_dims, shape=output_shape)
+            xtensor(dtype=output_dtype, dims=output_dims)
             for output_dtype in output_dtypes
         ]
         return Apply(self, inputs, outputs)
@@ -85,7 +84,7 @@ class XBlockwise(XOp):
                 f"Wrong number of inputs, expected {len(self.core_dims[0])}, got {len(inputs)}"
             )
 
-        dims_and_shape = combine_dims_and_shape(inputs)
+        dims_and_shape = broadcast_xtensors(inputs)
 
         core_inputs_dims, core_outputs_dims = self.core_dims
         core_input_dims_set = set(chain.from_iterable(core_inputs_dims))
@@ -216,7 +215,7 @@ class XRV(XOp, RNGConsumerOp):
                 self.extra_dims, get_static_shape_from_size_variables(extra_dim_lengths)
             )
         )
-        params_dims_and_shape = combine_dims_and_shape(params)
+        params_dims_and_shape = broadcast_xtensors(params)
 
         # Check that no parameter dims conflict with size dims
         if conflict_dims := set(extra_dims_and_shape).intersection(
