@@ -86,8 +86,7 @@ today_fmt = "%B %d, %Y"
 
 # List of directories, relative to source directories, that shouldn't be
 # searched for source files.
-exclude_dirs = ["images", "scripts", "sandbox"]
-exclude_patterns = ['page_footer.md', '**/*.myst.md']
+exclude_patterns = ["README.md", "images/*", "page_footer.md", "**/*.myst.md"]
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
