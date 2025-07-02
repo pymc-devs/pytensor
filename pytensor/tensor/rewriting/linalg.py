@@ -1046,11 +1046,15 @@ def scalar_solve_to_division(fgraph, node):
     if not all(a.broadcastable[-2:]):
         return None
 
+    if core_op.b_ndim == 1:
+        # Convert b to a column matrix
+        b = b[..., None]
+
     # Special handling for different types of solve
     match core_op:
         case SolveTriangular():
             # Corner case: if user asked for a triangular solve with a unit diagonal, a is taken to be 1
-            new_out = b / a if not core_op.unit_diagonal else b
+            new_out = b / a if not core_op.unit_diagonal else pt.second(a, b)
         case CholeskySolve():
             new_out = b / a**2
         case Solve():
@@ -1061,6 +1065,7 @@ def scalar_solve_to_division(fgraph, node):
             )
 
     if core_op.b_ndim == 1:
+        # Squeeze away the column dimension added earlier
         new_out = new_out.squeeze(-1)
 
     copy_stack_trace(old_out, new_out)
