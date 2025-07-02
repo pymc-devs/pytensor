@@ -11,17 +11,31 @@ def cholesky(
     lower: bool = True,
     *,
     check_finite: bool = False,
-    overwrite_a: bool = False,
     on_error: Literal["raise", "nan"] = "raise",
     dims: Sequence[str],
 ):
+    """Compute the Cholesky decomposition of an XTensorVariable.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        The input variable to decompose.
+    lower : bool, optional
+        Whether to return the lower triangular matrix. Default is True.
+    check_finite : bool, optional
+        Whether to check that the input is finite. Default is False.
+    on_error : {'raise', 'nan'}, optional
+        What to do if the input is not positive definite. If 'raise', an error is raised.
+        If 'nan', the output will contain NaNs. Default is 'raise'.
+    dims : Sequence[str]
+        The two core dimensions of the input variable, over which the Cholesky decomposition is computed.
+    """
     if len(dims) != 2:
         raise ValueError(f"Cholesky needs two dims, got {len(dims)}")
 
     core_op = Cholesky(
         lower=lower,
         check_finite=check_finite,
-        overwrite_a=overwrite_a,
         on_error=on_error,
     )
     core_dims = (
@@ -40,6 +54,30 @@ def solve(
     lower: bool = False,
     check_finite: bool = False,
 ):
+    """Solve a system of linear equations using XTensorVariables.
+
+    Parameters
+    ----------
+    a : XTensorVariable
+        The left hand-side xtensor.
+    b : XTensorVariable
+        The right-hand side xtensor.
+    dims : Sequence[str]
+        The core dimensions over which to solve the linear equations.
+        If length is 2, we are solving a matrix-vector equation,
+        and the two dimensions should be present in `a`, but only one in `b`.
+        If length is 3, we are solving a matrix-matrix equation,
+        and two dimensions should be present in `a`, two in `b`, and only one should be shared.
+        In both cases the shared dimension will not appear in the output.
+    assume_a : str, optional
+        The type of matrix `a` is assumed to be. Default is 'gen' (general).
+        Options are ["gen", "sym", "her", "pos", "tridiagonal", "banded"].
+        Long form options can also be used ["general", "symmetric", "hermitian", "positive_definite"].
+    lower : bool, optional
+        Whether `a` is lower triangular. Default is False. Only relevant if `assume_a` is "sym", "her", or "pos".
+    check_finite : bool, optional
+        Whether to check that the input is finite. Default is False.
+    """
     a, b = as_xtensor(a), as_xtensor(b)
     input_core_dims: tuple[tuple[str, str], tuple[str] | tuple[str, str]]
     output_core_dims: tuple[tuple[str] | tuple[str, str]]
