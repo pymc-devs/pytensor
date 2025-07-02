@@ -13,7 +13,7 @@ import pytensor.scalar as ps
 import pytensor.xtensor.math as pxm
 from pytensor import function
 from pytensor.scalar import ScalarOp
-from pytensor.xtensor.basic import rename
+from pytensor.xtensor.basic import map_dims
 from pytensor.xtensor.math import add, exp
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
@@ -77,8 +77,8 @@ def test_dimension_alignment():
 
 def test_renamed_dimension_alignment():
     x = xtensor("x", dims=("a", "b1", "b2"), shape=(2, 3, 3))
-    y = rename(x, b1="b2", b2="b1")
-    z = rename(x, b2="b3")
+    y = map_dims(x, b1="b2", b2="b1")
+    z = map_dims(x, b2="b3")
     assert y.type.dims == ("a", "b2", "b1")
     assert z.type.dims == ("a", "b1", "b3")
 

@@ -6,6 +6,7 @@ from pytensor.xtensor.math import dot
 from pytensor.xtensor.shape import concat
 from pytensor.xtensor.type import (
     as_xtensor,
+    dim,
     xtensor,
     xtensor_constant,
 )
