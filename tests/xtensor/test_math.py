@@ -11,6 +11,7 @@ import xarray as xr
 from xarray import DataArray
 
 import pytensor.scalar as ps
+import pytensor.xtensor as px
 import pytensor.xtensor.math as pxm
 from pytensor import function
 from pytensor.scalar import ScalarOp
@@ -324,55 +325,57 @@ def test_full_like():
     x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
     x_test = xr_arange_like(x)
 
-    y1 = pxm.full_like(x, 5.0)
+    y1 = px.full_like(x, 5.0)
     fn1 = xr_function([x], y1)
     result1 = fn1(x_test)
     expected1 = xr.full_like(x_test, 5.0)
-    xr_assert_allclose(result1, expected1)
+    xr_assert_allclose(result1, expected1, check_dtype=True)
 
-    # Different dtypes
-    y3 = pxm.full_like(x, 5.0, dtype="int32")
+    # Other dtypes
+    x_3d = xtensor("x_3d", dims=("a", "b", "c"), shape=(2, 3, 4), dtype="float32")
+    x_3d_test = xr_arange_like(x_3d)
+
+    y7 = px.full_like(x_3d, -1.0)
+    fn7 = xr_function([x_3d], y7)
+    result7 = fn7(x_3d_test)
+    expected7 = xr.full_like(x_3d_test, -1.0)
+    xr_assert_allclose(result7, expected7, check_dtype=True)
+
+    # Integer dtype
+    y3 = px.full_like(x, 5.0, dtype="int32")
     fn3 = xr_function([x], y3)
     result3 = fn3(x_test)
     expected3 = xr.full_like(x_test, 5.0, dtype="int32")
-    xr_assert_allclose(result3, expected3)
+    xr_assert_allclose(result3, expected3, check_dtype=True)
 
     # Different fill_value types
-    y4 = pxm.full_like(x, np.array(3.14))
+    y4 = px.full_like(x, np.array(3.14))
     fn4 = xr_function([x], y4)
     result4 = fn4(x_test)
     expected4 = xr.full_like(x_test, 3.14)
-    xr_assert_allclose(result4, expected4)
+    xr_assert_allclose(result4, expected4, check_dtype=True)
 
     # Integer input with float fill_value
     x_int = xtensor("x_int", dims=("a", "b"), shape=(2, 3), dtype="int32")
     x_int_test = DataArray(np.arange(6, dtype="int32").reshape(2, 3), dims=("a", "b"))
 
-    y5 = pxm.full_like(x_int, 2.5)
+    y5 = px.full_like(x_int, 2.5)
     fn5 = xr_function([x_int], y5)
     result5 = fn5(x_int_test)
     expected5 = xr.full_like(x_int_test, 2.5)
-    xr_assert_allclose(result5, expected5)
+    xr_assert_allclose(result5, expected5, check_dtype=True)
 
     # Symbolic shapes
     x_sym = xtensor("x_sym", dims=("a", "b"), shape=(None, 3))
-    x_sym_test = DataArray(np.arange(6).reshape(2, 3), dims=("a", "b"))
+    x_sym_test = DataArray(
+        np.arange(6, dtype=x_sym.type.dtype).reshape(2, 3), dims=("a", "b")
+    )
 
-    y6 = pxm.full_like(x_sym, 7.0)
+    y6 = px.full_like(x_sym, 7.0)
     fn6 = xr_function([x_sym], y6)
     result6 = fn6(x_sym_test)
     expected6 = xr.full_like(x_sym_test, 7.0)
-    xr_assert_allclose(result6, expected6)
-
-    # Higher dimensional tensor
-    x_3d = xtensor("x_3d", dims=("a", "b", "c"), shape=(2, 3, 4), dtype="float32")
-    x_3d_test = xr_arange_like(x_3d)
-
-    y7 = pxm.full_like(x_3d, -1.0)
-    fn7 = xr_function([x_3d], y7)
-    result7 = fn7(x_3d_test)
-    expected7 = xr.full_like(x_3d_test, -1.0)
-    xr_assert_allclose(result7, expected7)
+    xr_assert_allclose(result6, expected6, check_dtype=True)
 
     # Boolean dtype
     x_bool = xtensor("x_bool", dims=("a", "b"), shape=(2, 3), dtype="bool")
@@ -380,11 +383,11 @@ def test_full_like():
         np.array([[True, False, True], [False, True, False]]), dims=("a", "b")
     )
 
-    y8 = pxm.full_like(x_bool, True)
+    y8 = px.full_like(x_bool, True)
     fn8 = xr_function([x_bool], y8)
     result8 = fn8(x_bool_test)
     expected8 = xr.full_like(x_bool_test, True)
-    xr_assert_allclose(result8, expected8)
+    xr_assert_allclose(result8, expected8, check_dtype=True)
 
     # Complex dtype
     x_complex = xtensor("x_complex", dims=("a", "b"), shape=(2, 3), dtype="complex64")
@@ -392,11 +395,46 @@ def test_full_like():
         np.arange(6, dtype="complex64").reshape(2, 3), dims=("a", "b")
     )
 
-    y9 = pxm.full_like(x_complex, 1 + 2j)
+    y9 = px.full_like(x_complex, 1 + 2j)
     fn9 = xr_function([x_complex], y9)
     result9 = fn9(x_complex_test)
     expected9 = xr.full_like(x_complex_test, 1 + 2j)
-    xr_assert_allclose(result9, expected9)
+    xr_assert_allclose(result9, expected9, check_dtype=True)
+
+    # Symbolic fill value
+    x_sym_fill = xtensor("x_sym_fill", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    fill_val = xtensor("fill_val", dims=(), shape=(), dtype="float64")
+    x_sym_fill_test = xr_arange_like(x_sym_fill)
+    fill_val_test = DataArray(3.14, dims=())
+
+    y10 = px.full_like(x_sym_fill, fill_val)
+    fn10 = xr_function([x_sym_fill, fill_val], y10)
+    result10 = fn10(x_sym_fill_test, fill_val_test)
+    expected10 = xr.full_like(x_sym_fill_test, 3.14)
+    xr_assert_allclose(result10, expected10, check_dtype=True)
+
+    # Test dtype conversion to bool when neither input nor fill_value are bool
+    x_float = xtensor("x_float", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_float_test = xr_arange_like(x_float)
+
+    y11 = px.full_like(x_float, 5.0, dtype="bool")
+    fn11 = xr_function([x_float], y11)
+    result11 = fn11(x_float_test)
+    expected11 = xr.full_like(x_float_test, 5.0, dtype="bool")
+    xr_assert_allclose(result11, expected11, check_dtype=True)
+
+    # Verify the result is actually boolean
+    assert result11.dtype == "bool"
+    assert expected11.dtype == "bool"
+
+
+def test_full_like_errors():
+    """Test full_like function errors."""
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_test = xr_arange_like(x)
+
+    with pytest.raises(ValueError, match="fill_value must be a scalar"):
+        px.full_like(x, x_test)
 
 
 def test_ones_like():
@@ -404,11 +442,12 @@ def test_ones_like():
     x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
     x_test = xr_arange_like(x)
 
-    y1 = pxm.ones_like(x)
+    y1 = px.ones_like(x)
     fn1 = xr_function([x], y1)
     result1 = fn1(x_test)
     expected1 = xr.ones_like(x_test)
     xr_assert_allclose(result1, expected1)
+    assert result1.dtype == expected1.dtype
 
 
 def test_zeros_like():
@@ -416,8 +455,9 @@ def test_zeros_like():
     x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
     x_test = xr_arange_like(x)
 
-    y1 = pxm.zeros_like(x)
+    y1 = px.zeros_like(x)
     fn1 = xr_function([x], y1)
     result1 = fn1(x_test)
     expected1 = xr.zeros_like(x_test)
     xr_assert_allclose(result1, expected1)
+    assert result1.dtype == expected1.dtype

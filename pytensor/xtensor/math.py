@@ -279,6 +279,13 @@ def full_like(x, fill_value, dtype=None):
     (2, 3)
     """
     x = as_xtensor(x)
+    fill_value = as_xtensor(fill_value)
+
+    # Check that fill_value is a scalar (ndim=0)
+    if fill_value.type.ndim != 0:
+        raise ValueError(
+            f"fill_value must be a scalar, got ndim={fill_value.type.ndim}"
+        )
 
     # Handle dtype conversion
     if dtype is not None:

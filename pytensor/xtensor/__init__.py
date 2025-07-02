@@ -2,7 +2,7 @@ import warnings
 
 import pytensor.xtensor.rewriting
 from pytensor.xtensor import linalg
-from pytensor.xtensor.math import dot
+from pytensor.xtensor.math import dot, full_like, ones_like, zeros_like
 from pytensor.xtensor.shape import concat
 from pytensor.xtensor.type import (
     as_xtensor,
