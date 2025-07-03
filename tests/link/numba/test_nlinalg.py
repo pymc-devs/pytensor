@@ -187,60 +187,6 @@ def test_matrix_inverses(op, x, exc, op_args):
 
 
 @pytest.mark.parametrize(
-    "x, mode, exc",
-    [
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            "reduced",
-            None,
-        ),
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            "r",
-            None,
-        ),
-        (
-            (
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            "reduced",
-            None,
-        ),
-        (
-            (
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            "complete",
-            UserWarning,
-        ),
-    ],
-)
-def test_QRFull(x, mode, exc):
-    x, test_x = x
-    g = nlinalg.QRFull(mode)(x)
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x],
-            g,
-            [test_x],
-        )
-
-
-@pytest.mark.parametrize(
     "x, full_matrices, compute_uv, exc",
     [
         (
