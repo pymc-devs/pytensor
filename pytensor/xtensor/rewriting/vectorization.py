@@ -14,14 +14,15 @@ def lower_elemwise(fgraph, node):
     assert len(node.outputs) == 1
     out_dims = node.outputs[0].dims
     out_dims = [rebase_dim(dim, *node.inputs) for dim in out_dims]
+    out_dim_types = [dim.type for dim in out_dims]
 
     # Convert input XTensors to Tensors and align batch dimensions
     tensor_inputs = []
     for inp in node.inputs:
-        inp_dims = inp.type.dims
+        inp_dim_types = inp.type.dims
         order = [
-            inp_dims.index(out_dim) if out_dim in inp_dims else "x"
-            for out_dim in out_dims
+            inp_dim_types.index(out_dim_type) if out_dim_type in inp_dim_types else "x"
+            for out_dim_type in out_dim_types
         ]
         tensor_inp = tensor_from_xtensor(inp).dimshuffle(order)
         tensor_inputs.append(tensor_inp)
@@ -35,7 +36,6 @@ def lower_elemwise(fgraph, node):
         xtensor_from_tensor(tensor_out, dims=out_dims, check=False)
         for tensor_out in tensor_outs
     ]
-    new_outs[0].dprint()
     return new_outs
 
 

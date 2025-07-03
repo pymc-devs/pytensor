@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import typing
 import warnings
 from types import EllipsisType
@@ -27,7 +29,6 @@ except ModuleNotFoundError:
     XARRAY_AVAILABLE = False
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
 import numpy as np
@@ -46,77 +47,6 @@ from pytensor.tensor.variable import TensorConstantSignature, TensorVariable
 DIM_LENGTH_SCALAR = int64
 
 
-@dataclass(frozen=True, kw_only=True)
-class Dim:
-    """Base class for dimensions."""
-
-    size: int | None = None
-    name: str | None = None
-
-    def base_dims(self) -> set["BaseDim"]:
-        """Return a list of base dimensions."""
-        raise NotImplementedError(
-            "Subclasses must implement base_dims to return a list of base dimensions."
-        )
-
-
-@dataclass(frozen=True, kw_only=True)
-class BaseDim(Dim):
-    uuid: UUID | None = None
-
-    def base_dims(self) -> set["BaseDim"]:
-        return {self}
-
-
-@dataclass(frozen=True, kw_only=True)
-class ProductDim(Dim):
-    dims: tuple[Dim, ...]
-
-    def base_dims(self) -> set["BaseDim"]:
-        base = set()
-        for dim in self.dims:
-            base = set.union(base, dim.base_dims())
-        return base
-
-
-@dataclass(frozen=True, kw_only=True)
-class ConcatDim(Dim):
-    dims: tuple[Dim, ...]
-
-    def base_dims(self) -> set["BaseDim"]:
-        base = set()
-        for dim in self.dims:
-            base = set.union(base, dim.base_dims())
-        return base
-
-
-@dataclass(frozen=True)
-class ConstSliceDim(Dim):
-    base: Dim
-    slice: slice  # [int | None, int | None, int | None]
-
-    def base_dims(self) -> set["BaseDim"]:
-        return self.base.base_dims()
-
-
-@dataclass(frozen=True)
-class UnknownIndexedDim(Dim):
-    base: Dim
-    uuid: UUID
-
-    def base_dims(self) -> set["BaseDim"]:
-        return self.base.base_dims()
-
-
-@dataclass(frozen=True)
-class CloneDim(Dim):
-    base: Dim
-    uuid: UUID
-
-    def base_dims(self) -> list[Dim]:
-        return [self.base]
-
-
 class DimType(Type):
     """A type for dimensions.
 
@@ -124,11 +54,20 @@ class DimType(Type):
     length.
     """
 
-    __props__ = ("dim",)
+    __props__ = ("name", "size")
 
-    def __init__(self, dim):
-        self.dim = dim
+    name: str | None
+    size: int | None
+
+    def __init__(self, *, name: str | None = None, size: int | None = None):
         super().__init__()
+        self.name = name
+        self.size = size
+
+    def base_dims(self) -> set[BasicDim]:
+        raise NotImplementedError(
+            "Subclasses must implement base_dims to return a set of base dimensions."
+        )
 
     def filter(self, value, strict=False, allow_downcast=None):
         # At runtime, a dim behaves like a DIM_LENGTH_SCALAR scalar
@@ -153,9 +92,125 @@ class DimType(Type):
             f"Cannot convert Type {other.type} (of Variable {other}) into Type {self}."
         )
 
+    def __repr__(self) -> str:
+        props = []
+        for prop in self.__props__:
+            if not hasattr(self, prop):
+                raise AttributeError(
+                    f"{self.__class__.__name__} has no property '{prop}' even though it is listed in __props__"
+                )
+            value = getattr(self, prop)
+            if value is None:
+                continue
+            if prop == "name":
+                props.insert(0, f"{value}")
+            elif prop == "uuid":
+                props.append("uuid=?")
+            else:
+                props.append(f"{prop}={value!r}")
+        return f"{self.__class__.__name__}({', '.join(props)})"
+
+
+class BasicDim(DimType):
+    """A non-derived dimension type."""
+
+    __props__ = (*DimType.__props__, "uuid")
+
+    uuid: UUID | None = None
+
+    def __init__(self, *, uuid: UUID | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self.uuid = uuid
+
+    def base_dims(self) -> set[BasicDim]:
+        return {self}
+
+
+class ProductDim(DimType):
+    __props__ = (
+        *DimType.__props__,
+        "dims",
+    )
+
+    dims: tuple[DimType, ...]
+
+    def __init__(self, *, dims: Sequence[DimType], **kwargs):
+        super().__init__(**kwargs)
+        self.dims = tuple(dims)
+
+    def base_dims(self) -> set[BasicDim]:
+        base = set()
+        for dim in self.dims:
+            base = set.union(base, dim.base_dims())
+        return base
+
+
+class ConcatDim(DimType):
+    __props__ = (
+        *DimType.__props__,
+        "dims",
+    )
+
+    dims: tuple[DimType, ...]
+
+    def __init__(self, *, dims: Sequence[DimType], **kwargs):
+        super().__init__(**kwargs)
+        self.dims = tuple(dims)
+
+    def base_dims(self) -> set[BasicDim]:
+        base = set()
+        for dim in self.dims:
+            base = set.union(base, dim.base_dims())
+        return base
+
+
+class ConstSliceDim(DimType):
+    __props__ = (*DimType.__props__, "base", "slice")
+
+    base: DimType
+    slice: slice  # [int | None, int | None, int | None]
+
+    def __init__(self, *, base: DimType, slice: slice, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.slice = slice
+
+    def base_dims(self) -> set[BasicDim]:
+        return self.base.base_dims()
+
+
+class UnknownIndexedDim(DimType):
+    __props__ = (*DimType.__props__, "base", "uuid")
+
+    base: DimType
+    uuid: UUID
+
+    def __init__(self, *, base: DimType, uuid: UUID, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.uuid = uuid
+
+    def base_dims(self) -> set[BasicDim]:
+        return self.base.base_dims()
+
+
+class CloneDim(DimType):
+    __props__ = (*DimType.__props__, "base", "uuid")
+
+    base: DimType
+    uuid: UUID
+
+    def __init__(self, *, base: DimType, uuid: UUID, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.uuid = uuid
+
+    def base_dims(self) -> set[BasicDim]:
+        return self.base.base_dims()
+
 
 class DimVariable(Variable[DimType, OptionalApplyType]):
-    def clone_dim(self, name: str | None = None) -> "DimVariable":
+    def clone_dim(self, name: str | None = None) -> DimVariable:
         """Rename the dimension variable."""
         from pytensor.xtensor.dims import _clone_dim
 
@@ -199,10 +254,10 @@ def dim(
     if name is None:
         name = _new_dim_name()
     if size is None:
-        dim_type = DimType(BaseDim(name=name, uuid=uuid4()))
+        dim_type = BasicDim(name=name, uuid=uuid4())
         return dim_type.make_variable(name=name)
     if isinstance(size, int):
-        dim_type = DimType(BaseDim(size=size, name=name, uuid=uuid4()))
+        dim_type = BasicDim(size=size, name=name, uuid=uuid4())
         return dim_type.make_constant(value=size, name=name)
     if isinstance(size, ScalarVariable):
         if size.type != DIM_LENGTH_SCALAR:
@@ -224,11 +279,15 @@ class XTensorType(Type, HasDataType, HasShape):
 
     __props__ = ("dtype", "shape", "dims")
 
+    # TODO check type
+    dtype: str | np.dtype
+    dims: tuple[DimType]
+
     def __init__(
         self,
         dtype: str | np.dtype,
         *,
-        dims: Sequence[Dim],
+        dims: Sequence[DimType],
         name: str | None = None,
     ):
         if dtype == "floatX":
@@ -236,7 +295,7 @@ class XTensorType(Type, HasDataType, HasShape):
         else:
             self.dtype = np.dtype(dtype).name
 
-        self.dims = dims
+        self.dims = tuple(dims)
         if len(set(dims)) < len(dims):
             raise ValueError(f"Dimensions must be unique. Found duplicates in {dims}: ")
         self.ndim = len(self.dims)
@@ -330,8 +389,11 @@ class XTensorType(Type, HasDataType, HasShape):
                 return None
 
             # Needs a specify_shape
+            # TODO dims should be a DimVariable
             return as_xtensor(specify_shape(var.values, self.shape), dims=self.dims)
 
+        # TODO: This is not sound, we should not allow it, because we don't
+        # know if the dimension lengths match.
         if isinstance(var_type, TensorType):
             if (
                 self.ndim != var_type.ndim
@@ -387,7 +449,7 @@ def xtensor(
 ):
     if shape is not None:
         warnings.warn("should not pass shape")
-    return XTensorType(dtype=dtype, dims=tuple(dim.type.dim for dim in dims))(name=name)
+    return XTensorType(dtype=dtype, dims=tuple(dim.type for dim in dims))(name=name)
 
 
 _XTensorTypeType = TypeVar("_XTensorTypeType", bound=XTensorType)

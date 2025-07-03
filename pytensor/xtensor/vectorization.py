@@ -14,23 +14,29 @@ from pytensor.tensor.utils import (
     get_static_shape_from_size_variables,
 )
 from pytensor.xtensor.basic import XOp
-from pytensor.xtensor.type import Dim, DimVariable, XTensorVariable, as_xtensor, xtensor
+from pytensor.xtensor.type import (
+    DimType,
+    DimVariable,
+    XTensorVariable,
+    as_xtensor,
+    xtensor,
+)
 
 
 def broadcast_xtensors(inputs: Sequence[XTensorVariable]) -> list[DimVariable]:
-    dims_and_shape: dict[Dim, int | None] = {}
-    dim_to_dimvar: dict[Dim, DimVariable] = {}
+    dims_and_shape: dict[DimType, int | None] = {}
+    dim_to_dimvar: dict[DimType, DimVariable] = {}
     for inp in inputs:
         for dim, dim_length in zip(inp.dims, inp.type.shape):
-            if dim.type.dim not in dims_and_shape:
-                dims_and_shape[dim.type.dim] = dim_length
-            if dim.type.dim not in dim_to_dimvar:
-                dim_to_dimvar[dim.type.dim] = dim
+            if dim.type not in dims_and_shape:
+                dims_and_shape[dim.type] = dim_length
+            if dim.type not in dim_to_dimvar:
+                dim_to_dimvar[dim.type] = dim
 
             if dim_length is not None:
                 # Check for conflicting shapes
-                if (dims_and_shape[dim.type.dim] is not None) and (
-                    dims_and_shape[dim.type.dim] != dim_length
+                if (dims_and_shape[dim.type] is not None) and (
+                    dims_and_shape[dim.type] != dim_length
                 ):
                     raise ValueError(f"Dimension {dim} has conflicting shapes")
     return list(dim_to_dimvar.values())

@@ -1,18 +1,24 @@
 from pytensor.graph import node_rewriter
+from pytensor.tensor.rewriting.basic import (
+    register_canonicalize,
+    register_infer_shape,
+    register_useless,
+)
 from pytensor.xtensor.basic import (
     MapDims,
     TensorFromXTensor,
     XTensorFromTensor,
     xtensor_from_tensor,
 )
+from pytensor.xtensor.dims import FromLength, Length
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
 
 
-# @register_infer_shape
-# @register_useless
-# @register_canonicalize
-# @register_lower_xtensor
-# @node_rewriter(tracks=[TensorFromXTensor])
+@register_infer_shape
+@register_useless
+@register_canonicalize
+@register_lower_xtensor
+@node_rewriter(tracks=[TensorFromXTensor])
 def useless_tensor_from_xtensor(fgraph, node):
     """TensorFromXTensor(XTensorFromTensor(x)) -> x"""
     [x] = node.inputs
@@ -20,6 +26,7 @@ def useless_tensor_from_xtensor(fgraph, node):
         return [x.owner.inputs[0]]
 
 
+# TODO
 # @register_infer_shape
 # @register_useless
 # @register_canonicalize
@@ -31,6 +38,18 @@ def useless_xtensor_from_tensor(fgraph, node):
     [x, *dims] = node.inputs
     if x.owner and isinstance(x.owner.op, TensorFromXTensor):
         return [x.owner.inputs[0]]
+
+
+@register_infer_shape
+@register_useless
+@register_canonicalize
+@register_lower_xtensor
+@node_rewriter(tracks=[Length])
+def useless_length(fgraph, node):
+    """Length(FromLength(x)) -> x"""
+    [dim] = node.inputs
+    if dim.owner and isinstance(dim.owner.op, FromLength):
+        return [dim.owner.inputs[0]]
 
 
 @register_lower_xtensor

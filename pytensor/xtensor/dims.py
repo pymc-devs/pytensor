@@ -9,7 +9,7 @@ from pytensor.graph.op import Op, Variable
 from pytensor.scalar.basic import ScalarVariable
 from pytensor.xtensor.type import (
     DIM_LENGTH_SCALAR,
-    BaseDim,
+    BasicDim,
     CloneDim,
     DimType,
     DimVariable,
@@ -74,7 +74,7 @@ def from_length(length: ScalarVariable, name: str | None = None) -> DimVariable:
         )
 
     uuid = uuid4()
-    dim_type = DimType(dim=BaseDim(uuid=uuid, name=name))
+    dim_type = BasicDim(uuid=uuid, name=name)
     op = FromLength(dim_type)
     return op(length, name=name)
 
@@ -97,16 +97,14 @@ class FromTensor(Op):
         (x,) = inputs
         (x_var,) = node.inputs
         for i, dim in enumerate(x_var.type.dims):
-            if dim == self.dim_type.dim:
+            if dim == self.dim_type:
                 outputs[0][0] = x.shape[i]
                 return
-        raise ValueError(
-            f"Dimension {self.dim_type.dim} not found in tensor {x.type.dims}"
-        )
+        raise ValueError(f"Dimension {self.dim_type} not found in tensor {x.type.dims}")
 
 
 def _dim_from_tensor(x: XTensorVariable, idx: int) -> DimVariable:
-    op = FromTensor(dim_type=DimType(x.type.dims[idx]))
+    op = FromTensor(dim_type=x.type.dims[idx])
     return op(x, name=x.type.dims[idx].name)
 
 
@@ -136,7 +134,7 @@ def _clone_dim(dim: DimVariable, *, name: str | None = None) -> DimVariable:
     Returns:
         A new DimVariable with the updated name.
     """
-    dim_type = DimType(dim=CloneDim(uuid=uuid4(), base=dim.type.dim))
+    dim_type = CloneDim(uuid=uuid4(), base=dim.type)
     return Clone(dim_type)(dim, name=name)
 
 
@@ -166,8 +164,6 @@ def rebase_dim(dim: DimVariable, *tensors: XTensorVariable) -> DimVariable:
 
     for tensor in tensors:
         for i, tensor_dim in enumerate(tensor.type.dims):
-            if dim.type.dim == tensor_dim:
+            if dim.type == tensor_dim:
                 return _dim_from_tensor(tensor, idx=i)
-    raise ValueError(
-        f"Dimension {dim.type.dim} not found in any of the provided tensors."
-    )
+    raise ValueError(f"Dimension {dim.type} not found in any of the provided tensors.")
