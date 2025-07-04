@@ -10,6 +10,7 @@ import pytensor.tensor as pt
 from pytensor import In, config
 from pytensor.tensor.slinalg import (
     LU,
+    QR,
     Cholesky,
     CholeskySolve,
     LUFactor,
@@ -720,3 +721,51 @@ def test_lu_solve(b_func, b_shape: tuple[int, ...], trans: bool, overwrite_b: bo
 
     # Can never destroy non-contiguous inputs
     np.testing.assert_allclose(b_val_not_contig, b_val)
+
+
+@pytest.mark.parametrize(
+    "x, mode",
+    [
+        (
+            (
+                pt.dmatrix(),
+                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
+            ),
+            "reduced",
+        ),
+        (
+            (
+                pt.dmatrix(),
+                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
+            ),
+            "r",
+        ),
+        (
+            (
+                pt.lmatrix(),
+                (lambda x: x.T.dot(x))(
+                    rng.integers(1, 10, size=(3, 3)).astype("int64")
+                ),
+            ),
+            "reduced",
+        ),
+        (
+            (
+                pt.lmatrix(),
+                (lambda x: x.T.dot(x))(
+                    rng.integers(1, 10, size=(3, 3)).astype("int64")
+                ),
+            ),
+            "complete",
+        ),
+    ],
+)
+def test_QR(x, mode):
+    x, test_x = x
+    g = QR(mode=mode)(x)
+
+    compare_numba_and_py(
+        [x],
+        g,
+        [test_x],
+    )

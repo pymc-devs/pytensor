@@ -11,6 +11,7 @@ from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
     _pivot_to_permutation,
 )
 from pytensor.link.numba.dispatch.linalg.decomposition.lu_factor import _lu_factor
+from pytensor.link.numba.dispatch.linalg.decomposition.qr import _qr
 from pytensor.link.numba.dispatch.linalg.solve.cholesky import _cho_solve
 from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
 from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
@@ -19,6 +20,7 @@ from pytensor.link.numba.dispatch.linalg.solve.triangular import _solve_triangul
 from pytensor.link.numba.dispatch.linalg.solve.tridiagonal import _solve_tridiagonal
 from pytensor.tensor.slinalg import (
     LU,
+    QR,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
@@ -311,3 +313,27 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
         )
 
     return cho_solve
+
+
+@numba_funcify.register(QR)
+def numba_funcify_QR(op, node, **kwargs):
+    mode = op.mode
+    check_finite = op.check_finite
+    pivoting = op.pivoting
+    overwrite_a = op.overwrite_a
+
+    dtype = node.inputs[0].dtype
+    if dtype in complex_dtypes:
+        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+
+    @numba_njit
+    def qr(a):
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) found in input to qr"
+                )
+
+        return _qr(a, mode=mode, pivoting=pivoting, overwrite_a=overwrite_a)
+
+    return qr

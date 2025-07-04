@@ -103,6 +103,18 @@ def test_jax_basic():
         ],
     )
 
+    def assert_fn(x, y):
+        np.testing.assert_allclose(x.astype(config.floatX), y, rtol=1e-3)
+
+    M = rng.normal(size=(3, 3))
+    X = M.dot(M.T)
+
+    outs = pt_slinalg.qr(x, mode="full")
+    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
+
+    outs = pt_slinalg.qr(x, mode="economic")
+    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
+
 
 def test_jax_solve():
     rng = np.random.default_rng(utt.fetch_seed())
