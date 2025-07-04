@@ -360,12 +360,12 @@ class Blockwise(COp):
                 dummy_fgraph, dummy_core_node, core_input_shapes
             )
 
-            # Set to None those core_shapes that depend on dummy_core_inputs,
-            # meaning their value may not be constant across batch dims of the Blockwise
             if not dummy_core_inputs:
                 # All inputs are unbatched, so the core_shape can be used as is
                 return core_output_shapes
             else:
+                # Set to None those core_shapes that depend on dummy_core_inputs,
+                # meaning their value may not be constant across batch dims of the Blockwise
                 set_dummy_core_inputs = set(dummy_core_inputs)
                 safe_core_output_shapes = [list(shape) for shape in core_output_shapes]
                 for core_out_shape in safe_core_output_shapes:
