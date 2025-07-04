@@ -49,6 +49,7 @@ from pytensor.tensor.math import (
     bitwise_and,
     bitwise_or,
     bitwise_xor,
+    cast,
     conj,
     cosh,
     deg2rad,
@@ -4115,24 +4116,37 @@ class TestSigmoidRewrites:
     def test_local_1msigmoid(self):
         m = self.get_mode(excluding=["fusion", "inplace"])
         x = fmatrix()
+        xd = dmatrix()
 
         # Test `exp_over_1_plus_exp`
         f = pytensor.function([x], 1 - exp(x) / (1 + exp(x)), mode=m)
         # FIXME: PatternNodeRewriter does not copy stack trace
         #  (see https://github.com/Theano/Theano/issues/4581)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
 
         # Test `inv_1_plus_exp`
         f = pytensor.function([x], 1 - pt.fill(x, 1.0) / (1 + exp(-x)), mode=m)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
 
         # Test float constant
-        f = pytensor.function(
-            [x], np.array(1.000001, dtype="float32") - sigmoid(x), mode=m
-        )
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        for out, expected in [
+            (np.array(1.0, "float32") - sigmoid(x), sigmoid(-x)),
+            (np.array(1.0, "float64") - pt.sigmoid(x), cast(sigmoid(-x), "float64")),
+            (np.array(1.0, "float32") - sigmoid(xd), sigmoid(-xd)),
+            (np.array([[1.0]], "float64") - sigmoid(xd), sigmoid(-xd)),
+        ]:
+            f = pytensor.function([x, xd], out, m, on_unused_input="ignore")
+            f_outs = f.maker.fgraph.outputs
+            assert equal_computations(
+                f_outs, [expected]
+            ), "Expression:\n{}rewritten as:\n{}expected:\n{}".format(
+                *(
+                    pytensor.dprint(expr, print_type=True, file="str")
+                    for expr in (out, f_outs, expected)
+                )
+            )
 
     def test_local_sigm_times_exp(self):
         """

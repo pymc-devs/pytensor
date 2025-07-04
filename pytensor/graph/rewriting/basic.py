@@ -1550,6 +1550,7 @@ class PatternNodeRewriter(NodeRewriter):
         tracks=(),
         get_nodes=None,
         values_eq_approx=None,
+        allow_cast=True,
     ):
         """
 
@@ -1572,6 +1573,10 @@ class PatternNodeRewriter(NodeRewriter):
             If you provide `tracks`, you must provide this parameter. It must be a
             function that takes the tracked node and returns a list of nodes on
             which we will try this rewrite.
+        values_eq_approx
+            TODO
+        allow_cast
+            Automatically cast the output of the rewrite whenever new and old types differ
 
         Notes
         -----
@@ -1586,6 +1591,7 @@ class PatternNodeRewriter(NodeRewriter):
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
         self.values_eq_approx = values_eq_approx
+        self.allow_cast = allow_cast
         if isinstance(in_pattern, list | tuple):
             self.op = self.in_pattern[0]
         elif isinstance(in_pattern, dict):
@@ -1653,14 +1659,20 @@ class PatternNodeRewriter(NodeRewriter):
                 return False
 
         if ret.owner:
-            if not (
-                len(node.outputs) == len(ret.owner.outputs)
-                and all(
+            if len(node.outputs) != len(ret.owner.outputs):
+                return
+            if len(node.outputs) > 1:
+                if not all(
                     o.type.is_super(new_o.type)
                     for o, new_o in zip(node.outputs, ret.owner.outputs, strict=True)
-                )
-            ):
-                return False
+                ):
+                    return False
+            else:
+                out_dtype = node.outputs[0].type.dtype
+                if self.allow_cast and ret.owner.outputs[0].type.dtype != out_dtype:
+                    ret = pytensor.tensor.basic.cast(ret, out_dtype)
+                if not node.outputs[0].type.is_super(ret.owner.outputs[0].type):
+                    return False
         else:
             # ret is just an input variable
             assert len(node.outputs) == 1
