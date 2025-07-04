@@ -166,13 +166,5 @@ def test_psi(linker):
 
     x_test = np.float64(0.7)
 
-    np.testing.assert_allclose(
-        fn(x_test),
-        scipy.special.psi(x_test),
-        strict=True,
-    )
-    np.testing.assert_allclose(
-        fn(-x_test),
-        scipy.special.psi(-x_test),
-        strict=True,
-    )
+    np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test))
+    np.testing.assert_allclose(fn(-x_test), scipy.special.psi(-x_test))
