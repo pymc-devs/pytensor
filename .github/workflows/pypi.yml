@@ -41,10 +41,11 @@ jobs:
         id: set_should_run
         run: |
           if [[ "${{ github.event_name == 'release' || 
+                github.ref == 'refs/heads/main' ||
                 (
-                  github.ref == 'refs/heads/main' || 
-                  github.event_name == 'pull_request' 
-                ) && steps.filter.outputs.any_changed == 'true' 
+                  github.event_name == 'pull_request'
+                  && steps.filter.outputs.any_changed == 'true'
+                )
               }}" == "true" ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
