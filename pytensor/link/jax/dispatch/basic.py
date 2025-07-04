@@ -10,10 +10,11 @@ from pytensor.compile import JAX
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.configdefaults import config
+from pytensor.graph import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
-from pytensor.raise_op import Assert, CheckAndRaise
+from pytensor.raise_op import CheckAndRaise
 
 
 if config.floatX == "float64":
@@ -73,11 +74,14 @@ def jax_funcify_IfElse(op, **kwargs):
     return ifelse
 
 
-@jax_funcify.register(Assert)
 @jax_funcify.register(CheckAndRaise)
-def jax_funcify_CheckAndRaise(op, **kwargs):
+def jax_funcify_CheckAndRaise(op, node, **kwargs):
+    conds = node.inputs[1:]
+    if any(isinstance(cond, Constant) and not bool(cond.data) for cond in conds):
+        raise op.exc_type(op.msg)
+
     warnings.warn(
-        f"""Skipping `CheckAndRaise` Op (assertion: {op.msg}) as JAX tracing would remove it.""",
+        f"""Skipping {op} Op (assertion: {op.msg}) as JAX tracing would remove it.""",
         stacklevel=2,
     )
 

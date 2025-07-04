@@ -1910,10 +1910,6 @@ class TestGer(unittest_tools.OptimizationTestMixin):
     def test_c64_7_1(self):
         return self.given_dtype("complex64", 7, 1)
 
-    @pytest.mark.xfail(
-        raises=AssertionError,
-        reason="Unclear how this test was supposed to work with complex128",
-    )
     def test_c128_1_9(self):
         return self.given_dtype("complex128", 1, 9)
 

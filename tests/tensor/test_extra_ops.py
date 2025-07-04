@@ -8,6 +8,7 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
+from pytensor.graph import rewrite_graph
 from pytensor.graph.basic import Constant, applys_between, equal_computations
 from pytensor.npy_2_compat import old_np_unique
 from pytensor.raise_op import Assert
@@ -1252,11 +1253,17 @@ def test_broadcast_shape_symbolic_one_symbolic():
     ]
 
     res_shape = broadcast_shape(*index_shapes, arrays_are_shapes=True)
-
-    from pytensor.graph.rewriting.utils import rewrite_graph
-
     res_shape = rewrite_graph(res_shape)
+    assert res_shape[0].data == 1
+    assert res_shape[1].data == 1
+    with pytest.raises(AssertionError, match="Could not broadcast dimensions"):
+        # broadcast_shape doesn't treat int_div as a constant 1
+        res_shape[2].eval()
 
+    res_shape = broadcast_shape(
+        *index_shapes, arrays_are_shapes=True, allow_runtime_broadcast=True
+    )
+    res_shape = rewrite_graph(res_shape)
     assert res_shape[0].data == 1
     assert res_shape[1].data == 1
     assert res_shape[2].data == 3
