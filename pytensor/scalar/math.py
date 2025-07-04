@@ -378,6 +378,13 @@ class Psi(UnaryScalarOp):
 
     def c_support_code(self, **kwargs):
         return """
+            // For GPU support
+            #ifdef WITHIN_KERNEL
+            #define DEVICE WITHIN_KERNEL
+            #else
+            #define DEVICE
+            #endif
+
             #ifndef M_PI
             #define M_PI 3.14159265358979323846
             #endif
