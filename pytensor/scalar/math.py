@@ -391,7 +391,7 @@ class Psi(UnaryScalarOp):
 
             #ifndef _PSIFUNCDEFINED
             #define _PSIFUNCDEFINED
-            DEVICE double _psi(ga_double x) {
+            DEVICE double _psi(double x) {
 
                 /*taken from
                 Bernardo, J. M. (1976). Algorithm AS 103:
@@ -414,8 +414,8 @@ class Psi(UnaryScalarOp):
                     }
 
                     // Use reflection formula
-                    ga_double pi_x = M_PI * x;
-                    ga_double cot_pi_x = cos(pi_x) / sin(pi_x);
+                    double pi_x = M_PI * x;
+                    double cot_pi_x = cos(pi_x) / sin(pi_x);
                     return _psi(1.0 - x) - M_PI * cot_pi_x;
                 }
 
