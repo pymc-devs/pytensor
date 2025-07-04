@@ -10,7 +10,7 @@ from pytensor.xtensor.type import as_xtensor
 from pytensor.xtensor.vectorization import XRV
 
 
-def _as_xrv(
+def as_xrv(
     core_op: RandomVariable,
     core_inps_dims_map: Sequence[Sequence[int]] | None = None,
     core_out_dims_map: Sequence[int] | None = None,
@@ -52,7 +52,6 @@ def _as_xrv(
         max((entry + 1 for entry in core_out_dims_map), default=0),
     )
 
-    @wraps(core_op)
     def xrv_constructor(
         *params,
         core_dims: Sequence[str] | str | None = None,
@@ -93,38 +92,151 @@ def _as_xrv(
     return xrv_constructor
 
 
-bernoulli = _as_xrv(ptr.bernoulli)
-beta = _as_xrv(ptr.beta)
-betabinom = _as_xrv(ptr.betabinom)
-binomial = _as_xrv(ptr.binomial)
-categorical = _as_xrv(ptr.categorical)
-cauchy = _as_xrv(ptr.cauchy)
-dirichlet = _as_xrv(ptr.dirichlet)
-exponential = _as_xrv(ptr.exponential)
-gamma = _as_xrv(ptr._gamma)
-gengamma = _as_xrv(ptr.gengamma)
-geometric = _as_xrv(ptr.geometric)
-gumbel = _as_xrv(ptr.gumbel)
-halfcauchy = _as_xrv(ptr.halfcauchy)
-halfnormal = _as_xrv(ptr.halfnormal)
-hypergeometric = _as_xrv(ptr.hypergeometric)
-integers = _as_xrv(ptr.integers)
-invgamma = _as_xrv(ptr.invgamma)
-laplace = _as_xrv(ptr.laplace)
-logistic = _as_xrv(ptr.logistic)
-lognormal = _as_xrv(ptr.lognormal)
-multinomial = _as_xrv(ptr.multinomial)
-nbinom = negative_binomial = _as_xrv(ptr.negative_binomial)
-normal = _as_xrv(ptr.normal)
-pareto = _as_xrv(ptr.pareto)
-poisson = _as_xrv(ptr.poisson)
-t = _as_xrv(ptr.t)
-triangular = _as_xrv(ptr.triangular)
-truncexpon = _as_xrv(ptr.truncexpon)
-uniform = _as_xrv(ptr.uniform)
-vonmises = _as_xrv(ptr.vonmises)
-wald = _as_xrv(ptr.wald)
-weibull = _as_xrv(ptr.weibull)
+def _as_xrv(core_op: RandomVariable, name: str | None = None):
+    """A decorator to create a new XRV and document it in sphinx."""
+    xrv_constructor = as_xrv(core_op, name=name)
+
+    def decorator(func):
+        @wraps(as_xrv)
+        def wrapper(*args, **kwargs):
+            return xrv_constructor(*args, **kwargs)
+
+        wrapper.__doc__ = f"XRV version of {core_op.name} for XTensorVariables"
+
+        return wrapper
+
+    return decorator
+
+
+@_as_xrv(ptr.bernoulli)
+def bernoulli(): ...
+
+
+@_as_xrv(ptr.beta)
+def beta(): ...
+
+
+@_as_xrv(ptr.betabinom)
+def betabinom(): ...
+
+
+@_as_xrv(ptr.binomial)
+def binomial(): ...
+
+
+@_as_xrv(ptr.categorical)
+def categorical(): ...
+
+
+@_as_xrv(ptr.cauchy)
+def cauchy(): ...
+
+
+@_as_xrv(ptr.dirichlet)
+def dirichlet(): ...
+
+
+@_as_xrv(ptr.exponential)
+def exponential(): ...
+
+
+@_as_xrv(ptr._gamma)
+def gamma(): ...
+
+
+@_as_xrv(ptr.gengamma)
+def gengamma(): ...
+
+
+@_as_xrv(ptr.geometric)
+def geometric(): ...
+
+
+@_as_xrv(ptr.gumbel)
+def gumbel(): ...
+
+
+@_as_xrv(ptr.halfcauchy)
+def halfcauchy(): ...
+
+
+@_as_xrv(ptr.halfnormal)
+def halfnormal(): ...
+
+
+@_as_xrv(ptr.hypergeometric)
+def hypergeometric(): ...
+
+
+@_as_xrv(ptr.integers)
+def integers(): ...
+
+
+@_as_xrv(ptr.invgamma)
+def invgamma(): ...
+
+
+@_as_xrv(ptr.laplace)
+def laplace(): ...
+
+
+@_as_xrv(ptr.logistic)
+def logistic(): ...
+
+
+@_as_xrv(ptr.lognormal)
+def lognormal(): ...
+
+
+@_as_xrv(ptr.multinomial)
+def multinomial(): ...
+
+
+@_as_xrv(ptr.negative_binomial)
+def negative_binomial(): ...
+
+
+nbinom = negative_binomial
+
+
+@_as_xrv(ptr.normal)
+def normal(): ...
+
+
+@_as_xrv(ptr.pareto)
+def pareto(): ...
+
+
+@_as_xrv(ptr.poisson)
+def poisson(): ...
+
+
+@_as_xrv(ptr.t)
+def t(): ...
+
+
+@_as_xrv(ptr.triangular)
+def triangular(): ...
+
+
+@_as_xrv(ptr.truncexpon)
+def truncexpon(): ...
+
+
+@_as_xrv(ptr.uniform)
+def uniform(): ...
+
+
+@_as_xrv(ptr.vonmises)
+def vonmises(): ...
+
+
+@_as_xrv(ptr.wald)
+def wald(): ...
+
+
+@_as_xrv(ptr.weibull)
+def weibull(): ...
 
 
 def multivariate_normal(
@@ -136,6 +248,7 @@ def multivariate_normal(
     rng=None,
     method: Literal["cholesky", "svd", "eigh"] = "cholesky",
 ):
+    """Multivariate normal random variable."""
     mean = as_xtensor(mean)
     if len(core_dims) != 2:
         raise ValueError(
@@ -147,7 +260,7 @@ def multivariate_normal(
     if core_dims[0] not in mean.type.dims:
         core_dims = core_dims[::-1]
 
-    xop = _as_xrv(ptr.MvNormalRV(method=method))
+    xop = as_xrv(ptr.MvNormalRV(method=method))
     return xop(mean, cov, core_dims=core_dims, extra_dims=extra_dims, rng=rng)
 
 

@@ -13,7 +13,9 @@ dependencies:
   - mock
   - pillow
   - pymc-sphinx-theme
+  - sphinx-copybutton
   - sphinx-design
+  - sphinx-sitemap
   - pygments
   - pydot
   - ipython
@@ -23,5 +25,4 @@ dependencies:
   - ablog
   - pip
   - pip:
-    - sphinx_sitemap
     - -e ..

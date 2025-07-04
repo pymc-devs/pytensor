@@ -1,6 +1,7 @@
 import os
 import inspect
 import sys
+
 import pytensor
 from pathlib import Path
 
@@ -12,6 +13,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.todo",
     "sphinx.ext.doctest",
+    "sphinx_copybutton",
     "sphinx.ext.napoleon",
     "sphinx.ext.linkcode",
     "sphinx.ext.mathjax",
@@ -86,8 +88,7 @@ today_fmt = "%B %d, %Y"
 
 # List of directories, relative to source directories, that shouldn't be
 # searched for source files.
-exclude_dirs = ["images", "scripts", "sandbox"]
-exclude_patterns = ['page_footer.md', '**/*.myst.md']
+exclude_patterns = ["README.md", "images/*", "page_footer.md", "**/*.myst.md"]
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -235,24 +236,41 @@ htmlhelp_basename = "pytensor_doc"
 # Resolve function
 # This function is used to populate the (source) links in the API
 def linkcode_resolve(domain, info):
-    def find_source():
+    def find_obj() -> object:
         # try to find the file and line number, based on code from numpy:
         # https://github.com/numpy/numpy/blob/master/doc/source/conf.py#L286
         obj = sys.modules[info["module"]]
         for part in info["fullname"].split("."):
             obj = getattr(obj, part)
+        return obj
 
+    def find_source(obj):
         fn = Path(inspect.getsourcefile(obj))
-        fn = fn.relative_to(Path(__file__).parent)
+        fn = fn.relative_to(Path(pytensor.__file__).parent)
         source, lineno = inspect.getsourcelines(obj)
         return fn, lineno, lineno + len(source) - 1
 
+    def fallback_source():
+        return info["module"].replace(".", "/") + ".py"
+
     if domain != "py" or not info["module"]:
         return None
+
     try:
-        filename = "pytensor/%s#L%d-L%d" % find_source()
+        obj = find_obj()
     except Exception:
-        filename = info["module"].replace(".", "/") + ".py"
+        filename = fallback_source()
+    else:
+        try:
+            filename = "pytensor/%s#L%d-L%d" % find_source(obj)
+        except Exception:
+            # warnings.warn(f"Could not find source code for {domain}:{info}")
+            try:
+                filename = obj.__module__.replace(".", "/") + ".py"
+            except AttributeError:
+                # Some objects do not have a __module__ attribute (?)
+                filename = fallback_source()
+
     import subprocess
 
     tag = subprocess.Popen(
