@@ -1,13 +1,16 @@
 from typing import TYPE_CHECKING, Literal, cast
 
+import numpy as np
 from numpy import convolve as numpy_convolve
 
-from pytensor.graph import Apply
+from pytensor.gradient import DisconnectedType
+from pytensor.graph import Apply, Constant
 from pytensor.link.c.op import COp
+from pytensor.scalar import as_scalar
 from pytensor.scalar.basic import upcast
 from pytensor.tensor.basic import as_tensor_variable, join, zeros
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.math import maximum, minimum
+from pytensor.tensor.math import maximum, minimum, switch
 from pytensor.tensor.type import vector
 from pytensor.tensor.variable import TensorVariable
 
@@ -17,92 +20,83 @@ if TYPE_CHECKING:
 
 
 class Convolve1d(COp):
-    __props__ = ("mode",)
-    gufunc_signature = "(n),(k)->(o)"
+    __props__ = ()
+    gufunc_signature = "(n),(k),()->(o)"
 
-    def __init__(self, mode: Literal["full", "valid"] = "full"):
-        if mode not in ("full", "valid"):
-            raise ValueError(f"Invalid mode: {mode}")
-        self.mode = mode
-
-    def make_node(self, in1, in2):
+    def make_node(self, in1, in2, full_mode):
         in1 = as_tensor_variable(in1)
         in2 = as_tensor_variable(in2)
+        full_mode = as_scalar(full_mode)
 
-        assert in1.ndim == 1
-        assert in2.ndim == 1
+        if not (in1.ndim == 1 and in2.ndim == 1):
+            raise ValueError("Convolution inputs must be vector (ndim=1)")
+        if not full_mode.dtype == "bool":
+            raise ValueError("Convolution mode must be a boolean type")
 
         dtype = upcast(in1.dtype, in2.dtype)
-
         n = in1.type.shape[0]
         k = in2.type.shape[0]
+        match full_mode:
+            case Constant():
+                static_mode = "full" if full_mode.data else "valid"
+            case _:
+                static_mode = None
 
-        if n is None or k is None:
+        if n is None or k is None or static_mode is None:
             out_shape = (None,)
-        elif self.mode == "full":
+        elif static_mode == "full":
             out_shape = (n + k - 1,)
         else:  # mode == "valid":
             out_shape = (max(n, k) - min(n, k) + 1,)
 
         out = vector(dtype=dtype, shape=out_shape)
-        return Apply(self, [in1, in2], [out])
+        return Apply(self, [in1, in2, full_mode], [out])
 
     def perform(self, node, inputs, outputs):
         # We use numpy_convolve as that's what scipy would use if method="direct" was passed.
         # And mode != "same", which this Op doesn't cover anyway.
-        outputs[0][0] = numpy_convolve(*inputs, mode=self.mode)
+        in1, in2, full_mode = inputs
+        outputs[0][0] = numpy_convolve(in1, in2, mode="full" if full_mode else "valid")
 
     def infer_shape(self, fgraph, node, shapes):
-        in1_shape, in2_shape = shapes
+        _, _, full_mode = node.inputs
+        in1_shape, in2_shape, _ = shapes
         n = in1_shape[0]
         k = in2_shape[0]
-        if self.mode == "full":
-            shape = n + k - 1
-        else:  # mode == "valid":
-            shape = maximum(n, k) - minimum(n, k) + 1
+        shape_valid = maximum(n, k) - minimum(n, k) + 1
+        shape_full = n + k - 1
+        shape = switch(full_mode, shape_full, shape_valid)
         return [[shape]]
 
+    def connection_pattern(self, node):
+        return [[True], [True], [False]]
+
     def L_op(self, inputs, outputs, output_grads):
-        in1, in2 = inputs
+        in1, in2, full_mode = inputs
         [grad] = output_grads
 
-        if self.mode == "full":
-            valid_conv = type(self)(mode="valid")
-            in1_bar = valid_conv(grad, in2[::-1])
-            in2_bar = valid_conv(grad, in1[::-1])
+        n = in1.shape[0]
+        k = in2.shape[0]
 
-        else:  # mode == "valid":
-            full_conv = type(self)(mode="full")
-            n = in1.shape[0]
-            k = in2.shape[0]
-            kmn = maximum(0, k - n)
-            nmk = maximum(0, n - k)
-            # We need mode="full" if k >= n else "valid" for `in1_bar` (opposite for `in2_bar`), but mode is not symbolic.
-            # Instead, we always use mode="full" and slice the result so it behaves like "valid" for the input that's shorter.
-            # There is a rewrite that optimizes this case when n, k are static
-            in1_bar = full_conv(grad, in2[::-1])
-            in1_bar = in1_bar[kmn : in1_bar.shape[0] - kmn]
-            in2_bar = full_conv(grad, in1[::-1])
-            in2_bar = in2_bar[nmk : in2_bar.shape[0] - nmk]
+        # If mode is "full", or mode is "valid" and k >= n, then in1_bar mode should use "valid" convolve
+        # The expression below is equivalent to ~(full_mode | (k >= n))
+        full_mode_in1_bar = ~full_mode & (k < n)
+        # If mode is "full", or mode is "valid" and n >= k, then in2_bar mode should use "valid" convolve
+        # The expression below is equivalent to ~(full_mode | (n >= k))
+        full_mode_in2_bar = ~full_mode & (n < k)
 
-        return [in1_bar, in2_bar]
+        return [
+            self(grad, in2[::-1], full_mode_in1_bar),
+            self(grad, in1[::-1], full_mode_in2_bar),
+            DisconnectedType()(),
+        ]
 
     def c_code_cache_version(self):
-        return (1,)
+        return (2,)
 
     def c_code(self, node, name, inputs, outputs, sub):
-        # raise NotImplementedError()
-        in1, in2 = inputs
+        in1, in2, full_mode = inputs
         [out] = outputs
-        mode_str = self.mode
-
-        if mode_str == "full":
-            np_mode_val = 2  # NPY_CONVOLVE_FULL
-        elif mode_str == "valid":
-            np_mode_val = 0  # NPY_CONVOLVE_VALID
-        else:
-            # This case should ideally be prevented by __init__ or make_node
-            raise ValueError(f"Unsupported mode {mode_str}")
 
         code = f"""
         {{
@@ -158,7 +152,7 @@ class Convolve1d(COp):
 
             // TODO: Use lower level implementation that allows reusing the output buffer
             Py_XDECREF({out});
-            {out} = (PyArrayObject*) PyArray_Correlate2((PyObject*){in1}, (PyObject*)in2_flipped_view, {np_mode_val});
+            {out} = (PyArrayObject*) PyArray_Correlate2((PyObject*){in1}, (PyObject*)in2_flipped_view, {full_mode} ? 2 : 0);
             Py_XDECREF(in2_flipped_view); // Clean up the view if correlate fails
             if (!{out}) {{
                 // PyArray_Correlate already set an error
@@ -167,6 +161,9 @@ class Convolve1d(COp):
         }}
         """
         return code
+
+
+blockwise_convolve_1d = Blockwise(Convolve1d())
 
 
 def convolve1d(
@@ -212,4 +209,5 @@ def convolve1d(
         )
         mode = "valid"
 
-    return cast(TensorVariable, Blockwise(Convolve1d(mode=mode))(in1, in2))
+    full_mode = as_scalar(np.bool_(mode == "full"))
+    return cast(TensorVariable, blockwise_convolve_1d(in1, in2, full_mode))
