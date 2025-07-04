@@ -22,6 +22,7 @@ from pytensor.tensor.basic import (
     Eye,
     Join,
     MakeVector,
+    ScalarFromTensor,
     Split,
     TensorFromScalar,
 )
@@ -79,6 +80,14 @@ def pytorch_funcify_CastingOp(op, node, **kwargs):
     return type_cast
 
 
+@pytorch_funcify.register(ScalarFromTensor)
+def pytorch_funcify_ScalarFromTensor(op, node, **kwargs):
+    def scalar_from_tensor(x):
+        return x[()]
+
+    return scalar_from_tensor
+
+
 @pytorch_funcify.register(CheckAndRaise)
 def pytorch_funcify_CheckAndRaise(op, **kwargs):
     error = op.exc_type
@@ -86,7 +95,7 @@ def pytorch_funcify_CheckAndRaise(op, **kwargs):
 
     def assert_fn(x, *conditions):
         for cond in conditions:
-            if not cond.item():
+            if not cond:
                 raise error(msg)
         return x
 

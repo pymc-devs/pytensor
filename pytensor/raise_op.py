@@ -2,15 +2,13 @@
 
 from textwrap import indent
 
-import numpy as np
-
 from pytensor.gradient import DisconnectedType
-from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import Generic
-from pytensor.scalar.basic import ScalarType
+from pytensor.scalar.basic import ScalarType, as_scalar
 from pytensor.tensor.type import DenseTensorType
 
 
@@ -56,18 +54,6 @@ class CheckAndRaise(COp):
             msg = self.msg
         return f"{name}{{raises={exc_name}, msg='{msg}'}}"
 
-    def __eq__(self, other):
-        if type(self) is not type(other):
-            return False
-
-        if self.msg == other.msg and self.exc_type == other.exc_type:
-            return True
-
-        return False
-
-    def __hash__(self):
-        return hash((self.msg, self.exc_type))
-
     def make_node(self, value: Variable, *conds: Variable):
         """
 
@@ -84,12 +70,10 @@ class CheckAndRaise(COp):
         if not isinstance(value, Variable):
             value = pt.as_tensor_variable(value)
 
-        conds = [
-            pt.as_tensor_variable(c) if not isinstance(c, Variable) else c
-            for c in conds
-        ]
-
-        assert all(c.type.ndim == 0 for c in conds)
+        conds = [as_scalar(c) for c in conds]
+        for i, cond in enumerate(conds):
+            if cond.dtype != "bool":
+                conds[i] = cond.astype("bool")
 
         return Apply(
             self,
@@ -101,7 +85,7 @@ class CheckAndRaise(COp):
         (out,) = outputs
         val, *conds = inputs
         out[0] = val
-        if not np.all(conds):
+        if not all(conds):
             raise self.exc_type(self.msg)
 
     def grad(self, input, output_gradients):
@@ -117,38 +101,20 @@ class CheckAndRaise(COp):
             )
         value_name, *cond_names = inames
         out_name = onames[0]
-        check = []
         fail_code = props["fail"]
         param_struct_name = props["params"]
         msg = self.msg.replace('"', '\\"').replace("\n", "\\n")
 
-        for idx, cond_name in enumerate(cond_names):
-            if isinstance(node.inputs[0].type, DenseTensorType):
-                check.append(
-                    f"""
-            if(PyObject_IsTrue((PyObject *){cond_name}) == 0) {{
-                PyObject * exc_type = {param_struct_name}->exc_type;
-                Py_INCREF(exc_type);
-                PyErr_SetString(exc_type, "{msg}");
-                Py_XDECREF(exc_type);
-                {indent(fail_code, " " * 4)}
-            }}
-                    """
-                )
-            else:
-                check.append(
-                    f"""
-            if({cond_name} == 0) {{
-                PyObject * exc_type = {param_struct_name}->exc_type;
-                Py_INCREF(exc_type);
-                PyErr_SetString(exc_type, "{msg}");
-                Py_XDECREF(exc_type);
-                {indent(fail_code, " " * 4)}
-            }}
-                    """
-                )
-
-        check = "\n".join(check)
+        all_conds = " && ".join(cond_names)
+        check = f"""
+         if(!({all_conds})) {{
+            PyObject * exc_type = {param_struct_name}->exc_type;
+            Py_INCREF(exc_type);
+            PyErr_SetString(exc_type, "{msg}");
+            Py_XDECREF(exc_type);
+            {indent(fail_code, " " * 4)}
+        }}
+        """
 
         if isinstance(node.inputs[0].type, DenseTensorType):
             res = f"""
@@ -162,13 +128,18 @@ class CheckAndRaise(COp):
             {check}
             {out_name} = {value_name};
             """
-        return res
+
+        return "\n".join((check, res))
 
     def c_code_cache_version(self):
-        return (1, 1)
+        return (2,)
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]]
+
+    def do_constant_folding(self, fgraph, node):
+        # Only constant-fold if the Assert does not fail
+        return all((isinstance(c, Constant) and bool(c.data)) for c in node.inputs[1:])
 
 
 class Assert(CheckAndRaise):
