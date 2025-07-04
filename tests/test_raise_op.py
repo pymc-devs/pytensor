@@ -82,19 +82,26 @@ def test_CheckAndRaise_basic_c(linker):
 
     with pytest.raises(CustomException, match=exc_msg):
         y_fn(0)
+    assert y_fn(1) == 1.0
 
     x = pt.vector()
-    y = check_and_raise(x, conds)
-    y_fn = pytensor.function([conds, x], y.shape, mode=Mode(linker, OPT_FAST_RUN))
-
     x_val = np.array([1.0], dtype=pytensor.config.floatX)
+
+    y = check_and_raise(x, conds)
+    y_fn = pytensor.function([conds, x], y, mode=Mode(linker, OPT_FAST_RUN))
+    with pytest.raises(CustomException, match=exc_msg):
+        y_fn(0, x_val)
+    assert np.array_equal(y_fn(1, x_val), x_val)
+
+    y_fn = pytensor.function([conds, x], y.shape, mode=Mode(linker, OPT_FAST_RUN))
+    # The shape doesn't depend on y so the Assert is dropped from the graph
     assert np.array_equal(y_fn(0, x_val), x_val)
 
     y = check_and_raise(x, pt.as_tensor(0))
-    y_grad = pytensor.grad(y.sum(), [x])
+    y_grad = pytensor.grad(y.sum(), x)
     y_fn = pytensor.function([x], y_grad, mode=Mode(linker, OPT_FAST_RUN))
-
-    assert np.array_equal(y_fn(x_val), [x_val])
+    # The gradient doesn't depend on y, just it's shape so the Assert is dropped from the graph
+    assert np.array_equal(y_fn(x_val), x_val)
 
 
 @pytest.mark.parametrize(

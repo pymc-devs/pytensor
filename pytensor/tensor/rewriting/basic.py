@@ -732,20 +732,15 @@ def is_an_upcast(type1, type2):
 
 @register_useless
 @register_specialize
-@node_rewriter(None)
+@node_rewriter([CheckAndRaise])
 def local_remove_useless_assert(fgraph, node):
-    if not isinstance(node.op, CheckAndRaise):
-        return False
-
     new_conds = []
     n_conds = len(node.inputs[1:])
     for c in node.inputs[1:]:
         try:
             const = get_scalar_constant_value(c)
 
-            if 0 != const.ndim or const == 0:
-                # Should we raise an error here? How to be sure it
-                # is not caught?
+            if not const:
                 new_conds.append(c)
         except NotScalarConstantError:
             new_conds.append(c)
