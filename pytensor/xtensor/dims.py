@@ -6,9 +6,9 @@ import numpy as np
 
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op, Variable
-from pytensor.scalar.basic import ScalarVariable
 from pytensor.xtensor.type import (
-    DIM_LENGTH_SCALAR,
+    DIM_LENGTH_TYPE,
+    DIM_LENGTH_VARIABLE,
     BasicDim,
     CloneDim,
     DimType,
@@ -32,13 +32,14 @@ class Length(Op):
         (x,) = inputs
         if not isinstance(x, DimVariable):
             raise TypeError(f"x must be a DimVariable, got {type(x.type)}")
-        return Apply(self, [x], [DIM_LENGTH_SCALAR()])
+        return Apply(self, [x], [DIM_LENGTH_TYPE()])
 
     def perform(self, node, inputs, outputs):
-        outputs[0][0] = inputs[0]
+        # outputs[0][0] = np.int64(inputs[0])
+        outputs[0][0] = np.array(inputs[0], dtype=DIM_LENGTH_TYPE.dtype)
 
 
-def _dim_size(dim: DimVariable) -> ScalarVariable:
+def _dim_size(dim: DimVariable) -> DIM_LENGTH_VARIABLE:
     return Length()(dim)
 
 
@@ -51,9 +52,11 @@ class FromLength(DimOp):
 
     def make_node(self, *inputs: Variable) -> Apply:
         (length,) = inputs
-        if not isinstance(length, ScalarVariable):
-            raise TypeError(f"length must be a ScalarVariable, got {type(length.type)}")
-        if length.type != DIM_LENGTH_SCALAR:
+        if not isinstance(length, DIM_LENGTH_VARIABLE):
+            raise TypeError(
+                f"length must be a DIM_LENGTH_VARIABLE, got {type(length.type)}"
+            )
+        if length.type != DIM_LENGTH_TYPE:
             raise TypeError(
                 f"length must be of dtype 'DIM_LENGTH_SCALAR', got {length.type.dtype}"
             )
@@ -64,11 +67,13 @@ class FromLength(DimOp):
         outputs[0][0] = inputs[0]
 
 
-def from_length(length: ScalarVariable, name: str | None = None) -> DimVariable:
+def from_length(length: DIM_LENGTH_VARIABLE, name: str | None = None) -> DimVariable:
     # TODO add check for dtype
-    if not isinstance(length, ScalarVariable):
-        raise TypeError(f"length must be a ScalarVariable, got {type(length.type)}")
-    if length.type != DIM_LENGTH_SCALAR:
+    if not isinstance(length, DIM_LENGTH_VARIABLE):
+        raise TypeError(
+            f"length must be a DIM_LENGTH_VARIABLE, got {type(length.type)}"
+        )
+    if length.type != DIM_LENGTH_TYPE:
         raise TypeError(
             f"length must be of dtype 'DIM_LENGTH_SCALAR', got {length.type.dtype}"
         )
@@ -79,7 +84,7 @@ def from_length(length: ScalarVariable, name: str | None = None) -> DimVariable:
     return op(length, name=name)
 
 
-class FromTensor(Op):
+class DimFromTensor(Op):
     __props__ = ("dim_type",)
 
     def __init__(self, dim_type: DimType):
@@ -98,13 +103,14 @@ class FromTensor(Op):
         (x_var,) = node.inputs
         for i, dim in enumerate(x_var.type.dims):
             if dim == self.dim_type:
-                outputs[0][0] = x.shape[i]
+                # outputs[0][0] = np.int64(x.shape[i])
+                outputs[0][0] = np.array(x.shape[i], dtype=DIM_LENGTH_TYPE.dtype)
                 return
         raise ValueError(f"Dimension {self.dim_type} not found in tensor {x.type.dims}")
 
 
 def _dim_from_tensor(x: XTensorVariable, idx: int) -> DimVariable:
-    op = FromTensor(dim_type=x.type.dims[idx])
+    op = DimFromTensor(dim_type=x.type.dims[idx])
     return op(x, name=x.type.dims[idx].name)
 
 
@@ -134,7 +140,7 @@ def _clone_dim(dim: DimVariable, *, name: str | None = None) -> DimVariable:
     Returns:
         A new DimVariable with the updated name.
     """
-    dim_type = CloneDim(uuid=uuid4(), base=dim.type)
+    dim_type = CloneDim(uuid=uuid4(), base=dim.type, name=name)
     return Clone(dim_type)(dim, name=name)
 
 
@@ -148,7 +154,7 @@ class Product(Op):
         return Apply(self, list(dims), [out])
 
     def perform(self, node, inputs, outputs):
-        outputs[0][0] = np.prod(inputs, dtype=DIM_LENGTH_SCALAR.dtype).item()
+        outputs[0][0] = np.prod(inputs, dtype=DIM_LENGTH_TYPE.dtype).item()
 
 
 def product_dim(*dims: DimVariable, name: str | None = None) -> DimVariable:

@@ -9,20 +9,20 @@ from pytensor.tensor.math import variadic_mul
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.math import neq, sqrt
 from pytensor.xtensor.math import sqr as square
-from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.type import DimType, DimVariable, as_xtensor, xtensor
 
 
-REDUCE_DIM = str | Sequence[str] | EllipsisType | None
+REDUCE_DIM = DimVariable | Sequence[DimVariable] | EllipsisType | None
 
 
 class XReduce(XOp):
     __slots__ = ("binary_op", "dims")
 
-    def __init__(self, binary_op, dims: Sequence[str]):
+    def __init__(self, binary_op, dims: Sequence[DimVariable]):
         super().__init__()
         self.binary_op = binary_op
         # Order of reduce dims doesn't change the behavior of the Op
-        self.dims = tuple(sorted(dims))
+        self.dims = tuple(dims)
 
     def make_node(self, x):
         x = as_xtensor(x)
@@ -43,17 +43,17 @@ class XReduce(XOp):
                     if d not in reduce_dims_set
                 ]
             )
-        output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
+        output = xtensor(dtype=x.type.dtype, dims=out_dims)
         return Apply(self, [x], [output])
 
 
-def _process_user_dims(x, dim: REDUCE_DIM) -> Sequence[str]:
-    if isinstance(dim, str):
-        return (dim,)
+def _process_user_dims(x, dim: REDUCE_DIM) -> Sequence[DimType]:
+    if isinstance(dim, DimVariable):
+        return (dim.type,)
     elif dim is None or dim is Ellipsis:
         x = as_xtensor(x)
-        return typing.cast(tuple[str], x.type.dims)
-    return dim
+        return typing.cast(tuple[DimType], x.type.dims)
+    return tuple(dim.type for dim in dim)
 
 
 def reduce(x, dim: REDUCE_DIM = None, *, binary_op):
@@ -80,8 +80,14 @@ any = partial(bool_reduce, binary_op=ps.or_)
 
 def _infer_reduced_size(original_var, reduced_var):
     reduced_dims = reduced_var.dims
-    return variadic_mul(
-        *[size for dim, size in original_var.sizes if dim not in reduced_dims]
+    return as_xtensor(
+        variadic_mul(
+            *[
+                size
+                for dim, size in original_var.sizes.items()
+                if dim not in reduced_dims
+            ]
+        )
     )
 
 
@@ -96,7 +102,7 @@ def var(x, dim: REDUCE_DIM, *, ddof: int = 0):
     x = as_xtensor(x)
     x_mean = mean(x, dim)
     n = _infer_reduced_size(x, x_mean)
-    return square(x - x_mean) / (n - ddof)
+    return square(x - x_mean).mean(dim) / (n - ddof)
 
 
 def std(x, dim: REDUCE_DIM, *, ddof: int = 0):
