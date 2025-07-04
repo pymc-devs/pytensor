@@ -155,7 +155,7 @@ def test_scalarloop_grad_mixed_dtypes(op, scalar_loop_grads):
 
 @pytest.mark.parametrize(
     "linker",
-    ["py", "c"],
+    ["py", "cvm"],
 )
 def test_psi(linker):
     x = float64("x")
@@ -164,7 +164,7 @@ def test_psi(linker):
     fn = function([x], out, mode=Mode(linker=linker, optimizer="fast_run"))
     fn.dprint()
 
-    x_test = np.float64(0.5)
+    x_test = np.float64(0.7)
 
     np.testing.assert_allclose(
         fn(x_test),
