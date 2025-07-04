@@ -932,7 +932,7 @@ class TestFusion:
                 ),
                 (fx,),
                 (fxv,),
-                4,
+                5,
                 (np.zeros_like(fxv),),
                 ("float32",),
             ),
