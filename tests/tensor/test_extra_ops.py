@@ -1301,7 +1301,9 @@ def test_broadcast_arrays():
     ["linspace", "logspace", "geomspace"],
     ids=["linspace", "logspace", "geomspace"],
 )
-@pytest.mark.parametrize("dtype", [None, "int", "float"], ids=[None, "int", "float"])
+@pytest.mark.parametrize(
+    "dtype", [None, "int64", "floatX"], ids=[None, "int64", "floatX"]
+)
 @pytest.mark.parametrize(
     "start, stop, num_samples, endpoint, axis",
     [
@@ -1317,7 +1319,7 @@ def test_broadcast_arrays():
 def test_space_ops(op, dtype, start, stop, num_samples, endpoint, axis):
     pt_func = getattr(pt, op)
     np_func = getattr(np, op)
-    dtype = dtype + config.floatX[-2:] if dtype is not None else dtype
+    dtype = dtype if dtype != "floatX" else config.floatX
     z = pt_func(start, stop, num_samples, endpoint=endpoint, axis=axis, dtype=dtype)
 
     numpy_res = np_func(
