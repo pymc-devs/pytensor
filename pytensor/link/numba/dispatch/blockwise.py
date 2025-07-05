@@ -16,7 +16,7 @@ from pytensor.tensor import TensorVariable, get_vector_length
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 
 
-@numba_funcify.register
+@numba_funcify.register(BlockwiseWithCoreShape)
 def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
     [blockwise_node] = op.fgraph.apply_nodes
     blockwise_op: Blockwise = blockwise_node.op
@@ -26,7 +26,8 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
     core_shapes_len = tuple(get_vector_length(sh) for sh in node.inputs[nin:])
 
     core_node = blockwise_op._create_dummy_core_node(
-        cast(tuple[TensorVariable], blockwise_node.inputs)
+        cast(tuple[TensorVariable], node.inputs[:nin]),
+        propagate_unbatched_core_inputs=True,
     )
     core_op_fn = numba_funcify(
         core_op,
