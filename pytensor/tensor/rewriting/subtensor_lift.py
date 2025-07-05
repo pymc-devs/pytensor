@@ -613,10 +613,6 @@ def local_subtensor_make_vector(fgraph, node):
     something more general for constant ``*Subtensor*`` graphs (or perhaps
     include this kind of work in the constant folding).
     """
-
-    if not isinstance(node.op, Subtensor | AdvancedSubtensor1):
-        return False
-
     x = node.inputs[0]
 
     if not (x.owner and isinstance(x.owner.op, MakeVector)):
@@ -666,7 +662,11 @@ def local_subtensor_make_vector(fgraph, node):
             const_slice = get_constant_idx(
                 node.op.idx_list, node.inputs, allow_partial=False
             )[0]
-            ret = make_vector_op(*x.owner.inputs[const_slice])
+            sliced_inputs = x.owner.inputs[const_slice]
+            if len(sliced_inputs) == 1:
+                ret = expand_dims(sliced_inputs[0], axis=0)
+            else:
+                ret = make_vector_op(*sliced_inputs)
             copy_stack_trace(node.outputs, ret)
             return [ret]
         except NotScalarConstantError:
