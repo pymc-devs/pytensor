@@ -4,7 +4,7 @@ from pytensor.graph.destroyhandler import inplace_candidates
 from pytensor.graph.replace import vectorize_node
 from pytensor.graph.rewriting.basic import copy_stack_trace, out2in
 from pytensor.tensor.basic import Alloc, ARange, alloc, shape_padleft
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -88,17 +88,6 @@ def local_eager_useless_unbatched_blockwise(fgraph, node):
         # These other Ops can't always be trivially vectorized at runtime,
         # since their inputs may imply non-rectangular shapes.
         return local_useless_unbatched_blockwise.fn(fgraph, node)
-
-
-def _squeeze_left(x, stop_at_dim: int | None = None):
-    """Squeeze any leading dims of `x` until a real dim or `stop_at_dim` (if not None) is reached."""
-    x_dims = x.type.broadcastable
-    squeeze_ndim = len(x_dims) if all(x_dims) else x_dims.index(False)
-    if stop_at_dim is not None:
-        squeeze_ndim = min(squeeze_ndim, stop_at_dim)
-    if squeeze_ndim == 0:
-        return x
-    return x.squeeze(axis=tuple(range(squeeze_ndim)))
 
 
 @register_specialize("shape_unsafe")
