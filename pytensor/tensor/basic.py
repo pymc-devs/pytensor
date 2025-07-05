@@ -678,10 +678,9 @@ class ScalarFromTensor(COp):
             self, [t], [ps.get_scalar_type(dtype=t.type.dtype).make_variable()]
         )
 
-    def perform(self, node, inp, out_):
-        (s,) = inp
-        (out,) = out_
-        out[0] = s.flatten()[0]
+    def perform(self, node, inputs, output_storage):
+        # not using .item() because that returns a Python scalar, not a numpy scalar
+        output_storage[0][0] = inputs[0][()]
 
     def infer_shape(self, fgraph, node, in_shapes):
         return [()]
