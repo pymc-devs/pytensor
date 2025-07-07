@@ -124,6 +124,7 @@ from pytensor.tensor.type import (
     dvector,
     fmatrices,
     fmatrix,
+    fscalar,
     ftensor4,
     fvector,
     imatrices,
@@ -4115,8 +4116,8 @@ class TestSigmoidRewrites:
 
     def test_local_1msigmoid(self):
         m = self.get_mode(excluding=["fusion", "inplace"])
-        x = fmatrix()
-        xd = dmatrix()
+        x = fscalar()
+        xd = dscalar()
 
         # Test `exp_over_1_plus_exp`
         f = pytensor.function([x], 1 - exp(x) / (1 + exp(x)), mode=m)
@@ -4135,7 +4136,11 @@ class TestSigmoidRewrites:
             (np.array(1.0, "float32") - sigmoid(x), sigmoid(-x)),
             (np.array(1.0, "float64") - pt.sigmoid(x), cast(sigmoid(-x), "float64")),
             (np.array(1.0, "float32") - sigmoid(xd), sigmoid(-xd)),
-            (np.array([[1.0]], "float64") - sigmoid(xd), sigmoid(-xd)),
+            (np.array(1.0, "float64") - sigmoid(xd), sigmoid(-xd)),
+            (np.sum(1 / np.array([2, 3, 6], "float32")) - sigmoid(x), sigmoid(-x)),
+            (np.sum(1 / np.array([2, 3, 6], "float64")) - sigmoid(xd), sigmoid(-xd)),
+            (np.float32(1 - 9e-6) - sigmoid(x), np.float32(1 - 9e-6) - sigmoid(x)),
+            (np.float64(1 - 1e-9) - sigmoid(xd), np.float64(1 - 1e-9) - sigmoid(xd)),
         ]:
             f = pytensor.function([x, xd], out, m, on_unused_input="ignore")
             f_outs = f.maker.fgraph.outputs
