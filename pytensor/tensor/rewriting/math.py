@@ -2385,7 +2385,7 @@ def local_log1p(fgraph, node):
             log_arg.owner.inputs, only_process_constants=True
         )
         # scalar_inputs are potentially dimshuffled and fill'd scalars
-        if scalars and np.allclose(np.sum(scalars), 1):
+        if scalars and isclose(np.sum(scalars), 1):
             if nonconsts:
                 ninp = variadic_add(*nonconsts)
                 if ninp.dtype != log_arg.type.dtype:
@@ -2990,6 +2990,19 @@ def local_grad_log_erfc_neg(fgraph, node):
     return [ret]
 
 
+def isclose(x, ref, rtol=0, atol=0, num_ulps=10):
+    """
+
+    Returns
+    -------
+    bool
+        True iff x is a constant close to ref (by default 10 ULPs).
+
+    """
+    atol = atol + num_ulps * np.spacing(x)
+    return np.allclose(x, ref, rtol=rtol, atol=atol)
+
+
 def _skip_mul_1(r):
     if r.owner and r.owner.op == mul:
         not_is_1 = [i for i in r.owner.inputs if not _is_1(i)]
@@ -3008,7 +3021,7 @@ def _is_1(expr):
     """
     try:
         v = get_underlying_scalar_constant_value(expr)
-        return np.isclose(v, 1)
+        return isclose(v, 1)
     except NotScalarConstantError:
         return False
 
@@ -3069,7 +3082,7 @@ def is_1pexp(t, only_process_constants=True):
                     scal_sum = scalars[0]
                     for s in scalars[1:]:
                         scal_sum = scal_sum + s
-                    if np.allclose(scal_sum, 1):
+                    if isclose(scal_sum, 1):
                         return False, maybe_exp.owner.inputs[0]
     return None
 
@@ -3169,7 +3182,7 @@ def is_neg(var):
         for idx, mul_input in enumerate(var_node.inputs):
             try:
                 constant = get_underlying_scalar_constant_value(mul_input)
-                is_minus_1 = np.isclose(constant, -1)
+                is_minus_1 = isclose(constant, -1)
             except NotScalarConstantError:
                 is_minus_1 = False
             if is_minus_1:
@@ -3577,7 +3590,7 @@ def local_reciprocal_1_plus_exp(fgraph, node):
         # scalar_inputs are potentially dimshuffled and fill'd scalars
         if len(nonconsts) == 1:
             if nonconsts[0].owner and nonconsts[0].owner.op == exp:
-                if scalars_ and np.allclose(np.sum(scalars_), 1):
+                if scalars_ and isclose(np.sum(scalars_), 1):
                     out = [
                         alloc_like(
                             sigmoid(neg(nonconsts[0].owner.inputs[0])),
