@@ -1668,9 +1668,11 @@ class PatternNodeRewriter(NodeRewriter):
                 ):
                     return False
             else:
-                out_dtype = node.outputs[0].type.dtype
-                if self.allow_cast and ret.owner.outputs[0].type.dtype != out_dtype:
-                    ret = pytensor.tensor.basic.cast(ret, out_dtype)
+                if self.allow_cast:
+                    out_dtype = getattr(node.outputs[0].type, "dtype", None)
+                    ret_dtype = getattr(ret.owner.outputs[0].type, "dtype", None)
+                    if ret_dtype != out_dtype:
+                        ret = pytensor.tensor.basic.cast(ret, out_dtype)
                 if not node.outputs[0].type.is_super(ret.owner.outputs[0].type):
                     return False
         else:
