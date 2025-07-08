@@ -2180,7 +2180,7 @@ class TestJoinAndSplit:
         benchmark(fn, *test_values)
 
     def test_join_negative_axis_rewrite(self):
-        """Test that constant negative axis is rewritten to positive axis during canonicalization."""
+        """Test that constant negative axis is rewritten to positive axis in make_node."""
         v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
         a = self.shared(v)
         b = as_tensor_variable(v)
