@@ -2179,6 +2179,51 @@ class TestJoinAndSplit:
         assert fn(*test_values).shape == (n * 6, n)[:ndim] if axis == 0 else (n, n * 6)
         benchmark(fn, *test_values)
 
+    def test_join_negative_axis_rewrite(self):
+        """Test that constant negative axis is rewritten to positive axis during canonicalization."""
+        v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
+        a = self.shared(v)
+        b = as_tensor_variable(v)
+
+        # Create join with negative axis
+        s = join(-1, a, b)
+
+        # Get the actual Join op node from the graph
+        f = pytensor.function(
+            [], [s], mode=self.mode
+        )  # Use FAST_COMPILE to prevent optimizations from changing the graph structure
+
+        # Find the Join op node in the graph
+        join_nodes = [
+            node for node in f.maker.fgraph.toposort() if isinstance(node.op, Join)
+        ]
+        assert len(join_nodes) == 1, "Expected exactly one Join node in the graph"
+        join_node = join_nodes[0]
+
+        # Check that the axis input has been converted to a constant with value 1 (not -1)
+        axis_input = join_node.inputs[0]
+        assert isinstance(axis_input, ptb.Constant), "Expected axis to be a Constant"
+        assert (
+            axis_input.data == 1
+        ), f"Expected axis to be normalized to 1, got {axis_input.data}"
+
+        # Now test with axis -2 which should be rewritten to 0
+        s2 = join(-2, a, b)
+        f2 = pytensor.function([], [s2], mode=self.mode)
+
+        join_nodes = [
+            node for node in f2.maker.fgraph.toposort() if isinstance(node.op, Join)
+        ]
+        assert len(join_nodes) == 1, "Expected exactly one Join node in the graph"
+        join_node = join_nodes[0]
+
+        # Check that the axis input has been converted to a constant with value 0 (not -2)
+        axis_input = join_node.inputs[0]
+        assert isinstance(axis_input, ptb.Constant), "Expected axis to be a Constant"
+        assert (
+            axis_input.data == 0
+        ), f"Expected axis to be normalized to 0, got {axis_input.data}"
+
 
 def test_TensorFromScalar():
     s = ps.constant(56)
