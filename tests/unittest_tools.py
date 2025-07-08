@@ -11,6 +11,7 @@ import pytensor
 from pytensor.compile.debugmode import str_diagnostic
 from pytensor.configdefaults import config
 from pytensor.gradient import verify_grad as orig_verify_grad
+from pytensor.graph.basic import equal_computations
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.math import add as pt_add
@@ -277,6 +278,41 @@ class WrongValue(Exception):
 def assert_allclose(expected, value, rtol=None, atol=None):
     if not _allclose(expected, value, rtol, atol):
         raise WrongValue(expected, value, rtol, atol)
+
+
+def assert_equal_computations(rewritten, expected, *args, original=None, **kwargs):
+    """
+    Assert that `rewritten` computes the same as `expected`.
+
+    Parameters
+    ----------
+    rewritten
+        The expression after the rewrite pass.
+    expected
+        The reference expression to compare against.
+    *args, **kwargs
+        Extra arguments forwarded to equal_computations.
+    original : optional
+        If given, will be printed in the error message.
+    """
+    __tracebackhide__ = True  # Hide traceback for py.test
+
+    ok = equal_computations(rewritten, expected, *args, **kwargs)
+
+    if not ok:
+        parts = []
+
+        def _dprint(expr):
+            return pytensor.dprint(expr, print_type=True, file="str")
+
+        if original is not None:
+            parts.append(f"\nOriginal:\n{_dprint(original)}")
+        parts.append(f"\nRewritten:\n{_dprint(rewritten)}")
+        parts.append(f"\nExpected:\n{_dprint(expected)}")
+
+        raise AssertionError("equal_computations failed\n" + "".join(parts))
+
+    return True
 
 
 class AttemptManyTimes:

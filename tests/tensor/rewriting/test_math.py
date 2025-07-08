@@ -4142,16 +4142,10 @@ class TestSigmoidRewrites:
             (np.float32(1 - 9e-6) - sigmoid(x), np.float32(1 - 9e-6) - sigmoid(x)),
             (np.float64(1 - 1e-9) - sigmoid(xd), np.float64(1 - 1e-9) - sigmoid(xd)),
         ]:
-            f = pytensor.function([x, xd], out, m, on_unused_input="ignore")
-            f_outs = f.maker.fgraph.outputs
-            assert equal_computations(
-                f_outs, [expected]
-            ), "Expression:\n{}rewritten as:\n{}expected:\n{}".format(
-                *(
-                    pytensor.dprint(expr, print_type=True, file="str")
-                    for expr in (out, f_outs, expected)
-                )
+            rewritten = rewrite_graph(
+                out, include=["canonicalize", "specialize", "stabilize"]
             )
+            utt.assert_equal_computations([rewritten], [expected], original=out)
 
     def test_local_sigm_times_exp(self):
         """

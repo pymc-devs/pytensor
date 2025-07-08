@@ -1636,6 +1636,10 @@ class PatternNodeRewriter(NodeRewriter):
         if node.op != self.op:
             return False
 
+        if len(node.outputs) != 1:
+            # PatternNodeRewriter doesn't support replacing multi-output nodes
+            return False
+
         s = unify(self.in_pattern, node.out)
 
         if s is False:
@@ -1658,27 +1662,20 @@ class PatternNodeRewriter(NodeRewriter):
             ):
                 return False
 
-        if ret.owner:
-            if len(node.outputs) != len(ret.owner.outputs):
-                return
-            if len(node.outputs) > 1:
-                if not all(
-                    o.type.is_super(new_o.type)
-                    for o, new_o in zip(node.outputs, ret.owner.outputs, strict=True)
-                ):
-                    return False
-            else:
-                if self.allow_cast:
-                    out_dtype = getattr(node.outputs[0].type, "dtype", None)
-                    ret_dtype = getattr(ret.owner.outputs[0].type, "dtype", None)
-                    if ret_dtype != out_dtype:
-                        ret = pytensor.tensor.basic.cast(ret, out_dtype)
-                if not node.outputs[0].type.is_super(ret.owner.outputs[0].type):
-                    return False
-        else:
-            # ret is just an input variable
-            assert len(node.outputs) == 1
-            if not node.outputs[0].type.is_super(ret.type):
+        [old_out] = node.outputs
+        if not old_out.type.is_super(ret.type):
+            # Type doesn't match
+            if not (
+                self.allow_cast
+                and isinstance(old_out.type, pytensor.tensor.TensorType)
+                and isinstance(ret.type, pytensor.tensor.TensorType)
+            ):
+                return False
+
+            # Try to cast tensors
+            ret = ret.astype(old_out.type.dtype)
+            if not old_out.type.is_super(ret.type):
+                # Still doesn't match
                 return False
 
         return [ret]
