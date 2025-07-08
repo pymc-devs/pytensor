@@ -1651,7 +1651,18 @@ class BlockDiagonal(BaseBlockDiagonal):
     def make_node(self, *matrices):
         matrices = self._validate_and_prepare_inputs(matrices, pt.as_tensor)
         dtype = _largest_common_dtype(matrices)
-        out_type = pytensor.tensor.matrix(dtype=dtype)
+
+        shapes_by_dim = tuple(zip(*(m.type.shape for m in matrices)))
+        out_shape = tuple(
+            [
+                sum(dim_shapes)
+                if not any(shape is None for shape in dim_shapes)
+                else None
+                for dim_shapes in shapes_by_dim
+            ]
+        )
+
+        out_type = pytensor.tensor.matrix(shape=out_shape, dtype=dtype)
         return Apply(self, matrices, [out_type])
 
     def perform(self, node, inputs, output_storage, params=None):
