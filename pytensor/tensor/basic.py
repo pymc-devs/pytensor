@@ -2470,6 +2470,18 @@ class Join(COp):
         if axis.type.ndim > 0:
             raise TypeError(f"Axis {axis} must be 0-d.")
 
+        # Convert negative constant axis to positive during canonicalization
+        if isinstance(axis, Constant) and tensors:
+            # Get the axis value directly from the constant's data
+            axis_val = axis.data.item()
+            # Check if it's negative and needs normalization
+            if axis_val < 0:
+                ndim = tensors[0].ndim
+                # Convert negative axis to positive
+                axis_val = normalize_axis_index(axis_val, ndim)
+                # Replace the original axis with the normalized one
+                axis = constant(axis_val, dtype=axis.type.dtype)
+
         tensors = [as_tensor_variable(x) for x in tensors]
 
         if not builtins.all(targs.type.ndim > 0 for targs in tensors):
