@@ -2188,33 +2188,31 @@ class TestJoinAndSplit:
         # Create join with negative axis
         s = join(-1, a, b)
 
-        # Get the actual Join op node from the graph
-        f = pytensor.function([], [s], mode=self.mode)
+        assert isinstance(
+            s.owner.outputs[0].owner.op, Join
+        ), "Expected output node to be a Join op"
 
-        # Directly access the Join node from the output's owner
-        join_node = f.maker.fgraph.outputs[0].owner
-        assert isinstance(join_node.op, Join), "Expected output node to be a Join op"
-
-        # Check that the axis input has been converted to a constant with value 1 (not -1)
-        axis_input = join_node.inputs[0]
-        assert isinstance(axis_input, ptb.Constant), "Expected axis to be a Constant"
+        assert isinstance(
+            s.owner.inputs[0], ptb.Constant
+        ), "Expected axis to be a Constant"
         assert (
-            axis_input.data == 1
-        ), f"Expected axis to be normalized to 1, got {axis_input.data}"
+            s.owner.inputs[0].data == 1
+        ), f"Expected axis to be normalized to 1, got {s.owner.inputs[0].data}"
 
         # Now test with axis -2 which should be rewritten to 0
         s2 = join(-2, a, b)
-        f2 = pytensor.function([], [s2], mode=self.mode)
 
-        join_node = f2.maker.fgraph.outputs[0].owner
-        assert isinstance(join_node.op, Join), "Expected output node to be a Join op"
+        assert isinstance(
+            s2.owner.outputs[0].owner.op, Join
+        ), "Expected output node to be a Join op"
 
         # Check that the axis input has been converted to a constant with value 0 (not -2)
-        axis_input = join_node.inputs[0]
-        assert isinstance(axis_input, ptb.Constant), "Expected axis to be a Constant"
+        assert isinstance(
+            s2.owner.inputs[0], ptb.Constant
+        ), "Expected axis to be a Constant"
         assert (
-            axis_input.data == 0
-        ), f"Expected axis to be normalized to 0, got {axis_input.data}"
+            s2.owner.inputs[0].data == 0
+        ), f"Expected axis to be normalized to 0, got {s2.owner.inputs[0].data}"
 
 
 def test_TensorFromScalar():
