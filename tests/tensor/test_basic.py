@@ -2188,7 +2188,12 @@ class TestJoinAndSplit:
         # Create join with negative axis
         s = join(-1, a, b)
 
-        assert s.owner.op.axis == 1
+        # Get the actual Join op node from the graph
+        f = pytensor.function([], [s], mode=self.mode)
+
+        # Directly access the Join node from the output's owner
+        join_node = f.maker.fgraph.outputs[0].owner
+        assert isinstance(join_node.op, Join), "Expected output node to be a Join op"
 
         # Check that the axis input has been converted to a constant with value 1 (not -1)
         axis_input = join_node.inputs[0]
@@ -2201,11 +2206,8 @@ class TestJoinAndSplit:
         s2 = join(-2, a, b)
         f2 = pytensor.function([], [s2], mode=self.mode)
 
-        join_nodes = [
-            node for node in f2.maker.fgraph.toposort() if isinstance(node.op, Join)
-        ]
-        assert len(join_nodes) == 1, "Expected exactly one Join node in the graph"
-        join_node = join_nodes[0]
+        join_node = f2.maker.fgraph.outputs[0].owner
+        assert isinstance(join_node.op, Join), "Expected output node to be a Join op"
 
         # Check that the axis input has been converted to a constant with value 0 (not -2)
         axis_input = join_node.inputs[0]
