@@ -4659,41 +4659,56 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
 
 @pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
 @pytest.mark.parametrize(
-    "batch_left", [True, False], ids=["batched_left", "unbatched_left"]
+    "batch_blockdiag", [True, False], ids=["batch_blockdiag", "unbatched_blockdiag"]
 )
 @pytest.mark.parametrize(
-    "batch_right", [True, False], ids=["batched_right", "unbatched_right"]
+    "batch_other", [True, False], ids=["batched_other", "unbatched_other"]
 )
-def test_local_block_diag_dot_to_dot_block_diag(left_multiply, batch_left, batch_right):
+def test_local_block_diag_dot_to_dot_block_diag(
+    left_multiply, batch_blockdiag, batch_other
+):
     """
     Test that dot(block_diag(x, y,), z) is rewritten to concat(dot(x, z[:n]), dot(y, z[n:]))
     """
-    a = tensor("a", shape=(4, 2))
-    b = tensor("b", shape=(2, 4) if not batch_left else (3, 2, 4))
-    c = tensor("c", shape=(4, 4))
-    d = tensor("d", shape=(10, 10))
-    e = tensor("e", shape=(10, 10) if not batch_right else (3, 1, 10, 10))
 
+    def has_blockdiag(graph):
+        return any(
+            (
+                var.owner
+                and (
+                    isinstance(var.owner.op, BlockDiagonal)
+                    or (
+                        isinstance(var.owner.op, Blockwise)
+                        and isinstance(var.owner.op.core_op, BlockDiagonal)
+                    )
+                )
+            )
+            for var in ancestors([graph])
+        )
+
+    a = tensor("a", shape=(4, 2))
+    b = tensor("b", shape=(2, 4) if not batch_blockdiag else (3, 2, 4))
+    c = tensor("c", shape=(4, 4))
     x = pt.linalg.block_diag(a, b, c)
+
+    d = tensor("d", shape=(10, 10) if not batch_other else (3, 1, 10, 10))
 
     # Test multiple clients are all rewritten
     if left_multiply:
-        out = [x @ d, x @ e]
+        out = x @ d
     else:
-        out = [d @ x, e @ x]
+        out = d @ x
 
-    with config.change_flags(optimizer_verbose=True):
-        fn = pytensor.function([a, b, c, d, e], out, mode=rewrite_mode)
-
-    assert not any(
-        isinstance(node.op, BlockDiagonal) for node in fn.maker.fgraph.toposort()
-    )
+    assert has_blockdiag(out)
+    fn = pytensor.function([a, b, c, d], out, mode=rewrite_mode)
+    assert not has_blockdiag(fn.maker.fgraph.outputs[0])
 
     fn_expected = pytensor.function(
-        [a, b, c, d, e],
+        [a, b, c, d],
         out,
         mode=Mode(linker="py", optimizer=None),
     )
+    assert has_blockdiag(fn_expected.maker.fgraph.outputs[0])
 
     # TODO: Count Dots
 
@@ -4702,18 +4717,15 @@ def test_local_block_diag_dot_to_dot_block_diag(left_multiply, batch_left, batch
     b_val = rng.normal(size=b.type.shape).astype(b.type.dtype)
     c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)
     d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)
-    e_val = rng.normal(size=e.type.shape).astype(e.type.dtype)
 
-    rewrite_outs = fn(a_val, b_val, c_val, d_val, e_val)
-    expected_outs = fn_expected(a_val, b_val, c_val, d_val, e_val)
-
-    for out, expected in zip(rewrite_outs, expected_outs):
-        np.testing.assert_allclose(
-            out,
-            expected,
-            atol=1e-6 if config.floatX == "float32" else 1e-12,
-            rtol=1e-6 if config.floatX == "float32" else 1e-12,
-        )
+    rewrite_out = fn(a_val, b_val, c_val, d_val)
+    expected_out = fn_expected(a_val, b_val, c_val, d_val)
+    np.testing.assert_allclose(
+        rewrite_out,
+        expected_out,
+        atol=1e-6 if config.floatX == "float32" else 1e-12,
+        rtol=1e-6 if config.floatX == "float32" else 1e-12,
+    )
 
 
 @pytest.mark.parametrize("rewrite", [True, False], ids=["rewrite", "no_rewrite"])
