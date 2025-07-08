@@ -2185,34 +2185,8 @@ class TestJoinAndSplit:
         a = self.shared(v)
         b = as_tensor_variable(v)
 
-        # Create join with negative axis
-        s = join(-1, a, b)
-
-        assert isinstance(
-            s.owner.outputs[0].owner.op, Join
-        ), "Expected output node to be a Join op"
-
-        assert isinstance(
-            s.owner.inputs[0], ptb.Constant
-        ), "Expected axis to be a Constant"
-        assert (
-            s.owner.inputs[0].data == 1
-        ), f"Expected axis to be normalized to 1, got {s.owner.inputs[0].data}"
-
-        # Now test with axis -2 which should be rewritten to 0
-        s2 = join(-2, a, b)
-
-        assert isinstance(
-            s2.owner.outputs[0].owner.op, Join
-        ), "Expected output node to be a Join op"
-
-        # Check that the axis input has been converted to a constant with value 0 (not -2)
-        assert isinstance(
-            s2.owner.inputs[0], ptb.Constant
-        ), "Expected axis to be a Constant"
-        assert (
-            s2.owner.inputs[0].data == 0
-        ), f"Expected axis to be normalized to 0, got {s2.owner.inputs[0].data}"
+        equal_computations([join(-1, a, b)], [join(1, a, b)])
+        equal_computations([join(-2, a, b)], [join(0, a, b)])
 
 
 def test_TensorFromScalar():
