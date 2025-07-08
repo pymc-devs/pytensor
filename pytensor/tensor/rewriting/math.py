@@ -183,59 +183,40 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
     if not isinstance(node.op.core_op, BlockDiagonal):
         return
 
-    def check_for_block_diag(x):
-        return x.owner and (
-            isinstance(x.owner.op, BlockDiagonal)
-            or isinstance(x.owner.op, Blockwise)
-            and isinstance(x.owner.op.core_op, BlockDiagonal)
-        )
-
     # Check that the BlockDiagonal is an input to a Dot node:
     for client in get_clients_at_depth(fgraph, node, depth=1):
-        if not isinstance(client.op, Dot):
+        if not (
+            (
+                isinstance(client.op, Dot)
+                and all(input.ndim == 2 for input in client.inputs)
+            )
+            or client.op == _matrix_matrix_matmul
+        ):
             continue
 
         op = client.op
-        x, y = client.inputs
 
-        if not (check_for_block_diag(x) or check_for_block_diag(y)):
-            continue
+        client_idx = client.inputs.index(node.outputs[0])
 
-        # Case 1: Only one input is BlockDiagonal. In this case, multiply all components of the block-diagonal with the
-        # non-block diagonal, and return a new block diagonal
-        if check_for_block_diag(x) and not check_for_block_diag(y):
-            components = x.owner.inputs
-            y_splits = split(
-                y,
-                splits_size=[component.shape[-1] for component in components],
-                n_splits=len(components),
-            )
-            new_components = [
-                op(component, y_split)
-                for component, y_split in zip(components, y_splits)
-            ]
-            new_output = join(0, *new_components)
+        other_input = client.inputs[1 - client_idx]
+        components = node.inputs
 
-        elif not check_for_block_diag(x) and check_for_block_diag(y):
-            components = y.owner.inputs
-            x_splits = split(
-                x,
-                splits_size=[component.shape[0] for component in components],
-                n_splits=len(components),
-                axis=1,
-            )
+        split_axis = -2 if client_idx == 0 else -1
+        shape_idx = -1 if client_idx == 0 else -2
 
-            new_components = [
-                op(x_split, component)
-                for component, x_split in zip(components, x_splits)
-            ]
-            new_output = join(1, *new_components)
-
-        # Case 2: Both inputs are BlockDiagonal. Do nothing
-        else:
-            # TODO: If shapes are statically known and all components have equal shapes, we could rewrite
-            #  this case to block_diag(*[dot(comp_1, comp_2) for comp_1, comp_2 in zip(x.owner.inputs, y.owner.inputs)])
-            continue
+        other_dot_input_split = split(
+            other_input,
+            splits_size=[component.shape[shape_idx] for component in components],
+            n_splits=len(components),
+            axis=split_axis,
+        )
+        new_components = [
+            op(component, other_split)
+            if client_idx == 0
+            else op(other_split, component)
+            for component, other_split in zip(components, other_dot_input_split)
+        ]
+        new_output = join(split_axis, *new_components)
 
         copy_stack_trace(node.outputs[0], new_output)
         return {client.outputs[0]: new_output}
