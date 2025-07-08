@@ -2185,8 +2185,8 @@ class TestJoinAndSplit:
         a = self.shared(v)
         b = as_tensor_variable(v)
 
-        equal_computations([join(-1, a, b)], [join(1, a, b)])
-        equal_computations([join(-2, a, b)], [join(0, a, b)])
+        assert equal_computations([join(-1, a, b)], [join(1, a, b)])
+        assert equal_computations([join(-2, a, b)], [join(0, a, b)])
 
 
 def test_TensorFromScalar():
