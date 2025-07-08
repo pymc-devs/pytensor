@@ -4299,7 +4299,8 @@ class TestSoftplusRewrites:
         f(np.random.random((54, 11)).astype(config.floatX))
 
         # Test close to 1
-        out = log(np.nextafter(1.0, 2.0) - sigmoid(x))
+        x_dtype = np.dtype(x.dtype).type
+        out = log(np.nextafter(x_dtype(1), x_dtype(2)) - sigmoid(x))
         f = pytensor.function([x], out, mode=self.m)
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2

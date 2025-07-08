@@ -2999,7 +2999,9 @@ def isclose(x, ref, rtol=0, atol=0, num_ulps=10):
         True iff x is a constant close to ref (by default 10 ULPs).
 
     """
-    atol = atol + num_ulps * np.spacing(x)
+    x = np.asarray(x)
+    if np.issubdtype(x.dtype, np.floating):
+        atol = atol + num_ulps * np.abs(np.spacing(x.dtype.type(ref)))
     return np.allclose(x, ref, rtol=rtol, atol=atol)
 
 
