@@ -3025,6 +3025,11 @@ class Dot(Op):
             )
 
         sx, sy = (input.type.shape for input in inputs)
+        if sx[-1] is not None and sy[0] is not None and sx[-1] != sy[0]:
+            raise ValueError(
+                f"Incompatible shared dimension for dot product: {sx}, {sy}"
+            )
+
         if len(sy) == 2:
             sz = sx[:-1] + sy[-1:]
         elif len(sy) == 1:
