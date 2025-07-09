@@ -283,7 +283,6 @@ class _LAPACK:
 
         Called by scipy.linalg.lu_solve
         """
-        ...
         lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "getrs")
         functype = ctypes.CFUNCTYPE(
             None,
@@ -454,6 +453,93 @@ class _LAPACK:
             float_pointer,  # RCOND
             float_pointer,  # WORK
             _ptr_int,  # IWORK
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xgeqrf(cls, dtype):
+        """
+        Compute the QR factorization of a general M-by-N matrix A.
+
+        Used in QR decomposition (no pivoting).
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "geqrf")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # M
+            _ptr_int,  # N
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            float_pointer,  # TAU
+            float_pointer,  # WORK
+            _ptr_int,  # LWORK
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xgeqp3(cls, dtype):
+        """
+        Compute the QR factorization with column pivoting of a general M-by-N matrix A.
+
+        Used in QR decomposition with pivoting.
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "geqp3")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # M
+            _ptr_int,  # N
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            _ptr_int,  # JPVT
+            float_pointer,  # TAU
+            float_pointer,  # WORK
+            _ptr_int,  # LWORK
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xorgqr(cls, dtype):
+        """
+        Generate the orthogonal matrix Q from a QR factorization (real types).
+
+        Used in QR decomposition to form Q.
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "orgqr")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # M
+            _ptr_int,  # N
+            _ptr_int,  # K
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            float_pointer,  # TAU
+            float_pointer,  # WORK
+            _ptr_int,  # LWORK
+            _ptr_int,  # INFO
+        )
+        return functype(lapack_ptr)
+
+    @classmethod
+    def numba_xungqr(cls, dtype):
+        """
+        Generate the unitary matrix Q from a QR factorization (complex types).
+
+        Used in QR decomposition to form Q for complex types.
+        """
+        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "ungqr")
+        functype = ctypes.CFUNCTYPE(
+            None,
+            _ptr_int,  # M
+            _ptr_int,  # N
+            _ptr_int,  # K
+            float_pointer,  # A
+            _ptr_int,  # LDA
+            float_pointer,  # TAU
+            float_pointer,  # WORK
+            _ptr_int,  # LWORK
             _ptr_int,  # INFO
         )
         return functype(lapack_ptr)

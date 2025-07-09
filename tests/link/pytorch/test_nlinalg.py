@@ -8,17 +8,6 @@ from pytensor.tensor.type import matrix
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
-@pytest.fixture
-def matrix_test():
-    rng = np.random.default_rng(213234)
-
-    M = rng.normal(size=(3, 3))
-    test_value = M.dot(M.T).astype(config.floatX)
-
-    x = matrix("x")
-    return (x, test_value)
-
-
 @pytest.mark.parametrize(
     "func",
     (pt_nla.eig, pt_nla.eigh, pt_nla.SLogDet(), pt_nla.inv, pt_nla.det),
@@ -32,22 +21,6 @@ def test_lin_alg_no_params(func, matrix_test):
         np.testing.assert_allclose(x, y, rtol=1e-3)
 
     compare_pytorch_and_py([x], outs, [test_value], assert_fn=assert_fn)
-
-
-@pytest.mark.parametrize(
-    "mode",
-    (
-        "complete",
-        "reduced",
-        "r",
-        pytest.param("raw", marks=pytest.mark.xfail(raises=NotImplementedError)),
-    ),
-)
-def test_qr(mode, matrix_test):
-    x, test_value = matrix_test
-    outs = pt_nla.qr(x, mode=mode)
-
-    compare_pytorch_and_py([x], outs, [test_value])
 
 
 @pytest.mark.parametrize("compute_uv", [True, False])

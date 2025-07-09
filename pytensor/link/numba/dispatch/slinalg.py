@@ -2,6 +2,7 @@ import warnings
 
 import numpy as np
 
+from pytensor import config
 from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
 from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
@@ -11,6 +12,14 @@ from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
     _pivot_to_permutation,
 )
 from pytensor.link.numba.dispatch.linalg.decomposition.lu_factor import _lu_factor
+from pytensor.link.numba.dispatch.linalg.decomposition.qr import (
+    _qr_full_no_pivot,
+    _qr_full_pivot,
+    _qr_r_no_pivot,
+    _qr_r_pivot,
+    _qr_raw_no_pivot,
+    _qr_raw_pivot,
+)
 from pytensor.link.numba.dispatch.linalg.solve.cholesky import _cho_solve
 from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
 from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
@@ -19,6 +28,7 @@ from pytensor.link.numba.dispatch.linalg.solve.triangular import _solve_triangul
 from pytensor.link.numba.dispatch.linalg.solve.tridiagonal import _solve_tridiagonal
 from pytensor.tensor.slinalg import (
     LU,
+    QR,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
@@ -27,7 +37,7 @@ from pytensor.tensor.slinalg import (
     Solve,
     SolveTriangular,
 )
-from pytensor.tensor.type import complex_dtypes
+from pytensor.tensor.type import complex_dtypes, integer_dtypes
 
 
 _COMPLEX_DTYPE_NOT_SUPPORTED_MSG = (
@@ -311,3 +321,96 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
         )
 
     return cho_solve
+
+
+@numba_funcify.register(QR)
+def numba_funcify_QR(op, node, **kwargs):
+    mode = op.mode
+    check_finite = op.check_finite
+    pivoting = op.pivoting
+    overwrite_a = op.overwrite_a
+
+    dtype = node.inputs[0].dtype
+    if dtype in complex_dtypes:
+        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+
+    integer_input = dtype in integer_dtypes
+    in_dtype = config.floatX if integer_input else dtype
+
+    @numba_njit(cache=False)
+    def qr(a):
+        if check_finite:
+            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
+                raise np.linalg.LinAlgError(
+                    "Non-numeric values (nan or inf) found in input to qr"
+                )
+
+        if integer_input:
+            a = a.astype(in_dtype)
+
+        if (mode == "full" or mode == "economic") and pivoting:
+            Q, R, P = _qr_full_pivot(
+                a,
+                mode=mode,
+                pivoting=pivoting,
+                overwrite_a=overwrite_a,
+                check_finite=check_finite,
+            )
+            return Q, R, P
+
+        elif (mode == "full" or mode == "economic") and not pivoting:
+            Q, R = _qr_full_no_pivot(
+                a,
+                mode=mode,
+                pivoting=pivoting,
+                overwrite_a=overwrite_a,
+                check_finite=check_finite,
+            )
+            return Q, R
+
+        elif mode == "r" and pivoting:
+            R, P = _qr_r_pivot(
+                a,
+                mode=mode,
+                pivoting=pivoting,
+                overwrite_a=overwrite_a,
+                check_finite=check_finite,
+            )
+            return R, P
+
+        elif mode == "r" and not pivoting:
+            (R,) = _qr_r_no_pivot(
+                a,
+                mode=mode,
+                pivoting=pivoting,
+                overwrite_a=overwrite_a,
+                check_finite=check_finite,
+            )
+            return R
+
+        elif mode == "raw" and pivoting:
+            H, tau, R, P = _qr_raw_pivot(
+                a,
+                mode=mode,
+                pivoting=pivoting,
+                overwrite_a=overwrite_a,
+                check_finite=check_finite,
+            )
+            return H, tau, R, P
+
+        elif mode == "raw" and not pivoting:
+            H, tau, R = _qr_raw_no_pivot(
+                a,
+                mode=mode,
+                pivoting=pivoting,
+                overwrite_a=overwrite_a,
+                check_finite=check_finite,
+            )
+            return H, tau, R
+
+        else:
+            raise NotImplementedError(
+                f"QR mode={mode}, pivoting={pivoting} not supported in numba mode."
+            )
+
+    return qr

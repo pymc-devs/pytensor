@@ -9,7 +9,6 @@ from pytensor.tensor.nlinalg import (
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
-    QRFull,
     SLogDet,
 )
 
@@ -65,16 +64,6 @@ def jax_funcify_MatrixInverse(op, **kwargs):
         return jnp.linalg.inv(x)
 
     return matrix_inverse
-
-
-@jax_funcify.register(QRFull)
-def jax_funcify_QRFull(op, **kwargs):
-    mode = op.mode
-
-    def qr_full(x, mode=mode):
-        return jnp.linalg.qr(x, mode=mode)
-
-    return qr_full
 
 
 @jax_funcify.register(MatrixPinv)
