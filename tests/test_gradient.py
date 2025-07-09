@@ -32,7 +32,7 @@ from pytensor.graph.basic import Apply, graph_inputs
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
 from pytensor.scan.op import Scan
-from pytensor.tensor.math import add, dot, exp, outer, sigmoid, sqr, tanh
+from pytensor.tensor.math import add, dot, exp, outer, sigmoid, sqr, sqrt, tanh
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random import RandomStream
 from pytensor.tensor.type import (
@@ -1142,6 +1142,24 @@ class TestJacobian:
 
         fn = function([x], jac_y, trust_input=True)
         benchmark(fn, np.array([0, 1, 2], dtype=x.type.dtype))
+
+    def test_benchmark_partial_jacobian(self, vectorize, benchmark):
+        # Example from https://github.com/jax-ml/jax/discussions/5904#discussioncomment-422956
+        N = 1000
+        rng = np.random.default_rng(2025)
+        x_test = rng.random((N,))
+
+        f_mat = rng.random((N, N))
+        x = vector("x", dtype="float64")
+
+        def f(x):
+            return sqrt(f_mat @ x / N)
+
+        full_jacobian = jacobian(f(x), x, vectorize=vectorize)
+        partial_jacobian = full_jacobian[:5, :5]
+
+        f = pytensor.function([x], partial_jacobian, trust_input=True)
+        benchmark(f, x_test)
 
 
 def test_hessian():

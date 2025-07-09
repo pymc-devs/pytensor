@@ -2092,9 +2092,9 @@ class TestDot:
 
 def test_matrix_vector_ops():
     """Test vecdot, matvec, and vecmat helper functions."""
-    rng = np.random.default_rng(seed=utt.fetch_seed())
+    rng = np.random.default_rng(2089)
 
-    # Create test data with batch dimension (2)
+    atol = 1e-7 if config.floatX == "float32" else 1e-15
     batch_size = 2
     dim_k = 4  # Common dimension
     dim_m = 3  # Matrix rows
@@ -2109,7 +2109,6 @@ def test_matrix_vector_ops():
     mat_kn_val = random(batch_size, dim_k, dim_n, rng=rng).astype(config.floatX)
     vec_k_val = random(batch_size, dim_k, rng=rng).astype(config.floatX)
 
-    # Create tensor variables with matching dtype
     mat_mk = tensor(
         name="mat_mk", shape=(batch_size, dim_m, dim_k), dtype=config.floatX
     )
@@ -2130,7 +2129,7 @@ def test_matrix_vector_ops():
     expected_vecdot = np.zeros((batch_size,), dtype=np.int32)
     for i in range(batch_size):
         expected_vecdot[i] = np.sum(vec_k_val[i] * vec_k_val[i])
-    np.testing.assert_allclose(result, expected_vecdot)
+    np.testing.assert_allclose(result, expected_vecdot, atol=atol)
 
     # Test 2: matvec - matrix-vector product
     matvec_out = matvec(mat_mk, vec_k)
@@ -2141,7 +2140,7 @@ def test_matrix_vector_ops():
     expected_matvec = np.zeros((batch_size, dim_m), dtype=config.floatX)
     for i in range(batch_size):
         expected_matvec[i] = np.dot(mat_mk_val[i], vec_k_val[i])
-    np.testing.assert_allclose(result_matvec, expected_matvec)
+    np.testing.assert_allclose(result_matvec, expected_matvec, atol=atol)
 
     # Test 3: vecmat - vector-matrix product
     vecmat_out = vecmat(vec_k, mat_kn)
@@ -2152,7 +2151,7 @@ def test_matrix_vector_ops():
     expected_vecmat = np.zeros((batch_size, dim_n), dtype=config.floatX)
     for i in range(batch_size):
         expected_vecmat[i] = np.dot(vec_k_val[i], mat_kn_val[i])
-    np.testing.assert_allclose(result_vecmat, expected_vecmat)
+    np.testing.assert_allclose(result_vecmat, expected_vecmat, atol=atol)
 
 
 class TestTensordot:

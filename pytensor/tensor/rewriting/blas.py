@@ -98,7 +98,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import (
     Dot,
-    _matrix_matrix_matmul,
+    _matmul,
     add,
     mul,
     neg,
@@ -758,7 +758,7 @@ blas_optdb.register(
         ignore_newtrees=False,
     ),
     "fast_run",
-    position=15,
+    position=11,
 )
 
 
@@ -903,18 +903,22 @@ blas_optdb.register(
     "local_dot22_to_dot22scalar",
     in2out(local_dot22_to_dot22scalar),
     "fast_run",
-    position=11,
+    position=12,
 )
 
 
 @register_specialize
-@node_rewriter([_matrix_matrix_matmul])
+@node_rewriter([_matmul])
 def specialize_matmul_to_batched_dot(fgraph, node):
     """Rewrite Matmul (Blockwise matrix-matrix) without implicit broadcasted batched dimension as BatchedDot.
 
     TODO: Do the same for Blockwise BatchedDot
     """
     x, y = node.inputs
+
+    if x.type.ndim < 3:
+        # This doesn't actually have a batch dimension
+        return None
 
     # BatchedDot does not allow implicit broadcasting of the batch dimensions
     # We do not want to explicitly broadcast as it may result in huge arrays
@@ -926,6 +930,7 @@ def specialize_matmul_to_batched_dot(fgraph, node):
     if len(x_shape) > 3:
         # If we have more than one batch dim, ravel it
         x = x.reshape((-1, x_shape[-2], x_shape[-1]))
+    if len(y_shape) > 3:
         y = y.reshape((-1, y_shape[-2], y_shape[-1]))
 
     new_out = _batched_dot(x, y)
