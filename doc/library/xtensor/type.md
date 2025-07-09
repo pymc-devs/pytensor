@@ -14,7 +14,6 @@
 
 ```{eval-rst}
 .. automodule:: pytensor.xtensor.type
-   :noindex:
    :members: XTensorType, XTensorVariable, XTensorConstant
 ```
 
