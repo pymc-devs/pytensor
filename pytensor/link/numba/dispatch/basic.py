@@ -285,9 +285,13 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
     """Create a Numba compatible function from a Pytensor `Op`."""
 
     warnings.warn(
-        f"Numba will use object mode to run {op}'s perform method",
+        f"Numba will use object mode to run {op}'s perform method. "
+        f"Set `pytensor.config.compiler_verbose = True` to see more details.",
         UserWarning,
     )
+
+    if config.compiler_verbose:
+        node.dprint(depth=5, print_type=True)
 
     n_outputs = len(node.outputs)
 
