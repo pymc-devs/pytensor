@@ -29,9 +29,11 @@ from pytensor.tensor.basic import (
     cast,
     constant,
     get_underlying_scalar_constant_value,
+    join,
     moveaxis,
     ones_like,
     register_infer_shape,
+    split,
     switch,
     zeros_like,
 )
@@ -99,6 +101,7 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     complex_dtypes,
@@ -165,6 +168,58 @@ def local_0_dot_x(fgraph, node):
         elif x.ndim == 1 and y.ndim == 1:
             constant_zero = assert_op(constant_zero, eq(x.shape[0], y.shape[0]))
             return [constant_zero]
+
+
+@register_stabilize
+@node_rewriter([Blockwise])
+def local_block_diag_dot_to_dot_block_diag(fgraph, node):
+    r"""
+    Perform the rewrite ``dot(block_diag(A, B), C) -> concat(dot(A, C), dot(B, C))``
+
+    BlockDiag results in the creation of a matrix of shape ``(n1 * n2, m1 * m2)``. Because dot has complexity
+    of approximately O(n^3), it's always better to perform two dot products on the smaller matrices, rather than
+    a single dot on the larger matrix.
+    """
+    if not isinstance(node.op.core_op, BlockDiagonal):
+        return
+
+    # Check that the BlockDiagonal is an input to a Dot node:
+    for client in get_clients_at_depth(fgraph, node, depth=1):
+        if not (
+            (
+                isinstance(client.op, Dot)
+                and all(input.ndim == 2 for input in client.inputs)
+            )
+            or client.op == _matrix_matrix_matmul
+        ):
+            continue
+
+        op = client.op
+
+        client_idx = client.inputs.index(node.outputs[0])
+
+        other_input = client.inputs[1 - client_idx]
+        components = node.inputs
+
+        split_axis = -2 if client_idx == 0 else -1
+        shape_idx = -1 if client_idx == 0 else -2
+
+        other_dot_input_split = split(
+            other_input,
+            splits_size=[component.shape[shape_idx] for component in components],
+            n_splits=len(components),
+            axis=split_axis,
+        )
+        new_components = [
+            op(component, other_split)
+            if client_idx == 0
+            else op(other_split, component)
+            for component, other_split in zip(components, other_dot_input_split)
+        ]
+        new_output = join(split_axis, *new_components)
+
+        copy_stack_trace(node.outputs[0], new_output)
+        return {client.outputs[0]: new_output}
 
 
 @register_canonicalize
@@ -2527,7 +2582,6 @@ add_canonizer = in2out(
     name="add_canonizer_group",
 )
 
-
 register_canonicalize(local_add_canonizer, "shape_unsafe", name="local_add_canonizer")
 
 
@@ -3650,7 +3704,6 @@ logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
 )
 register_stabilize(logdiffexp_to_log1mexpdiff, name="logdiffexp_to_log1mexpdiff")
 
-
 # log(sigmoid(x) / (1 - sigmoid(x))) -> x
 # i.e logit(sigmoid(x)) -> x
 local_logit_sigmoid = PatternNodeRewriter(
@@ -3663,7 +3716,6 @@ local_logit_sigmoid = PatternNodeRewriter(
 )
 register_canonicalize(local_logit_sigmoid)
 register_specialize(local_logit_sigmoid)
-
 
 # sigmoid(log(x / (1-x)) -> x
 # i.e., sigmoid(logit(x)) -> x
@@ -3704,7 +3756,6 @@ local_polygamma_to_tri_gamma = PatternNodeRewriter(
 )
 
 register_specialize(local_polygamma_to_tri_gamma)
-
 
 local_log_kv = PatternNodeRewriter(
     # Rewrite log(kv(v, x)) = log(kve(v, x) * exp(-x)) -> log(kve(v, x)) - x
