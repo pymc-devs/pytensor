@@ -692,11 +692,11 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def sum(self, dim=None):
         return px.reduction.sum(self, dim)
 
-    def std(self, dim=None):
-        return px.reduction.std(self, dim)
+    def std(self, dim=None, ddof=0):
+        return px.reduction.std(self, dim, ddof=ddof)
 
-    def var(self, dim=None):
-        return px.reduction.var(self, dim)
+    def var(self, dim=None, ddof=0):
+        return px.reduction.var(self, dim, ddof=ddof)
 
     def cumsum(self, dim=None):
         return px.reduction.cumsum(self, dim)

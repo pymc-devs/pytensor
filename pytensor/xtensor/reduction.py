@@ -81,7 +81,7 @@ any = partial(bool_reduce, binary_op=ps.or_)
 def _infer_reduced_size(original_var, reduced_var):
     reduced_dims = reduced_var.dims
     return variadic_mul(
-        *[size for dim, size in original_var.sizes if dim not in reduced_dims]
+        *[size for dim, size in original_var.sizes.items() if dim not in reduced_dims]
     )
 
 
@@ -96,7 +96,7 @@ def var(x, dim: REDUCE_DIM, *, ddof: int = 0):
     x = as_xtensor(x)
     x_mean = mean(x, dim)
     n = _infer_reduced_size(x, x_mean)
-    return square(x - x_mean) / (n - ddof)
+    return square(x - x_mean).sum(dim) / (n - ddof)
 
 
 def std(x, dim: REDUCE_DIM, *, ddof: int = 0):
