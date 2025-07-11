@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-from pytensor.compile.ops import ViewOp
+from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -28,7 +28,7 @@ from pytensor.scalar.basic import (
     Second,
     Switch,
 )
-from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid
+from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid, Softplus
 
 
 @numba_funcify.register(ScalarOp)
@@ -198,14 +198,14 @@ def numba_funcify_Cast(op, node, **kwargs):
 
 
 @numba_basic.numba_njit
-def viewop(x):
+def identity(x):
     return x
 
 
 @numba_funcify.register(Identity)
-@numba_funcify.register(ViewOp)
-def numba_funcify_ViewOp(op, **kwargs):
-    return numba_basic.global_numba_func(viewop)
+@numba_funcify.register(TypeCastingOp)
+def numba_funcify_type_casting(op, **kwargs):
+    return numba_basic.global_numba_func(identity)
 
 
 @numba_basic.numba_njit
@@ -312,3 +312,22 @@ def erfc(x):
 @numba_funcify.register(Erfc)
 def numba_funcify_Erfc(op, **kwargs):
     return numba_basic.global_numba_func(erfc)
+
+
+@numba_funcify.register(Softplus)
+def numba_funcify_Softplus(op, node, **kwargs):
+    out_dtype = np.dtype(node.outputs[0].type.dtype)
+
+    @numba_basic.numba_njit
+    def softplus(x):
+        if x < -37.0:
+            value = np.exp(x)
+        elif x < 18.0:
+            value = np.log1p(np.exp(x))
+        elif x < 33.3:
+            value = x + np.exp(-x)
+        else:
+            value = x
+        return numba_basic.direct_cast(value, out_dtype)
+
+    return softplus

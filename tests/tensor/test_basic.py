@@ -117,6 +117,7 @@ from pytensor.tensor.type import (
     ivector,
     lscalar,
     lvector,
+    matrices,
     matrix,
     row,
     scalar,
@@ -1762,7 +1763,7 @@ class TestJoinAndSplit:
         got = f(-2)
         assert np.allclose(got, want)
 
-        with pytest.raises(IndexError):
+        with pytest.raises(ValueError):
             f(-3)
 
     @pytest.mark.parametrize("py_impl", (False, True))
@@ -1805,7 +1806,7 @@ class TestJoinAndSplit:
         got = f()
         assert np.allclose(got, want)
 
-        with pytest.raises(IndexError):
+        with pytest.raises(ValueError):
             join(-3, a, b)
 
         with impl_ctxt:
@@ -2118,28 +2119,6 @@ class TestJoinAndSplit:
         y = Split(2)(x, 0, [s, 5 - s])[0]
         assert y.type.shape == (None,)
 
-    def test_join_inplace(self):
-        # Test join to work inplace.
-        #
-        # This function tests the case when several elements are passed to the
-        # join function but all except one of them are empty. In this case join
-        # should work inplace and the output should be the view of the non-empty
-        # element.
-        s = lscalar()
-        x = vector("x")
-        z = ptb.zeros((s,))
-
-        join = Join(view=0)
-        c = join(0, x, z, z)
-
-        f = pytensor.function([In(x, borrow=True), s], Out(c, borrow=True))
-
-        data = np.array([3, 4, 5], dtype=config.floatX)
-
-        if config.mode not in ["DebugMode", "DEBUG_MODE"]:
-            assert f(data, 0) is data
-        assert np.allclose(f(data, 0), [3, 4, 5])
-
     def test_join_oneInput(self):
         # Test join when only 1 input is given.
         #
@@ -2173,6 +2152,41 @@ class TestJoinAndSplit:
         for r, expected in zip(res, ([], [0, 1, 2], [3, 4]), strict=True):
             assert np.allclose(r, expected)
             assert r.base is x_test
+
+    @pytest.mark.parametrize("gc", (True, False), ids=lambda x: f"gc={x}")
+    @pytest.mark.parametrize("memory_layout", ["C-contiguous", "F-contiguous", "Mixed"])
+    @pytest.mark.parametrize("axis", (0, 1), ids=lambda x: f"axis={x}")
+    @pytest.mark.parametrize("ndim", (1, 2), ids=["vector", "matrix"])
+    @config.change_flags(cmodule__warn_no_version=False)
+    def test_join_performance(self, ndim, axis, memory_layout, gc, benchmark):
+        if ndim == 1 and not (memory_layout == "C-contiguous" and axis == 0):
+            pytest.skip("Redundant parametrization")
+        n = 64
+        inputs = vectors("abcdef") if ndim == 1 else matrices("abcdef")
+        out = join(axis, *inputs)
+        fn = pytensor.function(inputs, Out(out, borrow=True), trust_input=True)
+        fn.vm.allow_gc = gc
+        test_values = [np.zeros((n, n)[:ndim], dtype=inputs[0].dtype) for _ in inputs]
+        if memory_layout == "C-contiguous":
+            pass
+        elif memory_layout == "F-contiguous":
+            test_values = [t.T for t in test_values]
+        elif memory_layout == "Mixed":
+            test_values = [t if i % 2 else t.T for i, t in enumerate(test_values)]
+        else:
+            raise ValueError
+
+        assert fn(*test_values).shape == (n * 6, n)[:ndim] if axis == 0 else (n, n * 6)
+        benchmark(fn, *test_values)
+
+    def test_join_negative_axis_rewrite(self):
+        """Test that constant negative axis is rewritten to positive axis in make_node."""
+        v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
+        a = self.shared(v)
+        b = as_tensor_variable(v)
+
+        assert equal_computations([join(-1, a, b)], [join(1, a, b)])
+        assert equal_computations([join(-2, a, b)], [join(0, a, b)])
 
 
 def test_TensorFromScalar():
@@ -2863,6 +2877,18 @@ class TestARange:
         assert np.arange(1, -9, 2).shape == arange(1, -9, 2).type.shape
         assert np.arange(1.3, 17.48, 2.67).shape == arange(1.3, 17.48, 2.67).type.shape
         assert np.arange(-64, 64).shape == arange(-64, 64).type.shape
+
+    def test_c_cache_bug(self):
+        # Regression test for bug caused by issues in hash of `np.dtype()` objects
+        # https://github.com/numpy/numpy/issues/17864
+        end = iscalar("end")
+        arange1 = ARange(np.dtype("float64"))(0, end, 1)
+        arange2 = ARange("float64")(0, end + 1, 1)
+        assert arange1.owner.op == arange2.owner.op
+        assert hash(arange1.owner.op) == hash(arange2.owner.op)
+        fn = function([end], [arange1, arange2])
+        res1, res2 = fn(10)
+        np.testing.assert_array_equal(res1, res2[:-1], strict=True)
 
 
 class TestNdGrid:
@@ -3850,35 +3876,22 @@ class TestInferShape(utt.InferShapeTester):
     def test_Flatten(self):
         atens3 = tensor3()
         atens3_val = random(4, 5, 3)
-        for ndim in (3, 2, 1):
+        for ndim in (2, 1):
             self._compile_and_check(
                 [atens3],
                 [flatten(atens3, ndim)],
                 [atens3_val],
                 Reshape,
-                excluding=["local_useless_reshape"],
             )
 
         amat = matrix()
         amat_val = random(4, 5)
-        for ndim in (2, 1):
-            self._compile_and_check(
-                [amat],
-                [flatten(amat, ndim)],
-                [amat_val],
-                Reshape,
-                excluding=["local_useless_reshape"],
-            )
-
-        avec = vector()
-        avec_val = random(4)
         ndim = 1
         self._compile_and_check(
-            [avec],
-            [flatten(avec, ndim)],
-            [avec_val],
+            [amat],
+            [flatten(amat, ndim)],
+            [amat_val],
             Reshape,
-            excluding=["local_useless_reshape"],
         )
 
     def test_Eye(self):

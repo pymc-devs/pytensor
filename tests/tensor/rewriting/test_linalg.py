@@ -10,6 +10,7 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.graph import ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise
@@ -29,6 +30,7 @@ from pytensor.tensor.rewriting.linalg import inv_as_solve
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
+    CholeskySolve,
     Solve,
     SolveBase,
     SolveTriangular,
@@ -920,14 +922,6 @@ def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
     nodes = f_rewritten.maker.fgraph.apply_nodes
     assert any(isinstance(node.op, Cholesky) for node in nodes)
 
-    # Case 2 : eye is degenerate
-    x = pt.scalar("x")
-    y = pt.eye(1) * x
-    z_cholesky = pt.linalg.cholesky(y)
-    f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
-    nodes = f_rewritten.maker.fgraph.apply_nodes
-    assert any(isinstance(node.op, Cholesky) for node in nodes)
-
 
 def test_slogdet_specialization():
     x, a = pt.dmatrix("x"), np.random.rand(20, 20)
@@ -993,3 +987,76 @@ def test_slogdet_specialization():
     f = function([x], [exp_det_x, sign_det_x], mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes
     assert not any(isinstance(node.op, SLogDet) for node in nodes)
+
+
+@pytest.mark.parametrize(
+    "a_batch_shape", [(), (5,)], ids=lambda x: f"a_batch_shape={x}"
+)
+@pytest.mark.parametrize(
+    "b_batch_shape", [(), (5,)], ids=lambda x: f"b_batch_shape={x}"
+)
+@pytest.mark.parametrize("b_ndim", (1, 2), ids=lambda x: f"b_ndim={x}")
+@pytest.mark.parametrize(
+    "op, fn, extra_kwargs",
+    [
+        (Solve, pt.linalg.solve, {}),
+        (SolveTriangular, pt.linalg.solve_triangular, {}),
+        (SolveTriangular, pt.linalg.solve_triangular, {"unit_diagonal": True}),
+        (CholeskySolve, pt.linalg.cho_solve, {}),
+    ],
+)
+def test_scalar_solve_to_division_rewrite(
+    op, fn, extra_kwargs, b_ndim, a_batch_shape, b_batch_shape
+):
+    def solve_op_in_graph(graph):
+        return any(
+            isinstance(var.owner.op, SolveBase)
+            or (
+                isinstance(var.owner.op, Blockwise)
+                and isinstance(var.owner.op.core_op, SolveBase)
+            )
+            for var in ancestors(graph)
+            if var.owner
+        )
+
+    rng = np.random.default_rng(
+        [
+            sum(map(ord, "scalar_solve_to_division_rewrite")),
+            b_ndim,
+            *a_batch_shape,
+            1,
+            *b_batch_shape,
+        ]
+    )
+
+    a = pt.tensor("a", shape=(*a_batch_shape, 1, 1), dtype="float64")
+    b = pt.tensor("b", shape=(*b_batch_shape, *([None] * b_ndim)), dtype="float64")
+
+    if op is CholeskySolve:
+        # cho_solve expects a tuple (c, lower) as the first input
+        c = fn((pt.linalg.cholesky(a), True), b, b_ndim=b_ndim, **extra_kwargs)
+    else:
+        c = fn(a, b, b_ndim=b_ndim, **extra_kwargs)
+
+    assert solve_op_in_graph([c])
+    f = function([a, b], c, mode="FAST_RUN")
+    assert not solve_op_in_graph(f.maker.fgraph.outputs)
+
+    a_val = rng.normal(size=(*a_batch_shape, 1, 1)).astype(pytensor.config.floatX)
+    b_core_shape = (1, 5) if b_ndim == 2 else (1,)
+    b_val = rng.normal(size=(*b_batch_shape, *b_core_shape)).astype(
+        pytensor.config.floatX
+    )
+
+    if op is CholeskySolve:
+        # Avoid sign ambiguity in solve
+        a_val = a_val**2
+
+    if extra_kwargs.get("unit_diagonal", False):
+        a_val = np.ones_like(a_val)
+
+    signature = "(n,m),(m)->(n)" if b_ndim == 1 else "(n,m),(m,k)->(n,k)"
+    c_val = np.vectorize(np.linalg.solve, signature=signature)(a_val, b_val)
+    np.testing.assert_allclose(
+        f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )

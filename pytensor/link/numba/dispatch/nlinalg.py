@@ -52,7 +52,7 @@ def numba_funcify_Det(op, node, **kwargs):
 
     @numba_basic.numba_njit(inline="always")
     def det(x):
-        return numba_basic.direct_cast(np.linalg.det(inputs_cast(x)), out_dtype)
+        return np.array(np.linalg.det(inputs_cast(x))).astype(out_dtype)
 
     return det
 
@@ -68,8 +68,8 @@ def numba_funcify_SLogDet(op, node, **kwargs):
     def slogdet(x):
         sign, det = np.linalg.slogdet(inputs_cast(x))
         return (
-            numba_basic.direct_cast(sign, out_dtype_1),
-            numba_basic.direct_cast(det, out_dtype_2),
+            np.array(sign).astype(out_dtype_1),
+            np.array(det).astype(out_dtype_2),
         )
 
     return slogdet

@@ -1,3 +1,4 @@
+import abc
 import warnings
 from collections.abc import Sequence
 from copy import deepcopy
@@ -32,7 +33,20 @@ from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
 
 
-class RandomVariable(Op):
+class RNGConsumerOp(Op):
+    """Baseclass for Ops that consume RNGs."""
+
+    @abc.abstractmethod
+    def update(self, node: Apply) -> dict[Variable, Variable]:
+        """Symbolic update expression for input RNG variables.
+
+        Returns a dictionary with the symbolic expressions required for correct updating
+        of RNG variables in repeated function evaluations.
+        """
+        pass
+
+
+class RandomVariable(RNGConsumerOp):
     """An `Op` that produces a sample from a random variable.
 
     This is essentially `RandomFunction`, except that it removes the
@@ -112,6 +126,8 @@ class RandomVariable(Op):
             else:
                 self.signature = safe_signature(self.ndims_params, [self.ndim_supp])
 
+        if isinstance(dtype, np.dtype):
+            dtype = dtype.name
         self.dtype = dtype or getattr(self, "dtype", None)
 
         self.inplace = (
@@ -120,6 +136,9 @@ class RandomVariable(Op):
 
         if self.inplace:
             self.destroy_map = {0: [0]}
+
+    def update(self, node: Apply) -> dict[Variable, Variable]:
+        return {node.inputs[0]: node.outputs[0]}
 
     def _supp_shape_from_params(self, dist_params, param_shapes=None):
         """Determine the support shape of a multivariate `RandomVariable`'s output given its parameters.
@@ -372,6 +391,13 @@ class RandomVariable(Op):
         inputs = (rng, size, *dist_params)
         out_type = TensorType(dtype=self.dtype, shape=static_shape)
         outputs = (rng.type(), out_type())
+
+        if self.dtype == "floatX":
+            # Commit to a specific float type if the Op is still using "floatX"
+            dtype = config.floatX
+            props = self._props_dict()
+            props["dtype"] = dtype
+            self = type(self)(**props)
 
         return Apply(self, inputs, outputs)
 

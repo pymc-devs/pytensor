@@ -9,7 +9,7 @@ from pytensor import In
 from pytensor.compile import PYTORCH
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function.types import add_supervisor_to_fgraph
-from pytensor.compile.ops import DeepCopyOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
@@ -22,6 +22,7 @@ from pytensor.tensor.basic import (
     Eye,
     Join,
     MakeVector,
+    ScalarFromTensor,
     Split,
     TensorFromScalar,
 )
@@ -71,6 +72,22 @@ def pytorch_funcify_FunctionGraph(
     )
 
 
+@pytorch_funcify.register(TypeCastingOp)
+def pytorch_funcify_CastingOp(op, node, **kwargs):
+    def type_cast(x):
+        return x
+
+    return type_cast
+
+
+@pytorch_funcify.register(ScalarFromTensor)
+def pytorch_funcify_ScalarFromTensor(op, node, **kwargs):
+    def scalar_from_tensor(x):
+        return x[()]
+
+    return scalar_from_tensor
+
+
 @pytorch_funcify.register(CheckAndRaise)
 def pytorch_funcify_CheckAndRaise(op, **kwargs):
     error = op.exc_type
@@ -78,7 +95,7 @@ def pytorch_funcify_CheckAndRaise(op, **kwargs):
 
     def assert_fn(x, *conditions):
         for cond in conditions:
-            if not cond.item():
+            if not cond:
                 raise error(msg)
         return x
 

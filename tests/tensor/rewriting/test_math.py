@@ -2031,6 +2031,45 @@ class TestExpLog:
         assert len(ops_graph) == expected_switches
 
 
+class TestSqrSqrt:
+    def setup_method(self):
+        mode = get_default_mode()
+        self.mode = mode.including(
+            "local_sqrt_sqr",
+        ).excluding("fusion")
+        self.rng = np.random.default_rng()
+
+    def test_sqr_sqrt(self):
+        # sqrt(x) ** 2 -> x
+        x = pt.tensor("x", shape=(None, None))
+        out = sqr(sqrt(x))
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        assert equal_computations([out], [pt_abs(x)])
+
+    def test_sqrt_sqr(self):
+        x = pt.tensor("x", shape=(None, None))
+        out = sqrt(sqr(x))
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        expected = switch(
+            ge(x, np.zeros((1, 1), dtype="int8")),
+            x,
+            np.full((1, 1), np.nan, dtype=x.type.dtype),
+        )
+
+        assert equal_computations([out], [expected])
+
+    def test_sqr_sqrt_integer_upcast(self):
+        x = ivector("x")
+        out = sqr(sqrt(x))
+        dtype = out.type.dtype
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        expected = pt.cast(pt_abs(x), dtype=dtype)
+        assert equal_computations([out], [expected])
+
+
 class TestLocalSwitchSink:
     def setup_method(self):
         # condition values
@@ -4438,11 +4477,22 @@ def test_local_add_neg_to_sub(first_negative):
     assert np.allclose(f(x_test, y_test), exp)
 
 
-def test_log1mexp_stabilization():
+@pytest.mark.parametrize(
+    "op_name",
+    ["log_1_minus_exp", "log1p_minus_exp", "log_minus_expm1", "log_minus_exp_minus_1"],
+)
+def test_log1mexp_stabilization(op_name):
     mode = Mode("py").including("stabilize")
 
     x = vector()
-    f = function([x], log(1 - exp(x)), mode=mode)
+    if op_name == "log_1_minus_exp":
+        f = function([x], log(1 - exp(x)), mode=mode)
+    elif op_name == "log1p_minus_exp":
+        f = function([x], log1p(-exp(x)), mode=mode)
+    elif op_name == "log_minus_expm1":
+        f = function([x], log(-expm1(x)), mode=mode)
+    elif op_name == "log_minus_exp_minus_1":
+        f = function([x], log(-(exp(x) - 1)), mode=mode)
 
     nodes = [node.op for node in f.maker.fgraph.toposort()]
     assert nodes == [pt.log1mexp]

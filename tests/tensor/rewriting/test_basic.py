@@ -487,8 +487,8 @@ class TestUselessCheckAndRaise:
 
     def test_local_remove_useless_2(self):
         """Remove `CheckAndRaise` conditions that are always true."""
-        x = scalar()
-        y = scalar()
+        x = scalar("x")
+        y = ps.bool("y")
         fg = FunctionGraph(outputs=[assert_op(x, y, 1)], clone=False)
         fg_res = rewrite_graph(fg, include=["canonicalize", "specialize"])
         topo = fg_res.toposort()
@@ -497,8 +497,8 @@ class TestUselessCheckAndRaise:
 
     def test_local_remove_useless_3(self):
         """Don't remove `CheckAndRaise` conditions that are always false."""
-        x = scalar()
-        y = scalar()
+        x = scalar("x")
+        y = ps.bool("y")
         fg = FunctionGraph(outputs=[assert_op(x, y, 0)], clone=False)
         fg_res = rewrite_graph(fg, include=["canonicalize", "specialize"])
         topo = fg_res.toposort()
@@ -1248,65 +1248,41 @@ def test_local_join_1():
 
 
 def test_local_join_empty():
-    # test for vector, vector, empty to vector
+    # Vector case
     empty_vec = np.asarray([], dtype=config.floatX)
-    a = vector("a")
-    s = pt.join(0, a, a, empty_vec)
-    f = function([a], s, mode=rewrite_mode)
-    val = f([1])
-    assert np.all(val == [1])
-    e = f.maker.fgraph.toposort()
-    assert len([n for n in e if isinstance(n.op, Join)]) == 1
-    assert all(
-        not isinstance(n.op, Join) or len(n.inputs) == 3
-        for n in e
-        if isinstance(n.op, Join)
-    )
-    assert f.maker.fgraph.outputs[0].dtype == config.floatX
+    vec = vector("vec")
+    s = pt.join(0, vec, vec, empty_vec)
+    new_s = rewrite_graph(s)
+    assert equal_computations([new_s], [join(0, vec, vec)])
+    assert new_s.dtype == s.dtype
 
-    # test for matrix join(1,a)
-    empty_mat = np.asarray([[]], dtype=config.floatX)
-    m = matrix("m")
-    s = join(1, empty_mat, m, m, m)
-    f = function([m], s, mode=rewrite_mode)
-    val = f([[1]])
-    assert np.all(val == [[1]])
-    e = f.maker.fgraph.toposort()
-    assert len([n for n in e if isinstance(n.op, Join)]) == 1
-    assert all(
-        not isinstance(n.op, Join) or len(n.inputs) == 4
-        for n in e
-        if isinstance(n.op, Join)
+    # Matrix case
+    empty_mat = np.zeros((2, 0), dtype=config.floatX)
+    empty_sym_mat = matrix("m", shape=(2, 0))
+    mat = matrix("mat", shape=(2, 10))
+    s = join(1, empty_mat, mat, empty_sym_mat, mat, mat)
+    new_s = rewrite_graph(s)
+    assert equal_computations([new_s], [join(1, mat, mat, mat)])
+    assert new_s.dtype == s.dtype
+
+    # Join can be completely removed, but casting and specify_shape are propagated
+    int_mat = matrix("int_mat", dtype=int)
+    s = join(-1, empty_mat, int_mat, empty_sym_mat)
+    new_s = rewrite_graph(s)
+    assert equal_computations(
+        [new_s], [specify_shape(int_mat, (2, None)).astype(s.dtype)]
     )
-    assert f.maker.fgraph.outputs[0].dtype == config.floatX
-    # test for vector, vector, empty to matrix
-    # We can't rewrite this case.
-    s = pt.stack([a, a, empty_vec])
-    f = function([a], s, mode=rewrite_mode)
-    val = f([])
-    assert np.all(val == [1])
-    e = f.maker.fgraph.toposort()
-    assert len([n for n in e if isinstance(n.op, Join)]) == 1
-    assert all(
-        not isinstance(n.op, Join) or len(n.inputs) == 4
-        for n in e
-        if isinstance(n.op, Join)
-    )
-    assert f.maker.fgraph.outputs[0].dtype == config.floatX
-    # test for matrix join(0,a)
-    # We can't rewrite this case.
-    s = join(0, m, np.asarray([[2.0]], dtype=config.floatX), m)
-    f = function([m], s, mode=rewrite_mode)
-    val = f([[1]])
-    assert np.all(val == [[1], [2], [1]])
-    e = f.maker.fgraph.toposort()
-    assert len([n for n in e if isinstance(n.op, Join)]) == 1
-    assert all(
-        not isinstance(n.op, Join) or len(n.inputs) == 4
-        for n in e
-        if isinstance(n.op, Join)
-    )
-    assert f.maker.fgraph.outputs[0].dtype == config.floatX
+
+    # Dynamic axis, can't apply rewrite
+    axis = scalar("axis", dtype=int)
+    s = join(axis, empty_mat, int_mat, empty_sym_mat)
+    new_s = rewrite_graph(s)
+    assert equal_computations([new_s], [s])
+
+    # Stack introduces an expand_dims in the join, that's a nonzero dim!
+    s = pt.stack([vec, vec, empty_vec])
+    new_s = rewrite_graph(s)
+    assert equal_computations([new_s], [s])
 
 
 def test_local_join_make_vector():
@@ -1583,7 +1559,7 @@ def test_local_merge_alloc():
     output = pt.alloc(pt.alloc(m, y, 1, 1), x, y2, z, w)
     f = function([m, x, y, y2, z, w], output, mode=rewrite_mode)
     topo = f.maker.fgraph.toposort()
-    assert len(topo) == 3
+    assert len(topo) == 4
     assert isinstance(topo[-2].op, Assert)
     assert isinstance(topo[-1].op, Alloc)
     o = f(0.0, 1, 2, 2, 3, 4)
@@ -1640,7 +1616,7 @@ def test_local_useless_alloc():
     useless_alloc.rewrite(g)
 
     topo = g.toposort()
-    assert len(topo) == 3
+    assert len(topo) == 4
     assert isinstance(topo[-2].op, Assert)
     assert isinstance(topo[-1].op, Alloc)
 

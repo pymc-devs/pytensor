@@ -8,6 +8,7 @@ from pytensor import In, shared
 from pytensor import scalar as ps
 from pytensor import tensor as pt
 from pytensor.compile.function import function
+from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
@@ -148,7 +149,7 @@ class TestDimshuffleLift:
 
     def test_useless_dimshuffle(self):
         x, *_ = inputs()
-        e = ds(x, (0, 1))
+        e = DimShuffle(new_order=(0, 1), input_ndim=2)(x)
         g = FunctionGraph([x], [e], clone=False)
         assert isinstance(g.outputs[0].owner.op, DimShuffle)
         dimshuffle_lift.rewrite(g)
@@ -238,6 +239,7 @@ class TestFusion:
         include=[
             "canonicalize",
             "fusion",
+            "add_mul_fusion",
             "inplace",
         ],
         exclude=["cxx_only", "BlasOpt"],
@@ -930,7 +932,7 @@ class TestFusion:
                 ),
                 (fx,),
                 (fxv,),
-                4,
+                5,
                 (np.zeros_like(fxv),),
                 ("float32",),
             ),
@@ -1104,7 +1106,8 @@ class TestFusion:
             np.random.random((5, 5)), np.random.random((5, 5)), np.random.random((5, 5))
         )
 
-    def test_fusion_multiout_inplace(self):
+    @pytest.mark.parametrize("linker", ["cvm", "py"])
+    def test_fusion_multiout_inplace(self, linker):
         x = vector("x")
 
         # Create Composite where inplacing the first non-constant output would corrupt the second output
@@ -1118,17 +1121,16 @@ class TestFusion:
         f = pytensor.function(
             [In(x, mutable=True)],
             outs,
-            mode=self.mode.including("inplace"),
+            mode=Mode(linker=linker, optimizer=self.rewrites.including("inplace")),
         )
         (composite_node,) = f.maker.fgraph.apply_nodes
 
-        # Destroy map must be None or the last toposorted output
         destroy_map = composite_node.op.destroy_map
-        assert (destroy_map == {}) or (
-            destroy_map == {1: [composite_node.inputs.index(x)]}
-        )
+        assert destroy_map == {0: [0]}
 
-        res = f([0, 1, 2])
+        inp = np.array([0, 1, 2], dtype=config.floatX)
+        res = f(inp)
+        assert not np.allclose(inp, [0, 1, 2])
         assert np.allclose(res[0], [1, 2, 3])
         assert np.allclose(res[1], np.cos([1, 2, 3]) + np.array([0, 1, 2]))
 
@@ -1507,3 +1509,52 @@ def test_local_useless_dimshuffle_makevector():
     )
 
     assert y_rewritten_fg.outputs[0] == a
+
+
+@pytest.mark.parametrize("op", (add, mul))
+def test_constant_fold_branches_add_mul(op):
+    rng = np.random.default_rng()
+    py_op = np.add if op is add else np.multiply
+
+    x = pt.vector("x")
+    a = rng.normal(size=(1, 512, 5))
+    b = rng.normal(size=(1, 512, 1))
+    out = op(op(a, x), b)
+    new_out = rewrite_graph(out, include=("add_mul_fusion",))
+    assert len(new_out.owner.inputs) == 2
+    assert equal_computations([new_out], [op(py_op(a, b), x)])
+
+    # c shouldn't be folded as it would increase the memory usage
+    c = rng.normal(size=(1024, 1, 1))
+    out = op(op(op(a, x), c), b)
+    new_out = rewrite_graph(out, include=("add_mul_fusion",))
+    assert len(new_out.owner.inputs) == 3
+    assert equal_computations([new_out], [op(py_op(a, b), c, x)])
+
+
+def test_InplaceElemwiseOptimizer_bug():
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/1420
+
+    # This graph fails if InplaceElemwiseOptimizer were to try to skip `fgraph.validate`
+    # in between two invalid inplace rewrites.
+    z = pt.matrix("z")
+
+    z1 = ps.float64("z1")
+    z2 = ps.float64("z2")
+    out1, out2 = Elemwise(ps.Composite([z1, z2], [z1 + z2, z2 - z1]))(z[1:], z[:-1])
+    out = pt.exp(z[1:-1]).sum() + out1.sum() + out2.sum()
+
+    # Add 500 unrelated nodes to trigger the old special behavior
+    irrelevant_outs = [pt.specify_shape(z, (4, 4)) for _ in range(500)]
+
+    fgraph = FunctionGraph(inputs=[z], outputs=[out, *irrelevant_outs], clone=False)
+    add_supervisor_to_fgraph(fgraph, [In(z)])
+    # with config.change_flags(tensor__insert_inplace_optimizer_validate_nb=10):
+    rewrite_graph(fgraph, include=("inplace",))
+
+    pytensor.config.tensor__insert_inplace_optimizer_validate_nb = 1
+    with pytest.warns(
+        FutureWarning,
+        match="tensor__insert_inplace_optimizer_validate_nb config is deprecated",
+    ):
+        rewrite_graph(fgraph, include=("inplace",))

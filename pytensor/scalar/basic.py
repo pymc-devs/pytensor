@@ -1302,19 +1302,7 @@ class ScalarOp(COp):
     def __str__(self):
         if hasattr(self, "name") and self.name:
             return self.name
-        else:
-            param = [
-                (k, v)
-                for k, v in self.__dict__.items()
-                if k
-                not in ("name", "_op_use_c_code", "bool", "output_types_preference")
-            ]
-            if param:
-                classname = self.__class__.__name__
-                args = ", ".join(f"{k}={v}" for k, v in param)
-                return f"{classname}{{{args}}}"
-            else:
-                return self.__class__.__name__
+        return self.__class__.__name__
 
     def c_code_cache_version(self):
         return (4,)
@@ -3249,7 +3237,7 @@ class Exp2(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz * exp2(x) * log(np.array(2, dtype=x.type)),)
+        return (gz * exp2(x) * log(np.array(2, dtype=x.dtype)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3388,7 +3376,7 @@ class Deg2Rad(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz * np.array(np.pi / 180, dtype=gz.type),)
+        return (gz * np.array(np.pi / 180, dtype=gz.dtype),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3423,7 +3411,7 @@ class Rad2Deg(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz * np.array(180.0 / np.pi, dtype=gz.type),)
+        return (gz * np.array(180.0 / np.pi, dtype=gz.dtype),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3496,7 +3484,7 @@ class ArcCos(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (-gz / sqrt(np.array(1, dtype=x.type) - sqr(x)),)
+        return (-gz / sqrt(np.array(1, dtype=x.dtype) - sqr(x)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3570,7 +3558,7 @@ class ArcSin(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / sqrt(np.array(1, dtype=x.type) - sqr(x)),)
+        return (gz / sqrt(np.array(1, dtype=x.dtype) - sqr(x)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3642,7 +3630,7 @@ class ArcTan(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / (np.array(1, dtype=x.type) + sqr(x)),)
+        return (gz / (np.array(1, dtype=x.dtype) + sqr(x)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3765,7 +3753,7 @@ class ArcCosh(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / sqrt(sqr(x) - np.array(1, dtype=x.type)),)
+        return (gz / sqrt(sqr(x) - np.array(1, dtype=x.dtype)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3842,7 +3830,7 @@ class ArcSinh(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / sqrt(sqr(x) + np.array(1, dtype=x.type)),)
+        return (gz / sqrt(sqr(x) + np.array(1, dtype=x.dtype)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -3920,7 +3908,7 @@ class ArcTanh(UnaryScalarOp):
             else:
                 return [x.zeros_like()]
 
-        return (gz / (np.array(1, dtype=x.type) - sqr(x)),)
+        return (gz / (np.array(1, dtype=x.dtype) - sqr(x)),)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x,) = inputs
@@ -4102,6 +4090,7 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
 
     def __init__(self, *args, **kwargs):
         self.prepare_node_called = set()
+        super().__init__(*args, **kwargs)
 
     def _cleanup_graph(self, inputs, outputs):
         # TODO: We could convert to TensorVariable, optimize graph,
@@ -4344,9 +4333,9 @@ class Composite(ScalarInnerGraphOp):
 
         # Rename internal variables
         for i, r in enumerate(self.fgraph.inputs):
-            r.name = f"i{int(i)}"
+            r.name = f"i{i}"
         for i, r in enumerate(self.fgraph.outputs):
-            r.name = f"o{int(i)}"
+            r.name = f"o{i}"
         io = set(self.fgraph.inputs + self.fgraph.outputs)
         for i, r in enumerate(self.fgraph.variables):
             if (
@@ -4354,7 +4343,7 @@ class Composite(ScalarInnerGraphOp):
                 and r not in io
                 and len(self.fgraph.clients[r]) > 1
             ):
-                r.name = f"t{int(i)}"
+                r.name = f"t{i}"
 
         if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
             self._name = "Composite{...}"
@@ -4427,8 +4416,8 @@ class Composite(ScalarInnerGraphOp):
 
     def perform(self, node, inputs, output_storage):
         outputs = self.py_perform_fn(*inputs)
-        # strict=False because we are in a hot loop
-        for storage, out_val in zip(output_storage, outputs, strict=False):
+        # zip strict not specified because we are in a hot loop
+        for storage, out_val in zip(output_storage, outputs):
             storage[0] = out_val
 
     def grad(self, inputs, output_grads):
@@ -4441,16 +4430,12 @@ class Composite(ScalarInnerGraphOp):
         if hasattr(self, "_c_code"):
             return self._c_code
 
-        subd = dict(
-            chain(
-                ((e, f"%(i{int(i)})s") for i, e in enumerate(self.fgraph.inputs)),
-                ((e, f"%(o{int(i)})s") for i, e in enumerate(self.fgraph.outputs)),
-            )
-        )
+        fg = self.fgraph
+        subd = {e: f"%(i{i})s" for i, e in enumerate(fg.inputs)}
 
-        for var in self.fgraph.variables:
+        for var in fg.variables:
             if var.owner is None:
-                if var not in self.fgraph.inputs:
+                if var not in fg.inputs:
                     # This is an orphan
                     if isinstance(var, Constant) and isinstance(var.type, CLinkerType):
                         subd[var] = f"({var.type.c_literal(var.data)})"
@@ -4465,29 +4450,34 @@ class Composite(ScalarInnerGraphOp):
                 # flag for elemwise ops to check.
                 self.inner_float16 = True
 
-        _c_code = "{\n"
-        self.nodenames = [
-            f"%(nodename)s_subnode{int(j)}"
-            for j, n in enumerate(self.fgraph.toposort())
-        ]
+        self.nodenames = nodenames = []  # Used by self.c_support_code_apply
 
+        _c_code = "{\n"
         i = 0
-        for j, node in enumerate(self.fgraph.toposort()):
+        for j, node in enumerate(fg.toposort()):
             for output in node.outputs:
                 if output not in subd:
                     i += 1
-                    name = f"V%(id)s_tmp{int(i)}"
+                    name = f"V%(id)s_tmp{i}"
                     subd[output] = name
                     _c_code += f"{output.type.dtype_specs()[1]} {name};\n"
+
+            nodename = f"%(nodename)s_subnode{j}"
+            nodenames.append(nodename)
+
             s = node.op.c_code(
                 node,
-                self.nodenames[j],
+                nodename,
                 [subd[input] for input in node.inputs],
                 [subd[output] for output in node.outputs],
-                dict(fail="%(fail)s", id=f"%(id)s_{int(j)}"),
+                dict(fail="%(fail)s", id=f"%(id)s_{j}"),
             )
             _c_code += s
             _c_code += "\n"
+
+        # Copy the temporary outputs to the real outputs
+        for i, output in enumerate(fg.outputs):
+            _c_code += f"%(o{i})s = {subd[output]};\n"
 
         _c_code += "}\n"
 
@@ -4498,8 +4488,8 @@ class Composite(ScalarInnerGraphOp):
     def c_code(self, node, nodename, inames, onames, sub):
         d = dict(
             chain(
-                zip((f"i{int(i)}" for i in range(len(inames))), inames, strict=True),
-                zip((f"o{int(i)}" for i in range(len(onames))), onames, strict=True),
+                zip((f"i{i}" for i in range(len(inames))), inames, strict=True),
+                zip((f"o{i}" for i in range(len(onames))), onames, strict=True),
             ),
             **sub,
         )
@@ -4512,7 +4502,7 @@ class Composite(ScalarInnerGraphOp):
         return self.c_code_template % d
 
     def c_code_cache_version_outer(self) -> tuple[int, ...]:
-        return (5,)
+        return (6,)
 
 
 class Compositef32:

@@ -746,9 +746,8 @@ test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_metho
     ],
 )
 def test_dirichlet_samples(alphas, size):
-    def dirichlet_test_fn(mean=None, cov=None, size=None, random_state=None):
-        if size is None:
-            size = ()
+    # FIXME: Is this just testing itself against itself?
+    def dirichlet_test_fn(alphas, size, random_state):
         return dirichlet.rng_fn(random_state, alphas, size)
 
     compare_sample_values(dirichlet, alphas, size=size, test_fn=dirichlet_test_fn)

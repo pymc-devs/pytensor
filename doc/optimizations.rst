@@ -239,7 +239,7 @@ Optimization                                              o4             o3  o2 
         See :func:`insert_inplace_optimizer`
 
     inplace_random
-        Typically when a graph uses random numbers, the RandomState is stored
+        Typically when a graph uses random numbers, the random Generator is stored
         in a shared variable, used once per call and, updated after each function
         call.  In this common case, it makes sense to update the random number generator in-place.
 

@@ -6,6 +6,7 @@ from numba.np.linalg import ensure_lapack
 from numpy import ndarray
 from scipy import linalg
 
+from pytensor.link.numba.dispatch import numba_funcify
 from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
@@ -19,6 +20,10 @@ from pytensor.link.numba.dispatch.linalg.utils import (
     _copy_to_fortran_order_even_if_1d,
     _solve_check,
     _trans_char_to_int,
+)
+from pytensor.tensor._linalg.solve.tridiagonal import (
+    LUFactorTridiagonal,
+    SolveLUFactorTridiagonal,
 )
 
 
@@ -34,7 +39,12 @@ def tridiagonal_norm(du, d, dl):
 
 
 def _gttrf(
-    dl: ndarray, d: ndarray, du: ndarray
+    dl: ndarray,
+    d: ndarray,
+    du: ndarray,
+    overwrite_dl: bool,
+    overwrite_d: bool,
+    overwrite_du: bool,
 ) -> tuple[ndarray, ndarray, ndarray, ndarray, ndarray, int]:
     """Placeholder for LU factorization of tridiagonal matrix."""
     return  # type: ignore
@@ -45,8 +55,12 @@ def gttrf_impl(
     dl: ndarray,
     d: ndarray,
     du: ndarray,
+    overwrite_dl: bool,
+    overwrite_d: bool,
+    overwrite_du: bool,
 ) -> Callable[
-    [ndarray, ndarray, ndarray], tuple[ndarray, ndarray, ndarray, ndarray, ndarray, int]
+    [ndarray, ndarray, ndarray, bool, bool, bool],
+    tuple[ndarray, ndarray, ndarray, ndarray, ndarray, int],
 ]:
     ensure_lapack()
     _check_scipy_linalg_matrix(dl, "gttrf")
@@ -60,11 +74,23 @@ def gttrf_impl(
         dl: ndarray,
         d: ndarray,
         du: ndarray,
+        overwrite_dl: bool,
+        overwrite_d: bool,
+        overwrite_du: bool,
     ) -> tuple[ndarray, ndarray, ndarray, ndarray, ndarray, int]:
         n = np.int32(d.shape[-1])
         ipiv = np.empty(n, dtype=np.int32)
         du2 = np.empty(n - 2, dtype=dtype)
         info = val_to_int_ptr(0)
+
+        if not overwrite_dl or not dl.flags.f_contiguous:
+            dl = dl.copy()
+
+        if not overwrite_d or not d.flags.f_contiguous:
+            d = d.copy()
+
+        if not overwrite_du or not du.flags.f_contiguous:
+            du = du.copy()
 
         numba_gttrf(
             val_to_int_ptr(n),
@@ -133,10 +159,23 @@ def gttrs_impl(
         nrhs = 1 if b.ndim == 1 else int(b.shape[-1])
         info = val_to_int_ptr(0)
 
-        if overwrite_b and b.flags.f_contiguous:
-            b_copy = b
-        else:
-            b_copy = _copy_to_fortran_order_even_if_1d(b)
+        if not overwrite_b or not b.flags.f_contiguous:
+            b = _copy_to_fortran_order_even_if_1d(b)
+
+        if not dl.flags.f_contiguous:
+            dl = dl.copy()
+
+        if not d.flags.f_contiguous:
+            d = d.copy()
+
+        if not du.flags.f_contiguous:
+            du = du.copy()
+
+        if not du2.flags.f_contiguous:
+            du2 = du2.copy()
+
+        if not ipiv.flags.f_contiguous:
+            ipiv = ipiv.copy()
 
         numba_gttrs(
             val_to_int_ptr(_trans_char_to_int(trans)),
@@ -147,12 +186,12 @@ def gttrs_impl(
             du.view(w_type).ctypes,
             du2.view(w_type).ctypes,
             ipiv.ctypes,
-            b_copy.view(w_type).ctypes,
+            b.view(w_type).ctypes,
             val_to_int_ptr(n),
             info,
         )
 
-        return b_copy, int_ptr_to_val(info)
+        return b, int_ptr_to_val(info)
 
     return impl
 
@@ -283,7 +322,9 @@ def _tridiagonal_solve_impl(
 
         anorm = tridiagonal_norm(du, d, dl)
 
-        dl, d, du, du2, IPIV, INFO = _gttrf(dl, d, du)
+        dl, d, du, du2, IPIV, INFO = _gttrf(
+            dl, d, du, overwrite_dl=True, overwrite_d=True, overwrite_du=True
+        )
         _solve_check(n, INFO)
 
         X, INFO = _gttrs(
@@ -297,3 +338,48 @@ def _tridiagonal_solve_impl(
         return X
 
     return impl
+
+
+@numba_funcify.register(LUFactorTridiagonal)
+def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
+    overwrite_dl = op.overwrite_dl
+    overwrite_d = op.overwrite_d
+    overwrite_du = op.overwrite_du
+
+    @numba_njit(cache=False)
+    def lu_factor_tridiagonal(dl, d, du):
+        dl, d, du, du2, ipiv, _ = _gttrf(
+            dl,
+            d,
+            du,
+            overwrite_dl=overwrite_dl,
+            overwrite_d=overwrite_d,
+            overwrite_du=overwrite_du,
+        )
+        return dl, d, du, du2, ipiv
+
+    return lu_factor_tridiagonal
+
+
+@numba_funcify.register(SolveLUFactorTridiagonal)
+def numba_funcify_SolveLUFactorTridiagonal(
+    op: SolveLUFactorTridiagonal, node, **kwargs
+):
+    overwrite_b = op.overwrite_b
+    transposed = op.transposed
+
+    @numba_njit(cache=False)
+    def solve_lu_factor_tridiagonal(dl, d, du, du2, ipiv, b):
+        x, _ = _gttrs(
+            dl,
+            d,
+            du,
+            du2,
+            ipiv,
+            b,
+            overwrite_b=overwrite_b,
+            trans=transposed,
+        )
+        return x
+
+    return solve_lu_factor_tridiagonal

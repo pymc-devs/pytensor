@@ -561,7 +561,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
 
         @numba_basic.numba_njit(inline="always")
         def argmax(x):
-            return 0
+            return np.array(0, dtype="int64")
 
     else:
         axes = tuple(int(ax) for ax in axis)

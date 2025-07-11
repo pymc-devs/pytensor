@@ -123,6 +123,18 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         self.name = name
         self.numpy_dtype = np.dtype(self.dtype)
 
+    def __call__(self, *args, shape=None, **kwargs):
+        if shape is not None:
+            # Check if shape is compatible with the original type
+            new_type = self.clone(shape=shape)
+            if self.is_super(new_type):
+                return new_type(*args, **kwargs)
+            else:
+                raise ValueError(
+                    f"{shape=} is incompatible with original type shape {self.shape=}"
+                )
+        return super().__call__(*args, **kwargs)
+
     def clone(
         self, dtype=None, shape=None, broadcastable=None, **kwargs
     ) -> "TensorType":
@@ -249,10 +261,10 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 " PyTensor C code does not support that.",
             )
 
-        # strict=False because we are in a hot loop
+        # zip strict not specified because we are in a hot loop
         if not all(
             ds == ts if ts is not None else True
-            for ds, ts in zip(data.shape, self.shape, strict=False)
+            for ds, ts in zip(data.shape, self.shape)
         ):
             raise TypeError(
                 f"The type's shape ({self.shape}) is not compatible with the data's ({data.shape})"
@@ -321,17 +333,14 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         return False
 
     def is_super(self, otype):
-        # strict=False because we are in a hot loop
+        # zip strict not specified because we are in a hot loop
         if (
             isinstance(otype, type(self))
             and otype.dtype == self.dtype
             and otype.ndim == self.ndim
             # `otype` is allowed to be as or more shape-specific than `self`,
             # but not less
-            and all(
-                sb == ob or sb is None
-                for sb, ob in zip(self.shape, otype.shape, strict=False)
-            )
+            and all(sb == ob or sb is None for sb, ob in zip(self.shape, otype.shape))
         ):
             return True
 
@@ -784,7 +793,7 @@ def tensor(
         try:
             # Help catching errors with the new tensor API
             # Many single letter strings are valid sctypes
-            if str(name) == "floatX" or (len(str(name)) > 1 and np.dtype(name).type):
+            if str(name) == "floatX" or (len(str(name)) > 2 and np.dtype(name).type):
                 raise ValueError(
                     f"The first and only positional argument of tensor is now `name`. Got {name}.\n"
                     "This name looks like a dtype, which you should pass as a keyword argument only."

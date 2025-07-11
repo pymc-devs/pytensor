@@ -1,7 +1,7 @@
 import os
+import string
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -37,7 +37,7 @@ class QuadraticCOpFunc(ExternalCOp):
 
     def __init__(self, a, b, c):
         super().__init__(
-            "{test_dir}/c_code/test_quadratic_function.c", "APPLY_SPECIFIC(compute_quadratic)"
+            "{str(test_dir).replace(os.sep, "/")}/c_code/test_quadratic_function.c", "APPLY_SPECIFIC(compute_quadratic)"
         )
         self.a = a
         self.b = b
@@ -215,9 +215,10 @@ def get_hash(modname, seed=None):
 def test_ExternalCOp_c_code_cache_version():
     """Make sure the C cache versions produced by `ExternalCOp` don't depend on `hash` seeding."""
 
-    with tempfile.NamedTemporaryFile(dir=".", suffix=".py") as tmp:
-        tmp.write(externalcop_test_code.encode())
-        tmp.seek(0)
+    tmp = Path() / ("".join(np.random.choice(list(string.ascii_letters), 8)) + ".py")
+    tmp.write_bytes(externalcop_test_code.encode())
+
+    try:
         modname = tmp.name
         out_1, err1, returncode1 = get_hash(modname, seed=428)
         out_2, err2, returncode2 = get_hash(modname, seed=3849)
@@ -225,9 +226,11 @@ def test_ExternalCOp_c_code_cache_version():
         assert returncode2 == 0
         assert err1 == err2
 
-        hash_1, msg, _ = out_1.decode().split("\n")
+        hash_1, msg, _ = out_1.decode().split(os.linesep)
         assert msg == "__success__"
-        hash_2, msg, _ = out_2.decode().split("\n")
+        hash_2, msg, _ = out_2.decode().split(os.linesep)
         assert msg == "__success__"
 
         assert hash_1 == hash_2
+    finally:
+        tmp.unlink()

@@ -11,13 +11,13 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
+from pytensor.link.numba.dispatch.linalg.decomposition.lu_factor import _getrf
+from pytensor.link.numba.dispatch.linalg.solve.lu_solve import _getrs
 from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 from pytensor.link.numba.dispatch.linalg.solve.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
     _check_scipy_linalg_matrix,
-    _copy_to_fortran_order_even_if_1d,
     _solve_check,
-    _trans_char_to_int,
 )
 
 
@@ -68,116 +68,6 @@ def xgecon_impl(
         )
 
         return RCOND, int_ptr_to_val(INFO)
-
-    return impl
-
-
-def _getrf(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray, int]:
-    """
-    Placeholder for LU factorization; used by linalg.solve.
-
-    # TODO: Implement an LU_factor Op, then dispatch to this function in numba mode.
-    """
-    return  # type: ignore
-
-
-@overload(_getrf)
-def getrf_impl(
-    A: np.ndarray, overwrite_a: bool = False
-) -> Callable[[np.ndarray, bool], tuple[np.ndarray, np.ndarray, int]]:
-    ensure_lapack()
-    _check_scipy_linalg_matrix(A, "getrf")
-    dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
-    numba_getrf = _LAPACK().numba_xgetrf(dtype)
-
-    def impl(
-        A: np.ndarray, overwrite_a: bool = False
-    ) -> tuple[np.ndarray, np.ndarray, int]:
-        _M, _N = np.int32(A.shape[-2:])  # type: ignore
-
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
-
-        M = val_to_int_ptr(_M)  # type: ignore
-        N = val_to_int_ptr(_N)  # type: ignore
-        LDA = val_to_int_ptr(_M)  # type: ignore
-        IPIV = np.empty(_N, dtype=np.int32)  # type: ignore
-        INFO = val_to_int_ptr(0)
-
-        numba_getrf(M, N, A_copy.view(w_type).ctypes, LDA, IPIV.ctypes, INFO)
-
-        return A_copy, IPIV, int_ptr_to_val(INFO)
-
-    return impl
-
-
-def _getrs(
-    LU: np.ndarray, B: np.ndarray, IPIV: np.ndarray, trans: int, overwrite_b: bool
-) -> tuple[np.ndarray, int]:
-    """
-    Placeholder for solving a linear system with a matrix that has been LU-factored; used by linalg.solve.
-
-    # TODO: Implement an LU_solve Op, then dispatch to this function in numba mode.
-    """
-    return  # type: ignore
-
-
-@overload(_getrs)
-def getrs_impl(
-    LU: np.ndarray, B: np.ndarray, IPIV: np.ndarray, trans: int, overwrite_b: bool
-) -> Callable[[np.ndarray, np.ndarray, np.ndarray, int, bool], tuple[np.ndarray, int]]:
-    ensure_lapack()
-    _check_scipy_linalg_matrix(LU, "getrs")
-    _check_scipy_linalg_matrix(B, "getrs")
-    dtype = LU.dtype
-    w_type = _get_underlying_float(dtype)
-    numba_getrs = _LAPACK().numba_xgetrs(dtype)
-
-    def impl(
-        LU: np.ndarray, B: np.ndarray, IPIV: np.ndarray, trans: int, overwrite_b: bool
-    ) -> tuple[np.ndarray, int]:
-        _N = np.int32(LU.shape[-1])
-        _solve_check_input_shapes(LU, B)
-
-        B_is_1d = B.ndim == 1
-
-        if overwrite_b and B.flags.f_contiguous:
-            B_copy = B
-        else:
-            B_copy = _copy_to_fortran_order_even_if_1d(B)
-
-        if B_is_1d:
-            B_copy = np.expand_dims(B_copy, -1)
-
-        NRHS = 1 if B_is_1d else int(B_copy.shape[-1])
-
-        TRANS = val_to_int_ptr(_trans_char_to_int(trans))
-        N = val_to_int_ptr(_N)
-        NRHS = val_to_int_ptr(NRHS)
-        LDA = val_to_int_ptr(_N)
-        LDB = val_to_int_ptr(_N)
-        IPIV = _copy_to_fortran_order(IPIV)
-        INFO = val_to_int_ptr(0)
-
-        numba_getrs(
-            TRANS,
-            N,
-            NRHS,
-            LU.view(w_type).ctypes,
-            LDA,
-            IPIV.ctypes,
-            B_copy.view(w_type).ctypes,
-            LDB,
-            INFO,
-        )
-
-        if B_is_1d:
-            B_copy = B_copy[..., 0]
-
-        return B_copy, int_ptr_to_val(INFO)
 
     return impl
 

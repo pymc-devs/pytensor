@@ -473,24 +473,6 @@ def cumprod(x, axis=None):
     return CumOp(axis=axis, mode="mul")(x)
 
 
-class CumsumOp(Op):
-    __props__ = ("axis",)
-
-    def __new__(typ, *args, **kwargs):
-        obj = object.__new__(CumOp, *args, **kwargs)
-        obj.mode = "add"
-        return obj
-
-
-class CumprodOp(Op):
-    __props__ = ("axis",)
-
-    def __new__(typ, *args, **kwargs):
-        obj = object.__new__(CumOp, *args, **kwargs)
-        obj.mode = "mul"
-        return obj
-
-
 def diff(x, n=1, axis=-1):
     """Calculate the `n`-th order discrete difference along the given `axis`.
 

@@ -39,7 +39,7 @@ class COp(Op, CLinkerOp):
         self,
         node: Apply,
         storage_map: StorageMapType,
-        compute_map: ComputeMapType,
+        compute_map: ComputeMapType | None,
         no_recycling: Collection[Variable],
     ) -> CThunkWrapperType:
         """Create a thunk for a C implementation.
@@ -86,11 +86,17 @@ class COp(Op, CLinkerOp):
         )
         thunk, node_input_filters, node_output_filters = outputs
 
-        @is_cthunk_wrapper_type
-        def rval():
-            thunk()
-            for o in node.outputs:
-                compute_map[o][0] = True
+        if compute_map is None:
+            rval = is_cthunk_wrapper_type(thunk)
+
+        else:
+            cm_entries = [compute_map[o] for o in node.outputs]
+
+            @is_cthunk_wrapper_type
+            def rval(thunk=thunk, cm_entries=cm_entries):
+                thunk()
+                for entry in cm_entries:
+                    entry[0] = True
 
         rval.thunk = thunk
         rval.cthunk = thunk.cthunk

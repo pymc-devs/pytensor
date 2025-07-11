@@ -102,6 +102,15 @@ def numba_core_BernoulliRV(op, node):
     return random
 
 
+@numba_core_rv_funcify.register(ptr.StudentTRV)
+def numba_core_StudentTRV(op, node):
+    @numba_basic.numba_njit
+    def random_fn(rng, df, loc, scale):
+        return loc + scale * rng.standard_t(df)
+
+    return random_fn
+
+
 @numba_core_rv_funcify.register(ptr.HalfNormalRV)
 def numba_core_HalfNormalRV(op, node):
     @numba_basic.numba_njit

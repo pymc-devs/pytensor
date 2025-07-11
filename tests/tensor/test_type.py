@@ -10,6 +10,10 @@ from pytensor.tensor.shape import SpecifyShape
 from pytensor.tensor.type import (
     TensorType,
     col,
+    dmatrix,
+    drow,
+    fmatrix,
+    frow,
     matrix,
     row,
     scalar,
@@ -477,3 +481,21 @@ def test_row_matrix_creator_helpers(helper):
         match = "The second dimension of a `col` must have shape 1, got 5"
     with pytest.raises(ValueError, match=match):
         helper(shape=(2, 5))
+
+
+def test_shape_of_predefined_dtype_tensor():
+    # Valid: None dimensions can be specialized
+    assert fmatrix(shape=(1, None)).type == frow
+    assert drow(shape=(1, 5)).type == dmatrix(shape=(1, 5)).type
+
+    # Invalid: Number of dimensions must match
+    with pytest.raises(ValueError):
+        fmatrix(shape=(None, None, None))
+
+    # Invalid: Fixed shapes must match
+    with pytest.raises(ValueError):
+        fmatrix(shape=(3, 5)).type(shape=(4, 5))
+
+    # Invalid: Known shapes can't be lost
+    with pytest.raises(ValueError):
+        drow(shape=(None, None))

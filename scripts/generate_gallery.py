@@ -58,6 +58,7 @@ folder_title_map = {
     "introduction": "Introduction",
     "rewrites": "Graph Rewriting",
     "scan": "Looping in Pytensor",
+    "optimize": "Optimization in Pytensor",
 }
 
 

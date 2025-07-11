@@ -113,23 +113,22 @@ from pytensor.tensor.type import DenseTensorType, tensor
 _logger = logging.getLogger("pytensor.tensor.blas")
 
 
-# If check_init_y() == True we need to initialize y when beta == 0.
-def check_init_y():
-    # TODO: What is going on here?
+def must_initialize_y_gemv():
+    # Check whether Scipy GEMV could output nan if y in not initialized
     from scipy.linalg.blas import get_blas_funcs
 
-    if check_init_y._result is None:
-        y = float("NaN") * np.ones((2,))
+    if must_initialize_y_gemv._result is None:
+        y = np.full((2,), np.nan)
         x = np.ones((2,))
         A = np.ones((2, 2))
         gemv = get_blas_funcs("gemv", dtype=y.dtype)
         gemv(1.0, A.T, x, 0.0, y, overwrite_y=True, trans=True)
-        check_init_y._result = np.isnan(y).any()
+        must_initialize_y_gemv._result = np.isnan(y).any()
 
-    return check_init_y._result
+    return must_initialize_y_gemv._result
 
 
-check_init_y._result = None  # type: ignore
+must_initialize_y_gemv._result = None  # type: ignore
 
 
 class Gemv(Op):
@@ -197,7 +196,13 @@ class Gemv(Op):
                     f"(beta * y + alpha * dot(A, x)). y: {y.shape}, A: {A.shape}, x: {x.shape}"
                 )
 
-            if beta == 0 and check_init_y():
+            if beta == 0 and must_initialize_y_gemv():
+                # Most BLAS implementations of GEMV ignore y=nan when beta=0
+                # PyTensor considers that the correct behavior,
+                # and even exploits it to avoid copying or initializing outputs.
+                # By deciding to exploit this, however, it becomes our responsibility
+                # to ensure the behavior even in the rare cases BLAS deviates,
+                # or users will get errors, even for graphs that had no nan to begin with.
                 y.fill(0)
 
             # Here I suppose that A is in c order. If we don't make it
@@ -460,13 +465,6 @@ class GemmRelated(COp):
         #ifndef MOD
         #define MOD %
         #endif
-        static double time_time() // a time function like time.perf_counter()
-        {
-            struct timeval tv;
-            gettimeofday(&tv, 0);
-            return (double) tv.tv_sec + (double) tv.tv_usec / 1000000.0;
-        }
-
         void compute_strides(npy_intp *shape, int N_shape, int type_size, npy_intp *res) {
             int s;
             res[N_shape - 1] = type_size;
@@ -479,9 +477,7 @@ class GemmRelated(COp):
         return blas_header_text() + mod_str
 
     def c_headers(self, **kwargs):
-        # std.cout doesn't require the '%' symbol to print stuff...
-        # so it works much better with python's string-substitution stuff.
-        return ["<iostream>", "<time.h>", "<sys/time.h>"]
+        return []
 
     def c_libraries(self, **kwargs):
         return ldflags()
@@ -690,8 +686,6 @@ class GemmRelated(COp):
                 char N = 'N';
                 char T = 'T';
                 int Nz0 = Nz[0], Nz1 = Nz[1], Nx1 = Nx[1];
-                //std::cerr << (unit/256) MOD 16 << (unit / 16) MOD 16 << unit MOD 16<< '\\n';
-                //double t0 = time_time();
                 switch(unit)
                 {
                     case 0x000: sgemm_(&N, &N, &Nz1, &Nz0, &Nx1, &a, y, &sy_0, x, &sx_0, &b, z, &sz_0); break;
@@ -704,7 +698,6 @@ class GemmRelated(COp):
                     case 0x111: sgemm_(&N, &N, &Nz0, &Nz1, &Nx1, &a, x, &sx_1, y, &sy_1, &b, z, &sz_1); break;
                     default: PyErr_SetString(PyExc_ValueError, "some matrix has no unit stride"); %(fail)s;
                 };
-                //fprintf(stderr, "Calling sgemm %%i %%i %%i %%i took %%f\\n", unit, Nz1, Nz0, Nx1, time_time() - t0);
         """
 
     case_double = """
@@ -723,14 +716,6 @@ class GemmRelated(COp):
                 char N = 'N';
                 char T = 'T';
                 int Nz0 = Nz[0], Nz1 = Nz[1], Nx1 = Nx[1];
-                //std::cerr << (unit/256) MOD 16 << (unit / 16) MOD 16 << unit MOD 16<< '\\n';
-                //double t0 = time_time();
-                //fprintf(stderr, "unit=%%x N= %%i %%i %%i S = %%i %%i %%i %%i %%i %%i\\n", unit,
-                //Nz1, Nz0, Nx1,
-                //sy_0, sy_1,
-                //sx_0, sx_1,
-                //sz_0, sz_1
-                //);
                 switch(unit)
                 {
                     case 0x000: dgemm_(&N, &N, &Nz1, &Nz0, &Nx1, &a, y,
@@ -753,8 +738,6 @@ class GemmRelated(COp):
                                              "some matrix has no unit stride");
                              %(fail)s;
                 };
-                //fprintf(stderr, "Calling dgemm %%i %%i %%i %%i took %%f\\n",
-                //        unit, Nz1, Nz0, Nx1, time_time()- t0);
         """
 
     end_switch_typenum = """
@@ -1735,7 +1718,7 @@ def batched_dot(a, b):
     """
     warnings.warn(
         "batched_dot is deprecated. "
-        "Use `dot` in conjution with `tensor.vectorize` or `graph.replace.vectorize_graph`",
+        "Use `dot` in conjunction with `tensor.vectorize` or `graph.replace.vectorize_graph`",
         FutureWarning,
     )
     a, b = as_tensor_variable(a), as_tensor_variable(b)

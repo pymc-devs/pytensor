@@ -7,7 +7,7 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.blas import Ger
-from pytensor.tensor.blas_c import CGemv, CGer, check_force_gemv_init
+from pytensor.tensor.blas_c import CGemv, CGer, must_initialize_y_gemv
 from pytensor.tensor.blas_scipy import ScipyGer
 from pytensor.tensor.type import dmatrix, dvector, matrix, scalar, tensor, vector
 from tests import unittest_tools
@@ -130,31 +130,35 @@ class TestCGemv(OptimizationTestMixin):
         self.dtype = dtype
         self.mode = pytensor.compile.get_default_mode().including("fast_run")
         # matrix
-        self.A = tensor(dtype=dtype, shape=(None, None))
+        self.A = tensor("A", dtype=dtype, shape=(None, None))
         self.Aval = np.ones((2, 3), dtype=dtype)
 
         # vector
-        self.x = tensor(dtype=dtype, shape=(None,))
-        self.y = tensor(dtype=dtype, shape=(None,))
+        self.x = tensor("x", dtype=dtype, shape=(None,))
+        self.y = tensor("y", dtype=dtype, shape=(None,))
         self.xval = np.asarray([1, 2], dtype=dtype)
         self.yval = np.asarray([1.5, 2.7, 3.9], dtype=dtype)
 
         # scalar
-        self.a = tensor(dtype=dtype, shape=())
+        self.a = tensor("a", dtype=dtype, shape=())
 
-    def test_nan_beta_0(self):
+    @pytest.mark.parametrize("inplace", [True, False])
+    def test_nan_beta_0(self, inplace):
         mode = self.mode.including()
         mode.check_isfinite = False
         f = pytensor.function(
-            [self.A, self.x, self.y, self.a],
+            [self.A, self.x, pytensor.In(self.y, mutable=inplace), self.a],
             self.a * self.y + pt.dot(self.A, self.x),
             mode=mode,
         )
-        Aval = np.ones((3, 1), dtype=self.dtype)
-        xval = np.ones((1,), dtype=self.dtype)
-        yval = float("NaN") * np.ones((3,), dtype=self.dtype)
-        zval = f(Aval, xval, yval, 0)
-        assert not np.isnan(zval).any()
+        [node] = f.maker.fgraph.apply_nodes
+        assert isinstance(node.op, CGemv) and node.op.inplace == inplace
+        for rows in (3, 1):
+            Aval = np.ones((rows, 1), dtype=self.dtype)
+            xval = np.ones((1,), dtype=self.dtype)
+            yval = np.full((rows,), np.nan, dtype=self.dtype)
+            zval = f(Aval, xval, yval, 0)
+            assert not np.isnan(zval).any()
 
     def test_optimizations_vm(self):
         skip_if_blas_ldflags_empty()
@@ -191,8 +195,10 @@ class TestCGemv(OptimizationTestMixin):
             np.dot(self.Aval[::-1, ::-1], self.yval),
         )
 
-    def test_force_gemv_init(self):
-        if check_force_gemv_init():
+    def test_must_initialize_y_gemv(self):
+        if must_initialize_y_gemv():
+            # FIME: This warn should be emitted by the function if we find it relevant
+            # Not in a test that doesn't care about the outcome either way
             warn(
                 "WARNING: The current BLAS requires PyTensor to initialize"
                 " memory for some GEMV calls which will result in a minor"
@@ -243,6 +249,7 @@ class TestCGemv(OptimizationTestMixin):
         self.t_gemv1((0, 2))
         self.t_gemv1((3, 1))
         self.t_gemv1((3, 0))
+        self.t_gemv1((1, 1))
         self.t_gemv1((1, 0))
         self.t_gemv1((0, 1))
         self.t_gemv1((0, 0))
@@ -411,3 +418,71 @@ class TestSdotNoFlags(TestCGemvNoFlags):
 
 class TestBlasStridesC(TestBlasStrides):
     mode = mode_blas_opt
+
+
+def test_gemv_vector_dot_perf(benchmark):
+    n = 400_000
+    a = pt.vector("A", shape=(n,))
+    b = pt.vector("x", shape=(n,))
+
+    out = CGemv(inplace=True)(
+        pt.empty((1,)),
+        1.0,
+        a[None],
+        b,
+        0.0,
+    )
+    fn = pytensor.function([a, b], out, accept_inplace=True, trust_input=True)
+
+    rng = np.random.default_rng(430)
+    test_a = rng.normal(size=n)
+    test_b = rng.normal(size=n)
+
+    np.testing.assert_allclose(
+        fn(test_a, test_b),
+        np.dot(test_a, test_b),
+    )
+
+    benchmark(fn, test_a, test_b)
+
+
+@pytest.mark.parametrize(
+    "neg_stride1", (True, False), ids=["neg_stride1", "pos_stride1"]
+)
+@pytest.mark.parametrize(
+    "neg_stride0", (True, False), ids=["neg_stride0", "pos_stride0"]
+)
+@pytest.mark.parametrize("F_layout", (True, False), ids=["F_layout", "C_layout"])
+def test_gemv_negative_strides_perf(neg_stride0, neg_stride1, F_layout, benchmark):
+    A = pt.matrix("A", shape=(512, 512))
+    x = pt.vector("x", shape=(A.type.shape[-1],))
+    y = pt.vector("y", shape=(A.type.shape[0],))
+
+    out = CGemv(inplace=False)(
+        y,
+        1.0,
+        A,
+        x,
+        1.0,
+    )
+    fn = pytensor.function([A, x, y], out, trust_input=True)
+
+    rng = np.random.default_rng(430)
+    test_A = rng.normal(size=A.type.shape)
+    test_x = rng.normal(size=x.type.shape)
+    test_y = rng.normal(size=y.type.shape)
+
+    if F_layout:
+        test_A = test_A.T
+    if neg_stride0:
+        test_A = test_A[::-1]
+    if neg_stride1:
+        test_A = test_A[:, ::-1]
+    assert (test_A.strides[0] < 0) == neg_stride0
+    assert (test_A.strides[1] < 0) == neg_stride1
+
+    # Check result is correct by using a copy of A with positive strides
+    res = fn(test_A, test_x, test_y)
+    np.testing.assert_allclose(res, fn(test_A.copy(), test_x, test_y))
+
+    benchmark(fn, test_A, test_x, test_y)

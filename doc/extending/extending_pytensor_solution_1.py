@@ -118,7 +118,7 @@ class TestSumDiffOp(utt.InferShapeTester):
         self.op_class = SumDiffOp
 
     def test_perform(self):
-        rng = np.random.RandomState(43)
+        rng = np.random.default_rng(43)
         x = matrix()
         y = matrix()
         f = pytensor.function([x, y], self.op_class()(x, y))
@@ -128,7 +128,7 @@ class TestSumDiffOp(utt.InferShapeTester):
         assert np.allclose([x_val + y_val, x_val - y_val], out)
 
     def test_gradient(self):
-        rng = np.random.RandomState(43)
+        rng = np.random.default_rng(43)
 
         def output_0(x, y):
             return self.op_class()(x, y)[0]
@@ -150,7 +150,7 @@ class TestSumDiffOp(utt.InferShapeTester):
         )
 
     def test_infer_shape(self):
-        rng = np.random.RandomState(43)
+        rng = np.random.default_rng(43)
 
         x = dmatrix()
         y = dmatrix()

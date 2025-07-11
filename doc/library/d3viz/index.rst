@@ -58,7 +58,7 @@ hidden layer and a softmax output layer.
     noutputs = 10
     nhiddens = 50
 
-    rng = np.random.RandomState(0)
+    rng = np.random.default_rng(0)
     x = pt.dmatrix('x')
     wh = pytensor.shared(rng.normal(0, 1, (nfeatures, nhiddens)), borrow=True)
     bh = pytensor.shared(np.zeros(nhiddens), borrow=True)

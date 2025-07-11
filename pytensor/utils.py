@@ -123,7 +123,7 @@ def maybe_add_to_os_environ_pathlist(var: str, newpath: Path | str) -> None:
         pass
 
 
-def subprocess_Popen(command: str | list[str], **params):
+def subprocess_Popen(command: list[str], **params) -> subprocess.Popen:
     """
     Utility function to work around windows behavior that open windows.
 
@@ -137,37 +137,17 @@ def subprocess_Popen(command: str | list[str], **params):
         except AttributeError:
             startupinfo.dwFlags |= subprocess._subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
 
-        # Anaconda for Windows does not always provide .exe files
-        # in the PATH, they also have .bat files that call the corresponding
-        # executable. For instance, "g++.bat" is in the PATH, not "g++.exe"
-        # Unless "shell=True", "g++.bat" is not executed when trying to
-        # execute "g++" without extensions.
-        # (Executing "g++.bat" explicitly would also work.)
-        params["shell"] = True
         # "If shell is True, it is recommended to pass args as a string rather than as a sequence." (cite taken from https://docs.python.org/2/library/subprocess.html#frequently-used-arguments)
         # In case when command arguments have spaces, passing a command as a list will result in incorrect arguments break down, and consequently
         # in "The filename, directory name, or volume label syntax is incorrect" error message.
         # Passing the command as a single string solves this problem.
         if isinstance(command, list):
-            command = " ".join(command)
+            command = " ".join(command)  # type: ignore[assignment]
 
-    # Using the dummy file descriptors below is a workaround for a
-    # crash experienced in an unusual Python 2.4.4 Windows environment
-    # with the default None values.
-    stdin = None
-    if "stdin" not in params:
-        stdin = Path(os.devnull).open()
-        params["stdin"] = stdin.fileno()
-
-    try:
-        proc = subprocess.Popen(command, startupinfo=startupinfo, **params)
-    finally:
-        if stdin is not None:
-            stdin.close()
-    return proc
+    return subprocess.Popen(command, startupinfo=startupinfo, **params)
 
 
-def call_subprocess_Popen(command, **params):
+def call_subprocess_Popen(command: list[str], **params) -> int:
     """
     Calls subprocess_Popen and discards the output, returning only the
     exit code.
@@ -185,13 +165,17 @@ def call_subprocess_Popen(command, **params):
     return returncode
 
 
-def output_subprocess_Popen(command, **params):
+def output_subprocess_Popen(command: list[str], **params) -> tuple[bytes, bytes, int]:
     """
     Calls subprocess_Popen, returning the output, error and exit code
     in a tuple.
     """
     if "stdout" in params or "stderr" in params:
         raise TypeError("don't use stderr or stdout with output_subprocess_Popen")
+    if "encoding" in params:
+        raise TypeError(
+            "adjust the output_subprocess_Popen type annotation to support str"
+        )
     params["stdout"] = subprocess.PIPE
     params["stderr"] = subprocess.PIPE
     p = subprocess_Popen(command, **params)

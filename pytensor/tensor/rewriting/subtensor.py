@@ -1,6 +1,5 @@
 import itertools
 import sys
-from collections.abc import Iterable
 
 import numpy as np
 
@@ -20,14 +19,15 @@ from pytensor.scalar import Add, ScalarConstant, ScalarType
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
+    ExtractDiag,
     Join,
-    MakeVector,
     ScalarFromTensor,
     TensorFromScalar,
     alloc,
-    as_tensor,
     cast,
     concatenate,
+    expand_dims,
+    full,
     get_scalar_constant_value,
     get_underlying_scalar_constant_value,
     register_infer_shape,
@@ -38,11 +38,8 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import (
-    Dot,
     add,
     and_,
-    ceil_intdiv,
-    dot,
     eq,
     ge,
     gt,
@@ -60,11 +57,8 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.shape import (
-    Shape,
-    SpecifyShape,
     shape_padleft,
     shape_tuple,
-    specify_shape,
 )
 from pytensor.tensor.sharedvar import TensorSharedVariable
 from pytensor.tensor.subtensor import (
@@ -78,7 +72,6 @@ from pytensor.tensor.subtensor import (
     advanced_subtensor,
     advanced_subtensor1,
     as_index_constant,
-    as_index_literal,
     get_canonical_form_slice,
     get_constant_idx,
     get_idx_list,
@@ -87,7 +80,7 @@ from pytensor.tensor.subtensor import (
     indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType, integer_dtypes
-from pytensor.tensor.type_other import NoneTypeT, SliceConstant, SliceType
+from pytensor.tensor.type_other import NoneTypeT, SliceType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
@@ -167,19 +160,21 @@ def transform_take(a, indices, axis):
 
 def is_full_slice(x):
     """Determine if `x` is a ``slice(None)`` or a symbolic equivalent."""
-    if (
-        (isinstance(x, slice) and x == slice(None))
-        or (isinstance(x, SliceConstant) and x.value == slice(None))
-        or (
-            not isinstance(x, SliceConstant)
-            and isinstance(getattr(x, "type", None), SliceType)
-            and x.owner is not None
-            and all(
-                isinstance(getattr(i, "type", None), NoneTypeT) for i in x.owner.inputs
-            )
-        )
-    ):
-        return True
+    if isinstance(x, slice):
+        return x == slice(None)
+
+    if isinstance(x, Variable) and isinstance(x.type, SliceType):
+        if x.owner is None:
+            if isinstance(x, Constant):
+                return x.data == slice(None)
+            else:
+                # Root slice variable
+                return False
+
+        # Symbolic MakeSlice
+        # Ignores start = 0, step = 1 cases
+        return all(isinstance(i.type, NoneTypeT) for i in x.owner.inputs)
+
     return False
 
 
@@ -277,64 +272,6 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     return [new_res]
 
 
-@register_canonicalize
-@register_stabilize
-@register_specialize
-@node_rewriter([Subtensor])
-def local_subtensor_of_dot(fgraph, node):
-    """Rewrite ``at.dot(A, B)[idxs]`` into ``at.dot(A[idxs_a], B[idxs_b])``.
-    ``idxs_a`` is the first ``A.ndim-1`` entries of ``idxs``, and ``idxs_b`` is
-    the remaining entries of ``idxs`` (if any), modified to skip the
-    second-to-last dimension of ``B`` (because dot sums over this dimension).
-    """
-    if not isinstance(node.op, Subtensor):
-        return
-    if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Dot)):
-        return
-    # If there is other node that use the outputs of the dot
-    # We don't want to compute twice the sub part.
-    if len(fgraph.clients[node.inputs[0]]) > 1:
-        return
-
-    a = node.inputs[0].owner.inputs[0]
-    b = node.inputs[0].owner.inputs[1]
-
-    idx_list = get_idx_list(node.inputs, node.op.idx_list)
-
-    num_a_indices = min(a.ndim - 1, len(idx_list))
-    a_indices = idx_list[:num_a_indices]
-    b_indices = idx_list[num_a_indices:]
-
-    # This is necessary because np.dot sums the last index of a with the second to last of b
-    # so we want to skip the second-to-last index into b.
-    # This wasn't necessary for a, because we just omitted the last index.
-    # We skip this if b.ndim = 1, since then we just want b_sub = b, not b_sub = b[:]
-    # (dot also handles b.ndim < 2 as a special case)
-    if b.ndim > 1 and len(b_indices) >= b.ndim - 1:
-        b_indices = (
-            b_indices[: b.ndim - 2]
-            + (slice(None, None, None),)
-            + b_indices[b.ndim - 2 :]
-        )
-
-    a_sub = a.__getitem__(tuple(a_indices))
-    b_sub = b.__getitem__(tuple(b_indices)) if b_indices else b
-
-    # Copy over previous output stacktrace to a_sub and b_sub,
-    # because an error in the subtensor operation (e.g. an index error)
-    # on either a or b must correspond to an error in the
-    # subtensor operation on their dot product.
-    copy_stack_trace(node.outputs[0], [a_sub, b_sub])
-
-    # Copy over previous output stacktrace and previous dot product stacktrace,
-    # because an error here may correspond to an either in either the original
-    # dot product, or in the dot product after the subtensor operation.
-    r = dot(a_sub, b_sub)
-    copy_stack_trace([node.outputs[0], node.inputs[0]], r)
-
-    return [r]
-
-
 @register_infer_shape
 @register_useless
 @register_canonicalize
@@ -418,75 +355,6 @@ def local_useless_slice(fgraph, node):
         # Copy over previous output stacktrace
         copy_stack_trace(node.outputs, out)
         return [out]
-
-
-# fast_compile to allow opt subtensor(cast{float32}(make_vector))
-@register_canonicalize("fast_compile")
-@node_rewriter([Subtensor])
-def local_subtensor_lift(fgraph, node):
-    """
-    unary(x)[idx] -> unary(x[idx])#any broadcast pattern.
-
-    Handles the following unary ops:
-    elemwise(x,...)[idx] -> elemwise(x[idx],...)
-      when x,... are broadcasted scalar or not broadcasted at all
-
-    """
-    if isinstance(node.op, Subtensor):
-        u = node.inputs[0]
-        if u.owner is None or len(fgraph.clients[u]) > 1:
-            return False
-
-        if isinstance(u.owner.op, Elemwise) and len(u.owner.inputs) == 1:
-            idx = node.inputs[1:]
-            x_idx = node.op(u.owner.inputs[0], *idx)
-            # Copy over previous output stacktrace
-            copy_stack_trace(node.outputs, x_idx)
-            ret = u.owner.op(x_idx)
-            # Copy over previous output stacktrace
-            # and stacktrace from previous unary operation
-            copy_stack_trace([node.outputs[0], node.inputs[0]], ret)
-            return [ret]
-
-        if isinstance(u.owner.op, Elemwise):
-            new_inputs = []
-            if all(sum(i.type.broadcastable) == 0 for i in u.owner.inputs):
-                # There is no broadcastable in the inputs
-                idx = node.inputs[1:]
-                new_inputs = [node.op(i, *idx) for i in u.owner.inputs]
-                # Copy over previous output stacktrace
-                copy_stack_trace(node.outputs[0], new_inputs)
-
-                ret = u.owner.op(*new_inputs)
-                # Copy over previous output stacktrace
-                # and stacktrace from previous unary operation
-                copy_stack_trace([node.outputs[0], node.inputs[0]], ret)
-                return [ret]
-            elif all(sum(i.type.broadcastable) in [i.ndim, 0] for i in u.owner.inputs):
-                # There is no broadcastable in the inputs or it is scalar
-                idx = node.inputs[1:]
-                new_inputs = []
-                for i in u.owner.inputs:
-                    if sum(i.type.broadcastable) == 0:
-                        new_inputs.append(node.op(i, *idx))
-                    else:
-                        # If the subtensor remove some dims, we must
-                        # lower the number of dimensions of this scalar.
-                        if node.outputs[0].ndim == i.ndim:
-                            new_inputs.append(i)
-                        else:
-                            new_inputs.append(
-                                i.dimshuffle(["x"] * node.outputs[0].ndim)
-                            )
-
-                # Copy over previous output stacktrace
-                copy_stack_trace(node.outputs[0], new_inputs)
-
-                ret = u.owner.op(*new_inputs)
-                # Copy over previous output stacktrace
-                # and stacktrace from previous unary operation
-                copy_stack_trace([node.outputs[0], node.inputs[0]], ret)
-                return [ret]
 
 
 @register_canonicalize
@@ -619,76 +487,6 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
 
 
-@register_infer_shape
-@register_useless
-@register_canonicalize
-@register_specialize
-@node_rewriter([Subtensor])
-def local_subtensor_of_alloc(fgraph, node):
-    """
-
-    alloc(val)[x:y] -> alloc(val[...])
-    alloc(val)[x:y] -> alloc(val)
-    This can be seen as a lift, but it also reduce the number of computation/memory.
-
-    """
-    if not isinstance(node.op, Subtensor):
-        return False
-    u = node.inputs[0]
-    if u.owner is None:
-        return False
-    if not isinstance(u.owner.op, Alloc):
-        return False
-    slices = get_idx_list(node.inputs, node.op.idx_list)
-    val = u.owner.inputs[0]
-    dims = u.owner.inputs[1:]
-    assert len(slices) <= len(dims)
-
-    # Number of dimensions added to val
-    n_added_dims = u.ndim - val.ndim
-    # Dimensions of the returned alloc
-    nw_dims = []
-    # Slices to take from val
-    val_slices = []
-
-    for i, (sl, dim) in enumerate(zip(slices, dims, strict=False)):
-        # If val was not copied over that dim,
-        # we need to take the appropriate subtensor on it.
-        if i >= n_added_dims:
-            # We check that the corresponding val dimensions was
-            # not a broadcasted dimensions.
-            if (
-                val.type.ndim > (i - n_added_dims)
-                and val.type.broadcastable[i - n_added_dims]
-            ):
-                val_slices.append(slice(None))
-            else:
-                val_slices.append(sl)
-
-        csl, _ = get_canonical_form_slice(sl, dim)
-        if type(csl) is not slice:
-            # That dimension is removed.
-            pass
-        else:
-            nw_dim = csl.stop - csl.start
-
-            if csl.step != 1:
-                # Do not add the ceil_intdiv() graphs in the graphs
-                # when this is not needed as it prevent detecting the
-                # correct broadcast pattern.
-                nw_dim = ceil_intdiv(nw_dim, csl.step)
-            nw_dims += [nw_dim]
-
-    nw_val = val[tuple(val_slices)]
-    nw_dims += dims[len(slices) :]
-    if nw_val.ndim > len(nw_dims):
-        return False
-    rval = alloc(nw_val, *nw_dims)
-    if not isinstance(rval, list | tuple):
-        rval = [rval]
-    return rval
-
-
 @register_specialize
 @register_canonicalize
 @node_rewriter([Subtensor])
@@ -726,91 +524,6 @@ def local_subtensor_inc_subtensor(fgraph, node):
                 return [alloc(y, *x_subtensor.shape)]
         else:
             return
-
-
-@register_infer_shape
-@register_specialize
-@register_canonicalize("fast_compile")
-@register_useless
-@node_rewriter([Subtensor, AdvancedSubtensor1])
-def local_subtensor_make_vector(fgraph, node):
-    """Perform ``*Subtensor*`` operations on ``MakeVector`` outputs when the indices are constant.
-
-    Replace all ``Subtensor`` and ``MakeVector`` cases like:
-        [a,b,c][0] -> a
-        [a,b,c][0:2] -> [a,b]
-
-    Replace all ``AdvancedSubtensor1`` and ``MakeVector`` cases like:
-        [a,b,c][[0,2]] -> [a,c]
-
-    We can do this for constant indexes.
-
-    .. note:
-
-        This optimization implicitly relies on shape optimizations.
-
-    TODO: This only applies to a single indexed dimension; we should have
-    something more general for constant ``*Subtensor*`` graphs (or perhaps
-    include this kind of work in the constant folding).
-    """
-
-    if not isinstance(node.op, Subtensor | AdvancedSubtensor1):
-        return False
-
-    x = node.inputs[0]
-
-    if not (x.owner and isinstance(x.owner.op, MakeVector)):
-        return False
-
-    make_vector_op = x.owner.op
-
-    if isinstance(node.op, Subtensor):
-        idxs = node.op.idx_list
-
-        # Subtensor has no indexes, return make_vector
-        if not idxs:
-            return [x]
-
-        (idx,) = idxs
-
-        if isinstance(idx, ScalarType | TensorType):
-            old_idx, idx = idx, node.inputs[1]
-            assert idx.type.is_super(old_idx)
-    elif isinstance(node.op, AdvancedSubtensor1):
-        idx = node.inputs[1]
-
-    if isinstance(idx, int | np.integer):
-        return [x.owner.inputs[idx]]
-    elif isinstance(idx, Variable):
-        if idx.ndim == 0:
-            try:
-                v = get_underlying_scalar_constant_value(
-                    idx, only_process_constants=True
-                )
-                try:
-                    ret = [x.owner.inputs[v]]
-                except IndexError:
-                    raise NotScalarConstantError("Bad user graph!")
-                return ret
-            except NotScalarConstantError:
-                pass
-        elif idx.ndim == 1 and isinstance(idx, Constant):
-            values = list(map(int, list(idx.value)))
-            ret = make_vector_op(*[x.owner.inputs[v] for v in values])
-            copy_stack_trace(node.outputs[0], ret)
-            return [ret]
-    elif isinstance(idx, slice):
-        # The index is a slice.  If it's a constant slice, we can perform the
-        # index operation here.
-        try:
-            const_slice = get_constant_idx(
-                node.op.idx_list, node.inputs, allow_partial=False
-            )[0]
-            ret = make_vector_op(*x.owner.inputs[const_slice])
-            copy_stack_trace(node.outputs, ret)
-            return [ret]
-        except NotScalarConstantError:
-            pass
 
 
 @register_infer_shape
@@ -1295,12 +1008,26 @@ compile.optdb.register(
 
 @node_rewriter([AdvancedIncSubtensor1], inplace=True)
 def local_inplace_AdvancedIncSubtensor1(fgraph, node):
-    if isinstance(node.op, AdvancedIncSubtensor1) and not node.op.inplace:
-        new_op = node.op.clone_inplace()
-        new_node = new_op(*node.inputs)
-        copy_stack_trace(node.outputs, new_node)
-        return [new_node]
-    return False
+    if node.op.inplace:
+        return
+
+    x, y, idx = node.inputs
+    if fgraph.has_destroyers([x]):
+        # In this case we can't operate inplace, but if x is just an alloc of zeros
+        # We're better off duplicating it and then acting on it inplace.
+        if (
+            x.owner is not None
+            and isinstance(x.owner.op, Alloc)
+            and x.owner.op.value_is_scalar_zero(x.owner.inputs[0])
+        ):
+            x = x.owner.clone().outputs[0]
+        else:
+            return None  # Inplace isn't valid
+
+    new_op = node.op.clone_inplace()
+    new_node = new_op(x, y, idx)
+    copy_stack_trace(node.outputs, new_node)
+    return [new_node]
 
 
 compile.optdb.register(
@@ -1602,95 +1329,6 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
 
 
 @register_specialize
-@register_canonicalize
-@node_rewriter([Subtensor])
-def local_subtensor_shape_constant(fgraph, node):
-    r"""Simplify constant `Subtensor`\s on `Shape`\s dimensions that are known.
-
-    We want to convert graphs like
-
-        Subtensor{int64} [id A] ''
-         |Shape [id B] ''
-         | |<TensorType(float64, row)> [id C]
-         |ScalarConstant{0} [id D]
-
-    into
-
-        TensorConstant{1}
-
-    TODO: Something like `local_shape_to_shape_i` should be a general
-    canonicalization, and not a `ShapeFeature`-dependent rewrite.  If that were
-    the case, we could change this to only operate on `Shape_i`\s.
-    Currently, we're not handling them because they should only appear when
-    `ShapeFeature` is present, and it will also simplify/remove them.
-
-    """
-    if not isinstance(node.op, Subtensor):
-        return False
-
-    shape = node.inputs[0]
-
-    if not (shape.owner and isinstance(shape.owner.op, Shape)):
-        return False
-
-    shape_arg = shape.owner.inputs[0]
-
-    (idx,) = get_idx_list(node.inputs, node.op.idx_list)
-
-    try:
-        idx_val = as_index_literal(idx)
-    except NotScalarConstantError:
-        return False
-
-    assert idx_val != np.newaxis
-
-    if not isinstance(shape_arg.type, TensorType):
-        return False
-
-    shape_parts = shape_arg.type.broadcastable[idx_val]
-
-    if isinstance(shape_parts, Iterable):
-        if all(shape_parts):
-            return [as_tensor([1] * len(shape_parts), dtype=np.int64, ndim=1)]
-    elif shape_parts:
-        return [as_tensor(1, dtype=np.int64)]
-
-
-@register_canonicalize
-@node_rewriter([Subtensor])
-def local_subtensor_SpecifyShape_lift(fgraph, node):
-    """Lift ``specify_shape(x, s)[i_1, ..., i_n]`` to ``specify_shape(x[i1, ... , i_n], s[n:])``."""
-
-    if not isinstance(node.op, Subtensor):
-        return False
-
-    specify_shape_node = node.inputs[0]
-
-    if not (
-        specify_shape_node.owner
-        and isinstance(specify_shape_node.owner.op, SpecifyShape)
-    ):
-        return False
-
-    obj_arg = specify_shape_node.owner.inputs[0]
-    shape_arg = specify_shape_node.owner.inputs[1:]
-
-    indices = get_idx_list(node.inputs, node.op.idx_list)
-
-    if any(
-        isinstance(index, slice) or isinstance(getattr(index, "type", None), SliceType)
-        for index in indices
-    ):
-        return False
-
-    new_obj_arg = obj_arg[indices]
-    # No need to specify shape for scalar outputs
-    if new_obj_arg.ndim == 0:
-        return [new_obj_arg]
-    return [specify_shape(new_obj_arg, shape_arg[len(indices) :])]
-
-
-@register_specialize
 @node_rewriter([Join])
 def local_join_subtensors(fgraph, node):
     r"""Simplify contiguous :class:`Subtensor`\s inside a :class:`Join`.
@@ -1941,7 +1579,15 @@ def local_blockwise_advanced_inc_subtensor(fgraph, node):
         x = alloc(x, *batch_shape, *core_shape)
 
     new_idxs = [slice(None)] * batch_ndim + new_idxs
-    symbolic_idxs = x[tuple(new_idxs)].owner.inputs[1:]
+    x_view = x[tuple(new_idxs)]
+
+    # We need to introduce any implicit expand_dims on core dimension of y
+    y_core_ndim = y.type.ndim - batch_ndim
+    if (missing_y_core_ndim := x_view.type.ndim - batch_ndim - y_core_ndim) > 0:
+        missing_axes = tuple(range(batch_ndim, batch_ndim + missing_y_core_ndim))
+        y = expand_dims(y, missing_axes)
+
+    symbolic_idxs = x_view.owner.inputs[1:]
     new_out = op.core_op.make_node(x, y, *symbolic_idxs).outputs
     copy_stack_trace(node.outputs, new_out)
     return new_out
@@ -2149,3 +1795,96 @@ optdb["specialize"].register(
     "numba",
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([ExtractDiag])
+def extract_diag_of_diagonal_set_subtensor(fgraph, node):
+    """Undo extract diagonal from a set diagonal
+
+    This rewrites the following pattern:
+        y = write_diagonal*(x, x_diag, offset=k1)
+        z = extract_diag(y, offset=k2)
+
+    as:
+        z = diag_x, if k1 == k2
+        z = x if k1 != k2
+
+    * write_diagonal is not an atomic operation, but a sequence of Arange/SetSubtensor operations.
+
+    """
+
+    def is_cosntant_arange(var) -> bool:
+        if not (isinstance(var, TensorConstant) and var.type.ndim == 1):
+            return False
+
+        data = var.data
+        start, stop = data[0], data[-1] + 1
+        return data.size == (stop - start) and (data == np.arange(start, stop)).all()  # type: ignore
+
+    [diag_x] = node.inputs
+    if not (
+        diag_x.owner is not None
+        and isinstance(diag_x.owner.op, AdvancedIncSubtensor)
+        and diag_x.owner.op.set_instead_of_inc
+    ):
+        return None
+
+    x, y, *idxs = diag_x.owner.inputs
+
+    if not (
+        x.type.ndim >= 2
+        and None not in x.type.shape[-2:]
+        and x.type.shape[-2] == x.type.shape[-1]
+    ):
+        # TODO: for now we only support rewrite with static square shape for x
+        return None
+
+    op = node.op
+    if op.axis2 > len(idxs):
+        return None
+
+    # Check all non-axis indices are full slices
+    axis = {op.axis1, op.axis2}
+    if not all(is_full_slice(idx) for i, idx in enumerate(idxs) if i not in axis):
+        return None
+
+    # Check axis indices are arange we would expect from setting on the diagonal
+    axis1_idx = idxs[op.axis1]
+    axis2_idx = idxs[op.axis2]
+    if not (is_cosntant_arange(axis1_idx) and is_cosntant_arange(axis2_idx)):
+        return None
+
+    dim_length = x.type.shape[-1]
+    offset = op.offset
+    start_stop1 = (axis1_idx.data[0], axis1_idx.data[-1] + 1)
+    start_stop2 = (axis2_idx.data[0], axis2_idx.data[-1] + 1)
+    orig_start1, orig_start2 = start_stop1[0], start_stop2[0]
+
+    if offset < 0:
+        # The logic for checking if we are selecting or not a diagonal for negative offset is the same
+        # as the one with positive offset but swapped axis
+        start_stop1, start_stop2 = start_stop2, start_stop1
+        offset = -offset
+
+    start1, stop1 = start_stop1
+    start2, stop2 = start_stop2
+    if (
+        start1 == 0
+        and start2 == offset
+        and stop1 == dim_length - offset
+        and stop2 == dim_length
+    ):
+        # We are extracting the just written diagonal
+        if y.type.ndim == 0 or y.type.shape[-1] == 1:
+            # We may need to broadcast y
+            y = full((*x.shape[:-2], dim_length - offset), y, dtype=x.type.dtype)
+        return [y]
+    elif (orig_start2 - orig_start1) != op.offset:
+        # Some other diagonal was written, ignore it
+        return [op(x)]
+    else:
+        # A portion, but no the whole diagonal was written, don't do anything
+        return None

@@ -1,12 +1,15 @@
 import re
 from collections.abc import Sequence
+from itertools import product
 from typing import cast
 
 import numpy as np
+from numpy import nditer
 
 import pytensor
 from pytensor.graph import FunctionGraph, Variable
 from pytensor.npy_2_compat import normalize_axis_tuple
+from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.utils import hash_from_code
 
 
@@ -233,3 +236,52 @@ def normalize_reduce_axis(axis, ndim: int) -> tuple[int, ...] | None:
 
     # TODO: If axis tuple is equivalent to None, return None for more canonicalization?
     return cast(tuple, axis)
+
+
+def faster_broadcast_to(x, shape):
+    # Stripped down core logic of `np.broadcast_to`
+    return nditer(
+        (x,),
+        flags=["multi_index", "zerosize_ok"],
+        op_flags=["readonly"],
+        itershape=shape,
+        order="C",
+    ).itviews[0]
+
+
+def faster_ndindex(shape: Sequence[int]):
+    """Equivalent to `np.ndindex` but usually 10x faster.
+
+    Unlike `np.ndindex`, this function expects a single sequence of integers
+
+    https://github.com/numpy/numpy/issues/28921
+    """
+    return product(*(range(s) for s in shape))
+
+
+def get_static_shape_from_size_variables(
+    size_vars: Sequence[Variable],
+) -> tuple[int | None, ...]:
+    """Get static shape from size variables.
+
+    Parameters
+    ----------
+    size_vars : Sequence[Variable]
+        A sequence of variables representing the size of each dimension.
+    Returns
+    -------
+    tuple[int | None, ...]
+        A tuple containing the static lengths of each dimension, or None if
+        the length is not statically known.
+    """
+    from pytensor.tensor.basic import get_scalar_constant_value
+
+    static_lengths: list[None | int] = [None] * len(size_vars)
+    for i, length in enumerate(size_vars):
+        try:
+            static_length = get_scalar_constant_value(length)
+        except NotScalarConstantError:
+            pass
+        else:
+            static_lengths[i] = int(static_length)
+    return tuple(static_lengths)

@@ -27,8 +27,7 @@ def fetch_seed(pseed=None):
     If config.unittest.rseed is set to "random", it will seed the rng with
     None, which is equivalent to seeding with a random seed.
 
-    Useful for seeding RandomState or Generator objects.
-    >>> rng = np.random.RandomState(fetch_seed())
+    Useful for seeding Generator objects.
     >>> rng = np.random.default_rng(fetch_seed())
     """
 

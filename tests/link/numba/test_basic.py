@@ -14,7 +14,6 @@ from tests.tensor.test_math_scipy import scipy
 numba = pytest.importorskip("numba")
 
 import pytensor.scalar as ps
-import pytensor.scalar.math as psm
 import pytensor.tensor as pt
 import pytensor.tensor.math as ptm
 from pytensor import config, shared
@@ -31,7 +30,7 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
-from pytensor.tensor import blas
+from pytensor.tensor import blas, tensor
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.tensor.sort import ArgSortOp, SortOp
@@ -260,9 +259,12 @@ def compare_numba_and_py(
     if assert_fn is None:
 
         def assert_fn(x, y):
-            return np.testing.assert_allclose(x, y, rtol=1e-4) and compare_shape_dtype(
-                x, y
-            )
+            np.testing.assert_allclose(x, y, rtol=1e-4, strict=True)
+            # Make sure we don't have one input be a np.ndarray while the other is not
+            if isinstance(x, np.ndarray):
+                assert isinstance(y, np.ndarray), "y is not a NumPy array, but x is"
+            else:
+                assert not isinstance(y, np.ndarray), "y is a NumPy array, but x is not"
 
     if any(
         inp.owner is not None
@@ -295,8 +297,8 @@ def compare_numba_and_py(
     test_inputs_copy = (inp.copy() for inp in test_inputs) if inplace else test_inputs
     numba_res = pytensor_numba_fn(*test_inputs_copy)
     if isinstance(graph_outputs, tuple | list):
-        for j, p in zip(numba_res, py_res, strict=True):
-            assert_fn(j, p)
+        for numba_res_i, python_res_i in zip(numba_res, py_res, strict=True):
+            assert_fn(numba_res_i, python_res_i)
     else:
         assert_fn(numba_res, py_res)
 
@@ -601,85 +603,41 @@ def test_perform_type_convert():
 
 
 @pytest.mark.parametrize(
-    "x, y, exc",
+    "x, y",
     [
         (
             (pt.matrix(), rng.random(size=(3, 2)).astype(config.floatX)),
             (pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
-            None,
         ),
         (
             (pt.matrix(dtype="float64"), rng.random(size=(3, 2)).astype("float64")),
             (pt.vector(dtype="float32"), rng.random(size=(2,)).astype("float32")),
-            None,
         ),
         (
             (pt.lmatrix(), rng.poisson(size=(3, 2))),
             (pt.fvector(), rng.random(size=(2,)).astype("float32")),
-            None,
         ),
         (
             (pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
             (pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
-            None,
+        ),
+        (
+            (pt.vector(dtype="int16"), rng.random(size=(2,)).astype(np.int16)),
+            (pt.vector(dtype="uint8"), rng.random(size=(2,)).astype(np.uint8)),
         ),
     ],
 )
-def test_Dot(x, y, exc):
+def test_Dot(x, y):
     x, x_test_value = x
     y, y_test_value = y
 
     g = ptm.Dot()(x, y)
 
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x, y],
-            [g],
-            [x_test_value, y_test_value],
-        )
-
-
-@pytest.mark.parametrize(
-    "x, exc",
-    [
-        (
-            (ps.float64(), np.array(0.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.float64(), np.array(-32.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.float64(), np.array(-40.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.float64(), np.array(32.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.float64(), np.array(40.0, dtype="float64")),
-            None,
-        ),
-        (
-            (ps.int64(), np.array(32, dtype="int64")),
-            None,
-        ),
-    ],
-)
-def test_Softplus(x, exc):
-    x, x_test_value = x
-    g = psm.Softplus(ps.upgrade_to_float)(x)
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x],
-            [g],
-            [x_test_value],
-        )
+    compare_numba_and_py(
+        [x, y],
+        [g],
+        [x_test_value, y_test_value],
+    )
 
 
 @pytest.mark.parametrize(
@@ -977,3 +935,18 @@ def test_Nonzero(input_data):
     compare_numba_and_py(
         graph_inputs=[a], graph_outputs=graph_outputs, test_inputs=[input_data]
     )
+
+
+@pytest.mark.parametrize("dtype", ("float64", "float32", "mixed"))
+def test_mat_vec_dot_performance(dtype, benchmark):
+    A = tensor("A", shape=(512, 512), dtype="float64" if dtype == "mixed" else dtype)
+    x = tensor("x", shape=(512,), dtype="float32" if dtype == "mixed" else dtype)
+    out = ptm.dot(A, x)
+
+    fn = function([A, x], out, mode="NUMBA", trust_input=True)
+
+    rng = np.random.default_rng(948)
+    A_test = rng.standard_normal(size=A.type.shape, dtype=A.type.dtype)
+    x_test = rng.standard_normal(size=x.type.shape, dtype=x.type.dtype)
+    np.testing.assert_allclose(fn(A_test, x_test), np.dot(A_test, x_test), atol=1e-4)
+    benchmark(fn, A_test, x_test)

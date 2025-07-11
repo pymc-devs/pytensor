@@ -122,6 +122,54 @@ def test_jax_solve():
     )
 
 
+@pytest.mark.parametrize(
+    "A_size, b_size, b_ndim",
+    [
+        (
+            (5, 5),
+            (5,),
+            1,
+        ),
+        (
+            (5, 5),
+            (5, 1),
+            2,
+        ),
+        (
+            (5, 5),
+            (1, 5),
+            1,
+        ),
+        (
+            (4, 5, 5),
+            (4, 5, 5),
+            2,
+        ),
+    ],
+    ids=["basic_vector", "basic_matrix", "vector_broadcasted", "fully_batched"],
+)
+def test_jax_tridiagonal_solve(A_size: tuple, b_size: tuple, b_ndim: int):
+    A = pt.tensor("A", shape=A_size)
+    b = pt.tensor("b", shape=b_size)
+
+    out = pt.linalg.solve(A, b, assume_a="tridiagonal", b_ndim=b_ndim)
+
+    A_val = np.zeros(A_size)
+    N = A_size[-1]
+    A_val[...] = np.eye(N)
+    for i in range(N - 1):
+        A_val[..., i, i + 1] = np.random.randn()
+        A_val[..., i + 1, i] = np.random.randn()
+
+    b_val = np.random.randn(*b_size)
+
+    compare_jax_and_py(
+        [A, b],
+        [out],
+        [A_val, b_val],
+    )
+
+
 def test_jax_SolveTriangular():
     rng = np.random.default_rng(utt.fetch_seed())
 
@@ -228,3 +276,76 @@ def test_jax_solve_discrete_lyapunov(
         jax_mode="JAX",
         assert_fn=partial(np.testing.assert_allclose, atol=atol, rtol=rtol),
     )
+
+
+@pytest.mark.parametrize(
+    "permute_l, p_indices",
+    [(True, False), (False, True), (False, False)],
+    ids=["PL", "p_indices", "P"],
+)
+@pytest.mark.parametrize("complex", [False, True], ids=["real", "complex"])
+@pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
+def test_jax_lu(permute_l, p_indices, complex, shape: tuple[int]):
+    rng = np.random.default_rng()
+    A = pt.tensor(
+        "A",
+        shape=shape,
+        dtype=f"complex{int(config.floatX[-2:]) * 2}" if complex else config.floatX,
+    )
+    out = pt_slinalg.lu(A, permute_l=permute_l, p_indices=p_indices)
+
+    x = rng.normal(size=shape).astype(config.floatX)
+    if complex:
+        x = x + 1j * rng.normal(size=shape).astype(config.floatX)
+
+    if p_indices:
+        with pytest.raises(
+            ValueError, match="JAX does not support the p_indices argument"
+        ):
+            compare_jax_and_py(graph_inputs=[A], graph_outputs=out, test_inputs=[x])
+    else:
+        compare_jax_and_py(graph_inputs=[A], graph_outputs=out, test_inputs=[x])
+
+
+@pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
+def test_jax_lu_factor(shape):
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = pt.tensor(name="A", shape=shape)
+    A_value = rng.normal(size=shape).astype(config.floatX)
+    out = pt_slinalg.lu_factor(A)
+
+    compare_jax_and_py(
+        [A],
+        out,
+        [A_value],
+    )
+
+
+@pytest.mark.parametrize("b_shape", [(5,), (5, 5)])
+def test_jax_lu_solve(b_shape):
+    rng = np.random.default_rng(utt.fetch_seed())
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    b_val = rng.normal(size=b_shape).astype(config.floatX)
+
+    A = pt.tensor(name="A", shape=(5, 5))
+    b = pt.tensor(name="b", shape=b_shape)
+    lu_and_pivots = pt_slinalg.lu_factor(A)
+    out = pt_slinalg.lu_solve(lu_and_pivots, b)
+
+    compare_jax_and_py([A, b], [out], [A_val, b_val])
+
+
+@pytest.mark.parametrize("b_shape, lower", [((5,), True), ((5, 5), False)])
+def test_jax_cho_solve(b_shape, lower):
+    rng = np.random.default_rng(utt.fetch_seed())
+    L_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    A_val = (L_val @ L_val.T).astype(config.floatX)
+
+    b_val = rng.normal(size=b_shape).astype(config.floatX)
+
+    A = pt.tensor(name="A", shape=(5, 5))
+    b = pt.tensor(name="b", shape=b_shape)
+    c = pt_slinalg.cholesky(A, lower=lower)
+    out = pt_slinalg.cho_solve((c, lower), b, b_ndim=len(b_shape))
+
+    compare_jax_and_py([A, b], [out], [A_val, b_val])

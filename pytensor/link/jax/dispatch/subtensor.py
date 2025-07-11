@@ -67,6 +67,9 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
         if len(indices) == 1:
             indices = indices[0]
 
+        if isinstance(op, AdvancedIncSubtensor1):
+            op._check_runtime_broadcasting(node, x, y, indices)
+
         return jax_fn(x, indices, y)
 
     return incsubtensor

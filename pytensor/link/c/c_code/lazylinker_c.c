@@ -477,7 +477,7 @@ static PyObject *pycall(CLazyLinker *self, Py_ssize_t node_idx, int verbose) {
     double t0 = pytime(NULL);
     if (verbose)
       fprintf(stderr, "calling via Python (node %i)\n", (int)node_idx);
-    rval = PyObject_CallObject(thunk, NULL);
+    rval = PyObject_CallNoArgs(thunk);
     if (rval) {
       double t1 = pytime(NULL);
       double ti = PyFloat_AsDouble(PyList_GetItem(self->call_times, node_idx));
@@ -491,7 +491,7 @@ static PyObject *pycall(CLazyLinker *self, Py_ssize_t node_idx, int verbose) {
     if (verbose) {
       fprintf(stderr, "calling via Python (node %i)\n", (int)node_idx);
     }
-    rval = PyObject_CallObject(thunk, NULL);
+    rval = PyObject_CallNoArgs(thunk);
   }
   return rval;
 }
@@ -981,7 +981,7 @@ static PyTypeObject lazylinker_ext_CLazyLinkerType = {
 };
 
 static PyObject *get_version(PyObject *dummy, PyObject *args) {
-  PyObject *result = PyFloat_FromDouble(0.3);
+  PyObject *result = PyFloat_FromDouble(0.31);
   return result;
 }
 

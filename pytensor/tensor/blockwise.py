@@ -1,13 +1,14 @@
-from collections.abc import Sequence
-from typing import Any, cast
+from collections.abc import Callable, Sequence
+from typing import Any, Literal, cast, overload
 
 import numpy as np
+from numpy import broadcast_shapes, empty
 
 from pytensor import config
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import FunctionGraph
-from pytensor.graph.basic import Apply, Constant, ancestors
+from pytensor.graph.basic import Apply, Constant, explicit_graph_inputs
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
 from pytensor.graph.replace import (
@@ -15,24 +16,144 @@ from pytensor.graph.replace import (
     _vectorize_not_needed,
     vectorize_graph,
 )
+from pytensor.link.c.op import COp
 from pytensor.scalar import ScalarType
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.shape import shape_padleft
-from pytensor.tensor.type import TensorType, continuous_dtypes, discrete_dtypes, tensor
+from pytensor.tensor.type import TensorType, tensor
 from pytensor.tensor.utils import (
     _parse_gufunc_signature,
     broadcast_static_dim_lengths,
+    faster_broadcast_to,
+    faster_ndindex,
     import_func_from_string,
     safe_signature,
 )
 from pytensor.tensor.variable import TensorVariable
 
 
-class Blockwise(Op):
+def _squeeze_left(x, stop_at_dim: int | None = None):
+    """Squeeze any leading dims of `x` until a real dim or `stop_at_dim` (if not None) is reached."""
+    x_dims = x.type.broadcastable
+    squeeze_ndim = len(x_dims) if all(x_dims) else x_dims.index(False)
+    if stop_at_dim is not None:
+        squeeze_ndim = min(squeeze_ndim, stop_at_dim)
+    if squeeze_ndim == 0:
+        return x
+    return x.squeeze(axis=tuple(range(squeeze_ndim)))
+
+
+def _vectorize_node_perform(
+    core_node: Apply,
+    batch_bcast_patterns: Sequence[tuple[bool, ...]],
+    batch_ndim: int,
+    impl: str | None,
+) -> Callable:
+    """Creates a vectorized `perform` function for a given core node.
+
+    Similar behavior of np.vectorize, but specialized for PyTensor Blockwise Op.
+    """
+
+    storage_map = {var: [None] for var in core_node.inputs + core_node.outputs}
+    try:
+        core_thunk = core_node.op.make_thunk(
+            core_node, storage_map, None, [], impl=impl
+        )
+    except NotImplementedError:
+        if impl == "c":
+            # Try again with py impl
+            core_thunk = core_node.op.make_thunk(
+                core_node, storage_map, None, [], impl="py"
+            )
+        else:
+            raise
+    single_in = len(core_node.inputs) == 1
+    core_input_storage = [storage_map[inp] for inp in core_node.inputs]
+    core_output_storage = [storage_map[out] for out in core_node.outputs]
+    core_storage = core_input_storage + core_output_storage
+
+    def vectorized_perform(
+        *args,
+        batch_bcast_patterns=batch_bcast_patterns,
+        batch_ndim=batch_ndim,
+        single_in=single_in,
+        core_thunk=core_thunk,
+        core_input_storage=core_input_storage,
+        core_output_storage=core_output_storage,
+        core_storage=core_storage,
+    ):
+        if single_in:
+            batch_shape = args[0].shape[:batch_ndim]
+        else:
+            _check_runtime_broadcast_core(args, batch_bcast_patterns, batch_ndim)
+            batch_shape = broadcast_shapes(*(arg.shape[:batch_ndim] for arg in args))
+            args = list(args)
+            for i, arg in enumerate(args):
+                if arg.shape[:batch_ndim] != batch_shape:
+                    args[i] = faster_broadcast_to(
+                        arg, batch_shape + arg.shape[batch_ndim:]
+                    )
+
+        ndindex_iterator = faster_ndindex(batch_shape)
+        # Call once to get the output shapes
+        try:
+            # TODO: Pass core shape as input like BlockwiseWithCoreShape does?
+            index0 = next(ndindex_iterator)
+        except StopIteration:
+            raise NotImplementedError("vectorize with zero size not implemented")
+        else:
+            for core_input, arg in zip(core_input_storage, args):
+                core_input[0] = np.asarray(arg[index0])
+            core_thunk()
+            outputs = tuple(
+                empty(batch_shape + core_output[0].shape, dtype=core_output[0].dtype)
+                for core_output in core_output_storage
+            )
+            for output, core_output in zip(outputs, core_output_storage):
+                output[index0] = core_output[0]
+
+        for index in ndindex_iterator:
+            for core_input, arg in zip(core_input_storage, args):
+                core_input[0] = np.asarray(arg[index])
+            core_thunk()
+            for output, core_output in zip(outputs, core_output_storage):
+                output[index] = core_output[0]
+
+        # Clear storage
+        for core_val in core_storage:
+            core_val[0] = None
+        return outputs
+
+    return vectorized_perform
+
+
+def _check_runtime_broadcast_core(numerical_inputs, batch_bcast_patterns, batch_ndim):
+    # strict=None because we are in a hot loop
+    # We zip together the dimension lengths of each input and their broadcast patterns
+    for dim_lengths_and_bcast in zip(
+        *[
+            zip(input.shape[:batch_ndim], batch_bcast_pattern)
+            for input, batch_bcast_pattern in zip(
+                numerical_inputs, batch_bcast_patterns
+            )
+        ],
+    ):
+        # If for any dimension where an entry has dim_length != 1,
+        # and another a dim_length of 1 and broadcastable=False, we have runtime broadcasting.
+        if (
+            any(d != 1 for d, _ in dim_lengths_and_bcast)
+            and (1, False) in dim_lengths_and_bcast
+        ):
+            raise ValueError(
+                "Runtime broadcasting not allowed. "
+                "At least one input has a distinct batch dimension length of 1, but was not marked as broadcastable.\n"
+                "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
+            )
+
+
+class Blockwise(COp):
     """Generalizes a core `Op` to work with batched dimensions.
 
-    TODO: Dispatch JAX (should be easy with the vectorize macro)
-    TODO: Dispatch Numba
     TODO: C implementation?
     TODO: Fuse Blockwise?
     """
@@ -90,21 +211,52 @@ class Blockwise(Op):
 
         super().__init__(**kwargs)
 
-    def _create_dummy_core_node(self, inputs: Sequence[TensorVariable]) -> Apply:
-        core_input_types = []
+    @overload
+    def _create_dummy_core_node(
+        self,
+        inputs: Sequence[TensorVariable],
+        *,
+        propagate_unbatched_core_inputs: bool = False,
+        return_dummy_inputs: Literal[False] = ...,
+    ) -> Apply: ...
+
+    @overload
+    def _create_dummy_core_node(
+        self,
+        inputs: Sequence[TensorVariable],
+        *,
+        propagate_unbatched_core_inputs: bool = False,
+        return_dummy_inputs: Literal[True] = ...,
+    ) -> tuple[Apply, list[TensorVariable]]: ...
+
+    def _create_dummy_core_node(
+        self,
+        inputs: Sequence[TensorVariable],
+        *,
+        propagate_unbatched_core_inputs: bool = False,
+        return_dummy_inputs: bool = False,
+    ) -> Apply | tuple[Apply, list[TensorVariable]]:
+        core_inputs = []
+        core_dummy_inputs = []
         for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig, strict=True)):
             if inp.type.ndim < len(sig):
                 raise ValueError(
                     f"Input {i} {inp} has insufficient core dimensions for signature {self.signature}"
                 )
             # ndim_supp = 0 case
-            if not sig:
-                core_shape = ()
+            inp_ndim = inp.type.ndim
+            batch_ndim = inp_ndim - len(sig)
+            core_shape = inp.type.shape[batch_ndim:]
+            if propagate_unbatched_core_inputs and all(
+                inp.type.broadcastable[:batch_ndim]
+            ):
+                core_inputs.append(_squeeze_left(inp, batch_ndim))
             else:
-                core_shape = inp.type.shape[-len(sig) :]
-            core_input_types.append(tensor(dtype=inp.type.dtype, shape=core_shape))
+                dummy_inp = tensor(dtype=inp.type.dtype, shape=core_shape)
+                core_inputs.append(dummy_inp)
+                core_dummy_inputs.append(dummy_inp)
 
-        core_node = self.core_op.make_node(*core_input_types)
+        core_node = self.core_op.make_node(*core_inputs)
 
         if len(core_node.outputs) != len(self.outputs_sig):
             raise ValueError(
@@ -117,6 +269,9 @@ class Blockwise(Op):
                 raise ValueError(
                     f"Output {i} of {self.core_op} has wrong number of core dimensions for signature {self.signature}: {core_out.type.ndim}"
                 )
+
+        if return_dummy_inputs:
+            return core_node, core_dummy_inputs
 
         return core_node
 
@@ -186,11 +341,17 @@ class Blockwise(Op):
 
         batch_shape = broadcast_shape(*batch_shapes, arrays_are_shapes=True)
 
-        # Try to extract the core shapes from the core_op
-        core_op_infer_shape = getattr(self.core_op, "infer_shape", None)
-        if core_op_infer_shape is not None:
-            dummy_core_node = self._create_dummy_core_node(node.inputs)
-            dummy_core_inputs = dummy_core_node.inputs
+        def extract_core_shape_from_infer_shape():
+            # Try to extract the core shapes from the core_op
+            core_op_infer_shape = getattr(self.core_op, "infer_shape", None)
+            if core_op_infer_shape is None:
+                return [[None] * out.ndim for out in node.outputs]
+
+            dummy_core_node, dummy_core_inputs = self._create_dummy_core_node(
+                node.inputs,
+                return_dummy_inputs=True,
+                propagate_unbatched_core_inputs=True,
+            )
             dummy_fgraph = FunctionGraph(outputs=dummy_core_node.outputs, clone=False)
             core_input_shapes = [
                 input_shape[batch_ndims:] for input_shape in input_shapes
@@ -198,6 +359,25 @@ class Blockwise(Op):
             core_output_shapes = core_op_infer_shape(
                 dummy_fgraph, dummy_core_node, core_input_shapes
             )
+
+            if not dummy_core_inputs:
+                # All inputs are unbatched, so the core_shape can be used as is
+                return core_output_shapes
+            else:
+                # Set to None those core_shapes that depend on dummy_core_inputs,
+                # meaning their value may not be constant across batch dims of the Blockwise
+                set_dummy_core_inputs = set(dummy_core_inputs)
+                safe_core_output_shapes = [list(shape) for shape in core_output_shapes]
+                for core_out_shape in safe_core_output_shapes:
+                    for o, core_out_dim in enumerate(core_out_shape):
+                        if set_dummy_core_inputs & set(
+                            explicit_graph_inputs([core_out_dim])
+                        ):
+                            core_out_shape[o] = None
+
+                return safe_core_output_shapes
+
+        safe_core_out_shape = None
 
         out_shapes = []
         for o, (output, sig) in enumerate(
@@ -209,18 +389,15 @@ class Blockwise(Op):
                 if dim_name in core_dims:
                     core_out_shape.append(core_dims[dim_name])
                 else:
-                    if core_op_infer_shape is not None:
-                        # If the input values are needed to compute the dimension length, we can't use the infer_shape
-                        # of the core_node as the value is not constant across batch dims of the Blockwise
-                        core_out_dim = core_output_shapes[o][i]
-                        if not (
-                            set(dummy_core_inputs) & set(ancestors([core_out_dim]))
-                        ):
-                            core_out_shape.append(core_out_dim)
-                            continue
-
-                    # Fallback shape requires evaluating the Blockwise Op
-                    core_out_shape.append(Shape_i(batch_ndims + i)(output))
+                    if safe_core_out_shape is None:
+                        # Extract the core shape from the core_op infer_shape on demand
+                        # For many Ops we never need to do this, because all info is in their signature
+                        safe_core_out_shape = extract_core_shape_from_infer_shape()
+                    if (core_out_dim := safe_core_out_shape[o][i]) is not None:
+                        core_out_shape.append(core_out_dim)
+                    else:
+                        # Fallback shape requires evaluating the Blockwise Op
+                        core_out_shape.append(Shape_i(batch_ndims + i)(output))
             out_shapes.append((*batch_shape, *core_out_shape))
 
         return out_shapes
@@ -231,100 +408,68 @@ class Blockwise(Op):
 
         return [[True for _ in node.outputs] for _ in node.inputs]
 
-    def _bgrad(self, inputs, outputs, ograds):
-        # Grad, with respect to broadcasted versions of inputs
+    def L_op(self, inputs, outputs, output_gradients):
+        batch_ndim = self.batch_ndim(outputs[0].owner)
 
-        def as_core(t, core_t):
-            # Inputs could be NullType or DisconnectedType
-            if isinstance(t.type, NullType | DisconnectedType):
-                return t
-            return core_t.type()
-
+        # Obtain core_op gradients
         with config.change_flags(compute_test_value="off"):
-            safe_inputs = [
-                tensor(dtype=inp.type.dtype, shape=(None,) * len(sig))
-                for inp, sig in zip(inputs, self.inputs_sig, strict=True)
-            ]
-            core_node = self._create_dummy_core_node(safe_inputs)
-
             core_inputs = [
-                as_core(inp, core_inp)
-                for inp, core_inp in zip(inputs, core_node.inputs, strict=True)
-            ]
-            core_ograds = [
-                as_core(ograd, core_ograd)
-                for ograd, core_ograd in zip(ograds, core_node.outputs, strict=True)
-            ]
-            core_outputs = core_node.outputs
-
-            core_igrads = self.core_op.L_op(core_inputs, core_outputs, core_ograds)
-
-        igrads = vectorize_graph(
-            [core_igrad for core_igrad in core_igrads if core_igrad is not None],
-            replace=dict(
-                zip(
-                    core_inputs + core_outputs + core_ograds,
-                    inputs + outputs + ograds,
-                    strict=True,
+                tensor(
+                    dtype=inp.type.dtype,
+                    shape=inp.type.shape[batch_ndim:],
                 )
-            ),
+                for inp in inputs
+            ]
+            core_outputs = self._create_dummy_core_node(core_inputs).outputs
+
+            # Define core output_gradients, but keep original disconnected/null output_gradients (if any)
+            core_output_gradients = [
+                output_grad
+                if isinstance(output_grad.type, NullType | DisconnectedType)
+                else core_output.type()
+                for output_grad, core_output in zip(
+                    output_gradients, core_outputs, strict=True
+                )
+            ]
+
+            core_input_gradients = self.core_op.L_op(
+                core_inputs, core_outputs, core_output_gradients
+            )
+
+        # Vectorize core gradients to original inputs
+        input_gradients = list(
+            vectorize_graph(
+                core_input_gradients,
+                replace=dict(
+                    zip(
+                        core_inputs + core_outputs + core_output_gradients,
+                        inputs + outputs + output_gradients,
+                        strict=True,
+                    )
+                ),
+            )
         )
 
-        igrads_iter = iter(igrads)
-        return [
-            None if core_igrad is None else next(igrads_iter)
-            for core_igrad in core_igrads
-        ]
-
-    def L_op(self, inputs, outs, ograds):
-        from pytensor.tensor.math import sum as pt_sum
-
-        # Compute grad with respect to broadcasted input
-        rval = self._bgrad(inputs, outs, ograds)
-
-        # TODO: (Borrowed from Elemwise) make sure that zeros are clearly identifiable
-        # to the gradient.grad method when the outputs have
-        # some integer and some floating point outputs
-        if any(out.type.dtype not in continuous_dtypes for out in outs):
-            # For integer output, return value may only be zero or undefined
-            # We don't bother with trying to check that the scalar ops
-            # correctly returned something that evaluates to 0, we just make
-            # the return value obviously zero so that gradient.grad can tell
-            # this op did the right thing.
-            new_rval = []
-            for elem, inp in zip(rval, inputs, strict=True):
-                if isinstance(elem.type, NullType | DisconnectedType):
-                    new_rval.append(elem)
-                else:
-                    elem = inp.zeros_like()
-                    if str(elem.type.dtype) not in continuous_dtypes:
-                        elem = elem.astype(config.floatX)
-                    assert str(elem.type.dtype) not in discrete_dtypes
-                    new_rval.append(elem)
-            return new_rval
-
-        # Sum out the broadcasted dimensions
-        batch_ndims = self.batch_ndim(outs[0].owner)
-        batch_shape = outs[0].type.shape[:batch_ndims]
+        # Sum out the broadcasted batch dimensions
+        batch_shape = outputs[0].type.shape[:batch_ndim]
         for i, (inp, sig) in enumerate(zip(inputs, self.inputs_sig, strict=True)):
-            if isinstance(rval[i].type, NullType | DisconnectedType):
+            if isinstance(input_gradients[i].type, NullType | DisconnectedType):
                 continue
 
-            assert inp.type.ndim == batch_ndims + len(sig)
+            assert inp.type.ndim == batch_ndim + len(sig)
 
-            to_sum = [
+            if to_sum := [
                 j
                 for j, (inp_s, out_s) in enumerate(
                     zip(inp.type.shape, batch_shape, strict=False)
                 )
                 if inp_s == 1 and out_s != 1
-            ]
-            if to_sum:
-                rval[i] = pt_sum(rval[i], axis=to_sum, keepdims=True)
+            ]:
+                input_gradients[i] = input_gradients[i].sum(axis=to_sum, keepdims=True)
 
-        return rval
+        return input_gradients
 
-    def _create_node_gufunc(self, node) -> None:
+    def _create_node_gufunc(self, node: Apply, impl) -> Callable:
         """Define (or retrieve) the node gufunc used in `perform`.
 
         If the Blockwise or core_op have a `gufunc_spec`, the relevant numpy or scipy gufunc is used directly.
@@ -332,89 +477,83 @@ class Blockwise(Op):
 
         The gufunc is stored in the tag of the node.
         """
-        gufunc_spec = self.gufunc_spec or getattr(self.core_op, "gufunc_spec", None)
-
-        if gufunc_spec is not None:
-            gufunc = import_func_from_string(gufunc_spec[0])
-            if gufunc is None:
+        batch_ndim = self.batch_ndim(node)
+        batch_bcast_patterns = [
+            inp.type.broadcastable[:batch_ndim] for inp in node.inputs
+        ]
+        if (
+            gufunc_spec := self.gufunc_spec
+            or getattr(self.core_op, "gufunc_spec", None)
+        ) is not None:
+            core_func = import_func_from_string(gufunc_spec[0])
+            if core_func is None:
                 raise ValueError(f"Could not import gufunc {gufunc_spec[0]} for {self}")
 
+            if len(node.outputs) == 1:
+
+                def gufunc(
+                    *inputs,
+                    batch_bcast_patterns=batch_bcast_patterns,
+                    batch_ndim=batch_ndim,
+                ):
+                    _check_runtime_broadcast_core(
+                        inputs, batch_bcast_patterns, batch_ndim
+                    )
+                    return (core_func(*inputs),)
+            else:
+
+                def gufunc(
+                    *inputs,
+                    batch_bcast_patterns=batch_bcast_patterns,
+                    batch_ndim=batch_ndim,
+                ):
+                    _check_runtime_broadcast_core(
+                        inputs, batch_bcast_patterns, batch_ndim
+                    )
+                    return core_func(*inputs)
         else:
-            # Wrap core_op perform method in numpy vectorize
-            n_outs = len(self.outputs_sig)
-            core_node = self._create_dummy_core_node(node.inputs)
-            inner_outputs_storage = [[None] for _ in range(n_outs)]
+            core_node = self._create_dummy_core_node(
+                cast(list[TensorVariable], node.inputs),
+                propagate_unbatched_core_inputs=True,
+            )
+            gufunc = _vectorize_node_perform(
+                core_node,
+                batch_bcast_patterns=batch_bcast_patterns,
+                batch_ndim=self.batch_ndim(node),
+                impl=impl,
+            )
 
-            def core_func(
-                *inner_inputs,
-                core_node=core_node,
-                inner_outputs_storage=inner_outputs_storage,
-            ):
-                self.core_op.perform(
-                    core_node,
-                    [np.asarray(inp) for inp in inner_inputs],
-                    inner_outputs_storage,
-                )
-
-                if n_outs == 1:
-                    return inner_outputs_storage[0][0]
-                else:
-                    return tuple(r[0] for r in inner_outputs_storage)
-
-            gufunc = np.vectorize(core_func, signature=self.signature)
-
-        node.tag.gufunc = gufunc
+        return gufunc
 
     def _check_runtime_broadcast(self, node, inputs):
         batch_ndim = self.batch_ndim(node)
+        batch_bcast = [pt_inp.type.broadcastable[:batch_ndim] for pt_inp in node.inputs]
+        _check_runtime_broadcast_core(inputs, batch_bcast, batch_ndim)
 
-        # strict=False because we are in a hot loop
-        for dims_and_bcast in zip(
-            *[
-                zip(
-                    input.shape[:batch_ndim],
-                    sinput.type.broadcastable[:batch_ndim],
-                    strict=False,
-                )
-                for input, sinput in zip(inputs, node.inputs, strict=False)
-            ],
-            strict=False,
-        ):
-            if any(d != 1 for d, _ in dims_and_bcast) and (1, False) in dims_and_bcast:
-                raise ValueError(
-                    "Runtime broadcasting not allowed. "
-                    "At least one input has a distinct batch dimension length of 1, but was not marked as broadcastable.\n"
-                    "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
-                )
+    def prepare_node(self, node, storage_map, compute_map, impl=None):
+        node.tag.gufunc = self._create_node_gufunc(node, impl=impl)
 
     def perform(self, node, inputs, output_storage):
-        gufunc = getattr(node.tag, "gufunc", None)
-
-        if gufunc is None:
-            # Cache it once per node
-            self._create_node_gufunc(node)
+        try:
             gufunc = node.tag.gufunc
-
-        self._check_runtime_broadcast(node, inputs)
-
-        res = gufunc(*inputs)
-        if not isinstance(res, tuple):
-            res = (res,)
-
-        # strict=False because we are in a hot loop
-        for node_out, out_storage, r in zip(
-            node.outputs, output_storage, res, strict=False
-        ):
-            out_dtype = getattr(node_out, "dtype", None)
-            if out_dtype and out_dtype != r.dtype:
-                r = np.asarray(r, dtype=out_dtype)
-            out_storage[0] = r
+        except AttributeError:
+            gufunc = node.tag.gufunc = self._create_node_gufunc(node, impl=None)
+        for out_storage, result in zip(output_storage, gufunc(*inputs)):
+            out_storage[0] = result
 
     def __str__(self):
         if self.name is None:
             return f"{type(self).__name__}{{{self.core_op}, {self.signature}}}"
         else:
             return self.name
+
+    def c_code(self, *args, **kwargs):
+        # Blockwise is a C_Op just so we can propagate compilation mode to the inner Op.
+        # It doesn't itself have a C implementation yet.
+        raise NotImplementedError()
+
+    def c_code_cache_version(self):
+        return (-1,)
 
 
 @_vectorize_node.register(Op)

@@ -31,7 +31,6 @@ from pytensor.link.utils import (
     fgraph_to_python,
 )
 from pytensor.scalar.basic import ScalarType
-from pytensor.scalar.math import Softplus
 from pytensor.sparse import SparseTensorType
 from pytensor.tensor.basic import Nonzero
 from pytensor.tensor.blas import BatchedDot
@@ -76,7 +75,7 @@ def numba_njit(*args, fastmath=None, **kwargs):
         message=(
             "(\x1b\\[1m)*"  # ansi escape code for bold text
             "Cannot cache compiled function "
-            '"(numba_funcified_fgraph|store_core_outputs|cholesky|solve|solve_triangular|cho_solve)" '
+            '"(numba_funcified_fgraph|store_core_outputs|cholesky|solve|solve_triangular|cho_solve|lu_factor)" '
             "as it uses dynamic globals"
         ),
         category=NumbaWarning,
@@ -312,10 +311,10 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
     else:
 
         def py_perform_return(inputs):
-            # strict=False because we are in a hot loop
+            # zip strict not specified because we are in a hot loop
             return tuple(
                 out_type.filter(out[0])
-                for out_type, out in zip(output_types, py_perform(inputs), strict=False)
+                for out_type, out in zip(output_types, py_perform(inputs))
             )
 
     @numba_njit
@@ -466,7 +465,7 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
             axis = axis.item()
 
             Y = np.swapaxes(X, axis, 0)
-            result = np.empty_like(Y)
+            result = np.empty_like(Y, dtype="int64")
 
             indices = list(np.ndindex(Y.shape[1:]))
 
@@ -566,18 +565,19 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
 def int_to_float_fn(inputs, out_dtype):
     """Create a Numba function that converts integer and boolean ``ndarray``s to floats."""
 
-    if all(
-        input.type.numpy_dtype == np.dtype(out_dtype) for input in inputs
-    ) and isinstance(np.dtype(out_dtype), np.floating):
+    if (
+        all(inp.type.dtype == out_dtype for inp in inputs)
+        and np.dtype(out_dtype).kind == "f"
+    ):
 
-        @numba_njit
+        @numba_njit(inline="always")
         def inputs_cast(x):
             return x
 
-    elif any(i.type.numpy_dtype.kind in "ib" for i in inputs):
+    elif any(i.type.numpy_dtype.kind in "uib" for i in inputs):
         args_dtype = np.dtype(f"f{out_dtype.itemsize}")
 
-        @numba_njit
+        @numba_njit(inline="always")
         def inputs_cast(x):
             return x.astype(args_dtype)
 
@@ -585,7 +585,7 @@ def int_to_float_fn(inputs, out_dtype):
         args_dtype_sz = max(_arg.type.numpy_dtype.itemsize for _arg in inputs)
         args_dtype = np.dtype(f"f{args_dtype_sz}")
 
-        @numba_njit
+        @numba_njit(inline="always")
         def inputs_cast(x):
             return x.astype(args_dtype)
 
@@ -594,36 +594,49 @@ def int_to_float_fn(inputs, out_dtype):
 
 @numba_funcify.register(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
-    # Numba's `np.dot` does not support integer dtypes, so we need to cast to
-    # float.
+    # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
+    x, y = node.inputs
+    [out] = node.outputs
 
-    out_dtype = node.outputs[0].type.numpy_dtype
-    inputs_cast = int_to_float_fn(node.inputs, out_dtype)
+    x_dtype = x.type.dtype
+    y_dtype = y.type.dtype
+    dot_dtype = f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
+    out_dtype = out.type.dtype
 
-    @numba_njit
-    def dot(x, y):
-        return np.asarray(np.dot(inputs_cast(x), inputs_cast(y))).astype(out_dtype)
+    if x_dtype == dot_dtype and y_dtype == dot_dtype:
 
-    return dot
+        @numba_njit
+        def dot(x, y):
+            return np.asarray(np.dot(x, y))
 
+    elif x_dtype == dot_dtype and y_dtype != dot_dtype:
 
-@numba_funcify.register(Softplus)
-def numba_funcify_Softplus(op, node, **kwargs):
-    x_dtype = np.dtype(node.inputs[0].dtype)
+        @numba_njit
+        def dot(x, y):
+            return np.asarray(np.dot(x, y.astype(dot_dtype)))
 
-    @numba_njit
-    def softplus(x):
-        if x < -37.0:
-            value = np.exp(x)
-        elif x < 18.0:
-            value = np.log1p(np.exp(x))
-        elif x < 33.3:
-            value = x + np.exp(-x)
-        else:
-            value = x
-        return direct_cast(value, x_dtype)
+    elif x_dtype != dot_dtype and y_dtype == dot_dtype:
 
-    return softplus
+        @numba_njit
+        def dot(x, y):
+            return np.asarray(np.dot(x.astype(dot_dtype), y))
+
+    else:
+
+        @numba_njit()
+        def dot(x, y):
+            return np.asarray(np.dot(x.astype(dot_dtype), y.astype(dot_dtype)))
+
+    if out_dtype == dot_dtype:
+        return dot
+
+    else:
+
+        @numba_njit
+        def dot_with_cast(x, y):
+            return dot(x, y).astype(out_dtype)
+
+    return dot_with_cast
 
 
 @numba_funcify.register(Solve)
@@ -687,11 +700,6 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
         return z0
 
     return batched_dot
-
-
-# NOTE: The remaining `pytensor.tensor.blas` `Op`s appear unnecessary, because
-# they're only used to optimize basic `Dot` nodes, and those GEMV and GEMM
-# optimizations are apparently already performed by Numba
 
 
 @numba_funcify.register(IfElse)

@@ -4,9 +4,13 @@ import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.slinalg import (
+    LU,
     BlockDiagonal,
     Cholesky,
+    CholeskySolve,
     Eigvalsh,
+    LUFactor,
+    PivotToPermutations,
     Solve,
     SolveTriangular,
 )
@@ -43,6 +47,7 @@ def jax_funcify_Cholesky(op, **kwargs):
 def jax_funcify_Solve(op, **kwargs):
     assume_a = op.assume_a
     lower = op.lower
+    b_is_vec = op.b_ndim == 1
 
     if assume_a == "tridiagonal":
         # jax.scipy.solve does not yet support tridiagonal matrices
@@ -51,7 +56,20 @@ def jax_funcify_Solve(op, **kwargs):
             dl = jax.numpy.diagonal(a, offset=-1, axis1=-2, axis2=-1)
             d = jax.numpy.diagonal(a, offset=0, axis1=-2, axis2=-1)
             du = jax.numpy.diagonal(a, offset=1, axis1=-2, axis2=-1)
-            return jax.lax.linalg.tridiagonal_solve(dl, d, du, b, lower=lower)
+
+            # jax requires dl and du to have the same shape as d
+            dl = jax.numpy.pad(dl, (1, 0))
+            du = jax.numpy.pad(du, (0, 1))
+
+            if b_is_vec:
+                b = jax.numpy.expand_dims(b, -1)
+
+            res = jax.lax.linalg.tridiagonal_solve(dl, d, du, b)
+
+            if b_is_vec:
+                return jax.numpy.squeeze(res, -1)
+
+            return res
 
     else:
         if assume_a not in ("gen", "sym", "her", "pos"):
@@ -93,3 +111,60 @@ def jax_funcify_BlockDiagonalMatrix(op, **kwargs):
         return jax.scipy.linalg.block_diag(*inputs)
 
     return block_diag
+
+
+@jax_funcify.register(PivotToPermutations)
+def jax_funcify_PivotToPermutation(op, **kwargs):
+    inverse = op.inverse
+
+    def pivot_to_permutations(pivots):
+        p_inv = jax.lax.linalg.lu_pivots_to_permutation(pivots, pivots.shape[0])
+        if inverse:
+            return p_inv
+        return jax.numpy.argsort(p_inv)
+
+    return pivot_to_permutations
+
+
+@jax_funcify.register(LU)
+def jax_funcify_LU(op, **kwargs):
+    permute_l = op.permute_l
+    p_indices = op.p_indices
+    check_finite = op.check_finite
+
+    if p_indices:
+        raise ValueError("JAX does not support the p_indices argument")
+
+    def lu(*inputs):
+        return jax.scipy.linalg.lu(
+            *inputs, permute_l=permute_l, check_finite=check_finite
+        )
+
+    return lu
+
+
+@jax_funcify.register(LUFactor)
+def jax_funcify_LUFactor(op, **kwargs):
+    check_finite = op.check_finite
+    overwrite_a = op.overwrite_a
+
+    def lu_factor(a):
+        return jax.scipy.linalg.lu_factor(
+            a, check_finite=check_finite, overwrite_a=overwrite_a
+        )
+
+    return lu_factor
+
+
+@jax_funcify.register(CholeskySolve)
+def jax_funcify_ChoSolve(op, **kwargs):
+    lower = op.lower
+    check_finite = op.check_finite
+    overwrite_b = op.overwrite_b
+
+    def cho_solve(c, b):
+        return jax.scipy.linalg.cho_solve(
+            (c, lower), b, check_finite=check_finite, overwrite_b=overwrite_b
+        )
+
+    return cho_solve

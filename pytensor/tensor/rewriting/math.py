@@ -64,6 +64,7 @@ from pytensor.tensor.math import (
     log,
     log1mexp,
     log1p,
+    log1pexp,
     makeKeepDims,
     maximum,
     mul,
@@ -397,6 +398,37 @@ def local_exp_log(fgraph, node):
     if isinstance(prev_op, ps_math.Softplus) and isinstance(node_op, ps.Expm1):
         x = x.owner.inputs[0]
         return [exp(x)]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([sqrt, sqr])
+def local_sqrt_sqr(fgraph, node):
+    x = node.inputs[0]
+
+    if not (x.owner and isinstance(x.owner.op, Elemwise)):
+        return
+
+    prev_op = x.owner.op.scalar_op
+    node_op = node.op.scalar_op
+
+    # Case for sqrt(sqr(x)) -> |x|
+    if isinstance(prev_op, ps.Sqrt) and isinstance(node_op, ps.Sqr):
+        new_out = pt_abs(x.owner.inputs[0])
+        old_out = node.outputs[0]
+
+        # Handle potential integer to float cast by sqr
+        if new_out.dtype != old_out.dtype:
+            new_out = cast(new_out, old_out.dtype)
+        return [new_out]
+
+    # Case for sqr(sqrt(x)) -> x
+    if isinstance(prev_op, ps.Sqr) and isinstance(node_op, ps.Sqrt):
+        x = x.owner.inputs[0]
+        old_out = node.outputs[0]
+        new_out = switch(ge(x, 0), x, np.asarray(np.nan, old_out.dtype))
+
+        return [new_out]
 
 
 @register_specialize
@@ -2999,12 +3031,6 @@ log1msigm_to_softplus = PatternNodeRewriter(
     tracks=[sigmoid],
     get_nodes=get_clients_at_depth2,
 )
-log1pexp_to_softplus = PatternNodeRewriter(
-    (log1p, (exp, "x")),
-    (softplus, "x"),
-    values_eq_approx=values_eq_approx_remove_inf,
-    allow_multiple_clients=True,
-)
 log1p_neg_sigmoid = PatternNodeRewriter(
     (log1p, (neg, (sigmoid, "x"))),
     (neg, (softplus, "x")),
@@ -3016,7 +3042,6 @@ log1p_neg_sigmoid = PatternNodeRewriter(
 
 register_stabilize(logsigm_to_softplus, name="logsigm_to_softplus")
 register_stabilize(log1msigm_to_softplus, name="log1msigm_to_softplus")
-register_stabilize(log1pexp_to_softplus, name="log1pexp_to_softplus")
 register_stabilize(log1p_neg_sigmoid, name="log1p_neg_sigmoid")
 register_specialize(log1p_neg_sigmoid, name="log1p_neg_sigmoid")
 
@@ -3582,12 +3607,40 @@ register_stabilize(local_1msigmoid)
 register_specialize(local_1msigmoid)
 
 
-log1pmexp_to_log1mexp = PatternNodeRewriter(
-    (log1p, (neg, (exp, "x"))),
-    (log1mexp, "x"),
-    allow_multiple_clients=True,
-)
-register_stabilize(log1pmexp_to_log1mexp, name="log1pmexp_to_log1mexp")
+@register_stabilize
+@node_rewriter([log1p])
+def local_log1p_plusminus_exp(fgraph, node):
+    """Transforms log1p of ±exp(x) into log1pexp (aka softplus) / log1mexp
+    ``log1p(exp(x))  -> log1pexp(x)``
+    ``log1p(-exp(x)) -> log1mexp(x)``
+    where "-" can be "neg" or any other expression detected by "is_neg"
+    """
+    (log1p_arg,) = node.inputs
+    exp_info = is_exp(log1p_arg)
+    if exp_info is not None:
+        exp_neg, exp_arg = exp_info
+        if exp_neg:
+            return [log1mexp(exp_arg)]
+        else:
+            return [log1pexp(exp_arg)]  # aka softplus
+
+
+@register_stabilize
+@node_rewriter([expm1])
+def logmexpm1_to_log1mexp(fgraph, node):
+    """``log(-expm1(x)) -> log1mexp(x)``
+    where "-" can be "neg" or any other expression detected by "is_neg"
+    """
+    rewrites = {}
+    for node in get_clients_at_depth(fgraph, node, depth=2):
+        if node.op == log:
+            (log_arg,) = node.inputs
+            neg_arg = is_neg(log_arg)
+            if neg_arg is not None and neg_arg.owner and neg_arg.owner.op == expm1:
+                (expm1_arg,) = neg_arg.owner.inputs
+                rewrites[node.outputs[0]] = log1mexp(expm1_arg)
+    return rewrites
+
 
 # log(exp(a) - exp(b)) -> a + log1mexp(b - a)
 logdiffexp_to_log1mexpdiff = PatternNodeRewriter(

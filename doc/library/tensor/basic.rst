@@ -1144,9 +1144,9 @@ Indexing
 
 Like NumPy, PyTensor distinguishes between *basic* and *advanced* indexing.
 PyTensor fully supports basic indexing
-(see `NumPy's indexing  <http://docs.scipy.org/doc/numpy/reference/arrays.indexing.html>`_)
+(see `NumPy's indexing  <https://numpy.org/doc/stable/user/basics.indexing.html>`_)
 and `integer advanced indexing
-<http://docs.scipy.org/doc/numpy/reference/arrays.indexing.html#integer>`_.
+<https://numpy.org/doc/stable/user/basics.indexing.html#integer-array-indexing>`_.
 
 Index-assignment is *not* supported.  If you want to do something like ``a[5]
 = b`` or ``a[5]+=b``, see :func:`pytensor.tensor.subtensor.set_subtensor` and

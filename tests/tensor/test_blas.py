@@ -2226,8 +2226,10 @@ class TestBlasStrides:
 
                 a.set_value(a_dev.copy()[::a_step], borrow=True)
                 b.set_value(b_dev.copy()[::b_step1, ::b_step2], borrow=True)
+                # Copy as C so that it becomes F after the transpose in the graph
                 b_t.set_value(
-                    np.transpose(b_dev.copy())[::b_step2, ::b_step1], borrow=True
+                    np.transpose(b_dev).copy(order="C")[::b_step2, ::b_step1],
+                    borrow=True,
                 )
                 c.set_value(c_dev.copy()[::c_step], borrow=True)
 
@@ -2244,6 +2246,7 @@ class TestBlasStrides:
         self.cmp_gemv(3, (3, 5), 5, rng)
         self.cmp_gemv(1, (1, 5), 5, rng)
         self.cmp_gemv(3, (3, 1), 1, rng)
+        self.cmp_gemv(1, (1, 1), 1, rng)
         self.cmp_gemv(0, (0, 5), 5, rng)
         self.cmp_gemv(3, (3, 0), 0, rng)
         self.cmp_gemv(0, (0, 1), 1, rng)
@@ -2301,6 +2304,7 @@ class TestBlasStrides:
         self.cmp_ger((3, 5), 3, 5, rng)
         self.cmp_ger((1, 5), 1, 5, rng)
         self.cmp_ger((3, 1), 3, 1, rng)
+        self.cmp_ger((1, 1), 1, 1, rng)
         self.cmp_ger((0, 5), 0, 5, rng)
         self.cmp_ger((3, 0), 3, 0, rng)
         self.cmp_ger((0, 1), 0, 1, rng)

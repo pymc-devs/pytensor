@@ -15,6 +15,7 @@ from pytensor.tensor.extra_ops import broadcast_arrays, broadcast_to
 from pytensor.tensor.math import maximum
 from pytensor.tensor.shape import shape_padleft, specify_shape
 from pytensor.tensor.type import int_dtypes
+from pytensor.tensor.utils import faster_broadcast_to
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -44,8 +45,8 @@ def params_broadcast_shapes(
     max_fn = maximum if use_pytensor else max
 
     rev_extra_dims: list[int] = []
-    # strict=False because we are in a hot loop
-    for ndim_param, param_shape in zip(ndims_params, param_shapes, strict=False):
+    # zip strict not specified because we are in a hot loop
+    for ndim_param, param_shape in zip(ndims_params, param_shapes):
         # We need this in order to use `len`
         param_shape = tuple(param_shape)
         extras = tuple(param_shape[: (len(param_shape) - ndim_param)])
@@ -64,12 +65,12 @@ def params_broadcast_shapes(
 
     extra_dims = tuple(reversed(rev_extra_dims))
 
-    # strict=False because we are in a hot loop
+    # zip strict not specified because we are in a hot loop
     bcast_shapes = [
         (extra_dims + tuple(param_shape)[-ndim_param:])
         if ndim_param > 0
         else extra_dims
-        for ndim_param, param_shape in zip(ndims_params, param_shapes, strict=False)
+        for ndim_param, param_shape in zip(ndims_params, param_shapes)
     ]
 
     return bcast_shapes
@@ -125,12 +126,11 @@ def broadcast_params(
     shapes = params_broadcast_shapes(
         param_shapes, ndims_params, use_pytensor=use_pytensor
     )
-    broadcast_to_fn = broadcast_to if use_pytensor else np.broadcast_to
+    broadcast_to_fn = broadcast_to if use_pytensor else faster_broadcast_to
 
-    # strict=False because we are in a hot loop
+    # zip strict not specified because we are in a hot loop
     bcast_params = [
-        broadcast_to_fn(param, shape)
-        for shape, param in zip(shapes, params, strict=False)
+        broadcast_to_fn(param, shape) for shape, param in zip(shapes, params)
     ]
 
     return bcast_params

@@ -22,14 +22,6 @@ elemwise implementation will automatically have C code too. This
 will enable the fusion of elemwise operations using your new scalar
 operation. It is similar for reduction operations.
 
-Be careful about some possible problems in the definition of the
-``grad`` method, and about dependencies that may not be available. In
-particular, see the following fixes:
-`Fix to grad() methods
-<https://github.com/Theano/Theano/commit/002872ad97919b97eaf58e095044e3c3067668e4>`_
-and `impl() methods related to SciPy
-<https://github.com/Theano/Theano/commit/08d16c0aa6681fc53d8d0f40342551eb47ff536e>`_.
-
 .. _sparse_ops:
 
 Sparse Ops
@@ -116,43 +108,6 @@ needed sparse variable and data, you can use
 many parameters, including parameters for the format (csr or csc), the shape, the
 dtype, whether to have explicit 0 and whether to have unsorted indices.
 
-.. _random_ops:
-
-Random distribution
-===================
-
-We have 3 base random number generators. One that wraps NumPy's random
-generator, one that implements MRG31k3p and one that wraps CURAND.
-
-The recommended and 2nd faster is MRG. It works on the CPU and
-has more implemented distributions.
-
-The slowest is our wrapper on NumPy's random generator.
-
-We explain and provide advice on 3 possibles implementations of new
-distributions here:
-
-1. Extend our wrapper around NumPy random functions.
-   See this `PR <https://github.com/Theano/Theano/pull/1607>`_ as an example.
-
-2. Extend MRG implementation by reusing existing PyTensor Op. Look into
-   the ``PyTensor/sandbox/rng_mrg.py`` file and grep for all code about
-   binomial(). This distribution uses the output of the uniform
-   distribution and converts it to a binomial distribution with
-   existing PyTensor operations. The tests go in
-   ``PyTensor/sandbox/test_rng_mrg.py``
-
-3. Extend MRG implementation with a new Op that takes a uniform sample as
-   input. Look in the ``PyTensor/sandbox/{rng_mrg,multinomial}.py`` file
-   and its test in ``PyTensor/sandbox/test_multinomal.py``. This is
-   recommended when current PyTensor ops aren't well suited to modify
-   the uniform to the target distribution. This can happen in
-   particular if there is a loop or complicated condition.
-
-.. note::
-
-    In all cases, you must reuse the same interface as NumPy for compatibility.
-
 
 .. _openmp_ops:
 
@@ -188,14 +143,6 @@ current convention.
    same inputs and they execute 2 ConvOp that only differ on the
    OpenMP parameter, we want them to be merged.
 
-.. _numba_ops:
-
-Numba Ops
-=========
-
-Want C speed without writing C code for your new Op? You can use Numba
-to generate the C code for you! Here is an `example
-Op <https://gist.github.com/nouiz/5492778#file-theano_op-py>`_ doing that.
 
 .. _alternate_pytensor_types:
 

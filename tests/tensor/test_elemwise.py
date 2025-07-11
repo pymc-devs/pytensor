@@ -11,16 +11,16 @@ import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
-from pytensor import In, Out
+from pytensor import In, Out, config, grad
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.npy_2_compat import numpy_maxdims
+from pytensor.scalar import ScalarOp, float32, float64, int32, int64
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import get_scalar_constant_value, second
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -1067,4 +1067,29 @@ def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
 def test_c_careduce_benchmark(axis, c_contiguous, benchmark):
     return careduce_benchmark_tester(
         axis, c_contiguous, mode="FAST_RUN", benchmark=benchmark
+    )
+
+
+def test_gradient_mixed_discrete_output_scalar_op():
+    class MixedDtypeScalarOp(ScalarOp):
+        def make_node(self, *inputs):
+            float_op = float64 if config.floatX == "float64" else float32
+            int_op = int64 if config.floatX == "int64" else int32
+            inputs = [float_op()]
+            outputs = [float_op(), int_op()]
+            return Apply(self, inputs, outputs)
+
+        def perform(self, node, inputs, outputs):
+            raise NotImplementedError()
+
+        def L_op(self, inputs, outputs, output_gradients):
+            return [inputs[0].ones_like() * output_gradients[0]]
+
+    op = Elemwise(MixedDtypeScalarOp())
+    x = vector("x")
+    y, _ = op(x)
+    np.testing.assert_array_equal(
+        grad(y.sum(), x).eval({x: np.full((12,), np.nan, dtype=config.floatX)}),
+        np.ones((12,), dtype=config.floatX),
+        strict=True,
     )
