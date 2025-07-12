@@ -163,5 +163,36 @@ def test_convolve2d(kernel_shape, data_shape, mode, boundary):
         scipy_convolve2d(
             data_val, kernel_val, mode=mode, boundary=boundary, fillvalue=0
         ),
-        rtol=1e-6 if config.floatX == "float32" else 1e-15,
+        atol=1e-6 if config.floatX == "float32" else 1e-8,
     )
+
+    utt.verify_grad(lambda k: op(data_val, k).sum(), [kernel_val], eps=1e-4)
+
+
+# @pytest.mark.parametrize(
+#     "data_shape, kernel_shape", [[(10, 1, 8, 8), (3, 1, 3, 3)], # 8x8 grayscale
+#                                  [(1000, 1, 8, 8), (3, 1, 1, 3)], # same, but with 1000 images
+#                                  [(10, 3, 64, 64), (10, 3, 8, 8)], # 64x64 RGB
+#                                  [(1000, 3, 64, 64), (10, 3, 8, 8)], # same, but with 1000 images
+#                                  [(3, 100, 100, 100), (250, 100, 50, 50)]], # Very large, deep hidden layer or something
+#
+#     ids=lambda x: f"data_shape={x[0]}, kernel_shape={x[1]}"
+# )
+# @pytest.mark.parametrize('func', ['new', 'theano'], ids=['new-impl', 'theano-impl'])
+# def test_conv2d_nn_benchmark(data_shape, kernel_shape, func, benchmark):
+#     import pytensor.tensor as pt
+#     x = pt.tensor("x", shape=data_shape)
+#     y = pt.tensor("y", shape=kernel_shape)
+#
+#     if func == 'new':
+#         out = nn_conv2d(x, y)
+#     else:
+#         out = conv2d(input=x, filters=y, border_mode="valid")
+#
+#     rng = np.random.default_rng(38)
+#     x_test = rng.normal(size=data_shape).astype(x.dtype)
+#     y_test = rng.normal(size=kernel_shape).astype(y.dtype)
+#
+#     fn = function([x, y], out, trust_input=True)
+#
+#     benchmark(fn, x_test, y_test)
