@@ -107,6 +107,9 @@ class MyOpCastType2(MyOp):
 
 
 class MyOpMultipleOutputs(MyOp):
+    def __init__(self, name, dmap=None, x=None):
+        super().__init__(name=name, dmap=dmap, x=x, n_outs=2)
+
     def make_node(self, input):
         outputs = [input.type(), input.type()]
         return Apply(self, [input], outputs)

@@ -1550,6 +1550,7 @@ class PatternNodeRewriter(NodeRewriter):
         tracks=(),
         get_nodes=None,
         values_eq_approx=None,
+        allow_cast=True,
     ):
         """
 
@@ -1572,6 +1573,10 @@ class PatternNodeRewriter(NodeRewriter):
             If you provide `tracks`, you must provide this parameter. It must be a
             function that takes the tracked node and returns a list of nodes on
             which we will try this rewrite.
+        values_eq_approx
+            TODO
+        allow_cast
+            Automatically cast the output of the rewrite whenever new and old types differ
 
         Notes
         -----
@@ -1586,6 +1591,7 @@ class PatternNodeRewriter(NodeRewriter):
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
         self.values_eq_approx = values_eq_approx
+        self.allow_cast = allow_cast
         if isinstance(in_pattern, list | tuple):
             self.op = self.in_pattern[0]
         elif isinstance(in_pattern, dict):
@@ -1630,6 +1636,10 @@ class PatternNodeRewriter(NodeRewriter):
         if node.op != self.op:
             return False
 
+        if len(node.outputs) != 1:
+            # PatternNodeRewriter doesn't support replacing multi-output nodes
+            return False
+
         s = unify(self.in_pattern, node.out)
 
         if s is False:
@@ -1652,19 +1662,20 @@ class PatternNodeRewriter(NodeRewriter):
             ):
                 return False
 
-        if ret.owner:
+        [old_out] = node.outputs
+        if not old_out.type.is_super(ret.type):
+            # Type doesn't match
             if not (
-                len(node.outputs) == len(ret.owner.outputs)
-                and all(
-                    o.type.is_super(new_o.type)
-                    for o, new_o in zip(node.outputs, ret.owner.outputs, strict=True)
-                )
+                self.allow_cast
+                and isinstance(old_out.type, pytensor.tensor.TensorType)
+                and isinstance(ret.type, pytensor.tensor.TensorType)
             ):
                 return False
-        else:
-            # ret is just an input variable
-            assert len(node.outputs) == 1
-            if not node.outputs[0].type.is_super(ret.type):
+
+            # Try to cast tensors
+            ret = ret.astype(old_out.type.dtype)
+            if not old_out.type.is_super(ret.type):
+                # Still doesn't match
                 return False
 
         return [ret]
