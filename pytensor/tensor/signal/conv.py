@@ -6,6 +6,7 @@ from scipy.signal import convolve2d as scipy_convolve2d
 
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Constant
+from pytensor.graph.op import Op
 from pytensor.link.c.op import COp
 from pytensor.scalar import as_scalar
 from pytensor.scalar.basic import upcast
@@ -220,18 +221,16 @@ class Convolve2D(Op):
 
     def __init__(
         self,
-        mode: Literal["full", "valid", "same"] = "full",
+        mode: Literal["full", "valid"] = "full",
         boundary: Literal["fill", "wrap", "symm"] = "fill",
         fillvalue: float | int = 0,
     ):
-        if mode not in ("full", "valid", "same"):
+        if mode not in ("full", "valid"):
             raise ValueError(f"Invalid mode: {mode}")
-        if boundary not in ("fill", "wrap", "symm"):
-            raise ValueError(f"Invalid boundary: {boundary}")
 
         self.mode = mode
-        self.boundary = boundary
         self.fillvalue = fillvalue
+        self.boundary = boundary
 
     def make_node(self, in1, in2):
         in1, in2 = map(as_tensor_variable, (in1, in2))
@@ -262,8 +261,13 @@ class Convolve2D(Op):
 
     def perform(self, node, inputs, outputs):
         in1, in2 = inputs
+
+        # if all(inpt.dtype.kind in ['f', 'c'] for inpt in inputs):
+        #     outputs[0][0] = scipy_convolve(in1, in2, mode=self.mode, method='fft')
+        #
+        # else:
         outputs[0][0] = scipy_convolve2d(
-            in1, in2, mode=self.mode, boundary=self.boundary, fillvalue=self.fillvalue
+            in1, in2, mode=self.mode, fillvalue=self.fillvalue, boundary=self.boundary
         )
 
     def infer_shape(self, fgraph, node, shapes):
@@ -284,7 +288,18 @@ class Convolve2D(Op):
         return [shape]
 
     def L_op(self, inputs, outputs, output_grads):
-        raise NotImplementedError
+        in1, in2 = inputs
+        incoming_grads = output_grads[0]
+
+        if self.mode == "full":
+            prop_dict = self._props_dict()
+            prop_dict["mode"] = "valid"
+            conv_valid = type(self)(**prop_dict)
+
+            in1_grad = conv_valid(in2, incoming_grads)
+            in2_grad = conv_valid(in1, incoming_grads)
+
+        return [in1_grad, in2_grad]
 
 
 def convolve2d(
@@ -324,6 +339,9 @@ def convolve2d(
     """
     in1 = as_tensor_variable(in1)
     in2 = as_tensor_variable(in2)
+
+    # TODO: Handle boundaries symbolically
+    # TODO: Handle 'same' symbolically
 
     blockwise_convolve = Blockwise(
         Convolve2D(mode=mode, boundary=boundary, fillvalue=fillvalue)
