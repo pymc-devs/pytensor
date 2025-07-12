@@ -1188,45 +1188,21 @@ default_colorCodes = {
 
 
 def _try_pydot_import():
-    pydot_imported = False
-    pydot_imported_msg = ""
     try:
-        # pydot-ng is a fork of pydot that is better maintained
-        import pydot_ng as pd
+        import pydot as pd
 
-        if pd.find_graphviz():
-            pydot_imported = True
-        else:
-            pydot_imported_msg = "pydot-ng can't find graphviz. Install graphviz."
+        pd.Dot.create(pd.Dot())
+        return pd
     except ImportError:
-        try:
-            # fall back on pydot if necessary
-            import pydot as pd
+        # tests should not fail on optional dependency
+        extra_msg = ""
+    except Exception as e:
+        extra_msg = f"\nAn error happened while importing/trying pydot: {e!r}"
 
-            if hasattr(pd, "find_graphviz"):
-                if pd.find_graphviz():
-                    pydot_imported = True
-                else:
-                    pydot_imported_msg = "pydot can't find graphviz"
-            else:
-                pd.Dot.create(pd.Dot())
-                pydot_imported = True
-        except ImportError:
-            # tests should not fail on optional dependency
-            pydot_imported_msg = (
-                "Install the python package pydot or pydot-ng. Install graphviz."
-            )
-        except Exception as e:
-            pydot_imported_msg = "An error happened while importing/trying pydot: "
-            pydot_imported_msg += str(e.args)
-
-    if not pydot_imported:
-        raise ImportError(
-            "Failed to import pydot. You must install graphviz "
-            "and either pydot or pydot-ng for "
-            f"`pydotprint` to work:\n {pydot_imported_msg}",
-        )
-    return pd
+    raise ImportError(
+        "Failed to import pydot. You must install graphviz and pydot for "
+        f"`pydotprint` to work.{extra_msg}",
+    )
 
 
 def pydotprint(
