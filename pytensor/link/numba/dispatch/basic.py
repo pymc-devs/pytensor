@@ -46,8 +46,6 @@ from pytensor.tensor.type_other import MakeSlice, NoneConst
 def global_numba_func(func):
     """Use to return global numba functions in numba_funcify_*.
 
-
-
     This allows tests to remove the compilation using mock.
     """
     return func
