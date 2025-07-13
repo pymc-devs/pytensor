@@ -245,13 +245,6 @@ def numba_funcify_Second(op, node, **kwargs):
     return second
 
 
-@numba_basic.numba_njit
-def reciprocal(x):
-    # TODO FIXME: This isn't really the behavior or `numpy.reciprocal` when
-    # `x` is an `int`
-    return 1 / x
-
-
 @numba_funcify.register(Reciprocal)
 def numba_funcify_Reciprocal(op, node, **kwargs):
     @numba_basic.numba_njit
