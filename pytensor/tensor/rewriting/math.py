@@ -344,57 +344,26 @@ def local_batched_matmul_to_core_matmul_with_reshape(fgraph, node):
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([_matmul])
-def local_blockwise_dot_to_mul(fgraph, node):
-    """Rewrite blockwise dots that correspond to multiplication without summation.
-
-    We don't touch the regular dot, to not interfere with the BLAS optimizations.
-    """
+@node_rewriter([_matmul, _dot])
+def local_dot_to_mul(fgraph, node):
+    """Rewrite blockwise dots that correspond to multiplication without summation."""
     a, b = node.inputs
     a_static_shape = a.type.shape
     b_static_shape = b.type.shape
-    core_a_ndim = len(node.op.inputs_sig[0])
-    core_b_ndim = len(node.op.inputs_sig[1])
 
-    if core_a_ndim > 2 or core_b_ndim > 2:
-        # Shouldn't happen, but here just in case
+    if isinstance(node.op, Dot) and (
+        len(a_static_shape) != 2 or len(b_static_shape) != 2
+    ):
+        # For now, we only support matrix-matrix multiplication
+        # We should eventually canonicalize all dots to this form
         return None
 
-    if core_b_ndim == 1:
-        if a_static_shape[-1] == 1 or b_static_shape[-1] == 1:
-            if core_a_ndim == 1:
-                # inner product: (..., 1) * (..., 1) -> (...)
-                # just squeeze the last dimensions of a and b
-                new_a = a.squeeze(-1)
-                new_b = b.squeeze(-1)
-            else:
-                # matrix vector product: (..., m, 1) * (..., 1) -> (..., m)
-                # the last dimension of b is already aligned for the elemwise multiplication
-                # after we squeeze the last dimension of a
-                new_a = a.squeeze(-1)
-                new_b = b
-        else:
-            return None
+    # Check if we have matrix matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
+    if not (a_static_shape[-1] == 1 or b_static_shape[-2] == 1):
+        return None
 
-    else:
-        if a_static_shape[-1] == 1 or b_static_shape[-2] == 1:
-            if core_a_ndim == 1:
-                # vector_matrix product: (..., 1) * (..., 1, n) -> (..., n)
-                # the last dimension of a is already aligned for the elemwise multiplication
-                # after we squeeze the one to last dimension of b
-                new_a = a
-                new_b = b.squeeze(-2)
-            else:
-                # matrix matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
-                # the dimensions of a and b are already aligned for the elemwise multiplication
-                new_a = a
-                new_b = b
-        else:
-            return None
-
-    new_a = copy_stack_trace(a, new_a)
-    new_b = copy_stack_trace(b, new_b)
-    new_out = copy_stack_trace(node.out, mul(new_a, new_b))
+    new_out = mul(a, b)
+    copy_stack_trace(node.out, new_out)
     return [new_out]
 
 
