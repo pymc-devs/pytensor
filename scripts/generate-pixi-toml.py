@@ -15,6 +15,7 @@ pixi exec conda-lock render-lock-spec \
     --channel=conda-forge \
     --kind=pixi.toml \
     --file=environment.yml \
+    --file=scripts/environment-blas.yml \
     --file=pyproject.toml \
     --stdout \
     --pixi-project-name=pytensor \
@@ -59,6 +60,12 @@ def main():
     with working_environment_file.open("w") as fh:
         fh.write(environment_data)
 
+    environment_blas_file = project_root / "scripts" / "environment-blas.yml"
+    working_environment_blas_file = working_path / "scripts" / "environment-blas.yml"
+    # This is for our exclusive use, so it doesn't need to be preprocessed.
+    working_environment_blas_file.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(environment_blas_file, working_environment_blas_file)
+
     print(f"Running the command:\n{shlex.join(PARSED_COMMAND)}\n")  # noqa: T201
     result = subprocess.run(
         PARSED_COMMAND, check=True, capture_output=True, cwd=working_path
@@ -81,6 +88,8 @@ def main():
     # Clean up
     working_pyproject_file.unlink()
     working_environment_file.unlink()
+    working_environment_blas_file.unlink()
+    working_environment_blas_file.parent.rmdir()
     pixi_toml_raw_file.unlink()
     gitignore_file.unlink()
     working_path.rmdir()
