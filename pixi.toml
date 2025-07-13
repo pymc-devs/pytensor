@@ -94,13 +94,13 @@ pytest-sphinx = "*"
 
 [environments]
 # Redefine the default environment to include all categories.
-default = ["blas", "conda-dev", "jax", "numba", "rtd", "tests"]
+default = {features = ["blas", "conda-dev", "jax", "numba", "rtd", "tests"], solve-group = "default"}
 # Define a minimal environment with only the default feature.
-minimal = []
+minimal = {features = [], solve-group = "default"}
 # Create an environment for each feature.
-blas = ["blas"]
-conda-dev = ["conda-dev"]
-jax = ["jax"]
-numba = ["numba"]
-rtd = ["rtd"]
-tests = ["tests"]
+blas = {features = ["blas"], solve-group = "default"}
+jax = {features = ["jax"], solve-group = "default"}
+# conda-dev = {features = ["conda-dev"], solve-group = "default"}
+# numba = {features = ["numba"], solve-group = "default"}
+# rtd = {features = ["rtd"], solve-group = "default"}
+# tests = {features = ["tests"], solve-group = "default"}
