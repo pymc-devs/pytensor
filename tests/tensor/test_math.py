@@ -2785,7 +2785,7 @@ class TestInferShape(utt.InferShapeTester):
         bdvec_val = random(4, rng=rng)
         self._compile_and_check(
             [advec, bdvec],
-            [Dot()(advec, bdvec)],
+            [dot(advec, bdvec)],
             [advec_val, bdvec_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )
@@ -2797,7 +2797,7 @@ class TestInferShape(utt.InferShapeTester):
         bdmat_val = random(5, 3, rng=rng)
         self._compile_and_check(
             [admat, bdmat],
-            [Dot()(admat, bdmat)],
+            [dot(admat, bdmat)],
             [admat_val, bdmat_val],
             (Dot, blas.Dot22),
         )
@@ -2806,7 +2806,7 @@ class TestInferShape(utt.InferShapeTester):
         bdmat_val = random(4, 5, rng=rng)
         self._compile_and_check(
             [advec, bdmat],
-            [Dot()(advec, bdmat)],
+            [dot(advec, bdmat)],
             [advec_val, bdmat_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )
@@ -2815,7 +2815,7 @@ class TestInferShape(utt.InferShapeTester):
         admat_val = random(5, 4, rng=rng)
         self._compile_and_check(
             [admat, bdvec],
-            [Dot()(admat, bdvec)],
+            [dot(admat, bdvec)],
             [admat_val, bdvec_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )

@@ -4762,13 +4762,14 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
 
     rewritten_out = rewrite_graph(out)
     assert rewritten_out.type.shape == out.type.shape
-    # For now the rewrite doesn't apply to non matrix-matrix dots
-    applies = batched or (len(a_shape) == 2 and len(b_shape) == 2)
-    assert sum(
-        isinstance(var.owner.op, (Blockwise | Dot))
-        for var in ancestors([rewritten_out])
-        if var.owner
-    ) == (0 if applies else 1)
+    assert (
+        sum(
+            isinstance(var.owner.op, (Blockwise | Dot))
+            for var in ancestors([rewritten_out])
+            if var.owner
+        )
+        == 0
+    )
 
     a_test = np.random.normal(size=a.type.shape).astype(a.type.dtype)
     b_test = np.random.normal(size=b.type.shape).astype(b.type.dtype)

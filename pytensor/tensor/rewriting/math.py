@@ -19,7 +19,6 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
-from pytensor.raise_op import assert_op
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -34,6 +33,7 @@ from pytensor.tensor.basic import (
     ones_like,
     register_infer_shape,
     switch,
+    zeros,
     zeros_like,
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -44,12 +44,10 @@ from pytensor.tensor.math import (
     Prod,
     Sum,
     _conj,
-    _dot,
     _matmul,
     add,
     digamma,
     dot,
-    eq,
     erf,
     erfc,
     exp,
@@ -130,16 +128,12 @@ def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
     return consts, origconsts, nonconsts
 
 
-@register_canonicalize
-@register_stabilize
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
 @node_rewriter([Dot])
 def local_0_dot_x(fgraph, node):
-    if not isinstance(node.op, Dot):
-        return False
-
-    x = node.inputs[0]
-    y = node.inputs[1]
-    replace = (
+    x, y = node.inputs
+    if (
         get_underlying_scalar_constant_value(
             x, only_process_constants=True, raise_not_constant=False
         )
@@ -148,26 +142,12 @@ def local_0_dot_x(fgraph, node):
             y, only_process_constants=True, raise_not_constant=False
         )
         == 0
-    )
-
-    if replace:
-        constant_zero = constant(0, dtype=node.outputs[0].type.dtype)
-        if x.ndim == 2 and y.ndim == 2:
-            constant_zero = assert_op(constant_zero, eq(x.shape[1], y.shape[0]))
-            return [alloc(constant_zero, x.shape[0], y.shape[1])]
-        elif x.ndim == 1 and y.ndim == 2:
-            constant_zero = assert_op(constant_zero, eq(x.shape[0], y.shape[0]))
-            return [alloc(constant_zero, y.shape[1])]
-        elif x.ndim == 2 and y.ndim == 1:
-            constant_zero = assert_op(constant_zero, eq(x.shape[1], y.shape[0]))
-            return [alloc(constant_zero, x.shape[0])]
-        elif x.ndim == 1 and y.ndim == 1:
-            constant_zero = assert_op(constant_zero, eq(x.shape[0], y.shape[0]))
-            return [constant_zero]
+    ):
+        return [zeros((x.shape[0], y.shape[1]), dtype=node.outputs[0].type.dtype)]
 
 
 @register_canonicalize
-@node_rewriter([DimShuffle])
+@node_rewriter([Dot, _matmul])
 def local_lift_transpose_through_dot(fgraph, node):
     r"""Perform the rewrite ``dot(x,y).T -> dot(y.T, x.T)``.
 
@@ -176,22 +156,24 @@ def local_lift_transpose_through_dot(fgraph, node):
     and to later merge consecutive `DimShuffle`\s.
     """
 
-    if not (
-        is_matrix_transpose(node.out)
-        and node.inputs[0].owner
-        and ((dot_op := node.inputs[0].owner.op) in (_dot, _matmul))
-    ):
-        return False
+    clients = fgraph.clients[node.out]
+    if len(clients) != 1:
+        # If the dot is used in more than one place, we don't want to duplicate it
+        return None
 
-    x, y = node.inputs[0].owner.inputs
+    [(client, _)] = clients
 
-    if x.ndim >= y.ndim >= 2:
-        # Output is dot product of transposed inputs in reverse order
-        ret = [dot_op(y.mT, x.mT)]
+    if not (isinstance(client.op, DimShuffle) and is_matrix_transpose(client.out)):
+        return None
 
-        # Copy over stack trace to output from result of dot-product
-        copy_stack_trace(node.inputs[0], ret)
-        return ret
+    x, y = node.inputs
+    # Output is dot product of transposed inputs in reverse order
+    ret = node.op(y.mT, x.mT)
+
+    # Copy over stack trace to output from result of dot-product
+    copy_stack_trace(node.out, ret)
+
+    return {client.out: ret}
 
 
 def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
@@ -344,21 +326,14 @@ def local_batched_matmul_to_core_matmul_with_reshape(fgraph, node):
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([_matmul, _dot])
+@node_rewriter([_matmul, Dot])
 def local_dot_to_mul(fgraph, node):
     """Rewrite blockwise dots that correspond to multiplication without summation."""
     a, b = node.inputs
     a_static_shape = a.type.shape
     b_static_shape = b.type.shape
 
-    if isinstance(node.op, Dot) and (
-        len(a_static_shape) != 2 or len(b_static_shape) != 2
-    ):
-        # For now, we only support matrix-matrix multiplication
-        # We should eventually canonicalize all dots to this form
-        return None
-
-    # Check if we have matrix matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
+    # Check if we have (..., m, 1) * (..., 1, n) -> (..., m, n)
     if not (a_static_shape[-1] == 1 or b_static_shape[-2] == 1):
         return None
 
