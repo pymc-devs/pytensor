@@ -14,6 +14,7 @@ RAW_COMMAND = """
 pixi exec conda-lock render-lock-spec \
     --channel=conda-forge \
     --kind=pixi.toml \
+    --file=environment.yml \
     --file=pyproject.toml \
     --stdout \
     --pixi-project-name=pytensor \
@@ -49,6 +50,15 @@ def main():
     with working_pyproject_file.open("w") as fh:
         tomlkit.dump(pyproject_data, fh)
 
+    raw_environment_file = project_root / "environment.yml"
+    raw_environment_data = raw_environment_file.read_text()
+
+    environment_data = preprocess_environment_data(raw_environment_data)
+
+    working_environment_file = working_path / "environment.yml"
+    with working_environment_file.open("w") as fh:
+        fh.write(environment_data)
+
     print(f"Running the command:\n{shlex.join(PARSED_COMMAND)}\n")  # noqa: T201
     result = subprocess.run(
         PARSED_COMMAND, check=True, capture_output=True, cwd=working_path
@@ -70,6 +80,7 @@ def main():
 
     # Clean up
     working_pyproject_file.unlink()
+    working_environment_file.unlink()
     pixi_toml_raw_file.unlink()
     gitignore_file.unlink()
     working_path.rmdir()
@@ -204,6 +215,33 @@ def add_header_comment(pixi_toml_data: tomlkit.TOMLDocument) -> tomlkit.TOMLDocu
         new_doc.add(key, value)
 
     return new_doc
+
+
+def preprocess_environment_data(
+    raw_environment_data: str,
+) -> str:
+    environment_data = remove_blas_dependencies(raw_environment_data)
+    return environment_data
+
+
+def remove_blas_dependencies(
+    raw_environment_data: str,
+) -> str:
+    """
+    Remove the BLAS dependencies from the environment.yml file.
+    """
+    lines = raw_environment_data.splitlines()
+
+    def filter(line: str) -> bool:
+        TO_REMOVE = [
+            "- mkl",
+            "- mkl-service",
+            "- libblas=*=*mkl",
+        ]
+        return line.strip() not in TO_REMOVE
+
+    lines = [line for line in lines if filter(line)]
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
