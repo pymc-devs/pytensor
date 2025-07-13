@@ -15,11 +15,52 @@ filelock = ">=3.15"
 logical-unification = "*"
 minikanren = "*"
 numpy = ">=1.17.0"
+pip = "*"
 scipy = "<2,>=1"
 setuptools = ">=59.0.0"
 
 [pypi-dependencies]
 pytensor = {path = ".", editable = true}
+
+[feature.blas.target.linux-64.dependencies]
+libblas = {version = "*", build = "*mkl"}
+mkl = "*"
+mkl-service = "*"
+
+[feature.blas.target.osx-64.dependencies]
+libblas = {version = "*", build = "*mkl"}
+mkl = "*"
+mkl-service = "*"
+
+[feature.blas.target.osx-arm64.dependencies]
+libblas = {version = "*", build = "*accelerate"}
+
+[feature.blas.target.win-64.dependencies]
+libblas = {version = "*", build = "*mkl"}
+mkl = "*"
+mkl-service = "*"
+
+[feature.conda-dev.dependencies]
+compilers = "*"
+coveralls = "*"
+cython = "*"
+diff-cover = "*"
+graphviz = "*"
+ipython = "*"
+matplotlib = "*"
+mypy = "*"
+myst-nb = "*"
+packaging = "*"
+pandas = "*"
+pydeprecate = "*"
+pymc-sphinx-theme = "*"
+pytest-xdist = "*"
+python = ">=3.10"
+ruff = "*"
+sphinx-design = "*"
+sphinx_rtd_theme = "*"
+types-setuptools = "*"
+watermark = "*"
 
 [feature.jax]
 platforms = ["linux-64", "osx-64", "osx-arm64"]
@@ -53,10 +94,12 @@ pytest-sphinx = "*"
 
 [environments]
 # Redefine the default environment to include all categories.
-default = ["jax", "numba", "rtd", "tests"]
+default = ["blas", "conda-dev", "jax", "numba", "rtd", "tests"]
 # Define a minimal environment with only the default feature.
 minimal = []
 # Create an environment for each feature.
+blas = ["blas"]
+conda-dev = ["conda-dev"]
 jax = ["jax"]
 numba = ["numba"]
 rtd = ["rtd"]
