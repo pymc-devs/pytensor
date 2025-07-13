@@ -135,6 +135,8 @@ def postprocess_pixi_toml_data(
 ) -> tomlkit.TOMLDocument:
     pixi_toml_data = restrict_jax_platforms(pixi_toml_data)
     pixi_toml_data = add_header_comment(pixi_toml_data)
+    pixi_toml_data = use_only_default_solve_group(pixi_toml_data)
+    pixi_toml_data = comment_out_environments_that_wont_solve(pixi_toml_data)
     return pixi_toml_data
 
 
@@ -224,6 +226,128 @@ def add_header_comment(pixi_toml_data: tomlkit.TOMLDocument) -> tomlkit.TOMLDocu
         new_doc.add(key, value)
 
     return new_doc
+
+
+def comment_out_environments_that_wont_solve(
+    pixi_toml_data: tomlkit.TOMLDocument,
+) -> tomlkit.TOMLDocument:
+    """
+    Comment out the lines defining environments that won't solve.
+
+    TODO: Understand why these environments won't solve.
+    This happens when I set everything to use the default solve group.
+    Ordinarily the dependencies in each environment would just be subsets
+    of the dependencies in the full default environment. Perhaps there's
+    some non-monotonic constraint like a run-constrained dependency. But
+    this needs to be investigated.
+
+    >>> input_data = tomlkit.loads('''
+    ... [environments]
+    ... tests = {features = ["tests"]}
+    ... dev = {features = ["dev"]}
+    ... ''')
+    >>> output_data = comment_out_environments_that_wont_solve(input_data)
+    >>> print(tomlkit.dumps(output_data))
+    [environments]
+    dev = {features = ["dev"]}
+    # tests = {features = ["tests"]}
+    """
+    TO_COMMENT_OUT = ["conda-dev", "numba", "rtd", "tests"]
+    environments_item = pixi_toml_data.get("environments")
+    assert isinstance(environments_item, tomlkit.items.Table)
+
+    # Modify the table in-place to preserve comments and formatting
+    for key, value in list(environments_item.items()):
+        if key in TO_COMMENT_OUT:
+            # Create a comment with the key-value pair
+            comment_text = f"{key} = {value.as_string()}"
+
+            # If the original value had a comment, append it to the comment text
+            if hasattr(value, "trivia") and value.trivia.comment:
+                comment_text += f"  {value.trivia.comment}"
+
+            # Remove the original key-value pair and add a comment
+            del environments_item[key]
+            environments_item.add(tomlkit.comment(comment_text))
+
+    return pixi_toml_data
+
+
+def use_only_default_solve_group(
+    pixi_toml_data: tomlkit.TOMLDocument,
+) -> tomlkit.TOMLDocument:
+    """
+    Use only the default solve group.
+
+    TODO: upstream this to conda-lock.
+    """
+    pixi_toml_data = _convert_environment_items_to_dict_form(pixi_toml_data)
+    pixi_toml_data = _add_default_solve_group(pixi_toml_data)
+    return pixi_toml_data
+
+
+def _convert_environment_items_to_dict_form(
+    pixi_toml_data: tomlkit.TOMLDocument,
+) -> tomlkit.TOMLDocument:
+    """
+    Convert the environment items to dict form.
+
+    >>> input_data = tomlkit.loads('''
+    ... [environments]
+    ... tests = ["tests"]
+    ... dev = {features = ["dev"]}
+    ... ''')
+    >>> output_data = _convert_environment_items_to_dict_form(input_data)
+    >>> print(tomlkit.dumps(output_data))
+    [environments]
+    tests = {features = ["tests"]}
+    dev = {features = ["dev"]}
+    """
+    environments_item = pixi_toml_data.get("environments")
+    assert isinstance(environments_item, tomlkit.items.Table)
+
+    # Modify the table in-place to preserve comments and formatting
+    for key, value in list(environments_item.items()):
+        if isinstance(value, tomlkit.items.Array):
+            # Create an inline table and try to preserve comments
+            inline_table = tomlkit.inline_table()
+            inline_table["features"] = value.unwrap()
+
+            # Try to preserve any comment from the original array
+            if hasattr(value, "trivia") and value.trivia.comment:
+                inline_table.comment(value.trivia.comment)
+
+            environments_item[key] = inline_table
+
+    return pixi_toml_data
+
+
+def _add_default_solve_group(
+    pixi_toml_data: tomlkit.TOMLDocument,
+) -> tomlkit.TOMLDocument:
+    """
+    Add the default solve group to each environment entry.
+
+    >>> input_data = tomlkit.loads('''
+    ... [environments]
+    ... tests = {features = ["tests"]}
+    ... dev = {features = ["dev"]}
+    ... ''')
+    >>> output_data = _add_default_solve_group(input_data)
+    >>> print(tomlkit.dumps(output_data))
+    [environments]
+    tests = {features = ["tests"], solve-group = "default"}
+    dev = {features = ["dev"], solve-group = "default"}
+    """
+    environments_item = pixi_toml_data.get("environments")
+    assert isinstance(environments_item, tomlkit.items.Table)
+
+    for value in environments_item.values():
+        if isinstance(value, tomlkit.items.InlineTable):
+            if "solve-group" not in value:
+                value["solve-group"] = "default"
+
+    return pixi_toml_data
 
 
 def preprocess_environment_data(
