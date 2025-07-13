@@ -25,6 +25,7 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.link.utils import (
     compile_function_src,
@@ -40,14 +41,6 @@ from pytensor.tensor.slinalg import Solve
 from pytensor.tensor.sort import ArgSortOp, SortOp
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import MakeSlice, NoneConst
-
-
-def global_numba_func(func):
-    """Use to return global numba functions in numba_funcify_*.
-
-    This allows tests to remove the compilation using mock.
-    """
-    return func
 
 
 def numba_njit(*args, fastmath=None, **kwargs):
@@ -402,24 +395,22 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
     return deepcopyop
 
 
-@numba_njit
-def makeslice(*x):
-    return slice(*x)
-
-
 @numba_funcify.register(MakeSlice)
 def numba_funcify_MakeSlice(op, **kwargs):
-    return global_numba_func(makeslice)
+    @numba_basic.numba_njit
+    def makeslice(*x):
+        return slice(*x)
 
-
-@numba_njit
-def shape(x):
-    return np.asarray(np.shape(x))
+    return makeslice
 
 
 @numba_funcify.register(Shape)
 def numba_funcify_Shape(op, **kwargs):
-    return global_numba_func(shape)
+    @numba_basic.numba_njit
+    def shape(x):
+        return np.asarray(np.shape(x))
+
+    return shape
 
 
 @numba_funcify.register(Shape_i)

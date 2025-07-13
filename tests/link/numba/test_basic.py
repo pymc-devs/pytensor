@@ -175,18 +175,9 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
         else:
             return wrap
 
-    def py_global_numba_func(func):
-        if hasattr(func, "py_func"):
-            return func.py_func
-        return func
-
     mocks = [
         mock.patch("numba.njit", njit_noop),
         mock.patch("numba.vectorize", vectorize_noop),
-        mock.patch(
-            "pytensor.link.numba.dispatch.basic.global_numba_func",
-            py_global_numba_func,
-        ),
         mock.patch(
             "pytensor.link.numba.dispatch.basic.tuple_setitem", py_tuple_setitem
         ),
