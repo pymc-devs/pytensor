@@ -402,24 +402,22 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
     return deepcopyop
 
 
-@numba_njit
-def makeslice(*x):
-    return slice(*x)
-
-
 @numba_funcify.register(MakeSlice)
 def numba_funcify_MakeSlice(op, **kwargs):
-    return global_numba_func(makeslice)
+    @numba_njit
+    def makeslice(*x):
+        return slice(*x)
 
-
-@numba_njit
-def shape(x):
-    return np.asarray(np.shape(x))
+    return makeslice
 
 
 @numba_funcify.register(Shape)
 def numba_funcify_Shape(op, **kwargs):
-    return global_numba_func(shape)
+    @numba_njit
+    def shape(x):
+        return np.asarray(np.shape(x))
+
+    return shape
 
 
 @numba_funcify.register(Shape_i)
