@@ -195,10 +195,3 @@ test-skip = ["cp37*", "*musllinux*", "*win32*", "*i686*"]
 # Testing seems to be running into issues locating libs where expected
 # test-requires = ["pytest", "numba", "jax", "jaxlib"]
 # test-command = "pytest {package}/tests"
-
-# This is a temporary hack to achieve automatic pixi.toml generation.
-# Unfortunately pytest-sphinx is not yet on conda-forge. I'm trying to add
-# it in <https://github.com/conda-forge/staged-recipes/pull/30520>. In the
-# meantime, we need to make it a PyPI dependency.
-[tool.conda-lock.dependencies]
-pytest-sphinx = {source = "pypi", category="docs"}
