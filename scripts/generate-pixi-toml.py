@@ -5,9 +5,21 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import tomlkit
 import tomlkit.items
+
+
+class WorkingDirectoryPaths(NamedTuple):
+    """Paths within the temporary working directory"""
+
+    working_path: Path
+    working_pyproject_file: Path
+    working_environment_file: Path
+    working_environment_blas_file: Path
+    pixi_toml_raw_file: Path
+    gitignore_file: Path
 
 
 RAW_COMMAND = """
@@ -82,17 +94,32 @@ def main():
 
     pixi_toml_data = postprocess_pixi_toml_data(pixi_toml_raw_data)
 
-    # Write the pixi.toml file to the project root
-    (project_root / "pixi.toml").write_text(tomlkit.dumps(pixi_toml_data))
+    working_directory_paths = WorkingDirectoryPaths(
+        working_path=working_path,
+        working_pyproject_file=working_pyproject_file,
+        working_environment_file=working_environment_file,
+        working_environment_blas_file=working_environment_blas_file,
+        pixi_toml_raw_file=pixi_toml_raw_file,
+        gitignore_file=gitignore_file,
+    )
+
+    # Generate the pixi.toml content
+    pixi_toml_content = tomlkit.dumps(pixi_toml_data)
+    (project_root / "pixi.toml").write_text(pixi_toml_content)
 
     # Clean up
-    working_pyproject_file.unlink()
-    working_environment_file.unlink()
-    working_environment_blas_file.unlink()
-    working_environment_blas_file.parent.rmdir()
-    pixi_toml_raw_file.unlink()
-    gitignore_file.unlink()
-    working_path.rmdir()
+    cleanup_working_directory(working_directory_paths)
+
+
+def cleanup_working_directory(working_paths: WorkingDirectoryPaths):
+    """Clean up the temporary working directory and files"""
+    working_paths.working_pyproject_file.unlink()
+    working_paths.working_environment_file.unlink()
+    working_paths.working_environment_blas_file.unlink()
+    working_paths.working_environment_blas_file.parent.rmdir()
+    working_paths.pixi_toml_raw_file.unlink()
+    working_paths.gitignore_file.unlink()
+    working_paths.working_path.rmdir()
 
 
 def preprocess_pyproject_data(
