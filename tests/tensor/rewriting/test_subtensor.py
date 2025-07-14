@@ -1992,3 +1992,20 @@ def test_extract_diag_of_diagonal_set_subtensor():
     expected_outs.append(outs[-1])
 
     assert equal_computations(rewritten_outs, expected_outs)
+
+
+def test_local_convert_negative_indices():
+    x = pt.tensor("x", shape=(None, 3, 1))
+
+    # Dim length is unknown rewrite can't be applied
+    rewritten_out = rewrite_graph(x[-2])
+    assert equal_computations([rewritten_out], [x[-2]])
+
+    # Rewrite applies
+    rewritten_out = rewrite_graph(x[:, -2])
+    assert equal_computations([rewritten_out], [x[:, 1]])
+
+    # Rewrite doesn't apply because index is invalid
+    # TODO: If Subtensor decides to raise on make_node, this test can be removed
+    rewritten_out = rewrite_graph(x[:, :, -2])
+    assert equal_computations([rewritten_out], [x[:, :, -2]])
