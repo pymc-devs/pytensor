@@ -234,12 +234,7 @@ def comment_out_environments_that_wont_solve(
     """
     Comment out the lines defining environments that won't solve.
 
-    TODO: Understand why these environments won't solve.
-    This happens when I set everything to use the default solve group.
-    Ordinarily the dependencies in each environment would just be subsets
-    of the dependencies in the full default environment. Perhaps there's
-    some non-monotonic constraint like a run-constrained dependency. But
-    this needs to be investigated.
+    Reference: <https://github.com/prefix-dev/pixi/issues/2725>
 
     >>> input_data = tomlkit.loads('''
     ... [environments]
@@ -252,23 +247,32 @@ def comment_out_environments_that_wont_solve(
     dev = {features = ["dev"]}
     # tests = {features = ["tests"]}
     """
-    TO_COMMENT_OUT = ["conda-dev", "numba", "rtd", "tests"]
     environments_item = pixi_toml_data.get("environments")
     assert isinstance(environments_item, tomlkit.items.Table)
 
-    # Modify the table in-place to preserve comments and formatting
-    for key, value in list(environments_item.items()):
-        if key in TO_COMMENT_OUT:
-            # Create a comment with the key-value pair
+    # Create a new table to rebuild with the desired order
+    new_environments_table = tomlkit.table()
+
+    COMMENT_TEXT = "Disable non-default environments pending <https://github.com/prefix-dev/pixi/issues/2725>"
+    # Process each key-value pair in the original table
+    for key, value in environments_item.items():
+        if key == "default":
+            # Keep the default environment as-is
+            new_environments_table.append(key, value)
+
+            # Add explanatory comment at the beginning
+            new_environments_table.append(None, tomlkit.nl())
+            new_environments_table.append(None, tomlkit.comment(COMMENT_TEXT))
+        else:
+            # Convert other environments to comments
             comment_text = f"{key} = {value.as_string()}"
 
-            # If the original value had a comment, append it to the comment text
-            if hasattr(value, "trivia") and value.trivia.comment:
-                comment_text += f"  {value.trivia.comment}"
+            # Note: We don't preserve original comments here since they
+            # don't make sense in the commented-out context
+            new_environments_table.append(None, tomlkit.comment(comment_text))
 
-            # Remove the original key-value pair and add a comment
-            del environments_item[key]
-            environments_item.add(tomlkit.comment(comment_text))
+    # Replace the original environments table with the new one
+    pixi_toml_data["environments"] = new_environments_table
 
     return pixi_toml_data
 
