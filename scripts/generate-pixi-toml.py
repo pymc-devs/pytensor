@@ -253,7 +253,15 @@ def comment_out_environments_that_wont_solve(
     # Create a new table to rebuild with the desired order
     new_environments_table = tomlkit.table()
 
-    COMMENT_TEXT = "Disable non-default environments pending <https://github.com/prefix-dev/pixi/issues/2725>"
+    COMMENT_TEXT_1 = (
+        "Disable non-default environments pending "
+        "<https://github.com/prefix-dev/pixi/issues/2725>"
+    )
+    COMMENT_TEXT_2 = (
+        "If you want to re-enable some of these, it's recommended to "
+        "remove the solve-group key."
+    )
+
     # Process each key-value pair in the original table
     for key, value in environments_item.items():
         if key == "default":
@@ -262,7 +270,8 @@ def comment_out_environments_that_wont_solve(
 
             # Add explanatory comment at the beginning
             new_environments_table.append(None, tomlkit.nl())
-            new_environments_table.append(None, tomlkit.comment(COMMENT_TEXT))
+            new_environments_table.append(None, tomlkit.comment(COMMENT_TEXT_1))
+            new_environments_table.append(None, tomlkit.comment(COMMENT_TEXT_2))
         else:
             # Convert other environments to comments
             comment_text = f"{key} = {value.as_string()}"
