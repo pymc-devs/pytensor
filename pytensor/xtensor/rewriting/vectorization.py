@@ -3,6 +3,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.random.utils import compute_batch_shape
 from pytensor.xtensor.basic import xtensor_from_tensor
+from pytensor.xtensor.dims import rebase_dim
 from pytensor.xtensor.rewriting.utils import lower_aligned, register_lower_xtensor
 from pytensor.xtensor.vectorization import XRV, XBlockwise, XElemwise
 
@@ -10,7 +11,10 @@ from pytensor.xtensor.vectorization import XRV, XBlockwise, XElemwise
 @register_lower_xtensor
 @node_rewriter(tracks=[XElemwise])
 def lower_elemwise(fgraph, node):
-    out_dims = node.outputs[0].type.dims
+    assert len(node.outputs) == 1
+    out_dims = node.outputs[0].dims
+    out_dims = [rebase_dim(dim, *node.inputs) for dim in out_dims]
+    out_dim_types = [dim.type for dim in out_dims]
 
     # Convert input XTensors to Tensors and align batch dimensions
     tensor_inputs = [lower_aligned(inp, out_dims) for inp in node.inputs]
@@ -21,7 +25,8 @@ def lower_elemwise(fgraph, node):
 
     # Convert output Tensors to XTensors
     new_outs = [
-        xtensor_from_tensor(tensor_out, dims=out_dims) for tensor_out in tensor_outs
+        xtensor_from_tensor(tensor_out, dims=out_dims, check=False)
+        for tensor_out in tensor_outs
     ]
     return new_outs
 

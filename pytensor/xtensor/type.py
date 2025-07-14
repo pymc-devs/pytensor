@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import typing
 import warnings
+from itertools import combinations
 from types import EllipsisType
+from uuid import UUID, uuid4
 
 from pytensor.compile import (
     DeepCopyOp,
@@ -8,11 +12,11 @@ from pytensor.compile import (
     register_deep_copy_op_c_code,
     register_view_op_c_code,
 )
+from pytensor.scalar.basic import ScalarType, ScalarVariable
 from pytensor.tensor import (
     TensorType,
     _as_tensor_variable,
     as_tensor_variable,
-    specify_shape,
 )
 from pytensor.tensor.math import variadic_mul
 
@@ -25,7 +29,7 @@ except ModuleNotFoundError:
     XARRAY_AVAILABLE = False
 
 from collections.abc import Sequence
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal, TypeVar, cast
 
 import numpy as np
 
@@ -38,17 +42,329 @@ from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.variable import TensorConstantSignature, TensorVariable
 
 
+# I think uint64 would make more sense, but some code in tensor/rewrites/shape
+# asserts that it is int64?
+# DIM_LENGTH_TYPE = int64
+DIM_LENGTH_TYPE = TensorType(dtype="int64", shape=())
+DIM_LENGTH_VARIABLE = TensorVariable
+
+
+class DimType(Type):
+    """A type for dimensions.
+
+    If two dimensions share the same type, they must have the same
+    length.
+    """
+
+    __props__ = ("name", "size")
+
+    name: str | None
+    size: int | None
+
+    def __init__(self, *, name: str | None = None, size: int | None = None):
+        super().__init__()
+        self.name = name
+        self.size = size
+
+    def base_dims(self) -> set[BasicDim]:
+        raise NotImplementedError(
+            "Subclasses must implement base_dims to return a set of base dimensions."
+        )
+
+    def filter(self, data, strict=False, allow_downcast=None):
+        # At runtime, a dim behaves like a DIM_LENGTH_SCALAR scalar
+        return DIM_LENGTH_TYPE.filter(
+            data, strict=strict, allow_downcast=allow_downcast
+        )
+
+    def filer_variable(self, other, allow_convert=True):
+        """Filter a variable to ensure it is a DimVariable."""
+        if not isinstance(other, Variable):
+            raise ValueError()
+
+        if isinstance(other.type, DimType):
+            return other
+
+        if allow_convert:
+            other2 = self.convert_variable(other)
+            if other2 is not None:
+                return other2
+
+        raise TypeError(
+            f"Cannot convert Type {other.type} (of Variable {other}) into Type {self}."
+        )
+
+    def __repr__(self) -> str:
+        props = []
+        for prop in self.__props__:
+            if not hasattr(self, prop):
+                raise AttributeError(
+                    f"{self.__class__.__name__} has no property '{prop}' even though it is listed in __props__"
+                )
+            value = getattr(self, prop)
+            if value is None:
+                continue
+            if prop == "name":
+                props.insert(0, f"{value}")
+            elif prop == "uuid":
+                props.append("uuid=?")
+            else:
+                props.append(f"{prop}={value!r}")
+        return f"{self.__class__.__name__}({', '.join(props)})"
+
+    def dim_compatible(self, other: DimType):
+        """Test if the dimension is compatible with other dimensions.
+
+        If two dimensions are compatible, they must have a common
+        dimension that they can broadcast to. Tensors can not contain
+        any dimensions that are compatible.
+
+        dim compatibility *must* me reflexive, symmetric and transitive.
+
+        It defaults to dim equality, but can be overridden by subclasses.
+        """
+        return self == other
+
+    def broadcasted_dim_type(self, *other: DimType) -> DimType | None:
+        """Find the smallest dimension that all dimensions can broadcast to.
+
+        Note, that this does not correspond to the usual numpy broadcasting,
+        but will be used mostly to broadcast dimensions that are subsets
+        of some larger dimension.
+
+        If the dimensions are not compatible, it returns None.
+        """
+        if all(self.dim_compatible(o) for o in other):
+            return self
+        return None
+
+    def broadcast_dim(self, dim_var: DimVariable, target_type: DimType) -> DimVariable:
+        """Broadcast this dimension to the given broadcast_dim.
+
+        If the dimensions are not compatible, it raises a ValueError.
+        """
+        if target_type == self:
+            return dim_var
+
+        if not self.dim_compatible(target_type):
+            raise ValueError(
+                f"Cannot broadcast {self} to {target_type}. "
+                "Dimensions must be compatible."
+            )
+        raise NotImplementedError("Subclass did not implent dim broadcasting")
+
+
+class BasicDim(DimType):
+    """A non-derived dimension type."""
+
+    __props__ = (*DimType.__props__, "uuid")
+
+    uuid: UUID | None = None
+
+    def __init__(self, *, uuid: UUID | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self.uuid = uuid
+
+    def base_dims(self) -> set[BasicDim]:
+        return {self}
+
+    """
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, BasicDim):
+            return False
+
+        is_equal = True
+        for prop in self.__props__:
+            if prop == "size":
+                continue
+            is_equal = is_equal and getattr(self, prop) == getattr(other, prop)
+
+        if not is_equal:
+            return False
+
+        if self.size is None or other.size is None:
+            return True
+
+        if self.size != other.size:
+            raise ValueError(f"Incompatible shapes for dimenson {self.name}")
+    """
+
+
+class SubsetDim(DimType):
+    __props__ = (*DimType.__props__, "base", "subset")
+
+
+class ProductDim(DimType):
+    __props__ = (
+        *DimType.__props__,
+        "dims",
+    )
+
+    dims: tuple[DimType, ...]
+
+    def __init__(self, *, dims: Sequence[DimType], **kwargs):
+        super().__init__(**kwargs)
+        self.dims = tuple(dims)
+
+    def base_dims(self) -> set[BasicDim]:
+        base = set()
+        for dim in self.dims:
+            base = set.union(base, dim.base_dims())
+        return base
+
+
+class ConcatDim(DimType):
+    __props__ = (
+        *DimType.__props__,
+        "dims",
+    )
+
+    dims: tuple[DimType, ...]
+
+    def __init__(self, *, dims: Sequence[DimType], **kwargs):
+        super().__init__(**kwargs)
+        self.dims = tuple(dims)
+
+    def base_dims(self) -> set[BasicDim]:
+        base = set()
+        for dim in self.dims:
+            base = set.union(base, dim.base_dims())
+        return base
+
+
+class ConstSliceDim(DimType):
+    __props__ = (*DimType.__props__, "base", "slice")
+
+    base: DimType
+    slice: slice  # [int | None, int | None, int | None]
+
+    def __init__(self, *, base: DimType, slice: slice, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.slice = slice
+
+    def base_dims(self) -> set[BasicDim]:
+        return self.base.base_dims()
+
+
+class UnknownIndexedDim(DimType):
+    __props__ = (*DimType.__props__, "base", "uuid")
+
+    base: DimType
+    uuid: UUID
+
+    def __init__(self, *, base: DimType, uuid: UUID, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.uuid = uuid
+
+    def base_dims(self) -> set[BasicDim]:
+        return self.base.base_dims()
+
+
+class CloneDim(DimType):
+    __props__ = (*DimType.__props__, "base", "uuid")
+
+    base: DimType
+    uuid: UUID
+
+    def __init__(self, *, base: DimType, uuid: UUID, **kwargs):
+        super().__init__(**kwargs)
+        self.base = base
+        self.uuid = uuid
+
+    def base_dims(self) -> set[BasicDim]:
+        return self.base.base_dims()
+
+
+class DimVariable(Variable[DimType, OptionalApplyType]):
+    def clone_dim(self, name: str | None = None) -> DimVariable:
+        """Rename the dimension variable."""
+        from pytensor.xtensor.dims import _clone_dim
+
+        return _clone_dim(self, name=name)
+
+    @property
+    def size(self) -> ScalarVariable:
+        """Return the length of the dimension variable."""
+        import pytensor.xtensor.dims as px_dims
+
+        return px_dims._dim_size(self)
+
+
+class ConstantDim(Constant[DimType], DimVariable):
+    def __repr__(self, firstPass=True) -> str:
+        if self.name is None:
+            return f"UnnamedDim({int(self.data)})"
+        else:
+            return f"{self.name}({int(self.data)})"
+
+
+DimType.variable_type = DimVariable
+DimType.constant_type = ConstantDim
+
+_unknown_dim_counter: int = 0
+
+
+def _new_dim_name() -> str:
+    global _unknown_dim_counter
+    count = _unknown_dim_counter
+    _unknown_dim_counter += 1
+    return f"dim{count}"
+
+
+def dim(
+    name: str | None = None,
+    size: DimVariable | ScalarVariable | TensorVariable | int | None = None,
+    unique: bool = True,
+) -> DimVariable:
+    """Create a dimension variable."""
+    if unique:
+        uuid = uuid4()
+    else:
+        uuid = None
+
+    if name is None:
+        name = _new_dim_name()
+    if size is None:
+        dim_type = BasicDim(name=name, uuid=uuid)
+        return cast(DimVariable, dim_type.make_variable(name=name))
+    if isinstance(size, int):
+        dim_type = BasicDim(size=size, name=name, uuid=uuid)
+        return cast(DimVariable, dim_type.make_constant(value=size, name=name))
+    if isinstance(size, ScalarVariable):
+        size = as_tensor_variable(size)
+    if isinstance(size, DIM_LENGTH_VARIABLE):
+        if size.type != DIM_LENGTH_TYPE:
+            raise TypeError(
+                f"length must be a DIM_LENGTH_SCALAR scalar, got {size.type} for {name}"
+            )
+        from pytensor.xtensor.dims import from_length
+
+        return from_length(size, name=name)
+    if isinstance(size, DimVariable):
+        return size.clone_dim(name=name)
+    raise TypeError(
+        f"length must be an int or a DIM_LENGTH_SCALAR scalar, got {type(size)} for {name}"
+    )
+
+
+def dims(*names: str) -> list[DimVariable]:
+    return [dim(name) for name in names]
+
+
 class XTensorType(Type, HasDataType, HasShape):
     """A `Type` for Xtensors (Xarray-like tensors with dims)."""
 
     __props__ = ("dtype", "shape", "dims")
 
+    dims: tuple[DimType, ...]
+
     def __init__(
         self,
         dtype: str | np.dtype,
         *,
-        dims: Sequence[str],
-        shape: Sequence[int | None] | None = None,
+        dims: Sequence[DimType],
         name: str | None = None,
     ):
         if dtype == "floatX":
@@ -59,14 +375,13 @@ class XTensorType(Type, HasDataType, HasShape):
         self.dims = tuple(dims)
         if len(set(dims)) < len(dims):
             raise ValueError(f"Dimensions must be unique. Found duplicates in {dims}: ")
-        if shape is None:
-            self.shape = (None,) * len(self.dims)
-        else:
-            self.shape = tuple(shape)
-            if len(self.shape) != len(self.dims):
+
+        for dim1, dim2 in combinations(dims, r=2):
+            if dim1.dim_compatible(dim2):
                 raise ValueError(
-                    f"Shape {self.shape} must have the same length as dims {self.dims}"
+                    f"Dimensions {dim1} and {dim2} are compatible, but must be distinct. Clone one of them."
                 )
+        self.shape = tuple(dim.size for dim in self.dims)
         self.ndim = len(self.dims)
         self.name = name
         self.numpy_dtype = np.dtype(self.dtype)
@@ -87,12 +402,12 @@ class XTensorType(Type, HasDataType, HasShape):
             dims = self.dims
         if shape is None:
             shape = self.shape
-        return type(self)(dtype=dtype, shape=shape, dims=dims, **kwargs)
+        return type(self)(dtype=dtype, dims=dims, **kwargs)
 
-    def filter(self, value, strict=False, allow_downcast=None):
+    def filter(self, data, strict=False, allow_downcast=None):
         # XTensorType behaves like TensorType at runtime, so we filter the same way.
         return TensorType.filter(
-            self, value, strict=strict, allow_downcast=allow_downcast
+            self, data, strict=strict, allow_downcast=allow_downcast
         )
 
     @staticmethod
@@ -118,11 +433,12 @@ class XTensorType(Type, HasDataType, HasShape):
             f"You can try to manually convert {other} into a {self}. "
         )
 
-    def convert_variable(self, var):
+    def convert_variable(self, var: Variable):
         var_type = var.type
         if self.is_super(var_type):
             return var
         if isinstance(var_type, XTensorType):
+            var = cast(XTensorVariable, var)
             if (
                 self.ndim != var_type.ndim
                 or self.dtype != var_type.dtype
@@ -136,32 +452,12 @@ class XTensorType(Type, HasDataType, HasShape):
                 if self.is_super(var_type):
                     return var
 
-            if any(
-                s_length is not None
-                and var_length is not None
-                and s_length != var_length
-                for s_length, var_length in zip(self.shape, var_type.shape)
-            ):
-                # Incompatible static shapes
-                return None
-
-            # Needs a specify_shape
-            return as_xtensor(specify_shape(var.values, self.shape), dims=self.dims)
+            return var
 
         if isinstance(var_type, TensorType):
-            if (
-                self.ndim != var_type.ndim
-                or self.dtype != var_type.dtype
-                or any(
-                    s_length is not None
-                    and var_length is not None
-                    and s_length != var_length
-                    for s_length, var_length in zip(self.shape, var_type.shape)
-                )
-            ):
-                return None
-            else:
-                return as_xtensor(specify_shape(var, self.shape), dims=self.dims)
+            var = cast(TensorVariable, var)
+            if self.ndim == 0 and var.ndim == 0:
+                return as_xtensor(var, dims=())
 
         return None
 
@@ -179,26 +475,17 @@ class XTensorType(Type, HasDataType, HasShape):
             and self.shape == other.shape
         )
 
-    def is_super(self, otype):
+    def is_super(self, otype: Type):
         if type(self) is not type(otype):
             return False
-        if self.dtype != otype.dtype:
-            return False
-        if self.dims != otype.dims:
-            return False
-        if any(
-            s_dim_length is not None and s_dim_length != o_dim_length
-            for s_dim_length, o_dim_length in zip(self.shape, otype.shape)
-        ):
-            return False
-        return True
+        otype = cast(XTensorType, otype)
+        return self == otype
 
 
 def xtensor(
     name: str | None = None,
     *,
-    dims: Sequence[str],
-    shape: Sequence[int | None] | None = None,
+    dims: Sequence[AsDim],
     dtype: str | np.dtype = "floatX",
 ):
     """Create an XTensorVariable.
@@ -207,10 +494,8 @@ def xtensor(
     ----------
     name : str or None, optional
         The name of the variable
-    dims : Sequence[str]
-        The names of the dimensions of the tensor
-    shape : Sequence[int | None] or None, optional
-        The shape of the tensor. If None, defaults to a shape with None for each dimension.
+    dims : Sequence[AsDim]
+        The dimensions of the tensor
     dtype : str or np.dtype, optional
         The data type of the tensor. Defaults to 'floatX' (config.floatX).
 
@@ -219,7 +504,8 @@ def xtensor(
     XTensorVariable
         A new XTensorVariable with the specified name, dims, shape, and dtype.
     """
-    return XTensorType(dtype=dtype, dims=dims, shape=shape)(name=name)
+    dims = [as_dim(dim) for dim in dims]
+    return XTensorType(dtype=dtype, dims=tuple(dim.type for dim in dims))(name=name)
 
 
 _XTensorTypeType = TypeVar("_XTensorTypeType", bound=XTensorType)
@@ -376,12 +662,16 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         raise NotImplementedError("coords not implemented for XTensorVariable")
 
     @property
-    def dims(self) -> tuple[str, ...]:
-        return self.type.dims
+    def dims(self) -> tuple[DimVariable, ...]:
+        from pytensor.xtensor.dims import _dim_from_tensor
+
+        return tuple(
+            _dim_from_tensor(self, idx) for idx, _ in enumerate(self.type.dims)
+        )
 
     @property
-    def sizes(self) -> dict[str, TensorVariable]:
-        return dict(zip(self.dims, self.shape))
+    def sizes(self) -> dict[DimType, TensorVariable]:
+        return dict(zip(self.type.dims, self.shape))
 
     @property
     def as_numpy(self):
@@ -396,7 +686,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     @property
     def shape(self) -> tuple[TensorVariable, ...]:
-        return tuple(px.basic.tensor_from_xtensor(self).shape)  # type: ignore
+        return tuple(as_tensor_variable(dim.size) for dim in self.dims)  # type: ignore
 
     @property
     def size(self) -> TensorVariable:
@@ -797,7 +1087,7 @@ XTensorType.variable_type = XTensorVariable  # type: ignore
 XTensorType.constant_type = XTensorConstant  # type: ignore
 
 
-def xtensor_constant(x, name=None, dims: None | Sequence[str] = None):
+def xtensor_constant(x, name=None, dims: None | Sequence[DimVariable] = None):
     """Convert a constant value to an XTensorConstant."""
 
     x_dims: tuple[str, ...]
@@ -828,7 +1118,7 @@ def xtensor_constant(x, name=None, dims: None | Sequence[str] = None):
                 )
     try:
         return XTensorConstant(
-            XTensorType(dtype=x_data.dtype, dims=x_dims, shape=x_data.shape),
+            XTensorType(dtype=x_data.dtype, dims=x_dims),
             x_data,
             name=name,
         )
@@ -843,7 +1133,47 @@ if XARRAY_AVAILABLE:
         return xtensor_constant(x, **kwargs)
 
 
-def as_xtensor(x, dims: Sequence[str] | None = None, *, name: str | None = None):
+AsDim = str | DimVariable | DimType
+
+
+def as_dim(
+    x: AsDim,
+    *,
+    allow_new: bool = False,
+) -> DimVariable:
+    if isinstance(x, DimVariable):
+        return x
+    if isinstance(x, str):
+        if allow_new:
+            return dim(name=x, unique=True)
+        else:
+            raise ValueError(
+                f"Cannot convert string {x} to dim without allow_new=True. "
+                "Use `dim(name=x)` to create a new dimension."
+            )
+    if isinstance(x, DimType):
+        if allow_new:
+            return cast(DimVariable, x())
+        else:
+            raise ValueError(
+                f"Cannot convert DimType {x} to dim without allow_new=True. "
+                "Use `x.make_variable()` to create a new dimension variable."
+            )
+    raise ValueError(f"Can not convert {type(x)} to dim.")
+
+
+def as_dim_type(
+    x: AsDim,
+) -> DimType:
+    return as_dim(x, allow_new=True).type
+
+
+def as_xtensor(
+    x,
+    dims: Sequence[DimVariable] | None = None,
+    *,
+    name: str | None = None,
+) -> XTensorVariable:
     """Convert a variable or data to an XTensorVariable.
 
     Parameters
@@ -883,10 +1213,13 @@ def as_xtensor(x, dims: Sequence[str] | None = None, *, name: str | None = None)
                         "non-scalar TensorVariable cannot be converted to XTensorVariable without dims."
                     )
             return px.basic.xtensor_from_tensor(x, dims=dims, name=name)
-        else:
-            raise TypeError(
-                "Variable with type {x.type} cannot be converted to XTensorVariable."
-            )
+
+        if isinstance(x.type, ScalarType):
+            # Convert scalar to XTensorVariable with no dims
+            return as_xtensor(as_tensor_variable(x), name=name, dims=dims)
+        raise TypeError(
+            f"Variable with type {x.type} cannot be converted to XTensorVariable."
+        )
     try:
         return xtensor_constant(x, dims=dims, name=name)
     except TypeError as err:

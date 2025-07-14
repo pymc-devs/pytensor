@@ -14,33 +14,42 @@ from pytensor.tensor.utils import (
     get_static_shape_from_size_variables,
 )
 from pytensor.xtensor.basic import XOp
-from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
+from pytensor.xtensor.type import (
+    AsDim,
+    DimType,
+    DimVariable,
+    XTensorVariable,
+    as_dim,
+    as_xtensor,
+    xtensor,
+)
 
 
-def combine_dims_and_shape(
-    inputs: Sequence[XTensorVariable], exclude: Sequence[str] | None = None
-) -> dict[str, int | None]:
-    """Combine information of static dimensions and shapes from multiple xtensor inputs.
-
-    Exclude
-    """
-    exclude_set: set[str] = set() if exclude is None else set(exclude)
-    dims_and_shape: dict[str, int | None] = {}
+def broadcast_xtensors(
+    inputs: Sequence[XTensorVariable], exclude: Sequence[AsDim] | None = None
+) -> list[DimVariable]:
+    if exclude is None:
+        exclude = []
+    exclude_set: set[DimType] = {as_dim(d).type for d in exclude}
+    dims_and_shape: dict[DimType, int | None] = {}
+    dim_to_dimvar: dict[DimType, DimVariable] = {}
     for inp in inputs:
-        for dim, dim_length in zip(inp.type.dims, inp.type.shape):
-            if dim in exclude_set:
+        for dim, dim_length in zip(inp.dims, inp.type.shape):
+            # TODO Must check dim conversion!!!
+            if dim.type in exclude_set:
                 continue
-            if dim not in dims_and_shape:
-                dims_and_shape[dim] = dim_length
-            elif dim_length is not None:
+            if dim.type not in dims_and_shape:
+                dims_and_shape[dim.type] = dim_length
+            if dim.type not in dim_to_dimvar:
+                dim_to_dimvar[dim.type] = dim
+
+            if dim_length is not None:
                 # Check for conflicting shapes
-                if (dims_and_shape[dim] is not None) and (
-                    dims_and_shape[dim] != dim_length
+                if (dims_and_shape[dim.type] is not None) and (
+                    dims_and_shape[dim.type] != dim_length
                 ):
                     raise ValueError(f"Dimension {dim} has conflicting shapes")
-                # Keep the non-None shape
-                dims_and_shape[dim] = dim_length
-    return dims_and_shape
+    return list(dim_to_dimvar.values())
 
 
 class XElemwise(XOp):
@@ -57,18 +66,14 @@ class XElemwise(XOp):
                 f"Wrong number of inputs, expected {self.scalar_op.nin}, got {len(inputs)}"
             )
 
-        dims_and_shape = combine_dims_and_shape(inputs)
-        if dims_and_shape:
-            output_dims, output_shape = zip(*dims_and_shape.items())
-        else:
-            output_dims, output_shape = (), ()
+        output_dims = broadcast_xtensors(inputs)
 
         dummy_scalars = [ps.get_scalar_type(inp.type.dtype)() for inp in inputs]
         output_dtypes = [
             out.type.dtype for out in self.scalar_op.make_node(*dummy_scalars).outputs
         ]
         outputs = [
-            xtensor(dtype=output_dtype, dims=output_dims, shape=output_shape)
+            xtensor(dtype=output_dtype, dims=output_dims)
             for output_dtype in output_dtypes
         ]
         return Apply(self, inputs, outputs)
@@ -95,7 +100,7 @@ class XBlockwise(XOp):
                 f"Wrong number of inputs, expected {len(self.core_dims[0])}, got {len(inputs)}"
             )
 
-        dims_and_shape = combine_dims_and_shape(inputs)
+        dims_and_shape = broadcast_xtensors(inputs)
 
         core_inputs_dims, core_outputs_dims = self.core_dims
         core_input_dims_set = set(chain.from_iterable(core_inputs_dims))
@@ -226,7 +231,7 @@ class XRV(XOp, RNGConsumerOp):
                 self.extra_dims, get_static_shape_from_size_variables(extra_dim_lengths)
             )
         )
-        params_dims_and_shape = combine_dims_and_shape(params)
+        params_dims_and_shape = broadcast_xtensors(params)
 
         # Check that no parameter dims conflict with size dims
         if conflict_dims := set(extra_dims_and_shape).intersection(
