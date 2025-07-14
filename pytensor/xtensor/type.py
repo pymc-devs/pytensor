@@ -1138,14 +1138,34 @@ AsDim = str | DimVariable | DimType
 
 def as_dim(
     x: AsDim,
+    *,
+    allow_new: bool = False,
 ) -> DimVariable:
     if isinstance(x, DimVariable):
         return x
     if isinstance(x, str):
-        return dim(name=x, unique=False)
+        if allow_new:
+            return dim(name=x, unique=True)
+        else:
+            raise ValueError(
+                f"Cannot convert string {x} to dim without allow_new=True. "
+                "Use `dim(name=x)` to create a new dimension."
+            )
     if isinstance(x, DimType):
-        return cast(DimVariable, x())
+        if allow_new:
+            return cast(DimVariable, x())
+        else:
+            raise ValueError(
+                f"Cannot convert DimType {x} to dim without allow_new=True. "
+                "Use `x.make_variable()` to create a new dimension variable."
+            )
     raise ValueError(f"Can not convert {type(x)} to dim.")
+
+
+def as_dim_type(
+    x: AsDim,
+) -> DimType:
+    return as_dim(x, allow_new=True).type
 
 
 def as_xtensor(

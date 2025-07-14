@@ -41,6 +41,8 @@ class Length(Op):
 
 
 def _dim_size(dim: DimVariable) -> DIM_LENGTH_VARIABLE:
+    if dim.type.size is not None:
+        return DIM_LENGTH_TYPE.filter_variable(dim.type.size)
     return Length()(dim)
 
 
@@ -162,21 +164,26 @@ def product_dim(*dims: DimVariable, name: str | None = None) -> DimVariable:
     return Product()(*dims, name=name)
 
 
-def rebase_dim(dim: DimVariable, *tensors: XTensorVariable) -> DimVariable:
-    if not isinstance(dim, DimVariable):
+def rebase_dim(dim: DimVariable | DimType, *tensors: XTensorVariable) -> DimVariable:
+    if not isinstance(dim, DimVariable | DimType):
         raise TypeError(f"dim must be a DimVariable, got {type(dim)}")
 
     if not tensors:
         raise ValueError("At least one tensor must be provided for rebasing.")
 
+    if isinstance(dim, DimVariable):
+        dim_type = dim.type
+    else:
+        dim_type = dim
+
     for tensor in tensors:
         for i, tensor_dim in enumerate(tensor.type.dims):
-            if dim.type == tensor_dim:
+            if dim_type == tensor_dim:
                 return _dim_from_tensor(tensor, idx=i)
-    raise ValueError(f"Dimension {dim.type} not found in any of the provided tensors.")
+    raise ValueError(f"Dimension {dim} not found in any of the provided tensors.")
 
 
 def rebase_dims(
-    dims: Iterable[DimVariable], *tensors: XTensorVariable
+    dims: Iterable[DimVariable | DimType], *tensors: XTensorVariable
 ) -> list[DimVariable]:
     return [rebase_dim(dim, *tensors) for dim in dims]

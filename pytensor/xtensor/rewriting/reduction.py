@@ -17,6 +17,7 @@ def lower_reduce(fgraph, node):
     x_dims = x.type.dims
     reduce_dims = node.op.dims
     reduce_axis = [x_dims.index(dim) for dim in reduce_dims]
+    out_dims = [x_dim for x_dim in x.dims if x_dim.type not in reduce_dims]
 
     if not reduce_axis:
         return [x]
@@ -40,7 +41,7 @@ def lower_reduce(fgraph, node):
 
     x_tensor = tensor_from_xtensor(x)
     out_tensor = tensor_op_class(axis=reduce_axis)(x_tensor)
-    new_out = xtensor_from_tensor(out_tensor, out.type.dims)
+    new_out = xtensor_from_tensor(out_tensor, out_dims)
     return [new_out]
 
 
@@ -51,6 +52,7 @@ def lower_cumreduce(fgraph, node):
     x_dims = x.type.dims
     reduce_dims = node.op.dims
     reduce_axis = [x_dims.index(dim) for dim in reduce_dims]
+    out_dims = [x_dim for x_dim in x.dims if x_dim not in reduce_dims]
 
     if not reduce_axis:
         return [x]
@@ -68,5 +70,5 @@ def lower_cumreduce(fgraph, node):
     out_tensor = tensor_from_xtensor(x)
     for axis in reduce_axis:
         out_tensor = tensor_op_class(axis=axis)(out_tensor)
-    out = xtensor_from_tensor(out_tensor, x.type.dims)
+    out = xtensor_from_tensor(out_tensor, out_dims)
     return [out]

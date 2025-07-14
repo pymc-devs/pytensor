@@ -19,6 +19,7 @@ from pytensor.xtensor.type import (
     DimType,
     DimVariable,
     XTensorVariable,
+    as_dim,
     as_xtensor,
     xtensor,
 )
@@ -27,12 +28,15 @@ from pytensor.xtensor.type import (
 def broadcast_xtensors(
     inputs: Sequence[XTensorVariable], exclude: Sequence[AsDim] | None = None
 ) -> list[DimVariable]:
+    if exclude is None:
+        exclude = []
+    exclude_set: set[DimType] = {as_dim(d).type for d in exclude}
     dims_and_shape: dict[DimType, int | None] = {}
     dim_to_dimvar: dict[DimType, DimVariable] = {}
     for inp in inputs:
         for dim, dim_length in zip(inp.dims, inp.type.shape):
             # TODO Must check dim conversion!!!
-            if dim in exclude:
+            if dim.type in exclude_set:
                 continue
             if dim.type not in dims_and_shape:
                 dims_and_shape[dim.type] = dim_length

@@ -55,6 +55,18 @@ def useless_length(fgraph, node):
 @register_useless
 @register_canonicalize
 @register_lower_xtensor
+@node_rewriter(tracks=[Length])
+def known_length(fgraph, node):
+    """Length(dim_with_size) -> size"""
+    [dim] = node.inputs
+    if dim.type.size is not None:
+        return [dim.type.size]
+
+
+@register_infer_shape
+@register_useless
+@register_canonicalize
+@register_lower_xtensor
 @node_rewriter(tracks=[DimFromTensor])
 def useless_dim_from_tensor(fgraph, node):
     """DimFromTensor(XTensorFromTensor(..., dim)) -> dim"""

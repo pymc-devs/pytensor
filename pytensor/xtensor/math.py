@@ -9,7 +9,8 @@ from pytensor import config
 from pytensor.graph.basic import Apply
 from pytensor.scalar.basic import _cast_mapping, upcast
 from pytensor.xtensor.basic import XOp, as_xtensor
-from pytensor.xtensor.type import AsDim, DimType, DimVariable, as_dim, xtensor
+from pytensor.xtensor.dims import rebase_dims
+from pytensor.xtensor.type import AsDim, DimType, as_dim_type, xtensor
 from pytensor.xtensor.vectorization import XElemwise
 
 
@@ -527,7 +528,7 @@ class Dot(XOp):
     __props__ = ("dims",)
 
     def __init__(self, dims: Iterable[DimType]):
-        self.dims = dims
+        self.dims = frozenset(dims)
         super().__init__()
 
     def make_node(self, x, y):
@@ -544,7 +545,7 @@ class Dot(XOp):
         # Determine output dtype
         out_dtype = upcast(x.type.dtype, y.type.dtype)
 
-        out = xtensor(dtype=out_dtype, dims=out_dims)
+        out = xtensor(dtype=out_dtype, dims=rebase_dims(out_dims, x, y))
         return Apply(self, [x, y], [out])
 
 
@@ -589,7 +590,6 @@ def dot(x, y, dim: str | Iterable[AsDim] | EllipsisType | None = None):
 
     x_dims = set(x.type.dims)
     y_dims = set(y.type.dims)
-    print(x_dims, y_dims, dim)
     intersection = x_dims & y_dims
     union = x_dims | y_dims
 
@@ -599,9 +599,9 @@ def dot(x, y, dim: str | Iterable[AsDim] | EllipsisType | None = None):
     elif dim is ...:
         dim_set = union
     elif isinstance(dim, Iterable):
-        dim_set = set([as_dim(dim).type for dim in dim])
-    elif isinstance(dim, (DimVariable, DimType, str)):
-        dim_set = {as_dim(dim).type}
+        dim_set = {as_dim_type(dim) for dim in dim}
+    elif isinstance(dim, AsDim):
+        dim_set = {as_dim_type(dim)}
     else:
         raise TypeError(f"Unknown type {dim} for dimension")
 

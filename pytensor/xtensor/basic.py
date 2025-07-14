@@ -5,7 +5,7 @@ from pytensor.tensor.basic import ones as tensor_ones
 from pytensor.tensor.basic import zeros as tensor_zeros
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import TensorType
-from pytensor.xtensor.type import DimVariable, XTensorType, as_xtensor, xtensor
+from pytensor.xtensor.type import DimVariable, XTensorType, as_dim, as_xtensor, xtensor
 
 
 DIM_LENGTH_SCALAR = uint64
@@ -64,6 +64,7 @@ class XTensorFromTensor(XTypeCastOp):
 def xtensor_from_tensor(x, dims, name=None, check: bool = True):
     if check:
         x = specify_shape(x, [dim.size for dim in dims])
+    dims = [as_dim(dim) for dim in dims]
     return XTensorFromTensor()(x, *dims, name=name)
 
 

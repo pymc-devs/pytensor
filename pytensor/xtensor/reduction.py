@@ -7,12 +7,20 @@ import pytensor.scalar as ps
 from pytensor.graph.basic import Apply
 from pytensor.tensor.math import variadic_mul
 from pytensor.xtensor.basic import XOp
+from pytensor.xtensor.dims import rebase_dims
 from pytensor.xtensor.math import neq, sqrt
 from pytensor.xtensor.math import sqr as square
-from pytensor.xtensor.type import DimType, DimVariable, as_xtensor, xtensor
+from pytensor.xtensor.type import (
+    AsDim,
+    DimType,
+    DimVariable,
+    as_dim_type,
+    as_xtensor,
+    xtensor,
+)
 
 
-REDUCE_DIM = DimVariable | Sequence[DimVariable] | EllipsisType | None
+REDUCE_DIM = DimVariable | Sequence[AsDim] | EllipsisType | None
 
 
 class XReduce(XOp):
@@ -22,7 +30,7 @@ class XReduce(XOp):
         super().__init__()
         self.binary_op = binary_op
         # Order of reduce dims doesn't change the behavior of the Op
-        self.dims = tuple(dims)
+        self.dims = frozenset(dims)
 
     def make_node(self, x):
         x = as_xtensor(x)
@@ -30,20 +38,20 @@ class XReduce(XOp):
         x_dims_set = set(x_dims)
         reduce_dims_set = set(self.dims)
         if x_dims_set == reduce_dims_set:
-            out_dims, out_shape = [], []
+            out_dim_types, out_shape = [], []
         else:
             if not reduce_dims_set.issubset(x_dims_set):
                 raise ValueError(
                     f"Reduced dims {self.dims} not found in array dimensions {x_dims}."
                 )
-            out_dims, out_shape = zip(
+            out_dim_types, out_shape = zip(
                 *[
                     (d, s)
                     for d, s in zip(x_dims, x.type.shape)
                     if d not in reduce_dims_set
                 ]
             )
-        output = xtensor(dtype=x.type.dtype, dims=out_dims)
+        output = xtensor(dtype=x.type.dtype, dims=rebase_dims(out_dim_types, x))
         return Apply(self, [x], [output])
 
 
@@ -53,7 +61,7 @@ def _process_user_dims(x, dim: REDUCE_DIM) -> Sequence[DimType]:
     elif dim is None or dim is Ellipsis:
         x = as_xtensor(x)
         return typing.cast(tuple[DimType], x.type.dims)
-    return tuple(dim.type for dim in dim)
+    return tuple(as_dim_type(dim) for dim in dim)
 
 
 def reduce(x, dim: REDUCE_DIM = None, *, binary_op):
@@ -112,9 +120,9 @@ def std(x, dim: REDUCE_DIM, *, ddof: int = 0):
 class XCumReduce(XOp):
     __props__ = ("binary_op", "dims")
 
-    def __init__(self, binary_op, dims: Sequence[str]):
+    def __init__(self, binary_op, dims: Sequence[DimType]):
         self.binary_op = binary_op
-        self.dims = tuple(sorted(dims))  # Order doesn't matter
+        self.dims = frozenset(dims)
 
     def make_node(self, x):
         x = as_xtensor(x)

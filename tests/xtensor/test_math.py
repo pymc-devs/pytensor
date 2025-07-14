@@ -320,14 +320,18 @@ def test_dot():
 
 def test_dot_errors():
     # No matching dimensions
-    x = xtensor("x", dims=("a", "b"))
-    y = xtensor("y", dims=("b", "c"))
+    a = dim("a")
+    b = dim("b")
+    c = dim("c")
+    e = dim("e")
+    x = xtensor("x", dims=(a, b))
+    y = xtensor("y", dims=(b, c))
     with pytest.raises(ValueError, match="not found in either input"):
-        x.dot(y, dim="e")
+        x.dot(y, dim=e)
 
     # Symbolic dimension size mismatches
-    x = xtensor("x", dims=("a", "b"))
-    y = xtensor("y", dims=("b", "c"))
+    x = xtensor("x", dims=(a, b))
+    y = xtensor("y", dims=(b, c))
     z = x.dot(y)
     fn = xr_function([x, y], z)
     x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))

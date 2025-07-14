@@ -22,7 +22,6 @@ from pytensor.xtensor.type import (
     as_xtensor,
     xtensor,
 )
-from pytensor.xtensor.vectorization import combine_dims_and_shape
 
 
 class Stack(XOp):
