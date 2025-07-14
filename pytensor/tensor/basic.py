@@ -678,10 +678,9 @@ class ScalarFromTensor(COp):
             self, [t], [ps.get_scalar_type(dtype=t.type.dtype).make_variable()]
         )
 
-    def perform(self, node, inp, out_):
-        (s,) = inp
-        (out,) = out_
-        out[0] = s.flatten()[0]
+    def perform(self, node, inputs, output_storage):
+        # not using .item() because that returns a Python scalar, not a numpy scalar
+        output_storage[0][0] = inputs[0][()]
 
     def infer_shape(self, fgraph, node, in_shapes):
         return [()]
@@ -2470,6 +2469,18 @@ class Join(COp):
             raise TypeError(f"Axis {axis} must be an integer type.")
         if axis.type.ndim > 0:
             raise TypeError(f"Axis {axis} must be 0-d.")
+
+        # Convert negative constant axis to positive during canonicalization
+        if isinstance(axis, Constant) and tensors:
+            # Get the axis value directly from the constant's data
+            axis_val = axis.data.item()
+            # Check if it's negative and needs normalization
+            if axis_val < 0:
+                ndim = tensors[0].ndim
+                # Convert negative axis to positive
+                axis_val = normalize_axis_index(axis_val, ndim)
+                # Replace the original axis with the normalized one
+                axis = constant(axis_val, dtype=axis.type.dtype)
 
         tensors = [as_tensor_variable(x) for x in tensors]
 

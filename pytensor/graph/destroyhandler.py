@@ -7,7 +7,6 @@ and inplace operations.
 import itertools
 from collections import deque
 
-import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant
 from pytensor.graph.features import AlreadyThere, Bookkeeper
@@ -223,7 +222,7 @@ def _build_droot_impact(destroy_handler):
     return droot, impact, root_destroyer
 
 
-def fast_inplace_check(fgraph, inputs):
+def inplace_candidates(fgraph, inputs, protected_inputs=None):
     """
     Return the variables in inputs that are possible candidate for as inputs of
     inplace operation.
@@ -234,22 +233,49 @@ def fast_inplace_check(fgraph, inputs):
         Inputs Variable that you want to use as inplace destination.
 
     """
-    Supervisor = pytensor.compile.function.types.Supervisor
-    protected_inputs = list(
-        itertools.chain.from_iterable(
-            f.protected for f in fgraph._features if isinstance(f, Supervisor)
-        )
-    )
-    protected_inputs.extend(fgraph.outputs)
+    if protected_inputs is None:
+        from pytensor.compile.function.types import Supervisor
 
-    inputs = [
-        i
-        for i in inputs
-        if not isinstance(i, Constant)
-        and not fgraph.has_destroyers([i])
-        and i not in protected_inputs
-    ]
-    return inputs
+        protected_inputs = set(
+            itertools.chain.from_iterable(
+                f.protected for f in fgraph._features if isinstance(f, Supervisor)
+            )
+        )
+        protected_inputs.update(fgraph.outputs)
+
+    has_destroyers = fgraph.has_destroyers
+    view_i = fgraph.destroy_handler.view_i
+    candidate_roots = {}
+    candidate_inputs = []
+    for inp in inputs:
+        if isinstance(inp, Constant):
+            # Can't inplace on constants.
+            continue
+
+        # Find the root of the view chain, and while traversing check if it passes on any protected inputs.
+        view_of_protected = False
+        root = inp
+        try:
+            while True:
+                if root in protected_inputs:
+                    view_of_protected = True
+                root = view_i[root]
+        except KeyError:
+            pass
+
+        if root in candidate_roots:
+            # Another input views on the same root, we can't destroy either
+            if (invalid_candidate := candidate_roots[root]) is not None:
+                # Invalidate the previous candidate
+                candidate_inputs.remove(invalid_candidate)
+            candidate_roots[root] = None
+        elif not view_of_protected and not has_destroyers([inp]):
+            candidate_inputs.append(inp)
+            candidate_roots[root] = inp
+        else:
+            candidate_roots[root] = None
+
+    return candidate_inputs
 
 
 class DestroyHandler(Bookkeeper):

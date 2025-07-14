@@ -26,7 +26,9 @@ def xr_function(*args, **kwargs):
         ]
         np_outputs = fn(*np_inputs)
         if not isinstance(np_outputs, tuple | list):
-            return DataArray(np_outputs, dims=[dim.name for dim in symbolic_outputs[0].type.dims])
+            return DataArray(
+                np_outputs, dims=[dim.name for dim in symbolic_outputs[0].type.dims]
+            )
         else:
             return tuple(
                 DataArray(res, dims=[dim.name for dim in out.type.dims])
@@ -37,11 +39,30 @@ def xr_function(*args, **kwargs):
     return xfn
 
 
-def xr_assert_allclose(x, y, *args, **kwargs):
-    # Assert that two xarray DataArrays are close, ignoring coordinates
+def xr_assert_allclose(x, y, check_dtype=False, *args, **kwargs):
+    """Assert that two xarray DataArrays are close, ignoring coordinates.
+
+    Mostly a wrapper around xarray.testing.assert_allclose,
+    but with the option to check the dtype.
+
+    Parameters
+    ----------
+    x : xarray.DataArray
+        The first xarray DataArray to compare.
+    y : xarray.DataArray
+        The second xarray DataArray to compare.
+    check_dtype : bool, optional
+        If True, check that the dtype of the two DataArrays is the same.
+    *args :
+        Additional arguments to pass to xarray.testing.assert_allclose.
+    **kwargs :
+        Additional keyword arguments to pass to xarray.testing.assert_allclose.
+    """
     x = x.drop_vars(x.coords)
     y = y.drop_vars(y.coords)
     assert_allclose(x, y, *args, **kwargs)
+    if check_dtype:
+        assert x.dtype == y.dtype
 
 
 def xr_arange_like(x):

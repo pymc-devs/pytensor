@@ -4,12 +4,12 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor import einsum
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.dims import rebase_dims
-from pytensor.xtensor.math import XDot
+from pytensor.xtensor.math import Dot
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
 
 
 @register_lower_xtensor
-@node_rewriter(tracks=[XDot])
+@node_rewriter(tracks=[Dot])
 def lower_dot(fgraph, node):
     """Rewrite XDot to tensor.dot.
 

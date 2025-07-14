@@ -2179,6 +2179,15 @@ class TestJoinAndSplit:
         assert fn(*test_values).shape == (n * 6, n)[:ndim] if axis == 0 else (n, n * 6)
         benchmark(fn, *test_values)
 
+    def test_join_negative_axis_rewrite(self):
+        """Test that constant negative axis is rewritten to positive axis in make_node."""
+        v = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=self.floatX)
+        a = self.shared(v)
+        b = as_tensor_variable(v)
+
+        assert equal_computations([join(-1, a, b)], [join(1, a, b)])
+        assert equal_computations([join(-2, a, b)], [join(0, a, b)])
+
 
 def test_TensorFromScalar():
     s = ps.constant(56)

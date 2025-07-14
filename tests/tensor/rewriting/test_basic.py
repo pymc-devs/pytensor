@@ -487,8 +487,8 @@ class TestUselessCheckAndRaise:
 
     def test_local_remove_useless_2(self):
         """Remove `CheckAndRaise` conditions that are always true."""
-        x = scalar()
-        y = scalar()
+        x = scalar("x")
+        y = ps.bool("y")
         fg = FunctionGraph(outputs=[assert_op(x, y, 1)], clone=False)
         fg_res = rewrite_graph(fg, include=["canonicalize", "specialize"])
         topo = fg_res.toposort()
@@ -497,8 +497,8 @@ class TestUselessCheckAndRaise:
 
     def test_local_remove_useless_3(self):
         """Don't remove `CheckAndRaise` conditions that are always false."""
-        x = scalar()
-        y = scalar()
+        x = scalar("x")
+        y = ps.bool("y")
         fg = FunctionGraph(outputs=[assert_op(x, y, 0)], clone=False)
         fg_res = rewrite_graph(fg, include=["canonicalize", "specialize"])
         topo = fg_res.toposort()
@@ -1559,7 +1559,7 @@ def test_local_merge_alloc():
     output = pt.alloc(pt.alloc(m, y, 1, 1), x, y2, z, w)
     f = function([m, x, y, y2, z, w], output, mode=rewrite_mode)
     topo = f.maker.fgraph.toposort()
-    assert len(topo) == 3
+    assert len(topo) == 4
     assert isinstance(topo[-2].op, Assert)
     assert isinstance(topo[-1].op, Alloc)
     o = f(0.0, 1, 2, 2, 3, 4)
@@ -1616,7 +1616,7 @@ def test_local_useless_alloc():
     useless_alloc.rewrite(g)
 
     topo = g.toposort()
-    assert len(topo) == 3
+    assert len(topo) == 4
     assert isinstance(topo[-2].op, Assert)
     assert isinstance(topo[-1].op, Alloc)
 

@@ -20,14 +20,12 @@ Modules
    d3viz/index
    graph/index
    gradient
-   misc/pkl_utils
    printing
-   scalar/index
    scan
    sparse/index
-   sparse/sandbox
    tensor/index
    typed_list
+   xtensor/index
 
 .. module:: pytensor
    :platform: Unix, Windows

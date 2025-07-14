@@ -1040,9 +1040,26 @@ def test_block_diagonal():
     A = np.array([[1.0, 2.0], [3.0, 4.0]])
     B = np.array([[5.0, 6.0], [7.0, 8.0]])
     result = block_diag(A, B)
+    assert result.type.shape == (4, 4)
     assert result.owner.op.core_op._props_dict() == {"n_inputs": 2}
 
     np.testing.assert_allclose(result.eval(), scipy.linalg.block_diag(A, B))
+
+
+def test_block_diagonal_static_shape():
+    A = pt.dmatrix("A", shape=(5, 5))
+    B = pt.dmatrix("B", shape=(3, 10))
+    result = block_diag(A, B)
+    assert result.type.shape == (8, 15)
+
+    A = pt.dmatrix("A", shape=(5, 5))
+    B = pt.dmatrix("B", shape=(3, None))
+    result = block_diag(A, B)
+    assert result.type.shape == (8, None)
+
+    A = pt.dmatrix("A", shape=(None, 5))
+    result = block_diag(A, B)
+    assert result.type.shape == (None, None)
 
 
 def test_block_diagonal_grad():

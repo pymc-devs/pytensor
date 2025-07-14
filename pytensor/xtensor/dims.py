@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 from uuid import uuid4
 
 import numpy as np
@@ -176,5 +176,7 @@ def rebase_dim(dim: DimVariable, *tensors: XTensorVariable) -> DimVariable:
     raise ValueError(f"Dimension {dim.type} not found in any of the provided tensors.")
 
 
-def rebase_dims(dims: Iterable[DimVariable], *tensors: XTensorVariable) -> list[DimVariable]:
+def rebase_dims(
+    dims: Iterable[DimVariable], *tensors: XTensorVariable
+) -> list[DimVariable]:
     return [rebase_dim(dim, *tensors) for dim in dims]

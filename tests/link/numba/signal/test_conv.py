@@ -7,6 +7,7 @@ from pytensor import function
 from pytensor.tensor import dmatrix, tensor
 from pytensor.tensor.signal import convolve1d
 from tests.link.numba.test_basic import compare_numba_and_py
+from tests.tensor.signal.test_conv import convolve1d_grad_benchmarker
 
 
 pytestmark = pytest.mark.filterwarnings("error")
@@ -31,15 +32,8 @@ def test_convolve1d(x_smaller, mode):
 
 @pytest.mark.parametrize("mode", ("full", "valid"), ids=lambda x: f"mode={x}")
 @pytest.mark.parametrize("batch", (False, True), ids=lambda x: f"batch={x}")
-def test_convolve1d_benchmark(batch, mode, benchmark):
-    x = tensor(
-        shape=(
-            7,
-            183,
-        )
-        if batch
-        else (183,)
-    )
+def test_convolve1d_benchmark_numba(batch, mode, benchmark):
+    x = tensor(shape=(7, 183) if batch else (183,))
     y = tensor(shape=(7, 6) if batch else (6,))
     out = convolve1d(x, y, mode=mode)
     fn = function([x, y], out, mode="NUMBA", trust_input=True)
@@ -57,3 +51,8 @@ def test_convolve1d_benchmark(batch, mode, benchmark):
         np_convolve1d(x_test, y_test),
     )
     benchmark(fn, x_test, y_test)
+
+
+@pytest.mark.parametrize("convolve_mode", ["full", "valid"])
+def test_convolve1d_grad_benchmark_numba(convolve_mode, benchmark):
+    convolve1d_grad_benchmarker(convolve_mode, "NUMBA", benchmark)

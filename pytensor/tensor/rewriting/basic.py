@@ -732,20 +732,15 @@ def is_an_upcast(type1, type2):
 
 @register_useless
 @register_specialize
-@node_rewriter(None)
+@node_rewriter([CheckAndRaise])
 def local_remove_useless_assert(fgraph, node):
-    if not isinstance(node.op, CheckAndRaise):
-        return False
-
     new_conds = []
     n_conds = len(node.inputs[1:])
     for c in node.inputs[1:]:
         try:
             const = get_scalar_constant_value(c)
 
-            if 0 != const.ndim or const == 0:
-                # Should we raise an error here? How to be sure it
-                # is not caught?
+            if not const:
                 new_conds.append(c)
         except NotScalarConstantError:
             new_conds.append(c)
@@ -1106,8 +1101,15 @@ def unconditional_constant_folding(fgraph, node):
         storage_map[o] = [None]
         compute_map[o] = [False]
 
-    thunk = node.op.make_thunk(node, storage_map, compute_map, no_recycling=[])
-    required = thunk()
+    try:
+        thunk = node.op.make_thunk(
+            node, storage_map, compute_map, no_recycling=[], impl="py"
+        )
+        required = thunk()
+    except NotImplementedError:
+        # Not all Ops have a python implementation
+        thunk = node.op.make_thunk(node, storage_map, compute_map, no_recycling=[])
+        required = thunk()
 
     # A node whose inputs are all provided should always return successfully
     assert not required

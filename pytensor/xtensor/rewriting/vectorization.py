@@ -2,9 +2,9 @@ from pytensor.graph import node_rewriter
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.random.utils import compute_batch_shape
-from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
+from pytensor.xtensor.basic import xtensor_from_tensor
 from pytensor.xtensor.dims import rebase_dim
-from pytensor.xtensor.rewriting.utils import register_lower_xtensor
+from pytensor.xtensor.rewriting.utils import lower_aligned, register_lower_xtensor
 from pytensor.xtensor.vectorization import XRV, XBlockwise, XElemwise
 
 
@@ -17,15 +17,7 @@ def lower_elemwise(fgraph, node):
     out_dim_types = [dim.type for dim in out_dims]
 
     # Convert input XTensors to Tensors and align batch dimensions
-    tensor_inputs = []
-    for inp in node.inputs:
-        inp_dim_types = inp.type.dims
-        order = [
-            inp_dim_types.index(out_dim_type) if out_dim_type in inp_dim_types else "x"
-            for out_dim_type in out_dim_types
-        ]
-        tensor_inp = tensor_from_xtensor(inp).dimshuffle(order)
-        tensor_inputs.append(tensor_inp)
+    tensor_inputs = [lower_aligned(inp, out_dims) for inp in node.inputs]
 
     tensor_outs = Elemwise(scalar_op=node.op.scalar_op)(
         *tensor_inputs, return_list=True
@@ -47,17 +39,10 @@ def lower_blockwise(fgraph, node):
     batch_dims = node.outputs[0].type.dims[:batch_ndim]
 
     # Convert input Tensors to XTensors, align batch dimensions and place core dimension at the end
-    tensor_inputs = []
-    for inp, core_dims in zip(node.inputs, op.core_dims[0]):
-        inp_dims = inp.type.dims
-        # Align the batch dims of the input, and place the core dims on the right
-        batch_order = [
-            inp_dims.index(batch_dim) if batch_dim in inp_dims else "x"
-            for batch_dim in batch_dims
-        ]
-        core_order = [inp_dims.index(core_dim) for core_dim in core_dims]
-        tensor_inp = tensor_from_xtensor(inp).dimshuffle(batch_order + core_order)
-        tensor_inputs.append(tensor_inp)
+    tensor_inputs = [
+        lower_aligned(inp, batch_dims + core_dims)
+        for inp, core_dims in zip(node.inputs, op.core_dims[0], strict=True)
+    ]
 
     signature = op.signature or getattr(op.core_op, "gufunc_signature", None)
     if signature is None:
@@ -97,17 +82,10 @@ def lower_rv(fgraph, node):
     param_batch_dims = old_out.type.dims[len(op.extra_dims) : batch_ndim]
 
     # Convert params Tensors to XTensors, align batch dimensions and place core dimension at the end
-    tensor_params = []
-    for inp, core_dims in zip(params, op.core_dims[0]):
-        inp_dims = inp.type.dims
-        # Align the batch dims of the input, and place the core dims on the right
-        batch_order = [
-            inp_dims.index(batch_dim) if batch_dim in inp_dims else "x"
-            for batch_dim in param_batch_dims
-        ]
-        core_order = [inp_dims.index(core_dim) for core_dim in core_dims]
-        tensor_inp = tensor_from_xtensor(inp).dimshuffle(batch_order + core_order)
-        tensor_params.append(tensor_inp)
+    tensor_params = [
+        lower_aligned(inp, param_batch_dims + core_dims)
+        for inp, core_dims in zip(params, op.core_dims[0], strict=True)
+    ]
 
     size = None
     if op.extra_dims:

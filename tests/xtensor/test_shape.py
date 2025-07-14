@@ -9,15 +9,23 @@ from itertools import chain, combinations
 
 import numpy as np
 from xarray import DataArray
+from xarray import broadcast as xr_broadcast
 from xarray import concat as xr_concat
+from xarray import full_like as xr_full_like
+from xarray import ones_like as xr_ones_like
+from xarray import zeros_like as xr_zeros_like
 
 from pytensor.tensor import scalar
 from pytensor.xtensor.shape import (
+    broadcast,
     concat,
+    full_like,
+    ones_like,
     stack,
     unstack,
+    zeros_like,
 )
-from pytensor.xtensor.type import xtensor, dim
+from pytensor.xtensor.type import dim, xtensor
 from tests.xtensor.util import (
     xr_arange_like,
     xr_assert_allclose,
@@ -39,7 +47,7 @@ def powerset(iterable, min_group_size=0):
 
 
 def test_transpose():
-    a, b, c, d, e = [dim(name, size) for name, size in zip("abcde", range(2, 12))]
+    a, b, c, d, e = (dim(name, size) for name, size in zip("abcde", range(2, 12)))
 
     x = xtensor("x", dims=(a, b, c, d, e))
     permutations = [
@@ -57,7 +65,10 @@ def test_transpose():
     fn = xr_function([x], outs)
     x_test = xr_arange_like(x)
     res = fn(x_test)
-    expected_res = [x_test.transpose(*[dim.name if dim != ... else ... for dim in perm]) for perm in permutations]
+    expected_res = [
+        x_test.transpose(*[dim.name if dim != ... else ... for dim in perm])
+        for perm in permutations
+    ]
     for outs_i, res_i, expected_res_i in zip(outs, res, expected_res):
         xr_assert_allclose(res_i, expected_res_i)
 
@@ -487,3 +498,313 @@ def test_expand_dims_errors():
     # Test with a numpy array as dim (not supported)
     with pytest.raises(TypeError, match="unhashable type"):
         y.expand_dims(np.array([1, 2]))
+
+
+class TestBroadcast:
+    @pytest.mark.parametrize(
+        "exclude",
+        [
+            None,
+            [],
+            ["b"],
+            ["b", "d"],
+            ["a", "d"],
+            ["b", "c", "d"],
+            ["a", "b", "c", "d"],
+        ],
+    )
+    def test_compatible_excluded_shapes(self, exclude):
+        # Create test data
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 6))
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        z_test = xr_arange_like(z)
+
+        # Test with excluded dims
+        x2_expected, y2_expected, z2_expected = xr_broadcast(
+            x_test, y_test, z_test, exclude=exclude
+        )
+        x2, y2, z2 = broadcast(x, y, z, exclude=exclude)
+        fn = xr_function([x, y, z], [x2, y2, z2])
+        x2_result, y2_result, z2_result = fn(x_test, y_test, z_test)
+
+        xr_assert_allclose(x2_result, x2_expected)
+        xr_assert_allclose(y2_result, y2_expected)
+        xr_assert_allclose(z2_result, z2_expected)
+
+    def test_incompatible_excluded_shapes(self):
+        # Test that excluded dims are allowed to be different sizes
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 7))
+        out = broadcast(x, y, z, exclude=["d"])
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        z_test = xr_arange_like(z)
+        fn = xr_function([x, y, z], out)
+        results = fn(x_test, y_test, z_test)
+        expected_results = xr_broadcast(x_test, y_test, z_test, exclude=["d"])
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+    @pytest.mark.parametrize("exclude", [[], ["b"], ["b", "c"], ["a", "b", "d"]])
+    def test_runtime_shapes(self, exclude):
+        x = xtensor("x", dims=("a", "b"), shape=(None, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, None))
+        z = xtensor("z", dims=("b", "d"), shape=(None, None))
+        out = broadcast(x, y, z, exclude=exclude)
+
+        x_test = xr_arange_like(xtensor(dims=x.dims, shape=(3, 4)))
+        y_test = xr_arange_like(xtensor(dims=y.dims, shape=(5, 6)))
+        z_test = xr_arange_like(xtensor(dims=z.dims, shape=(4, 6)))
+        fn = xr_function([x, y, z], out)
+        results = fn(x_test, y_test, z_test)
+        expected_results = xr_broadcast(x_test, y_test, z_test, exclude=exclude)
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+        # Test invalid shape raises an error
+        # Note: We might decide not to raise an error in the lowered graphs for performance reasons
+        if "d" not in exclude:
+            z_test_bad = xr_arange_like(xtensor(dims=z.dims, shape=(4, 7)))
+            with pytest.raises(Exception):
+                fn(x_test, y_test, z_test_bad)
+
+    def test_broadcast_excluded_dims_in_different_order(self):
+        """Test broadcasting excluded dims are aligned with user input."""
+        x = xtensor("x", dims=("a", "c", "b"), shape=(3, 4, 5))
+        y = xtensor("y", dims=("a", "b", "c"), shape=(3, 5, 4))
+        out = (out_x, out_y) = broadcast(x, y, exclude=["c", "b"])
+        assert out_x.type.dims == ("a", "c", "b")
+        assert out_y.type.dims == ("a", "c", "b")
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        fn = xr_function([x, y], out)
+        results = fn(x_test, y_test)
+        expected_results = xr_broadcast(x_test, y_test, exclude=["c", "b"])
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+    def test_broadcast_errors(self):
+        """Test error handling in broadcast."""
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 6))
+
+        with pytest.raises(TypeError, match="exclude must be None, str, or Sequence"):
+            broadcast(x, y, z, exclude=1)
+
+        # Test with conflicting shapes
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 7))
+
+        with pytest.raises(ValueError, match="Dimension .* has conflicting shapes"):
+            broadcast(x, y, z)
+
+    def test_broadcast_no_input(self):
+        assert broadcast() == xr_broadcast()
+        assert broadcast(exclude=("a",)) == xr_broadcast(exclude=("a",))
+
+    def test_broadcast_single_input(self):
+        """Test broadcasting a single input."""
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        # Broadcast with a single input can still imply a transpose via the exclude parameter
+        outs = [
+            *broadcast(x),
+            *broadcast(x, exclude=("a", "b")),
+            *broadcast(x, exclude=("b", "a")),
+            *broadcast(x, exclude=("b",)),
+        ]
+
+        fn = xr_function([x], outs)
+        x_test = xr_arange_like(x)
+        results = fn(x_test)
+        expected_results = [
+            *xr_broadcast(x_test),
+            *xr_broadcast(x_test, exclude=("a", "b")),
+            *xr_broadcast(x_test, exclude=("b", "a")),
+            *xr_broadcast(x_test, exclude=("b",)),
+        ]
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+    @pytest.mark.parametrize("exclude", [None, ["b"], ["b", "c"]])
+    def test_broadcast_like(self, exclude):
+        """Test broadcast_like method"""
+        # Create test data
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6))
+        z = xtensor("z", dims=("b", "d"), shape=(4, 6))
+
+        # Order matters so we test both orders
+        outs = [
+            x.broadcast_like(y, exclude=exclude),
+            y.broadcast_like(x, exclude=exclude),
+            y.broadcast_like(z, exclude=exclude),
+            z.broadcast_like(y, exclude=exclude),
+        ]
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        z_test = xr_arange_like(z)
+        fn = xr_function([x, y, z], outs)
+        results = fn(x_test, y_test, z_test)
+        expected_results = [
+            x_test.broadcast_like(y_test, exclude=exclude),
+            y_test.broadcast_like(x_test, exclude=exclude),
+            y_test.broadcast_like(z_test, exclude=exclude),
+            z_test.broadcast_like(y_test, exclude=exclude),
+        ]
+        for res, expected_res in zip(results, expected_results, strict=True):
+            xr_assert_allclose(res, expected_res)
+
+
+def test_full_like():
+    """Test full_like function, comparing with xarray's full_like."""
+
+    # Basic functionality with scalar fill_value
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_test = xr_arange_like(x)
+
+    y1 = full_like(x, 5.0)
+    fn1 = xr_function([x], y1)
+    result1 = fn1(x_test)
+    expected1 = xr_full_like(x_test, 5.0)
+    xr_assert_allclose(result1, expected1, check_dtype=True)
+
+    # Other dtypes
+    x_3d = xtensor("x_3d", dims=("a", "b", "c"), shape=(2, 3, 4), dtype="float32")
+    x_3d_test = xr_arange_like(x_3d)
+
+    y7 = full_like(x_3d, -1.0)
+    fn7 = xr_function([x_3d], y7)
+    result7 = fn7(x_3d_test)
+    expected7 = xr_full_like(x_3d_test, -1.0)
+    xr_assert_allclose(result7, expected7, check_dtype=True)
+
+    # Integer dtype
+    y3 = full_like(x, 5.0, dtype="int32")
+    fn3 = xr_function([x], y3)
+    result3 = fn3(x_test)
+    expected3 = xr_full_like(x_test, 5.0, dtype="int32")
+    xr_assert_allclose(result3, expected3, check_dtype=True)
+
+    # Different fill_value types
+    y4 = full_like(x, np.array(3.14))
+    fn4 = xr_function([x], y4)
+    result4 = fn4(x_test)
+    expected4 = xr_full_like(x_test, 3.14)
+    xr_assert_allclose(result4, expected4, check_dtype=True)
+
+    # Integer input with float fill_value
+    x_int = xtensor("x_int", dims=("a", "b"), shape=(2, 3), dtype="int32")
+    x_int_test = DataArray(np.arange(6, dtype="int32").reshape(2, 3), dims=("a", "b"))
+
+    y5 = full_like(x_int, 2.5)
+    fn5 = xr_function([x_int], y5)
+    result5 = fn5(x_int_test)
+    expected5 = xr_full_like(x_int_test, 2.5)
+    xr_assert_allclose(result5, expected5, check_dtype=True)
+
+    # Symbolic shapes
+    x_sym = xtensor("x_sym", dims=("a", "b"), shape=(None, 3))
+    x_sym_test = DataArray(
+        np.arange(6, dtype=x_sym.type.dtype).reshape(2, 3), dims=("a", "b")
+    )
+
+    y6 = full_like(x_sym, 7.0)
+    fn6 = xr_function([x_sym], y6)
+    result6 = fn6(x_sym_test)
+    expected6 = xr_full_like(x_sym_test, 7.0)
+    xr_assert_allclose(result6, expected6, check_dtype=True)
+
+    # Boolean dtype
+    x_bool = xtensor("x_bool", dims=("a", "b"), shape=(2, 3), dtype="bool")
+    x_bool_test = DataArray(
+        np.array([[True, False, True], [False, True, False]]), dims=("a", "b")
+    )
+
+    y8 = full_like(x_bool, True)
+    fn8 = xr_function([x_bool], y8)
+    result8 = fn8(x_bool_test)
+    expected8 = xr_full_like(x_bool_test, True)
+    xr_assert_allclose(result8, expected8, check_dtype=True)
+
+    # Complex dtype
+    x_complex = xtensor("x_complex", dims=("a", "b"), shape=(2, 3), dtype="complex64")
+    x_complex_test = DataArray(
+        np.arange(6, dtype="complex64").reshape(2, 3), dims=("a", "b")
+    )
+
+    y9 = full_like(x_complex, 1 + 2j)
+    fn9 = xr_function([x_complex], y9)
+    result9 = fn9(x_complex_test)
+    expected9 = xr_full_like(x_complex_test, 1 + 2j)
+    xr_assert_allclose(result9, expected9, check_dtype=True)
+
+    # Symbolic fill value
+    x_sym_fill = xtensor("x_sym_fill", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    fill_val = xtensor("fill_val", dims=(), shape=(), dtype="float64")
+    x_sym_fill_test = xr_arange_like(x_sym_fill)
+    fill_val_test = DataArray(3.14, dims=())
+
+    y10 = full_like(x_sym_fill, fill_val)
+    fn10 = xr_function([x_sym_fill, fill_val], y10)
+    result10 = fn10(x_sym_fill_test, fill_val_test)
+    expected10 = xr_full_like(x_sym_fill_test, 3.14)
+    xr_assert_allclose(result10, expected10, check_dtype=True)
+
+    # Test dtype conversion to bool when neither input nor fill_value are bool
+    x_float = xtensor("x_float", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_float_test = xr_arange_like(x_float)
+
+    y11 = full_like(x_float, 5.0, dtype="bool")
+    fn11 = xr_function([x_float], y11)
+    result11 = fn11(x_float_test)
+    expected11 = xr_full_like(x_float_test, 5.0, dtype="bool")
+    xr_assert_allclose(result11, expected11, check_dtype=True)
+
+    # Verify the result is actually boolean
+    assert result11.dtype == "bool"
+    assert expected11.dtype == "bool"
+
+
+def test_full_like_errors():
+    """Test full_like function errors."""
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_test = xr_arange_like(x)
+
+    with pytest.raises(ValueError, match="fill_value must be a scalar"):
+        full_like(x, x_test)
+
+
+def test_ones_like():
+    """Test ones_like function, comparing with xarray's ones_like."""
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_test = xr_arange_like(x)
+
+    y1 = ones_like(x)
+    fn1 = xr_function([x], y1)
+    result1 = fn1(x_test)
+    expected1 = xr_ones_like(x_test)
+    xr_assert_allclose(result1, expected1)
+    assert result1.dtype == expected1.dtype
+
+
+def test_zeros_like():
+    """Test zeros_like function, comparing with xarray's zeros_like."""
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    x_test = xr_arange_like(x)
+
+    y1 = zeros_like(x)
+    fn1 = xr_function([x], y1)
+    result1 = fn1(x_test)
+    expected1 = xr_zeros_like(x_test)
+    xr_assert_allclose(result1, expected1)
+    assert result1.dtype == expected1.dtype

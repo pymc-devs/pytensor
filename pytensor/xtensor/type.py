@@ -488,6 +488,22 @@ def xtensor(
     dims: Sequence[AsDim],
     dtype: str | np.dtype = "floatX",
 ):
+    """Create an XTensorVariable.
+
+    Parameters
+    ----------
+    name : str or None, optional
+        The name of the variable
+    dims : Sequence[AsDim]
+        The dimensions of the tensor
+    dtype : str or np.dtype, optional
+        The data type of the tensor. Defaults to 'floatX' (config.floatX).
+
+    Returns
+    -------
+    XTensorVariable
+        A new XTensorVariable with the specified name, dims, shape, and dtype.
+    """
     dims = [as_dim(dim) for dim in dims]
     return XTensorType(dtype=dtype, dims=tuple(dim.type for dim in dims))(name=name)
 
@@ -496,6 +512,8 @@ _XTensorTypeType = TypeVar("_XTensorTypeType", bound=XTensorType)
 
 
 class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
+    """Variable of XTensorType."""
+
     # These can't work because Python requires native output types
     def __bool__(self):
         raise TypeError(
@@ -698,7 +716,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     def copy(self, name: str | None = None):
         out = px.math.identity(self)
-        out.name = name  # type: ignore
+        out.name = name
         return out
 
     def astype(self, dtype):
@@ -1028,12 +1046,23 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         """Matrix multiplication with another XTensorVariable, contracting over matching or specified dims."""
         return px.math.dot(self, other, dim=dim)
 
+    def broadcast(self, *others, exclude=None):
+        """Broadcast this tensor against other XTensorVariables."""
+        return px.shape.broadcast(self, *others, exclude=exclude)
+
+    def broadcast_like(self, other, exclude=None):
+        """Broadcast this tensor against another XTensorVariable."""
+        _, self_bcast = px.shape.broadcast(other, self, exclude=exclude)
+        return self_bcast
+
 
 class XTensorConstantSignature(TensorConstantSignature):
     pass
 
 
 class XTensorConstant(XTensorVariable, Constant[_XTensorTypeType]):
+    """Constant of XtensorType."""
+
     def __init__(self, type: _XTensorTypeType, data, name=None):
         data_shape = np.shape(data)
 
@@ -1059,8 +1088,8 @@ XTensorType.constant_type = XTensorConstant  # type: ignore
 
 
 def xtensor_constant(x, name=None, dims: None | Sequence[DimVariable] = None):
-    print("calling xtensor_constant", x, dims)
-    # TODO check this function for changes with dim objects
+    """Convert a constant value to an XTensorConstant."""
+
     x_dims: tuple[str, ...]
     if XARRAY_AVAILABLE and isinstance(x, xr.DataArray):
         xarray_dims = x.dims
@@ -1106,6 +1135,7 @@ if XARRAY_AVAILABLE:
 
 AsDim = str | DimVariable | DimType
 
+
 def as_dim(
     x: AsDim,
 ) -> DimVariable:
@@ -1119,8 +1149,24 @@ def as_dim(
 
 
 def as_xtensor(
-    x, name=None, dims: Sequence[DimVariable] | None = None
+    x,
+    dims: Sequence[DimVariable] | None = None,
+    *,
+    name: str | None = None,
 ) -> XTensorVariable:
+    """Convert a variable or data to an XTensorVariable.
+
+    Parameters
+    ----------
+    x : Variable or data
+    dims: Sequence[str] or None, optional
+        If dims are provided, TensorVariable (or data) will be converted to an XTensorVariable with those dims.
+        XTensorVariables will be returned as is, if the dims match. Otherwise, a ValueError is raised.
+        If dims are not provided, and the data is not a scalar, an XTensorVariable or xarray.DataArray, an error is raised.
+    name: str or None, optional
+        Name of the resulting XTensorVariable.
+    """
+
     if isinstance(x, Apply):
         if len(x.outputs) != 1:
             raise ValueError(

@@ -15,7 +15,7 @@ from pytensor import function
 from pytensor.scalar import ScalarOp
 from pytensor.xtensor.basic import map_dims
 from pytensor.xtensor.math import add, exp
-from pytensor.xtensor.type import xtensor, dim
+from pytensor.xtensor.type import dim, xtensor
 from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
 
 
@@ -65,7 +65,13 @@ def test_dimension_alignment():
     )
     z = xtensor("z", dims=(universe,))
     out = add(x, y, z)
-    assert tuple(dim.name for dim in out.type.dims) == ("city", "country", "planet", "galaxy", "universe")
+    assert tuple(dim.name for dim in out.type.dims) == (
+        "city",
+        "country",
+        "planet",
+        "galaxy",
+        "universe",
+    )
 
     fn = function([x, y, z], out)
 
@@ -318,7 +324,6 @@ def test_dot_errors():
     y = xtensor("y", dims=("b", "c"))
     with pytest.raises(ValueError, match="not found in either input"):
         x.dot(y, dim="e")
-
 
     # Symbolic dimension size mismatches
     x = xtensor("x", dims=("a", "b"))
