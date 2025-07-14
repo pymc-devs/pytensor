@@ -25,7 +25,6 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
-from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.link.utils import (
     compile_function_src,
@@ -405,7 +404,7 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
 
 @numba_funcify.register(MakeSlice)
 def numba_funcify_MakeSlice(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def makeslice(*x):
         return slice(*x)
 
@@ -414,7 +413,7 @@ def numba_funcify_MakeSlice(op, **kwargs):
 
 @numba_funcify.register(Shape)
 def numba_funcify_Shape(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def shape(x):
         return np.asarray(np.shape(x))
 
