@@ -2,8 +2,8 @@ from string import ascii_lowercase
 
 from pytensor.graph import node_rewriter
 from pytensor.tensor import einsum
-from pytensor.tensor.shape import specify_shape
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
+from pytensor.xtensor.dims import rebase_dims
 from pytensor.xtensor.math import XDot
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
 
@@ -30,6 +30,13 @@ def lower_dot(fgraph, node):
     if len(all_dims) > len(ascii_lowercase):
         raise ValueError("Too many dimensions to map to einsum subscripts")
 
+    # Collect all dimension names across inputs and output
+    all_dims = list(
+        dict.fromkeys(x.type.dims + y.type.dims + out.type.dims)
+    )  # preserve order
+    if len(all_dims) > len(ascii_lowercase):
+        raise ValueError("Too many dimensions to map to einsum subscripts")
+
     dim_to_char = dict(zip(all_dims, ascii_lowercase))
 
     # Build einsum string
@@ -41,7 +48,4 @@ def lower_dot(fgraph, node):
     # Perform the einsum operation
     out_tensor = einsum(einsum_str, x_tensor, y_tensor)
 
-    # Reshape to match the output shape
-    out_tensor = specify_shape(out_tensor, out.type.shape)
-
-    return [xtensor_from_tensor(out_tensor, out.type.dims)]
+    return [xtensor_from_tensor(out_tensor, rebase_dims(out.dims, x, y))]

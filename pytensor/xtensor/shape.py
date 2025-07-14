@@ -13,7 +13,7 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import integer_dtypes
 from pytensor.tensor.utils import get_static_shape_from_size_variables
 from pytensor.xtensor.basic import XOp
-from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.type import AsDim, DimType, as_xtensor, xtensor, as_dim
 
 
 class Stack(XOp):
@@ -165,7 +165,7 @@ class Transpose(XOp):
 
     def __init__(
         self,
-        dims: Sequence[str],
+        dims: Sequence[DimType],
     ):
         super().__init__()
         self.dims = tuple(dims)
@@ -174,14 +174,12 @@ class Transpose(XOp):
         x = as_xtensor(x)
 
         transpose_dims = self.dims
-        x_shape = x.type.shape
         x_dims = x.type.dims
         if set(transpose_dims) != set(x_dims):
             raise ValueError(f"{transpose_dims} must be a permuted list of {x_dims}")
 
         output = xtensor(
             dtype=x.type.dtype,
-            shape=tuple(x_shape[x_dims.index(d)] for d in transpose_dims),
             dims=transpose_dims,
         )
         return Apply(self, [x], [output])
@@ -189,7 +187,7 @@ class Transpose(XOp):
 
 def transpose(
     x,
-    *dim: str | EllipsisType,
+    *dim: AsDim | EllipsisType,
     missing_dims: Literal["raise", "warn", "ignore"] = "raise",
 ):
     """Transpose dimensions of the tensor.
@@ -220,10 +218,11 @@ def transpose(
     # Validate dimensions
     x = as_xtensor(x)
     x_dims = x.type.dims
+    dim = tuple(as_dim(dim).type if dim != ... else ... for dim in dim)
     invalid_dims = set(dim) - {..., *x_dims}
     if invalid_dims:
         if missing_dims != "ignore":
-            msg = f"Dimensions {invalid_dims} do not exist. Expected one or more of: {x_dims}"
+            msg = f"Dimensions {invalid_dims!r} do not exist. Expected one or more of: {x_dims!r}"
             if missing_dims == "raise":
                 raise ValueError(msg)
             else:
@@ -249,7 +248,7 @@ def transpose(
         # No-op transpose
         return x
 
-    return Transpose(dims=typing.cast(tuple[str], dim))(x)
+    return Transpose(dims=typing.cast(tuple[DimType], dim))(x)
 
 
 class Concat(XOp):

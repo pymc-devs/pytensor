@@ -10,7 +10,7 @@ from pytensor.graph.basic import Apply
 from pytensor.scalar import ScalarOp
 from pytensor.scalar.basic import _cast_mapping, upcast
 from pytensor.xtensor.basic import XOp, as_xtensor
-from pytensor.xtensor.type import xtensor
+from pytensor.xtensor.type import AsDim, DimVariable, DimType, xtensor, as_dim
 from pytensor.xtensor.vectorization import XElemwise
 
 
@@ -159,7 +159,7 @@ class XDot(XOp):
 
     __props__ = ("dims",)
 
-    def __init__(self, dims: Iterable[str]):
+    def __init__(self, dims: Iterable[DimType]):
         self.dims = dims
         super().__init__()
 
@@ -170,32 +170,18 @@ class XDot(XOp):
         x_shape_dict = dict(zip(x.type.dims, x.type.shape))
         y_shape_dict = dict(zip(y.type.dims, y.type.shape))
 
-        # Check for dimension size mismatches (concrete only)
-        for dim in self.dims:
-            x_shape = x_shape_dict.get(dim, None)
-            y_shape = y_shape_dict.get(dim, None)
-            if (
-                isinstance(x_shape, int)
-                and isinstance(y_shape, int)
-                and x_shape != y_shape
-            ):
-                raise ValueError(f"Size of dim '{dim}' does not match")
-
         # Determine output dimensions
         shape_dict = {**x_shape_dict, **y_shape_dict}
         out_dims = tuple(d for d in shape_dict if d not in self.dims)
 
-        # Determine output shape
-        out_shape = tuple(shape_dict[d] for d in out_dims)
-
         # Determine output dtype
         out_dtype = upcast(x.type.dtype, y.type.dtype)
 
-        out = xtensor(dtype=out_dtype, shape=out_shape, dims=out_dims)
+        out = xtensor(dtype=out_dtype, dims=out_dims)
         return Apply(self, [x, y], [out])
 
 
-def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
+def dot(x, y, dim: str | Iterable[AsDim] | EllipsisType | None = None):
     """Matrix multiplication between two XTensorVariables.
 
     This operation performs matrix multiplication between two tensors, automatically
@@ -207,7 +193,7 @@ def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
         First input tensor
     y : XTensorVariable
         Second input tensor
-    dim : str, Iterable[Hashable], EllipsisType, or None, optional
+    dim : str, Iterable[DimVariable], EllipsisType, or None, optional
         The dimensions to contract over. If None, will contract over all matching dimensions.
         If Ellipsis (...), will contract over all dimensions.
 
@@ -228,6 +214,7 @@ def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
 
     x_dims = set(x.type.dims)
     y_dims = set(y.type.dims)
+    print(x_dims, y_dims, dim)
     intersection = x_dims & y_dims
     union = x_dims | y_dims
 
@@ -236,10 +223,12 @@ def dot(x, y, dim: str | Iterable[str] | EllipsisType | None = None):
         dim_set = intersection
     elif dim is ...:
         dim_set = union
-    elif isinstance(dim, str):
-        dim_set = {dim}
     elif isinstance(dim, Iterable):
-        dim_set = set(dim)
+        dim_set = set([as_dim(dim).type for dim in dim])
+    elif isinstance(dim, (DimVariable, DimType, str)):
+        dim_set = {as_dim(dim).type}
+    else:
+        raise TypeError(f"Unknown type {dim} for dimension")
 
     # Validate provided dims
     # Check if any dimension is not found in either input

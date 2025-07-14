@@ -26,10 +26,10 @@ def xr_function(*args, **kwargs):
         ]
         np_outputs = fn(*np_inputs)
         if not isinstance(np_outputs, tuple | list):
-            return DataArray(np_outputs, dims=symbolic_outputs[0].type.dims)
+            return DataArray(np_outputs, dims=[dim.name for dim in symbolic_outputs[0].type.dims])
         else:
             return tuple(
-                DataArray(res, dims=out.type.dims)
+                DataArray(res, dims=[dim.name for dim in out.type.dims])
                 for res, out in zip(np_outputs, symbolic_outputs)
             )
 
@@ -45,9 +45,12 @@ def xr_assert_allclose(x, y, *args, **kwargs):
 
 
 def xr_arange_like(x):
+    data = np.arange(np.prod(x.type.shape), dtype=x.type.dtype)
+    dtype = x.type.dtype
+
     return DataArray(
-        np.arange(np.prod(x.type.shape), dtype=x.type.dtype).reshape(x.type.shape),
-        dims=x.type.dims,
+        data.reshape(x.type.shape),
+        dims=[dim.name for dim in x.type.dims],
     )
 
 

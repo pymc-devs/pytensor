@@ -15,7 +15,10 @@ from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
     "method", ["sum", "prod", "all", "any", "max", "min", "cumsum", "cumprod"][2:]
 )
 def test_reduction(method, dim):
-    x = xtensor("x", dims=("a", "b", "c"), shape=(3, 5, 7))
+    a = dim("a", size=3)
+    b = dim("b", size=5)
+    c = dim("c", size=7)
+    x = xtensor("x", dims=(a, b, c))
     out = getattr(x, method)(dim=dim)
 
     fn = xr_function([x], out)

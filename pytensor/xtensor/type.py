@@ -168,6 +168,27 @@ class BasicDim(DimType):
     def base_dims(self) -> set[BasicDim]:
         return {self}
 
+    """
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, BasicDim):
+            return False
+
+        is_equal = True
+        for prop in self.__props__:
+            if prop == "size":
+                continue
+            is_equal = is_equal and getattr(self, prop) == getattr(other, prop)
+
+        if not is_equal:
+            return False
+
+        if self.size is None or other.size is None:
+            return True
+
+        if self.size != other.size:
+            raise ValueError(f"Incompatible shapes for dimenson {self.name}")
+    """
+
 
 class SubsetDim(DimType):
     __props__ = (*DimType.__props__, "base", "subset")
@@ -295,16 +316,21 @@ def _new_dim_name() -> str:
 def dim(
     name: str | None = None,
     size: DimVariable | ScalarVariable | TensorVariable | int | None = None,
+    unique: bool = True,
 ) -> DimVariable:
     """Create a dimension variable."""
+    if unique:
+        uuid = uuid4()
+    else:
+        uuid = None
 
     if name is None:
         name = _new_dim_name()
     if size is None:
-        dim_type = BasicDim(name=name, uuid=uuid4())
+        dim_type = BasicDim(name=name, uuid=uuid)
         return cast(DimVariable, dim_type.make_variable(name=name))
     if isinstance(size, int):
-        dim_type = BasicDim(size=size, name=name, uuid=uuid4())
+        dim_type = BasicDim(size=size, name=name, uuid=uuid)
         return cast(DimVariable, dim_type.make_constant(value=size, name=name))
     if isinstance(size, ScalarVariable):
         size = as_tensor_variable(size)
@@ -321,6 +347,10 @@ def dim(
     raise TypeError(
         f"length must be an int or a DIM_LENGTH_SCALAR scalar, got {type(size)} for {name}"
     )
+
+
+def dims(*names: str) -> list[DimVariable]:
+    return [dim(name) for name in names]
 
 
 class XTensorType(Type, HasDataType, HasShape):
@@ -455,9 +485,10 @@ class XTensorType(Type, HasDataType, HasShape):
 def xtensor(
     name: str | None = None,
     *,
-    dims: Sequence[DimVariable],
+    dims: Sequence[AsDim],
     dtype: str | np.dtype = "floatX",
 ):
+    dims = [as_dim(dim) for dim in dims]
     return XTensorType(dtype=dtype, dims=tuple(dim.type for dim in dims))(name=name)
 
 
@@ -1027,7 +1058,8 @@ XTensorType.variable_type = XTensorVariable  # type: ignore
 XTensorType.constant_type = XTensorConstant  # type: ignore
 
 
-def xtensor_constant(x, name=None, dims: None | Sequence[str] = None):
+def xtensor_constant(x, name=None, dims: None | Sequence[DimVariable] = None):
+    print("calling xtensor_constant", x, dims)
     # TODO check this function for changes with dim objects
     x_dims: tuple[str, ...]
     if XARRAY_AVAILABLE and isinstance(x, xr.DataArray):
@@ -1070,6 +1102,20 @@ if XARRAY_AVAILABLE:
     @_as_symbolic.register(xr.DataArray)
     def as_symbolic_xarray(x, **kwargs):
         return xtensor_constant(x, **kwargs)
+
+
+AsDim = str | DimVariable | DimType
+
+def as_dim(
+    x: AsDim,
+) -> DimVariable:
+    if isinstance(x, DimVariable):
+        return x
+    if isinstance(x, str):
+        return dim(name=x, unique=False)
+    if isinstance(x, DimType):
+        return cast(DimVariable, x())
+    raise ValueError(f"Can not convert {type(x)} to dim.")
 
 
 def as_xtensor(
