@@ -11,6 +11,7 @@ from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor import TensorVariable
+from pytensor.tensor.blas import BandedGEMV, banded_gemv
 from pytensor.tensor.slinalg import (
     Cholesky,
     CholeskySolve,
@@ -1088,3 +1089,69 @@ def test_block_diagonal_blockwise():
     B = np.random.normal(size=(1, batch_size, 4, 4)).astype(config.floatX)
     result = block_diag(A, B).eval()
     assert result.shape == (10, batch_size, 6, 6)
+
+
+def _make_banded_A(A, kl, ku):
+    diag_idxs = range(-kl, ku + 1)
+    diags = (np.diag(A, k=k) for k in diag_idxs)
+    return sum(np.diag(d, k=k) for k, d in zip(diag_idxs, diags))
+
+
+@pytest.mark.parametrize(
+    "kl, ku", [(1, 1), (0, 1), (2, 2)], ids=["tridiag", "upper-only", "banded"]
+)
+@pytest.mark.parametrize("stride", [1, 2, -1], ids=lambda x: f"stride={x}")
+def test_banded_dot(kl, ku, stride):
+    rng = np.random.default_rng()
+
+    size = 10
+
+    A_val = _make_banded_A(rng.normal(size=(size, size)), kl=kl, ku=ku).astype(
+        config.floatX
+    )
+    x_val = rng.normal(size=(size * abs(stride),)).astype(config.floatX)
+    x_val = x_val[::stride]
+
+    A = pt.tensor("A", shape=A_val.shape, dtype=A_val.dtype)
+    x = pt.tensor("x", shape=x_val.shape, dtype=x_val.dtype)
+    res = banded_gemv(A, x, kl, ku)
+    res_2 = A @ x
+
+    fn = function([A, x], [res, res_2], trust_input=True)
+    assert any(isinstance(node.op, BandedGEMV) for node in fn.maker.fgraph.apply_nodes)
+
+    out_val, out_2_val = fn(A_val, x_val)
+
+    atol = 1e-4 if config.floatX == "float32" else 1e-8
+    rtol = 1e-4 if config.floatX == "float32" else 1e-8
+
+    np.testing.assert_allclose(out_val, out_2_val, atol=atol, rtol=rtol)
+
+
+def test_banded_dot_grad():
+    rng = np.random.default_rng()
+    size = 10
+
+    A_val = _make_banded_A(rng.normal(size=(size, size)), kl=1, ku=1).astype(
+        config.floatX
+    )
+    x_val = rng.normal(size=(size,)).astype(config.floatX)
+
+    def make_banded_pt(A):
+        # Like structured solve Ops, we have to incldue the transformation from an unconstrained matrix A to a banded
+        # matrix on the compute graph. Otherwise, the random perturbations used by verify_grad will result in invalid
+        # input matrices.
+
+        diag_idxs = range(-1, 2)
+        diags = (pt.diag(A, k=k) for k in diag_idxs)
+        return sum(pt.diag(d, k=k) for k, d in zip(diag_idxs, diags))
+
+    def test_fn(A, x):
+        return banded_gemv(make_banded_pt(A), x, lower_diags=1, upper_diags=1).sum()
+
+    utt.verify_grad(
+        test_fn,
+        [A_val, x_val],
+        rng=rng,
+        eps=1e-4 if config.floatX == "float32" else 1e-8,
+    )
