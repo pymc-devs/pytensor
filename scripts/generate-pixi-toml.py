@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import shlex
 import shutil
 import subprocess
@@ -38,6 +39,16 @@ PARSED_COMMAND = shlex.split(RAW_COMMAND)
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Generate pixi.toml from environment files"
+    )
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Only verify that pixi.toml is consistent with environment files, don't write",
+    )
+    args = parser.parse_args()
+
     # Check if pixi is installed
     if not shutil.which("pixi"):
         print("pixi is not installed. See <https://pixi.sh/latest/#installation>")  # noqa: T201
@@ -105,10 +116,29 @@ def main():
 
     # Generate the pixi.toml content
     pixi_toml_content = tomlkit.dumps(pixi_toml_data)
-    (project_root / "pixi.toml").write_text(pixi_toml_content)
 
-    # Clean up
-    cleanup_working_directory(working_directory_paths)
+    if args.verify_only:
+        # Compare with existing pixi.toml
+        pixi_toml_file = project_root / "pixi.toml"
+        if not pixi_toml_file.exists():
+            print("ERROR: pixi.toml does not exist")  # noqa: T201
+            cleanup_working_directory(working_directory_paths)
+            sys.exit(1)
+
+        existing_content = pixi_toml_file.read_text()
+        if existing_content != pixi_toml_content:
+            print("ERROR: pixi.toml is not consistent with environment files")  # noqa: T201
+            print("Run 'python scripts/generate-pixi-toml.py' to update it")  # noqa: T201
+            cleanup_working_directory(working_directory_paths)
+            sys.exit(1)
+
+        print("SUCCESS: pixi.toml is consistent with environment files")  # noqa: T201
+        cleanup_working_directory(working_directory_paths)
+        sys.exit(0)
+    else:
+        # Write the pixi.toml file to the project root
+        (project_root / "pixi.toml").write_text(pixi_toml_content)
+        cleanup_working_directory(working_directory_paths)
 
 
 def cleanup_working_directory(working_paths: WorkingDirectoryPaths):
