@@ -15,7 +15,6 @@ filelock = ">=3.15"
 logical-unification = "*"
 minikanren = "*"
 numpy = ">=1.17.0"
-pip = "*"
 scipy = "<2,>=1"
 setuptools = ">=59.0.0"
 
@@ -86,21 +85,19 @@ pytest = "*"
 pytest-benchmark = "*"
 pytest-cov = ">=2.6.1"
 pytest-mock = "*"
-tomlkit = "*"
-
-[feature.tests.pypi-dependencies]
 pytest-sphinx = "*"
+tomlkit = "*"
 
 
 [environments]
-# Redefine the default environment to include all categories.
 default = {features = ["blas", "conda-dev", "jax", "numba", "rtd", "tests"], solve-group = "default"}
-# Define a minimal environment with only the default feature.
-minimal = {features = [], solve-group = "default"}
-# Create an environment for each feature.
-blas = {features = ["blas"], solve-group = "default"}
-jax = {features = ["jax"], solve-group = "default"}
+
+# Disable non-default environments pending <https://github.com/prefix-dev/pixi/issues/2725>
+# If you want to re-enable some of these, it's recommended to remove the solve-group key.
+# minimal = {features = [], solve-group = "default"}
+# blas = {features = ["blas"], solve-group = "default"}
 # conda-dev = {features = ["conda-dev"], solve-group = "default"}
+# jax = {features = ["jax"], solve-group = "default"}
 # numba = {features = ["numba"], solve-group = "default"}
 # rtd = {features = ["rtd"], solve-group = "default"}
 # tests = {features = ["tests"], solve-group = "default"}
