@@ -725,6 +725,44 @@ def local_useless_subtensor(fgraph, node):
 
 
 @register_canonicalize
+@node_rewriter([Subtensor])
+def local_convert_negative_indices(fgraph, node):
+    """Convert negative indices in `Subtensor` with static length to positive indices."""
+    x, *raw_idxs = node.inputs
+    idxs = indices_from_subtensor(raw_idxs, node.op.idx_list)
+
+    new_idxs = None
+    for i, (dim_length, idx) in enumerate(zip(x.type.shape, idxs)):
+        if (
+            dim_length is None
+            or isinstance(idx, slice)
+            or not isinstance(idx, Constant)
+        ):
+            continue
+
+        val = idx.data
+        if val >= 0:
+            continue
+
+        new_val = val + dim_length
+        if new_val < 0:
+            # This is an invalid index, keep original to not confuse the user
+            return None
+
+        if new_idxs is None:
+            new_idxs = list(idxs)
+        new_idxs[i] = new_val
+
+    if new_idxs is None:
+        # No negative indices to convert
+        return None
+
+    new_subtensor = x[tuple(new_idxs)]
+    copy_stack_trace(node.outputs, new_subtensor)
+    return [new_subtensor]
+
+
+@register_canonicalize
 @register_specialize
 @node_rewriter([AdvancedSubtensor1])
 def local_useless_AdvancedSubtensor1(fgraph, node):

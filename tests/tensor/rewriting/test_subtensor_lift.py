@@ -202,7 +202,7 @@ def test_local_subtensor_of_reduce(original_fn, expected_fn):
 
     out = original_fn(x)
     expected_opt_out = expected_fn(x)
-    opt_out = rewrite_graph(out)
+    opt_out = rewrite_graph(out, exclude=("local_convert_negative_indices",))
     assert equal_computations([opt_out], [expected_opt_out]), debugprint(
         [expected_opt_out, opt_out], print_type=True
     )
