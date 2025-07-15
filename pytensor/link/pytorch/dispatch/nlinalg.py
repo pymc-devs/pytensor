@@ -9,7 +9,6 @@ from pytensor.tensor.nlinalg import (
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
-    QRFull,
     SLogDet,
 )
 
@@ -68,21 +67,6 @@ def pytorch_funcify_MatrixInverse(op, **kwargs):
         return torch.linalg.inv(x)
 
     return matrix_inverse
-
-
-@pytorch_funcify.register(QRFull)
-def pytorch_funcify_QRFull(op, **kwargs):
-    mode = op.mode
-    if mode == "raw":
-        raise NotImplementedError("raw mode not implemented in PyTorch")
-
-    def qr_full(x):
-        Q, R = torch.linalg.qr(x, mode=mode)
-        if mode == "r":
-            return R
-        return Q, R
-
-    return qr_full
 
 
 @pytorch_funcify.register(MatrixPinv)

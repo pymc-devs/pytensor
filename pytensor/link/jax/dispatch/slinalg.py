@@ -5,6 +5,7 @@ import jax
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.slinalg import (
     LU,
+    QR,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
@@ -168,3 +169,13 @@ def jax_funcify_ChoSolve(op, **kwargs):
         )
 
     return cho_solve
+
+
+@jax_funcify.register(QR)
+def jax_funcify_QR(op, **kwargs):
+    mode = op.mode
+
+    def qr(x, mode=mode):
+        return jax.scipy.linalg.qr(x, mode=mode)
+
+    return qr
