@@ -71,21 +71,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from textwrap import dedent
 from typing import NamedTuple
 
 import tomlkit
 import tomlkit.items
-
-
-class WorkingDirectoryPaths(NamedTuple):
-    """Paths within the temporary working directory"""
-
-    working_path: Path
-    working_pyproject_file: Path
-    working_environment_file: Path
-    working_environment_blas_file: Path
-    pixi_toml_raw_file: Path
-    gitignore_file: Path
 
 
 RAW_COMMAND = """
@@ -101,6 +91,27 @@ pixi exec conda-lock render-lock-spec \
 """
 
 PARSED_COMMAND = shlex.split(RAW_COMMAND)
+
+
+class OriginalPaths(NamedTuple):
+    """Paths to the original files"""
+
+    project_root: Path  # ./
+    pyproject_file: Path  # ./pyproject.toml
+    environment_file: Path  # ./environment.yml
+    environment_blas_file: Path  # ./scripts/environment-blas.yml
+    pixi_toml_file: Path  # ./pixi.toml
+
+
+class WorkingDirectoryPaths(NamedTuple):
+    """Paths within the temporary working directory"""
+
+    working_path: Path  # ./pixi-working/
+    pyproject_file: Path  # ./pixi-working/pyproject.toml
+    environment_file: Path  # ./pixi-working/environment.yml
+    environment_blas_file: Path  # ./pixi-working/scripts/environment-blas.yml
+    pixi_toml_file: Path  # ./pixi-working/pixi.toml
+    gitignore_file: Path  # ./pixi-working/.gitignore
 
 
 def main():
@@ -119,82 +130,78 @@ def main():
         print("pixi is not installed. See <https://pixi.sh/latest/#installation>")  # noqa: T201
         sys.exit(1)
 
-    current_dir = Path(__file__).parent
-    assert current_dir.name == "scripts"
-    project_root = current_dir.parent
-
-    pyproject_file = project_root / "pyproject.toml"
-
-    pyproject_data = tomlkit.loads(pyproject_file.read_text())
-
-    pyproject_data = preprocess_pyproject_data(pyproject_data)
+    original_paths = get_original_paths()
 
     # Make temporary working directory
-    working_path = project_root / "pixi-working"
-    working_path.mkdir(parents=True, exist_ok=True)
-    gitignore_file = working_path / ".gitignore"
-    gitignore_file.write_text("*")
+    working_directory_paths = initialize_working_directory(original_paths)
 
-    working_pyproject_file = working_path / "pyproject.toml"
-    with working_pyproject_file.open("w") as fh:
+    # Copy the processed pyproject.toml to the working directory
+    pyproject_data = tomlkit.loads(original_paths.pyproject_file.read_text())
+    pyproject_data = preprocess_pyproject_data(pyproject_data)
+    with working_directory_paths.pyproject_file.open("w") as fh:
         tomlkit.dump(pyproject_data, fh)
 
-    raw_environment_file = project_root / "environment.yml"
-    raw_environment_data = raw_environment_file.read_text()
-
+    # Copy the processed environment file to the working directory
+    raw_environment_data = original_paths.environment_file.read_text()
     environment_data = preprocess_environment_data(raw_environment_data)
-
-    working_environment_file = working_path / "environment.yml"
-    with working_environment_file.open("w") as fh:
+    with working_directory_paths.environment_file.open("w") as fh:
         fh.write(environment_data)
 
-    environment_blas_file = project_root / "scripts" / "environment-blas.yml"
-    working_environment_blas_file = working_path / "scripts" / "environment-blas.yml"
+    # Copy environment-blas.yml to the working directory
     # This is for our exclusive use, so it doesn't need to be preprocessed.
-    working_environment_blas_file.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(environment_blas_file, working_environment_blas_file)
+    working_directory_paths.environment_blas_file.parent.mkdir(
+        parents=True, exist_ok=True
+    )
+    shutil.copy(
+        original_paths.environment_blas_file,
+        working_directory_paths.environment_blas_file,
+    )
 
+    # Run conda-lock to generate the pixi.toml file
     print(f"Running the command:\n{shlex.join(PARSED_COMMAND)}\n")  # noqa: T201
     result = subprocess.run(
-        PARSED_COMMAND, check=True, capture_output=True, cwd=working_path
+        PARSED_COMMAND,
+        check=True,
+        capture_output=True,
+        cwd=working_directory_paths.working_path,
     )
 
     warnings = result.stderr.decode("utf-8")
     if warnings:
         print(f"Warnings: \n{warnings}\n")  # noqa: T201
 
+    # Write the unprocessed pixi.toml data to the working directory
     pixi_toml_raw_data = tomlkit.loads(result.stdout.decode("utf-8"))
-
-    pixi_toml_raw_file = working_path / "pixi.toml"
-    pixi_toml_raw_file.write_text(tomlkit.dumps(pixi_toml_raw_data))
-
-    pixi_toml_data = postprocess_pixi_toml_data(pixi_toml_raw_data)
-
-    working_directory_paths = WorkingDirectoryPaths(
-        working_path=working_path,
-        working_pyproject_file=working_pyproject_file,
-        working_environment_file=working_environment_file,
-        working_environment_blas_file=working_environment_blas_file,
-        pixi_toml_raw_file=pixi_toml_raw_file,
-        gitignore_file=gitignore_file,
-    )
+    pixi_toml_raw_content = tomlkit.dumps(pixi_toml_raw_data)
+    working_directory_paths.pixi_toml_file.write_text(pixi_toml_raw_content)
 
     # Generate the pixi.toml content
+    pixi_toml_data = postprocess_pixi_toml_data(pixi_toml_raw_data)
     pixi_toml_content = tomlkit.dumps(pixi_toml_data)
 
     if args.verify_only:
         # Compare with existing pixi.toml
-        pixi_toml_file = project_root / "pixi.toml"
-        if not pixi_toml_file.exists():
-            print("ERROR: pixi.toml does not exist")  # noqa: T201
-            cleanup_working_directory(working_directory_paths)
-            sys.exit(1)
+        existing_pixi_toml_content = original_paths.pixi_toml_file.read_text()
+        if existing_pixi_toml_content != pixi_toml_content:
+            message = dedent("""\
+            Mismatch detected between existing and new pixi.toml content.
 
-        existing_content = pixi_toml_file.read_text()
-        if existing_content != pixi_toml_content:
-            print("ERROR: pixi.toml is not consistent with environment files")  # noqa: T201
-            print("Run 'python scripts/generate-pixi-toml.py' to update it")  # noqa: T201
-            cleanup_working_directory(working_directory_paths)
+            New pixi.toml content:
+            {pixi_toml_content}
+
+            Run 'python scripts/generate-pixi-toml.py' to regenerate it.
+            After updating `pixi.toml`, it's suggested to run the following commands:
+
+                pixi lock
+                git add pixi.toml
+                git commit -m "Regenerate pixi.toml"
+                git add pixi.lock
+                git commit -m "Update pixi lockfile"
+
+            ERROR: pixi.toml is not consistent with environment files.
+            See above for details.
+            """).format(pixi_toml_content=pixi_toml_content)
+            print(message)  # noqa: T201
             sys.exit(1)
 
         print("SUCCESS: pixi.toml is consistent with environment files")  # noqa: T201
@@ -202,17 +209,61 @@ def main():
         sys.exit(0)
     else:
         # Write the pixi.toml file to the project root
-        (project_root / "pixi.toml").write_text(pixi_toml_content)
+        original_paths.pixi_toml_file.write_text(pixi_toml_content)
         cleanup_working_directory(working_directory_paths)
+
+
+def get_original_paths() -> OriginalPaths:
+    """Get the paths to the original files"""
+    current_dir = Path(__file__).parent
+    assert current_dir.name == "scripts"
+    project_root = current_dir.parent
+    pyproject_file = project_root / "pyproject.toml"
+    environment_file = project_root / "environment.yml"
+    environment_blas_file = project_root / "scripts" / "environment-blas.yml"
+    pixi_toml_file = project_root / "pixi.toml"
+    if not pixi_toml_file.exists():
+        raise FileNotFoundError(f"pixi.toml does not exist at {pixi_toml_file}")
+    return OriginalPaths(
+        project_root=project_root,
+        pyproject_file=pyproject_file,
+        environment_file=environment_file,
+        environment_blas_file=environment_blas_file,
+        pixi_toml_file=pixi_toml_file,
+    )
+
+
+def initialize_working_directory(
+    original_paths: OriginalPaths,
+) -> WorkingDirectoryPaths:
+    """Initialize the temporary working directory"""
+    working_path = original_paths.project_root / "pixi-working"
+    working_path.mkdir(parents=True, exist_ok=True)
+    gitignore_file = working_path / ".gitignore"
+    gitignore_file.write_text("*")
+
+    pyproject_file = working_path / "pyproject.toml"
+    environment_file = working_path / "environment.yml"
+    environment_blas_file = working_path / "scripts" / "environment-blas.yml"
+    pixi_toml_file = working_path / "pixi.toml"
+
+    return WorkingDirectoryPaths(
+        working_path=working_path,
+        pyproject_file=pyproject_file,
+        environment_file=environment_file,
+        environment_blas_file=environment_blas_file,
+        pixi_toml_file=pixi_toml_file,
+        gitignore_file=gitignore_file,
+    )
 
 
 def cleanup_working_directory(working_paths: WorkingDirectoryPaths):
     """Clean up the temporary working directory and files"""
-    working_paths.working_pyproject_file.unlink()
-    working_paths.working_environment_file.unlink()
-    working_paths.working_environment_blas_file.unlink()
-    working_paths.working_environment_blas_file.parent.rmdir()
-    working_paths.pixi_toml_raw_file.unlink()
+    working_paths.pyproject_file.unlink()
+    working_paths.environment_file.unlink()
+    working_paths.environment_blas_file.unlink()
+    working_paths.environment_blas_file.parent.rmdir()
+    working_paths.pixi_toml_file.unlink()
     working_paths.gitignore_file.unlink()
     working_paths.working_path.rmdir()
 
