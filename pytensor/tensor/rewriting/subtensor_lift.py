@@ -5,7 +5,7 @@ import numpy as np
 
 from pytensor import Variable
 from pytensor.compile import optdb
-from pytensor.graph import Constant, FunctionGraph, node_rewriter
+from pytensor.graph import Constant, FunctionGraph, node_rewriter, vectorize_graph
 from pytensor.graph.rewriting.basic import NodeRewriter, copy_stack_trace
 from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.scalar import basic as ps
@@ -20,6 +20,7 @@ from pytensor.tensor.basic import (
     join,
     register_infer_shape,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
@@ -118,21 +119,43 @@ def local_subtensor_of_dot(fgraph, node):
     the remaining entries of ``idxs`` (if any), modified to skip the
     second-to-last dimension of ``B`` (because dot sums over this dimension).
     """
-    if not isinstance(node.op, Subtensor):
-        return
-    if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Dot)):
+    x, *idx_vars = node.inputs
+    if not (
+        x.owner is not None
+        and (
+            isinstance(x.owner.op, Dot)
+            or (
+                isinstance(x.owner.op, Blockwise)
+                and isinstance(x.owner.op.core_op, Dot)
+            )
+        )
+    ):
         return
     # If there is other node that use the outputs of the dot
     # We don't want to compute twice the sub part.
-    if len(fgraph.clients[node.inputs[0]]) > 1:
+    if len(fgraph.clients[x]) > 1:
         return
 
-    a = node.inputs[0].owner.inputs[0]
-    b = node.inputs[0].owner.inputs[1]
+    a = x.owner.inputs[0]
+    b = x.owner.inputs[1]
+    idx_list = indices_from_subtensor(idx_vars, node.op.idx_list)
 
-    idx_list = get_idx_list(node.inputs, node.op.idx_list)
+    batch_ndim = (
+        x.owner.op.batch_ndim(x.owner) if isinstance(x.owner.op, Blockwise) else 0
+    )
 
-    num_a_indices = min(a.ndim - 1, len(idx_list))
+    if batch_ndim:
+        batch_idx_list, idx_list = idx_list[:batch_ndim], idx_list[batch_ndim:]
+        if not idx_list:
+            # Indexing only over batch dimensions of Blockwise, that can be handled by another rewrite
+            return None
+        # We perform the rest of the rewrite on dummy a, b that correspond to the core case
+        a = a.type.clone(shape=a.type.shape[batch_ndim:])()
+        b = b.type.clone(shape=b.type.shape[batch_ndim:])()
+
+    a_ndim = a.ndim
+    b_ndim = b.ndim
+    num_a_indices = min(a_ndim - 1, len(idx_list))
     a_indices = idx_list[:num_a_indices]
     b_indices = idx_list[num_a_indices:]
 
@@ -141,26 +164,22 @@ def local_subtensor_of_dot(fgraph, node):
     # This wasn't necessary for a, because we just omitted the last index.
     # We skip this if b.ndim = 1, since then we just want b_sub = b, not b_sub = b[:]
     # (dot also handles b.ndim < 2 as a special case)
-    if b.ndim > 1 and len(b_indices) >= b.ndim - 1:
+    if b_ndim > 1 and len(b_indices) >= b_ndim - 1:
         b_indices = (
-            b_indices[: b.ndim - 2]
+            b_indices[: b_ndim - 2]
             + (slice(None, None, None),)
-            + b_indices[b.ndim - 2 :]
+            + b_indices[b_ndim - 2 :]
         )
 
-    a_sub = a.__getitem__(tuple(a_indices))
-    b_sub = b.__getitem__(tuple(b_indices)) if b_indices else b
-
-    # Copy over previous output stacktrace to a_sub and b_sub,
-    # because an error in the subtensor operation (e.g. an index error)
-    # on either a or b must correspond to an error in the
-    # subtensor operation on their dot product.
-    copy_stack_trace(node.outputs[0], [a_sub, b_sub])
-
-    # Copy over previous output stacktrace and previous dot product stacktrace,
-    # because an error here may correspond to an either in either the original
-    # dot product, or in the dot product after the subtensor operation.
+    a_sub = a[tuple(a_indices)]
+    b_sub = b[tuple(b_indices)] if b_indices else b
     r = dot(a_sub, b_sub)
+
+    if batch_ndim:
+        # Replace dummy inputs by the original batch ones
+        r = vectorize_graph(r, replace={a: x.owner.inputs[0], b: x.owner.inputs[1]})
+        r = r[tuple(batch_idx_list)]
+
     copy_stack_trace([node.outputs[0], node.inputs[0]], r)
 
     return [r]
@@ -169,8 +188,8 @@ def local_subtensor_of_dot(fgraph, node):
 @register_canonicalize("shape_unsafe")
 @register_specialize("shape_unsafe")
 @node_rewriter([Subtensor])
-def local_subtensor_of_elemwise(fgraph, node):
-    """Lift a Subtensor through an Elemwise and its implicit broadcasting behavior.
+def local_subtensor_of_batch_dims(fgraph, node):
+    """Lift a Subtensor through the batch dims of an (Elemwise or Blockwise) operation and its implicit broadcasting behavior.
 
     exp(x)[:, 0] -> exp(x[:, 0])
     add(x, y)[0] -> add(x[0], y[0])
@@ -178,7 +197,7 @@ def local_subtensor_of_elemwise(fgraph, node):
     """
     elem, *idx = node.inputs
 
-    if not (elem.owner and isinstance(elem.owner.op, Elemwise)):
+    if not (elem.owner and isinstance(elem.owner.op, Elemwise | Blockwise)):
         return None
 
     if len(fgraph.clients[elem]) > 1:
@@ -188,9 +207,34 @@ def local_subtensor_of_elemwise(fgraph, node):
 
     idx_tuple = indices_from_subtensor(idx, node.op.idx_list)
 
+    batch_ndim = (
+        elem.owner.op.batch_ndim(elem.owner)
+        if isinstance(elem.owner.op, Blockwise)
+        else elem.ndim
+    )
+
+    if len(idx_tuple) > batch_ndim:
+        # Indexing on core dimensions of Blockwise. We split the indices and lift the batch ones only
+        batch_indices, core_indices = idx_tuple[:batch_ndim], idx_tuple[batch_ndim:]
+        if all(is_full_slice(idx) for idx in batch_indices):
+            # No batch indices, nothing to do
+            return None
+        elem_with_batch_indices = elem[batch_indices]
+        [elem_with_batch_indices_lifted] = local_subtensor_of_batch_dims.transform(
+            fgraph, elem_with_batch_indices.owner
+        )
+        # Reapply the core_indices
+        core_ndim = elem.type.ndim - batch_ndim
+        # Number of batch dims may have changed with the lifting of indices, so we recompute
+        new_batch_ndim = elem_with_batch_indices_lifted.type.ndim - core_ndim
+        new_indices = (*(slice(None),) * new_batch_ndim, *core_indices)
+        new_elem = elem_with_batch_indices_lifted[new_indices]
+        copy_stack_trace(node.outputs[0], new_elem)
+        return [new_elem]
+
     elem_inputs = elem.owner.inputs
-    elem_bcast = elem.type.broadcastable
-    if all(inp.type.broadcastable == elem_bcast for inp in elem_inputs):
+    elem_bcast = elem.type.broadcastable[:batch_ndim]
+    if all(inp.type.broadcastable[:batch_ndim] == elem_bcast for inp in elem_inputs):
         # No need to worry about implicit broadcasting.
         indexed_inputs = [inp[idx_tuple] for inp in elem_inputs]
 
@@ -201,7 +245,7 @@ def local_subtensor_of_elemwise(fgraph, node):
             zip(
                 idx_tuple,
                 elem_bcast,
-                *(inp.type.broadcastable for inp in elem_inputs),
+                *(inp.type.broadcastable[:batch_ndim] for inp in elem_inputs),
                 # Indices can be shorter than input ndims
                 strict=False,
             )
@@ -433,6 +477,41 @@ def local_subtensor_of_expand_dims(fgraph, node):
         copy_stack_trace(old_out, out)
 
     return [out]
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([Subtensor])
+def local_subtensor_of_squeeze(fgraph, node):
+    """Lift subtensor through a squeeze operation"""
+    x, *idxs_vars = node.inputs
+    if not (
+        x.owner is not None
+        and isinstance(x.owner.op, DimShuffle)
+        and x.owner.op.is_squeeze
+    ):
+        return None
+
+    [x_before_squeeze] = x.owner.inputs
+    idxs = indices_from_subtensor(idxs_vars, node.op.idx_list)
+    dropped_dims = x.owner.op.drop
+
+    # Apply indices directly on x
+    # Add empty slices on the axis that squeeze would have removed
+    new_idxs = np.insert(np.array(idxs, dtype=object), dropped_dims, slice(None))
+    x_indexed = x_before_squeeze[tuple(new_idxs)]
+
+    # Reapply squeeze
+    # Indexing may have squeezed some dimensions, so we need to recalculate dropped_dims
+    new_dropped_dims = np.array(dropped_dims)
+    for i, new_idx in reversed(tuple(enumerate(new_idxs))):
+        if not isinstance(new_idx, slice):
+            # If it's not a slice, it's an integer which drops the dimension
+            new_dropped_dims[new_dropped_dims > i] -= 1
+    new_x = x_indexed.squeeze(tuple(new_dropped_dims))
+
+    copy_stack_trace(x, new_x)
+    return [new_x]
 
 
 @register_canonicalize

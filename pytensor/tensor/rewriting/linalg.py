@@ -26,7 +26,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blas import Dot22
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Dot, Prod, _matrix_matrix_matmul, log, outer, prod
+from pytensor.tensor.math import Dot, Prod, _matmul, log, outer, prod
 from pytensor.tensor.nlinalg import (
     SVD,
     KroneckerProduct,
@@ -284,7 +284,7 @@ def cholesky_ldotlt(fgraph, node):
                 # This rewrite only applies to matrix Dot
                 and A.owner.inputs[0].type.ndim == 2
             )
-            or (A.owner.op == _matrix_matrix_matmul)
+            or (A.owner.op == _matmul)
         )
     ):
         return
