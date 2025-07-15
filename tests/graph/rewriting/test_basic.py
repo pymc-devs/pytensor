@@ -41,6 +41,7 @@ from tests.graph.utils import (
     op_y,
     op_z,
 )
+from tests.unittest_tools import assert_equal_computations
 
 
 class AssertNoChanges(Feature):
@@ -725,22 +726,35 @@ def test_patternsub_invalid_dtype(out_pattern):
     assert e.type.is_super(fg.outputs[0].type)
 
 
-def test_patternsub_different_output_lengths():
-    # Test that PatternNodeRewriter won't replace nodes with different numbers of outputs
-    ps = PatternNodeRewriter(
-        (op1, "x"),
-        ("x"),
+def test_patternsub_multi_output_nodes():
+    # Test that PatternNodeRewriter won't attempt to replace multi-output nodes
+    multiple_op_ps = PatternNodeRewriter(
+        (op_multiple_outputs, "x"),
+        "x",
         name="ps",
     )
-    rewriter = in2out(ps)
+
+    single_op_ps = PatternNodeRewriter(
+        (op_y, "x"),
+        "x",
+        name="ps",
+    )
+
+    rewriter = in2out(multiple_op_ps, single_op_ps)
 
     x = MyVariable("x")
     e1, e2 = op_multiple_outputs(x)
-    o = op1(e1)
+    o1, o2 = op_y(e1), op_y(e2)
 
-    fgraph = FunctionGraph(inputs=[x], outputs=[o])
+    fgraph = FunctionGraph(inputs=[x], outputs=[e2, e1], copy_inputs=False)
     rewriter.rewrite(fgraph)
-    assert fgraph.outputs[0].owner.op == op1
+    # This shouldn't rewrite because PatternNodeRewriter has no way of specifying which output(s) are being matched
+    assert_equal_computations(fgraph.outputs, [e2, e1])
+
+    fgraph = FunctionGraph(inputs=[x], outputs=[o2, o1], copy_inputs=False)
+    rewriter.rewrite(fgraph)
+    # Having a variable that comes out of a multi-output node should be fine
+    assert_equal_computations(fgraph.outputs, [e2, e1])
 
 
 class TestSequentialNodeRewriter:
