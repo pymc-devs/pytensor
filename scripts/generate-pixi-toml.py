@@ -1,5 +1,70 @@
 #!/usr/bin/env python3
 
+"""
+Generate a `pixi.toml` file.
+
+Overview:
+
+To a very good approximation, this script just runs RAW_COMMAND,
+and writes the output to `pixi.toml`.
+
+This script is necessary in order to do some minor pre- and post-processing.
+
+Context:
+
+Pixi is a modern project-centric manager of Conda environments.
+It runs completely independently of more traditional tools like `conda`
+or `mamba`, or non-Conda-enabled Python environment managers like
+`pip` or `uv`. As such, we need to define the dependencies and Conda
+environments that pixi should automatically manage. This is specified
+in a `pixi.toml` file.
+
+The sources of truth for the dependencies in this project are:
+- `environment.yml`
+- `pyproject.toml`
+
+The goal of this script is to maintain the original sources of truth and
+in a completely automatic way generate a valid `pixi.toml` from them.
+
+Currently, pixi has no mechanism for importing `environment.yml` files,
+and when loading `pyproject.toml` files it does not attempt to convert
+the PyPI dependencies into conda-forge dependencies. On the other hand,
+`conda-lock` does both of these things, and recently added support for
+generating `pixi.toml` files from `environment.yml` and `pyproject.toml`
+files.
+
+PyTensor has some rather complicated dependencies, and so we do some
+pre- and post-processing in this script in order to work around some
+idiosyncrasies.
+
+Technical details:
+
+This script creates a temporary working directory `pixi-working/` in
+the project root, copies pre-processed versions of `environment.yml`,
+`pyproject.toml`, and `scripts/environment-blas.yml` into it, and then
+runs `conda-lock` via `pixi exec` in order to generate the contents of
+a `pixi.toml` file.
+
+The generated `pixi.toml` contents are then post-processed and written
+to the project root.
+
+The pre-processing steps are:
+
+- Remove the `complete` and `development` optional dependencies from
+  `pyproject.toml`.
+- Remove the BLAS dependencies from `environment.yml`. (They are redefined
+  in `scripts/environment-blas.yml` on a platform-by-platform basis to
+  work around limitations in `conda-lock`'s selector parsing.)
+
+The post-processing steps are:
+
+- Add an explanatory header comment to the `pixi.toml` file.
+- Remove the `win-64` platform from the jax feature (jaxlib is not
+  available for Windows from conda-forge).
+- Add the default solve group to each environment entry.
+- Comment out the non-default environments.
+"""
+
 import argparse
 import shlex
 import shutil
