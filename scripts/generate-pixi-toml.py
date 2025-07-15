@@ -289,8 +289,10 @@ def remove_extraneous_features(
     ... ''')
     >>> output_data = remove_extraneous_features(input_data)
     >>> print(tomlkit.dumps(output_data))
+    <BLANKLINE>
     [project.optional-dependencies]
     rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot"]
+    <BLANKLINE>
     """
     project_item = pyproject_data.get("project")
     assert isinstance(project_item, tomlkit.items.Table)
@@ -335,12 +337,15 @@ def restrict_jax_platforms(
     ... ''')
     >>> output_data = restrict_jax_platforms(input_data)
     >>> print(tomlkit.dumps(output_data))
+    <BLANKLINE>
     [project]
     platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
     [feature.jax]
     platforms = ["linux-64", "osx-64", "osx-arm64"]
+    <BLANKLINE>
     [feature.jax.dependencies]
     jax = "*"
+    <BLANKLINE>
     """
     # Get the platforms from the project section - unwrap to get the actual list
     project_item = pixi_toml_data["project"]
@@ -416,9 +421,11 @@ def comment_out_environments_that_wont_solve(
     ... ''')
     >>> output_data = comment_out_environments_that_wont_solve(input_data)
     >>> print(tomlkit.dumps(output_data))
+    <BLANKLINE>
     [environments]
-    dev = {features = ["dev"]}
     # tests = {features = ["tests"]}
+    # dev = {features = ["dev"]}
+    <BLANKLINE>
     """
     environments_item = pixi_toml_data.get("environments")
     assert isinstance(environments_item, tomlkit.items.Table)
@@ -485,9 +492,11 @@ def _convert_environment_items_to_dict_form(
     ... ''')
     >>> output_data = _convert_environment_items_to_dict_form(input_data)
     >>> print(tomlkit.dumps(output_data))
+    <BLANKLINE>
     [environments]
     tests = {features = ["tests"]}
     dev = {features = ["dev"]}
+    <BLANKLINE>
     """
     environments_item = pixi_toml_data.get("environments")
     assert isinstance(environments_item, tomlkit.items.Table)
@@ -521,9 +530,11 @@ def _add_default_solve_group(
     ... ''')
     >>> output_data = _add_default_solve_group(input_data)
     >>> print(tomlkit.dumps(output_data))
+    <BLANKLINE>
     [environments]
-    tests = {features = ["tests"], solve-group = "default"}
-    dev = {features = ["dev"], solve-group = "default"}
+    tests = {features = ["tests"],solve-group = "default"}
+    dev = {features = ["dev"],solve-group = "default"}
+    <BLANKLINE>
     """
     environments_item = pixi_toml_data.get("environments")
     assert isinstance(environments_item, tomlkit.items.Table)
