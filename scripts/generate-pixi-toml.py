@@ -110,7 +110,8 @@ class WorkingDirectoryPaths(NamedTuple):
     pyproject_file: Path  # ./pixi-working/pyproject.toml
     environment_file: Path  # ./pixi-working/environment.yml
     environment_blas_file: Path  # ./pixi-working/scripts/environment-blas.yml
-    pixi_toml_file: Path  # ./pixi-working/pixi.toml
+    raw_generated_pixi_toml: Path  # ./pixi-working/pixi-raw.toml
+    processed_generated_pixi_toml: Path  # ./pixi-working/pixi-processed.toml
     gitignore_file: Path  # ./pixi-working/.gitignore
 
 
@@ -173,21 +174,34 @@ def main():
     # Write the unprocessed pixi.toml data to the working directory
     pixi_toml_raw_data = tomlkit.loads(result.stdout.decode("utf-8"))
     pixi_toml_raw_content = tomlkit.dumps(pixi_toml_raw_data)
-    working_directory_paths.pixi_toml_file.write_text(pixi_toml_raw_content)
+    working_directory_paths.raw_generated_pixi_toml.write_text(pixi_toml_raw_content)
 
     # Generate the pixi.toml content
     pixi_toml_data = postprocess_pixi_toml_data(pixi_toml_raw_data)
     pixi_toml_content = tomlkit.dumps(pixi_toml_data)
+    working_directory_paths.processed_generated_pixi_toml.write_text(pixi_toml_content)
 
     if args.verify_only:
         # Compare with existing pixi.toml
         existing_pixi_toml_content = original_paths.pixi_toml_file.read_text()
         if existing_pixi_toml_content != pixi_toml_content:
+            # Run diff command to show the differences
+            cmd = [
+                "diff",
+                "-u",
+                str(original_paths.pixi_toml_file),
+                str(working_directory_paths.processed_generated_pixi_toml),
+            ]
+            diff_result = subprocess.run(cmd, capture_output=True, text=True)
+
             message = dedent("""\
             Mismatch detected between existing and new pixi.toml content.
 
-            New pixi.toml content:
-            {pixi_toml_content}
+            Diff command:
+            {diff_command}
+
+            Diff output:
+            {diff_output}
 
             Run 'python scripts/generate-pixi-toml.py' to regenerate it.
             After updating `pixi.toml`, it's suggested to run the following commands:
@@ -200,7 +214,7 @@ def main():
 
             ERROR: pixi.toml is not consistent with environment files.
             See above for details.
-            """).format(pixi_toml_content=pixi_toml_content)
+            """).format(diff_command=shlex.join(cmd), diff_output=diff_result.stdout)
             print(message)  # noqa: T201
             sys.exit(1)
 
@@ -245,14 +259,16 @@ def initialize_working_directory(
     pyproject_file = working_path / "pyproject.toml"
     environment_file = working_path / "environment.yml"
     environment_blas_file = working_path / "scripts" / "environment-blas.yml"
-    pixi_toml_file = working_path / "pixi.toml"
+    raw_generated_pixi_toml = working_path / "pixi-raw.toml"
+    processed_generated_pixi_toml = working_path / "pixi-processed.toml"
 
     return WorkingDirectoryPaths(
         working_path=working_path,
         pyproject_file=pyproject_file,
         environment_file=environment_file,
         environment_blas_file=environment_blas_file,
-        pixi_toml_file=pixi_toml_file,
+        raw_generated_pixi_toml=raw_generated_pixi_toml,
+        processed_generated_pixi_toml=processed_generated_pixi_toml,
         gitignore_file=gitignore_file,
     )
 
@@ -263,7 +279,8 @@ def cleanup_working_directory(working_paths: WorkingDirectoryPaths):
     working_paths.environment_file.unlink()
     working_paths.environment_blas_file.unlink()
     working_paths.environment_blas_file.parent.rmdir()
-    working_paths.pixi_toml_file.unlink()
+    working_paths.raw_generated_pixi_toml.unlink()
+    working_paths.processed_generated_pixi_toml.unlink()
     working_paths.gitignore_file.unlink()
     working_paths.working_path.rmdir()
 
