@@ -391,6 +391,10 @@ def local_blockwise_dot_to_mul(fgraph, node):
                 new_b = b
         else:
             return None
+    
+     # new condition to handle (1,1) @ (1,1)
+    if a.ndim == 2 and b.ndim == 2 and a.shape == (1, 1) and b.shape == (1, 1):
+        return [a * b]  # Direct elementwise multiplication
 
     new_a = copy_stack_trace(a, new_a)
     new_b = copy_stack_trace(b, new_b)
