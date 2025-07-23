@@ -486,3 +486,26 @@ def test_gemv_negative_strides_perf(neg_stride0, neg_stride1, F_layout, benchmar
     np.testing.assert_allclose(res, fn(test_A.copy(), test_x, test_y))
 
     benchmark(fn, test_A, test_x, test_y)
+
+
+@pytest.mark.parametrize("inplace", (True, False), ids=["inplace", "no_inplace"])
+@pytest.mark.parametrize("n", [2**7, 2**9, 2**13])
+def test_ger_benchmark(n, inplace, benchmark):
+    alpha = pt.dscalar("alpha")
+    x = pt.dvector("x")
+    y = pt.dvector("y")
+    A = pt.dmatrix("A")
+
+    out = alpha * pt.outer(x, y) + A
+
+    fn = pytensor.function(
+        [alpha, x, y, pytensor.In(A, mutable=inplace)], out, trust_input=True
+    )
+
+    rng = np.random.default_rng([2274, n])
+    alpha_test = rng.normal(size=())
+    x_test = rng.normal(size=(n,))
+    y_test = rng.normal(size=(n,))
+    A_test = rng.normal(size=(n, n))
+
+    benchmark(fn, alpha_test, x_test, y_test, A_test)
