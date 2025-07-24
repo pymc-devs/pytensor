@@ -37,51 +37,51 @@ def clear_assoccomm():
 
 def test_kanren_basic():
     A_pt = pt.matrix("A")
-    x_pt = pt.vector("x")
+    B_pt = pt.matrix("B")
 
-    y_pt = pt.dot(A_pt, x_pt)
+    y_pt = pt.dot(A_pt, B_pt)
 
     q = var()
-    res = list(run(None, q, eq(y_pt, etuple(_dot, q, x_pt))))
+    res = list(run(None, q, eq(y_pt, etuple(_dot, q, B_pt))))
 
     assert res == [A_pt]
 
 
 def test_KanrenRelationSub_filters():
-    x_pt = pt.vector("x")
-    y_pt = pt.vector("y")
-    z_pt = pt.vector("z")
     A_pt = pt.matrix("A")
+    B_pt = pt.matrix("B")
+    C_pt = pt.matrix("C")
+    D_pt = pt.matrix("D")
 
     fact(commutative, _dot)
     fact(commutative, pt.add)
     fact(associative, pt.add)
 
-    Z_pt = A_pt.dot((x_pt + y_pt) + z_pt)
+    Z_pt = A_pt.dot((B_pt + C_pt) + D_pt)
 
     fgraph = FunctionGraph(outputs=[Z_pt], clone=False)
 
     def distributes(in_lv, out_lv):
-        A_lv, x_lv, y_lv, z_lv = vars(4)
+        A_lv, B_lv, C_lv, D_lv = vars(4)
         return lall(
             # lhs == A * (x + y + z)
             eq_assoccomm(
-                etuple(_dot, A_lv, etuple(pt.add, x_lv, etuple(pt.add, y_lv, z_lv))),
+                etuple(_dot, A_lv, etuple(pt.add, B_lv, etuple(pt.add, C_lv, D_lv))),
                 in_lv,
             ),
             # This relation does nothing but provide us with a means of
             # generating associative-commutative matches in the `kanren`
             # output.
-            eq((A_lv, x_lv, y_lv, z_lv), out_lv),
+            eq((A_lv, B_lv, C_lv, D_lv), out_lv),
         )
 
     def results_filter(results):
         _results = [eval_if_etuple(v) for v in results]
 
         # Make sure that at least a couple permutations are present
-        assert (A_pt, x_pt, y_pt, z_pt) in _results
-        assert (A_pt, y_pt, x_pt, z_pt) in _results
-        assert (A_pt, z_pt, x_pt, y_pt) in _results
+        assert (A_pt, B_pt, C_pt, D_pt) in _results
+        assert (A_pt, C_pt, B_pt, D_pt) in _results
+        assert (A_pt, D_pt, B_pt, C_pt) in _results
 
         return None
 
@@ -121,13 +121,13 @@ def test_KanrenRelationSub_multiout():
 
 def test_KanrenRelationSub_dot():
     """Make sure we can run miniKanren "optimizations" over a graph until a fixed-point/normal-form is reached."""
-    x_pt = pt.vector("x")
-    c_pt = pt.vector("c")
-    d_pt = pt.vector("d")
     A_pt = pt.matrix("A")
     B_pt = pt.matrix("B")
+    C_pt = pt.matrix("C")
+    D_pt = pt.matrix("D")
+    E_pt = pt.matrix("E")
 
-    Z_pt = A_pt.dot(x_pt + B_pt.dot(c_pt + d_pt))
+    Z_pt = A_pt.dot(E_pt + B_pt.dot(C_pt + D_pt))
 
     fgraph = FunctionGraph(outputs=[Z_pt], clone=False)
 
@@ -137,15 +137,15 @@ def test_KanrenRelationSub_dot():
         return lall(
             # lhs == A * (x + b)
             eq(
-                etuple(_dot, var("A"), etuple(pt.add, var("x"), var("b"))),
+                etuple(_dot, var("A"), etuple(pt.add, var("E"), var("B"))),
                 in_lv,
             ),
             # rhs == A * x + A * b
             eq(
                 etuple(
                     pt.add,
-                    etuple(_dot, var("A"), var("x")),
-                    etuple(_dot, var("A"), var("b")),
+                    etuple(_dot, var("A"), var("E")),
+                    etuple(_dot, var("A"), var("B")),
                 ),
                 out_lv,
             ),

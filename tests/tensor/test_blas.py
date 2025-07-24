@@ -9,7 +9,6 @@ from numpy.testing import assert_array_almost_equal
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-import pytensor.tensor.blas_scipy
 from pytensor.compile.function import function
 from pytensor.compile.io import In
 from pytensor.compile.mode import Mode

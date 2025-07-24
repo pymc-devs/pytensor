@@ -8,7 +8,6 @@ import pytensor.tensor as pt
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.blas import Ger
 from pytensor.tensor.blas_c import CGemv, CGer, must_initialize_y_gemv
-from pytensor.tensor.blas_scipy import ScipyGer
 from pytensor.tensor.type import dmatrix, dvector, matrix, scalar, tensor, vector
 from tests import unittest_tools
 from tests.tensor.test_blas import BaseGemv, TestBlasStrides
@@ -68,8 +67,6 @@ class TestCGer(OptimizationTestMixin):
         assert CGer(False) == CGer(False)
         assert CGer(False) != CGer(True)
 
-        assert CGer(True) != ScipyGer(True)
-        assert CGer(False) != ScipyGer(False)
         assert CGer(True) != Ger(True)
         assert CGer(False) != Ger(False)
 

@@ -158,26 +158,11 @@ def local_subtensor_of_dot(fgraph, node):
         a = a.type.clone(shape=a.type.shape[batch_ndim:])()
         b = b.type.clone(shape=b.type.shape[batch_ndim:])()
 
-    a_ndim = a.ndim
-    b_ndim = b.ndim
-    num_a_indices = min(a_ndim - 1, len(idx_list))
-    a_indices = idx_list[:num_a_indices]
-    b_indices = idx_list[num_a_indices:]
-
-    # This is necessary because np.dot sums the last index of a with the second to last of b
-    # so we want to skip the second-to-last index into b.
-    # This wasn't necessary for a, because we just omitted the last index.
-    # We skip this if b.ndim = 1, since then we just want b_sub = b, not b_sub = b[:]
-    # (dot also handles b.ndim < 2 as a special case)
-    if b_ndim > 1 and len(b_indices) >= b_ndim - 1:
-        b_indices = (
-            b_indices[: b_ndim - 2]
-            + (slice(None, None, None),)
-            + b_indices[b_ndim - 2 :]
-        )
+    a_indices = idx_list[:1]
+    b_indices = (slice(None), *idx_list[1:])
 
     a_sub = a[tuple(a_indices)]
-    b_sub = b[tuple(b_indices)] if b_indices else b
+    b_sub = b[tuple(b_indices)]
     r = dot(a_sub, b_sub)
 
     if batch_ndim:

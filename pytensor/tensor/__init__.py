@@ -107,7 +107,6 @@ from pytensor.gradient import grad, hessian, jacobian
 from pytensor.tensor import (
     blas,
     blas_c,
-    blas_scipy,
     sharedvar,
     xlogx,
 )

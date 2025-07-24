@@ -107,7 +107,6 @@ from pytensor.tensor.math import (
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.type import (
-    DenseTensorType,
     TensorType,
     integer_dtypes,
     values_eq_approx_remove_inf_nan,
@@ -580,12 +579,6 @@ class GemmOptimizer(GraphRewriter):
 def local_dot_to_dot22(fgraph, node):
     # This works for tensor.outer too because basic.outer is a macro that
     # produces a dot(dimshuffle,dimshuffle) of form 4 below
-    if not isinstance(node.op, Dot):
-        return
-
-    if any(not isinstance(i.type, DenseTensorType) for i in node.inputs):
-        return False
-
     x, y = node.inputs
     if y.type.dtype != x.type.dtype:
         # TODO: upcast one so the types match
@@ -593,16 +586,7 @@ def local_dot_to_dot22(fgraph, node):
         return
 
     if y.type.dtype in ("float16", "float32", "float64", "complex64", "complex128"):
-        if x.ndim == 2 and y.ndim == 2:
-            new_out = [_dot22(*node.inputs)]
-        elif x.ndim == 2 and y.ndim == 1:
-            new_out = [_dot22(x, y.dimshuffle(0, "x")).dimshuffle(0)]
-        elif x.ndim == 1 and y.ndim == 2:
-            new_out = [_dot22(x.dimshuffle("x", 0), y).dimshuffle(1)]
-        elif x.ndim == 1 and y.ndim == 1:
-            new_out = [_dot22(x.dimshuffle("x", 0), y.dimshuffle(0, "x")).dimshuffle()]
-        else:
-            return
+        new_out = [_dot22(*node.inputs)]
         copy_stack_trace(node.outputs, new_out)
         return new_out
 
