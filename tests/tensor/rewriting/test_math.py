@@ -4714,14 +4714,15 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
         == 1
     )
 
-    # For now rewrite only applies to Batched Dots
+    # For now we do not rewrite only the case of unbatched outer
+    core_outer = (not batched) and (a_shape == (3, 1)) and (b_shape == (1, 3))
     rewritten_out = rewrite_graph(out)
     assert rewritten_out.type.shape == out.type.shape
     assert sum(
         isinstance(var.owner.op, (Blockwise | Dot))
         for var in ancestors([rewritten_out])
         if var.owner
-    ) == (0 if batched else 1)
+    ) == (1 if core_outer else 0)
 
     a_test = np.random.normal(size=a.type.shape).astype(a.type.dtype)
     b_test = np.random.normal(size=b.type.shape).astype(b.type.dtype)

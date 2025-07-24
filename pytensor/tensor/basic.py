@@ -1801,8 +1801,7 @@ class Alloc(COp):
                     | pytensor.tensor.blas.Gemv
                     | pytensor.tensor.blas_c.CGemv
                     | pytensor.tensor.blas.Ger
-                    | pytensor.tensor.blas_c.CGer
-                    | pytensor.tensor.blas_scipy.ScipyGer,
+                    | pytensor.tensor.blas_c.CGer,
                 )
             ):
                 # Ops that will work inplace on the Alloc. So if they

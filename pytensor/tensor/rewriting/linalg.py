@@ -276,15 +276,7 @@ def cholesky_ldotlt(fgraph, node):
 
     A = node.inputs[0]
     if not (
-        A.owner is not None
-        and (
-            (
-                isinstance(A.owner.op, Dot)
-                # This rewrite only applies to matrix Dot
-                and A.owner.inputs[0].type.ndim == 2
-            )
-            or (A.owner.op == _matmul)
-        )
+        A.owner is not None and (isinstance(A.owner.op, Dot) or (A.owner.op == _matmul))
     ):
         return
 

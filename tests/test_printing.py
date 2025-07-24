@@ -333,7 +333,7 @@ def test_debugprint():
 
 
 def test_debugprint_id_type():
-    a_at = dvector()
+    a_at = dmatrix()
     b_at = dmatrix()
 
     d_at = b_at.dot(a_at)
@@ -344,10 +344,10 @@ def test_debugprint_id_type():
     s = s.getvalue()
 
     exp_res = f"""Add [id {e_at.auto_name}]
- ├─ dot [id {d_at.auto_name}]
+ ├─ Dot [id {d_at.auto_name}]
  │  ├─ <Matrix(float64, shape=(?, ?))> [id {b_at.auto_name}]
- │  └─ <Vector(float64, shape=(?,))> [id {a_at.auto_name}]
- └─ <Vector(float64, shape=(?,))> [id {a_at.auto_name}]
+ │  └─ <Matrix(float64, shape=(?, ?))> [id {a_at.auto_name}]
+ └─ <Matrix(float64, shape=(?, ?))> [id {a_at.auto_name}]
     """
 
     assert [l.strip() for l in s.split("\n")] == [

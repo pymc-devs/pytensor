@@ -312,5 +312,7 @@ def test_dot_errors():
     x_test = DataArray(np.ones((2, 3)), dims=("a", "b"))
     y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
     # Doesn't fail until the rewrite
-    with pytest.raises(ValueError, match="not aligned"):
+    with pytest.raises(
+        ValueError, match="Input operand 1 has a mismatch in its core dimension 0"
+    ):
         fn(x_test, y_test)

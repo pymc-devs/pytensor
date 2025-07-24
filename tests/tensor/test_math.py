@@ -1998,50 +1998,20 @@ class TestMean:
         assert mean(ll).eval() == 1
 
 
-def test_dot_numpy_inputs():
-    """Test the `PyTensor.tensor.dot` interface function with NumPy inputs."""
-    a = np.ones(2)
-    b = np.ones(2)
-    res = dot(a, b)
-    assert isinstance(res, Variable)
-    assert isinstance(res.owner.op, Dot)
-
-
 class TestDot:
-    def test_Op_dims(self):
+    def test_valid_ndim(self):
         d0 = scalar()
         d1 = vector()
         d2 = matrix()
         d3 = tensor3()
 
         with pytest.raises(TypeError):
-            _dot(d0, d0)
-        with pytest.raises(TypeError):
-            _dot(d0, d1)
-        with pytest.raises(TypeError):
             _dot(d0, d2)
         with pytest.raises(TypeError):
-            _dot(d0, d3)
-        with pytest.raises(TypeError):
-            _dot(d1, d0)
-        _dot(d1, d1)
-        _dot(d1, d2)
-        with pytest.raises(TypeError):
-            _dot(d1, d3)
-        with pytest.raises(TypeError):
-            _dot(d2, d0)
-        _dot(d2, d1)
-        _dot(d2, d2)
-        with pytest.raises(TypeError):
-            _dot(d2, d3)
-        with pytest.raises(TypeError):
-            _dot(d3, d0)
-        with pytest.raises(TypeError):
-            _dot(d3, d1)
+            _dot(d1, d2)
         with pytest.raises(TypeError):
             _dot(d3, d2)
-        with pytest.raises(TypeError):
-            _dot(d3, d3)
+        _dot(d2, d2)  # Fine
 
     def test_grad(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -2088,6 +2058,14 @@ class TestDot:
                             assert is_super_shape(x, g)
                             g = grad(z.sum(), y)
                             assert is_super_shape(y, g)
+
+    def test_dot_numpy_inputs(self):
+        """Test the `PyTensor.tensor.dot` interface function with NumPy inputs."""
+        a = np.ones((2, 2))
+        b = np.ones((2, 2))
+        res = dot(a, b)
+        assert isinstance(res, Variable)
+        assert isinstance(res.owner.op, Dot)
 
 
 def test_matrix_vector_ops():
@@ -2796,7 +2774,7 @@ class TestInferShape(utt.InferShapeTester):
         bdvec_val = random(4, rng=rng)
         self._compile_and_check(
             [advec, bdvec],
-            [Dot()(advec, bdvec)],
+            [dot(advec, bdvec)],
             [advec_val, bdvec_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )
@@ -2808,7 +2786,7 @@ class TestInferShape(utt.InferShapeTester):
         bdmat_val = random(5, 3, rng=rng)
         self._compile_and_check(
             [admat, bdmat],
-            [Dot()(admat, bdmat)],
+            [dot(admat, bdmat)],
             [admat_val, bdmat_val],
             (Dot, blas.Dot22),
         )
@@ -2817,7 +2795,7 @@ class TestInferShape(utt.InferShapeTester):
         bdmat_val = random(4, 5, rng=rng)
         self._compile_and_check(
             [advec, bdmat],
-            [Dot()(advec, bdmat)],
+            [dot(advec, bdmat)],
             [advec_val, bdmat_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )
@@ -2826,7 +2804,7 @@ class TestInferShape(utt.InferShapeTester):
         admat_val = random(5, 4, rng=rng)
         self._compile_and_check(
             [admat, bdvec],
-            [Dot()(admat, bdvec)],
+            [dot(admat, bdvec)],
             [admat_val, bdvec_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )

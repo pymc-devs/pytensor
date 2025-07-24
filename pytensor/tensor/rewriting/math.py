@@ -19,7 +19,6 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
-from pytensor.raise_op import assert_op
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -34,6 +33,7 @@ from pytensor.tensor.basic import (
     ones_like,
     register_infer_shape,
     switch,
+    zeros,
     zeros_like,
 )
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -44,12 +44,10 @@ from pytensor.tensor.math import (
     Prod,
     Sum,
     _conj,
-    _dot,
     _matmul,
     add,
     digamma,
     dot,
-    eq,
     erf,
     erfc,
     exp,
@@ -130,16 +128,12 @@ def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
     return consts, origconsts, nonconsts
 
 
-@register_canonicalize
-@register_stabilize
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
 @node_rewriter([Dot])
 def local_0_dot_x(fgraph, node):
-    if not isinstance(node.op, Dot):
-        return False
-
-    x = node.inputs[0]
-    y = node.inputs[1]
-    replace = (
+    x, y = node.inputs
+    if (
         get_underlying_scalar_constant_value(
             x, only_process_constants=True, raise_not_constant=False
         )
@@ -148,26 +142,12 @@ def local_0_dot_x(fgraph, node):
             y, only_process_constants=True, raise_not_constant=False
         )
         == 0
-    )
-
-    if replace:
-        constant_zero = constant(0, dtype=node.outputs[0].type.dtype)
-        if x.ndim == 2 and y.ndim == 2:
-            constant_zero = assert_op(constant_zero, eq(x.shape[1], y.shape[0]))
-            return [alloc(constant_zero, x.shape[0], y.shape[1])]
-        elif x.ndim == 1 and y.ndim == 2:
-            constant_zero = assert_op(constant_zero, eq(x.shape[0], y.shape[0]))
-            return [alloc(constant_zero, y.shape[1])]
-        elif x.ndim == 2 and y.ndim == 1:
-            constant_zero = assert_op(constant_zero, eq(x.shape[1], y.shape[0]))
-            return [alloc(constant_zero, x.shape[0])]
-        elif x.ndim == 1 and y.ndim == 1:
-            constant_zero = assert_op(constant_zero, eq(x.shape[0], y.shape[0]))
-            return [constant_zero]
+    ):
+        return [zeros((x.shape[0], y.shape[1]), dtype=node.outputs[0].type.dtype)]
 
 
 @register_canonicalize
-@node_rewriter([DimShuffle])
+@node_rewriter([Dot, _matmul])
 def local_lift_transpose_through_dot(fgraph, node):
     r"""Perform the rewrite ``dot(x,y).T -> dot(y.T, x.T)``.
 
@@ -176,22 +156,25 @@ def local_lift_transpose_through_dot(fgraph, node):
     and to later merge consecutive `DimShuffle`\s.
     """
 
-    if not (
-        is_matrix_transpose(node.outputs[0])
-        and node.inputs[0].owner
-        and ((dot_op := node.inputs[0].owner.op) in (_dot, _matmul))
-    ):
-        return False
+    clients = fgraph.clients[node.out]
 
-    x, y = node.inputs[0].owner.inputs
+    if len(clients) != 1:
+        # If the dot is used in more than one place, we don't want to duplicate it
+        return None
 
-    if x.ndim >= y.ndim >= 2:
-        # Output is dot product of transposed inputs in reverse order
-        ret = [dot_op(y.mT, x.mT)]
+    [(client, _)] = clients
 
-        # Copy over stack trace to output from result of dot-product
-        copy_stack_trace(node.inputs[0], ret)
-        return ret
+    if not (isinstance(client.op, DimShuffle) and is_matrix_transpose(client.out)):
+        return None
+
+    x, y = node.inputs
+    # Output is dot product of transposed inputs in reverse order
+    ret = node.op(y.mT, x.mT)
+
+    # Copy over stack trace to output from result of dot-product
+    copy_stack_trace(node.out, ret)
+
+    return {client.out: ret}
 
 
 def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
@@ -344,57 +327,34 @@ def local_batched_matmul_to_core_matmul_with_reshape(fgraph, node):
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([_matmul])
-def local_blockwise_dot_to_mul(fgraph, node):
-    """Rewrite blockwise dots that correspond to multiplication without summation.
+@node_rewriter([_matmul, Dot])
+def local_dot_to_mul(fgraph, node):
+    """Rewrite dots that correspond to multiplication without summation.
 
-    We don't touch the regular dot, to not interfere with the BLAS optimizations.
+    We don't touch outer product without batch-dimensions, to allow rewriting into GER,
+    which seems more performant in that case.
+
+    # TODO: Once we blockwise Blas operations we shouldn't do it for outer product with batch-dimensions either
+    # TODO: We may still want to canonicalize outer dot as mul, and detect that for GER.
     """
     a, b = node.inputs
     a_static_shape = a.type.shape
     b_static_shape = b.type.shape
-    core_a_ndim = len(node.op.inputs_sig[0])
-    core_b_ndim = len(node.op.inputs_sig[1])
 
-    if core_a_ndim > 2 or core_b_ndim > 2:
-        # Shouldn't happen, but here just in case
+    # Check if we have matrix-matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
+    if not (a_static_shape[-1] == 1 or b_static_shape[-2] == 1):
         return None
 
-    if core_b_ndim == 1:
-        if a_static_shape[-1] == 1 or b_static_shape[-1] == 1:
-            if core_a_ndim == 1:
-                # inner product: (..., 1) * (..., 1) -> (...)
-                # just squeeze the last dimensions of a and b
-                new_a = a.squeeze(-1)
-                new_b = b.squeeze(-1)
-            else:
-                # matrix vector product: (..., m, 1) * (..., 1) -> (..., m)
-                # the last dimension of b is already aligned for the elemwise multiplication
-                # after we squeeze the last dimension of a
-                new_a = a.squeeze(-1)
-                new_b = b
-        else:
-            return None
+    # If it's a core Dot we only rewrite if there's no outer product
+    # (1, 1) * (1, n) or (m, 1) * (1, 1)
+    # Otherwise we leave as is, so GER can be used instead
+    if isinstance(node.op, Dot) and not (
+        a_static_shape[-2] == 1 or b_static_shape[-1] == 1
+    ):
+        return None
 
-    else:
-        if a_static_shape[-1] == 1 or b_static_shape[-2] == 1:
-            if core_a_ndim == 1:
-                # vector_matrix product: (..., 1) * (..., 1, n) -> (..., n)
-                # the last dimension of a is already aligned for the elemwise multiplication
-                # after we squeeze the one to last dimension of b
-                new_a = a
-                new_b = b.squeeze(-2)
-            else:
-                # matrix matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
-                # the dimensions of a and b are already aligned for the elemwise multiplication
-                new_a = a
-                new_b = b
-        else:
-            return None
-
-    new_a = copy_stack_trace(a, new_a)
-    new_b = copy_stack_trace(b, new_b)
-    new_out = copy_stack_trace(node.out, mul(new_a, new_b))
+    new_out = mul(a, b)
+    copy_stack_trace(node.out, new_out)
     return [new_out]
 
 
