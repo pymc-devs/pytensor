@@ -2561,7 +2561,11 @@ class AdvancedIncSubtensor1(COp):
             and y_.type.dtype not in complex_dtypes
         ):
             # Simple implementation for vector x, y cases
-            idx_may_be_neg = not (isinstance(idx_, Constant) and idx_.data.min() >= 0)
+            idx_may_be_neg = not (
+                # Empty idx needs no negative checks
+                idx_.type.shape[0] == 0
+                or (isinstance(idx_, Constant) and idx_.data.min() >= 0)
+            )
             idx_may_be_invalid = AdvancedSubtensor1._idx_may_be_invalid(x_, idx_)
             shape0 = x_.type.shape[0]
             # This is used to make sure that when we trust the indices to be valid
@@ -2680,7 +2684,7 @@ class AdvancedIncSubtensor1(COp):
         """
 
     def c_code_cache_version(self):
-        return (9,)
+        return (10,)
 
     def _check_runtime_broadcasting(
         self, node: Apply, x: np.ndarray, y: np.ndarray, idx: np.ndarray
