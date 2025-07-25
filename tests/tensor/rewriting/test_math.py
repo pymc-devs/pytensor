@@ -50,6 +50,7 @@ from pytensor.tensor.math import (
     bitwise_and,
     bitwise_or,
     bitwise_xor,
+    cast,
     conj,
     cosh,
     deg2rad,
@@ -124,6 +125,7 @@ from pytensor.tensor.type import (
     dvector,
     fmatrices,
     fmatrix,
+    fscalar,
     ftensor4,
     fvector,
     imatrices,
@@ -4069,25 +4071,36 @@ class TestSigmoidRewrites:
 
     def test_local_1msigmoid(self):
         m = self.get_mode(excluding=["fusion", "inplace"])
-        x = fmatrix()
+        x = fscalar()
+        xd = dscalar()
 
         # Test `exp_over_1_plus_exp`
         f = pytensor.function([x], 1 - exp(x) / (1 + exp(x)), mode=m)
         # FIXME: PatternNodeRewriter does not copy stack trace
         #  (see https://github.com/Theano/Theano/issues/4581)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
 
         # Test `inv_1_plus_exp`
         f = pytensor.function([x], 1 - pt.fill(x, 1.0) / (1 + exp(-x)), mode=m)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
 
         # Test float constant
-        f = pytensor.function(
-            [x], np.array(1.000001, dtype="float32") - sigmoid(x), mode=m
-        )
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        for out, expected in [
+            (np.array(1.0, "float32") - sigmoid(x), sigmoid(-x)),
+            (np.array(1.0, "float64") - pt.sigmoid(x), cast(sigmoid(-x), "float64")),
+            (np.array(1.0, "float32") - sigmoid(xd), sigmoid(-xd)),
+            (np.array(1.0, "float64") - sigmoid(xd), sigmoid(-xd)),
+            (np.sum(1 / np.array([2, 3, 6], "float32")) - sigmoid(x), sigmoid(-x)),
+            (np.sum(1 / np.array([2, 3, 6], "float64")) - sigmoid(xd), sigmoid(-xd)),
+            (np.float32(1 - 9e-6) - sigmoid(x), np.float32(1 - 9e-6) - sigmoid(x)),
+            (np.float64(1 - 1e-9) - sigmoid(xd), np.float64(1 - 1e-9) - sigmoid(xd)),
+        ]:
+            rewritten = rewrite_graph(
+                out, include=["canonicalize", "specialize", "stabilize"]
+            )
+            utt.assert_equal_computations([rewritten], [expected], original=out)
 
     def test_local_sigm_times_exp(self):
         """
@@ -4235,7 +4248,8 @@ class TestSoftplusRewrites:
         f(np.random.random((54, 11)).astype(config.floatX))
 
         # Test close to 1
-        out = log(1.000001 - sigmoid(x))
+        x_dtype = np.dtype(x.dtype).type
+        out = log(np.nextafter(x_dtype(1), x_dtype(2)) - sigmoid(x))
         f = pytensor.function([x], out, mode=self.m)
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2
