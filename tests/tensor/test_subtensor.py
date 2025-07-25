@@ -22,7 +22,7 @@ from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
-from pytensor.tensor import as_tensor, get_vector_length, vectorize
+from pytensor.tensor import as_tensor, constant, get_vector_length, vectorize
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import exp, isinf, lt, switch
@@ -1730,7 +1730,7 @@ class TestIncSubtensor:
         )
 
 
-class TestIncSubtensor1:
+class TestAdvancedIncSubtensor1:
     def setup_method(self):
         self.rng = np.random.default_rng(seed=utt.fetch_seed())
 
@@ -1816,6 +1816,16 @@ class TestIncSubtensor1:
 
         out1val, out2val = f(mval, incval, incval)
         utt.assert_allclose(out1val, out2val)
+
+    def test_empty_index(self):
+        x = fvector()
+        idx = constant([], dtype="int64")
+        y = idx.astype("float32")
+        out = advanced_inc_subtensor1(x, y, idx)
+
+        test_x = np.array([1, 2, 3], dtype="float32")
+        res = out.eval({x: test_x}, mode=Mode(optimizer=None))
+        np.testing.assert_array_equal(res, test_x)
 
 
 class TestAdvancedSubtensor:
