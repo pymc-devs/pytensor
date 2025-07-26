@@ -32,18 +32,21 @@ from pytensor.tensor.basic import (
     moveaxis,
     ones_like,
     register_infer_shape,
+    split,
     switch,
     zeros,
     zeros_like,
 )
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.extra_ops import broadcast_arrays
+from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
 from pytensor.tensor.math import (
     Dot,
     Prod,
     Sum,
     _conj,
+    _dot,
     _matmul,
     add,
     digamma,
@@ -96,6 +99,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.rewriting.linalg import is_matrix_transpose
 from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     complex_dtypes,
@@ -144,6 +148,68 @@ def local_0_dot_x(fgraph, node):
         == 0
     ):
         return [zeros((x.shape[0], y.shape[1]), dtype=node.outputs[0].type.dtype)]
+
+
+@register_stabilize
+@node_rewriter([Blockwise])
+def local_block_diag_dot_to_dot_block_diag(fgraph, node):
+    r"""
+    Perform the rewrite ``dot(block_diag(A, B), C) -> concat(dot(A, C), dot(B, C))``
+
+    BlockDiag results in the creation of a matrix of shape ``(n1 * n2, m1 * m2)``. Because dot has complexity
+    of approximately O(n^3), it's always better to perform two dot products on the smaller matrices, rather than
+    a single dot on the larger matrix.
+    """
+    if not isinstance(node.op.core_op, BlockDiagonal):
+        return
+
+    # Check that the BlockDiagonal is an input to a Dot node:
+    for client in itertools.chain.from_iterable(
+        get_clients_at_depth(fgraph, node, depth=i) for i in [1, 2]
+    ):
+        if client.op not in (_dot, _matmul):
+            continue
+
+        [blockdiag_result] = node.outputs
+        blockdiag_inputs = node.inputs
+
+        dot_op = client.op
+
+        try:
+            client_idx = client.inputs.index(blockdiag_result)
+        except ValueError:
+            # If the blockdiag result is not an input to the dot, there is at least one Op between them (usually a
+            # DimShuffle). In this case, we need to figure out which of the inputs of the dot eventually leads to the
+            # blockdiag result.
+            for ancestor in client.inputs:
+                if ancestor.owner and blockdiag_result in ancestor.owner.inputs:
+                    client_idx = client.inputs.index(ancestor)
+                    break
+
+        other_input = client.inputs[1 - client_idx]
+
+        split_axis = -2 if client_idx == 0 else -1
+        split_size_axis = -1 if client_idx == 0 else -2
+
+        other_dot_input_split = split(
+            other_input,
+            splits_size=[
+                component.shape[split_size_axis] for component in blockdiag_inputs
+            ],
+            n_splits=len(blockdiag_inputs),
+            axis=split_axis,
+        )
+
+        split_dot_results = [
+            dot_op(component, other_split)
+            if client_idx == 0
+            else dot_op(other_split, component)
+            for component, other_split in zip(blockdiag_inputs, other_dot_input_split)
+        ]
+        new_output = concat_with_broadcast(split_dot_results, axis=split_axis)
+
+        copy_stack_trace(node.outputs[0], new_output)
+        return {client.outputs[0]: new_output}
 
 
 @register_canonicalize
@@ -2582,7 +2648,6 @@ add_canonizer = in2out(
     name="add_canonizer_group",
 )
 
-
 register_canonicalize(local_add_canonizer, "shape_unsafe", name="local_add_canonizer")
 
 
@@ -3720,7 +3785,6 @@ logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
 )
 register_stabilize(logdiffexp_to_log1mexpdiff, name="logdiffexp_to_log1mexpdiff")
 
-
 # log(sigmoid(x) / (1 - sigmoid(x))) -> x
 # i.e logit(sigmoid(x)) -> x
 local_logit_sigmoid = PatternNodeRewriter(
@@ -3733,7 +3797,6 @@ local_logit_sigmoid = PatternNodeRewriter(
 )
 register_canonicalize(local_logit_sigmoid)
 register_specialize(local_logit_sigmoid)
-
 
 # sigmoid(log(x / (1-x)) -> x
 # i.e., sigmoid(logit(x)) -> x
@@ -3774,7 +3837,6 @@ local_polygamma_to_tri_gamma = PatternNodeRewriter(
 )
 
 register_specialize(local_polygamma_to_tri_gamma)
-
 
 local_log_kv = PatternNodeRewriter(
     # Rewrite log(kv(v, x)) = log(kve(v, x) * exp(-x)) -> log(kve(v, x)) - x

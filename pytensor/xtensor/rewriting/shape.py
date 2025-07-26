@@ -2,8 +2,8 @@ import pytensor.tensor as pt
 from pytensor.graph import node_rewriter
 from pytensor.tensor import (
     broadcast_to,
+    concat_with_broadcast,
     expand_dims,
-    join,
     moveaxis,
     specify_shape,
     squeeze,
@@ -74,28 +74,7 @@ def lower_concat(fgraph, node):
 
     # Convert input XTensors to Tensors and align batch dimensions
     tensor_inputs = [lower_aligned(inp, out_dims) for inp in node.inputs]
-
-    # Broadcast non-concatenated dimensions of each input
-    non_concat_shape = [None] * len(out_dims)
-    for tensor_inp in tensor_inputs:
-        # TODO: This is assuming the graph is correct and every non-concat dimension matches in shape at runtime
-        # I'm running this as "shape_unsafe" to simplify the logic / returned graph
-        for i, (bcast, sh) in enumerate(
-            zip(tensor_inp.type.broadcastable, tensor_inp.shape)
-        ):
-            if bcast or i == concat_axis or non_concat_shape[i] is not None:
-                continue
-            non_concat_shape[i] = sh
-
-    assert non_concat_shape.count(None) == 1
-
-    bcast_tensor_inputs = []
-    for tensor_inp in tensor_inputs:
-        # We modify the concat_axis in place, as we don't need the list anywhere else
-        non_concat_shape[concat_axis] = tensor_inp.shape[concat_axis]
-        bcast_tensor_inputs.append(broadcast_to(tensor_inp, non_concat_shape))
-
-    joined_tensor = join(concat_axis, *bcast_tensor_inputs)
+    joined_tensor = concat_with_broadcast(tensor_inputs, axis=concat_axis)
     new_out = xtensor_from_tensor(joined_tensor, dims=out_dims)
     return [new_out]
 
