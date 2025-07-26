@@ -27,7 +27,7 @@ from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import alloc, second
+from pytensor.tensor.basic import alloc, join, second
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
@@ -2018,6 +2018,42 @@ def broadcast_arrays(*args: TensorVariable) -> tuple[TensorVariable, ...]:
     return brodacasted_vars
 
 
+def concat_with_broadcast(tensor_list, axis=0):
+    """
+    Concatenate a list of tensors, broadcasting the non-concatenated dimensions to align.
+    """
+    if not tensor_list:
+        raise ValueError("Cannot concatenate an empty list of tensors.")
+
+    ndim = tensor_list[0].ndim
+    if not all(t.ndim == ndim for t in tensor_list):
+        raise TypeError(
+            "Only tensors with the same number of dimensions can be concatenated. "
+            f"Input ndims were: {[x.ndim for x in tensor_list]}"
+        )
+
+    axis = normalize_axis_index(axis=axis, ndim=ndim)
+    non_concat_shape = [1 if i != axis else None for i in range(ndim)]
+
+    for tensor_inp in tensor_list:
+        for i, (bcast, sh) in enumerate(
+            zip(tensor_inp.type.broadcastable, tensor_inp.shape)
+        ):
+            if bcast or i == axis:
+                continue
+            non_concat_shape[i] = sh
+
+    assert non_concat_shape.count(None) == 1
+
+    bcast_tensor_inputs = []
+    for tensor_inp in tensor_list:
+        # We modify the concat_axis in place, as we don't need the list anywhere else
+        non_concat_shape[axis] = tensor_inp.shape[axis]
+        bcast_tensor_inputs.append(broadcast_to(tensor_inp, non_concat_shape))
+
+    return join(axis, *bcast_tensor_inputs)
+
+
 __all__ = [
     "searchsorted",
     "cumsum",
@@ -2035,6 +2071,7 @@ __all__ = [
     "ravel_multi_index",
     "broadcast_shape",
     "broadcast_to",
+    "concat_with_broadcast",
     "geomspace",
     "logspace",
     "linspace",

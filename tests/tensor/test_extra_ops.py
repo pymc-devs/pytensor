@@ -1333,3 +1333,48 @@ def test_space_ops(op, dtype, start, stop, num_samples, endpoint, axis):
         atol=1e-6 if config.floatX.endswith("64") else 1e-4,
         rtol=1e-6 if config.floatX.endswith("64") else 1e-4,
     )
+
+
+def test_concat_with_broadcast():
+    rng = np.random.default_rng()
+    a = pt.tensor("a", shape=(1, 3, 5))
+    b = pt.tensor("b", shape=(5, 3, 10))
+
+    c = pt.concat_with_broadcast([a, b], axis=2)
+    fn = function([a, b], c, mode="FAST_COMPILE")
+    assert c.type.shape == (5, 3, 15)
+
+    a_val = rng.normal(size=(1, 3, 5)).astype(config.floatX)
+    b_val = rng.normal(size=(5, 3, 10)).astype(config.floatX)
+    c_val = fn(a_val, b_val)
+
+    # The result should be a tile + concat
+    np.testing.assert_allclose(c_val[:, :, :5], np.tile(a_val, (5, 1, 1)))
+    np.testing.assert_allclose(c_val[:, :, 5:], b_val)
+
+    # If a and b already conform, the result should be the same as a concatenation
+    a = pt.tensor("a", shape=(1, 1, 3, 5, 10))
+    b = pt.tensor("b", shape=(1, 1, 3, 2, 10))
+    c = pt.concat_with_broadcast([a, b], axis=-2)
+    assert c.type.shape == (1, 1, 3, 7, 10)
+
+    fn = function([a, b], c, mode="FAST_COMPILE")
+    a_val = rng.normal(size=(1, 1, 3, 5, 10)).astype(config.floatX)
+    b_val = rng.normal(size=(1, 1, 3, 2, 10)).astype(config.floatX)
+    c_val = fn(a_val, b_val)
+    np.testing.assert_allclose(c_val, np.concatenate([a_val, b_val], axis=-2))
+
+    c = pt.concat_with_broadcast([a], axis=0)
+    fn = function([a], c, mode="FAST_COMPILE")
+    np.testing.assert_allclose(fn(a_val), a_val)
+
+    with pytest.raises(ValueError, match="Cannot concatenate an empty list of tensors"):
+        pt.concat_with_broadcast([], axis=0)
+
+    with pytest.raises(
+        TypeError,
+        match="Only tensors with the same number of dimensions can be concatenated.",
+    ):
+        a = pt.tensor("a", shape=(1, 3, 5))
+        b = pt.tensor("b", shape=(3, 5))
+        pt.concat_with_broadcast([a, b], axis=1)
