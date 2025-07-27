@@ -1989,6 +1989,18 @@ class TestExpLog:
         assert len(ops_graph) == expected_switches
 
 
+def test_log_sqrt() -> None:
+    x = pt.tensor("x", shape=(None, None))
+    out = log(sqrt(x))
+
+    out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+    assert equal_computations(
+        [out],
+        [mul(np.array([[0.5]]), log(x))],
+    )
+
+
 class TestSqrSqrt:
     def setup_method(self):
         mode = get_default_mode()
