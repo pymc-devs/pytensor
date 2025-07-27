@@ -568,6 +568,7 @@ def local_log_sqrt(fgraph, node):
     new_out = mul(0.5, log(x))
     if new_out.dtype != old_out.dtype:
         new_out = cast(new_out, old_out.dtype)
+        copy_stack_trace(node.out, new_out)
     return [new_out]
 
 
