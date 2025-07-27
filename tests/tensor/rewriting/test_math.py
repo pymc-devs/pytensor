@@ -1997,7 +1997,7 @@ def test_log_sqrt() -> None:
 
     assert equal_computations(
         [out],
-        [mul(np.array([[0.5]]), log(x))],
+        [mul(pt.as_tensor_variable([[0.5]]), log(x))],
     )
 
 
