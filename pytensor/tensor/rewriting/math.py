@@ -561,9 +561,8 @@ def local_log_sqrt(fgraph, node):
         return
 
     prev_op = x.owner.op.scalar_op
-    node_op = node.op.scalar_op
 
-    if isinstance(prev_op, ps.Sqrt) and isinstance(node_op, ps.Log):
+    if isinstance(prev_op, ps.Sqrt):
         # Case for log(sqrt(x)) -> 0.5 * log(x)
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
