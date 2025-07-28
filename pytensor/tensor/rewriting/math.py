@@ -567,7 +567,7 @@ def local_log_sqrt(fgraph, node):
     # Case for log(sqrt(x)) -> 0.5 * log(x)
     x = x.owner.inputs[0]
     old_out = node.outputs[0]
-    new_out = mul(0.5, log(x))
+    new_out = mul(as_tensor_variable(0.5, dtype=x.dtype), log(x))
     if new_out.dtype != old_out.dtype:
         new_out = cast(new_out, old_out.dtype)
 

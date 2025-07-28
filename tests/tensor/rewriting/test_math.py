@@ -1995,9 +1995,9 @@ def test_log_sqrt() -> None:
 
     out = rewrite_graph(out, include=["specialize"])
 
-    assert equal_computations(
+    assert utt.assert_equal_computations(
         [out],
-        [mul(pt.as_tensor_variable([[0.5]]), log(x))],
+        [mul(pt.as_tensor_variable([[0.5]], dtype=x.dtype), log(x))],
     )
 
 
