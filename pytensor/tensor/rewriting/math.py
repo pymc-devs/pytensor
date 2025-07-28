@@ -552,13 +552,15 @@ def local_sqrt_sqr(fgraph, node):
         return [new_out]
 
 
-@register_canonicalize
+@register_specialize
 @node_rewriter([log])
 def local_log_sqrt(fgraph, node):
     x = node.inputs[0]
 
-    if not (x.owner and isinstance(x.owner.op, Elemwise)) and isinstance(
-        x.owner.op.scalar_op, ps.Sqrt
+    if (
+        not x.owner
+        or not isinstance(x.owner.op, Elemwise)
+        or not isinstance(x.owner.op.scalar_op, ps.Sqrt)
     ):
         return
 
