@@ -99,6 +99,8 @@ def local_blockwise_alloc(fgraph, node):
     BOp(vector, alloc(vector, 10, 5)) -> alloc(BOp)(vector, vector), 10, 5)
     BOp(vector, alloc(scalar, 10, 5)) -> alloc(BOp)(vector, alloc(scalar, 5), 10, 5)
     BOp(matrix, alloc(vector, 10, 5)) -> BOp(matrix, vector)
+
+    This is critical to remove many unnecessary Blockwise, or to reduce the work done by it
     """
 
     op: Blockwise = node.op  # type: ignore
