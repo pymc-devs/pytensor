@@ -1993,7 +1993,7 @@ def test_log_sqrt() -> None:
     x = pt.tensor("x", shape=(None, None))
     out = log(sqrt(x))
 
-    out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+    out = rewrite_graph(out, include=["canonicalize"])
 
     assert equal_computations(
         [out],
