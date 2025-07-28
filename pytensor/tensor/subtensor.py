@@ -1433,7 +1433,6 @@ class SubtensorPrinter(Printer):
 pprint.assign(Subtensor, SubtensorPrinter())
 
 
-# TODO: Implement similar vectorize for Inc/SetSubtensor
 @_vectorize_node.register(Subtensor)
 def vectorize_subtensor(op: Subtensor, node, batch_x, *batch_idxs):
     """Rewrite subtensor with non-batched indexes as another Subtensor with prepended empty slices."""
