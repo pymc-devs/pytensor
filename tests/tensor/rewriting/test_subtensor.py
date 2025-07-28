@@ -1790,101 +1790,202 @@ def test_local_uint_constant_indices():
     assert new_index.type.dtype == "uint8"
 
 
-@pytest.mark.parametrize("core_y_implicitly_batched", (False, True))
-@pytest.mark.parametrize("set_instead_of_inc", (True, False))
-def test_local_blockwise_advanced_inc_subtensor(
-    set_instead_of_inc, core_y_implicitly_batched
-):
-    rng = np.random.default_rng([1764, set_instead_of_inc, core_y_implicitly_batched])
+class TestBlockwiseIncSubtensor:
+    @staticmethod
+    def compile_fn_and_ref(*args, **kwargs):
+        fn = pytensor.function(*args, **kwargs, mode="FAST_RUN")
+        ref_fn = pytensor.function(
+            *args, **kwargs, mode=Mode(linker="py", optimizer=None)
+        )
+        return fn, ref_fn
 
-    def np_inplace_f(x, idx, y):
-        if core_y_implicitly_batched:
-            y = y[..., None]
+    @staticmethod
+    def has_blockwise(fn):
+        return any(
+            isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+        )
+
+    @pytest.mark.parametrize(
+        "core_y_implicitly_batched", (False, True), ids=["y_explicit", "y_implicit"]
+    )
+    @pytest.mark.parametrize("set_instead_of_inc", (True, False), ids=["set", "inc"])
+    @pytest.mark.parametrize("basic_idx", (True, False), ids=["basic_idx", "adv_idx"])
+    def test_idxs_not_vectorized(
+        self, basic_idx, set_instead_of_inc, core_y_implicitly_batched
+    ):
+        rng = np.random.default_rng(
+            [1764, set_instead_of_inc, core_y_implicitly_batched, basic_idx]
+        )
+
+        core_y_shape = () if core_y_implicitly_batched else (3,)
+        core_x = tensor("x", shape=(6, 6))
+        core_y = tensor("y", shape=core_y_shape, dtype=int)
+        core_idxs = (-1, slice(None, 3)) if basic_idx else (-1, [0, 2, 4])
         if set_instead_of_inc:
-            x[idx] = y
+            core_graph = set_subtensor(core_x[core_idxs], core_y)
         else:
-            x[idx] += y
+            core_graph = inc_subtensor(core_x[core_idxs], core_y)
+        assert isinstance(
+            core_graph.owner.op, IncSubtensor if basic_idx else AdvancedIncSubtensor
+        )
 
-    core_y_shape = () if core_y_implicitly_batched else (3,)
-    core_x = tensor("x", shape=(6,))
-    core_y = tensor("y", shape=core_y_shape, dtype=int)
-    core_idxs = [0, 2, 4]
-    if set_instead_of_inc:
-        core_graph = set_subtensor(core_x[core_idxs], core_y)
-    else:
+        # Only x is batched
+        x = tensor("x", shape=(5, 2, 6, 6))
+        y = tensor("y", shape=core_y_shape, dtype=int)
+        out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+        fn, ref_fn = self.compile_fn_and_ref([x, y], out)
+        assert self.has_blockwise(ref_fn)
+        assert not self.has_blockwise(fn)
+        test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+        test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
+        np.testing.assert_allclose(fn(test_x, test_y), ref_fn(test_x, test_y))
+
+        # Only y is batched
+        x = tensor("y", shape=(6, 6))
+        y = tensor("y", shape=(2, *core_y_shape), dtype=int)
+        out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+        fn, ref_fn = self.compile_fn_and_ref([x, y], out)
+        assert self.has_blockwise(ref_fn)
+        assert not self.has_blockwise(fn)
+        test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+        test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
+        np.testing.assert_allclose(fn(test_x, test_y), ref_fn(test_x, test_y))
+
+        # Both x and y are batched, and do not need to be broadcasted
+        x = tensor("y", shape=(2, 6, 6))
+        y = tensor("y", shape=(2, *core_y_shape), dtype=int)
+        out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+        fn, ref_fn = self.compile_fn_and_ref([x, y], out)
+        assert self.has_blockwise(ref_fn)
+        assert not self.has_blockwise(fn)
+        test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+        test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
+        np.testing.assert_allclose(fn(test_x, test_y), ref_fn(test_x, test_y))
+
+        # Both x and y are batched, but must be broadcasted
+        x = tensor("y", shape=(5, 1, 6, 6))
+        y = tensor("y", shape=(1, 2, *core_y_shape), dtype=int)
+        out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
+        fn, ref_fn = self.compile_fn_and_ref([x, y], out)
+        assert self.has_blockwise(ref_fn)
+        assert not self.has_blockwise(fn)
+        test_x = np.ones(x.type.shape, dtype=x.type.dtype)
+        test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
+        np.testing.assert_allclose(fn(test_x, test_y), ref_fn(test_x, test_y))
+
+    @pytest.mark.parametrize("basic_idx", (True, False), ids=["basic_idx", "adv_idx"])
+    @pytest.mark.parametrize(
+        "batched_y", (False, True), ids=("unbatched_y", "batched_y")
+    )
+    @pytest.mark.parametrize(
+        "batched_x", (False, True), ids=("unbatched_x", "batched_x")
+    )
+    def test_vectorized_idxs(
+        self,
+        basic_idx,
+        batched_y,
+        batched_x,
+    ):
+        rng = np.random.default_rng([1874, basic_idx, batched_y, batched_x])
+
+        core_x = tensor("x", shape=(6, 6))
+        core_y = tensor("y", shape=(), dtype=int)
+        scalar_idx = scalar("scalar_idx", dtype="int64")
+        vector_idx = vector("vector_idx", dtype="int64")
+        core_idxs = (
+            (slice(None, 3), scalar_idx) if basic_idx else (scalar_idx, vector_idx)
+        )
         core_graph = inc_subtensor(core_x[core_idxs], core_y)
+        assert isinstance(
+            core_graph.owner.op, IncSubtensor if basic_idx else AdvancedIncSubtensor
+        )
 
-    # Only x is batched
-    x = tensor("x", shape=(5, 2, 6))
-    y = tensor("y", shape=core_y_shape, dtype=int)
-    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
-    assert isinstance(out.owner.op, Blockwise)
+        # Indices don't broadcast with each other
+        x = pt.tensor("x", shape=(4, 1, *core_x.type.shape)) if batched_x else core_x
+        y = pt.tensor("y", shape=(2,)) if batched_y else core_y
+        out = vectorize_graph(
+            core_graph,
+            replace={
+                scalar_idx: pt.constant([0, -1]),
+                vector_idx: pt.constant([[0, 2, 4], [1, 3, 5]]),
+                core_x: x,
+                core_y: y,
+            },
+        )
+        fn, ref_fn = self.compile_fn_and_ref([x, y], out)
+        assert self.has_blockwise(ref_fn)
+        assert not self.has_blockwise(fn)
+        test_x = np.ones(x.type.shape, dtype=core_x.type.dtype)
+        test_y = rng.integers(1, 10, size=y.type.shape)
+        np.testing.assert_allclose(ref_fn(test_x, test_y), ref_fn(test_x, test_y))
 
-    fn = pytensor.function([x, y], out, mode="FAST_RUN")
-    assert not any(
-        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+        # Indices broadcast with each other
+        x = core_x
+        y = pt.tensor("y", shape=(2,)) if batched_y else core_y
+        out = vectorize_graph(
+            core_graph,
+            replace={
+                scalar_idx: pt.constant([0, -1, 0, -1])[:, None],
+                vector_idx: pt.constant([[0, 2, 4], [1, 3, 5]])[None, :],
+                core_x: x,
+                core_y: y,
+            },
+        )
+        fn, ref_fn = self.compile_fn_and_ref([x, y], out)
+        assert self.has_blockwise(ref_fn)
+        assert not self.has_blockwise(fn)
+        test_x = np.ones(core_x.type.shape, dtype=x.type.dtype)
+        test_y = rng.integers(1, 10, size=y.type.shape)
+        np.testing.assert_allclose(fn(test_x, test_y), ref_fn(test_x, test_y))
+
+    @pytest.mark.parametrize(
+        "basic_idx",
+        [
+            True,
+            pytest.param(
+                False,
+                marks=pytest.mark.xfail(
+                    reason="AdvancedIncSubtensor with slices can't be blockwise"
+                ),
+            ),
+        ],
+        ids=["basic_idx", "adv_idx"],
     )
-
-    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
-    test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
-    expected_out = test_x.copy()
-    np_inplace_f(expected_out, np.s_[:, :, core_idxs], test_y)
-    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
-
-    # Only y is batched
-    x = tensor("y", shape=(6,))
-    y = tensor("y", shape=(2, *core_y_shape), dtype=int)
-    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
-    assert isinstance(out.owner.op, Blockwise)
-
-    fn = pytensor.function([x, y], out, mode="FAST_RUN")
-    assert not any(
-        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
+    @pytest.mark.parametrize(
+        "vectorize_idx", (False, True), ids=lambda x: f"vectorize_idx={x}"
     )
+    def test_non_consecutive_integer_indices(self, vectorize_idx, basic_idx):
+        """Test numpy special behavior of transposing non-consecutive advanced indices to the front.
 
-    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
-    test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
-    expected_out = np.ones((2, *x.type.shape))
-    np_inplace_f(expected_out, np.s_[:, core_idxs], test_y)
-    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+        Either in the original graph (id adv_idx) or in the induced graph after rewrite
+        """
 
-    # Both x and y are batched, and do not need to be broadcasted
-    x = tensor("y", shape=(2, 6))
-    y = tensor("y", shape=(2, *core_y_shape), dtype=int)
-    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
-    assert isinstance(out.owner.op, Blockwise)
+        core_a = pt.tensor("a", shape=(4, 3, 2))
+        core_v = pt.tensor("v", dtype="float64", shape=(3,) if basic_idx else (2, 3))
+        core_idx = pt.tensor("idx", dtype=int, shape=() if basic_idx else (2,))
 
-    fn = pytensor.function([x, y], out, mode="FAST_RUN")
-    assert not any(
-        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
-    )
+        # The empty slice before core_idx, will lead to a transposition of the advanced view
+        # once it is paired with an new arange slice on the batched dimensions.
+        # That's why core_v is (2, 3), and not (3, 2), in the case of advanced indexing
+        core_out = core_a[0, :, core_idx].set(core_v)
 
-    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
-    test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
-    expected_out = test_x.copy()
-    np_inplace_f(expected_out, np.s_[:, core_idxs], test_y)
-    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+        vec_a = pt.tensor(shape=(2, 2, 4, 3, 2))
+        vec_idx = pt.constant([0, -1]) if vectorize_idx else pt.constant(-1, dtype=int)
+        vec_v = pt.constant([[0, 1, 2], [2, 1, 0]])
+        if not basic_idx:
+            vec_idx = pt.repeat(vec_idx[..., None], 2, axis=-1)
+            vec_v = pt.repeat(vec_v[None], repeats=2, axis=0)
 
-    # Both x and y are batched, but must be broadcasted
-    x = tensor("y", shape=(5, 1, 6))
-    y = tensor("y", shape=(1, 2, *core_y_shape), dtype=int)
-    out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
-    assert isinstance(out.owner.op, Blockwise)
+        vec_out = vectorize_graph(
+            core_out,
+            {core_a: vec_a, core_v: vec_v, core_idx: vec_idx},
+        )
 
-    fn = pytensor.function([x, y], out, mode="FAST_RUN")
-    assert not any(
-        isinstance(node.op, Blockwise) for node in fn.maker.fgraph.apply_nodes
-    )
-
-    test_x = np.ones(x.type.shape, dtype=x.type.dtype)
-    test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
-    final_shape = (
-        *np.broadcast_shapes(x.type.shape[:2], y.type.shape[:2]),
-        x.type.shape[-1],
-    )
-    expected_out = np.broadcast_to(test_x, final_shape).copy()
-    np_inplace_f(expected_out, np.s_[:, :, core_idxs], test_y)
-    np.testing.assert_allclose(fn(test_x, test_y), expected_out)
+        fn, ref_fn = self.compile_fn_and_ref([vec_a], vec_out)
+        assert self.has_blockwise(ref_fn)
+        assert not self.has_blockwise(fn)
+        test_vec_a = np.arange(np.prod(vec_a.type.shape)).reshape(vec_a.type.shape)
+        np.testing.assert_allclose(fn(test_vec_a), ref_fn(test_vec_a))
 
 
 class TestUselessSlice:
