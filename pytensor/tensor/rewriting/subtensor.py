@@ -1573,6 +1573,29 @@ compile.optdb.register(
 )
 
 
+@register_stabilize
+@register_specialize
+@node_rewriter([Blockwise])
+def local_blockwise_of_subtensor(fgraph, node):
+    """Rewrite Blockwise of Subtensor, where the only batch input is the indexed tensor.
+
+    Blockwise(Subtensor{a: b})(x, a, b) -> x[:, a:b] when x has one batch dimension, and a/b none
+    """
+    if not isinstance(node.op.core_op, Subtensor):
+        return
+
+    x, *idxs = node.inputs
+    if not all(all(idx.type.broadcastable) for idx in idxs):
+        return
+
+    core_idxs = indices_from_subtensor(
+        [idx.squeeze() for idx in idxs], node.op.core_op.idx_list
+    )
+    # Add empty slices for the batch dims
+    none_slices = (slice(None),) * node.op.batch_ndim(node)
+    return [x[(*none_slices, *core_idxs)]]
+
+
 @register_canonicalize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @register_specialize("shape_unsafe")
