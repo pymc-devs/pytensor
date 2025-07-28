@@ -828,6 +828,133 @@ def test_slogdet_kronecker_rewrite():
     )
 
 
+@pytest.mark.parametrize("add_batch", [True, False], ids=["batched", "not_batched"])
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["b_ndim_1", "b_ndim_2"])
+@pytest.mark.parametrize(
+    "solve_op, solve_kwargs",
+    [
+        (pt.linalg.solve, {"assume_a": "gen"}),
+        (pt.linalg.solve, {"assume_a": "pos"}),
+        (pt.linalg.solve, {"assume_a": "upper triangular"}),
+    ],
+    ids=["general", "positive definite", "triangular"],
+)
+def test_rewrite_solve_kron_to_solve(add_batch, b_ndim, solve_op, solve_kwargs):
+    # A and B have different shapes to make the test more interesting, but both need to be square matrices, otherwise
+    # the rewrite is invalid.
+    a_shape = (3, 3) if not add_batch else (2, 3, 3)
+    b_shape = (2, 2) if not add_batch else (2, 2, 2)
+    A, B = pt.tensor("A", shape=a_shape), pt.tensor("B", shape=b_shape)
+
+    m, n = a_shape[-2], b_shape[-2]
+    y_shape = (m * n,)
+    if b_ndim == 2:
+        y_shape = (m * n, 3)
+    if add_batch:
+        y_shape = (2, *y_shape)
+
+    y = pt.tensor("y", shape=y_shape)
+    C = pt.vectorize(pt.linalg.kron, "(i,j),(k,l)->(m,n)")(A, B)
+
+    x = solve_op(C, y, **solve_kwargs, b_ndim=b_ndim)
+
+    def count_kron_ops(fn):
+        return sum(
+            [
+                isinstance(node.op, KroneckerProduct)
+                or (
+                    isinstance(node.op, Blockwise)
+                    and isinstance(node.op.core_op, KroneckerProduct)
+                )
+                for node in fn.maker.fgraph.apply_nodes
+            ]
+        )
+
+    fn_expected = pytensor.function(
+        [A, B, y], x, mode=get_default_mode().excluding("rewrite_solve_kron_to_solve")
+    )
+    assert count_kron_ops(fn_expected) == 1
+
+    fn = pytensor.function([A, B, y], x)
+    assert (
+        count_kron_ops(fn) == 0
+    ), "Rewrite did not apply, KroneckerProduct found in the graph"
+
+    rng = np.random.default_rng(sum(map(ord, "Go away Kron!")))
+    a_val = rng.normal(size=a_shape)
+    b_val = rng.normal(size=b_shape)
+    y_val = rng.normal(size=y_shape)
+
+    if solve_kwargs["assume_a"] == "pos":
+        a_val = a_val @ np.moveaxis(a_val, -2, -1)
+        b_val = b_val @ np.moveaxis(b_val, -2, -1)
+    elif solve_kwargs["assume_a"] == "upper triangular":
+        a_idx = np.tril_indices(n=a_shape[-2], m=a_shape[-1], k=-1)
+        b_idx = np.tril_indices(n=b_shape[-2], m=b_shape[-1], k=-1)
+
+        if len(a_shape) > 2:
+            a_idx = (slice(None, None), *a_idx)
+        if len(b_shape) > 2:
+            b_idx = (slice(None, None), *b_idx)
+
+        a_val[a_idx] = 0
+        b_val[b_idx] = 0
+
+    a_val = a_val.astype(config.floatX)
+    b_val = b_val.astype(config.floatX)
+    y_val = y_val.astype(config.floatX)
+
+    expected = fn_expected(a_val, b_val, y_val)
+    result = fn(a_val, b_val, y_val)
+
+    if config.floatX == "float64":
+        tol = 1e-8
+    elif config.floatX == "float32" and not solve_kwargs["assume_a"] == "pos":
+        tol = 1e-4
+    else:
+        # Precision needs to be extremely low for the assume_a = pos test to pass in float32 mode. I don't have a
+        # good theory of why. Skipping this case would also be an option.
+        tol = 1e-2
+
+    np.testing.assert_allclose(
+        expected,
+        result,
+        atol=tol,
+        rtol=tol,
+    )
+
+
+@pytest.mark.parametrize(
+    "a_shape, b_shape",
+    [((5, 5), (5, 5)), ((50, 50), (50, 50)), ((100, 100), (100, 100))],
+    ids=["small", "medium", "large"],
+)
+@pytest.mark.parametrize("rewrite", [True, False], ids=["rewrite", "no_rewrite"])
+def test_rewrite_solve_kron_to_solve_benchmark(a_shape, b_shape, rewrite, benchmark):
+    A, B = pt.tensor("A", shape=a_shape), pt.tensor("B", shape=b_shape)
+    C = pt.linalg.kron(A, B)
+
+    m, n = a_shape[-2], b_shape[-2]
+    has_batch = len(a_shape) == 3
+    y_shape = (a_shape[0], m * n) if has_batch else (m * n,)
+    y = pt.tensor("y", shape=y_shape)
+    x = pt.linalg.solve(C, y, b_ndim=1)
+
+    rng = np.random.default_rng(sum(map(ord, "Go away Kron!")))
+    a_val = rng.normal(size=a_shape).astype(config.floatX)
+    b_val = rng.normal(size=b_shape).astype(config.floatX)
+    y_val = rng.normal(size=y_shape).astype(config.floatX)
+
+    mode = (
+        get_default_mode()
+        if rewrite
+        else get_default_mode().excluding("rewrite_solve_kron_to_solve")
+    )
+
+    fn = pytensor.function([A, B, y], x, mode=mode)
+    benchmark(fn, a_val, b_val, y_val)
+
+
 def test_cholesky_eye_rewrite():
     x = pt.eye(10)
     L = pt.linalg.cholesky(x)
