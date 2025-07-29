@@ -526,7 +526,6 @@ def local_subtensor_inc_subtensor(fgraph, node):
             return
 
 
-@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -1263,7 +1262,6 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     return [r2]
 
 
-@register_infer_shape
 @register_specialize
 @register_stabilize
 @register_canonicalize
