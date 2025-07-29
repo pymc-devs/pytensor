@@ -949,6 +949,7 @@ def equivalent_up_to_constant_casting(a, b) -> bool:
     return False
 
 
+@register_infer_shape
 @register_useless("shape_unsafe")
 @register_canonicalize("fast_compile", "shape_unsafe")
 @register_specialize("shape_unsafe")
