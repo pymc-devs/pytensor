@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 from io import StringIO
 
@@ -1846,6 +1847,95 @@ class TestAdvancedSubtensor:
         self.ix12 = lvector()
         self.ix2 = lmatrix()
         self.ixr = lrow()
+
+    def test_static_shape(self):
+        x = tensor("x", shape=(None, None))
+        y = tensor("y", shape=(4, 5, 6))
+        idx1 = tensor("idx1", shape=(10,), dtype=int)
+        idx2 = tensor("idx2", shape=(3, None), dtype=int)
+
+        assert x[idx1].type.shape == (10, None)
+        assert x[:, idx1].type.shape == (None, 10)
+        assert x[idx2, :5].type.shape == (3, None, None)
+        assert specify_shape(x, (None, 7))[idx2, :5].type.shape == (3, None, 5)
+        assert specify_shape(x, (None, 3))[idx2, :5].type.shape == (3, None, 3)
+        assert x[idx1, idx2].type.shape == (3, 10)
+        assert x[idx2, idx1].type.shape == (3, 10)
+        assert x[None, idx1, idx2].type.shape == (1, 3, 10)
+        assert x[idx1, None, idx2].type.shape == (3, 10, 1)
+        assert x[idx1, idx2, None].type.shape == (3, 10, 1)
+
+        assert y[idx1, idx2, ::-1].type.shape == (3, 10, 6)
+        assert y[idx1, ::-1, idx2].type.shape == (3, 10, 5)
+        assert y[::-1, idx1, idx2].type.shape == (4, 3, 10)
+        assert y[::-1, idx1, None, idx2].type.shape == (3, 10, 4, 1)
+
+        msg = re.escape(
+            "shape mismatch: indexing tensors could not be broadcast together with shapes [(10,), (9,)]"
+        )
+        with pytest.raises(IndexError, match=msg):
+            x[idx1, idx1[1:]]
+
+    def test_static_shape_boolean(self):
+        y = tensor("y", shape=(4, 5, 6))
+        idx1 = tensor("idx1", shape=(4,), dtype=int)
+        idx2 = tensor("idx2", shape=(3, None), dtype=int)
+        bool_idx1 = tensor("bool_idx1", shape=(4,), dtype=bool)
+        bool_idx2 = tensor(
+            "bool_idx2",
+            shape=(
+                None,
+                5,
+            ),
+            dtype=bool,
+        )
+
+        assert y[bool_idx1].type.shape == (None, 5, 6)
+        assert y[bool_idx1, :, None:-4:-1].type.shape == (None, 5, 3)
+        assert y[bool_idx1, idx2].type.shape == (3, None, 6)
+        assert y[bool_idx1, idx1, :].type.shape == (4, 6)
+        assert y[bool_idx1, :, idx1].type.shape == (4, 5)
+        assert y[bool_idx1, idx1, idx2].type.shape == (3, 4)
+        assert y[None, bool_idx1, None, idx2, None, idx1].type.shape == (3, 4, 1, 1, 1)
+
+        assert y[bool_idx2, :].type.shape == (None, 6)
+        assert y[bool_idx2, idx1].type.shape == (4,)
+        assert y[bool_idx2, idx2].type.shape == (3, None)
+
+        msg = re.escape(
+            "too many indices for tensor: tensor is 3-dimensional, but 4 were indexed"
+        )
+        with pytest.raises(IndexError, match=msg):
+            y[bool_idx2, bool_idx2]
+
+        # Case that could conceivably be detected as index error at definition time
+        bad_idx = ptb.concatenate([idx1, idx1])
+        assert y[bool_idx1, bad_idx].type.shape == (8, 6)
+
+    def test_static_shape_constant_boolean(self):
+        y = tensor("y", shape=(None, None, None))
+        idx1 = tensor("idx1", shape=(3,), dtype=int)
+        idx2 = tensor("idx2", shape=(4, None), dtype=int)
+
+        bool_idx1 = constant(np.array([True, False, True, True]), name="bool_idx1")
+        bool_idx2 = constant(
+            np.array([[True, False, True, True], [True, False, False, True]]),
+            name="bool_idx2",
+        )
+
+        assert y[bool_idx1].type.shape == (3, None, None)
+        assert y[bool_idx1, :, idx1].type.shape == (3, None)
+        assert y[bool_idx1, :, idx2].type.shape == (4, 3, None)
+
+        assert y[bool_idx2].type.shape == (5, None)
+        assert y[bool_idx1, idx2].type.shape == (4, 3, None)
+
+        bad_idx = ptb.concatenate([idx1, idx1])
+        msg = re.escape(
+            "shape mismatch: indexing tensors could not be broadcast together with shapes [(3,), (6,)]"
+        )
+        with pytest.raises(IndexError, match=msg):
+            y[bool_idx1, bad_idx]
 
     @pytest.mark.parametrize(
         "inplace",
