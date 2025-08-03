@@ -828,6 +828,19 @@ def test_slogdet_kronecker_rewrite():
     )
 
 
+def count_kron_ops(fgraph):
+    return sum(
+        [
+            isinstance(node.op, KroneckerProduct)
+            or (
+                isinstance(node.op, Blockwise)
+                and isinstance(node.op.core_op, KroneckerProduct)
+            )
+            for node in fgraph.apply_nodes
+        ]
+    )
+
+
 @pytest.mark.parametrize("add_batch", [True, False], ids=["batched", "not_batched"])
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=["b_ndim_1", "b_ndim_2"])
 @pytest.mark.parametrize(
@@ -858,27 +871,13 @@ def test_rewrite_solve_kron_to_solve(add_batch, b_ndim, solve_op, solve_kwargs):
 
     x = solve_op(C, y, **solve_kwargs, b_ndim=b_ndim)
 
-    def count_kron_ops(fn):
-        return sum(
-            [
-                isinstance(node.op, KroneckerProduct)
-                or (
-                    isinstance(node.op, Blockwise)
-                    and isinstance(node.op.core_op, KroneckerProduct)
-                )
-                for node in fn.maker.fgraph.apply_nodes
-            ]
-        )
-
     fn_expected = pytensor.function(
         [A, B, y], x, mode=get_default_mode().excluding("rewrite_solve_kron_to_solve")
     )
-    assert count_kron_ops(fn_expected) == 1
+    assert count_kron_ops(fn_expected.maker.fgraph) == 1
 
     fn = pytensor.function([A, B, y], x)
-    assert (
-        count_kron_ops(fn) == 0
-    ), "Rewrite did not apply, KroneckerProduct found in the graph"
+    assert count_kron_ops(fn.maker.fgraph) == 0
 
     rng = np.random.default_rng(sum(map(ord, "Go away Kron!")))
     a_val = rng.normal(size=a_shape)
@@ -922,6 +921,30 @@ def test_rewrite_solve_kron_to_solve(add_batch, b_ndim, solve_op, solve_kwargs):
         atol=tol,
         rtol=tol,
     )
+
+
+def test_rewrite_solve_kron_to_solve_not_applied():
+    # Check that the rewrite is not applied when the component matrices to the kron are static and not square
+    A = pt.tensor("A", shape=(3, 2))
+    B = pt.tensor("B", shape=(2, 3))
+    C = pt.linalg.kron(A, B)
+
+    y = pt.vector("y", shape=(6,))
+    x = pt.linalg.solve(C, y)
+
+    fn = pytensor.function([A, B, y], x)
+
+    assert count_kron_ops(fn.maker.fgraph) == 1
+
+    # If shapes are static, it should always be applied
+    A = pt.tensor("A", shape=(3, None, None))
+    B = pt.tensor("B", shape=(3, None, None))
+    C = pt.linalg.kron(A, B)
+    y = pt.tensor("y", shape=(None,))
+    x = pt.linalg.solve(C, y)
+    fn = pytensor.function([A, B, y], x)
+
+    assert count_kron_ops(fn.maker.fgraph) == 0
 
 
 @pytest.mark.parametrize(

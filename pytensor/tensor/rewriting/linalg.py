@@ -857,8 +857,8 @@ def rewrite_det_kronecker(fgraph, node):
     return [det_final]
 
 
-@register_canonicalize
-@register_stabilize
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
 @node_rewriter([Blockwise])
 def rewrite_solve_kron_to_solve(fgraph, node):
     """
@@ -895,6 +895,20 @@ def rewrite_solve_kron_to_solve(fgraph, node):
         return
 
     x1, x2 = A.owner.inputs
+
+    # If x1 and x2 have statically known core shapes, check that they are square. If not, the rewrite will be invalid.
+    # We will proceed if they are unknown, but this makes the rewrite shape unsafe.
+    x1_core_shapes = x1.type.shape[-2:]
+    x2_core_shapes = x2.type.shape[-2:]
+
+    if (
+        all(shape is not None for shape in x1_core_shapes)
+        and x1_core_shapes[-1] != x1_core_shapes[-2]
+    ) or (
+        all(shape is not None for shape in x2_core_shapes)
+        and x2_core_shapes[-1] != x2_core_shapes[-2]
+    ):
+        return None
 
     m, n = x1.shape[-2], x2.shape[-2]
     batch_shapes = x1.shape[:-2]
