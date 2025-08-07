@@ -33,8 +33,7 @@ dependencies:
   - pytest-xdist
   - pytest-benchmark
   - pytest-mock
-  - pip:
-    - pytest-sphinx
+  - pytest-sphinx
   # For building docs
   - sphinx>=5.1.0,<6
   - sphinx_rtd_theme
@@ -57,3 +56,7 @@ dependencies:
   - cython
   - graphviz
   - pydot
+
+# This line can be ignored by users, it's only needed by the script
+# `scripts/generate-pixi-toml.py`. It is used to determine the feature name.
+category: conda-dev

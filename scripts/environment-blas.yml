@@ -1,0 +1,22 @@
+# This file defines BLAS for pixi.toml generation via
+# `scripts/generate-pixi-toml.py`.
+
+name: pytensor-blas
+channels:
+  - conda-forge
+dependencies:
+  # Use MKL for Linux, Intel macOS, and Windows.
+  - mkl  # [linux]
+  - mkl-service  # [linux]
+  - libblas=*=*mkl  # [linux]
+  - mkl  # [osx64]
+  - mkl-service  # [osx64]
+  - libblas=*=*mkl  # [osx64]
+  - mkl  # [win]
+  - mkl-service  # [win]
+  - libblas=*=*mkl  # [win]
+
+  # Use Accelerate for Apple Silicon.
+  - libblas=*=*accelerate  # [arm64]
+
+category: blas
