@@ -17,7 +17,6 @@ from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
     Subtensor,
-    indices_from_subtensor,
 )
 
 
@@ -99,6 +98,8 @@ def local_blockwise_alloc(fgraph, node):
     BOp(vector, alloc(vector, 10, 5)) -> alloc(BOp)(vector, vector), 10, 5)
     BOp(vector, alloc(scalar, 10, 5)) -> alloc(BOp)(vector, alloc(scalar, 5), 10, 5)
     BOp(matrix, alloc(vector, 10, 5)) -> BOp(matrix, vector)
+
+    This is critical to remove many unnecessary Blockwise, or to reduce the work done by it
     """
 
     op: Blockwise = node.op  # type: ignore
@@ -225,29 +226,6 @@ def local_blockwise_reshape(fgraph, node):
         new_out = x.reshape([*tuple(batched_shape), *tuple(core_reshape)])
         copy_stack_trace(node.outputs[0], new_out)
         return [new_out]
-
-
-@register_stabilize
-@register_specialize
-@node_rewriter([Blockwise])
-def local_blockwise_of_subtensor(fgraph, node):
-    """Rewrite Blockwise of Subtensor, where the only batch input is the indexed tensor.
-
-    Blockwise(Subtensor{a: b})(x, a, b) -> x[:, a:b] when x has one batch dimension, and a/b none
-    """
-    if not isinstance(node.op.core_op, Subtensor):
-        return
-
-    x, *idxs = node.inputs
-    if not all(all(idx.type.broadcastable) for idx in idxs):
-        return
-
-    core_idxs = indices_from_subtensor(
-        [idx.squeeze() for idx in idxs], node.op.core_op.idx_list
-    )
-    # Add empty slices for the batch dims
-    none_slices = (slice(None),) * node.op.batch_ndim(node)
-    return [x[(*none_slices, *core_idxs)]]
 
 
 class InplaceBlockwiseOptimizer(InplaceGraphOptimizer):
