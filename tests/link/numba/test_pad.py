@@ -11,6 +11,9 @@ floatX = config.floatX
 RTOL = ATOL = 1e-6 if floatX.endswith("64") else 1e-3
 
 
+@pytest.mark.skip(
+    "Numba compilation is too slow and this is just a test for dispatch of OpFromGraph"
+)
 @pytest.mark.parametrize(
     "mode, kwargs",
     [
