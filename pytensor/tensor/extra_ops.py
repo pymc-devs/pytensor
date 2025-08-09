@@ -294,7 +294,7 @@ class CumOp(COp):
     __props__ = ("axis", "mode")
     check_input = False
     params_type = ParamsType(
-        c_axis=int_t, mode=EnumList(("MODE_ADD", "add"), ("MODE_MUL", "mul"))
+        axis=int_t, mode=EnumList(("MODE_ADD", "add"), ("MODE_MUL", "mul"))
     )
 
     def __init__(self, axis: int, mode="add"):
@@ -307,9 +307,6 @@ class CumOp(COp):
         self.axis = axis
         self.mode = mode
 
-    @property
-    def c_axis(self) -> int:
-        return self.axis
 
     def make_node(self, x):
         x = ptb.as_tensor_variable(x)
@@ -360,7 +357,7 @@ class CumOp(COp):
         fail = sub["fail"]
         params = sub["params"]
 
-        axis_code = f"int axis = {params}->c_axis;\n"
+        axis_code = f"int axis = {params}->axis;\n"
 
         code = (
             axis_code
@@ -432,12 +429,13 @@ def cumsum(x, axis=None):
     .. versionadded:: 0.7
 
     """
+    x = ptb.as_tensor_variable(x)
     if axis is None:
-        return CumOp(axis=0, mode="add")(ptb.as_tensor_variable(x).ravel())
+        x = x.ravel()
+        axis = 0
     else:
-        x = ptb.as_tensor_variable(x)
         axis = normalize_axis_index(axis, x.ndim)
-        return CumOp(axis=axis, mode="add")(x)
+    return CumOp(axis=axis, mode="add")(x)
 
 
 def cumprod(x, axis=None):
@@ -457,12 +455,13 @@ def cumprod(x, axis=None):
     .. versionadded:: 0.7
 
     """
+    x = ptb.as_tensor_variable(x)
     if axis is None:
-        return CumOp(axis=0, mode="mul")(ptb.as_tensor_variable(x).ravel())
+        x = x.ravel()
+        axis = 0
     else:
-        x = ptb.as_tensor_variable(x)
         axis = normalize_axis_index(axis, x.ndim)
-        return CumOp(axis=axis, mode="mul")(x)
+    return CumOp(axis=axis, mode="mul")(x)
 
 
 @_vectorize_node.register(CumOp)
