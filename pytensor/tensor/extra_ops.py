@@ -302,6 +302,8 @@ class CumOp(COp):
             raise ValueError(f'{type(self).__name__}: Unknown mode "{mode}"')
         if not isinstance(axis, int):
             raise TypeError("axis must be an integer.")
+        if axis < 0:
+            raise ValueError("axis must be non-negative.")
         self.axis = axis
         self.mode = mode
 
@@ -313,7 +315,7 @@ class CumOp(COp):
         x = ptb.as_tensor_variable(x)
         out_type = x.type()
 
-        if self.axis >= x.ndim or self.axis < -x.ndim:
+        if self.axis >= x.ndim:
             raise ValueError(f"axis(={self.axis}) out of bounds")
 
         return Apply(self, [x], [out_type])
@@ -431,10 +433,10 @@ def cumsum(x, axis=None):
 
     """
     if axis is None:
-        # Handle raveling symbolically by flattening first, then applying cumsum with axis=0
-        x_flattened = flatten(x, ndim=1)  # This creates a 1D tensor
-        return CumOp(axis=0, mode="add")(x_flattened)
+        return CumOp(axis=0, mode="add")(ptb.as_tensor_variable(x).ravel())
     else:
+        x = ptb.as_tensor_variable(x)
+        axis = normalize_axis_index(axis, x.ndim)
         return CumOp(axis=axis, mode="add")(x)
 
 
@@ -456,10 +458,10 @@ def cumprod(x, axis=None):
 
     """
     if axis is None:
-        # Handle raveling symbolically by flattening first, then applying cumprod with axis=0
-        x_flattened = flatten(x, ndim=1)  # This creates a 1D tensor
-        return CumOp(axis=0, mode="mul")(x_flattened)
+        return CumOp(axis=0, mode="mul")(ptb.as_tensor_variable(x).ravel())
     else:
+        x = ptb.as_tensor_variable(x)
+        axis = normalize_axis_index(axis, x.ndim)
         return CumOp(axis=axis, mode="mul")(x)
 
 
@@ -468,8 +470,8 @@ def vectorize_cum_op(op: CumOp, node: Apply, batch_x):
     """Vectorize the CumOp to work on a batch of inputs."""
     [original_x] = node.inputs
     batch_ndim = batch_x.ndim - original_x.ndim
-    axis = normalize_axis_index(op.axis, original_x.ndim)
-    return type(op)(axis=axis + batch_ndim, mode=op.mode).make_node(batch_x)
+    # op.axis is already normalized and non-negative
+    return type(op)(axis=op.axis + batch_ndim, mode=op.mode).make_node(batch_x)
 
 
 def diff(x, n=1, axis=-1):

@@ -226,7 +226,7 @@ class TestCumOp(utt.InferShapeTester):
         a = np.random.random((3, 5, 2)).astype(config.floatX)
 
         # Test axis=None using cumsum function (which now handles it symbolically)
-        self._compile_and_check([x], [cumsum(x)], [a], type(cumsum(x).owner.op))
+        self._compile_and_check([x], [cumsum(x)], [a], self.op_class)
 
         for axis in range(-len(a.shape), len(a.shape)):
             self._compile_and_check([x], [cumsum(x, axis=axis)], [a], self.op_class)
