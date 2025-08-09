@@ -39,11 +39,6 @@ def test_Bartlett(val):
             "add",
         ),
         (
-            (pt.dtensor3(), np.arange(30, dtype=config.floatX).reshape((2, 3, 5))),
-            -1,
-            "add",
-        ),
-        (
             (pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))),
             0,
             "add",
@@ -55,22 +50,12 @@ def test_Bartlett(val):
         ),
         (
             (pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))),
-            None,
-            "add",
-        ),
-        (
-            (pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))),
             0,
             "mul",
         ),
         (
             (pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))),
             1,
-            "mul",
-        ),
-        (
-            (pt.matrix(), np.arange(6, dtype=config.floatX).reshape((3, 2))),
-            None,
             "mul",
         ),
     ],
