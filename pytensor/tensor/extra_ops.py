@@ -1,5 +1,6 @@
 import warnings
 from collections.abc import Collection, Iterable
+from textwrap import dedent
 
 import numpy as np
 
@@ -20,7 +21,6 @@ from pytensor.link.c.type import EnumList, Generic
 from pytensor.npy_2_compat import (
     normalize_axis_index,
     npy_2_compat_header,
-    numpy_axis_is_none_flag,
     old_np_unique,
 )
 from pytensor.raise_op import Assert
@@ -28,7 +28,7 @@ from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import alloc, join, second, flatten
+from pytensor.tensor.basic import alloc, join, second
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
@@ -48,7 +48,7 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
-from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
+from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
@@ -307,7 +307,6 @@ class CumOp(COp):
         self.axis = axis
         self.mode = mode
 
-
     def make_node(self, x):
         x = ptb.as_tensor_variable(x)
         out_type = x.type()
@@ -325,7 +324,7 @@ class CumOp(COp):
         else:
             z[0] = np.cumprod(x, axis=self.axis)
 
-    def grad(self, inputs, output_gradients):
+    def L_op(self, inputs, outputs, output_gradients):
         (x,) = inputs
         (gi,) = output_gradients
 
@@ -357,58 +356,43 @@ class CumOp(COp):
         fail = sub["fail"]
         params = sub["params"]
 
-        axis_code = f"int axis = {params}->axis;\n"
+        return dedent(
+            f"""
+            int axis = {params}->axis;
 
-        code = (
-            axis_code
-            + f"""
-                #undef NPY_UF_DBG_TRACING
-                #define NPY_UF_DBG_TRACING 1
+            if (!({z} && PyArray_CompareLists(PyArray_DIMS({z}), PyArray_DIMS({x}), PyArray_NDIM({x}))))
+            {{
+                Py_XDECREF({z});
+                {z} = (PyArrayObject*) PyArray_SimpleNew(PyArray_NDIM({x}), PyArray_DIMS({x}), PyArray_TYPE({x}));
+                if (!{z}){{ {fail} }};
+            }}
 
-                if (axis == 0 && PyArray_NDIM({x}) == 1)
-                    axis = NPY_RAVEL_AXIS;
-                npy_intp shape[1] = {{ PyArray_SIZE({x}) }};
-                if(axis == NPY_RAVEL_AXIS && !({z} && PyArray_DIMS({z})[0] == shape[0]))
-                {{
-                    Py_XDECREF({z});
-                    {z} = (PyArrayObject*) PyArray_SimpleNew(1, shape, PyArray_TYPE({x}));
-                }}
+            {{
 
-                else if(axis != NPY_RAVEL_AXIS && !({z} && PyArray_CompareLists(PyArray_DIMS({z}), PyArray_DIMS({x}), PyArray_NDIM({x}))))
-                {{
-                    Py_XDECREF({z});
-                    {z} = (PyArrayObject*) PyArray_SimpleNew(PyArray_NDIM({x}), PyArray_DIMS({x}), PyArray_TYPE({x}));
-                }}
+                PyObject * t = NULL;
+                if({params}->mode == MODE_ADD)
+                    t = PyArray_CumSum({x}, axis, PyArray_TYPE({x}), {z});
+                else if({params}->mode == MODE_MUL)
+                    t = PyArray_CumProd({x}, axis, PyArray_TYPE({x}), {z});
 
-                if (!{z})
+                if (!t){{
                     {fail};
-                {{
-
-                    PyObject * t = NULL;
-                    if({params}->mode == MODE_ADD)
-                        t = PyArray_CumSum(
-                            {x}, axis,
-                            PyArray_TYPE({x}), {z});
-                    else if({params}->mode == MODE_MUL)
-                        t = PyArray_CumProd(
-                            {x}, axis,
-                            PyArray_TYPE({x}), {z});
-
-                    if (!t){{
-                       {fail};
-                    }}
-                    // Because PyArray_CumSum/CumProd returns a newly created reference on t.
-                    Py_XDECREF(t);
                 }}
+
+                // Because PyArray_CumSum/CumProd returns a newly created reference on t.
+                Py_XDECREF(t);
+            }}
             """
         )
 
-        return code
-
     def c_code_cache_version(self):
-        return (9,)
+        return (10,)
 
     def __str__(self):
+        if self.mode == "add":
+            return f"Cumsum{{axis={self.axis}}}"
+        elif self.mode == "mul":
+            return f"Cumprod{{axis={self.axis}}}"
         return f"{self.__class__.__name__}{{{self.axis}, {self.mode}}}"
 
 
