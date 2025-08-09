@@ -1,5 +1,6 @@
 import warnings
 from collections.abc import Collection, Iterable
+from textwrap import dedent
 
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_index
@@ -44,10 +45,10 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
-from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
+from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
-from pytensor.utils import LOCAL_BITWIDTH, NPY_RAVEL_AXIS, PYTHON_INT_BITWIDTH
+from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
 
 
 class CpuContiguous(COp):
@@ -290,33 +291,28 @@ class CumOp(COp):
     __props__ = ("axis", "mode")
     check_input = False
     params_type = ParamsType(
-        c_axis=int_t, mode=EnumList(("MODE_ADD", "add"), ("MODE_MUL", "mul"))
+        axis=int_t, mode=EnumList(("MODE_ADD", "add"), ("MODE_MUL", "mul"))
     )
 
-    def __init__(self, axis: int | None = None, mode="add"):
+    def __init__(self, axis: int, mode="add"):
         if mode not in ("add", "mul"):
             raise ValueError(f'{type(self).__name__}: Unknown mode "{mode}"')
-        if not (isinstance(axis, int) or axis is None):
-            raise TypeError("axis must be an integer or None.")
+        if not isinstance(axis, int):
+            raise TypeError(f"axis must be an integer, got {axis} of type {type(axis)}")
+        if axis < 0:
+            raise ValueError(f"axis must be non-negative, got {axis}")
         self.axis = axis
         self.mode = mode
 
-    @property
-    def c_axis(self) -> int:
-        if self.axis is None:
-            return NPY_RAVEL_AXIS
-        return self.axis
-
     def make_node(self, x):
         x = ptb.as_tensor_variable(x)
-        out_type = x.type()
 
-        if self.axis is None:
-            out_type = vector(dtype=x.dtype)  # Flatten
-        elif self.axis >= x.ndim or self.axis < -x.ndim:
-            raise ValueError(f"axis(={self.axis}) out of bounds")
+        if self.axis >= x.type.ndim:
+            raise ValueError(
+                f"axis(={self.axis}) out of bounds for variable {x} with {x.type.ndim} ndims"
+            )
 
-        return Apply(self, [x], [out_type])
+        return Apply(self, [x], [x.type()])
 
     def perform(self, node, inputs, output_storage):
         x = inputs[0]
@@ -326,20 +322,9 @@ class CumOp(COp):
         else:
             z[0] = np.cumprod(x, axis=self.axis)
 
-    def grad(self, inputs, output_gradients):
+    def L_op(self, inputs, outputs, output_gradients):
         (x,) = inputs
         (gi,) = output_gradients
-
-        if self.axis is None:
-            if self.mode == "add":
-                return [cumsum(gi[::-1])[::-1].reshape(x.shape)]
-            elif self.mode == "mul":
-                fx = cumprod(x, axis=self.axis)
-                return [cumsum((fx * gi)[::-1])[::-1].reshape(x.shape) / x]
-            else:
-                raise NotImplementedError(
-                    f'{type(self).__name__}: unknown gradient for mode "{self.mode}"'
-                )
 
         reverse_slicing = [slice(None, None, None)] * gi.ndim
         reverse_slicing[self.axis] = slice(None, None, -1)
@@ -357,9 +342,6 @@ class CumOp(COp):
             )
 
     def infer_shape(self, fgraph, node, shapes):
-        if self.axis is None and len(shapes[0]) > 1:
-            return [(prod(shapes[0]),)]  # Flatten
-
         return shapes
 
     def c_code(self, node, name, inames, onames, sub):
@@ -368,61 +350,43 @@ class CumOp(COp):
         fail = sub["fail"]
         params = sub["params"]
 
-        if self.axis is None:
-            axis_code = "int axis = NPY_RAVEL_AXIS;\n"
-        else:
-            axis_code = f"int axis = {params}->c_axis;\n"
+        return dedent(
+            f"""
+            int axis = {params}->axis;
 
-        code = (
-            axis_code
-            + f"""
-                #undef NPY_UF_DBG_TRACING
-                #define NPY_UF_DBG_TRACING 1
+            if (!({z} && PyArray_CompareLists(PyArray_DIMS({z}), PyArray_DIMS({x}), PyArray_NDIM({x}))))
+            {{
+                Py_XDECREF({z});
+                {z} = (PyArrayObject*) PyArray_SimpleNew(PyArray_NDIM({x}), PyArray_DIMS({x}), PyArray_TYPE({x}));
+                if (!{z}){{ {fail} }};
+            }}
 
-                if (axis == 0 && PyArray_NDIM({x}) == 1)
-                    axis = NPY_RAVEL_AXIS;
-                npy_intp shape[1] = {{ PyArray_SIZE({x}) }};
-                if(axis == NPY_RAVEL_AXIS && !({z} && PyArray_DIMS({z})[0] == shape[0]))
-                {{
-                    Py_XDECREF({z});
-                    {z} = (PyArrayObject*) PyArray_SimpleNew(1, shape, PyArray_TYPE({x}));
-                }}
+            {{
 
-                else if(axis != NPY_RAVEL_AXIS && !({z} && PyArray_CompareLists(PyArray_DIMS({z}), PyArray_DIMS({x}), PyArray_NDIM({x}))))
-                {{
-                    Py_XDECREF({z});
-                    {z} = (PyArrayObject*) PyArray_SimpleNew(PyArray_NDIM({x}), PyArray_DIMS({x}), PyArray_TYPE({x}));
-                }}
+                PyObject * t = NULL;
+                if({params}->mode == MODE_ADD)
+                    t = PyArray_CumSum({x}, axis, PyArray_TYPE({x}), {z});
+                else if({params}->mode == MODE_MUL)
+                    t = PyArray_CumProd({x}, axis, PyArray_TYPE({x}), {z});
 
-                if (!{z})
+                if (!t){{
                     {fail};
-                {{
-
-                    PyObject * t = NULL;
-                    if({params}->mode == MODE_ADD)
-                        t = PyArray_CumSum(
-                            {x}, axis,
-                            PyArray_TYPE({x}), {z});
-                    else if({params}->mode == MODE_MUL)
-                        t = PyArray_CumProd(
-                            {x}, axis,
-                            PyArray_TYPE({x}), {z});
-
-                    if (!t){{
-                       {fail};
-                    }}
-                    // Because PyArray_CumSum/CumProd returns a newly created reference on t.
-                    Py_XDECREF(t);
                 }}
+
+                // Because PyArray_CumSum/CumProd returns a newly created reference on t.
+                Py_XDECREF(t);
+            }}
             """
         )
 
-        return code
-
     def c_code_cache_version(self):
-        return (10,)
+        return (11,)
 
     def __str__(self):
+        if self.mode == "add":
+            return f"Cumsum{{axis={self.axis}}}"
+        elif self.mode == "mul":
+            return f"Cumprod{{axis={self.axis}}}"
         return f"{self.__class__.__name__}{{{self.axis}, {self.mode}}}"
 
 
@@ -443,6 +407,12 @@ def cumsum(x, axis=None):
     .. versionadded:: 0.7
 
     """
+    x = ptb.as_tensor_variable(x)
+    if axis is None:
+        x = x.ravel()
+        axis = 0
+    else:
+        axis = normalize_axis_index(axis, x.ndim)
     return CumOp(axis=axis, mode="add")(x)
 
 
@@ -463,6 +433,12 @@ def cumprod(x, axis=None):
     .. versionadded:: 0.7
 
     """
+    x = ptb.as_tensor_variable(x)
+    if axis is None:
+        x = x.ravel()
+        axis = 0
+    else:
+        axis = normalize_axis_index(axis, x.ndim)
     return CumOp(axis=axis, mode="mul")(x)
 
 
@@ -471,18 +447,8 @@ def vectorize_cum_op(op: CumOp, node: Apply, batch_x):
     """Vectorize the CumOp to work on a batch of inputs."""
     [original_x] = node.inputs
     batch_ndim = batch_x.ndim - original_x.ndim
-    axis = op.axis
-    if axis is None and original_x.ndim == 1:
-        axis = 0
-    elif axis is not None:
-        axis = normalize_axis_index(op.axis, original_x.ndim)
-
-    if axis is None:
-        # Ravel all unbatched dimensions and perform CumOp on the last axis
-        batch_x_raveled = [batch_x.flatten(ndim=batch_ndim + 1) for x in batch_x]
-        return type(op)(axis=-1, mode=op.mode).make_node(batch_x_raveled)
-    else:
-        return type(op)(axis=axis + batch_ndim, mode=op.mode).make_node(batch_x)
+    # op.axis is already normalized and non-negative
+    return type(op)(axis=op.axis + batch_ndim, mode=op.mode).make_node(batch_x)
 
 
 def diff(x, n=1, axis=-1):

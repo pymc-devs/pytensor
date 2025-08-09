@@ -41,21 +41,15 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     mode = op.mode
     ndim = cast(TensorVariable, node.outputs[0]).ndim
 
-    if axis is not None:
-        if axis < 0:
-            axis = ndim + axis
-        if axis < 0 or axis >= ndim:
-            raise ValueError(f"Invalid axis {axis} for array with ndim {ndim}")
-
-        reaxis_first = (axis, *(i for i in range(ndim) if i != axis))
-        reaxis_first_inv = tuple(np.argsort(reaxis_first))
+    reaxis_first = (axis, *(i for i in range(ndim) if i != axis))
+    reaxis_first_inv = tuple(np.argsort(reaxis_first))
 
     if mode == "add":
-        if axis is None or ndim == 1:
+        if ndim == 1:
 
             @numba_basic.numba_njit
             def cumop(x):
-                return np.cumsum(x)
+                return np.cumsum(x, axis=axis)
 
         else:
 
@@ -75,11 +69,11 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
                 return res.transpose(reaxis_first_inv)
 
     else:
-        if axis is None or ndim == 1:
+        if ndim == 1:
 
             @numba_basic.numba_njit
             def cumop(x):
-                return np.cumprod(x)
+                return np.cumprod(x, axis=axis)
 
         else:
 
@@ -96,7 +90,7 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
                 for m in range(1, x.shape[axis]):
                     res[m] = res[m - 1] * x_axis_first[m]
 
-                return res.transpose(reaxis_first)
+                return res.transpose(reaxis_first_inv)
 
     return cumop
 
