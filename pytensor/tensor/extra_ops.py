@@ -28,7 +28,7 @@ from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import alloc, join, second
+from pytensor.tensor.basic import alloc, join, second, flatten
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
@@ -297,27 +297,23 @@ class CumOp(COp):
         c_axis=int_t, mode=EnumList(("MODE_ADD", "add"), ("MODE_MUL", "mul"))
     )
 
-    def __init__(self, axis: int | None = None, mode="add"):
+    def __init__(self, axis: int, mode="add"):
         if mode not in ("add", "mul"):
             raise ValueError(f'{type(self).__name__}: Unknown mode "{mode}"')
-        if not (isinstance(axis, int) or axis is None):
-            raise TypeError("axis must be an integer or None.")
+        if not isinstance(axis, int):
+            raise TypeError("axis must be an integer.")
         self.axis = axis
         self.mode = mode
 
     @property
     def c_axis(self) -> int:
-        if self.axis is None:
-            return numpy_axis_is_none_flag
         return self.axis
 
     def make_node(self, x):
         x = ptb.as_tensor_variable(x)
         out_type = x.type()
 
-        if self.axis is None:
-            out_type = vector(dtype=x.dtype)  # Flatten
-        elif self.axis >= x.ndim or self.axis < -x.ndim:
+        if self.axis >= x.ndim or self.axis < -x.ndim:
             raise ValueError(f"axis(={self.axis}) out of bounds")
 
         return Apply(self, [x], [out_type])
@@ -333,17 +329,6 @@ class CumOp(COp):
     def grad(self, inputs, output_gradients):
         (x,) = inputs
         (gi,) = output_gradients
-
-        if self.axis is None:
-            if self.mode == "add":
-                return [cumsum(gi[::-1])[::-1].reshape(x.shape)]
-            elif self.mode == "mul":
-                fx = cumprod(x, axis=self.axis)
-                return [cumsum((fx * gi)[::-1])[::-1].reshape(x.shape) / x]
-            else:
-                raise NotImplementedError(
-                    f'{type(self).__name__}: unknown gradient for mode "{self.mode}"'
-                )
 
         reverse_slicing = [slice(None, None, None)] * gi.ndim
         reverse_slicing[self.axis] = slice(None, None, -1)
@@ -361,9 +346,6 @@ class CumOp(COp):
             )
 
     def infer_shape(self, fgraph, node, shapes):
-        if self.axis is None and len(shapes[0]) > 1:
-            return [(prod(shapes[0]),)]  # Flatten
-
         return shapes
 
     def c_support_code_apply(self, node: Apply, name: str) -> str:
@@ -376,10 +358,7 @@ class CumOp(COp):
         fail = sub["fail"]
         params = sub["params"]
 
-        if self.axis is None:
-            axis_code = "int axis = NPY_RAVEL_AXIS;\n"
-        else:
-            axis_code = f"int axis = {params}->c_axis;\n"
+        axis_code = f"int axis = {params}->c_axis;\n"
 
         code = (
             axis_code
@@ -451,7 +430,12 @@ def cumsum(x, axis=None):
     .. versionadded:: 0.7
 
     """
-    return CumOp(axis=axis, mode="add")(x)
+    if axis is None:
+        # Handle raveling symbolically by flattening first, then applying cumsum with axis=0
+        x_flattened = flatten(x, ndim=1)  # This creates a 1D tensor
+        return CumOp(axis=0, mode="add")(x_flattened)
+    else:
+        return CumOp(axis=axis, mode="add")(x)
 
 
 def cumprod(x, axis=None):
@@ -471,7 +455,12 @@ def cumprod(x, axis=None):
     .. versionadded:: 0.7
 
     """
-    return CumOp(axis=axis, mode="mul")(x)
+    if axis is None:
+        # Handle raveling symbolically by flattening first, then applying cumprod with axis=0
+        x_flattened = flatten(x, ndim=1)  # This creates a 1D tensor
+        return CumOp(axis=0, mode="mul")(x_flattened)
+    else:
+        return CumOp(axis=axis, mode="mul")(x)
 
 
 @_vectorize_node.register(CumOp)
@@ -479,18 +468,8 @@ def vectorize_cum_op(op: CumOp, node: Apply, batch_x):
     """Vectorize the CumOp to work on a batch of inputs."""
     [original_x] = node.inputs
     batch_ndim = batch_x.ndim - original_x.ndim
-    axis = op.axis
-    if axis is None and original_x.ndim == 1:
-        axis = 0
-    elif axis is not None:
-        axis = normalize_axis_index(op.axis, original_x.ndim)
-
-    if axis is None:
-        # Ravel all unbatched dimensions and perform CumOp on the last axis
-        batch_x_raveled = [batch_x.flatten(ndim=batch_ndim + 1) for x in batch_x]
-        return type(op)(axis=-1, mode=op.mode).make_node(batch_x_raveled)
-    else:
-        return type(op)(axis=axis + batch_ndim, mode=op.mode).make_node(batch_x)
+    axis = normalize_axis_index(op.axis, original_x.ndim)
+    return type(op)(axis=axis + batch_ndim, mode=op.mode).make_node(batch_x)
 
 
 def diff(x, n=1, axis=-1):

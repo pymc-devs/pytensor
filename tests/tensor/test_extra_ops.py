@@ -194,7 +194,7 @@ class TestCumOp(utt.InferShapeTester):
     def setup_method(self):
         super().setup_method()
         self.op_class = CumOp
-        self.op = CumOp()
+        self.op = CumOp(axis=0)  # Use a specific axis since None is no longer supported
 
     def test_cum_op(self):
         x = tensor3("x")
@@ -225,8 +225,8 @@ class TestCumOp(utt.InferShapeTester):
         x = tensor3("x")
         a = np.random.random((3, 5, 2)).astype(config.floatX)
 
-        # Test axis=None
-        self._compile_and_check([x], [self.op(x)], [a], self.op_class)
+        # Test axis=None using cumsum function (which now handles it symbolically)
+        self._compile_and_check([x], [cumsum(x)], [a], type(cumsum(x).owner.op))
 
         for axis in range(-len(a.shape), len(a.shape)):
             self._compile_and_check([x], [cumsum(x, axis=axis)], [a], self.op_class)
@@ -234,8 +234,9 @@ class TestCumOp(utt.InferShapeTester):
     def test_grad(self):
         a = np.random.random((3, 5, 2)).astype(config.floatX)
 
-        utt.verify_grad(self.op_class(mode="add"), [a])  # Test axis=None
-        utt.verify_grad(self.op_class(mode="mul"), [a])  # Test axis=None
+        # Test axis=None using cumsum/cumprod functions (which now handle it symbolically)
+        utt.verify_grad(lambda x: cumsum(x), [a])  # Test axis=None for cumsum
+        utt.verify_grad(lambda x: cumprod(x), [a])  # Test axis=None for cumprod
 
         for axis in range(-len(a.shape), len(a.shape)):
             utt.verify_grad(self.op_class(axis=axis, mode="add"), [a], eps=4e-4)
