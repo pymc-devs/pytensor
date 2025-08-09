@@ -194,7 +194,7 @@ class TestCumOp(utt.InferShapeTester):
     def setup_method(self):
         super().setup_method()
         self.op_class = CumOp
-        self.op = CumOp(axis=0)  # Use a specific axis since None is no longer supported
+        self.op = CumOp(axis=0)
 
     def test_cum_op(self):
         x = tensor3("x")
