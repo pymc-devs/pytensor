@@ -37,8 +37,6 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     mode = op.mode
     ndim = cast(TensorVariable, node.outputs[0]).ndim
 
-
-
     reaxis_first = (axis, *(i for i in range(ndim) if i != axis))
     reaxis_first_inv = tuple(np.argsort(reaxis_first))
 
