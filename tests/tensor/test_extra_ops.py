@@ -38,9 +38,11 @@ from pytensor.tensor.extra_ops import (
     diff,
     fill_diagonal,
     fill_diagonal_offset,
+    join_dims,
     ravel_multi_index,
     repeat,
     searchsorted,
+    split_dims,
     squeeze,
     to_one_hot,
     unravel_index,
@@ -1387,3 +1389,70 @@ def test_concat_with_broadcast():
         a = pt.tensor("a", shape=(1, 3, 5))
         b = pt.tensor("b", shape=(3, 5))
         pt.concat_with_broadcast([a, b], axis=1)
+
+
+def test_join_dims():
+    rng = np.random.default_rng()
+
+    x = pt.tensor("x", shape=(2, 3, 4, 5))
+    assert join_dims(x, axis=(0, 1)).type.shape == (6, 4, 5)
+    assert join_dims(x, axis=(1, 2)).type.shape == (2, 12, 5)
+    assert join_dims(x, axis=(-1, -2)).type.shape == (2, 3, 20)
+
+    assert join_dims(x, axis=()).type.shape == (2, 3, 4, 5)
+    assert join_dims(x, axis=(2,)).type.shape == (2, 3, 4, 5)
+
+    with pytest.raises(
+        ValueError,
+        match=r"join_dims axis must be consecutive, got normalized axis: \(0, 2\)",
+    ):
+        _ = join_dims(x, axis=(0, 2)).type.shape == (8, 3, 5)
+
+    x_joined = join_dims(x, axis=(1, 2))
+    x_value = rng.normal(size=(2, 3, 4, 5)).astype(config.floatX)
+
+    fn = function([x], x_joined, mode="FAST_COMPILE")
+
+    x_joined_value = fn(x_value)
+    np.testing.assert_allclose(x_joined_value, x_value.reshape(2, 12, 5))
+
+    assert join_dims(x, axis=(1,)).eval({x: x_value}).shape == (2, 3, 4, 5)
+    assert join_dims(x, axis=()).eval({x: x_value}).shape == (2, 3, 4, 5)
+
+
+@pytest.mark.parametrize(
+    "axis, shape, expected_shape",
+    [
+        (0, pt.as_tensor([2, 3]), (2, 3, 4, 6)),
+        (2, [2, 3], (6, 4, 2, 3)),
+        (-1, 6, (6, 4, 6)),
+    ],
+    ids=["tensor", "list", "integer"],
+)
+def test_split_dims(axis, shape, expected_shape):
+    rng = np.random.default_rng()
+
+    x = pt.tensor("x", shape=(6, 4, 6))
+    x_split = split_dims(x, axis=axis, shape=shape)
+    assert x_split.type.shape == expected_shape
+
+    x_split = split_dims(x, axis=axis, shape=shape)
+    x_value = rng.normal(size=(6, 4, 6)).astype(config.floatX)
+
+    fn = function([x], x_split, mode="FAST_COMPILE")
+
+    x_split_value = fn(x_value)
+    np.testing.assert_allclose(x_split_value, x_value.reshape(expected_shape))
+
+
+def test_split_size_zero_shape():
+    x = pt.tensor("x", shape=(1, 4, 6))
+    x_split = split_dims(x, axis=0, shape=pt.as_tensor(np.zeros((0,))))
+    assert x_split.type.shape == (4, 6)
+
+    x_value = np.empty((1, 4, 6), dtype=config.floatX)
+
+    fn = function([x], x_split, mode="FAST_COMPILE")
+
+    x_split_value = fn(x_value)
+    np.testing.assert_allclose(x_split_value, x_value.squeeze(0))
