@@ -25,7 +25,7 @@ from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import alloc, join, second
+from pytensor.tensor.basic import alloc, arange, join, second
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
@@ -45,7 +45,7 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
-from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
+from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
@@ -2011,6 +2011,73 @@ def concat_with_broadcast(tensor_list, axis=0):
     return join(axis, *bcast_tensor_inputs)
 
 
+def pack(
+    *tensors: TensorVariable,
+) -> tuple[TensorVariable, list[tuple[TensorVariable]]]:
+    """
+    Given a list of tensors of varying shapes and dimensions, ravels and concatenates them into a single 1d vector.
+
+    Parameters
+    ----------
+    tensors: TensorVariable
+        Tensors to be packed into a single vector.
+
+    Returns
+    -------
+    flat_tensor: TensorVariable
+        A new symbolic variable representing the concatenated 1d vector of all tensor inputs
+    packed_shapes: list of tuples of TensorVariable
+        A list of tuples, where each tuple contains the symbolic shape of the original tensors.
+    """
+    if not tensors:
+        raise ValueError("Cannot pack an empty list of tensors.")
+
+    # Get the shapes of the input tensors
+    packed_shapes = [
+        t.type.shape if not any(s is None for s in t.type.shape) else t.shape
+        for t in tensors
+    ]
+
+    # Flatten each tensor and concatenate them into a single 1D vector
+    flat_tensor = join(0, *[t.ravel() for t in tensors])
+
+    return flat_tensor, packed_shapes
+
+
+def unpack(
+    flat_tensor: TensorVariable, packed_shapes: list[tuple[TensorVariable | int]]
+) -> tuple[TensorVariable, ...]:
+    """
+    Unpack a flat tensor into its original shapes based on the provided packed shapes.
+
+    Parameters
+    ----------
+    flat_tensor: TensorVariable
+        A 1D tensor that contains the concatenated values of the original tensors.
+    packed_shapes: list of tuples of TensorVariable
+        A list of tuples, where each tuple contains the symbolic shape of the original tensors.
+
+    Returns
+    -------
+    unpacked_tensors: tuple of TensorVariable
+        A tuple containing the unpacked tensors with their original shapes.
+    """
+    if not packed_shapes:
+        raise ValueError("Cannot unpack an empty list of shapes.")
+
+    start = 0
+    unpacked_tensors = []
+    for shape in packed_shapes:
+        size = prod(shape, no_zeros_in_input=True)
+        end = start + size
+        unpacked_tensors.append(
+            take(flat_tensor, arange(start, end, dtype="int"), axis=0).reshape(shape)
+        )
+        start = end
+
+    return tuple(unpacked_tensors)
+
+
 __all__ = [
     "bartlett",
     "bincount",
@@ -2033,4 +2100,6 @@ __all__ = [
     "squeeze",
     "unique",
     "unravel_index",
+    "pack",
+    "unpack",
 ]

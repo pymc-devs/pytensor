@@ -9,7 +9,7 @@ from pytensor import tensor as pt
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph
-from pytensor.graph.basic import Constant, equal_computations
+from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.traversal import applys_between
 from pytensor.npy_2_compat import old_np_unique
 from pytensor.raise_op import Assert
@@ -38,11 +38,13 @@ from pytensor.tensor.extra_ops import (
     diff,
     fill_diagonal,
     fill_diagonal_offset,
+    pack,
     ravel_multi_index,
     repeat,
     searchsorted,
     squeeze,
     to_one_hot,
+    unpack,
     unravel_index,
 )
 from pytensor.tensor.type import (
@@ -1387,3 +1389,72 @@ def test_concat_with_broadcast():
         a = pt.tensor("a", shape=(1, 3, 5))
         b = pt.tensor("b", shape=(3, 5))
         pt.concat_with_broadcast([a, b], axis=1)
+
+
+@pytest.mark.parametrize(
+    "shapes, expected_flat_shape",
+    [([(), (5,), (3, 3)], 15), ([(), (None,), (None, None)], None)],
+    ids=["static", "symbolic"],
+)
+def test_pack(shapes, expected_flat_shape):
+    rng = np.random.default_rng()
+
+    x = pt.tensor("x", shape=shapes[0])
+    y = pt.tensor("y", shape=shapes[1])
+    z = pt.tensor("z", shape=shapes[2])
+
+    has_static_shape = [not any(s is None for s in shape) for shape in shapes]
+
+    flat_packed, packed_shapes = pack(x, y, z)
+
+    assert flat_packed.type.shape[0] == expected_flat_shape
+
+    for i, (packed_shape, has_static) in enumerate(
+        zip(packed_shapes, has_static_shape)
+    ):
+        if has_static:
+            assert packed_shape == shapes[i]
+        else:
+            assert isinstance(packed_shape, Variable)
+
+    new_outputs = unpack(flat_packed, packed_shapes)
+
+    assert len(new_outputs) == 3
+    assert all(
+        out.type.shape == var.type.shape for out, var in zip(new_outputs, [x, y, z])
+    )
+
+    fn = function([x, y, z], new_outputs, mode="FAST_COMPILE")
+
+    input_vals = [
+        rng.normal(size=shape).astype(config.floatX)
+        for var, shape in zip([x, y, z], [(), (5,), (3, 3)])
+    ]
+    new_output_vals = fn(*input_vals)
+    for input, output in zip(input_vals, new_output_vals):
+        np.testing.assert_allclose(input, output)
+
+
+def test_make_replacements_with_pack_unpack():
+    rng = np.random.default_rng()
+
+    x = pt.tensor("x", shape=())
+    y = pt.tensor("y", shape=(5,))
+    z = pt.tensor("z", shape=(3, 3))
+
+    loss = (x + y.sum() + z.sum()) ** 2
+
+    flat_packed, packed_shapes = pack(x, y, z)
+    new_input = flat_packed.type()
+    new_outputs = unpack(new_input, packed_shapes)
+
+    loss = pytensor.graph.graph_replace(loss, dict(zip([x, y, z], new_outputs)))
+    fn = pytensor.function([new_input], loss, mode="FAST_COMPILE")
+
+    input_vals = [
+        rng.normal(size=(var.type.shape)).astype(config.floatX) for var in [x, y, z]
+    ]
+    flat_inputs = np.concatenate([input.ravel() for input in input_vals], axis=0)
+    output_val = fn(flat_inputs)
+
+    assert np.allclose(output_val, sum([input.sum() for input in input_vals]) ** 2)
