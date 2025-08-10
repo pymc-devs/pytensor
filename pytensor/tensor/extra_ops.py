@@ -1,9 +1,9 @@
 import warnings
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from textwrap import dedent
 
 import numpy as np
-from numpy.lib.array_utils import normalize_axis_index
+from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
 import pytensor
 import pytensor.scalar.basic as ps
@@ -43,7 +43,7 @@ from pytensor.tensor.math import (
 )
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.shape import Shape_i, ShapeValueType
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
@@ -2007,6 +2007,55 @@ def concat_with_broadcast(tensor_list, axis=0):
         bcast_tensor_inputs.append(broadcast_to(tensor_inp, non_concat_shape))
 
     return join(axis, *bcast_tensor_inputs)
+
+
+def join_dims(x: Variable, axis: Sequence[int] | int | None = None) -> Variable:
+    if axis is None:
+        axis = range(x.ndim).tolist()
+    if not isinstance(axis, (list, tuple)):
+        axis = [axis]
+
+    if not axis:
+        # The user passed an empty list/tuple, so we return the input as is
+        return x
+
+    axis = normalize_axis_tuple(axis, x.ndim)
+
+    if len(axis) > 1 and np.diff(axis).max() > 1:
+        raise ValueError(
+            f"join_dims axis must be consecutive, got normalized axis: {axis}"
+        )
+
+    x_shape = tuple(x.shape)
+
+    return x.reshape((*x_shape[: min(axis)], -1, *x_shape[max(axis) + 1 :]))
+
+
+def split_dims(x, shape: ShapeValueType, axis: int | None = None) -> Variable:
+    if axis is None:
+        if x.ndim != 1:
+            raise ValueError(
+                "split_dims can only be called with axis=None for 1d inputs"
+            )
+        axis = 0
+
+    if isinstance(shape, int):
+        shape = [shape]
+
+    shape = list(shape)
+    new_shape = list(x.shape)
+
+    # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for example
+    # when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes (3, ) and
+    # (3, 3) to (3, 4)
+    if not shape:
+        return x.squeeze(axis=axis)
+
+    new_shape[axis] = shape.pop(-1)
+    for s in shape[::-1]:
+        new_shape.insert(axis, s)
+
+    return x.reshape(tuple(new_shape))
 
 
 __all__ = [
