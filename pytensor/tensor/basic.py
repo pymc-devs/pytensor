@@ -663,6 +663,10 @@ class TensorFromScalar(COp):
 
 tensor_from_scalar = TensorFromScalar()
 
+@_vectorize_node.register(TensorFromScalar)
+def vectorize_tensor_from_scalar(op, node, batch_x):
+    return identity(batch_x).owner
+
 
 class ScalarFromTensor(COp):
     __props__ = ()
@@ -2046,6 +2050,8 @@ def register_transfer(fn):
 """Create a duplicate of `a` (with duplicated storage)"""
 tensor_copy = Elemwise(ps.identity)
 pprint.assign(tensor_copy, printing.IgnorePrinter())
+identity = tensor_copy
+pprint.assign(identity, printing.IgnorePrinter())
 
 
 class Default(Op):
@@ -4603,6 +4609,7 @@ __all__ = [
     "matrix_transpose",
     "default",
     "tensor_copy",
+    "identity",
     "transfer",
     "alloc",
     "identity_like",
