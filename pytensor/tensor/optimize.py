@@ -561,7 +561,10 @@ class MinimizeOp(ScipyWrapperOp):
         implicit_f = grad(inner_fx, inner_x)
 
         df_dx, *df_dtheta_columns = jacobian(
-            implicit_f, [inner_x, *inner_args], disconnected_inputs="ignore", vectorize=True
+            implicit_f,
+            [inner_x, *inner_args],
+            disconnected_inputs="ignore",
+            vectorize=True,
         )
         grad_wrt_args = implict_optimization_grads(
             df_dx=df_dx,

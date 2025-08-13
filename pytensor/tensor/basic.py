@@ -663,6 +663,7 @@ class TensorFromScalar(COp):
 
 tensor_from_scalar = TensorFromScalar()
 
+
 @_vectorize_node.register(TensorFromScalar)
 def vectorize_tensor_from_scalar(op, node, batch_x):
     return identity(batch_x).owner
