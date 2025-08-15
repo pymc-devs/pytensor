@@ -2052,7 +2052,6 @@ def register_transfer(fn):
 tensor_copy = Elemwise(ps.identity)
 pprint.assign(tensor_copy, printing.IgnorePrinter())
 identity = tensor_copy
-pprint.assign(identity, printing.IgnorePrinter())
 
 
 class Default(Op):
