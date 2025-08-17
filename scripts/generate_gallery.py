@@ -58,8 +58,8 @@ folder_title_map = {
     "introduction": "Introduction",
     "rewrites": "Graph Rewriting",
     "autodiff": "Automatic Differentiation",
-    "scan": "Looping in Pytensor",
-    "optimize": "Optimization in Pytensor",
+    "scan": "Looping in PyTensor",
+    "optimize": "Optimization in PyTensor",
     "applications": "Applications",
 }
 
