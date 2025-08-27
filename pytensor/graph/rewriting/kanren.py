@@ -86,7 +86,7 @@ class KanrenRelationSub(NodeRewriter):
         q = var()
         kanren_results = run(None, q, self.kanren_relation(input_expr, q))
 
-        chosen_res = self.results_filter(kanren_results)
+        chosen_res = self.results_filter(kanren_results)  # type: ignore[arg-type]
 
         if chosen_res:
             if isinstance(chosen_res, list):
