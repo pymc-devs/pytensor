@@ -11,7 +11,11 @@ import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor.graph.basic import Apply, Constant, equal_computations
 from pytensor.graph.op import Op
-from pytensor.graph.rewriting.unify import ConstrainedVar, convert_strs_to_vars
+from pytensor.graph.rewriting.unify import (
+    ConstrainedVar,
+    OpPattern,
+    convert_strs_to_vars,
+)
 from pytensor.tensor.type import TensorType
 from tests.graph.utils import MyType
 
@@ -348,3 +352,25 @@ def test_convert_strs_to_vars():
     res = convert_strs_to_vars((val,))
     assert isinstance(res[0], Constant)
     assert np.array_equal(res[0].data, val)
+
+
+def test_unify_OpPattern():
+    x_pt = MyType()("x_pt")
+    y_pt = MyType()("y_pt")
+    out1 = CustomOp(a=1)(x_pt, y_pt)
+    out2 = CustomOp(a=2)(x_pt, y_pt)
+
+    x = var("x")
+    y = var("y")
+    pattern = etuple(OpPattern(CustomOp), x, y)
+    assert unify(pattern, out1) == {x: x_pt, y: y_pt}
+    assert unify(pattern, out2) == {x: x_pt, y: y_pt}
+
+    pattern = etuple(OpPattern(CustomOp, a=1), x, y)
+    assert unify(pattern, out1) == {x: x_pt, y: y_pt}
+    assert unify(pattern, out2) is False
+
+    a = var("a")
+    pattern = etuple(OpPattern(CustomOp, a=a), x, y)
+    assert unify(pattern, out1) == {x: x_pt, y: y_pt, a: 1}
+    assert unify(pattern, out2) == {x: x_pt, y: y_pt, a: 2}
