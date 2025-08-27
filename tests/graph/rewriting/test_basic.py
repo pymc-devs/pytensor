@@ -8,11 +8,9 @@ from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
     MergeOptimizer,
-    OpKeyGraphRewriter,
     OpToRewriterTracker,
     PatternNodeRewriter,
     SequentialNodeRewriter,
-    SubstitutionNodeRewriter,
     WalkingGraphRewriter,
     in2out,
     logging,
@@ -51,15 +49,11 @@ class AssertNoChanges(Feature):
         raise AssertionError()
 
 
-def OpKeyPatternNodeRewriter(p1, p2, allow_multiple_clients=False, ign=False):
-    return OpKeyGraphRewriter(
+def WalkingPatternNodeRewriter(p1, p2, allow_multiple_clients=False, ign=False):
+    return WalkingGraphRewriter(
         PatternNodeRewriter(p1, p2, allow_multiple_clients=allow_multiple_clients),
         ignore_newtrees=ign,
     )
-
-
-def WalkingPatternNodeRewriter(p1, p2, ign=True):
-    return WalkingGraphRewriter(PatternNodeRewriter(p1, p2), ignore_newtrees=ign)
 
 
 class TestPatternNodeRewriter:
@@ -68,16 +62,16 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op2(x, y), z)
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op1, (op2, "1", "2"), "3"), (op4, "3", "2")).rewrite(
-            g
-        )
+        WalkingPatternNodeRewriter(
+            (op1, (op2, "1", "2"), "3"), (op4, "3", "2")
+        ).rewrite(g)
         assert str(g) == "FunctionGraph(Op4(z, y))"
 
     def test_nested_out_pattern(self):
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(x, y)
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op1, "1", "2"), (op4, (op1, "1"), (op2, "2"), (op3, "1", "2"))
         ).rewrite(g)
         assert str(g) == "FunctionGraph(Op4(Op1(x), Op2(y), Op3(x, y)))"
@@ -86,7 +80,7 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op2(x, x), z)  # the arguments to op2 are the same
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op1, (op2, "1", "1"), "2"),  # they are the same in the pattern
             (op4, "2", "1"),
         ).rewrite(g)
@@ -97,7 +91,7 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op2(x, y), z)  # the arguments to op2 are different
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op1, (op2, "1", "1"), "2"),  # they are the same in the pattern
             (op4, "2", "1"),
         ).rewrite(g)
@@ -109,7 +103,7 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op2(x, y), z)
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op2, "1", "2"), (op1, "2", "1")).rewrite(g)
+        WalkingPatternNodeRewriter((op2, "1", "2"), (op1, "2", "1")).rewrite(g)
         assert str(g) == "FunctionGraph(Op1(Op1(y, x), z))"
 
     def test_no_recurse(self):
@@ -119,7 +113,9 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op2(x, y), z)
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op2, "1", "2"), (op2, "2", "1"), ign=True).rewrite(g)
+        WalkingPatternNodeRewriter((op2, "1", "2"), (op2, "2", "1"), ign=True).rewrite(
+            g
+        )
         assert str(g) == "FunctionGraph(Op1(Op2(y, x), z))"
 
     def test_multiple(self):
@@ -127,7 +123,7 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op2(x, y), op2(x, y), op2(y, z))
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op2, "1", "2"), (op4, "1")).rewrite(g)
+        WalkingPatternNodeRewriter((op2, "1", "2"), (op4, "1")).rewrite(g)
         assert str(g) == "FunctionGraph(Op1(Op4(x), Op4(x), Op4(y)))"
 
     def test_nested_even(self):
@@ -136,21 +132,21 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op1(op1(op1(x))))
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op1, (op1, "1")), "1").rewrite(g)
+        WalkingPatternNodeRewriter((op1, (op1, "1")), "1").rewrite(g)
         assert str(g) == "FunctionGraph(x)"
 
     def test_nested_odd(self):
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op1(op1(op1(op1(x)))))
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op1, (op1, "1")), "1").rewrite(g)
+        WalkingPatternNodeRewriter((op1, (op1, "1")), "1").rewrite(g)
         assert str(g) == "FunctionGraph(Op1(x))"
 
     def test_expand(self):
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op1(op1(x)))
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op1, "1"), (op2, (op1, "1")), ign=True).rewrite(g)
+        WalkingPatternNodeRewriter((op1, "1"), (op2, (op1, "1")), ign=True).rewrite(g)
         assert str(g) == "FunctionGraph(Op2(Op1(Op2(Op1(Op2(Op1(x)))))))"
 
     def test_ambiguous(self):
@@ -169,7 +165,7 @@ class TestPatternNodeRewriter:
         z = Constant(MyType(), 2, name="z")
         e = op1(op1(x, y), y)
         g = FunctionGraph([y], [e])
-        OpKeyPatternNodeRewriter((op1, z, "1"), (op2, "1", z)).rewrite(g)
+        WalkingPatternNodeRewriter((op1, z, "1"), (op2, "1", z)).rewrite(g)
         assert str(g) == "FunctionGraph(Op1(Op2(y, z{2}), y))"
 
     def test_constraints(self):
@@ -181,7 +177,7 @@ class TestPatternNodeRewriter:
             # Only replacing if the input is an instance of Op2
             return r.owner.op == op2
 
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op1, {"pattern": "1", "constraint": constraint}), (op3, "1")
         ).rewrite(g)
         assert str(g) == "FunctionGraph(Op4(Op3(Op2(x, y)), Op1(Op1(x, y))))"
@@ -190,7 +186,7 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(x, x)
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op1, "x", "y"), (op3, "x", "y")).rewrite(g)
+        WalkingPatternNodeRewriter((op1, "x", "y"), (op3, "x", "y")).rewrite(g)
         assert str(g) == "FunctionGraph(Op3(x, x))"
 
     @pytest.mark.xfail(
@@ -202,10 +198,10 @@ class TestPatternNodeRewriter:
         g = FunctionGraph([x, y, z], [e])
 
         def constraint(r):
-            # Only replacing if the input is an instance of Op2
+            # Only replacing if the inputs are not identical
             return r.owner.inputs[0] is not r.owner.inputs[1]
 
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             {"pattern": (op1, "x", "y"), "constraint": constraint}, (op3, "x", "y")
         ).rewrite(g)
         assert str(g) == "FunctionGraph(Op2(Op1(x, x), Op3(x, y)))"
@@ -220,7 +216,7 @@ class TestPatternNodeRewriter:
         # So the replacement should fail
         outputs = [e]
         g = FunctionGraph(inputs, outputs, copy_inputs=False)
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op4, (op1, "x", "y")),
             (op3, "x", "y"),
         ).rewrite(g)
@@ -228,7 +224,7 @@ class TestPatternNodeRewriter:
 
         # Now it should be fine
         g = FunctionGraph(inputs, outputs, copy_inputs=False)
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op4, (op1, "x", "y")),
             (op3, "x", "y"),
             allow_multiple_clients=True,
@@ -237,7 +233,7 @@ class TestPatternNodeRewriter:
 
         # The fact that the inputs of the pattern have multiple clients should not matter
         g = FunctionGraph(inputs, outputs, copy_inputs=False)
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op3, (op4, "w"), "w"),
             (op3, "w", "w"),
             allow_multiple_clients=False,
@@ -252,7 +248,7 @@ class TestPatternNodeRewriter:
 
         outputs = [e1, e2]
         g = FunctionGraph(inputs, outputs, copy_inputs=False)
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op4, (op4, "e")),
             "e",
             allow_multiple_clients=False,
@@ -261,7 +257,7 @@ class TestPatternNodeRewriter:
 
         outputs = [e1, e3]
         g = FunctionGraph([x, y, z], outputs, copy_inputs=False)
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op4, (op4, "e")),
             "e",
             allow_multiple_clients=False,
@@ -269,7 +265,7 @@ class TestPatternNodeRewriter:
         assert equal_computations(g.outputs, outputs)
 
         g = FunctionGraph(inputs, outputs, copy_inputs=False)
-        OpKeyPatternNodeRewriter(
+        WalkingPatternNodeRewriter(
             (op4, (op4, "e")),
             "e",
             allow_multiple_clients=True,
@@ -281,31 +277,11 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op_y(x, y), z)
         g = FunctionGraph([x, y, z], [e])
-        OpKeyPatternNodeRewriter((op1, (op_z, "1", "2"), "3"), (op4, "3", "2")).rewrite(
-            g
-        )
+        WalkingPatternNodeRewriter(
+            (op1, (op_z, "1", "2"), "3"), (op4, "3", "2")
+        ).rewrite(g)
         str_g = str(g)
         assert str_g == "FunctionGraph(Op4(z, y))"
-
-
-def KeyedSubstitutionNodeRewriter(op1, op2):
-    return OpKeyGraphRewriter(SubstitutionNodeRewriter(op1, op2))
-
-
-class TestSubstitutionNodeRewriter:
-    def test_straightforward(self):
-        x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
-        e = op1(op1(op1(op1(op1(x)))))
-        g = FunctionGraph([x, y, z], [e])
-        KeyedSubstitutionNodeRewriter(op1, op2).rewrite(g)
-        assert str(g) == "FunctionGraph(Op2(Op2(Op2(Op2(Op2(x))))))"
-
-    def test_straightforward_2(self):
-        x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
-        e = op1(op2(x), op3(y), op4(z))
-        g = FunctionGraph([x, y, z], [e])
-        KeyedSubstitutionNodeRewriter(op3, op4).rewrite(g)
-        assert str(g) == "FunctionGraph(Op1(Op2(x), Op4(y), Op4(z)))"
 
 
 class NoInputOp(Op):

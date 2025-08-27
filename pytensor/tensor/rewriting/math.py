@@ -3162,13 +3162,6 @@ def isclose(x, ref, rtol=0, atol=0, num_ulps=10):
     return np.allclose(x, ref, rtol=rtol, atol=atol)
 
 
-def _skip_mul_1(r):
-    if r.owner and r.owner.op == mul:
-        not_is_1 = [i for i in r.owner.inputs if not _is_1(i)]
-        if len(not_is_1) == 1:
-            return not_is_1[0]
-
-
 def _is_1(expr):
     """
 
@@ -3190,7 +3183,6 @@ logsigm_to_softplus = PatternNodeRewriter(
     (neg, (softplus, (neg, "x"))),
     allow_multiple_clients=True,
     values_eq_approx=values_eq_approx_remove_inf,
-    skip_identities_fn=_skip_mul_1,
     tracks=[sigmoid],
     get_nodes=get_clients_at_depth1,
 )
@@ -3199,7 +3191,6 @@ log1msigm_to_softplus = PatternNodeRewriter(
     (neg, (softplus, "x")),
     allow_multiple_clients=True,
     values_eq_approx=values_eq_approx_remove_inf,
-    skip_identities_fn=_skip_mul_1,
     tracks=[sigmoid],
     get_nodes=get_clients_at_depth2,
 )
