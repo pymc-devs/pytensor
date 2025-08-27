@@ -159,8 +159,7 @@ class DimShuffle(ExternalCOp):
         # This is the list of the original dimensions that we keep
         self.shuffle = [x for x in new_order if x != "x"]
         self.transposition = self.shuffle + drop
-        # List of dimensions of the output that are broadcastable and were not
-        # in the original input
+        # List of dimensions of the output that are broadcastable and were not in the original input
         self.augment = augment = sorted(i for i, x in enumerate(new_order) if x == "x")
         self.drop = drop
 
@@ -175,6 +174,12 @@ class DimShuffle(ExternalCOp):
         self.is_right_expand_dims = self.is_expand_dims and new_order[
             :input_ndim
         ] == list(range(input_ndim))
+        self.is_matrix_transpose = False
+        if dims_are_shuffled and (not drop) and input_ndim >= 2:
+            # We consider a matrix transpose if we only flip the last two dims
+            # Regardless of whethre there's an expand_dims or not
+            mt_pattern = [*range(input_ndim - 2), input_ndim - 1, input_ndim - 2]
+            self.is_matrix_transpose = new_order[len(augment) :] == mt_pattern
 
     def __setstate__(self, state):
         self.__dict__.update(state)
