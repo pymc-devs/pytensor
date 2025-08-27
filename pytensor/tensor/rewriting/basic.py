@@ -34,7 +34,6 @@ from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
-    RemovalNodeRewriter,
     Rewriter,
     copy_stack_trace,
     in2out,
@@ -1224,7 +1223,10 @@ def local_merge_alloc(fgraph, node):
     return [alloc(inputs_inner[0], *dims_outer)]
 
 
-register_canonicalize(RemovalNodeRewriter(tensor_copy), name="remove_tensor_copy")
+@register_canonicalize
+@node_rewriter(tracks=[tensor_copy])
+def remove_tensor_copy(fgraph, node):
+    return node.inputs
 
 
 @register_specialize

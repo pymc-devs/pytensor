@@ -8,18 +8,16 @@ from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
     MergeOptimizer,
-    OpKeyGraphRewriter,
     OpToRewriterTracker,
     PatternNodeRewriter,
     SequentialNodeRewriter,
-    SubstitutionNodeRewriter,
-    WalkingGraphRewriter,
     in2out,
     logging,
     node_rewriter,
     pre_constant_merge,
     pre_greedy_node_rewriter,
 )
+from pytensor.graph.rewriting.unify import LiteralString, OpInstance
 from pytensor.raise_op import assert_op
 from pytensor.tensor.math import Dot, add, dot, exp
 from pytensor.tensor.rewriting.basic import constant_folding
@@ -52,14 +50,10 @@ class AssertNoChanges(Feature):
 
 
 def OpKeyPatternNodeRewriter(p1, p2, allow_multiple_clients=False, ign=False):
-    return OpKeyGraphRewriter(
+    return in2out(
         PatternNodeRewriter(p1, p2, allow_multiple_clients=allow_multiple_clients),
         ignore_newtrees=ign,
     )
-
-
-def WalkingPatternNodeRewriter(p1, p2, ign=True):
-    return WalkingGraphRewriter(PatternNodeRewriter(p1, p2), ignore_newtrees=ign)
 
 
 class TestPatternNodeRewriter:
@@ -160,7 +154,7 @@ class TestPatternNodeRewriter:
         x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
         e = op1(op1(op1(op1(op1(x)))))
         g = FunctionGraph([x, y, z], [e])
-        WalkingPatternNodeRewriter((op1, (op1, "1")), (op1, "1"), ign=False).rewrite(g)
+        OpKeyPatternNodeRewriter((op1, (op1, "1")), (op1, "1"), ign=False).rewrite(g)
         assert str(g) == "FunctionGraph(Op1(x))"
 
     def test_constant(self):
@@ -202,7 +196,7 @@ class TestPatternNodeRewriter:
         g = FunctionGraph([x, y, z], [e])
 
         def constraint(r):
-            # Only replacing if the input is an instance of Op2
+            # Only replacing if the inputs are not identical
             return r.owner.inputs[0] is not r.owner.inputs[1]
 
         OpKeyPatternNodeRewriter(
@@ -287,25 +281,41 @@ class TestPatternNodeRewriter:
         str_g = str(g)
         assert str_g == "FunctionGraph(Op4(z, y))"
 
+    def test_op_instance(self):
+        a = MyVariable("a")
+        e1 = MyOp(name="MyOp(x=1)", x=1)(a)
+        e2 = MyOp(name="MyOp(x=2)", x=2)(a)
+        e_hello = MyOp(name="MyOp(x='hello')", x="hello")(a)
+        op_x3 = MyOp(name="MyOp(x=3)", x=3)
+        assert not equal_computations([e1], [op_x3(a)])
+        assert not equal_computations([e2], [op_x3(a)])
 
-def KeyedSubstitutionNodeRewriter(op1, op2):
-    return OpKeyGraphRewriter(SubstitutionNodeRewriter(op1, op2))
+        rewriter = OpKeyPatternNodeRewriter(
+            (OpInstance(MyOp, x=1), "a"),
+            "a",
+        )
+        g = FunctionGraph([a], [e1, e2, e1], copy_inputs=False)
+        rewriter.rewrite(g)
+        assert equal_computations(g.outputs, [a, e2, a])
 
+        rewriter = OpKeyPatternNodeRewriter(
+            (OpInstance(MyOp, x="x"), "a"),
+            lambda fgraph, node, subs: (
+                MyOp(name="MyOp(x+=10)", x=subs["x"] + 10)(subs["a"])
+                if subs["x"] < 10
+                else False
+            ),
+        )
+        g = FunctionGraph([a], [e1], copy_inputs=False)
+        rewriter.rewrite(g)
+        assert equal_computations(g.outputs, [MyOp(name="x=11", x=11)(a)])
 
-class TestSubstitutionNodeRewriter:
-    def test_straightforward(self):
-        x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
-        e = op1(op1(op1(op1(op1(x)))))
-        g = FunctionGraph([x, y, z], [e])
-        KeyedSubstitutionNodeRewriter(op1, op2).rewrite(g)
-        assert str(g) == "FunctionGraph(Op2(Op2(Op2(Op2(Op2(x))))))"
-
-    def test_straightforward_2(self):
-        x, y, z = MyVariable("x"), MyVariable("y"), MyVariable("z")
-        e = op1(op2(x), op3(y), op4(z))
-        g = FunctionGraph([x, y, z], [e])
-        KeyedSubstitutionNodeRewriter(op3, op4).rewrite(g)
-        assert str(g) == "FunctionGraph(Op1(Op2(x), Op4(y), Op4(z)))"
+        rewriter = OpKeyPatternNodeRewriter(
+            (OpInstance(MyOp, x=LiteralString("hello")), "a"), "a"
+        )
+        g = FunctionGraph([a], [e1, e_hello], copy_inputs=False)
+        rewriter.rewrite(g)
+        assert equal_computations(g.outputs, [e1, a])
 
 
 class NoInputOp(Op):

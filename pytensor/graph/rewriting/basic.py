@@ -11,12 +11,10 @@ import traceback
 import warnings
 from collections import Counter, UserList, defaultdict, deque
 from collections.abc import Callable, Iterable, Sequence
-from collections.abc import Iterable as IterableType
-from functools import _compose_mro, partial, reduce  # type: ignore
+from functools import _compose_mro, partial  # type: ignore
 from itertools import chain
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph import destroyhandler as dh
 from pytensor.graph.basic import (
@@ -28,16 +26,13 @@ from pytensor.graph.basic import (
     io_toposort,
     vars_between,
 )
-from pytensor.graph.features import AlreadyThere, Feature, NodeFinder
+from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
+from pytensor.graph.rewriting.unify import OpInstance, Var, convert_strs_to_vars
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 from pytensor.utils import flatten
-
-
-if TYPE_CHECKING:
-    from pytensor.graph.rewriting.unify import Var
 
 
 _logger = logging.getLogger("pytensor.graph.rewriting.basic")
@@ -942,129 +937,6 @@ def pre_constant_merge(fgraph, variables):
     return [recursive_merge(v) for v in variables]
 
 
-class MetaNodeRewriter(NodeRewriter):
-    r"""
-    Base class for meta-rewriters that try a set of `NodeRewriter`\s
-    to replace a node and choose the one that executes the fastest.
-
-    If the error `MetaNodeRewriterSkip` is raised during
-    compilation, we will skip that function compilation and not print
-    the error.
-
-    """
-
-    def __init__(self):
-        self.verbose = config.metaopt__verbose
-        self.track_dict = defaultdict(list)
-        self.tag_dict = defaultdict(list)
-        self._tracks = []
-        self.rewriters = []
-
-    def register(self, rewriter: NodeRewriter, tag_list: IterableType[str]):
-        self.rewriters.append(rewriter)
-
-        tracks = rewriter.tracks()
-        if tracks:
-            self._tracks.extend(tracks)
-            for c in tracks:
-                self.track_dict[c].append(rewriter)
-
-        for tag in tag_list:
-            self.tag_dict[tag].append(rewriter)
-
-    def tracks(self):
-        return self._tracks
-
-    def transform(self, fgraph, node, *args, **kwargs):
-        # safety check: depending on registration, tracks may have been ignored
-        if self._tracks is not None:
-            if not isinstance(node.op, tuple(self._tracks)):
-                return
-        # first, we need to provide dummy values for all inputs
-        # to the node that are not shared variables anyway
-        givens = {}
-        missing = set()
-        for input in node.inputs:
-            if isinstance(input, pytensor.compile.SharedVariable):
-                pass
-            elif hasattr(input.tag, "test_value"):
-                givens[input] = pytensor.shared(
-                    input.type.filter(input.tag.test_value),
-                    input.name,
-                    shape=input.broadcastable,
-                    borrow=True,
-                )
-            else:
-                missing.add(input)
-        if missing:
-            givens.update(self.provide_inputs(node, missing))
-            missing.difference_update(givens.keys())
-        # ensure we have data for all input variables that need it
-        if missing:
-            if self.verbose > 0:
-                print(  # noqa: T201
-                    f"{self.__class__.__name__} cannot meta-rewrite {node}, "
-                    f"{len(missing)} of {int(node.nin)} input shapes unknown"
-                )
-            return
-        # now we can apply the different rewrites in turn,
-        # compile the resulting subgraphs and time their execution
-        if self.verbose > 1:
-            print(  # noqa: T201
-                f"{self.__class__.__name__} meta-rewriting {node} ({len(self.get_rewrites(node))} choices):"
-            )
-        timings = []
-        for node_rewriter in self.get_rewrites(node):
-            outputs = node_rewriter.transform(fgraph, node, *args, **kwargs)
-            if outputs:
-                try:
-                    fn = pytensor.function(
-                        [], outputs, givens=givens, on_unused_input="ignore"
-                    )
-                    fn.trust_input = True
-                    timing = min(self.time_call(fn) for _ in range(2))
-                except MetaNodeRewriterSkip:
-                    continue
-                except Exception as e:
-                    if self.verbose > 0:
-                        print(f"* {node_rewriter}: exception", e)  # noqa: T201
-                    continue
-                else:
-                    if self.verbose > 1:
-                        print(f"* {node_rewriter}: {timing:.5g} sec")  # noqa: T201
-                    timings.append((timing, outputs, node_rewriter))
-            else:
-                if self.verbose > 0:
-                    print(f"* {node_rewriter}: not applicable")  # noqa: T201
-        # finally, we choose the fastest one
-        if timings:
-            timings.sort()
-            if self.verbose > 1:
-                print(f"= {timings[0][2]}")  # noqa: T201
-            return timings[0][1]
-        return
-
-    def provide_inputs(self, node, inputs):
-        """Return a dictionary mapping some `inputs` to `SharedVariable` instances of with dummy values.
-
-        The `node` argument can be inspected to infer required input shapes.
-
-        """
-        raise NotImplementedError()
-
-    def get_rewrites(self, node):
-        """Return the rewrites that apply to `node`.
-
-        This uses ``self.track_dict[type(node.op)]`` by default.
-        """
-        return self.track_dict[type(node.op)]
-
-    def time_call(self, fn):
-        start = time.perf_counter()
-        fn()
-        return time.perf_counter() - start
-
-
 class FromFunctionNodeRewriter(NodeRewriter):
     """A `NodeRewriter` constructed from a function."""
 
@@ -1214,9 +1086,6 @@ class SequentialNodeRewriter(NodeRewriter):
     reentrant : bool
         Some global rewriters, like `NodeProcessingGraphRewriter`, use this value to
         determine if they should ignore new nodes.
-    retains_inputs : bool
-        States whether or not the inputs of a transformed node are transferred
-        to the outputs.
     """
 
     def __init__(
@@ -1246,9 +1115,6 @@ class SequentialNodeRewriter(NodeRewriter):
 
         self.reentrant = any(
             getattr(rewrite, "reentrant", True) for rewrite in rewriters
-        )
-        self.retains_inputs = all(
-            getattr(rewrite, "retains_inputs", False) for rewrite in rewriters
         )
 
         self.apply_all_rewrites = apply_all_rewrites
@@ -1425,16 +1291,11 @@ class SubstitutionNodeRewriter(NodeRewriter):
 
     # an SubstitutionNodeRewriter does not apply to the nodes it produces
     reentrant = False
-    # all the inputs of the original node are transferred to the outputs
-    retains_inputs = True
 
     def __init__(self, op1, op2, transfer_tags=True):
         self.op1 = op1
         self.op2 = op2
         self.transfer_tags = transfer_tags
-
-    def op_key(self):
-        return self.op1
 
     def tracks(self):
         return [self.op1]
@@ -1453,45 +1314,13 @@ class SubstitutionNodeRewriter(NodeRewriter):
         return f"{self.op1} -> {self.op2}"
 
 
-class RemovalNodeRewriter(NodeRewriter):
-    """
-    Removes all applications of an `Op` by transferring each of its
-    outputs to the corresponding input.
-
-    """
-
-    reentrant = False  # no nodes are added at all
-
-    def __init__(self, op):
-        self.op = op
-
-    def op_key(self):
-        return self.op
-
-    def tracks(self):
-        return [self.op]
-
-    def transform(self, fgraph, node):
-        if node.op != self.op:
-            return False
-        return node.inputs
-
-    def __str__(self):
-        return f"{self.op}(x) -> x"
-
-    def print_summary(self, stream=sys.stdout, level=0, depth=-1):
-        print(
-            f"{' ' * level}{self.__class__.__name__}(self.op) id={id(self)}",
-            file=stream,
-        )
-
-
 class PatternNodeRewriter(NodeRewriter):
     """Replace all occurrences of an input pattern with an output pattern.
 
     The input and output patterns have the following syntax:
 
         input_pattern ::= (op, <sub_pattern1>, <sub_pattern2>, ...)
+        input_pattern ::= (OpInstance(type(op), {<param>: <value>, ...}), <sub_pattern1>, <sub_pattern2>, ...)
         input_pattern ::= dict(pattern = <input_pattern>,
                                constraint = <constraint>)
         sub_pattern ::= input_pattern
@@ -1505,6 +1334,7 @@ class PatternNodeRewriter(NodeRewriter):
         output_pattern ::= string
         output_pattern ::= int
         output_pattern ::= float
+        output_pattern ::= callable
 
     Each string in the input pattern is a variable that will be set to
     whatever expression is found in its place. If the same string is
@@ -1530,22 +1360,74 @@ class PatternNodeRewriter(NodeRewriter):
     Examples
     --------
 
-        PatternNodeRewriter((add, 'x', 'y'), (add, 'y', 'x'))
-        PatternNodeRewriter((multiply, 'x', 'x'), (square, 'x'))
-        PatternNodeRewriter((subtract, (add, 'x', 'y'), 'y'), 'x')
-        PatternNodeRewriter((power, 'x', Constant(double, 2.0)), (square, 'x'))
-        PatternNodeRewriter((boggle, {'pattern': 'x',
-                            'constraint': lambda expr: expr.type == scrabble}),
-                   (scrabble, 'x'))
+    .. code-block:: python
 
+        from pytensor.graph.rewriting.basic import PatternNodeRewriter
+        from pytensor.tensor import add, mul, sub, pow, square
+
+        PatternNodeRewriter((add, "x", "y"), (add, "y", "x"))
+        PatternNodeRewriter((mul, "x", "x"), (square, "x"))
+        PatternNodeRewriter((sub, (add, "x", "y"), "y"), "x")
+        PatternNodeRewriter((pow, "x", 2.0), (square, "x"))
+        PatternNodeRewriter(
+            (mul, {"pattern": "x", "constraint": lambda expr: expr.ndim == 0}, "y"),
+            (mul, "y", "x"),
+        )
+
+    You can use OpInstance to match a subtype of an Op, with some parameter constraints
+    You can also specify a callable as the output pattern, which will be called with (fgraph, node, subs_dict) as arguments.
+
+
+    .. code-block:: python
+
+        from pytensor.graph.rewriting.basic import PatternNodeRewriter
+        from pytensor.graph.rewriting.unify import OpInstance
+        from pytensor.tensor.basic import Join
+        from pytensor.tensor.elemwise import CAReduce, Elemwise
+
+
+        def output_fn(fgraph, node, s):
+            reduce_op = node.op
+            reduced_a = reduce_op(s["a"])
+            reduced_b = reduce_op(s["b"])
+            return Elemwise(s["scalar_op"])(reduced_a, reduced_b)
+
+
+        PatternNodeRewriter(
+            (
+                OpInstance(CAReduce, scalar_op="scalar_op", axis=None),
+                (Join(), "join_axis", "a", "b"),
+            ),
+            output_fn,
+        )
+
+
+    If you want to test a string parameter, you must use LiteralString to avoid it being interpreted as a unification variable.
+
+    .. code-block:: python
+
+
+        from pytensor.graph.rewriting.basic import PatternNodeRewriter
+        from pytensor.graph.rewriting.unify import OpInstance, LiteralString
+        from pytensor.tensor.blockwise import Blockwise
+        from pytensor.tensor.slinalg import Solve
+
+        PatternNodeRewriter(
+            (
+                OpInstance(
+                    Blockwise, core_op=OpInstance(Solve, assume_a=LiteralString("gen"))
+                ),
+                "A",
+                "b",
+            )
+        )
     """
 
     def __init__(
         self,
-        in_pattern,
-        out_pattern,
+        in_pattern: tuple,
+        out_pattern: tuple | Callable,
         allow_multiple_clients: bool = False,
-        skip_identities_fn=None,
         name: str | None = None,
         tracks=(),
         get_nodes=None,
@@ -1559,12 +1441,10 @@ class PatternNodeRewriter(NodeRewriter):
         in_pattern
             The input pattern that we want to replace.
         out_pattern
-            The replacement pattern.
+            The replacement pattern. Or a callable that takes (fgraph, node, subs_dict) as inputs
         allow_multiple_clients
             If ``False``, the pattern matching will fail if one of the subpatterns has
             more than one client.
-        skip_identities_fn
-            TODO
         name
             Set the name of this rewriter.
         tracks
@@ -1574,49 +1454,51 @@ class PatternNodeRewriter(NodeRewriter):
             function that takes the tracked node and returns a list of nodes on
             which we will try this rewrite.
         values_eq_approx
-            TODO
+            If specified, this value will be assigned to the ``values_eq_approx``
+            tag of the output variable. This is used by DebugMode to determine if rewrites are correct.
         allow_cast
             Automatically cast the output of the rewrite whenever new and old types differ
 
         Notes
         -----
         `tracks` and `get_nodes` can be used to make this rewrite track a less
-        frequent `Op`, which will prevent the rewrite from being tried as
-        often.
+        frequent `Op`, which will prevent the rewrite from being tried as often.
 
         """
-        from pytensor.graph.rewriting.unify import convert_strs_to_vars
-
         var_map: dict[str, Var] = {}
         self.in_pattern = convert_strs_to_vars(in_pattern, var_map=var_map)
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
         self.values_eq_approx = values_eq_approx
         self.allow_cast = allow_cast
-        if isinstance(in_pattern, list | tuple):
-            self.op = self.in_pattern[0]
-        elif isinstance(in_pattern, dict):
-            self.op = self.in_pattern["pattern"][0]
-        else:
-            raise TypeError(
-                "The pattern to search for must start with a specific Op instance."
-            )
-        self.__doc__ = f"{self.__class__.__doc__}\n\nThis instance does: {self}\n"
         self.allow_multiple_clients = allow_multiple_clients
-        self.skip_identities_fn = skip_identities_fn
         if name:
             self.__name__ = name
-        self._tracks = tracks
         self.get_nodes = get_nodes
         if tracks != ():
-            assert get_nodes
-
-    def op_key(self):
-        return self.op
+            if not get_nodes:
+                raise ValueError("Custom `tracks` requires `get_nodes` to be provided.")
+            self._tracks = tracks
+        else:
+            if isinstance(in_pattern, list | tuple):
+                op = self.in_pattern[0]
+            elif isinstance(in_pattern, dict):
+                op = self.in_pattern["pattern"][0]
+            else:
+                raise TypeError(
+                    "The pattern to search for must start with a specific Op instance."
+                )
+            if isinstance(op, Op):
+                self._tracks = [op]
+            elif isinstance(op, OpInstance):
+                self._tracks = [op.op_type]
+            else:
+                raise ValueError(
+                    f"The pattern to search for must start with a specific Op instance or an OpInstance class. "
+                    f"Got {op}, with type {type(op)}."
+                )
 
     def tracks(self):
-        if self._tracks != ():
-            return self._tracks
-        return [self.op]
+        return self._tracks
 
     def transform(self, fgraph, node, get_nodes=True):
         """Check if the graph from node corresponds to ``in_pattern``.
@@ -1633,42 +1515,52 @@ class PatternNodeRewriter(NodeRewriter):
                 if ret is not False and ret is not None:
                     return dict(zip(real_node.outputs, ret, strict=True))
 
-        if node.op != self.op:
-            return False
-
         if len(node.outputs) != 1:
             # PatternNodeRewriter doesn't support replacing multi-output nodes
             return False
 
-        s = unify(self.in_pattern, node.out)
+        s = unify(self.in_pattern, node.out, {})
 
         if s is False:
             return False
 
-        ret = reify(self.out_pattern, s)
-
-        if isinstance(ret, ExpressionTuple):
-            ret = ret.evaled_obj
-
-        if self.values_eq_approx:
-            ret.tag.values_eq_approx = self.values_eq_approx
-
         if not self.allow_multiple_clients:
-            input_vars = list(s.values())
+            input_vars = set(s.values())
+            clients = fgraph.clients
             if any(
-                len(fgraph.clients[v]) > 1
+                len(clients[v]) > 1
                 for v in vars_between(input_vars, node.inputs)
                 if v not in input_vars
             ):
                 return False
 
+        if callable(self.out_pattern):
+            # token is the variable name used in the original pattern
+            ret = self.out_pattern(fgraph, node, {k.token: v for k, v in s.items()})
+            if ret is None or ret is False:
+                # The output function is still allowed to reject the rewrite
+                return False
+            if not isinstance(ret, Variable):
+                raise ValueError(
+                    f"The output of the PatternNodeRewriter callable must be a variable got {ret} of type {type(ret)}."
+                )
+        else:
+            ret = reify(self.out_pattern, s)
+            if isinstance(ret, ExpressionTuple):
+                ret = ret.evaled_obj
+
+        if self.values_eq_approx:
+            ret.tag.values_eq_approx = self.values_eq_approx
+
         [old_out] = node.outputs
         if not old_out.type.is_super(ret.type):
+            from pytensor.tensor.type import TensorType
+
             # Type doesn't match
             if not (
                 self.allow_cast
-                and isinstance(old_out.type, pytensor.tensor.TensorType)
-                and isinstance(ret.type, pytensor.tensor.TensorType)
+                and isinstance(old_out.type, TensorType)
+                and isinstance(ret.type, TensorType)
             ):
                 return False
 
@@ -2136,7 +2028,7 @@ def walking_rewriter(
     else:
         (node_rewriters,) = node_rewriters
         if not name:
-            name = node_rewriters.__name__
+            name = getattr(node_rewriters, "__name__", None)
     ret = WalkingGraphRewriter(
         node_rewriters,
         order=order,
@@ -2150,52 +2042,6 @@ def walking_rewriter(
 
 in2out = partial(walking_rewriter, "in_to_out")
 out2in = partial(walking_rewriter, "out_to_in")
-
-
-class OpKeyGraphRewriter(NodeProcessingGraphRewriter):
-    r"""A rewriter that applies a `NodeRewriter` to specific `Op`\s.
-
-    The `Op`\s are provided by a :meth:`NodeRewriter.op_key` method (either
-    as a list of `Op`\s or a single `Op`), and discovered within a
-    `FunctionGraph` using the `NodeFinder` `Feature`.
-
-    This is similar to the `Op`-based tracking feature used by other rewriters.
-
-    """
-
-    def __init__(self, node_rewriter, ignore_newtrees=False, failure_callback=None):
-        if not hasattr(node_rewriter, "op_key"):
-            raise TypeError(f"{node_rewriter} must have an `op_key` method.")
-        super().__init__(node_rewriter, ignore_newtrees, failure_callback)
-
-    def apply(self, fgraph):
-        op = self.node_rewriter.op_key()
-        if isinstance(op, list | tuple):
-            q = reduce(list.__iadd__, map(fgraph.get_nodes, op))
-        else:
-            q = list(fgraph.get_nodes(op))
-
-        def importer(node):
-            if node is not current_node:
-                if node.op == op:
-                    q.append(node)
-
-        u = self.attach_updater(
-            fgraph, importer, None, name=getattr(self, "name", None)
-        )
-        try:
-            while q:
-                node = q.pop()
-                if node not in fgraph.apply_nodes:
-                    continue
-                current_node = node
-                self.process_node(fgraph, node)
-        finally:
-            self.detach_updater(fgraph, u)
-
-    def add_requirements(self, fgraph):
-        super().add_requirements(fgraph)
-        fgraph.attach_feature(NodeFinder())
 
 
 class ChangeTracker(Feature):
@@ -2785,38 +2631,6 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
         )
 
 
-def _check_chain(r, chain):
-    """
-    WRITEME
-
-    """
-    chain = list(reversed(chain))
-    while chain:
-        elem = chain.pop()
-        if elem is None:
-            if r.owner is not None:
-                return False
-        elif r.owner is None:
-            return False
-        elif isinstance(elem, Op):
-            if r.owner.op != elem:
-                return False
-        else:
-            try:
-                if issubclass(elem, Op) and not isinstance(r.owner.op, elem):
-                    return False
-            except TypeError:
-                return False
-        if chain:
-            r = r.owner.inputs[chain.pop()]
-    # print 'check_chain', _check_chain.n_calls
-    # _check_chain.n_calls += 1
-
-    # The return value will be used as a Boolean, but some Variables cannot
-    # be used as Booleans (the results of comparisons, for instance)
-    return r is not None
-
-
 def pre_greedy_node_rewriter(
     fgraph: FunctionGraph, rewrites: Sequence[NodeRewriter], out: Variable
 ) -> Variable:
@@ -2998,10 +2812,10 @@ def check_stack_trace(f_or_fgraph, ops_to_check="last", bug_print="raise"):
         otherwise.
 
     """
-    if isinstance(f_or_fgraph, pytensor.compile.function.types.Function):
-        fgraph = f_or_fgraph.maker.fgraph
-    elif isinstance(f_or_fgraph, pytensor.graph.fg.FunctionGraph):
+    if isinstance(f_or_fgraph, FunctionGraph):
         fgraph = f_or_fgraph
+    elif hasattr(f_or_fgraph, "fgraph"):
+        fgraph = f_or_fgraph.fgraph
     else:
         raise ValueError("The type of f_or_fgraph is not supported")
 
