@@ -17,6 +17,7 @@ from pytensor.graph.rewriting.basic import (
     pre_constant_merge,
     pre_greedy_node_rewriter,
 )
+from pytensor.graph.rewriting.unify import LiteralString, OpInstance
 from pytensor.raise_op import assert_op
 from pytensor.tensor.math import Dot, add, dot, exp
 from pytensor.tensor.rewriting.basic import constant_folding
@@ -279,6 +280,42 @@ class TestPatternNodeRewriter:
         )
         str_g = str(g)
         assert str_g == "FunctionGraph(Op4(z, y))"
+
+    def test_op_instance(self):
+        a = MyVariable("a")
+        e1 = MyOp(name="MyOp(x=1)", x=1)(a)
+        e2 = MyOp(name="MyOp(x=2)", x=2)(a)
+        e_hello = MyOp(name="MyOp(x='hello')", x="hello")(a)
+        op_x3 = MyOp(name="MyOp(x=3)", x=3)
+        assert not equal_computations([e1], [op_x3(a)])
+        assert not equal_computations([e2], [op_x3(a)])
+
+        rewriter = OpKeyPatternNodeRewriter(
+            (OpInstance(MyOp, x=1), "a"),
+            "a",
+        )
+        g = FunctionGraph([a], [e1, e2, e1], copy_inputs=False)
+        rewriter.rewrite(g)
+        assert equal_computations(g.outputs, [a, e2, a])
+
+        rewriter = OpKeyPatternNodeRewriter(
+            (OpInstance(MyOp, x="x"), "a"),
+            lambda fgraph, node, subs: (
+                MyOp(name="MyOp(x+=10)", x=subs["x"] + 10)(subs["a"])
+                if subs["x"] < 10
+                else False
+            ),
+        )
+        g = FunctionGraph([a], [e1], copy_inputs=False)
+        rewriter.rewrite(g)
+        assert equal_computations(g.outputs, [MyOp(name="x=11", x=11)(a)])
+
+        rewriter = OpKeyPatternNodeRewriter(
+            (OpInstance(MyOp, x=LiteralString("hello")), "a"), "a"
+        )
+        g = FunctionGraph([a], [e1, e_hello], copy_inputs=False)
+        rewriter.rewrite(g)
+        assert equal_computations(g.outputs, [e1, a])
 
 
 class NoInputOp(Op):

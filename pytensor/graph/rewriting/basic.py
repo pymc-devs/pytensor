@@ -29,7 +29,7 @@ from pytensor.graph.basic import (
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
-from pytensor.graph.rewriting.unify import Var, convert_strs_to_vars
+from pytensor.graph.rewriting.unify import OpInstance, Var, convert_strs_to_vars
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 from pytensor.utils import flatten
@@ -1320,6 +1320,7 @@ class PatternNodeRewriter(NodeRewriter):
     The input and output patterns have the following syntax:
 
         input_pattern ::= (op, <sub_pattern1>, <sub_pattern2>, ...)
+        input_pattern ::= (OpInstance(type(op), {<param>: <value>, ...}), <sub_pattern1>, <sub_pattern2>, ...)
         input_pattern ::= dict(pattern = <input_pattern>,
                                constraint = <constraint>)
         sub_pattern ::= input_pattern
@@ -1333,6 +1334,7 @@ class PatternNodeRewriter(NodeRewriter):
         output_pattern ::= string
         output_pattern ::= int
         output_pattern ::= float
+        output_pattern ::= callable
 
     Each string in the input pattern is a variable that will be set to
     whatever expression is found in its place. If the same string is
@@ -1358,20 +1360,73 @@ class PatternNodeRewriter(NodeRewriter):
     Examples
     --------
 
-        PatternNodeRewriter((add, 'x', 'y'), (add, 'y', 'x'))
-        PatternNodeRewriter((multiply, 'x', 'x'), (square, 'x'))
-        PatternNodeRewriter((subtract, (add, 'x', 'y'), 'y'), 'x')
-        PatternNodeRewriter((power, 'x', Constant(double, 2.0)), (square, 'x'))
-        PatternNodeRewriter((boggle, {'pattern': 'x',
-                            'constraint': lambda expr: expr.type == scrabble}),
-                   (scrabble, 'x'))
+    .. code-block:: python
 
+        from pytensor.graph.rewriting.basic import PatternNodeRewriter
+        from pytensor.tensor import add, mul, sub, pow, square
+
+        PatternNodeRewriter((add, "x", "y"), (add, "y", "x"))
+        PatternNodeRewriter((mul, "x", "x"), (square, "x"))
+        PatternNodeRewriter((sub, (add, "x", "y"), "y"), "x")
+        PatternNodeRewriter((pow, "x", 2.0), (square, "x"))
+        PatternNodeRewriter(
+            (mul, {"pattern": "x", "constraint": lambda expr: expr.ndim == 0}, "y"),
+            (mul, "y", "x"),
+        )
+
+    You can use OpInstance to match a subtype of an Op, with some parameter constraints
+    You can also specify a callable as the output pattern, which will be called with (fgraph, node, subs_dict) as arguments.
+
+
+    .. code-block:: python
+
+        from pytensor.graph.rewriting.basic import PatternNodeRewriter
+        from pytensor.graph.rewriting.unify import OpInstance
+        from pytensor.tensor.basic import Join
+        from pytensor.tensor.elemwise import CAReduce, Elemwise
+
+
+        def output_fn(fgraph, node, s):
+            reduce_op = node.op
+            reduced_a = reduce_op(s["a"])
+            reduced_b = reduce_op(s["b"])
+            return Elemwise(s["scalar_op"])(reduced_a, reduced_b)
+
+
+        PatternNodeRewriter(
+            (
+                OpInstance(CAReduce, scalar_op="scalar_op", axis=None),
+                (Join(), "join_axis", "a", "b"),
+            ),
+            output_fn,
+        )
+
+
+    If you want to test a string parameter, you must use LiteralString to avoid it being interpreted as a unification variable.
+
+    .. code-block:: python
+
+
+        from pytensor.graph.rewriting.basic import PatternNodeRewriter
+        from pytensor.graph.rewriting.unify import OpInstance, LiteralString
+        from pytensor.tensor.blockwise import Blockwise
+        from pytensor.tensor.slinalg import Solve
+
+        PatternNodeRewriter(
+            (
+                OpInstance(
+                    Blockwise, core_op=OpInstance(Solve, assume_a=LiteralString("gen"))
+                ),
+                "A",
+                "b",
+            )
+        )
     """
 
     def __init__(
         self,
-        in_pattern,
-        out_pattern,
+        in_pattern: tuple,
+        out_pattern: tuple | Callable,
         allow_multiple_clients: bool = False,
         name: str | None = None,
         tracks=(),
@@ -1386,7 +1441,7 @@ class PatternNodeRewriter(NodeRewriter):
         in_pattern
             The input pattern that we want to replace.
         out_pattern
-            The replacement pattern.
+            The replacement pattern. Or a callable that takes (fgraph, node, subs_dict) as inputs
         allow_multiple_clients
             If ``False``, the pattern matching will fail if one of the subpatterns has
             more than one client.
@@ -1415,26 +1470,35 @@ class PatternNodeRewriter(NodeRewriter):
         self.out_pattern = convert_strs_to_vars(out_pattern, var_map=var_map)
         self.values_eq_approx = values_eq_approx
         self.allow_cast = allow_cast
-        if isinstance(in_pattern, list | tuple):
-            self.op = self.in_pattern[0]
-        elif isinstance(in_pattern, dict):
-            self.op = self.in_pattern["pattern"][0]
-        else:
-            raise TypeError(
-                "The pattern to search for must start with a specific Op instance."
-            )
         self.allow_multiple_clients = allow_multiple_clients
         if name:
             self.__name__ = name
-        self._tracks = tracks
         self.get_nodes = get_nodes
         if tracks != ():
-            assert get_nodes
+            if not get_nodes:
+                raise ValueError("Custom `tracks` requires `get_nodes` to be provided.")
+            self._tracks = tracks
+        else:
+            if isinstance(in_pattern, list | tuple):
+                op = self.in_pattern[0]
+            elif isinstance(in_pattern, dict):
+                op = self.in_pattern["pattern"][0]
+            else:
+                raise TypeError(
+                    "The pattern to search for must start with a specific Op instance."
+                )
+            if isinstance(op, Op):
+                self._tracks = [op]
+            elif isinstance(op, OpInstance):
+                self._tracks = [op.op_type]
+            else:
+                raise ValueError(
+                    f"The pattern to search for must start with a specific Op instance or an OpInstance class. "
+                    f"Got {op}, with type {type(op)}."
+                )
 
     def tracks(self):
-        if self._tracks != ():
-            return self._tracks
-        return [self.op]
+        return self._tracks
 
     def transform(self, fgraph, node, get_nodes=True):
         """Check if the graph from node corresponds to ``in_pattern``.
@@ -1455,27 +1519,38 @@ class PatternNodeRewriter(NodeRewriter):
             # PatternNodeRewriter doesn't support replacing multi-output nodes
             return False
 
-        s = unify(self.in_pattern, node.out)
+        s = unify(self.in_pattern, node.out, {})
 
         if s is False:
             return False
 
-        ret = reify(self.out_pattern, s)
-
-        if isinstance(ret, ExpressionTuple):
-            ret = ret.evaled_obj
-
-        if self.values_eq_approx:
-            ret.tag.values_eq_approx = self.values_eq_approx
-
         if not self.allow_multiple_clients:
-            input_vars = list(s.values())
+            input_vars = set(s.values())
+            clients = fgraph.clients
             if any(
-                len(fgraph.clients[v]) > 1
+                len(clients[v]) > 1
                 for v in vars_between(input_vars, node.inputs)
                 if v not in input_vars
             ):
                 return False
+
+        if callable(self.out_pattern):
+            # token is the variable name used in the original pattern
+            ret = self.out_pattern(fgraph, node, {k.token: v for k, v in s.items()})
+            if ret is None or ret is False:
+                # The output function is still allowed to reject the rewrite
+                return False
+            if not isinstance(ret, Variable):
+                raise ValueError(
+                    f"The output of the PatternNodeRewriter callable must be a variable got {ret} of type {type(ret)}."
+                )
+        else:
+            ret = reify(self.out_pattern, s)
+            if isinstance(ret, ExpressionTuple):
+                ret = ret.evaled_obj
+
+        if self.values_eq_approx:
+            ret.tag.values_eq_approx = self.values_eq_approx
 
         [old_out] = node.outputs
         if not old_out.type.is_super(ret.type):

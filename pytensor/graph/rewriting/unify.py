@@ -10,8 +10,10 @@ that satisfies the constraints. That's useful for pattern matching.
 
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from numbers import Number
+from typing import Any
 
 import numpy as np
 from cons.core import ConsError, _car, _cdr
@@ -254,6 +256,103 @@ def _unify_ConstrainedVar_object(u, v, s):
 _unify.add((object, ConstrainedVar, Mapping), _unify_ConstrainedVar_object)
 
 
+@dataclass(frozen=True)
+class LiteralString:
+    value: str
+
+
+class OpInstance:
+    """Class that can be unified with Op instances of a given type and parameters.
+
+    An op instance is unified as long as the parameters specified in the OpInstance can be unified as well.
+    Parameters that are not specified in the OpInstance are ignored during unification.
+
+    This is needed because some Ops can be complex to parametrize fully,
+    and not all parameters are relevant for a given pattern.
+
+    Examples
+    --------
+
+    .. testcode::
+
+        from unification import var, unify
+        from etuples import etuple
+
+        import pytensor.tensor as pt
+        from pytensor.graph.rewriting.unify import OpInstance
+        from pytensor.tensor.blockwise import Blockwise
+        from pytensor.tensor.slinalg import Solve
+
+        A = var("A")
+        b = var("b")
+        pattern = etuple(
+            OpInstance(Blockwise, core_op=OpInstance(Solve, assume_a="gen")), A, b
+        )
+
+        A_pt = pt.tensor3("A")
+        b_pt = pt.tensor3("b")
+        out1 = pt.linalg.solve(A_pt, b_pt)
+        out2 = pt.linalg.solve(A_pt, b_pt, assume_a="pos")
+
+        assert unify(pattern, out1) == {A: A_pt, b: b_pt}
+        assert unify(pattern, out2) is False
+
+        assume_a = var("assume_a")
+        pattern = etuple(
+            OpInstance(Blockwise, core_op=OpInstance(Solve, assume_a=assume_a)),
+            A,
+            b,
+        )
+        assert unify(pattern, out1) == {A: A_pt, b: b_pt, assume_a: "gen"}
+        assert unify(pattern, out2) == {A: A_pt, b: b_pt, assume_a: "pos"}
+
+
+    """
+
+    def __init__(
+        self,
+        op_type: type[Op],
+        parameters: dict[str, Any] | Sequence[tuple[str, Any]] | None = None,
+        **kwargs,
+    ):
+        if not (isinstance(op_type, type) and issubclass(op_type, Op)):
+            raise TypeError(f"Invalid op_type {op_type}. Expected type(Op)")
+
+        if kwargs:
+            if parameters is not None:
+                raise ValueError(
+                    "Cannot provide both parameters dict and keyword arguments"
+                )
+            parameters = kwargs
+        if isinstance(parameters, dict):
+            parameters = tuple(sorted(parameters.items()))
+        elif isinstance(parameters, list | tuple):
+            parameters = tuple(sorted(parameters))
+        elif parameters is None:
+            parameters = ()
+        self.op_type = op_type
+        self.parameters = parameters
+
+    def __str__(self):
+        return f"{self.op_type.__name__}({self.op_type}, {', '.join(f'{k}={v}' for k, v in self.parameters)})"
+
+
+def _unify_parametrized_op(v: Op, u: OpInstance, s: Mapping):
+    if not isinstance(v, u.op_type):
+        yield False
+        return
+    for parameter_key, parameter_pattern in u.parameters:
+        parameter_value = getattr(v, parameter_key)
+        s = yield _unify(parameter_value, parameter_pattern, s)
+        if s is False:
+            yield False
+            return
+    yield s
+
+
+_unify.add((Op, OpInstance, Mapping), _unify_parametrized_op)
+
+
 def convert_strs_to_vars(
     x: tuple | str | dict, var_map: dict[str, Var] | None = None
 ) -> ExpressionTuple | Var:
@@ -266,11 +365,13 @@ def convert_strs_to_vars(
     if var_map is None:
         var_map = {}
 
-    def _convert(y):
+    def _convert(y, op_prop=False):
         if isinstance(y, str):
             v = var_map.get(y, var(y))
             var_map[y] = v
             return v
+        if isinstance(y, LiteralString):
+            return y.value
         elif isinstance(y, dict):
             pattern = y["pattern"]
             if not isinstance(pattern, str):
@@ -282,8 +383,14 @@ def convert_strs_to_vars(
             var_map[pattern] = v
             return v
         elif isinstance(y, tuple):
-            return etuple(*(_convert(e) for e in y))
-        elif isinstance(y, Number | np.ndarray):
+            return etuple(*(_convert(e, op_prop=op_prop) for e in y))
+        elif isinstance(y, OpInstance):
+            return OpInstance(
+                y.op_type,
+                {k: _convert(v, op_prop=True) for k, v in y.parameters},
+            )
+        elif (not op_prop) and isinstance(y, Number | np.ndarray):
+            # If we are converting an Op property, we don't want to convert numbers to PyTensor constants
             from pytensor.tensor import as_tensor_variable
 
             return as_tensor_variable(y)
