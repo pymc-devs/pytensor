@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 from textwrap import dedent, indent
 
+import numpy as np
+
 from pytensor.configdefaults import config
 
 
@@ -191,7 +193,7 @@ def make_alloc(loop_orders, dtype, sub, fortran="0"):
                 PyArray_Dims new_dims;
                 new_dims.len = {nd};
                 new_dims.ptr = dims;
-                PyObject* success = PyArray_Resize({olv}, &new_dims, 0, NPY_CORDER);
+                PyObject* success = PyArray_Resize({olv}, &new_dims, 0, NPY_KEEPORDER);
                 if (!success) {{
                     // If we can't resize the ndarray we have we can allocate a new one.
                     PyErr_Clear();
@@ -450,129 +452,117 @@ def make_reordered_loop(
     return f"{{\n{code}\n}}\n"
 
 
-##################
-#   DimShuffle   #
-##################
-
-#################
-#   Broadcast   #
-#################
-
-
-################
-#   CAReduce   #
-################
-
-
-def make_complete_loop_careduce(
-    inp_var: str,
-    acc_var: str,
-    inp_dtype: str,
-    acc_dtype: str,
-    initial_value: str,
-    inner_task: str,
-    fail_code,
+def make_careduce_alloc(
+    inp_name: str,
+    out_name: str,
+    inp_ndim: int,
+    reduced_axes: Sequence[int],
+    dtype: str,
+    fail: str,
 ) -> str:
-    """Generate C code for a complete reduction loop.
+    """Generate C code to allocate outputs for a Careduce operation.
 
-    The generated code for a float64 input variable `inp` and accumulation variable `acc` looks like:
+    We create an output that is aligned with the strides of the input variable
+    to optimize memor access
 
-    .. code-block:: C
-        {
-            NpyIter* iter;
-            NpyIter_IterNextFunc *iternext;
-            char** data_ptr;
-            npy_intp* stride_ptr,* innersize_ptr;
 
-            // Special case for empty inputs
-            if (PyArray_SIZE(inp) == 0) {
-                npy_float64 acc_i = *(npy_float64*)(PyArray_DATA(acc));
-                acc_i = 0;
-            }else{
-                iter = NpyIter_New(inp,
-                                   NPY_ITER_READONLY| NPY_ITER_EXTERNAL_LOOP| NPY_ITER_REFS_OK,
-                                   NPY_KEEPORDER,
-                                   NPY_NO_CASTING,
-                                   NULL);
-                iternext = NpyIter_GetIterNext(iter, NULL);
-                if (iternext == NULL) {
-                    NpyIter_Deallocate(iter);
-                    { fail }
-                }
-                data_ptr = NpyIter_GetDataPtrArray(iter);
-                stride_ptr = NpyIter_GetInnerStrideArray(iter);
-                innersize_ptr = NpyIter_GetInnerLoopSizePtr(iter);
-
-                npy_float64 acc_i;
-                acc_i = 0;
-                do {
-                    char* data = *data_ptr;
-                    npy_intp stride = *stride_ptr;
-                    npy_intp count = *innersize_ptr;
-
-                    while(count--) {
-                        npy_float64 inp_i = *((npy_float64*)data);
-                        acc_i = acc_i + inp_i;
-                        data += stride;
-                    }
-
-                } while(iternext(iter));
-                NpyIter_Deallocate(iter);
-
-                *(npy_float64*)(PyArray_DATA(acc)) = acc_i;
-            }
-        }
     """
-    return dedent(
+    elemsize = np.dtype(dtype.lower().removeprefix("npy_")).itemsize
+    type = dtype.upper()
+    if type.startswith("PYTENSOR_COMPLEX"):
+        type = type.replace("PYTENSOR_COMPLEX", "NPY_COMPLEX")
+    out_ndim = inp_ndim - len(reduced_axes)
+
+    out_dims_values = ",".join(
+        f"PyArray_DIMS({inp_name})[{i}]"
+        for i in range(inp_ndim)
+        if i not in reduced_axes
+    )
+    declare_out_dims = f"npy_intp out_dims[{out_ndim}] = {{ {out_dims_values} }};"
+
+    declare_unsorted_out_strides = f"""
+npy_intp out_strides[{out_ndim}];
+npy_intp total_size = {elemsize};
+"""
+
+    for i in range(out_ndim):
+        declare_unsorted_out_strides += f"""
+out_strides[{i}] = total_size;
+total_size *= out_dims[{i}];
+"""
+
+    # Fill the loop vector with the appropriate <stride, index> pairs
+    populate_order_strides = ""
+    i = 0
+    for j in range(inp_ndim):
+        if j in reduced_axes:
+            continue
+        populate_order_strides += (
+            f"strides_it->first = abs(PyArray_STRIDES({inp_name})[{j}]);\n"
+        )
+        populate_order_strides += f"strides_it->second = out_strides[{i}];\n"
+        populate_order_strides += "++strides_it;\n"
+        i += 1
+
+    sort_strides = dedent(
+        f"""
+        std::vector< std::pair<npy_intp, npy_intp> > strides({out_ndim});
+        std::vector< std::pair<npy_intp, npy_intp> >::iterator strides_it = strides.begin();
+        {populate_order_strides}
+        std::sort(strides.begin(), strides.end());
+        """
+    )
+
+    reassign_sorted_strides = ""
+    for i in range(out_ndim):
+        reassign_sorted_strides += f"out_strides[{i}] = strides[{i}].second;\n"
+
+    code = dedent(
         f"""
         {{
-            NpyIter* iter;
-            NpyIter_IterNextFunc *iternext;
-            char** data_ptr;
-            npy_intp* stride_ptr,* innersize_ptr;
+            {declare_out_dims}
 
-            // Special case for empty inputs
-            if (PyArray_SIZE({inp_var}) == 0) {{
-                {acc_dtype} &{acc_var}_i = *({acc_dtype}*)(PyArray_DATA({acc_var}));
-                {initial_value}
-            }}else{{
-                iter = NpyIter_New({inp_var},
-                                   NPY_ITER_READONLY| NPY_ITER_EXTERNAL_LOOP| NPY_ITER_REFS_OK,
-                                   NPY_KEEPORDER,
-                                   NPY_NO_CASTING,
-                                   NULL);
-
-                iternext = NpyIter_GetIterNext(iter, NULL);
-                if (iternext == NULL) {{
-                    NpyIter_Deallocate(iter);
-                    {fail_code}
+            if ({out_name}) {{
+                PyArray_Dims new_dims;
+                new_dims.len = {out_ndim};
+                new_dims.ptr = out_dims;
+                PyObject* success = PyArray_Resize({out_name}, &new_dims, 0, NPY_KEEPORDER);
+                if (!success) {{
+                    // If we can't resize the ndarray we have we can allocate a new one.
+                    PyErr_Clear();
+                    Py_XDECREF({out_name});
+                    {out_name} = NULL;
+                }} else {{
+                    Py_DECREF(success);
                 }}
+            }}
 
-                data_ptr = NpyIter_GetDataPtrArray(iter);
-                stride_ptr = NpyIter_GetInnerStrideArray(iter);
-                innersize_ptr = NpyIter_GetInnerLoopSizePtr(iter);
+            if (!{out_name})  {{
+                {declare_unsorted_out_strides}
+                {sort_strides}
+                {reassign_sorted_strides}
 
-                {acc_dtype} {acc_var}_i;
-                {initial_value}
-
-                do {{
-                    char* data = *data_ptr;
-                    npy_intp stride = *stride_ptr;
-                    npy_intp count = *innersize_ptr;
-
-                    while(count--) {{
-                        {inp_dtype} {inp_var}_i = *(({inp_dtype}*)data);
-                        {inner_task}
-                        data += stride;
-                    }}
-                }} while(iternext(iter));
-
-                NpyIter_Deallocate(iter);
-                *({acc_dtype}*)(PyArray_DATA({acc_var})) = {acc_var}_i;
+                {out_name} = (PyArrayObject*)PyArray_NewFromDescr(
+                    &PyArray_Type,
+                    PyArray_DescrFromType({type}),
+                    {out_ndim},
+                    out_dims,
+                    out_strides,
+                    NULL,
+                    NPY_ARRAY_WRITEABLE,
+                    NULL
+                );
+                if ({out_name}) {{
+                    PyArray_UpdateFlags({out_name}, NPY_ARRAY_UPDATE_ALL);
+                }}
+            }}
+            if (!{out_name}) {{
+                {fail}
             }}
         }}
         """
     )
+    return code
 
 
 def make_reordered_loop_careduce(
@@ -649,18 +639,15 @@ def make_reordered_loop_careduce(
 
     """
 
+    empty_condition = f"PyArray_SIZE({inp_var}) == 0"
     empty_case = dedent(
         f"""
-        // Special case for empty inputs
-        if (PyArray_SIZE({inp_var}) == 0) {{
-            {acc_var}_iter = ({acc_dtype}*)(PyArray_DATA({acc_var}));
-            int n =  PyArray_SIZE({acc_var});
-            for(int i = 0; i < n; i++)
-            {{
-                {acc_dtype} &{acc_var}_i = {acc_var}_iter[i];
-                {initial_value}
-            }}
-        }} else {{
+        {acc_var}_iter = ({acc_dtype}*)(PyArray_DATA({acc_var}));
+        int n =  PyArray_SIZE({acc_var});
+        for(int i = 0; i < n; i++)
+        {{
+            {acc_var}_iter[i] = {initial_value};
+        }}
         """
     )
 
@@ -691,22 +678,21 @@ def make_reordered_loop_careduce(
     counter = iter(range(inp_ndim))
     unsorted_vars = dedent(
         f"""
-        int dim_lengths[{inp_ndim}] = {{{','.join(f'{inp_var}_n{i}' for i in range(inp_ndim))}}};
-        int inp_strides[{inp_ndim}] = {{{','.join(f'{inp_var}_stride{i}' for i in range(inp_ndim))}}};
-        int acc_strides[{inp_ndim}] = {{{','.join("0" if i in reduction_axes else f'{acc_var}_stride{next(counter)}'for i in range(inp_ndim))}}};
+        npy_intp dim_lengths[{inp_ndim}] = {{{','.join(f'{inp_var}_n{i}' for i in range(inp_ndim))}}};
+        npy_intp inp_strides[{inp_ndim}] = {{{','.join(f'{inp_var}_stride{i}' for i in range(inp_ndim))}}};
+        npy_intp acc_strides[{inp_ndim}] = {{{','.join("0" if i in reduction_axes else f'{acc_var}_stride{next(counter)}'for i in range(inp_ndim))}}};
         bool reduction_axes[{inp_ndim}] = {{{', '.join("1" if i in reduction_axes else "0" for i in range(inp_ndim))}}};\n
         """
     )
 
-    sorted_vars = "loops_it = loops.begin();"
+    sorted_vars = ""
     for i in range(inp_ndim):
         sorted_vars += dedent(
             f"""
-            int dim_length_{i} = dim_lengths[loops_it->second];
-            int is_reduction_axis_{i} = reduction_axes[loops_it->second];
-            int {inp_var}_stride_{i} = inp_strides[loops_it->second];
-            int {acc_var}_stride_{i} = acc_strides[loops_it->second];
-            ++loops_it;
+            npy_intp dim_length_{i} = dim_lengths[loops[{i}].second];
+            bool is_reduction_axis_{i} = reduction_axes[loops[{i}].second];
+            npy_intp {inp_var}_stride_{i} = inp_strides[loops[{i}].second];
+            npy_intp {acc_var}_stride_{i} = acc_strides[loops[{i}].second];
             """
         )
 
@@ -717,45 +703,124 @@ def make_reordered_loop_careduce(
         """
     )
 
-    pointer_update = ""
-    for var, dtype in ((inp_var, inp_dtype), (acc_var, acc_dtype)):
-        pointer_update += f"{dtype} &{var}_i = *({var}_iter"
-        for i in reversed(tuple(range(inp_ndim))):
-            iter_var = f"iter_{i}"
-            pointer_update += f" + {var}_stride_{i}*{iter_var}"
-        pointer_update += ");\n"
+    non_empty_body = "\n".join((order_loops, unsorted_vars, sorted_vars, declare_iter))
 
-    # Set initial value in first iteration of each output
-    # This happens on the first iteration of every reduction axis
-    initial_iteration = " && ".join(
-        f"(!is_reduction_axis_{i} || iter_{i} == 0)" for i in range(inp_ndim)
-    )
-    set_initial_value = dedent(
-        f"""
-        if({initial_iteration})
-        {{
-            {initial_value}
-        }}
-        """
+    reduction_along_contiguous_dim = (
+        f"({acc_var}_stride_{inp_ndim-1} == 0) && ({inp_var}_stride_{inp_ndim-1} == 1)"
     )
 
-    # We set do pointer_update, initial_value and inner task in inner loop
-    loop = "\n\n".join((pointer_update, set_initial_value, f"{{{inner_task}}}"))
-
-    # Create outer loops recursively
+    # Inner loop where accumulation is done on temporary values
+    # This is used for the case where a contiguous dimension is being reduced
+    temporary_accumulation_loop = None
     for i in reversed(range(inp_ndim)):
         iter_var = f"iter_{i}"
         dim_length = f"dim_length_{i}"
-        loop = dedent(
-            f"""
-            for(int {iter_var} = 0; {iter_var}<{dim_length}; {iter_var}++){{
-                {loop}
-            }}
-            """
-        )
+        if i == inp_ndim - 1:
+            # Innermost loop
+            if inp_ndim == 1:
+                # There is only one axis
+                is_initial_iteration = "1"
+            else:
+                is_initial_iteration = " && ".join(
+                    f"(!is_reduction_axis_{j} || iter_{j} == 0)"
+                    for j in range(inp_ndim - 1)
+                )
+            # Code where we write to an intermediate variable in the innermost loop
+            inp_pointer_update = f"{inp_dtype} &{inp_var}_i = *({inp_var}_iter"
+            for j in reversed(tuple(range(inp_ndim))):
+                inp_pointer_update += f" + {inp_var}_stride_{j}*iter_{j}"
+            inp_pointer_update += ");"
 
-    non_empty_case = "\n".join(
-        (order_loops, unsorted_vars, sorted_vars, declare_iter, loop)
-    )
-    code = "\n".join((empty_case, non_empty_case, "}"))
-    return f"{{\n{code}\n}}\n"
+            acc_pointer = f"*({acc_var}_iter"
+            for j in reversed(tuple(range(inp_ndim - 1))):
+                acc_pointer += f" + {acc_var}_stride_{j}*iter_{j}"
+            acc_pointer += ")"
+
+            temporary_accumulation_loop = dedent(
+                f"""
+                if ({is_initial_iteration}){{
+                    {acc_pointer} = {initial_value};
+                }}
+                {acc_dtype} {acc_var}_i = {initial_value};
+                for (int {iter_var} = 0; {iter_var}<{dim_length}; {iter_var}++){{
+                    {inp_pointer_update}
+                    {{
+                        {inner_task}
+                    }}
+                }}
+                {acc_pointer} += {acc_var}_i;
+                """
+            )
+        else:
+            temporary_accumulation_loop = dedent(
+                f"""
+                    for(int {iter_var} = 0; {iter_var}<{dim_length}; {iter_var}++){{
+                        {temporary_accumulation_loop}
+                    }}
+                    """
+            )
+
+    # Code where the innermost loop writes directly to the output buffer
+    # Chosen either because the fastest changing dimension isn't being reduced
+    # Or if it is, it is not contiguous.  # TODO: Check this last check is actually helping with SIMD?
+    direct_accumulation_loop = None
+    for i in reversed(range(inp_ndim)):
+        iter_var = f"iter_{i}"
+        dim_length = f"dim_length_{i}"
+        if i == inp_ndim - 1:
+            # Innermost loop
+
+            # Define expressions that update the pointers based on loop iteration
+            pointer_update = ""
+            for var, dtype in ((inp_var, inp_dtype), (acc_var, acc_dtype)):
+                pointer_update += f"{dtype} &{var}_i = *({var}_iter"
+                for j in reversed(tuple(range(inp_ndim))):
+                    pointer_update += f" + {var}_stride_{j}*iter_{j}"
+                pointer_update += ");\n"
+
+            # Set initial value in first iteration of each output
+            # This happens on the first iteration of every reduction axis
+            is_initial_iteration = " && ".join(
+                f"(!is_reduction_axis_{j} || iter_{j} == 0)" for j in range(inp_ndim)
+            )
+
+            direct_accumulation_loop = dedent(
+                f"""
+                for(int {iter_var} = 0; {iter_var}<{dim_length}; {iter_var}++){{
+                    {pointer_update}
+                    if({is_initial_iteration}){{
+                        {acc_var}_i = {initial_value};
+                    }}
+                    {{
+                        {inner_task}
+                    }}
+                }}
+                """
+            )
+        else:
+            direct_accumulation_loop = dedent(
+                f"""
+                for(int {iter_var} = 0; {iter_var}<{dim_length}; {iter_var}++){{
+                    {direct_accumulation_loop}
+                }}
+                """
+            )
+
+    code = f"""
+    if ({empty_condition}) {{
+        // Empty case
+        {empty_case}
+    }} else {{
+        {non_empty_body}
+        if ({reduction_along_contiguous_dim}) {{
+            // Temporary accumulation loop
+            // SIMD friendly
+            {temporary_accumulation_loop}
+        }} else {{
+            // Direct accumulation loop
+            {direct_accumulation_loop}
+        }}
+    }}
+    """
+
+    return code
