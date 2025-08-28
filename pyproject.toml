@@ -178,7 +178,6 @@ warn_unused_ignores = true
 warn_return_any = true
 warn_unreachable = true
 files = ["pytensor", "tests"]
-plugins = ["numpy.typing.mypy_plugin"]
 
 [tool.cibuildwheel]
 build = "*"
