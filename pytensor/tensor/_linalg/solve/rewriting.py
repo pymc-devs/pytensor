@@ -14,6 +14,7 @@ from pytensor.tensor.basic import atleast_Nd
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.rewriting.basic import register_specialize
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.linalg import is_matrix_transpose
 from pytensor.tensor.slinalg import Solve, cho_solve, cholesky, lu_factor, lu_solve
 from pytensor.tensor.variable import TensorVariable
@@ -227,7 +228,7 @@ def _scan_split_non_sequence_decomposition_and_solve(
 
 
 @register_specialize
-@node_rewriter([Blockwise])
+@node_rewriter([blockwise_of(Solve)])
 def reuse_decomposition_multiple_solves(fgraph, node):
     return _split_decomp_and_solve_steps(
         fgraph, node, eager=False, allowed_assume_a={"gen", "tridiagonal", "pos"}

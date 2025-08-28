@@ -35,7 +35,7 @@ from pytensor.tensor.basic import (
     switch,
 )
 from pytensor.tensor.basic import constant as tensor_constant
-from pytensor.tensor.blockwise import Blockwise, _squeeze_left
+from pytensor.tensor.blockwise import _squeeze_left
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_to
@@ -58,6 +58,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.shape import (
     shape_padleft,
     shape_padright,
@@ -974,33 +975,30 @@ def local_IncSubtensor_serialize(fgraph, node):
             and not i.owner.op.set_instead_of_inc
         )
 
-    if node.op == add:
-        o_type = node.outputs[0].type
+    o_type = node.outputs[0].type
 
-        movable_inputs = [i for i in node.inputs if movable(i)]
+    movable_inputs = [i for i in node.inputs if movable(i)]
 
-        if movable_inputs:
-            new_inputs = [i for i in node.inputs if not movable(i)] + [
-                mi.owner.inputs[0] for mi in movable_inputs
-            ]
-            new_add = variadic_add(*new_inputs)
-            # Copy over stacktrace from original output, as an error
-            # (e.g. an index error) in this add operation should
-            # correspond to an error in the original add operation.
-            copy_stack_trace(node.outputs[0], new_add)
+    if movable_inputs:
+        new_inputs = [i for i in node.inputs if not movable(i)] + [
+            mi.owner.inputs[0] for mi in movable_inputs
+        ]
+        new_add = variadic_add(*new_inputs)
+        # Copy over stacktrace from original output, as an error
+        # (e.g. an index error) in this add operation should
+        # correspond to an error in the original add operation.
+        copy_stack_trace(node.outputs[0], new_add)
 
-            # stack up the new incsubtensors
-            tip = new_add
-            for mi in movable_inputs:
-                assert o_type.is_super(tip.type)
-                tip = mi.owner.op(tip, *mi.owner.inputs[1:])
-                # Copy over stacktrace from outputs of the original
-                # "movable" operation to the new operation.
-                copy_stack_trace(node.outputs + mi.owner.outputs, tip)
+        # stack up the new incsubtensors
+        tip = new_add
+        for mi in movable_inputs:
+            assert o_type.is_super(tip.type)
+            tip = mi.owner.op(tip, *mi.owner.inputs[1:])
+            # Copy over stacktrace from outputs of the original
+            # "movable" operation to the new operation.
+            copy_stack_trace(node.outputs + mi.owner.outputs, tip)
 
-            return [tip]
-
-        # print incsub_inputs, [id(i.owner.inputs[0]) for i in incsub_inputs]
+        return [tip]
 
 
 # We register it in a WalkingGraphRewriter inside the canonizer EQ optimizer.
@@ -1576,7 +1574,7 @@ compile.optdb.register(
 
 @register_stabilize
 @register_specialize
-@node_rewriter([Blockwise])
+@node_rewriter([blockwise_of(Subtensor)])
 def local_blockwise_of_subtensor(fgraph, node):
     """Rewrite Blockwise of Subtensor, where the only batch input is the indexed tensor.
 
@@ -1585,9 +1583,6 @@ def local_blockwise_of_subtensor(fgraph, node):
     TODO: Handle batched indices like we do with blockwise of inc_subtensor
     TODO: Extend to AdvanceSubtensor
     """
-    if not isinstance(node.op.core_op, Subtensor):
-        return
-
     x, *idxs = node.inputs
     if not all(all(idx.type.broadcastable) for idx in idxs):
         return
@@ -1603,7 +1598,7 @@ def local_blockwise_of_subtensor(fgraph, node):
 @register_canonicalize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @register_specialize("shape_unsafe")
-@node_rewriter([Blockwise])
+@node_rewriter([blockwise_of(IncSubtensor | AdvancedIncSubtensor)])
 def local_blockwise_inc_subtensor(fgraph, node):
     """Rewrite blockwised inc_subtensors.
 
@@ -1614,12 +1609,9 @@ def local_blockwise_inc_subtensor(fgraph, node):
     and can be safely rewritten without Blockwise.
     """
     core_op = node.op.core_op
-    if not isinstance(core_op, AdvancedIncSubtensor | IncSubtensor):
-        return None
-
     x, y, *idxs = node.inputs
     [out] = node.outputs
-    if isinstance(node.op.core_op, AdvancedIncSubtensor):
+    if isinstance(core_op, AdvancedIncSubtensor):
         if any(
             (
                 # Blockwise requires all inputs to be tensors so it is not possible

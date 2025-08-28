@@ -26,6 +26,7 @@ from pytensor.graph.rewriting.basic import (
     out2in,
 )
 from pytensor.graph.rewriting.db import SequenceDB
+from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import (
@@ -37,6 +38,7 @@ from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
     alloc_like,
     broadcasted_by,
+    elemwise_of,
     register_canonicalize,
     register_specialize,
     register_stabilize,
@@ -422,7 +424,14 @@ def local_useless_dimshuffle_makevector(fgraph, node):
 
 
 @register_canonicalize
-@node_rewriter([Elemwise])
+@node_rewriter(
+    [
+        elemwise_of(
+            OpPattern(ps.ScalarOp, output_types_preference=ps.upgrade_to_float)
+        ),
+        elemwise_of(OpPattern(ps.ScalarOp, output_types_preference=ps.upcast_out)),
+    ]
+)
 def local_upcast_elemwise_constant_inputs(fgraph, node):
     """This explicitly upcasts constant inputs to elemwise Ops, when
     those Ops do implicit upcasting anyway.
@@ -431,12 +440,6 @@ def local_upcast_elemwise_constant_inputs(fgraph, node):
 
     """
     if len(node.outputs) > 1:
-        return None
-
-    if getattr(node.op.scalar_op, "output_types_preference", None) not in (
-        ps.upgrade_to_float,
-        ps.upcast_out,
-    ):
         return None
 
     # this is the kind of op that we can screw with the input
@@ -988,13 +991,9 @@ class FusionOptimizer(GraphRewriter):
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([Elemwise])
+@node_rewriter([elemwise_of(ps.Composite)])
 def local_useless_composite_outputs(fgraph, node):
     """Remove inputs and outputs of Composite Ops that are not used anywhere."""
-    if not (
-        isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.Composite)
-    ):
-        return
     comp = node.op.scalar_op
     used_outputs_idxs = [
         i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]
@@ -1104,14 +1103,10 @@ def local_careduce_fusion(fgraph, node):
     return [new_car_op(*elm_inputs)]
 
 
-@node_rewriter([Elemwise])
+@node_rewriter([elemwise_of(ps.Composite)])
 def local_inline_composite_constants(fgraph, node):
     """Inline scalar constants in Composite graphs."""
     composite_op = node.op.scalar_op
-
-    if not isinstance(composite_op, ps.Composite):
-        return None
-
     new_outer_inputs = []
     new_inner_inputs = []
     inner_replacements = {}
@@ -1287,14 +1282,9 @@ def _rebuild_partial_2f1grad_loop(node, wrt):
 
 
 @register_specialize
-@node_rewriter([Elemwise])
+@node_rewriter([elemwise_of(Grad2F1Loop)])
 def local_useless_2f1grad_loop(fgraph, node):
     # Remove unused terms from the hyp2f1 grad loop
-
-    loop_op = node.op.scalar_op
-    if not isinstance(loop_op, Grad2F1Loop):
-        return
-
     grad_related_vars = node.outputs[:-4]
     # Rewrite was already applied
     if len(grad_related_vars) // 3 != 3:
@@ -1326,18 +1316,13 @@ def local_useless_2f1grad_loop(fgraph, node):
     return replacements
 
 
-@node_rewriter([Elemwise])
+@node_rewriter([elemwise_of(Grad2F1Loop)])
 def split_2f1grad_loop(fgraph, node):
     """
     2f1grad loop has too many operands for Numpy frompyfunc code used by Elemwise nodes on python mode.
 
     This rewrite splits it across 3 different operations. It is not needed if `local_useless_2f1grad_loop` was applied
     """
-    loop_op = node.op.scalar_op
-
-    if not isinstance(loop_op, Grad2F1Loop):
-        return None
-
     grad_related_vars = node.outputs[:-4]
     # local_useless_2f1grad_loop was used, we should be safe
     if len(grad_related_vars) // 3 != 3:
