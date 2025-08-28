@@ -26,10 +26,9 @@ import logging
 
 import numpy as np
 
-import pytensor.scalar.basic as ps
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
-from pytensor.graph import FunctionGraph
+from pytensor.graph import FunctionGraph, Op
 from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
@@ -40,9 +39,24 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.db import RewriteDatabase
+from pytensor.graph.rewriting.unify import OpPattern, OpPatternOpTypeType
 from pytensor.npy_2_compat import normalize_axis_index
 from pytensor.raise_op import Assert, CheckAndRaise, assert_op
-from pytensor.scalar.basic import Second
+from pytensor.scalar import (
+    AND,
+    EQ,
+    LE,
+    NEQ,
+    OR,
+    XOR,
+    Add,
+    BinaryScalarOp,
+    Cast,
+    Identity,
+    Mul,
+    Second,
+    Switch,
+)
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -223,6 +237,12 @@ def register_uncanonicalize(
             name, node_rewriter, "fast_run", *tags, **kwargs
         )
         return node_rewriter
+
+
+def elemwise_of(scalar_op: OpPatternOpTypeType | OpPattern) -> OpPattern:
+    if not isinstance(scalar_op, Op | OpPattern):
+        scalar_op = OpPattern(scalar_op)
+    return OpPattern(Elemwise, scalar_op=scalar_op)
 
 
 @register_canonicalize
@@ -551,7 +571,7 @@ def local_useless_elemwise(fgraph, node):
     dtype = node.outputs[0].type.dtype
     scalar_op = node.op.scalar_op
 
-    if isinstance(scalar_op, ps.EQ) and len(node.inputs) == 2:
+    if isinstance(scalar_op, EQ) and len(node.inputs) == 2:
         if node.inputs[0] is node.inputs[1]:
             # it is the same var in the graph. That will always be true
             ret = ones_like(node.inputs[0], dtype=dtype, opt=True)
@@ -559,7 +579,7 @@ def local_useless_elemwise(fgraph, node):
             # Copy stack trace from input to constant output
             copy_stack_trace(node.outputs[0], ret)
             return [ret]
-    elif isinstance(scalar_op, ps.NEQ | ps.XOR) and len(node.inputs) == 2:
+    elif isinstance(scalar_op, NEQ | XOR) and len(node.inputs) == 2:
         if node.inputs[0] is node.inputs[1]:
             # it is the same var in the graph. That will always be false
             ret = zeros_like(node.inputs[0], dtype=dtype, opt=True)
@@ -568,14 +588,11 @@ def local_useless_elemwise(fgraph, node):
             copy_stack_trace(node.outputs[0], ret)
             return [ret]
 
-    elif (
-        isinstance(node.op.scalar_op, ps.Mul | ps.Add | ps.Identity)
-        and len(node.inputs) == 1
-    ):
+    elif isinstance(node.op.scalar_op, Mul | Add | Identity) and len(node.inputs) == 1:
         # No need to copy over any stack trace
         return [node.inputs[0]]
 
-    elif isinstance(node.op.scalar_op, ps.AND) and len(node.inputs) == 2:
+    elif isinstance(node.op.scalar_op, AND) and len(node.inputs) == 2:
         if (
             isinstance(node.inputs[0], TensorConstant)
             and node.inputs[1].type.broadcastable == out_bcast
@@ -602,7 +619,7 @@ def local_useless_elemwise(fgraph, node):
                     # and this rewrite would be wrong
                     return [node.inputs[0].astype(node.outputs[0].dtype)]
 
-    elif isinstance(node.op.scalar_op, ps.OR) and len(node.inputs) == 2:
+    elif isinstance(node.op.scalar_op, OR) and len(node.inputs) == 2:
         if (
             isinstance(node.inputs[0], TensorConstant)
             and node.inputs[1].type.broadcastable == out_bcast
@@ -653,7 +670,7 @@ def local_alloc_unary(fgraph, node):
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([Elemwise])
+@node_rewriter([elemwise_of(Cast)])
 def local_cast_cast(fgraph, node):
     """cast(cast(x, dtype1), dtype2)
 
@@ -663,13 +680,11 @@ def local_cast_cast(fgraph, node):
           and the first cast cause an upcast.
 
     """
-    if not (isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.Cast)):
-        return
     x = node.inputs[0]
     if not (
         x.owner
         and isinstance(x.owner.op, Elemwise)
-        and isinstance(x.owner.op.scalar_op, ps.Cast)
+        and isinstance(x.owner.op.scalar_op, Cast)
     ):
         return
 
@@ -1009,7 +1024,7 @@ def local_useless_switch(fgraph, node):
         node.outputs[0].type.ndim == 0
         and cond_var.owner
         and isinstance(cond_var.owner.op, Elemwise)
-        and isinstance(cond_var.owner.op.scalar_op, ps.LE)
+        and isinstance(cond_var.owner.op.scalar_op, LE)
         and cond_var.owner.inputs[0].owner
         and isinstance(cond_var.owner.inputs[0].owner.op, Shape_i)
         and get_scalar_constant_value(
@@ -1031,24 +1046,18 @@ def local_useless_switch(fgraph, node):
 
 
 @register_canonicalize
-@node_rewriter([Elemwise])
+@node_rewriter([elemwise_of(BinaryScalarOp | Add | Mul)])
 def local_merge_switch_same_cond(fgraph, node):
     """
     Merge add/sub/mul/div/minimum/maximum/... of switches sharing the same
     condition, to enable further simplification of their branches
     Example: switch(c, a, b) + switch(c, x, y) -> switch(c, a+x, b+y)
     """
-    # node must be binary elemwise or add or mul
-    if not (
-        isinstance(node.op, Elemwise)
-        and isinstance(node.op.scalar_op, ps.BinaryScalarOp | ps.Add | ps.Mul)
-    ):
-        return
     # all inputs must be switch
     if not all(
         s.owner
         and isinstance(s.owner.op, Elemwise)
-        and isinstance(s.owner.op.scalar_op, ps.Switch)
+        and isinstance(s.owner.op.scalar_op, Switch)
         for s in node.inputs
     ):
         return
@@ -1174,10 +1183,9 @@ register_specialize(topo_constant_folding, "fast_compile", final_rewriter=True)
 @register_infer_shape
 @register_canonicalize("fast_compile")
 @register_useless("fast_compile")
-@node_rewriter(None)
+@node_rewriter([ViewOp])
 def local_view_op(fgraph, node):
-    if isinstance(node.op, ViewOp):
-        return node.inputs
+    return node.inputs
 
 
 @register_infer_shape

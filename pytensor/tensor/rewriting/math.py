@@ -37,7 +37,6 @@ from pytensor.tensor.basic import (
     zeros,
     zeros_like,
 )
-from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
@@ -49,6 +48,11 @@ from pytensor.tensor.math import (
     _dot,
     _matmul,
     add,
+    arccosh,
+    arcsinh,
+    arctanh,
+    cosh,
+    deg2rad,
     digamma,
     dot,
     erf,
@@ -70,13 +74,16 @@ from pytensor.tensor.math import (
     neg,
     polygamma,
     prod,
+    rad2deg,
     reciprocal,
     sigmoid,
     sign,
+    sinh,
     softplus,
     sqr,
     sqrt,
     sub,
+    tanh,
     tri_gamma,
     true_div,
     variadic_add,
@@ -96,6 +103,7 @@ from pytensor.tensor.rewriting.basic import (
     register_uncanonicalize,
     register_useless,
 )
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.rewriting.linalg import is_matrix_transpose
 from pytensor.tensor.shape import Shape, Shape_i
@@ -151,7 +159,7 @@ def local_0_dot_x(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([Blockwise])
+@node_rewriter([blockwise_of(BlockDiagonal)])
 def local_block_diag_dot_to_dot_block_diag(fgraph, node):
     r"""
     Perform the rewrite ``dot(block_diag(A, B), C) -> concat(dot(A, C), dot(B, C))``
@@ -160,9 +168,6 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
     of approximately O(n^3), it's always better to perform two dot products on the smaller matrices, rather than
     a single dot on the larger matrix.
     """
-    if not isinstance(node.op.core_op, BlockDiagonal):
-        return
-
     # Check that the BlockDiagonal is an input to a Dot node:
     for client in itertools.chain.from_iterable(
         get_clients_at_depth(fgraph, node, depth=i) for i in [1, 2]
@@ -424,60 +429,30 @@ def local_dot_to_mul(fgraph, node):
     return [new_out]
 
 
-def is_inverse_pair(node_op, prev_op, inv_pair):
-    """
-    Given two consecutive operations, check if they are the
-    provided pair of inverse functions.
+for pair in (
+    (deg2rad, rad2deg),
+    (cosh, arccosh),
+    (tanh, arctanh),
+    (sinh, arcsinh),
+    (_conj, _conj),
+    (neg, neg),
+    (reciprocal, reciprocal),
+):
+    # Create a simple PatternNodeRewriter for each pair of opposite ops
+    # instead of a general Op that is called to often for very few hits
+    for op, inv_op in (pair, reversed(pair)):
+        rewrite = PatternNodeRewriter(
+            (op, (inv_op, "x")),
+            "x",
+            allow_multiple_clients=True,
+            allow_cast=True,
+            name=f"useless_{op}_of_{inv_op}",
+        )
+        register_canonicalize(rewrite)
+        register_specialize(rewrite)
 
-    """
-    node_is_op0 = isinstance(node_op, inv_pair[0])
-    node_is_op1 = isinstance(node_op, inv_pair[1])
-    prev_is_op0 = isinstance(prev_op, inv_pair[0])
-    prev_is_op1 = isinstance(prev_op, inv_pair[1])
-
-    return (node_is_op0 and prev_is_op1) or (node_is_op1 and prev_is_op0)
-
-
-@register_canonicalize
-@register_specialize
-@node_rewriter([Elemwise])
-def local_func_inv(fgraph, node):
-    """
-    Check for two consecutive operations that are functional inverses
-    and remove them from the function graph.
-
-    """
-    inv_pairs = (
-        (ps.Deg2Rad, ps.Rad2Deg),
-        (ps.Cosh, ps.ArcCosh),
-        (ps.Tanh, ps.ArcTanh),
-        (ps.Sinh, ps.ArcSinh),
-        (ps.Conj, ps.Conj),
-        (ps.Neg, ps.Neg),
-        (ps.Reciprocal, ps.Reciprocal),
-    )
-    x = node.inputs[0]
-
-    if not isinstance(node.op, Elemwise):
-        return
-    if not (x.owner and isinstance(x.owner.op, Elemwise)):
-        return
-
-    prev_op = x.owner.op.scalar_op
-    node_op = node.op.scalar_op
-
-    for inv_pair in inv_pairs:
-        if is_inverse_pair(node_op, prev_op, inv_pair):
-            # We don't need to copy stack trace, because the rewrite
-            # is trivial and maintains the earlier stack trace
-            ottype = node.out.dtype
-            inp = x.owner.inputs[0]
-            # Functions may have casted integer input to float
-            if inp.dtype != ottype:
-                inp = cast(inp, ottype)
-            return [inp]
-
-    return
+        if op is inv_op:
+            break  # Same Op, no need to define two rewrites
 
 
 @register_canonicalize
