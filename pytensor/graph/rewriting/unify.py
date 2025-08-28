@@ -278,6 +278,42 @@ class OpPattern:
     Examples
     --------
 
+    OpPattern can be used in the `tracks` functionality of `node_rewriter` to more flexible filter out nodes.
+    For Ops that are parametrized by other Ops, it's possible to use nested OpPatterns.
+
+    .. test-code::
+
+        from pytensor.graph.rewriting.basic import node_rewriter
+        from pytensor.graph.rewriting.unify import OpPattern
+        from pytensor.tensor.elemwise import CAReduce
+        from pytensor.tensor.blockwise import Blockwise
+        from pytensor.tensor.slinalg import Solve
+
+        @node_rewriter(tracks=[OpPattern(CAReduce, axis=None)])
+        def local_car_reduce_all_rewriter(fgraph, node):
+            # This will always be true!
+            assert isinstance(node.op, CAReduce) and node.op.axis is None
+            ...
+
+        # Any Blockwise whose core_op is a Solve Op (or subclass) instance
+        @node_rewriter(tracks=[OpPattern(Blockwise, core_op=OpPattern(Solve))])
+        def local_blockwise_solve_triangular_rewriter(fgraph, node):
+            # This will always be true!
+            assert isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
+            ...
+
+        # Any Blockwise whose core_op is a Solve Op (or subclass) instance with b_ndim==1
+        @node_rewriter(tracks=[OpPattern(Blockwise, core_op=OpPattern(Solve, b_ndim=1))])
+        def local_blockwise_vector_solve_rewriter(fgraph, node):
+            # This will always be true!
+            assert (
+                isinstance(node.op, Blockwise)
+                and isinstance(node.op.core_op, Solve)
+                and node.op.core_op.b_ndim == 1
+            )
+            ...
+
+
     OpPattern can be used with `PatternNodeRewriter` to define graph rewrites that match Ops with specific parameters.
     The example below matches two nested CAReduce Ops with the same `scalar_op`,
     the outer with `axis=None` (full reduction) and fuses them into a single CAReduce.

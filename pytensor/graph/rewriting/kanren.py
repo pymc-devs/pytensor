@@ -74,7 +74,7 @@ class KanrenRelationSub(NodeRewriter):
         self.node_filter = node_filter
         super().__init__()
 
-    def transform(self, fgraph, node):
+    def transform(self, fgraph, node, enforce_tracks: bool = True):
         if self.node_filter(node) is False:
             return False
 
@@ -92,7 +92,7 @@ class KanrenRelationSub(NodeRewriter):
             if isinstance(chosen_res, list):
                 new_outputs = [eval_if_etuple(v) for v in chosen_res]
             else:
-                new_outputs = [eval_if_etuple(chosen_res)]
+                new_outputs = [eval_if_etuple(chosen_res)]  # type: ignore[unreachable]
 
             return new_outputs
         else:
