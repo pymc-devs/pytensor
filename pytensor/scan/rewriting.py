@@ -30,6 +30,7 @@ from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import compute_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import (
+    EquilibriumGraphRewriter,
     GraphRewriter,
     copy_stack_trace,
     in2out,
@@ -2517,12 +2518,21 @@ def scan_push_out_dot1(fgraph, node):
     return False
 
 
+class ScanEquilibriumGraphRewriter(EquilibriumGraphRewriter):
+    """Subclass of EquilibriumGraphRewriter that aborts early if there are no Scan Ops in the graph"""
+
+    def apply(self, fgraph, start_from=None):
+        if not any(isinstance(node.op, Scan) for node in fgraph.apply_nodes):
+            return
+        super().apply(fgraph=fgraph, start_from=start_from)
+
+
 # I've added an equilibrium because later scan optimization in the sequence
 # can make it such that earlier optimizations should apply. However, in
 # general I do not expect the sequence to run more then once
-scan_eqopt1 = EquilibriumDB()
+scan_eqopt1 = EquilibriumDB(eq_rewriter_class=ScanEquilibriumGraphRewriter)
 scan_seqopt1 = SequenceDB()
-scan_eqopt2 = EquilibriumDB()
+scan_eqopt2 = EquilibriumDB(eq_rewriter_class=ScanEquilibriumGraphRewriter)
 
 # scan_eqopt1 before ShapeOpt at 0.1
 # This is needed to don't have ShapeFeature trac old Scan that we

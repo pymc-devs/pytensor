@@ -310,18 +310,21 @@ class EquilibriumDB(RewriteDatabase):
     """
 
     def __init__(
-        self, ignore_newtrees: bool = True, tracks_on_change_inputs: bool = False
+        self,
+        ignore_newtrees: bool = True,
+        tracks_on_change_inputs: bool = False,
+        eq_rewriter_class=pytensor_rewriting.EquilibriumGraphRewriter,
     ):
         """
 
         Parameters
         ----------
         ignore_newtrees
-            If ``False``, apply rewrites to new nodes introduced during
-            rewriting.
-
+            If ``False``, apply rewrites to new nodes introduced during rewritings.
         tracks_on_change_inputs
             If ``True``, re-apply rewrites on nodes with changed inputs.
+        eq_rewriter_class: EquilibriumGraphRewriter class, optional
+            The class used to create the equilibrium rewriter. Defaults to EquilibriumGraphRewriter.
 
         """
         super().__init__()
@@ -329,6 +332,7 @@ class EquilibriumDB(RewriteDatabase):
         self.tracks_on_change_inputs = tracks_on_change_inputs
         self.__final__: dict[str, bool] = {}
         self.__cleanup__: dict[str, bool] = {}
+        self.eq_rewriter_class = eq_rewriter_class
 
     def register(
         self,
@@ -360,7 +364,7 @@ class EquilibriumDB(RewriteDatabase):
             final_rewriters = None
         if len(cleanup_rewriters) == 0:
             cleanup_rewriters = None
-        return pytensor_rewriting.EquilibriumGraphRewriter(
+        return self.eq_rewriter_class(
             rewriters,
             max_use_ratio=config.optdb__max_use_ratio,
             ignore_newtrees=self.ignore_newtrees,
