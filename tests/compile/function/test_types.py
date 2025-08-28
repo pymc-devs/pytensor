@@ -13,7 +13,7 @@ from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant
-from pytensor.graph.rewriting.basic import OpKeyGraphRewriter, PatternNodeRewriter
+from pytensor.graph.rewriting.basic import PatternNodeRewriter, WalkingGraphRewriter
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.vm import VMLinker
 from pytensor.printing import debugprint
@@ -39,7 +39,7 @@ pytestmark = pytest.mark.filterwarnings("error")
 
 
 def PatternOptimizer(p1, p2, ign=True):
-    return OpKeyGraphRewriter(PatternNodeRewriter(p1, p2), ignore_newtrees=ign)
+    return WalkingGraphRewriter(PatternNodeRewriter(p1, p2), ignore_newtrees=ign)
 
 
 class TestFunction:

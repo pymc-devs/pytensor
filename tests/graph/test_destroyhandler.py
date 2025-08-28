@@ -10,7 +10,6 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
-    OpKeyGraphRewriter,
     PatternNodeRewriter,
     SubstitutionNodeRewriter,
     WalkingGraphRewriter,
@@ -21,7 +20,7 @@ from tests.unittest_tools import assertFailure_fast
 
 
 def OpKeyPatternNodeRewriter(p1, p2, ign=True):
-    return OpKeyGraphRewriter(PatternNodeRewriter(p1, p2), ignore_newtrees=ign)
+    return WalkingGraphRewriter(PatternNodeRewriter(p1, p2), ignore_newtrees=ign)
 
 
 def TopoSubstitutionNodeRewriter(

@@ -1227,7 +1227,7 @@ class ScalarOp(COp):
                     f"Expected a callable for the 'output_types_preference' argument to {self.__class__}. "
                     f"(got: {output_types_preference})"
                 )
-            self.output_types_preference = output_types_preference
+        self.output_types_preference = output_types_preference
 
     def make_node(self, *inputs):
         if self.nin >= 0:
@@ -1247,7 +1247,7 @@ class ScalarOp(COp):
         return Apply(self, inputs, outputs)
 
     def output_types(self, types):
-        if hasattr(self, "output_types_preference"):
+        if self.output_types_preference is not None:
             variables = self.output_types_preference(*types)
             if not isinstance(variables, list | tuple) or any(
                 not isinstance(x, CType) for x in variables
@@ -2696,7 +2696,7 @@ class Sign(UnaryScalarOp):
     nfunc_spec = ("sign", 1, 1)
 
     @staticmethod
-    def output_types_preference(x):
+    def _output_types_preference(x):
         if x == bool:
             raise TypeError(x)
         return same_out_nocomplex(x)
@@ -2737,7 +2737,7 @@ class Sign(UnaryScalarOp):
             return s
 
 
-sign = Sign(name="sign")
+sign = Sign(name="sign", output_types_preference=Sign._output_types_preference)
 
 
 class Ceil(UnaryScalarOp):

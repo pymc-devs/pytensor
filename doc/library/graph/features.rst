@@ -26,7 +26,3 @@ Guide
 .. class:: ReplaceValidate(History, Validator)
 
     .. method:: replace_validate(fgraph, var, new_var, reason=None)
-
-.. class:: NodeFinder(Bookkeeper)
-
-.. class:: PrintListener(object)

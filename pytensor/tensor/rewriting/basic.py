@@ -29,21 +29,20 @@ import numpy as np
 import pytensor.scalar.basic as ps
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
-from pytensor.graph import FunctionGraph
+from pytensor.graph import FunctionGraph, Op
 from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
-    RemovalNodeRewriter,
     Rewriter,
     copy_stack_trace,
     in2out,
     node_rewriter,
 )
 from pytensor.graph.rewriting.db import RewriteDatabase
+from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.npy_2_compat import normalize_axis_index
 from pytensor.raise_op import Assert, CheckAndRaise, assert_op
-from pytensor.scalar.basic import Second
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -226,6 +225,12 @@ def register_uncanonicalize(
         return node_rewriter
 
 
+def elemwise_of(scalar_op) -> OpPattern:
+    if not isinstance(scalar_op, Op | OpPattern):
+        scalar_op = OpPattern(scalar_op)
+    return OpPattern(Elemwise, scalar_op=scalar_op)
+
+
 @register_canonicalize
 @register_specialize
 @node_rewriter([TensorFromScalar])
@@ -325,15 +330,12 @@ def local_elemwise_alloc(fgraph, node):
     return new_outs
 
 
-@node_rewriter([Elemwise])
+@node_rewriter([fill])
 def local_fill_sink(fgraph, node):
     """
     f(fill(a, b), fill(c, d), e) -> fill(c, fill(a, f(b, d, e)))
     f need to be an elemwise that isn't a fill.
     """
-    if isinstance(node.op.scalar_op, Second):
-        return False
-
     models = []
     inputs = []
     for inp in node.inputs:
@@ -654,7 +656,7 @@ def local_alloc_unary(fgraph, node):
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([Elemwise])
+@node_rewriter([elemwise_of(ps.Cast)])
 def local_cast_cast(fgraph, node):
     """cast(cast(x, dtype1), dtype2)
 
@@ -664,8 +666,6 @@ def local_cast_cast(fgraph, node):
           and the first cast cause an upcast.
 
     """
-    if not (isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.Cast)):
-        return
     x = node.inputs[0]
     if not (
         x.owner
@@ -1032,19 +1032,13 @@ def local_useless_switch(fgraph, node):
 
 
 @register_canonicalize
-@node_rewriter([Elemwise])
+@node_rewriter([elemwise_of(ps.BinaryScalarOp | ps.Add | ps.Mul)])
 def local_merge_switch_same_cond(fgraph, node):
     """
     Merge add/sub/mul/div/minimum/maximum/... of switches sharing the same
     condition, to enable further simplification of their branches
     Example: switch(c, a, b) + switch(c, x, y) -> switch(c, a+x, b+y)
     """
-    # node must be binary elemwise or add or mul
-    if not (
-        isinstance(node.op, Elemwise)
-        and isinstance(node.op.scalar_op, ps.BinaryScalarOp | ps.Add | ps.Mul)
-    ):
-        return
     # all inputs must be switch
     if not all(
         s.owner
@@ -1175,10 +1169,9 @@ register_specialize(topo_constant_folding, "fast_compile", final_rewriter=True)
 @register_infer_shape
 @register_canonicalize("fast_compile")
 @register_useless("fast_compile")
-@node_rewriter(None)
+@node_rewriter([ViewOp])
 def local_view_op(fgraph, node):
-    if isinstance(node.op, ViewOp):
-        return node.inputs
+    return node.inputs
 
 
 @register_infer_shape
@@ -1224,7 +1217,10 @@ def local_merge_alloc(fgraph, node):
     return [alloc(inputs_inner[0], *dims_outer)]
 
 
-register_canonicalize(RemovalNodeRewriter(tensor_copy), name="remove_tensor_copy")
+@register_canonicalize
+@node_rewriter(tracks=[tensor_copy])
+def remove_tensor_copy(fgraph, node):
+    return node.inputs
 
 
 @register_specialize
