@@ -360,7 +360,7 @@ class OpPattern:
         return True
 
     def __str__(self):
-        return f"{self.op_type.__name__}({self.op_type}, {', '.join(f'{k}={v}' for k, v in self.parameters)})"
+        return f"OpPattern({self.op_type}, {', '.join(f'{k}={v}' for k, v in self.parameters)})"
 
 
 def _unify_parametrized_op(v: Op, u: OpPattern, s: Mapping):

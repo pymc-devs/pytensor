@@ -1338,9 +1338,9 @@ class AlgebraicCanonizer(NodeRewriter):
 
         return ct + num, denum
 
-    def transform(self, fgraph, node):
+    def transform(self, fgraph, node, enforce_tracks=True):
         op = node.op
-        if op not in [self.main, self.inverse, self.reciprocal]:
+        if enforce_tracks and (op not in {self.main, self.inverse, self.reciprocal}):
             return False
 
         assert len(node.outputs) == 1
