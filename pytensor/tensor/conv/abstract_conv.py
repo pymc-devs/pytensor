@@ -6,17 +6,27 @@ import logging
 import sys
 import warnings
 from math import gcd
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.exceptions import ComplexWarning
 
 
-try:
-    from scipy.signal.signaltools import _bvalfromboundary, _valfrommode, convolve
-    from scipy.signal.sigtools import _convolve2d
-except ImportError:
-    from scipy.signal._signaltools import _bvalfromboundary, _valfrommode, convolve
+if TYPE_CHECKING:
+    # https://github.com/scipy/scipy-stubs/issues/851
+    from scipy.signal._signaltools import (  # type: ignore[attr-defined]
+        _bvalfromboundary,
+        _valfrommode,
+        convolve,
+    )
     from scipy.signal._sigtools import _convolve2d
+else:
+    try:
+        from scipy.signal.signaltools import _bvalfromboundary, _valfrommode, convolve
+        from scipy.signal.sigtools import _convolve2d
+    except ImportError:
+        from scipy.signal._signaltools import _bvalfromboundary, _valfrommode, convolve
+        from scipy.signal._sigtools import _convolve2d
 
 import pytensor
 from pytensor import tensor as pt

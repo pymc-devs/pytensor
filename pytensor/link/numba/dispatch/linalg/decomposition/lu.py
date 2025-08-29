@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import cast as typing_cast
+from typing import Literal
 
 import numpy as np
 from numba import njit as numba_njit
@@ -37,9 +37,9 @@ def _lu_factor_to_lu(a, dtype, overwrite_a):
 
 def _lu_1(
     a: np.ndarray,
-    permute_l: bool,
+    permute_l: Literal[True],
     check_finite: bool,
-    p_indices: bool,
+    p_indices: Literal[False],
     overwrite_a: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -48,23 +48,20 @@ def _lu_1(
     Called when permute_l is True and p_indices is False, and returns a tuple of (perm, L, U), where perm an integer
     array of row swaps, such that L[perm] @ U = A.
     """
-    return typing_cast(
-        tuple[np.ndarray, np.ndarray, np.ndarray],
-        linalg.lu(
-            a,
-            permute_l=permute_l,
-            check_finite=check_finite,
-            p_indices=p_indices,
-            overwrite_a=overwrite_a,
-        ),
+    return linalg.lu(
+        a,
+        permute_l=permute_l,
+        check_finite=check_finite,
+        p_indices=p_indices,
+        overwrite_a=overwrite_a,
     )
 
 
 def _lu_2(
     a: np.ndarray,
-    permute_l: bool,
+    permute_l: Literal[False],
     check_finite: bool,
-    p_indices: bool,
+    p_indices: Literal[True],
     overwrite_a: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -73,23 +70,20 @@ def _lu_2(
     Called when permute_l is False and p_indices is True, and returns a tuple of (PL, U), where PL is the
     permuted L matrix, PL = P @ L.
     """
-    return typing_cast(
-        tuple[np.ndarray, np.ndarray],
-        linalg.lu(
-            a,
-            permute_l=permute_l,
-            check_finite=check_finite,
-            p_indices=p_indices,
-            overwrite_a=overwrite_a,
-        ),
+    return linalg.lu(
+        a,
+        permute_l=permute_l,
+        check_finite=check_finite,
+        p_indices=p_indices,
+        overwrite_a=overwrite_a,
     )
 
 
 def _lu_3(
     a: np.ndarray,
-    permute_l: bool,
+    permute_l: Literal[False],
     check_finite: bool,
-    p_indices: bool,
+    p_indices: Literal[False],
     overwrite_a: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -98,15 +92,12 @@ def _lu_3(
     Called when permute_l is False and p_indices is False, and returns a tuple of (P, L, U), where P is the permutation
     matrix, P @ L @ U = A.
     """
-    return typing_cast(
-        tuple[np.ndarray, np.ndarray, np.ndarray],
-        linalg.lu(
-            a,
-            permute_l=permute_l,
-            check_finite=check_finite,
-            p_indices=p_indices,
-            overwrite_a=overwrite_a,
-        ),
+    return linalg.lu(
+        a,
+        permute_l=permute_l,
+        check_finite=check_finite,
+        p_indices=p_indices,
+        overwrite_a=overwrite_a,
     )
 
 

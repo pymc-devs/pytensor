@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Literal, TypeAlias
 
 import numpy as np
 from numba.core.extending import overload
@@ -20,8 +21,15 @@ from pytensor.link.numba.dispatch.linalg.utils import (
 )
 
 
+_Trans: TypeAlias = Literal[0, 1, 2]
+
+
 def _getrs(
-    LU: np.ndarray, B: np.ndarray, IPIV: np.ndarray, trans: int, overwrite_b: bool
+    LU: np.ndarray,
+    B: np.ndarray,
+    IPIV: np.ndarray,
+    trans: _Trans | bool,  # mypy does not realize that `bool <: Literal[0, 1]`
+    overwrite_b: bool,
 ) -> tuple[np.ndarray, int]:
     """
     Placeholder for solving a linear system with a matrix that has been LU-factored. Used by linalg.lu_solve.
@@ -31,8 +39,10 @@ def _getrs(
 
 @overload(_getrs)
 def getrs_impl(
-    LU: np.ndarray, B: np.ndarray, IPIV: np.ndarray, trans: int, overwrite_b: bool
-) -> Callable[[np.ndarray, np.ndarray, np.ndarray, int, bool], tuple[np.ndarray, int]]:
+    LU: np.ndarray, B: np.ndarray, IPIV: np.ndarray, trans: _Trans, overwrite_b: bool
+) -> Callable[
+    [np.ndarray, np.ndarray, np.ndarray, _Trans, bool], tuple[np.ndarray, int]
+]:
     ensure_lapack()
     _check_scipy_linalg_matrix(LU, "getrs")
     _check_scipy_linalg_matrix(B, "getrs")
@@ -41,7 +51,11 @@ def getrs_impl(
     numba_getrs = _LAPACK().numba_xgetrs(dtype)
 
     def impl(
-        LU: np.ndarray, B: np.ndarray, IPIV: np.ndarray, trans: int, overwrite_b: bool
+        LU: np.ndarray,
+        B: np.ndarray,
+        IPIV: np.ndarray,
+        trans: _Trans,
+        overwrite_b: bool,
     ) -> tuple[np.ndarray, int]:
         _N = np.int32(LU.shape[-1])
         _solve_check_input_shapes(LU, B)
@@ -89,7 +103,7 @@ def getrs_impl(
 def _lu_solve(
     lu_and_piv: tuple[np.ndarray, np.ndarray],
     b: np.ndarray,
-    trans: int,
+    trans: _Trans,
     overwrite_b: bool,
     check_finite: bool,
 ):
@@ -105,10 +119,10 @@ def _lu_solve(
 def lu_solve_impl(
     lu_and_piv: tuple[np.ndarray, np.ndarray],
     b: np.ndarray,
-    trans: int,
+    trans: _Trans,
     overwrite_b: bool,
     check_finite: bool,
-) -> Callable[[np.ndarray, np.ndarray, np.ndarray, bool, bool, bool], np.ndarray]:
+) -> Callable[[np.ndarray, np.ndarray, np.ndarray, _Trans, bool, bool], np.ndarray]:
     ensure_lapack()
     _check_scipy_linalg_matrix(lu_and_piv[0], "lu_solve")
     _check_scipy_linalg_matrix(b, "lu_solve")
@@ -117,7 +131,7 @@ def lu_solve_impl(
         lu: np.ndarray,
         piv: np.ndarray,
         b: np.ndarray,
-        trans: int,
+        trans: _Trans,
         overwrite_b: bool,
         check_finite: bool,
     ) -> np.ndarray:
