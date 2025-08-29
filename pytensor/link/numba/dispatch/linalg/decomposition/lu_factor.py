@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import cast as typing_cast
 
 import numpy as np
 from numba.core.extending import overload
@@ -21,8 +22,13 @@ def _getrf(A, overwrite_a=False) -> tuple[np.ndarray, np.ndarray, int]:
     Underlying LAPACK function used for LU factorization. Compared to scipy.linalg.lu_factorize, this function also
     returns an info code with diagnostic information.
     """
-    (getrf,) = linalg.get_lapack_funcs("getrf", (A,))
-    A_copy, ipiv, info = getrf(A, overwrite_a=overwrite_a)
+    funcs = linalg.get_lapack_funcs("getrf", (A,))
+    assert isinstance(funcs, list)  # narrows `funcs: list[F] | F` to `funcs: list[F]`
+    getrf = funcs[0]
+
+    A_copy, ipiv, info = typing_cast(
+        tuple[np.ndarray, np.ndarray, int], getrf(A, overwrite_a=overwrite_a)
+    )
 
     return A_copy, ipiv, info
 

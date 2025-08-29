@@ -109,7 +109,7 @@ def safe_new(
         except TestValueError:
             pass
 
-    return nw_x
+    return type_cast(Variable, nw_x)
 
 
 class until:
