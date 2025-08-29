@@ -35,6 +35,7 @@ from pytensor.graph.rewriting.basic import (
     NodeRewriter,
     Rewriter,
     copy_stack_trace,
+    dfs_rewriter,
     in2out,
     node_rewriter,
 )
@@ -538,7 +539,7 @@ def local_alloc_empty_to_zeros(fgraph, node):
 
 compile.optdb.register(
     "local_alloc_empty_to_zeros",
-    in2out(local_alloc_empty_to_zeros),
+    dfs_rewriter(local_alloc_empty_to_zeros),
     # After move to gpu and merge2, before inplace.
     "alloc_empty_to_zeros",
     position=49.3,

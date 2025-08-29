@@ -10,9 +10,9 @@ from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
     copy_stack_trace,
+    dfs_rewriter,
     in2out,
     node_rewriter,
-    out2in,
 )
 from pytensor.raise_op import Assert
 from pytensor.scalar import Add, ScalarConstant, ScalarType
@@ -1560,7 +1560,7 @@ def local_uint_constant_indices(fgraph, node):
 
 compile.optdb.register(
     local_uint_constant_indices.__name__,
-    out2in(local_uint_constant_indices),
+    dfs_rewriter(local_uint_constant_indices),
     # We don't include in the Python / C because those always cast indices to int64 internally.
     "numba",
     "jax",

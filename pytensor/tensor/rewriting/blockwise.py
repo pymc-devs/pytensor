@@ -2,7 +2,7 @@ from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, Op, node_rewriter
 from pytensor.graph.destroyhandler import inplace_candidates
 from pytensor.graph.replace import vectorize_node
-from pytensor.graph.rewriting.basic import copy_stack_trace, out2in
+from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.graph.rewriting.unify import OpPattern, OpPatternOpTypeType
 from pytensor.tensor.basic import Alloc, ARange, alloc, shape_padleft
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
@@ -66,7 +66,7 @@ def local_useless_unbatched_blockwise(fgraph, node):
 # We do it after position>=60 so that Blockwise inplace rewrites will work also on useless Blockwise Ops
 optdb.register(
     "local_useless_unbatched_blockwise",
-    out2in(local_useless_unbatched_blockwise, ignore_newtrees=True),
+    dfs_rewriter(local_useless_unbatched_blockwise, ignore_newtrees=True),
     "fast_run",
     "fast_compile",
     "blockwise",
