@@ -4,7 +4,7 @@ from pytensor import Variable, clone_replace
 from pytensor.compile import optdb
 from pytensor.compile.builders import OpFromGraph
 from pytensor.graph import Apply, node_rewriter
-from pytensor.graph.rewriting.basic import copy_stack_trace, in2out
+from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.tensor.basic import AllocDiag
 from pytensor.tensor.rewriting.basic import register_specialize
 
@@ -37,7 +37,7 @@ def inline_ofg_expansion(fgraph, node):
 # and before the first scan optimizer.
 optdb.register(
     "inline_ofg_expansion",
-    in2out(inline_ofg_expansion),
+    dfs_rewriter(inline_ofg_expansion),
     "fast_compile",
     "fast_run",
     position=-0.01,

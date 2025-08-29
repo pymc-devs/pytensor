@@ -77,7 +77,7 @@ from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
     GraphRewriter,
     copy_stack_trace,
-    in2out,
+    dfs_rewriter,
     node_rewriter,
 )
 from pytensor.graph.rewriting.db import SequenceDB
@@ -721,7 +721,7 @@ optdb.register("BlasOpt", blas_optdb, "fast_run", "fast_compile", position=1.7)
 # fast_compile is needed to have GpuDot22 created.
 blas_optdb.register(
     "local_dot_to_dot22",
-    in2out(local_dot_to_dot22),
+    dfs_rewriter(local_dot_to_dot22),
     "fast_run",
     "fast_compile",
     position=0,
@@ -744,7 +744,7 @@ blas_optdb.register(
 )
 
 
-blas_opt_inplace = in2out(
+blas_opt_inplace = dfs_rewriter(
     local_inplace_gemm, local_inplace_gemv, local_inplace_ger, name="blas_opt_inplace"
 )
 optdb.register(
@@ -883,7 +883,7 @@ def local_dot22_to_dot22scalar(fgraph, node):
 # dot22scalar and gemm give more speed up then dot22scalar
 blas_optdb.register(
     "local_dot22_to_dot22scalar",
-    in2out(local_dot22_to_dot22scalar),
+    dfs_rewriter(local_dot22_to_dot22scalar),
     "fast_run",
     position=12,
 )
