@@ -65,10 +65,10 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
         # [Blockwise{SVD{full_matrices=True, compute_uv=True}, (m,n)->(m,m),(k),(n,n)}].2 [id A] 6
         #  └─ ···
     """
-    op: Blockwise = node.op  # type: ignore[annotation-unchecked]
+    op: Blockwise = node.op
     batch_ndim = op.batch_ndim(node)
 
-    shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)  # type: ignore[annotation-unchecked]
+    shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
     if shape_feature:
         core_shapes = [
             [shape_feature.get_shape(out, i) for i in range(batch_ndim, out.type.ndim)]

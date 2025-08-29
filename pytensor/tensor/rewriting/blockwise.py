@@ -102,7 +102,7 @@ def local_blockwise_alloc(fgraph, node):
     This is critical to remove many unnecessary Blockwise, or to reduce the work done by it
     """
 
-    op: Blockwise = node.op  # type: ignore
+    op: Blockwise = node.op
 
     batch_ndim = op.batch_ndim(node)
     if not batch_ndim:
