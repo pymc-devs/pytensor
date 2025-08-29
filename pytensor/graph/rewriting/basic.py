@@ -27,7 +27,12 @@ from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.unify import Var, convert_strs_to_vars
-from pytensor.graph.traversal import apply_toposort, applys_between, vars_between
+from pytensor.graph.traversal import (
+    apply_ancestors,
+    apply_toposort,
+    applys_between,
+    vars_between,
+)
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 from pytensor.utils import flatten
@@ -1819,12 +1824,13 @@ class WalkingGraphRewriter(NodeProcessingGraphRewriter):
     def __init__(
         self,
         node_rewriter: NodeRewriter,
-        order: Literal["out_to_in", "in_to_out"] = "in_to_out",
+        order: Literal["out_to_in", "in_to_out", "bfs"] = "in_to_out",
         ignore_newtrees: bool = False,
         failure_callback: FailureCallbackType | None = None,
     ):
-        if order not in ("out_to_in", "in_to_out"):
-            raise ValueError("order must be 'out_to_in' or 'in_to_out'")
+        valid_orders = ("out_to_in", "in_to_out", "bfs")
+        if order not in valid_orders:
+            raise ValueError(f"order must be one of {valid_orders}, got {order}")
         self.order = order
         super().__init__(node_rewriter, ignore_newtrees, failure_callback)
 
@@ -1834,7 +1840,10 @@ class WalkingGraphRewriter(NodeProcessingGraphRewriter):
         callback_before = fgraph.execute_callbacks_time
         nb_nodes_start = len(fgraph.apply_nodes)
         t0 = time.perf_counter()
-        q = deque(apply_toposort(o.owner for o in start_from))
+        if self.order == "bfs":
+            q = deque(apply_ancestors(o.owner for o in start_from))
+        else:
+            q = deque(apply_toposort(o.owner for o in start_from))
         io_t = time.perf_counter() - t0
 
         def importer(node):
@@ -1957,6 +1966,7 @@ def walking_rewriter(
 
 in2out = partial(walking_rewriter, "in_to_out")
 out2in = partial(walking_rewriter, "out_to_in")
+bfs_rewriter = partial(walking_rewriter, "bfs")
 
 
 class ChangeTracker(Feature):

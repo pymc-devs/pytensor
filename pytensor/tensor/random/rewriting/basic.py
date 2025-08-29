@@ -4,7 +4,11 @@ from pytensor.compile import optdb
 from pytensor.configdefaults import config
 from pytensor.graph import ancestors
 from pytensor.graph.op import compute_test_value
-from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, node_rewriter
+from pytensor.graph.rewriting.basic import (
+    bfs_rewriter,
+    copy_stack_trace,
+    node_rewriter,
+)
 from pytensor.tensor import NoneConst, TensorVariable
 from pytensor.tensor.basic import constant
 from pytensor.tensor.elemwise import DimShuffle
@@ -57,7 +61,7 @@ def random_make_inplace(fgraph, node):
 
 optdb.register(
     "random_make_inplace",
-    in2out(random_make_inplace, ignore_newtrees=True),
+    bfs_rewriter(random_make_inplace, ignore_newtrees=True),
     "fast_run",
     "inplace",
     position=50.9,

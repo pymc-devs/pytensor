@@ -2,7 +2,7 @@ import typing
 from collections.abc import Sequence
 
 from pytensor.compile import optdb
-from pytensor.graph.rewriting.basic import NodeRewriter, in2out
+from pytensor.graph.rewriting.basic import NodeRewriter, bfs_rewriter
 from pytensor.graph.rewriting.db import EquilibriumDB, RewriteDatabase
 from pytensor.tensor.rewriting.ofg import inline_ofg_expansion
 from pytensor.tensor.variable import TensorVariable
@@ -23,7 +23,7 @@ optdb.register(
 # Register OFG inline again after lowering xtensor
 optdb.register(
     "inline_ofg_expansion_xtensor",
-    in2out(inline_ofg_expansion),
+    bfs_rewriter(inline_ofg_expansion),
     "fast_run",
     "fast_compile",
     position=0.11,

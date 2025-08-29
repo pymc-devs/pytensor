@@ -22,6 +22,7 @@ from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import (
     SequentialNodeRewriter,
     WalkingGraphRewriter,
+    bfs_rewriter,
     check_stack_trace,
     in2out,
     out2in,
@@ -995,7 +996,7 @@ class TestAlgebraicCanonizer:
         ).outputs[0]
 
         z_rewritten = rewrite_graph(
-            z, custom_rewrite=in2out(local_mul_canonizer, name="blah")
+            z, custom_rewrite=bfs_rewriter(local_mul_canonizer, name="blah")
         )
         # No rewrite was applied
         assert z_rewritten is z

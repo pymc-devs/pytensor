@@ -20,6 +20,7 @@ from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
+    bfs_rewriter,
     copy_stack_trace,
     in2out,
     node_rewriter,
@@ -1242,21 +1243,21 @@ fuse_seqopt.register(
 )
 fuse_seqopt.register(
     "local_useless_composite_outputs",
-    in2out(local_useless_composite_outputs),
+    bfs_rewriter(local_useless_composite_outputs),
     "fast_run",
     "fusion",
     position=2,
 )
 fuse_seqopt.register(
     "local_careduce_fusion",
-    in2out(local_careduce_fusion),
+    bfs_rewriter(local_careduce_fusion),
     "fast_run",
     "fusion",
     position=10,
 )
 fuse_seqopt.register(
     "local_inline_composite_constants",
-    in2out(local_inline_composite_constants, ignore_newtrees=True),
+    bfs_rewriter(local_inline_composite_constants, ignore_newtrees=True),
     "fast_run",
     "fusion",
     position=20,

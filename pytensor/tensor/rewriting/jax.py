@@ -1,6 +1,6 @@
 import pytensor.tensor as pt
 from pytensor.compile import optdb
-from pytensor.graph.rewriting.basic import in2out, node_rewriter
+from pytensor.graph.rewriting.basic import bfs_rewriter, node_rewriter
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum
@@ -46,7 +46,7 @@ def boolean_indexing_set_or_inc(fgraph, node):
 
 optdb.register(
     "jax_boolean_indexing_set_or_inc",
-    in2out(boolean_indexing_set_or_inc),
+    bfs_rewriter(boolean_indexing_set_or_inc),
     "jax",
     position=100,
 )
@@ -96,7 +96,7 @@ def boolean_indexing_sum(fgraph, node):
 
 
 optdb.register(
-    "jax_boolean_indexing_sum", in2out(boolean_indexing_sum), "jax", position=100
+    "jax_boolean_indexing_sum", bfs_rewriter(boolean_indexing_sum), "jax", position=100
 )
 
 
@@ -144,7 +144,7 @@ def shape_parameter_as_tuple(fgraph, node):
 
 optdb.register(
     "jax_shape_parameter_as_tuple",
-    in2out(shape_parameter_as_tuple),
+    bfs_rewriter(shape_parameter_as_tuple),
     "jax",
     position=100,
 )
