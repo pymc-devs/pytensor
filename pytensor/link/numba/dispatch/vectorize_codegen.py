@@ -517,9 +517,9 @@ def make_loop_call(
     output_slices = []
     for output, output_type, bc in zip(outputs, output_types, output_bc, strict=True):
         core_ndim = output_type.ndim - len(bc)
-        size_type = output.shape.type.element  # type: ignore
-        output_shape = cgutils.unpack_tuple(builder, output.shape)  # type: ignore
-        output_strides = cgutils.unpack_tuple(builder, output.strides)  # type: ignore
+        size_type = output.shape.type.element  # pyright: ignore[reportAttributeAccessIssue]
+        output_shape = cgutils.unpack_tuple(builder, output.shape)  # pyright: ignore[reportAttributeAccessIssue]
+        output_strides = cgutils.unpack_tuple(builder, output.strides)  # pyright: ignore[reportAttributeAccessIssue]
 
         idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)] + [
             zero
@@ -527,7 +527,7 @@ def make_loop_call(
         ptr = cgutils.get_item_pointer2(
             context,
             builder,
-            output.data,  # type:ignore
+            output.data,
             output_shape,
             output_strides,
             output_type.layout,
