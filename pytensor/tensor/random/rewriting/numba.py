@@ -53,10 +53,10 @@ def introduce_explicit_core_shape_rv(fgraph, node):
             #  ← dirichlet_rv{"(a)->(a)"}.1 [id F]
             #     └─ ···
     """
-    op: RandomVariable = node.op  # type: ignore[annotation-unchecked]
+    op: RandomVariable = node.op
 
     next_rng, rv = node.outputs
-    shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)  # type: ignore[annotation-unchecked]
+    shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
     if shape_feature:
         core_shape = [
             shape_feature.get_shape(rv, -i - 1) for i in reversed(range(op.ndim_supp))
