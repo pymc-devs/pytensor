@@ -584,11 +584,6 @@ def test_apply_depends_on():
     assert apply_depends_on(o3.owner, [o1.owner, o2.owner])
 
 
-@pytest.mark.xfail(reason="Not implemented")
-def test_io_connection_pattern():
-    raise AssertionError()
-
-
 def test_get_var_by_name():
     r1, r2, r3 = MyVariable(1), MyVariable(2), MyVariable(3)
     o1 = MyOp(r1, r2)
