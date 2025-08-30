@@ -4,13 +4,14 @@ import scipy.special
 
 import pytensor.tensor as pt
 from pytensor import config, function, shared
-from pytensor.graph.basic import equal_computations, graph_inputs
+from pytensor.graph.basic import equal_computations
 from pytensor.graph.replace import (
     clone_replace,
     graph_replace,
     vectorize_graph,
     vectorize_node,
 )
+from pytensor.graph.traversal import graph_inputs
 from pytensor.tensor import dvector, fvector, vector
 from tests import unittest_tools as utt
 from tests.graph.utils import MyOp, MyVariable, op_multiple_outputs

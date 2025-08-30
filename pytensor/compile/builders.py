@@ -16,12 +16,12 @@ from pytensor.graph.basic import (
     Constant,
     NominalVariable,
     Variable,
-    graph_inputs,
 )
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
+from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
 
 

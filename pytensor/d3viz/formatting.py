@@ -10,8 +10,9 @@ import numpy as np
 
 import pytensor
 from pytensor.compile import Function, builders
-from pytensor.graph.basic import Apply, Constant, Variable, graph_inputs
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.traversal import graph_inputs
 from pytensor.printing import _try_pydot_import
 
 

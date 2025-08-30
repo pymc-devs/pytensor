@@ -7,11 +7,10 @@ from pytensor.graph.basic import (
     Apply,
     Constant,
     Variable,
-    io_toposort,
-    truncated_graph_inputs,
 )
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
+from pytensor.graph.traversal import io_toposort, truncated_graph_inputs
 
 
 ReplaceTypes = Iterable[tuple[Variable, Variable]] | dict[Variable, Variable]

@@ -8,7 +8,7 @@ from pytensor import config
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import FunctionGraph
-from pytensor.graph.basic import Apply, Constant, explicit_graph_inputs
+from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
 from pytensor.graph.replace import (
@@ -16,6 +16,7 @@ from pytensor.graph.replace import (
     _vectorize_not_needed,
     vectorize_graph,
 )
+from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.link.c.op import COp
 from pytensor.scalar import ScalarType
 from pytensor.tensor import as_tensor_variable
