@@ -27,11 +27,12 @@ from pytensor.compile.monitormode import MonitorMode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, Rop, disconnected_grad, grad, hessian
-from pytensor.graph import vectorize_graph
-from pytensor.graph.basic import Apply, ancestors, equal_computations
+from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
+from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import MergeOptimizer
+from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import MissingInputError
 from pytensor.raise_op import assert_op
 from pytensor.scan.basic import scan

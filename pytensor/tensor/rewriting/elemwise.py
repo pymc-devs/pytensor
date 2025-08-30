@@ -13,11 +13,11 @@ from pytensor import clone_replace, compile
 from pytensor.compile.function.types import Supervisor
 from pytensor.compile.mode import get_target_language
 from pytensor.configdefaults import config
-from pytensor.graph import FunctionGraph, Op
-from pytensor.graph.basic import Apply, Variable, ancestors
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.fg import Output
+from pytensor.graph.fg import FunctionGraph, Output
+from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
     copy_stack_trace,
@@ -27,6 +27,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
+from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import (

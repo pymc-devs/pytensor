@@ -19,9 +19,10 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, grad, numeric_grad
-from pytensor.graph.basic import Variable, ancestors, applys_between, equal_computations
+from pytensor.graph.basic import Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
+from pytensor.graph.traversal import ancestors, applys_between
 from pytensor.link.c.basic import DualLinker
 from pytensor.npy_2_compat import using_numpy_2
 from pytensor.printing import pprint

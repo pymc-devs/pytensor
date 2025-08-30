@@ -27,11 +27,12 @@ from pytensor.compile.function.types import (
 from pytensor.compile.mode import Mode, register_mode
 from pytensor.compile.ops import OutputGuard, _output_guard
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Variable, io_toposort
+from pytensor.graph.basic import Variable
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import AlreadyThere, BadOptimization
 from pytensor.graph.fg import Output
 from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.traversal import io_toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.link.basic import Container, LocalLinker
 from pytensor.link.c.op import COp

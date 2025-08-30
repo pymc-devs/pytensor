@@ -12,8 +12,9 @@ from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph, vectorize_graph
-from pytensor.graph.basic import Constant, Variable, ancestors, equal_computations
+from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.graph.traversal import ancestors
 from pytensor.raise_op import Assert
 from pytensor.tensor.basic import Alloc, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise

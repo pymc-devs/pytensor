@@ -1,7 +1,7 @@
 from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
-from pytensor.graph.basic import applys_between
 from pytensor.graph.rewriting.basic import out2in
+from pytensor.graph.traversal import applys_between
 from pytensor.tensor.basic import as_tensor, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.rewriting.shape import ShapeFeature

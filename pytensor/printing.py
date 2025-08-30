@@ -18,9 +18,10 @@ from pytensor.compile import Function, SharedVariable
 from pytensor.compile.io import In, Out
 from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Constant, Variable, graph_inputs, io_toposort
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph, Op, StorageMapType
+from pytensor.graph.traversal import graph_inputs, io_toposort
 from pytensor.graph.utils import Scratchpad
 
 

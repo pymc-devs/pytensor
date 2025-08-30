@@ -7,7 +7,7 @@ import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Constant, Variable, ancestors, equal_computations
+from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import (
@@ -15,6 +15,7 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
+from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import InconsistencyError, get_variable_trace_string
 from pytensor.scalar import ScalarType
 from pytensor.tensor.basic import (
