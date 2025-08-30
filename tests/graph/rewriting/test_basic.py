@@ -12,7 +12,7 @@ from pytensor.graph.rewriting.basic import (
     PatternNodeRewriter,
     SequentialNodeRewriter,
     WalkingGraphRewriter,
-    in2out,
+    bfs_rewriter,
     logging,
     node_rewriter,
     pre_constant_merge,
@@ -716,7 +716,7 @@ def test_patternsub_multi_output_nodes():
         name="ps",
     )
 
-    rewriter = in2out(multiple_op_ps, single_op_ps)
+    rewriter = bfs_rewriter(multiple_op_ps, single_op_ps)
 
     x = MyVariable("x")
     e1, e2 = op_multiple_outputs(x)

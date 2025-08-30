@@ -3,7 +3,7 @@ from copy import copy
 
 from pytensor.compile import optdb
 from pytensor.graph import Constant, graph_inputs
-from pytensor.graph.rewriting.basic import copy_stack_trace, in2out, node_rewriter
+from pytensor.graph.rewriting.basic import bfs_rewriter, copy_stack_trace, node_rewriter
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
 from pytensor.tensor._linalg.solve.tridiagonal import (
@@ -243,7 +243,7 @@ def scan_split_non_sequence_decomposition_and_solve(fgraph, node):
 
 scan_seqopt1.register(
     scan_split_non_sequence_decomposition_and_solve.__name__,
-    in2out(scan_split_non_sequence_decomposition_and_solve, ignore_newtrees=True),
+    bfs_rewriter(scan_split_non_sequence_decomposition_and_solve, ignore_newtrees=True),
     "fast_run",
     "scan",
     "scan_pushout",
@@ -260,7 +260,7 @@ def reuse_decomposition_multiple_solves_jax(fgraph, node):
 
 optdb["specialize"].register(
     reuse_decomposition_multiple_solves_jax.__name__,
-    in2out(reuse_decomposition_multiple_solves_jax, ignore_newtrees=True),
+    bfs_rewriter(reuse_decomposition_multiple_solves_jax, ignore_newtrees=True),
     "jax",
     use_db_name_as_tag=False,
 )
@@ -275,7 +275,9 @@ def scan_split_non_sequence_decomposition_and_solve_jax(fgraph, node):
 
 scan_seqopt1.register(
     scan_split_non_sequence_decomposition_and_solve_jax.__name__,
-    in2out(scan_split_non_sequence_decomposition_and_solve_jax, ignore_newtrees=True),
+    bfs_rewriter(
+        scan_split_non_sequence_decomposition_and_solve_jax, ignore_newtrees=True
+    ),
     "jax",
     use_db_name_as_tag=False,
     position=2,

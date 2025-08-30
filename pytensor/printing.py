@@ -18,9 +18,10 @@ from pytensor.compile import Function, SharedVariable
 from pytensor.compile.io import In, Out
 from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Constant, Variable, graph_inputs, io_toposort
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph, Op, StorageMapType
+from pytensor.graph.traversal import graph_inputs, variable_toposort
 from pytensor.graph.utils import Scratchpad
 
 
@@ -1102,7 +1103,9 @@ class PPrinter(Printer):
         )
         inv_updates = {b: a for (a, b) in updates.items()}
         i = 1
-        for node in io_toposort([*inputs, *updates], [*outputs, *updates.values()]):
+        for node in variable_toposort(
+            [*outputs, *updates.values()], [*inputs, *updates]
+        ):
             for output in node.outputs:
                 if output in inv_updates:
                     name = str(inv_updates[output])

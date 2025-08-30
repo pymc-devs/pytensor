@@ -11,17 +11,19 @@ from pytensor.graph.basic import (
     Apply,
     AtomicVariable,
     Variable,
-    applys_between,
     clone_get_equiv,
-    graph_inputs,
-    io_toposort,
-    vars_between,
 )
 from pytensor.graph.basic import as_string as graph_as_string
 from pytensor.graph.features import AlreadyThere, Feature, ReplaceValidate
 from pytensor.graph.op import Op
+from pytensor.graph.traversal import (
+    apply_toposort,
+    applys_between,
+    graph_inputs,
+    variable_toposort,
+    vars_between,
+)
 from pytensor.graph.utils import MetaObject, MissingInputError, TestValueError
-from pytensor.misc.ordered_set import OrderedSet
 
 
 ClientType = tuple[Apply, int]
@@ -130,7 +132,6 @@ class FunctionGraph(MetaObject):
             features = []
 
         self._features: list[Feature] = []
-
         # All apply nodes in the subgraph defined by inputs and
         # outputs are cached in this field
         self.apply_nodes: set[Apply] = set()
@@ -353,21 +354,16 @@ class FunctionGraph(MetaObject):
         apply_node : Apply
             The node to be imported.
         check : bool
-            Check that the inputs for the imported nodes are also present in
-            the `FunctionGraph`.
+            Check that the inputs for the imported nodes are also present in the `FunctionGraph`.
         reason : str
             The name of the optimization or operation in progress.
         import_missing : bool
             Add missing inputs instead of raising an exception.
         """
         # We import the nodes in topological order. We only are interested in
-        # new nodes, so we use all variables we know of as if they were the
-        # input set.  (The functions in the graph module only use the input set
-        # to know where to stop going down.)
-        new_nodes = io_toposort(self.variables, apply_node.outputs)
-
-        if check:
-            for node in new_nodes:
+        # new nodes, so we use all nodes we know of as inputs to interrupt the toposort
+        for node in apply_toposort([apply_node], blockers=self.apply_nodes):
+            if check:
                 for var in node.inputs:
                     if (
                         var.owner is None
@@ -387,8 +383,6 @@ class FunctionGraph(MetaObject):
                             )
                             raise MissingInputError(error_msg, variable=var)
 
-        for node in new_nodes:
-            assert node not in self.apply_nodes
             self.apply_nodes.add(node)
             if not hasattr(node.tag, "imported_by"):
                 node.tag.imported_by = []
@@ -753,11 +747,11 @@ class FunctionGraph(MetaObject):
           :meth:`FunctionGraph.orderings`.
 
         """
-        if len(self.apply_nodes) < 2:
-            # No sorting is necessary
-            return list(self.apply_nodes)
-
-        return io_toposort(self.inputs, self.outputs, self.orderings())
+        if orderings := self.orderings():
+            return list(variable_toposort(self.outputs, self.inputs, orderings))
+        else:
+            # Faster implementation when no orderings are needed
+            return list(apply_toposort(o.owner for o in self.outputs))
 
     def orderings(self) -> dict[Apply, list[Apply]]:
         """Return a map of node to node evaluation dependencies.
@@ -776,29 +770,16 @@ class FunctionGraph(MetaObject):
         take care of computing the dependencies by itself.
 
         """
-        assert isinstance(self._features, list)
         all_orderings: list[dict] = []
 
         for feature in self._features:
             if hasattr(feature, "orderings"):
-                orderings = feature.orderings(self)
-                if not isinstance(orderings, dict):
-                    raise TypeError(
-                        "Non-deterministic return value from "
-                        + str(feature.orderings)
-                        + ". Nondeterministic object is "
-                        + str(orderings)
-                    )
-                if len(orderings) > 0:
+                if orderings := feature.orderings(self):
                     all_orderings.append(orderings)
-                    for node, prereqs in orderings.items():
-                        if not isinstance(prereqs, list | OrderedSet):
-                            raise TypeError(
-                                "prereqs must be a type with a "
-                                "deterministic iteration order, or toposort "
-                                " will be non-deterministic."
-                            )
-        if len(all_orderings) == 1:
+
+        if not all_orderings:
+            return {}
+        elif len(all_orderings) == 1:
             # If there is only 1 ordering, we reuse it directly.
             return all_orderings[0].copy()
         else:

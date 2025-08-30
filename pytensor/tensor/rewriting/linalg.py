@@ -9,8 +9,8 @@ from pytensor import tensor as pt
 from pytensor.compile import optdb
 from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
+    bfs_rewriter,
     copy_stack_trace,
-    in2out,
     node_rewriter,
 )
 from pytensor.scalar.basic import Abs, Log, Mul, Sign
@@ -952,7 +952,7 @@ def jax_bilinaer_lyapunov_to_direct(fgraph: FunctionGraph, node: Apply):
 
 optdb.register(
     "jax_bilinaer_lyapunov_to_direct",
-    in2out(jax_bilinaer_lyapunov_to_direct),
+    bfs_rewriter(jax_bilinaer_lyapunov_to_direct),
     "jax",
     position=0.9,  # Run before canonicalization
 )

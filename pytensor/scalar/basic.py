@@ -24,10 +24,11 @@ import pytensor
 from pytensor import printing
 from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, grad_undefined
-from pytensor.graph.basic import Apply, Constant, Variable, applys_between, clone
+from pytensor.graph.basic import Apply, Constant, Variable, clone
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph
 from pytensor.graph.rewriting.basic import MergeOptimizer
+from pytensor.graph.traversal import applys_between
 from pytensor.graph.type import HasDataType, HasShape
 from pytensor.graph.utils import MetaObject, MethodNotDefined
 from pytensor.link.c.op import COp

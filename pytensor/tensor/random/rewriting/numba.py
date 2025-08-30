@@ -1,6 +1,6 @@
 from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
-from pytensor.graph.rewriting.basic import out2in
+from pytensor.graph.rewriting.basic import bfs_rewriter
 from pytensor.tensor import as_tensor, constant
 from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
 from pytensor.tensor.rewriting.shape import ShapeFeature
@@ -82,7 +82,7 @@ def introduce_explicit_core_shape_rv(fgraph, node):
 
 optdb.register(
     introduce_explicit_core_shape_rv.__name__,
-    out2in(introduce_explicit_core_shape_rv),
+    bfs_rewriter(introduce_explicit_core_shape_rv),
     "numba",
     position=100,
 )

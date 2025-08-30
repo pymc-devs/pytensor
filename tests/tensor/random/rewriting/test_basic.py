@@ -7,10 +7,11 @@ import pytensor.tensor as pt
 from pytensor import config, shared
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
-from pytensor.graph.basic import Constant, Variable, ancestors
+from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter, check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.traversal import ancestors
 from pytensor.tensor import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.random.basic import (

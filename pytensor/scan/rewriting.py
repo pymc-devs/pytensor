@@ -18,11 +18,7 @@ from pytensor.graph.basic import (
     Constant,
     NominalVariable,
     Variable,
-    ancestors,
-    apply_depends_on,
     equal_computations,
-    graph_inputs,
-    io_toposort,
 )
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import ReplaceValidate
@@ -31,12 +27,17 @@ from pytensor.graph.op import compute_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
+    bfs_rewriter,
     copy_stack_trace,
-    in2out,
     node_rewriter,
 )
 from pytensor.graph.rewriting.db import EquilibriumDB, SequenceDB
 from pytensor.graph.rewriting.utils import get_clients_at_depth
+from pytensor.graph.traversal import (
+    ancestors,
+    apply_depends_on,
+    graph_inputs,
+)
 from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError
 from pytensor.raise_op import Assert
@@ -219,12 +220,9 @@ def scan_push_out_non_seq(fgraph, node):
     it to the outer function to be executed only once, before the `Scan` `Op`,
     reduces the amount of computation that needs to be performed.
     """
-    if not isinstance(node.op, Scan):
-        return False
-
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
-    local_fgraph_topo = io_toposort(node_inputs, node_outputs)
+    local_fgraph_topo = node.op.fgraph.toposort()
     local_fgraph_outs_set = set(node_outputs)
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
@@ -429,12 +427,9 @@ def scan_push_out_seq(fgraph, node):
     many times on many smaller tensors. In many cases, this optimization can
     increase memory usage but, in some specific cases, it can also decrease it.
     """
-    if not isinstance(node.op, Scan):
-        return False
-
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
-    local_fgraph_topo = io_toposort(node_inputs, node_outputs)
+    local_fgraph_topo = node.op.fgraph.toposort()
     local_fgraph_outs_set = set(node_outputs)
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
@@ -846,10 +841,8 @@ def scan_push_out_add(fgraph, node):
         node.inputs, node.outputs, op.inner_inputs, op.inner_outputs, op.info
     )
 
-    clients = {}
-    local_fgraph_topo = io_toposort(
-        args.inner_inputs, args.inner_outputs, clients=clients
-    )
+    clients = op.fgraph.clients
+    local_fgraph_topo = op.fgraph.toposort()
 
     for nd in local_fgraph_topo:
         if (
@@ -2534,7 +2527,7 @@ optdb.register("scan_eqopt2", scan_eqopt2, "fast_run", "scan", position=1.6)
 # ScanSaveMem should execute only once per node.
 optdb.register(
     "scan_save_mem_prealloc",
-    in2out(scan_save_mem_prealloc, ignore_newtrees=True),
+    bfs_rewriter(scan_save_mem_prealloc, ignore_newtrees=True),
     "fast_run",
     "scan",
     "scan_save_mem",
@@ -2542,7 +2535,7 @@ optdb.register(
 )
 optdb.register(
     "scan_save_mem_no_prealloc",
-    in2out(scan_save_mem_no_prealloc, ignore_newtrees=True),
+    bfs_rewriter(scan_save_mem_no_prealloc, ignore_newtrees=True),
     "numba",
     "jax",
     "pytorch",
@@ -2563,7 +2556,7 @@ scan_eqopt1.register("all_pushout_opt", scan_seqopt1, "fast_run", "scan")
 
 scan_seqopt1.register(
     "scan_remove_constants_and_unused_inputs0",
-    in2out(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
+    bfs_rewriter(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
     "remove_constants_and_unused_inputs_scan",
     "fast_run",
     "scan",
@@ -2572,7 +2565,7 @@ scan_seqopt1.register(
 
 scan_seqopt1.register(
     "scan_push_out_non_seq",
-    in2out(scan_push_out_non_seq, ignore_newtrees=True),
+    bfs_rewriter(scan_push_out_non_seq, ignore_newtrees=True),
     "scan_pushout_nonseqs_ops",  # For backcompat: so it can be tagged with old name
     "fast_run",
     "scan",
@@ -2582,7 +2575,7 @@ scan_seqopt1.register(
 
 scan_seqopt1.register(
     "scan_push_out_seq",
-    in2out(scan_push_out_seq, ignore_newtrees=True),
+    bfs_rewriter(scan_push_out_seq, ignore_newtrees=True),
     "scan_pushout_seqs_ops",  # For backcompat: so it can be tagged with old name
     "fast_run",
     "scan",
@@ -2593,7 +2586,7 @@ scan_seqopt1.register(
 
 scan_seqopt1.register(
     "scan_push_out_dot1",
-    in2out(scan_push_out_dot1, ignore_newtrees=True),
+    bfs_rewriter(scan_push_out_dot1, ignore_newtrees=True),
     "scan_pushout_dot1",  # For backcompat: so it can be tagged with old name
     "fast_run",
     "more_mem",
@@ -2606,7 +2599,7 @@ scan_seqopt1.register(
 scan_seqopt1.register(
     "scan_push_out_add",
     # TODO: Perhaps this should be an `EquilibriumGraphRewriter`?
-    in2out(scan_push_out_add, ignore_newtrees=False),
+    bfs_rewriter(scan_push_out_add, ignore_newtrees=False),
     "scan_pushout_add",  # For backcompat: so it can be tagged with old name
     "fast_run",
     "more_mem",
@@ -2617,14 +2610,14 @@ scan_seqopt1.register(
 
 scan_eqopt2.register(
     "while_scan_merge_subtensor_last_element",
-    in2out(while_scan_merge_subtensor_last_element, ignore_newtrees=True),
+    bfs_rewriter(while_scan_merge_subtensor_last_element, ignore_newtrees=True),
     "fast_run",
     "scan",
 )
 
 scan_eqopt2.register(
     "constant_folding_for_scan2",
-    in2out(constant_folding, ignore_newtrees=True),
+    bfs_rewriter(constant_folding, ignore_newtrees=True),
     "fast_run",
     "scan",
 )
@@ -2632,7 +2625,7 @@ scan_eqopt2.register(
 
 scan_eqopt2.register(
     "scan_remove_constants_and_unused_inputs1",
-    in2out(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
+    bfs_rewriter(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
     "remove_constants_and_unused_inputs_scan",
     "fast_run",
     "scan",
@@ -2647,7 +2640,7 @@ scan_eqopt2.register("scan_merge", ScanMerge(), "fast_run", "scan")
 # After Merge optimization
 scan_eqopt2.register(
     "scan_remove_constants_and_unused_inputs2",
-    in2out(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
+    bfs_rewriter(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
     "remove_constants_and_unused_inputs_scan",
     "fast_run",
     "scan",
@@ -2655,7 +2648,7 @@ scan_eqopt2.register(
 
 scan_eqopt2.register(
     "scan_merge_inouts",
-    in2out(scan_merge_inouts, ignore_newtrees=True),
+    bfs_rewriter(scan_merge_inouts, ignore_newtrees=True),
     "fast_run",
     "scan",
 )
@@ -2663,7 +2656,7 @@ scan_eqopt2.register(
 # After everything else
 scan_eqopt2.register(
     "scan_remove_constants_and_unused_inputs3",
-    in2out(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
+    bfs_rewriter(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
     "remove_constants_and_unused_inputs_scan",
     "fast_run",
     "scan",
