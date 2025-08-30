@@ -9,7 +9,8 @@ import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Variable, io_toposort
+from pytensor.graph.basic import Variable
+from pytensor.graph.traversal import io_toposort
 from pytensor.graph.utils import InconsistencyError
 
 

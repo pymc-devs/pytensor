@@ -5,8 +5,8 @@ import pytest
 from scipy.signal import convolve as scipy_convolve
 
 from pytensor import config, function, grad
-from pytensor.graph.basic import ancestors, io_toposort
 from pytensor.graph.rewriting import rewrite_graph
+from pytensor.graph.traversal import ancestors, io_toposort
 from pytensor.tensor import matrix, tensor, vector
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.signal.conv import Convolve1d, convolve1d

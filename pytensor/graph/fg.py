@@ -11,15 +11,17 @@ from pytensor.graph.basic import (
     Apply,
     AtomicVariable,
     Variable,
-    applys_between,
     clone_get_equiv,
-    graph_inputs,
-    io_toposort,
-    vars_between,
 )
 from pytensor.graph.basic import as_string as graph_as_string
 from pytensor.graph.features import AlreadyThere, Feature, ReplaceValidate
 from pytensor.graph.op import Op
+from pytensor.graph.traversal import (
+    applys_between,
+    graph_inputs,
+    io_toposort,
+    vars_between,
+)
 from pytensor.graph.utils import MetaObject, MissingInputError, TestValueError
 from pytensor.misc.ordered_set import OrderedSet
 

@@ -15,10 +15,8 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     AtomicVariable,
     Constant,
-    NoParams,
-    io_toposort,
-    vars_between,
 )
+from pytensor.graph.traversal import io_toposort, vars_between
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.basic import Container, Linker, LocalLinker, PerformLinker
 from pytensor.link.c.cmodule import (
@@ -33,6 +31,9 @@ from pytensor.link.c.interface import CLinkerObject, CLinkerOp, CLinkerType
 from pytensor.link.utils import gc_helper, map_storage, raise_with_op, streamline
 from pytensor.npy_2_compat import ndarray_c_version
 from pytensor.utils import difference, uniq
+
+
+NoParams = object()
 
 
 if TYPE_CHECKING:
