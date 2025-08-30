@@ -13,7 +13,8 @@ from typing import (
 
 import pytensor
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Variable, io_toposort
+from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.traversal import io_toposort
 from pytensor.graph.utils import (
     MetaObject,
     TestValueError,

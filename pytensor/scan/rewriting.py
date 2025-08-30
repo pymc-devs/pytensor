@@ -13,16 +13,13 @@ from pytensor import tensor as pt
 from pytensor.compile import optdb
 from pytensor.compile.function.types import deep_copy_op
 from pytensor.configdefaults import config
+from pytensor.graph import ancestors, graph_inputs
 from pytensor.graph.basic import (
     Apply,
     Constant,
     NominalVariable,
     Variable,
-    ancestors,
-    apply_depends_on,
     equal_computations,
-    graph_inputs,
-    io_toposort,
 )
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import ReplaceValidate
@@ -38,6 +35,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import EquilibriumDB, SequenceDB
 from pytensor.graph.rewriting.utils import get_clients_at_depth
+from pytensor.graph.traversal import apply_depends_on, io_toposort
 from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError
 from pytensor.raise_op import Assert

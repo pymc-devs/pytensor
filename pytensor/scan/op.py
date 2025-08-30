@@ -67,11 +67,11 @@ from pytensor.graph.basic import (
     Apply,
     Variable,
     equal_computations,
-    graph_inputs,
 )
 from pytensor.graph.features import NoOutputFromInplace
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
+from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError, MissingInputError
 from pytensor.link.c.basic import CLinker

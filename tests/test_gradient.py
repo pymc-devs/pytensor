@@ -28,9 +28,10 @@ from pytensor.gradient import (
     zero_grad,
     zero_grad_,
 )
-from pytensor.graph.basic import Apply, graph_inputs
+from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
+from pytensor.graph.traversal import graph_inputs
 from pytensor.scan.op import Scan
 from pytensor.tensor.math import add, dot, exp, outer, sigmoid, sqr, sqrt, tanh
 from pytensor.tensor.math import sum as pt_sum
