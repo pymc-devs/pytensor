@@ -589,11 +589,6 @@ def test_io_connection_pattern():
     raise AssertionError()
 
 
-@pytest.mark.xfail(reason="Not implemented")
-def test_view_roots():
-    raise AssertionError()
-
-
 def test_get_var_by_name():
     r1, r2, r3 = MyVariable(1), MyVariable(2), MyVariable(3)
     o1 = MyOp(r1, r2)
