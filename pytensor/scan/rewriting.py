@@ -13,7 +13,6 @@ from pytensor import tensor as pt
 from pytensor.compile import optdb
 from pytensor.compile.function.types import deep_copy_op
 from pytensor.configdefaults import config
-from pytensor.graph import ancestors, graph_inputs
 from pytensor.graph.basic import (
     Apply,
     Constant,
@@ -34,7 +33,11 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import EquilibriumDB, SequenceDB
 from pytensor.graph.rewriting.utils import get_clients_at_depth
-from pytensor.graph.traversal import apply_depends_on, io_toposort
+from pytensor.graph.traversal import (
+    ancestors,
+    apply_depends_on,
+    graph_inputs,
+)
 from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError
 from pytensor.raise_op import Assert
@@ -217,12 +220,9 @@ def scan_push_out_non_seq(fgraph, node):
     it to the outer function to be executed only once, before the `Scan` `Op`,
     reduces the amount of computation that needs to be performed.
     """
-    if not isinstance(node.op, Scan):
-        return False
-
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
-    local_fgraph_topo = io_toposort(node_inputs, node_outputs)
+    local_fgraph_topo = node.op.fgraph.toposort()
     local_fgraph_outs_set = set(node_outputs)
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
@@ -427,12 +427,9 @@ def scan_push_out_seq(fgraph, node):
     many times on many smaller tensors. In many cases, this optimization can
     increase memory usage but, in some specific cases, it can also decrease it.
     """
-    if not isinstance(node.op, Scan):
-        return False
-
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
-    local_fgraph_topo = io_toposort(node_inputs, node_outputs)
+    local_fgraph_topo = node.op.fgraph.toposort()
     local_fgraph_outs_set = set(node_outputs)
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
@@ -844,10 +841,8 @@ def scan_push_out_add(fgraph, node):
         node.inputs, node.outputs, op.inner_inputs, op.inner_outputs, op.info
     )
 
-    clients = {}
-    local_fgraph_topo = io_toposort(
-        args.inner_inputs, args.inner_outputs, clients=clients
-    )
+    clients = op.fgraph.clients
+    local_fgraph_topo = op.fgraph.toposort()
 
     for nd in local_fgraph_topo:
         if (

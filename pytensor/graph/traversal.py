@@ -4,14 +4,12 @@ from collections.abc import (
     Collection,
     Generator,
     Iterable,
-    Iterator,
     Reversible,
     Sequence,
 )
 from typing import (
     TypeVar,
     cast,
-    overload,
 )
 
 from pytensor.graph.basic import Apply, Constant, Node, Variable
@@ -27,7 +25,6 @@ def walk(
     expand: Callable[[T], Iterable[T] | None],
     bfs: bool = True,
     return_children: bool = False,
-    hash_fn: Callable[[T], int] = id,
 ) -> Generator[T | NodeAndChildren, None, None]:
     r"""Walk through a graph, either breadth- or depth-first.
 
@@ -44,9 +41,6 @@ def walk(
     return_children
         If ``True``, each output node will be accompanied by the output of
         `expand` (i.e. the corresponding child nodes).
-    hash_fn
-        The function used to produce hashes of the elements in `nodes`.
-        The default is ``id``.
 
     Notes
     -----
@@ -55,33 +49,30 @@ def walk(
 
     """
 
+    rval_set: set[T] = set()
     nodes = deque(nodes)
-
-    rval_set: set[int] = set()
-
-    nodes_pop: Callable[[], T]
-    if bfs:
-        nodes_pop = nodes.popleft
-    else:
-        nodes_pop = nodes.pop
-
-    while nodes:
-        node: T = nodes_pop()
-
-        node_hash: int = hash_fn(node)
-
-        if node_hash not in rval_set:
-            rval_set.add(node_hash)
-
-            new_nodes: Iterable[T] | None = expand(node)
-
-            if return_children:
-                yield node, new_nodes
-            else:
-                yield node
-
-            if new_nodes:
-                nodes.extend(new_nodes)
+    nodes_pop: Callable[[], T] = nodes.popleft if bfs else nodes.pop
+    try:
+        if return_children:
+            while True:
+                node: T = nodes_pop()
+                if node not in rval_set:
+                    new_nodes: Iterable[T] | None = expand(node)
+                    yield node, new_nodes
+                    rval_set.add(node)
+                    if new_nodes:
+                        nodes.extend(new_nodes)
+        else:
+            while True:
+                node: T = nodes_pop()
+                if node not in rval_set:
+                    yield node
+                    rval_set.add(node)
+                    new_nodes: Iterable[T] | None = expand(node)
+                    if new_nodes:
+                        nodes.extend(new_nodes)
+    except IndexError:
+        return None
 
 
 def ancestors(
@@ -101,17 +92,38 @@ def ancestors(
     Yields
     ------
     `Variable`\s
-        All input nodes, in the order found by a left-recursive depth-first
-        search started at the nodes in `graphs`.
+        All input variables, in the order found by a breath-first search started at the variables in `graphs`.
 
     """
 
-    def expand(r: Variable) -> Iterator[Variable] | None:
-        if r.owner and (not blockers or r not in blockers):
-            return reversed(r.owner.inputs)
-        return None
+    blockers = set() if blockers is None else set(blockers)
+    seen = set()
+    queue = list(graphs)
+    try:
+        while True:
+            if (var := queue.pop()) not in seen:
+                yield var
+                seen.add(var)
+                if var not in blockers and (node := var.owner) is not None:
+                    queue.extend(reversed(node.inputs))
+    except IndexError:
+        return
 
-    yield from cast(Generator[Variable, None, None], walk(graphs, expand, False))
+
+variable_ancestors = ancestors
+
+
+def apply_ancestors(graphs: Iterable[Apply], blockers: Collection[Apply] = ()):
+    seen = {None, *blockers}
+    queue = list(graphs)
+    try:
+        while True:
+            if (node := queue.pop()) not in seen:
+                yield node
+                seen.add(node)
+                queue.extend(i.owner for i in reversed(node.inputs))
+    except IndexError:
+        return
 
 
 def graph_inputs(
@@ -130,8 +142,7 @@ def graph_inputs(
 
     Yields
     ------
-        Input nodes with no owner, in the order found by a left-recursive
-        depth-first search started at the nodes in `graphs`.
+        Input nodes with no owner, in the order found by a breath first search started at the nodes in `graphs`.
 
     """
     yield from (r for r in ancestors(graphs, blockers) if r.owner is None)
@@ -181,8 +192,8 @@ def explicit_graph_inputs(
 
     return (
         v
-        for v in graph_inputs(graph)
-        if isinstance(v, Variable) and not isinstance(v, Constant | SharedVariable)
+        for v in ancestors(graph)
+        if v.owner is None and not isinstance(v, Constant | SharedVariable)
     )
 
 
@@ -288,24 +299,11 @@ def apply_depends_on(apply: Apply, depends_on: Apply | Collection[Apply]) -> boo
     bool
 
     """
-    computed = set()
-    todo = [apply]
     if not isinstance(depends_on, Collection):
         depends_on = {depends_on}
     else:
         depends_on = set(depends_on)
-    while todo:
-        cur = todo.pop()
-        if cur.outputs[0] in computed:
-            continue
-        if all(i in computed or i.owner is None for i in cur.inputs):
-            computed.update(cur.outputs)
-            if cur in depends_on:
-                return True
-        else:
-            todo.append(cur)
-            todo.extend(i.owner for i in cur.inputs if i.owner)
-    return False
+    return any(ancestor in depends_on for ancestor in apply_ancestors([apply]))
 
 
 def variable_depends_on(
@@ -463,24 +461,72 @@ def truncated_graph_inputs(
     return truncated_inputs
 
 
-@overload
-def general_toposort(
-    outputs: Iterable[T],
-    deps: Callable[[T], OrderedSet | list[T]],
-    compute_deps_cache: None,
-    deps_cache: None,
-    clients: dict[T, list[T]] | None,
-) -> list[T]: ...
+def general_toposort_generator(
+    graphs: Iterable[Variable | Apply],
+    deps: Callable[[T], OrderedSet | list[T]] | None,
+) -> Generator[T, None, None]:
+    """Perform a topological sort of all nodes starting from a given node.
 
+    Parameters
+    ----------
+    graphs:
+        An iterable of nodes from which to start the topological sort.
+    deps : callable
+        A Python function that takes a node as input and returns its dependence.
 
-@overload
-def general_toposort(
-    outputs: Iterable[T],
-    deps: None,
-    compute_deps_cache: Callable[[T], OrderedSet | list[T] | None],
-    deps_cache: dict[T, list[T]] | None,
-    clients: dict[T, list[T]] | None,
-) -> list[T]: ...
+    Notes
+    -----
+
+    ``deps(i)`` should behave like a pure function (no funny business with internal state).
+
+    The order of the return value list is determined by the order of nodes
+    returned by the `deps` function.
+    """
+
+    # Cache the dependencies (ancestors) as we iterate over the nodes with the deps function
+    deps_cache = {}
+
+    def compute_deps_cache(obj, deps_cache=deps_cache):
+        if obj in deps_cache:
+            return deps_cache[obj]
+        d = deps_cache[obj] = deps(obj) or []
+        return d
+
+    clients: dict[T, list[T]] = {}
+    sources: deque[T] = deque()
+    total_nodes = 0
+    for node, children in walk(
+        graphs, compute_deps_cache, bfs=False, return_children=True
+    ):
+        total_nodes += 1
+        for child in children:
+            clients.setdefault(child, []).append(node)
+        if not deps_cache[node]:
+            # Add nodes without dependencies to the stack
+            sources.append(node)
+
+    rset: set[T] = set()
+    try:
+        while True:
+            node: T = sources.popleft()
+            if node not in rset:
+                yield node
+                total_nodes -= 1
+                rset.add(node)
+                # Iterate over each client node (that is, it depends on the current node)
+                for client in clients.get(node, []):
+                    # Remove itself from the dependent (ancestor) list of each client
+                    d = deps_cache[client] = [
+                        a for a in deps_cache[client] if a is not node
+                    ]
+                    if not d:
+                        # If there are no dependencies left to visit for this node, add it to the stack
+                        sources.append(client)
+    except IndexError:
+        pass
+
+    if total_nodes != 0:
+        raise ValueError("graph contains cycles")
 
 
 def general_toposort(
@@ -499,12 +545,6 @@ def general_toposort(
     compute_deps_cache : optional
         If provided, `deps_cache` should also be provided. This is a function like
         `deps`, but that also caches its results in a ``dict`` passed as `deps_cache`.
-    deps_cache : dict
-        A ``dict`` mapping nodes to their children.  This is populated by
-        `compute_deps_cache`.
-    clients : dict
-        If a ``dict`` is passed, it will be filled with a mapping of
-        nodes-to-clients for each node in the subgraph.
 
     Notes
     -----
@@ -512,80 +552,95 @@ def general_toposort(
     ``deps(i)`` should behave like a pure function (no funny business with
     internal state).
 
-    ``deps(i)`` will be cached by this function (to be fast).
-
     The order of the return value list is determined by the order of nodes
     returned by the `deps` function.
-
-    The second option removes a Python function call, and allows for more
-    specialized code, so it can be faster.
-
     """
-    if compute_deps_cache is None:
-        if deps_cache is None:
-            deps_cache = {}
-
-        def _compute_deps_cache_(io):
-            if io not in deps_cache:
-                d = deps(io)
-
-                if d:
-                    if not isinstance(d, list | OrderedSet):
-                        raise TypeError(
-                            "Non-deterministic collections found; make"
-                            " toposort non-deterministic."
-                        )
-                    deps_cache[io] = list(d)
-                else:
-                    deps_cache[io] = None
-
-                return d
-            else:
-                return deps_cache[io]
-
-        _compute_deps_cache = _compute_deps_cache_
-
-    else:
-        _compute_deps_cache = compute_deps_cache
-
-    if deps_cache is None:
-        raise ValueError("deps_cache cannot be None")
-
-    search_res: list[NodeAndChildren] = cast(
-        list[NodeAndChildren],
-        list(walk(outputs, _compute_deps_cache, bfs=False, return_children=True)),
-    )
-
-    _clients: dict[T, list[T]] = {}
-    sources: deque[T] = deque()
-    search_res_len = len(search_res)
-    for snode, children in search_res:
-        if children:
-            for child in children:
-                _clients.setdefault(child, []).append(snode)
-        if not deps_cache.get(snode):
-            sources.append(snode)
-
+    if compute_deps_cache is not None:
+        raise ValueError("compute_deps_cache is no longer supported")
+    if deps_cache is not None:
+        raise ValueError("deps_cache is no longer supported")
     if clients is not None:
-        clients.update(_clients)
+        raise ValueError("clients is no longer supported")
+    return list(general_toposort_generator(outputs, deps))
 
-    rset: set[T] = set()
-    rlist: list[T] = []
-    while sources:
-        node: T = sources.popleft()
-        if node not in rset:
-            rlist.append(node)
-            rset.add(node)
-            for client in _clients.get(node, []):
-                d = [a for a in deps_cache[client] if a is not node]
-                deps_cache[client] = d
-                if not d:
-                    sources.append(client)
 
-    if len(rlist) != search_res_len:
-        raise ValueError("graph contains cycles")
+def apply_toposort(
+    graphs: Iterable[Apply],
+    blockers: Iterable[Apply] = (),
+) -> Generator[Apply]:
+    """Topologically sort a sequence of Apply nodes.
 
-    return rlist
+    Faster than variable_toposort because we don't need to worry about specific variable edges from blockers
+    """
+    computed = {None, *blockers}
+    todo = list(graphs)
+    while todo:
+        cur = todo[-1]
+        if cur in computed:
+            todo.pop()
+            continue
+        # Since computed includes None we don't need to filter it in this check
+        if all(i.owner in computed for i in cur.inputs):
+            computed.add(cur)
+            yield todo.pop()
+        else:
+            todo.extend(i.owner for i in cur.inputs if i.owner is not None)
+
+
+def variable_toposort(
+    graphs: Iterable[Variable],
+    blockers: Iterable[Variable] = (),
+    orderings: dict[Apply, list[Apply]] | None = None,
+) -> Generator[Apply, None, None]:
+    """Topologically sort a sequence of Apply nodes, given a set of grapph and blocker variables.
+
+    Allows to specify additional ordering constraints between Apply or Variable nodes using the `orderings` parameter.
+
+    When there are no 'orderings' specified, this function is similar to `apply_toposort` except it can handle
+    the case where multi-output nodes are partially blocked.
+    """
+
+    if not orderings:
+        computed = set(blockers)
+        todo = [o.owner for o in graphs if o.owner is not None]
+        while todo:
+            cur = todo[-1]
+            # It's faster to short circuit on the first output, as most nodes will have all edges non-computed
+            # Starting the `all` iterator has a non-negligeable cost
+            if cur.outputs[0] in computed and all(
+                out in computed for out in cur.outputs[1:]
+            ):
+                todo.pop()
+                continue
+            if all(i in computed or i.owner is None for i in cur.inputs):
+                computed.update(cur.outputs)
+                yield todo.pop()
+            else:
+                todo.extend(
+                    i.owner
+                    for i in cur.inputs
+                    if ((i.owner is not None) and (i not in computed))
+                )
+    else:
+        # the inputs are used to decide where to stop expanding
+        def compute_deps(obj, input_set=set(blockers), orderings=orderings):
+            if obj in input_set:
+                return []
+
+            if isinstance(obj, Apply):
+                return [*obj.inputs, *orderings.get(obj, [])]
+            else:
+                node = obj.owner
+                if node is None:
+                    return orderings.get(obj, [])
+                else:
+                    return [node, *orderings.get(node, [])]
+
+        yield from (
+            node
+            for node in general_toposort_generator(graphs, deps=compute_deps)
+            if isinstance(node, Apply)
+        )
 
 
 def io_toposort(
@@ -594,7 +649,13 @@ def io_toposort(
     orderings: dict[Apply, list[Apply]] | None = None,
     clients: dict[Variable, list[Variable]] | None = None,
 ) -> list[Apply]:
-    """Perform topological sort from input and output nodes.
+    """Perform topological of nodes between input and output variables.
+
+    Notes
+    -----
+    If sorting from root or single-output node variables, without orderings or clients,
+    it's slightly faster to use `list(apply_toposort((o.owner for o in outputs)))` instead,
+    as the individual variables can be ignored
 
     Parameters
     ----------
@@ -604,96 +665,20 @@ def io_toposort(
         Graph outputs.
     orderings : dict
         Keys are `Apply` instances, values are lists of `Apply` instances.
-    clients : dict
-        If provided, it will be filled with mappings of nodes-to-clients for
-        each node in the subgraph that is sorted.
-
     """
-    if not orderings and clients is None:  # ordering can be None or empty dict
-        # Specialized function that is faster when more then ~10 nodes
-        # when no ordering.
-
-        # Do a new stack implementation with the vm algo.
-        # This will change the order returned.
-        computed = set(inputs)
-        todo = [o.owner for o in reversed(outputs) if o.owner]
-        order = []
-        while todo:
-            cur = todo.pop()
-            if all(out in computed for out in cur.outputs):
-                continue
-            if all(i in computed or i.owner is None for i in cur.inputs):
-                computed.update(cur.outputs)
-                order.append(cur)
-            else:
-                todo.append(cur)
-                todo.extend(
-                    i.owner for i in cur.inputs if (i.owner and i not in computed)
-                )
-        return order
-
-    iset = set(inputs)
-
-    if not orderings:  # ordering can be None or empty dict
-        # Specialized function that is faster when no ordering.
-        # Also include the cache in the function itself for speed up.
-
-        deps_cache: dict = {}
-
-        def compute_deps_cache(obj):
-            if obj in deps_cache:
-                return deps_cache[obj]
-            rval = []
-            if obj not in iset:
-                if isinstance(obj, Variable):
-                    if obj.owner:
-                        rval = [obj.owner]
-                elif isinstance(obj, Apply):
-                    rval = list(obj.inputs)
-                if rval:
-                    deps_cache[obj] = list(rval)
-                else:
-                    deps_cache[obj] = rval
-            else:
-                deps_cache[obj] = rval
-            return rval
-
-        topo = general_toposort(
+    if clients is not None:
+        raise ValueError("clients is no longer supported")
+    return list(
+        variable_toposort(
             outputs,
-            deps=None,
-            compute_deps_cache=compute_deps_cache,
-            deps_cache=deps_cache,
-            clients=clients,
+            blockers=inputs if inputs is not None else (),
+            orderings=orderings,
         )
-
-    else:
-        # the inputs are used only here in the function that decides what
-        # 'predecessors' to explore
-        def compute_deps(obj):
-            rval = []
-            if obj not in iset:
-                if isinstance(obj, Variable):
-                    if obj.owner:
-                        rval = [obj.owner]
-                elif isinstance(obj, Apply):
-                    rval = list(obj.inputs)
-                rval.extend(orderings.get(obj, []))
-            else:
-                assert not orderings.get(obj, None)
-            return rval
-
-        topo = general_toposort(
-            outputs,
-            deps=compute_deps,
-            compute_deps_cache=None,
-            deps_cache=None,
-            clients=clients,
-        )
-    return [o for o in topo if isinstance(o, Apply)]
+    )
 
 
 def get_var_by_name(
-    graphs: Iterable[Variable], target_var_id: str, ids: str = "CHAR"
+    graphs: Iterable[Variable], target_var_id: str
 ) -> tuple[Variable, ...]:
     r"""Get variables in a graph using their names.
 

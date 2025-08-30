@@ -1002,7 +1002,7 @@ def clone_get_equiv(
         Keywords passed to `Apply.clone_with_new_inputs`.
 
     """
-    from pytensor.graph.traversal import io_toposort
+    from pytensor.graph.traversal import variable_toposort
 
     if memo is None:
         memo = {}
@@ -1018,7 +1018,7 @@ def clone_get_equiv(
             memo.setdefault(input, input)
 
     # go through the inputs -> outputs graph cloning as we go
-    for apply in io_toposort(inputs, outputs):
+    for apply in variable_toposort(outputs, blockers=inputs):
         for input in apply.inputs:
             if input not in memo:
                 if not isinstance(input, Constant) and copy_orphans:

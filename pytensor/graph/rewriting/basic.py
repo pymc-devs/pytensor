@@ -27,7 +27,7 @@ from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.unify import Var, convert_strs_to_vars
-from pytensor.graph.traversal import applys_between, io_toposort, vars_between
+from pytensor.graph.traversal import apply_toposort, applys_between, vars_between
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 from pytensor.utils import flatten
@@ -1834,7 +1834,7 @@ class WalkingGraphRewriter(NodeProcessingGraphRewriter):
         callback_before = fgraph.execute_callbacks_time
         nb_nodes_start = len(fgraph.apply_nodes)
         t0 = time.perf_counter()
-        q = deque(io_toposort(fgraph.inputs, start_from))
+        q = deque(apply_toposort(o.owner for o in start_from))
         io_t = time.perf_counter() - t0
 
         def importer(node):
@@ -2081,11 +2081,6 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
     def apply(self, fgraph, start_from=None):
         change_tracker = ChangeTracker()
         fgraph.attach_feature(change_tracker)
-        if start_from is None:
-            start_from = fgraph.outputs
-        else:
-            for node in start_from:
-                assert node in fgraph.outputs
 
         changed = True
         max_use_abort = False
@@ -2164,7 +2159,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
             changed |= apply_cleanup(iter_cleanup_sub_profs)
 
             topo_t0 = time.perf_counter()
-            q = deque(io_toposort(fgraph.inputs, start_from))
+            q = deque(apply_toposort(o.owner for o in fgraph.outputs))
             io_toposort_timing.append(time.perf_counter() - topo_t0)
 
             nb_nodes.append(len(q))

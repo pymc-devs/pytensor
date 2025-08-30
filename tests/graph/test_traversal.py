@@ -4,14 +4,18 @@ from pytensor import Variable, shared
 from pytensor import tensor as pt
 from pytensor.graph import Apply, ancestors, graph_inputs
 from pytensor.graph.traversal import (
+    apply_ancestors,
     apply_depends_on,
+    apply_toposort,
     explicit_graph_inputs,
     general_toposort,
     get_var_by_name,
     io_toposort,
     orphans_between,
     truncated_graph_inputs,
+    variable_ancestors,
     variable_depends_on,
+    variable_toposort,
     vars_between,
     walk,
 )
@@ -36,23 +40,17 @@ class TestToposort:
         o2 = MyOp(o, r5)
         o2.name = "o2"
 
-        clients = {}
-        res = general_toposort([o2], self.prenode, clients=clients)
-
-        assert clients == {
-            o2.owner: [o2],
-            o: [o2.owner],
-            r5: [o2.owner],
-            o.owner: [o],
-            r1: [o.owner],
-            r2: [o.owner],
-        }
+        res = general_toposort([o2], self.prenode)
         assert res == [r5, r2, r1, o.owner, o, o2.owner, o2]
 
-        with pytest.raises(ValueError):
-            general_toposort(
-                [o2], self.prenode, compute_deps_cache=lambda x: None, deps_cache=None
-            )
+        def circular_dependency(obj):
+            if obj is o:
+                # o2 depends on o, so o cannot depend on o2
+                return [o2, *self.prenode(obj)]
+            return self.prenode(obj)
+
+        with pytest.raises(ValueError, match="graph contains cycles"):
+            general_toposort([o2], circular_dependency)
 
         res = io_toposort([r5], [o2])
         assert res == [o.owner, o2.owner]
@@ -408,3 +406,29 @@ def test_get_var_by_name():
 
     exp_res = igo.fgraph.outputs[0]
     assert res == exp_res
+
+
+@pytest.mark.parametrize(
+    "toposort_func",
+    [
+        lambda x: all(variable_ancestors([x])),
+        lambda x: all(apply_ancestors([x.owner])),
+        lambda x: all(variable_toposort([x])),
+        lambda x: all(variable_toposort([x], orderings={x: []})),
+        lambda x: all(apply_toposort([x.owner])),
+    ],
+    ids=[
+        "variable_ancestors",
+        "apply_ancestors",
+        "variable_toposort",
+        "variable_toposort_with_orderings",
+        "apply_toposort",
+    ],
+)
+def test_traversal_benchmark(toposort_func, benchmark):
+    r1 = MyVariable(1)
+    out = r1
+    for i in range(50):
+        out = MyOp(out, out)
+
+    benchmark(toposort_func, out)
