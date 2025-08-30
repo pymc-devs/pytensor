@@ -12,8 +12,9 @@ from pytensor.compile.function import function
 from pytensor.compile.io import In, Out
 from pytensor.configdefaults import config
 from pytensor.gradient import GradientError
-from pytensor.graph.basic import Apply, Constant, applys_between
+from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.op import Op
+from pytensor.graph.traversal import applys_between
 from pytensor.sparse import (
     CSC,
     CSM,

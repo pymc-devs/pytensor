@@ -16,9 +16,9 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp, deep_copy_op
 from pytensor.configdefaults import config
-from pytensor.graph import vectorize_graph
-from pytensor.graph.basic import Apply, ancestors, equal_computations
+from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import (
     SequentialNodeRewriter,
     WalkingGraphRewriter,
@@ -28,6 +28,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
+from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor import inplace

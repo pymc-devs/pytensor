@@ -11,11 +11,12 @@ from pytensor import function, shared
 from pytensor.compile.mode import Mode
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Constant, Variable, graph_inputs
+from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import get_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.traversal import graph_inputs
 from pytensor.tensor import ones, stack
 from pytensor.tensor.random.basic import (
     ChoiceWithoutReplacement,

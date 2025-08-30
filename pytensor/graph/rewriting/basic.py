@@ -22,14 +22,12 @@ from pytensor.graph.basic import (
     AtomicVariable,
     Constant,
     Variable,
-    applys_between,
-    io_toposort,
-    vars_between,
 )
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.unify import OpPattern, Var, convert_strs_to_vars
+from pytensor.graph.traversal import applys_between, io_toposort, vars_between
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 from pytensor.utils import flatten

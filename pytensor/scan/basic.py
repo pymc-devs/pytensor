@@ -6,9 +6,10 @@ import pytensor.tensor as pt
 from pytensor.compile.function.pfunc import construct_pfunc_ins_and_outs
 from pytensor.compile.sharedvalue import SharedVariable, collect_new_shareds
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Constant, Variable, graph_inputs
+from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.op import get_test_value
 from pytensor.graph.replace import clone_replace
+from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError, TestValueError
 from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.utils import expand_empty, safe_new, until

@@ -5,10 +5,9 @@ from pytensor.graph.basic import (
     Apply,
     Variable,
     Constant,
-    graph_inputs,
     clone,
-    ancestors,
 )
+from pytensor.graph.traversal import ancestors, graph_inputs
 from pytensor.graph.replace import clone_replace, graph_replace, vectorize_graph
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type

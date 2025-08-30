@@ -9,9 +9,10 @@ from pytensor.compile.io import In
 from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
-from pytensor.graph.basic import Constant, ancestors, equal_computations
+from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace
+from pytensor.graph.traversal import ancestors
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import ScanInplaceOptimizer, ScanMerge
 from pytensor.scan.utils import until

@@ -8,10 +8,11 @@ import numpy as np
 import pytensor.scalar as ps
 from pytensor.compile.function import function
 from pytensor.gradient import grad, hessian, jacobian
-from pytensor.graph import Apply, Constant, FunctionGraph
-from pytensor.graph.basic import ancestors, truncated_graph_inputs
+from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.graph.replace import graph_replace
+from pytensor.graph.traversal import ancestors, truncated_graph_inputs
 from pytensor.tensor.basic import (
     atleast_2d,
     concatenate,

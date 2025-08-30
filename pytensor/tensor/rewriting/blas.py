@@ -59,6 +59,7 @@ import time
 
 import numpy as np
 
+from pytensor.graph.traversal import io_toposort
 from pytensor.tensor.rewriting.basic import register_specialize
 
 
@@ -470,7 +471,7 @@ class GemmOptimizer(GraphRewriter):
         while did_something:
             nb_iter += 1
             t0 = time.perf_counter()
-            nodelist = pytensor.graph.basic.io_toposort(fgraph.inputs, fgraph.outputs)
+            nodelist = io_toposort(fgraph.inputs, fgraph.outputs)
             time_toposort += time.perf_counter() - t0
             did_something = False
             nodelist.reverse()
