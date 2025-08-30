@@ -68,10 +68,9 @@ from pytensor.graph.basic import (
     Variable,
     equal_computations,
     graph_inputs,
-    io_connection_pattern,
 )
 from pytensor.graph.features import NoOutputFromInplace
-from pytensor.graph.op import HasInnerGraph, Op
+from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError, MissingInputError
