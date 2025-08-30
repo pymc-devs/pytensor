@@ -1787,25 +1787,6 @@ def as_string(
     return [describe(output) for output in outputs]
 
 
-def view_roots(node: Variable) -> list[Variable]:
-    """Return the leaves from a search through consecutive view-maps."""
-    owner = node.owner
-    if owner is not None:
-        try:
-            vars_to_views = {owner.outputs[o]: i for o, i in owner.op.view_map.items()}
-        except AttributeError:
-            return [node]
-        if node in vars_to_views:
-            answer = []
-            for i in vars_to_views[node]:
-                answer += view_roots(owner.inputs[i])
-            return answer
-        else:
-            return [node]
-    else:
-        return [node]
-
-
 def apply_depends_on(apply: Apply, depends_on: Apply | Collection[Apply]) -> bool:
     """Determine if any `depends_on` is in the graph given by ``apply``.
 
