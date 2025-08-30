@@ -39,6 +39,7 @@ class TestProfiling:
                 m = None
 
             f = function(x, z, profile=p, name="test_profiling", mode=m)
+            f.dprint(print_memory_map=True)
 
             inp = [np.arange(1024, dtype="float32") + 1 for i in range(len(x))]
             f(*inp)

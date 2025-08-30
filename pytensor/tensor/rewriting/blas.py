@@ -475,7 +475,6 @@ class GemmOptimizer(GraphRewriter):
             t0 = time.perf_counter()
             time_toposort += time.perf_counter() - t0
             did_something = False
-            nodelist.reverse()
             for node in nodelist:
                 if not (
                     isinstance(node.op, Elemwise)
