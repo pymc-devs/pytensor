@@ -21,14 +21,14 @@ def make_declare(loop_orders, dtypes, sub, compute_stride_jump=True):
                 # the number of elements in that dimension,
                 # the stride in that dimension,
                 # and the jump from an iteration to the next
-                decl += f"npy_intp {var}_n{value};\nssize_t {var}_stride{value};\n"
+                decl += f"npy_intp {var}_n{value};\nnpy_intp {var}_stride{value};\n"
                 if compute_stride_jump:
-                    decl += f"int {var}_jump{value}_{j};\n"
+                    decl += f"npy_intp {var}_jump{value}_{j};\n"
 
             elif compute_stride_jump:
                 # if the dimension is broadcasted, we only need
                 # the jump (arbitrary length and stride = 0)
-                decl += f"int {var}_jump{value}_{j};\n"
+                decl += f"npy_intp {var}_jump{value}_{j};\n"
 
     return decl
 
@@ -257,7 +257,7 @@ def make_loop(
             forloop = f"""#pragma omp parallel for if( {suitable_n} >={openmp_elemwise_minsize})\n"""
         else:
             forloop = ""
-        forloop += f"""for (int {iterv} = 0; {iterv}<{suitable_n}; {iterv}++)"""
+        forloop += f"""for (npy_intp {iterv} = 0; {iterv}<{suitable_n}; {iterv}++)"""
         return f"""
         {preloop}
         {forloop} {{
@@ -317,8 +317,8 @@ def make_reordered_loop(
     # The first element of each pair is the absolute value of the stride
     # The second element correspond to the index in the initial loop order
     order_loops = f"""
-    std::vector< std::pair<int, int> > {ovar}_loops({nnested});
-    std::vector< std::pair<int, int> >::iterator {ovar}_loops_it = {ovar}_loops.begin();
+    std::vector< std::pair<int, npy_intp> > {ovar}_loops({nnested});
+    std::vector< std::pair<int, npy_intp> >::iterator {ovar}_loops_it = {ovar}_loops.begin();
     """
 
     # Fill the loop vector with the appropriate <stride, index> pairs
@@ -347,7 +347,7 @@ def make_reordered_loop(
     """
 
     # Get the (sorted) total number of iterations of each loop
-    declare_totals = f"int init_totals[{nnested}];\n"
+    declare_totals = f"npy_intp init_totals[{nnested}];\n"
     declare_totals += compute_output_dims_lengths("init_totals", init_loop_orders, sub)
 
     # Sort totals to match the new order that was computed by sorting
@@ -358,7 +358,7 @@ def make_reordered_loop(
 
     for i in range(nnested):
         declare_totals += f"""
-        int TOTAL_{i} = init_totals[{ovar}_loops_it->second];
+        npy_intp TOTAL_{i} = init_totals[{ovar}_loops_it->second];
         ++{ovar}_loops_it;
         """
 
@@ -389,14 +389,14 @@ def make_reordered_loop(
     )
 
     declare_strides = f"""
-    int init_strides[{nvars}][{nnested}] = {{
+    npy_intp init_strides[{nvars}][{nnested}] = {{
         {strides}
     }};"""
 
     # Declare (sorted) stride and for each variable
     # we iterate from innermost loop to outermost loop
     declare_strides += f"""
-    std::vector< std::pair<int, int> >::reverse_iterator {ovar}_loops_rit;
+    std::vector< std::pair<int, npy_intp> >::reverse_iterator {ovar}_loops_rit;
     """
 
     for i in range(nvars):
@@ -405,7 +405,7 @@ def make_reordered_loop(
         {ovar}_loops_rit = {ovar}_loops.rbegin();"""
         for j in reversed(range(nnested)):
             declare_strides += f"""
-            int {var}_stride_l{j} = init_strides[{i}][{ovar}_loops_rit->second];
+            npy_intp {var}_stride_l{j} = init_strides[{i}][{ovar}_loops_rit->second];
             ++{ovar}_loops_rit;
             """
 
@@ -436,7 +436,7 @@ def make_reordered_loop(
             if openmp:
                 openmp_elemwise_minsize = config.openmp_elemwise_minsize
                 forloop += f"""#pragma omp parallel for if( {total} >={openmp_elemwise_minsize})\n"""
-        forloop += f"for(int {iterv} = 0; {iterv}<{total}; {iterv}++)"
+        forloop += f"for(npy_intp {iterv} = 0; {iterv}<{total}; {iterv}++)"
 
         loop = f"""
         {forloop}
@@ -596,14 +596,14 @@ def make_reordered_loop_careduce(
             if (PyArray_SIZE(inp) == 0) {
                 acc_iter = (npy_float64*)(PyArray_DATA(acc));
                 int_n =  PyArray_SIZE(acc);
-                for(int i = 0; i < n; i++)
+                for(npy_intp i = 0; i < n; i++)
                 {
                     npy_float64 &acc_i = acc_iter[i];
                     acc_i = 0;
                 }
             } else {
-            std::vector< std::pair<int, int> > loops(2);
-            std::vector< std::pair<int, int> >::iterator loops_it = loops.begin();
+            std::vector< std::pair<int, npy_intp> > loops(2);
+            std::vector< std::pair<int, npy_intp> >::iterator loops_it = loops.begin();
 
             loops_it->first = abs(PyArray_STRIDES(inp)[0]);
             loops_it->second = 0;
@@ -613,28 +613,28 @@ def make_reordered_loop_careduce(
             ++loops_it;
             std::sort(loops.rbegin(), loops.rend());
 
-            int dim_lengths[2] = {inp_n0, inp_n1};
-            int inp_strides[2] = {inp_stride0, inp_stride1};
-            int acc_strides[2] = {acc_stride0, 0};
+            npy_intp dim_lengths[2] = {inp_n0, inp_n1};
+            npy_intp inp_strides[2] = {inp_stride0, inp_stride1};
+            npy_intp acc_strides[2] = {acc_stride0, 0};
             bool reduction_axes[2] = {0, 1};
 
             loops_it = loops.begin();
-            int dim_length_0 = dim_lengths[loops_it->second];
-            int is_reduction_axis_0 = reduction_axes[loops_it->second];
-            int inp_stride_0 = inp_strides[loops_it->second];
-            int acc_stride_0 = acc_strides[loops_it->second];
+            npy_intp dim_length_0 = dim_lengths[loops_it->second];
+            bool is_reduction_axis_0 = reduction_axes[loops_it->second];
+            npy_intp inp_stride_0 = inp_strides[loops_it->second];
+            npy_intp acc_stride_0 = acc_strides[loops_it->second];
             ++loops_it;
-            int dim_length_1 = dim_lengths[loops_it->second];
-            int is_reduction_axis_1 = reduction_axes[loops_it->second];
-            int inp_stride_1 = inp_strides[loops_it->second];
-            int acc_stride_1 = acc_strides[loops_it->second];
+            npy_intp dim_length_1 = dim_lengths[loops_it->second];
+            bool is_reduction_axis_1 = reduction_axes[loops_it->second];
+            npy_intp inp_stride_1 = inp_strides[loops_it->second];
+            npy_intp acc_stride_1 = acc_strides[loops_it->second];
             ++loops_it;
 
             inp_iter = (npy_float64*)(PyArray_DATA(inp));
             acc_iter = (npy_float64*)(PyArray_DATA(acc));
 
-            for(int iter_0 = 0; iter_0<dim_length_0; iter_0++){
-                for(int iter_1 = 0; iter_1<dim_length_1; iter_1++){
+            for(npy_intp iter_0 = 0; iter_0<dim_length_0; iter_0++){
+                for(npy_intp iter_1 = 0; iter_1<dim_length_1; iter_1++){
                     npy_float64 &inp_i = *(inp_iter + inp_stride_1*iter_1 + inp_stride_0*iter_0);
                     npy_float64 &acc_i = *(acc_iter + acc_stride_1*iter_1 + acc_stride_0*iter_0);
 
@@ -654,8 +654,8 @@ def make_reordered_loop_careduce(
         // Special case for empty inputs
         if (PyArray_SIZE({inp_var}) == 0) {{
             {acc_var}_iter = ({acc_dtype}*)(PyArray_DATA({acc_var}));
-            int n =  PyArray_SIZE({acc_var});
-            for(int i = 0; i < n; i++)
+            npy_intp n =  PyArray_SIZE({acc_var});
+            for(npy_intp i = 0; i < n; i++)
             {{
                 {acc_dtype} &{acc_var}_i = {acc_var}_iter[i];
                 {initial_value}
@@ -669,8 +669,8 @@ def make_reordered_loop_careduce(
     # The second element correspond to the index in the initial loop order
     order_loops = dedent(
         f"""
-        std::vector< std::pair<int, int> > loops({inp_ndim});
-        std::vector< std::pair<int, int> >::iterator loops_it = loops.begin();
+        std::vector< std::pair<int, npy_intp> > loops({inp_ndim});
+        std::vector< std::pair<int, npy_intp> >::iterator loops_it = loops.begin();
         """
     )
 
@@ -691,9 +691,9 @@ def make_reordered_loop_careduce(
     counter = iter(range(inp_ndim))
     unsorted_vars = dedent(
         f"""
-        int dim_lengths[{inp_ndim}] = {{{','.join(f'{inp_var}_n{i}' for i in range(inp_ndim))}}};
-        int inp_strides[{inp_ndim}] = {{{','.join(f'{inp_var}_stride{i}' for i in range(inp_ndim))}}};
-        int acc_strides[{inp_ndim}] = {{{','.join("0" if i in reduction_axes else f'{acc_var}_stride{next(counter)}'for i in range(inp_ndim))}}};
+        npy_intp dim_lengths[{inp_ndim}] = {{{','.join(f'{inp_var}_n{i}' for i in range(inp_ndim))}}};
+        npy_intp inp_strides[{inp_ndim}] = {{{','.join(f'{inp_var}_stride{i}' for i in range(inp_ndim))}}};
+        npy_intp acc_strides[{inp_ndim}] = {{{','.join("0" if i in reduction_axes else f'{acc_var}_stride{next(counter)}'for i in range(inp_ndim))}}};
         bool reduction_axes[{inp_ndim}] = {{{', '.join("1" if i in reduction_axes else "0" for i in range(inp_ndim))}}};\n
         """
     )
@@ -702,10 +702,10 @@ def make_reordered_loop_careduce(
     for i in range(inp_ndim):
         sorted_vars += dedent(
             f"""
-            int dim_length_{i} = dim_lengths[loops_it->second];
-            int is_reduction_axis_{i} = reduction_axes[loops_it->second];
-            int {inp_var}_stride_{i} = inp_strides[loops_it->second];
-            int {acc_var}_stride_{i} = acc_strides[loops_it->second];
+            npy_intp dim_length_{i} = dim_lengths[loops_it->second];
+            bool is_reduction_axis_{i} = reduction_axes[loops_it->second];
+            npy_intp {inp_var}_stride_{i} = inp_strides[loops_it->second];
+            npy_intp {acc_var}_stride_{i} = acc_strides[loops_it->second];
             ++loops_it;
             """
         )
@@ -748,7 +748,7 @@ def make_reordered_loop_careduce(
         dim_length = f"dim_length_{i}"
         loop = dedent(
             f"""
-            for(int {iter_var} = 0; {iter_var}<{dim_length}; {iter_var}++){{
+            for(npy_intp {iter_var} = 0; {iter_var}<{dim_length}; {iter_var}++){{
                 {loop}
             }}
             """
