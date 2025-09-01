@@ -75,7 +75,7 @@ jobs:
         run: pipx run build --sdist
 
       - name: Attest GitHub build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         # Don't attest from forks
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         with:
@@ -130,7 +130,7 @@ jobs:
         uses: pypa/cibuildwheel@faf86a6ed7efa889faf6996aa23820831055001a # v2.23.3
 
       - name: Attest GitHub build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         # Don't attest from forks
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         with:
@@ -171,7 +171,7 @@ jobs:
           PYODIDE=1 python setup.py bdist_wheel --universal
 
       - name: Attest GitHub build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         # Don't attest from forks
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         with:
