@@ -814,6 +814,21 @@ def test_cho_solve():
     )
 
 
+def test_cho_solve_empty():
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = matrix()
+    b = matrix()
+    y = cho_solve((A, True), b)
+    cho_solve_lower_func = function([A, b], y)
+
+    A_empty = np.tril(np.asarray(rng.random((5, 5)), dtype=config.floatX))
+    b_empty = np.empty([5, 0], dtype=config.floatX)
+
+    res = cho_solve_lower_func(A_empty, b_empty)
+    assert res.size == 0
+    assert res.dtype == config.floatX
+
+
 def test_expm():
     rng = np.random.default_rng(utt.fetch_seed())
     A = rng.standard_normal((5, 5)).astype(config.floatX)
