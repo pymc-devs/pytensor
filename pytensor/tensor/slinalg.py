@@ -384,15 +384,28 @@ class CholeskySolve(SolveBase):
         return Apply(self, [A, b], [out])
 
     def perform(self, node, inputs, output_storage):
-        C, b = inputs
-        rval = scipy_linalg.cho_solve(
-            (C, self.lower),
-            b,
-            check_finite=self.check_finite,
-            overwrite_b=self.overwrite_b,
-        )
+        c, b = inputs
 
-        output_storage[0][0] = rval
+        (potrs,) = get_lapack_funcs(("potrs",), (c, b))
+
+        if self.check_finite and not (np.isfinite(c).all() and np.isfinite(b).all()):
+            raise ValueError("array must not contain infs or NaNs")
+
+        if c.ndim != 2 or c.shape[0] != c.shape[1]:
+            raise ValueError("The factored matrix c is not square.")
+        if c.shape[1] != b.shape[0]:
+            raise ValueError(f"incompatible dimensions ({c.shape} and {b.shape})")
+
+        # Quick return for empty arrays
+        if b.size == 0:
+            output_storage[0][0] = np.empty_like(b, dtype=potrs.dtype)
+            return
+
+        x, info = potrs(c, b, lower=self.lower, overwrite_b=self.overwrite_b)
+        if info != 0:
+            raise ValueError(f"illegal value in {-info}th argument of internal potrs")
+
+        output_storage[0][0] = x
 
     def L_op(self, *args, **kwargs):
         # TODO: Base impl should work, let's try it
