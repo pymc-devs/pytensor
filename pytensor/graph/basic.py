@@ -451,23 +451,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
     # __slots__ = ['type', 'owner', 'index', 'name']
     __count__ = count(0)
 
-    _owner: OptionalApplyType
-
-    @property
-    def owner(self) -> OptionalApplyType:
-        return self._owner
-
-    @owner.setter
-    def owner(self, value) -> None:
-        self._owner = value
-
-    @property
-    def index(self):
-        return self._index
-
-    @index.setter
-    def index(self, value):
-        self._index = value
+    owner: OptionalApplyType
 
     def __init__(
         self,
@@ -482,7 +466,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
 
         self.type = type
 
-        self._owner = owner
+        self.owner = owner
 
         if owner is not None and not isinstance(owner, Apply):
             raise TypeError("owner must be an Apply instance")
