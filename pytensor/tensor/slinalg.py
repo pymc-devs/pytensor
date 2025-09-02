@@ -8,6 +8,7 @@ import numpy as np
 import scipy.linalg as scipy_linalg
 from numpy.exceptions import ComplexWarning
 from scipy.linalg import get_lapack_funcs
+from scipy.linalg._misc import LinAlgWarning
 
 import pytensor
 from pytensor import ifelse
@@ -709,9 +710,27 @@ class LUFactor(Op):
     def perform(self, node, inputs, outputs):
         A = inputs[0]
 
-        LU, p = scipy_linalg.lu_factor(
-            A, overwrite_a=self.overwrite_a, check_finite=self.check_finite
-        )
+        # Quick return for empty arrays
+        if A.size == 0:
+            outputs[0][0] = np.empty_like(A)
+            outputs[1][0] = np.arange(0, dtype=np.int32)
+            return
+
+        if self.check_finite and not np.isfinite(A).all():
+            raise ValueError("array must not contain infs or NaNs")
+
+        (getrf,) = get_lapack_funcs(("getrf",), (A,))
+        LU, p, info = getrf(A, overwrite_a=self.overwrite_a)
+        if info < 0:
+            raise ValueError(
+                f"illegal value in {-info}th argument of internal getrf (lu_factor)"
+            )
+        if info > 0:
+            warnings.warn(
+                f"Diagonal number {info} is exactly zero. Singular matrix.",
+                LinAlgWarning,
+                stacklevel=2,
+            )
 
         outputs[0][0] = LU
         outputs[1][0] = p
