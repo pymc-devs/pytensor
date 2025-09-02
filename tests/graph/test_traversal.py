@@ -4,13 +4,17 @@ from pytensor import Variable, shared
 from pytensor import tensor as pt
 from pytensor.graph import Apply, ancestors, graph_inputs
 from pytensor.graph.traversal import (
+    apply_ancestors,
     apply_depends_on,
     explicit_graph_inputs,
     general_toposort,
     get_var_by_name,
     io_toposort,
     orphans_between,
+    toposort,
+    toposort_with_orderings,
     truncated_graph_inputs,
+    variable_ancestors,
     variable_depends_on,
     vars_between,
     walk,
@@ -36,23 +40,17 @@ class TestToposort:
         o2 = MyOp(o, r5)
         o2.name = "o2"
 
-        clients = {}
-        res = general_toposort([o2], self.prenode, clients=clients)
-
-        assert clients == {
-            o2.owner: [o2],
-            o: [o2.owner],
-            r5: [o2.owner],
-            o.owner: [o],
-            r1: [o.owner],
-            r2: [o.owner],
-        }
+        res = general_toposort([o2], self.prenode)
         assert res == [r5, r2, r1, o.owner, o, o2.owner, o2]
 
-        with pytest.raises(ValueError):
-            general_toposort(
-                [o2], self.prenode, compute_deps_cache=lambda x: None, deps_cache=None
-            )
+        def circular_dependency(obj):
+            if obj is o:
+                # o2 depends on o, so o cannot depend on o2
+                return [o2, *self.prenode(obj)]
+            return self.prenode(obj)
+
+        with pytest.raises(ValueError, match="graph contains cycles"):
+            general_toposort([o2], circular_dependency)
 
         res = io_toposort([r5], [o2])
         assert res == [o.owner, o2.owner]
@@ -181,16 +179,16 @@ def test_ancestors():
 
     res = ancestors([o2], blockers=None)
     res_list = list(res)
-    assert res_list == [o2, r3, o1, r1, r2]
+    assert res_list == [o2, o1, r2, r1, r3]
 
     res = ancestors([o2], blockers=None)
-    assert r3 in res
+    assert o1 in res
     res_list = list(res)
-    assert res_list == [o1, r1, r2]
+    assert res_list == [r2, r1, r3]
 
     res = ancestors([o2], blockers=[o1])
     res_list = list(res)
-    assert res_list == [o2, r3, o1]
+    assert res_list == [o2, o1, r3]
 
 
 def test_graph_inputs():
@@ -202,7 +200,7 @@ def test_graph_inputs():
 
     res = graph_inputs([o2], blockers=None)
     res_list = list(res)
-    assert res_list == [r3, r1, r2]
+    assert res_list == [r2, r1, r3]
 
 
 def test_explicit_graph_inputs():
@@ -231,7 +229,7 @@ def test_variables_and_orphans():
 
     vars_res_list = list(vars_res)
     orphans_res_list = list(orphans_res)
-    assert vars_res_list == [o2, o1, r3, r2, r1]
+    assert vars_res_list == [o2, o1, r2, r1, r3]
     assert orphans_res_list == [r3]
 
 
@@ -408,3 +406,37 @@ def test_get_var_by_name():
 
     exp_res = igo.fgraph.outputs[0]
     assert res == exp_res
+
+
+@pytest.mark.parametrize(
+    "func",
+    [
+        lambda x: all(variable_ancestors([x])),
+        lambda x: all(variable_ancestors([x], blockers=[x.clone()])),
+        lambda x: all(apply_ancestors([x])),
+        lambda x: all(apply_ancestors([x], blockers=[x.clone()])),
+        lambda x: all(toposort([x])),
+        lambda x: all(toposort([x], blockers=[x.clone()])),
+        lambda x: all(toposort_with_orderings([x], orderings={x: []})),
+        lambda x: all(
+            toposort_with_orderings([x], blockers=[x.clone()], orderings={x: []})
+        ),
+    ],
+    ids=[
+        "variable_ancestors",
+        "variable_ancestors_with_blockers",
+        "apply_ancestors",
+        "apply_ancestors_with_blockers)",
+        "toposort",
+        "toposort_with_blockers",
+        "toposort_with_orderings",
+        "toposort_with_orderings_and_blockers",
+    ],
+)
+def test_traversal_benchmark(func, benchmark):
+    r1 = MyVariable(1)
+    out = r1
+    for i in range(50):
+        out = MyOp(out, out)
+
+    benchmark(func, out)
