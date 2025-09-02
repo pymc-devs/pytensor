@@ -600,10 +600,12 @@ class TestPushOutAddScan:
     is used to compute the sum over the dot products between the corresponding
     elements of two list of matrices.
 
-    TODO FIXME XXX: These aren't real tests; they simply confirm that a few
+    FIXME: These aren't real tests; they simply confirm that a few
     graph that could be relevant to the push-out optimizations can be compiled
     and evaluated.  None of them confirm that a push-out optimization has been
     performed.
+
+    FIXME: The rewrite is indeed broken, probably fro a long while, see FIXME details in the respective rewrite
     """
 
     def test_sum_dot(self):
@@ -614,7 +616,15 @@ class TestPushOutAddScan:
             sequences=[A.dimshuffle(0, 1, "x"), B.dimshuffle(0, "x", 1)],
             outputs_info=[pt.zeros_like(A)],
         )
+        # FIXME: This `s.owner.inputs[0][-1]` is a hack, users will never do that.
+        #  They will do `s[-1]` which the rewrite fails to identify since it explicitly looks for a `scan_out[-1]`
+        #  instead of `scan_out[1:][-1]` that the user would define by writing `s[-1]`
+        #  It however, tests the only case the rewrite supports now
         f = function([A, B], S.owner.inputs[0][-1])
+        has_scan = any(isinstance(node.op, Scan) for node in f.maker.fgraph.apply_nodes)
+        # Rewrite is only triggered in fast_run mode
+        assert has_scan if (config.mode == "FAST_COMPILE") else (not has_scan)
+
         rng = np.random.default_rng(utt.fetch_seed())
         vA = rng.uniform(size=(5, 5)).astype(config.floatX)
         vB = rng.uniform(size=(5, 5)).astype(config.floatX)
