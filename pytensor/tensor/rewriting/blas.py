@@ -59,7 +59,7 @@ import time
 
 import numpy as np
 
-from pytensor.graph.traversal import io_toposort
+from pytensor.graph.traversal import toposort
 from pytensor.tensor.rewriting.basic import register_specialize
 
 
@@ -460,6 +460,9 @@ class GemmOptimizer(GraphRewriter):
             callbacks_before = fgraph.execute_callbacks_times.copy()
             callback_before = fgraph.execute_callbacks_time
 
+        nodelist = list(toposort(fgraph.outputs))
+        nodelist.reverse()
+
         def on_import(new_node):
             if new_node is not node:
                 nodelist.append(new_node)
@@ -471,10 +474,8 @@ class GemmOptimizer(GraphRewriter):
         while did_something:
             nb_iter += 1
             t0 = time.perf_counter()
-            nodelist = io_toposort(fgraph.inputs, fgraph.outputs)
             time_toposort += time.perf_counter() - t0
             did_something = False
-            nodelist.reverse()
             for node in nodelist:
                 if not (
                     isinstance(node.op, Elemwise)

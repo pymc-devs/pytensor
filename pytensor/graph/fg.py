@@ -19,7 +19,8 @@ from pytensor.graph.op import Op
 from pytensor.graph.traversal import (
     applys_between,
     graph_inputs,
-    io_toposort,
+    toposort,
+    toposort_with_orderings,
     vars_between,
 )
 from pytensor.graph.utils import MetaObject, MissingInputError, TestValueError
@@ -366,7 +367,7 @@ class FunctionGraph(MetaObject):
         # new nodes, so we use all variables we know of as if they were the
         # input set.  (The functions in the graph module only use the input set
         # to know where to stop going down.)
-        new_nodes = io_toposort(self.variables, apply_node.outputs)
+        new_nodes = tuple(toposort(apply_node.outputs, blockers=self.variables))
 
         if check:
             for node in new_nodes:
@@ -759,7 +760,7 @@ class FunctionGraph(MetaObject):
             # No sorting is necessary
             return list(self.apply_nodes)
 
-        return io_toposort(self.inputs, self.outputs, self.orderings())
+        return list(toposort_with_orderings(self.outputs, orderings=self.orderings()))
 
     def orderings(self) -> dict[Apply, list[Apply]]:
         """Return a map of node to node evaluation dependencies.

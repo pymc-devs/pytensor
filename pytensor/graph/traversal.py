@@ -1,25 +1,40 @@
 from collections import deque
 from collections.abc import (
     Callable,
-    Collection,
     Generator,
     Iterable,
-    Iterator,
     Reversible,
     Sequence,
 )
 from typing import (
+    Literal,
     TypeVar,
-    cast,
     overload,
 )
 
 from pytensor.graph.basic import Apply, Constant, Node, Variable
-from pytensor.misc.ordered_set import OrderedSet
 
 
 T = TypeVar("T", bound=Node)
 NodeAndChildren = tuple[T, Iterable[T] | None]
+
+
+@overload
+def walk(
+    nodes: Iterable[T],
+    expand: Callable[[T], Iterable[T] | None],
+    bfs: bool = True,
+    return_children: Literal[False] = False,
+) -> Generator[T, None, None]: ...
+
+
+@overload
+def walk(
+    nodes: Iterable[T],
+    expand: Callable[[T], Iterable[T] | None],
+    bfs: bool,
+    return_children: Literal[True],
+) -> Generator[NodeAndChildren, None, None]: ...
 
 
 def walk(
@@ -27,7 +42,6 @@ def walk(
     expand: Callable[[T], Iterable[T] | None],
     bfs: bool = True,
     return_children: bool = False,
-    hash_fn: Callable[[T], int] = id,
 ) -> Generator[T | NodeAndChildren, None, None]:
     r"""Walk through a graph, either breadth- or depth-first.
 
@@ -44,9 +58,6 @@ def walk(
     return_children
         If ``True``, each output node will be accompanied by the output of
         `expand` (i.e. the corresponding child nodes).
-    hash_fn
-        The function used to produce hashes of the elements in `nodes`.
-        The default is ``id``.
 
     Notes
     -----
@@ -55,39 +66,39 @@ def walk(
 
     """
 
+    rval_set: set[T] = set()
     nodes = deque(nodes)
-
-    rval_set: set[int] = set()
-
-    nodes_pop: Callable[[], T]
-    if bfs:
-        nodes_pop = nodes.popleft
-    else:
-        nodes_pop = nodes.pop
-
-    while nodes:
-        node: T = nodes_pop()
-
-        node_hash: int = hash_fn(node)
-
-        if node_hash not in rval_set:
-            rval_set.add(node_hash)
-
-            new_nodes: Iterable[T] | None = expand(node)
-
-            if return_children:
-                yield node, new_nodes
-            else:
-                yield node
-
-            if new_nodes:
-                nodes.extend(new_nodes)
+    nodes_pop: Callable[[], T] = nodes.popleft if bfs else nodes.pop
+    node: T
+    new_nodes: Iterable[T] | None
+    try:
+        if return_children:
+            while True:
+                node = nodes_pop()
+                if node not in rval_set:
+                    new_nodes = expand(node)
+                    yield node, new_nodes
+                    rval_set.add(node)
+                    if new_nodes:
+                        nodes.extend(new_nodes)
+        else:
+            while True:
+                node = nodes_pop()
+                if node not in rval_set:
+                    yield node
+                    rval_set.add(node)
+                    new_nodes = expand(node)
+                    if new_nodes:
+                        nodes.extend(new_nodes)
+    except IndexError:
+        return None
 
 
 def ancestors(
-    graphs: Iterable[Variable], blockers: Collection[Variable] | None = None
+    graphs: Iterable[Variable],
+    blockers: Iterable[Variable] | None = None,
 ) -> Generator[Variable, None, None]:
-    r"""Return the variables that contribute to those in given graphs (inclusive).
+    r"""Return the variables that contribute to those in given graphs (inclusive), stopping at blockers.
 
     Parameters
     ----------
@@ -101,21 +112,52 @@ def ancestors(
     Yields
     ------
     `Variable`\s
-        All input nodes, in the order found by a left-recursive depth-first
-        search started at the nodes in `graphs`.
-
+        All ancestor variables, in the order found by a right-recursive depth-first search
+        started at the variables in `graphs`.
     """
 
-    def expand(r: Variable) -> Iterator[Variable] | None:
-        if r.owner and (not blockers or r not in blockers):
-            return reversed(r.owner.inputs)
-        return None
+    seen = set()
+    queue = list(graphs)
+    try:
+        if blockers:
+            blockers = frozenset(blockers)
+            while True:
+                if (var := queue.pop()) not in seen:
+                    yield var
+                    seen.add(var)
+                    if var not in blockers and (apply := var.owner) is not None:
+                        queue.extend(apply.inputs)
+        else:
+            while True:
+                if (var := queue.pop()) not in seen:
+                    yield var
+                    seen.add(var)
+                    if (apply := var.owner) is not None:
+                        queue.extend(apply.inputs)
+    except IndexError:
+        return
 
-    yield from cast(Generator[Variable, None, None], walk(graphs, expand, False))
+
+variable_ancestors = ancestors
+
+
+def apply_ancestors(
+    graphs: Iterable[Variable],
+    blockers: Iterable[Variable] | None = None,
+) -> Generator[Apply, None, None]:
+    """Return the Apply nodes that contribute to those in given graphs (inclusive)."""
+    seen = {None}  # This filters out Variables without an owner
+    for var in ancestors(graphs, blockers):
+        # For multi-output nodes, we'll see multiple variables
+        # but we should only yield the Apply once
+        if (apply := var.owner) not in seen:
+            yield apply
+            seen.add(apply)
+    return
 
 
 def graph_inputs(
-    graphs: Iterable[Variable], blockers: Collection[Variable] | None = None
+    graphs: Iterable[Variable], blockers: Iterable[Variable] | None = None
 ) -> Generator[Variable, None, None]:
     r"""Return the inputs required to compute the given Variables.
 
@@ -130,11 +172,10 @@ def graph_inputs(
 
     Yields
     ------
-        Input nodes with no owner, in the order found by a left-recursive
-        depth-first search started at the nodes in `graphs`.
+        Input nodes with no owner, in the order found by a breath first search started at the nodes in `graphs`.
 
     """
-    yield from (r for r in ancestors(graphs, blockers) if r.owner is None)
+    yield from (var for var in ancestors(graphs, blockers) if var.owner is None)
 
 
 def explicit_graph_inputs(
@@ -177,12 +218,12 @@ def explicit_graph_inputs(
     from pytensor.compile.sharedvalue import SharedVariable
 
     if isinstance(graph, Variable):
-        graph = [graph]
+        graph = (graph,)
 
     return (
-        v
-        for v in graph_inputs(graph)
-        if isinstance(v, Variable) and not isinstance(v, Constant | SharedVariable)
+        var
+        for var in ancestors(graph)
+        if var.owner is None and not isinstance(var, Constant | SharedVariable)
     )
 
 
@@ -190,6 +231,11 @@ def vars_between(
     ins: Iterable[Variable], outs: Iterable[Variable]
 ) -> Generator[Variable, None, None]:
     r"""Extract the `Variable`\s within the sub-graph between input and output nodes.
+
+    Notes
+    -----
+    This function is like ancestors(outs, blockers=ins),
+    except it can also yield disconnected output variables from multi-output apply nodes.
 
     Parameters
     ----------
@@ -207,20 +253,19 @@ def vars_between(
 
     """
 
-    ins = set(ins)
-
-    def expand(r: Variable) -> Iterable[Variable] | None:
-        if r.owner and r not in ins:
-            return reversed(r.owner.inputs + r.owner.outputs)
+    def expand(var: Variable, ins=frozenset(ins)) -> Iterable[Variable] | None:
+        if var.owner is not None and var not in ins:
+            return (*var.owner.inputs, *var.owner.outputs)
         return None
 
-    yield from cast(Generator[Variable, None, None], walk(outs, expand))
+    # With bfs = False, it iterates similarly to ancestors
+    yield from walk(outs, expand, bfs=False)
 
 
 def orphans_between(
-    ins: Collection[Variable], outs: Iterable[Variable]
+    ins: Iterable[Variable], outs: Iterable[Variable]
 ) -> Generator[Variable, None, None]:
-    r"""Extract the `Variable`\s not within the sub-graph between input and output nodes.
+    r"""Extract the root `Variable`\s not within the sub-graph between input and output nodes.
 
     Parameters
     ----------
@@ -245,13 +290,22 @@ def orphans_between(
     [y]
 
     """
-    yield from (r for r in vars_between(ins, outs) if r.owner is None and r not in ins)
+    ins = frozenset(ins)
+    yield from (
+        var
+        for var in vars_between(ins, outs)
+        if ((var.owner is None) and (var not in ins))
+    )
 
 
 def applys_between(
-    ins: Collection[Variable], outs: Iterable[Variable]
+    ins: Iterable[Variable], outs: Iterable[Variable]
 ) -> Generator[Apply, None, None]:
     r"""Extract the `Apply`\s contained within the sub-graph between given input and output variables.
+
+    Notes
+    -----
+    This is identical to apply_ancestors(outs, blockers=ins)
 
     Parameters
     ----------
@@ -268,12 +322,10 @@ def applys_between(
     owners of the `Variable`\s in `ins`.
 
     """
-    yield from (
-        r.owner for r in vars_between(ins, outs) if r not in ins and r.owner is not None
-    )
+    return apply_ancestors(outs, blockers=ins)
 
 
-def apply_depends_on(apply: Apply, depends_on: Apply | Collection[Apply]) -> bool:
+def apply_depends_on(apply: Apply, depends_on: Apply | Iterable[Apply]) -> bool:
     """Determine if any `depends_on` is in the graph given by ``apply``.
 
     Parameters
@@ -288,51 +340,47 @@ def apply_depends_on(apply: Apply, depends_on: Apply | Collection[Apply]) -> boo
     bool
 
     """
-    computed = set()
-    todo = [apply]
-    if not isinstance(depends_on, Collection):
-        depends_on = {depends_on}
+    if isinstance(depends_on, Apply):
+        depends_on = frozenset((depends_on,))
     else:
-        depends_on = set(depends_on)
-    while todo:
-        cur = todo.pop()
-        if cur.outputs[0] in computed:
-            continue
-        if all(i in computed or i.owner is None for i in cur.inputs):
-            computed.update(cur.outputs)
-            if cur in depends_on:
-                return True
-        else:
-            todo.append(cur)
-            todo.extend(i.owner for i in cur.inputs if i.owner)
-    return False
+        depends_on = frozenset(depends_on)
+    return (apply in depends_on) or any(
+        apply in depends_on for apply in apply_ancestors(apply.inputs)
+    )
 
 
 def variable_depends_on(
-    variable: Variable, depends_on: Variable | Collection[Variable]
+    variable: Variable, depends_on: Variable | Iterable[Variable]
 ) -> bool:
     """Determine if any `depends_on` is in the graph given by ``variable``.
+
+    Notes
+    -----
+    The interpretation of dependency is done at a variable level.
+    A variable may depend on some output variables from a multi-output apply node but not others.
+
+
     Parameters
     ----------
     variable: Variable
-        Node to check
-    depends_on: Collection[Variable]
+        T to check
+    depends_on: Iterable[Variable]
         Nodes to check dependency on
 
     Returns
     -------
     bool
     """
-    if not isinstance(depends_on, Collection):
-        depends_on = {depends_on}
+    if isinstance(depends_on, Variable):
+        depends_on_set = frozenset((depends_on,))
     else:
-        depends_on = set(depends_on)
-    return any(interim in depends_on for interim in ancestors([variable]))
+        depends_on_set = frozenset(depends_on)
+    return any(var in depends_on_set for var in variable_ancestors([variable]))
 
 
 def truncated_graph_inputs(
     outputs: Sequence[Variable],
-    ancestors_to_include: Collection[Variable] | None = None,
+    ancestors_to_include: Iterable[Variable] | None = None,
 ) -> list[Variable]:
     """Get the truncate graph inputs.
 
@@ -345,9 +393,9 @@ def truncated_graph_inputs(
 
     Parameters
     ----------
-    outputs : Collection[Variable]
+    outputs : Iterable[Variable]
         Variable to get conditions for
-    ancestors_to_include : Optional[Collection[Variable]]
+    ancestors_to_include : Optional[Iterable[Variable]]
         Additional ancestors to assume, by default None
 
     Returns
@@ -405,88 +453,136 @@ def truncated_graph_inputs(
         n - (c) - (o/c)
 
     """
-    # simple case, no additional ancestors to include
     truncated_inputs: list[Variable] = list()
-    # blockers have known independent variables and ancestors to include
-    candidates = list(outputs)
-    if not ancestors_to_include:  # None or empty
+    seen: set[Variable] = set()
+
+    # simple case, no additional ancestors to include
+    if not ancestors_to_include:
         # just filter out unique variables
-        for variable in candidates:
-            if variable not in truncated_inputs:
+        for variable in outputs:
+            if variable not in seen:
+                seen.add(variable)
                 truncated_inputs.append(variable)
-        # no more actions are needed
         return truncated_inputs
 
+    # blockers have known independent variables and ancestors to include
     blockers: set[Variable] = set(ancestors_to_include)
-    # variables that go here are under check already, do not repeat the loop for them
-    seen: set[Variable] = set()
     # enforce O(1) check for variable in ancestors to include
     ancestors_to_include = blockers.copy()
+    candidates = list(outputs)
+    try:
+        while True:
+            if (variable := candidates.pop()) not in seen:
+                seen.add(variable)
+                # check if the variable is independent, never go above blockers;
+                # blockers are independent variables and ancestors to include
+                if variable in ancestors_to_include:
+                    # ancestors to include that are present in the graph (not disconnected)
+                    # should be added to truncated_inputs
+                    truncated_inputs.append(variable)
+                    # if the ancestors to include is still dependent on other ancestors we need to go above,
+                    # FIXME: This seems wrong? The other ancestors above are either redundant given this variable,
+                    #  or another path leads to them and the special casing isn't needed
+                    #  It seems the only reason we are expanding on these inputs is to find other ancestors_to_include
+                    #  (instead of treating them as disconnected), but this may yet cause other unrelated variables
+                    #  to become "independent" in the process
+                    if variable_depends_on(variable, ancestors_to_include - {variable}):
+                        # owner can never be None for a dependent variable
+                        candidates.extend(
+                            n for n in variable.owner.inputs if n not in seen
+                        )
+                else:
+                    # A regular variable to check
+                    # if we've found an independent variable and it is not in blockers so far
+                    # it is a new independent variable not present in ancestors to include
+                    if variable_depends_on(variable, blockers):
+                        # If it's not an independent variable, inputs become candidates
+                        candidates.extend(variable.owner.inputs)
+                    else:
+                        # otherwise it's a truncated input itself
+                        truncated_inputs.append(variable)
+                    # all regular variables fall to blockers
+                    # 1. it is dependent - we already expanded on the inputs, nothing to do if we find it again
+                    # 2. it is independent - this is a truncated input, search for other nodes can stop here
+                    blockers.add(variable)
+    except IndexError:  # pop from an empty list
+        pass
 
-    while candidates:
-        # on any new candidate
-        variable = candidates.pop()
-        # we've looked into this variable already
-        if variable in seen:
-            continue
-        # check if the variable is independent, never go above blockers;
-        # blockers are independent variables and ancestors to include
-        elif variable in ancestors_to_include:
-            # The case where variable is in ancestors to include so we check if it depends on others
-            # it should be removed from the blockers to check against the rest
-            dependent = variable_depends_on(variable, ancestors_to_include - {variable})
-            # ancestors to include that are present in the graph (not disconnected)
-            # should be added to truncated_inputs
-            truncated_inputs.append(variable)
-            if dependent:
-                # if the ancestors to include is still dependent we need to go above, the search is not yet finished
-                # owner can never be None for a dependent variable
-                candidates.extend(n for n in variable.owner.inputs if n not in seen)
-        else:
-            # A regular variable to check
-            dependent = variable_depends_on(variable, blockers)
-            # all regular variables fall to blockers
-            # 1. it is dependent - further search irrelevant
-            # 2. it is independent - the search variable is inside the closure
-            blockers.add(variable)
-            # if we've found an independent variable and it is not in blockers so far
-            # it is a new independent variable not present in ancestors to include
-            if dependent:
-                # populate search if it's not an independent variable
-                # owner can never be None for a dependent variable
-                candidates.extend(n for n in variable.owner.inputs if n not in seen)
-            else:
-                # otherwise, do not search beyond
-                truncated_inputs.append(variable)
-        # add variable to seen, no point in checking it once more
-        seen.add(variable)
     return truncated_inputs
 
 
-@overload
+def walk_toposort(
+    graphs: Iterable[T],
+    deps: Callable[[T], Iterable[T] | None],
+) -> Generator[T, None, None]:
+    """Perform a topological sort of all nodes starting from a given node.
+
+    Parameters
+    ----------
+    graphs:
+        An iterable of nodes from which to start the topological sort.
+    deps : callable
+        A Python function that takes a node as input and returns its dependence.
+
+    Notes
+    -----
+
+    ``deps(i)`` should behave like a pure function (no funny business with internal state).
+
+    The order of the return value list is determined by the order of nodes
+    returned by the `deps` function.
+    """
+
+    # Cache the dependencies (ancestors) as we iterate over the nodes with the deps function
+    deps_cache: dict[T, list[T]] = {}
+
+    def compute_deps_cache(obj, deps_cache=deps_cache):
+        if obj in deps_cache:
+            return deps_cache[obj]
+        d = deps_cache[obj] = deps(obj) or []
+        return d
+
+    clients: dict[T, list[T]] = {}
+    sources: deque[T] = deque()
+    total_nodes = 0
+    for node, children in walk(
+        graphs, compute_deps_cache, bfs=False, return_children=True
+    ):
+        total_nodes += 1
+        # Mypy doesn't know that toposort will not return `None` because of our `or []` in the `compute_deps_cache`
+        for child in children:  # type: ignore
+            clients.setdefault(child, []).append(node)
+        if not deps_cache[node]:
+            # Add nodes without dependencies to the stack
+            sources.append(node)
+
+    rset: set[T] = set()
+    try:
+        while True:
+            if (node := sources.popleft()) not in rset:
+                yield node
+                total_nodes -= 1
+                rset.add(node)
+                # Iterate over each client node (that is, it depends on the current node)
+                for client in clients.get(node, []):
+                    # Remove itself from the dependent (ancestor) list of each client
+                    d = deps_cache[client] = [
+                        a for a in deps_cache[client] if a is not node
+                    ]
+                    if not d:
+                        # If there are no dependencies left to visit for this node, add it to the stack
+                        sources.append(client)
+    except IndexError:
+        pass
+
+    if total_nodes != 0:
+        raise ValueError("graph contains cycles")
+
+
 def general_toposort(
     outputs: Iterable[T],
-    deps: Callable[[T], OrderedSet | list[T]],
-    compute_deps_cache: None,
-    deps_cache: None,
-    clients: dict[T, list[T]] | None,
-) -> list[T]: ...
-
-
-@overload
-def general_toposort(
-    outputs: Iterable[T],
-    deps: None,
-    compute_deps_cache: Callable[[T], OrderedSet | list[T] | None],
-    deps_cache: dict[T, list[T]] | None,
-    clients: dict[T, list[T]] | None,
-) -> list[T]: ...
-
-
-def general_toposort(
-    outputs: Iterable[T],
-    deps: Callable[[T], OrderedSet | list[T]] | None,
-    compute_deps_cache: Callable[[T], OrderedSet | list[T] | None] | None = None,
+    deps: Callable[[T], Iterable[T] | None],
+    compute_deps_cache: Callable[[T], Iterable[T] | None] | None = None,
     deps_cache: dict[T, list[T]] | None = None,
     clients: dict[T, list[T]] | None = None,
 ) -> list[T]:
@@ -499,93 +595,117 @@ def general_toposort(
     compute_deps_cache : optional
         If provided, `deps_cache` should also be provided. This is a function like
         `deps`, but that also caches its results in a ``dict`` passed as `deps_cache`.
-    deps_cache : dict
-        A ``dict`` mapping nodes to their children.  This is populated by
-        `compute_deps_cache`.
-    clients : dict
-        If a ``dict`` is passed, it will be filled with a mapping of
-        nodes-to-clients for each node in the subgraph.
 
     Notes
     -----
+    This is a simple wrapper around `walk_toposort` for backwards compatibility
 
     ``deps(i)`` should behave like a pure function (no funny business with
     internal state).
 
-    ``deps(i)`` will be cached by this function (to be fast).
-
     The order of the return value list is determined by the order of nodes
     returned by the `deps` function.
+    """
+    # TODO: Deprecate me later
+    if compute_deps_cache is not None:
+        raise ValueError("compute_deps_cache is no longer supported")
+    if deps_cache is not None:
+        raise ValueError("deps_cache is no longer supported")
+    if clients is not None:
+        raise ValueError("clients is no longer supported")
+    return list(walk_toposort(outputs, deps))
 
-    The second option removes a Python function call, and allows for more
-    specialized code, so it can be faster.
+
+def toposort(
+    graphs: Iterable[Variable],
+    blockers: Iterable[Variable] | None = None,
+) -> Generator[Apply, None, None]:
+    """Topologically sort of Apply nodes between graphs (outputs) and blockers (inputs).
+
+    This is a streamlined version of `io_toposort_generator` when no additional ordering
+    constraints are needed.
+    """
+
+    # We can put blocker variables in computed, as we only return apply nodes
+    computed = set(blockers or ())
+    todo = list(graphs)
+    try:
+        while True:
+            if (cur := todo.pop()) not in computed and (apply := cur.owner) is not None:
+                uncomputed_inputs = tuple(
+                    i
+                    for i in apply.inputs
+                    if (i not in computed and i.owner is not None)
+                )
+                if not uncomputed_inputs:
+                    yield apply
+                    computed.update(apply.outputs)
+                else:
+                    todo.append(cur)
+                    todo.extend(uncomputed_inputs)
+    except IndexError:  # queue is empty
+        return
+
+
+def toposort_with_orderings(
+    graphs: Iterable[Variable],
+    *,
+    blockers: Iterable[Variable] | None = None,
+    orderings: dict[Apply, list[Apply]] | None = None,
+) -> Generator[Apply, None, None]:
+    """Perform topological of nodes between blocker (input) and graphs (output) variables with arbitrary extra orderings
+
+    Extra orderings can be used to force sorting of variables that are not naturally related in the graph.
+    This can be used by inplace optimizations to ensure a variable is only destroyed after all other uses.
+    Those other uses show up as dependencies of the destroying node, in the orderings dictionary.
+
+
+    Parameters
+    ----------
+    graphs : list or tuple of Variable instances
+        Graph inputs.
+    outputs : list or tuple of Apply instances
+        Graph outputs.
+    orderings : dict
+        Keys are `Apply` or `Variable` instances, values are lists of `Apply` or `Variable` instances.
 
     """
-    if compute_deps_cache is None:
-        if deps_cache is None:
-            deps_cache = {}
-
-        def _compute_deps_cache_(io):
-            if io not in deps_cache:
-                d = deps(io)
-
-                if d:
-                    if not isinstance(d, list | OrderedSet):
-                        raise TypeError(
-                            "Non-deterministic collections found; make"
-                            " toposort non-deterministic."
-                        )
-                    deps_cache[io] = list(d)
-                else:
-                    deps_cache[io] = None
-
-                return d
-            else:
-                return deps_cache[io]
-
-        _compute_deps_cache = _compute_deps_cache_
+    if not orderings:
+        # Faster branch
+        yield from toposort(graphs, blockers=blockers)
 
     else:
-        _compute_deps_cache = compute_deps_cache
+        # the inputs are used to decide where to stop expanding
+        if blockers:
 
-    if deps_cache is None:
-        raise ValueError("deps_cache cannot be None")
+            def compute_deps(obj, blocker_set=frozenset(blockers), orderings=orderings):
+                if obj in blocker_set:
+                    return None
+                if isinstance(obj, Apply):
+                    return [*obj.inputs, *orderings.get(obj, [])]
+                else:
+                    if (apply := obj.owner) is not None:
+                        return [apply, *orderings.get(apply, [])]
+                    else:
+                        return orderings.get(obj, [])
+        else:
+            # mypy doesn't like conditional functions with different signatures,
+            # but passing the globals as optional is faster
+            def compute_deps(obj, orderings=orderings):  # type: ignore[misc]
+                if isinstance(obj, Apply):
+                    return [*obj.inputs, *orderings.get(obj, [])]
+                else:
+                    if (apply := obj.owner) is not None:
+                        return [apply, *orderings.get(apply, [])]
+                    else:
+                        return orderings.get(obj, [])
 
-    search_res: list[NodeAndChildren] = cast(
-        list[NodeAndChildren],
-        list(walk(outputs, _compute_deps_cache, bfs=False, return_children=True)),
-    )
-
-    _clients: dict[T, list[T]] = {}
-    sources: deque[T] = deque()
-    search_res_len = len(search_res)
-    for snode, children in search_res:
-        if children:
-            for child in children:
-                _clients.setdefault(child, []).append(snode)
-        if not deps_cache.get(snode):
-            sources.append(snode)
-
-    if clients is not None:
-        clients.update(_clients)
-
-    rset: set[T] = set()
-    rlist: list[T] = []
-    while sources:
-        node: T = sources.popleft()
-        if node not in rset:
-            rlist.append(node)
-            rset.add(node)
-            for client in _clients.get(node, []):
-                d = [a for a in deps_cache[client] if a is not node]
-                deps_cache[client] = d
-                if not d:
-                    sources.append(client)
-
-    if len(rlist) != search_res_len:
-        raise ValueError("graph contains cycles")
-
-    return rlist
+        yield from (
+            apply
+            for apply in walk_toposort(graphs, deps=compute_deps)
+            # mypy doesn't understand that our generator will return both Apply and Variables
+            if isinstance(apply, Apply)  # type: ignore
+        )
 
 
 def io_toposort(
@@ -594,7 +714,11 @@ def io_toposort(
     orderings: dict[Apply, list[Apply]] | None = None,
     clients: dict[Variable, list[Variable]] | None = None,
 ) -> list[Apply]:
-    """Perform topological sort from input and output nodes.
+    """Perform topological of nodes between input and output variables.
+
+    Notes
+    -----
+    This is just a wrapper around `toposort_with_extra_orderings` for backwards compatibility
 
     Parameters
     ----------
@@ -604,96 +728,16 @@ def io_toposort(
         Graph outputs.
     orderings : dict
         Keys are `Apply` instances, values are lists of `Apply` instances.
-    clients : dict
-        If provided, it will be filled with mappings of nodes-to-clients for
-        each node in the subgraph that is sorted.
-
     """
-    if not orderings and clients is None:  # ordering can be None or empty dict
-        # Specialized function that is faster when more then ~10 nodes
-        # when no ordering.
+    # TODO: Deprecate me later
+    if clients is not None:
+        raise ValueError("clients is no longer supported")
 
-        # Do a new stack implementation with the vm algo.
-        # This will change the order returned.
-        computed = set(inputs)
-        todo = [o.owner for o in reversed(outputs) if o.owner]
-        order = []
-        while todo:
-            cur = todo.pop()
-            if all(out in computed for out in cur.outputs):
-                continue
-            if all(i in computed or i.owner is None for i in cur.inputs):
-                computed.update(cur.outputs)
-                order.append(cur)
-            else:
-                todo.append(cur)
-                todo.extend(
-                    i.owner for i in cur.inputs if (i.owner and i not in computed)
-                )
-        return order
-
-    iset = set(inputs)
-
-    if not orderings:  # ordering can be None or empty dict
-        # Specialized function that is faster when no ordering.
-        # Also include the cache in the function itself for speed up.
-
-        deps_cache: dict = {}
-
-        def compute_deps_cache(obj):
-            if obj in deps_cache:
-                return deps_cache[obj]
-            rval = []
-            if obj not in iset:
-                if isinstance(obj, Variable):
-                    if obj.owner:
-                        rval = [obj.owner]
-                elif isinstance(obj, Apply):
-                    rval = list(obj.inputs)
-                if rval:
-                    deps_cache[obj] = list(rval)
-                else:
-                    deps_cache[obj] = rval
-            else:
-                deps_cache[obj] = rval
-            return rval
-
-        topo = general_toposort(
-            outputs,
-            deps=None,
-            compute_deps_cache=compute_deps_cache,
-            deps_cache=deps_cache,
-            clients=clients,
-        )
-
-    else:
-        # the inputs are used only here in the function that decides what
-        # 'predecessors' to explore
-        def compute_deps(obj):
-            rval = []
-            if obj not in iset:
-                if isinstance(obj, Variable):
-                    if obj.owner:
-                        rval = [obj.owner]
-                elif isinstance(obj, Apply):
-                    rval = list(obj.inputs)
-                rval.extend(orderings.get(obj, []))
-            else:
-                assert not orderings.get(obj, None)
-            return rval
-
-        topo = general_toposort(
-            outputs,
-            deps=compute_deps,
-            compute_deps_cache=None,
-            deps_cache=None,
-            clients=clients,
-        )
-    return [o for o in topo if isinstance(o, Apply)]
+    return list(toposort_with_orderings(outputs, blockers=inputs, orderings=orderings))
 
 
 def get_var_by_name(
-    graphs: Iterable[Variable], target_var_id: str, ids: str = "CHAR"
+    graphs: Iterable[Variable], target_var_id: str
 ) -> tuple[Variable, ...]:
     r"""Get variables in a graph using their names.
 
@@ -712,21 +756,18 @@ def get_var_by_name(
     """
     from pytensor.graph.op import HasInnerGraph
 
-    def expand(r) -> list[Variable] | None:
-        if not r.owner:
+    def expand(r: Variable) -> list[Variable] | None:
+        if (apply := r.owner) is not None:
+            if isinstance(apply.op, HasInnerGraph):
+                return [*apply.inputs, *apply.op.inner_outputs]
+            else:
+                # Mypy doesn't know these will never be None
+                return apply.inputs  # type: ignore
+        else:
             return None
 
-        res = list(r.owner.inputs)
-
-        if isinstance(r.owner.op, HasInnerGraph):
-            res.extend(r.owner.op.inner_outputs)
-
-        return res
-
-    results: tuple[Variable, ...] = ()
-    for var in walk(graphs, expand, False):
-        var = cast(Variable, var)
-        if target_var_id == var.name or target_var_id == var.auto_name:
-            results += (var,)
-
-    return results
+    return tuple(
+        var
+        for var in walk(graphs, expand)
+        if (target_var_id == var.name or target_var_id == var.auto_name)
+    )
