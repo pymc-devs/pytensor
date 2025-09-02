@@ -658,10 +658,9 @@ def inner_sitsot_only_last_step_used(
     fgraph: FunctionGraph, var: Variable, scan_args: ScanArgs
 ) -> bool:
     """
-    Given a inner nit-sot output of `Scan`, return ``True`` iff the outer
-    nit-sot output has only one client and that client is a `Subtensor`
-    instance that takes only the last step (last element along the first
-    axis).
+    Given a inner sit-sot output of `Scan`, return ``True`` iff the outer
+    sit-sot output has only one client and that client is a `Subtensor`
+    instance that takes only the last step (last element along the first axis).
     """
     idx = scan_args.inner_out_sit_sot.index(var)
     outer_var = scan_args.outer_out_sit_sot[idx]
@@ -832,6 +831,14 @@ def scan_push_out_add(fgraph, node):
     Like `scan_push_out_seq`, this optimization aims to replace many operations
     on small tensors by few operations on large tensors. It can also lead to
     increased memory usage.
+
+    FIXME: This rewrite doesn't cover user defined graphs,
+      since it doesn't account for the intermediate slice
+      returned by the scan constructor for sit-sot (i.e., something like output[1:]).
+      It only looks for `outputs[-1]` but the user will only ever write `outputs[1:][-1]`
+      The relevant helper function is `inner_sitsot_only_last_step_used` which is only used by this rewrite
+      Note this rewrite is registered before subtensor_merge, but even if it were after subtensor_merge is a mess
+      and doesn't simplify to x[1:][-1] to x[-1] unless x length is statically known
     """
     # Don't perform the optimization on `as_while` `Scan`s. Because these
     # `Scan`s don't run for a predetermined number of steps, handling them is
@@ -857,6 +864,7 @@ def scan_push_out_add(fgraph, node):
             isinstance(nd.op, Elemwise)
             and isinstance(nd.op.scalar_op, ps.Add)
             and nd.out in args.inner_out_sit_sot
+            # FIXME: This function doesn't handle `sitsot_out[1:][-1]` pattern
             and inner_sitsot_only_last_step_used(fgraph, nd.out, args)
         ):
             # Ensure that one of the input to the add is the output of
@@ -920,6 +928,7 @@ def scan_push_out_add(fgraph, node):
                     # external Dot instead of the output of scan
                     # Modify the outer graph to add the outer Dot
                     outer_sitsot = new_scan_args.outer_out_sit_sot[sitsot_idx]
+                    # TODO: If we fix the FIXME above, we have to make sure we replace the last subtensor, not the immediate one
                     subtensor_node = fgraph.clients[outer_sitsot][0][0]
                     outer_sitsot_last_step = subtensor_node.outputs[0]
 
