@@ -272,10 +272,21 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         parent_node=node,
         **kwargs,
     )
-
     nin = len(node.inputs)
     nout = len(node.outputs)
-    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
+    # TODO: Proper key
+    key = "_".join(
+        map(
+            str,
+            (
+                op,
+                op.scalar_op,
+                tuple(op.inplace_pattern.items()),
+                tuple(getattr(op.scalar_op, "props_dict", lambda: {})().items()),
+            ),
+        )
+    )
+    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout, core_op_key=key)
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
     output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)

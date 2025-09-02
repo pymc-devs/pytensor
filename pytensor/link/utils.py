@@ -577,15 +577,26 @@ def register_thunk_trace_excepthook(handler: TextIO = sys.stdout) -> None:
 register_thunk_trace_excepthook()
 
 
+COMPILED_SRC_FUNCTIONS = {}
+
+
 def compile_function_src(
     src: str,
     function_name: str,
     global_env: dict[Any, Any] | None = None,
     local_env: dict[Any, Any] | None = None,
+    key: tuple[str] = None,
 ) -> Callable:
-    with NamedTemporaryFile(delete=False) as f:
-        filename = f.name
-        f.write(src.encode())
+    if key is not None:
+        numba_path = config.base_compiledir / "numba"
+        numba_path.mkdir(exist_ok=True)
+        filename = numba_path / key
+        with open(filename, "wb") as f:
+            f.write(src.encode())
+    else:
+        with NamedTemporaryFile(delete=False) as f:
+            filename = f.name
+            f.write(src.encode())
 
     if global_env is None:
         global_env = {}
@@ -598,6 +609,9 @@ def compile_function_src(
 
     res = cast(Callable, local_env[function_name])
     res.__source__ = src  # type: ignore
+
+    global COMPILED_SRC_FUNCTIONS
+    COMPILED_SRC_FUNCTIONS[res] = key
     return res
 
 

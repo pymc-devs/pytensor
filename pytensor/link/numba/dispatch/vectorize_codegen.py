@@ -23,7 +23,9 @@ def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
-def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
+def store_core_outputs(
+    core_op_fn: Callable, nin: int, nout: int, core_op_key=None
+) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
     @njit
@@ -52,8 +54,13 @@ def store_core_outputs({inp_signature}, {out_signature}):
 {indent(store_outputs, " " * 4)}
 """
     global_env = {"core_op_fn": core_op_fn}
+
+    key = "_".join(("store_core_outputs", core_op_key)) if core_op_key else None
     func = compile_function_src(
-        func_src, "store_core_outputs", {**globals(), **global_env}
+        func_src,
+        "store_core_outputs",
+        {**globals(), **global_env},
+        key=key,
     )
     return cast(Callable, numba_basic.numba_njit(func))
 
