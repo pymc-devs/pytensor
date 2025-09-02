@@ -13,7 +13,6 @@ from pytensor import tensor as pt
 from pytensor.compile import optdb
 from pytensor.compile.function.types import deep_copy_op
 from pytensor.configdefaults import config
-from pytensor.graph import ancestors, graph_inputs
 from pytensor.graph.basic import (
     Apply,
     Constant,
@@ -35,7 +34,11 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import EquilibriumDB, SequenceDB
 from pytensor.graph.rewriting.utils import get_clients_at_depth
-from pytensor.graph.traversal import apply_depends_on, io_toposort
+from pytensor.graph.traversal import (
+    ancestors,
+    apply_depends_on,
+    graph_inputs,
+)
 from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError
 from pytensor.raise_op import Assert
@@ -220,7 +223,7 @@ def scan_push_out_non_seq(fgraph, node):
     """
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
-    local_fgraph_topo = io_toposort(node_inputs, node_outputs)
+    local_fgraph_topo = node.op.fgraph.toposort()
     local_fgraph_outs_set = set(node_outputs)
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
@@ -427,7 +430,7 @@ def scan_push_out_seq(fgraph, node):
     """
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
-    local_fgraph_topo = io_toposort(node_inputs, node_outputs)
+    local_fgraph_topo = node.op.fgraph.toposort()
     local_fgraph_outs_set = set(node_outputs)
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
@@ -840,22 +843,42 @@ def scan_push_out_add(fgraph, node):
 
     # apply_ancestors(args.inner_outputs)
 
-    # Use `ScanArgs` to parse the inputs and outputs of scan for ease of
-    # use
+    add_of_dot_nodes = [
+        n
+        for n in op.fgraph.apply_nodes
+        if
+        (
+            # We have an Add
+            isinstance(n.op, Elemwise)
+            and isinstance(n.op.scalar_op, ps.Add)
+            and any(
+                (
+                    # With a Dot input that's only used in the Add
+                    n_inp.owner is not None
+                    and isinstance(n_inp.owner.op, Dot)
+                    and len(op.fgraph.clients[n_inp]) == 1
+                )
+                for n_inp in n.inputs
+            )
+        )
+    ]
+
+    if not add_of_dot_nodes:
+        return False
+
+    # Use `ScanArgs` to parse the inputs and outputs of scan for ease of access
     args = ScanArgs(
-        node.inputs, node.outputs, op.inner_inputs, op.inner_outputs, op.info
+        node.inputs,
+        node.outputs,
+        op.inner_inputs,
+        op.inner_outputs,
+        op.info,
+        clone=False,
     )
 
-    clients = {}
-    local_fgraph_topo = io_toposort(
-        args.inner_inputs, args.inner_outputs, clients=clients
-    )
-
-    for nd in local_fgraph_topo:
+    for nd in add_of_dot_nodes:
         if (
-            isinstance(nd.op, Elemwise)
-            and isinstance(nd.op.scalar_op, ps.Add)
-            and nd.out in args.inner_out_sit_sot
+            nd.out in args.inner_out_sit_sot
             # FIXME: This function doesn't handle `sitsot_out[1:][-1]` pattern
             and inner_sitsot_only_last_step_used(fgraph, nd.out, args)
         ):
@@ -863,27 +886,17 @@ def scan_push_out_add(fgraph, node):
             # the add from a previous iteration of the inner function
             sitsot_idx = args.inner_out_sit_sot.index(nd.out)
             if args.inner_in_sit_sot[sitsot_idx] in nd.inputs:
-                # Ensure that the other input to the add is a dot product
-                # between 2 matrices which will become a tensor3 and a
-                # matrix if pushed outside of the scan. Also make sure
-                # that the output of the Dot is ONLY used by the 'add'
-                # otherwise doing a Dot in the outer graph will only
-                # duplicate computation.
-
                 sitsot_in_idx = nd.inputs.index(args.inner_in_sit_sot[sitsot_idx])
 
                 # 0 if sitsot_in_idx==1, 1 if sitsot_in_idx==0
                 dot_in_idx = 1 - sitsot_in_idx
-
                 dot_input = nd.inputs[dot_in_idx]
+                assert dot_input.owner is not None and isinstance(
+                    dot_input.owner.op, Dot
+                )
 
                 if (
-                    dot_input.owner is not None
-                    and isinstance(dot_input.owner.op, Dot)
-                    and len(clients[dot_input]) == 1
-                    and dot_input.owner.inputs[0].ndim == 2
-                    and dot_input.owner.inputs[1].ndim == 2
-                    and get_outer_ndim(dot_input.owner.inputs[0], args) == 3
+                    get_outer_ndim(dot_input.owner.inputs[0], args) == 3
                     and get_outer_ndim(dot_input.owner.inputs[1], args) == 3
                 ):
                     # The optimization can be be applied in this case.

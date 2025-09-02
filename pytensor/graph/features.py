@@ -10,7 +10,7 @@ import numpy as np
 import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
-from pytensor.graph.traversal import io_toposort
+from pytensor.graph.traversal import toposort
 from pytensor.graph.utils import InconsistencyError
 
 
@@ -340,11 +340,11 @@ class Feature:
 
 class Bookkeeper(Feature):
     def on_attach(self, fgraph):
-        for node in io_toposort(fgraph.inputs, fgraph.outputs):
+        for node in toposort(fgraph.outputs):
             self.on_import(fgraph, node, "on_attach")
 
     def on_detach(self, fgraph):
-        for node in io_toposort(fgraph.inputs, fgraph.outputs):
+        for node in toposort(fgraph.outputs):
             self.on_prune(fgraph, node, "Bookkeeper.detach")
 
 

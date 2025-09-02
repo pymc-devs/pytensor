@@ -28,7 +28,7 @@ class TestCloneReplace:
 
         f1 = z * (x + y) ** 2 + 5
         f2 = clone_replace(f1, replace=None, rebuild_strict=True, copy_inputs_over=True)
-        f2_inp = graph_inputs([f2])
+        f2_inp = tuple(graph_inputs([f2]))
 
         assert z in f2_inp
         assert x in f2_inp
@@ -65,7 +65,7 @@ class TestCloneReplace:
         f2 = clone_replace(
             f1, replace={y: y2}, rebuild_strict=True, copy_inputs_over=True
         )
-        f2_inp = graph_inputs([f2])
+        f2_inp = tuple(graph_inputs([f2]))
         assert z in f2_inp
         assert x in f2_inp
         assert y2 in f2_inp
@@ -83,7 +83,7 @@ class TestCloneReplace:
         f2 = clone_replace(
             f1, replace={y: y2}, rebuild_strict=False, copy_inputs_over=True
         )
-        f2_inp = graph_inputs([f2])
+        f2_inp = tuple(graph_inputs([f2]))
         assert z in f2_inp
         assert x in f2_inp
         assert y2 in f2_inp

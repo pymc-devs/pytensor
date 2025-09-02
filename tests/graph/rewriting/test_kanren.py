@@ -160,7 +160,7 @@ def test_KanrenRelationSub_dot():
 
     assert expr_opt.owner.op == pt.add
     assert isinstance(expr_opt.owner.inputs[0].owner.op, Dot)
-    assert fgraph_opt.inputs[0] is A_pt
+    assert fgraph_opt.inputs[-1] is A_pt
     assert expr_opt.owner.inputs[0].owner.inputs[0].name == "A"
     assert expr_opt.owner.inputs[1].owner.op == pt.add
     assert isinstance(expr_opt.owner.inputs[1].owner.inputs[0].owner.op, Dot)

@@ -56,7 +56,7 @@ class TestFunctionGraph:
         with pytest.raises(TypeError, match="'Variable' object is not iterable"):
             FunctionGraph(var1, [var2])
 
-        with pytest.raises(TypeError, match="'Variable' object is not reversible"):
+        with pytest.raises(TypeError, match="'Variable' object is not iterable"):
             FunctionGraph([var1], var2)
 
         with pytest.raises(
