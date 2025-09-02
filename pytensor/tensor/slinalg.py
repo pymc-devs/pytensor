@@ -8,7 +8,7 @@ import numpy as np
 import scipy.linalg as scipy_linalg
 from numpy.exceptions import ComplexWarning
 from scipy.linalg import get_lapack_funcs
-from scipy.linalg._misc import LinAlgWarning
+from scipy.linalg._misc import LinAlgError, LinAlgWarning
 
 import pytensor
 from pytensor import ifelse
@@ -897,15 +897,51 @@ class SolveTriangular(SolveBase):
 
     def perform(self, node, inputs, outputs):
         A, b = inputs
-        outputs[0][0] = scipy_linalg.solve_triangular(
-            A,
-            b,
-            lower=self.lower,
-            trans=0,
-            unit_diagonal=self.unit_diagonal,
-            check_finite=self.check_finite,
-            overwrite_b=self.overwrite_b,
-        )
+
+        if self.check_finite and not (np.isfinite(A).all() and np.isfinite(b).all()):
+            raise ValueError("array must not contain infs or NaNs")
+
+        if len(A.shape) != 2 or A.shape[0] != A.shape[1]:
+            raise ValueError("expected square matrix")
+
+        if A.shape[0] != b.shape[0]:
+            raise ValueError(f"shapes of a {A.shape} and b {b.shape} are incompatible")
+
+        (trtrs,) = get_lapack_funcs(("trtrs",), (A, b))
+
+        # Quick return for empty arrays
+        if b.size == 0:
+            outputs[0][0] = np.empty_like(b, dtype=trtrs.dtype)
+            return
+
+        if A.flags["F_CONTIGUOUS"]:
+            x, info = trtrs(
+                A,
+                b,
+                overwrite_b=self.overwrite_b,
+                lower=self.lower,
+                trans=0,
+                unitdiag=self.unit_diagonal,
+            )
+        else:
+            # transposed system is solved since trtrs expects Fortran ordering
+            x, info = trtrs(
+                A.T,
+                b,
+                overwrite_b=self.overwrite_b,
+                lower=not self.lower,
+                trans=1,
+                unitdiag=self.unit_diagonal,
+            )
+
+        if info > 0:
+            raise LinAlgError(
+                f"singular matrix: resolution failed at diagonal {info-1}"
+            )
+        elif info < 0:
+            raise ValueError(f"illegal value in {-info}-th argument of internal trtrs")
+
+        outputs[0][0] = x
 
     def L_op(self, inputs, outputs, output_gradients):
         res = super().L_op(inputs, outputs, output_gradients)

@@ -513,6 +513,31 @@ class TestSolveTriangular(utt.InferShapeTester):
 
         utt.verify_grad(solve_op, [A_val, b_val], 3, rng, eps=eps)
 
+    def test_solve_triangular_empty(self):
+        rng = np.random.default_rng(utt.fetch_seed())
+        A = pt.tensor("A", shape=(5, 5))
+        b = pt.tensor("b", shape=(5, 0))
+
+        A_val = rng.random((5, 5)).astype(config.floatX)
+        b_empty = np.empty([5, 0], dtype=config.floatX)
+
+        A_func = functools.partial(self.A_func, lower=True, unit_diagonal=True)
+
+        x = solve_triangular(
+            A_func(A),
+            b,
+            lower=True,
+            trans=0,
+            unit_diagonal=True,
+            b_ndim=len((5, 0)),
+        )
+
+        f = function([A, b], x)
+
+        res = f(A_val, b_empty)
+        assert res.size == 0
+        assert res.dtype == config.floatX
+
 
 class TestCholeskySolve(utt.InferShapeTester):
     def setup_method(self):
