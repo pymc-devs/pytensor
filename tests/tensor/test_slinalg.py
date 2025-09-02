@@ -822,6 +822,18 @@ def test_lu_factor():
     )
 
 
+def test_lu_factor_empty():
+    A = matrix()
+    f = function([A], lu_factor(A))
+
+    A_empty = np.empty([0, 0], dtype=config.floatX)
+    LU, pt_p_idx = f(A_empty)
+
+    assert LU.size == 0
+    assert LU.dtype == config.floatX
+    assert pt_p_idx.size == 0
+
+
 def test_cho_solve():
     rng = np.random.default_rng(utt.fetch_seed())
     A = matrix()
