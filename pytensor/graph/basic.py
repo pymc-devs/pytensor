@@ -5,7 +5,6 @@ import warnings
 from collections.abc import (
     Hashable,
     Iterable,
-    Reversible,
     Sequence,
 )
 from copy import copy
@@ -961,7 +960,7 @@ def clone_node_and_cache(
 
 def clone_get_equiv(
     inputs: Iterable[Variable],
-    outputs: Reversible[Variable],
+    outputs: Iterable[Variable],
     copy_inputs: bool = True,
     copy_orphans: bool = True,
     memo: dict[Union[Apply, Variable, "Op"], Union[Apply, Variable, "Op"]]
@@ -1002,7 +1001,7 @@ def clone_get_equiv(
         Keywords passed to `Apply.clone_with_new_inputs`.
 
     """
-    from pytensor.graph.traversal import io_toposort
+    from pytensor.graph.traversal import toposort
 
     if memo is None:
         memo = {}
@@ -1018,7 +1017,7 @@ def clone_get_equiv(
             memo.setdefault(input, input)
 
     # go through the inputs -> outputs graph cloning as we go
-    for apply in io_toposort(inputs, outputs):
+    for apply in toposort(outputs, blockers=inputs):
         for input in apply.inputs:
             if input not in memo:
                 if not isinstance(input, Constant) and copy_orphans:

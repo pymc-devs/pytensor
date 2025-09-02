@@ -1170,8 +1170,8 @@ class TestHyp2F1Grad:
                 if isinstance(node.op, Elemwise)
                 and isinstance(node.op.scalar_op, ScalarLoop)
             ]
-            assert scalar_loop_op1.nin == 10 + 3 * 2  # wrt=[0, 1]
-            assert scalar_loop_op2.nin == 10 + 3 * 1  # wrt=[2]
+            assert scalar_loop_op1.nin == 10 + 3 * 1  # wrt=[2]
+            assert scalar_loop_op2.nin == 10 + 3 * 2  # wrt=[0, 1]
         else:
             [scalar_loop_op] = [
                 node.op.scalar_op

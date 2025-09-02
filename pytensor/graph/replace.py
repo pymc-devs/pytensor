@@ -10,7 +10,10 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
-from pytensor.graph.traversal import io_toposort, truncated_graph_inputs
+from pytensor.graph.traversal import (
+    toposort,
+    truncated_graph_inputs,
+)
 
 
 ReplaceTypes = Iterable[tuple[Variable, Variable]] | dict[Variable, Variable]
@@ -295,7 +298,7 @@ def vectorize_graph(
     new_inputs = [replace.get(inp, inp) for inp in inputs]
 
     vect_vars = dict(zip(inputs, new_inputs, strict=True))
-    for node in io_toposort(inputs, seq_outputs):
+    for node in toposort(seq_outputs, blockers=inputs):
         vect_inputs = [vect_vars.get(inp, inp) for inp in node.inputs]
         vect_node = vectorize_node(node, *vect_inputs)
         for output, vect_output in zip(node.outputs, vect_node.outputs, strict=True):
