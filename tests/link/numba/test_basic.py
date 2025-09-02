@@ -6,9 +6,9 @@ from unittest import mock
 
 import numpy as np
 import pytest
+import scipy
 
 from pytensor.compile import SymbolicInput
-from tests.tensor.test_math_scipy import scipy
 
 
 numba = pytest.importorskip("numba")
