@@ -472,6 +472,11 @@ NUMBA = Mode(
     ),
 )
 
+NUMBA_VM = Mode(
+    NumbaLinker(vm=True),
+    NUMBA._optimizer,
+)
+
 JAX = Mode(
     JAXLinker(),
     RewriteDatabaseQuery(
@@ -510,6 +515,7 @@ predefined_modes = {
     "FAST_RUN": FAST_RUN,
     "JAX": JAX,
     "NUMBA": NUMBA,
+    "NUMBA_VM": NUMBA_VM,
     "PYTORCH": PYTORCH,
 }
 
