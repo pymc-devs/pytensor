@@ -13,7 +13,6 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 import builtins
 import math
 from collections.abc import Callable
-from copy import copy
 from itertools import chain
 from textwrap import dedent
 from typing import Any, TypeAlias
@@ -4093,12 +4092,12 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         self.prepare_node_called = set()
         super().__init__(*args, **kwargs)
 
-    def _cleanup_graph(self, inputs, outputs):
+    def _cleanup_graph(self, inputs, outputs, clone: bool = True):
         # TODO: We could convert to TensorVariable, optimize graph,
         # and then convert back to ScalarVariable.
         # This would introduce rewrites like `log(1 + x) -> log1p`.
 
-        fgraph = FunctionGraph(copy(inputs), copy(outputs))
+        fgraph = FunctionGraph(inputs, outputs, clone=clone)
 
         # Validate node types
         for node in fgraph.apply_nodes:
@@ -4321,7 +4320,7 @@ class Composite(ScalarInnerGraphOp):
             assert res[0] != inputs
             inputs, outputs = res[0], res2[1]
 
-        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
+        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs, clone=False)
         self.inputs_type = tuple(input.type for input in self.inputs)
         self.outputs_type = tuple(output.type for output in self.outputs)
         self.nin = len(inputs)
@@ -4376,7 +4375,7 @@ class Composite(ScalarInnerGraphOp):
             return self._fgraph
         # fgraph cannot be a property of the base class because it messes up with C caching.
         # We also need a `FunctionGraph(clone=True)` (default) according to an old comment
-        fgraph = FunctionGraph(self.inputs, self.outputs)
+        fgraph = FunctionGraph(self.inputs, self.outputs, clone=False)
         self._fgraph = fgraph
         return self._fgraph
 
