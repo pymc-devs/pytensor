@@ -948,6 +948,8 @@ class FusionOptimizer(GraphRewriter):
                         starting_nodes=starting_nodes,
                     )
 
+        checkpoint = fgraph.checkpoint()
+        nb_inconsintency_replace = 0
         for inputs, outputs in find_next_fuseable_subgraph(fgraph):
             if (len(inputs) + len(outputs)) > max_operands:
                 warn(
@@ -966,11 +968,21 @@ class FusionOptimizer(GraphRewriter):
                 if old_out.name:
                     composite_out.name = old_out.name
 
-            fgraph.replace_all_validate(
+            fgraph.replace_all(
                 list(zip(outputs, composite_outputs, strict=True)),
                 reason=self.__class__.__name__,
             )
             nb_replacement += 1
+
+        try:
+            fgraph.validate()
+        except InconsistencyError:
+            warn(
+                f"{self.__class__.__name__} produced an inconsistent graph. Reverting to the previous state."
+            )
+            fgraph.revert(checkpoint)
+            nb_inconsintency_replace = nb_replacement
+            nb_replacement = 0
 
         if fgraph.profile:
             validate_time = fgraph.profile.validate_time - validate_before
@@ -990,7 +1002,7 @@ class FusionOptimizer(GraphRewriter):
             self,
             1,  # nb_iter
             nb_replacement,
-            0,  # nb_inconsintency_replace
+            nb_inconsintency_replace,
             validate_time,
             callback_time,
             callbacks_time,
