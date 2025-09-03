@@ -1357,3 +1357,17 @@ def test_minimal_random_function_call_benchmark(trust_input, benchmark):
 
     rng_val = np.random.default_rng()
     benchmark(f, rng_val)
+
+
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+@pytest.mark.parametrize("depth", [2, 20])
+def test_function_compilation_benchmark(mode, depth, benchmark):
+    def compile_function(mode=mode, depth=depth):
+        x = pt.matrix("x")
+        out = x
+        for _ in range(depth):
+            out = pt.sin(out.T) + pt.cos(out)
+        fn = function([x], out, mode=mode)
+        return fn
+
+    benchmark.pedantic(compile_function, iterations=20, rounds=5)
