@@ -699,106 +699,106 @@ class DestroyHandler(Bookkeeper):
         c) an Apply destroys (illegally) one of its own inputs by aliasing
 
         """
+        if not self.destroyers:
+            return {}
+
         set_type = OrderedSet if ordered else set
         rval = {}
 
-        if self.destroyers:
-            # BUILD DATA STRUCTURES
-            # CHECK for multiple destructions during construction of variables
+        # BUILD DATA STRUCTURES
+        # CHECK for multiple destructions during construction of variables
 
-            droot, impact, __ignore = self.refresh_droot_impact()
+        droot, impact, __ignore = self.refresh_droot_impact()
 
-            # check for destruction of constants
-            illegal_destroy = [
-                r
-                for r in droot
-                if getattr(r.tag, "indestructible", False) or isinstance(r, Constant)
-            ]
-            if illegal_destroy:
-                raise InconsistencyError(
-                    f"Attempting to destroy indestructible variables: {illegal_destroy}"
+        # check for destruction of constants
+        illegal_destroy = [
+            r
+            for r in droot
+            if getattr(r.tag, "indestructible", False) or isinstance(r, Constant)
+        ]
+        if illegal_destroy:
+            raise InconsistencyError(
+                f"Attempting to destroy indestructible variables: {illegal_destroy}"
+            )
+
+        # add destroyed variable clients as computational dependencies
+        for app in self.destroyers:
+            # keep track of clients that should run before the current Apply
+            root_clients = set_type()
+            # for each destroyed input...
+            for input_idx_list in app.op.destroy_map.values():
+                destroyed_idx = input_idx_list[0]
+                destroyed_variable = app.inputs[destroyed_idx]
+                root = droot[destroyed_variable]
+                root_impact = impact[root]
+                # we generally want to put all clients of things which depend on root
+                # as pre-requisites of app.
+                # But, app is itself one such client!
+                # App will always be a client of the node we're destroying
+                # (destroyed_variable, but the tricky thing is when it is also a client of
+                # *another variable* viewing on the root.  Generally this is illegal, (e.g.,
+                # add_inplace(x, x.T).  In some special cases though, the in-place op will
+                # actually be able to work properly with multiple destroyed inputs (e.g,
+                # add_inplace(x, x).  An Op that can still work in this case should declare
+                # so via the 'destroyhandler_tolerate_same' attribute or
+                # 'destroyhandler_tolerate_aliased' attribute.
+                #
+                # destroyhandler_tolerate_same should be a list of pairs of the form
+                # [(idx0, idx1), (idx0, idx2), ...]
+                # The first element of each pair is the input index of a destroyed
+                # variable.
+                # The second element of each pair is the index of a different input where
+                # we will permit exactly the same variable to appear.
+                # For example, add_inplace.tolerate_same might be [(0,1)] if the destroyed
+                # input is also allowed to appear as the second argument.
+                #
+                # destroyhandler_tolerate_aliased is the same sort of list of
+                # pairs.
+                # op.destroyhandler_tolerate_aliased = [(idx0, idx1)] tells the
+                # destroyhandler to IGNORE an aliasing between a destroyed
+                # input idx0 and another input idx1.
+                # This is generally a bad idea, but it is safe in some
+                # cases, such as
+                # - the op reads from the aliased idx1 before modifying idx0
+                # - the idx0 and idx1 are guaranteed not to overlap (e.g.
+                #   they are pointed at different rows of a matrix).
+                #
+
+                # CHECK FOR INPUT ALIASING
+                # OPT: pre-compute this on import
+                tolerate_same = getattr(app.op, "destroyhandler_tolerate_same", [])
+                assert isinstance(tolerate_same, list)
+                tolerated = {
+                    idx1 for idx0, idx1 in tolerate_same if idx0 == destroyed_idx
+                }
+                tolerated.add(destroyed_idx)
+                tolerate_aliased = getattr(
+                    app.op, "destroyhandler_tolerate_aliased", []
                 )
-
-            # add destroyed variable clients as computational dependencies
-            for app in self.destroyers:
-                # keep track of clients that should run before the current Apply
-                root_clients = set_type()
-                # for each destroyed input...
-                for input_idx_list in app.op.destroy_map.values():
-                    destroyed_idx = input_idx_list[0]
-                    destroyed_variable = app.inputs[destroyed_idx]
-                    root = droot[destroyed_variable]
-                    root_impact = impact[root]
-                    # we generally want to put all clients of things which depend on root
-                    # as pre-requisites of app.
-                    # But, app is itself one such client!
-                    # App will always be a client of the node we're destroying
-                    # (destroyed_variable, but the tricky thing is when it is also a client of
-                    # *another variable* viewing on the root.  Generally this is illegal, (e.g.,
-                    # add_inplace(x, x.T).  In some special cases though, the in-place op will
-                    # actually be able to work properly with multiple destroyed inputs (e.g,
-                    # add_inplace(x, x).  An Op that can still work in this case should declare
-                    # so via the 'destroyhandler_tolerate_same' attribute or
-                    # 'destroyhandler_tolerate_aliased' attribute.
-                    #
-                    # destroyhandler_tolerate_same should be a list of pairs of the form
-                    # [(idx0, idx1), (idx0, idx2), ...]
-                    # The first element of each pair is the input index of a destroyed
-                    # variable.
-                    # The second element of each pair is the index of a different input where
-                    # we will permit exactly the same variable to appear.
-                    # For example, add_inplace.tolerate_same might be [(0,1)] if the destroyed
-                    # input is also allowed to appear as the second argument.
-                    #
-                    # destroyhandler_tolerate_aliased is the same sort of list of
-                    # pairs.
-                    # op.destroyhandler_tolerate_aliased = [(idx0, idx1)] tells the
-                    # destroyhandler to IGNORE an aliasing between a destroyed
-                    # input idx0 and another input idx1.
-                    # This is generally a bad idea, but it is safe in some
-                    # cases, such as
-                    # - the op reads from the aliased idx1 before modifying idx0
-                    # - the idx0 and idx1 are guaranteed not to overlap (e.g.
-                    #   they are pointed at different rows of a matrix).
-                    #
-
-                    # CHECK FOR INPUT ALIASING
-                    # OPT: pre-compute this on import
-                    tolerate_same = getattr(app.op, "destroyhandler_tolerate_same", [])
-                    assert isinstance(tolerate_same, list)
-                    tolerated = {
-                        idx1 for idx0, idx1 in tolerate_same if idx0 == destroyed_idx
-                    }
-                    tolerated.add(destroyed_idx)
-                    tolerate_aliased = getattr(
-                        app.op, "destroyhandler_tolerate_aliased", []
-                    )
-                    assert isinstance(tolerate_aliased, list)
-                    ignored = {
-                        idx1 for idx0, idx1 in tolerate_aliased if idx0 == destroyed_idx
-                    }
-                    for i, input in enumerate(app.inputs):
-                        if i in ignored:
-                            continue
-                        if input in root_impact and (
-                            i not in tolerated or input is not destroyed_variable
-                        ):
-                            raise InconsistencyError(
-                                f"Input aliasing: {app} ({destroyed_idx}, {i})"
-                            )
-
-                    # add the rule: app must be preceded by all other Apply instances that
-                    # depend on destroyed_input
-                    for r in root_impact:
-                        assert not [a for a, c in self.clients[r].items() if not c]
-                        root_clients.update(
-                            [a for a, c in self.clients[r].items() if c]
+                assert isinstance(tolerate_aliased, list)
+                ignored = {
+                    idx1 for idx0, idx1 in tolerate_aliased if idx0 == destroyed_idx
+                }
+                for i, input in enumerate(app.inputs):
+                    if i in ignored:
+                        continue
+                    if input in root_impact and (
+                        i not in tolerated or input is not destroyed_variable
+                    ):
+                        raise InconsistencyError(
+                            f"Input aliasing: {app} ({destroyed_idx}, {i})"
                         )
 
-                # app itself is a client of the destroyed inputs,
-                # but should not run before itself
-                root_clients.remove(app)
-                if root_clients:
-                    rval[app] = root_clients
+                # add the rule: app must be preceded by all other Apply instances that
+                # depend on destroyed_input
+                for r in root_impact:
+                    assert not [a for a, c in self.clients[r].items() if not c]
+                    root_clients.update([a for a, c in self.clients[r].items() if c])
+
+            # app itself is a client of the destroyed inputs,
+            # but should not run before itself
+            root_clients.remove(app)
+            if root_clients:
+                rval[app] = root_clients
 
         return rval
