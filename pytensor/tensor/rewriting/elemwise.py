@@ -659,14 +659,30 @@ class FusionOptimizer(GraphRewriter):
                     return new_dict
 
                 def variables_depend_on(
-                    variables, depend_on, stop_search_at=None
+                    variables,
+                    depend_on,
+                    stop_search_at=(),
+                    variable_toposort=(),
                 ) -> bool:
+                    # We can stop search at any variable that comes topologically before depend_on
+                    # As those can't logically be dependents anymore
+                    depend_on = frozenset(depend_on)
+                    first_depend_toposort_idx = next(
+                        i for i, var in enumerate(variable_toposort) if var in depend_on
+                    )
                     return any(
                         a in depend_on
-                        for a in ancestors(variables, blockers=stop_search_at)
+                        for a in ancestors(
+                            variables,
+                            blockers=(
+                                *stop_search_at,
+                                *variable_toposort[:first_depend_toposort_idx],
+                            ),
+                        )
                     )
 
                 toposort = fg.toposort()
+                variable_toposort = None  # build only lazily
                 for starting_node in toposort:
                     if starting_node in visited_nodes:
                         continue
@@ -729,10 +745,15 @@ class FusionOptimizer(GraphRewriter):
                             # We need to check that any new inputs required by this node
                             # do not depend on other outputs of the current subgraph,
                             # via an unfuseable path.
+                            if variable_toposort is None:
+                                variable_toposort = [
+                                    o for node in toposort for o in node.outputs
+                                ]
                             if variables_depend_on(
                                 [next_out],
                                 depend_on=unfuseable_clients_subgraph,
                                 stop_search_at=subgraph_outputs,
+                                variable_toposort=variable_toposort,
                             ):
                                 must_backtrack = True
 
@@ -752,9 +773,14 @@ class FusionOptimizer(GraphRewriter):
                                 # We need to check that any inputs of the current subgraph
                                 # do not depend on other clients of this node,
                                 # via an unfuseable path.
+                                if variable_toposort is None:
+                                    variable_toposort = [
+                                        o for node in toposort for o in node.outputs
+                                    ]
                                 if variables_depend_on(
                                     subgraph_inputs,
                                     depend_on=new_implied_unfuseable_clients,
+                                    variable_toposort=variable_toposort,
                                 ):
                                     must_backtrack = True
 
