@@ -273,7 +273,8 @@ class TestFusion:
     fwx = fw + fx
     ftanx = tan(fx)
 
-    def large_fuseable_graph(self, n):
+    @staticmethod
+    def large_fuseable_graph(n):
         factors = []
         sd = dscalar()
         means = dvector()
@@ -295,6 +296,24 @@ class TestFusion:
         vars = [sd, means]
         dlogp = [pytensor.grad(logp, v) for v in vars]
         return vars, dlogp
+
+    @staticmethod
+    def deep_small_kernels(n):
+        x = pt.matrix("x")
+        out = x
+        for _ in range(n):
+            out = pt.sin(out.T) + pt.cos(out)
+
+        return [x], [out]
+
+    @staticmethod
+    def diamond_graph(n):
+        a = pt.matrix("a")
+        b = pt.exp(a)
+        c = pt.log(b)
+        d = pt.sin(c)
+        e = c + d
+        return [a], [e]
 
     @pytest.mark.parametrize(
         "case",
@@ -1347,16 +1366,27 @@ class TestFusion:
         benchmark(func)
 
     @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
-    def test_rewrite_benchmark(self, benchmark):
-        inps, outs = self.large_fuseable_graph(n=25)
+    @pytest.mark.parametrize(
+        "graph_fn, n, expected_n_repl",
+        [
+            # ("diamond_graph", None, (1, 4)),
+            ("deep_small_kernels", 20, (20, 60)),
+            ("large_fuseable_graph", 25, (103, 876)),
+        ],
+    )
+    def test_rewrite_benchmark(self, graph_fn, n, expected_n_repl, benchmark):
+        inps, outs = getattr(self, graph_fn)(n)
         fg = FunctionGraph(inps, outs)
         opt = FusionOptimizer()
 
         def rewrite_func():
-            nb_replacement = opt.apply(fg.clone())[2]
-            return nb_replacement
+            fg_clone = fg.clone()
+            _, nb_fused, nb_replacement, *_ = opt.apply(fg_clone)
+            # fg_clone.dprint()
+            return nb_fused, nb_replacement
 
-        assert benchmark(rewrite_func) == 103
+        assert rewrite_func() == expected_n_repl
+        benchmark.pedantic(rewrite_func, rounds=7, iterations=5)
 
     def test_no_warning_from_old_client(self):
         # There used to be a warning issued when creating fuseable mapping
