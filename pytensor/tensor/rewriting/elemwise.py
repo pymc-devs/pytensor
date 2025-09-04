@@ -27,7 +27,7 @@ from pytensor.graph.rewriting.basic import (
     out2in,
 )
 from pytensor.graph.rewriting.db import SequenceDB
-from pytensor.graph.traversal import ancestors
+from pytensor.graph.traversal import ancestors, toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import (
@@ -647,6 +647,7 @@ class FusionOptimizer(GraphRewriter):
                 visited_nodes: set[Apply],
                 fuseable_clients: FUSEABLE_MAPPING,
                 unfuseable_clients: UNFUSEABLE_MAPPING,
+                toposort_index: dict[Apply, int],
             ) -> tuple[list[Variable], list[Variable]]:
                 KT = TypeVar("KT")
                 VT = TypeVar("VT", list, set)
@@ -661,29 +662,19 @@ class FusionOptimizer(GraphRewriter):
                 def variables_depend_on(
                     variables,
                     depend_on,
-                    stop_search_at=(),
-                    variable_toposort=(),
+                    stop_search_at=None,
                 ) -> bool:
                     # We can stop search at any variable that comes topologically before depend_on
                     # As those can't logically be dependents anymore
-                    depend_on = frozenset(depend_on)
-                    first_depend_toposort_idx = next(
-                        i for i, var in enumerate(variable_toposort) if var in depend_on
-                    )
                     return any(
                         a in depend_on
                         for a in ancestors(
                             variables,
-                            blockers=(
-                                *stop_search_at,
-                                *variable_toposort[:first_depend_toposort_idx],
-                            ),
+                            blockers=stop_search_at,
                         )
                     )
 
-                toposort = fg.toposort()
-                variable_toposort = None  # build only lazily
-                for starting_node in toposort:
+                for starting_node in toposort_index:
                     if starting_node in visited_nodes:
                         continue
 
@@ -745,15 +736,10 @@ class FusionOptimizer(GraphRewriter):
                             # We need to check that any new inputs required by this node
                             # do not depend on other outputs of the current subgraph,
                             # via an unfuseable path.
-                            if variable_toposort is None:
-                                variable_toposort = [
-                                    o for node in toposort for o in node.outputs
-                                ]
                             if variables_depend_on(
                                 [next_out],
                                 depend_on=unfuseable_clients_subgraph,
                                 stop_search_at=subgraph_outputs,
-                                variable_toposort=variable_toposort,
                             ):
                                 must_backtrack = True
 
@@ -773,14 +759,9 @@ class FusionOptimizer(GraphRewriter):
                                 # We need to check that any inputs of the current subgraph
                                 # do not depend on other clients of this node,
                                 # via an unfuseable path.
-                                if variable_toposort is None:
-                                    variable_toposort = [
-                                        o for node in toposort for o in node.outputs
-                                    ]
                                 if variables_depend_on(
                                     subgraph_inputs,
                                     depend_on=new_implied_unfuseable_clients,
-                                    variable_toposort=variable_toposort,
                                 ):
                                     must_backtrack = True
 
@@ -835,7 +816,7 @@ class FusionOptimizer(GraphRewriter):
                                     and inp.owner not in visited_nodes
                                 )
                             ),
-                            key=lambda inp: toposort.index(inp.owner),
+                            key=lambda inp: toposort_index[inp.owner],
                             reverse=True,
                         ):
                             fuseable_nodes_to_visit.appendleft(inp.owner)
@@ -847,7 +828,7 @@ class FusionOptimizer(GraphRewriter):
                                 for node in fuseable_clients_temp.get(next_out, ())
                                 if node not in visited_nodes
                             ),
-                            key=lambda node: toposort.index(node),
+                            key=lambda node: toposort_index[node],
                         ):
                             fuseable_nodes_to_visit.append(next_node)
 
@@ -921,20 +902,25 @@ class FusionOptimizer(GraphRewriter):
             # client (those that don't fit into 1))
             fuseable_clients, unfuseable_clients = initialize_fuseable_mappings(fg=fg)
             visited_nodes: set[Apply] = set()
+            toposort_index = {
+                node: i for i, node in enumerate(toposort(fgraph.outputs))
+            }
             while True:
-                starting_nodes = fg.apply_nodes.copy()
                 try:
                     subgraph_inputs, subgraph_outputs = find_fuseable_subgraph(
                         fg=fg,
                         visited_nodes=visited_nodes,
                         fuseable_clients=fuseable_clients,
                         unfuseable_clients=unfuseable_clients,
+                        toposort_index=toposort_index,
                     )
                 except ValueError:
                     return
                 else:
                     # The caller is now expected to update fg in place,
                     # by replacing the subgraph with a Composite Op
+                    starting_nodes = fg.apply_nodes.copy()
+
                     yield subgraph_inputs, subgraph_outputs
 
                     # This is where we avoid repeated work by using a stateful
