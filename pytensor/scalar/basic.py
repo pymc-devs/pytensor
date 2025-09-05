@@ -988,8 +988,17 @@ def constant(x, name=None, dtype=None) -> ScalarConstant:
 
 
 def as_scalar(x: Any, name: str | None = None) -> ScalarVariable:
-    from pytensor.tensor.basic import scalar_from_tensor
-    from pytensor.tensor.type import TensorType
+    if isinstance(x, ScalarVariable):
+        return x
+
+    if isinstance(x, Variable):
+        from pytensor.tensor.basic import scalar_from_tensor
+        from pytensor.tensor.type import TensorType
+
+        if isinstance(x.type, TensorType) and x.type.ndim == 0:
+            return scalar_from_tensor(x)
+        else:
+            raise TypeError(f"Cannot convert {x} to a scalar type")
 
     if isinstance(x, Apply):
         if len(x.outputs) != 1:
@@ -999,14 +1008,7 @@ def as_scalar(x: Any, name: str | None = None) -> ScalarVariable:
                 x,
             )
         else:
-            x = x.outputs[0]
-    if isinstance(x, Variable):
-        if isinstance(x, ScalarVariable):
-            return x
-        elif isinstance(x.type, TensorType) and x.type.ndim == 0:
-            return scalar_from_tensor(x)
-        else:
-            raise TypeError(f"Cannot convert {x} to a scalar type")
+            return as_scalar(x.outputs[0])
 
     return constant(x)
 
@@ -1238,7 +1240,10 @@ class ScalarOp(COp):
                     f"Wrong number of inputs for {self}.make_node "
                     f"(got {len(inputs)}({inputs}), expected {self.nin})"
                 )
-        inputs = [as_scalar(input) for input in inputs]
+        inputs = [
+            inp if isinstance(inp, ScalarVariable) else as_scalar(input)
+            for inp in inputs
+        ]
         outputs = [t() for t in self.output_types([input.type for input in inputs])]
         if len(outputs) != self.nout:
             inputs_str = (", ".join(str(input) for input in inputs),)
@@ -4376,6 +4381,7 @@ class Composite(ScalarInnerGraphOp):
         else:
             name = out.name
         out._c_code = self._c_code
+        out.nodenames = self.nodenames
         super(Composite, out).__init__(output_types_preference, name)
         return out
 
