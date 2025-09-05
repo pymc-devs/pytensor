@@ -1048,8 +1048,13 @@ class ScanInplaceOptimizer(GraphRewriter):
             return None
 
     def apply(self, fgraph):
+        scan_nodes = {node for node in fgraph.apply_nodes if isinstance(node.op, Scan)}
+
+        if not scan_nodes:
+            return
+
         for scan_idx, original_node in enumerate(reversed(fgraph.toposort())):
-            if not isinstance(original_node.op, Scan):
+            if original_node not in scan_nodes:
                 continue
 
             # First attempt to make the Scan compute inplace every recurrent
