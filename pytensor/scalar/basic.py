@@ -4287,7 +4287,14 @@ class Composite(ScalarInnerGraphOp):
 
     init_param: tuple[str, ...] = ("inputs", "outputs")
 
-    def __init__(self, inputs, outputs, name="Composite", cleanup_graph: bool = True):
+    def __init__(
+        self,
+        inputs,
+        outputs,
+        name="Composite",
+        clone_graph: bool = True,
+        output_types_preference=None,
+    ):
         self.name = name
         self._name = None
         # We need to clone the graph as sometimes its nodes already
@@ -4302,33 +4309,35 @@ class Composite(ScalarInnerGraphOp):
         for i in inputs:
             assert i not in outputs  # This isn't supported, use identity
 
-        if len(outputs) > 1 or not any(
-            isinstance(var.owner.op, Composite) for var in outputs
-        ):
-            # No inner Composite
-            # FIXME: There could be a composite in the middle of the graph
-            inputs, outputs = clone(inputs, outputs)
-        else:
-            # Inner Composite that we need to flatten
-            assert len(outputs) == 1
-            # 1. Create a new graph from inputs up to the
-            # Composite
-            res = pytensor.compile.rebuild_collect_shared(
-                inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
-            )  # Clone also the inputs
-            # 2. We continue this partial clone with the graph in
-            # the inner Composite
-            res2 = pytensor.compile.rebuild_collect_shared(
-                inputs=outputs[0].owner.op.inputs,
-                outputs=outputs[0].owner.op.outputs,
-                replace=dict(zip(outputs[0].owner.op.inputs, res[1], strict=True)),
-            )
-            assert len(res2[1]) == len(outputs)
-            assert len(res[0]) == len(inputs)
-            assert res[0] != inputs
-            inputs, outputs = res[0], res2[1]
+        if clone_graph:
+            if len(outputs) > 1 or not any(
+                isinstance(var.owner.op, Composite) for var in outputs
+            ):
+                # No inner Composite
+                # FIXME: There could be a composite in the middle of the graph
+                inputs, outputs = clone(inputs, outputs)
+            else:
+                # Inner Composite that we need to flatten
+                assert len(outputs) == 1
+                # 1. Create a new graph from inputs up to the
+                # Composite
+                res = pytensor.compile.rebuild_collect_shared(
+                    inputs=inputs,
+                    outputs=outputs[0].owner.inputs,
+                    copy_inputs_over=False,
+                )  # Clone also the inputs
+                # 2. We continue this partial clone with the graph in
+                # the inner Composite
+                res2 = pytensor.compile.rebuild_collect_shared(
+                    inputs=outputs[0].owner.op.inputs,
+                    outputs=outputs[0].owner.op.outputs,
+                    replace=dict(zip(outputs[0].owner.op.inputs, res[1], strict=True)),
+                )
+                assert len(res2[1]) == len(outputs)
+                assert len(res[0]) == len(inputs)
+                assert res[0] != inputs
+                inputs, outputs = res[0], res2[1]
 
-        if cleanup_graph:
             self.inputs, self.outputs = self._cleanup_graph(
                 inputs, outputs, clone=False
             )
@@ -4338,7 +4347,7 @@ class Composite(ScalarInnerGraphOp):
         self.outputs_type = tuple(output.type for output in self.outputs)
         self.nin = len(inputs)
         self.nout = len(outputs)
-        super().__init__()
+        super().__init__(output_types_preference=output_types_preference)
 
     def __str__(self):
         if self._name is not None:
@@ -4374,15 +4383,17 @@ class Composite(ScalarInnerGraphOp):
         This fct allow fix patch this.
 
         """
+
         d = {k: getattr(self, k) for k in self.init_param}
-        out = type(self)(**d, cleanup_graph=False)
-        if name:
-            out.name = name
-        else:
-            name = out.name
+        out = type(self)(
+            **d,
+            clone_graph=False,
+            output_types_preference=output_types_preference,
+            name=name or self.name,
+        )
+        # No need to recompute the _cocde and nodenames if they were already computed (which is true if the hash of the Op was requested)
         out._c_code = self._c_code
         out.nodenames = self.nodenames
-        super(Composite, out).__init__(output_types_preference, name)
         return out
 
     @property
