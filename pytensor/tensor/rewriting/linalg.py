@@ -25,6 +25,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.extra_ops import broadcast_shape
 from pytensor.tensor.math import Dot, Prod, _matmul, log, outer, prod
 from pytensor.tensor.nlinalg import (
     SVD,
@@ -886,11 +887,17 @@ def rewrite_solve_kron_to_solve(fgraph, node):
     b_ndim = props_dict["b_ndim"]
 
     A, b = node.inputs
+    [old_res] = node.outputs
 
-    if not A.owner or not (
-        isinstance(A.owner.op, KroneckerProduct)
-        or isinstance(A.owner.op, Blockwise)
-        and isinstance(A.owner.op.core_op, KroneckerProduct)
+    if not (
+        A.owner
+        and (
+            isinstance(A.owner.op, KroneckerProduct)
+            or (
+                isinstance(A.owner.op, Blockwise)
+                and isinstance(A.owner.op.core_op, KroneckerProduct)
+            )
+        )
     ):
         return
 
@@ -911,7 +918,7 @@ def rewrite_solve_kron_to_solve(fgraph, node):
         return None
 
     m, n = x1.shape[-2], x2.shape[-2]
-    batch_shapes = x1.shape[:-2]
+    batch_shapes = broadcast_shape(x1, x2)[:-2]
 
     if b_ndim == 1:
         # The rewritten expression will reshape B to be 2d. The easiest way to handle this is to just make a new
@@ -930,6 +937,8 @@ def rewrite_solve_kron_to_solve(fgraph, node):
         res = pt.moveaxis(solve_op(x1, solve_op(x2, B.mT).mT), 0, -1).reshape(
             (*batch_shapes, -1, b_batch)
         )
+
+    copy_stack_trace(old_res, res)
 
     return [res]
 
