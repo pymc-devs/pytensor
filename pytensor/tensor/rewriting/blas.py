@@ -60,6 +60,7 @@ import time
 import numpy as np
 
 from pytensor.graph.traversal import toposort
+from pytensor.scalar import Add, Mul, Neg, Sub
 from pytensor.tensor.rewriting.basic import register_specialize
 
 
@@ -100,10 +101,7 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import (
     Dot,
     _matmul,
-    add,
     mul,
-    neg,
-    sub,
     variadic_add,
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
@@ -237,22 +235,27 @@ def _gemm_canonicalize(fgraph, r, scale, rval, maxclients):
         rval.append(scaled(r))
         return rval
 
-    if maxclients and len(fgraph.clients[r]) > maxclients:
+    if (
+        (r.owner is None)
+        or (not isinstance(r.owner.op, Elemwise))
+        or (maxclients and len(fgraph.clients[r]) > maxclients)
+    ):
         rval.append((scale, r))
         return rval
 
-    if r.owner and r.owner.op == sub:
+    scalar_op = r.owner.op.scalar_op
+    if isinstance(scalar_op, Sub):
         _gemm_canonicalize(fgraph, r.owner.inputs[0], scale, rval, 1)
         _gemm_canonicalize(fgraph, r.owner.inputs[1], -scale, rval, 1)
 
-    elif r.owner and r.owner.op == add:
+    elif isinstance(scalar_op, Add):
         for i in r.owner.inputs:
             _gemm_canonicalize(fgraph, i, scale, rval, 1)
 
-    elif r.owner and r.owner.op == neg:
+    elif isinstance(scalar_op, Neg):
         _gemm_canonicalize(fgraph, r.owner.inputs[0], -scale, rval, 1)
 
-    elif r.owner and r.owner.op == mul:
+    elif isinstance(scalar_op, Mul):
         scalars = []
         vectors = []
         matrices = []
@@ -460,35 +463,45 @@ class GemmOptimizer(GraphRewriter):
             callbacks_before = fgraph.execute_callbacks_times.copy()
             callback_before = fgraph.execute_callbacks_time
 
-        nodelist = list(toposort(fgraph.outputs))
+        relevant_core_ops = (
+            pytensor.scalar.Add
+            | pytensor.scalar.Sub
+            | pytensor.scalar.Neg
+            | pytensor.scalar.Mul
+        )
+        nodelist = [
+            a
+            for a in toposort(fgraph.outputs)
+            if (
+                isinstance(a.op, Elemwise)
+                and isinstance(a.op.scalar_op, relevant_core_ops)
+            )
+        ]
+        if not nodelist:
+            return None
+
         nodelist.reverse()
 
         def on_import(new_node):
-            if new_node is not node:
+            if (
+                new_node is not node
+                and isinstance(new_node.op, Elemwise)
+                and isinstance(new_node.op.scalar_op, relevant_core_ops)
+            ):
                 nodelist.append(new_node)
 
         u = pytensor.graph.rewriting.basic.DispatchingFeature(
             on_import, None, None, name="GemmOptimizer"
         )
         fgraph.attach_feature(u)
+        fgraph_apply_nodes = fgraph.apply_nodes
         while did_something:
             nb_iter += 1
             t0 = time.perf_counter()
             time_toposort += time.perf_counter() - t0
             did_something = False
             for node in nodelist:
-                if not (
-                    isinstance(node.op, Elemwise)
-                    and isinstance(
-                        node.op.scalar_op,
-                        pytensor.scalar.Add
-                        | pytensor.scalar.Sub
-                        | pytensor.scalar.Neg
-                        | pytensor.scalar.Mul,
-                    )
-                ):
-                    continue
-                if node not in fgraph.apply_nodes:
+                if node not in fgraph_apply_nodes:
                     # This mean that we already removed this node from
                     # the graph
                     continue
@@ -502,7 +515,6 @@ class GemmOptimizer(GraphRewriter):
                     continue
                 if new_outputs:
                     new_outputs, old_dot22 = new_outputs
-                    assert len(new_outputs) == len(node.outputs)
                     new_outputs[
                         0
                     ].tag.values_eq_approx = values_eq_approx_remove_inf_nan
@@ -518,8 +530,7 @@ class GemmOptimizer(GraphRewriter):
                         did_something = True
                         nb_replacement += 1
                     except InconsistencyError:
-                        # TODO: retry other applications of gemm (see comment
-                        # in _gemm_from_node)
+                        # TODO: retry other applications of gemm (see comment in _gemm_from_node)
                         nb_inconsistency_replace += 1
                     except ReplacementDidNotRemoveError:
                         nb_replacement_didn_t_remove += 1
