@@ -13,6 +13,7 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 import builtins
 import math
 from collections.abc import Callable
+from functools import lru_cache
 from itertools import chain
 from textwrap import dedent
 from typing import Any, TypeAlias
@@ -57,38 +58,49 @@ class IntegerDivisionError(Exception):
     """
 
 
+@lru_cache
+def _upcast_pairwise(dtype1, dtype2=None, *, cast_policy, floatX):
+    # This tries to keep data in floatX or lower precision, unless we
+    # explicitly request a higher precision datatype.
+    if dtype1 == "float64":
+        keep_float32, keep_float16 = False, False
+    else:
+        keep_float32 = cast_policy == "numpy+floatX" and floatX == "float32"
+        keep_float16 = cast_policy == "numpy+floatX" and floatX == "float16"
+
+    if dtype2 is not None:
+        if dtype2 == "float64":
+            keep_float32, keep_float16 = False, False
+        elif dtype2 == "float32":
+            keep_float16 = False
+
+    if dtype2 is None:
+        rval = dtype1
+    else:
+        rval = (np.zeros((), dtype=dtype1) + np.zeros((), dtype=dtype2)).dtype.name
+
+    if rval == "float64":
+        if keep_float16:
+            return "float16"
+        if keep_float32:
+            return "float32"
+    elif rval == "float32":
+        if keep_float16:
+            return "float16"
+    return rval
+
+
 def upcast(dtype, *dtypes) -> str:
     # This tries to keep data in floatX or lower precision, unless we
     # explicitly request a higher precision datatype.
-    keep_float32 = [
-        (config.cast_policy == "numpy+floatX" and config.floatX == "float32")
-    ]
-    keep_float16 = [
-        (config.cast_policy == "numpy+floatX" and config.floatX == "float16")
-    ]
-
-    def make_array(dt):
-        if dt == "float64":
-            # There is an explicit float64 dtype: we cannot keep float32.
-            keep_float32[0] = False
-            keep_float16[0] = False
-        if dt == "float32":
-            keep_float16[0] = False
-        return np.zeros((), dtype=dt)
-
-    z = make_array(dtype)
+    floatX = config.floatX
+    cast_policy = config.cast_policy
+    res_dtype = _upcast_pairwise(dtype, cast_policy=cast_policy, floatX=floatX)
     for dt in dtypes:
-        z = z + make_array(dt=dt)
-    rval = str(z.dtype)
-    if rval == "float64":
-        if keep_float16[0]:
-            return "float16"
-        if keep_float32[0]:
-            return "float32"
-    elif rval == "float32":
-        if keep_float16[0]:
-            return "float16"
-    return rval
+        res_dtype = _upcast_pairwise(
+            res_dtype, dt, cast_policy=cast_policy, floatX=floatX
+        )
+    return res_dtype
 
 
 def as_common_dtype(*vars):
