@@ -85,7 +85,7 @@ from pathlib import Path
 import numpy as np
 from scipy.linalg import get_blas_funcs
 
-from pytensor.graph import vectorize_graph
+from pytensor.graph import Variable, vectorize_graph
 from pytensor.npy_2_compat import normalize_axis_tuple
 
 
@@ -97,7 +97,7 @@ except ImportError:
 
 import pytensor.scalar
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, view_roots
+from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
 from pytensor.link.c.op import COp
@@ -112,6 +112,25 @@ from pytensor.tensor.type import DenseTensorType, tensor
 
 
 _logger = logging.getLogger("pytensor.tensor.blas")
+
+
+def view_roots(node: Variable) -> list[Variable]:
+    """Return the leaves from a search through consecutive view-maps."""
+    owner = node.owner
+    if owner is not None:
+        try:
+            vars_to_views = {owner.outputs[o]: i for o, i in owner.op.view_map.items()}
+        except AttributeError:
+            return [node]
+        if node in vars_to_views:
+            answer = []
+            for i in vars_to_views[node]:
+                answer += view_roots(owner.inputs[i])
+            return answer
+        else:
+            return [node]
+    else:
+        return [node]
 
 
 def must_initialize_y_gemv():

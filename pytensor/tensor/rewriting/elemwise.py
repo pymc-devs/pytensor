@@ -13,19 +13,21 @@ from pytensor import clone_replace, compile
 from pytensor.compile.function.types import Supervisor
 from pytensor.compile.mode import get_target_language
 from pytensor.configdefaults import config
-from pytensor.graph import FunctionGraph, Op
-from pytensor.graph.basic import Apply, Variable, ancestors
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.fg import Output
+from pytensor.graph.fg import FunctionGraph, Output
+from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
     copy_stack_trace,
+    dfs_rewriter,
     in2out,
     node_rewriter,
     out2in,
 )
 from pytensor.graph.rewriting.db import SequenceDB
+from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import (
@@ -1241,21 +1243,21 @@ fuse_seqopt.register(
 )
 fuse_seqopt.register(
     "local_useless_composite_outputs",
-    in2out(local_useless_composite_outputs),
+    dfs_rewriter(local_useless_composite_outputs),
     "fast_run",
     "fusion",
     position=2,
 )
 fuse_seqopt.register(
     "local_careduce_fusion",
-    in2out(local_careduce_fusion),
+    dfs_rewriter(local_careduce_fusion),
     "fast_run",
     "fusion",
     position=10,
 )
 fuse_seqopt.register(
     "local_inline_composite_constants",
-    in2out(local_inline_composite_constants, ignore_newtrees=True),
+    dfs_rewriter(local_inline_composite_constants, ignore_newtrees=True),
     "fast_run",
     "fusion",
     position=20,

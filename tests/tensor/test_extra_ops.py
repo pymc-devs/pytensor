@@ -9,7 +9,8 @@ from pytensor import tensor as pt
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph
-from pytensor.graph.basic import Constant, applys_between, equal_computations
+from pytensor.graph.basic import Constant, equal_computations
+from pytensor.graph.traversal import applys_between
 from pytensor.npy_2_compat import old_np_unique
 from pytensor.raise_op import Assert
 from pytensor.tensor import alloc

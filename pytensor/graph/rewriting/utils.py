@@ -7,11 +7,10 @@ from pytensor.graph.basic import (
     Apply,
     Variable,
     equal_computations,
-    graph_inputs,
-    vars_between,
 )
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
+from pytensor.graph.traversal import graph_inputs, vars_between
 
 
 if TYPE_CHECKING:

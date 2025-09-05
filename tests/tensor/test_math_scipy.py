@@ -1,24 +1,19 @@
 import warnings
+from functools import partial
 
 import numpy as np
 import pytest
-
-from pytensor.gradient import NullTypeGradError, verify_grad
-from pytensor.scalar import ScalarLoop
-from pytensor.tensor.elemwise import Elemwise
-
-
-scipy = pytest.importorskip("scipy")
-
-from functools import partial
-
+import scipy
 from scipy import special, stats
 
 from pytensor import function, grad
 from pytensor import tensor as pt
 from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.gradient import NullTypeGradError, verify_grad
+from pytensor.scalar import ScalarLoop
 from pytensor.tensor import gammaincc, inplace, kn, kv, kve, vector
+from pytensor.tensor.elemwise import Elemwise
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
     _good_broadcast_unary_chi2sf,
@@ -1175,8 +1170,8 @@ class TestHyp2F1Grad:
                 if isinstance(node.op, Elemwise)
                 and isinstance(node.op.scalar_op, ScalarLoop)
             ]
-            assert scalar_loop_op1.nin == 10 + 3 * 2  # wrt=[0, 1]
-            assert scalar_loop_op2.nin == 10 + 3 * 1  # wrt=[2]
+            assert scalar_loop_op1.nin == 10 + 3 * 1  # wrt=[2]
+            assert scalar_loop_op2.nin == 10 + 3 * 2  # wrt=[0, 1]
         else:
             [scalar_loop_op] = [
                 node.op.scalar_op

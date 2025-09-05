@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy
 
 import pytensor
 import pytensor.typed_list
@@ -37,8 +38,7 @@ def rand_ranged_matrix(minimum, maximum, shape):
 
 
 def random_lil(shape, dtype, nnz):
-    sp = pytest.importorskip("scipy")
-    rval = sp.sparse.lil_matrix(shape, dtype=dtype)
+    rval = scipy.sparse.lil_matrix(shape, dtype=dtype)
     huge = 2**30
     for k in range(nnz):
         # set non-zeros in random locations (row x, col y)
@@ -451,7 +451,6 @@ class TestIndex:
         assert f([[x, y], [x, y, y]], [x, y]) == 0
 
     def test_sparse(self):
-        sp = pytest.importorskip("scipy")
         mySymbolicSparseList = TypedListType(
             sparse.SparseTensorType("csr", pytensor.config.floatX)
         )()
@@ -461,8 +460,8 @@ class TestIndex:
 
         f = pytensor.function([mySymbolicSparseList, mySymbolicSparse], z)
 
-        x = sp.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
-        y = sp.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
+        x = scipy.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
+        y = scipy.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
 
         assert f([x, y], y) == 1
 
@@ -519,7 +518,6 @@ class TestCount:
         assert f([[x, y], [x, y, y]], [x, y]) == 1
 
     def test_sparse(self):
-        sp = pytest.importorskip("scipy")
         mySymbolicSparseList = TypedListType(
             sparse.SparseTensorType("csr", pytensor.config.floatX)
         )()
@@ -529,8 +527,8 @@ class TestCount:
 
         f = pytensor.function([mySymbolicSparseList, mySymbolicSparse], z)
 
-        x = sp.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
-        y = sp.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
+        x = scipy.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
+        y = scipy.sparse.csr_matrix(random_lil((10, 40), pytensor.config.floatX, 3))
 
         assert f([x, y, y], y) == 2
 

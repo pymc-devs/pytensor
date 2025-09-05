@@ -1,3 +1,5 @@
+from itertools import chain
+
 import numpy as np
 import pytest
 
@@ -490,6 +492,7 @@ def test_inplace_taps(n_steps_constant):
         if isinstance(node.op, Scan)
     ]
 
+    # Collect inner inputs we expect to be destroyed by the step function
     # Scan reorders inputs internally, so we need to check its ordering
     inner_inps = scan_op.fgraph.inputs
     mit_sot_inps = scan_op.inner_mitsot(inner_inps)
@@ -501,28 +504,22 @@ def test_inplace_taps(n_steps_constant):
     ]
     [sit_sot_inp] = scan_op.inner_sitsot(inner_inps)
 
-    inner_outs = scan_op.fgraph.outputs
-    mit_sot_outs = scan_op.inner_mitsot_outs(inner_outs)
-    [sit_sot_out] = scan_op.inner_sitsot_outs(inner_outs)
-    [nit_sot_out] = scan_op.inner_nitsot_outs(inner_outs)
+    destroyed_inputs = []
+    for inner_out in scan_op.fgraph.outputs:
+        node = inner_out.owner
+        dm = node.op.destroy_map
+        if dm:
+            destroyed_inputs.extend(
+                node.inputs[idx] for idx in chain.from_iterable(dm.values())
+            )
 
     if n_steps_constant:
-        assert mit_sot_outs[0].owner.op.destroy_map == {
-            0: [mit_sot_outs[0].owner.inputs.index(oldest_mit_sot_inps[0])]
-        }
-        assert mit_sot_outs[1].owner.op.destroy_map == {
-            0: [mit_sot_outs[1].owner.inputs.index(oldest_mit_sot_inps[1])]
-        }
-        assert sit_sot_out.owner.op.destroy_map == {
-            0: [sit_sot_out.owner.inputs.index(sit_sot_inp)]
-        }
+        assert len(destroyed_inputs) == 3
+        assert set(destroyed_inputs) == {*oldest_mit_sot_inps, sit_sot_inp}
     else:
         # This is not a feature, but a current limitation
         # https://github.com/pymc-devs/pytensor/issues/1283
-        assert mit_sot_outs[0].owner.op.destroy_map == {}
-        assert mit_sot_outs[1].owner.op.destroy_map == {}
-        assert sit_sot_out.owner.op.destroy_map == {}
-    assert nit_sot_out.owner.op.destroy_map == {}
+        assert not destroyed_inputs
 
 
 @pytest.mark.parametrize(
