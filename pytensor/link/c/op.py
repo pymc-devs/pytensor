@@ -331,6 +331,10 @@ class ExternalCOp(COp):
         files overriding sections in previous files.
 
         """
+        warnings.warn(
+            "ExternalCOp is deprecated and will be removed in a future release. Use regular COp instead.",
+            FutureWarning,
+        )
         if not isinstance(func_files, list):
             self.func_files = [Path(func_files)]
         else:
