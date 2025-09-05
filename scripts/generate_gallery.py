@@ -60,7 +60,7 @@ folder_title_map = {
     "autodiff": "Automatic Differentiation",
     "scan": "Looping in PyTensor",
     "optimize": "Optimization in PyTensor",
-    "applications": "Applications",
+    "applications": "Case Studies",
 }
 
 
