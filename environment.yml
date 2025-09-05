@@ -57,3 +57,7 @@ dependencies:
   - cython
   - graphviz
   - pydot
+
+# This line can be ignored by users, it's only needed by the script
+# `scripts/generate-pixi-toml.py`. It is used to determine the feature name.
+category: conda-dev
