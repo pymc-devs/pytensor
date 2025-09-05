@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 from numba.core.extending import overload
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
@@ -13,7 +15,13 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
 
 def _xgeqrf(A: np.ndarray, overwrite_a: bool, lwork: int):
     """LAPACK geqrf: Computes a QR factorization of a general M-by-N matrix A."""
-    (geqrf,) = get_lapack_funcs(("geqrf",), (A,))
+    # (geqrf,) = typing_cast(
+    #     list[Callable[..., np.ndarray]], get_lapack_funcs(("geqrf",), (A,))
+    # )
+    funcs = get_lapack_funcs(("geqrf",), (A,))
+    assert isinstance(funcs, list)  # narrows `funcs: list[F] | F` to `funcs: list[F]`
+    geqrf = funcs[0]
+
     return geqrf(A, overwrite_a=overwrite_a, lwork=lwork)
 
 
@@ -61,7 +69,10 @@ def xgeqrf_impl(A, overwrite_a, lwork):
 
 def _xgeqp3(A: np.ndarray, overwrite_a: bool, lwork: int):
     """LAPACK geqp3: Computes a QR factorization with column pivoting of a general M-by-N matrix A."""
-    (geqp3,) = get_lapack_funcs(("geqp3",), (A,))
+    funcs = get_lapack_funcs(("geqp3",), (A,))
+    assert isinstance(funcs, list)  # narrows `funcs: list[F] | F` to `funcs: list[F]`
+    geqp3 = funcs[0]
+
     return geqp3(A, overwrite_a=overwrite_a, lwork=lwork)
 
 
@@ -111,7 +122,10 @@ def xgeqp3_impl(A, overwrite_a, lwork):
 
 def _xorgqr(A: np.ndarray, tau: np.ndarray, overwrite_a: bool, lwork: int):
     """LAPACK orgqr: Generates the M-by-N matrix Q with orthonormal columns from a QR factorization (real types)."""
-    (orgqr,) = get_lapack_funcs(("orgqr",), (A,))
+    funcs = get_lapack_funcs(("orgqr",), (A,))
+    assert isinstance(funcs, list)  # narrows `funcs: list[F] | F` to `funcs: list[F]`
+    orgqr = funcs[0]
+
     return orgqr(A, tau, overwrite_a=overwrite_a, lwork=lwork)
 
 
@@ -160,7 +174,10 @@ def xorgqr_impl(A, tau, overwrite_a, lwork):
 
 def _xungqr(A: np.ndarray, tau: np.ndarray, overwrite_a: bool, lwork: int):
     """LAPACK ungqr: Generates the M-by-N matrix Q with orthonormal columns from a QR factorization (complex types)."""
-    (ungqr,) = get_lapack_funcs(("ungqr",), (A,))
+    funcs = get_lapack_funcs(("ungqr",), (A,))
+    assert isinstance(funcs, list)  # narrows `funcs: list[F] | F` to `funcs: list[F]`
+    ungqr = funcs[0]
+
     return ungqr(A, tau, overwrite_a=overwrite_a, lwork=lwork)
 
 
@@ -209,8 +226,8 @@ def xungqr_impl(A, tau, overwrite_a, lwork):
 
 def _qr_full_pivot(
     x: np.ndarray,
-    mode: str = "full",
-    pivoting: bool = True,
+    mode: Literal["full", "economic"] = "full",
+    pivoting: Literal[True] = True,
     overwrite_a: bool = False,
     check_finite: bool = False,
     lwork: int | None = None,
@@ -234,8 +251,8 @@ def _qr_full_pivot(
 
 def _qr_full_no_pivot(
     x: np.ndarray,
-    mode: str = "full",
-    pivoting: bool = False,
+    mode: Literal["full", "economic"] = "full",
+    pivoting: Literal[False] = False,
     overwrite_a: bool = False,
     check_finite: bool = False,
     lwork: int | None = None,
@@ -258,8 +275,8 @@ def _qr_full_no_pivot(
 
 def _qr_r_pivot(
     x: np.ndarray,
-    mode: str = "r",
-    pivoting: bool = True,
+    mode: Literal["r", "raw"] = "r",
+    pivoting: Literal[True] = True,
     overwrite_a: bool = False,
     check_finite: bool = False,
     lwork: int | None = None,
@@ -282,8 +299,8 @@ def _qr_r_pivot(
 
 def _qr_r_no_pivot(
     x: np.ndarray,
-    mode: str = "r",
-    pivoting: bool = False,
+    mode: Literal["r", "raw"] = "r",
+    pivoting: Literal[False] = False,
     overwrite_a: bool = False,
     check_finite: bool = False,
     lwork: int | None = None,
@@ -306,8 +323,8 @@ def _qr_r_no_pivot(
 
 def _qr_raw_no_pivot(
     x: np.ndarray,
-    mode: str = "raw",
-    pivoting: bool = False,
+    mode: Literal["raw"] = "raw",
+    pivoting: Literal[False] = False,
     overwrite_a: bool = False,
     check_finite: bool = False,
     lwork: int | None = None,
@@ -332,8 +349,8 @@ def _qr_raw_no_pivot(
 
 def _qr_raw_pivot(
     x: np.ndarray,
-    mode: str = "raw",
-    pivoting: bool = True,
+    mode: Literal["raw"] = "raw",
+    pivoting: Literal[True] = True,
     overwrite_a: bool = False,
     check_finite: bool = False,
     lwork: int | None = None,
