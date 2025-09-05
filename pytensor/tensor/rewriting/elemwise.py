@@ -528,43 +528,24 @@ class FusionOptimizer(GraphRewriter):
 
     @staticmethod
     def elemwise_to_scalar(inputs, outputs):
-        replace_inputs = [(inp, inp.clone()) for inp in inputs]
-        outputs = clone_replace(outputs, replace=replace_inputs)
-
-        inputs = [inp for _, inp in replace_inputs]
-        fg = FunctionGraph(inputs=inputs, outputs=outputs, clone=False)
-        middle_inputs = []
-
-        scalar_inputs = [
-            ps.get_scalar_type(inp.type.dtype).make_variable() for inp in inputs
-        ]
-        middle_scalar_inputs = []
-
-        for node in fg.toposort():
-            node_scalar_inputs = []
-            for inp in node.inputs:
-                if inp in inputs:
-                    node_scalar_inputs.append(scalar_inputs[inputs.index(inp)])
-                elif inp in middle_inputs:
-                    node_scalar_inputs.append(
-                        middle_scalar_inputs[middle_inputs.index(inp)]
+        replacement = {
+            inp: ps.get_scalar_type(inp.type.dtype).make_variable() for inp in inputs
+        }
+        for node in toposort(outputs, blockers=inputs):
+            scalar_inputs = [replacement[inp] for inp in node.inputs]
+            replacement.update(
+                dict(
+                    zip(
+                        node.outputs,
+                        node.op.scalar_op.make_node(*scalar_inputs).outputs,
                     )
-                else:
-                    new_scalar_input = ps.get_scalar_type(
-                        inp.type.dtype
-                    ).make_variable()
-                    node_scalar_inputs.append(new_scalar_input)
-                    middle_scalar_inputs.append(new_scalar_input)
-                    middle_inputs.append(inp)
+                )
+            )
 
-            new_scalar_node = node.op.scalar_op.make_node(*node_scalar_inputs)
-            middle_scalar_inputs.append(new_scalar_node.outputs[0])
-            middle_inputs.append(node.outputs[0])
-
-        scalar_outputs = [
-            middle_scalar_inputs[middle_inputs.index(out)] for out in fg.outputs
-        ]
-        return scalar_inputs, scalar_outputs
+        return (
+            [replacement[inp] for inp in inputs],
+            [replacement[out] for out in outputs],
+        )
 
     def apply(self, fgraph):
         nb_replacement = 0

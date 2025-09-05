@@ -778,9 +778,11 @@ def get_scalar_type(dtype, cache: dict[str, ScalarType] = {}) -> ScalarType:
     This caches objects to save allocation and run time.
 
     """
-    if dtype not in cache:
-        cache[dtype] = ScalarType(dtype=dtype)
-    return cache[dtype]
+    try:
+        return cache[dtype]
+    except KeyError:
+        cache[dtype] = res = ScalarType(dtype=dtype)
+    return res
 
 
 # Register C code for ViewOp on Scalars.
