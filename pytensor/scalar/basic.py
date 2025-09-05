@@ -4331,24 +4331,25 @@ class Composite(ScalarInnerGraphOp):
         if self._name is not None:
             return self._name
 
-        # Rename internal variables
-        for i, r in enumerate(self.fgraph.inputs):
-            r.name = f"i{i}"
-        for i, r in enumerate(self.fgraph.outputs):
-            r.name = f"o{i}"
-        io = set(self.fgraph.inputs + self.fgraph.outputs)
-        for i, r in enumerate(self.fgraph.variables):
-            if (
-                not isinstance(r, Constant)
-                and r not in io
-                and len(self.fgraph.clients[r]) > 1
-            ):
-                r.name = f"t{i}"
+        fgraph = self.fgraph
 
-        if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
+        if len(fgraph.outputs) > 1 or len(fgraph.apply_nodes) > 10:
             self._name = "Composite{...}"
         else:
-            outputs_str = ", ".join(pprint(output) for output in self.fgraph.outputs)
+            # Rename internal variables
+            for i, r in enumerate(fgraph.inputs):
+                r.name = f"i{i}"
+            for i, r in enumerate(fgraph.outputs):
+                r.name = f"o{i}"
+            io = set(fgraph.inputs + fgraph.outputs)
+            for i, r in enumerate(fgraph.variables):
+                if (
+                    not isinstance(r, Constant)
+                    and r not in io
+                    and len(fgraph.clients[r]) > 1
+                ):
+                    r.name = f"t{i}"
+            outputs_str = ", ".join(pprint(output) for output in fgraph.outputs)
             self._name = f"Composite{{{outputs_str}}}"
 
         return self._name
@@ -4433,9 +4434,10 @@ class Composite(ScalarInnerGraphOp):
         fg = self.fgraph
         subd = {e: f"%(i{i})s" for i, e in enumerate(fg.inputs)}
 
+        inputs_set = frozenset(fg.inputs)
         for var in fg.variables:
             if var.owner is None:
-                if var not in fg.inputs:
+                if var not in inputs_set:
                     # This is an orphan
                     if isinstance(var, Constant) and isinstance(var.type, CLinkerType):
                         subd[var] = f"({var.type.c_literal(var.data)})"
