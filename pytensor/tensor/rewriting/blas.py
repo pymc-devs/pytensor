@@ -60,7 +60,7 @@ import time
 import numpy as np
 
 from pytensor.graph.traversal import toposort
-from pytensor.scalar import Add, Mul, Neg, Sub
+from pytensor.scalar import Add, Mul, Neg, Sub, upcast
 from pytensor.tensor.rewriting.basic import register_specialize
 
 
@@ -359,8 +359,12 @@ def _gemm_from_factored_list(fgraph, lst):
         if isinstance(sM, tuple):
             sm0, sm1 = sM
             sm0 = ptb.as_tensor_variable(sm0)
-            if pytensor.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
-                lst2.append((ptb.cast(sm0, sm1.dtype), sM[1]))
+            sm0_dtype = sm0.type.dtype
+            sm1_dtype = sm1.type.dtype
+            if sm0_dtype == sm1_dtype:
+                lst2.append((sm0, sm1))
+            elif upcast(sm0_dtype, sm1_dtype) == sm1_dtype:
+                lst2.append((ptb.cast(sm0, sm1_dtype), sm1))
 
     lst = lst2
 
@@ -385,20 +389,15 @@ def _gemm_from_factored_list(fgraph, lst):
             if not M_j.type.in_same_class(M_i.type):
                 continue
 
-            # print 'TRYING', (s_i, M_i, s_j, M_j)
-
             gemm_of_sM_list, old_dot22 = _beta_L_plus_alpha_M(
                 fgraph, s_i, M_i, s_j, M_j
             )
-            # print 'GOT IT', gemm_of_sM_list
             if gemm_of_sM_list:
-                assert len(gemm_of_sM_list) == 1
+                [new_add_inp] = gemm_of_sM_list
                 add_inputs = [
                     item_to_var(input) for k, input in enumerate(lst) if k not in (i, j)
                 ]
-                add_inputs.extend(gemm_of_sM_list)
-                rval = [variadic_add(*add_inputs)]
-                # print "RETURNING GEMM THING", rval
+                rval = [variadic_add(*add_inputs, new_add_inp)]
                 return rval, old_dot22
 
 
