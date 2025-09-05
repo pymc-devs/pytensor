@@ -556,6 +556,15 @@ import ``pytensor`` and print the config variable, as in:
 
     When ``True``, print the rewrites applied to stdout.
 
+.. attribute:: compiler_verbose
+
+    Bool value: either ``True`` or ``False``
+
+    Default: ``False``
+
+    When ``True``, print detailed information about the compilation of a graph. The type of information printed will
+    vary depending on the computational backend, and some backends may not provide additional information.
+
 .. attribute:: nocleanup
 
     Bool value: either ``True`` or ``False``
