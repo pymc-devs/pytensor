@@ -8,7 +8,7 @@ import numpy as np
 import pytensor.tensor.basic
 from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.null_type import NullType
 from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
 from pytensor.graph.utils import MethodNotDefined
@@ -797,10 +797,24 @@ class Elemwise(OpenMPOp):
                 )
 
     def infer_shape(self, fgraph, node, i_shapes) -> list[tuple[TensorVariable, ...]]:
-        from pytensor.tensor.extra_ops import broadcast_shape
+        out_shape = list(node.outputs[0].type.shape)
+        if missing_dims := [i for i, s in enumerate(out_shape) if s is None]:
+            for inp_idx, inp in enumerate(node.inputs):
+                inp_st_shape = inp.type.shape
+                for d in missing_dims:
+                    if inp_st_shape[d] == 1:
+                        continue  # Nothing to learn from this input
+                    if inp_st_shape[d] is not None:
+                        out_shape[d] = inp_st_shape[d]
+                        missing_dims.remove(d)
+                    else:
+                        out_shape[d] = new_dim = i_shapes[inp_idx][d]
+                        if isinstance(new_dim, Constant):
+                            missing_dims.remove(d)
+                if not missing_dims:
+                    break
 
-        out_shape = broadcast_shape(*i_shapes, arrays_are_shapes=True)
-        return [tuple(as_tensor_variable(s) for s in out_shape)] * len(node.outputs)
+        return [tuple(out_shape) for _ in node.outputs]
 
     def _c_all(self, node, nodename, inames, onames, sub):
         # Some `Op`s directly call `Elemwise._c_all` or `Elemwise.c_code`
