@@ -321,3 +321,12 @@ def numba_funcify_Softplus(op, node, **kwargs):
         return numba_basic.direct_cast(value, out_dtype)
 
     return softplus
+
+
+def test():
+    import pytensor
+    import pytensor.tensor as pt
+
+    x = pt.vector("x")
+    out = pt.exp(x)
+    fn = pytensor.function([x], out, mode="NUMBA")

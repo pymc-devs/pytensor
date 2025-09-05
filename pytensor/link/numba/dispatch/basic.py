@@ -51,9 +51,10 @@ def global_numba_func(func):
 
 
 def numba_njit(*args, fastmath=None, **kwargs):
-    kwargs.setdefault("cache", config.numba__cache)
-    kwargs.setdefault("no_cpython_wrapper", True)
-    kwargs.setdefault("no_cfunc_wrapper", True)
+    kwargs.setdefault("cache", True)
+    kwargs.setdefault("no_cpython_wrapper", False)
+    kwargs.setdefault("no_cfunc_wrapper", False)
+    # print(kwargs)
     if fastmath is None:
         if config.numba__fastmath:
             # Opinionated default on fastmath flags
