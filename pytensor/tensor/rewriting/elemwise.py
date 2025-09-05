@@ -664,8 +664,6 @@ class FusionOptimizer(GraphRewriter):
                     depend_on,
                     stop_search_at=None,
                 ) -> bool:
-                    # We can stop search at any variable that comes topologically before depend_on
-                    # As those can't logically be dependents anymore
                     return any(
                         a in depend_on
                         for a in ancestors(
