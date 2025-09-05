@@ -915,10 +915,8 @@ def clone_node_and_cache(
     # Use a cached `Op` clone when available
     new_op: Op | None = cast(Optional["Op"], clone_d.get(node.op))
 
-    cloned_inputs: list[Variable] = [cast(Variable, clone_d[i]) for i in node.inputs]
-
     new_node = node.clone_with_new_inputs(
-        cloned_inputs,
+        [clone_d[i] for i in node.inputs],
         # Only clone inner-graph `Op`s when there isn't a cached clone (and
         # when `clone_inner_graphs` is enabled)
         clone_inner_graph=clone_inner_graphs if new_op is None else False,
