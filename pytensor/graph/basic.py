@@ -2032,7 +2032,7 @@ def equal_computations(
 
 
 def get_var_by_name(
-    graphs: Iterable[Variable], target_var_id: str, ids: str = "CHAR"
+    graphs: Iterable[Variable], target_var_id: str, include_inner_graphs: bool = False
 ) -> tuple[Variable, ...]:
     r"""Get variables in a graph using their names.
 
@@ -2057,7 +2057,7 @@ def get_var_by_name(
 
         res = list(r.owner.inputs)
 
-        if isinstance(r.owner.op, HasInnerGraph):
+        if include_inner_graphs and isinstance(r.owner.op, HasInnerGraph):
             res.extend(r.owner.op.inner_outputs)
 
         return res
