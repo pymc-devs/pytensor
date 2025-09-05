@@ -1255,7 +1255,9 @@ class ScalarOp(COp):
                     f"Wrong number of inputs for {self}.make_node "
                     f"(got {len(inputs)}({inputs}), expected {self.nin})"
                 )
-        inputs = [as_scalar(input) for input in inputs]
+        inputs = [
+            inp if isinstance(inp, ScalarVariable) else as_scalar(inp) for inp in inputs
+        ]
         outputs = [t() for t in self.output_types([input.type for input in inputs])]
         if len(outputs) != self.nout:
             inputs_str = (", ".join(str(input) for input in inputs),)
@@ -4294,7 +4296,13 @@ class Composite(ScalarInnerGraphOp):
     init_param: tuple[str, ...] = ("inputs", "outputs")
 
     def __init__(
-        self, inputs, outputs, name="Composite", clone_graph: builtins.bool = True
+        self,
+        inputs,
+        outputs,
+        name="Composite",
+        clone_graph: builtins.bool = True,
+        cleanup_graph: builtins.bool = True,
+        output_types_preference=None,
     ):
         self.name = name
         self._name = None
@@ -4324,7 +4332,9 @@ class Composite(ScalarInnerGraphOp):
             # 1. Create a new graph from inputs up to the
             # Composite
             res = pytensor.compile.rebuild_collect_shared(
-                inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
+                inputs=inputs,
+                outputs=outputs[0].owner.inputs,
+                copy_inputs_over=False,
             )  # Clone also the inputs
             # 2. We continue this partial clone with the graph in
             # the inner Composite
@@ -4338,36 +4348,42 @@ class Composite(ScalarInnerGraphOp):
             assert res[0] != inputs
             inputs, outputs = res[0], res2[1]
 
-        # We already cloned the graph, or the user told us there was no need for it
-        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs, clone=False)
+        if cleanup_graph:
+            # We already cloned the graph, or the user told us there was no need for it
+            self.inputs, self.outputs = self._cleanup_graph(
+                inputs, outputs, clone=False
+            )
+        else:
+            self.inputs, self.outputs = inputs, outputs
         self.inputs_type = tuple(input.type for input in self.inputs)
         self.outputs_type = tuple(output.type for output in self.outputs)
         self.nin = len(inputs)
         self.nout = len(outputs)
-        super().__init__()
+        super().__init__(output_types_preference=output_types_preference)
 
     def __str__(self):
         if self._name is not None:
             return self._name
 
-        # Rename internal variables
-        for i, r in enumerate(self.fgraph.inputs):
-            r.name = f"i{i}"
-        for i, r in enumerate(self.fgraph.outputs):
-            r.name = f"o{i}"
-        io = set(self.fgraph.inputs + self.fgraph.outputs)
-        for i, r in enumerate(self.fgraph.variables):
-            if (
-                not isinstance(r, Constant)
-                and r not in io
-                and len(self.fgraph.clients[r]) > 1
-            ):
-                r.name = f"t{i}"
+        fgraph = self.fgraph
 
-        if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
+        if len(fgraph.outputs) > 1 or len(fgraph.apply_nodes) > 10:
             self._name = "Composite{...}"
         else:
-            outputs_str = ", ".join(pprint(output) for output in self.fgraph.outputs)
+            # Rename internal variables
+            for i, r in enumerate(fgraph.inputs):
+                r.name = f"i{i}"
+            for i, r in enumerate(fgraph.outputs):
+                r.name = f"o{i}"
+            io = set(fgraph.inputs + fgraph.outputs)
+            for i, r in enumerate(fgraph.variables):
+                if (
+                    not isinstance(r, Constant)
+                    and r not in io
+                    and len(fgraph.clients[r]) > 1
+                ):
+                    r.name = f"t{i}"
+            outputs_str = ", ".join(pprint(output) for output in fgraph.outputs)
             self._name = f"Composite{{{outputs_str}}}"
 
         return self._name
@@ -4380,12 +4396,16 @@ class Composite(ScalarInnerGraphOp):
 
         """
         d = {k: getattr(self, k) for k in self.init_param}
-        out = self.__class__(**d)
-        if name:
-            out.name = name
-        else:
-            name = out.name
-        super(Composite, out).__init__(output_types_preference, name)
+        out = type(self)(
+            **d,
+            cleanup_graph=False,
+            clone_graph=False,
+            output_types_preference=output_types_preference,
+            name=name or self.name,
+        )
+        # No need to recompute the _cocde and nodenames if they were already computed (which is true if the hash of the Op was requested)
+        out._c_code = self._c_code
+        out.nodenames = self.nodenames
         return out
 
     @property
@@ -4452,9 +4472,10 @@ class Composite(ScalarInnerGraphOp):
         fg = self.fgraph
         subd = {e: f"%(i{i})s" for i, e in enumerate(fg.inputs)}
 
+        inputs_set = frozenset(fg.inputs)
         for var in fg.variables:
             if var.owner is None:
-                if var not in fg.inputs:
+                if var not in inputs_set:
                     # This is an orphan
                     if isinstance(var, Constant) and isinstance(var.type, CLinkerType):
                         subd[var] = f"({var.type.c_literal(var.data)})"

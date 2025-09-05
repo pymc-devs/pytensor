@@ -28,8 +28,9 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.graph.traversal import toposort
+from pytensor.graph.traversal import graph_inputs, toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
+from pytensor.scalar import ScalarConstant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import (
     MakeVector,
@@ -885,26 +886,44 @@ class FusionOptimizer(GraphRewriter):
 def local_useless_composite_outputs(fgraph, node):
     """Remove inputs and outputs of Composite Ops that are not used anywhere."""
     comp = node.op.scalar_op
-    used_outputs_idxs = [
-        i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]
-    ]
-    used_inner_outputs = [comp.outputs[i] for i in used_outputs_idxs]
-    comp_fgraph = FunctionGraph(
-        inputs=comp.inputs, outputs=used_inner_outputs, clone=False
-    )
-    used_inputs_idxs = [
-        i
-        for i, i_intern in enumerate(comp_fgraph.inputs)
-        if comp_fgraph.clients[i_intern]
-    ]
-    used_inner_inputs = [comp.inputs[i] for i in used_inputs_idxs]
-    if len(used_inner_inputs) < len(node.inputs) or len(used_inner_outputs) < len(
-        node.outputs
+
+    clients = fgraph.clients
+    outer_inputs, outer_outputs = node.inputs, node.outputs
+    inner_inputs, inner_outputs = comp.inputs, comp.outputs
+
+    used_inner_outputs = {
+        inner_out
+        for inner_out, outer_out in zip(inner_outputs, outer_outputs)
+        if clients[outer_out]
+    }
+    used_inner_inputs = {
+        inner_inp
+        for inner_inp in graph_inputs(used_inner_outputs)
+        if not isinstance(inner_inp, ScalarConstant)
+    }
+
+    if len(used_inner_inputs) == len(outer_inputs) or len(used_inner_outputs) == len(
+        outer_outputs
     ):
-        used_inputs = [node.inputs[i] for i in used_inputs_idxs]
-        c = ps.Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
-        e = Elemwise(scalar_op=c)(*used_inputs, return_list=True)
-        return dict(zip([node.outputs[i] for i in used_outputs_idxs], e, strict=True))
+        return None
+
+    used_inputs_idxs = [
+        i for i, inp in enumerate(inner_inputs) if inp in used_inner_inputs
+    ]
+    used_inner_inputs = [inner_inputs[i] for i in used_inputs_idxs]
+    used_outer_inputs = [outer_inputs[i] for i in used_inputs_idxs]
+
+    new_comp = ps.Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
+    new_outer_outputs = Elemwise(scalar_op=new_comp)(
+        *used_outer_inputs, return_list=True
+    )
+
+    used_outer_outputs = (
+        outer_outputs[i]
+        for i, out in enumerate(inner_outputs)
+        if out in used_inner_outputs
+    )
+    return dict(zip(used_outer_outputs, new_outer_outputs, strict=True))
 
 
 @node_rewriter([CAReduce])
