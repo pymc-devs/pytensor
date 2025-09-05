@@ -4280,7 +4280,7 @@ class Composite(ScalarInnerGraphOp):
 
     init_param: tuple[str, ...] = ("inputs", "outputs")
 
-    def __init__(self, inputs, outputs, name="Composite"):
+    def __init__(self, inputs, outputs, name="Composite", cleanup_graph: bool = True):
         self.name = name
         self._name = None
         # We need to clone the graph as sometimes its nodes already
@@ -4299,6 +4299,7 @@ class Composite(ScalarInnerGraphOp):
             isinstance(var.owner.op, Composite) for var in outputs
         ):
             # No inner Composite
+            # FIXME: There could be a composite in the middle of the graph
             inputs, outputs = clone(inputs, outputs)
         else:
             # Inner Composite that we need to flatten
@@ -4320,7 +4321,12 @@ class Composite(ScalarInnerGraphOp):
             assert res[0] != inputs
             inputs, outputs = res[0], res2[1]
 
-        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs, clone=False)
+        if cleanup_graph:
+            self.inputs, self.outputs = self._cleanup_graph(
+                inputs, outputs, clone=False
+            )
+        else:
+            self.inputs, self.outputs = inputs, outputs
         self.inputs_type = tuple(input.type for input in self.inputs)
         self.outputs_type = tuple(output.type for output in self.outputs)
         self.nin = len(inputs)
@@ -4362,11 +4368,12 @@ class Composite(ScalarInnerGraphOp):
 
         """
         d = {k: getattr(self, k) for k in self.init_param}
-        out = self.__class__(**d)
+        out = type(self)(**d, cleanup_graph=False)
         if name:
             out.name = name
         else:
             name = out.name
+        out._c_code = self._c_code
         super(Composite, out).__init__(output_types_preference, name)
         return out
 
