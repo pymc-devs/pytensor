@@ -108,10 +108,10 @@ def unbox_matrix(typ, obj, c):
     indptr = c.pyapi.object_getattr_string(obj, "indptr")
     shape = c.pyapi.object_getattr_string(obj, "shape")
 
-    struct_ptr.data = c.unbox(typ.data, data).value
-    struct_ptr.indices = c.unbox(typ.indices, indices).value
-    struct_ptr.indptr = c.unbox(typ.indptr, indptr).value
-    struct_ptr.shape = c.unbox(typ.shape, shape).value
+    struct_ptr.data = c.unbox(typ.data, data).data
+    struct_ptr.indices = c.unbox(typ.indices, indices).data
+    struct_ptr.indptr = c.unbox(typ.indptr, indptr).data
+    struct_ptr.shape = c.unbox(typ.shape, shape).data
 
     c.pyapi.decref(data)
     c.pyapi.decref(indices)
