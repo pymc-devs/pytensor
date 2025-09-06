@@ -124,7 +124,7 @@ xfail_strict = true
 
 [tool.ruff]
 line-length = 88
-exclude = ["doc/", "pytensor/_version.py"]
+exclude = ["pytensor/_version.py"]
 
 [tool.ruff.format]
 docstring-code-format = true
