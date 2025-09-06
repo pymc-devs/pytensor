@@ -10,6 +10,7 @@ import numpy as np
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import ComputeMapType, Op, StorageMapType, ThunkType
 from pytensor.graph.type import HasDataType
 from pytensor.graph.utils import MethodNotDefined
@@ -32,6 +33,30 @@ def is_cthunk_wrapper_type(thunk: Callable[[], None]) -> CThunkWrapperType:
     return res
 
 
+class SingleOpFunctionGraph(FunctionGraph):
+    """A `FunctionGraph` with a single `Apply` node.
+
+    This is used to compile a single `Apply` node with the C linker.
+
+    """
+
+    def __init__(self, node: Apply, clone: bool = True):
+        if clone:
+            node = node.clone_with_new_inputs([i.clone() for i in node.inputs])
+        self.node = node
+        self.apply_nodes = {node}
+        self.inputs = inputs = node.inputs
+        self.outputs = outputs = node.outputs
+        self.variables = set(inputs) | set(outputs)
+        self.clients = {inp: [(node, idx)] for idx, inp in enumerate(inputs)}
+        self.clients |= {
+            out: [(Output(idx).make_node(out), 0)] for idx, out in enumerate(outputs)
+        }
+
+    def toposort(self):
+        return [self.node]
+
+
 class COp(Op, CLinkerOp):
     """An `Op` with a C implementation."""
 
@@ -51,12 +76,11 @@ class COp(Op, CLinkerOp):
         #        The conclusion should be that the antire "make_c_thunk" method should be defined
         #        in pytensor.link.c and dispatched onto the Op!
         import pytensor.link.c.basic
-        from pytensor.graph.fg import FunctionGraph
 
         node_input_storage = [storage_map[r] for r in node.inputs]
         node_output_storage = [storage_map[r] for r in node.outputs]
 
-        e = FunctionGraph(node.inputs, node.outputs)
+        e = SingleOpFunctionGraph(node)
         e_no_recycling = [
             new_o
             for (new_o, old_o) in zip(e.outputs, node.outputs, strict=True)
@@ -307,6 +331,10 @@ class ExternalCOp(COp):
         files overriding sections in previous files.
 
         """
+        warnings.warn(
+            "ExternalCOp is deprecated and will be removed in a future release. Use regular COp instead.",
+            FutureWarning,
+        )
         if not isinstance(func_files, list):
             self.func_files = [Path(func_files)]
         else:

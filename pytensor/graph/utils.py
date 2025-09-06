@@ -252,6 +252,7 @@ class MetaType(ABCMeta):
         return super().__new__(cls, name, bases, dct)
 
 
+
 class MetaObject(metaclass=MetaType):
     __slots__: list = []
 

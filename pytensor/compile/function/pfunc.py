@@ -179,47 +179,54 @@ def rebuild_collect_shared(
 
         """
         # this co-recurses with clone_a
-        assert v is not None
-        if v in clone_d:
-            return clone_d[v]
-        if v.owner:
-            owner = v.owner
-            if owner not in clone_d:
-                for i in owner.inputs:
-                    clone_v_get_shared_updates(i, copy_inputs_over)
-                clone_node_and_cache(
-                    owner,
-                    clone_d,
-                    strict=rebuild_strict,
-                    clone_inner_graphs=clone_inner_graphs,
-                )
-            return clone_d.setdefault(v, v)
-        elif isinstance(v, SharedVariable):
-            if v not in shared_inputs:
-                shared_inputs.append(v)
-            if v.default_update is not None:
-                # Check that v should not be excluded from the default
-                # updates list
-                if no_default_updates is False or (
-                    isinstance(no_default_updates, list) and v not in no_default_updates
-                ):
-                    # Do not use default_update if a "real" update was
-                    # provided
-                    if v not in update_d:
-                        v_update = v.type.filter_variable(
-                            v.default_update, allow_convert=False
+        stack = [v]
+        try:
+            while True:
+                v = stack.pop()
+                if v in clone_d:
+                    continue
+                if (apply := v.owner) is not None:
+                    if all(i in clone_d for i in apply.inputs):
+                        # all inputs have been cloned, we can clone this node
+                        clone_node_and_cache(
+                            apply,
+                            clone_d,
+                            strict=rebuild_strict,
+                            clone_inner_graphs=clone_inner_graphs,
                         )
-                        if not v.type.is_super(v_update.type):
-                            raise TypeError(
-                                "An update must have a type compatible with "
-                                "the original shared variable"
-                            )
-                        update_d[v] = v_update
-                        update_expr.append((v, v_update))
-        if not copy_inputs_over:
-            return clone_d.setdefault(v, v.clone())
-        else:
-            return clone_d.setdefault(v, v)
+                    else:
+                        # expand on the inputs
+                        stack.extend(apply.inputs)
+                else:
+                    clone_d[v] = v if copy_inputs_over else v.clone()
+
+                    # Special handling of SharedVariables
+                    if isinstance(v, SharedVariable):
+                        if v not in shared_inputs:
+                            shared_inputs.append(v)
+                        if v.default_update is not None:
+                            # Check that v should not be excluded from the default
+                            # updates list
+                            if no_default_updates is False or (
+                                isinstance(no_default_updates, list)
+                                and v not in no_default_updates
+                            ):
+                                # Do not use default_update if a "real" update was
+                                # provided
+                                if v not in update_d:
+                                    v_update = v.type.filter_variable(
+                                        v.default_update, allow_convert=False
+                                    )
+                                    if not v.type.is_super(v_update.type):
+                                        raise TypeError(
+                                            "An update must have a type compatible with "
+                                            "the original shared variable"
+                                        )
+                                    update_d[v] = v_update
+                                    update_expr.append((v, v_update))
+        except IndexError:
+            pass  # stack is empty
+        return clone_d[v]
 
     # initialize the clone_d mapping with the replace dictionary
     if replace is None:

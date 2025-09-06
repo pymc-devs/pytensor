@@ -50,23 +50,14 @@ class TestProfiling:
             the_string = buf.getvalue()
             lines1 = [l for l in the_string.split("\n") if "Max if linker" in l]
             lines2 = [l for l in the_string.split("\n") if "Minimum peak" in l]
-            if config.device == "cpu":
-                assert "CPU: 4112KB (4104KB)" in the_string, (lines1, lines2)
-                assert "CPU: 8204KB (8196KB)" in the_string, (lines1, lines2)
-                assert "CPU: 8208KB" in the_string, (lines1, lines2)
-                assert (
-                    "Minimum peak from all valid apply node order is 4104KB"
-                    in the_string
-                ), (lines1, lines2)
-            else:
-                assert "CPU: 16KB (16KB)" in the_string, (lines1, lines2)
-                assert "GPU: 8204KB (8204KB)" in the_string, (lines1, lines2)
-                assert "GPU: 12300KB (12300KB)" in the_string, (lines1, lines2)
-                assert "GPU: 8212KB" in the_string, (lines1, lines2)
-                assert (
-                    "Minimum peak from all valid apply node order is 4116KB"
-                    in the_string
-                ), (lines1, lines2)
+            # NODE: The specific numbers can change for distinct (but correct) toposort orderings
+            #  Update the test values if a different algorithm is used
+            assert "CPU: 4112KB (4112KB)" in the_string, (lines1, lines2)
+            assert "CPU: 8204KB (8204KB)" in the_string, (lines1, lines2)
+            assert "CPU: 8208KB" in the_string, (lines1, lines2)
+            assert (
+                "Minimum peak from all valid apply node order is 4104KB" in the_string
+            ), (lines1, lines2)
 
         finally:
             config.profile = config1

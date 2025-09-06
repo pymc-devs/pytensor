@@ -13,20 +13,23 @@ from pytensor import clone_replace, compile
 from pytensor.compile.function.types import Supervisor
 from pytensor.compile.mode import get_target_language
 from pytensor.configdefaults import config
-from pytensor.graph import FunctionGraph, Op
-from pytensor.graph.basic import Apply, Variable, ancestors
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.fg import Output
+from pytensor.graph.fg import FunctionGraph, Output
+from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
     copy_stack_trace,
+    dfs_rewriter,
     in2out,
     node_rewriter,
     out2in,
 )
 from pytensor.graph.rewriting.db import SequenceDB
+from pytensor.graph.traversal import ancestors, graph_inputs, toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
+from pytensor.scalar import ScalarConstant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import (
     MakeVector,
@@ -525,43 +528,24 @@ class FusionOptimizer(GraphRewriter):
 
     @staticmethod
     def elemwise_to_scalar(inputs, outputs):
-        replace_inputs = [(inp, inp.clone()) for inp in inputs]
-        outputs = clone_replace(outputs, replace=replace_inputs)
-
-        inputs = [inp for _, inp in replace_inputs]
-        fg = FunctionGraph(inputs=inputs, outputs=outputs, clone=False)
-        middle_inputs = []
-
-        scalar_inputs = [
-            ps.get_scalar_type(inp.type.dtype).make_variable() for inp in inputs
-        ]
-        middle_scalar_inputs = []
-
-        for node in fg.toposort():
-            node_scalar_inputs = []
-            for inp in node.inputs:
-                if inp in inputs:
-                    node_scalar_inputs.append(scalar_inputs[inputs.index(inp)])
-                elif inp in middle_inputs:
-                    node_scalar_inputs.append(
-                        middle_scalar_inputs[middle_inputs.index(inp)]
+        replacement = {
+            inp: ps.get_scalar_type(inp.type.dtype).make_variable() for inp in inputs
+        }
+        for node in toposort(outputs, blockers=inputs):
+            scalar_inputs = [replacement[inp] for inp in node.inputs]
+            replacement.update(
+                dict(
+                    zip(
+                        node.outputs,
+                        node.op.scalar_op.make_node(*scalar_inputs).outputs,
                     )
-                else:
-                    new_scalar_input = ps.get_scalar_type(
-                        inp.type.dtype
-                    ).make_variable()
-                    node_scalar_inputs.append(new_scalar_input)
-                    middle_scalar_inputs.append(new_scalar_input)
-                    middle_inputs.append(inp)
+                )
+            )
 
-            new_scalar_node = node.op.scalar_op.make_node(*node_scalar_inputs)
-            middle_scalar_inputs.append(new_scalar_node.outputs[0])
-            middle_inputs.append(node.outputs[0])
-
-        scalar_outputs = [
-            middle_scalar_inputs[middle_inputs.index(out)] for out in fg.outputs
-        ]
-        return scalar_inputs, scalar_outputs
+        return (
+            [replacement[inp] for inp in inputs],
+            [replacement[out] for out in outputs],
+        )
 
     def apply(self, fgraph):
         nb_replacement = 0
@@ -645,6 +629,7 @@ class FusionOptimizer(GraphRewriter):
                 visited_nodes: set[Apply],
                 fuseable_clients: FUSEABLE_MAPPING,
                 unfuseable_clients: UNFUSEABLE_MAPPING,
+                toposort_index: dict[Apply, int],
             ) -> tuple[list[Variable], list[Variable]]:
                 KT = TypeVar("KT")
                 VT = TypeVar("VT", list, set)
@@ -657,15 +642,19 @@ class FusionOptimizer(GraphRewriter):
                     return new_dict
 
                 def variables_depend_on(
-                    variables, depend_on, stop_search_at=None
+                    variables,
+                    depend_on,
+                    stop_search_at=None,
                 ) -> bool:
                     return any(
                         a in depend_on
-                        for a in ancestors(variables, blockers=stop_search_at)
+                        for a in ancestors(
+                            variables,
+                            blockers=stop_search_at,
+                        )
                     )
 
-                toposort = fg.toposort()
-                for starting_node in toposort:
+                for starting_node in toposort_index:
                     if starting_node in visited_nodes:
                         continue
 
@@ -807,7 +796,7 @@ class FusionOptimizer(GraphRewriter):
                                     and inp.owner not in visited_nodes
                                 )
                             ),
-                            key=lambda inp: toposort.index(inp.owner),
+                            key=lambda inp: toposort_index[inp.owner],
                             reverse=True,
                         ):
                             fuseable_nodes_to_visit.appendleft(inp.owner)
@@ -819,7 +808,7 @@ class FusionOptimizer(GraphRewriter):
                                 for node in fuseable_clients_temp.get(next_out, ())
                                 if node not in visited_nodes
                             ),
-                            key=lambda node: toposort.index(node),
+                            key=lambda node: toposort_index[node],
                         ):
                             fuseable_nodes_to_visit.append(next_node)
 
@@ -893,20 +882,25 @@ class FusionOptimizer(GraphRewriter):
             # client (those that don't fit into 1))
             fuseable_clients, unfuseable_clients = initialize_fuseable_mappings(fg=fg)
             visited_nodes: set[Apply] = set()
+            toposort_index = {
+                node: i for i, node in enumerate(toposort(fgraph.outputs))
+            }
             while True:
-                starting_nodes = fg.apply_nodes.copy()
                 try:
                     subgraph_inputs, subgraph_outputs = find_fuseable_subgraph(
                         fg=fg,
                         visited_nodes=visited_nodes,
                         fuseable_clients=fuseable_clients,
                         unfuseable_clients=unfuseable_clients,
+                        toposort_index=toposort_index,
                     )
                 except ValueError:
                     return
                 else:
                     # The caller is now expected to update fg in place,
                     # by replacing the subgraph with a Composite Op
+                    starting_nodes = fg.apply_nodes.copy()
+
                     yield subgraph_inputs, subgraph_outputs
 
                     # This is where we avoid repeated work by using a stateful
@@ -920,6 +914,8 @@ class FusionOptimizer(GraphRewriter):
                         starting_nodes=starting_nodes,
                     )
 
+        checkpoint = fgraph.checkpoint()
+        nb_inconsintency_replace = 0
         for inputs, outputs in find_next_fuseable_subgraph(fgraph):
             if (len(inputs) + len(outputs)) > max_operands:
                 warn(
@@ -938,11 +934,21 @@ class FusionOptimizer(GraphRewriter):
                 if old_out.name:
                     composite_out.name = old_out.name
 
-            fgraph.replace_all_validate(
+            fgraph.replace_all(
                 list(zip(outputs, composite_outputs, strict=True)),
                 reason=self.__class__.__name__,
             )
             nb_replacement += 1
+
+        try:
+            fgraph.validate()
+        except InconsistencyError:
+            warn(
+                f"{self.__class__.__name__} produced an inconsistent graph. Reverting to the previous state."
+            )
+            fgraph.revert(checkpoint)
+            nb_inconsintency_replace = nb_replacement
+            nb_replacement = 0
 
         if fgraph.profile:
             validate_time = fgraph.profile.validate_time - validate_before
@@ -962,7 +968,7 @@ class FusionOptimizer(GraphRewriter):
             self,
             1,  # nb_iter
             nb_replacement,
-            0,  # nb_inconsintency_replace
+            nb_inconsintency_replace,
             validate_time,
             callback_time,
             callbacks_time,
@@ -991,31 +997,48 @@ class FusionOptimizer(GraphRewriter):
 @node_rewriter([Elemwise])
 def local_useless_composite_outputs(fgraph, node):
     """Remove inputs and outputs of Composite Ops that are not used anywhere."""
-    if not (
-        isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, ps.Composite)
-    ):
-        return
     comp = node.op.scalar_op
-    used_outputs_idxs = [
-        i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]
-    ]
-    used_inner_outputs = [comp.outputs[i] for i in used_outputs_idxs]
-    comp_fgraph = FunctionGraph(
-        inputs=comp.inputs, outputs=used_inner_outputs, clone=False
-    )
-    used_inputs_idxs = [
-        i
-        for i, i_intern in enumerate(comp_fgraph.inputs)
-        if comp_fgraph.clients[i_intern]
-    ]
-    used_inner_inputs = [comp.inputs[i] for i in used_inputs_idxs]
-    if len(used_inner_inputs) < len(node.inputs) or len(used_inner_outputs) < len(
-        node.outputs
+
+    if not isinstance(node.op.scalar_op, ps.Composite):
+        return None
+
+    clients = fgraph.clients
+    outer_inputs, outer_outputs = node.inputs, node.outputs
+    inner_inputs, inner_outputs = comp.inputs, comp.outputs
+
+    used_inner_outputs = {
+        inner_out
+        for inner_out, outer_out in zip(inner_outputs, outer_outputs)
+        if clients[outer_out]
+    }
+    used_inner_inputs = {
+        inner_inp
+        for inner_inp in graph_inputs(used_inner_outputs)
+        if not isinstance(inner_inp, ScalarConstant)
+    }
+
+    if len(used_inner_inputs) == len(outer_inputs) or len(used_inner_outputs) == len(
+        outer_outputs
     ):
-        used_inputs = [node.inputs[i] for i in used_inputs_idxs]
-        c = ps.Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
-        e = Elemwise(scalar_op=c)(*used_inputs, return_list=True)
-        return dict(zip([node.outputs[i] for i in used_outputs_idxs], e, strict=True))
+        return None
+
+    used_inputs_idxs = [
+        i for i, inp in enumerate(inner_inputs) if inp in used_inner_inputs
+    ]
+    used_inner_inputs = [inner_inputs[i] for i in used_inputs_idxs]
+    used_outer_inputs = [outer_inputs[i] for i in used_inputs_idxs]
+
+    new_comp = ps.Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
+    new_outer_outputs = Elemwise(scalar_op=new_comp)(
+        *used_outer_inputs, return_list=True
+    )
+
+    used_outer_outputs = (
+        outer_outputs[i]
+        for i, out in enumerate(inner_outputs)
+        if out in used_inner_outputs
+    )
+    return dict(zip(used_outer_outputs, new_outer_outputs, strict=True))
 
 
 @node_rewriter([CAReduce])
@@ -1241,21 +1264,21 @@ fuse_seqopt.register(
 )
 fuse_seqopt.register(
     "local_useless_composite_outputs",
-    in2out(local_useless_composite_outputs),
+    dfs_rewriter(local_useless_composite_outputs),
     "fast_run",
     "fusion",
     position=2,
 )
 fuse_seqopt.register(
     "local_careduce_fusion",
-    in2out(local_careduce_fusion),
+    dfs_rewriter(local_careduce_fusion),
     "fast_run",
     "fusion",
     position=10,
 )
 fuse_seqopt.register(
     "local_inline_composite_constants",
-    in2out(local_inline_composite_constants, ignore_newtrees=True),
+    dfs_rewriter(local_inline_composite_constants, ignore_newtrees=True),
     "fast_run",
     "fusion",
     position=20,

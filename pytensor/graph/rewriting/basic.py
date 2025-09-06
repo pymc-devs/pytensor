@@ -22,14 +22,17 @@ from pytensor.graph.basic import (
     AtomicVariable,
     Constant,
     Variable,
-    applys_between,
-    io_toposort,
-    vars_between,
 )
 from pytensor.graph.features import AlreadyThere, Feature
 from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.unify import Var, convert_strs_to_vars
+from pytensor.graph.traversal import (
+    apply_ancestors,
+    applys_between,
+    toposort,
+    vars_between,
+)
 from pytensor.graph.utils import AssocList, InconsistencyError
 from pytensor.misc.ordered_set import OrderedSet
 from pytensor.utils import flatten
@@ -1821,27 +1824,80 @@ class WalkingGraphRewriter(NodeProcessingGraphRewriter):
     def __init__(
         self,
         node_rewriter: NodeRewriter,
-        order: Literal["out_to_in", "in_to_out"] = "in_to_out",
+        order: Literal["out_to_in", "in_to_out", "dfs"] = "in_to_out",
         ignore_newtrees: bool = False,
         failure_callback: FailureCallbackType | None = None,
     ):
-        if order not in ("out_to_in", "in_to_out"):
-            raise ValueError("order must be 'out_to_in' or 'in_to_out'")
+        valid_orders = ("out_to_in", "in_to_out", "dfs")
+        if order not in valid_orders:
+            raise ValueError(f"order must be one of {valid_orders}, got {order}")
         self.order = order
+        # Use tracks functionality to pre-filter nodes, if it's a single Op or Op type
+        tracks = node_rewriter.tracks()
+        self.tracks = tracks[0] if (tracks is not None and len(tracks) == 1) else None
         super().__init__(node_rewriter, ignore_newtrees, failure_callback)
 
     def apply(self, fgraph, start_from=None):
         if start_from is None:
             start_from = fgraph.outputs
         callback_before = fgraph.execute_callbacks_time
-        nb_nodes_start = len(fgraph.apply_nodes)
+        apply_nodes = fgraph.apply_nodes
+        nb_nodes_start = len(apply_nodes)
         t0 = time.perf_counter()
-        q = deque(io_toposort(fgraph.inputs, start_from))
-        io_t = time.perf_counter() - t0
+        if (tracks := self.tracks) is not None:
+            # Pre-filter nodes to consider based on tracks
+            if isinstance(tracks, Op):
+                # Equality
+                candidate_nodes = {
+                    node for node in fgraph.apply_nodes if node.op == tracks
+                }
+            else:
+                # isinstance
+                candidate_nodes = {
+                    node for node in fgraph.apply_nodes if isinstance(node.op, tracks)
+                }
+            if not candidate_nodes:
+                # Abort early
+                return (
+                    self,
+                    0,  # nodes changed
+                    nb_nodes_start,
+                    nb_nodes_start,  # nb_nodes_end
+                    time.perf_counter() - t0,  # io_t
+                    0,  # loop_t
+                    0,  # callback_time
+                    self.node_rewriter,
+                )
 
-        def importer(node):
-            if node is not current_node:
-                q.append(node)
+            if isinstance(tracks, Op):
+
+                def importer(node):
+                    if node is not current_node and node.op == tracks:
+                        q.append(node)
+
+            else:
+
+                def importer(node):
+                    if node is not current_node and isinstance(node.op, tracks):
+                        q.append(node)
+        else:
+            # Otherwise, we will call the node_rewriter on every node in the graph
+            candidate_nodes = None
+
+            def importer(node):
+                if node is not current_node:
+                    q.append(node)
+
+        node_iterator = (
+            apply_ancestors(start_from)
+            if (self.order == "dfs")
+            else toposort(start_from)
+        )
+        if candidate_nodes:
+            q = deque(node for node in node_iterator if node in candidate_nodes)
+        else:
+            q = deque(node_iterator)
+        io_t = time.perf_counter() - t0
 
         u = self.attach_updater(
             fgraph, importer, None, name=getattr(self, "name", None)
@@ -1959,6 +2015,7 @@ def walking_rewriter(
 
 in2out = partial(walking_rewriter, "in_to_out")
 out2in = partial(walking_rewriter, "out_to_in")
+dfs_rewriter = partial(walking_rewriter, "dfs")
 
 
 class ChangeTracker(Feature):
@@ -2166,7 +2223,7 @@ class EquilibriumGraphRewriter(NodeProcessingGraphRewriter):
             changed |= apply_cleanup(iter_cleanup_sub_profs)
 
             topo_t0 = time.perf_counter()
-            q = deque(io_toposort(fgraph.inputs, start_from))
+            q = deque(toposort(start_from))
             io_toposort_timing.append(time.perf_counter() - topo_t0)
 
             nb_nodes.append(len(q))

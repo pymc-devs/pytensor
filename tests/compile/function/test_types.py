@@ -12,6 +12,7 @@ from pytensor.compile.function.types import UnusedInputError
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
+from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import PatternNodeRewriter, WalkingGraphRewriter
 from pytensor.graph.utils import MissingInputError
@@ -21,6 +22,7 @@ from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.type import random_generator_type
+from pytensor.tensor.rewriting.elemwise import FusionOptimizer
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,
@@ -1357,3 +1359,32 @@ def test_minimal_random_function_call_benchmark(trust_input, benchmark):
 
     rng_val = np.random.default_rng()
     benchmark(f, rng_val)
+
+
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
+@pytest.mark.parametrize("depth", [2, 20])
+def test_function_compilation_benchmark(mode, depth, benchmark):
+    def compile_function(mode=mode, depth=depth):
+        x = pt.matrix("x")
+        out = x
+        for _ in range(depth):
+            out = pt.sin(out.T) + pt.cos(out)
+        fn = function([x], out, mode=mode)
+        return fn
+
+    benchmark.pedantic(compile_function, iterations=20, rounds=5)
+
+
+def test_benchmark_fusion_optimizer(benchmark):
+    x = pt.matrix("x")
+    out = x
+    for _ in range(20):
+        out = pt.sin(out.T) + pt.cos(out)
+
+    optimizer = FusionOptimizer()
+
+    def foo():
+        fg = FunctionGraph(outputs=[out])
+        optimizer.apply(fg)
+
+    benchmark(foo)

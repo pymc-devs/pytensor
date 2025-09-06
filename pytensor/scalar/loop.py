@@ -67,7 +67,7 @@ class ScalarLoop(ScalarInnerGraphOp):
             inputs, outputs = clone([*init, *constant], update)
 
         self.is_while = until is not None
-        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
+        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs, clone=False)
         self._validate_updates(self.inputs, self.outputs)
 
         self.inputs_type = tuple(input.type for input in self.inputs)

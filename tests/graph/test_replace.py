@@ -4,13 +4,14 @@ import scipy.special
 
 import pytensor.tensor as pt
 from pytensor import config, function, shared
-from pytensor.graph.basic import equal_computations, graph_inputs
+from pytensor.graph.basic import equal_computations
 from pytensor.graph.replace import (
     clone_replace,
     graph_replace,
     vectorize_graph,
     vectorize_node,
 )
+from pytensor.graph.traversal import graph_inputs
 from pytensor.tensor import dvector, fvector, vector
 from tests import unittest_tools as utt
 from tests.graph.utils import MyOp, MyVariable, op_multiple_outputs
@@ -27,7 +28,7 @@ class TestCloneReplace:
 
         f1 = z * (x + y) ** 2 + 5
         f2 = clone_replace(f1, replace=None, rebuild_strict=True, copy_inputs_over=True)
-        f2_inp = graph_inputs([f2])
+        f2_inp = tuple(graph_inputs([f2]))
 
         assert z in f2_inp
         assert x in f2_inp
@@ -64,7 +65,7 @@ class TestCloneReplace:
         f2 = clone_replace(
             f1, replace={y: y2}, rebuild_strict=True, copy_inputs_over=True
         )
-        f2_inp = graph_inputs([f2])
+        f2_inp = tuple(graph_inputs([f2]))
         assert z in f2_inp
         assert x in f2_inp
         assert y2 in f2_inp
@@ -82,7 +83,7 @@ class TestCloneReplace:
         f2 = clone_replace(
             f1, replace={y: y2}, rebuild_strict=False, copy_inputs_over=True
         )
-        f2_inp = graph_inputs([f2])
+        f2_inp = tuple(graph_inputs([f2]))
         assert z in f2_inp
         assert x in f2_inp
         assert y2 in f2_inp
