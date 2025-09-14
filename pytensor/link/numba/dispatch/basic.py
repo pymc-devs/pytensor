@@ -3,6 +3,7 @@ import sys
 import warnings
 from copy import copy
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent
 
 import numba
@@ -14,7 +15,8 @@ from llvmlite import ir
 from numba import types
 from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
-from numba.extending import box, overload, register_jitable as _register_jitable
+from numba.extending import box, overload
+from numba.extending import register_jitable as _register_jitable
 
 from pytensor import In, config
 from pytensor.compile import NUMBA
@@ -25,11 +27,9 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.cache import compile_and_cache_numba_function_src
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
-from pytensor.link.utils import (
-    compile_function_src,
-    fgraph_to_python,
-)
+from pytensor.link.utils import fgraph_to_python
 from pytensor.scalar.basic import ScalarType
 from pytensor.sparse import SparseTensorType
 from pytensor.tensor.basic import Nonzero
@@ -558,7 +558,13 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
         """
     )
 
-    specify_shape = compile_function_src(func, "specify_shape", globals())
+    specify_shape = compile_and_cache_numba_function_src(
+        func,
+        "specify_shape",
+        globals(),
+        # use the sha256 of func_conditions in the key to avoid long keys
+        key=f"SpecifyShape_{sha256(';'.join(func_conditions).encode()).hexdigest()}",
+    )
     return numba_njit(specify_shape)
 
 
