@@ -14,7 +14,7 @@ from llvmlite import ir
 from numba import types
 from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
-from numba.extending import box, overload
+from numba.extending import box, overload, register_jitable as _register_jitable
 
 from pytensor import In, config
 from pytensor.compile import NUMBA
@@ -50,10 +50,11 @@ def global_numba_func(func):
     return func
 
 
-def numba_njit(*args, fastmath=None, **kwargs):
-    kwargs.setdefault("cache", config.numba__cache)
-    kwargs.setdefault("no_cpython_wrapper", True)
-    kwargs.setdefault("no_cfunc_wrapper", True)
+def numba_njit(*args, fastmath=None, register_jitable: bool = False, **kwargs):
+    kwargs.setdefault("cache", True)
+    kwargs.setdefault("no_cpython_wrapper", False)
+    kwargs.setdefault("no_cfunc_wrapper", False)
+    # print(kwargs)
     if fastmath is None:
         if config.numba__fastmath:
             # Opinionated default on fastmath flags
@@ -81,10 +82,11 @@ def numba_njit(*args, fastmath=None, **kwargs):
         category=NumbaWarning,
     )
 
+    func = _register_jitable if register_jitable else numba.njit
     if len(args) > 0 and callable(args[0]):
-        return numba.njit(*args[1:], fastmath=fastmath, **kwargs)(args[0])
-
-    return numba.njit(*args, fastmath=fastmath, **kwargs)
+        return func(*args[1:], fastmath=fastmath, **kwargs)(args[0])
+    else:
+        return func(*args, fastmath=fastmath, **kwargs)
 
 
 def numba_vectorize(*args, **kwargs):

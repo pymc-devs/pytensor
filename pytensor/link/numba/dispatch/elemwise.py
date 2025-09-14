@@ -1,4 +1,5 @@
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent, indent
 
 import numba
@@ -7,18 +8,17 @@ from numba.core.extending import overload
 from numpy.lib.stride_tricks import as_strided
 
 from pytensor.graph.op import Op
+from pytensor.link.numba.cache import compile_and_cache_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     numba_funcify,
     numba_njit,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
-    _jit_options,
     _vectorized,
     encode_literals,
     store_core_outputs,
 )
-from pytensor.link.utils import compile_function_src
 from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.scalar.basic import (
     AND,
@@ -237,7 +237,7 @@ def create_multiaxis_reducer(
     careduce_def_src += "\n\n"
     careduce_def_src += indent(f"return {return_obj}", " " * 4)
 
-    careduce_fn = compile_function_src(
+    careduce_fn = compile_and_cache_numba_function_src(
         careduce_def_src, careduce_fn_name, {**globals(), **global_env}
     )
 
@@ -264,9 +264,11 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 
 @numba_funcify.register(Elemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
+    nin = len(node.inputs)
+    nout = len(node.outputs)
+
     scalar_inputs = [get_scalar_type(dtype=input.dtype)() for input in node.inputs]
     scalar_node = op.scalar_op.make_node(*scalar_inputs)
-
     scalar_op_fn = numba_funcify(
         op.scalar_op,
         node=scalar_node,
@@ -274,9 +276,22 @@ def numba_funcify_Elemwise(op, node, **kwargs):
         **kwargs,
     )
 
-    nin = len(node.inputs)
-    nout = len(node.outputs)
-    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
+    # TODO: Proper key
+    core_op_key = "_".join(
+        map(
+            str,
+            (
+                op,
+                op.scalar_op,
+                tuple(op.inplace_pattern.items()),
+                tuple(getattr(op.scalar_op, "props_dict", lambda: {})().items()),
+            ),
+        )
+    )
+    core_op_key = sha256(core_op_key.encode()).hexdigest()
+    core_op_fn = store_core_outputs(
+        scalar_op_fn, nin=nin, nout=nout, core_op_key=core_op_key
+    )
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
     output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
@@ -333,11 +348,31 @@ def numba_funcify_Elemwise(op, node, **kwargs):
             return tuple(outputs_summed)
         return outputs_summed[0]
 
-    @overload(elemwise, jit_options=_jit_options)
+    @overload(elemwise)
     def ov_elemwise(*inputs):
         return elemwise_wrapper
 
-    return elemwise
+    # TODO: Also input dtypes in key
+    elemwise_key = "_".join(
+        map(
+            str,
+            (
+                "Elemwise",
+                core_op_key,
+                input_bc_patterns,
+                inplace_pattern,
+            ),
+        )
+    )
+    elemwise_key = sha256(elemwise_key.encode()).hexdigest()
+    f = compile_and_cache_numba_function_src(
+        "def f(*inputs): return elemwise(*inputs)",
+        "f",
+        {**globals(), **{"elemwise": elemwise}},
+        key=elemwise_key,
+    )
+
+    return numba_njit(f)
 
 
 @numba_funcify.register(Sum)

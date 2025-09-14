@@ -4,7 +4,7 @@ import base64
 import pickle
 from collections.abc import Callable, Sequence
 from textwrap import indent
-from typing import Any, cast
+from typing import Any
 
 import numba
 import numpy as np
@@ -15,15 +15,17 @@ from numba.core.base import BaseContext
 from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
+from pytensor.link.numba.cache import compile_and_cache_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.utils import compile_function_src
 
 
 def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
-def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
+def store_core_outputs(
+    core_op_fn: Callable, nin: int, nout: int, core_op_key=None
+) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
     @njit
@@ -52,10 +54,20 @@ def store_core_outputs({inp_signature}, {out_signature}):
 {indent(store_outputs, " " * 4)}
 """
     global_env = {"core_op_fn": core_op_fn}
-    func = compile_function_src(
-        func_src, "store_core_outputs", {**globals(), **global_env}
+
+    key = "_".join(("store_core_outputs", core_op_key)) if core_op_key else None
+    func = compile_and_cache_numba_function_src(
+        func_src,
+        "store_core_outputs",
+        {**globals(), **global_env},
+        key=key,
     )
-    return cast(Callable, numba_basic.numba_njit(func))
+    return numba_basic.numba_njit(
+        func,
+        register_jitable=True,
+        no_cpython_wrapper=True,
+        no_cfunc_wrapper=True,
+    )
 
 
 _jit_options = {
@@ -74,7 +86,7 @@ _jit_options = {
 @numba.extending.intrinsic(jit_options=_jit_options, prefer_literal=True)
 def _vectorized(
     typingctx,
-    scalar_func,
+    core_func,
     input_bc_patterns,
     output_bc_patterns,
     output_dtypes,
@@ -85,7 +97,7 @@ def _vectorized(
     size_type,
 ):
     arg_types = [
-        scalar_func,
+        core_func,
         input_bc_patterns,
         output_bc_patterns,
         output_dtypes,
@@ -173,16 +185,6 @@ def _vectorized(
         )
         out_types[output_idx] = output_type
 
-    core_signature = typingctx.resolve_function_type(
-        scalar_func,
-        [
-            *constant_inputs_types,
-            *core_input_types,
-            *core_out_types,
-        ],
-        {},
-    )
-
     ret_type = types.Tuple(out_types)
 
     if len(output_dtypes) == 1:
@@ -239,11 +241,21 @@ def _vectorized(
             output_core_shapes,
         )
 
+        core_signature = typingctx.resolve_function_type(
+            core_func,
+            [
+                *constant_inputs_types,
+                *core_input_types,
+                *core_out_types,
+            ],
+            {},
+        )
+
         make_loop_call(
             typingctx,
             ctx,
             builder,
-            scalar_func,
+            core_func,
             core_signature,
             iter_shape,
             constant_inputs,
