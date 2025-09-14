@@ -14,7 +14,8 @@ from llvmlite import ir
 from numba import types
 from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
-from numba.extending import box, overload, register_jitable as _register_jitable
+from numba.extending import box, overload
+from numba.extending import register_jitable as _register_jitable
 
 from pytensor import In, config
 from pytensor.compile import NUMBA
@@ -25,11 +26,9 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.cache import compile_and_cache_numba_function_src
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
-from pytensor.link.utils import (
-    compile_function_src,
-    fgraph_to_python,
-)
+from pytensor.link.utils import fgraph_to_python
 from pytensor.scalar.basic import ScalarType
 from pytensor.sparse import SparseTensorType
 from pytensor.tensor.basic import Nonzero
@@ -40,6 +39,7 @@ from pytensor.tensor.slinalg import Solve
 from pytensor.tensor.sort import ArgSortOp, SortOp
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import MakeSlice, NoneConst
+from pytensor.utils import hash_from_code
 
 
 def global_numba_func(func):
@@ -562,7 +562,12 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
         """
     )
 
-    specify_shape = compile_function_src(func, "specify_shape", globals())
+    specify_shape = compile_and_cache_numba_function_src(
+        func,
+        "specify_shape",
+        globals(),
+        key=hash_from_code(func),
+    )
     return numba_njit(specify_shape)
 
 

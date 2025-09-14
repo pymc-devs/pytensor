@@ -1,9 +1,10 @@
 import numpy as np
 
 from pytensor.graph import Type
+from pytensor.link.numba.cache import compile_and_cache_numba_function_src
 from pytensor.link.numba.dispatch import numba_funcify
 from pytensor.link.numba.dispatch.basic import generate_fallback_impl, numba_njit
-from pytensor.link.utils import compile_function_src, unique_name_generator
+from pytensor.link.utils import unique_name_generator
 from pytensor.tensor import TensorType
 from pytensor.tensor.rewriting.subtensor import is_full_slice
 from pytensor.tensor.subtensor import (
@@ -15,6 +16,7 @@ from pytensor.tensor.subtensor import (
     Subtensor,
 )
 from pytensor.tensor.type_other import NoneTypeT, SliceType
+from pytensor.utils import hash_from_code
 
 
 @numba_funcify.register(Subtensor)
@@ -95,10 +97,11 @@ def {function_name}({", ".join(input_names)}):
     return np.asarray(z)
     """
 
-    func = compile_function_src(
+    func = compile_and_cache_numba_function_src(
         subtensor_def_src,
         function_name=function_name,
         global_env=globals() | {"np": np},
+        key=hash_from_code(subtensor_def_src),
     )
     return numba_njit(func, boundscheck=True)
 

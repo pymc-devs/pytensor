@@ -2,9 +2,10 @@ from textwrap import indent
 
 import numpy as np
 
+from pytensor.link.numba.cache import compile_and_cache_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import create_tuple_string, numba_funcify
-from pytensor.link.utils import compile_function_src, unique_name_generator
+from pytensor.link.utils import unique_name_generator
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -17,6 +18,7 @@ from pytensor.tensor.basic import (
     Split,
     TensorFromScalar,
 )
+from pytensor.utils import hash_from_code
 
 
 @numba_funcify.register(AllocEmpty)
@@ -49,8 +51,11 @@ def allocempty({", ".join(shape_var_names)}):
     return np.empty(scalar_shape, dtype)
     """
 
-    alloc_fn = compile_function_src(
-        alloc_def_src, "allocempty", {**globals(), **global_env}
+    alloc_fn = compile_and_cache_numba_function_src(
+        alloc_def_src,
+        "allocempty",
+        {**globals(), **global_env},
+        key=hash_from_code(alloc_def_src),
     )
 
     return numba_basic.numba_njit(alloc_fn)
@@ -93,7 +98,12 @@ def alloc(val, {", ".join(shape_var_names)}):
     res[...] = val
     return res
     """
-    alloc_fn = compile_function_src(alloc_def_src, "alloc", {**globals(), **global_env})
+    alloc_fn = compile_and_cache_numba_function_src(
+        alloc_def_src,
+        "alloc",
+        {**globals(), **global_env},
+        key=hash_from_code(alloc_def_src),
+    )
 
     return numba_basic.numba_njit(alloc_fn)
 
@@ -212,8 +222,11 @@ def makevector({", ".join(input_names)}):
     return np.array({create_list_string(input_names)}, dtype=dtype)
     """
 
-    makevector_fn = compile_function_src(
-        makevector_def_src, "makevector", {**globals(), **global_env}
+    makevector_fn = compile_and_cache_numba_function_src(
+        makevector_def_src,
+        "makevector",
+        {**globals(), **global_env},
+        key=f"MakeVector({op.dtype})",
     )
 
     return numba_basic.numba_njit(makevector_fn)
