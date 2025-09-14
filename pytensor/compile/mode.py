@@ -50,7 +50,7 @@ predefined_linkers = {
     "jax": JAXLinker(),
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
-    "numba_vm": NumbaLinker(),
+    "numba_vm": NumbaLinker(vm=True),
 }
 
 
@@ -453,7 +453,7 @@ class Mode:
 # string as the key
 # Use VM_linker to allow lazy evaluation by default.
 FAST_COMPILE = Mode(
-    NumbaLinker(),
+    NumbaLinker(vm=True),
     # TODO: Fast_compile should just use python code, CHANGE ME!
     RewriteDatabaseQuery(
         include=["fast_compile", "numba"],
@@ -461,7 +461,7 @@ FAST_COMPILE = Mode(
     ),
 )
 FAST_RUN = Mode(
-    NumbaLinker(),
+    NumbaLinker(vm=True),
     RewriteDatabaseQuery(
         include=["fast_run", "numba"],
         exclude=["cxx_only", "BlasOpt", "local_careduce_fusion"],
@@ -479,6 +479,11 @@ NUMBA = Mode(
             "scan_save_mem_prealloc",
         ],
     ),
+)
+
+NUMBA_VM = Mode(
+    NumbaLinker(vm=True),
+    NUMBA._optimizer,
 )
 
 JAX = Mode(
@@ -519,6 +524,7 @@ predefined_modes = {
     "FAST_RUN": FAST_RUN,
     "JAX": JAX,
     "NUMBA": NUMBA,
+    "NUMBA_VM": NUMBA_VM,
     "PYTORCH": PYTORCH,
 }
 

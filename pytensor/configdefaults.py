@@ -380,11 +380,12 @@ def add_compile_configvars():
             "vm_nogc",
             "cvm_nogc",
             "jax",
+            "numba",
         ]
     else:
         # g++ is not present or the user disabled it,
         # linker should default to python only.
-        linker_options = ["py", "vm", "vm_nogc", "jax"]
+        linker_options = ["py", "vm", "vm_nogc", "jax", "numba"]
         if type(config).cxx.is_default:
             # If the user provided an empty value for cxx, do not warn.
             _logger.warning(
@@ -398,7 +399,7 @@ def add_compile_configvars():
         "linker",
         "Default linker used if the pytensor flags mode is Mode",
         # Not mutable because the default mode is cached after the first use.
-        EnumStr("numba", linker_options, mutable=False),
+        EnumStr("numba_vm", linker_options, mutable=False),
         in_c_key=False,
     )
 
