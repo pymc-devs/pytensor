@@ -7,6 +7,7 @@ from functools import wraps
 import numpy as np
 
 import pytensor.tensor as pt
+from pytensor.compile.function import function
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Op, Variable
 
@@ -158,7 +159,7 @@ class JAXOp(Op):
         return output
 
 
-def as_jax_op(jaxfunc):
+def as_jax_op(jaxfunc=None, *, allow_eval=True):
     """Return a Pytensor-compatible function from a JAX jittable function.
 
     This decorator wraps a JAX function so that it accepts and returns `pytensor.Variable`
@@ -169,8 +170,11 @@ def as_jax_op(jaxfunc):
 
     Parameters
     ----------
-    jaxfunc : Callable
-        A JAX function to be wrapped.
+    jaxfunc : Callable, optional
+        A JAX function to be wrapped. If None, returns a decorator function.
+    allow_eval : bool, default=True
+        Whether to allow evaluation of symbolic shapes when input shapes are
+        not fully determined.
 
     Returns
     -------
@@ -223,7 +227,7 @@ def as_jax_op(jaxfunc):
     -----
     The function is based on a blog post by Ricardo Vieira and Adrian Seyboldt,
     available at
-    `pymc-labls.io <https://www.pymc-labs.io/blog-posts/jax-functions-in-pymc-3-quick
+    `pymc-labs.io <https://www.pymc-labs.io/blog-posts/jax-functions-in-pymc-3-quick
     -examples/>`__.
     To accept functions and non pytensor variables as input, the function make use
     of :func:`equinox.partition` and :func:`equinox.combine` to split and combine the
@@ -231,102 +235,148 @@ def as_jax_op(jaxfunc):
     :func:`pytensor.compile.builders.infer_shape` and :func:`jax.eval_shape`.
 
     """
-    name = jaxfunc.__name__
 
-    try:
-        import equinox as eqx
-        import jax
-        import jax.numpy as jnp
-    except ImportError as e:
-        raise ImportError(
-            "The as_jax_op decorator requires both jax and equinox to be installed."
-        ) from e
+    def decorator(func):
+        name = func.__name__
 
-    @wraps(jaxfunc)
-    def func(*args, **kwargs):
-        # Partition inputs into dynamic pytensor variables, wrapped functions and
-        # static variables.
-        # Static variables don't take part in the graph.
+        try:
+            import equinox as eqx
+            import jax
+        except ImportError as e:
+            raise ImportError(
+                "The as_jax_op decorator requires both jax and equinox to be installed."
+            ) from e
 
-        pt_vars, static_vars = eqx.partition(
-            (args, kwargs), lambda x: isinstance(x, pt.Variable)
-        )
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Partition inputs into dynamic pytensor variables, wrapped functions and
+            # static variables.
+            # Static variables don't take part in the graph.
 
-        # Flatten the input dictionary.
-        pt_vars_flat, pt_vars_treedef = jax.tree.flatten(
-            pt_vars,
-        )
-        pt_types = [var.type for var in pt_vars_flat]
+            input_vars, static_input = eqx.partition(
+                (args, kwargs), lambda x: isinstance(x, pt.Variable)
+            )
 
-        # We need to figure out static shapes so that we can figure
-        # out the output types.
-        input_shapes = [var.type.shape for var in pt_vars_flat]
-        resolved_input_shapes = []
-        for var, shape in zip(pt_vars_flat, input_shapes, strict=True):
-            if any(s is None for s in shape):
-                _, shape = pt.basic.infer_static_shape(var.shape)
-                if any(s is None for s in shape):
-                    raise ValueError(
-                        f"Input variable {var} has a shape with undetermined "
-                        "shape. Please provide inputs with fully determined shapes "
-                        "by calling pt.specify_shape."
-                    )
+            # Flatten the input dictionary.
+            input_flat, input_treedef = jax.tree.flatten(
+                input_vars,
+            )
+            input_types = [var.type for var in input_flat]
+
+            # We need to figure out static shapes so that we can figure
+            # out the output types.
+            output_types, output_treedef, output_static = _find_output_types(
+                func, input_flat, input_treedef, static_input, allow_eval=allow_eval
+            )
+
+            def flat_func(*flat_vars):
+                vars = jax.tree.unflatten(input_treedef, flat_vars)
+                args, kwargs = eqx.combine(
+                    vars,
+                    static_input,
+                )
+                outputs = func(*args, **kwargs)
+                output_vals, _ = eqx.partition(outputs, eqx.is_array)
+                outputs_flat, _ = jax.tree.flatten(output_vals)
+                return outputs_flat
+
+            op_instance = JAXOp(
+                input_types,
+                output_types,
+                flat_func,
+                name=name,
+            )
+
+            # 8. Execute the op and unflatten the outputs.
+            output_flat = op_instance(*input_flat)
+            if not isinstance(output_flat, Sequence):
+                output_flat = [output_flat]
+            outvars = jax.tree.unflatten(output_treedef, output_flat)
+            outvars = eqx.combine(outvars, output_static)
+
+            return outvars
+
+        return wrapper
+
+    if jaxfunc is None:
+        return decorator
+    else:
+        return decorator(jaxfunc)
+
+
+def _find_output_types(
+    jaxfunc, inputs_flat, input_treedef, static_input, *, allow_eval=True
+):
+    import equinox as eqx
+    import jax
+    import jax.numpy as jnp
+
+    resolved_input_shapes = []
+    needs_eval = False
+    for var in inputs_flat:
+        # If shape is already fully determined, use it directly
+        if not any(s is None for s in var.type.shape):
+            resolved_input_shapes.append(var.type.shape)
+            continue
+
+        # Try to infer static shape
+        _, shape = pt.basic.infer_static_shape(var.shape)
+        if not any(s is None for s in shape):
             resolved_input_shapes.append(shape)
+            continue
 
-        # Figure out output types using jax.eval_shape.
-        extra_output_storage = {}
-
-        def wrap_jaxfunc(args):
-            vars = jax.tree.unflatten(pt_vars_treedef, args)
-            args, kwargs = eqx.combine(
-                vars,
-                static_vars,
+        # Shape still has undetermined dimensions
+        if not allow_eval:
+            raise ValueError(
+                f"Input variable {var} has a shape with undetermined "
+                "shape. Please provide inputs with fully determined shapes "
+                "by calling pt.specify_shape."
             )
-            outputs = jaxfunc(*args, **kwargs)
-            output_vals, output_static = eqx.partition(outputs, eqx.is_array)
-            extra_output_storage["output_static"] = output_static
-            outputs_flat, output_treedef = jax.tree.flatten(output_vals)
-            extra_output_storage["output_treedef"] = output_treedef
-            return outputs_flat
+        needs_eval = True
+        resolved_input_shapes.append(var.shape)
 
-        dummy_inputs = [
-            jnp.ones(shape, dtype=var.type.dtype)
-            for var, shape in zip(pt_vars_flat, resolved_input_shapes, strict=True)
-        ]
-
-        output_shapes_flat = jax.eval_shape(wrap_jaxfunc, dummy_inputs)
-        output_treedef = extra_output_storage["output_treedef"]
-        output_static = extra_output_storage["output_static"]
-        pt_output_types = [
-            pt.TensorType(dtype=var.dtype, shape=var.shape)
-            for var in output_shapes_flat
-        ]
-
-        def flat_func(*flat_vars):
-            vars = jax.tree.unflatten(pt_vars_treedef, flat_vars)
-            args, kwargs = eqx.combine(
-                vars,
-                static_vars,
+    if needs_eval:
+        try:
+            shape_fn = function(
+                [],
+                resolved_input_shapes,
+                on_unused_input="ignore",
+                mode="FAST_COMPILE",
             )
-            outputs = jaxfunc(*args, **kwargs)
-            output_vals, _ = eqx.partition(outputs, eqx.is_array)
-            outputs_flat, _ = jax.tree.flatten(output_vals)
-            return outputs_flat
+        except Exception as e:
+            raise ValueError(
+                "Could not compile a function to infer example shapes. "
+                "Please provide inputs with fully determined shapes by "
+                "calling pt.specify_shape."
+            ) from e
+        resolved_input_shapes = shape_fn()
 
-        op_instance = JAXOp(
-            pt_types,
-            pt_output_types,
-            flat_func,
-            name=name,
+    # Figure out output types using jax.eval_shape.
+    extra_output_storage = {}
+
+    dummy_inputs = [
+        jnp.ones(shape, dtype=var.type.dtype)
+        for var, shape in zip(inputs_flat, resolved_input_shapes, strict=True)
+    ]
+
+    def wrap_jaxfunc(args):
+        vars = jax.tree.unflatten(input_treedef, args)
+        args, kwargs = eqx.combine(
+            vars,
+            static_input,
         )
+        outputs = jaxfunc(*args, **kwargs)
+        output_vals, output_static = eqx.partition(outputs, eqx.is_array)
+        extra_output_storage["output_static"] = output_static
+        outputs_flat, output_treedef = jax.tree.flatten(output_vals)
+        extra_output_storage["output_treedef"] = output_treedef
+        return outputs_flat
 
-        # 8. Execute the op and unflatten the outputs.
-        output_flat = op_instance(*pt_vars_flat)
-        if not isinstance(output_flat, Sequence):
-            output_flat = [output_flat]
-        outvars = jax.tree.unflatten(output_treedef, output_flat)
-        outvars = eqx.combine(outvars, output_static)
+    output_shapes_flat = jax.eval_shape(wrap_jaxfunc, dummy_inputs)
+    output_treedef = extra_output_storage["output_treedef"]
+    output_static = extra_output_storage["output_static"]
+    output_types = [
+        pt.TensorType(dtype=var.dtype, shape=var.shape) for var in output_shapes_flat
+    ]
 
-        return outvars
-
-    return func
+    return output_types, output_treedef, output_static

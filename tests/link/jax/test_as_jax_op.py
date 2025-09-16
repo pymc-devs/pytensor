@@ -384,10 +384,10 @@ def test_nn():
     out = f(x, mlp)
     grad_out = grad(pt.sum(out), [x])
 
-    compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
+    compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
     with jax.disable_jit():
-        compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
+        compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
 
 class TestDtypes:
