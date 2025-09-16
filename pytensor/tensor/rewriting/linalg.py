@@ -20,6 +20,7 @@ from pytensor.tensor.basic import (
     ExtractDiag,
     Eye,
     TensorVariable,
+    Tri,
     concatenate,
     diag,
     diagonal,
@@ -1017,3 +1018,56 @@ def scalar_solve_to_division(fgraph, node):
     copy_stack_trace(old_out, new_out)
 
     return [new_out]
+
+
+def _find_triangular_op(var):
+    """
+    Inspects a variable to see if it's triangular.
+
+    Returns a tuple (is_lower, is_upper) if triangular, otherwise None.
+    """
+
+    is_lower = getattr(var.tag, "lower_triangular", False)
+    is_upper = getattr(var.tag, "upper_triangular", False)
+
+    if is_lower or is_upper:
+        return (is_lower, is_upper)
+
+    if var.owner and isinstance(var.owner.op, Tri):
+        # The 'k' parameter of Tri determines the diagonal.
+        # k=0 is the main diagonal.
+        k = var.owner.op.k
+        if k == 0:
+            is_lower = var.owner.op.lower
+            return (is_lower, not is_lower)
+
+    if var.owner and isinstance(var.owner.op, Blockwise):
+        core_op = var.owner.op.core_op
+        if isinstance(core_op, Cholesky):
+            return (core_op.lower, not core_op.lower)
+
+    return None
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Blockwise])
+def rewrite_inv_to_triangular_solve(fgraph, node):
+    """
+    This rewrite takes advantage of the fact that the inverse of a triangular
+    matrix can be computed more efficiently than the inverse of a general
+    matrix by using a triangular solve instead of a general matrix inverse.
+    """
+    core_op = node.op.core_op
+    if not isinstance(core_op, ALL_INVERSE_OPS):
+        return None
+
+    A = node.inputs[0]
+    triangular_info = _find_triangular_op(A)
+    if triangular_info is None:
+        return None
+
+    is_lower, is_upper = triangular_info
+    if is_lower or is_upper:
+        I = pt.eye(A.shape[0], dtype=A.dtype)
+        return [solve_triangular(A, I, lower=is_lower)]
