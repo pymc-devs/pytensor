@@ -8,6 +8,7 @@ import numpy as np
 
 import pytensor.tensor as pt
 from pytensor.compile.function import function
+from pytensor.compile.mode import Mode
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Op, Variable
 
@@ -365,7 +366,7 @@ def _find_output_types(
                 [],
                 resolved_input_shapes,
                 on_unused_input="ignore",
-                mode="FAST_COMPILE",
+                mode=Mode(linker="py", optimizer="fast_compile"),
             )
         except Exception as e:
             raise ValueError(
