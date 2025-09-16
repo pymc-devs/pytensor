@@ -3,6 +3,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import as_jax_op, config, grad
+from pytensor.compile.sharedvalue import shared
 from pytensor.link.jax.ops import JAXOp
 from pytensor.scalar import all_types
 from pytensor.tensor import TensorType, tensor
@@ -388,6 +389,43 @@ def test_nn():
 
     with jax.disable_jit():
         compare_jax_and_py([x, y], [out, *grad_out], test_values)
+
+
+def test_no_inputs():
+    def f():
+        return jax.numpy.array(42.0)
+
+    out = as_jax_op(f)()
+    assert out.eval() == 42.0
+
+
+def test_unknown_shape():
+    x = tensor("x", shape=(None,))
+
+    def f(x):
+        return x * 2
+
+    with pytest.raises(ValueError, match="Please provide inputs"):
+        as_jax_op(f)(x)
+
+
+def test_unknown_shape_with_eval():
+    x = shared(np.ones(3))
+    assert x.type.shape == (None,)
+
+    def f(x):
+        return x * 2
+
+    out = as_jax_op(f)(x)
+    grad_out = grad(pt.sum(out), [x])
+
+    compare_jax_and_py([], [out, *grad_out], [])
+
+    with jax.disable_jit():
+        compare_jax_and_py([], [out, *grad_out], [], must_be_device_array=False)
+
+    with pytest.raises(ValueError, match="Please provide inputs"):
+        as_jax_op(f, allow_eval=False)(x)
 
 
 class TestDtypes:
