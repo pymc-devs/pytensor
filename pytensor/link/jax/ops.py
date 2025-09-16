@@ -79,7 +79,7 @@ class JAXOp(Op):
     [array([1., 1.], dtype=float32)]
     """
 
-    __props__ = ("input_types", "output_types", "jax_func", "name")
+    __props__ = ("input_types", "output_types", "jax_func")
 
     def __init__(self, input_types, output_types, jax_function, name=None):
         import jax
