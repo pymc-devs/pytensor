@@ -280,7 +280,7 @@ def as_jax_op(jax_function=None, *, allow_eval=True):
             variables_flat, variables_treedef = jax.tree.flatten(pytensor_variables)
             input_types = [var.type for var in variables_flat]
 
-            # Determine output types by analyzing the function structure
+            # Determine output types by calling the function through jax.eval_shape
             output_types, output_treedef, output_static = _find_output_types(
                 func,
                 variables_flat,
@@ -329,7 +329,7 @@ def as_jax_op(jax_function=None, *, allow_eval=True):
 def _find_output_types(
     jax_function, inputs_flat, input_treedef, static_input, *, allow_eval=True
 ):
-    """Determine output types by analyzing the JAX function structure."""
+    """Determine output types with jax.eval_shape on dummy inputs."""
     import equinox as eqx
     import jax
     import jax.numpy as jnp
@@ -400,9 +400,18 @@ def _find_output_types(
     output_treedef = output_metadata_storage["output_treedef"]
     output_static = output_metadata_storage["output_static"]
 
-    output_types = [
-        pt.TensorType(dtype=output_shape.dtype, shape=output_shape.shape)
-        for output_shape in output_shapes_flat
-    ]
+    # If we used shape evaluation, set all output shapes to unknown
+    if requires_shape_evaluation:
+        output_types = [
+            pt.TensorType(
+                dtype=output_shape.dtype, shape=tuple(None for _ in output_shape.shape)
+            )
+            for output_shape in output_shapes_flat
+        ]
+    else:
+        output_types = [
+            pt.TensorType(dtype=output_shape.dtype, shape=output_shape.shape)
+            for output_shape in output_shapes_flat
+        ]
 
     return output_types, output_treedef, output_static

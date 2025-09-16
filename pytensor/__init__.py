@@ -173,7 +173,7 @@ try:
 except ImportError as e:
     import_error_as_jax_op = e
 
-    def as_jax_op(jaxfunc):
+    def as_jax_op(jax_function=None, allow_eval=True):
         raise ImportError(
             "JAX and/or equinox are not installed. Install them"
             " to use this function: pip install pytensor[jax]"
