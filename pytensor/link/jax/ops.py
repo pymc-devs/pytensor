@@ -17,7 +17,8 @@ log = logging.getLogger(__name__)
 
 class JAXOp(Op):
     """
-    JAXOp is a PyTensor Op that wraps a JAX function, providing both forward computation and reverse-mode differentiation (via the VJPJAXOp class).
+    JAXOp is a PyTensor Op that wraps a JAX function, providing both forward
+    computation and reverse-mode differentiation (via VJP).
 
     Parameters
     ----------
@@ -25,7 +26,7 @@ class JAXOp(Op):
         A list of PyTensor types for each input variable.
     output_types : list
         A list of PyTensor types for each output variable.
-    flat_func : callable
+    jax_function : callable
         The JAX function that computes outputs from inputs.
     name : str, optional
         A custom name for the Op instance. If provided, the class name will be
@@ -80,13 +81,13 @@ class JAXOp(Op):
 
     __props__ = ("input_types", "output_types", "jax_func", "name")
 
-    def __init__(self, input_types, output_types, jax_func, name=None):
+    def __init__(self, input_types, output_types, jax_function, name=None):
         import jax
 
         self.input_types = tuple(input_types)
         self.output_types = tuple(output_types)
-        self.jax_func = jax_func
-        self.jitted_func = jax.jit(jax_func)
+        self.jax_func = jax_function
+        self.jitted_func = jax.jit(jax_function)
         self.name = name
         super().__init__()
 
@@ -100,77 +101,96 @@ class JAXOp(Op):
         return f"{base}({props})"
 
     def make_node(self, *inputs: Variable) -> Apply:
-        outputs = [typ() for typ in self.output_types]
+        """Create an Apply node with the given inputs and inferred outputs."""
+        outputs = [output_type() for output_type in self.output_types]
         return Apply(self, inputs, outputs)
 
     def perform(self, node, inputs, outputs):
+        """Execute the JAX function and store results in output storage."""
         results = self.jitted_func(*inputs)
         if len(results) != len(outputs):
             raise ValueError(
-                f"Expected {len(outputs)} outputs from jax function, got {len(results)}."
+                f"JAX function returned {len(results)} outputs, but "
+                f"{len(outputs)} were expected."
             )
         for i, result in enumerate(results):
-            outputs[i][0] = np.array(result, self.output_types[i].dtype)
+            outputs[i][0] = np.array(result, dtype=self.output_types[i].dtype)
 
     def perform_jax(self, *inputs):
-        output = self.jitted_func(*inputs)
-        if len(output) == 1:
-            return output[0]
-        return output
+        """Execute the JAX function directly, returning JAX arrays."""
+        outputs = self.jitted_func(*inputs)
+        if len(outputs) == 1:
+            return outputs[0]
+        return outputs
 
     def grad(self, inputs, output_gradients):
+        """Compute gradients using JAX's vector-Jacobian product (VJP)."""
         import jax
 
-        wrt_index = []
-        for i, out in enumerate(output_gradients):
-            if not isinstance(out.type, DisconnectedType):
-                wrt_index.append(i)
+        # Find indices of outputs that need gradients
+        connected_output_indices = []
+        for i, output_grad in enumerate(output_gradients):
+            if not isinstance(output_grad.type, DisconnectedType):
+                connected_output_indices.append(i)
 
         num_inputs = len(inputs)
 
-        def vjp_jax_op(*args):
-            inputs = args[:num_inputs]
-            covectors = args[num_inputs:]
-            assert len(covectors) == len(wrt_index)
+        def vjp_operation(*args):
+            """VJP operation that computes gradients w.r.t. inputs."""
+            input_values = args[:num_inputs]
+            cotangent_vectors = args[num_inputs:]
+            assert len(cotangent_vectors) == len(connected_output_indices)
 
-            def func_restricted(*inputs):
-                out = self.jax_func(*inputs)
-                return [out[i].astype(self.output_types[i].dtype) for i in wrt_index]
+            def restricted_function(*input_values):
+                """Restricted function that only returns connected outputs."""
+                outputs = self.jax_func(*input_values)
+                return [
+                    outputs[i].astype(self.output_types[i].dtype)
+                    for i in connected_output_indices
+                ]
 
-            _primals, vjp_fn = jax.vjp(func_restricted, *inputs)
-            dtypes = [self.output_types[i].dtype for i in wrt_index]
-            return vjp_fn(
+            _primals, vjp_function = jax.vjp(restricted_function, *input_values)
+            output_dtypes = [
+                self.output_types[i].dtype for i in connected_output_indices
+            ]
+            return vjp_function(
                 [
-                    covector.astype(dtype)
-                    for covector, dtype in zip(covectors, dtypes, strict=True)
+                    cotangent.astype(dtype)
+                    for cotangent, dtype in zip(
+                        cotangent_vectors, output_dtypes, strict=True
+                    )
                 ]
             )
 
-        op = JAXOp(
-            self.input_types + tuple(self.output_types[i] for i in wrt_index),
+        # Create VJP operation
+        vjp_op = JAXOp(
+            self.input_types
+            + tuple(self.output_types[i] for i in connected_output_indices),
             [self.input_types[i] for i in range(num_inputs)],
-            vjp_jax_op,
+            vjp_operation,
             name="VJP" + (self.name if self.name is not None else ""),
         )
 
-        output = op(*[*inputs, *[output_gradients[i] for i in wrt_index]])
-        if not isinstance(output, Sequence):
-            output = [output]
-        return output
+        gradient_outputs = vjp_op(
+            *[*inputs, *[output_gradients[i] for i in connected_output_indices]]
+        )
+        if not isinstance(gradient_outputs, Sequence):
+            gradient_outputs = [gradient_outputs]
+        return gradient_outputs
 
 
-def as_jax_op(jaxfunc=None, *, allow_eval=True):
-    """Return a Pytensor-compatible function from a JAX jittable function.
+def as_jax_op(jax_function=None, *, allow_eval=True):
+    """Return a PyTensor-compatible function from a JAX jittable function.
 
-    This decorator wraps a JAX function so that it accepts and returns `pytensor.Variable`
-    objects. The JAX-jittable function can accept any
-    nested python structure (a `Pytree
-    <https://jax.readthedocs.io/en/latest/pytrees.html>`_) as input, and might return
-    any nested Python structure.
+    This decorator wraps a JAX function so that it accepts and returns
+    `pytensor.Variable` objects. The JAX-jittable function can accept any
+    nested Python structure (a `Pytree
+    <https://jax.readthedocs.io/en/latest/pytrees.html>`_) as input, and might
+    return any nested Python structure.
 
     Parameters
     ----------
-    jaxfunc : Callable, optional
+    jax_function : Callable, optional
         A JAX function to be wrapped. If None, returns a decorator function.
     allow_eval : bool, default=True
         Whether to allow evaluation of symbolic shapes when input shapes are
@@ -212,16 +232,17 @@ def as_jax_op(jaxfunc=None, *, allow_eval=True):
     >>> result = complex_function(x, y, scale=2.0)
     >>> f = pytensor.function([x, y], [result["sum"]])
 
-    Or even Equinox modules:
+    Or Equinox modules:
 
-    >>> x = tensor("x", shape=(3,))
-    >>> y = tensor("y", shape=(3,))
-    >>> mlp = nn.MLP(3, 3, 3, depth=2, activation=jnp.tanh, key=jax.random.key(0))
+    >>> x = pt.tensor("x", shape=(3,))
+    >>> y = pt.tensor("y", shape=(3,))
+    >>> import equinox as eqx
+    >>> mlp = eqx.nn.MLP(3, 3, 3, depth=2, activation=jnp.tanh, key=jax.random.key(0))
     >>> mlp = eqx.tree_at(lambda m: m.layers[0].bias, mlp, y)
     >>> @as_jax_op
-    >>> def f(x, mlp):
-    >>>     return mlp(x)
-    >>> out = f(x, mlp)
+    ... def neural_network(x, mlp):
+    ...     return mlp(x)
+    >>> out = neural_network(x, mlp)
 
     Notes
     -----
@@ -229,8 +250,8 @@ def as_jax_op(jaxfunc=None, *, allow_eval=True):
     available at
     `pymc-labs.io <https://www.pymc-labs.io/blog-posts/jax-functions-in-pymc-3-quick
     -examples/>`__.
-    To accept functions and non pytensor variables as input, the function make use
-    of :func:`equinox.partition` and :func:`equinox.combine` to split and combine the
+    To accept functions and non-PyTensor variables as input, the function uses
+    :func:`equinox.partition` and :func:`equinox.combine` to split and combine the
     variables. Shapes are inferred using
     :func:`pytensor.compile.builders.infer_shape` and :func:`jax.eval_shape`.
 
@@ -249,95 +270,98 @@ def as_jax_op(jaxfunc=None, *, allow_eval=True):
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Partition inputs into dynamic pytensor variables, wrapped functions and
-            # static variables.
-            # Static variables don't take part in the graph.
-
-            input_vars, static_input = eqx.partition(
+            # Partition inputs into dynamic PyTensor variables and static variables.
+            # Static variables don't participate in the computational graph.
+            pytensor_variables, static_values = eqx.partition(
                 (args, kwargs), lambda x: isinstance(x, pt.Variable)
             )
 
-            # Flatten the input dictionary.
-            input_flat, input_treedef = jax.tree.flatten(
-                input_vars,
-            )
-            input_types = [var.type for var in input_flat]
+            # Flatten the PyTensor variables for processing
+            variables_flat, variables_treedef = jax.tree.flatten(pytensor_variables)
+            input_types = [var.type for var in variables_flat]
 
-            # We need to figure out static shapes so that we can figure
-            # out the output types.
+            # Determine output types by analyzing the function structure
             output_types, output_treedef, output_static = _find_output_types(
-                func, input_flat, input_treedef, static_input, allow_eval=allow_eval
+                func,
+                variables_flat,
+                variables_treedef,
+                static_values,
+                allow_eval=allow_eval,
             )
 
-            def flat_func(*flat_vars):
-                vars = jax.tree.unflatten(input_treedef, flat_vars)
-                args, kwargs = eqx.combine(
-                    vars,
-                    static_input,
+            def flattened_function(*flat_variables):
+                """Execute the original function with flattened inputs."""
+                variables = jax.tree.unflatten(variables_treedef, flat_variables)
+                reconstructed_args, reconstructed_kwargs = eqx.combine(
+                    variables, static_values
                 )
-                outputs = func(*args, **kwargs)
-                output_vals, _ = eqx.partition(outputs, eqx.is_array)
-                outputs_flat, _ = jax.tree.flatten(output_vals)
-                return outputs_flat
+                function_outputs = func(*reconstructed_args, **reconstructed_kwargs)
+                array_outputs, _ = eqx.partition(function_outputs, eqx.is_array)
+                flattened_outputs, _ = jax.tree.flatten(array_outputs)
+                return flattened_outputs
 
-            op_instance = JAXOp(
+            # Create the JAX operation
+            jax_op_instance = JAXOp(
                 input_types,
                 output_types,
-                flat_func,
+                flattened_function,
                 name=name,
             )
 
-            # 8. Execute the op and unflatten the outputs.
-            output_flat = op_instance(*input_flat)
-            if not isinstance(output_flat, Sequence):
-                output_flat = [output_flat]
-            outvars = jax.tree.unflatten(output_treedef, output_flat)
-            outvars = eqx.combine(outvars, output_static)
+            # Execute the operation and reconstruct the output structure
+            flattened_results = jax_op_instance(*variables_flat)
+            if not isinstance(flattened_results, Sequence):
+                flattened_results = [flattened_results]
 
-            return outvars
+            output_variables = jax.tree.unflatten(output_treedef, flattened_results)
+            final_outputs = eqx.combine(output_variables, output_static)
+
+            return final_outputs
 
         return wrapper
 
-    if jaxfunc is None:
+    if jax_function is None:
         return decorator
     else:
-        return decorator(jaxfunc)
+        return decorator(jax_function)
 
 
 def _find_output_types(
-    jaxfunc, inputs_flat, input_treedef, static_input, *, allow_eval=True
+    jax_function, inputs_flat, input_treedef, static_input, *, allow_eval=True
 ):
+    """Determine output types by analyzing the JAX function structure."""
     import equinox as eqx
     import jax
     import jax.numpy as jnp
 
     resolved_input_shapes = []
-    needs_eval = False
-    for var in inputs_flat:
+    requires_shape_evaluation = False
+
+    for variable in inputs_flat:
         # If shape is already fully determined, use it directly
-        if not any(s is None for s in var.type.shape):
-            resolved_input_shapes.append(var.type.shape)
+        if not any(dimension is None for dimension in variable.type.shape):
+            resolved_input_shapes.append(variable.type.shape)
             continue
 
         # Try to infer static shape
-        _, shape = pt.basic.infer_static_shape(var.shape)
-        if not any(s is None for s in shape):
-            resolved_input_shapes.append(shape)
+        _, inferred_shape = pt.basic.infer_static_shape(variable.shape)
+        if not any(dimension is None for dimension in inferred_shape):
+            resolved_input_shapes.append(inferred_shape)
             continue
 
         # Shape still has undetermined dimensions
         if not allow_eval:
             raise ValueError(
-                f"Input variable {var} has a shape with undetermined "
-                "shape. Please provide inputs with fully determined shapes "
-                "by calling pt.specify_shape."
+                f"Input variable {variable} has undetermined shape dimensions. "
+                "Please provide inputs with fully determined shapes by calling "
+                "pt.specify_shape."
             )
-        needs_eval = True
-        resolved_input_shapes.append(var.shape)
+        requires_shape_evaluation = True
+        resolved_input_shapes.append(variable.shape)
 
-    if needs_eval:
+    if requires_shape_evaluation:
         try:
-            shape_fn = function(
+            shape_evaluation_function = function(
                 [],
                 resolved_input_shapes,
                 on_unused_input="ignore",
@@ -349,34 +373,36 @@ def _find_output_types(
                 "Please provide inputs with fully determined shapes by "
                 "calling pt.specify_shape."
             ) from e
-        resolved_input_shapes = shape_fn()
+        resolved_input_shapes = shape_evaluation_function()
 
-    # Figure out output types using jax.eval_shape.
-    extra_output_storage = {}
+    # Determine output types using jax.eval_shape with dummy inputs
+    output_metadata_storage = {}
 
-    dummy_inputs = [
-        jnp.ones(shape, dtype=var.type.dtype)
-        for var, shape in zip(inputs_flat, resolved_input_shapes, strict=True)
+    dummy_input_arrays = [
+        jnp.ones(shape, dtype=variable.type.dtype)
+        for variable, shape in zip(inputs_flat, resolved_input_shapes, strict=True)
     ]
 
-    def wrap_jaxfunc(args):
-        vars = jax.tree.unflatten(input_treedef, args)
-        args, kwargs = eqx.combine(
-            vars,
-            static_input,
-        )
-        outputs = jaxfunc(*args, **kwargs)
-        output_vals, output_static = eqx.partition(outputs, eqx.is_array)
-        extra_output_storage["output_static"] = output_static
-        outputs_flat, output_treedef = jax.tree.flatten(output_vals)
-        extra_output_storage["output_treedef"] = output_treedef
-        return outputs_flat
+    def wrapped_jax_function(input_arrays):
+        """Wrapper to extract output metadata during shape evaluation."""
+        variables = jax.tree.unflatten(input_treedef, input_arrays)
+        reconstructed_args, reconstructed_kwargs = eqx.combine(variables, static_input)
+        function_outputs = jax_function(*reconstructed_args, **reconstructed_kwargs)
+        array_outputs, static_outputs = eqx.partition(function_outputs, eqx.is_array)
 
-    output_shapes_flat = jax.eval_shape(wrap_jaxfunc, dummy_inputs)
-    output_treedef = extra_output_storage["output_treedef"]
-    output_static = extra_output_storage["output_static"]
+        # Store metadata for later use
+        output_metadata_storage["output_static"] = static_outputs
+        flattened_outputs, output_structure = jax.tree.flatten(array_outputs)
+        output_metadata_storage["output_treedef"] = output_structure
+        return flattened_outputs
+
+    output_shapes_flat = jax.eval_shape(wrapped_jax_function, dummy_input_arrays)
+    output_treedef = output_metadata_storage["output_treedef"]
+    output_static = output_metadata_storage["output_static"]
+
     output_types = [
-        pt.TensorType(dtype=var.dtype, shape=var.shape) for var in output_shapes_flat
+        pt.TensorType(dtype=output_shape.dtype, shape=output_shape.shape)
+        for output_shape in output_shapes_flat
     ]
 
     return output_types, output_treedef, output_static
