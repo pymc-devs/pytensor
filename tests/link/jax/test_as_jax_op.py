@@ -1,15 +1,15 @@
-import jax
-import jax.numpy as jnp
 import numpy as np
 import pytest
 
 import pytensor.tensor as pt
 from pytensor import as_jax_op, config, grad
-from pytensor.graph.fg import FunctionGraph
 from pytensor.link.jax.ops import JAXOp
 from pytensor.scalar import all_types
 from pytensor.tensor import TensorType, tensor
 from tests.link.jax.test_basic import compare_jax_and_py
+
+
+jax = pytest.importorskip("jax")
 
 
 def test_two_inputs_single_output():
@@ -27,10 +27,12 @@ def test_two_inputs_single_output():
     out = as_jax_op(f)(x, y)
     grad_out = grad(pt.sum(out), [x, y])
 
-    fg = FunctionGraph([x, y], [out, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out, *grad_out], test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        compare_jax_and_py([x, y], [out, *grad_out], test_values)
+
+    def f(x, y):
+        return [jax.nn.sigmoid(x + y)]
 
     # Test direct JAXOp usage
     jax_op = JAXOp(
@@ -40,8 +42,7 @@ def test_two_inputs_single_output():
     )
     out = jax_op(x, y)
     grad_out = grad(pt.sum(out), [x, y])
-    fg = FunctionGraph([x, y], [out, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
 
 def test_two_inputs_tuple_output():
@@ -59,12 +60,13 @@ def test_two_inputs_tuple_output():
     out1, out2 = as_jax_op(f)(x, y)
     grad_out = grad(pt.sum(out1 + out2), [x, y])
 
-    fg = FunctionGraph([x, y], [out1, out2, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out1, out2, *grad_out], test_values)
     with jax.disable_jit():
         # must_be_device_array is False, because the with disabled jit compilation,
         # inputs are not automatically transformed to jax.Array anymore
-        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+        compare_jax_and_py(
+            [x, y], [out1, out2, *grad_out], test_values, must_be_device_array=False
+        )
 
     # Test direct JAXOp usage
     jax_op = JAXOp(
@@ -74,8 +76,7 @@ def test_two_inputs_tuple_output():
     )
     out1, out2 = jax_op(x, y)
     grad_out = grad(pt.sum(out1 + out2), [x, y])
-    fg = FunctionGraph([x, y], [out1, out2, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out1, out2, *grad_out], test_values)
 
 
 def test_two_inputs_list_output_one_unused_output():
@@ -94,10 +95,9 @@ def test_two_inputs_list_output_one_unused_output():
     out, _ = as_jax_op(f)(x, y)
     grad_out = grad(pt.sum(out), [x, y])
 
-    fg = FunctionGraph([x, y], [out, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out, *grad_out], test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
     # Test direct JAXOp usage
     jax_op = JAXOp(
@@ -107,8 +107,7 @@ def test_two_inputs_list_output_one_unused_output():
     )
     out, _ = jax_op(x, y)
     grad_out = grad(pt.sum(out), [x, y])
-    fg = FunctionGraph([x, y], [out, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
 
 def test_single_input_tuple_output():
@@ -123,10 +122,11 @@ def test_single_input_tuple_output():
     out1, out2 = as_jax_op(f)(x)
     grad_out = grad(pt.sum(out1), [x])
 
-    fg = FunctionGraph([x], [out1, out2, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+        compare_jax_and_py(
+            [x], [out1, out2, *grad_out], test_values, must_be_device_array=False
+        )
 
     # Test direct JAXOp usage
     jax_op = JAXOp(
@@ -136,8 +136,7 @@ def test_single_input_tuple_output():
     )
     out1, out2 = jax_op(x)
     grad_out = grad(pt.sum(out1), [x])
-    fg = FunctionGraph([x], [out1, out2, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
 
 
 def test_scalar_input_tuple_output():
@@ -152,10 +151,11 @@ def test_scalar_input_tuple_output():
     out1, out2 = as_jax_op(f)(x)
     grad_out = grad(pt.sum(out1), [x])
 
-    fg = FunctionGraph([x], [out1, out2, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+        compare_jax_and_py(
+            [x], [out1, out2, *grad_out], test_values, must_be_device_array=False
+        )
 
     # Test direct JAXOp usage
     jax_op = JAXOp(
@@ -165,8 +165,7 @@ def test_scalar_input_tuple_output():
     )
     out1, out2 = jax_op(x)
     grad_out = grad(pt.sum(out1), [x])
-    fg = FunctionGraph([x], [out1, out2, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
 
 
 def test_single_input_list_output():
@@ -181,10 +180,11 @@ def test_single_input_list_output():
     out1, out2 = as_jax_op(f)(x)
     grad_out = grad(pt.sum(out1), [x])
 
-    fg = FunctionGraph([x], [out1, out2, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+        compare_jax_and_py(
+            [x], [out1, out2, *grad_out], test_values, must_be_device_array=False
+        )
 
     # Test direct JAXOp usage, with unspecified output shapes
     jax_op = JAXOp(
@@ -197,8 +197,7 @@ def test_single_input_list_output():
     )
     out1, out2 = jax_op(x)
     grad_out = grad(pt.sum(out1), [x])
-    fg = FunctionGraph([x], [out1, out2, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
 
 
 def test_pytree_input_tuple_output():
@@ -218,11 +217,12 @@ def test_pytree_input_tuple_output():
     out = f(x, y_tmp)
     grad_out = grad(pt.sum(out[1]), [x, y])
 
-    fg = FunctionGraph([x, y], [out[0], out[1], *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out[0], out[1], *grad_out], test_values)
 
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+        compare_jax_and_py(
+            [x, y], [out[0], out[1], *grad_out], test_values, must_be_device_array=False
+        )
 
 
 def test_pytree_input_pytree_output():
@@ -236,17 +236,21 @@ def test_pytree_input_pytree_output():
 
     @as_jax_op
     def f(x, y):
-        return x, jax.tree_util.tree_map(lambda x: jnp.exp(x), y)
+        return x, jax.tree_util.tree_map(lambda x: jax.numpy.exp(x), y)
 
     # Test with as_jax_op decorator
     out = f(x, y_tmp)
     grad_out = grad(pt.sum(out[1]["b"][0]), [x, y])
 
-    fg = FunctionGraph([x, y], [out[0], out[1]["a"], *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out[0], out[1]["a"], *grad_out], test_values)
 
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values, must_be_device_array=False)
+        compare_jax_and_py(
+            [x, y],
+            [out[0], out[1]["a"], *grad_out],
+            test_values,
+            must_be_device_array=False,
+        )
 
 
 def test_pytree_input_with_non_graph_args():
@@ -274,17 +278,15 @@ def test_pytree_input_with_non_graph_args():
     # arguments depth and which_variable are not part of the graph
     out = f(x, y_tmp, depth=3, which_variable="x")
     grad_out = grad(pt.sum(out), [x])
-    fg = FunctionGraph([x, y], [out[0], *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out[0], *grad_out], test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        compare_jax_and_py([x, y], [out[0], *grad_out], test_values)
 
     out = f(x, y_tmp, depth=7, which_variable="y")
     grad_out = grad(pt.sum(out), [x])
-    fg = FunctionGraph([x, y], [out[0], *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out[0], *grad_out], test_values)
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        compare_jax_and_py([x, y], [out[0], *grad_out], test_values)
 
     out = f(x, y_tmp, depth=10, which_variable="z")
     assert out == "Unsupported argument"
@@ -302,17 +304,16 @@ def test_unused_matrix_product():
     ]
 
     def f(x, y):
-        return x[:, None] @ y[None], jnp.exp(x)
+        return x[:, None] @ y[None], jax.numpy.exp(x)
 
     # Test with as_jax_op decorator
     out = as_jax_op(f)(x, y)
     grad_out = grad(pt.sum(out[1]), [x])
 
-    fg = FunctionGraph([x, y], [out[1], *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
 
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
 
     # Test direct JAXOp usage
     jax_op = JAXOp(
@@ -325,8 +326,7 @@ def test_unused_matrix_product():
     )
     out = jax_op(x, y)
     grad_out = grad(pt.sum(out[1]), [x])
-    fg = FunctionGraph([x, y], [out[1], *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
 
 
 def test_unknown_static_shape():
@@ -340,16 +340,15 @@ def test_unknown_static_shape():
     x_cumsum = pt.cumsum(x)  # Now x_cumsum has an unknown shape
 
     def f(x, y):
-        return x * jnp.ones(3)
+        return [x * jax.numpy.ones(3)]
 
-    out = as_jax_op(f)(x_cumsum, y)
+    (out,) = as_jax_op(f)(x_cumsum, y)
     grad_out = grad(pt.sum(out), [x])
 
-    fg = FunctionGraph([x, y], [out, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
     # Test direct JAXOp usage
     jax_op = JAXOp(
@@ -359,11 +358,13 @@ def test_unknown_static_shape():
     )
     out = jax_op(x_cumsum, y)
     grad_out = grad(pt.sum(out), [x])
-    fg = FunctionGraph([x, y], [out, *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
 
-def test_nested_functions():
+def test_nn():
+    import equinox as eqx
+    import equinox.nn as nn
+
     rng = np.random.default_rng(13)
     x = tensor("x", shape=(3,))
     y = tensor("y", shape=(3,))
@@ -371,31 +372,22 @@ def test_nested_functions():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    @as_jax_op
-    def f_internal(y):
-        def f_ret(t):
-            return y + t
-
-        def f_ret2(t):
-            return f_ret(t) + t**2
-
-        return f_ret, y**2 * jnp.ones(1), f_ret2
-
-    f, y_pow, f2 = f_internal(y)
+    x = tensor("x", shape=(3,))
+    y = tensor("y", shape=(3,))
+    mlp = nn.MLP(3, 3, 3, depth=2, activation=jax.numpy.tanh, key=jax.random.key(0))
+    mlp = eqx.tree_at(lambda m: m.layers[0].bias, mlp, y)
 
     @as_jax_op
-    def f_outer(x, dict_other):
-        f, y_pow = dict_other["func"], dict_other["y"]
-        return x * jnp.ones(3), f(x) * y_pow
+    def f(x, mlp):
+        return mlp(x)
 
-    out = f_outer(x, {"func": f, "y": y_pow})
-    grad_out = grad(pt.sum(out[1]), [x])
+    out = f(x, mlp)
+    grad_out = grad(pt.sum(out), [x])
 
-    fg = FunctionGraph([x, y], [out[1], *grad_out])
-    fn, _ = compare_jax_and_py(fg, test_values)
+    compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
 
     with jax.disable_jit():
-        fn, _ = compare_jax_and_py(fg, test_values)
+        compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
 
 
 class TestDtypes:
@@ -418,8 +410,8 @@ class TestDtypes:
 
         @as_jax_op
         def f(x, y):
-            out = jnp.add(x, y)
-            return jnp.real(out).astype(out_dtype)
+            out = jax.numpy.add(x, y)
+            return jax.numpy.real(out).astype(out_dtype)
 
         out = f(x, y)
         assert out.dtype == out_dtype
@@ -427,14 +419,15 @@ class TestDtypes:
         if "float" in in_dtype and "float" in out_dtype:
             grad_out = grad(out[0], [x, y])
             assert grad_out[0].dtype == in_dtype
-            fg = FunctionGraph([x, y], [out, *grad_out])
+            compare_jax_and_py([x, y], [out, *grad_out], test_values)
         else:
-            fg = FunctionGraph([x, y], [out])
-
-        fn, _ = compare_jax_and_py(fg, test_values)
+            compare_jax_and_py([x, y], [out], test_values)
 
         with jax.disable_jit():
-            fn, _ = compare_jax_and_py(fg, test_values)
+            if "float" in in_dtype and "float" in out_dtype:
+                compare_jax_and_py([x, y], [out, *grad_out], test_values)
+            else:
+                compare_jax_and_py([x, y], [out], test_values)
 
     @pytest.mark.parametrize("in1_dtype", list(map(str, all_types)))
     @pytest.mark.parametrize("in2_dtype", list(map(str, all_types)))
@@ -453,8 +446,8 @@ class TestDtypes:
 
         @as_jax_op
         def f(x, y):
-            out = jnp.add(x, y)
-            return jnp.real(out).astype(in1_dtype)
+            out = jax.numpy.add(x, y)
+            return jax.numpy.real(out).astype(in1_dtype)
 
         out = f(x, y)
         assert out.dtype == in1_dtype
@@ -464,11 +457,16 @@ class TestDtypes:
             # an integer, but it doesn't work for some reason.
             grad_out = grad(out[0], [x])
             assert grad_out[0].dtype == in1_dtype
-            fg = FunctionGraph([x, y], [out, *grad_out])
+            inputs = [x, y]
+            outputs = [out, *grad_out]
         else:
-            fg = FunctionGraph([x, y], [out])
+            inputs = [x, y]
+            outputs = [out]
 
-        fn, _ = compare_jax_and_py(fg, test_values)
+        fn, _ = compare_jax_and_py(inputs, outputs, test_values)
 
         with jax.disable_jit():
-            fn, _ = compare_jax_and_py(fg, test_values)
+            if "float" in in1_dtype and "float" in in2_dtype:
+                compare_jax_and_py([x, y], [out, *grad_out], test_values)
+            else:
+                compare_jax_and_py([x, y], [out], test_values)
