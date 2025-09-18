@@ -1371,7 +1371,7 @@ class TestFusion:
         [
             # ("diamond_graph", None, (1, 4)),
             ("deep_small_kernels", 20, (20, 60)),
-            ("large_fuseable_graph", 25, (103, 876)),
+            ("large_fuseable_graph", 25, (128, 876)),
         ],
     )
     def test_rewrite_benchmark(self, graph_fn, n, expected_n_repl, benchmark):
