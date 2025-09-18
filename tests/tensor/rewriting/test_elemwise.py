@@ -319,6 +319,26 @@ class TestFusion:
         assert nb_fused == 1
         assert nb_replacement == 4
 
+    def test_expansion_order(self):
+        # This test is designed to fail if we don't use the right expansion order in the current implementation
+        # It may be considered irrelevant if the algorithm changes and this is no longer a concern.
+        # In that case the test can be tweaked or removed
+        a = pt.vector("a")
+        b = pt.exp(a)
+        # Unique creates an unfuesable path between b and d/e
+        c = pt.unique(b)
+        d = pt.log(c)
+        # The critical aspect of the current implementation, is that we must visit d before c,
+        # so we learn about the unfuseable path by the time we visit c
+        e1 = b + d
+        e2 = d + b  # test both orders
+
+        fg = FunctionGraph([a], [e1, e2], clone=False)
+        _, nb_fused, nb_replacement, *_ = FusionOptimizer().apply(fg)
+        fg.dprint()
+        assert nb_fused == 1
+        assert nb_replacement == 3
+
     @pytest.mark.parametrize(
         "case",
         [
@@ -1374,7 +1394,7 @@ class TestFusion:
         "graph_fn, n, expected_n_repl",
         [
             ("deep_small_kernels", 20, (20, 60)),
-            ("large_fuseable_graph", 25, (103, 876)),
+            ("large_fuseable_graph", 25, (128, 876)),
         ],
     )
     def test_rewrite_benchmark(self, graph_fn, n, expected_n_repl, benchmark):
