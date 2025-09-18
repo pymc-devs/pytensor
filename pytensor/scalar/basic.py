@@ -1332,32 +1332,26 @@ class ScalarOp(COp):
         the given Elemwise inputs, outputs.
 
         """
+        tmp_s_input = []
+        # To keep the same aliasing between inputs
+        mapping = {}
+        for ii in inputs:
+            if ii in mapping:
+                tmp_s_input.append(mapping[ii])
+            else:
+                tmp = mapping[ii] = get_scalar_type(ii.dtype).make_variable()
+                tmp_s_input.append(tmp)
+
         try:
-            tmp_s_input = []
-            # To keep the same aliasing between inputs
-            mapping = dict()
-            for ii in inputs:
-                if ii in mapping:
-                    tmp_s_input.append(mapping[ii])
-                else:
-                    tmp = get_scalar_type(ii.dtype).make_variable()
-                    tmp_s_input.append(tmp)
-                    mapping[ii] = tmp_s_input[-1]
-
-            with config.change_flags(compute_test_value="ignore"):
-                s_op = self(*tmp_s_input, return_list=True)
-
-            # if the scalar_op don't have a c implementation,
-            # we skip its fusion to allow the fusion of the
-            # other ops.
             self.c_code(
-                s_op[0].owner,
+                self.make_node(*tmp_s_input),
                 "test_presence_of_c_code",
+                # FIXME: Shouldn't this be a unique name per unique variable?
                 ["x" for x in inputs],
                 ["z" for z in outputs],
                 {"fail": "%(fail)s"},
             )
-        except (MethodNotDefined, NotImplementedError):
+        except (NotImplementedError, MethodNotDefined):
             return False
         return True
 
