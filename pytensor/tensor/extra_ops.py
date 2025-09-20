@@ -1,5 +1,5 @@
 import warnings
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from textwrap import dedent
 
 import numpy as np
@@ -2012,7 +2012,7 @@ def concat_with_broadcast(tensor_list, axis=0):
 
 
 def pack(
-    *tensors: TensorVariable,
+    *tensors: TensorVariable, axes: int | Sequence[int] | None = None
 ) -> tuple[TensorVariable, list[tuple[TensorVariable]]]:
     """
     Given a list of tensors of varying shapes and dimensions, ravels and concatenates them into a single 1d vector.
@@ -2021,6 +2021,9 @@ def pack(
     ----------
     tensors: TensorVariable
         Tensors to be packed into a single vector.
+    axes: int or sequence of int, optional
+        Axes to be concatenated. All other axes will be raveled (packed) and joined. If None, all axes will be raveled
+        and joined.
 
     Returns
     -------
@@ -2032,13 +2035,11 @@ def pack(
     if not tensors:
         raise ValueError("Cannot pack an empty list of tensors.")
 
-    # Get the shapes of the input tensors
     packed_shapes = [
         t.type.shape if not any(s is None for s in t.type.shape) else t.shape
         for t in tensors
     ]
 
-    # Flatten each tensor and concatenate them into a single 1D vector
     flat_tensor = join(0, *[t.ravel() for t in tensors])
 
     return flat_tensor, packed_shapes
