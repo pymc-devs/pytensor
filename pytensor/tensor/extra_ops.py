@@ -2066,9 +2066,7 @@ def unpack(
         raise ValueError("Cannot unpack an empty list of shapes.")
 
     n_splits = len(packed_shapes)
-    split_size = [
-        prod(shape, no_zeros_in_input=True).astype(int) for shape in packed_shapes
-    ]
+    split_size = [prod(shape).astype(int) for shape in packed_shapes]
     unpacked_tensors = split(flat_tensor, splits_size=split_size, n_splits=n_splits)
 
     return tuple(
