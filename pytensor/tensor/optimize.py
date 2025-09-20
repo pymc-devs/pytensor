@@ -7,7 +7,7 @@ import numpy as np
 
 import pytensor.scalar as ps
 from pytensor.compile.function import function
-from pytensor.gradient import grad, hessian, jacobian
+from pytensor.gradient import grad, jacobian
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
