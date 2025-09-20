@@ -915,12 +915,13 @@ class FusionOptimizer(GraphRewriter):
                 break
 
             scalar_inputs, scalar_outputs = self.elemwise_to_scalar(inputs, outputs)
-            composite_outputs = Elemwise(ps.Composite(scalar_inputs, scalar_outputs))(
-                *inputs
-            )
-            if not isinstance(composite_outputs, list):
-                composite_outputs = [composite_outputs]
-            for old_out, composite_out in zip(outputs, composite_outputs, strict=True):
+            composite_outputs = Elemwise(
+                # No need to clone Composite graph, because `self.elemwise_to_scalar` creates fresh variables
+                ps.Composite(scalar_inputs, scalar_outputs, clone_graph=False)
+            )(*inputs, return_list=True)
+            assert len(outputs) == len(composite_outputs)
+            for old_out, composite_out in zip(outputs, composite_outputs):
+                # Preserve any names on the original outputs
                 if old_out.name:
                     composite_out.name = old_out.name
 
