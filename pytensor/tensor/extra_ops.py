@@ -25,7 +25,7 @@ from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import alloc, arange, join, second
+from pytensor.tensor.basic import alloc, join, second, split
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
@@ -2065,17 +2065,15 @@ def unpack(
     if not packed_shapes:
         raise ValueError("Cannot unpack an empty list of shapes.")
 
-    start = 0
-    unpacked_tensors = []
-    for shape in packed_shapes:
-        size = prod(shape, no_zeros_in_input=True)
-        end = start + size
-        unpacked_tensors.append(
-            take(flat_tensor, arange(start, end, dtype="int"), axis=0).reshape(shape)
-        )
-        start = end
+    n_splits = len(packed_shapes)
+    split_size = [
+        prod(shape, no_zeros_in_input=True).astype(int) for shape in packed_shapes
+    ]
+    unpacked_tensors = split(flat_tensor, splits_size=split_size, n_splits=n_splits)
 
-    return tuple(unpacked_tensors)
+    return tuple(
+        [x.reshape(shape) for x, shape in zip(unpacked_tensors, packed_shapes)]
+    )
 
 
 __all__ = [
