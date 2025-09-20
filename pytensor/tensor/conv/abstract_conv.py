@@ -14,7 +14,7 @@ from numpy.exceptions import ComplexWarning
 
 if TYPE_CHECKING:
     # https://github.com/scipy/scipy-stubs/issues/851
-    from scipy.signal._signaltools import (  # type: ignore[attr-defined]
+    from scipy.signal._signaltools import (
         _bvalfromboundary,
         _valfrommode,
         convolve,
