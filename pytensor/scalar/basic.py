@@ -1294,13 +1294,12 @@ class ScalarOp(COp):
         return self.grad(inputs, output_gradients)
 
     def __eq__(self, other):
-        test = type(self) is type(other) and getattr(
+        return type(self) is type(other) and getattr(
             self, "output_types_preference", None
         ) == getattr(other, "output_types_preference", None)
-        return test
 
     def __hash__(self):
-        return hash((type(self), getattr(self, "output_types_preference", 0)))
+        return hash((type(self), getattr(self, "output_types_preference", None)))
 
     def __str__(self):
         if hasattr(self, "name") and self.name:
