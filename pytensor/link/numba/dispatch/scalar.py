@@ -4,6 +4,7 @@ import numpy as np
 
 from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Variable
+from pytensor.link.numba.cache import compile_and_cache_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     create_numba_signature,
@@ -12,7 +13,6 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.cython_support import wrap_cython_function
 from pytensor.link.utils import (
-    compile_function_src,
     get_name_for_object,
     unique_name_generator,
 )
@@ -128,16 +128,20 @@ def {scalar_op_fn_name}({', '.join(input_names)}):
     return direct_cast(scalar_func_numba({converted_call_args}, np.intc(1)), output_dtype)
             """
 
-    scalar_op_fn = compile_function_src(
-        scalar_op_src, scalar_op_fn_name, {**globals(), **global_env}
+    scalar_op_fn = compile_and_cache_numba_function_src(
+        scalar_op_src,
+        scalar_op_fn_name,
+        {**globals(), **global_env},
     )
 
-    signature = create_numba_signature(node, force_scalar=True)
+    # signature = create_numba_signature(node, force_scalar=True)
 
     return numba_basic.numba_njit(
-        signature,
+        # signature,
         # Functions that call a function pointer can't be cached
-        cache=False,
+        no_cfunc_wrapper=True,
+        no_cpython_wrapper=True,
+        register_jitable=False,
     )(scalar_op_fn)
 
 
@@ -164,7 +168,7 @@ def binary_to_nary_func(inputs: list[Variable], binary_op_name: str, binary_op: 
 def {binary_op_name}({input_signature}):
     return {output_expr}
     """
-    nary_fn = compile_function_src(nary_src, binary_op_name, globals())
+    nary_fn = compile_and_cache_numba_function_src(nary_src, binary_op_name, globals())
 
     return nary_fn
 

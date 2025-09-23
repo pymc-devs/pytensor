@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import scipy
 
+import pytensor.link.numba.cache
 from pytensor.compile import SymbolicInput
 
 
@@ -950,3 +951,22 @@ def test_mat_vec_dot_performance(dtype, benchmark):
     x_test = rng.standard_normal(size=x.type.shape, dtype=x.type.dtype)
     np.testing.assert_allclose(fn(A_test, x_test), np.dot(A_test, x_test), atol=1e-4)
     benchmark(fn, A_test, x_test)
+
+
+@pytest.mark.parametrize("use_cache", [False, True], ids=["no-cache", "cache"])
+@pytest.mark.parametrize("func", [pt.cos, pt.sin], ids=["cos", "sin"])
+def test_compile_time_benchmark(func, use_cache, benchmark):
+    x = pt.matrix("x")
+    y = func(x)
+    rng = np.random.default_rng(42)
+    x_test = rng.normal(size=(5, 3))
+
+    def compile():
+        fn = function([x], y, mode="NUMBA_VM", trust_input=True)
+        return fn(x_test)
+
+    pytensor.link.numba.cache.NUMBA_PYTENSOR_CACHE_ENABLED = use_cache
+
+    res = compile()
+    np.testing.assert_allclose(res, y.eval({x: x_test}))
+    benchmark(compile)

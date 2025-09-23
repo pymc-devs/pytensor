@@ -3,6 +3,7 @@ import sys
 import warnings
 from copy import copy
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent
 
 import numba
@@ -15,6 +16,7 @@ from numba import types
 from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 from numba.extending import box, overload
+from numba.extending import register_jitable as _register_jitable
 
 from pytensor import In, config
 from pytensor.compile import NUMBA
@@ -25,11 +27,9 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.cache import compile_and_cache_numba_function_src
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
-from pytensor.link.utils import (
-    compile_function_src,
-    fgraph_to_python,
-)
+from pytensor.link.utils import fgraph_to_python
 from pytensor.scalar.basic import ScalarType
 from pytensor.sparse import SparseTensorType
 from pytensor.tensor.basic import Nonzero
@@ -50,10 +50,11 @@ def global_numba_func(func):
     return func
 
 
-def numba_njit(*args, fastmath=None, **kwargs):
-    kwargs.setdefault("cache", config.numba__cache)
-    kwargs.setdefault("no_cpython_wrapper", True)
-    kwargs.setdefault("no_cfunc_wrapper", True)
+def numba_njit(*args, fastmath=None, register_jitable: bool = False, **kwargs):
+    kwargs.setdefault("cache", True)
+    kwargs.setdefault("no_cpython_wrapper", False)
+    kwargs.setdefault("no_cfunc_wrapper", False)
+    # print(kwargs)
     if fastmath is None:
         if config.numba__fastmath:
             # Opinionated default on fastmath flags
@@ -81,10 +82,11 @@ def numba_njit(*args, fastmath=None, **kwargs):
         category=NumbaWarning,
     )
 
+    func = _register_jitable if register_jitable else numba.njit
     if len(args) > 0 and callable(args[0]):
-        return numba.njit(*args[1:], fastmath=fastmath, **kwargs)(args[0])
-
-    return numba.njit(*args, fastmath=fastmath, **kwargs)
+        return func(*args[1:], fastmath=fastmath, **kwargs)(args[0])
+    else:
+        return func(*args, fastmath=fastmath, **kwargs)
 
 
 def numba_vectorize(*args, **kwargs):
@@ -545,11 +547,11 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
     shape_input_names = ["shape_" + str(i) for i in range(len(shape_inputs))]
 
     func_conditions = [
-        f"assert x.shape[{i}] == {shape_input_names}"
-        for i, (shape_input, shape_input_names) in enumerate(
+        f"assert x.shape[{i}] == {eval_dim_name}, f'SpecifyShape: dim {{{i}}} of input has shape {{x.shape[{i}]}}, expected {{{eval_dim_name}.item()}}.'"
+        for i, (node_dim_input, eval_dim_name) in enumerate(
             zip(shape_inputs, shape_input_names, strict=True)
         )
-        if shape_input is not NoneConst
+        if node_dim_input is not NoneConst
     ]
 
     func = dedent(
@@ -560,7 +562,13 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
         """
     )
 
-    specify_shape = compile_function_src(func, "specify_shape", globals())
+    specify_shape = compile_and_cache_numba_function_src(
+        func,
+        "specify_shape",
+        globals(),
+        # use the sha256 of func_conditions in the key to avoid long keys
+        key=f"SpecifyShape_{sha256(';'.join(func_conditions).encode()).hexdigest()}",
+    )
     return numba_njit(specify_shape)
 
 
