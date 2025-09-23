@@ -35,6 +35,9 @@ all_dtypes = list(map(str, ps.all_types))
 int_dtypes = list(map(str, ps.int_types))
 uint_dtypes = list(map(str, ps.uint_types))
 
+_all_dtypes_str: dict[str, str] = {d: d for d in all_dtypes}
+_str_to_numpy_dtype: dict[str, np.dtype] = {}
+
 # TODO: add more type correspondences for e.g. int32, int64, float32,
 # complex64, etc.
 dtype_specs_map = {
@@ -99,13 +102,26 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             )
             shape = broadcastable
 
-        if str(dtype) == "floatX":
-            self.dtype = config.floatX
+        if isinstance(dtype, str):
+            if dtype == "floatX":
+                dtype = config.floatX
+            elif dtype not in _all_dtypes_str:
+                # Check if dtype is a valid numpy dtype
+                try:
+                    dtype = str(np.dtype(dtype))
+                except TypeError as exc:
+                    raise TypeError(
+                        f"Unsupported dtype for TensorType: {dtype}"
+                    ) from exc
+                else:
+                    _all_dtypes_str[dtype] = dtype
         else:
             try:
-                self.dtype = str(np.dtype(dtype))
-            except TypeError:
-                raise TypeError(f"Invalid dtype: {dtype}")
+                dtype = str(np.dtype(dtype))
+            except TypeError as exc:
+                raise TypeError(f"Unsupported dtype for TensorType: {dtype}") from exc
+
+        self.dtype = dtype
 
         def parse_bcast_and_shape(s):
             if isinstance(s, bool | np.bool_):
@@ -121,7 +137,10 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
         self.shape = tuple(parse_bcast_and_shape(s) for s in shape)
         self.dtype_specs()  # error checking is done there
         self.name = name
-        self.numpy_dtype = np.dtype(self.dtype)
+        try:
+            self.numpy_dtype = _str_to_numpy_dtype[dtype]
+        except KeyError:
+            self.numpy_dtype = _str_to_numpy_dtype[dtype] = np.dtype(dtype)
 
     def __call__(self, *args, shape=None, **kwargs):
         if shape is not None:

@@ -1248,6 +1248,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         return apply_node
 
     def __eq__(self, other):
+        if self is other:
+            return True
+
         if type(self) is not type(other):
             return False
 

@@ -2008,24 +2008,88 @@ class WalkingGraphRewriter(NodeProcessingGraphRewriter):
         if order not in valid_orders:
             raise ValueError(f"order must be one of {valid_orders}, got {order}")
         self.order = order
+        # Use tracks functionality to pre-filter nodes, if it's a single Op or Op type
+        tracks = node_rewriter.tracks()
+        self.tracks = tracks[0] if (tracks is not None and len(tracks) == 1) else None
         super().__init__(node_rewriter, ignore_newtrees, failure_callback)
 
     def apply(self, fgraph, start_from=None):
         if start_from is None:
             start_from = fgraph.outputs
         callback_before = fgraph.execute_callbacks_time
-        nb_nodes_start = len(fgraph.apply_nodes)
+        apply_nodes = fgraph.apply_nodes
+        nb_nodes_start = len(apply_nodes)
         t0 = time.perf_counter()
-        q = deque(
+        if (tracks := self.tracks) is not None:
+            # Pre-filter nodes to consider based on tracks
+            if isinstance(tracks, Op):
+                # Equality
+                candidate_nodes = {
+                    node for node in fgraph.apply_nodes if node.op == tracks
+                }
+            elif isinstance(tracks, OpPattern):
+                candidate_nodes = {
+                    node
+                    for node in fgraph.apply_nodes
+                    if tracks.match_op(node.op) is not False
+                }
+            else:
+                # isinstance
+                candidate_nodes = {
+                    node for node in fgraph.apply_nodes if isinstance(node.op, tracks)
+                }
+
+            if not candidate_nodes:
+                # Abort early
+                return (
+                    self,
+                    0,  # nodes changed
+                    nb_nodes_start,
+                    nb_nodes_start,  # nb_nodes_end
+                    time.perf_counter() - t0,  # io_t
+                    0,  # loop_t
+                    0,  # callback_time
+                    self.node_rewriter,
+                )
+
+            if isinstance(tracks, Op):
+
+                def importer(node):
+                    if node is not current_node and node.op == tracks:
+                        q.append(node)
+
+            elif isinstance(tracks, OpPattern):
+
+                def importer(node):
+                    if (
+                        node is not current_node
+                        and tracks.match_op(node.op) is not False
+                    ):
+                        q.append(node)
+
+            else:
+
+                def importer(node):
+                    if node is not current_node and isinstance(node.op, tracks):
+                        q.append(node)
+        else:
+            # Otherwise, we will call the node_rewriter on every node in the graph
+            candidate_nodes = None
+
+            def importer(node):
+                if node is not current_node:
+                    q.append(node)
+
+        node_iterator = (
             apply_ancestors(start_from)
             if (self.order == "dfs")
             else toposort(start_from)
         )
+        if candidate_nodes:
+            q = deque(node for node in node_iterator if node in candidate_nodes)
+        else:
+            q = deque(node_iterator)
         io_t = time.perf_counter() - t0
-
-        def importer(node):
-            if node is not current_node:
-                q.append(node)
 
         u = self.attach_updater(
             fgraph, importer, None, name=getattr(self, "name", None)

@@ -4,6 +4,8 @@ import time
 import warnings
 from collections.abc import Callable, Mapping, MutableSequence, Sequence
 from functools import partial, reduce
+from itertools import chain
+from operator import add as operator_add
 from typing import TYPE_CHECKING, Literal, TypeVar, Union, overload
 
 import numpy as np
@@ -12,9 +14,8 @@ import pytensor
 from pytensor.compile.ops import ViewOp
 from pytensor.configdefaults import config
 from pytensor.graph import utils, vectorize_graph
-from pytensor.graph.basic import Apply, NominalVariable, Variable
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.null_type import NullType, null_type
-from pytensor.graph.op import get_test_values
 from pytensor.graph.type import Type
 
 
@@ -1162,381 +1163,311 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
     # its inputs' gradients
     term_dict = {}
 
+    from pytensor.scalar import discrete_dtypes, float_dtypes
+
+    discrete_dtypes_set = frozenset(discrete_dtypes)
+    float_dtypes_set = frozenset(float_dtypes)
+
     def access_term_cache(node):
         """Populates term_dict[node] and returns it"""
+        try:
+            return term_dict[node]
+        except KeyError:
+            pass
 
-        if node not in term_dict:
-            inputs = node.inputs
+        inputs = node.inputs
+        output_grads = [access_grad_cache(var) for var in node.outputs]
+        output_grads_connected = [
+            not isinstance(g.type, DisconnectedType) for g in output_grads
+        ]
 
-            output_grads = [access_grad_cache(var) for var in node.outputs]
+        connection_pattern = (
+            None
+            if not hasattr(node.op, "connection_pattern")
+            else _node_to_pattern(node)
+        )
 
-            # list of bools indicating if each output is connected to the cost
-            outputs_connected = [
-                not isinstance(g.type, DisconnectedType) for g in output_grads
-            ]
-
-            connection_pattern = _node_to_pattern(node)
-
-            # list of bools indicating if each input is connected to the cost
+        # list of bools indicating if each input is connected to the cost
+        if connection_pattern is None:
+            inputs_connected = [any(output_grads_connected)] * len(inputs)
+        else:
             inputs_connected = [
                 (
                     any(
-                        input_to_output and output_to_cost
-                        for input_to_output, output_to_cost in zip(
-                            input_to_outputs, outputs_connected, strict=True
+                        in_to_out and out_to_cost
+                        for in_to_out, out_to_cost in zip(
+                            input_to_outputs, output_grads_connected
                         )
                     )
                 )
                 for input_to_outputs in connection_pattern
             ]
 
-            # List of bools indicating if each output is an integer dtype
-            output_is_int = [
-                hasattr(output.type, "dtype")
-                and output.type.dtype in pytensor.tensor.type.discrete_dtypes
-                for output in node.outputs
-            ]
+        if not any(inputs_connected):
+            # All outputs of this op are disconnected so we can skip
+            # Calling the op's grad method and report that the inputs are disconnected
+            # (The op's grad method could do this too, but this saves the
+            # implementer the trouble of worrying about this case)
+            term_dict[node] = input_grads = [disconnected_type() for _ in inputs]
+            return input_grads
 
-            # List of bools indicating if each output is NullType
-            ograd_is_nan = [
-                isinstance(output.type, NullType) for output in output_grads
-            ]
+        # List of bools indicating if each output is NullType
+        output_grads_null = [
+            isinstance(output.type, NullType) for output in output_grads
+        ]
 
-            # List of bools indicating if each input only has NullType outputs
+        # List of bools indicating if each input only has NullType outputs
+        if connection_pattern is None:
+            only_connected_to_nan = [all(output_grads_null)] * len(inputs)
+        else:
             only_connected_to_nan = [
                 (
                     not any(
                         in_to_out and out_to_cost and not out_nan
                         for in_to_out, out_to_cost, out_nan in zip(
-                            in_to_outs, outputs_connected, ograd_is_nan, strict=True
+                            in_to_outs, output_grads_connected, output_grads_null
                         )
                     )
                 )
                 for in_to_outs in connection_pattern
             ]
 
-            if not any(inputs_connected):
-                # All outputs of this op are disconnected so we can skip
-                # Calling the op's grad method and report that the inputs
-                # are disconnected
-                # (The op's grad method could do this too, but this saves the
-                # implementer the trouble of worrying about this case)
-                input_grads = [disconnected_type() for ipt in inputs]
-            elif all(only_connected_to_nan):
-                # All inputs are only connected to nan gradients, so we don't
-                # need to bother calling the grad method. We know the gradient
-                # with respect to all connected inputs is nan.
-                input_grads = []
-                for connected in inputs_connected:
-                    if connected:
-                        input_grads.append(null_type())
-                    else:
-                        input_grads.append(disconnected_type())
-            else:
-                # At least one input of this op is connected to the cost so and
-                # not all output gradients are undefined so we must
-                # call the op's grad method
+        if all(only_connected_to_nan):
+            # All inputs are only connected to nan gradients, so we don't
+            # need to bother calling the grad method. We know the gradient
+            # with respect to all connected inputs is nan.
+            term_dict[node] = input_grads = [
+                null_type() if connected else disconnected_type()
+                for connected in inputs_connected
+            ]
+            return input_grads
 
-                # Each Op's grad function requires inputs and output_grads
-                # If the Op destroys any input, but the grad expression uses
-                # it, then chances are the resulting graph will have a
-                # dependency cycle. We avoid this cycle by passing (symbolic)
-                # copies of each destroyed input.
+        # At least one input of this op is connected to the cost so and
+        # not all output gradients are undefined so we must
+        # call the op's grad method
+
+        # Each Op's grad function requires inputs and output_grads
+        # If the Op destroys any input, but the grad expression uses
+        # it, then chances are the resulting graph will have a
+        # dependency cycle. We avoid this cycle by passing (symbolic)
+        # copies of each destroyed input.
+        if (destroy_map := getattr(node.op, "destroy_map", None)) is not None:
+            # Is this just an index?
+            dinputs = frozenset(chain.from_iterable(destroy_map.values()))
+
+            def try_to_copy(var):
                 try:
-                    dinputs = [node.inputs[x[0]] for x in node.op.destroy_map.values()]
+                    return var.copy()
                 except AttributeError:
-                    dinputs = []
-
-                def try_to_copy_if_needed(var):
-                    if var in dinputs and hasattr(var, "copy"):
-                        return var.copy()
                     return var
 
-                inputs = [try_to_copy_if_needed(ipt) for ipt in inputs]
+            inputs = [
+                try_to_copy(ipt) if ipt_idx in dinputs else ipt
+                for ipt_idx, ipt in enumerate(inputs)
+            ]
 
-                # Build a list of output gradients with the same dtype as
-                # the corresponding output variable.
-                # If an output is of a float dtype, we want to cast the
-                # output gradient into the same dtype, to avoid having a
-                # gradient graph with double precision (taking more memory,
-                # and more computation).
-                # If an output is of an integer dtype, then we just leave it
-                # alone.
-                # DO NOT force integer variables to have zero grad. This causes
-                # bugs where we fail to detect disconnected or undefined
-                # gradients.
-                # DO NOT force integer variables to have integer dtype.
-                # This is a violation of the op contract.
-                new_output_grads = []
-                for o, og in zip(node.outputs, output_grads, strict=True):
-                    o_dt = getattr(o.type, "dtype", None)
-                    og_dt = getattr(og.type, "dtype", None)
-                    if (
-                        o_dt not in pytensor.tensor.type.discrete_dtypes
-                        and og_dt
-                        and o_dt != og_dt
-                    ):
-                        new_output_grads.append(og.astype(o_dt))
-                    else:
-                        new_output_grads.append(og)
+        # Build a list of output gradients with the same dtype as
+        # the corresponding output variable.
+        # If an output is of a float dtype, we want to cast the
+        # output gradient into the same dtype, to avoid having a
+        # gradient graph with double precision (taking more memory,
+        # and more computation).
+        # If an output is of an integer dtype, then we just leave it alone.
+        # DO NOT force integer variables to have zero grad. This causes
+        # bugs where we fail to detect disconnected or undefined gradients.
+        # DO NOT force integer variables to have integer dtype.
+        # This is a violation of the op contract.
 
-                # Make sure that, if new_output_grads[i] has a floating point
-                # dtype, it is the same dtype as outputs[i]
-                for o, ng in zip(node.outputs, new_output_grads, strict=True):
-                    o_dt = getattr(o.type, "dtype", None)
-                    ng_dt = getattr(ng.type, "dtype", None)
-                    if (
-                        ng_dt is not None
-                        and o_dt not in pytensor.tensor.type.discrete_dtypes
-                    ):
-                        assert ng_dt == o_dt
+        for o_idx, (o, og) in enumerate(zip(node.outputs, output_grads)):
+            try:
+                og_dt = og.type.dtype
+                o_dt = o.type.dtype
+            except AttributeError:
+                continue
+            if o_dt not in discrete_dtypes and o_dt != og_dt:
+                output_grads[o_idx] = og.astype(o_dt)
 
-                assert all(
-                    getattr(ng.type, "dtype", None)
-                    not in pytensor.tensor.type.discrete_dtypes
-                    for ng in new_output_grads
+        input_grads = node.op.L_op(inputs, node.outputs, output_grads)
+
+        if input_grads is None:
+            raise TypeError(f"{node.op}.grad returned None, expected iterable.")
+
+        if len(input_grads) != len(inputs):
+            raise ValueError(f"{node.op} returned the wrong number of gradient terms.")
+
+        # Need to propagate the NullType gradients; if an input grad is
+        # not disconnected and the corresponding input is connected
+        # to at least one output whose gradient is NullType then the input
+        # grad should be NullType.
+        # TODO: Why are we the ones enforcing this?
+        if any(output_grads_null):
+            if connection_pattern is None:
+                nan_ograd = next(
+                    ograd for ograd in output_grads if isinstance(ograd.type, NullType)
                 )
-
-                # If config.compute_test_value is turned on, check that the
-                # gradients on the outputs of this node have the right shape.
-                # We also check the gradient on the inputs later--both checks
-                # are needed, because some gradients are only ever specified
-                # by the user, not computed by Op.grad, and some gradients are
-                # only computed and returned, but never passed as another
-                # node's output grads.
-                for idx, packed in enumerate(
-                    zip(node.outputs, new_output_grads, strict=True)
+                input_grads = [
+                    inp_grad
+                    if isinstance(inp_grad.type, DisconnectedType)
+                    else nan_ograd
+                    for inp_grad in input_grads
+                ]
+            else:
+                # convert to list so we can modify it inplace
+                input_grads = list(input_grads)
+                for inp_idx, (inp_grad, in_to_outs) in enumerate(
+                    zip(input_grads, connection_pattern)
                 ):
-                    orig_output, new_output_grad = packed
-                    if not hasattr(orig_output, "shape"):
+                    if isinstance(inp_grad.type, DisconnectedType):
                         continue
-                    if isinstance(new_output_grad.type, DisconnectedType):
-                        continue
-                    for orig_output_v, new_output_grad_v in get_test_values(*packed):
-                        o_shape = orig_output_v.shape
-                        g_shape = new_output_grad_v.shape
-                        if o_shape != g_shape:
-                            raise ValueError(
-                                "Got a gradient of shape "
-                                + str(o_shape)
-                                + " on an output of shape "
-                                + str(g_shape)
-                            )
-
-                input_grads = node.op.L_op(inputs, node.outputs, new_output_grads)
-
-                if input_grads is None:
-                    raise TypeError(
-                        f"{node.op}.grad returned NoneType, expected iterable."
-                    )
-
-                if len(input_grads) != len(inputs):
-                    raise ValueError(
-                        f"{node.op} returned the wrong number of gradient terms."
-                    )
-            # We can not enforce this, as AdvancedSubtensor1 has an option to
-            # return the sparse grad for optimization reason.
-
-            #            for ig, i in zip(input_grads, inputs):
-            #                if (not isinstance(ig.type, (DisconnectedType, NullType)) and
-            #                    type(ig.type) != type(i.type)):
-            #                    raise ValueError(
-            #                        "%s returned the wrong type for gradient terms."
-            #                        " Sparse inputs must have sparse grads and dense"
-            #                        " inputs must have dense grad. Got %s, expected %s" %(
-            #                            str(node.op), ig.type, i.type))
-
-            # must convert to list in case the op returns a tuple
-            # we won't be able to post-process out the Nones if it does that
-            input_grads = list(input_grads)
-
-            # Need to propagate the NullType gradients; if an input grad is
-            # not disconnected and the corresponding input is connected
-            # to at least one output whose gradient is NullType then the input
-            # grad should be NullType.
-            for inp_idx in range(len(input_grads)):
-                for out_idx in range(len(ograd_is_nan)):
-                    if (
-                        ograd_is_nan[out_idx]
-                        and connection_pattern[inp_idx][out_idx]
-                        and not isinstance(input_grads[inp_idx].type, DisconnectedType)
+                    for in_to_out, ograd_null, ograd in zip(
+                        in_to_outs, output_grads_null, output_grads
                     ):
-                        input_grads[inp_idx] = output_grads[out_idx]
+                        if in_to_out and ograd_null:
+                            input_grads[inp_idx] = ograd
+                            break
 
-            # Do type checking on the result
+        # List of bools indicating if each output is an integer dtype
+        output_is_int = [
+            getattr(output.type, "dtype", "float64") in discrete_dtypes_set
+            for output in node.outputs
+        ]
 
-            # List of bools indicating if each input only has integer outputs
+        # List of bools indicating if each input only has integer outputs
+        if connection_pattern is None:
+            only_connected_to_int = [all(output_is_int)] * len(inputs)
+        else:
             only_connected_to_int = [
                 (
-                    True
-                    not in [
+                    not any(
                         in_to_out and out_to_cost and not out_int
                         for in_to_out, out_to_cost, out_int in zip(
-                            in_to_outs, outputs_connected, output_is_int, strict=True
+                            in_to_outs, output_grads_connected, output_is_int
                         )
-                    ]
+                    )
                 )
                 for in_to_outs in connection_pattern
             ]
 
-            for i, term in enumerate(input_grads):
-                # Disallow Nones
-                if term is None:
-                    # We don't know what None means. in the past it has been
-                    # used to mean undefined, zero, or disconnected.
-                    # We therefore don't allow it because its usage has become
-                    # so muddied.
+        # Do type checking on the result
+        for i, (
+            inp,
+            term,
+            term_connected,
+            term_only_connected_to_nan,
+            term_only_connected_to_int,
+        ) in enumerate(
+            zip(
+                inputs,
+                input_grads,
+                inputs_connected,
+                only_connected_to_nan,
+                only_connected_to_int,
+            )
+        ):
+            if term is None:
+                # We don't know what None means. in the past it has been used to mean undefined, zero, or disconnected.
+                raise TypeError(
+                    f"{node.op} grad returned None for a gradient term.\n"
+                    "Instead, it should return zeros_like(input), disconnected_type(), or a NullType variable "
+                    "such as those created by the grad_undefined or grad_unimplemented helpers."
+                )
+
+            term_type = term.type
+
+            if term_only_connected_to_nan:
+                assert isinstance(term_type, NullType | DisconnectedType)
+
+            elif not isinstance(term_type, NullType | DisconnectedType):
+                if term_type.dtype not in float_dtypes_set:
                     raise TypeError(
-                        f"{node.op}.grad returned None for a gradient term, "
-                        "this is prohibited. Instead of None,"
-                        "return zeros_like(input), disconnected_type(),"
-                        " or a NullType variable such as those made with "
-                        "the grad_undefined or grad_unimplemented helper "
-                        "functions."
+                        f"{node.op} grad illegally returned an integer-valued variable for input index {i} "
+                        f"with dtype {term_type.dtype}."
                     )
 
-                # Check that the gradient term for this input
-                # has the right shape
-                if hasattr(term, "shape"):
-                    orig_ipt = inputs[i]
-                    if not isinstance(orig_ipt, NominalVariable):
-                        for orig_ipt_v, term_v in get_test_values(orig_ipt, term):
-                            i_shape = orig_ipt_v.shape
-                            t_shape = term_v.shape
-                            if i_shape != t_shape:
-                                raise ValueError(
-                                    f"{node.op}.grad returned object of "
-                                    f"shape {t_shape} as gradient term on input {int(i)} "
-                                    f"of shape {i_shape}"
-                                )
+                if (
+                    inp_ndim := getattr(inp.type, "ndim", None)
+                ) is not None and inp_ndim != term_type.ndim:
+                    raise ValueError(
+                        f"{node.op}.grad returned a term with {term_type.ndim} "
+                        f"dimensions for input {i}, but {inp.type.ndim} are required."
+                    )
 
-                if not isinstance(term.type, NullType | DisconnectedType):
-                    if term.type.dtype not in pytensor.tensor.type.float_dtypes:
-                        raise TypeError(
-                            str(node.op) + ".grad illegally "
-                            " returned an integer-valued variable."
-                            f" (Input index {int(i)}, dtype {term.type.dtype})"
-                        )
+                if term_only_connected_to_int and _is_zero(term) == "no":
+                    raise ValueError(
+                        f"{node.op}.grad returned {term} of type {type(term)} for input {i}"
+                        f"Since this input is only connected to integer-valued outputs, it should evaluate to zeros, "
+                        f" but it evaluates to {pytensor.get_underlying_scalar_constant_value(term)}."
+                    )
 
-                    if only_connected_to_nan[i]:
-                        assert isinstance(term.type, NullType)
-
-                    if only_connected_to_int[i]:
-                        # This term has only integer outputs and we know
-                        # it's not undefined or disconnected
-                        # The only other valid thing it can be is 0
-
-                        is_zero = _is_zero(term)
-                        assert is_zero in ("yes", "no", "maybe")
-                        if is_zero == "maybe":
-                            msg = (
-                                f"{node.op}.grad returned {term} of type {type(term)} for input"
-                                f" {i}. This input's only connections to "
-                                "the cost through this op are via "
-                                "integer-valued outputs so it should be "
-                                "NullType, DisconnectedType, or some form "
-                                "of zeros. It is not NullType or "
-                                "DisconnectedType and pytensor can't "
-                                "simplify it to a constant, so it's not "
-                                "verifiably zeros."
-                            )
-                        elif is_zero == "no":
-                            msg = (
-                                f"{node.op}.grad returned {term} of type {type(term)} for input"
-                                f" {i}. Since this input is only connected "
-                                "to integer-valued outputs, it should "
-                                "evaluate to zeros, but it evaluates to"
-                                f"{pytensor.get_underlying_scalar_constant_value(term)}."
-                            )
-                            raise ValueError(msg)
-
-            # Check that op.connection_pattern matches the connectivity
-            # logic driving the op.grad method
-            for i, (ipt, ig, connected) in enumerate(
-                zip(inputs, input_grads, inputs_connected, strict=True)
+            # Check that op.connection_pattern matches the connectivity logic driving the op.grad method
+            if term_connected != (
+                actually_connected := not isinstance(term_type, DisconnectedType)
             ):
-                actually_connected = not isinstance(ig.type, DisconnectedType)
-
-                if actually_connected and not connected:
-                    msg = (
-                        f"{node.op}.grad returned {ig} of type {ig.type} for input {i}."
-                        " Expected DisconnectedType instance based on "
-                        " the output of the op's connection_pattern "
-                        "method."
+                if actually_connected:
+                    raise TypeError(
+                        f"{node.op}.grad returned an input gradient of type {term_type} for input {i}.\n"
+                        "Expected DisconnectedType instance based on the output of the op's connection_pattern method."
                     )
-                    raise TypeError(msg)
-
-                elif connected and not actually_connected:
-                    msg = f"{node.op}.grad returned DisconnectedType for input {i}."
+                else:
+                    msg = f"{node.op}.grad returned DisconnectedType for input {i}. "
                     if hasattr(node.op, "connection_pattern"):
-                        msg += " Its connection_pattern method does not allow this."
-                        raise TypeError(msg)
-                    else:
-                        msg += (
-                            " You may want to implement a "
-                            "connection_pattern method for it."
+                        raise TypeError(
+                            msg + "Its connection_pattern method does not allow this."
                         )
-                        warnings.warn(msg)
+                    else:
+                        warnings.warn(
+                            msg
+                            + "You may want to implement a connection_pattern method for it."
+                        )
 
-            # cache the result
-            term_dict[node] = input_grads
-
-        return term_dict[node]
+        term_dict[node] = input_grads
+        return input_grads
 
     # populate grad_dict[var] and return it
     def access_grad_cache(var):
-        if var not in grad_dict:
-            # If var is not in grad_dict already, we must compute it
-            if var in var_to_app_to_idx:
-                null_terms = []
-                terms = []
-                node_to_idx = var_to_app_to_idx[var]
-                for node in node_to_idx:
-                    for idx in node_to_idx[node]:
-                        term = access_term_cache(node)[idx]
+        try:
+            return grad_dict[var]
+        except KeyError:
+            pass
 
-                        if not isinstance(term, Variable):
-                            raise TypeError(
-                                f"{node.op}.grad returned {type(term)}, expected"
-                                " Variable instance."
-                            )
+        # If var is not in grad_dict already, we must compute it
+        if (node_to_idx := var_to_app_to_idx.get(var, None)) is None:
+            # this variable isn't connected to the cost in the computational graph
+            grad_var = disconnected_type()
 
-                        if isinstance(term.type, NullType):
-                            null_terms.append(term)
-                            continue
+        else:
+            terms = []
+            for node, indices in node_to_idx.items():
+                node_terms = access_term_cache(node)
+                terms.extend(
+                    term
+                    for idx in indices
+                    # Don't include disconnected terms in the sum
+                    if not isinstance((term := node_terms[idx]).type, DisconnectedType)
+                )
 
-                        # Don't try to sum up DisconnectedType placeholders
-                        if isinstance(term.type, DisconnectedType):
-                            continue
-
-                        if hasattr(var, "ndim") and term.ndim != var.ndim:
-                            raise ValueError(
-                                f"{node.op}.grad returned a term with"
-                                f" {int(term.ndim)} dimensions, but {int(var.ndim)} are required."
-                            )
-
-                        terms.append(term)
-
+            if terms:
                 # Add up the terms to get the total gradient on this variable
-                if len(null_terms) > 0:
-                    # At least one term is a NullType : the total gradient
-                    # will also be a NullType
-                    grad_dict[var] = null_terms[0]
-                elif len(terms) > 0:
-                    # the next line is like sum(terms) but doesn't add an
-                    # extraneous TensorConstant(0)
-                    grad_dict[var] = reduce(lambda x, y: x + y, terms)
-                else:
-                    grad_dict[var] = disconnected_type()
-
-                if cost_name is not None and var.name is not None:
-                    grad_dict[var].name = f"(d{cost_name}/d{var.name})"
+                try:
+                    grad_var = reduce(operator_add, terms)
+                except TypeError:
+                    # This should only happen when there's a NullType term
+                    try:
+                        grad_var = next(
+                            t for t in terms if isinstance(t.type, NullType)
+                        )
+                    except StopIteration:
+                        raise TypeError(
+                            f"The gradient terms of variable {var} could not be added together: {terms}."
+                        )
             else:
-                # this variable isn't connected to the cost in the
-                # computational graph
-                grad_dict[var] = disconnected_type()
-        # end if cache miss
-        return grad_dict[var]
+                grad_var = disconnected_type()
+
+            if cost_name is not None and var.name is not None:
+                grad_var.name = f"(d{cost_name}/d{var.name})"
+
+        grad_dict[var] = grad_var
+        return grad_var
 
     rval = [access_grad_cache(elem) for elem in wrt]
 

@@ -2,10 +2,10 @@ import abc
 import itertools
 import operator
 import sys
-from collections import defaultdict, deque
 from collections.abc import Generator, Sequence
 from functools import cache, reduce
-from typing import TypeVar
+from heapq import heapify, heappop, heappush
+from operator import or_
 from warnings import warn
 
 import pytensor.scalar.basic as ps
@@ -28,8 +28,9 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.graph.traversal import ancestors
+from pytensor.graph.traversal import graph_inputs, toposort
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
+from pytensor.scalar import ScalarConstant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import (
     MakeVector,
@@ -530,47 +531,26 @@ class FusionOptimizer(GraphRewriter):
 
     @staticmethod
     def elemwise_to_scalar(inputs, outputs):
-        replace_inputs = [(inp, inp.clone()) for inp in inputs]
-        outputs = clone_replace(outputs, replace=replace_inputs)
-
-        inputs = [inp for _, inp in replace_inputs]
-        fg = FunctionGraph(inputs=inputs, outputs=outputs, clone=False)
-        middle_inputs = []
-
-        scalar_inputs = [
-            ps.get_scalar_type(inp.type.dtype).make_variable() for inp in inputs
-        ]
-        middle_scalar_inputs = []
-
-        for node in fg.toposort():
-            node_scalar_inputs = []
-            for inp in node.inputs:
-                if inp in inputs:
-                    node_scalar_inputs.append(scalar_inputs[inputs.index(inp)])
-                elif inp in middle_inputs:
-                    node_scalar_inputs.append(
-                        middle_scalar_inputs[middle_inputs.index(inp)]
+        replacement = {
+            inp: ps.get_scalar_type(inp.type.dtype).make_variable() for inp in inputs
+        }
+        for node in toposort(outputs, blockers=inputs):
+            scalar_inputs = [replacement[inp] for inp in node.inputs]
+            replacement.update(
+                dict(
+                    zip(
+                        node.outputs,
+                        node.op.scalar_op.make_node(*scalar_inputs).outputs,
                     )
-                else:
-                    new_scalar_input = ps.get_scalar_type(
-                        inp.type.dtype
-                    ).make_variable()
-                    node_scalar_inputs.append(new_scalar_input)
-                    middle_scalar_inputs.append(new_scalar_input)
-                    middle_inputs.append(inp)
+                )
+            )
 
-            new_scalar_node = node.op.scalar_op.make_node(*node_scalar_inputs)
-            middle_scalar_inputs.append(new_scalar_node.outputs[0])
-            middle_inputs.append(node.outputs[0])
-
-        scalar_outputs = [
-            middle_scalar_inputs[middle_inputs.index(out)] for out in fg.outputs
-        ]
-        return scalar_inputs, scalar_outputs
+        return (
+            [replacement[inp] for inp in inputs],
+            [replacement[out] for out in outputs],
+        )
 
     def apply(self, fgraph):
-        nb_replacement = 0
-
         if fgraph.profile:
             validate_before = fgraph.profile.validate_time
             callbacks_before = fgraph.execute_callbacks_times.copy()
@@ -578,376 +558,285 @@ class FusionOptimizer(GraphRewriter):
 
         max_operands = elemwise_max_operands_fct(None)
 
-        def find_next_fuseable_subgraph(
+        def find_fuseable_subgraphs(
             fg: FunctionGraph,
         ) -> Generator[tuple[list[Variable], list[Variable]], None, None]:
-            """Find all subgraphs in a FunctionGraph that can be fused together
+            """Find subgraphs of Elemwise nodes that can be fused together.
 
-            Yields
-            -------
-            List of inputs and outputs that determine subgraphs which can be fused.
-            This generator assumes that such subgraph is replaced by a single
-            Elemwise Composite before being accessed again in the next iteration.
+            In general there is no single solution, we try to find large subgraphs eagerly
+
+            Any two consecutive Elemwise nodes that have the same broadcasting pattern,
+            and a C-implementation (historical accident that should be revisited), are potentially fuseable.
+
+            However, we need to be careful about keeping the fused subgraph "convex", meaning that no two
+            nodes in the same subgraph are connected via a path that goes outside the subgraph, either because they
+            are connected via unfuseable nodes, or nodes that have been claimed by another subgraph.
+
+            For example the graph add(sin(exp(x)), sum(exp(x)) cannot be fused into a single Elemwise, because the sum
+            node breaks the convexity of the subgraph {exp, sin, add}. However, we can fuse {exp, sin},
+            and perhaps fuse add with somethnig else.
             """
 
-            FUSEABLE_MAPPING = defaultdict[Variable, list[Apply]]
-            UNFUSEABLE_MAPPING = defaultdict[Variable, set[Apply]]
+            @cache
+            def elemwise_scalar_op_has_c_code(
+                node: Apply, optimizer_verbose=config.optimizer_verbose
+            ) -> bool:
+                # TODO: This should not play a role in non-c backends!
+                if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
+                    return True
+                elif optimizer_verbose:
+                    warn(
+                        f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
+                    )
+                return False
 
-            def initialize_fuseable_mappings(
-                *, fg: FunctionGraph
-            ) -> tuple[FUSEABLE_MAPPING, UNFUSEABLE_MAPPING]:
-                @cache
-                def elemwise_scalar_op_has_c_code(node: Apply) -> bool:
-                    # TODO: This should not play a role in non-c backends!
-                    if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
-                        return True
-                    else:
-                        if config.optimizer_verbose:
-                            warn(
-                                f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
-                            )
-                        return False
+            fuseable_clients: dict[Apply, set[Apply]] = {}
+            candidate_nodes = set()
+            fg_clients = fg.clients
+            for out, clients_and_indices in fg_clients.items():
+                out_node = out.owner
 
-                # Fuseable nodes have to be accessed in a deterministic manner
-                # to ensure the rewrite remains deterministic.
-                # This is not a problem from unfuseable ones, as they can never
-                # become part of the graph.
-                fuseable_clients: FUSEABLE_MAPPING = defaultdict(list)
-                unfuseable_clients: UNFUSEABLE_MAPPING = defaultdict(set)
-                for out, clients in fg.clients.items():
-                    # Old FunctionGraph nodes remain in the clients dictionary
-                    # even after they are removed by rewrites
-                    if not clients:
+                if not (
+                    out_node is not None
+                    and len(out_node.outputs) == 1
+                    and isinstance(out_node.op, Elemwise)
+                    and elemwise_scalar_op_has_c_code(out_node)
+                ):
+                    continue
+
+                candidate_nodes.add(out_node)
+                out_bcast = out.type.broadcastable
+                out_fuseable_clients = {
+                    client
+                    for client, _ in clients_and_indices
+                    if (
+                        len(client.outputs) == 1
+                        and isinstance(client.op, Elemwise)
+                        and out_bcast == client.outputs[0].type.broadcastable
+                        and elemwise_scalar_op_has_c_code(client)
+                    )
+                }
+                if out_fuseable_clients:
+                    fuseable_clients[out_node] = out_fuseable_clients
+
+            if not fuseable_clients:
+                return None
+
+            # Create a bitset of ancestors for each node.
+            # Each node is represented by a bit flag of it's position in the toposort
+            # With two variables {a, b, c} owned by nodes {A, B, C}, where a is an input of b, and b an input of c,
+            # the ancestors bit flags would be {A: 0b001, B: 0b010, C: 0b100}
+            # and the ancestors bitset would be {A: 0b001, B: 0b011, C: 0b111}
+            # This allows us to quickly ask if one or more variables are ancestors of a node by a simple bitwise AND
+            # For example, to ask if B is an ancestor of C we can do `ancestors_bitset[C] & node_bitset[B] != 0`
+            # We can also easily handle multiple nodes at once, for example to ask if A or B are ancestors of C we can do
+            # `ancestors_bitset[C] & (node_bitset[A] | node_bitset[B]) != 0`
+            node_bitflags = {node: 1 << i for i, node in enumerate(fgraph.toposort())}
+            ancestors_bitset = {
+                None: 0
+            }  # Root variables have `None` as owner, which we can handle with a bitset of 0 for `None`
+            for node, node_bit in node_bitflags.items():
+                # The bitset of each node is the union of the bitsets of its inputs, plus its own bit
+                ancestors_bitset[node] = reduce(
+                    or_, (ancestors_bitset[inp.owner] for inp in node.inputs), node_bit
+                )
+            # handle root and leaf nodes gracefully
+            node_bitflags[None] = (
+                0  # Root variables have `None` as owner, which we can handle with a bitflag of 0 for `None`
+            )
+            out_bitflag = 1 << len(
+                node_bitflags
+            )  # Nothing ever depends on output nodes, so just use a new bit for all
+            for out in fg.outputs:
+                for client, _ in fg_clients[out]:
+                    if isinstance(client.op, Output):
+                        node_bitflags[client] = out_bitflag
+
+            subgraphs: list[tuple[int, tuple[list[Variable], list[Variable]]]] = []
+            all_subgraphs_bitset = 0
+            # Start exploring from candidate sink nodes (backwards)
+            # These are Elemwise nodes with a C-implementation, that are not part of another subgraph
+            # And have no other fuseable clients (i.e., are sinks)
+            for starting_node, starting_bitflag in reversed(node_bitflags.items()):
+                if (
+                    starting_bitflag & all_subgraphs_bitset
+                    or starting_node not in candidate_nodes
+                ):
+                    continue
+
+                if starting_node in fuseable_clients:
+                    # Not a sink,
+                    continue
+
+                # We keep an ordered queue for expanding the subgraph
+                # We always want to visit ancestors before clients
+                # For ancestors, we want to visit the later nodes first (those that have more dependencies)
+                # whereas for clients we want to visit earlier nodes first (those that have fewer dependencies)
+                # We negate the bitflag for ancestors to achieve this ordering
+                fuseables_nodes_queue = [(-starting_bitflag, starting_node)]
+                heapify(fuseables_nodes_queue)
+
+                # We keep 3 bitsets during the exploration:
+                #  - the nodes that are part of the subgraph
+                #  - the unfuseable ancestors of the subgraph (i.e., ancestors that are not fuseable with any node in the subgraph)
+                #  - the unfuseable clients of the subgraph (i.e., clients that are not fuseable with any node in the subgraph)
+                # Whenever we visit a node, we check if unfuseable ancestors depend on it, or if it depends on an unfuseable client,
+                # in which case we can't fuse it. If we can fuse it, we then add its unfuseable ancestors/clients to the respective bitsets
+                # and add its fuseable ancestors/clients to the queue to explore later. This approach requires a visit in the order described above.
+                # Otherwise, we need to recompute target bitsets in every iteration and/or backtrack.
+                subgraph_nodes = []
+                subgraph_bitset = 0
+                unfuseable_ancestors_bitset = 0
+                unfuseable_clients_bitset = 0
+
+                # print(f"\nStarting new subgraph exploration from {starting_node}")
+                while fuseables_nodes_queue:
+                    node_bitflag, node = heappop(fuseables_nodes_queue)
+                    is_ancestor = node_bitflag < 0
+                    if is_ancestor:
+                        node_bitflag = -node_bitflag
+                    # print(f"\t > Visiting {'ancestor' if is_ancestor else 'client'} {next_node}")
+
+                    if node_bitflag & subgraph_bitset:
+                        # Already part of the subgraph
+                        # print("\t   - already in subgraph")
                         continue
 
-                    out_maybe_fuseable = (
-                        out.owner
-                        and isinstance(out.owner.op, Elemwise)
-                        # and not isinstance(out.owner.op.scalar_op, ps.Composite)
-                        and len(out.owner.outputs) == 1
-                        and elemwise_scalar_op_has_c_code(out.owner)
-                    )
-                    for client, _ in clients:
-                        if (
-                            out_maybe_fuseable
-                            and isinstance(client.op, Elemwise)
-                            # and not isinstance(client.op.scalar_op, ps.Composite)
-                            and len(client.outputs) == 1
-                            and out.type.broadcastable
-                            == client.outputs[0].type.broadcastable
-                            and elemwise_scalar_op_has_c_code(client)
-                        ):
-                            if client not in fuseable_clients[out]:
-                                fuseable_clients[out].append(client)
-                        else:
-                            unfuseable_clients[out].add(client)
-
-                return fuseable_clients, unfuseable_clients
-
-            def find_fuseable_subgraph(
-                *,
-                fg: FunctionGraph,
-                visited_nodes: set[Apply],
-                fuseable_clients: FUSEABLE_MAPPING,
-                unfuseable_clients: UNFUSEABLE_MAPPING,
-            ) -> tuple[list[Variable], list[Variable]]:
-                KT = TypeVar("KT")
-                VT = TypeVar("VT", list, set)
-
-                def shallow_clone_defaultdict(
-                    d: defaultdict[KT, VT],
-                ) -> defaultdict[KT, VT]:
-                    new_dict: defaultdict[KT, VT] = defaultdict(d.default_factory)
-                    new_dict.update({k: v.copy() for k, v in d.items()})
-                    return new_dict
-
-                def variables_depend_on(
-                    variables, depend_on, stop_search_at=None
-                ) -> bool:
-                    return any(
-                        a in depend_on
-                        for a in ancestors(variables, blockers=stop_search_at)
-                    )
-
-                toposort = fg.toposort()
-                for starting_node in toposort:
-                    if starting_node in visited_nodes:
-                        continue
-
-                    starting_out = starting_node.outputs[0]
-                    if not fuseable_clients.get(starting_out):
-                        visited_nodes.add(starting_node)
-                        continue
-
-                    subgraph_inputs: list[Variable] = []
-                    subgraph_outputs: list[Variable] = []
-                    unfuseable_clients_subgraph: set[Variable] = set()
-
-                    # Shallow cloning of maps so that they can be manipulated in place
-                    fuseable_clients_temp = shallow_clone_defaultdict(fuseable_clients)
-                    unfuseable_clients_clone = shallow_clone_defaultdict(
-                        unfuseable_clients
-                    )
-
-                    fuseable_nodes_to_visit = deque([starting_node])
-
-                    # We now try to expand as much as possible towards the potentially
-                    # fuseable clients and ancestors to detect the largest possible
-                    # subgraph that can be Composed together into a single `Op`. The
-                    # largest issue to watch out is for cyclical dependencies, where
-                    # some inputs or clients may depend on other nodes of the same
-                    # subgraph via a path that cannot be included in the Composite
-                    # (unfuseable)
-                    while fuseable_nodes_to_visit:
-                        next_node = fuseable_nodes_to_visit.popleft()
-                        visited_nodes.add(next_node)
-                        next_out = next_node.outputs[0]
-
-                        # If the output variable of next_node has no fuseable clients
-                        # or has unfuseable clients, then next_node must become an output
-                        # if it is to be fused.
-                        must_become_output = (
-                            next_out not in fuseable_clients_temp
-                            or next_out in unfuseable_clients_clone
-                        )
-
-                        # We have backtracked to this node, and it may no longer be a viable output,
-                        # so we remove it and check again as if we had never seen this node
-                        if must_become_output and next_out in subgraph_outputs:
-                            subgraph_outputs.remove(next_out)
-
-                        required_unfuseable_inputs = [
-                            inp
-                            for inp in next_node.inputs
-                            if next_node in unfuseable_clients_clone.get(inp, ())
-                        ]
-                        new_required_unfuseable_inputs = [
-                            inp
-                            for inp in required_unfuseable_inputs
-                            if inp not in subgraph_inputs
-                        ]
-
-                        must_backtrack = False
-                        if new_required_unfuseable_inputs and subgraph_outputs:
-                            # We need to check that any new inputs required by this node
-                            # do not depend on other outputs of the current subgraph,
-                            # via an unfuseable path.
-                            if variables_depend_on(
-                                [next_out],
-                                depend_on=unfuseable_clients_subgraph,
-                                stop_search_at=subgraph_outputs,
-                            ):
-                                must_backtrack = True
-
-                        if not must_backtrack:
-                            implied_unfuseable_clients = {
-                                c
-                                for client in unfuseable_clients_clone.get(next_out, ())
-                                if not isinstance(client.op, Output)
-                                for c in client.outputs
-                            }
-
-                            new_implied_unfuseable_clients = (
-                                implied_unfuseable_clients - unfuseable_clients_subgraph
-                            )
-
-                            if new_implied_unfuseable_clients and subgraph_inputs:
-                                # We need to check that any inputs of the current subgraph
-                                # do not depend on other clients of this node,
-                                # via an unfuseable path.
-                                if variables_depend_on(
-                                    subgraph_inputs,
-                                    depend_on=new_implied_unfuseable_clients,
-                                ):
-                                    must_backtrack = True
-
-                        if must_backtrack:
-                            for inp in next_node.inputs:
-                                if (
-                                    inp.owner in visited_nodes
-                                    # next_node could have the same input repeated
-                                    and next_node in fuseable_clients_temp[inp]
-                                ):
-                                    fuseable_clients_temp[inp].remove(next_node)
-                                    unfuseable_clients_clone[inp].add(next_node)
-                                    # This input must become an output of the subgraph,
-                                    # because it can't be merged with next_node.
-                                    # We will revisit it to make sure this is safe.
-                                    fuseable_nodes_to_visit.appendleft(inp.owner)
-
-                            for client in fuseable_clients_temp[next_out]:
-                                if client in visited_nodes:
-                                    fuseable_clients_temp[next_out].remove(client)
-                                    unfuseable_clients_clone[next_out].add(client)
-                                    # next_out must become an input of the subgraph.
-                                    # We will revisit any of its clients currently
-                                    # in the subgraph to make sure this is safe.
-                                    fuseable_nodes_to_visit.appendleft(client)
-
-                            # Revisit node at a later time
-                            visited_nodes.remove(next_node)
+                    if is_ancestor:
+                        if node_bitflag & unfuseable_ancestors_bitset:
+                            # An unfuseable ancestor depends on this node, can't fuse
+                            # print("\t   failed - unfuseable ancestor depends on it")
                             continue
-
-                        # Adding next_node to subgraph does not result in any
-                        # immediate dependency problems. Update subgraph
-                        # mappings as if it next_node was part of it.
-                        # Useless inputs will be removed by the useless Composite rewrite
-                        for inp in new_required_unfuseable_inputs:
-                            if inp not in subgraph_inputs:
-                                subgraph_inputs.append(inp)
-
-                        if must_become_output:
-                            subgraph_outputs.append(next_out)
-                            unfuseable_clients_subgraph.update(
-                                new_implied_unfuseable_clients
-                            )
-
-                        # Expand through unvisited fuseable ancestors
-                        for inp in sorted(
-                            (
-                                inp
-                                for inp in next_node.inputs
-                                if (
-                                    inp not in required_unfuseable_inputs
-                                    and inp.owner not in visited_nodes
-                                )
-                            ),
-                            key=lambda inp: toposort.index(inp.owner),
-                            reverse=True,
-                        ):
-                            fuseable_nodes_to_visit.appendleft(inp.owner)
-
-                        # Expand through unvisited fuseable clients
-                        for next_node in sorted(
-                            (
-                                node
-                                for node in fuseable_clients_temp.get(next_out, ())
-                                if node not in visited_nodes
-                            ),
-                            key=lambda node: toposort.index(node),
-                        ):
-                            fuseable_nodes_to_visit.append(next_node)
-
-                    # Don't return if final subgraph is just the original Elemwise
-                    if len(subgraph_outputs) == 1 and set(
-                        subgraph_outputs[0].owner.inputs
-                    ) == set(subgraph_inputs):
-                        # Update global fuseable mappings
-                        # No input was actually fuseable
-                        for inp in starting_node.inputs:
-                            if starting_node in fuseable_clients.get(inp, ()):
-                                fuseable_clients[inp].remove(starting_node)
-                                unfuseable_clients[inp].add(starting_node)
-                        # No client was actually fuseable
-                        unfuseable_clients[starting_out].update(
-                            fuseable_clients.pop(starting_out, ())
-                        )
+                    elif ancestors_bitset[node] & unfuseable_clients_bitset:
+                        # This node depends on an unfuseable client, can't fuse
+                        # print("\t  failed - depends on unfuseable client")
                         continue
 
-                    return subgraph_inputs, subgraph_outputs
-                raise ValueError
+                    # print("\t   succeeded - adding to subgraph")
+                    subgraph_nodes.append(node)
+                    subgraph_bitset |= node_bitflag
 
-            def update_fuseable_mappings_after_fg_replace(
-                *,
-                fg: FunctionGraph,
-                visited_nodes: set[Apply],
-                fuseable_clients: FUSEABLE_MAPPING,
-                unfuseable_clients: UNFUSEABLE_MAPPING,
-                starting_nodes: set[Apply],
-            ) -> None:
-                # Find new composite node and dropped intermediate nodes
-                # by comparing the current fg.apply nodes with the cached
-                # original nodes
-                next_nodes = fg.apply_nodes
-                (new_composite_node,) = next_nodes - starting_nodes
-                dropped_nodes = starting_nodes - next_nodes
-
-                # Remove intermediate Composite nodes from mappings
-                for dropped_node in dropped_nodes:
-                    (dropped_out,) = dropped_node.outputs
-                    fuseable_clients.pop(dropped_out, None)
-                    unfuseable_clients.pop(dropped_out, None)
-                    visited_nodes.remove(dropped_node)
-
-                # Update fuseable information for subgraph inputs
-                for inp in subgraph_inputs:
-                    if inp in fuseable_clients:
-                        new_fuseable_clients = [
-                            client
-                            for client in fuseable_clients[inp]
-                            if client not in dropped_nodes
-                        ]
-                        if new_fuseable_clients:
-                            fuseable_clients[inp] = new_fuseable_clients
+                    # Expand through ancestors and client nodes
+                    # A node can either be:
+                    #  - already part of the subgraph (skip)
+                    #  - fuseable (add to queue)
+                    #  - unfuseable (add to respective unfuseable bitset)
+                    for ancestor in node.inputs:
+                        ancestor_node = ancestor.owner
+                        ancestor_bitflag = node_bitflags[ancestor_node]
+                        if ancestor_bitflag & subgraph_bitset:
+                            continue
+                        if node in fuseable_clients.get(ancestor_node, ()):
+                            heappush(
+                                fuseables_nodes_queue,
+                                (-ancestor_bitflag, ancestor_node),
+                            )
                         else:
-                            fuseable_clients.pop(inp)
-                    unfuseable_clients[inp] = (
-                        unfuseable_clients[inp] - dropped_nodes
-                    ) | {new_composite_node}
+                            # If an ancestor is unfuseable, so are all its ancestors
+                            unfuseable_ancestors_bitset |= ancestors_bitset[
+                                ancestor_node
+                            ]
 
-                # Update fuseable information for subgraph outputs
-                for out in new_composite_node.outputs:
-                    unfuseable_clients[out] = {client for client, _ in fg.clients[out]}
+                    next_fuseable_clients = fuseable_clients.get(node, ())
+                    for client, _ in fg_clients[node.outputs[0]]:
+                        client_bitflag = node_bitflags[client]
+                        if client_bitflag & subgraph_bitset:
+                            continue
+                        if client in next_fuseable_clients:
+                            heappush(fuseables_nodes_queue, (client_bitflag, client))
+                        else:
+                            # If a client is unfuseable, so are all its clients, but we don't need to keep track of those
+                            # Any downstream client will also depend on this unfuseable client and will be rejected when visited
+                            unfuseable_clients_bitset |= client_bitflag
 
-                visited_nodes.add(new_composite_node)
-                return
+                # Finished exploring this subgraph
+                all_subgraphs_bitset |= subgraph_bitset
 
-            # We start by creating two maps, 1) from each node to each potentially
-            # fuseable client (both nodes must be single output Elemwise with same
-            # broadcast type) and 2) from each node to each certainly unfuseable
-            # client (those that don't fit into 1))
-            fuseable_clients, unfuseable_clients = initialize_fuseable_mappings(fg=fg)
-            visited_nodes: set[Apply] = set()
-            while True:
-                starting_nodes = fg.apply_nodes.copy()
-                try:
-                    subgraph_inputs, subgraph_outputs = find_fuseable_subgraph(
-                        fg=fg,
-                        visited_nodes=visited_nodes,
-                        fuseable_clients=fuseable_clients,
-                        unfuseable_clients=unfuseable_clients,
+                if subgraph_bitset == starting_bitflag:
+                    # No fusion possible, single node subgraph
+                    continue
+
+                # Find out inputs/outputs of subgraph_nodes
+                not_subgraph_bitset = ~subgraph_bitset
+                subgraph_inputs = list(
+                    {
+                        inp: None
+                        for node in subgraph_nodes
+                        for inp in node.inputs
+                        if (ancestor_node := inp.owner) is None
+                        or node_bitflags[ancestor_node] & not_subgraph_bitset
+                    }
+                )
+
+                subgraph_outputs = [
+                    node.outputs[0]
+                    for node in subgraph_nodes
+                    if any(
+                        node_bitflags[client] & not_subgraph_bitset
+                        for client, _ in fg_clients[node.outputs[0]]
                     )
-                except ValueError:
-                    return
-                else:
-                    # The caller is now expected to update fg in place,
-                    # by replacing the subgraph with a Composite Op
-                    yield subgraph_inputs, subgraph_outputs
+                ]
 
-                    # This is where we avoid repeated work by using a stateful
-                    # generator. For large models (as in `TestFusion.test_big_fusion`)
-                    # this can provide huge speedups
-                    update_fuseable_mappings_after_fg_replace(
-                        fg=fg,
-                        visited_nodes=visited_nodes,
-                        fuseable_clients=fuseable_clients,
-                        unfuseable_clients=unfuseable_clients,
-                        starting_nodes=starting_nodes,
+                # We use the min toposort_index for sorting the subgraphs later
+                min_toposort_index = min(
+                    node_bitflags[var.owner] for var in subgraph_outputs
+                )
+
+                # print(f"Found subgraph with {len(subgraph_inputs)} inputs, {len(subgraph_outputs)} outputs, and {len(subgraph_nodes)} nodes ({min_toposort_index=})")
+                # FunctionGraph(list(subgraph_inputs), subgraph_outputs).dprint()
+
+                subgraphs.append(
+                    (
+                        min_toposort_index,
+                        (subgraph_inputs, subgraph_outputs),
                     )
+                )
 
-        for inputs, outputs in find_next_fuseable_subgraph(fgraph):
+                # Update fuseable clients, inputs can no longer be fused with graph variables
+                # and outputs can't be fused with anything else
+                for ancestor in subgraph_inputs:
+                    if (ancestor_node := ancestor.owner) is not None:
+                        if ancestor_fuseable_clients := fuseable_clients.get(
+                            ancestor_node
+                        ):
+                            ancestor_fuseable_clients.difference_update(subgraph_nodes)
+                            if not ancestor_fuseable_clients:
+                                del fuseable_clients[ancestor_node]
+
+                for out in subgraph_outputs:
+                    fuseable_clients.pop(out.owner, None)
+
+            # We need to replace in reverse topological order
+            yield from (io for _, io in sorted(subgraphs, reverse=True))
+
+        nb_fused = 0
+        nb_replacement = 0
+        for inputs, outputs in find_fuseable_subgraphs(fgraph):
             if (len(inputs) + len(outputs)) > max_operands:
                 warn(
                     "Loop fusion failed because the resulting node would exceed "
                     "the kernel argument limit."
                 )
-                break
+                continue
 
             scalar_inputs, scalar_outputs = self.elemwise_to_scalar(inputs, outputs)
-            composite_outputs = Elemwise(ps.Composite(scalar_inputs, scalar_outputs))(
-                *inputs
-            )
-            if not isinstance(composite_outputs, list):
-                composite_outputs = [composite_outputs]
-            for old_out, composite_out in zip(outputs, composite_outputs, strict=True):
+            composite_outputs = Elemwise(
+                # No need to clone Composite graph, because `self.elemwise_to_scalar` creates fresh variables
+                ps.Composite(scalar_inputs, scalar_outputs, clone_graph=False)
+            )(*inputs, return_list=True)
+            assert len(outputs) == len(composite_outputs)
+            for old_out, composite_out in zip(outputs, composite_outputs):
+                # Preserve any names on the original outputs
                 if old_out.name:
                     composite_out.name = old_out.name
 
+            starting_nodes = len(fgraph.apply_nodes)
             fgraph.replace_all_validate(
-                list(zip(outputs, composite_outputs, strict=True)),
+                tuple(zip(outputs, composite_outputs)),
                 reason=self.__class__.__name__,
             )
-            nb_replacement += 1
+            nb_fused += 1
+            nb_replacement += (starting_nodes - len(fgraph.apply_nodes)) + 1
 
         if fgraph.profile:
             validate_time = fgraph.profile.validate_time - validate_before
@@ -965,7 +854,7 @@ class FusionOptimizer(GraphRewriter):
 
         return (
             self,
-            1,  # nb_iter
+            nb_fused,
             nb_replacement,
             0,  # nb_inconsintency_replace
             validate_time,
@@ -978,7 +867,7 @@ class FusionOptimizer(GraphRewriter):
     def print_profile(stream, prof, level=0):
         blanc = "    " * level
         print(blanc, "FusionOptimizer", file=stream)
-        print(blanc, " nb_iter", prof[1], file=stream)
+        print(blanc, " nb_fused", prof[1], file=stream)
         print(blanc, " nb_replacement", prof[2], file=stream)
         print(blanc, " nb_inconsistency_replace", prof[3], file=stream)
         print(blanc, " validate_time", prof[4], file=stream)
@@ -997,26 +886,44 @@ class FusionOptimizer(GraphRewriter):
 def local_useless_composite_outputs(fgraph, node):
     """Remove inputs and outputs of Composite Ops that are not used anywhere."""
     comp = node.op.scalar_op
-    used_outputs_idxs = [
-        i for i, o_extern in enumerate(node.outputs) if fgraph.clients[o_extern]
-    ]
-    used_inner_outputs = [comp.outputs[i] for i in used_outputs_idxs]
-    comp_fgraph = FunctionGraph(
-        inputs=comp.inputs, outputs=used_inner_outputs, clone=False
-    )
-    used_inputs_idxs = [
-        i
-        for i, i_intern in enumerate(comp_fgraph.inputs)
-        if comp_fgraph.clients[i_intern]
-    ]
-    used_inner_inputs = [comp.inputs[i] for i in used_inputs_idxs]
-    if len(used_inner_inputs) < len(node.inputs) or len(used_inner_outputs) < len(
-        node.outputs
+
+    clients = fgraph.clients
+    outer_inputs, outer_outputs = node.inputs, node.outputs
+    inner_inputs, inner_outputs = comp.inputs, comp.outputs
+
+    used_inner_outputs = {
+        inner_out
+        for inner_out, outer_out in zip(inner_outputs, outer_outputs)
+        if clients[outer_out]
+    }
+    used_inner_inputs = {
+        inner_inp
+        for inner_inp in graph_inputs(used_inner_outputs)
+        if not isinstance(inner_inp, ScalarConstant)
+    }
+
+    if len(used_inner_inputs) == len(outer_inputs) or len(used_inner_outputs) == len(
+        outer_outputs
     ):
-        used_inputs = [node.inputs[i] for i in used_inputs_idxs]
-        c = ps.Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
-        e = Elemwise(scalar_op=c)(*used_inputs, return_list=True)
-        return dict(zip([node.outputs[i] for i in used_outputs_idxs], e, strict=True))
+        return None
+
+    used_inputs_idxs = [
+        i for i, inp in enumerate(inner_inputs) if inp in used_inner_inputs
+    ]
+    used_inner_inputs = [inner_inputs[i] for i in used_inputs_idxs]
+    used_outer_inputs = [outer_inputs[i] for i in used_inputs_idxs]
+
+    new_comp = ps.Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
+    new_outer_outputs = Elemwise(scalar_op=new_comp)(
+        *used_outer_inputs, return_list=True
+    )
+
+    used_outer_outputs = (
+        outer_outputs[i]
+        for i, out in enumerate(inner_outputs)
+        if out in used_inner_outputs
+    )
+    return dict(zip(used_outer_outputs, new_outer_outputs, strict=True))
 
 
 @node_rewriter([CAReduce])

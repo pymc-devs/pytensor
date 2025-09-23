@@ -60,6 +60,7 @@ import time
 import numpy as np
 
 from pytensor.graph.traversal import toposort
+from pytensor.scalar import Add, Mul, Neg, Sub, upcast
 from pytensor.tensor.rewriting.basic import register_specialize
 
 
@@ -82,7 +83,13 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.graph.utils import InconsistencyError
-from pytensor.tensor import basic as ptb
+from pytensor.tensor import as_tensor_variable
+from pytensor.tensor.basic import (
+    AllocEmpty,
+    cast,
+    get_underlying_scalar_constant_value,
+    zeros,
+)
 from pytensor.tensor.blas import (
     Dot22,
     _batched_dot,
@@ -100,10 +107,7 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import (
     Dot,
     _matmul,
-    add,
     mul,
-    neg,
-    sub,
     variadic_add,
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
@@ -145,7 +149,7 @@ def _as_scalar(res, dtype=None):
             # as the cast of the scalar can be done before or after the dot22
             # and this will give the same result.
             if pytensor.scalar.upcast(res.dtype, dtype) == dtype:
-                return ptb.cast(rval, dtype)
+                return cast(rval, dtype)
             else:
                 return None
 
@@ -237,22 +241,27 @@ def _gemm_canonicalize(fgraph, r, scale, rval, maxclients):
         rval.append(scaled(r))
         return rval
 
-    if maxclients and len(fgraph.clients[r]) > maxclients:
+    if (
+        (r.owner is None)
+        or (not isinstance(r.owner.op, Elemwise))
+        or (maxclients and len(fgraph.clients[r]) > maxclients)
+    ):
         rval.append((scale, r))
         return rval
 
-    if r.owner and r.owner.op == sub:
+    scalar_op = r.owner.op.scalar_op
+    if isinstance(scalar_op, Sub):
         _gemm_canonicalize(fgraph, r.owner.inputs[0], scale, rval, 1)
         _gemm_canonicalize(fgraph, r.owner.inputs[1], -scale, rval, 1)
 
-    elif r.owner and r.owner.op == add:
+    elif isinstance(scalar_op, Add):
         for i in r.owner.inputs:
             _gemm_canonicalize(fgraph, i, scale, rval, 1)
 
-    elif r.owner and r.owner.op == neg:
+    elif isinstance(scalar_op, Neg):
         _gemm_canonicalize(fgraph, r.owner.inputs[0], -scale, rval, 1)
 
-    elif r.owner and r.owner.op == mul:
+    elif isinstance(scalar_op, Mul):
         scalars = []
         vectors = []
         matrices = []
@@ -355,9 +364,13 @@ def _gemm_from_factored_list(fgraph, lst):
         # sM can be a tuple of 2 elements or an PyTensor variable.
         if isinstance(sM, tuple):
             sm0, sm1 = sM
-            sm0 = ptb.as_tensor_variable(sm0)
-            if pytensor.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
-                lst2.append((ptb.cast(sm0, sm1.dtype), sM[1]))
+            sm1_dtype = sm1.type.dtype
+            sm0 = as_tensor_variable(sm0, dtype=sm1_dtype)
+            sm0_dtype = sm0.type.dtype
+            if sm0_dtype == sm1_dtype:
+                lst2.append((sm0, sm1))
+            elif upcast(sm0_dtype, sm1_dtype) == sm1_dtype:
+                lst2.append((cast(sm0, sm1_dtype), sm1))
 
     lst = lst2
 
@@ -382,20 +395,15 @@ def _gemm_from_factored_list(fgraph, lst):
             if not M_j.type.in_same_class(M_i.type):
                 continue
 
-            # print 'TRYING', (s_i, M_i, s_j, M_j)
-
             gemm_of_sM_list, old_dot22 = _beta_L_plus_alpha_M(
                 fgraph, s_i, M_i, s_j, M_j
             )
-            # print 'GOT IT', gemm_of_sM_list
             if gemm_of_sM_list:
-                assert len(gemm_of_sM_list) == 1
+                [new_add_inp] = gemm_of_sM_list
                 add_inputs = [
                     item_to_var(input) for k, input in enumerate(lst) if k not in (i, j)
                 ]
-                add_inputs.extend(gemm_of_sM_list)
-                rval = [variadic_add(*add_inputs)]
-                # print "RETURNING GEMM THING", rval
+                rval = [variadic_add(*add_inputs, new_add_inp)]
                 return rval, old_dot22
 
 
@@ -460,35 +468,45 @@ class GemmOptimizer(GraphRewriter):
             callbacks_before = fgraph.execute_callbacks_times.copy()
             callback_before = fgraph.execute_callbacks_time
 
-        nodelist = list(toposort(fgraph.outputs))
+        relevant_core_ops = (
+            pytensor.scalar.Add
+            | pytensor.scalar.Sub
+            | pytensor.scalar.Neg
+            | pytensor.scalar.Mul
+        )
+        nodelist = [
+            a
+            for a in toposort(fgraph.outputs)
+            if (
+                isinstance(a.op, Elemwise)
+                and isinstance(a.op.scalar_op, relevant_core_ops)
+            )
+        ]
+        if not nodelist:
+            return None
+
         nodelist.reverse()
 
         def on_import(new_node):
-            if new_node is not node:
+            if (
+                new_node is not node
+                and isinstance(new_node.op, Elemwise)
+                and isinstance(new_node.op.scalar_op, relevant_core_ops)
+            ):
                 nodelist.append(new_node)
 
         u = pytensor.graph.rewriting.basic.DispatchingFeature(
             on_import, None, None, name="GemmOptimizer"
         )
         fgraph.attach_feature(u)
+        fgraph_apply_nodes = fgraph.apply_nodes
         while did_something:
             nb_iter += 1
             t0 = time.perf_counter()
             time_toposort += time.perf_counter() - t0
             did_something = False
             for node in nodelist:
-                if not (
-                    isinstance(node.op, Elemwise)
-                    and isinstance(
-                        node.op.scalar_op,
-                        pytensor.scalar.Add
-                        | pytensor.scalar.Sub
-                        | pytensor.scalar.Neg
-                        | pytensor.scalar.Mul,
-                    )
-                ):
-                    continue
-                if node not in fgraph.apply_nodes:
+                if node not in fgraph_apply_nodes:
                     # This mean that we already removed this node from
                     # the graph
                     continue
@@ -502,7 +520,6 @@ class GemmOptimizer(GraphRewriter):
                     continue
                 if new_outputs:
                     new_outputs, old_dot22 = new_outputs
-                    assert len(new_outputs) == len(node.outputs)
                     new_outputs[
                         0
                     ].tag.values_eq_approx = values_eq_approx_remove_inf_nan
@@ -518,8 +535,7 @@ class GemmOptimizer(GraphRewriter):
                         did_something = True
                         nb_replacement += 1
                     except InconsistencyError:
-                        # TODO: retry other applications of gemm (see comment
-                        # in _gemm_from_node)
+                        # TODO: retry other applications of gemm (see comment in _gemm_from_node)
                         nb_inconsistency_replace += 1
                     except ReplacementDidNotRemoveError:
                         nb_replacement_didn_t_remove += 1
@@ -644,7 +660,7 @@ def local_gemm_to_ger(fgraph, node):
         xv = x.dimshuffle(0)
         yv = y.dimshuffle(1)
         try:
-            bval = ptb.get_underlying_scalar_constant_value(b)
+            bval = get_underlying_scalar_constant_value(b)
         except NotScalarConstantError:
             # b isn't a constant, GEMM is doing useful pre-scaling
             return
@@ -653,8 +669,7 @@ def local_gemm_to_ger(fgraph, node):
             rval = ger(z, a, xv, yv)
             new_out = [rval]
         elif bval == 0:  # GER on zeros_like should be faster than GEMM
-            zeros = ptb.zeros([x.shape[0], y.shape[1]], x.dtype)
-            rval = ger(zeros, a, xv, yv)
+            rval = ger(zeros([x.shape[0], y.shape[1]], x.dtype), a, xv, yv)
             new_out = [rval]
         else:
             # if bval is another constant, then z is being usefully
@@ -671,32 +686,32 @@ def local_dot22_to_ger_or_gemv(fgraph, node):
     x, y = node.inputs
     xb = x.broadcastable
     yb = y.broadcastable
-    one = ptb.as_tensor_variable(np.asarray(1, dtype=x.dtype))
-    zero = ptb.as_tensor_variable(np.asarray(0, dtype=x.dtype))
+    one = as_tensor_variable(np.asarray(1, dtype=x.dtype))
+    zero = as_tensor_variable(np.asarray(0, dtype=x.dtype))
     if xb[1] and yb[0]:
         # x and y are both vectors so this might qualifies for a GER
         xv = x.dimshuffle(0)
         yv = y.dimshuffle(1)
-        zeros = ptb.zeros([x.shape[0], y.shape[1]], dtype=x.dtype)
+        zeros = zeros([x.shape[0], y.shape[1]], dtype=x.dtype)
         rval = ger(zeros, one, xv, yv)
         new_out = [rval]
     elif xb[0] and yb[1]:
         # x and y are both vectors so this qualifies for a sdot / ddot
         # PyTensor's CGemv will call sdot/ddot at runtime, the Scipy Gemv may not
         xv = x.dimshuffle(1)
-        zeros = ptb.AllocEmpty(x.dtype)(1)
+        zeros = AllocEmpty(x.dtype)(1)
         rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
         new_out = [rval.dimshuffle("x", 0)]
     elif xb[0] and not yb[0] and not yb[1]:
         # x is vector, y is matrix so try gemv
         xv = x.dimshuffle(1)
-        zeros = ptb.AllocEmpty(x.dtype)(y.shape[1])
+        zeros = AllocEmpty(x.dtype)(y.shape[1])
         rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
         new_out = [rval.dimshuffle("x", 0)]
     elif not xb[0] and not xb[1] and yb[1]:
         # x is matrix, y is vector, try gemv
         yv = y.dimshuffle(0)
-        zeros = ptb.AllocEmpty(x.dtype)(x.shape[0])
+        zeros = AllocEmpty(x.dtype)(x.shape[0])
         rval = gemv_no_inplace(zeros, one, x, yv, zero)
         new_out = [rval.dimshuffle(0, "x")]
     else:
@@ -831,9 +846,7 @@ def local_dot22_to_dot22scalar(fgraph, node):
                 " matrix type"
             )
             return False
-        a = ptb.cast(
-            _as_scalar(m.owner.inputs[scalar_idx], dtype=d.dtype), d.type.dtype
-        )
+        a = cast(_as_scalar(m.owner.inputs[scalar_idx], dtype=d.dtype), d.type.dtype)
         assert not a.type.ndim
         dot = _dot22scalar(d.owner.inputs[0], d.owner.inputs[1], a)
 
@@ -871,7 +884,7 @@ def local_dot22_to_dot22scalar(fgraph, node):
     o.remove(d)
     o.remove(s)
 
-    a = ptb.cast(i_scalar[scalar_idx], d.type.dtype)
+    a = cast(i_scalar[scalar_idx], d.type.dtype)
     assert not a.type.ndim
     if len(o) == 0:
         return [_dot22scalar(d.owner.inputs[0], d.owner.inputs[1], a)]

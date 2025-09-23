@@ -13,7 +13,7 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 import builtins
 import math
 from collections.abc import Callable
-from copy import copy
+from functools import lru_cache
 from itertools import chain
 from textwrap import dedent
 from typing import Any, TypeAlias
@@ -58,38 +58,49 @@ class IntegerDivisionError(Exception):
     """
 
 
+@lru_cache
+def _upcast_pairwise(dtype1, dtype2=None, *, cast_policy, floatX):
+    # This tries to keep data in floatX or lower precision, unless we
+    # explicitly request a higher precision datatype.
+    if dtype1 == "float64":
+        keep_float32, keep_float16 = False, False
+    else:
+        keep_float32 = cast_policy == "numpy+floatX" and floatX == "float32"
+        keep_float16 = cast_policy == "numpy+floatX" and floatX == "float16"
+
+    if dtype2 is not None:
+        if dtype2 == "float64":
+            keep_float32, keep_float16 = False, False
+        elif dtype2 == "float32":
+            keep_float16 = False
+
+    if dtype2 is None:
+        rval = dtype1
+    else:
+        rval = (np.zeros((), dtype=dtype1) + np.zeros((), dtype=dtype2)).dtype.name
+
+    if rval == "float64":
+        if keep_float16:
+            return "float16"
+        if keep_float32:
+            return "float32"
+    elif rval == "float32":
+        if keep_float16:
+            return "float16"
+    return rval
+
+
 def upcast(dtype, *dtypes) -> str:
     # This tries to keep data in floatX or lower precision, unless we
     # explicitly request a higher precision datatype.
-    keep_float32 = [
-        (config.cast_policy == "numpy+floatX" and config.floatX == "float32")
-    ]
-    keep_float16 = [
-        (config.cast_policy == "numpy+floatX" and config.floatX == "float16")
-    ]
-
-    def make_array(dt):
-        if dt == "float64":
-            # There is an explicit float64 dtype: we cannot keep float32.
-            keep_float32[0] = False
-            keep_float16[0] = False
-        if dt == "float32":
-            keep_float16[0] = False
-        return np.zeros((), dtype=dt)
-
-    z = make_array(dtype)
+    floatX = config.floatX
+    cast_policy = config.cast_policy
+    res_dtype = _upcast_pairwise(dtype, cast_policy=cast_policy, floatX=floatX)
     for dt in dtypes:
-        z = z + make_array(dt=dt)
-    rval = str(z.dtype)
-    if rval == "float64":
-        if keep_float16[0]:
-            return "float16"
-        if keep_float32[0]:
-            return "float32"
-    elif rval == "float32":
-        if keep_float16[0]:
-            return "float16"
-    return rval
+        res_dtype = _upcast_pairwise(
+            res_dtype, dt, cast_policy=cast_policy, floatX=floatX
+        )
+    return res_dtype
 
 
 def as_common_dtype(*vars):
@@ -779,9 +790,11 @@ def get_scalar_type(dtype, cache: dict[str, ScalarType] = {}) -> ScalarType:
     This caches objects to save allocation and run time.
 
     """
-    if dtype not in cache:
-        cache[dtype] = ScalarType(dtype=dtype)
-    return cache[dtype]
+    try:
+        return cache[dtype]
+    except KeyError:
+        cache[dtype] = res = ScalarType(dtype=dtype)
+    return res
 
 
 # Register C code for ViewOp on Scalars.
@@ -820,6 +833,7 @@ discrete_types: _ScalarTypes = (bool, *integer_types)
 continuous_types: _ScalarTypes = float_types + complex_types
 all_types: _ScalarTypes = discrete_types + continuous_types
 
+float_dtypes = tuple(t.dtype for t in float_types)
 discrete_dtypes = tuple(t.dtype for t in discrete_types)
 
 
@@ -987,25 +1001,28 @@ def constant(x, name=None, dtype=None) -> ScalarConstant:
 
 
 def as_scalar(x: Any, name: str | None = None) -> ScalarVariable:
-    from pytensor.tensor.basic import scalar_from_tensor
-    from pytensor.tensor.type import TensorType
+    if isinstance(x, ScalarVariable):
+        return x
+
+    if isinstance(x, Variable):
+        from pytensor.tensor.basic import scalar_from_tensor
+        from pytensor.tensor.type import TensorType
+
+        if isinstance(x.type, TensorType) and x.type.ndim == 0:
+            return scalar_from_tensor(x)
+        else:
+            raise TypeError(f"Cannot convert {x} to a scalar type")
 
     if isinstance(x, Apply):
+        # FIXME: Why do we support calling this with Apply?
+        #  Also, if we do, why can't we support multiple outputs?
         if len(x.outputs) != 1:
             raise ValueError(
                 "It is ambiguous which output of a multi-output"
                 " Op has to be fetched.",
                 x,
             )
-        else:
-            x = x.outputs[0]
-    if isinstance(x, Variable):
-        if isinstance(x, ScalarVariable):
-            return x
-        elif isinstance(x.type, TensorType) and x.type.ndim == 0:
-            return scalar_from_tensor(x)
-        else:
-            raise TypeError(f"Cannot convert {x} to a scalar type")
+        return as_scalar(x.outputs[0])
 
     return constant(x)
 
@@ -1239,7 +1256,9 @@ class ScalarOp(COp):
                     f"Wrong number of inputs for {self}.make_node "
                     f"(got {len(inputs)}({inputs}), expected {self.nin})"
                 )
-        inputs = [as_scalar(input) for input in inputs]
+        inputs = [
+            inp if isinstance(inp, ScalarVariable) else as_scalar(inp) for inp in inputs
+        ]
         outputs = [t() for t in self.output_types([input.type for input in inputs])]
         if len(outputs) != self.nout:
             inputs_str = (", ".join(str(input) for input in inputs),)
@@ -1329,32 +1348,26 @@ class ScalarOp(COp):
         the given Elemwise inputs, outputs.
 
         """
+        tmp_s_input = []
+        # To keep the same aliasing between inputs
+        mapping = {}
+        for ii in inputs:
+            if ii in mapping:
+                tmp_s_input.append(mapping[ii])
+            else:
+                tmp = mapping[ii] = get_scalar_type(ii.dtype).make_variable()
+                tmp_s_input.append(tmp)
+
         try:
-            tmp_s_input = []
-            # To keep the same aliasing between inputs
-            mapping = dict()
-            for ii in inputs:
-                if ii in mapping:
-                    tmp_s_input.append(mapping[ii])
-                else:
-                    tmp = get_scalar_type(ii.dtype).make_variable()
-                    tmp_s_input.append(tmp)
-                    mapping[ii] = tmp_s_input[-1]
-
-            with config.change_flags(compute_test_value="ignore"):
-                s_op = self(*tmp_s_input, return_list=True)
-
-            # if the scalar_op don't have a c implementation,
-            # we skip its fusion to allow the fusion of the
-            # other ops.
             self.c_code(
-                s_op[0].owner,
+                self.make_node(*tmp_s_input),
                 "test_presence_of_c_code",
+                # FIXME: Shouldn't this be a unique name per unique variable?
                 ["x" for x in inputs],
                 ["z" for z in outputs],
                 {"fail": "%(fail)s"},
             )
-        except (MethodNotDefined, NotImplementedError):
+        except (NotImplementedError, MethodNotDefined):
             return False
         return True
 
@@ -4094,12 +4107,12 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         self.prepare_node_called = set()
         super().__init__(*args, **kwargs)
 
-    def _cleanup_graph(self, inputs, outputs):
+    def _cleanup_graph(self, inputs, outputs, clone: builtins.bool = True):
         # TODO: We could convert to TensorVariable, optimize graph,
         # and then convert back to ScalarVariable.
         # This would introduce rewrites like `log(1 + x) -> log1p`.
 
-        fgraph = FunctionGraph(copy(inputs), copy(outputs))
+        fgraph = FunctionGraph(inputs, outputs, clone=clone)
 
         # Validate node types
         for node in fgraph.apply_nodes:
@@ -4282,7 +4295,15 @@ class Composite(ScalarInnerGraphOp):
 
     init_param: tuple[str, ...] = ("inputs", "outputs")
 
-    def __init__(self, inputs, outputs, name="Composite"):
+    def __init__(
+        self,
+        inputs,
+        outputs,
+        name="Composite",
+        clone_graph: builtins.bool = True,
+        cleanup_graph: builtins.bool = True,
+        output_types_preference=None,
+    ):
         self.name = name
         self._name = None
         # We need to clone the graph as sometimes its nodes already
@@ -4300,15 +4321,20 @@ class Composite(ScalarInnerGraphOp):
         if len(outputs) > 1 or not any(
             isinstance(var.owner.op, Composite) for var in outputs
         ):
-            # No inner Composite
-            inputs, outputs = clone(inputs, outputs)
+            if clone_graph:
+                inputs, outputs = clone(inputs, outputs)
+
         else:
             # Inner Composite that we need to flatten
+            # FIXME: There could be a composite in the middle of the graph, why is this here?
+            #  If anything it should be an optimization, but I suspect lower-level compilation can handle this anyway.
             assert len(outputs) == 1
             # 1. Create a new graph from inputs up to the
             # Composite
             res = pytensor.compile.rebuild_collect_shared(
-                inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
+                inputs=inputs,
+                outputs=outputs[0].owner.inputs,
+                copy_inputs_over=False,
             )  # Clone also the inputs
             # 2. We continue this partial clone with the graph in
             # the inner Composite
@@ -4322,35 +4348,42 @@ class Composite(ScalarInnerGraphOp):
             assert res[0] != inputs
             inputs, outputs = res[0], res2[1]
 
-        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
+        if cleanup_graph:
+            # We already cloned the graph, or the user told us there was no need for it
+            self.inputs, self.outputs = self._cleanup_graph(
+                inputs, outputs, clone=False
+            )
+        else:
+            self.inputs, self.outputs = inputs, outputs
         self.inputs_type = tuple(input.type for input in self.inputs)
         self.outputs_type = tuple(output.type for output in self.outputs)
         self.nin = len(inputs)
         self.nout = len(outputs)
-        super().__init__()
+        super().__init__(output_types_preference=output_types_preference)
 
     def __str__(self):
         if self._name is not None:
             return self._name
 
-        # Rename internal variables
-        for i, r in enumerate(self.fgraph.inputs):
-            r.name = f"i{i}"
-        for i, r in enumerate(self.fgraph.outputs):
-            r.name = f"o{i}"
-        io = set(self.fgraph.inputs + self.fgraph.outputs)
-        for i, r in enumerate(self.fgraph.variables):
-            if (
-                not isinstance(r, Constant)
-                and r not in io
-                and len(self.fgraph.clients[r]) > 1
-            ):
-                r.name = f"t{i}"
+        fgraph = self.fgraph
 
-        if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
+        if len(fgraph.outputs) > 1 or len(fgraph.apply_nodes) > 10:
             self._name = "Composite{...}"
         else:
-            outputs_str = ", ".join(pprint(output) for output in self.fgraph.outputs)
+            # Rename internal variables
+            for i, r in enumerate(fgraph.inputs):
+                r.name = f"i{i}"
+            for i, r in enumerate(fgraph.outputs):
+                r.name = f"o{i}"
+            io = set(fgraph.inputs + fgraph.outputs)
+            for i, r in enumerate(fgraph.variables):
+                if (
+                    not isinstance(r, Constant)
+                    and r not in io
+                    and len(fgraph.clients[r]) > 1
+                ):
+                    r.name = f"t{i}"
+            outputs_str = ", ".join(pprint(output) for output in fgraph.outputs)
             self._name = f"Composite{{{outputs_str}}}"
 
         return self._name
@@ -4363,12 +4396,16 @@ class Composite(ScalarInnerGraphOp):
 
         """
         d = {k: getattr(self, k) for k in self.init_param}
-        out = self.__class__(**d)
-        if name:
-            out.name = name
-        else:
-            name = out.name
-        super(Composite, out).__init__(output_types_preference, name)
+        out = type(self)(
+            **d,
+            cleanup_graph=False,
+            clone_graph=False,
+            output_types_preference=output_types_preference,
+            name=name or self.name,
+        )
+        # No need to recompute the _cocde and nodenames if they were already computed (which is true if the hash of the Op was requested)
+        out._c_code = self._c_code
+        out.nodenames = self.nodenames
         return out
 
     @property
@@ -4435,9 +4472,10 @@ class Composite(ScalarInnerGraphOp):
         fg = self.fgraph
         subd = {e: f"%(i{i})s" for i, e in enumerate(fg.inputs)}
 
+        inputs_set = frozenset(fg.inputs)
         for var in fg.variables:
             if var.owner is None:
-                if var not in fg.inputs:
+                if var not in inputs_set:
                     # This is an orphan
                     if isinstance(var, Constant) and isinstance(var.type, CLinkerType):
                         subd[var] = f"({var.type.c_literal(var.data)})"

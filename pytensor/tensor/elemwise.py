@@ -8,19 +8,18 @@ import numpy as np
 import pytensor.tensor.basic
 from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.null_type import NullType
 from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.basic import failure_code
-from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
-from pytensor.link.c.params_type import ParamsType
+from pytensor.link.c.op import COp, OpenMPOp
 from pytensor.misc.frozendict import frozendict
 from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import int64, transfer_type, upcast
+from pytensor.scalar.basic import transfer_type, upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
@@ -29,7 +28,6 @@ from pytensor.tensor.type import (
     continuous_dtypes,
     discrete_dtypes,
     float_dtypes,
-    lvector,
 )
 from pytensor.tensor.utils import (
     broadcast_static_dim_lengths,
@@ -40,7 +38,7 @@ from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq
 
 
-class DimShuffle(ExternalCOp):
+class DimShuffle(COp):
     """
     Allows to reorder the dimensions of a tensor or insert or remove
     broadcastable dimensions.
@@ -114,20 +112,9 @@ class DimShuffle(ExternalCOp):
     _f16_ok = True
     check_input = False
     __props__ = ("input_ndim", "new_order")
-    c_func_file = "c_code/dimshuffle.c"
-    c_func_name = "APPLY_SPECIFIC(cpu_dimshuffle)"
     view_map = {0: [0]}
 
-    @property
-    def params_type(self):
-        return ParamsType(
-            _new_order=lvector,
-            input_ndim=int64,
-        )
-
     def __init__(self, *, input_ndim: int, new_order: Sequence[int | Literal["x"]]):
-        super().__init__([self.c_func_file], self.c_func_name)
-
         if not isinstance(input_ndim, int):
             raise TypeError(f"input_ndim must be an integer, got {type(int)}")
 
@@ -135,53 +122,44 @@ class DimShuffle(ExternalCOp):
         self.new_order = tuple(new_order)
         self._new_order = [(-1 if x == "x" else x) for x in self.new_order]
 
-        for i, j in enumerate(new_order):
-            if j != "x":
-                if not isinstance(j, int | np.integer):
-                    raise TypeError(
-                        "DimShuffle indices must be Python ints; got "
-                        f"{j} of type {type(j)}."
-                    )
-                if j >= input_ndim:
-                    raise ValueError(
-                        f"new_order[{i}] is {j}, but the input only has "
-                        f"{input_ndim} axes."
-                    )
-                if j in new_order[(i + 1) :]:
-                    raise ValueError(
-                        "The same input dimension may not appear "
-                        f"twice in the list of output dimensions: {new_order}"
-                    )
-
         # List of input dimensions to drop
-        drop = [i for i in range(input_ndim) if i not in new_order]
+        self.drop = drop = [i for i in range(input_ndim) if i not in new_order]
 
         # This is the list of the original dimensions that we keep
-        self.shuffle = [x for x in new_order if x != "x"]
+        self.shuffle = shuffle = [x for x in new_order if x != "x"]
+
+        # Input validation
+        if not all(isinstance(x, int | np.integer) for x in shuffle):
+            raise TypeError(
+                "DimShuffle indices must be Python ints; got "
+                f"{shuffle} of type {[type(x) for x in shuffle]}."
+            )
+        if len(shuffle) != len(set(shuffle)):
+            raise ValueError(
+                f"Some dimensions were duplicated in new_order: {new_order}"
+            )
+        if max(shuffle, default=0) > input_ndim:
+            raise ValueError(
+                f"Some dimensions in new_order are too large for input_ndim {input_ndim}: {new_order}"
+            )
+
         self.transposition = self.shuffle + drop
-        # List of dimensions of the output that are broadcastable and were not
-        # in the original input
-        self.augment = augment = sorted(i for i, x in enumerate(new_order) if x == "x")
-        self.drop = drop
+        # List of expand_dims positions
+        self.augment = augment = [i for i, x in enumerate(new_order) if x == "x"]
 
-        dims_are_shuffled = sorted(self.shuffle) != self.shuffle
-
+        # Properties that are useful for rewrites
+        self.dims_are_shuffled = dims_are_shuffled = sorted(shuffle) != shuffle
         self.is_transpose = dims_are_shuffled and not augment and not drop
         self.is_squeeze = drop and not dims_are_shuffled and not augment
-        self.is_expand_dims = augment and not dims_are_shuffled and not drop
-        self.is_left_expand_dims = self.is_expand_dims and (
+        self.is_expand_dims = is_expand_dims = (
+            augment and not dims_are_shuffled and not drop
+        )
+        self.is_left_expand_dims = is_expand_dims and (
             input_ndim == 0 or new_order[-input_ndim:] == list(range(input_ndim))
         )
-        self.is_right_expand_dims = self.is_expand_dims and new_order[
-            :input_ndim
-        ] == list(range(input_ndim))
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        if not hasattr(self, "func_files"):
-            # Perhaps we are loading an old `Op` version of DimShuffle.
-            # Let's just build the ExternalCOp.
-            super().__init__([self.c_func_file], self.c_func_name)
+        self.is_right_expand_dims = is_expand_dims and new_order[:input_ndim] == list(
+            range(input_ndim)
+        )
 
     def make_node(self, inp):
         input = as_tensor_variable(inp)
@@ -193,22 +171,18 @@ class DimShuffle(ExternalCOp):
 
         input_static_shape = input.type.shape
 
-        # Runtime check for invalid drop
-        for d in self.drop:
-            if input_static_shape[d] not in (1, None):
-                raise TypeError(
-                    f"Input dropped dimension {d} must have length 1 but has {input_static_shape[d]}"
-                )
+        # Check for invalid drop
+        if self.drop:
+            for d in self.drop:
+                if input_static_shape[d] not in (1, None):
+                    raise TypeError(
+                        f"Input dropped dimension {d} must have length 1 but has {input_static_shape[d]}"
+                    )
 
-        out_static_shape = []
-        for dim_idx in self.new_order:
-            if dim_idx == "x":
-                out_static_shape.append(1)
-            else:
-                out_static_shape.append(input_static_shape[dim_idx])
-
-        output = TensorType(dtype=input.type.dtype, shape=out_static_shape)()
-
+        output = TensorType(
+            dtype=input.type.dtype,
+            shape=[1 if d == "x" else input_static_shape[d] for d in self.new_order],
+        )()
         return Apply(self, [input], [output])
 
     def __str__(self):
@@ -272,6 +246,84 @@ class DimShuffle(ExternalCOp):
             return [x.zeros_like(dtype=config.floatX)]
         else:
             return [gz.dimshuffle(grad_order)]
+
+    def c_code(self, node, name, input_names, output_names, sub):
+        [inp] = input_names
+        [out] = output_names
+        nd_in = node.inputs[0].ndim
+        nd_out = node.outputs[0].ndim
+        drop = self.drop
+        fail = sub["fail"]
+
+        code = f"npy_intp dimensions[{nd_out}];\n"
+        code += f"npy_intp strides[{nd_out}];\n"
+        if drop:
+            code += "npy_intp new_size = 1;\n"
+
+        code += dedent(
+            f"""
+            if (PyArray_NDIM({inp}) != {nd_in}) {{
+                PyErr_SetString(PyExc_ValueError, "ExpandDims: Input dimensions do not match expected.");
+                {fail}
+            }}
+            """
+        )
+
+        for i, o in enumerate(self.new_order):
+            if o == "x":
+                code += f"dimensions[{i}] = 1;\n"
+                code += f"strides[{i}] = PyArray_ITEMSIZE({inp});\n"
+            else:
+                code += f"dimensions[{i}] = PyArray_DIMS({inp})[{o}];\n"
+                code += f"strides[{i}] = PyArray_DIMS({inp})[{o}] == 1 ? PyArray_ITEMSIZE({inp}) : PyArray_STRIDES({inp})[{o}];\n"
+                if drop:
+                    code += f"new_size *= dimensions[{i}];\n"
+
+        if drop:
+            code += dedent(
+                f"""
+                if (PyArray_SIZE({inp}) != new_size) {{
+                    PyErr_SetString(PyExc_ValueError, "DimShuffle: Attempting to squeeze axes with size not equal to one.");
+                    {fail}
+                }}
+                """
+            )
+
+        code += dedent(
+            f"""
+            Py_XDECREF({out});
+
+            Py_INCREF(PyArray_DESCR({inp}));
+            {out} = (PyArrayObject*)PyArray_NewFromDescr(&PyArray_Type,
+                                                PyArray_DESCR({inp}),
+                                                {nd_out}, dimensions,
+                                                strides,
+                                                PyArray_DATA({inp}),
+                                                (PyArray_FLAGS({inp}) & ~NPY_ARRAY_OWNDATA),
+                                                NULL);
+
+            if ({out} == NULL) {{
+                {fail}
+            }}
+
+            // Declare it a view of the original input
+            Py_INCREF((PyObject*){inp});
+            PyArray_SetBaseObject({out}, (PyObject*){inp});
+            """
+        )
+
+        if self.dims_are_shuffled:
+            code += dedent(
+                f"""
+                // recalculate flags: CONTIGUOUS, FORTRAN, ALIGNED
+                PyArray_UpdateFlags({out}, NPY_ARRAY_UPDATE_ALL);
+                """
+            )
+
+        return code
+
+    def c_code_cache_version(self):
+        return (0,)
 
 
 class DimShufflePrinter(Printer):
@@ -745,10 +797,24 @@ class Elemwise(OpenMPOp):
                 )
 
     def infer_shape(self, fgraph, node, i_shapes) -> list[tuple[TensorVariable, ...]]:
-        from pytensor.tensor.extra_ops import broadcast_shape
+        out_shape = list(node.outputs[0].type.shape)
+        if missing_dims := [i for i, s in enumerate(out_shape) if s is None]:
+            for inp_idx, inp in enumerate(node.inputs):
+                inp_st_shape = inp.type.shape
+                for d in missing_dims:
+                    if inp_st_shape[d] == 1:
+                        continue  # Nothing to learn from this input
+                    if inp_st_shape[d] is not None:
+                        out_shape[d] = inp_st_shape[d]
+                        missing_dims.remove(d)
+                    else:
+                        out_shape[d] = new_dim = i_shapes[inp_idx][d]
+                        if isinstance(new_dim, Constant):
+                            missing_dims.remove(d)
+                if not missing_dims:
+                    break
 
-        out_shape = broadcast_shape(*i_shapes, arrays_are_shapes=True)
-        return [tuple(as_tensor_variable(s) for s in out_shape)] * len(node.outputs)
+        return [tuple(out_shape) for _ in node.outputs]
 
     def _c_all(self, node, nodename, inames, onames, sub):
         # Some `Op`s directly call `Elemwise._c_all` or `Elemwise.c_code`
