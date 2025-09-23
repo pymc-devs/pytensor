@@ -833,6 +833,7 @@ discrete_types: _ScalarTypes = (bool, *integer_types)
 continuous_types: _ScalarTypes = float_types + complex_types
 all_types: _ScalarTypes = discrete_types + continuous_types
 
+float_dtypes = tuple(t.dtype for t in float_types)
 discrete_dtypes = tuple(t.dtype for t in discrete_types)
 
 
