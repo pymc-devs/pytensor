@@ -1,6 +1,6 @@
 """
 This file contains auxiliary Ops, used during the compilation phase and Ops
-building class (:class:`FromFunctionOp`) and decorator (:func:`as_op`) that
+building class (:class:`FromFunctionOp`) and decorator (:func:`wrap_py`) that
 help make new Ops more rapidly.
 
 """
@@ -268,12 +268,12 @@ class FromFunctionOp(Op):
             obj = load_back(mod, name)
         except (ImportError, KeyError, AttributeError):
             raise pickle.PicklingError(
-                f"Can't pickle as_op(), not found as {mod}.{name}"
+                f"Can't pickle wrap_py(), not found as {mod}.{name}"
             )
         else:
             if obj is not self:
                 raise pickle.PicklingError(
-                    f"Can't pickle as_op(), not the object at {mod}.{name}"
+                    f"Can't pickle wrap_py(), not the object at {mod}.{name}"
                 )
         return load_back, (mod, name)
 
@@ -282,6 +282,18 @@ class FromFunctionOp(Op):
 
 
 def as_op(itypes, otypes, infer_shape=None):
+    import warnings
+
+    warnings.warn(
+        "pytensor.as_op is deprecated and will be removed in a future release. "
+        "Please use pytensor.wrap_py instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return wrap_py(itypes, otypes, infer_shape)
+
+
+def wrap_py(itypes, otypes, infer_shape=None):
     """
     Decorator that converts a function into a basic PyTensor op that will call
     the supplied function as its implementation.
@@ -301,8 +313,8 @@ def as_op(itypes, otypes, infer_shape=None):
 
     Examples
     --------
-    @as_op(itypes=[pytensor.tensor.fmatrix, pytensor.tensor.fmatrix],
-           otypes=[pytensor.tensor.fmatrix])
+    @wrap_py(itypes=[pytensor.tensor.fmatrix, pytensor.tensor.fmatrix],
+             otypes=[pytensor.tensor.fmatrix])
     def numpy_dot(a, b):
         return numpy.dot(a, b)
 

@@ -61,10 +61,16 @@ Convert to Variable
 
 .. autofunction:: pytensor.as_symbolic(...)
 
+Wrap JAX functions
+==================
+
+.. autofunction:: wrap_jax(...)
+
+   Alias for :func:`pytensor.link.jax.ops.wrap_jax`
+
 Debug
 =====
 
 .. autofunction:: pytensor.dprint(...)
 
    Alias for :func:`pytensor.printing.debugprint`
-

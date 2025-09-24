@@ -13,6 +13,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
+from pytensor.link.jax.ops import JAXOp
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
 
@@ -142,3 +143,8 @@ def jax_funcify_OpFromGraph(ofg: OpFromGraph, node=None, **kwargs) -> Callable:
             return fgraph_fn(*inputs)
 
     return opfromgraph
+
+
+@jax_funcify.register(JAXOp)
+def jax_op_funcify(op, **kwargs):
+    return op.perform_jax

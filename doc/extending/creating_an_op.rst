@@ -803,10 +803,10 @@ You can omit the :meth:`Rop` functions. Try to implement the testing apparatus d
 :download:`Solution<extending_pytensor_solution_1.py>`
 
 
-:func:`as_op`
+:func:`wrap_py`
 -------------
 
-:func:`as_op` is a Python decorator that converts a Python function into a
+:func:`wrap_py` is a Python decorator that converts a Python function into a
 basic PyTensor :class:`Op` that will call the supplied function during execution.
 
 This isn't the recommended way to build an :class:`Op`, but allows for a quick implementation.
@@ -839,11 +839,11 @@ It takes an optional :meth:`infer_shape` parameter that must have this signature
     inputs PyTensor variables that were declared.
 
 .. note::
-    The python function wrapped by the :func:`as_op` decorator needs to return a new
+    The python function wrapped by the :func:`wrap_py` decorator needs to return a new
     data allocation, no views or in place modification of the input.
 
 
-:func:`as_op` Example
+:func:`wrap_py` Example
 ^^^^^^^^^^^^^^^^^^^^^
 
 .. testcode:: asop
@@ -852,14 +852,14 @@ It takes an optional :meth:`infer_shape` parameter that must have this signature
     import pytensor.tensor as pt
     import numpy as np
     from pytensor import function
-    from pytensor.compile.ops import as_op
+    from pytensor.compile.ops import wrap_py
 
     def infer_shape_numpy_dot(fgraph, node, input_shapes):
         ashp, bshp = input_shapes
         return [ashp[:-1] + bshp[-1:]]
 
 
-    @as_op(
+    @wrap_py(
         itypes=[pt.dmatrix, pt.dmatrix],
         otypes=[pt.dmatrix],
         infer_shape=infer_shape_numpy_dot,

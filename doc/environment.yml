@@ -25,4 +25,4 @@ dependencies:
   - ablog
   - pip
   - pip:
-    - -e ..
+    - -e ..[jax]
