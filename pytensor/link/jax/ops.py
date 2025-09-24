@@ -1,19 +1,16 @@
 """Convert a jax function to a pytensor compatible function."""
 
-import logging
 from collections.abc import Sequence
 from functools import wraps
 
 import numpy as np
 
-import pytensor.tensor as pt
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Op, Variable
-
-
-log = logging.getLogger(__name__)
+from pytensor.tensor.basic import infer_static_shape
+from pytensor.tensor.type import TensorType
 
 
 class JAXOp(Op):
@@ -28,7 +25,8 @@ class JAXOp(Op):
     output_types : list
         A list of PyTensor types for each output variable.
     jax_function : callable
-        The JAX function that computes outputs from inputs.
+        The JAX function that computes outputs from inputs. It should
+        always return a tuple of outputs, even if there is only one output.
     name : str, optional
         A custom name for the Op instance. If provided, the class name will be
         updated accordingly.
@@ -48,7 +46,7 @@ class JAXOp(Op):
     >>>
     >>> # Create the input and output types, input has a dynamic shape.
     >>> input_type = TensorType("float32", shape=(None,))
-    >>> output_type = TensorType("float32", shape=(1,))
+    >>> output_type = TensorType("float32", shape=())
     >>>
     >>> # Instantiate a JAXOp
     >>> op = JAXOp(
@@ -94,32 +92,45 @@ class JAXOp(Op):
 
     def __repr__(self):
         base = self.__class__.__name__
-        if self.name is not None:
-            base = f"{base}{self.name}"
         props = list(self.__props__)
-        props.remove("name")
-        props = ",".join(f"{prop}={getattr(self, prop, '?')}" for prop in props)
+        if self.name is not None:
+            props.insert(0, "name")
+        props = ", ".join(f"{prop}={getattr(self, prop)}" for prop in props)
         return f"{base}({props})"
 
     def make_node(self, *inputs: Variable) -> Apply:
         """Create an Apply node with the given inputs and inferred outputs."""
+        if len(inputs) != len(self.input_types):
+            raise ValueError(
+                f"Op {self} expected {len(self.input_types)} inputs, got {len(inputs)}"
+            )
+        filtered_inputs = [
+            inp_type.filter_variable(inp)
+            for inp, inp_type in zip(inputs, self.input_types)
+        ]
         outputs = [output_type() for output_type in self.output_types]
-        return Apply(self, inputs, outputs)
+        return Apply(self, filtered_inputs, outputs)
 
     def perform(self, node, inputs, outputs):
         """Execute the JAX function and store results in output storage."""
         results = self.jitted_func(*inputs)
+        if not isinstance(results, tuple):
+            raise TypeError("JAX function must return a tuple of outputs.")
         if len(results) != len(outputs):
             raise ValueError(
                 f"JAX function returned {len(results)} outputs, but "
                 f"{len(outputs)} were expected."
             )
-        for i, result in enumerate(results):
-            outputs[i][0] = np.array(result, dtype=self.output_types[i].dtype)
+        for output_container, result, out_type in zip(
+            outputs, results, self.output_types
+        ):
+            output_container[0] = np.array(result, dtype=out_type.dtype)
 
     def perform_jax(self, *inputs):
         """Execute the JAX function directly, returning JAX arrays."""
         outputs = self.jitted_func(*inputs)
+        if not isinstance(outputs, tuple):
+            raise TypeError("JAX function must return a tuple of outputs.")
         if len(outputs) == 1:
             return outputs[0]
         return outputs
@@ -129,10 +140,11 @@ class JAXOp(Op):
         import jax
 
         # Find indices of outputs that need gradients
-        connected_output_indices = []
-        for i, output_grad in enumerate(output_gradients):
-            if not isinstance(output_grad.type, DisconnectedType):
-                connected_output_indices.append(i)
+        connected_output_indices = [
+            i
+            for i, output_grad in enumerate(output_gradients)
+            if not isinstance(output_grad.type, DisconnectedType)
+        ]
 
         num_inputs = len(inputs)
 
@@ -163,21 +175,24 @@ class JAXOp(Op):
                 ]
             )
 
+        if self.name is not None:
+            name = "vjp_" + self.name
+        else:
+            name = "vjp_jax_op"
+
         # Create VJP operation
         vjp_op = JAXOp(
             self.input_types
             + tuple(self.output_types[i] for i in connected_output_indices),
             [self.input_types[i] for i in range(num_inputs)],
             vjp_operation,
-            name="VJP" + (self.name if self.name is not None else ""),
+            name=name,
         )
 
-        gradient_outputs = vjp_op(
-            *[*inputs, *[output_gradients[i] for i in connected_output_indices]]
+        return vjp_op(
+            *[*inputs, *[output_gradients[i] for i in connected_output_indices]],
+            return_list=True,
         )
-        if not isinstance(gradient_outputs, Sequence):
-            gradient_outputs = [gradient_outputs]
-        return gradient_outputs
 
 
 def as_jax_op(jax_function=None, *, allow_eval=True):
@@ -235,34 +250,23 @@ def as_jax_op(jax_function=None, *, allow_eval=True):
 
     Or Equinox modules:
 
-    >>> x = pt.tensor("x", shape=(3,))
-    >>> y = pt.tensor("y", shape=(3,))
-    >>> import equinox as eqx
-    >>> mlp = eqx.nn.MLP(3, 3, 3, depth=2, activation=jnp.tanh, key=jax.random.key(0))
-    >>> mlp = eqx.tree_at(lambda m: m.layers[0].bias, mlp, y)
-    >>> @as_jax_op
-    ... def neural_network(x, mlp):
-    ...     return mlp(x)
-    >>> out = neural_network(x, mlp)
-
-    Notes
-    -----
-    The function is based on a blog post by Ricardo Vieira and Adrian Seyboldt,
-    available at
-    `pymc-labs.io <https://www.pymc-labs.io/blog-posts/jax-functions-in-pymc-3-quick
-    -examples/>`__.
-    To accept functions and non-PyTensor variables as input, the function uses
-    :func:`equinox.partition` and :func:`equinox.combine` to split and combine the
-    variables. Shapes are inferred using
-    :func:`pytensor.compile.builders.infer_shape` and :func:`jax.eval_shape`.
-
+    >>> x = pt.tensor("x", shape=(3,))  # doctest +SKIP
+    >>> y = pt.tensor("y", shape=(3,))  # doctest +SKIP
+    >>> import equinox as eqx  # doctest +SKIP
+    >>> mlp = eqx.nn.MLP(
+    ...     3, 3, 3, depth=2, activation=jnp.tanh, key=jax.random.key(0)
+    ... )  # doctest +SKIP
+    >>> mlp = eqx.tree_at(lambda m: m.layers[0].bias, mlp, y)  # doctest +SKIP
+    >>> @as_jax_op  # doctest +SKIP
+    ... def neural_network(x, mlp):  # doctest +SKIP
+    ...     return mlp(x)  # doctest +SKIP
+    >>> out = neural_network(x, mlp)  # doctest +SKIP
     """
 
     def decorator(func):
         name = func.__name__
 
         try:
-            import equinox as eqx
             import jax
         except ImportError as e:
             raise ImportError(
@@ -345,7 +349,7 @@ def _find_output_types(
             continue
 
         # Try to infer static shape
-        _, inferred_shape = pt.basic.infer_static_shape(variable.shape)
+        _, inferred_shape = infer_static_shape(variable.shape)
         if not any(dimension is None for dimension in inferred_shape):
             resolved_input_shapes.append(inferred_shape)
             continue
@@ -404,14 +408,14 @@ def _find_output_types(
     # If we used shape evaluation, set all output shapes to unknown
     if requires_shape_evaluation:
         output_types = [
-            pt.TensorType(
+            TensorType(
                 dtype=output_shape.dtype, shape=tuple(None for _ in output_shape.shape)
             )
             for output_shape in output_shapes_flat
         ]
     else:
         output_types = [
-            pt.TensorType(dtype=output_shape.dtype, shape=output_shape.shape)
+            TensorType(dtype=output_shape.dtype, shape=output_shape.shape)
             for output_shape in output_shapes_flat
         ]
 
