@@ -166,7 +166,7 @@ from pytensor.scan import checkpoints
 from pytensor.scan.basic import scan
 from pytensor.scan.views import foldl, foldr, map, reduce
 from pytensor.compile.builders import OpFromGraph
-from pytensor.link.jax.ops import as_jax_op
+from pytensor.link.jax.ops import wrap_jax
 # isort: on
 
 

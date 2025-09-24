@@ -64,9 +64,9 @@ Convert to Variable
 Wrap JAX functions
 ==================
 
-.. autofunction:: as_jax_op(...)
+.. autofunction:: wrap_jax(...)
 
-   Alias for :func:`pytensor.link.jax.ops.as_jax_op`
+   Alias for :func:`pytensor.link.jax.ops.wrap_jax`
 
 Debug
 =====
@@ -74,4 +74,3 @@ Debug
 .. autofunction:: pytensor.dprint(...)
 
    Alias for :func:`pytensor.printing.debugprint`
-

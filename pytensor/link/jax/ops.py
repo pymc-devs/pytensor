@@ -195,7 +195,7 @@ class JAXOp(Op):
         )
 
 
-def as_jax_op(jax_function=None, *, allow_eval=True):
+def wrap_jax(jax_function=None, *, allow_eval=True):
     """Return a PyTensor-compatible function from a JAX jittable function.
 
     This decorator wraps a JAX function so that it accepts and returns
@@ -223,7 +223,7 @@ def as_jax_op(jax_function=None, *, allow_eval=True):
 
     >>> import jax.numpy as jnp
     >>> import pytensor.tensor as pt
-    >>> @as_jax_op
+    >>> @wrap_jax
     ... def add(x, y):
     ...     return jnp.add(x, y)
     >>> x = pt.scalar("x")
@@ -238,7 +238,7 @@ def as_jax_op(jax_function=None, *, allow_eval=True):
     >>> import jax
     >>> import jax.numpy as jnp
     >>> import pytensor.tensor as pt
-    >>> @as_jax_op
+    >>> @wrap_jax
     ... def complex_function(x, y, scale=1.0):
     ...     return {
     ...         "sum": jnp.add(x, y) * scale,
@@ -257,7 +257,7 @@ def as_jax_op(jax_function=None, *, allow_eval=True):
     ...     3, 3, 3, depth=2, activation=jnp.tanh, key=jax.random.key(0)
     ... )  # doctest +SKIP
     >>> mlp = eqx.tree_at(lambda m: m.layers[0].bias, mlp, y)  # doctest +SKIP
-    >>> @as_jax_op  # doctest +SKIP
+    >>> @wrap_jax  # doctest +SKIP
     ... def neural_network(x, mlp):  # doctest +SKIP
     ...     return mlp(x)  # doctest +SKIP
     >>> out = neural_network(x, mlp)  # doctest +SKIP
@@ -270,7 +270,7 @@ def as_jax_op(jax_function=None, *, allow_eval=True):
             import jax
         except ImportError as e:
             raise ImportError(
-                "The as_jax_op decorator requires both jax and equinox to be installed."
+                "The wrap_jax decorator requires both jax and equinox to be installed."
             ) from e
 
         @wraps(func)

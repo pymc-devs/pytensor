@@ -1,8 +1,7 @@
 import numpy as np
 import pytest
 
-import pytensor.tensor as pt
-from pytensor import as_jax_op, config, grad
+from pytensor import config, grad, wrap_jax
 from pytensor.compile.sharedvalue import shared
 from pytensor.link.jax.ops import JAXOp
 from pytensor.scalar import all_types
@@ -24,16 +23,16 @@ def test_two_inputs_single_output():
     def f(x, y):
         return jax.nn.sigmoid(x + y)
 
-    # Test with as_jax_op decorator
-    out = as_jax_op(f)(x, y)
-    grad_out = grad(pt.sum(out), [x, y])
+    # Test with wrap_jax decorator
+    out = wrap_jax(f)(x, y)
+    grad_out = grad(out.sum(), [x, y])
 
     compare_jax_and_py([x, y], [out, *grad_out], test_values)
     with jax.disable_jit():
         compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
     def f(x, y):
-        return [jax.nn.sigmoid(x + y)]
+        return (jax.nn.sigmoid(x + y),)
 
     # Test direct JAXOp usage
     jax_op = JAXOp(
@@ -42,8 +41,30 @@ def test_two_inputs_single_output():
         f,
     )
     out = jax_op(x, y)
-    grad_out = grad(pt.sum(out), [x, y])
+    grad_out = grad(out.sum(), [x, y])
     compare_jax_and_py([x, y], [out, *grad_out], test_values)
+
+
+def test_op_returns_list():
+    x = tensor("x", shape=(2,))
+    y = tensor("y", shape=(2,))
+
+    test_values = [np.ones((2,)).astype(config.floatX) for inp in (x, y)]
+
+    def f(x, y):
+        return jax.nn.sigmoid(x + y)
+
+    # Test direct JAXOp usage
+    jax_op = JAXOp(
+        [x.type, y.type],
+        [TensorType(config.floatX, shape=(2,))],
+        f,
+    )
+
+    with pytest.raises(TypeError, match="tuple of outputs"):
+        out = jax_op(x, y)
+        grad_out = grad(out.sum(), [x, y])
+        compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
 
 def test_two_inputs_tuple_output():
@@ -57,9 +78,9 @@ def test_two_inputs_tuple_output():
     def f(x, y):
         return jax.nn.sigmoid(x + y), y * 2
 
-    # Test with as_jax_op decorator
-    out1, out2 = as_jax_op(f)(x, y)
-    grad_out = grad(pt.sum(out1 + out2), [x, y])
+    # Test with wrap_jax decorator
+    out1, out2 = wrap_jax(f)(x, y)
+    grad_out = grad((out1 + out2).sum(), [x, y])
 
     compare_jax_and_py([x, y], [out1, out2, *grad_out], test_values)
     with jax.disable_jit():
@@ -76,7 +97,7 @@ def test_two_inputs_tuple_output():
         f,
     )
     out1, out2 = jax_op(x, y)
-    grad_out = grad(pt.sum(out1 + out2), [x, y])
+    grad_out = grad((out1 + out2).sum(), [x, y])
     compare_jax_and_py([x, y], [out1, out2, *grad_out], test_values)
 
 
@@ -90,11 +111,11 @@ def test_two_inputs_list_output_one_unused_output():
     ]
 
     def f(x, y):
-        return [jax.nn.sigmoid(x + y), y * 2]
+        return (jax.nn.sigmoid(x + y), y * 2)
 
-    # Test with as_jax_op decorator
-    out, _ = as_jax_op(f)(x, y)
-    grad_out = grad(pt.sum(out), [x, y])
+    # Test with wrap_jax decorator
+    out, _ = wrap_jax(f)(x, y)
+    grad_out = grad(out.sum(), [x, y])
 
     compare_jax_and_py([x, y], [out, *grad_out], test_values)
     with jax.disable_jit():
@@ -107,7 +128,7 @@ def test_two_inputs_list_output_one_unused_output():
         f,
     )
     out, _ = jax_op(x, y)
-    grad_out = grad(pt.sum(out), [x, y])
+    grad_out = grad(out.sum(), [x, y])
     compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
 
@@ -119,9 +140,9 @@ def test_single_input_tuple_output():
     def f(x):
         return jax.nn.sigmoid(x), x * 2
 
-    # Test with as_jax_op decorator
-    out1, out2 = as_jax_op(f)(x)
-    grad_out = grad(pt.sum(out1), [x])
+    # Test with wrap_jax decorator
+    out1, out2 = wrap_jax(f)(x)
+    grad_out = grad(out1.sum(), [x])
 
     compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
     with jax.disable_jit():
@@ -136,7 +157,7 @@ def test_single_input_tuple_output():
         f,
     )
     out1, out2 = jax_op(x)
-    grad_out = grad(pt.sum(out1), [x])
+    grad_out = grad(out1.sum(), [x])
     compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
 
 
@@ -148,9 +169,9 @@ def test_scalar_input_tuple_output():
     def f(x):
         return jax.nn.sigmoid(x), x
 
-    # Test with as_jax_op decorator
-    out1, out2 = as_jax_op(f)(x)
-    grad_out = grad(pt.sum(out1), [x])
+    # Test with wrap_jax decorator
+    out1, out2 = wrap_jax(f)(x)
+    grad_out = grad(out1.sum(), [x])
 
     compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
     with jax.disable_jit():
@@ -165,7 +186,7 @@ def test_scalar_input_tuple_output():
         f,
     )
     out1, out2 = jax_op(x)
-    grad_out = grad(pt.sum(out1), [x])
+    grad_out = grad(out1.sum(), [x])
     compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
 
 
@@ -175,11 +196,11 @@ def test_single_input_list_output():
     test_values = [rng.normal(size=(x.type.shape)).astype(config.floatX)]
 
     def f(x):
-        return [jax.nn.sigmoid(x), 2 * x]
+        return (jax.nn.sigmoid(x), 2 * x)
 
-    # Test with as_jax_op decorator
-    out1, out2 = as_jax_op(f)(x)
-    grad_out = grad(pt.sum(out1), [x])
+    # Test with wrap_jax decorator
+    out1, out2 = wrap_jax(f)(x)
+    grad_out = grad(out1.sum(), [x])
 
     compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
     with jax.disable_jit():
@@ -197,7 +218,7 @@ def test_single_input_list_output():
         f,
     )
     out1, out2 = jax_op(x)
-    grad_out = grad(pt.sum(out1), [x])
+    grad_out = grad(out1.sum(), [x])
     compare_jax_and_py([x], [out1, out2, *grad_out], test_values)
 
 
@@ -210,13 +231,13 @@ def test_pytree_input_tuple_output():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    @as_jax_op
+    @wrap_jax
     def f(x, y):
         return jax.nn.sigmoid(x), 2 * x + y["y"] + y["y2"][0]
 
-    # Test with as_jax_op decorator
+    # Test with wrap_jax decorator
     out = f(x, y_tmp)
-    grad_out = grad(pt.sum(out[1]), [x, y])
+    grad_out = grad(out[1].sum(), [x, y])
 
     compare_jax_and_py([x, y], [out[0], out[1], *grad_out], test_values)
 
@@ -235,13 +256,13 @@ def test_pytree_input_pytree_output():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    @as_jax_op
+    @wrap_jax
     def f(x, y):
         return x, jax.tree_util.tree_map(lambda x: jax.numpy.exp(x), y)
 
-    # Test with as_jax_op decorator
+    # Test with wrap_jax decorator
     out = f(x, y_tmp)
-    grad_out = grad(pt.sum(out[1]["b"][0]), [x, y])
+    grad_out = grad(out[1]["b"][0].sum(), [x, y])
 
     compare_jax_and_py([x, y], [out[0], out[1]["a"], *grad_out], test_values)
 
@@ -263,7 +284,7 @@ def test_pytree_input_with_non_graph_args():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    @as_jax_op
+    @wrap_jax
     def f(x, y, depth, which_variable):
         if which_variable == "x":
             var = x
@@ -275,16 +296,16 @@ def test_pytree_input_with_non_graph_args():
             var = jax.nn.sigmoid(var)
         return var
 
-    # Test with as_jax_op decorator
+    # Test with wrap_jax decorator
     # arguments depth and which_variable are not part of the graph
     out = f(x, y_tmp, depth=3, which_variable="x")
-    grad_out = grad(pt.sum(out), [x])
+    grad_out = grad(out.sum(), [x])
     compare_jax_and_py([x, y], [out[0], *grad_out], test_values)
     with jax.disable_jit():
         compare_jax_and_py([x, y], [out[0], *grad_out], test_values)
 
     out = f(x, y_tmp, depth=7, which_variable="y")
-    grad_out = grad(pt.sum(out), [x])
+    grad_out = grad(out.sum(), [x])
     compare_jax_and_py([x, y], [out[0], *grad_out], test_values)
     with jax.disable_jit():
         compare_jax_and_py([x, y], [out[0], *grad_out], test_values)
@@ -307,9 +328,9 @@ def test_unused_matrix_product():
     def f(x, y):
         return x[:, None] @ y[None], jax.numpy.exp(x)
 
-    # Test with as_jax_op decorator
-    out = as_jax_op(f)(x, y)
-    grad_out = grad(pt.sum(out[1]), [x])
+    # Test with wrap_jax decorator
+    out = wrap_jax(f)(x, y)
+    grad_out = grad(out[1].sum(), [x])
 
     compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
 
@@ -326,7 +347,7 @@ def test_unused_matrix_product():
         f,
     )
     out = jax_op(x, y)
-    grad_out = grad(pt.sum(out[1]), [x])
+    grad_out = grad(out[1].sum(), [x])
     compare_jax_and_py([x, y], [out[1], *grad_out], test_values)
 
 
@@ -338,13 +359,13 @@ def test_unknown_static_shape():
         rng.normal(size=(inp.type.shape)).astype(config.floatX) for inp in (x, y)
     ]
 
-    x_cumsum = pt.cumsum(x)  # Now x_cumsum has an unknown shape
+    x_cumsum = x.cumsum()  # Now x_cumsum has an unknown shape
 
     def f(x, y):
-        return [x * jax.numpy.ones(3)]
+        return (x * jax.numpy.ones(3),)
 
-    (out,) = as_jax_op(f)(x_cumsum, y)
-    grad_out = grad(pt.sum(out), [x])
+    (out,) = wrap_jax(f)(x_cumsum, y)
+    grad_out = grad(out.sum(), [x])
 
     compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
@@ -358,13 +379,13 @@ def test_unknown_static_shape():
         f,
     )
     out = jax_op(x_cumsum, y)
-    grad_out = grad(pt.sum(out), [x])
+    grad_out = grad(out.sum(), [x])
     compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
 
 def test_nn():
-    import equinox as eqx
-    import equinox.nn as nn
+    eqx = pytest.importorskip("equinox")
+    nn = pytest.importorskip("equinox.nn")
 
     rng = np.random.default_rng(13)
     x = tensor("x", shape=(3,))
@@ -378,12 +399,12 @@ def test_nn():
     mlp = nn.MLP(3, 3, 3, depth=2, activation=jax.numpy.tanh, key=jax.random.key(0))
     mlp = eqx.tree_at(lambda m: m.layers[0].bias, mlp, y)
 
-    @as_jax_op
+    @wrap_jax
     def f(x, mlp):
         return mlp(x)
 
     out = f(x, mlp)
-    grad_out = grad(pt.sum(out), [x])
+    grad_out = grad(out.sum(), [x])
 
     compare_jax_and_py([x, y], [out, *grad_out], test_values)
 
@@ -395,7 +416,7 @@ def test_no_inputs():
     def f():
         return jax.numpy.array(42.0)
 
-    out = as_jax_op(f)()
+    out = wrap_jax(f)()
     assert out.eval() == 42.0
 
 
@@ -406,7 +427,7 @@ def test_unknown_shape():
         return x * 2
 
     with pytest.raises(ValueError, match="Please provide inputs"):
-        as_jax_op(f)(x)
+        wrap_jax(f)(x)
 
 
 def test_unknown_shape_with_eval():
@@ -416,8 +437,8 @@ def test_unknown_shape_with_eval():
     def f(x):
         return x * 2
 
-    out = as_jax_op(f)(x)
-    grad_out = grad(pt.sum(out), [x])
+    out = wrap_jax(f)(x)
+    grad_out = grad(out.sum(), [x])
 
     compare_jax_and_py([], [out, *grad_out], [])
 
@@ -425,7 +446,37 @@ def test_unknown_shape_with_eval():
         compare_jax_and_py([], [out, *grad_out], [], must_be_device_array=False)
 
     with pytest.raises(ValueError, match="Please provide inputs"):
-        as_jax_op(f, allow_eval=False)(x)
+        wrap_jax(f, allow_eval=False)(x)
+
+
+def test_decorator_forms():
+    x = tensor("x", shape=(3,))
+    y = tensor("y", shape=(3,))
+
+    @wrap_jax
+    def the_name1(x, y):
+        return (x + y).sum()
+
+    @wrap_jax(allow_eval=True)
+    def the_name2(x, y):
+        return (x + y).sum()
+
+    the_name1(x, y)
+    the_name2(x, y)
+
+
+def test_repr():
+    x = tensor("x", shape=(3,))
+    y = tensor("y", shape=(3,))
+
+    def the_name(x, y):
+        return (x + y).sum()
+
+    jax_op = wrap_jax(the_name)
+    assert "the_name" in repr(jax_op(x, y).owner.op)
+
+    (grad_x, _) = grad(jax_op(x, y), [x, y])
+    assert "vjp_the_name" in repr(grad_x.owner.op)
 
 
 class TestDtypes:
@@ -446,7 +497,7 @@ class TestDtypes:
                 for inp in (x, y)
             ]
 
-        @as_jax_op
+        @wrap_jax
         def f(x, y):
             out = jax.numpy.add(x, y)
             return jax.numpy.real(out).astype(out_dtype)
@@ -482,7 +533,7 @@ class TestDtypes:
         else:
             test_values.append(np.random.normal(size=(3,)).astype(y.type.dtype))
 
-        @as_jax_op
+        @wrap_jax
         def f(x, y):
             out = jax.numpy.add(x, y)
             return jax.numpy.real(out).astype(in1_dtype)
@@ -501,7 +552,7 @@ class TestDtypes:
             inputs = [x, y]
             outputs = [out]
 
-        fn, _ = compare_jax_and_py(inputs, outputs, test_values)
+        compare_jax_and_py(inputs, outputs, test_values)
 
         with jax.disable_jit():
             if "float" in in1_dtype and "float" in in2_dtype:
