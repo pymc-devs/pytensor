@@ -38,7 +38,6 @@ intersphinx_mapping = {
     "jax": ("https://jax.readthedocs.io/en/latest", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "torch": ("https://pytorch.org/docs/stable", None),
-    "equinox": ("https://docs.kidger.site/equinox/", None),
 }
 
 needs_sphinx = "3"

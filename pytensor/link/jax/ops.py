@@ -42,7 +42,7 @@ class JAXOp(Op):
     >>>
     >>> # Create the jax function that sums the input array.
     >>> def sum_function(x, y):
-    ...     return jnp.sum(x + y)
+    ...     return (jnp.sum(x + y),)
     >>>
     >>> # Create the input and output types, input has a dynamic shape.
     >>> input_type = TensorType("float32", shape=(None,))
@@ -67,7 +67,7 @@ class JAXOp(Op):
     [array(14., dtype=float32)]
     >>>
     >>> # Compute the gradient of op(x, y) with respect to x.
-    >>> g = pt.grad(result[0], x)
+    >>> g = pt.grad(result, x)
     >>> grad_f = pytensor.function([x, y], [g])
     >>> print(
     ...     grad_f(
@@ -223,6 +223,7 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
 
     >>> import jax.numpy as jnp
     >>> import pytensor.tensor as pt
+    >>> from pytensor import wrap_jax
     >>> @wrap_jax
     ... def add(x, y):
     ...     return jnp.add(x, y)
@@ -238,13 +239,14 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
     >>> import jax
     >>> import jax.numpy as jnp
     >>> import pytensor.tensor as pt
+    >>> from pytensor import wrap_jax
     >>> @wrap_jax
     ... def complex_function(x, y, scale=1.0):
     ...     return {
     ...         "sum": jnp.add(x, y) * scale,
     ...     }
-    >>> x = pt.vector("x")
-    >>> y = pt.vector("y")
+    >>> x = pt.vector("x", shape=(3,))
+    >>> y = pt.vector("y", shape=(3,))
     >>> result = complex_function(x, y, scale=2.0)
     >>> f = pytensor.function([x, y], [result["sum"]])
 
@@ -261,6 +263,21 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
     ... def neural_network(x, mlp):  # doctest +SKIP
     ...     return mlp(x)  # doctest +SKIP
     >>> out = neural_network(x, mlp)  # doctest +SKIP
+
+    If the input shapes are not fully determined, and valid
+    input shapes cannot be inferred by evaluating the inputs either,
+    an error will be raised:
+
+    >>> import jax.numpy as jnp
+    >>> import pytensor.tensor as pt
+    >>> @wrap_jax
+    ... def add(x, y):
+    ...     return jnp.add(x, y)
+    >>> x = pt.vector("x")  # shape is not fully determined
+    >>> y = pt.vector("y")  # shape is not fully determined
+    >>> result = add(x, y)
+    ValueError: Could not compile a function to infer example shapes. Please provide inputs with fully determined shapes by calling pt.specify_shape.
+    ...
     """
 
     def decorator(func):
