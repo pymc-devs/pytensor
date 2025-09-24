@@ -1,14 +1,15 @@
 import pickle
 
 import numpy as np
+import pytest
 
 from pytensor import function
-from pytensor.compile.ops import as_op
+from pytensor.compile.ops import as_op, wrap_py
 from pytensor.tensor.type import dmatrix, dvector
 from tests import unittest_tools as utt
 
 
-@as_op([dmatrix, dmatrix], dmatrix)
+@wrap_py([dmatrix, dmatrix], dmatrix)
 def mul(a, b):
     """
     This is for test_pickle, since the function still has to be
@@ -21,9 +22,24 @@ class TestOpDecorator(utt.InferShapeTester):
     def test_1arg(self):
         x = dmatrix("x")
 
-        @as_op(dmatrix, dvector)
+        @wrap_py(dmatrix, dvector)
         def cumprod(x):
             return np.cumprod(x)
+
+        fn = function([x], cumprod(x))
+        r = fn([[1.5, 5], [2, 2]])
+        r0 = np.array([1.5, 7.5, 15.0, 30.0])
+
+        assert np.allclose(r, r0), (r, r0)
+
+    def test_deprecation(self):
+        x = dmatrix("x")
+
+        with pytest.warns(DeprecationWarning):
+
+            @as_op(dmatrix, dvector)
+            def cumprod(x):
+                return np.cumprod(x)
 
         fn = function([x], cumprod(x))
         r = fn([[1.5, 5], [2, 2]])
@@ -37,7 +53,7 @@ class TestOpDecorator(utt.InferShapeTester):
         y = dvector("y")
         y.tag.test_value = [0, 0, 0, 0]
 
-        @as_op([dmatrix, dvector], dvector)
+        @wrap_py([dmatrix, dvector], dvector)
         def cumprod_plus(x, y):
             return np.cumprod(x) + y
 
@@ -57,7 +73,7 @@ class TestOpDecorator(utt.InferShapeTester):
             x, y = shapes
             return [y]
 
-        @as_op([dmatrix, dvector], dvector, infer_shape)
+        @wrap_py([dmatrix, dvector], dvector, infer_shape)
         def cumprod_plus(x, y):
             return np.cumprod(x) + y
 
