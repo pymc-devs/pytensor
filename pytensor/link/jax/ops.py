@@ -270,15 +270,15 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
             import jax
         except ImportError as e:
             raise ImportError(
-                "The wrap_jax decorator requires both jax and equinox to be installed."
+                "The wrap_jax decorator requires jax to be installed."
             ) from e
 
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Partition inputs into dynamic PyTensor variables and static variables.
             # Static variables don't participate in the computational graph.
-            pytensor_variables, static_values = eqx.partition(
-                (args, kwargs), lambda x: isinstance(x, pt.Variable)
+            pytensor_variables, static_values = _eqx_partition(
+                (args, kwargs), lambda x: isinstance(x, Variable)
             )
 
             # Flatten the PyTensor variables for processing
@@ -297,13 +297,13 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
             def flattened_function(*flat_variables):
                 """Execute the original function with flattened inputs."""
                 variables = jax.tree.unflatten(variables_treedef, flat_variables)
-                reconstructed_args, reconstructed_kwargs = eqx.combine(
+                reconstructed_args, reconstructed_kwargs = _eqx_combine(
                     variables, static_values
                 )
                 function_outputs = func(*reconstructed_args, **reconstructed_kwargs)
-                array_outputs, _ = eqx.partition(function_outputs, eqx.is_array)
+                array_outputs, _ = _eqx_partition(function_outputs, _is_array)
                 flattened_outputs, _ = jax.tree.flatten(array_outputs)
-                return flattened_outputs
+                return tuple(flattened_outputs)
 
             # Create the JAX operation
             jax_op_instance = JAXOp(
@@ -319,7 +319,7 @@ def wrap_jax(jax_function=None, *, allow_eval=True):
                 flattened_results = [flattened_results]
 
             output_variables = jax.tree.unflatten(output_treedef, flattened_results)
-            final_outputs = eqx.combine(output_variables, output_static)
+            final_outputs = _eqx_combine(output_variables, output_static)
 
             return final_outputs
 
@@ -335,7 +335,6 @@ def _find_output_types(
     jax_function, inputs_flat, input_treedef, static_input, *, allow_eval=True
 ):
     """Determine output types with jax.eval_shape on dummy inputs."""
-    import equinox as eqx
     import jax
     import jax.numpy as jnp
 
@@ -391,9 +390,9 @@ def _find_output_types(
     def wrapped_jax_function(input_arrays):
         """Wrapper to extract output metadata during shape evaluation."""
         variables = jax.tree.unflatten(input_treedef, input_arrays)
-        reconstructed_args, reconstructed_kwargs = eqx.combine(variables, static_input)
+        reconstructed_args, reconstructed_kwargs = _eqx_combine(variables, static_input)
         function_outputs = jax_function(*reconstructed_args, **reconstructed_kwargs)
-        array_outputs, static_outputs = eqx.partition(function_outputs, eqx.is_array)
+        array_outputs, static_outputs = _eqx_partition(function_outputs, _is_array)
 
         # Store metadata for later use
         output_metadata_storage["output_static"] = static_outputs
@@ -420,3 +419,102 @@ def _find_output_types(
         ]
 
     return output_types, output_treedef, output_static
+
+
+# From the equinox library, licensed under Apache 2.0
+# https://github.com/patrick-kidger/equinox
+#
+# Copied here to avoid a dependency on equinox just these functions.
+def _eqx_combine(*pytrees, is_leaf=None):
+    """Combines multiple PyTrees into one PyTree, by replacing `None` leaves.
+
+    !!! example
+
+        ```python
+        pytree1 = [None, 1, 2]
+        pytree2 = [0, None, None]
+        equinox.combine(pytree1, pytree2)  # [0, 1, 2]
+        ```
+
+    !!! tip
+
+        The idea is that `equinox.combine` should be used to undo a call to
+        [`equinox.filter`][] or [`equinox.partition`][].
+
+    **Arguments:**
+
+    - `*pytrees`: a sequence of PyTrees all with the same structure.
+    - `is_leaf`: As [`equinox.partition`][].
+
+    **Returns:**
+
+    A PyTree with the same structure as its inputs. Each leaf will be the first
+    non-`None` leaf found in the corresponding leaves of `pytrees` as they are
+    iterated over.
+    """
+    import jax
+
+    if is_leaf is None:
+        _is_leaf = _is_none
+    else:
+        _is_leaf = lambda x: _is_none(x) or is_leaf(x)  # noqa: E731
+
+    return jax.tree.map(_combine, *pytrees, is_leaf=_is_leaf)
+
+
+def _eqx_partition(
+    pytree,
+    filter_spec,
+    replace=None,
+    is_leaf=None,
+):
+    """Splits a PyTree into two pieces. Equivalent to
+    `filter(...), filter(..., inverse=True)`, but slightly more efficient.
+
+    !!! info
+
+        See also [`equinox.combine`][] to reconstitute the PyTree again.
+    """
+    import jax
+
+    filter_tree = jax.tree.map(_make_filter_tree(is_leaf), filter_spec, pytree)
+    left = jax.tree.map(lambda mask, x: x if mask else replace, filter_tree, pytree)
+    right = jax.tree.map(lambda mask, x: replace if mask else x, filter_tree, pytree)
+    return left, right
+
+
+def _make_filter_tree(is_leaf):
+    import jax
+    import jax.core
+
+    def _filter_tree(mask, arg):
+        if isinstance(mask, jax.core.Tracer):
+            raise ValueError("`filter_spec` leaf values cannot be traced arrays.")
+        if isinstance(mask, bool):
+            return jax.tree.map(lambda _: mask, arg, is_leaf=is_leaf)
+        elif callable(mask):
+            return jax.tree.map(mask, arg, is_leaf=is_leaf)
+        else:
+            raise ValueError(
+                "`filter_spec` must consist of booleans and callables only."
+            )
+
+    return _filter_tree
+
+
+def _is_array(element) -> bool:
+    """Returns `True` if `element` is a JAX array or NumPy array."""
+    import jax
+
+    return isinstance(element, np.ndarray | np.generic | jax.Array)
+
+
+def _combine(*args):
+    for arg in args:
+        if arg is not None:
+            return arg
+    return None
+
+
+def _is_none(x):
+    return x is None
