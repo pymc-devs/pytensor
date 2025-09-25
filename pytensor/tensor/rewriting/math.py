@@ -2181,7 +2181,7 @@ def local_mul_to_sqr(fgraph, node):
 @node_rewriter([int_div])
 def local_intdiv_by_one(fgraph, node):
     """x // 1 -> x"""
-    if isinstance(node.inputs[1], TensorConstant) and np.all(node.inputs[1].value == 1):
+    if isinstance(node.inputs[1], TensorConstant) and np.all(node.inputs[1].data == 1):
         return [node.inputs[0].astype(node.outputs[0].dtype)]
 
 
