@@ -575,47 +575,219 @@ class FusionOptimizer(GraphRewriter):
             and perhaps fuse add with somethnig else.
             """
 
-            @cache
-            def elemwise_scalar_op_has_c_code(
-                node: Apply, optimizer_verbose=config.optimizer_verbose
-            ) -> bool:
-                # TODO: This should not play a role in non-c backends!
-                if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
-                    return True
-                elif optimizer_verbose:
-                    warn(
-                        f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
+            class FuseableClients:
+                __slots__ = ("fuseable_clients", "candidate_nodes")
+
+                def __init__(self, fgraph):
+                    @cache
+                    def elemwise_scalar_op_has_c_code(
+                        node: Apply, optimizer_verbose=config.optimizer_verbose
+                    ) -> bool:
+                        # TODO: This should not play a role in non-c backends!
+                        if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
+                            return True
+                        elif optimizer_verbose:
+                            warn(
+                                f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
+                            )
+                        return False
+
+                    self.fuseable_clients = fuseable_clients = {}
+                    self.candidate_nodes = candidate_nodes = set()
+                    fg_clients = fg.clients
+                    for out, clients_and_indices in fg_clients.items():
+                        out_node = out.owner
+
+                        if not (
+                            out_node is not None
+                            and len(out_node.outputs) == 1
+                            and isinstance(out_node.op, Elemwise)
+                            and elemwise_scalar_op_has_c_code(out_node)
+                        ):
+                            continue
+
+                        candidate_nodes.add(out_node)
+                        out_bcast = out.type.broadcastable
+                        out_fuseable_clients = {
+                            client
+                            for client, _ in clients_and_indices
+                            if (
+                                len(client.outputs) == 1
+                                and isinstance(client.op, Elemwise)
+                                and out_bcast == client.outputs[0].type.broadcastable
+                                and elemwise_scalar_op_has_c_code(client)
+                            )
+                        }
+                        if out_fuseable_clients:
+                            fuseable_clients[out_node] = out_fuseable_clients
+
+                def __bool__(self):
+                    return bool(self.fuseable_clients)
+
+                def __getitem__(self, node: Apply):
+                    return self.fuseable_clients.get(node, ())
+
+                def is_sink_node(self, node: Apply) -> bool:
+                    # A sink node is a candidate node that has no fuseable clients
+                    return (
+                        node in self.candidate_nodes
+                        and node not in self.fuseable_clients
                     )
-                return False
 
-            fuseable_clients: dict[Apply, set[Apply]] = {}
-            candidate_nodes = set()
-            fg_clients = fg.clients
-            for out, clients_and_indices in fg_clients.items():
-                out_node = out.owner
-
-                if not (
-                    out_node is not None
-                    and len(out_node.outputs) == 1
-                    and isinstance(out_node.op, Elemwise)
-                    and elemwise_scalar_op_has_c_code(out_node)
-                ):
-                    continue
-
-                candidate_nodes.add(out_node)
-                out_bcast = out.type.broadcastable
-                out_fuseable_clients = {
-                    client
-                    for client, _ in clients_and_indices
-                    if (
-                        len(client.outputs) == 1
-                        and isinstance(client.op, Elemwise)
-                        and out_bcast == client.outputs[0].type.broadcastable
-                        and elemwise_scalar_op_has_c_code(client)
+                def remove_subgraph_connections(self, subgraph: "ConvexSubgraph"):
+                    # Update fuseable clients, inputs can no longer be fused with graph variables
+                    # and outputs can't be fused with anything else
+                    subgraph_inputs, subgraph_outputs = (
+                        subgraph.get_inputs_and_outputs()
                     )
-                }
-                if out_fuseable_clients:
-                    fuseable_clients[out_node] = out_fuseable_clients
+                    fuseable_clients = self.fuseable_clients
+                    for ancestor in subgraph_inputs:
+                        if (ancestor_node := ancestor.owner) is not None:
+                            if ancestor_fuseable_clients := fuseable_clients.get(
+                                ancestor_node
+                            ):
+                                ancestor_fuseable_clients.difference_update(
+                                    subgraph.nodes
+                                )
+                                if not ancestor_fuseable_clients:
+                                    del fuseable_clients[ancestor_node]
+
+                    for out in subgraph_outputs:
+                        fuseable_clients.pop(out.owner, None)
+
+            class SortedFuseableNodesQueue:
+                __slots__ = ("queue",)
+
+                def __init__(self):
+                    # We keep an ordered queue for expanding the subgraph
+                    # We always want to visit ancestors before clients
+                    # For ancestors, we want to visit the later nodes first (those that have more dependencies)
+                    # whereas for clients we want to visit earlier nodes first (those that have fewer dependencies)
+                    # We negate the bitflag for ancestors to achieve this ordering
+                    self.queue = queue = []
+                    heapify(queue)
+
+                def push(self, node: Apply, toposort_index: int, is_ancestor: bool):
+                    if is_ancestor:
+                        toposort_index = -toposort_index
+                    heappush(self.queue, (toposort_index, node))
+
+                def pop(self) -> tuple[Apply, bool]:
+                    toposort_index, node = heappop(self.queue)
+                    return node, toposort_index < 0
+
+                def __bool__(self):
+                    return bool(self.queue)
+
+            class NonConvexError(Exception):
+                pass
+
+            class ConvexSubgraph:
+                __slots__ = (
+                    "node_ancestors",
+                    "nodes",
+                    "bitset",
+                    "unfuseable_ancestors",
+                    "unfuseable_clients",
+                    "inputs_and_outputs",
+                )
+
+                def __init__(self, node_ancestors):
+                    self.node_ancestors = node_ancestors
+                    self.nodes = {}
+                    self.bitset = 0
+                    self.unfuseable_ancestors = set()
+                    self.unfuseable_clients = set()
+                    self.inputs_and_outputs = None
+
+                def __len__(self):
+                    return len(self.nodes)
+
+                def __contains__(self, node: Apply):
+                    return node in self.nodes
+
+                def add_node(self, node: Apply, is_ancestor: bool):
+                    if is_ancestor:
+                        if node in self.unfuseable_ancestors:
+                            raise NonConvexError
+                    elif self.node_ancestors[node] & self.unfuseable_clients:
+                        raise NonConvexError
+                    self.nodes[node] = None
+                    self.inputs_and_outputs = None  # clear cache
+
+                def add_unfuseable_ancestor(self, ancestor: Apply):
+                    # If an ancestor is unfuseable, so are all its ancestors
+                    self.unfuseable_ancestors |= self.node_ancestors[ancestor]
+
+                def add_unfuseable_client(self, client: Apply):
+                    # If a client is unfuseable, so are all its clients, but we don't need to keep track of those
+                    # Any downstream client will also depend on this unfuseable client and will be rejected when visited
+                    self.unfuseable_clients.add(client)
+
+                def get_inputs_and_outputs(self):
+                    if self.inputs_and_outputs is not None:
+                        return self.inputs_and_outputs
+
+                    nodes = self.nodes
+                    # Use a dict to deduplicate while preserving order
+                    subgraph_inputs = tuple(
+                        dict.fromkeys(
+                            inp
+                            for node in nodes
+                            for inp in node.inputs
+                            if (ancestor_node := inp.owner) is None
+                            or ancestor_node not in nodes
+                        )
+                    )
+
+                    subgraph_outputs = tuple(
+                        node.outputs[0]
+                        for node in nodes
+                        if any(
+                            client not in nodes
+                            for client, _ in fg_clients[node.outputs[0]]
+                        )
+                    )
+                    self.inputs_and_outputs = subgraph_inputs, subgraph_outputs
+                    return subgraph_inputs, subgraph_outputs
+
+            class SortedSubgraphCollection:
+                __slots__ = ("subgraphs", "nodes")
+
+                def __init__(self):
+                    self.subgraphs: list[
+                        tuple[int, tuple[tuple[Variable], tuple[Variable]]]
+                    ] = []
+                    self.nodes = {}
+
+                def __contains__(self, node: Apply):
+                    return node in self.nodes
+
+                def insert_subgraph(self, subgraph: ConvexSubgraph):
+                    # Usually new subgraphs don't depend on previous subgraphs, so we can just append them at the end
+                    # But in some cases they can, so we need to insert at the right position.
+                    subgraph_unfuseable_ancestors = subgraph.unfuseable_ancestors
+                    if subgraph_unfuseable_ancestors.isdisjoint(self.nodes):
+                        self.subgraphs.append(subgraph)
+                    else:
+                        # Iterate from the end, removing the bitsets of each previous subgraphs until our current subgraph
+                        # no longer depends on what's left. This tells us where to insert the current subgraph.
+                        remaining_nodes = set(self.nodes)
+                        for index, other_subgraph in enumerate(
+                            reversed(self.subgraphs)
+                        ):
+                            remaining_nodes.difference_update(other_subgraph.nodes)
+                            if subgraph_unfuseable_ancestors.isdisjoint(
+                                remaining_nodes
+                            ):
+                                break
+                        self.subgraphs.insert(-(index + 1), subgraph)
+                    self.nodes |= subgraph.nodes
+
+                def __iter__(self):
+                    yield from self.subgraphs
+
+            fuseable_clients = FuseableClients(fgraph)
 
             if not fuseable_clients:
                 return None
@@ -629,72 +801,33 @@ class FusionOptimizer(GraphRewriter):
                     *(node_ancestors[inp.owner] for inp in node.inputs), {node}
                 )
 
-            sorted_subgraphs: list[
-                tuple[int, tuple[tuple[Variable], tuple[Variable]]]
-            ] = []
-            subgraph_set = set()
-            unfuseable_ancestors_set = set()
-            unfuseable_clients_set = set()
-            all_subgraphs_set = set()
+            fg_clients = fgraph.clients
+            sorted_subgraphs = SortedSubgraphCollection()
+
             # Start exploring from candidate sink nodes (backwards)
             # These are Elemwise nodes with a C-implementation, that are not part of another subgraph
             # And have no other fuseable clients (i.e., are sinks)
-            for starting_node, starting_index in reversed(toposort_idx.items()):
+            for starting_node, starting_idx in reversed(toposort_idx.items()):
                 if (
-                    starting_node in all_subgraphs_set
-                    or starting_node not in candidate_nodes
+                    starting_node in sorted_subgraphs
+                    or not fuseable_clients.is_sink_node(starting_node)
                 ):
                     continue
 
-                if starting_node in fuseable_clients:
-                    # Not a sink,
-                    continue
+                subgraph = ConvexSubgraph(node_ancestors)
 
-                # We keep an ordered queue for expanding the subgraph
-                # We always want to visit ancestors before clients
-                # For ancestors, we want to visit the later nodes first (those that have more dependencies)
-                # whereas for clients we want to visit earlier nodes first (those that have fewer dependencies)
-                # We negate the bitflag for ancestors to achieve this ordering
-                fuseables_nodes_queue = [(-starting_index, starting_node)]
-                heapify(fuseables_nodes_queue)
+                fuseable_nodes_queue = SortedFuseableNodesQueue()
+                fuseable_nodes_queue.push(starting_node, starting_idx, is_ancestor=True)
+                while fuseable_nodes_queue:
+                    node, is_ancestor = fuseable_nodes_queue.pop()
 
-                # We keep 3 bitsets during the exploration:
-                #  - the nodes that are part of the subgraph
-                #  - the unfuseable ancestors of the subgraph (i.e., ancestors that are not fuseable with any node in the subgraph)
-                #  - the unfuseable clients of the subgraph (i.e., clients that are not fuseable with any node in the subgraph)
-                # Whenever we visit a node, we check if unfuseable ancestors depend on it, or if it depends on an unfuseable client,
-                # in which case we can't fuse it. If we can fuse it, we then add its unfuseable ancestors/clients to the respective bitsets
-                # and add its fuseable ancestors/clients to the queue to explore later. This approach requires a visit in the order described above.
-                # Otherwise, we need to recompute target bitsets in every iteration and/or backtrack.
-                subgraph_set.clear()
-                unfuseable_ancestors_set.clear()
-                unfuseable_clients_set.clear()
-
-                # print(f"\nStarting new subgraph exploration from {starting_node}")
-                while fuseables_nodes_queue:
-                    node_idx, node = heappop(fuseables_nodes_queue)
-                    is_ancestor = node_idx < 0
-                    if is_ancestor:
-                        node_idx = -node_idx
-                    # print(f"\t > Visiting {'ancestor' if is_ancestor else 'client'} {next_node}")
-
-                    if node in subgraph_set:
-                        # Already part of the subgraph
-                        # print("\t   - already in subgraph")
+                    if node in subgraph:
                         continue
 
-                    if is_ancestor:
-                        if node in unfuseable_ancestors_set:
-                            # An unfuseable ancestor depends on this node, can't fuse
-                            # print("\t   failed - unfuseable ancestor depends on it")
-                            continue
-                    elif not node_ancestors[node].isdisjoint(unfuseable_clients_set):
-                        # This node depends on an unfuseable client, can't fuse
-                        # print("\t  failed - depends on unfuseable client")
+                    try:
+                        subgraph.add_node(node, is_ancestor=is_ancestor)
+                    except NonConvexError:
                         continue
-
-                    # print("\t   succeeded - adding to subgraph")
-                    subgraph_set.add(node)
 
                     # Expand through ancestors and client nodes
                     # A node can either be:
@@ -703,100 +836,42 @@ class FusionOptimizer(GraphRewriter):
                     #  - unfuseable (add to respective unfuseable bitset)
                     for ancestor in node.inputs:
                         ancestor_node = ancestor.owner
-                        if ancestor_node in subgraph_set:
+                        if ancestor_node in subgraph:
                             continue
-                        if node in fuseable_clients.get(ancestor_node, ()):
-                            heappush(
-                                fuseables_nodes_queue,
-                                (-toposort_idx[ancestor_node], ancestor_node),
+                        if node in fuseable_clients[ancestor_node]:
+                            fuseable_nodes_queue.push(
+                                ancestor_node,
+                                toposort_idx[ancestor_node],
+                                is_ancestor=True,
                             )
                         else:
-                            # If an ancestor is unfuseable, so are all its ancestors
-                            unfuseable_ancestors_set |= node_ancestors[ancestor_node]
+                            subgraph.add_unfuseable_ancestor(ancestor_node)
 
-                    next_fuseable_clients = fuseable_clients.get(node, ())
-                    for client, _ in fg_clients[node.outputs[0]]:
-                        if client in subgraph_set:
+                    next_fuseable_clients = fuseable_clients[node]
+                    for client_node, _ in fg_clients[node.outputs[0]]:
+                        if client_node in subgraph:
                             continue
-                        if client in next_fuseable_clients:
-                            heappush(
-                                fuseables_nodes_queue, (toposort_idx[client], client)
+                        if client_node in next_fuseable_clients:
+                            fuseable_nodes_queue.push(
+                                client_node,
+                                toposort_idx[client_node],
+                                is_ancestor=False,
                             )
                         else:
-                            # If a client is unfuseable, so are all its clients, but we don't need to keep track of those
-                            # Any downstream client will also depend on this unfuseable client and will be rejected when visited
-                            unfuseable_clients_set.add(client)
+                            subgraph.add_unfuseable_client(client_node)
 
                 # Finished exploring this subgraph
-                all_subgraphs_set |= subgraph_set
-
-                if len(subgraph_set) == 1:
+                if len(subgraph) == 1:
                     # No fusion possible, single node subgraph
                     continue
 
-                # Find out inputs/outputs of subgraph_nodes
-                # not_subgraph_bitset = ~subgraph_set
-                # Use a dict to deduplicate while preserving order
-                subgraph_nodes = sorted(subgraph_set, key=toposort_idx.get)
-                subgraph_inputs = tuple(
-                    dict.fromkeys(
-                        inp
-                        for node in subgraph_nodes
-                        for inp in node.inputs
-                        if (ancestor_node := inp.owner) is None
-                        or ancestor_node not in subgraph_set
-                    )
-                )
+                sorted_subgraphs.insert_subgraph(subgraph)
+                # Mark the nodes of this subgraph as no longer fuseable
+                fuseable_clients.remove_subgraph_connections(subgraph)
 
-                subgraph_outputs = tuple(
-                    node.outputs[0]
-                    for node in subgraph_nodes
-                    if any(
-                        client not in subgraph_set
-                        for client, _ in fg_clients[node.outputs[0]]
-                    )
-                )
-
-                # print(f"Found subgraph with {len(subgraph_inputs)} inputs, {len(subgraph_outputs)} outputs, and {len(subgraph_nodes)} nodes (subgraph_bitset={bin(subgraph_bitset)})")
-                # FunctionGraph(list(subgraph_inputs), subgraph_outputs).dprint()
-
-                # Usually new subgraphs don't depend on previous subgraphs, so we can just append them at the end
-                # But in some cases they can, so we need to insert at the right position.
-                if not (unfuseable_ancestors_set & all_subgraphs_set):
-                    sorted_subgraphs.append(
-                        (subgraph_set, (subgraph_inputs, subgraph_outputs))
-                    )
-                else:
-                    # Iterate from the end, removing the bitsets of each previous subgraphs until our current subgraph
-                    # no longer depends on what's left. This tells us where to insert the current subgraph.
-                    remaining_subgraphs_bitset = all_subgraphs_set.copy()
-                    for index, (other_subgraph_set, _) in enumerate(
-                        reversed(sorted_subgraphs)
-                    ):
-                        remaining_subgraphs_bitset.difference_update(other_subgraph_set)
-                        if not (unfuseable_ancestors_set & remaining_subgraphs_bitset):
-                            break
-
-                    sorted_subgraphs.insert(
-                        -(index + 1),
-                        (subgraph_set, (subgraph_inputs, subgraph_outputs)),
-                    )
-
-                # Update fuseable clients, inputs can no longer be fused with graph variables
-                # and outputs can't be fused with anything else
-                for ancestor in subgraph_inputs:
-                    if (ancestor_node := ancestor.owner) is not None:
-                        if ancestor_fuseable_clients := fuseable_clients.get(
-                            ancestor_node
-                        ):
-                            ancestor_fuseable_clients.difference_update(subgraph_nodes)
-                            if not ancestor_fuseable_clients:
-                                del fuseable_clients[ancestor_node]
-
-                for out in subgraph_outputs:
-                    fuseable_clients.pop(out.owner, None)
-
-            yield from (io for _, io in sorted_subgraphs)
+            yield from (
+                subgraph.get_inputs_and_outputs() for subgraph in sorted_subgraphs
+            )
 
         nb_fused = 0
         nb_replacement = 0
