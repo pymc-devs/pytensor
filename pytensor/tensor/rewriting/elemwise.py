@@ -5,7 +5,6 @@ import sys
 from collections.abc import Generator, Sequence
 from functools import cache, reduce
 from heapq import heapify, heappop, heappush
-from operator import or_
 from warnings import warn
 
 import pytensor.scalar.basic as ps
@@ -16,7 +15,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.fg import FunctionGraph, Output
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
@@ -621,48 +620,28 @@ class FusionOptimizer(GraphRewriter):
             if not fuseable_clients:
                 return None
 
-            # Create a bitset of ancestors for each node.
-            # Each node is represented by a bit flag of it's position in the toposort
-            # With two variables {a, b, c} owned by nodes {A, B, C}, where a is an input of b, and b an input of c,
-            # the ancestors bit flags would be {A: 0b001, B: 0b010, C: 0b100}
-            # and the ancestors bitset would be {A: 0b001, B: 0b011, C: 0b111}
-            # This allows us to quickly ask if one or more variables are ancestors of a node by a simple bitwise AND
-            # For example, to ask if B is an ancestor of C we can do `ancestors_bitset[C] & node_bitset[B] != 0`
-            # We can also easily handle multiple nodes at once, for example to ask if A or B are ancestors of C we can do
-            # `ancestors_bitset[C] & (node_bitset[A] | node_bitset[B]) != 0`
-            nodes_bitflags = {node: 1 << i for i, node in enumerate(fgraph.toposort())}
-            ancestors_bitset = {
-                None: 0
-            }  # Root variables have `None` as owner, which we can handle with a bitset of 0 for `None`
-            for node, node_bitflag in nodes_bitflags.items():
-                # The bitset of each node is the union of the bitsets of its inputs, plus its own bit
-                ancestors_bitset[node] = reduce(
-                    or_,
-                    (ancestors_bitset[inp.owner] for inp in node.inputs),
-                    node_bitflag,
+            toposort_idx = {
+                node: idx for idx, node in enumerate(fg.toposort(), start=1)
+            }
+            node_ancestors = {None: frozenset()}
+            for node in toposort_idx:
+                node_ancestors[node] = frozenset.union(
+                    *(node_ancestors[inp.owner] for inp in node.inputs), {node}
                 )
-            # handle root and leaf nodes gracefully
-            nodes_bitflags[None] = (
-                0  # Root variables have `None` as owner, which we can handle with a bitflag of 0 for `None`
-            )
-            out_bitflag = 1 << len(
-                nodes_bitflags
-            )  # Nothing ever depends on output nodes, so just use a new bit for all
-            for out in fg.outputs:
-                for client, _ in fg_clients[out]:
-                    if isinstance(client.op, Output):
-                        nodes_bitflags[client] = out_bitflag
 
             sorted_subgraphs: list[
                 tuple[int, tuple[tuple[Variable], tuple[Variable]]]
             ] = []
-            all_subgraphs_bitset = 0
+            subgraph_set = set()
+            unfuseable_ancestors_set = set()
+            unfuseable_clients_set = set()
+            all_subgraphs_set = set()
             # Start exploring from candidate sink nodes (backwards)
             # These are Elemwise nodes with a C-implementation, that are not part of another subgraph
             # And have no other fuseable clients (i.e., are sinks)
-            for starting_node, starting_bitflag in reversed(nodes_bitflags.items()):
+            for starting_node, starting_index in reversed(toposort_idx.items()):
                 if (
-                    starting_bitflag & all_subgraphs_bitset
+                    starting_node in all_subgraphs_set
                     or starting_node not in candidate_nodes
                 ):
                     continue
@@ -676,7 +655,7 @@ class FusionOptimizer(GraphRewriter):
                 # For ancestors, we want to visit the later nodes first (those that have more dependencies)
                 # whereas for clients we want to visit earlier nodes first (those that have fewer dependencies)
                 # We negate the bitflag for ancestors to achieve this ordering
-                fuseables_nodes_queue = [(-starting_bitflag, starting_node)]
+                fuseables_nodes_queue = [(-starting_index, starting_node)]
                 heapify(fuseables_nodes_queue)
 
                 # We keep 3 bitsets during the exploration:
@@ -687,37 +666,35 @@ class FusionOptimizer(GraphRewriter):
                 # in which case we can't fuse it. If we can fuse it, we then add its unfuseable ancestors/clients to the respective bitsets
                 # and add its fuseable ancestors/clients to the queue to explore later. This approach requires a visit in the order described above.
                 # Otherwise, we need to recompute target bitsets in every iteration and/or backtrack.
-                subgraph_nodes = []
-                subgraph_bitset = 0
-                unfuseable_ancestors_bitset = 0
-                unfuseable_clients_bitset = 0
+                subgraph_set.clear()
+                unfuseable_ancestors_set.clear()
+                unfuseable_clients_set.clear()
 
                 # print(f"\nStarting new subgraph exploration from {starting_node}")
                 while fuseables_nodes_queue:
-                    node_bitflag, node = heappop(fuseables_nodes_queue)
-                    is_ancestor = node_bitflag < 0
+                    node_idx, node = heappop(fuseables_nodes_queue)
+                    is_ancestor = node_idx < 0
                     if is_ancestor:
-                        node_bitflag = -node_bitflag
+                        node_idx = -node_idx
                     # print(f"\t > Visiting {'ancestor' if is_ancestor else 'client'} {next_node}")
 
-                    if node_bitflag & subgraph_bitset:
+                    if node in subgraph_set:
                         # Already part of the subgraph
                         # print("\t   - already in subgraph")
                         continue
 
                     if is_ancestor:
-                        if node_bitflag & unfuseable_ancestors_bitset:
+                        if node in unfuseable_ancestors_set:
                             # An unfuseable ancestor depends on this node, can't fuse
                             # print("\t   failed - unfuseable ancestor depends on it")
                             continue
-                    elif ancestors_bitset[node] & unfuseable_clients_bitset:
+                    elif not node_ancestors[node].isdisjoint(unfuseable_clients_set):
                         # This node depends on an unfuseable client, can't fuse
                         # print("\t  failed - depends on unfuseable client")
                         continue
 
                     # print("\t   succeeded - adding to subgraph")
-                    subgraph_nodes.append(node)
-                    subgraph_bitset |= node_bitflag
+                    subgraph_set.add(node)
 
                     # Expand through ancestors and client nodes
                     # A node can either be:
@@ -726,49 +703,48 @@ class FusionOptimizer(GraphRewriter):
                     #  - unfuseable (add to respective unfuseable bitset)
                     for ancestor in node.inputs:
                         ancestor_node = ancestor.owner
-                        ancestor_bitflag = nodes_bitflags[ancestor_node]
-                        if ancestor_bitflag & subgraph_bitset:
+                        if ancestor_node in subgraph_set:
                             continue
                         if node in fuseable_clients.get(ancestor_node, ()):
                             heappush(
                                 fuseables_nodes_queue,
-                                (-ancestor_bitflag, ancestor_node),
+                                (-toposort_idx[ancestor_node], ancestor_node),
                             )
                         else:
                             # If an ancestor is unfuseable, so are all its ancestors
-                            unfuseable_ancestors_bitset |= ancestors_bitset[
-                                ancestor_node
-                            ]
+                            unfuseable_ancestors_set |= node_ancestors[ancestor_node]
 
                     next_fuseable_clients = fuseable_clients.get(node, ())
                     for client, _ in fg_clients[node.outputs[0]]:
-                        client_bitflag = nodes_bitflags[client]
-                        if client_bitflag & subgraph_bitset:
+                        if client in subgraph_set:
                             continue
                         if client in next_fuseable_clients:
-                            heappush(fuseables_nodes_queue, (client_bitflag, client))
+                            heappush(
+                                fuseables_nodes_queue, (toposort_idx[client], client)
+                            )
                         else:
                             # If a client is unfuseable, so are all its clients, but we don't need to keep track of those
                             # Any downstream client will also depend on this unfuseable client and will be rejected when visited
-                            unfuseable_clients_bitset |= client_bitflag
+                            unfuseable_clients_set.add(client)
 
                 # Finished exploring this subgraph
-                all_subgraphs_bitset |= subgraph_bitset
+                all_subgraphs_set |= subgraph_set
 
-                if subgraph_bitset == starting_bitflag:
+                if len(subgraph_set) == 1:
                     # No fusion possible, single node subgraph
                     continue
 
                 # Find out inputs/outputs of subgraph_nodes
-                not_subgraph_bitset = ~subgraph_bitset
+                # not_subgraph_bitset = ~subgraph_set
                 # Use a dict to deduplicate while preserving order
+                subgraph_nodes = sorted(subgraph_set, key=toposort_idx.get)
                 subgraph_inputs = tuple(
                     dict.fromkeys(
                         inp
                         for node in subgraph_nodes
                         for inp in node.inputs
                         if (ancestor_node := inp.owner) is None
-                        or nodes_bitflags[ancestor_node] & not_subgraph_bitset
+                        or ancestor_node not in subgraph_set
                     )
                 )
 
@@ -776,7 +752,7 @@ class FusionOptimizer(GraphRewriter):
                     node.outputs[0]
                     for node in subgraph_nodes
                     if any(
-                        nodes_bitflags[client] & not_subgraph_bitset
+                        client not in subgraph_set
                         for client, _ in fg_clients[node.outputs[0]]
                     )
                 )
@@ -786,26 +762,24 @@ class FusionOptimizer(GraphRewriter):
 
                 # Usually new subgraphs don't depend on previous subgraphs, so we can just append them at the end
                 # But in some cases they can, so we need to insert at the right position.
-                if not (unfuseable_ancestors_bitset & all_subgraphs_bitset):
+                if not (unfuseable_ancestors_set & all_subgraphs_set):
                     sorted_subgraphs.append(
-                        (subgraph_bitset, (subgraph_inputs, subgraph_outputs))
+                        (subgraph_set, (subgraph_inputs, subgraph_outputs))
                     )
                 else:
                     # Iterate from the end, removing the bitsets of each previous subgraphs until our current subgraph
                     # no longer depends on what's left. This tells us where to insert the current subgraph.
-                    remaining_subgraphs_bitset = all_subgraphs_bitset
-                    for index, (other_subgraph_bitset, _) in enumerate(
+                    remaining_subgraphs_bitset = all_subgraphs_set.copy()
+                    for index, (other_subgraph_set, _) in enumerate(
                         reversed(sorted_subgraphs)
                     ):
-                        remaining_subgraphs_bitset &= ~other_subgraph_bitset
-                        if not (
-                            unfuseable_ancestors_bitset & remaining_subgraphs_bitset
-                        ):
+                        remaining_subgraphs_bitset.difference_update(other_subgraph_set)
+                        if not (unfuseable_ancestors_set & remaining_subgraphs_bitset):
                             break
 
                     sorted_subgraphs.insert(
                         -(index + 1),
-                        (subgraph_bitset, (subgraph_inputs, subgraph_outputs)),
+                        (subgraph_set, (subgraph_inputs, subgraph_outputs)),
                     )
 
                 # Update fuseable clients, inputs can no longer be fused with graph variables
