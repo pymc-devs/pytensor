@@ -5,6 +5,7 @@ import sys
 from collections.abc import Generator, Sequence
 from functools import cache, reduce
 from heapq import heapify, heappop, heappush
+from operator import or_
 from warnings import warn
 
 import pytensor.scalar.basic as ps
@@ -15,7 +16,7 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.basic import (
     GraphRewriter,
@@ -667,14 +668,14 @@ class FusionOptimizer(GraphRewriter):
                     self.queue = queue = []
                     heapify(queue)
 
-                def push(self, node: Apply, toposort_index: int, is_ancestor: bool):
+                def push(self, node: Apply, node_bitflag: int, is_ancestor: bool):
                     if is_ancestor:
-                        toposort_index = -toposort_index
-                    heappush(self.queue, (toposort_index, node))
+                        node_bitflag = -node_bitflag
+                    heappush(self.queue, (node_bitflag, node))
 
-                def pop(self) -> tuple[Apply, bool]:
-                    toposort_index, node = heappop(self.queue)
-                    return node, toposort_index < 0
+                def pop(self) -> tuple[Apply, int, bool]:
+                    node_bitflag, node = heappop(self.queue)
+                    return node, node_bitflag < 0
 
                 def __bool__(self):
                     return bool(self.queue)
@@ -684,45 +685,49 @@ class FusionOptimizer(GraphRewriter):
 
             class ConvexSubgraph:
                 __slots__ = (
-                    "node_ancestors",
+                    "nodes_bitflags",
+                    "ancestors_bitset",
                     "nodes",
-                    "bitset",
-                    "unfuseable_ancestors",
-                    "unfuseable_clients",
+                    "nodes_bitset",
+                    "unfuseable_ancestors_bitset",
+                    "unfuseable_clients_bitset",
                     "inputs_and_outputs",
                 )
 
-                def __init__(self, node_ancestors):
-                    self.node_ancestors = node_ancestors
+                def __init__(self, nodes_bitflags, ancestors_bitset):
+                    self.nodes_bitflags = nodes_bitflags
+                    self.ancestors_bitset = ancestors_bitset
                     self.nodes = {}
-                    self.bitset = 0
-                    self.unfuseable_ancestors = set()
-                    self.unfuseable_clients = set()
+                    self.nodes_bitset = 0
+                    self.unfuseable_ancestors_bitset = 0
+                    self.unfuseable_clients_bitset = 0
                     self.inputs_and_outputs = None
 
                 def __len__(self):
                     return len(self.nodes)
 
-                def __contains__(self, node: Apply):
-                    return node in self.nodes
+                def __contains__(self, node: int):
+                    return bool(self.nodes_bitset & self.nodes_bitflags[node])
 
                 def add_node(self, node: Apply, is_ancestor: bool):
+                    node_bitflag = self.nodes_bitflags[node]
                     if is_ancestor:
-                        if node in self.unfuseable_ancestors:
+                        if node_bitflag & self.unfuseable_ancestors_bitset:
                             raise NonConvexError
-                    elif self.node_ancestors[node] & self.unfuseable_clients:
+                    elif self.ancestors_bitset[node] & self.unfuseable_clients_bitset:
                         raise NonConvexError
+                    self.nodes_bitset |= node_bitflag
                     self.nodes[node] = None
                     self.inputs_and_outputs = None  # clear cache
 
                 def add_unfuseable_ancestor(self, ancestor: Apply):
                     # If an ancestor is unfuseable, so are all its ancestors
-                    self.unfuseable_ancestors |= self.node_ancestors[ancestor]
+                    self.unfuseable_ancestors_bitset |= self.ancestors_bitset[ancestor]
 
                 def add_unfuseable_client(self, client: Apply):
                     # If a client is unfuseable, so are all its clients, but we don't need to keep track of those
                     # Any downstream client will also depend on this unfuseable client and will be rejected when visited
-                    self.unfuseable_clients.add(client)
+                    self.unfuseable_clients_bitset |= self.nodes_bitflags[client]
 
                 def get_inputs_and_outputs(self):
                     if self.inputs_and_outputs is not None:
@@ -752,37 +757,40 @@ class FusionOptimizer(GraphRewriter):
                     return subgraph_inputs, subgraph_outputs
 
             class SortedSubgraphCollection:
-                __slots__ = ("subgraphs", "nodes")
+                __slots__ = ("subgraphs", "nodes_bitset")
 
                 def __init__(self):
                     self.subgraphs: list[
                         tuple[int, tuple[tuple[Variable], tuple[Variable]]]
                     ] = []
-                    self.nodes = {}
+                    self.nodes_bitset = 0
 
-                def __contains__(self, node: Apply):
-                    return node in self.nodes
+                def __contains__(self, node_bitflag: int):
+                    return bool(node_bitflag & self.nodes_bitset)
 
                 def insert_subgraph(self, subgraph: ConvexSubgraph):
                     # Usually new subgraphs don't depend on previous subgraphs, so we can just append them at the end
                     # But in some cases they can, so we need to insert at the right position.
-                    subgraph_unfuseable_ancestors = subgraph.unfuseable_ancestors
-                    if subgraph_unfuseable_ancestors.isdisjoint(self.nodes):
+                    subgraph_unfuseable_ancestors_bitset = (
+                        subgraph.unfuseable_ancestors_bitset
+                    )
+                    if not (subgraph_unfuseable_ancestors_bitset & self.nodes_bitset):
                         self.subgraphs.append(subgraph)
                     else:
                         # Iterate from the end, removing the bitsets of each previous subgraphs until our current subgraph
                         # no longer depends on what's left. This tells us where to insert the current subgraph.
-                        remaining_nodes = set(self.nodes)
+                        remaining_nodes_bitset = self.nodes_bitset
                         for index, other_subgraph in enumerate(
                             reversed(self.subgraphs)
                         ):
-                            remaining_nodes.difference_update(other_subgraph.nodes)
-                            if subgraph_unfuseable_ancestors.isdisjoint(
-                                remaining_nodes
+                            remaining_nodes_bitset &= ~other_subgraph.nodes_bitset
+                            if not (
+                                subgraph_unfuseable_ancestors_bitset
+                                & remaining_nodes_bitset
                             ):
                                 break
                         self.subgraphs.insert(-(index + 1), subgraph)
-                    self.nodes |= subgraph.nodes
+                    self.nodes_bitset |= subgraph.nodes_bitset
 
                 def __iter__(self):
                     yield from self.subgraphs
@@ -792,32 +800,54 @@ class FusionOptimizer(GraphRewriter):
             if not fuseable_clients:
                 return None
 
-            toposort_idx = {
-                node: idx for idx, node in enumerate(fg.toposort(), start=1)
-            }
-            node_ancestors = {None: frozenset()}
-            for node in toposort_idx:
-                node_ancestors[node] = frozenset.union(
-                    *(node_ancestors[inp.owner] for inp in node.inputs), {node}
-                )
-
+            # Create a bitset of ancestors for each node.
+            # Each node is represented by a bit flag of it's position in the toposort
+            # With two variables {a, b, c} owned by nodes {A, B, C}, where a is an input of b, and b an input of c,
+            # the ancestors bit flags would be {A: 0b001, B: 0b010, C: 0b100}
+            # and the ancestors bitset would be {A: 0b001, B: 0b011, C: 0b111}
+            # This allows us to quickly ask if one or more variables are ancestors of a node by a simple bitwise AND
+            # For example, to ask if B is an ancestor of C we can do `ancestors_bitset[C] & node_bitset[B] != 0`
+            # We can also easily handle multiple nodes at once, for example to ask if A or B are ancestors of C we can do
+            # `ancestors_bitset[C] & (node_bitset[A] | node_bitset[B]) != 0`
             fg_clients = fgraph.clients
+            nodes_bitflags = {node: 1 << i for i, node in enumerate(fgraph.toposort())}
+            # Root variables have `None` as owner, which we can handle with a bitset of 0 for `None`
+            ancestors_bitset = {None: 0}
+            for node, node_bitflag in nodes_bitflags.items():
+                # The bitset of each node is the union of the bitsets of its inputs, plus its own bit
+                ancestors_bitset[node] = reduce(
+                    or_,
+                    (ancestors_bitset[inp.owner] for inp in node.inputs),
+                    node_bitflag,
+                )
+            # handle root and leaf nodes gracefully
+            # Root variables have `None` as owner, which we can handle with a bitflag of 0 for `None`
+            nodes_bitflags[None] = 0
+            # Nothing ever depends on output nodes, so just use a new bit for all
+            out_bitflag = 1 << len(nodes_bitflags)
+            for out in fg.outputs:
+                for client, _ in fg_clients[out]:
+                    if isinstance(client.op, Output):
+                        nodes_bitflags[client] = out_bitflag
+
             sorted_subgraphs = SortedSubgraphCollection()
 
             # Start exploring from candidate sink nodes (backwards)
             # These are Elemwise nodes with a C-implementation, that are not part of another subgraph
             # And have no other fuseable clients (i.e., are sinks)
-            for starting_node, starting_idx in reversed(toposort_idx.items()):
+            for starting_node, starting_bitflag in reversed(nodes_bitflags.items()):
                 if (
-                    starting_node in sorted_subgraphs
+                    starting_bitflag in sorted_subgraphs
                     or not fuseable_clients.is_sink_node(starting_node)
                 ):
                     continue
 
-                subgraph = ConvexSubgraph(node_ancestors)
+                subgraph = ConvexSubgraph(nodes_bitflags, ancestors_bitset)
 
                 fuseable_nodes_queue = SortedFuseableNodesQueue()
-                fuseable_nodes_queue.push(starting_node, starting_idx, is_ancestor=True)
+                fuseable_nodes_queue.push(
+                    starting_node, starting_bitflag, is_ancestor=True
+                )
                 while fuseable_nodes_queue:
                     node, is_ancestor = fuseable_nodes_queue.pop()
 
@@ -841,7 +871,7 @@ class FusionOptimizer(GraphRewriter):
                         if node in fuseable_clients[ancestor_node]:
                             fuseable_nodes_queue.push(
                                 ancestor_node,
-                                toposort_idx[ancestor_node],
+                                nodes_bitflags[ancestor_node],
                                 is_ancestor=True,
                             )
                         else:
@@ -854,7 +884,7 @@ class FusionOptimizer(GraphRewriter):
                         if client_node in next_fuseable_clients:
                             fuseable_nodes_queue.push(
                                 client_node,
-                                toposort_idx[client_node],
+                                nodes_bitflags[client_node],
                                 is_ancestor=False,
                             )
                         else:
