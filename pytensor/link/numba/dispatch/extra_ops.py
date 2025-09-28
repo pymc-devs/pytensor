@@ -6,7 +6,11 @@ import numpy as np
 
 from pytensor.graph import Apply
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import get_numba_type, numba_funcify
+from pytensor.link.numba.dispatch.basic import (
+    generate_fallback_impl,
+    get_numba_type,
+    numba_funcify,
+)
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.extra_ops import (
@@ -200,45 +204,19 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
 @numba_funcify.register(Repeat)
 def numba_funcify_Repeat(op, node, **kwargs):
     axis = op.axis
+    a, _ = node.inputs
 
-    use_python = False
+    # Numba only supports axis=None, which in our case is when axis is 0 and the input is a vector
+    if axis == 0 and a.type.ndim == 1:
 
-    if axis is not None:
-        use_python = True
-
-    if use_python:
-        warnings.warn(
-            (
-                "Numba will use object mode to allow the "
-                "`axis` argument to `numpy.repeat`."
-            ),
-            UserWarning,
-        )
-
-        ret_sig = get_numba_type(node.outputs[0].type)
-
-        @numba_basic.numba_njit
+        @numba_basic.numba_njit(inline="always")
         def repeatop(x, repeats):
-            with numba.objmode(ret=ret_sig):
-                ret = np.repeat(x, repeats, axis)
-            return ret
+            return np.repeat(x, repeats)
+
+        return repeatop
 
     else:
-        repeats_ndim = node.inputs[1].ndim
-
-        if repeats_ndim == 0:
-
-            @numba_basic.numba_njit(inline="always")
-            def repeatop(x, repeats):
-                return np.repeat(x, repeats.item())
-
-        else:
-
-            @numba_basic.numba_njit(inline="always")
-            def repeatop(x, repeats):
-                return np.repeat(x, repeats)
-
-    return repeatop
+        return generate_fallback_impl(op, node)
 
 
 @numba_funcify.register(Unique)

@@ -668,53 +668,72 @@ class Repeat(Op):
 
     __props__ = ("axis",)
 
-    def __init__(self, axis: int | None = None):
-        if axis is not None:
-            if not isinstance(axis, int) or axis < 0:
+    def __init__(self, axis: int):
+        if isinstance(axis, int):
+            if axis < 0:
                 raise ValueError(
-                    f"Repeat only accepts positive integer axis or None, got {axis}"
+                    f"Repeat Op only accepts positive integer axis, got {axis}. "
+                    "Use the helper `pt.repeat` to handle negative axis."
                 )
+        elif axis is None:
+            raise ValueError(
+                "Repeat Op only accepts positive integer axis. "
+                "Use the helper `pt.repeat` to handle axis=None."
+            )
+        else:
+            raise TypeError(
+                f"Invalid type for axis {axis}, expected int got {type(axis)}"
+            )
+
         self.axis = axis
 
     def make_node(self, x, repeats):
         x = ptb.as_tensor_variable(x)
         repeats = ptb.as_tensor_variable(repeats, dtype="int64")
 
-        if repeats.dtype not in integer_dtypes:
-            raise TypeError("repeats.dtype must be an integer.")
+        if repeats.type.ndim != 1:
+            if repeats.type.ndim == 0:
+                raise ValueError(
+                    f"repeats {repeats} must have 1 dimension, got 0. Use the helper `pt.repeat` to handle scalar repeats."
+                )
+            else:
+                raise ValueError(
+                    f"repeats {repeats} must have 1 dimension, got {repeats.type.ndim}"
+                )
+
+        if repeats.type.dtype not in integer_dtypes:
+            raise TypeError(
+                f"repeats {repeats} dtype must be an integer, got {repeats.type.dtype}."
+            )
 
         # Some dtypes are not supported by numpy's implementation of repeat.
         # Until another one is available, we should fail at graph construction
         # time, not wait for execution.
-        ptr_bitwidth = LOCAL_BITWIDTH
-        if ptr_bitwidth == 64:
-            numpy_unsupported_dtypes = ("uint64",)
-        if ptr_bitwidth == 32:
-            numpy_unsupported_dtypes = ("uint32", "int64", "uint64")
-
-        if repeats.dtype in numpy_unsupported_dtypes:
+        numpy_unsupported_dtypes = (
+            ("uint64",) if LOCAL_BITWIDTH == 64 else ("uint64", "uint32", "int64")
+        )
+        if repeats.type.dtype in numpy_unsupported_dtypes:
             raise TypeError(
-                (
-                    f"dtypes {numpy_unsupported_dtypes!s} are not supported by numpy.repeat "
-                    "for the 'repeats' parameter, "
-                ),
-                repeats.dtype,
+                f"repeats {repeats} dtype {repeats.type.dtype} are not supported by numpy.repeat"
             )
 
-        if self.axis is None:
-            out_shape = [None]
-        else:
-            try:
-                const_reps = ptb.get_scalar_constant_value(repeats)
-            except NotScalarConstantError:
-                const_reps = None
-            if const_reps == 1:
-                out_shape = x.type.shape
-            else:
-                out_shape = list(x.type.shape)
-                out_shape[self.axis] = None
+        shape = list(x.type.shape)
+        axis_input_dim_length = shape[self.axis]
+        axis_output_dim_length = None
 
-        out_type = TensorType(x.dtype, shape=out_shape)
+        if axis_input_dim_length is not None:
+            # If we have a static dim and constant repeats we can infer the length of the output dim
+            # Right now we only support homogenous constant repeats
+            try:
+                const_reps = ptb.get_underlying_scalar_constant_value(repeats)
+            except NotScalarConstantError:
+                pass
+            else:
+                axis_output_dim_length = int(const_reps * axis_input_dim_length)
+
+        shape[self.axis] = axis_output_dim_length
+
+        out_type = TensorType(x.dtype, shape=shape)
         return Apply(self, [x, repeats], [out_type()])
 
     def perform(self, node, inputs, output_storage):
@@ -728,36 +747,19 @@ class Repeat(Op):
         (x, repeats) = inputs
         (gz,) = gout
         axis = self.axis
-        if repeats.ndim == 0:
-            # When axis is a scalar (same number of reps for all elements),
-            # We can split the repetitions into their own axis with reshape and sum them back
-            # to the original element location
-            sum_axis = x.ndim if axis is None else axis + 1
-            shape = list(x.shape)
-            shape.insert(sum_axis, repeats)
-            gx = gz.reshape(shape).sum(axis=sum_axis)
 
-        elif repeats.ndim == 1:
-            # To sum the gradients that belong to the same repeated x,
-            # We create a repeated eye and dot product it with the gradient.
-            axis_size = x.size if axis is None else x.shape[axis]
-            repeated_eye = repeat(
-                ptb.eye(axis_size), repeats, axis=0
-            )  # A sparse repeat would be neat
+        # To sum the gradients that belong to the same repeated x,
+        # We create a repeated eye and dot product it with the gradient.
+        axis_size = x.shape[axis]
+        repeated_eye = repeat(
+            ptb.eye(axis_size), repeats, axis=0
+        )  # A sparse repeat would be neat
 
-            if axis is None:
-                gx = gz @ repeated_eye
-                # Undo the ravelling when axis=None
-                gx = gx.reshape(x.shape)
-            else:
-                # Place gradient axis at end for dot product
-                gx = ptb.moveaxis(gz, axis, -1)
-                gx = gx @ repeated_eye
-                # Place gradient back into the correct axis
-                gx = ptb.moveaxis(gx, -1, axis)
-
-        else:
-            raise ValueError()
+        # Place gradient axis at end for dot product
+        gx = ptb.moveaxis(gz, axis, -1)
+        gx = gx @ repeated_eye
+        # Place gradient back into the correct axis
+        gx = ptb.moveaxis(gx, -1, axis)
 
         return [gx, DisconnectedType()()]
 
@@ -771,22 +773,8 @@ class Repeat(Op):
         dtype = None
         if repeats.dtype in ("uint8", "uint16", "uint32"):
             dtype = "int64"
-        if axis is None:
-            if repeats.ndim == 0:
-                if len(i0_shapes) == 0:
-                    out_shape = [repeats]
-                else:
-                    res = 1
-                    for d in i0_shapes:
-                        res = res * d
-                    out_shape = (res * repeats,)
-            else:
-                out_shape = [pt_sum(repeats, dtype=dtype)]
-        else:
-            if repeats.ndim == 0:
-                out_shape[axis] = out_shape[axis] * repeats
-            else:
-                out_shape[axis] = pt_sum(repeats, dtype=dtype)
+
+        out_shape[axis] = pt_sum(repeats, dtype=dtype)
         return [out_shape]
 
 
@@ -851,7 +839,10 @@ def repeat(
     """
     a = ptb.as_tensor_variable(a)
 
-    if axis is not None:
+    if axis is None:
+        axis = 0
+        a = a.flatten()
+    else:
         axis = normalize_axis_index(axis, a.ndim)
 
     repeats = ptb.as_tensor_variable(repeats, dtype=np.int64)
@@ -859,40 +850,31 @@ def repeat(
     if repeats.ndim > 1:
         raise ValueError("The dimension of repeats should not exceed 1.")
 
-    if repeats.ndim == 1 and not repeats.broadcastable[0]:
+    if repeats.type.broadcastable == (True,):
+        # This behaves the same as scalar repeat
+        repeats = repeats.squeeze()
+
+    if repeats.ndim == 1:
         # We only use the Repeat Op for vector repeats
         return Repeat(axis=axis)(a, repeats)
     else:
-        if repeats.ndim == 1:
-            repeats = repeats[0]
-
         if a.dtype == "uint64":
             # Multiplying int64 (shape) by uint64 (repeats) yields a float64
             # Which is not valid for the `reshape` operation at the end
             raise TypeError("repeat doesn't support dtype uint64")
 
-        if axis is None:
-            axis = 0
-            a = a.flatten()
+        # Scalar repeat, we implement this with canonical Ops broadcast + reshape
+        a_shape = a.shape
 
-        repeat_shape = list(a.shape)
+        # Replicate a along a new axis (axis+1) repeats times
+        broadcast_shape = list(a_shape)
+        broadcast_shape.insert(axis + 1, repeats)
+        broadcast_a = broadcast_to(ptb.expand_dims(a, axis + 1), broadcast_shape)
 
-        # alloc_shape is the shape of the intermediate tensor which has
-        # an additional dimension comparing to x. We use alloc to
-        # allocate space for this intermediate tensor to replicate x
-        # along that additional dimension.
-        alloc_shape = repeat_shape[:]
-        alloc_shape.insert(axis + 1, repeats)
-
-        # repeat_shape is now the shape of output, where shape[axis] becomes
-        # shape[axis]*repeats.
+        # Reshape broadcast_a to the final shape, merging axis and axis+1
+        repeat_shape = list(a_shape)
         repeat_shape[axis] = repeat_shape[axis] * repeats
-
-        # After the original tensor is duplicated along the additional
-        # dimension, we reshape it to the expected output shape
-        return ptb.alloc(ptb.expand_dims(a, axis + 1), *alloc_shape).reshape(
-            repeat_shape
-        )
+        return broadcast_a.reshape(repeat_shape)
 
 
 class Bartlett(Op):
