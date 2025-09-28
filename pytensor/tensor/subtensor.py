@@ -3401,15 +3401,8 @@ def advanced_subtensor(x, *args):
     This function converts the arguments to work with the new AdvancedSubtensor 
     interface that separates slice structure from variable inputs.
     """
-    # Convert raw args to proper form first
-    processed_args = []
-    for arg in args:
-        if arg is None:
-            processed_args.append(NoneConst.clone())
-        elif isinstance(arg, slice):
-            processed_args.append(make_slice(arg))
-        else:
-            processed_args.append(as_tensor_variable(arg))
+    # Convert args using as_index_variable (like original AdvancedSubtensor did)
+    processed_args = tuple(map(as_index_variable, args))
     
     # Now create idx_list and extract inputs
     idx_list = []
@@ -3454,15 +3447,8 @@ def advanced_subtensor(x, *args):
 
 def advanced_inc_subtensor(x, y, *args, **kwargs):
     """Create an AdvancedIncSubtensor operation for incrementing."""
-    # Convert raw args to proper form first
-    processed_args = []
-    for arg in args:
-        if arg is None:
-            processed_args.append(NoneConst.clone())
-        elif isinstance(arg, slice):
-            processed_args.append(make_slice(arg))
-        else:
-            processed_args.append(as_tensor_variable(arg))
+    # Convert args using as_index_variable (like original AdvancedIncSubtensor would)
+    processed_args = tuple(map(as_index_variable, args))
     
     # Now create idx_list and extract inputs
     idx_list = []
