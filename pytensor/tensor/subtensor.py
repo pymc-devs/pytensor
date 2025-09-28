@@ -2832,16 +2832,12 @@ class AdvancedSubtensor(Op):
         if len(inputs) != len(expected_inputs):
             raise ValueError(f"Expected {len(expected_inputs)} inputs but got {len(inputs)}")
 
-        # Build explicit_indices for shape inference
+        # Build explicit_indices for shape inference (newaxis handled by __getitem__)
         explicit_indices = []
-        new_axes = []
         input_idx = 0
         
         for i, entry in enumerate(idx_list):
-            if entry is np.newaxis:
-                new_axes.append(len(explicit_indices))
-                explicit_indices.append(np.newaxis)
-            elif isinstance(entry, slice):
+            if isinstance(entry, slice):
                 # Reconstruct slice with actual values from inputs
                 if entry.start is not None and isinstance(entry.start, Type):
                     start_val = inputs[input_idx]
@@ -2875,7 +2871,7 @@ class AdvancedSubtensor(Op):
                         )
 
                     # Check static shape aligned
-                    axis = len(explicit_indices) - len(new_axes)
+                    axis = len(explicit_indices)
                     indexed_shape = x.type.shape[axis : axis + inp.type.ndim]
                     for j, (indexed_length, indexer_length) in enumerate(
                         zip(indexed_shape, inp.type.shape)
@@ -2901,25 +2897,20 @@ class AdvancedSubtensor(Op):
             else:
                 raise ValueError(f"Invalid entry in idx_list: {entry}")
 
-        if (len(explicit_indices) - len(new_axes)) > x.type.ndim:
+        if len(explicit_indices) > x.type.ndim:
             raise IndexError(
-                f"too many indices for array: tensor is {x.type.ndim}-dimensional, but {len(explicit_indices) - len(new_axes)} were indexed"
+                f"too many indices for array: tensor is {x.type.ndim}-dimensional, but {len(explicit_indices)} were indexed"
             )
 
-        # Perform basic and advanced indexing shape inference separately
+        # Perform basic and advanced indexing shape inference separately (no newaxis)
         basic_group_shape = []
         advanced_indices = []
         adv_group_axis = None
         last_adv_group_axis = None
-        expanded_x_shape = tuple(
-            np.insert(np.array(x.type.shape, dtype=object), 1, new_axes)
-        )
         for i, (idx, dim_length) in enumerate(
-            zip_longest(explicit_indices, expanded_x_shape, fillvalue=slice(None))
+            zip_longest(explicit_indices, x.type.shape, fillvalue=slice(None))
         ):
-            if idx is np.newaxis:
-                basic_group_shape.append(1)  # New-axis
-            elif isinstance(idx, slice):
+            if isinstance(idx, slice):
                 basic_group_shape.append(slice_static_length(idx, dim_length))
             else:  # TensorType (advanced index)
                 # Keep track of advanced group axis
@@ -2972,16 +2963,14 @@ class AdvancedSubtensor(Op):
                 or getattr(idx, "dtype", None) == "bool"
             )
 
-        # Reconstruct the full indices from idx_list and inputs (like perform method)
+        # Reconstruct the full indices from idx_list and inputs (newaxis handled by __getitem__)
         inputs = node.inputs[1:]
         
         full_indices = []
         input_idx = 0
         
         for entry in self.idx_list:
-            if entry is np.newaxis:
-                full_indices.append(np.newaxis)
-            elif isinstance(entry, slice):
+            if isinstance(entry, slice):
                 # Reconstruct slice from idx_list and inputs
                 if entry.start is not None and isinstance(entry.start, Type):
                     start_val = inputs[input_idx]
@@ -3013,8 +3002,6 @@ class AdvancedSubtensor(Op):
         index_shapes = []
         for idx in full_indices:
             if isinstance(idx, slice):
-                index_shapes.append(idx)
-            elif idx is np.newaxis:
                 index_shapes.append(idx)
             elif hasattr(idx, 'type'):
                 # Mixed bool indexes are converted to nonzero entries
@@ -3057,7 +3044,7 @@ class AdvancedSubtensor(Op):
     def perform(self, node, inputs, out_):
         (out,) = out_
         
-        # Reconstruct the full tuple of indices from idx_list and inputs
+        # Reconstruct the full tuple of indices from idx_list and inputs (newaxis handled by __getitem__)
         x = inputs[0]
         tensor_inputs = inputs[1:]
         
@@ -3065,9 +3052,7 @@ class AdvancedSubtensor(Op):
         input_idx = 0
         
         for entry in self.idx_list:
-            if entry is np.newaxis:
-                full_indices.append(np.newaxis)
-            elif isinstance(entry, slice):
+            if isinstance(entry, slice):
                 # Reconstruct slice from idx_list and inputs
                 if entry.start is not None and isinstance(entry.start, Type):
                     start_val = tensor_inputs[input_idx]
@@ -3158,7 +3143,7 @@ class AdvancedSubtensor(Op):
         bool
             True if the advanced indexing is non-consecutive, False otherwise.
         """
-        # Reconstruct the full indices from idx_list and inputs to check consecutivity
+        # Reconstruct the full indices from idx_list and inputs to check consecutivity (newaxis handled by __getitem__)
         op = node.op
         tensor_inputs = node.inputs[1:]
         
@@ -3168,8 +3153,6 @@ class AdvancedSubtensor(Op):
         for entry in op.idx_list:
             if isinstance(entry, slice):
                 full_indices.append(slice(None))  # Represent as basic slice
-            elif entry is np.newaxis:
-                full_indices.append(np.newaxis)
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
                 if input_idx < len(tensor_inputs):
@@ -3255,14 +3238,12 @@ class AdvancedIncSubtensor(Op):
     def perform(self, node, inputs, out_):
         x, y, *tensor_inputs = inputs
 
-        # Reconstruct the full tuple of indices from idx_list and inputs
+        # Reconstruct the full tuple of indices from idx_list and inputs (newaxis handled by __getitem__)
         full_indices = []
         input_idx = 0
         
         for entry in self.idx_list:
-            if entry is np.newaxis:
-                full_indices.append(np.newaxis)
-            elif isinstance(entry, slice):
+            if isinstance(entry, slice):
                 # Reconstruct slice from idx_list and inputs
                 if entry.start is not None and isinstance(entry.start, Type):
                     start_val = tensor_inputs[input_idx]
@@ -3374,7 +3355,7 @@ class AdvancedIncSubtensor(Op):
         bool
             True if the advanced indexing is non-consecutive, False otherwise.
         """
-        # Reconstruct the full indices from idx_list and inputs to check consecutivity
+        # Reconstruct the full indices from idx_list and inputs to check consecutivity (newaxis handled by __getitem__)
         op = node.op
         tensor_inputs = node.inputs[2:]  # Skip x and y
         
@@ -3384,8 +3365,6 @@ class AdvancedIncSubtensor(Op):
         for entry in op.idx_list:
             if isinstance(entry, slice):
                 full_indices.append(slice(None))  # Represent as basic slice
-            elif entry is np.newaxis:
-                full_indices.append(np.newaxis)
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
                 if input_idx < len(tensor_inputs):
@@ -3400,6 +3379,9 @@ def advanced_subtensor(x, *args):
     
     This function converts the arguments to work with the new AdvancedSubtensor 
     interface that separates slice structure from variable inputs.
+    
+    Note: newaxis (None) should be handled by __getitem__ using dimshuffle
+    before calling this function.
     """
     # Convert args using as_index_variable (like original AdvancedSubtensor did)
     processed_args = tuple(map(as_index_variable, args))
@@ -3409,9 +3391,7 @@ def advanced_subtensor(x, *args):
     input_vars = []
     
     for arg in processed_args:
-        if isinstance(arg.type, NoneTypeT):
-            idx_list.append(np.newaxis)
-        elif isinstance(arg.type, SliceType):
+        if isinstance(arg.type, SliceType):
             # Handle SliceType - extract components and structure  
             if isinstance(arg, Constant):
                 # Constant slice
@@ -3438,7 +3418,7 @@ def advanced_subtensor(x, *args):
                 # Other slice case
                 idx_list.append(slice(None))
         else:
-            # Tensor index
+            # Tensor index (should not be NoneType since newaxis handled in __getitem__)
             idx_list.append(index_vars_to_types(arg))
             input_vars.append(arg)
     
@@ -3446,7 +3426,11 @@ def advanced_subtensor(x, *args):
 
 
 def advanced_inc_subtensor(x, y, *args, **kwargs):
-    """Create an AdvancedIncSubtensor operation for incrementing."""
+    """Create an AdvancedIncSubtensor operation for incrementing.
+    
+    Note: newaxis (None) should be handled by __getitem__ using dimshuffle
+    before calling this function.
+    """
     # Convert args using as_index_variable (like original AdvancedIncSubtensor would)
     processed_args = tuple(map(as_index_variable, args))
     
@@ -3455,9 +3439,7 @@ def advanced_inc_subtensor(x, y, *args, **kwargs):
     input_vars = []
     
     for arg in processed_args:
-        if isinstance(arg.type, NoneTypeT):
-            idx_list.append(np.newaxis)
-        elif isinstance(arg.type, SliceType):
+        if isinstance(arg.type, SliceType):
             # Handle SliceType - extract components and structure  
             if isinstance(arg, Constant):
                 # Constant slice
@@ -3484,7 +3466,7 @@ def advanced_inc_subtensor(x, y, *args, **kwargs):
                 # Other slice case
                 idx_list.append(slice(None))
         else:
-            # Tensor index
+            # Tensor index (should not be NoneType since newaxis handled in __getitem__)
             idx_list.append(index_vars_to_types(arg))
             input_vars.append(arg)
     
