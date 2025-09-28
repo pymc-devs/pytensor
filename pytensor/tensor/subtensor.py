@@ -2824,28 +2824,48 @@ class AdvancedSubtensor(Op):
         inputs = tuple(as_tensor_variable(a) for a in inputs)
 
         idx_list = list(self.idx_list)
-        if len(idx_list) > x.type.ndim:
+        if (len([entry for entry in idx_list if entry is not np.newaxis]) > x.type.ndim):
             raise IndexError("too many indices for array")
 
-        # Get input types from idx_list - only process numerical indices
-        input_types = []
-        input_idx = 0
+        # Validate input count matches expected from idx_list
+        expected_inputs = get_slice_elements(idx_list, lambda entry: isinstance(entry, Type))
+        if len(inputs) != len(expected_inputs):
+            raise ValueError(f"Expected {len(expected_inputs)} inputs but got {len(inputs)}")
+
+        # Build explicit_indices for shape inference
         explicit_indices = []
         new_axes = []
+        input_idx = 0
         
         for i, entry in enumerate(idx_list):
-            if isinstance(entry, slice):
-                # Slices are stored in idx_list, not passed as inputs
-                explicit_indices.append(entry)
-            elif entry is np.newaxis:
-                # Newaxis stored in idx_list, not passed as inputs
+            if entry is np.newaxis:
                 new_axes.append(len(explicit_indices))
-                explicit_indices.append(entry)
+                explicit_indices.append(np.newaxis)
+            elif isinstance(entry, slice):
+                # Reconstruct slice with actual values from inputs
+                if entry.start is not None and isinstance(entry.start, Type):
+                    start_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+                    
+                if entry.stop is not None and isinstance(entry.stop, Type):
+                    stop_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+                    
+                if entry.step is not None and isinstance(entry.step, Type):
+                    step_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+                
+                explicit_indices.append(slice(start_val, stop_val, step_val))
             elif isinstance(entry, Type):
-                # This is a numerical index - should have corresponding input
-                if input_idx >= len(inputs):
-                    raise ValueError(f"Missing input for index {i}")
+                # This is a numerical index
                 inp = inputs[input_idx]
+                input_idx += 1
                 
                 # Handle boolean indices
                 if inp.dtype == "bool":
@@ -2869,25 +2889,17 @@ class AdvancedSubtensor(Op):
                                 f"boolean index did not match indexed tensor along axis {axis + j};"
                                 f"size of axis is {indexed_length} but size of corresponding boolean axis is {indexer_length}"
                             )
-                    # Convert boolean indices to integer with nonzero, to reason about static shape next
+                    # Convert boolean indices to integer with nonzero
                     if isinstance(inp, Constant):
                         nonzero_indices = [tensor_constant(i) for i in inp.data.nonzero()]
                     else:
-                        # Note: Sometimes we could infer a shape error by reasoning about the largest possible size of nonzero
-                        #  and seeing that other integer indices cannot possible match it
                         nonzero_indices = inp.nonzero()
                     explicit_indices.extend(nonzero_indices)
                 else:
                     # Regular numerical index
                     explicit_indices.append(inp)
-                
-                input_types.append(entry)
-                input_idx += 1
             else:
                 raise ValueError(f"Invalid entry in idx_list: {entry}")
-
-        if input_idx != len(inputs):
-            raise ValueError(f"Expected {input_idx} inputs but got {len(inputs)}")
 
         if (len(explicit_indices) - len(new_axes)) > x.type.ndim:
             raise IndexError(
@@ -2960,20 +2972,40 @@ class AdvancedSubtensor(Op):
                 or getattr(idx, "dtype", None) == "bool"
             )
 
-        # Reconstruct full index list from idx_list and inputs
-        indices = node.inputs[1:]
+        # Reconstruct the full indices from idx_list and inputs (like perform method)
+        inputs = node.inputs[1:]
+        
         full_indices = []
         input_idx = 0
         
         for entry in self.idx_list:
-            if isinstance(entry, slice):
-                full_indices.append(entry)
-            elif entry is np.newaxis:
-                full_indices.append(entry)
+            if entry is np.newaxis:
+                full_indices.append(np.newaxis)
+            elif isinstance(entry, slice):
+                # Reconstruct slice from idx_list and inputs
+                if entry.start is not None and isinstance(entry.start, Type):
+                    start_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+                    
+                if entry.stop is not None and isinstance(entry.stop, Type):
+                    stop_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+                    
+                if entry.step is not None and isinstance(entry.step, Type):
+                    step_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+                
+                full_indices.append(slice(start_val, stop_val, step_val))
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
-                if input_idx < len(indices):
-                    full_indices.append(indices[input_idx])
+                if input_idx < len(inputs):
+                    full_indices.append(inputs[input_idx])
                     input_idx += 1
                 else:
                     raise ValueError("Mismatch between idx_list and inputs")
@@ -2991,7 +3023,7 @@ class AdvancedSubtensor(Op):
                     index_shapes.extend((shape0_op(nz_dim),) for nz_dim in nonzero(idx))
                 else:
                     # Get ishape for this input
-                    input_shape_idx = indices.index(idx) + 1  # +1 because ishapes[0] is x
+                    input_shape_idx = inputs.index(idx) + 1  # +1 because ishapes[0] is x
                     index_shapes.append(ishapes[input_shape_idx])
             else:
                 index_shapes.append(idx)
@@ -3033,10 +3065,29 @@ class AdvancedSubtensor(Op):
         input_idx = 0
         
         for entry in self.idx_list:
-            if isinstance(entry, slice):
-                full_indices.append(entry)
-            elif entry is np.newaxis:
+            if entry is np.newaxis:
                 full_indices.append(np.newaxis)
+            elif isinstance(entry, slice):
+                # Reconstruct slice from idx_list and inputs
+                if entry.start is not None and isinstance(entry.start, Type):
+                    start_val = tensor_inputs[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+                    
+                if entry.stop is not None and isinstance(entry.stop, Type):
+                    stop_val = tensor_inputs[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+                    
+                if entry.step is not None and isinstance(entry.step, Type):
+                    step_val = tensor_inputs[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+                
+                full_indices.append(slice(start_val, stop_val, step_val))
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
                 if input_idx < len(tensor_inputs):
@@ -3209,10 +3260,29 @@ class AdvancedIncSubtensor(Op):
         input_idx = 0
         
         for entry in self.idx_list:
-            if isinstance(entry, slice):
-                full_indices.append(entry)
-            elif entry is np.newaxis:
+            if entry is np.newaxis:
                 full_indices.append(np.newaxis)
+            elif isinstance(entry, slice):
+                # Reconstruct slice from idx_list and inputs
+                if entry.start is not None and isinstance(entry.start, Type):
+                    start_val = tensor_inputs[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+                    
+                if entry.stop is not None and isinstance(entry.stop, Type):
+                    stop_val = tensor_inputs[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+                    
+                if entry.step is not None and isinstance(entry.step, Type):
+                    step_val = tensor_inputs[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+                
+                full_indices.append(slice(start_val, stop_val, step_val))
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
                 if input_idx < len(tensor_inputs):
@@ -3328,75 +3398,111 @@ class AdvancedIncSubtensor(Op):
 def advanced_subtensor(x, *args):
     """Create an AdvancedSubtensor operation.
     
-    This function processes the arguments to separate numerical indices from
-    slice/newaxis information and creates the appropriate AdvancedSubtensor op.
+    This function converts the arguments to work with the new AdvancedSubtensor 
+    interface that separates slice structure from variable inputs.
     """
-    # Process args to extract idx_list and numerical inputs
-    idx_list = []
-    numerical_inputs = []
-    
+    # Convert raw args to proper form first
+    processed_args = []
     for arg in args:
         if arg is None:
-            idx_list.append(np.newaxis)
+            processed_args.append(NoneConst.clone())
         elif isinstance(arg, slice):
-            idx_list.append(arg)
-        elif isinstance(arg, Variable) and isinstance(arg.type, SliceType):
-            # Convert SliceType variable back to slice - this should be a constant
+            processed_args.append(make_slice(arg))
+        else:
+            processed_args.append(as_tensor_variable(arg))
+    
+    # Now create idx_list and extract inputs
+    idx_list = []
+    input_vars = []
+    
+    for arg in processed_args:
+        if isinstance(arg.type, NoneTypeT):
+            idx_list.append(np.newaxis)
+        elif isinstance(arg.type, SliceType):
+            # Handle SliceType - extract components and structure  
             if isinstance(arg, Constant):
+                # Constant slice
                 idx_list.append(arg.data)
             elif arg.owner and isinstance(arg.owner.op, MakeSlice):
-                # Convert MakeSlice back to slice
+                # Variable slice - extract components
                 start, stop, step = arg.owner.inputs
-                start_val = start.data if isinstance(start, Constant) else start
-                stop_val = stop.data if isinstance(stop, Constant) else stop
-                step_val = step.data if isinstance(step, Constant) else step
-                idx_list.append(slice(start_val, stop_val, step_val))
+                
+                # Convert components to types for idx_list
+                start_type = index_vars_to_types(start, False) if not isinstance(start.type, NoneTypeT) else None
+                stop_type = index_vars_to_types(stop, False) if not isinstance(stop.type, NoneTypeT) else None
+                step_type = index_vars_to_types(step, False) if not isinstance(step.type, NoneTypeT) else None
+                
+                idx_list.append(slice(start_type, stop_type, step_type))
+                
+                # Add variable components to inputs
+                if not isinstance(start.type, NoneTypeT):
+                    input_vars.append(start)
+                if not isinstance(stop.type, NoneTypeT):
+                    input_vars.append(stop)  
+                if not isinstance(step.type, NoneTypeT):
+                    input_vars.append(step)
             else:
-                # This is a symbolic slice that we need to handle
-                # For now, convert to a generic slice - this may need more work
+                # Other slice case
                 idx_list.append(slice(None))
-        elif isinstance(arg, Variable) and isinstance(arg.type, NoneTypeT):
-            idx_list.append(np.newaxis)
         else:
-            # This is a numerical index (tensor, scalar, etc.)
-            idx_list.append(index_vars_to_types(as_tensor_variable(arg)))
-            numerical_inputs.append(as_tensor_variable(arg))
+            # Tensor index
+            idx_list.append(index_vars_to_types(arg))
+            input_vars.append(arg)
     
-    return AdvancedSubtensor(idx_list).make_node(x, *numerical_inputs).outputs[0]
+    return AdvancedSubtensor(idx_list).make_node(x, *input_vars).outputs[0]
 
 
 def advanced_inc_subtensor(x, y, *args, **kwargs):
     """Create an AdvancedIncSubtensor operation for incrementing."""
-    # Process args to extract idx_list and numerical inputs
-    idx_list = []
-    numerical_inputs = []
-    
+    # Convert raw args to proper form first
+    processed_args = []
     for arg in args:
         if arg is None:
-            idx_list.append(np.newaxis)
+            processed_args.append(NoneConst.clone())
         elif isinstance(arg, slice):
-            idx_list.append(arg)
-        elif isinstance(arg, Variable) and isinstance(arg.type, SliceType):
-            # Convert SliceType variable back to slice
+            processed_args.append(make_slice(arg))
+        else:
+            processed_args.append(as_tensor_variable(arg))
+    
+    # Now create idx_list and extract inputs
+    idx_list = []
+    input_vars = []
+    
+    for arg in processed_args:
+        if isinstance(arg.type, NoneTypeT):
+            idx_list.append(np.newaxis)
+        elif isinstance(arg.type, SliceType):
+            # Handle SliceType - extract components and structure  
             if isinstance(arg, Constant):
+                # Constant slice
                 idx_list.append(arg.data)
             elif arg.owner and isinstance(arg.owner.op, MakeSlice):
-                # Convert MakeSlice back to slice
+                # Variable slice - extract components
                 start, stop, step = arg.owner.inputs
-                start_val = start.data if isinstance(start, Constant) else start
-                stop_val = stop.data if isinstance(stop, Constant) else stop
-                step_val = step.data if isinstance(step, Constant) else step
-                idx_list.append(slice(start_val, stop_val, step_val))
+                
+                # Convert components to types for idx_list
+                start_type = index_vars_to_types(start, False) if not isinstance(start.type, NoneTypeT) else None
+                stop_type = index_vars_to_types(stop, False) if not isinstance(stop.type, NoneTypeT) else None
+                step_type = index_vars_to_types(step, False) if not isinstance(step.type, NoneTypeT) else None
+                
+                idx_list.append(slice(start_type, stop_type, step_type))
+                
+                # Add variable components to inputs
+                if not isinstance(start.type, NoneTypeT):
+                    input_vars.append(start)
+                if not isinstance(stop.type, NoneTypeT):
+                    input_vars.append(stop)  
+                if not isinstance(step.type, NoneTypeT):
+                    input_vars.append(step)
             else:
+                # Other slice case
                 idx_list.append(slice(None))
-        elif isinstance(arg, Variable) and isinstance(arg.type, NoneTypeT):
-            idx_list.append(np.newaxis)
         else:
-            # This is a numerical index
-            idx_list.append(index_vars_to_types(as_tensor_variable(arg)))
-            numerical_inputs.append(as_tensor_variable(arg))
+            # Tensor index
+            idx_list.append(index_vars_to_types(arg))
+            input_vars.append(arg)
     
-    return AdvancedIncSubtensor(idx_list, **kwargs).make_node(x, y, *numerical_inputs).outputs[0]
+    return AdvancedIncSubtensor(idx_list, **kwargs).make_node(x, y, *input_vars).outputs[0]
 
 
 def advanced_set_subtensor(x, y, *args, **kwargs):
