@@ -35,11 +35,6 @@ else:
     ndarray_c_version = np.core._multiarray_umath._get_ndarray_c_version()  # type: ignore[attr-defined]
 
 
-# used in tests: the type of error thrown if a value is too large for the specified
-# numpy data type is different in numpy 2.x
-UintOverflowError = OverflowError if using_numpy_2 else TypeError
-
-
 # to patch up some of the C code, we need to use these special values...
 if using_numpy_2:
     numpy_axis_is_none_flag = np.iinfo(np.int32).min  # the value of "NPY_RAVEL_AXIS"
