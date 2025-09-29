@@ -3,25 +3,6 @@ from textwrap import dedent
 import numpy as np
 
 
-try:
-    from numpy._core.einsumfunc import (  # type: ignore[attr-defined]
-        _find_contraction,
-        _parse_einsum_input,
-    )
-except ModuleNotFoundError:
-    from numpy.core.einsumfunc import (  # type: ignore[no-redef]
-        _find_contraction,
-        _parse_einsum_input,
-    )
-
-
-# suppress linting warning by "using" the imports here:
-__all__ = [
-    "_find_contraction",
-    "_parse_einsum_input",
-]
-
-
 numpy_version_tuple = tuple(int(n) for n in np.__version__.split(".")[:2])
 numpy_version = np.lib.NumpyVersion(
     np.__version__
