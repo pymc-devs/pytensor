@@ -6,10 +6,13 @@ from itertools import pairwise
 from typing import cast
 
 import numpy as np
+from numpy._core.einsumfunc import (  # type: ignore[attr-defined]
+    _find_contraction,
+    _parse_einsum_input,
+)
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
 from pytensor.compile.builders import OpFromGraph
-from pytensor.npy_2_compat import _find_contraction, _parse_einsum_input
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     arange,
