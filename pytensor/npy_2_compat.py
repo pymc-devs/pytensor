@@ -24,10 +24,6 @@ else:
     numpy_axis_is_none_flag = 32
 
 
-# max number of dims is 64 in numpy 2.x; 32 in older versions
-numpy_maxdims = 64 if using_numpy_2 else 32
-
-
 # function that replicates np.unique from numpy < 2.0
 def old_np_unique(
     arr, return_index=False, return_inverse=False, return_counts=False, axis=None
