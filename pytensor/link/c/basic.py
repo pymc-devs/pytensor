@@ -29,8 +29,7 @@ from pytensor.link.c.cmodule import (
 from pytensor.link.c.cmodule import get_module_cache as _get_module_cache
 from pytensor.link.c.interface import CLinkerObject, CLinkerOp, CLinkerType
 from pytensor.link.utils import gc_helper, map_storage, raise_with_op, streamline
-from pytensor.npy_2_compat import ndarray_c_version
-from pytensor.utils import difference, uniq
+from pytensor.utils import NDARRAY_C_VERSION, difference, uniq
 
 
 NoParams = object()
@@ -1367,7 +1366,7 @@ class CLinker(Linker):
 
         # We must always add the numpy ABI version here as
         # DynamicModule always add the include <numpy/arrayobject.h>
-        sig.append(f"NPY_ABI_VERSION=0x{ndarray_c_version:X}")
+        sig.append(f"NPY_ABI_VERSION=0x{NDARRAY_C_VERSION:X}")
         if c_compiler:
             sig.append("c_compiler_str=" + c_compiler.version_str())
 

@@ -10,10 +10,6 @@ numpy_version = np.lib.NumpyVersion(
 using_numpy_2 = numpy_version >= "2.0.0rc1"
 
 
-if using_numpy_2:
-    ndarray_c_version = np._core._multiarray_umath._get_ndarray_c_version()  # type: ignore[attr-defined]
-else:
-    ndarray_c_version = np.core._multiarray_umath._get_ndarray_c_version()  # type: ignore[attr-defined]
 
 
 # function that replicates np.unique from numpy < 2.0
