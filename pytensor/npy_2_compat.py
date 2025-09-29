@@ -3,21 +3,12 @@ from textwrap import dedent
 import numpy as np
 
 
-numpy_version_tuple = tuple(int(n) for n in np.__version__.split(".")[:2])
-numpy_version = np.lib.NumpyVersion(
-    np.__version__
-)  # used to compare with version strings, e.g. numpy_version < "1.16.0"
-using_numpy_2 = numpy_version >= "2.0.0rc1"
-
-
-
-
 # function that replicates np.unique from numpy < 2.0
 def old_np_unique(
     arr, return_index=False, return_inverse=False, return_counts=False, axis=None
 ):
     """Replicate np.unique from numpy versions < 2.0"""
-    if not return_inverse or not using_numpy_2:
+    if not return_inverse:
         return np.unique(arr, return_index, return_inverse, return_counts, axis)
 
     outs = list(np.unique(arr, return_index, return_inverse, return_counts, axis))
