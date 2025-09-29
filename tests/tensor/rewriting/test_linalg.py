@@ -23,6 +23,7 @@ from pytensor.tensor.nlinalg import (
     MatrixInverse,
     MatrixPinv,
     SLogDet,
+    inv,
     matrix_inverse,
     svd,
 )
@@ -34,6 +35,7 @@ from pytensor.tensor.slinalg import (
     Solve,
     SolveBase,
     SolveTriangular,
+    TriangularInv,
     cho_solve,
     cholesky,
     solve,
@@ -1059,4 +1061,45 @@ def test_scalar_solve_to_division_rewrite(
     c_val = np.vectorize(np.linalg.solve, signature=signature)(a_val, b_val)
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+
+def test_triangular_inv_op():
+    x = matrix("x")
+    f_lower = function([x], Blockwise(TriangularInv(lower=True))(x))
+    f_upper = function([x], Blockwise(TriangularInv(lower=False))(x))
+
+    # Test lower
+    a = np.tril(np.random.rand(5, 5) + 0.1)
+    a_inv = f_lower(a)
+    expected_inv = np.linalg.inv(a)
+    np.testing.assert_allclose(
+        np.tril(a_inv), np.tril(expected_inv), rtol=1e-5, atol=1e-7
+    )
+
+    # Test upper
+    a = np.triu(np.random.rand(5, 5) + 0.1)
+    a_inv = f_upper(a)
+    expected_inv = np.linalg.inv(a)
+    np.testing.assert_allclose(
+        np.triu(a_inv), np.triu(expected_inv), rtol=1e-5, atol=1e-7
+    )
+
+
+def test_inv_to_triangular_inv_rewrite():
+    x = matrix("x")
+
+    x_chol = cholesky(x)
+    y_chol = inv(x_chol)
+    f_chol = function([x], y_chol)
+    assert any(
+        isinstance(node.op, TriangularInv)
+        or (hasattr(node.op, "core_op") and isinstance(node.op.core_op, TriangularInv))
+        for node in f_chol.maker.fgraph.apply_nodes
+    )
+
+    a = np.random.rand(5, 5)
+    a = np.dot(a, a.T) + np.eye(5) * 0.1  # ensure positive definite
+    np.testing.assert_allclose(
+        f_chol(a), np.linalg.inv(np.linalg.cholesky(a)), rtol=1e-5, atol=1e-7
     )
