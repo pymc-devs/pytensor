@@ -10,6 +10,8 @@ from collections.abc import Iterable, Sequence
 from functools import partial
 from pathlib import Path
 
+import numpy as np
+
 
 __all__ = [
     "get_unbound_function",
@@ -19,6 +21,7 @@ __all__ = [
     "output_subprocess_Popen",
     "LOCAL_BITWIDTH",
     "PYTHON_INT_BITWIDTH",
+    "NPY_RAVEL_AXIS",
     "NoDuplicateOptWarningFilter",
 ]
 
@@ -44,6 +47,11 @@ The bit width of Python int (C long int).
 
 Note that it can be different from the size of a memory pointer.
 'l' denotes a C long int, and the size is expressed in bytes.
+"""
+
+NPY_RAVEL_AXIS = np.iinfo(np.int32).min
+"""
+The value of the numpy C API NPY_RAVEL_AXIS.
 """
 
 

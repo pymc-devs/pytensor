@@ -18,11 +18,7 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import EnumList, Generic
-from pytensor.npy_2_compat import (
-    npy_2_compat_header,
-    numpy_axis_is_none_flag,
-    old_np_unique,
-)
+from pytensor.npy_2_compat import npy_2_compat_header, old_np_unique
 from pytensor.raise_op import Assert
 from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
@@ -51,7 +47,7 @@ from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
-from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
+from pytensor.utils import LOCAL_BITWIDTH, NPY_RAVEL_AXIS, PYTHON_INT_BITWIDTH
 
 
 class CpuContiguous(COp):
@@ -308,7 +304,7 @@ class CumOp(COp):
     @property
     def c_axis(self) -> int:
         if self.axis is None:
-            return numpy_axis_is_none_flag
+            return NPY_RAVEL_AXIS
         return self.axis
 
     def make_node(self, x):

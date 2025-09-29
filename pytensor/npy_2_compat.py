@@ -16,14 +16,6 @@ else:
     ndarray_c_version = np.core._multiarray_umath._get_ndarray_c_version()  # type: ignore[attr-defined]
 
 
-# to patch up some of the C code, we need to use these special values...
-if using_numpy_2:
-    numpy_axis_is_none_flag = np.iinfo(np.int32).min  # the value of "NPY_RAVEL_AXIS"
-else:
-    # 32 is the value used to mark axis = None in Numpy C-API prior to version 2.0
-    numpy_axis_is_none_flag = 32
-
-
 # function that replicates np.unique from numpy < 2.0
 def old_np_unique(
     arr, return_index=False, return_inverse=False, return_counts=False, axis=None
