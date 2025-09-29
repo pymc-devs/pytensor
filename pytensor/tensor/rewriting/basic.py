@@ -25,6 +25,7 @@ Many stabilize and stabilization rewrites refuse to be applied when a variable h
 import logging
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_index
 
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
@@ -41,7 +42,6 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import RewriteDatabase
 from pytensor.graph.rewriting.unify import OpPattern, OpPatternOpTypeType
-from pytensor.npy_2_compat import normalize_axis_index
 from pytensor.raise_op import Assert, CheckAndRaise, assert_op
 from pytensor.scalar import (
     AND,

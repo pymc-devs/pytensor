@@ -15,6 +15,7 @@ from typing import cast as type_cast
 
 import numpy as np
 from numpy.exceptions import AxisError
+from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
 import pytensor
 import pytensor.scalar.sharedvar
@@ -31,7 +32,6 @@ from pytensor.graph.rewriting.db import EquilibriumDB
 from pytensor.graph.type import HasShape, Type
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
 from pytensor.raise_op import CheckAndRaise
 from pytensor.scalar import int32

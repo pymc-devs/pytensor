@@ -2,6 +2,7 @@ import warnings
 from collections.abc import Collection, Iterable
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_index
 
 import pytensor
 import pytensor.scalar.basic as ps
@@ -18,7 +19,6 @@ from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import EnumList, Generic
 from pytensor.npy_2_compat import (
-    normalize_axis_index,
     npy_2_compat_header,
     numpy_axis_is_none_flag,
     old_np_unique,
