@@ -22,6 +22,7 @@ __all__ = [
     "LOCAL_BITWIDTH",
     "PYTHON_INT_BITWIDTH",
     "NPY_RAVEL_AXIS",
+    "NDARRAY_C_VERSION",
     "NoDuplicateOptWarningFilter",
 ]
 
@@ -53,6 +54,8 @@ NPY_RAVEL_AXIS = np.iinfo(np.int32).min
 """
 The value of the numpy C API NPY_RAVEL_AXIS.
 """
+
+NDARRAY_C_VERSION = np._core._multiarray_umath._get_ndarray_c_version()  # type: ignore[attr-defined]
 
 
 def __call_excepthooks(type, value, trace):
