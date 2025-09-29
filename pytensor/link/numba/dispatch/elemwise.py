@@ -4,6 +4,7 @@ from textwrap import dedent, indent
 import numba
 import numpy as np
 from numba.core.extending import overload
+from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 from numpy.lib.stride_tricks import as_strided
 
 from pytensor.graph.op import Op
@@ -19,7 +20,6 @@ from pytensor.link.numba.dispatch.vectorize_codegen import (
     store_core_outputs,
 )
 from pytensor.link.utils import compile_function_src
-from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.scalar.basic import (
     AND,
     OR,
