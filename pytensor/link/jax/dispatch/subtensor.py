@@ -77,6 +77,8 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
 
 @jax_funcify.register(AdvancedIncSubtensor)
 def jax_funcify_AdvancedIncSubtensor(op, node, **kwargs):
+    idx_list = getattr(op, "idx_list", None)
+    
     if getattr(op, "set_instead_of_inc", False):
 
         def jax_fn(x, indices, y):
@@ -87,8 +89,11 @@ def jax_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         def jax_fn(x, indices, y):
             return x.at[indices].add(y)
 
-    def advancedincsubtensor(x, y, *ilist, jax_fn=jax_fn):
-        return jax_fn(x, ilist, y)
+    def advancedincsubtensor(x, y, *ilist, jax_fn=jax_fn, idx_list=idx_list):
+        indices = indices_from_subtensor(ilist, idx_list)
+        if len(indices) == 1:
+            indices = indices[0]
+        return jax_fn(x, indices, y)
 
     return advancedincsubtensor
 
