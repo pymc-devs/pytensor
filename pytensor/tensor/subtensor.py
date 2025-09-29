@@ -2805,10 +2805,12 @@ class AdvancedSubtensor(Op):
         Parameters
         ----------
         idx_list : tuple
-            List of indices where slices and newaxis are stored as-is,
+            List of indices where slices are stored as-is,
             and numerical indices are replaced by their types.
         """
         self.idx_list = tuple(map(index_vars_to_types, idx_list))
+        # Store expected number of tensor inputs for validation
+        self.expected_inputs_len = len(get_slice_elements(self.idx_list, lambda entry: isinstance(entry, Type)))
 
     def make_node(self, x, *inputs):
         """
@@ -2824,15 +2826,14 @@ class AdvancedSubtensor(Op):
         inputs = tuple(as_tensor_variable(a) for a in inputs)
 
         idx_list = list(self.idx_list)
-        if (len([entry for entry in idx_list if entry is not np.newaxis]) > x.type.ndim):
+        if len(idx_list) > x.type.ndim:
             raise IndexError("too many indices for array")
 
         # Validate input count matches expected from idx_list
-        expected_inputs = get_slice_elements(idx_list, lambda entry: isinstance(entry, Type))
-        if len(inputs) != len(expected_inputs):
-            raise ValueError(f"Expected {len(expected_inputs)} inputs but got {len(inputs)}")
+        if len(inputs) != self.expected_inputs_len:
+            raise ValueError(f"Expected {self.expected_inputs_len} inputs but got {len(inputs)}")
 
-        # Build explicit_indices for shape inference (newaxis handled by __getitem__)
+        # Build explicit_indices for shape inference
         explicit_indices = []
         input_idx = 0
         
@@ -3202,6 +3203,8 @@ class AdvancedIncSubtensor(Op):
         self, idx_list, inplace=False, set_instead_of_inc=False, ignore_duplicates=False
     ):
         self.idx_list = tuple(map(index_vars_to_types, idx_list))
+        # Store expected number of tensor inputs for validation
+        self.expected_inputs_len = len(get_slice_elements(self.idx_list, lambda entry: isinstance(entry, Type)))
         self.set_instead_of_inc = set_instead_of_inc
         self.inplace = inplace
         if inplace:
@@ -3220,9 +3223,8 @@ class AdvancedIncSubtensor(Op):
         y = as_tensor_variable(y)
 
         # Validate that we have the right number of tensor inputs for our idx_list
-        expected_tensor_inputs = sum(1 for entry in self.idx_list if isinstance(entry, Type))
-        if len(inputs) != expected_tensor_inputs:
-            raise ValueError(f"Expected {expected_tensor_inputs} tensor inputs but got {len(inputs)}")
+        if len(inputs) != self.expected_inputs_len:
+            raise ValueError(f"Expected {self.expected_inputs_len} tensor inputs but got {len(inputs)}")
 
         new_inputs = []
         for inp in inputs:
