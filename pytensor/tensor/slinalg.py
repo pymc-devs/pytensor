@@ -20,7 +20,7 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.nlinalg import kron, matrix_dot
+from pytensor.tensor.nlinalg import MatrixInverse, kron, matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
 from pytensor.tensor.variable import TensorVariable
@@ -1014,6 +1014,30 @@ def solve_triangular(
         )
     )(a, b)
     return cast(TensorVariable, ret)
+
+
+class TriangularInv(MatrixInverse):
+    """
+    Computes the inverse of a triangular matrix.
+    """
+
+    __props__ = ("lower",)
+
+    def __init__(self, lower=True):
+        self.lower = lower
+
+    def perform(self, node, inputs, outputs):
+        (x,) = inputs
+        (z,) = outputs
+        (dtrtri,) = get_lapack_funcs(("trtri",), (x,))
+        inv, info = dtrtri(x, lower=self.lower, overwrite_c=True)
+        if info > 0:
+            raise np.linalg.LinAlgError("Singular matrix")
+        elif info < 0:
+            raise ValueError(
+                "illegal value in %d-th argument of internal trtri" % -info
+            )
+        z[0] = inv
 
 
 class Solve(SolveBase):
