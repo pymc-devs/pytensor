@@ -9,7 +9,6 @@ from pytensor.compile.io import In
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph.utils import MissingInputError
-from pytensor.npy_2_compat import UintOverflowError
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
     bscalar,
@@ -239,11 +238,11 @@ class TestPfunc:
         assert np.all(f([2**20], np.ones(1, dtype="int8"), 1) == 2)
 
         # Value too big for b, raises OverflowError in numpy >= 2.0, TypeError in numpy <2.0
-        with pytest.raises(UintOverflowError):
+        with pytest.raises(OverflowError):
             f([3], [312], 1)
 
         # Value too big for c, raises OverflowError in numpy >= 2.0, TypeError in numpy <2.0
-        with pytest.raises(UintOverflowError):
+        with pytest.raises(OverflowError):
             f([3], [6], 806)
 
     def test_param_allow_downcast_floatX(self):
@@ -329,7 +328,7 @@ class TestPfunc:
             g([3], np.array([6], dtype="int16"), 0)
 
         # Value too big for b, raises OverflowError in numpy >= 2.0, TypeError in numpy <2.0
-        with pytest.raises(UintOverflowError):
+        with pytest.raises(OverflowError):
             g([3], [312], 0)
 
         h = pfunc([a, b, c], (a + b + c))  # Default: allow_input_downcast=None
@@ -340,7 +339,7 @@ class TestPfunc:
             h([3], np.array([6], dtype="int16"), 0)
 
         # Value too big for b, raises OverflowError in numpy >= 2.0, TypeError in numpy <2.0
-        with pytest.raises(UintOverflowError):
+        with pytest.raises(OverflowError):
             h([3], [312], 0)
 
     def test_allow_downcast_floatX(self):
