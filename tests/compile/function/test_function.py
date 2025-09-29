@@ -10,7 +10,6 @@ from pytensor.compile import shared
 from pytensor.compile.function import function, function_dump
 from pytensor.compile.io import In
 from pytensor.configdefaults import config
-from pytensor.npy_2_compat import UintOverflowError
 from pytensor.tensor.type import (
     bscalar,
     bvector,
@@ -176,11 +175,11 @@ class TestFunctionIn:
         assert np.array_equal(f([2**20], np.ones(1, dtype="int8"), 1), [2])
 
         # Value too big for b, raises OverflowError (in numpy >= 2.0... TypeError in numpy < 2.0)
-        with pytest.raises(UintOverflowError):
+        with pytest.raises(OverflowError):
             f([3], [312], 1)
 
         # Value too big for c, raises OverflowError
-        with pytest.raises(UintOverflowError):
+        with pytest.raises(OverflowError):
             f([3], [6], 806)
 
     def test_in_allow_downcast_floatX(self):
