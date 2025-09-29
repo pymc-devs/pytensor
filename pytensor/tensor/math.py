@@ -14,7 +14,7 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.npy_2_compat import npy_2_compat_header, numpy_axis_is_none_flag
+from pytensor.npy_2_compat import npy_2_compat_header
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
 from pytensor.scalar.basic import BinaryScalarOp
@@ -162,7 +162,7 @@ class Argmax(COp):
             c_axis = np.int64(self.axis[0])
         else:
             # The value here doesn't matter, it won't be used
-            c_axis = numpy_axis_is_none_flag
+            c_axis = 0
         return self.params_type.get_params(c_axis=c_axis)
 
     def make_node(self, x):
