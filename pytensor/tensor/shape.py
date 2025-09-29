@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Union, cast
 from typing import cast as typing_cast
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_tuple
 
 import pytensor
 from pytensor.gradient import DisconnectedType
@@ -15,7 +16,6 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.type import HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.tensor import _get_vector_length, as_tensor_variable, get_vector_length
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.exceptions import NotScalarConstantError

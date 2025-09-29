@@ -3,15 +3,6 @@ from textwrap import dedent
 import numpy as np
 
 
-# Conditional numpy imports for numpy 1.26 and 2.x compatibility
-try:
-    from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
-except ModuleNotFoundError:
-    # numpy < 2.0
-    from numpy.core.multiarray import normalize_axis_index  # type: ignore[no-redef]
-    from numpy.core.numeric import normalize_axis_tuple  # type: ignore[no-redef]
-
-
 try:
     from numpy._core.einsumfunc import (  # type: ignore[attr-defined]
         _find_contraction,
@@ -28,8 +19,6 @@ except ModuleNotFoundError:
 __all__ = [
     "_find_contraction",
     "_parse_einsum_input",
-    "normalize_axis_index",
-    "normalize_axis_tuple",
 ]
 
 

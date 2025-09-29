@@ -83,10 +83,10 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_tuple
 from scipy.linalg import get_blas_funcs
 
 from pytensor.graph import Variable, vectorize_graph
-from pytensor.npy_2_compat import normalize_axis_tuple
 
 
 try:
