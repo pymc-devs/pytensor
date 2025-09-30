@@ -35,7 +35,7 @@ class TestOpDecorator(utt.InferShapeTester):
     def test_deprecation(self):
         x = dmatrix("x")
 
-        with pytest.warns(DeprecationWarning):
+        with pytest.warns(FutureWarning):
 
             @as_op(dmatrix, dvector)
             def cumprod(x):
