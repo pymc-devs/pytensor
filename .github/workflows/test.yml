@@ -65,7 +65,7 @@ jobs:
       - uses: pre-commit/action@v3.0.1
 
   test:
-    name: "${{ matrix.os }} test py${{ matrix.python-version }} numpy${{ matrix.numpy-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
+    name: "${{ matrix.os }} test py${{ matrix.python-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
     needs:
       - changes
       - style
@@ -76,7 +76,6 @@ jobs:
       matrix:
         os: ["ubuntu-latest"]
         python-version: ["3.11", "3.13"]
-        numpy-version: ["~=1.26.0", ">=2.0"]
         fast-compile: [0, 1]
         float32: [0, 1]
         install-numba: [0]
@@ -98,17 +97,10 @@ jobs:
             float32: 1
           - fast-compile: 1
             float32: 1
-          - numpy-version: "~=1.26.0"
-            fast-compile: 1
-          - numpy-version: "~=1.26.0"
-            float32: 1
-          - numpy-version: "~=1.26.0"
-            python-version: "3.13"
         include:
           - os: "ubuntu-latest"
             part: "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link --ignore=pytensor/ipython.py"
             python-version: "3.12"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             install-numba: 0
@@ -118,55 +110,47 @@ jobs:
           - install-numba: 1
             os: "ubuntu-latest"
             python-version: "3.11"
-            numpy-version: "~=2.1.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"
           - install-numba: 1
             os: "ubuntu-latest"
             python-version: "3.13"
-            numpy-version: "~=2.1.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"
           - install-numba: 1
             os: "ubuntu-latest"
             python-version: "3.13"
-            numpy-version: "~=2.1.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba/test_slinalg.py"
           - install-jax: 1
             os: "ubuntu-latest"
             python-version: "3.11"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/jax"
           - install-jax: 1
             os: "ubuntu-latest"
             python-version: "3.13"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/jax"
           - install-torch: 1
             os: "ubuntu-latest"
             python-version: "3.11"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/pytorch"
           - install-xarray: 1
             os: "ubuntu-latest"
             python-version: "3.13"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             part: "tests/xtensor"
           - os: macos-15
             python-version: "3.13"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             install-numba: 0
@@ -222,7 +206,6 @@ jobs:
           fi
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
-          NUMPY_VERSION: ${{ matrix.numpy-version }}
           INSTALL_NUMBA: ${{ matrix.install-numba }}
           INSTALL_JAX: ${{ matrix.install-jax }}
           INSTALL_TORCH: ${{ matrix.install-torch}}
