@@ -287,7 +287,7 @@ def as_op(itypes, otypes, infer_shape=None):
     warnings.warn(
         "pytensor.as_op is deprecated and will be removed in a future release. "
         "Please use pytensor.wrap_py instead.",
-        DeprecationWarning,
+        FutureWarning,
         stacklevel=2,
     )
     return wrap_py(itypes, otypes, infer_shape)
