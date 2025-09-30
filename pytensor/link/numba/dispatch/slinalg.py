@@ -118,7 +118,7 @@ def numba_funcify_LU(op, node, **kwargs):
     if dtype in complex_dtypes:
         NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
-    @numba_njit(inline="always")
+    @numba_njit
     def lu(a):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):

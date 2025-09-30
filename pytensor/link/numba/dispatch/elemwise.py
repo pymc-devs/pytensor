@@ -320,33 +320,23 @@ def numba_funcify_Elemwise(op, node, **kwargs):
 
     # Pure python implementation, that will be used in tests
     def elemwise(*inputs):
-        inputs = [np.asarray(input) for input in inputs]
+        Elemwise._check_runtime_broadcast(node, inputs)
         inputs_bc = np.broadcast_arrays(*inputs)
-        shape = inputs[0].shape
-        for input, bc in zip(inputs, input_bc_patterns, strict=True):
-            for length, allow_bc, iter_length in zip(
-                input.shape, bc, shape, strict=True
-            ):
-                if length == 1 and shape and iter_length != 1 and not allow_bc:
-                    raise ValueError("Broadcast not allowed.")
+        shape = inputs_bc[0].shape
 
-        outputs = [np.empty(shape, dtype=dtype) for dtype in output_dtypes]
+        if len(output_dtypes) == 1:
+            output = np.empty(shape, dtype=output_dtypes[0])
+            for idx in np.ndindex(shape):
+                output[idx] = scalar_op_fn(*(inp[idx] for inp in inputs_bc))
+            return output
 
-        for idx in np.ndindex(shape):
-            vals = [input[idx] for input in inputs_bc]
-            outs = scalar_op_fn(*vals)
-            if not isinstance(outs, tuple):
-                outs = (outs,)
-            for out, out_val in zip(outputs, outs, strict=True):
-                out[idx] = out_val
-
-        outputs_summed = []
-        for output, bc in zip(outputs, output_bc_patterns, strict=True):
-            axes = tuple(np.nonzero(bc)[0])
-            outputs_summed.append(output.sum(axes, keepdims=True))
-        if len(outputs_summed) != 1:
-            return tuple(outputs_summed)
-        return outputs_summed[0]
+        else:
+            outputs = [np.empty(shape, dtype=dtype) for dtype in output_dtypes]
+            for idx in np.ndindex(shape):
+                outs_vals = scalar_op_fn(*(inp[idx] for inp in inputs_bc))
+                for out, out_val in zip(outputs, outs_vals):
+                    out[idx] = out_val
+            return outputs
 
     @overload(elemwise)
     def ov_elemwise(*inputs):
@@ -594,7 +584,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
 
     if x_ndim == 0:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def argmax(x):
             return np.array(0, dtype="int64")
 

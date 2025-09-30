@@ -24,7 +24,7 @@ from pytensor.tensor.extra_ops import (
 
 @numba_funcify.register(Bartlett)
 def numba_funcify_Bartlett(op, **kwargs):
-    @numba_basic.numba_njit(inline="always")
+    @numba_basic.numba_njit
     def bartlett(x):
         return np.bartlett(numba_basic.to_scalar(x))
 
@@ -228,13 +228,13 @@ def numba_funcify_Repeat(op, node, **kwargs):
 
         if repeats_ndim == 0:
 
-            @numba_basic.numba_njit(inline="always")
+            @numba_basic.numba_njit
             def repeatop(x, repeats):
                 return np.repeat(x, repeats.item())
 
         else:
 
-            @numba_basic.numba_njit(inline="always")
+            @numba_basic.numba_njit
             def repeatop(x, repeats):
                 return np.repeat(x, repeats)
 
@@ -348,7 +348,7 @@ def numba_funcify_Searchsorted(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def searchsorted(a, v):
             return np.searchsorted(a, v, side)
 

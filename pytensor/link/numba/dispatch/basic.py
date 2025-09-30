@@ -50,11 +50,11 @@ def global_numba_func(func):
     return func
 
 
-def numba_njit(*args, fastmath=None, register_jitable: bool = False, **kwargs):
+def numba_njit(*args, fastmath=None, register_jitable: bool = True, **kwargs):
     kwargs.setdefault("cache", True)
     kwargs.setdefault("no_cpython_wrapper", False)
     kwargs.setdefault("no_cfunc_wrapper", False)
-    # print(kwargs)
+
     if fastmath is None:
         if config.numba__fastmath:
             # Opinionated default on fastmath flags
@@ -380,11 +380,16 @@ def numba_funcify_FunctionGraph(
     fgraph,
     node=None,
     fgraph_name="numba_funcified_fgraph",
+    jit_nodes: bool = False,
     **kwargs,
 ):
+    def numba_funcify_njit(op, node, **kwargs):
+        jitable_func = numba_funcify(op, node=node, **kwargs)
+        return numba_njit(lambda *args: jitable_func(*args), register_jitable=False)
+
     return fgraph_to_python(
         fgraph,
-        numba_funcify,
+        op_conversion_fn=numba_funcify_njit if jit_nodes else numba_funcify,
         type_conversion_fn=numba_typify,
         fgraph_name=fgraph_name,
         **kwargs,

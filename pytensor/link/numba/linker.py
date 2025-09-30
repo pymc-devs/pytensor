@@ -11,7 +11,7 @@ class NumbaLinker(JITLinker):
     def fgraph_convert(self, fgraph, **kwargs):
         from pytensor.link.numba.dispatch import numba_funcify
 
-        return numba_funcify(fgraph, **kwargs)
+        return numba_funcify(fgraph, jit_nodes=self.vm, **kwargs)
 
     def jit_compile(self, fn):
         if self.vm:
