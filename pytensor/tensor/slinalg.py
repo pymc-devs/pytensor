@@ -7,8 +7,7 @@ from typing import Literal, cast
 import numpy as np
 import scipy.linalg as scipy_linalg
 from numpy.exceptions import ComplexWarning
-from scipy.linalg import get_lapack_funcs
-from scipy.linalg._misc import LinAlgError, LinAlgWarning
+from scipy.linalg import LinAlgError, LinAlgWarning, get_lapack_funcs
 
 import pytensor
 from pytensor import ifelse
