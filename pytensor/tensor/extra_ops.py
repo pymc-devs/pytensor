@@ -18,7 +18,7 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import EnumList, Generic
-from pytensor.npy_2_compat import npy_2_compat_header, old_np_unique
+from pytensor.npy_2_compat import old_np_unique
 from pytensor.raise_op import Assert
 from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
@@ -362,10 +362,6 @@ class CumOp(COp):
 
         return shapes
 
-    def c_support_code_apply(self, node: Apply, name: str) -> str:
-        """Needed to define NPY_RAVEL_AXIS"""
-        return npy_2_compat_header()
-
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
         (z,) = onames
@@ -424,7 +420,7 @@ class CumOp(COp):
         return code
 
     def c_code_cache_version(self):
-        return (9,)
+        return (10,)
 
     def __str__(self):
         return f"{self.__class__.__name__}{{{self.axis}, {self.mode}}}"

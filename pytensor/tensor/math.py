@@ -14,7 +14,6 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.npy_2_compat import npy_2_compat_header
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
 from pytensor.scalar.basic import BinaryScalarOp
@@ -205,10 +204,6 @@ class Argmax(COp):
 
         max_idx[0] = np.asarray(np.argmax(reshaped_x, axis=-1), dtype="int64")
 
-    def c_support_code_apply(self, node: Apply, name: str) -> str:
-        """Needed to define NPY_RAVEL_AXIS"""
-        return npy_2_compat_header()
-
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
         (argmax,) = out
@@ -255,7 +250,7 @@ class Argmax(COp):
         """
 
     def c_code_cache_version(self):
-        return (2,)
+        return (3,)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishape,) = shapes
