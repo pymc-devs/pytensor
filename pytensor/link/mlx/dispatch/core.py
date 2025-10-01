@@ -32,6 +32,17 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.exceptions import NotScalarConstantError
 
 
+MLX_DYNAMIC_SHAPE_ERROR = (
+    "MLX compilation limitation: Alloc operations with dynamic shapes "
+    "cannot be used inside compiled functions. This is because MLX "
+    "compilation forbids evaluating arrays to extract shape values. "
+    "\n\nWorkarounds:"
+    "\n1. Avoid using Alloc with dynamic shapes in compiled contexts"
+    "\n2. Use static shapes when possible"
+    "\n3. Move Alloc operations outside compiled functions"
+)
+
+
 @mlx_funcify.register(Join)
 def mlx_funcify_Join(op, **kwargs):
     def join(axis, *tensors):
@@ -247,33 +258,66 @@ def mlx_funcify_AllocEmpty(op, **kwargs):
 
 @mlx_funcify.register(Alloc)
 def mlx_funcify_Alloc(op, node, **kwargs):
+    node_inputs = getattr(node, "inputs", None)
+    static_dims = (
+        _extract_static_dims(node_inputs[1:])
+        if node_inputs and len(node_inputs) > 1
+        else None
+    )
+
     def alloc(x, *shape):
-        try:
-            # Convert shape elements to Python ints for MLX compatibility
-            # MLX requires shape dimensions to be Python integers, not MLX arrays
-            shape_ints = tuple(
-                int(s.item()) if hasattr(s, "item") else int(s) for s in shape
-            )
-            return mx.broadcast_to(x, shape_ints)
-        except ValueError as e:
-            if (
-                "[eval] Attempting to eval an array during function transformations"
-                in str(e)
-            ):
-                # This is the MLX compilation limitation - provide helpful error
-                raise ValueError(
-                    "MLX compilation limitation: Alloc operations with dynamic shapes "
-                    "cannot be used inside compiled functions. This is because MLX "
-                    "compilation forbids evaluating arrays to extract shape values. "
-                    # Just a note! TODO: remove this once we have a better solution
-                    "\n\nWorkarounds:"
-                    "\n1. Avoid using Alloc with dynamic shapes in compiled contexts"
-                    "\n2. Use static shapes when possible"
-                    "\n3. Move Alloc operations outside compiled functions"
-                    "\n\nOriginal error: " + str(e)
-                ) from e
-            else:
-                # Re-raise other ValueError exceptions
-                raise
+        resolved_shape = (
+            _resolve_shape(static_dims, shape)
+            if static_dims is not None
+            else tuple(_coerce_to_int(dim) for dim in shape)
+        )
+        result = mx.broadcast_to(x, resolved_shape)
+        if node_inputs is not None:
+            value_for_check = x if hasattr(x, "shape") else np.asarray(x)
+            Alloc._check_runtime_broadcast(node, value_for_check, resolved_shape)
+        return result
 
     return alloc
+
+
+def _extract_static_dims(shape_inputs):
+    static_dims = []
+    for dim in shape_inputs:
+        try:
+            static_dims.append(int(get_scalar_constant_value(dim)))
+        except NotScalarConstantError:
+            static_dims.append(None)
+    return tuple(static_dims)
+
+
+def _resolve_shape(static_dims, runtime_shape):
+    if len(static_dims) != len(runtime_shape):
+        raise ValueError("Alloc received unexpected number of shape dimensions")
+
+    resolved = []
+    for const_dim, dim in zip(static_dims, runtime_shape, strict=True):
+        resolved.append(const_dim if const_dim is not None else _coerce_to_int(dim))
+
+    return tuple(resolved)
+
+
+def _coerce_to_int(value):
+    if isinstance(value, np.integer | int):
+        return int(value)
+    try:
+        if hasattr(value, "item"):
+            return int(value.item())
+        return int(value)
+    except (ValueError, TypeError) as exc:
+        _rethrow_dynamic_shape_error(exc)
+        raise
+    raise TypeError(
+        "MLX Alloc expects integer shape components; got value of type "
+        f"{type(value).__name__}."
+    )
+
+
+def _rethrow_dynamic_shape_error(exc):
+    msg = str(exc)
+    if "[eval] Attempting to eval an array during function transformations" in msg:
+        raise ValueError(f"{MLX_DYNAMIC_SHAPE_ERROR}\n\nOriginal error: {msg}") from exc

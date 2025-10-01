@@ -61,19 +61,9 @@ class MLXLinker(JITLinker):
         list
             The inputs for the thunk
         """
-        from numpy.random import Generator, RandomState
-
-        from pytensor.link.mlx.dispatch import mlx_typify
-
         thunk_inputs = []
         for n in self.fgraph.inputs:
             sinput = storage_map[n]
-            # Handle random number generators specially
-            if isinstance(sinput[0], RandomState | Generator):
-                new_value = mlx_typify(
-                    sinput[0], dtype=getattr(sinput[0], "dtype", None)
-                )
-                sinput[0] = new_value
             thunk_inputs.append(sinput)
 
         return thunk_inputs
