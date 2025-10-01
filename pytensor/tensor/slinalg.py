@@ -391,7 +391,7 @@ class CholeskySolve(SolveBase):
         if self.check_finite and not (np.isfinite(c).all() and np.isfinite(b).all()):
             raise ValueError("array must not contain infs or NaNs")
 
-        if c.ndim != 2 or c.shape[0] != c.shape[1]:
+        if c.shape[0] != c.shape[1]:
             raise ValueError("The factored matrix c is not square.")
         if c.shape[1] != b.shape[0]:
             raise ValueError(f"incompatible dimensions ({c.shape} and {b.shape})")
@@ -712,7 +712,7 @@ class LUFactor(Op):
         # Quick return for empty arrays
         if A.size == 0:
             outputs[0][0] = np.empty_like(A)
-            outputs[1][0] = np.arange(0, dtype=np.int32)
+            outputs[1][0] = np.array([], dtype=np.int32)
             return
 
         if self.check_finite and not np.isfinite(A).all():
