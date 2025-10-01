@@ -76,7 +76,9 @@ def test_mlx_AdvancedSubtensor():
     compare_mlx_and_py([x_pt], [out_pt], [x_np])
 
 
-@pytest.mark.xfail(reason="MLX does not support boolean indexing yet")
+@pytest.mark.xfail(
+    raises=ValueError, reason="MLX does not support boolean indexing yet"
+)
 def test_mlx_AdvancedSubtensor_boolean():
     """Test advanced subtensor operations with boolean indexing."""
     shape = (3, 4, 5)
@@ -90,7 +92,6 @@ def test_mlx_AdvancedSubtensor_boolean():
     compare_mlx_and_py([x_pt], [out_pt], [x_np])
 
 
-@pytest.mark.xfail(reason="MLX indexing with tuples not yet supported")
 def test_mlx_IncSubtensor_set():
     """Test set operations using IncSubtensor (set_instead_of_inc=True)."""
     # Test data
@@ -105,7 +106,6 @@ def test_mlx_IncSubtensor_set():
     compare_mlx_and_py([], [out_pt], [])
 
 
-@pytest.mark.xfail(reason="MLX indexing with tuples not yet supported")
 def test_mlx_IncSubtensor_increment():
     """Test increment operations using IncSubtensor (set_instead_of_inc=False)."""
     # Test data

@@ -19,6 +19,7 @@ from pytensor.link.mlx import MLXLinker
 from pytensor.link.mlx.dispatch.core import (
     mlx_funcify_Alloc,
 )
+from pytensor.raise_op import assert_op
 from pytensor.tensor.basic import Alloc
 
 
@@ -390,3 +391,27 @@ def test_mlx_complex128_auto_casting():
             if "complex128" in msg and "complex64" in msg
         ]
         assert len(complex_warnings) > 0
+
+
+def test_mlx_checkandraise_constant_false():
+    x = pt.scalar("x", dtype="float32")
+    res = assert_op(x, pt.as_tensor_variable(np.array(False)))
+
+    with pytest.warns(UserWarning, match=r"Skipping `Assert` Op"):
+        mlx_fn = function([x], res, mode=mlx_mode)
+
+    out = mlx_fn(np.array(0.5, dtype=np.float32))
+    assert isinstance(out, mx.array)
+    assert np.allclose(out, 0.5)
+
+
+def test_mlx_checkandraise_warning_and_execution():
+    p = pt.scalar("p", dtype="float32")
+    res = assert_op(p, p < 1.0)
+
+    with pytest.warns(UserWarning, match=r"Skipping `Assert` Op"):
+        mlx_fn = function([p], res, mode=mlx_mode)
+
+    out = mlx_fn(np.array(0.5, dtype=np.float32))
+    assert isinstance(out, mx.array)
+    assert np.allclose(out, 0.5)

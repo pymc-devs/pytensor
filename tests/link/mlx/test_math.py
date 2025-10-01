@@ -204,7 +204,6 @@ def test_softplus_extreme_values() -> None:
     compare_mlx_and_py([x], out, [x_test], assert_fn=relaxed_assert)
 
 
-@pytest.mark.xfail(reason="Argmax not implemented yet")
 def test_mlx_max_and_argmax():
     # Test that a single output of a multi-output `Op` can be used as input to
     # another `Op`
