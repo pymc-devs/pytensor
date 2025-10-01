@@ -3,6 +3,7 @@ import sys
 import warnings
 from copy import copy
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent
 
 import numba
@@ -11,11 +12,11 @@ import numpy as np
 import scipy
 import scipy.special
 from llvmlite import ir
+from numba import njit as _njit
 from numba import types
 from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
-from numba.extending import box, overload
-from numba.extending import register_jitable as _register_jitable
+from numba.extending import box, overload, register_jitable
 
 from pytensor import In, config
 from pytensor.compile import NUMBA
@@ -26,7 +27,9 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
-from pytensor.link.numba.cache import compile_and_cache_numba_function_src
+from pytensor.link.numba.cache import (
+    compile_and_cache_numba_function_src,
+)
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.link.utils import fgraph_to_python
 from pytensor.scalar.basic import ScalarType
@@ -50,11 +53,7 @@ def global_numba_func(func):
     return func
 
 
-def numba_njit(*args, fastmath=None, register_jitable: bool = True, **kwargs):
-    kwargs.setdefault("cache", True)
-    kwargs.setdefault("no_cpython_wrapper", False)
-    kwargs.setdefault("no_cfunc_wrapper", False)
-
+def numba_njit(*args, fastmath=None, final_function: bool = False, **kwargs):
     if fastmath is None:
         if config.numba__fastmath:
             # Opinionated default on fastmath flags
@@ -69,6 +68,12 @@ def numba_njit(*args, fastmath=None, register_jitable: bool = True, **kwargs):
         else:
             fastmath = False
 
+    if final_function:
+        kwargs.setdefault("cache", True)
+    # else:
+    #     kwargs.setdefault("no_cpython_wrapper", True)
+    #     kwargs.setdefault("no_cfunc_wrapper", True)
+
     # Suppress cache warning for internal functions
     # We have to add an ansi escape code for optional bold text by numba
     warnings.filterwarnings(
@@ -82,7 +87,7 @@ def numba_njit(*args, fastmath=None, register_jitable: bool = True, **kwargs):
         category=NumbaWarning,
     )
 
-    func = _register_jitable if register_jitable else numba.njit
+    func = register_jitable if final_function else _njit
     if len(args) > 0 and callable(args[0]):
         return func(*args[1:], fastmath=fastmath, **kwargs)(args[0])
     else:
@@ -384,8 +389,43 @@ def numba_funcify_FunctionGraph(
     **kwargs,
 ):
     def numba_funcify_njit(op, node, **kwargs):
-        jitable_func = numba_funcify(op, node=node, **kwargs)
-        return numba_njit(lambda *args: jitable_func(*args), register_jitable=False)
+        jitable_func_and_key = numba_funcify(op, node=node, **kwargs)
+        from collections.abc import Callable
+
+        match jitable_func_and_key:
+            case (Callable(), str()):
+                jitable_func, key = jitable_func_and_key
+            case (Callable(), int()):
+                # Default key for Ops that return an integer
+                jitable_func, int_key = jitable_func_and_key
+                key = sha256(
+                    str((type(op), op._props_dict(), int_key)).encode()
+                ).hexdigest()
+            case Callable():
+                jitable_func, key = jitable_func_and_key, None
+                warnings.warn(
+                    f"No cache key returned by numba_funcify of op {op}. This function won't be cached by Numba"
+                )
+            case _:
+                raise TypeError(
+                    f"numpy_funcify should return a callable or a callable, key pair, got {jitable_func_and_key}"
+                )
+
+        if 0 and key is not None:
+            # To force numba to use our cache, we must compile the function so that any closure
+            # becomes a global variable...
+            op_name = op.__class__.__name__
+            cached_func = compile_and_cache_numba_function_src(
+                src=f"def {op_name}(*args): return jitable_func(*args)",
+                function_name=op_name,
+                global_env=globals() | dict(jitable_func=jitable_func),
+                key=key,
+            )
+            return numba_njit(cached_func, final_function=True, cache=True)
+        else:
+            return numba_njit(
+                lambda *args: jitable_func(*args), final_function=True, cache=False
+            )
 
     return fgraph_to_python(
         fgraph,
@@ -410,7 +450,7 @@ def dispatch_deepcopyop(x):
 
 @numba_funcify.register(DeepCopyOp)
 def numba_funcify_DeepCopyOp(op, node, **kwargs):
-    return deepcopyop
+    return deepcopyop, 0
 
 
 @numba_funcify.register(MakeSlice)
@@ -439,7 +479,7 @@ def numba_funcify_Shape_i(op, **kwargs):
     def shape_i(x):
         return np.asarray(np.shape(x)[i])
 
-    return shape_i
+    return shape_i, 0
 
 
 @numba_funcify.register(SortOp)
@@ -543,7 +583,7 @@ def numba_funcify_Reshape(op, **kwargs):
                 numba_ndarray.to_fixed_tuple(shape, ndim),
             )
 
-    return reshape
+    return reshape, 0
 
 
 @numba_funcify.register(SpecifyShape)
@@ -571,9 +611,8 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
         func,
         "specify_shape",
         globals(),
-        key=hash_from_code(func),
     )
-    return numba_njit(specify_shape)
+    return numba_njit(specify_shape), hash_from_code(func)
 
 
 def int_to_float_fn(inputs, out_dtype):

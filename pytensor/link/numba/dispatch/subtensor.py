@@ -101,9 +101,8 @@ def {function_name}({", ".join(input_names)}):
         subtensor_def_src,
         function_name=function_name,
         global_env=globals() | {"np": np},
-        key=hash_from_code(subtensor_def_src),
     )
-    return numba_njit(func, boundscheck=True)
+    return numba_njit(func, boundscheck=True), hash_from_code(subtensor_def_src)
 
 
 @numba_funcify.register(AdvancedSubtensor)
@@ -350,7 +349,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
                 return x
 
     if inplace:
-        return advancedincsubtensor1_inplace
+        return advancedincsubtensor1_inplace, 0
 
     else:
 
@@ -359,4 +358,4 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
             x = x.copy()
             return advancedincsubtensor1_inplace(x, vals, idxs)
 
-        return advancedincsubtensor1
+        return advancedincsubtensor1, 0

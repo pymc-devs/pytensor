@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from pathlib import Path
-from tempfile import NamedTemporaryFile, TemporaryFile
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from numba.core.caching import CacheImpl, _CacheLocator
@@ -9,7 +9,9 @@ from pytensor import config
 
 
 NUMBA_PYTENSOR_CACHE_ENABLED = True
-COMPILED_SRC_FUNCTIONS = {}
+NUMBA_CACHE_PATH = config.base_compiledir / "numba"
+NUMBA_CACHE_PATH.mkdir(exist_ok=True)
+CACHED_SRC_FUNCTIONS = {}
 
 
 def compile_and_cache_numba_function_src(
@@ -20,9 +22,7 @@ def compile_and_cache_numba_function_src(
     key: str | None = None,
 ) -> Callable:
     if key is not None:
-        numba_path = config.base_compiledir / "numba"
-        numba_path.mkdir(exist_ok=True)
-        filename = numba_path / key
+        filename = NUMBA_CACHE_PATH / key
         with filename.open("wb") as f:
             f.write(src.encode())
     else:
@@ -43,8 +43,17 @@ def compile_and_cache_numba_function_src(
     res.__source__ = src  # type: ignore
 
     if key is not None:
-        COMPILED_SRC_FUNCTIONS[res] = key
+        CACHED_SRC_FUNCTIONS[res] = key
     return res
+
+
+def cache_numba_function(
+    fn,
+    key: str | None = None,
+) -> Callable:
+    if key is not None:
+        CACHED_SRC_FUNCTIONS[fn] = key
+    return fn
 
 
 class NumbaPyTensorCacheLocator(_CacheLocator):
@@ -57,18 +66,13 @@ class NumbaPyTensorCacheLocator(_CacheLocator):
         # self._hash = hash((src_hash, py_file, pytensor.__version__))
 
     def ensure_cache_path(self):
-        # print("ensure_cache_path called")
-        path = self.get_cache_path()
-        path.mkdir(exist_ok=True)
-        # Ensure the directory is writable by trying to write a temporary file
-        TemporaryFile(dir=path).close()
+        pass
 
     def get_cache_path(self):
         """
         Return the directory the function is cached in.
         """
-        # print("get_cache_path called")
-        return self._py_file
+        return NUMBA_CACHE_PATH
 
     def get_source_stamp(self):
         """
@@ -76,15 +80,12 @@ class NumbaPyTensorCacheLocator(_CacheLocator):
         Can return any picklable Python object.
         """
         return 0
-        # print("get_source_stamp called")
-        return self._hash
 
     def get_disambiguator(self):
         """
         Get a string disambiguator for this locator's function.
         It should allow disambiguating different but similarly-named functions.
         """
-        # print("get_disambiguator called")
         return self._hash
 
     @classmethod
@@ -94,9 +95,9 @@ class NumbaPyTensorCacheLocator(_CacheLocator):
         """
         # py_file = Path(py_file).parent
         # if py_file == (config.base_compiledir / "numba"):
-        if NUMBA_PYTENSOR_CACHE_ENABLED and py_func in COMPILED_SRC_FUNCTIONS:
+        if NUMBA_PYTENSOR_CACHE_ENABLED and py_func in CACHED_SRC_FUNCTIONS:
             # print(f"Applies to {py_file}")
-            return cls(py_func, Path(py_file).parent, COMPILED_SRC_FUNCTIONS[py_func])
+            return cls(py_func, Path(py_file).parent, CACHED_SRC_FUNCTIONS[py_func])
 
 
 CacheImpl._locator_classes.insert(0, NumbaPyTensorCacheLocator)

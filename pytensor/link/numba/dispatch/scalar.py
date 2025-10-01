@@ -136,13 +136,7 @@ def {scalar_op_fn_name}({', '.join(input_names)}):
 
     # signature = create_numba_signature(node, force_scalar=True)
 
-    return numba_basic.numba_njit(
-        # signature,
-        # Functions that call a function pointer can't be cached
-        no_cfunc_wrapper=True,
-        no_cpython_wrapper=True,
-        register_jitable=False,
-    )(scalar_op_fn)
+    return numba_basic.numba_njit(scalar_op_fn)
 
 
 @numba_funcify.register(Switch)

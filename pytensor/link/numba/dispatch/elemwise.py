@@ -288,10 +288,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
             ),
         )
     )
-    core_op_key = sha256(core_op_key.encode()).hexdigest()
-    core_op_fn = store_core_outputs(
-        scalar_op_fn, nin=nin, nout=nout, core_op_key=core_op_key
-    )
+    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
     output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
@@ -342,27 +339,8 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     def ov_elemwise(*inputs):
         return elemwise_wrapper
 
-    # TODO: Also input dtypes in key
-    elemwise_key = "_".join(
-        map(
-            str,
-            (
-                "Elemwise",
-                core_op_key,
-                input_bc_patterns,
-                inplace_pattern,
-            ),
-        )
-    )
-    elemwise_key = sha256(elemwise_key.encode()).hexdigest()
-    f = compile_and_cache_numba_function_src(
-        "def f(*inputs): return elemwise(*inputs)",
-        "f",
-        {**globals(), **{"elemwise": elemwise}},
-        key=elemwise_key,
-    )
-
-    return numba_njit(f)
+    elemwise_key = sha256(f"Elemwise2{core_op_key}".encode()).hexdigest()
+    return elemwise, elemwise_key
 
 
 @numba_funcify.register(Sum)
@@ -470,7 +448,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
 
             return as_strided(x, shape=new_shape, strides=new_strides)
 
-    return dimshuffle
+    return dimshuffle, 0
 
 
 @numba_funcify.register(Softmax)

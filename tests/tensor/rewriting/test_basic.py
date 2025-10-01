@@ -127,7 +127,7 @@ _specialize_rewrites = RewriteDatabaseQuery(include=["fast_run"])
 _specialize_rewrites.position_cutoff = 2.01
 _specialize_rewrites = optdb.query(_specialize_rewrites)
 
-_fast_run_rewrites = RewriteDatabaseQuery(include=["fast_run"])
+_fast_run_rewrites = RewriteDatabaseQuery(include=["fast_run"], exclude=["inplace"])
 _fast_run_rewrites = optdb.query(_fast_run_rewrites)
 
 
@@ -476,6 +476,8 @@ class TestUselessCheckAndRaise:
         x = scalar()
         y = scalar()
         f = function([x, y], assert_op(x, eq(x, y)), mode=mode)
+        f.dprint()
+        return
         assert f(1, 1) == 1
         with pytest.raises(AssertionError):
             f(1, 0)

@@ -55,10 +55,12 @@ def allocempty({", ".join(shape_var_names)}):
         alloc_def_src,
         "allocempty",
         {**globals(), **global_env},
-        key=hash_from_code(alloc_def_src),
     )
 
-    return numba_basic.numba_njit(alloc_fn)
+    return (
+        numba_basic.numba_njit(alloc_fn),
+        hash_from_code(alloc_def_src),
+    )
 
 
 @numba_funcify.register(Alloc)
@@ -102,10 +104,12 @@ def alloc(val, {", ".join(shape_var_names)}):
         alloc_def_src,
         "alloc",
         {**globals(), **global_env},
-        key=hash_from_code(alloc_def_src),
     )
 
-    return numba_basic.numba_njit(alloc_fn)
+    return (
+        numba_basic.numba_njit(alloc_fn),
+        hash_from_code(alloc_def_src),
+    )
 
 
 @numba_funcify.register(ARange)
@@ -130,7 +134,7 @@ def numba_funcify_Join(op, **kwargs):
     def join(axis, *tensors):
         return np.concatenate(tensors, axis.item())
 
-    return join
+    return join, 0
 
 
 @numba_funcify.register(Split)
@@ -139,7 +143,7 @@ def numba_funcify_Split(op, **kwargs):
     def split(tensor, axis, indices):
         return np.split(tensor, np.cumsum(indices)[:-1], axis=axis.item())
 
-    return split
+    return split, 0
 
 
 @numba_funcify.register(ExtractDiag)
@@ -226,10 +230,8 @@ def makevector({", ".join(input_names)}):
         makevector_def_src,
         "makevector",
         {**globals(), **global_env},
-        key=f"MakeVector({op.dtype})",
     )
-
-    return numba_basic.numba_njit(makevector_fn)
+    return numba_basic.numba_njit(makevector_fn), hash_from_code(makevector_def_src)
 
 
 @numba_funcify.register(TensorFromScalar)
@@ -238,7 +240,7 @@ def numba_funcify_TensorFromScalar(op, **kwargs):
     def tensor_from_scalar(x):
         return np.array(x)
 
-    return tensor_from_scalar
+    return tensor_from_scalar, 0
 
 
 @numba_funcify.register(ScalarFromTensor)
@@ -247,4 +249,4 @@ def numba_funcify_ScalarFromTensor(op, **kwargs):
     def scalar_from_tensor(x):
         return x.item()
 
-    return scalar_from_tensor
+    return scalar_from_tensor, 0

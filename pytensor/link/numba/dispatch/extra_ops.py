@@ -367,4 +367,4 @@ def numba_funcify_CheckAndRaise(op, node, **kwargs):
                 raise error(msg)
         return x
 
-    return check_and_raise
+    return check_and_raise, 0
