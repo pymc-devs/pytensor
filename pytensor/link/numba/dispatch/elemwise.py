@@ -7,12 +7,12 @@ import numpy as np
 from numba.core.extending import overload
 from numpy.lib.stride_tricks import as_strided
 
+import pytensor.link.numba.compile
 from pytensor.graph.op import Op
-from pytensor.link.numba.cache import compile_and_cache_numba_function_src
+from pytensor.link.numba.compile import compile_and_cache_numba_function_src, numba_njit
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     numba_funcify,
-    numba_njit,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _vectorized,
@@ -249,7 +249,7 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 
     reaxis_first = (*(i for i in range(ndim) if i != axis), axis)
 
-    @numba_basic.numba_njit(boundscheck=False)
+    @pytensor.link.numba.compile.numba_njit(boundscheck=False)
     def axis_apply_fn(x):
         x_reaxis = x.transpose(reaxis_first)
 
@@ -424,7 +424,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
     if new_order == ():
         # Special case needed because of https://github.com/numba/numba/issues/9933
 
-        @numba_basic.numba_njit
+        @pytensor.link.numba.compile.numba_njit
         def squeeze_to_0d(x):
             return as_strided(x, shape=(), strides=())
 
@@ -432,7 +432,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit
+        @pytensor.link.numba.compile.numba_njit
         def dimshuffle(x):
             old_shape = x.shape
             old_strides = x.strides
@@ -448,7 +448,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
 
             return as_strided(x, shape=new_shape, strides=new_strides)
 
-    return dimshuffle, 0
+    return dimshuffle
 
 
 @numba_funcify.register(Softmax)
@@ -467,7 +467,7 @@ def numba_funcify_Softmax(op, node, **kwargs):
             add_as, 0.0, (axis,), x_at.ndim, x_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
+        jit_fn = pytensor.link.numba.compile.numba_njit(boundscheck=False)
         reduce_max = jit_fn(reduce_max_py)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
@@ -499,7 +499,7 @@ def numba_funcify_SoftmaxGrad(op, node, **kwargs):
             add_as, 0.0, (axis,), sm_at.ndim, sm_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
+        jit_fn = pytensor.link.numba.compile.numba_njit(boundscheck=False)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
         reduce_sum = np.sum
@@ -536,7 +536,7 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
             add_as, 0.0, (axis,), x_at.ndim, x_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
+        jit_fn = pytensor.link.numba.compile.numba_njit(boundscheck=False)
         reduce_max = jit_fn(reduce_max_py)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
@@ -562,7 +562,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
 
     if x_ndim == 0:
 
-        @numba_basic.numba_njit
+        @pytensor.link.numba.compile.numba_njit
         def argmax(x):
             return np.array(0, dtype="int64")
 
@@ -582,7 +582,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
         sl1 = slice(None, len(keep_axes))
         sl2 = slice(len(keep_axes), None)
 
-        @numba_basic.numba_njit
+        @pytensor.link.numba.compile.numba_njit
         def argmax(x):
             # Not-reduced axes in front
             transposed_x = np.ascontiguousarray(np.transpose(x, reaxis_order))

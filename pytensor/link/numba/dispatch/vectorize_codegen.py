@@ -15,8 +15,8 @@ from numba.core.base import BaseContext
 from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
-from pytensor.link.numba.cache import compile_and_cache_numba_function_src
-from pytensor.link.numba.dispatch import basic as numba_basic
+import pytensor.link.numba.compile
+from pytensor.link.numba.compile import compile_and_cache_numba_function_src
 
 
 def encode_literals(literals: Sequence) -> str:
@@ -58,7 +58,7 @@ def store_core_outputs({inp_signature}, {out_signature}):
         "store_core_outputs",
         {**globals(), **global_env},
     )
-    return numba_basic.numba_njit(func)
+    return pytensor.link.numba.compile.numba_njit(func)
 
 
 _jit_options = {

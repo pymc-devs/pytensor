@@ -3,7 +3,8 @@ import warnings
 import numpy as np
 
 from pytensor import config
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
+from pytensor.link.numba.compile import numba_njit
+from pytensor.link.numba.dispatch.basic import numba_funcify
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
 from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
     _lu_1,

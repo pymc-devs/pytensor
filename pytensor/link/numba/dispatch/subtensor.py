@@ -1,9 +1,9 @@
 import numpy as np
 
 from pytensor.graph import Type
-from pytensor.link.numba.cache import compile_and_cache_numba_function_src
+from pytensor.link.numba.compile import compile_and_cache_numba_function_src, numba_njit
 from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import generate_fallback_impl, numba_njit
+from pytensor.link.numba.dispatch.basic import generate_fallback_impl
 from pytensor.link.utils import unique_name_generator
 from pytensor.tensor import TensorType
 from pytensor.tensor.rewriting.subtensor import is_full_slice
@@ -349,7 +349,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
                 return x
 
     if inplace:
-        return advancedincsubtensor1_inplace, 0
+        return advancedincsubtensor1_inplace
 
     else:
 
@@ -358,4 +358,4 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
             x = x.copy()
             return advancedincsubtensor1_inplace(x, vals, idxs)
 
-        return advancedincsubtensor1, 0
+        return advancedincsubtensor1

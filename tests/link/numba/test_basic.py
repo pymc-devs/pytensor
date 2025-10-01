@@ -9,6 +9,7 @@ import pytest
 import scipy
 
 import pytensor.link.numba.cache
+import pytensor.link.numba.compile
 from pytensor.compile import SymbolicInput
 
 
@@ -27,7 +28,6 @@ from pytensor.graph.op import Op
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.type import Type
 from pytensor.ifelse import ifelse
-from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
@@ -325,7 +325,7 @@ def test_get_numba_type(v, expected, force_scalar, not_implemented):
         else pytest.raises(NotImplementedError)
     )
     with cm:
-        res = numba_basic.get_numba_type(v, force_scalar=force_scalar)
+        res = pytensor.link.numba.compile.get_numba_type(v, force_scalar=force_scalar)
         assert res == expected
 
 
@@ -367,7 +367,9 @@ def test_get_numba_type(v, expected, force_scalar, not_implemented):
     ],
 )
 def test_create_numba_signature(v, expected, force_scalar):
-    res = numba_basic.create_numba_signature(v, force_scalar=force_scalar)
+    res = pytensor.link.numba.compile.create_numba_signature(
+        v, force_scalar=force_scalar
+    )
     assert res == expected
 
 
