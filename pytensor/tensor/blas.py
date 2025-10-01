@@ -83,8 +83,9 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+from scipy.linalg import get_blas_funcs
 
-from pytensor.graph import vectorize_graph
+from pytensor.graph import Variable, vectorize_graph
 from pytensor.npy_2_compat import normalize_axis_tuple
 
 
@@ -96,7 +97,7 @@ except ImportError:
 
 import pytensor.scalar
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, view_roots
+from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined, TestValueError
 from pytensor.link.c.op import COp
@@ -111,6 +112,25 @@ from pytensor.tensor.type import DenseTensorType, tensor
 
 
 _logger = logging.getLogger("pytensor.tensor.blas")
+
+
+def view_roots(node: Variable) -> list[Variable]:
+    """Return the leaves from a search through consecutive view-maps."""
+    owner = node.owner
+    if owner is not None:
+        try:
+            vars_to_views = {owner.outputs[o]: i for o, i in owner.op.view_map.items()}
+        except AttributeError:
+            return [node]
+        if node in vars_to_views:
+            answer = []
+            for i in vars_to_views[node]:
+                answer += view_roots(owner.inputs[i])
+            return answer
+        else:
+            return [node]
+    else:
+        return [node]
 
 
 def must_initialize_y_gemv():
@@ -288,18 +308,17 @@ class Ger(Op):
 
         return Apply(self, inputs, [A.type()])
 
-    def perform(self, node, inp, out):
-        cA, calpha, cx, cy = inp
-        (cZ,) = out
-        if self.destructive:
-            A = cA
-        else:
-            A = cA.copy()
-        if calpha != 1:
-            A += calpha * np.outer(cx, cy)
-        else:
-            A += np.outer(cx, cy)
-        cZ[0] = A
+    def perform(self, node, inputs, output_storage):
+        A, alpha, x, y = inputs
+        if A.size:
+            # GER doesn't handle zero-sized inputs
+            ger_func = get_blas_funcs("ger", dtype=A.dtype)
+            if A.flags["C_CONTIGUOUS"]:
+                # Work on transposed system to avoid copying
+                A = ger_func(alpha, y, x, a=A.T, overwrite_a=self.destructive).T
+            else:
+                A = ger_func(alpha, x, y, a=A, overwrite_a=self.destructive)
+        output_storage[0][0] = A
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]]
@@ -1128,16 +1147,8 @@ class Dot22(GemmRelated):
         outputs = [tensor(dtype=x.type.dtype, shape=(x.type.shape[0], y.type.shape[1]))]
         return Apply(self, [x, y], outputs)
 
-    def perform(self, node, inp, out):
-        x, y = inp
-        (z,) = out
-        try:
-            z[0] = np.asarray(np.dot(x, y))
-        except ValueError as e:
-            # The error raised by numpy has no shape information, we mean to
-            # add that
-            e.args = (*e.args, x.shape, y.shape)
-            raise
+    def perform(self, node, inputs, output_storage):
+        output_storage[0][0] = np.dot(*inputs)
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [[input_shapes[0][0], input_shapes[1][1]]]

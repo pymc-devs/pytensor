@@ -18,11 +18,7 @@ from pytensor.graph.basic import (
     Constant,
     NominalVariable,
     Variable,
-    ancestors,
-    apply_depends_on,
     equal_computations,
-    graph_inputs,
-    io_toposort,
 )
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import ReplaceValidate
@@ -30,13 +26,19 @@ from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import compute_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import (
+    EquilibriumGraphRewriter,
     GraphRewriter,
     copy_stack_trace,
-    in2out,
+    dfs_rewriter,
     node_rewriter,
 )
 from pytensor.graph.rewriting.db import EquilibriumDB, SequenceDB
 from pytensor.graph.rewriting.utils import get_clients_at_depth
+from pytensor.graph.traversal import (
+    ancestors,
+    apply_depends_on,
+    graph_inputs,
+)
 from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError
 from pytensor.raise_op import Assert
@@ -219,12 +221,9 @@ def scan_push_out_non_seq(fgraph, node):
     it to the outer function to be executed only once, before the `Scan` `Op`,
     reduces the amount of computation that needs to be performed.
     """
-    if not isinstance(node.op, Scan):
-        return False
-
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
-    local_fgraph_topo = io_toposort(node_inputs, node_outputs)
+    local_fgraph_topo = node.op.fgraph.toposort()
     local_fgraph_outs_set = set(node_outputs)
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
@@ -429,12 +428,9 @@ def scan_push_out_seq(fgraph, node):
     many times on many smaller tensors. In many cases, this optimization can
     increase memory usage but, in some specific cases, it can also decrease it.
     """
-    if not isinstance(node.op, Scan):
-        return False
-
     node_inputs, node_outputs = node.op.inner_inputs, node.op.inner_outputs
 
-    local_fgraph_topo = io_toposort(node_inputs, node_outputs)
+    local_fgraph_topo = node.op.fgraph.toposort()
     local_fgraph_outs_set = set(node_outputs)
     local_fgraph_outs_map = {v: k for k, v in enumerate(node_outputs)}
 
@@ -657,10 +653,9 @@ def inner_sitsot_only_last_step_used(
     fgraph: FunctionGraph, var: Variable, scan_args: ScanArgs
 ) -> bool:
     """
-    Given a inner nit-sot output of `Scan`, return ``True`` iff the outer
-    nit-sot output has only one client and that client is a `Subtensor`
-    instance that takes only the last step (last element along the first
-    axis).
+    Given a inner sit-sot output of `Scan`, return ``True`` iff the outer
+    sit-sot output has only one client and that client is a `Subtensor`
+    instance that takes only the last step (last element along the first axis).
     """
     idx = scan_args.inner_out_sit_sot.index(var)
     outer_var = scan_args.outer_out_sit_sot[idx]
@@ -696,7 +691,6 @@ def push_out_inner_vars(
     old_scan_args: ScanArgs,
 ) -> tuple[list[Variable], ScanArgs, dict[Variable, Variable]]:
     tmp_outer_vars: list[Variable | None] = []
-    new_scan_node = old_scan_node
     new_scan_args = old_scan_args
     replacements: dict[Variable, Variable] = {}
 
@@ -831,58 +825,78 @@ def scan_push_out_add(fgraph, node):
     Like `scan_push_out_seq`, this optimization aims to replace many operations
     on small tensors by few operations on large tensors. It can also lead to
     increased memory usage.
+
+    FIXME: This rewrite doesn't cover user defined graphs,
+      since it doesn't account for the intermediate slice
+      returned by the scan constructor for sit-sot (i.e., something like output[1:]).
+      It only looks for `outputs[-1]` but the user will only ever write `outputs[1:][-1]`
+      The relevant helper function is `inner_sitsot_only_last_step_used` which is only used by this rewrite
+      Note this rewrite is registered before subtensor_merge, but even if it were after subtensor_merge is a mess
+      and doesn't simplify to x[1:][-1] to x[-1] unless x length is statically known
     """
     # Don't perform the optimization on `as_while` `Scan`s. Because these
     # `Scan`s don't run for a predetermined number of steps, handling them is
     # more complicated and this optimization doesn't support it at the moment.
-    if not (isinstance(node.op, Scan) and not node.op.info.as_while):
+    op = node.op
+    if op.info.as_while:
         return False
 
-    op = node.op
+    # apply_ancestors(args.inner_outputs)
 
-    # Use `ScanArgs` to parse the inputs and outputs of scan for ease of
-    # use
+    add_of_dot_nodes = [
+        n
+        for n in op.fgraph.apply_nodes
+        if
+        (
+            # We have an Add
+            isinstance(n.op, Elemwise)
+            and isinstance(n.op.scalar_op, ps.Add)
+            and any(
+                (
+                    # With a Dot input that's only used in the Add
+                    n_inp.owner is not None
+                    and isinstance(n_inp.owner.op, Dot)
+                    and len(op.fgraph.clients[n_inp]) == 1
+                )
+                for n_inp in n.inputs
+            )
+        )
+    ]
+
+    if not add_of_dot_nodes:
+        return False
+
+    # Use `ScanArgs` to parse the inputs and outputs of scan for ease of access
     args = ScanArgs(
-        node.inputs, node.outputs, op.inner_inputs, op.inner_outputs, op.info
+        node.inputs,
+        node.outputs,
+        op.inner_inputs,
+        op.inner_outputs,
+        op.info,
+        clone=False,
     )
 
-    clients = {}
-    local_fgraph_topo = io_toposort(
-        args.inner_inputs, args.inner_outputs, clients=clients
-    )
-
-    for nd in local_fgraph_topo:
+    for nd in add_of_dot_nodes:
         if (
-            isinstance(nd.op, Elemwise)
-            and isinstance(nd.op.scalar_op, ps.Add)
-            and nd.out in args.inner_out_sit_sot
+            nd.out in args.inner_out_sit_sot
+            # FIXME: This function doesn't handle `sitsot_out[1:][-1]` pattern
             and inner_sitsot_only_last_step_used(fgraph, nd.out, args)
         ):
             # Ensure that one of the input to the add is the output of
             # the add from a previous iteration of the inner function
             sitsot_idx = args.inner_out_sit_sot.index(nd.out)
             if args.inner_in_sit_sot[sitsot_idx] in nd.inputs:
-                # Ensure that the other input to the add is a dot product
-                # between 2 matrices which will become a tensor3 and a
-                # matrix if pushed outside of the scan. Also make sure
-                # that the output of the Dot is ONLY used by the 'add'
-                # otherwise doing a Dot in the outer graph will only
-                # duplicate computation.
-
                 sitsot_in_idx = nd.inputs.index(args.inner_in_sit_sot[sitsot_idx])
 
                 # 0 if sitsot_in_idx==1, 1 if sitsot_in_idx==0
                 dot_in_idx = 1 - sitsot_in_idx
-
                 dot_input = nd.inputs[dot_in_idx]
+                assert dot_input.owner is not None and isinstance(
+                    dot_input.owner.op, Dot
+                )
 
                 if (
-                    dot_input.owner is not None
-                    and isinstance(dot_input.owner.op, Dot)
-                    and len(clients[dot_input]) == 1
-                    and dot_input.owner.inputs[0].ndim == 2
-                    and dot_input.owner.inputs[1].ndim == 2
-                    and get_outer_ndim(dot_input.owner.inputs[0], args) == 3
+                    get_outer_ndim(dot_input.owner.inputs[0], args) == 3
                     and get_outer_ndim(dot_input.owner.inputs[1], args) == 3
                 ):
                     # The optimization can be be applied in this case.
@@ -919,6 +933,7 @@ def scan_push_out_add(fgraph, node):
                     # external Dot instead of the output of scan
                     # Modify the outer graph to add the outer Dot
                     outer_sitsot = new_scan_args.outer_out_sit_sot[sitsot_idx]
+                    # TODO: If we fix the FIXME above, we have to make sure we replace the last subtensor, not the immediate one
                     subtensor_node = fgraph.clients[outer_sitsot][0][0]
                     outer_sitsot_last_step = subtensor_node.outputs[0]
 
@@ -2517,12 +2532,21 @@ def scan_push_out_dot1(fgraph, node):
     return False
 
 
+class ScanEquilibriumGraphRewriter(EquilibriumGraphRewriter):
+    """Subclass of EquilibriumGraphRewriter that aborts early if there are no Scan Ops in the graph"""
+
+    def apply(self, fgraph, start_from=None):
+        if not any(isinstance(node.op, Scan) for node in fgraph.apply_nodes):
+            return
+        super().apply(fgraph=fgraph, start_from=start_from)
+
+
 # I've added an equilibrium because later scan optimization in the sequence
 # can make it such that earlier optimizations should apply. However, in
 # general I do not expect the sequence to run more then once
-scan_eqopt1 = EquilibriumDB()
+scan_eqopt1 = EquilibriumDB(eq_rewriter_class=ScanEquilibriumGraphRewriter)
 scan_seqopt1 = SequenceDB()
-scan_eqopt2 = EquilibriumDB()
+scan_eqopt2 = EquilibriumDB(eq_rewriter_class=ScanEquilibriumGraphRewriter)
 
 # scan_eqopt1 before ShapeOpt at 0.1
 # This is needed to don't have ShapeFeature trac old Scan that we
@@ -2534,7 +2558,7 @@ optdb.register("scan_eqopt2", scan_eqopt2, "fast_run", "scan", position=1.6)
 # ScanSaveMem should execute only once per node.
 optdb.register(
     "scan_save_mem_prealloc",
-    in2out(scan_save_mem_prealloc, ignore_newtrees=True),
+    dfs_rewriter(scan_save_mem_prealloc, ignore_newtrees=True),
     "fast_run",
     "scan",
     "scan_save_mem",
@@ -2542,7 +2566,7 @@ optdb.register(
 )
 optdb.register(
     "scan_save_mem_no_prealloc",
-    in2out(scan_save_mem_no_prealloc, ignore_newtrees=True),
+    dfs_rewriter(scan_save_mem_no_prealloc, ignore_newtrees=True),
     "numba",
     "jax",
     "pytorch",
@@ -2563,7 +2587,7 @@ scan_eqopt1.register("all_pushout_opt", scan_seqopt1, "fast_run", "scan")
 
 scan_seqopt1.register(
     "scan_remove_constants_and_unused_inputs0",
-    in2out(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
+    dfs_rewriter(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
     "remove_constants_and_unused_inputs_scan",
     "fast_run",
     "scan",
@@ -2572,7 +2596,7 @@ scan_seqopt1.register(
 
 scan_seqopt1.register(
     "scan_push_out_non_seq",
-    in2out(scan_push_out_non_seq, ignore_newtrees=True),
+    dfs_rewriter(scan_push_out_non_seq, ignore_newtrees=True),
     "scan_pushout_nonseqs_ops",  # For backcompat: so it can be tagged with old name
     "fast_run",
     "scan",
@@ -2582,7 +2606,7 @@ scan_seqopt1.register(
 
 scan_seqopt1.register(
     "scan_push_out_seq",
-    in2out(scan_push_out_seq, ignore_newtrees=True),
+    dfs_rewriter(scan_push_out_seq, ignore_newtrees=True),
     "scan_pushout_seqs_ops",  # For backcompat: so it can be tagged with old name
     "fast_run",
     "scan",
@@ -2593,7 +2617,7 @@ scan_seqopt1.register(
 
 scan_seqopt1.register(
     "scan_push_out_dot1",
-    in2out(scan_push_out_dot1, ignore_newtrees=True),
+    dfs_rewriter(scan_push_out_dot1, ignore_newtrees=True),
     "scan_pushout_dot1",  # For backcompat: so it can be tagged with old name
     "fast_run",
     "more_mem",
@@ -2606,7 +2630,7 @@ scan_seqopt1.register(
 scan_seqopt1.register(
     "scan_push_out_add",
     # TODO: Perhaps this should be an `EquilibriumGraphRewriter`?
-    in2out(scan_push_out_add, ignore_newtrees=False),
+    dfs_rewriter(scan_push_out_add, ignore_newtrees=False),
     "scan_pushout_add",  # For backcompat: so it can be tagged with old name
     "fast_run",
     "more_mem",
@@ -2617,14 +2641,14 @@ scan_seqopt1.register(
 
 scan_eqopt2.register(
     "while_scan_merge_subtensor_last_element",
-    in2out(while_scan_merge_subtensor_last_element, ignore_newtrees=True),
+    dfs_rewriter(while_scan_merge_subtensor_last_element, ignore_newtrees=True),
     "fast_run",
     "scan",
 )
 
 scan_eqopt2.register(
     "constant_folding_for_scan2",
-    in2out(constant_folding, ignore_newtrees=True),
+    dfs_rewriter(constant_folding, ignore_newtrees=True),
     "fast_run",
     "scan",
 )
@@ -2632,7 +2656,7 @@ scan_eqopt2.register(
 
 scan_eqopt2.register(
     "scan_remove_constants_and_unused_inputs1",
-    in2out(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
+    dfs_rewriter(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
     "remove_constants_and_unused_inputs_scan",
     "fast_run",
     "scan",
@@ -2647,7 +2671,7 @@ scan_eqopt2.register("scan_merge", ScanMerge(), "fast_run", "scan")
 # After Merge optimization
 scan_eqopt2.register(
     "scan_remove_constants_and_unused_inputs2",
-    in2out(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
+    dfs_rewriter(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
     "remove_constants_and_unused_inputs_scan",
     "fast_run",
     "scan",
@@ -2655,7 +2679,7 @@ scan_eqopt2.register(
 
 scan_eqopt2.register(
     "scan_merge_inouts",
-    in2out(scan_merge_inouts, ignore_newtrees=True),
+    dfs_rewriter(scan_merge_inouts, ignore_newtrees=True),
     "fast_run",
     "scan",
 )
@@ -2663,7 +2687,7 @@ scan_eqopt2.register(
 # After everything else
 scan_eqopt2.register(
     "scan_remove_constants_and_unused_inputs3",
-    in2out(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
+    dfs_rewriter(remove_constants_and_unused_inputs_scan, ignore_newtrees=True),
     "remove_constants_and_unused_inputs_scan",
     "fast_run",
     "scan",

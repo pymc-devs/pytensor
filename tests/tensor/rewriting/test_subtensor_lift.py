@@ -14,6 +14,7 @@ from pytensor.compile import DeepCopyOp, get_default_mode, get_mode
 from pytensor.graph import (
     Constant,
     FunctionGraph,
+    Op,
     RewriteDatabaseQuery,
     Type,
     rewrite_graph,
@@ -23,6 +24,7 @@ from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.printing import debugprint
 from pytensor.tensor import (
     add,
+    dvector,
     exp,
     iscalar,
     iscalars,
@@ -37,11 +39,14 @@ from pytensor.tensor import (
     vector,
 )
 from pytensor.tensor.basic import MakeVector, concatenate, expand_dims, make_vector
+from pytensor.tensor.blas import Dot22, Gemv
+from pytensor.tensor.blas_c import CGemv
+from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.subtensor_lift import (
     local_subtensor_make_vector,
-    local_subtensor_of_elemwise,
+    local_subtensor_of_batch_dims,
     local_subtensor_shape_constant,
 )
 from pytensor.tensor.shape import SpecifyShape, _shape
@@ -58,7 +63,7 @@ mode_opt = get_mode(mode_opt)
 NO_OPTIMIZATION_MODE = Mode(linker="py", optimizer=None)
 
 
-class TestLocalSubtensorOfElemwise:
+class TestLocalSubtensorOfBatchDims:
     def test_unary_multiple_clients(self):
         # as test0, but we reuse the output of the elemwise
         # So we should not lift the subtensor
@@ -144,7 +149,7 @@ class TestLocalSubtensorOfElemwise:
             ),
         ],
     )
-    def test_local_subtensor_of_elemwise(self, original_fn, expected_fn):
+    def test_elemwise(self, original_fn, expected_fn):
         rng = np.random.default_rng(257)
         x = pt.matrix("x", shape=(5, 3))
         y = pt.matrix("y", shape=(5, 3))
@@ -163,7 +168,7 @@ class TestLocalSubtensorOfElemwise:
             out.eval({x: x_test, y: y_test}, **eval_kwargs),
         )
 
-    def test_local_subtensor_of_elemwise_multiple_clients(self):
+    def test_elemwise_multiple_clients(self):
         x = pt.matrix("x", shape=(5, 3))
         y = pt.matrix("y", shape=(5, 3))
         out1 = add(x, y)
@@ -171,11 +176,90 @@ class TestLocalSubtensorOfElemwise:
 
         # Rewrite should fail when another node uses out1 directly (in this case it's an extra output)
         fgraph = FunctionGraph([x, y], [out1, out2], clone=False)
-        assert local_subtensor_of_elemwise.transform(fgraph, out2.owner) is None
+        assert local_subtensor_of_batch_dims.transform(fgraph, out2.owner) is None
 
         # Otherwise it should work
         fgraph.remove_output(0)
-        assert local_subtensor_of_elemwise.transform(fgraph, out2.owner) is not None
+        assert local_subtensor_of_batch_dims.transform(fgraph, out2.owner) is not None
+
+    def test_blockwise(self):
+        class CoreTestOp(Op):
+            itypes = [dvector, dvector]
+            otypes = [dvector]
+
+            def perform(self, node, inputs, output_storage):
+                output_storage[0][0] = np.convolve(*inputs, mode="valid")
+
+        core_test_op = CoreTestOp()
+        block_test_op = Blockwise(core_test_op, signature="(a),(b)->(c)")
+
+        x = tensor3("x", shape=(7, 5, 11), dtype="float64")
+        y = tensor("y", shape=(7, 33), dtype="float64")
+        out = block_test_op(x, y[:, None, :])
+        assert isinstance(out.owner.op, Blockwise)
+
+        out_sliced = out[2:][:, 3:]
+        rewritten_out_sliced = rewrite_graph(out_sliced)
+        expected_out_sliced = block_test_op(x[2:, 3:], y[2:][:, None, :])
+        assert equal_computations([rewritten_out_sliced], [expected_out_sliced])
+
+        rng = np.random.default_rng(191)
+        x_test = rng.normal(size=x.type.shape).astype(x.type.dtype)
+        y_test = rng.normal(size=y.type.shape).astype(y.type.dtype)
+        np.testing.assert_allclose(
+            rewritten_out_sliced.eval(
+                {x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE
+            ),
+            out_sliced.eval({x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE),
+        )
+
+        # Check slice on core dims
+        out_sliced = out[2:][:, 0][:, 4:]
+        rewritten_out_sliced = rewrite_graph(out_sliced)
+        expected_out_sliced = block_test_op(x[2:, 0], y[2:])[:, 4:]
+        assert equal_computations([rewritten_out_sliced], [expected_out_sliced])
+
+
+def test_local_subtensor_of_dot():
+    m1 = matrix()
+    m2 = matrix()
+    d1 = np.arange(6).reshape((3, 2)).astype(config.floatX)
+    d2 = np.arange(8).reshape((2, 4)).astype(config.floatX) + 10
+    mode = get_default_mode().including("local_subtensor_of_dot")
+
+    def test_equality(a, b):
+        return a.shape == b.shape and np.allclose(a, b)
+
+    # [cst]
+    f = function([m1, m2], pt.dot(m1, m2)[1], mode=mode)
+    topo = f.maker.fgraph.toposort()
+    assert test_equality(f(d1, d2), np.dot(d1, d2)[1])
+    # DimShuffle happen in FAST_COMPILE
+    assert isinstance(topo[-1].op, CGemv | Gemv | DimShuffle)
+
+    # slice
+    f = function([m1, m2], pt.dot(m1, m2)[1:2], mode=mode)
+    topo = f.maker.fgraph.toposort()
+    assert test_equality(f(d1, d2), np.dot(d1, d2)[1:2])
+    assert isinstance(topo[-1].op, Dot22)
+
+    m1 = tensor3()
+    m2 = tensor3()
+    idx = iscalar()
+    d1 = np.arange(30).reshape(2, 5, 3).astype(config.floatX)
+    d2 = np.arange(72).reshape(4, 3, 6).astype(config.floatX) + 100
+
+    f = function([m1, m2, idx], pt.dot(m1, m2)[idx, 1:4, :, idx:], mode=mode)
+    assert test_equality(f(d1, d2, 1), np.dot(d1, d2)[1, 1:4, :, 1:])
+    # if we return the gradients. We need to use same mode as before.
+    assert check_stack_trace(f, ops_to_check="last")
+
+    f = function([m1, m2, idx], pt.dot(m1, m2)[1:4, :, idx:, idx], mode=mode)
+    assert test_equality(f(d1, d2, 1), np.dot(d1, d2)[1:4, :, 1:, 1])
+
+    # Now test that the stack trace is copied over properly,
+    # if we return the gradients. We need to use same mode as before.
+    assert check_stack_trace(f, ops_to_check="last")
 
 
 @pytest.mark.parametrize(
@@ -202,7 +286,7 @@ def test_local_subtensor_of_reduce(original_fn, expected_fn):
 
     out = original_fn(x)
     expected_opt_out = expected_fn(x)
-    opt_out = rewrite_graph(out)
+    opt_out = rewrite_graph(out, exclude=("local_convert_negative_indices",))
     assert equal_computations([opt_out], [expected_opt_out]), debugprint(
         [expected_opt_out, opt_out], print_type=True
     )

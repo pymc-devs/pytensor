@@ -431,6 +431,13 @@ def add_compile_configvars():
     )
 
     config.add(
+        "compiler_verbose",
+        "Print information about compilation steps.",
+        BoolParam(False),
+        in_c_key=False,
+    )
+
+    config.add(
         "on_opt_error",
         (
             "What to do when an optimization crashes: warn and skip it, raise "

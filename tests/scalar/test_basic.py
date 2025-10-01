@@ -8,6 +8,7 @@ from pytensor.compile.mode import Mode
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.c.basic import DualLinker
 from pytensor.scalar.basic import (
+    EQ,
     ComplexError,
     Composite,
     InRange,
@@ -543,3 +544,18 @@ def test_grad_log10():
     b_grad = pytensor.gradient.grad(b, a)
     assert b.dtype == "float32"
     assert b_grad.dtype == "float32"
+
+
+def test_scalar_hash_default_output_type_preference():
+    # Old hash used `getattr(self, "output_type_preference", 0)`
+    # whereas equality used `getattr(self, "output_type_preference", None)`.
+    # Since 27d797076668fbf0617654fd9b91f92ddb6737e6,
+    # output_type_preference is always present (None if not specified),
+    # which led to C-caching errors when comparing old cached Ops and fresh Ops,
+    # as they evaluated equal but hashed differently
+
+    new_eq = EQ()
+    old_eq = EQ()
+    del old_eq.output_types_preference  # mimic old Op
+    assert new_eq == old_eq
+    assert hash(new_eq) == hash(old_eq)

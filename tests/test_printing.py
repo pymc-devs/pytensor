@@ -301,7 +301,8 @@ def test_debugprint():
     Gemv_op_name = "CGemv" if pytensor.config.blas__ldflags else "Gemv"
     exp_res = dedent(
         r"""
-        Composite{(i2 + (i0 - i1))} 4
+        Composite{(i0 + (i1 - i2))} 4
+        ├─ A
         ├─ ExpandDims{axis=0} v={0: [0]} 3
         """
         f"        │  └─ {Gemv_op_name}{{inplace}} d={{0: [0]}} 2"
@@ -313,17 +314,16 @@ def test_debugprint():
         │     ├─ B
         │     ├─ <Vector(float64, shape=(?,))>
         │     └─ 0.0
-        ├─ D
-        └─ A
+        └─ D
 
         Inner graphs:
 
-        Composite{(i2 + (i0 - i1))}
+        Composite{(i0 + (i1 - i2))}
         ← add 'o0'
-            ├─ i2
-            └─ sub
             ├─ i0
-            └─ i1
+            └─ sub
+            ├─ i1
+            └─ i2
         """
     ).lstrip()
 
@@ -333,7 +333,7 @@ def test_debugprint():
 
 
 def test_debugprint_id_type():
-    a_at = dvector()
+    a_at = dmatrix()
     b_at = dmatrix()
 
     d_at = b_at.dot(a_at)
@@ -344,10 +344,10 @@ def test_debugprint_id_type():
     s = s.getvalue()
 
     exp_res = f"""Add [id {e_at.auto_name}]
- ├─ dot [id {d_at.auto_name}]
+ ├─ Dot [id {d_at.auto_name}]
  │  ├─ <Matrix(float64, shape=(?, ?))> [id {b_at.auto_name}]
- │  └─ <Vector(float64, shape=(?,))> [id {a_at.auto_name}]
- └─ <Vector(float64, shape=(?,))> [id {a_at.auto_name}]
+ │  └─ <Matrix(float64, shape=(?, ?))> [id {a_at.auto_name}]
+ └─ <Matrix(float64, shape=(?, ?))> [id {a_at.auto_name}]
     """
 
     assert [l.strip() for l in s.split("\n")] == [

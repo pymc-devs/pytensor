@@ -134,7 +134,7 @@ computation graph.
 In a nutshell, :class:`ReplaceValidate` grants access to :meth:`fgraph.replace_validate`,
 and :meth:`fgraph.replace_validate` allows us to replace a :class:`Variable` with
 another while respecting certain validation constraints. As an
-exercise, try to rewrite :class:`Simplify` using :class:`NodeFinder`. (Hint: you
+exercise, try to rewrite :class:`Simplify` using :class:`WalkingGraphRewriter`. (Hint: you
 want to use the method it publishes instead of the call to toposort)
 
 Then, in :meth:`GraphRewriter.apply` we do the actual job of simplification. We start by

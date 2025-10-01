@@ -1,8 +1,9 @@
 from pytensor.compile.mode import optdb
-from pytensor.graph import Constant, node_rewriter
+from pytensor.graph import Constant, Op, node_rewriter
 from pytensor.graph.destroyhandler import inplace_candidates
 from pytensor.graph.replace import vectorize_node
-from pytensor.graph.rewriting.basic import copy_stack_trace, out2in
+from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
+from pytensor.graph.rewriting.unify import OpPattern, OpPatternOpTypeType
 from pytensor.tensor.basic import Alloc, ARange, alloc, shape_padleft
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.math import Dot
@@ -17,8 +18,13 @@ from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
     Subtensor,
-    indices_from_subtensor,
 )
+
+
+def blockwise_of(core_op: OpPatternOpTypeType | OpPattern) -> OpPattern:
+    if not isinstance(core_op, Op | OpPattern):
+        core_op = OpPattern(core_op)
+    return OpPattern(Blockwise, core_op=core_op)
 
 
 @node_rewriter([Blockwise])
@@ -60,7 +66,7 @@ def local_useless_unbatched_blockwise(fgraph, node):
 # We do it after position>=60 so that Blockwise inplace rewrites will work also on useless Blockwise Ops
 optdb.register(
     "local_useless_unbatched_blockwise",
-    out2in(local_useless_unbatched_blockwise, ignore_newtrees=True),
+    dfs_rewriter(local_useless_unbatched_blockwise, ignore_newtrees=True),
     "fast_run",
     "fast_compile",
     "blockwise",
@@ -72,22 +78,24 @@ optdb.register(
 @register_canonicalize
 @register_stabilize
 @register_specialize
-@node_rewriter(tracks=[Blockwise])
+@node_rewriter(
+    tracks=[
+        blockwise_of(
+            Dot
+            | Alloc
+            | ARange
+            | Subtensor
+            | AdvancedSubtensor
+            | AdvancedIncSubtensor
+            | Reshape
+        )
+    ]
+)
 def local_eager_useless_unbatched_blockwise(fgraph, node):
-    if isinstance(
-        node.op.core_op,
-        Dot
-        | Alloc
-        | ARange
-        | Subtensor
-        | AdvancedSubtensor
-        | AdvancedIncSubtensor
-        | Reshape,
-    ):
-        # Many Dot-related rewrites (eg, all of BlasOpt) happen before specialize
-        # These other Ops can't always be trivially vectorized at runtime,
-        # since their inputs may imply non-rectangular shapes.
-        return local_useless_unbatched_blockwise.fn(fgraph, node)
+    # Many Dot-related rewrites (eg, all of BlasOpt) happen before specialize
+    # These other Ops can't always be trivially vectorized at runtime,
+    # since their inputs may imply non-rectangular shapes.
+    return local_useless_unbatched_blockwise.fn(fgraph, node)
 
 
 @register_specialize("shape_unsafe")
@@ -99,9 +107,11 @@ def local_blockwise_alloc(fgraph, node):
     BOp(vector, alloc(vector, 10, 5)) -> alloc(BOp)(vector, vector), 10, 5)
     BOp(vector, alloc(scalar, 10, 5)) -> alloc(BOp)(vector, alloc(scalar, 5), 10, 5)
     BOp(matrix, alloc(vector, 10, 5)) -> BOp(matrix, vector)
+
+    This is critical to remove many unnecessary Blockwise, or to reduce the work done by it
     """
 
-    op: Blockwise = node.op  # type: ignore
+    op: Blockwise = node.op
 
     batch_ndim = op.batch_ndim(node)
     if not batch_ndim:
@@ -203,7 +213,7 @@ def local_blockwise_alloc(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([Blockwise])
+@node_rewriter([blockwise_of(Reshape)])
 def local_blockwise_reshape(fgraph, node):
     """Rewrite away square Blockwise reshapes.
 
@@ -214,9 +224,6 @@ def local_blockwise_reshape(fgraph, node):
     For the square Reshape case, we must wait for all the intermediate
     operations to be lifted as Allocs
     """
-    if not isinstance(node.op.core_op, Reshape):
-        return None
-
     x, output_shape = node.inputs
     batch_ndim = node.op.batch_ndim(node)
     if all(output_shape.type.broadcastable[:batch_ndim]):
@@ -225,29 +232,6 @@ def local_blockwise_reshape(fgraph, node):
         new_out = x.reshape([*tuple(batched_shape), *tuple(core_reshape)])
         copy_stack_trace(node.outputs[0], new_out)
         return [new_out]
-
-
-@register_stabilize
-@register_specialize
-@node_rewriter([Blockwise])
-def local_blockwise_of_subtensor(fgraph, node):
-    """Rewrite Blockwise of Subtensor, where the only batch input is the indexed tensor.
-
-    Blockwise(Subtensor{a: b})(x, a, b) -> x[:, a:b] when x has one batch dimension, and a/b none
-    """
-    if not isinstance(node.op.core_op, Subtensor):
-        return
-
-    x, *idxs = node.inputs
-    if not all(all(idx.type.broadcastable) for idx in idxs):
-        return
-
-    core_idxs = indices_from_subtensor(
-        [idx.squeeze() for idx in idxs], node.op.core_op.idx_list
-    )
-    # Add empty slices for the batch dims
-    none_slices = (slice(None),) * node.op.batch_ndim(node)
-    return [x[(*none_slices, *core_idxs)]]
 
 
 class InplaceBlockwiseOptimizer(InplaceGraphOptimizer):

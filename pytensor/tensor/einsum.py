@@ -597,10 +597,14 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
             # Numpy einsum_path requires arrays even though only the shapes matter
             # It's not trivial to duck-type our way around because of internal call to `asanyarray`
             *[np.empty(shape) for shape in shapes],
-            einsum_call=True,  # Not part of public API
+            # einsum_call is not part of public API
+            einsum_call=True,  # type: ignore[arg-type]
             optimize="optimal",
-        )  # type: ignore
-        np_path = tuple(contraction[0] for contraction in contraction_list)
+        )
+        np_path: PATH | tuple[tuple[int, ...]] = tuple(
+            contraction[0]  # type: ignore[misc]
+            for contraction in contraction_list
+        )
 
         if len(np_path) == 1 and len(np_path[0]) > 2:
             # When there's nothing to optimize, einsum_path reduces all entries simultaneously instead of doing
@@ -610,7 +614,7 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
                 subscripts, tensor_operands, path
             )
         else:
-            path = np_path
+            path = cast(PATH, np_path)
 
         optimized = True
 

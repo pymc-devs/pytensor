@@ -285,9 +285,13 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
     """Create a Numba compatible function from a Pytensor `Op`."""
 
     warnings.warn(
-        f"Numba will use object mode to run {op}'s perform method",
+        f"Numba will use object mode to run {op}'s perform method. "
+        f"Set `pytensor.config.compiler_verbose = True` to see more details.",
         UserWarning,
     )
+
+    if config.compiler_verbose:
+        node.dprint(depth=5, print_type=True)
 
     n_outputs = len(node.outputs)
 
@@ -402,24 +406,22 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
     return deepcopyop
 
 
-@numba_njit
-def makeslice(*x):
-    return slice(*x)
-
-
 @numba_funcify.register(MakeSlice)
 def numba_funcify_MakeSlice(op, **kwargs):
-    return global_numba_func(makeslice)
+    @numba_njit
+    def makeslice(*x):
+        return slice(*x)
 
-
-@numba_njit
-def shape(x):
-    return np.asarray(np.shape(x))
+    return makeslice
 
 
 @numba_funcify.register(Shape)
 def numba_funcify_Shape(op, **kwargs):
-    return global_numba_func(shape)
+    @numba_njit
+    def shape(x):
+        return np.asarray(np.shape(x))
+
+    return shape
 
 
 @numba_funcify.register(Shape_i)

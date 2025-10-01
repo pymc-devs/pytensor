@@ -506,7 +506,9 @@ class _tensor_py_operators:
 
         # Check if the number of dimensions isn't too large.
         if self.ndim < index_dim_count:
-            raise IndexError("too many indices for array")
+            raise IndexError(
+                f"too many indices for tensor: tensor is {self.ndim}-dimensional, but {index_dim_count} were indexed"
+            )
 
         # Convert an Ellipsis if provided into an appropriate number of
         # slice(None).

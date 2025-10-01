@@ -29,12 +29,6 @@ def test_jax_basic_multiout():
     outs = pt_nlinalg.eigh(x)
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = pt_nlinalg.qr(x, mode="full")
-    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
-
-    outs = pt_nlinalg.qr(x, mode="reduced")
-    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
-
     outs = pt_nlinalg.svd(x)
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 

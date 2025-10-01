@@ -114,6 +114,9 @@ def as_symbolic_slice(x, **kwargs):
     return SliceConstant(slicetype, x)
 
 
+NoneSliceConst = Constant(slicetype, slice(None), name="slice(None)")
+
+
 class NoneTypeT(Generic):
     """
     Inherit from Generic to have c code working.
@@ -137,4 +140,4 @@ def as_symbolic_None(x, **kwargs):
     return NoneConst
 
 
-__all__ = ["make_slice", "slicetype", "none_type_t", "NoneConst"]
+__all__ = ["make_slice", "slicetype", "none_type_t", "NoneConst", "NoneSliceConst"]

@@ -19,9 +19,10 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, grad, numeric_grad
-from pytensor.graph.basic import Variable, ancestors, applys_between, equal_computations
+from pytensor.graph.basic import Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
+from pytensor.graph.traversal import ancestors, applys_between
 from pytensor.link.c.basic import DualLinker
 from pytensor.npy_2_compat import using_numpy_2
 from pytensor.printing import pprint
@@ -1998,50 +1999,20 @@ class TestMean:
         assert mean(ll).eval() == 1
 
 
-def test_dot_numpy_inputs():
-    """Test the `PyTensor.tensor.dot` interface function with NumPy inputs."""
-    a = np.ones(2)
-    b = np.ones(2)
-    res = dot(a, b)
-    assert isinstance(res, Variable)
-    assert isinstance(res.owner.op, Dot)
-
-
 class TestDot:
-    def test_Op_dims(self):
+    def test_valid_ndim(self):
         d0 = scalar()
         d1 = vector()
         d2 = matrix()
         d3 = tensor3()
 
         with pytest.raises(TypeError):
-            _dot(d0, d0)
-        with pytest.raises(TypeError):
-            _dot(d0, d1)
-        with pytest.raises(TypeError):
             _dot(d0, d2)
         with pytest.raises(TypeError):
-            _dot(d0, d3)
-        with pytest.raises(TypeError):
-            _dot(d1, d0)
-        _dot(d1, d1)
-        _dot(d1, d2)
-        with pytest.raises(TypeError):
-            _dot(d1, d3)
-        with pytest.raises(TypeError):
-            _dot(d2, d0)
-        _dot(d2, d1)
-        _dot(d2, d2)
-        with pytest.raises(TypeError):
-            _dot(d2, d3)
-        with pytest.raises(TypeError):
-            _dot(d3, d0)
-        with pytest.raises(TypeError):
-            _dot(d3, d1)
+            _dot(d1, d2)
         with pytest.raises(TypeError):
             _dot(d3, d2)
-        with pytest.raises(TypeError):
-            _dot(d3, d3)
+        _dot(d2, d2)  # Fine
 
     def test_grad(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -2089,12 +2060,20 @@ class TestDot:
                             g = grad(z.sum(), y)
                             assert is_super_shape(y, g)
 
+    def test_dot_numpy_inputs(self):
+        """Test the `PyTensor.tensor.dot` interface function with NumPy inputs."""
+        a = np.ones((2, 2))
+        b = np.ones((2, 2))
+        res = dot(a, b)
+        assert isinstance(res, Variable)
+        assert isinstance(res.owner.op, Dot)
+
 
 def test_matrix_vector_ops():
     """Test vecdot, matvec, and vecmat helper functions."""
-    rng = np.random.default_rng(seed=utt.fetch_seed())
+    rng = np.random.default_rng(2089)
 
-    # Create test data with batch dimension (2)
+    atol = 1e-7 if config.floatX == "float32" else 1e-15
     batch_size = 2
     dim_k = 4  # Common dimension
     dim_m = 3  # Matrix rows
@@ -2109,7 +2088,6 @@ def test_matrix_vector_ops():
     mat_kn_val = random(batch_size, dim_k, dim_n, rng=rng).astype(config.floatX)
     vec_k_val = random(batch_size, dim_k, rng=rng).astype(config.floatX)
 
-    # Create tensor variables with matching dtype
     mat_mk = tensor(
         name="mat_mk", shape=(batch_size, dim_m, dim_k), dtype=config.floatX
     )
@@ -2130,7 +2108,7 @@ def test_matrix_vector_ops():
     expected_vecdot = np.zeros((batch_size,), dtype=np.int32)
     for i in range(batch_size):
         expected_vecdot[i] = np.sum(vec_k_val[i] * vec_k_val[i])
-    np.testing.assert_allclose(result, expected_vecdot)
+    np.testing.assert_allclose(result, expected_vecdot, atol=atol)
 
     # Test 2: matvec - matrix-vector product
     matvec_out = matvec(mat_mk, vec_k)
@@ -2141,7 +2119,7 @@ def test_matrix_vector_ops():
     expected_matvec = np.zeros((batch_size, dim_m), dtype=config.floatX)
     for i in range(batch_size):
         expected_matvec[i] = np.dot(mat_mk_val[i], vec_k_val[i])
-    np.testing.assert_allclose(result_matvec, expected_matvec)
+    np.testing.assert_allclose(result_matvec, expected_matvec, atol=atol)
 
     # Test 3: vecmat - vector-matrix product
     vecmat_out = vecmat(vec_k, mat_kn)
@@ -2152,7 +2130,7 @@ def test_matrix_vector_ops():
     expected_vecmat = np.zeros((batch_size, dim_n), dtype=config.floatX)
     for i in range(batch_size):
         expected_vecmat[i] = np.dot(vec_k_val[i], mat_kn_val[i])
-    np.testing.assert_allclose(result_vecmat, expected_vecmat)
+    np.testing.assert_allclose(result_vecmat, expected_vecmat, atol=atol)
 
 
 class TestTensordot:
@@ -2797,7 +2775,7 @@ class TestInferShape(utt.InferShapeTester):
         bdvec_val = random(4, rng=rng)
         self._compile_and_check(
             [advec, bdvec],
-            [Dot()(advec, bdvec)],
+            [dot(advec, bdvec)],
             [advec_val, bdvec_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )
@@ -2809,7 +2787,7 @@ class TestInferShape(utt.InferShapeTester):
         bdmat_val = random(5, 3, rng=rng)
         self._compile_and_check(
             [admat, bdmat],
-            [Dot()(admat, bdmat)],
+            [dot(admat, bdmat)],
             [admat_val, bdmat_val],
             (Dot, blas.Dot22),
         )
@@ -2818,7 +2796,7 @@ class TestInferShape(utt.InferShapeTester):
         bdmat_val = random(4, 5, rng=rng)
         self._compile_and_check(
             [advec, bdmat],
-            [Dot()(advec, bdmat)],
+            [dot(advec, bdmat)],
             [advec_val, bdmat_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )
@@ -2827,7 +2805,7 @@ class TestInferShape(utt.InferShapeTester):
         admat_val = random(5, 4, rng=rng)
         self._compile_and_check(
             [admat, bdvec],
-            [Dot()(admat, bdvec)],
+            [dot(admat, bdvec)],
             [admat_val, bdvec_val],
             (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
         )

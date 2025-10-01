@@ -16,9 +16,9 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp, deep_copy_op
 from pytensor.configdefaults import config
-from pytensor.graph import vectorize_graph
-from pytensor.graph.basic import Apply, ancestors, equal_computations
+from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import (
     SequentialNodeRewriter,
     WalkingGraphRewriter,
@@ -28,6 +28,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
+from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor import inplace
@@ -42,6 +43,7 @@ from pytensor.tensor.math import (
     Prod,
     Sum,
     _conj,
+    _matmul,
     add,
     arccosh,
     arcsinh,
@@ -49,6 +51,7 @@ from pytensor.tensor.math import (
     bitwise_and,
     bitwise_or,
     bitwise_xor,
+    cast,
     conj,
     cosh,
     deg2rad,
@@ -67,6 +70,7 @@ from pytensor.tensor.math import (
     log,
     log1mexp,
     log1p,
+    log1pexp,
     lt,
     maximum,
     minimum,
@@ -113,6 +117,7 @@ from pytensor.tensor.rewriting.math import (
     simplify_mul,
 )
 from pytensor.tensor.shape import Reshape, Shape_i, SpecifyShape, specify_shape
+from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.type import (
     TensorType,
     cmatrix,
@@ -123,6 +128,7 @@ from pytensor.tensor.type import (
     dvector,
     fmatrices,
     fmatrix,
+    fscalar,
     ftensor4,
     fvector,
     imatrices,
@@ -1203,52 +1209,6 @@ def test_local_log_add_exp():
     # TODO: test that the rewrite works in the presence of broadcasting.
 
 
-def test_local_subtensor_of_dot():
-    m1 = matrix()
-    m2 = matrix()
-    d1 = np.arange(6).reshape((3, 2)).astype(config.floatX)
-    d2 = np.arange(8).reshape((2, 4)).astype(config.floatX) + 10
-    mode = get_default_mode().including("local_subtensor_of_dot")
-
-    def test_equality(a, b):
-        return a.shape == b.shape and np.allclose(a, b)
-
-    # [cst]
-    f = function([m1, m2], pytensor.tensor.dot(m1, m2)[1], mode=mode)
-    topo = f.maker.fgraph.toposort()
-    assert test_equality(f(d1, d2), np.dot(d1, d2)[1])
-    # DimShuffle happen in FAST_COMPILE
-    assert isinstance(topo[-1].op, CGemv | Gemv | DimShuffle)
-
-    # slice
-    f = function([m1, m2], pytensor.tensor.dot(m1, m2)[1:2], mode=mode)
-    topo = f.maker.fgraph.toposort()
-    assert test_equality(f(d1, d2), np.dot(d1, d2)[1:2])
-    assert isinstance(topo[-1].op, Dot22)
-
-    m1 = tensor3()
-    m2 = tensor3()
-    idx = iscalar()
-    d1 = np.arange(30).reshape(2, 5, 3).astype(config.floatX)
-    d2 = np.arange(72).reshape(4, 3, 6).astype(config.floatX) + 100
-
-    f = function(
-        [m1, m2, idx], pytensor.tensor.dot(m1, m2)[idx, 1:4, :, idx:], mode=mode
-    )
-    assert test_equality(f(d1, d2, 1), np.dot(d1, d2)[1, 1:4, :, 1:])
-    # if we return the gradients. We need to use same mode as before.
-    assert check_stack_trace(f, ops_to_check="last")
-
-    f = function(
-        [m1, m2, idx], pytensor.tensor.dot(m1, m2)[1:4, :, idx:, idx], mode=mode
-    )
-    assert test_equality(f(d1, d2, 1), np.dot(d1, d2)[1:4, :, 1:, 1])
-
-    # Now test that the stack trace is copied over properly,
-    # if we return the gradients. We need to use same mode as before.
-    assert check_stack_trace(f, ops_to_check="last")
-
-
 def test_local_elemwise_sub_zeros():
     scal = scalar()
     vect = vector()
@@ -2010,6 +1970,53 @@ class TestExpLog:
             decimal=6,
         )
 
+    def test_log1pexp_log(self):
+        # log1pexp(log(x)) -> log1p(x)
+        data_valid = np.random.random((4, 3)).astype("float32") * 2
+        data_valid[0, 0] = 0  # edge case
+        data_invalid = data_valid - 2
+
+        x = fmatrix()
+        f = function([x], log1pexp(log(x)), mode=self.mode.excluding("inplace"))
+        assert equal_computations(
+            f.maker.fgraph.outputs,
+            [
+                pt.switch(
+                    x >= np.array([[0]], dtype=np.int8),
+                    pt.log1p(x),
+                    np.array([[np.nan]], dtype=np.float32),
+                )
+            ],
+        )
+
+        expected = np.log1p(data_valid)
+        np.testing.assert_almost_equal(f(data_valid), expected)
+        assert np.all(np.isnan(f(data_invalid)))
+
+    def test_log1mexp_log(self):
+        # log1mexp(log(x)) -> log1p(-x)
+        data_valid = np.random.random((4, 3)).astype("float32")
+        data_valid[0, 0] = 0  # edge case
+        data_valid[0, 1] = 1  # another edge case
+        data_invalid = np.concatenate([data_valid + 1.1, data_valid - 1.1])
+
+        x = fmatrix()
+        f = function([x], log1mexp(log(x)), mode=self.mode.excluding("inplace"))
+        assert equal_computations(
+            f.maker.fgraph.outputs,
+            [
+                pt.switch(
+                    x >= np.array([[0]], dtype=np.int8),
+                    pt.log1p(-x),
+                    np.array([[np.nan]], dtype=np.float32),
+                )
+            ],
+        )
+
+        expected = np.log1p(-data_valid)
+        np.testing.assert_almost_equal(f(data_valid), expected)
+        assert np.all(np.isnan(f(data_invalid)))
+
     @pytest.mark.parametrize(
         ["nested_expression", "expected_switches"],
         [
@@ -2029,6 +2036,18 @@ class TestExpLog:
             and isinstance(node.op.scalar_op, ps.Switch)
         ]
         assert len(ops_graph) == expected_switches
+
+
+def test_log_sqrt() -> None:
+    x = pt.tensor("x", shape=(None, None))
+    out = log(sqrt(x))
+
+    out = rewrite_graph(out, include=["specialize"])
+
+    assert utt.assert_equal_computations(
+        [out],
+        [mul(pt.as_tensor_variable([[0.5]], dtype=x.dtype), log(x))],
+    )
 
 
 class TestSqrSqrt:
@@ -4114,25 +4133,36 @@ class TestSigmoidRewrites:
 
     def test_local_1msigmoid(self):
         m = self.get_mode(excluding=["fusion", "inplace"])
-        x = fmatrix()
+        x = fscalar()
+        xd = dscalar()
 
         # Test `exp_over_1_plus_exp`
         f = pytensor.function([x], 1 - exp(x) / (1 + exp(x)), mode=m)
         # FIXME: PatternNodeRewriter does not copy stack trace
         #  (see https://github.com/Theano/Theano/issues/4581)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
 
         # Test `inv_1_plus_exp`
         f = pytensor.function([x], 1 - pt.fill(x, 1.0) / (1 + exp(-x)), mode=m)
         # assert check_stack_trace(f, ops_to_check=[neg, sigmoid])
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        assert equal_computations(f.maker.fgraph.outputs, [sigmoid(-x)])
 
         # Test float constant
-        f = pytensor.function(
-            [x], np.array(1.000001, dtype="float32") - sigmoid(x), mode=m
-        )
-        assert [node.op for node in f.maker.fgraph.toposort()] == [neg, sigmoid]
+        for out, expected in [
+            (np.array(1.0, "float32") - sigmoid(x), sigmoid(-x)),
+            (np.array(1.0, "float64") - pt.sigmoid(x), cast(sigmoid(-x), "float64")),
+            (np.array(1.0, "float32") - sigmoid(xd), sigmoid(-xd)),
+            (np.array(1.0, "float64") - sigmoid(xd), sigmoid(-xd)),
+            (np.sum(1 / np.array([2, 3, 6], "float32")) - sigmoid(x), sigmoid(-x)),
+            (np.sum(1 / np.array([2, 3, 6], "float64")) - sigmoid(xd), sigmoid(-xd)),
+            (np.float32(1 - 9e-6) - sigmoid(x), np.float32(1 - 9e-6) - sigmoid(x)),
+            (np.float64(1 - 1e-9) - sigmoid(xd), np.float64(1 - 1e-9) - sigmoid(xd)),
+        ]:
+            rewritten = rewrite_graph(
+                out, include=["canonicalize", "specialize", "stabilize"]
+            )
+            utt.assert_equal_computations([rewritten], [expected], original=out)
 
     def test_local_sigm_times_exp(self):
         """
@@ -4280,7 +4310,8 @@ class TestSoftplusRewrites:
         f(np.random.random((54, 11)).astype(config.floatX))
 
         # Test close to 1
-        out = log(1.000001 - sigmoid(x))
+        x_dtype = np.dtype(x.dtype).type
+        out = log(np.nextafter(x_dtype(1), x_dtype(2)) - sigmoid(x))
         f = pytensor.function([x], out, mode=self.m)
         topo = f.maker.fgraph.toposort()
         assert len(topo) == 2
@@ -4612,6 +4643,88 @@ def test_local_batched_matmul_to_core_matmul():
     np.testing.assert_allclose(fn(x_test, y_test), x_test @ y_test)
 
 
+@pytest.mark.parametrize(
+    "mat_shape, vec_shape",
+    [
+        [(1, 2, 2), (5, 2)],
+        [(5, 2, 2), (1, 2)],
+        [(1, 1, 2, 2), (7, 5, 2)],
+        [(7, 5, 2, 2), (1, 1, 5, 2)],
+        [(1, 5, 1, 2, 2), (7, 5, 7, 2)],
+        [(7, 5, 7, 2, 2), (1, 5, 1, 2)],
+        [(5, 1, 3, 1, 2, 2), (1, 7, 3, 7, 2)],
+        [(1, 7, 3, 7, 2, 2), (5, 1, 3, 1, 2)],
+    ],
+    ids=str,
+)
+@pytest.mark.parametrize("func", ("matvec", "vecmat", "vecdot"))
+def test_batch_matvec_to_matmul(func, mat_shape, vec_shape):
+    def count_matvec_nodes(graph):
+        # Counts how many matmul nodes actually correspond to matvec or vecmat
+        return len(
+            [
+                var
+                for var in ancestors([graph])
+                if (
+                    var.owner is not None
+                    and var.owner.op == _matmul
+                    and (
+                        (var.owner.inputs[0].type.shape[-2] == 1)
+                        or (var.owner.inputs[1].type.shape[-1] == 1)
+                    )
+                )
+            ]
+        )
+
+    mat = pt.tensor("mat", shape=mat_shape, dtype="float64")
+    vec = pt.tensor("vec", shape=vec_shape, dtype="float64")
+
+    if func == "matvec":
+        out = pt.matvec(mat, vec)
+    elif func == "vecmat":
+        out = pt.vecmat(vec, mat)
+    elif func == "vecdot":
+        out = pt.vecdot(mat[..., 0], vec)
+    else:
+        raise NotImplementedError(func)
+
+    assert count_matvec_nodes(out) == 1
+
+    rewritten_out = rewrite_graph(
+        out,
+        include=(
+            "canonicalize",
+            "specialize",
+        ),
+        exclude=(
+            "local_eager_useless_unbatched_blockwise",
+            "specialize_matmul_to_batched_dot",
+        ),
+    )
+    # No `matvec` in the rewritten out if one of the vector can be treated as a matrix
+    expected = not any(
+        mat_dim == 1 and vec_dim != 1
+        for vec_dim, mat_dim in zip(vec_shape[:-1], mat_shape[:-2])
+    )
+    if not expected and func == "vecdot":
+        # In this case there are two vectors, so we may still end up with a `matvec` unless the second vec can also be treated as matrix
+        expected = not any(
+            mat_dim != 1 and vec_dim == 1
+            for vec_dim, mat_dim in zip(vec_shape[:-1], mat_shape[:-2])
+        )
+
+    assert count_matvec_nodes(rewritten_out) == expected
+
+    rng = np.random.default_rng(mat_shape + vec_shape)
+    eval_dict = {mat: rng.random(mat.type.shape), vec: rng.random(vec.type.shape)}
+    # Evaluate results are correct without further rewrites
+    no_optimization = Mode(linker="py", optimizer=None)
+    np.testing.assert_allclose(
+        rewritten_out.eval(eval_dict, mode=no_optimization),
+        out.eval(eval_dict, mode=no_optimization),
+    )
+
+
 def test_log_kv_stabilization():
     x = pt.scalar("x")
     out = log(kv(4.5, x))
@@ -4662,8 +4775,8 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
 
     out = dot(a, b)
     if batched:
-        batch_a = tensor("batch_a", shape=(1, 5, *a_shape))
-        batch_b = tensor("batch_b", shape=(7, 1, *b_shape))
+        batch_a = tensor("batch_a", shape=(2, 1, 5, *a_shape))
+        batch_b = tensor("batch_b", shape=(2, 7, 1, *b_shape))
         out = vectorize_graph(out, {a: batch_a, b: batch_b})
         a = batch_a
         b = batch_b
@@ -4677,14 +4790,15 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
         == 1
     )
 
-    # For now rewrite only applies to Batched Dots
+    # For now we do not rewrite only the case of unbatched outer
+    core_outer = (not batched) and (a_shape == (3, 1)) and (b_shape == (1, 3))
     rewritten_out = rewrite_graph(out)
     assert rewritten_out.type.shape == out.type.shape
     assert sum(
         isinstance(var.owner.op, (Blockwise | Dot))
         for var in ancestors([rewritten_out])
         if var.owner
-    ) == (0 if batched else 1)
+    ) == (1 if core_outer else 0)
 
     a_test = np.random.normal(size=a.type.shape).astype(a.type.dtype)
     b_test = np.random.normal(size=b.type.shape).astype(b.type.dtype)
@@ -4692,4 +4806,122 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
     np.testing.assert_allclose(
         out.eval({a: a_test, b: b_test}, mode=test_mode),
         rewritten_out.eval({a: a_test, b: b_test}, mode=test_mode),
+    )
+
+
+@pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
+@pytest.mark.parametrize(
+    "batch_blockdiag", [True, False], ids=["batch_blockdiag", "unbatched_blockdiag"]
+)
+@pytest.mark.parametrize(
+    "batch_other", [True, False], ids=["batched_other", "unbatched_other"]
+)
+def test_local_block_diag_dot_to_dot_block_diag(
+    left_multiply, batch_blockdiag, batch_other
+):
+    """
+    Test that dot(block_diag(x, y,), z) is rewritten to concat(dot(x, z[:n]), dot(y, z[n:]))
+    """
+
+    def has_blockdiag(graph):
+        return any(
+            (
+                var.owner
+                and (
+                    isinstance(var.owner.op, BlockDiagonal)
+                    or (
+                        isinstance(var.owner.op, Blockwise)
+                        and isinstance(var.owner.op.core_op, BlockDiagonal)
+                    )
+                )
+            )
+            for var in ancestors([graph])
+        )
+
+    a = tensor("a", shape=(4, 2))
+    b = tensor("b", shape=(2, 4) if not batch_blockdiag else (3, 2, 4))
+    c = tensor("c", shape=(4, 4))
+    x = pt.linalg.block_diag(a, b, c)
+
+    d = tensor("d", shape=(10, 10) if not batch_other else (3, 1, 10, 10))
+
+    # Test multiple clients are all rewritten
+    if left_multiply:
+        out = x @ d
+    else:
+        out = d @ x
+
+    assert has_blockdiag(out)
+    fn = pytensor.function([a, b, c, d], out, mode=rewrite_mode)
+    assert not has_blockdiag(fn.maker.fgraph.outputs[0])
+
+    n_dots_rewrite = sum(
+        isinstance(node.op, Dot | Dot22)
+        or (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Dot | Dot22))
+        for node in fn.maker.fgraph.apply_nodes
+    )
+    assert n_dots_rewrite == 3
+
+    fn_expected = pytensor.function(
+        [a, b, c, d],
+        out,
+        mode=Mode(linker="py", optimizer=None),
+    )
+    assert has_blockdiag(fn_expected.maker.fgraph.outputs[0])
+
+    n_dots_no_rewrite = sum(
+        isinstance(node.op, Dot | Dot22)
+        or (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Dot | Dot22))
+        for node in fn_expected.maker.fgraph.apply_nodes
+    )
+    assert n_dots_no_rewrite == 1
+
+    rng = np.random.default_rng()
+    a_val = rng.normal(size=a.type.shape).astype(a.type.dtype)
+    b_val = rng.normal(size=b.type.shape).astype(b.type.dtype)
+    c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)
+    d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)
+
+    rewrite_out = fn(a_val, b_val, c_val, d_val)
+    expected_out = fn_expected(a_val, b_val, c_val, d_val)
+    np.testing.assert_allclose(
+        rewrite_out,
+        expected_out,
+        atol=1e-6 if config.floatX == "float32" else 1e-12,
+        rtol=1e-6 if config.floatX == "float32" else 1e-12,
+    )
+
+
+@pytest.mark.parametrize("rewrite", [True, False], ids=["rewrite", "no_rewrite"])
+@pytest.mark.parametrize("size", [10, 100, 1000], ids=["small", "medium", "large"])
+def test_block_diag_dot_to_dot_concat_benchmark(benchmark, size, rewrite):
+    rng = np.random.default_rng()
+    a_size = int(rng.uniform(1, int(0.8 * size)))
+    b_size = int(rng.uniform(1, int(0.8 * (size - a_size))))
+    c_size = size - a_size - b_size
+
+    a = tensor("a", shape=(a_size, a_size))
+    b = tensor("b", shape=(b_size, b_size))
+    c = tensor("c", shape=(c_size, c_size))
+    d = tensor("d", shape=(size,))
+
+    x = pt.linalg.block_diag(a, b, c)
+    out = x @ d
+
+    mode = get_default_mode()
+    if not rewrite:
+        mode = mode.excluding("local_block_diag_dot_to_dot_block_diag")
+    fn = pytensor.function([a, b, c, d], out, mode=mode)
+
+    a_val = rng.normal(size=a.type.shape).astype(a.type.dtype)
+    b_val = rng.normal(size=b.type.shape).astype(b.type.dtype)
+    c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)
+    d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)
+
+    benchmark(
+        fn,
+        a_val,
+        b_val,
+        c_val,
+        d_val,
     )

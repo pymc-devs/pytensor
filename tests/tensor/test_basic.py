@@ -191,15 +191,7 @@ TestSecondBroadcast = makeTester(
     name="SecondBroadcastTester",
     op=second,
     expected=_numpy_second,
-    good=dict(
-        itertools.chain(
-            multi_dtype_checks((4, 5), (5,)),
-            multi_dtype_checks((2, 3, 2), (3, 2)),
-            multi_dtype_checks((2, 3, 2), (2,)),
-        )
-    ),
-    # I can't think of any way to make this fail at build time
-    # Just some simple smoke tests
+    good=dict(multi_dtype_checks((4, 2, 3, 2), (3, 2))),
     bad_runtime=dict(
         fail1=(random(5, 4), random(5)),
         fail2=(random(3, 2, 3), random(6, 9)),
@@ -207,26 +199,15 @@ TestSecondBroadcast = makeTester(
     ),
 )
 
-# We exclude local_fill_to_alloc because it optimizes the "second" node
-# away from the graph.
+# We exclude local_fill_to_alloc because it optimizes the "second" node away from the graph.
 TestSecondSameRank = makeTester(
     name="SecondSameRankTester",
     op=second,
     expected=_numpy_second,
-    good=dict(
-        itertools.chain(
-            multi_dtype_checks((4, 5), (4, 5)),
-            multi_dtype_checks((1, 2), (3, 2)),
-            multi_dtype_checks((3, 2), (1, 2)),
-        )
-    ),
-    # These sizes are not broadcastable to one another
-    # and SHOULD raise an error, but currently don't.
+    good=dict(multi_dtype_checks((4, 5), (4, 1))),
     bad_runtime=dict(
-        itertools.chain(
-            multi_dtype_checks((4, 5), (5, 4)),
-            multi_dtype_checks((1, 5), (5, 4)),
-        )
+        fail1=(random(4, 5), random(5, 4)),
+        fail2=(integers(1, 5), integers(5, 4)),
     ),
     mode=get_default_mode().excluding("local_fill_to_alloc", "local_useless_fill"),
 )

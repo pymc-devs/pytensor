@@ -18,9 +18,10 @@ from pytensor.compile import Function, SharedVariable
 from pytensor.compile.io import In, Out
 from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Constant, Variable, graph_inputs, io_toposort
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph, Op, StorageMapType
+from pytensor.graph.traversal import graph_inputs, toposort
 from pytensor.graph.utils import Scratchpad
 
 
@@ -1102,7 +1103,7 @@ class PPrinter(Printer):
         )
         inv_updates = {b: a for (a, b) in updates.items()}
         i = 1
-        for node in io_toposort([*inputs, *updates], [*outputs, *updates.values()]):
+        for node in toposort([*outputs, *updates.values()], [*inputs, *updates]):
             for output in node.outputs:
                 if output in inv_updates:
                     name = str(inv_updates[output])
@@ -1188,45 +1189,21 @@ default_colorCodes = {
 
 
 def _try_pydot_import():
-    pydot_imported = False
-    pydot_imported_msg = ""
     try:
-        # pydot-ng is a fork of pydot that is better maintained
-        import pydot_ng as pd
+        import pydot as pd
 
-        if pd.find_graphviz():
-            pydot_imported = True
-        else:
-            pydot_imported_msg = "pydot-ng can't find graphviz. Install graphviz."
+        pd.Dot.create(pd.Dot())
+        return pd
     except ImportError:
-        try:
-            # fall back on pydot if necessary
-            import pydot as pd
+        # tests should not fail on optional dependency
+        extra_msg = ""
+    except Exception as e:
+        extra_msg = f"\nAn error happened while importing/trying pydot: {e!r}"
 
-            if hasattr(pd, "find_graphviz"):
-                if pd.find_graphviz():
-                    pydot_imported = True
-                else:
-                    pydot_imported_msg = "pydot can't find graphviz"
-            else:
-                pd.Dot.create(pd.Dot())
-                pydot_imported = True
-        except ImportError:
-            # tests should not fail on optional dependency
-            pydot_imported_msg = (
-                "Install the python package pydot or pydot-ng. Install graphviz."
-            )
-        except Exception as e:
-            pydot_imported_msg = "An error happened while importing/trying pydot: "
-            pydot_imported_msg += str(e.args)
-
-    if not pydot_imported:
-        raise ImportError(
-            "Failed to import pydot. You must install graphviz "
-            "and either pydot or pydot-ng for "
-            f"`pydotprint` to work:\n {pydot_imported_msg}",
-        )
-    return pd
+    raise ImportError(
+        "Failed to import pydot. You must install graphviz and pydot for "
+        f"`pydotprint` to work.{extra_msg}",
+    )
 
 
 def pydotprint(

@@ -273,7 +273,8 @@ class TestFusion:
     fwx = fw + fx
     ftanx = tan(fx)
 
-    def large_fuseable_graph(self, n):
+    @staticmethod
+    def large_fuseable_graph(n):
         factors = []
         sd = dscalar()
         means = dvector()
@@ -295,6 +296,48 @@ class TestFusion:
         vars = [sd, means]
         dlogp = [pytensor.grad(logp, v) for v in vars]
         return vars, dlogp
+
+    @staticmethod
+    def deep_small_kernels(n):
+        x = pt.matrix("x")
+        out = x
+        for _ in range(n):
+            out = pt.sin(out.T) + pt.cos(out)
+
+        return [x], [out]
+
+    @staticmethod
+    def test_diamond_graph():
+        a = pt.matrix("a")
+        b = pt.exp(a)
+        c = pt.log(b)
+        d = pt.sin(c)
+        e = c + d
+
+        fg = FunctionGraph([a], [e], clone=False)
+        _, nb_fused, nb_replacement, *_ = FusionOptimizer().apply(fg)
+        assert nb_fused == 1
+        assert nb_replacement == 4
+
+    def test_expansion_order(self):
+        # This test is designed to fail if we don't use the right expansion order in the current implementation
+        # It may be considered irrelevant if the algorithm changes and this is no longer a concern.
+        # In that case the test can be tweaked or removed
+        a = pt.vector("a")
+        b = pt.exp(a)
+        # Unique creates an unfuesable path between b and d/e
+        c = pt.unique(b)
+        d = pt.log(c)
+        # The critical aspect of the current implementation, is that we must visit d before c,
+        # so we learn about the unfuseable path by the time we visit c
+        e1 = b + d
+        e2 = d + b  # test both orders
+
+        fg = FunctionGraph([a], [e1, e2], clone=False)
+        _, nb_fused, nb_replacement, *_ = FusionOptimizer().apply(fg)
+        fg.dprint()
+        assert nb_fused == 1
+        assert nb_replacement == 3
 
     @pytest.mark.parametrize(
         "case",
@@ -1347,16 +1390,26 @@ class TestFusion:
         benchmark(func)
 
     @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
-    def test_rewrite_benchmark(self, benchmark):
-        inps, outs = self.large_fuseable_graph(n=25)
+    @pytest.mark.parametrize(
+        "graph_fn, n, expected_n_repl",
+        [
+            ("deep_small_kernels", 20, (20, 60)),
+            ("large_fuseable_graph", 25, (128, 876)),
+        ],
+    )
+    def test_rewrite_benchmark(self, graph_fn, n, expected_n_repl, benchmark):
+        inps, outs = getattr(self, graph_fn)(n)
         fg = FunctionGraph(inps, outs)
         opt = FusionOptimizer()
 
         def rewrite_func():
-            nb_replacement = opt.apply(fg.clone())[2]
-            return nb_replacement
+            fg_clone = fg.clone()
+            _, nb_fused, nb_replacement, *_ = opt.apply(fg_clone)
+            # fg_clone.dprint()
+            return nb_fused, nb_replacement
 
-        assert benchmark(rewrite_func) == 103
+        assert rewrite_func() == expected_n_repl
+        benchmark.pedantic(rewrite_func, rounds=7, iterations=5)
 
     def test_no_warning_from_old_client(self):
         # There used to be a warning issued when creating fuseable mapping

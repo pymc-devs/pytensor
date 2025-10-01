@@ -10,9 +10,9 @@ from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
     copy_stack_trace,
+    dfs_rewriter,
     in2out,
     node_rewriter,
-    out2in,
 )
 from pytensor.raise_op import Assert
 from pytensor.scalar import Add, ScalarConstant, ScalarType
@@ -24,6 +24,7 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     TensorFromScalar,
     alloc,
+    arange,
     cast,
     concatenate,
     expand_dims,
@@ -34,9 +35,10 @@ from pytensor.tensor.basic import (
     switch,
 )
 from pytensor.tensor.basic import constant as tensor_constant
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import _squeeze_left
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.math import (
     add,
     and_,
@@ -56,8 +58,10 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.shape import (
     shape_padleft,
+    shape_padright,
     shape_tuple,
 )
 from pytensor.tensor.sharedvar import TensorSharedVariable
@@ -351,7 +355,8 @@ def local_useless_slice(fgraph, node):
         new_idxs[dim] = slice(start, stop, step)
 
     if change_flag or ((last_useful_idx + 1) < len(idxs)):
-        out = x[tuple(new_idxs[: last_useful_idx + 1])]
+        new_idxs = tuple(new_idxs[: last_useful_idx + 1])
+        out = x[new_idxs] if new_idxs else x
         # Copy over previous output stacktrace
         copy_stack_trace(node.outputs, out)
         return [out]
@@ -369,74 +374,73 @@ def local_subtensor_merge(fgraph, node):
     """
     from pytensor.scan.op import Scan
 
-    if isinstance(node.op, Subtensor):
-        u = node.inputs[0]
-        if u.owner and isinstance(u.owner.op, Subtensor):
-            # We can merge :)
-            # x actual tensor on which we are picking slices
-            x = u.owner.inputs[0]
-            # slices of the first applied subtensor
-            slices1 = get_idx_list(u.owner.inputs, u.owner.op.idx_list)
-            slices2 = get_idx_list(node.inputs, node.op.idx_list)
+    u = node.inputs[0]
+    if not (u.owner is not None and isinstance(u.owner.op, Subtensor)):
+        return None
 
-            # Don't try to do the optimization on do-while scan outputs,
-            # as it will create a dependency on the shape of the outputs
-            if (
-                x.owner is not None
-                and isinstance(x.owner.op, Scan)
-                and x.owner.op.info.as_while
-            ):
-                return None
+    # We can merge :)
+    # x actual tensor on which we are picking slices
+    x = u.owner.inputs[0]
+    # slices of the first applied subtensor
+    slices1 = get_idx_list(u.owner.inputs, u.owner.op.idx_list)
+    slices2 = get_idx_list(node.inputs, node.op.idx_list)
 
-            # Get the shapes of the vectors !
-            try:
-                # try not to introduce new shape into the graph
-                xshape = fgraph.shape_feature.shape_of[x]
-                ushape = fgraph.shape_feature.shape_of[u]
-            except AttributeError:
-                # Following the suggested use of shape_feature which should
-                # consider the case when the compilation mode doesn't
-                # include the ShapeFeature
-                xshape = x.shape
-                ushape = u.shape
+    # Don't try to do the optimization on do-while scan outputs,
+    # as it will create a dependency on the shape of the outputs
+    if (
+        x.owner is not None
+        and isinstance(x.owner.op, Scan)
+        and x.owner.op.info.as_while
+    ):
+        return None
 
-            merged_slices = []
-            pos_2 = 0
-            pos_1 = 0
-            while (pos_1 < len(slices1)) and (pos_2 < len(slices2)):
-                slice1 = slices1[pos_1]
-                if isinstance(slice1, slice):
-                    merged_slices.append(
-                        merge_two_slices(
-                            fgraph, slice1, xshape[pos_1], slices2[pos_2], ushape[pos_2]
-                        )
-                    )
-                    pos_2 += 1
-                else:
-                    merged_slices.append(slice1)
-                pos_1 += 1
+    # Get the shapes of the vectors !
+    try:
+        # try not to introduce new shape into the graph
+        xshape = fgraph.shape_feature.shape_of[x]
+        ushape = fgraph.shape_feature.shape_of[u]
+    except AttributeError:
+        # Following the suggested use of shape_feature which should
+        # consider the case when the compilation mode doesn't
+        # include the ShapeFeature
+        xshape = x.shape
+        ushape = u.shape
 
-            if pos_2 < len(slices2):
-                merged_slices += slices2[pos_2:]
-            else:
-                merged_slices += slices1[pos_1:]
-
-            merged_slices = tuple(as_index_constant(s) for s in merged_slices)
-            subtens = Subtensor(merged_slices)
-
-            sl_ins = get_slice_elements(
-                merged_slices, lambda x: isinstance(x, Variable)
+    merged_slices = []
+    pos_2 = 0
+    pos_1 = 0
+    while (pos_1 < len(slices1)) and (pos_2 < len(slices2)):
+        slice1 = slices1[pos_1]
+        if isinstance(slice1, slice):
+            merged_slices.append(
+                merge_two_slices(
+                    fgraph, slice1, xshape[pos_1], slices2[pos_2], ushape[pos_2]
+                )
             )
-            # Do not call make_node for test_value
-            out = subtens(x, *sl_ins)
+            pos_2 += 1
+        else:
+            merged_slices.append(slice1)
+        pos_1 += 1
 
-            # Copy over previous output stacktrace
-            # and stacktrace from previous slicing operation.
-            # Why? Because, the merged slicing operation could have failed
-            # because of either of the two original slicing operations
-            orig_out = node.outputs[0]
-            copy_stack_trace([orig_out, node.inputs[0]], out)
-            return [out]
+    if pos_2 < len(slices2):
+        merged_slices += slices2[pos_2:]
+    else:
+        merged_slices += slices1[pos_1:]
+
+    merged_slices = tuple(as_index_constant(s) for s in merged_slices)
+    subtens = Subtensor(merged_slices)
+
+    sl_ins = get_slice_elements(merged_slices, lambda x: isinstance(x, Variable))
+    # Do not call make_node for test_value
+    out = subtens(x, *sl_ins)
+
+    # Copy over previous output stacktrace
+    # and stacktrace from previous slicing operation.
+    # Why? Because, the merged slicing operation could have failed
+    # because of either of the two original slicing operations
+    orig_out = node.outputs[0]
+    copy_stack_trace([orig_out, node.inputs[0]], out)
+    return [out]
 
 
 @register_specialize
@@ -526,7 +530,6 @@ def local_subtensor_inc_subtensor(fgraph, node):
             return
 
 
-@register_infer_shape
 @register_useless
 @register_canonicalize
 @register_specialize
@@ -725,6 +728,44 @@ def local_useless_subtensor(fgraph, node):
 
 
 @register_canonicalize
+@node_rewriter([Subtensor])
+def local_convert_negative_indices(fgraph, node):
+    """Convert negative indices in `Subtensor` with static length to positive indices."""
+    x, *raw_idxs = node.inputs
+    idxs = indices_from_subtensor(raw_idxs, node.op.idx_list)
+
+    new_idxs = None
+    for i, (dim_length, idx) in enumerate(zip(x.type.shape, idxs)):
+        if (
+            dim_length is None
+            or isinstance(idx, slice)
+            or not isinstance(idx, Constant)
+        ):
+            continue
+
+        val = idx.data
+        if val >= 0:
+            continue
+
+        new_val = val + dim_length
+        if new_val < 0:
+            # This is an invalid index, keep original to not confuse the user
+            return None
+
+        if new_idxs is None:
+            new_idxs = list(idxs)
+        new_idxs[i] = new_val
+
+    if new_idxs is None:
+        # No negative indices to convert
+        return None
+
+    new_subtensor = x[tuple(new_idxs)]
+    copy_stack_trace(node.outputs, new_subtensor)
+    return [new_subtensor]
+
+
+@register_canonicalize
 @register_specialize
 @node_rewriter([AdvancedSubtensor1])
 def local_useless_AdvancedSubtensor1(fgraph, node):
@@ -786,6 +827,12 @@ def merge_two_slices(fgraph, slice1, len1, slice2, len2):
 
     if not isinstance(slice1, slice):
         raise ValueError("slice1 should be of type `slice`")
+
+    # Simple case where one of the slices is useless
+    if is_full_slice(slice1):
+        return slice2
+    elif is_full_slice(slice2):
+        return slice1
 
     sl1, reverse1 = get_canonical_form_slice(slice1, len1)
     sl2, reverse2 = get_canonical_form_slice(slice2, len2)
@@ -928,33 +975,30 @@ def local_IncSubtensor_serialize(fgraph, node):
             and not i.owner.op.set_instead_of_inc
         )
 
-    if node.op == add:
-        o_type = node.outputs[0].type
+    o_type = node.outputs[0].type
 
-        movable_inputs = [i for i in node.inputs if movable(i)]
+    movable_inputs = [i for i in node.inputs if movable(i)]
 
-        if movable_inputs:
-            new_inputs = [i for i in node.inputs if not movable(i)] + [
-                mi.owner.inputs[0] for mi in movable_inputs
-            ]
-            new_add = variadic_add(*new_inputs)
-            # Copy over stacktrace from original output, as an error
-            # (e.g. an index error) in this add operation should
-            # correspond to an error in the original add operation.
-            copy_stack_trace(node.outputs[0], new_add)
+    if movable_inputs:
+        new_inputs = [i for i in node.inputs if not movable(i)] + [
+            mi.owner.inputs[0] for mi in movable_inputs
+        ]
+        new_add = variadic_add(*new_inputs)
+        # Copy over stacktrace from original output, as an error
+        # (e.g. an index error) in this add operation should
+        # correspond to an error in the original add operation.
+        copy_stack_trace(node.outputs[0], new_add)
 
-            # stack up the new incsubtensors
-            tip = new_add
-            for mi in movable_inputs:
-                assert o_type.is_super(tip.type)
-                tip = mi.owner.op(tip, *mi.owner.inputs[1:])
-                # Copy over stacktrace from outputs of the original
-                # "movable" operation to the new operation.
-                copy_stack_trace(node.outputs + mi.owner.outputs, tip)
+        # stack up the new incsubtensors
+        tip = new_add
+        for mi in movable_inputs:
+            assert o_type.is_super(tip.type)
+            tip = mi.owner.op(tip, *mi.owner.inputs[1:])
+            # Copy over stacktrace from outputs of the original
+            # "movable" operation to the new operation.
+            copy_stack_trace(node.outputs + mi.owner.outputs, tip)
 
-            return [tip]
-
-        # print incsub_inputs, [id(i.owner.inputs[0]) for i in incsub_inputs]
+        return [tip]
 
 
 # We register it in a WalkingGraphRewriter inside the canonizer EQ optimizer.
@@ -1219,7 +1263,6 @@ def local_adv_sub1_adv_inc_sub1(fgraph, node):
     return [r2]
 
 
-@register_infer_shape
 @register_specialize
 @register_stabilize
 @register_canonicalize
@@ -1517,7 +1560,7 @@ def local_uint_constant_indices(fgraph, node):
 
 compile.optdb.register(
     local_uint_constant_indices.__name__,
-    out2in(local_uint_constant_indices),
+    dfs_rewriter(local_uint_constant_indices),
     # We don't include in the Python / C because those always cast indices to int64 internally.
     "numba",
     "jax",
@@ -1529,68 +1572,175 @@ compile.optdb.register(
 )
 
 
+@register_stabilize
+@register_specialize
+@node_rewriter([blockwise_of(Subtensor)])
+def local_blockwise_of_subtensor(fgraph, node):
+    """Rewrite Blockwise of Subtensor, where the only batch input is the indexed tensor.
+
+    Blockwise(Subtensor{a: b})(x, a, b) -> x[:, a:b] when x has one batch dimension, and a/b none
+
+    TODO: Handle batched indices like we do with blockwise of inc_subtensor
+    TODO: Extend to AdvanceSubtensor
+    """
+    x, *idxs = node.inputs
+    if not all(all(idx.type.broadcastable) for idx in idxs):
+        return
+
+    core_idxs = indices_from_subtensor(
+        [idx.squeeze() for idx in idxs], node.op.core_op.idx_list
+    )
+    # Add empty slices for the batch dims
+    none_slices = (slice(None),) * node.op.batch_ndim(node)
+    return [x[(*none_slices, *core_idxs)]]
+
+
 @register_canonicalize("shape_unsafe")
 @register_stabilize("shape_unsafe")
 @register_specialize("shape_unsafe")
-@node_rewriter([Blockwise])
-def local_blockwise_advanced_inc_subtensor(fgraph, node):
-    """Rewrite blockwise advanced inc_subtensor whithout batched indexes as an inc_subtensor with prepended empty slices."""
-    if not isinstance(node.op.core_op, AdvancedIncSubtensor):
-        return None
+@node_rewriter([blockwise_of(IncSubtensor | AdvancedIncSubtensor)])
+def local_blockwise_inc_subtensor(fgraph, node):
+    """Rewrite blockwised inc_subtensors.
 
+    Note: The reason we don't apply this rewrite eagerly in the `vectorize_node` dispatch
+    Is that we often have batch dimensions from alloc of shapes/reshape that can be removed by rewrites
+
+    such as x[:vectorized(w.shape[0])].set(y), that will later be rewritten as x[:w.shape[1]].set(y),
+    and can be safely rewritten without Blockwise.
+    """
+    core_op = node.op.core_op
     x, y, *idxs = node.inputs
-
-    # It is currently not possible to Vectorize such AdvancedIncSubtensor, but we check again just in case
-    if any(
-        (
-            isinstance(idx, SliceType | NoneTypeT)
-            or (idx.type.dtype == "bool" and idx.type.ndim > 0)
-        )
-        for idx in idxs
-    ):
-        return None
-
-    op: Blockwise = node.op  # type: ignore
-    batch_ndim = op.batch_ndim(node)
-
-    new_idxs = []
-    for idx in idxs:
-        if all(idx.type.broadcastable[:batch_ndim]):
-            new_idxs.append(idx.squeeze(tuple(range(batch_ndim))))
-        else:
-            # Rewrite does not apply
+    [out] = node.outputs
+    if isinstance(core_op, AdvancedIncSubtensor):
+        if any(
+            (
+                # Blockwise requires all inputs to be tensors so it is not possible
+                # to wrap an AdvancedIncSubtensor with slice / newaxis inputs, but we check again just in case
+                # If this is ever supported we need to pay attention to special behavior of numpy when advanced indices
+                # are separated by basic indices
+                isinstance(idx, SliceType | NoneTypeT)
+                # Also get out if we have boolean indices as they cross dimension boundaries
+                # / can't be safely broadcasted depending on their runtime content
+                or (idx.type.dtype == "bool")
+            )
+            for idx in idxs
+        ):
             return None
 
-    x_batch_bcast = x.type.broadcastable[:batch_ndim]
-    y_batch_bcast = y.type.broadcastable[:batch_ndim]
-    if any(xb and not yb for xb, yb in zip(x_batch_bcast, y_batch_bcast, strict=True)):
-        # Need to broadcast batch x dims
-        batch_shape = tuple(
-            x_dim if (not xb or yb) else y_dim
-            for xb, x_dim, yb, y_dim in zip(
-                x_batch_bcast,
-                tuple(x.shape)[:batch_ndim],
-                y_batch_bcast,
-                tuple(y.shape)[:batch_ndim],
-                strict=True,
+    batch_ndim = node.op.batch_ndim(node)
+    idxs_core_ndim = [len(inp_sig) for inp_sig in node.op.inputs_sig[2:]]
+    max_idx_core_ndim = max(idxs_core_ndim, default=0)
+
+    # Step 1. Broadcast buffer to batch_shape
+    if x.type.broadcastable != out.type.broadcastable:
+        batch_shape = [1] * batch_ndim
+        for inp in node.inputs:
+            for i, (broadcastable, batch_dim) in enumerate(
+                zip(inp.type.broadcastable[:batch_ndim], tuple(inp.shape)[:batch_ndim])
+            ):
+                if broadcastable:
+                    # This dimension is broadcastable, it doesn't provide shape information
+                    continue
+                if batch_shape[i] != 1:
+                    # We already found a source of shape for this batch dimension
+                    continue
+                batch_shape[i] = batch_dim
+        x = broadcast_to(x, (*batch_shape, *x.shape[batch_ndim:]))
+        assert x.type.broadcastable == out.type.broadcastable
+
+    # Step 2. Massage indices so they respect blockwise semantics
+    if isinstance(core_op, IncSubtensor):
+        # For basic IncSubtensor there are two cases:
+        # 1. Slice entries -> We need to squeeze away dummy dimensions so we can convert back to slice
+        # 2. Integers -> Can be used as is, but we try to squeeze away dummy batch dimensions
+        #   in case we can end up with a basic IncSubtensor again
+        core_idxs = []
+        counter = 0
+        for idx in core_op.idx_list:
+            if isinstance(idx, slice):
+                # Squeeze away dummy dimensions so we can convert to slice
+                new_entries = [None, None, None]
+                for i, entry in enumerate((idx.start, idx.stop, idx.step)):
+                    if entry is None:
+                        continue
+                    else:
+                        new_entries[i] = new_entry = idxs[counter].squeeze()
+                        counter += 1
+                        if new_entry.ndim > 0:
+                            # If the slice entry has dimensions after the squeeze we can't convert it to a slice
+                            # We could try to convert to equivalent integer indices, but nothing guarantees
+                            # that the slice is "square".
+                            return None
+                core_idxs.append(slice(*new_entries))
+            else:
+                core_idxs.append(_squeeze_left(idxs[counter]))
+                counter += 1
+    else:
+        # For AdvancedIncSubtensor we have tensor integer indices,
+        # We need to expand batch indexes on the right, so they don't interact with core index dimensions
+        # We still squeeze on the left in case that allows us to use simpler indices
+        core_idxs = [
+            _squeeze_left(
+                shape_padright(idx, max_idx_core_ndim - idx_core_ndim),
+                stop_at_dim=batch_ndim,
             )
-        )
-        core_shape = tuple(x.shape)[batch_ndim:]
-        x = alloc(x, *batch_shape, *core_shape)
+            for idx, idx_core_ndim in zip(idxs, idxs_core_ndim)
+        ]
 
-    new_idxs = [slice(None)] * batch_ndim + new_idxs
-    x_view = x[tuple(new_idxs)]
+    # Step 3. Create new indices for the new batch dimension of x
+    if not all(
+        all(idx.type.broadcastable[:batch_ndim])
+        for idx in idxs
+        if not isinstance(idx, slice)
+    ):
+        # If indices have batch dimensions in the indices, they will interact with the new dimensions of x
+        # We build vectorized indexing with new arange indices that do not interact with core indices or each other
+        # (i.e., they broadcast)
 
-    # We need to introduce any implicit expand_dims on core dimension of y
-    y_core_ndim = y.type.ndim - batch_ndim
-    if (missing_y_core_ndim := x_view.type.ndim - batch_ndim - y_core_ndim) > 0:
-        missing_axes = tuple(range(batch_ndim, batch_ndim + missing_y_core_ndim))
-        y = expand_dims(y, missing_axes)
+        # Note: due to how numpy handles non-consecutive advanced indexing (transposing it to the front),
+        # we don't want to create a mix of slice(None), and arange() indices for the new batch dimension,
+        # even if not all batch dimensions have corresponding batch indices.
+        batch_slices = [
+            shape_padright(arange(x_batch_shape, dtype="int64"), n)
+            for (x_batch_shape, n) in zip(
+                tuple(x.shape)[:batch_ndim],
+                reversed(range(max_idx_core_ndim, max_idx_core_ndim + batch_ndim)),
+            )
+        ]
+    else:
+        # In the case we don't have batch indices,
+        # we can use slice(None) to broadcast the core indices to each new batch dimension of x / y
+        batch_slices = [slice(None)] * batch_ndim
 
-    symbolic_idxs = x_view.owner.inputs[1:]
-    new_out = op.core_op.make_node(x, y, *symbolic_idxs).outputs
-    copy_stack_trace(node.outputs, new_out)
-    return new_out
+    new_idxs = (*batch_slices, *core_idxs)
+    x_view = x[new_idxs]
+
+    # Step 4. Introduce any implicit expand_dims on core dimension of y
+    missing_y_core_ndim = x_view.type.ndim - y.type.ndim
+    implicit_axes = tuple(range(batch_ndim, batch_ndim + missing_y_core_ndim))
+    y = _squeeze_left(expand_dims(y, implicit_axes), stop_at_dim=batch_ndim)
+
+    if isinstance(core_op, IncSubtensor):
+        # Check if we can still use a basic IncSubtensor
+        if isinstance(x_view.owner.op, Subtensor):
+            new_props = core_op._props_dict()
+            new_props["idx_list"] = x_view.owner.op.idx_list
+            new_core_op = type(core_op)(**new_props)
+            symbolic_idxs = x_view.owner.inputs[1:]
+            new_out = new_core_op(x, y, *symbolic_idxs)
+        else:
+            # We need to use AdvancedSet/IncSubtensor
+            if core_op.set_instead_of_inc:
+                new_out = x[new_idxs].set(y)
+            else:
+                new_out = x[new_idxs].inc(y)
+    else:
+        # AdvancedIncSubtensor takes symbolic indices/slices directly, no need to create a new op
+        symbolic_idxs = x_view.owner.inputs[1:]
+        new_out = core_op(x, y, *symbolic_idxs)
+
+    copy_stack_trace(out, new_out)
+    return [new_out]
 
 
 @node_rewriter(tracks=[AdvancedSubtensor, AdvancedIncSubtensor])

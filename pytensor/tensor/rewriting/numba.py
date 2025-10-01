@@ -1,7 +1,7 @@
 from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
-from pytensor.graph.basic import applys_between
-from pytensor.graph.rewriting.basic import out2in
+from pytensor.graph.rewriting.basic import dfs_rewriter
+from pytensor.graph.traversal import applys_between
 from pytensor.tensor.basic import as_tensor, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.rewriting.shape import ShapeFeature
@@ -65,10 +65,10 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
         # [Blockwise{SVD{full_matrices=True, compute_uv=True}, (m,n)->(m,m),(k),(n,n)}].2 [id A] 6
         #  └─ ···
     """
-    op: Blockwise = node.op  # type: ignore[annotation-unchecked]
+    op: Blockwise = node.op
     batch_ndim = op.batch_ndim(node)
 
-    shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)  # type: ignore[annotation-unchecked]
+    shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
     if shape_feature:
         core_shapes = [
             [shape_feature.get_shape(out, i) for i in range(batch_ndim, out.type.ndim)]
@@ -102,7 +102,7 @@ def introduce_explicit_core_shape_blockwise(fgraph, node):
 
 optdb.register(
     introduce_explicit_core_shape_blockwise.__name__,
-    out2in(introduce_explicit_core_shape_blockwise),
+    dfs_rewriter(introduce_explicit_core_shape_blockwise),
     "numba",
     position=100,
 )

@@ -57,8 +57,10 @@ ITEM_TEMPLATE = """
 folder_title_map = {
     "introduction": "Introduction",
     "rewrites": "Graph Rewriting",
-    "scan": "Looping in Pytensor",
-    "optimize": "Optimization in Pytensor",
+    "autodiff": "Automatic Differentiation",
+    "scan": "Looping in PyTensor",
+    "optimize": "Optimization in PyTensor",
+    "applications": "Case Studies",
 }
 
 

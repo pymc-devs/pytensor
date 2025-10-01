@@ -664,6 +664,11 @@ class TensorFromScalar(COp):
 tensor_from_scalar = TensorFromScalar()
 
 
+@_vectorize_node.register(TensorFromScalar)
+def vectorize_tensor_from_scalar(op, node, batch_x):
+    return identity(batch_x).owner
+
+
 class ScalarFromTensor(COp):
     __props__ = ()
 
@@ -1801,8 +1806,7 @@ class Alloc(COp):
                     | pytensor.tensor.blas.Gemv
                     | pytensor.tensor.blas_c.CGemv
                     | pytensor.tensor.blas.Ger
-                    | pytensor.tensor.blas_c.CGer
-                    | pytensor.tensor.blas_scipy.ScipyGer,
+                    | pytensor.tensor.blas_c.CGer,
                 )
             ):
                 # Ops that will work inplace on the Alloc. So if they
@@ -2047,6 +2051,7 @@ def register_transfer(fn):
 """Create a duplicate of `a` (with duplicated storage)"""
 tensor_copy = Elemwise(ps.identity)
 pprint.assign(tensor_copy, printing.IgnorePrinter())
+identity = tensor_copy
 
 
 class Default(Op):
@@ -4604,6 +4609,7 @@ __all__ = [
     "matrix_transpose",
     "default",
     "tensor_copy",
+    "identity",
     "transfer",
     "alloc",
     "identity_like",

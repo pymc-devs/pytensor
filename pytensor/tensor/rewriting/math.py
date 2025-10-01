@@ -19,7 +19,6 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
-from pytensor.raise_op import assert_op
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -28,30 +27,34 @@ from pytensor.tensor.basic import (
     as_tensor_variable,
     cast,
     constant,
+    expand_dims,
     get_underlying_scalar_constant_value,
     moveaxis,
     ones_like,
     register_infer_shape,
+    split,
     switch,
+    zeros,
     zeros_like,
 )
-from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.extra_ops import broadcast_arrays
+from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
 from pytensor.tensor.math import (
     Dot,
     Prod,
     Sum,
     _conj,
-    _inner_prod,
-    _matrix_matrix_matmul,
-    _matrix_vec_prod,
-    _vec_matrix_prod,
+    _dot,
+    _matmul,
     add,
+    arccosh,
+    arcsinh,
+    arctanh,
+    cosh,
+    deg2rad,
     digamma,
     dot,
-    eq,
     erf,
     erfc,
     exp,
@@ -71,13 +74,16 @@ from pytensor.tensor.math import (
     neg,
     polygamma,
     prod,
+    rad2deg,
     reciprocal,
     sigmoid,
     sign,
+    sinh,
     softplus,
     sqr,
     sqrt,
     sub,
+    tanh,
     tri_gamma,
     true_div,
     variadic_add,
@@ -97,8 +103,11 @@ from pytensor.tensor.rewriting.basic import (
     register_uncanonicalize,
     register_useless,
 )
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
+from pytensor.tensor.rewriting.linalg import is_matrix_transpose
 from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     complex_dtypes,
@@ -131,16 +140,12 @@ def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
     return consts, origconsts, nonconsts
 
 
-@register_canonicalize
-@register_stabilize
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
 @node_rewriter([Dot])
 def local_0_dot_x(fgraph, node):
-    if not isinstance(node.op, Dot):
-        return False
-
-    x = node.inputs[0]
-    y = node.inputs[1]
-    replace = (
+    x, y = node.inputs
+    if (
         get_underlying_scalar_constant_value(
             x, only_process_constants=True, raise_not_constant=False
         )
@@ -149,214 +154,305 @@ def local_0_dot_x(fgraph, node):
             y, only_process_constants=True, raise_not_constant=False
         )
         == 0
-    )
+    ):
+        return [zeros((x.shape[0], y.shape[1]), dtype=node.outputs[0].type.dtype)]
 
-    if replace:
-        constant_zero = constant(0, dtype=node.outputs[0].type.dtype)
-        if x.ndim == 2 and y.ndim == 2:
-            constant_zero = assert_op(constant_zero, eq(x.shape[1], y.shape[0]))
-            return [alloc(constant_zero, x.shape[0], y.shape[1])]
-        elif x.ndim == 1 and y.ndim == 2:
-            constant_zero = assert_op(constant_zero, eq(x.shape[0], y.shape[0]))
-            return [alloc(constant_zero, y.shape[1])]
-        elif x.ndim == 2 and y.ndim == 1:
-            constant_zero = assert_op(constant_zero, eq(x.shape[1], y.shape[0]))
-            return [alloc(constant_zero, x.shape[0])]
-        elif x.ndim == 1 and y.ndim == 1:
-            constant_zero = assert_op(constant_zero, eq(x.shape[0], y.shape[0]))
-            return [constant_zero]
+
+@register_stabilize
+@node_rewriter([blockwise_of(BlockDiagonal)])
+def local_block_diag_dot_to_dot_block_diag(fgraph, node):
+    r"""
+    Perform the rewrite ``dot(block_diag(A, B), C) -> concat(dot(A, C), dot(B, C))``
+
+    BlockDiag results in the creation of a matrix of shape ``(n1 * n2, m1 * m2)``. Because dot has complexity
+    of approximately O(n^3), it's always better to perform two dot products on the smaller matrices, rather than
+    a single dot on the larger matrix.
+    """
+    # Check that the BlockDiagonal is an input to a Dot node:
+    for client in itertools.chain.from_iterable(
+        get_clients_at_depth(fgraph, node, depth=i) for i in [1, 2]
+    ):
+        if client.op not in (_dot, _matmul):
+            continue
+
+        [blockdiag_result] = node.outputs
+        blockdiag_inputs = node.inputs
+
+        dot_op = client.op
+
+        try:
+            client_idx = client.inputs.index(blockdiag_result)
+        except ValueError:
+            # If the blockdiag result is not an input to the dot, there is at least one Op between them (usually a
+            # DimShuffle). In this case, we need to figure out which of the inputs of the dot eventually leads to the
+            # blockdiag result.
+            for ancestor in client.inputs:
+                if ancestor.owner and blockdiag_result in ancestor.owner.inputs:
+                    client_idx = client.inputs.index(ancestor)
+                    break
+
+        other_input = client.inputs[1 - client_idx]
+
+        split_axis = -2 if client_idx == 0 else -1
+        split_size_axis = -1 if client_idx == 0 else -2
+
+        other_dot_input_split = split(
+            other_input,
+            splits_size=[
+                component.shape[split_size_axis] for component in blockdiag_inputs
+            ],
+            n_splits=len(blockdiag_inputs),
+            axis=split_axis,
+        )
+
+        split_dot_results = [
+            dot_op(component, other_split)
+            if client_idx == 0
+            else dot_op(other_split, component)
+            for component, other_split in zip(blockdiag_inputs, other_dot_input_split)
+        ]
+        new_output = concat_with_broadcast(split_dot_results, axis=split_axis)
+
+        copy_stack_trace(node.outputs[0], new_output)
+        return {client.outputs[0]: new_output}
 
 
 @register_canonicalize
-@node_rewriter([DimShuffle])
+@node_rewriter([Dot, _matmul])
 def local_lift_transpose_through_dot(fgraph, node):
     r"""Perform the rewrite ``dot(x,y).T -> dot(y.T, x.T)``.
 
     These rewrites "lift" (propagate towards the inputs) `DimShuffle`
     through dot product.  It allows to put the graph in a more standard shape,
     and to later merge consecutive `DimShuffle`\s.
-
-    The transformation should be apply whether or not the transpose is
-    inplace.  The newly-introduced transpositions are not inplace, this will
-    be taken care of in a later rewrite phase.
-
     """
-    if not (isinstance(node.op, DimShuffle) and node.op.new_order == (1, 0)):
-        return False
-    if not (node.inputs[0].owner and isinstance(node.inputs[0].owner.op, Dot)):
-        return False
-    x, y = node.inputs[0].owner.inputs
 
-    if x.ndim == y.ndim == 2:
-        # Output is dot product of transposed inputs in reverse order
-        ret = [dot(y.T, x.T)]
+    clients = fgraph.clients[node.out]
 
-        # Copy over stack trace to output from result of dot-product
-        copy_stack_trace(node.inputs[0], ret)
-        return ret
+    if len(clients) != 1:
+        # If the dot is used in more than one place, we don't want to duplicate it
+        return None
+
+    [(client, _)] = clients
+
+    if not (isinstance(client.op, DimShuffle) and is_matrix_transpose(client.out)):
+        return None
+
+    x, y = node.inputs
+    # Output is dot product of transposed inputs in reverse order
+    ret = node.op(y.mT, x.mT)
+
+    # Copy over stack trace to output from result of dot-product
+    copy_stack_trace(node.out, ret)
+
+    return {client.out: ret}
 
 
-@register_stabilize
-@register_specialize
-@node_rewriter(tracks=[Blockwise])
-def local_batched_matmul_to_core_matmul(fgraph, node):
-    """Rewrite matmul where only one of the inputs has batch dimensions to a reshaped core matmul.
+def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):
+    """Move batch dimensions of matmul operands to core matmul
 
-    Example, if x has batch dimensions, but y not:
+    Example, if x has batch dimensions that don't overlap with batch dimensions of y
     x @ y -> (x.reshape(-1, x.shape[-1]) @ y).reshape(*x.shape[:-1], y.shape[-1])
 
-    It also works when y has batch dimensions, but x not.
-    """
+    It also works for batch dimensions of y that don't overlap with batch dimensions of x
 
-    # Check whether we have a matmul operation in this node
-    if not (
-        isinstance(node.op.core_op, Dot)
-        and len(node.op.inputs_sig[0]) == 2
-        and len(node.op.inputs_sig[1]) == 2
-    ):
-        return None
+    The rewrite only uses reshape when mixing dimensions, and it can refuse to apply if `allow_reshape=False`
+    """
 
     x, y = node.inputs
     batch_ndim = node.op.batch_ndim(node)
 
-    # Check if x has batch dimensions, but y not (or only broadcastable dimensions)
-    if any(not b_dim for b_dim in x.type.broadcastable[:-2]) and all(
-        y.type.broadcastable[:-2]
-    ):
-        x_stacked = x.reshape((-1, x.shape[-1]))
-        out_stacked = x_stacked @ y.squeeze(tuple(range(batch_ndim)))
-        out = out_stacked.reshape((*x.shape[:-1], y.shape[-1]))
-        return [out]
+    x_axis_to_merge = [
+        i
+        for i, (bcast_x, bcast_y) in enumerate(
+            zip(x.type.broadcastable[:-2], y.type.broadcastable[:-2])
+        )
+        if bcast_y and not bcast_x
+    ]
 
-    # Otherwise, check if y has batch dimension, but x not
-    elif any(not b_dim for b_dim in y.type.broadcastable[:-2]) and all(
-        x.type.broadcastable[:-2]
-    ):
-        # For the y batch case we need to first move the batch axes and then reshape
-        # y.shape == (*b, k, n)
-        y_tr = moveaxis(y, -2, 0)  # (k, *b, n)
-        y_stacked = y_tr.reshape((y.shape[-2], -1))  # (k, *b * n)
-        out_stacked = x.squeeze(tuple(range(batch_ndim))) @ y_stacked  # (m, *b * n)
-        out_stacked_tr = out_stacked.reshape(
-            (x.shape[-2], *y.shape[:-2], y.shape[-1])
-        )  # (m, *b, n)
-        out = moveaxis(out_stacked_tr, 0, -2)  # (*b, m, n)
-        return [out]
+    y_axis_to_merge = [
+        i
+        for i, (bcast_x, bcast_y) in enumerate(
+            zip(x.type.broadcastable[:-2], y.type.broadcastable[:-2])
+        )
+        if bcast_x and not bcast_y
+    ]
 
-    # Both x and y have batch dimensions, nothing to do here
-    return None
+    if not (x_axis_to_merge or y_axis_to_merge):
+        return None
+
+    x_shape = tuple(x.shape)
+    y_shape = tuple(y.shape)
+    x_is_row = x.type.broadcastable[-2]
+    y_is_col = y.type.broadcastable[-1]
+    n_x_axis_to_merge = len(x_axis_to_merge)
+    n_y_axis_to_merge = len(y_axis_to_merge)
+    n_axis_to_merge = n_x_axis_to_merge + n_y_axis_to_merge
+
+    x_stacked, y_stacked = x, y
+    dims_were_merged = False
+
+    if n_x_axis_to_merge:
+        # ravel batch dimensions of x on the core (m) axis
+        x_axis_destination = tuple(range(-n_x_axis_to_merge - 2, -2))
+        x_stacked = moveaxis(x, x_axis_to_merge, x_axis_destination)
+        if x_is_row:
+            # x was a row matrix, squeeze it to clean up the graph
+            x_stacked = x_stacked.squeeze(-2)
+        if n_x_axis_to_merge > 1 or not x_is_row:
+            if not allow_reshape:
+                # TODO: We could allow the y rewrite to go on
+                # Or just move one axis (the largest) if x is row
+                return None
+
+            # Ravel moved batch dims together with (m) if needed
+            x_stacked_shape = tuple(x_stacked.shape)
+            x_stacked = x_stacked.reshape(
+                (*x_stacked_shape[: batch_ndim - n_x_axis_to_merge], -1, x_shape[-1])
+            )
+            dims_were_merged = True
+
+    if n_y_axis_to_merge:
+        # ravel batch dimensions of y on the core (n) axis
+        y_axis_destination = tuple(range(-n_y_axis_to_merge - 1, -1))
+        y_stacked = moveaxis(y, y_axis_to_merge, y_axis_destination)
+        if y_is_col:
+            # y was a column matrix, squeeze it to clean up the graph
+            y_stacked = y_stacked.squeeze(-1)
+        if n_y_axis_to_merge > 1 or not y_is_col:
+            if not allow_reshape:
+                # TODO: We could allow the x rewrite to go on
+                # Or just move one axis (the largest) if y is col
+                return None
+            # Ravel moved batch dims together with (n) if needed
+            y_stacked_shape = tuple(y_stacked.shape)
+            y_stacked = y_stacked.reshape(
+                (*y_stacked_shape[: batch_ndim - n_y_axis_to_merge], y_shape[-2], -1)
+            )
+            dims_were_merged = True
+
+    # Squeeze x_dims corresponding to merged dimensions of y
+    x_axis_to_squeeze = np.array(y_axis_to_merge)
+    for i in reversed(x_axis_to_merge):
+        # The corresponding dimensions of y may have shifted when we merged dimensions of x
+        x_axis_to_squeeze[x_axis_to_squeeze > i] -= 1
+    x_stacked = x_stacked.squeeze(tuple(x_axis_to_squeeze))
+
+    # Same for y
+    y_axis_to_squeeze = np.array(x_axis_to_merge)
+    for i in reversed(y_axis_to_merge):
+        y_axis_to_squeeze[y_axis_to_squeeze > i] -= 1
+    y_stacked = y_stacked.squeeze(tuple(y_axis_to_squeeze))
+
+    out_stacked = x_stacked @ y_stacked
+
+    # Split back any merged dimensions
+    if dims_were_merged:
+        x_merged_shapes = [x_shape[i] for i in x_axis_to_merge]
+        if not x_is_row:
+            # Otherwise we handle that later with expand_dims, which is cleaner
+            x_merged_shapes.append(x_shape[-2])
+        y_merged_shapes = [y_shape[i] for i in y_axis_to_merge]
+        if not y_is_col:
+            # Otherwise we handle that later with expand_dims, which is cleaner
+            y_merged_shapes.append(y_shape[-1])
+        out_stacked_shape = tuple(out_stacked.shape)
+        out_unstacked = out_stacked.reshape(
+            (
+                *out_stacked_shape[: batch_ndim - n_axis_to_merge],
+                *x_merged_shapes,
+                *y_merged_shapes,
+            )
+        )
+    else:
+        out_unstacked = out_stacked
+
+    # Add back dummy row, col axis
+    # We do this separately to avoid the reshape as much as we can
+    if y_is_col and (n_y_axis_to_merge or dims_were_merged):
+        out_unstacked = expand_dims(out_unstacked, -1)
+    if x_is_row and (n_x_axis_to_merge or dims_were_merged):
+        out_unstacked = expand_dims(out_unstacked, -n_y_axis_to_merge - 2)
+
+    # Move batch axis back to their original location
+    source = range(-n_axis_to_merge - 2, 0)
+    destination = (*x_axis_to_merge, -2, *y_axis_to_merge, -1)
+    out = moveaxis(out_unstacked, source, destination)
+    return [out]
+
+
+@register_canonicalize
+@node_rewriter(tracks=[_matmul])
+def local_batched_matmul_to_core_matmul(fgraph, node):
+    # Allow passing batch dimensions of matmul to core vector / column matrices
+    return _batched_matmul_to_core_matmul(fgraph, node, allow_reshape=False)
+
+
+@register_specialize
+@node_rewriter(tracks=[_matmul])
+def local_batched_matmul_to_core_matmul_with_reshape(fgraph, node):
+    # Allow stacking batch dimensions of matmul with core dimensions, with a reshape operation
+    # We only apply this in specialize, because grahs with reshape are hard to work with
+    return _batched_matmul_to_core_matmul(fgraph, node, allow_reshape=True)
 
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([_inner_prod, _matrix_vec_prod, _vec_matrix_prod, _matrix_matrix_matmul])
-def local_blockwise_dot_to_mul(fgraph, node):
-    """Rewrite blockwise dots that correspond to multiplication without summation.
+@node_rewriter([_matmul, Dot])
+def local_dot_to_mul(fgraph, node):
+    """Rewrite dots that correspond to multiplication without summation.
 
-    We don't touch the regular dot, to not interfere with the BLAS optimizations.
+    We don't touch outer product without batch-dimensions, to allow rewriting into GER,
+    which seems more performant in that case.
+
+    # TODO: Once we blockwise Blas operations we shouldn't do it for outer product with batch-dimensions either
+    # TODO: We may still want to canonicalize outer dot as mul, and detect that for GER.
     """
     a, b = node.inputs
     a_static_shape = a.type.shape
     b_static_shape = b.type.shape
-    core_a_ndim = len(node.op.inputs_sig[0])
-    core_b_ndim = len(node.op.inputs_sig[1])
 
-    if core_a_ndim > 2 or core_b_ndim > 2:
-        # Shouldn't happen, but here just in case
+    # Check if we have matrix-matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
+    if not (a_static_shape[-1] == 1 or b_static_shape[-2] == 1):
         return None
 
-    if core_b_ndim == 1:
-        if a_static_shape[-1] == 1 or b_static_shape[-1] == 1:
-            if core_a_ndim == 1:
-                # inner product: (..., 1) * (..., 1) -> (...)
-                # just squeeze the last dimensions of a and b
-                new_a = a.squeeze(-1)
-                new_b = b.squeeze(-1)
-            else:
-                # matrix vector product: (..., m, 1) * (..., 1) -> (..., m)
-                # the last dimension of b is already aligned for the elemwise multiplication
-                # after we squeeze the last dimension of a
-                new_a = a.squeeze(-1)
-                new_b = b
-        else:
-            return None
+    # If it's a core Dot we only rewrite if there's no outer product
+    # (1, 1) * (1, n) or (m, 1) * (1, 1)
+    # Otherwise we leave as is, so GER can be used instead
+    if isinstance(node.op, Dot) and not (
+        a_static_shape[-2] == 1 or b_static_shape[-1] == 1
+    ):
+        return None
 
-    else:
-        if a_static_shape[-1] == 1 or b_static_shape[-2] == 1:
-            if core_a_ndim == 1:
-                # vector_matrix product: (..., 1) * (..., 1, n) -> (..., n)
-                # the last dimension of a is already aligned for the elemwise multiplication
-                # after we squeeze the one to last dimension of b
-                new_a = a
-                new_b = b.squeeze(-2)
-            else:
-                # matrix matrix product: (..., m, 1) * (..., 1, n) -> (..., m, n)
-                # the dimensions of a and b are already aligned for the elemwise multiplication
-                new_a = a
-                new_b = b
-        else:
-            return None
-
-    new_a = copy_stack_trace(a, new_a)
-    new_b = copy_stack_trace(b, new_b)
-    new_out = copy_stack_trace(node.out, mul(new_a, new_b))
+    new_out = mul(a, b)
+    copy_stack_trace(node.out, new_out)
     return [new_out]
 
 
-def is_inverse_pair(node_op, prev_op, inv_pair):
-    """
-    Given two consecutive operations, check if they are the
-    provided pair of inverse functions.
+for pair in (
+    (deg2rad, rad2deg),
+    (cosh, arccosh),
+    (tanh, arctanh),
+    (sinh, arcsinh),
+    (_conj, _conj),
+    (neg, neg),
+    (reciprocal, reciprocal),
+):
+    # Create a simple PatternNodeRewriter for each pair of opposite ops
+    # instead of a general Op that is called to often for very few hits
+    for op, inv_op in (pair, reversed(pair)):
+        rewrite = PatternNodeRewriter(
+            (op, (inv_op, "x")),
+            "x",
+            allow_multiple_clients=True,
+            allow_cast=True,
+            name=f"useless_{op}_of_{inv_op}",
+        )
+        register_canonicalize(rewrite)
+        register_specialize(rewrite)
 
-    """
-    node_is_op0 = isinstance(node_op, inv_pair[0])
-    node_is_op1 = isinstance(node_op, inv_pair[1])
-    prev_is_op0 = isinstance(prev_op, inv_pair[0])
-    prev_is_op1 = isinstance(prev_op, inv_pair[1])
-
-    return (node_is_op0 and prev_is_op1) or (node_is_op1 and prev_is_op0)
-
-
-@register_canonicalize
-@register_specialize
-@node_rewriter([Elemwise])
-def local_func_inv(fgraph, node):
-    """
-    Check for two consecutive operations that are functional inverses
-    and remove them from the function graph.
-
-    """
-    inv_pairs = (
-        (ps.Deg2Rad, ps.Rad2Deg),
-        (ps.Cosh, ps.ArcCosh),
-        (ps.Tanh, ps.ArcTanh),
-        (ps.Sinh, ps.ArcSinh),
-        (ps.Conj, ps.Conj),
-        (ps.Neg, ps.Neg),
-        (ps.Reciprocal, ps.Reciprocal),
-    )
-    x = node.inputs[0]
-
-    if not isinstance(node.op, Elemwise):
-        return
-    if not (x.owner and isinstance(x.owner.op, Elemwise)):
-        return
-
-    prev_op = x.owner.op.scalar_op
-    node_op = node.op.scalar_op
-
-    for inv_pair in inv_pairs:
-        if is_inverse_pair(node_op, prev_op, inv_pair):
-            # We don't need to copy stack trace, because the rewrite
-            # is trivial and maintains the earlier stack trace
-            ottype = node.out.dtype
-            inp = x.owner.inputs[0]
-            # Functions may have casted integer input to float
-            if inp.dtype != ottype:
-                inp = cast(inp, ottype)
-            return [inp]
-
-    return
+        if op is inv_op:
+            break  # Same Op, no need to define two rewrites
 
 
 @register_canonicalize
@@ -432,7 +528,30 @@ def local_sqrt_sqr(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([exp, expm1])
+@node_rewriter([log])
+def local_log_sqrt(fgraph, node):
+    x = node.inputs[0]
+
+    if (
+        not x.owner
+        or not isinstance(x.owner.op, Elemwise)
+        or not isinstance(x.owner.op.scalar_op, ps.Sqrt)
+    ):
+        return
+
+    # Case for log(sqrt(x)) -> 0.5 * log(x)
+    x = x.owner.inputs[0]
+    old_out = node.outputs[0]
+    new_out = mul(as_tensor_variable(0.5, dtype=x.dtype), log(x))
+    if new_out.dtype != old_out.dtype:
+        new_out = cast(new_out, old_out.dtype)
+
+    copy_stack_trace(node.out, new_out)
+    return [new_out]
+
+
+@register_specialize
+@node_rewriter([exp, expm1, log1pexp, log1mexp])
 def local_exp_log_nan_switch(fgraph, node):
     # Rewrites of the kind exp(log...(x)) that require a `nan` switch
     x = node.inputs[0]
@@ -483,6 +602,20 @@ def local_exp_log_nan_switch(fgraph, node):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(le(x, 0), neg(exp(x)), np.asarray(np.nan, old_out.dtype))
+        return [new_out]
+
+    # Case for log1pexp(log(x)) -> log1p(x)   (log1pexp aka softplus)
+    if isinstance(prev_op, ps.Log) and isinstance(node_op, ps_math.Softplus):
+        x = x.owner.inputs[0]
+        old_out = node.outputs[0]
+        new_out = switch(ge(x, 0), log1p(x), np.asarray(np.nan, old_out.dtype))
+        return [new_out]
+
+    # Case for log1mexp(log(x)) -> log1p(-x)
+    if isinstance(prev_op, ps.Log) and isinstance(node_op, ps_math.Log1mexp):
+        x = x.owner.inputs[0]
+        old_out = node.outputs[0]
+        new_out = switch(ge(x, 0), log1p(-x), np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
 
@@ -1180,9 +1313,9 @@ class AlgebraicCanonizer(NodeRewriter):
 
         return ct + num, denum
 
-    def transform(self, fgraph, node):
+    def transform(self, fgraph, node, enforce_tracks=True):
         op = node.op
-        if op not in [self.main, self.inverse, self.reciprocal]:
+        if enforce_tracks and (op not in {self.main, self.inverse, self.reciprocal}):
             return False
 
         assert len(node.outputs) == 1
@@ -2385,7 +2518,7 @@ def local_log1p(fgraph, node):
             log_arg.owner.inputs, only_process_constants=True
         )
         # scalar_inputs are potentially dimshuffled and fill'd scalars
-        if scalars and np.allclose(np.sum(scalars), 1):
+        if scalars and isclose(np.sum(scalars), 1):
             if nonconsts:
                 ninp = variadic_add(*nonconsts)
                 if ninp.dtype != log_arg.type.dtype:
@@ -2526,7 +2659,6 @@ add_canonizer = in2out(
     ),
     name="add_canonizer_group",
 )
-
 
 register_canonicalize(local_add_canonizer, "shape_unsafe", name="local_add_canonizer")
 
@@ -2990,11 +3122,19 @@ def local_grad_log_erfc_neg(fgraph, node):
     return [ret]
 
 
-def _skip_mul_1(r):
-    if r.owner and r.owner.op == mul:
-        not_is_1 = [i for i in r.owner.inputs if not _is_1(i)]
-        if len(not_is_1) == 1:
-            return not_is_1[0]
+def isclose(x, ref, rtol=0, atol=0, num_ulps=10):
+    """
+
+    Returns
+    -------
+    bool
+        True iff x is a constant close to ref (by default 10 ULPs).
+
+    """
+    x = np.asarray(x)
+    if np.issubdtype(x.dtype, np.floating):
+        atol = atol + num_ulps * np.abs(np.spacing(x.dtype.type(ref)))
+    return np.allclose(x, ref, rtol=rtol, atol=atol)
 
 
 def _is_1(expr):
@@ -3008,7 +3148,7 @@ def _is_1(expr):
     """
     try:
         v = get_underlying_scalar_constant_value(expr)
-        return np.isclose(v, 1)
+        return isclose(v, 1)
     except NotScalarConstantError:
         return False
 
@@ -3018,7 +3158,6 @@ logsigm_to_softplus = PatternNodeRewriter(
     (neg, (softplus, (neg, "x"))),
     allow_multiple_clients=True,
     values_eq_approx=values_eq_approx_remove_inf,
-    skip_identities_fn=_skip_mul_1,
     tracks=[sigmoid],
     get_nodes=get_clients_at_depth1,
 )
@@ -3027,7 +3166,6 @@ log1msigm_to_softplus = PatternNodeRewriter(
     (neg, (softplus, "x")),
     allow_multiple_clients=True,
     values_eq_approx=values_eq_approx_remove_inf,
-    skip_identities_fn=_skip_mul_1,
     tracks=[sigmoid],
     get_nodes=get_clients_at_depth2,
 )
@@ -3069,7 +3207,7 @@ def is_1pexp(t, only_process_constants=True):
                     scal_sum = scalars[0]
                     for s in scalars[1:]:
                         scal_sum = scal_sum + s
-                    if np.allclose(scal_sum, 1):
+                    if isclose(scal_sum, 1):
                         return False, maybe_exp.owner.inputs[0]
     return None
 
@@ -3169,7 +3307,7 @@ def is_neg(var):
         for idx, mul_input in enumerate(var_node.inputs):
             try:
                 constant = get_underlying_scalar_constant_value(mul_input)
-                is_minus_1 = np.isclose(constant, -1)
+                is_minus_1 = isclose(constant, -1)
             except NotScalarConstantError:
                 is_minus_1 = False
             if is_minus_1:
@@ -3577,7 +3715,7 @@ def local_reciprocal_1_plus_exp(fgraph, node):
         # scalar_inputs are potentially dimshuffled and fill'd scalars
         if len(nonconsts) == 1:
             if nonconsts[0].owner and nonconsts[0].owner.op == exp:
-                if scalars_ and np.allclose(np.sum(scalars_), 1):
+                if scalars_ and isclose(np.sum(scalars_), 1):
                     out = [
                         alloc_like(
                             sigmoid(neg(nonconsts[0].owner.inputs[0])),
@@ -3650,7 +3788,6 @@ logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
 )
 register_stabilize(logdiffexp_to_log1mexpdiff, name="logdiffexp_to_log1mexpdiff")
 
-
 # log(sigmoid(x) / (1 - sigmoid(x))) -> x
 # i.e logit(sigmoid(x)) -> x
 local_logit_sigmoid = PatternNodeRewriter(
@@ -3663,7 +3800,6 @@ local_logit_sigmoid = PatternNodeRewriter(
 )
 register_canonicalize(local_logit_sigmoid)
 register_specialize(local_logit_sigmoid)
-
 
 # sigmoid(log(x / (1-x)) -> x
 # i.e., sigmoid(logit(x)) -> x
@@ -3704,7 +3840,6 @@ local_polygamma_to_tri_gamma = PatternNodeRewriter(
 )
 
 register_specialize(local_polygamma_to_tri_gamma)
-
 
 local_log_kv = PatternNodeRewriter(
     # Rewrite log(kv(v, x)) = log(kve(v, x) * exp(-x)) -> log(kve(v, x)) - x

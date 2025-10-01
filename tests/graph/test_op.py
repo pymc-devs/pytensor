@@ -275,3 +275,8 @@ def test_call_name(multi_output):
 
         res_nameless = single_op(x)
         assert res_nameless.name is None
+
+
+@pytest.mark.xfail(reason="Not implemented")
+def test_io_connection_pattern():
+    raise AssertionError()

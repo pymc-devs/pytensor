@@ -10,6 +10,7 @@ import pytensor.tensor as pt
 from pytensor import In, config
 from pytensor.tensor.slinalg import (
     LU,
+    QR,
     Cholesky,
     CholeskySolve,
     LUFactor,
@@ -720,3 +721,70 @@ def test_lu_solve(b_func, b_shape: tuple[int, ...], trans: bool, overwrite_b: bo
 
     # Can never destroy non-contiguous inputs
     np.testing.assert_allclose(b_val_not_contig, b_val)
+
+
+@pytest.mark.parametrize(
+    "mode, pivoting",
+    [("economic", False), ("full", True), ("r", False), ("raw", True)],
+    ids=["economic", "full_pivot", "r", "raw_pivot"],
+)
+@pytest.mark.parametrize(
+    "overwrite_a", [True, False], ids=["overwrite_a", "no_overwrite"]
+)
+def test_qr(mode, pivoting, overwrite_a):
+    shape = (5, 5)
+    rng = np.random.default_rng()
+    A = pt.tensor(
+        "A",
+        shape=shape,
+        dtype=config.floatX,
+    )
+    A_val = rng.normal(size=shape).astype(config.floatX)
+
+    qr_outputs = pt.linalg.qr(A, mode=mode, pivoting=pivoting)
+
+    fn, res = compare_numba_and_py(
+        [In(A, mutable=overwrite_a)],
+        qr_outputs,
+        [A_val],
+        numba_mode=numba_inplace_mode,
+        inplace=True,
+    )
+
+    op = fn.maker.fgraph.outputs[0].owner.op
+    assert isinstance(op, QR)
+
+    destroy_map = op.destroy_map
+
+    if overwrite_a:
+        assert destroy_map == {0: [0]}
+    else:
+        assert destroy_map == {}
+
+    # Test F-contiguous input
+    val_f_contig = np.copy(A_val, order="F")
+    res_f_contig = fn(val_f_contig)
+
+    for x, x_f_contig in zip(res, res_f_contig, strict=True):
+        np.testing.assert_allclose(x, x_f_contig)
+
+    # Should always be destroyable
+    assert (A_val == val_f_contig).all() == (not overwrite_a)
+
+    # Test C-contiguous input
+    val_c_contig = np.copy(A_val, order="C")
+    res_c_contig = fn(val_c_contig)
+    for x, x_c_contig in zip(res, res_c_contig, strict=True):
+        np.testing.assert_allclose(x, x_c_contig)
+
+    # Cannot destroy C-contiguous input
+    np.testing.assert_allclose(val_c_contig, A_val)
+
+    # Test non-contiguous input
+    val_not_contig = np.repeat(A_val, 2, axis=0)[::2]
+    res_not_contig = fn(val_not_contig)
+    for x, x_not_contig in zip(res, res_not_contig, strict=True):
+        np.testing.assert_allclose(x, x_not_contig)
+
+    # Cannot destroy non-contiguous input
+    np.testing.assert_allclose(val_not_contig, A_val)

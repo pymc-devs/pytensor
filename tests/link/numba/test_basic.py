@@ -6,9 +6,9 @@ from unittest import mock
 
 import numpy as np
 import pytest
+import scipy
 
 from pytensor.compile import SymbolicInput
-from tests.tensor.test_math_scipy import scipy
 
 
 numba = pytest.importorskip("numba")
@@ -631,7 +631,7 @@ def test_Dot(x, y):
     x, x_test_value = x
     y, y_test_value = y
 
-    g = ptm.Dot()(x, y)
+    g = ptm.dot(x, y)
 
     compare_numba_and_py(
         [x, y],

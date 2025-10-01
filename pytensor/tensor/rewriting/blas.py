@@ -59,6 +59,7 @@ import time
 
 import numpy as np
 
+from pytensor.graph.traversal import toposort
 from pytensor.tensor.rewriting.basic import register_specialize
 
 
@@ -76,7 +77,7 @@ from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
     GraphRewriter,
     copy_stack_trace,
-    in2out,
+    dfs_rewriter,
     node_rewriter,
 )
 from pytensor.graph.rewriting.db import SequenceDB
@@ -98,7 +99,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import (
     Dot,
-    _matrix_matrix_matmul,
+    _matmul,
     add,
     mul,
     neg,
@@ -107,7 +108,6 @@ from pytensor.tensor.math import (
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.type import (
-    DenseTensorType,
     TensorType,
     integer_dtypes,
     values_eq_approx_remove_inf_nan,
@@ -460,6 +460,9 @@ class GemmOptimizer(GraphRewriter):
             callbacks_before = fgraph.execute_callbacks_times.copy()
             callback_before = fgraph.execute_callbacks_time
 
+        nodelist = list(toposort(fgraph.outputs))
+        nodelist.reverse()
+
         def on_import(new_node):
             if new_node is not node:
                 nodelist.append(new_node)
@@ -471,10 +474,8 @@ class GemmOptimizer(GraphRewriter):
         while did_something:
             nb_iter += 1
             t0 = time.perf_counter()
-            nodelist = pytensor.graph.basic.io_toposort(fgraph.inputs, fgraph.outputs)
             time_toposort += time.perf_counter() - t0
             did_something = False
-            nodelist.reverse()
             for node in nodelist:
                 if not (
                     isinstance(node.op, Elemwise)
@@ -580,12 +581,6 @@ class GemmOptimizer(GraphRewriter):
 def local_dot_to_dot22(fgraph, node):
     # This works for tensor.outer too because basic.outer is a macro that
     # produces a dot(dimshuffle,dimshuffle) of form 4 below
-    if not isinstance(node.op, Dot):
-        return
-
-    if any(not isinstance(i.type, DenseTensorType) for i in node.inputs):
-        return False
-
     x, y = node.inputs
     if y.type.dtype != x.type.dtype:
         # TODO: upcast one so the types match
@@ -593,16 +588,7 @@ def local_dot_to_dot22(fgraph, node):
         return
 
     if y.type.dtype in ("float16", "float32", "float64", "complex64", "complex128"):
-        if x.ndim == 2 and y.ndim == 2:
-            new_out = [_dot22(*node.inputs)]
-        elif x.ndim == 2 and y.ndim == 1:
-            new_out = [_dot22(x, y.dimshuffle(0, "x")).dimshuffle(0)]
-        elif x.ndim == 1 and y.ndim == 2:
-            new_out = [_dot22(x.dimshuffle("x", 0), y).dimshuffle(1)]
-        elif x.ndim == 1 and y.ndim == 1:
-            new_out = [_dot22(x.dimshuffle("x", 0), y.dimshuffle(0, "x")).dimshuffle()]
-        else:
-            return
+        new_out = [_dot22(*node.inputs)]
         copy_stack_trace(node.outputs, new_out)
         return new_out
 
@@ -636,91 +622,87 @@ def local_inplace_ger(fgraph, node):
 @node_rewriter([gemm_no_inplace])
 def local_gemm_to_gemv(fgraph, node):
     """GEMM acting on row or column matrices -> GEMV."""
-    if node.op == gemm_no_inplace:
-        z, a, x, y, b = node.inputs
-        if z.broadcastable == x.broadcastable == (True, False):
-            r = gemv_no_inplace(z.dimshuffle(1), a, y.T, x.dimshuffle(1), b)
-            new_out = [r.dimshuffle("x", 0)]
-        elif z.broadcastable == y.broadcastable == (False, True):
-            r = gemv_no_inplace(z.dimshuffle(0), a, x, y.dimshuffle(0), b)
-            new_out = [r.dimshuffle(0, "x")]
-        else:
-            return
-        copy_stack_trace(node.outputs, new_out)
-        return new_out
+    z, a, x, y, b = node.inputs
+    if z.broadcastable == x.broadcastable == (True, False):
+        r = gemv_no_inplace(z.dimshuffle(1), a, y.T, x.dimshuffle(1), b)
+        new_out = [r.dimshuffle("x", 0)]
+    elif z.broadcastable == y.broadcastable == (False, True):
+        r = gemv_no_inplace(z.dimshuffle(0), a, x, y.dimshuffle(0), b)
+        new_out = [r.dimshuffle(0, "x")]
+    else:
+        return
+    copy_stack_trace(node.outputs, new_out)
+    return new_out
 
 
 @node_rewriter([gemm_no_inplace])
 def local_gemm_to_ger(fgraph, node):
     """GEMM computing an outer-product -> GER."""
-    if node.op == gemm_no_inplace:
-        z, a, x, y, b = node.inputs
-        if x.broadcastable[1] and y.broadcastable[0]:
-            # x and y are both vectors so this might qualifies for a GER
-            xv = x.dimshuffle(0)
-            yv = y.dimshuffle(1)
-            try:
-                bval = ptb.get_underlying_scalar_constant_value(b)
-            except NotScalarConstantError:
-                # b isn't a constant, GEMM is doing useful pre-scaling
-                return
+    z, a, x, y, b = node.inputs
+    if x.broadcastable[1] and y.broadcastable[0]:
+        # x and y are both vectors so this might qualifies for a GER
+        xv = x.dimshuffle(0)
+        yv = y.dimshuffle(1)
+        try:
+            bval = ptb.get_underlying_scalar_constant_value(b)
+        except NotScalarConstantError:
+            # b isn't a constant, GEMM is doing useful pre-scaling
+            return
 
-            if bval == 1:  # best case a natural GER
-                rval = ger(z, a, xv, yv)
-                new_out = [rval]
-            elif bval == 0:  # GER on zeros_like should be faster than GEMM
-                zeros = ptb.zeros([x.shape[0], y.shape[1]], x.dtype)
-                rval = ger(zeros, a, xv, yv)
-                new_out = [rval]
-            else:
-                # if bval is another constant, then z is being usefully
-                # pre-scaled and GER isn't really the right tool for the job.
-                return
-            copy_stack_trace(node.outputs, new_out)
-            return new_out
-
-
-# TODO: delete this optimization when we have the proper dot->gemm->ger pipeline
-#      working
-@node_rewriter([_dot22])
-def local_dot22_to_ger_or_gemv(fgraph, node):
-    """dot22 computing an outer-product -> GER."""
-    if node.op == _dot22:
-        x, y = node.inputs
-        xb = x.broadcastable
-        yb = y.broadcastable
-        one = ptb.as_tensor_variable(np.asarray(1, dtype=x.dtype))
-        zero = ptb.as_tensor_variable(np.asarray(0, dtype=x.dtype))
-        if xb[1] and yb[0]:
-            # x and y are both vectors so this might qualifies for a GER
-            xv = x.dimshuffle(0)
-            yv = y.dimshuffle(1)
-            zeros = ptb.zeros([x.shape[0], y.shape[1]], dtype=x.dtype)
-            rval = ger(zeros, one, xv, yv)
+        if bval == 1:  # best case a natural GER
+            rval = ger(z, a, xv, yv)
             new_out = [rval]
-        elif xb[0] and yb[1]:
-            # x and y are both vectors so this qualifies for a sdot / ddot
-            # PyTensor's CGemv will call sdot/ddot at runtime, the Scipy Gemv may not
-            xv = x.dimshuffle(1)
-            zeros = ptb.AllocEmpty(x.dtype)(1)
-            rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
-            new_out = [rval.dimshuffle("x", 0)]
-        elif xb[0] and not yb[0] and not yb[1]:
-            # x is vector, y is matrix so try gemv
-            xv = x.dimshuffle(1)
-            zeros = ptb.AllocEmpty(x.dtype)(y.shape[1])
-            rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
-            new_out = [rval.dimshuffle("x", 0)]
-        elif not xb[0] and not xb[1] and yb[1]:
-            # x is matrix, y is vector, try gemv
-            yv = y.dimshuffle(0)
-            zeros = ptb.AllocEmpty(x.dtype)(x.shape[0])
-            rval = gemv_no_inplace(zeros, one, x, yv, zero)
-            new_out = [rval.dimshuffle(0, "x")]
+        elif bval == 0:  # GER on zeros_like should be faster than GEMM
+            zeros = ptb.zeros([x.shape[0], y.shape[1]], x.dtype)
+            rval = ger(zeros, a, xv, yv)
+            new_out = [rval]
         else:
+            # if bval is another constant, then z is being usefully
+            # pre-scaled and GER isn't really the right tool for the job.
             return
         copy_stack_trace(node.outputs, new_out)
         return new_out
+
+
+# TODO: delete this optimization when we have the proper dot->gemm->ger pipeline working
+@node_rewriter([_dot22])
+def local_dot22_to_ger_or_gemv(fgraph, node):
+    """dot22 computing an outer-product -> GER."""
+    x, y = node.inputs
+    xb = x.broadcastable
+    yb = y.broadcastable
+    one = ptb.as_tensor_variable(np.asarray(1, dtype=x.dtype))
+    zero = ptb.as_tensor_variable(np.asarray(0, dtype=x.dtype))
+    if xb[1] and yb[0]:
+        # x and y are both vectors so this might qualifies for a GER
+        xv = x.dimshuffle(0)
+        yv = y.dimshuffle(1)
+        zeros = ptb.zeros([x.shape[0], y.shape[1]], dtype=x.dtype)
+        rval = ger(zeros, one, xv, yv)
+        new_out = [rval]
+    elif xb[0] and yb[1]:
+        # x and y are both vectors so this qualifies for a sdot / ddot
+        # PyTensor's CGemv will call sdot/ddot at runtime, the Scipy Gemv may not
+        xv = x.dimshuffle(1)
+        zeros = ptb.AllocEmpty(x.dtype)(1)
+        rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
+        new_out = [rval.dimshuffle("x", 0)]
+    elif xb[0] and not yb[0] and not yb[1]:
+        # x is vector, y is matrix so try gemv
+        xv = x.dimshuffle(1)
+        zeros = ptb.AllocEmpty(x.dtype)(y.shape[1])
+        rval = gemv_no_inplace(zeros, one, y.T, xv, zero)
+        new_out = [rval.dimshuffle("x", 0)]
+    elif not xb[0] and not xb[1] and yb[1]:
+        # x is matrix, y is vector, try gemv
+        yv = y.dimshuffle(0)
+        zeros = ptb.AllocEmpty(x.dtype)(x.shape[0])
+        rval = gemv_no_inplace(zeros, one, x, yv, zero)
+        new_out = [rval.dimshuffle(0, "x")]
+    else:
+        return
+    copy_stack_trace(node.outputs, new_out)
+    return new_out
 
 
 #################################
@@ -739,7 +721,7 @@ optdb.register("BlasOpt", blas_optdb, "fast_run", "fast_compile", position=1.7)
 # fast_compile is needed to have GpuDot22 created.
 blas_optdb.register(
     "local_dot_to_dot22",
-    in2out(local_dot_to_dot22),
+    dfs_rewriter(local_dot_to_dot22),
     "fast_run",
     "fast_compile",
     position=0,
@@ -758,11 +740,11 @@ blas_optdb.register(
         ignore_newtrees=False,
     ),
     "fast_run",
-    position=15,
+    position=11,
 )
 
 
-blas_opt_inplace = in2out(
+blas_opt_inplace = dfs_rewriter(
     local_inplace_gemm, local_inplace_gemv, local_inplace_ger, name="blas_opt_inplace"
 )
 optdb.register(
@@ -901,20 +883,24 @@ def local_dot22_to_dot22scalar(fgraph, node):
 # dot22scalar and gemm give more speed up then dot22scalar
 blas_optdb.register(
     "local_dot22_to_dot22scalar",
-    in2out(local_dot22_to_dot22scalar),
+    dfs_rewriter(local_dot22_to_dot22scalar),
     "fast_run",
-    position=11,
+    position=12,
 )
 
 
 @register_specialize
-@node_rewriter([_matrix_matrix_matmul])
+@node_rewriter([_matmul])
 def specialize_matmul_to_batched_dot(fgraph, node):
     """Rewrite Matmul (Blockwise matrix-matrix) without implicit broadcasted batched dimension as BatchedDot.
 
     TODO: Do the same for Blockwise BatchedDot
     """
     x, y = node.inputs
+
+    if x.type.ndim < 3:
+        # This doesn't actually have a batch dimension
+        return None
 
     # BatchedDot does not allow implicit broadcasting of the batch dimensions
     # We do not want to explicitly broadcast as it may result in huge arrays
@@ -926,6 +912,7 @@ def specialize_matmul_to_batched_dot(fgraph, node):
     if len(x_shape) > 3:
         # If we have more than one batch dim, ravel it
         x = x.reshape((-1, x_shape[-2], x_shape[-1]))
+    if len(y_shape) > 3:
         y = y.reshape((-1, y_shape[-2], y_shape[-1]))
 
     new_out = _batched_dot(x, y)

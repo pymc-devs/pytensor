@@ -9,8 +9,10 @@ from pytensor.link.basic import JITLinker
 class JAXLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using JAX."""
 
+    scalar_shape_inputs: tuple[int, ...]
+
     def __init__(self, *args, **kwargs):
-        self.scalar_shape_inputs: tuple[int] = ()  # type: ignore[annotation-unchecked]
+        self.scalar_shape_inputs = ()
         super().__init__(*args, **kwargs)
 
     def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):

@@ -78,7 +78,7 @@ tests = [
     "pytest-mock",
     "pytest-sphinx",
 ]
-rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot", "pydot2", "pydot-ng"]
+rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot"]
 jax = ["jax", "jaxlib"]
 numba = ["numba>=0.57", "llvmlite"]
 
@@ -124,7 +124,7 @@ xfail_strict = true
 
 [tool.ruff]
 line-length = 88
-exclude = ["doc/", "pytensor/_version.py"]
+exclude = ["pytensor/_version.py"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -178,7 +178,6 @@ warn_unused_ignores = true
 warn_return_any = true
 warn_unreachable = true
 files = ["pytensor", "tests"]
-plugins = ["numpy.typing.mypy_plugin"]
 
 [tool.cibuildwheel]
 build = "*"
