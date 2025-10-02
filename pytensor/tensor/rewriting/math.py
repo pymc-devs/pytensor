@@ -1068,15 +1068,11 @@ class AlgebraicCanonizer(NodeRewriter):
             else:
                 return [inp], []
 
-        num = []
-        denum = []
-
         # We get the (num, denum) pairs for each input
         # pairs = [self.get_num_denum(input2) if input2.type.dtype ==
         # input.type.dtype else ([input2], []) for input2 in
         # parent.inputs]
-        get_num_denum = self.get_num_denum
-        pairs = [get_num_denum(input2) for input2 in parent.inputs]
+        pairs = [self.get_num_denum(input2) for input2 in parent.inputs]
 
         if parent.op == self.main:
             # If we have main(x, y, ...), numx, denumx, numy, denumy, ...
@@ -1092,7 +1088,7 @@ class AlgebraicCanonizer(NodeRewriter):
             # concat(denumx, numy) note that inverse() is binary
             num = pairs[0][0] + pairs[1][1]
             denum = pairs[0][1] + pairs[1][0]
-        elif parent.op == self.reciprocal:
+        else:  # parent.op == self.reciprocal:
             # If we have reciprocal(x), numx, denumx
             # then num is denumx and denum is numx
             # note that reciprocal() is unary
@@ -2408,20 +2404,22 @@ def check_for_x_over_absX(numerators, denominators):
     """Convert x/abs(x) into sign(x)."""
     # TODO: this function should dig/search through dimshuffles
     # This won't catch a dimshuffled absolute value
-    for den in list(denominators):
-        if den.owner and den.owner.op == pt_abs and den.owner.inputs[0] in numerators:
-            if den.owner.inputs[0].type.dtype.startswith("complex"):
-                # TODO: Make an Op that projects a complex number to
-                #      have unit length but projects 0 to 0.  That
-                #      would be a weird Op, but consistent with the
-                #      special case below.  I heard there's some
-                #      convention in Matlab that is similar to
-                #      this... but not sure.
-                pass
-            else:
-                denominators.remove(den)
-                numerators.remove(den.owner.inputs[0])
-                numerators.append(sign(den.owner.inputs[0]))
+    if not numerators or not denominators:
+        return numerators, denominators
+
+    original_denominators = denominators
+    for den in original_denominators:
+        if (
+            (den_node := den.owner) is not None
+            and den_node.op == pt_abs
+            and (num_index := numerators.index(num := den_node.inputs[0])) >= 0
+            and not num.type.dtype.startswith("complex")
+        ):
+            if denominators is original_denominators:
+                denominators = denominators.copy()
+            denominators.remove(den)
+            numerators.pop(num_index)
+            numerators.append(sign(num))
     return numerators, denominators
 
 

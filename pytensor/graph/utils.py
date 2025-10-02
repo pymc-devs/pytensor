@@ -4,7 +4,7 @@ import traceback
 from abc import ABCMeta
 from collections.abc import Sequence
 from io import StringIO
-from typing import TYPE_CHECKING, Any, TypeVar, Union
+from typing import TYPE_CHECKING, TypeVar, Union
 
 
 if TYPE_CHECKING:
@@ -227,9 +227,10 @@ class MetaType(ABCMeta):
             if "__eq__" not in dct:
 
                 def __eq__(self, other):
-                    return type(self) is type(other) and tuple(
-                        getattr(self, a) for a in props
-                    ) == tuple(getattr(other, a) for a in props)
+                    return self is other or (
+                        type(self) is type(other)
+                        and all(getattr(self, a) == getattr(other, a) for a in props)
+                    )
 
                 dct["__eq__"] = __eq__
 
@@ -277,13 +278,6 @@ class Scratchpad:
         print(f"<pytensor.graph.utils.scratchpad instance at {id(self)}>")  # noqa: T201
         for k, v in self.__dict__.items():
             print(f"  {k}: {v}")  # noqa: T201
-
-    # These two methods have been added to help Mypy
-    def __getattribute__(self, name):
-        return super().__getattribute__(name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        self.__dict__[name] = value
 
 
 class ValidatingScratchpad(Scratchpad):

@@ -312,11 +312,11 @@ def apply_local_dimshuffle_lift(fgraph, var):
     """
     lift recursively
     """
-    if var.owner is None:
-        return var
-    new = local_dimshuffle_lift.transform(fgraph, var.owner)
-    if new:
-        return new[0]
+    if (node := var.owner) is not None and isinstance(node.op, DimShuffle):
+        # Sidestep indirection in local_dimshuffle_lift.apply
+        new = local_dimshuffle_lift.fn(fgraph, node)
+        if new:
+            return new[0]
     return var
 
 
@@ -1041,7 +1041,7 @@ def local_inline_composite_constants(fgraph, node):
     new_inner_outs = clone_replace(
         composite_op.fgraph.outputs, replace=inner_replacements
     )
-    new_composite_op = ps.Composite(new_inner_inputs, new_inner_outs)
+    new_composite_op = ps.Composite(new_inner_inputs, new_inner_outs, clone_graph=False)
     new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
 
     # Some of the inlined constants were broadcasting the output shape

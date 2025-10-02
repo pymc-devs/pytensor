@@ -35,7 +35,7 @@ from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
 from pytensor.raise_op import CheckAndRaise
 from pytensor.scalar import int32
-from pytensor.scalar.basic import ScalarConstant, ScalarType, ScalarVariable
+from pytensor.scalar.basic import ScalarConstant, ScalarType, ScalarVariable, convert
 from pytensor.tensor import (
     _as_tensor_variable,
     _get_vector_length,
@@ -219,7 +219,7 @@ def constant(x, name=None, ndim=None, dtype=None) -> TensorConstant:
         else:
             x = x.data
 
-    x_ = ps.convert(x, dtype=dtype)
+    x_ = convert(x, dtype=dtype)
 
     if ndim is not None:
         if x_.ndim < ndim:

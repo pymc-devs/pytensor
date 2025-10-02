@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
 import numpy.typing as npt
+from numpy import dtype as np_dtype
 
 import pytensor
 from pytensor import scalar as ps
@@ -36,7 +37,7 @@ int_dtypes = list(map(str, ps.int_types))
 uint_dtypes = list(map(str, ps.uint_types))
 
 _all_dtypes_str: dict[str, str] = {d: d for d in all_dtypes}
-_str_to_numpy_dtype: dict[str, np.dtype] = {}
+_str_to_numpy_dtype: dict[str, np_dtype] = {}
 
 # TODO: add more type correspondences for e.g. int32, int64, float32,
 # complex64, etc.
@@ -108,16 +109,18 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
             elif dtype not in _all_dtypes_str:
                 # Check if dtype is a valid numpy dtype
                 try:
-                    dtype = str(np.dtype(dtype))
+                    dtype = np_dtype(dtype).name
                 except TypeError as exc:
                     raise TypeError(
                         f"Unsupported dtype for TensorType: {dtype}"
                     ) from exc
                 else:
                     _all_dtypes_str[dtype] = dtype
+        elif isinstance(dtype, np_dtype):
+            dtype = dtype.name
         else:
             try:
-                dtype = str(np.dtype(dtype))
+                dtype = np.dtype(dtype).name
             except TypeError as exc:
                 raise TypeError(f"Unsupported dtype for TensorType: {dtype}") from exc
 
