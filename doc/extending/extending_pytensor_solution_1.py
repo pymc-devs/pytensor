@@ -167,9 +167,9 @@ class TestSumDiffOp(utt.InferShapeTester):
 
 import numpy as np
 
-# as_op exercice
+# wrap_py exercice
 import pytensor
-from pytensor.compile.ops import as_op
+from pytensor.compile.ops import wrap_py
 
 
 def infer_shape_numpy_dot(fgraph, node, input_shapes):
@@ -177,7 +177,7 @@ def infer_shape_numpy_dot(fgraph, node, input_shapes):
     return [ashp[:-1] + bshp[-1:]]
 
 
-@as_op(
+@wrap_py(
     itypes=[pt.fmatrix, pt.fmatrix],
     otypes=[pt.fmatrix],
     infer_shape=infer_shape_numpy_dot,
@@ -192,7 +192,7 @@ def infer_shape_numpy_add_sub(fgraph, node, input_shapes):
     return [ashp[0]]
 
 
-@as_op(
+@wrap_py(
     itypes=[pt.fmatrix, pt.fmatrix],
     otypes=[pt.fmatrix],
     infer_shape=infer_shape_numpy_add_sub,
@@ -201,7 +201,7 @@ def numpy_add(a, b):
     return np.add(a, b)
 
 
-@as_op(
+@wrap_py(
     itypes=[pt.fmatrix, pt.fmatrix],
     otypes=[pt.fmatrix],
     infer_shape=infer_shape_numpy_add_sub,

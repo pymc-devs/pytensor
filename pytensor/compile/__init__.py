@@ -56,6 +56,7 @@ from pytensor.compile.ops import (
     register_deep_copy_op_c_code,
     register_view_op_c_code,
     view_op,
+    wrap_py,
 )
 from pytensor.compile.profiling import ProfileStats
 from pytensor.compile.sharedvalue import SharedVariable, shared, shared_constructor
