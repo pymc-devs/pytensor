@@ -1000,7 +1000,11 @@ class FromFunctionNodeRewriter(NodeRewriter):
         return self._tracks
 
     def __str__(self):
-        return getattr(self, "__name__", repr(self))
+        try:
+            return self.__name__
+        except AttributeError:
+            self.__name__ = name = self.__repr__()
+            return name
 
     def __repr__(self):
         return f"FromFunctionNodeRewriter({self.fn!r}, {self._tracks!r}, {self.requirements!r})"
@@ -1215,11 +1219,13 @@ class SequentialNodeRewriter(NodeRewriter):
             self.tracker.add_tracker(o)
 
     def __str__(self):
-        return getattr(
-            self,
-            "__name__",
-            f"{type(self).__name__}({','.join(str(o) for o in self.rewrites)})",
-        )
+        try:
+            return self.__name__
+        except AttributeError:
+            self.__name__ = name = (
+                f"{type(self).__name__}({','.join(str(o) for o in self.rewrites)})"
+            )
+            return name
 
     def tracks(self):
         t = []

@@ -985,7 +985,7 @@ class TensorConstantSignature(tuple):
             # (note that if there are NaN values in d1, this will return
             # False, which is why we do not bother with testing `other.has_nan`
             # here).
-            return (self.sum == other.sum) and np.all(d0 == d1)
+            return (self.sum == other.sum) and (d0 == d1).all()
 
     def __ne__(self, other):
         return not self == other
@@ -1007,36 +1007,15 @@ class TensorConstantSignature(tuple):
             # Prevent warnings when there are `inf`s and `-inf`s present
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
-                self._sum = self.no_nan.sum()
+                self._sum = _sum = self.no_nan.sum()
 
-            # The following 2 lines are needed as in Python 3.3 with NumPy
-            # 1.7.1, numpy.ndarray and numpy.memmap aren't hashable.
-            if isinstance(self._sum, np.memmap):
-                self._sum = np.asarray(self._sum).item()
+            if not np.isfinite(_sum):
+                self._sum = _sum = np.nan_to_num(
+                    self[1], nan=0, posinf=0, neginf=0
+                ).sum()
+                assert not np.isnan(_sum)
 
-            if self.has_nan and self.no_nan.mask.all():
-                # In this case the sum is not properly computed by numpy.
-                self._sum = 0
-
-            if np.isinf(self._sum) or np.isnan(self._sum):
-                # NaN may happen when there are both -inf and +inf values.
-                if self.has_nan:
-                    # Filter both NaN and Inf values.
-                    mask = self.no_nan.mask + np.isinf(self[1])
-                else:
-                    # Filter only Inf values.
-                    mask = np.isinf(self[1])
-                if mask.all():
-                    self._sum = 0
-                else:
-                    self._sum = np.ma.masked_array(self[1], mask).sum()
-                # At this point there should be no more NaN.
-                assert not np.isnan(self._sum)
-
-            if isinstance(self._sum, np.ma.core.MaskedConstant):
-                self._sum = 0
-
-        return self._sum
+            return _sum
 
     @property
     def no_nan(self):
@@ -1044,8 +1023,8 @@ class TensorConstantSignature(tuple):
             return self._no_nan
         except AttributeError:
             nans = np.isnan(self[1])
-            self._no_nan = np.ma.masked_array(self[1], nans)
-            self.has_nan = np.any(nans)
+            self.has_nan = has_nans = nans.any()
+            self._no_nan = np.ma.masked_array(self[1], nans) if has_nans else self[1]
         return self._no_nan
 
 

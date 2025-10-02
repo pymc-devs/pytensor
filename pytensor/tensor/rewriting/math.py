@@ -1,9 +1,9 @@
 r"""Rewrites for the `Op`\s in :mod:`pytensor.tensor.math`."""
 
 import itertools
-import operator
 from collections import defaultdict
 from functools import partial, reduce
+from operator import itemgetter
 
 import numpy as np
 
@@ -1014,6 +1014,7 @@ class AlgebraicCanonizer(NodeRewriter):
         self.main = main
         self.inverse = inverse_fn
         self.reciprocal = reciprocal_fn
+        self.ops = (self.main, self.inverse, self.reciprocal)
         self.calculate = calculate
         self.use_reciprocal = use_reciprocal
 
@@ -1053,68 +1054,38 @@ class AlgebraicCanonizer(NodeRewriter):
         # internal data nodes all have the dtype of the 'input'
         # argument. The leaf-Variables of the graph covered by the
         # recursion may be of any Variable type.
-
-        if inp.owner is None or inp.owner.op not in [
-            self.main,
-            self.inverse,
-            self.reciprocal,
-        ]:
-            if inp.owner and isinstance(inp.owner.op, DimShuffle):
-                # If input is a DimShuffle of some input which does
-                # something like this:
-
-                # * change a vector of length N into a 1xN row matrix
-                # * change a scalar into a 1x1x1 tensor
-                # * in general, complete the shape of a tensor
-                #   with broadcastable 1s to the *left*
-                # Then we will simply discard the DimShuffle and return
-                # the num/denum of its input
-                dsn = inp.owner  # dimshuffle node
-                dsop = dsn.op  # dimshuffle op
-
-                # the first input of the dimshuffle i.e. the ndarray to redim
-                dsi0 = dsn.inputs[0]
-
-                # The compatible order is a DimShuffle "new_order" of the form:
-                # ('x', ..., 'x', 0, 1, 2, ..., dimshuffle_input.type.ndim)
-
-                # That kind of DimShuffle only adds broadcastable
-                # dimensions on the left, without discarding any
-                # existing broadcastable dimension and is inserted
-                # automatically by Elemwise when the inputs have
-                # different numbers of dimensions (hence why we can
-                # discard its information - we know we can retrieve it
-                # later on).
-                compatible_order = ("x",) * (inp.type.ndim - dsi0.type.ndim) + tuple(
-                    range(dsi0.type.ndim)
-                )
-                if dsop.new_order == compatible_order:
-                    # If the "new_order" is the one we recognize,
-                    # we return the num_denum of the dimshuffled input.
-                    return self.get_num_denum(inp.owner.inputs[0])
-                else:
-                    # This is when the input isn't produced by main,
-                    # inverse or reciprocal.
-                    return [inp], []
+        parent = inp.owner
+        if parent is None or parent.op not in self.ops:
+            if (
+                parent is not None
+                and isinstance(ds_op := parent.op, DimShuffle)
+                and ds_op.is_left_expand_dims
+            ):
+                # If input is a left_expand_dims DimShuffle,
+                # the kind of which is inserted automatically by Elemwise
+                # we return the num_denum of the dimshuffled input.
+                return self.get_num_denum(parent.inputs[0])
             else:
                 return [inp], []
+
         num = []
         denum = []
-        parent = inp.owner
 
         # We get the (num, denum) pairs for each input
         # pairs = [self.get_num_denum(input2) if input2.type.dtype ==
         # input.type.dtype else ([input2], []) for input2 in
         # parent.inputs]
-        pairs = [self.get_num_denum(input2) for input2 in parent.inputs]
+        get_num_denum = self.get_num_denum
+        pairs = [get_num_denum(input2) for input2 in parent.inputs]
 
         if parent.op == self.main:
             # If we have main(x, y, ...), numx, denumx, numy, denumy, ...
             # then num is concat(numx, numy, num...) and denum is
             # concat(denumx, denumy, denum...) note that main() can have any
             # number of arguments >= 0 concat is list concatenation
-            num = reduce(list.__iadd__, map(operator.itemgetter(0), pairs))
-            denum = reduce(list.__iadd__, map(operator.itemgetter(1), pairs))
+            list_concat = list.__iadd__
+            num = reduce(list_concat, map(itemgetter(0), pairs))
+            denum = reduce(list_concat, map(itemgetter(1), pairs))
         elif parent.op == self.inverse:
             # If we have inverse(x, y), numx, denumx, numy and denumy
             # then num is concat(numx, denumy) and denum is
@@ -1125,8 +1096,7 @@ class AlgebraicCanonizer(NodeRewriter):
             # If we have reciprocal(x), numx, denumx
             # then num is denumx and denum is numx
             # note that reciprocal() is unary
-            num = pairs[0][1]
-            denum = pairs[0][0]
+            denum, num = pairs[0]
         return num, denum
 
     def merge_num_denum(self, num, denum):
@@ -1207,6 +1177,8 @@ class AlgebraicCanonizer(NodeRewriter):
         """
         ln = len(num)
         ld = len(denum)
+        if ln == 0 or ld == 0:
+            return num, denum
         if ld > 2 and ln > 2:
             # Faster version for "big" inputs.
             while True:
@@ -1252,15 +1224,21 @@ class AlgebraicCanonizer(NodeRewriter):
         numct, denumct = [], []
 
         for v in orig_num:
-            if isinstance(v, TensorConstant) and v.unique_value is not None:
+            if (
+                isinstance(v, TensorConstant)
+                and (unique_val := v.unique_value) is not None
+            ):
                 # We found a constant in the numerator!
                 # We add it to numct
-                numct.append(v.unique_value)
+                numct.append(unique_val)
             else:
                 num.append(v)
         for v in orig_denum:
-            if isinstance(v, TensorConstant) and v.unique_value is not None:
-                denumct.append(v.unique_value)
+            if (
+                isinstance(v, TensorConstant)
+                and (unique_val := v.unique_value) is not None
+            ):
+                denumct.append(unique_val)
             else:
                 denum.append(v)
 
@@ -1315,13 +1293,16 @@ class AlgebraicCanonizer(NodeRewriter):
 
     def transform(self, fgraph, node, enforce_tracks=True):
         op = node.op
-        if enforce_tracks and (op not in {self.main, self.inverse, self.reciprocal}):
+        if enforce_tracks and (op not in self.ops):
             return False
 
-        assert len(node.outputs) == 1
-        out = node.outputs[0]
+        [out] = node.outputs
+        clients = fgraph.clients
 
-        out_clients = fgraph.clients.get(out)
+        try:
+            out_clients = clients[out]
+        except Exception:
+            return False
 
         if not out_clients:
             return False
@@ -1330,22 +1311,18 @@ class AlgebraicCanonizer(NodeRewriter):
         # this canonized graph...  if so, we do nothing and wait for
         # them to be transformed.
         for c, c_idx in out_clients:
-            while (
-                isinstance(c.op, DimShuffle) and len(fgraph.clients[c.outputs[0]]) <= 1
-            ):
-                c = fgraph.clients[c.outputs[0]][0][0]
-            if c.op in [self.main, self.inverse, self.reciprocal]:
+            while isinstance(c.op, DimShuffle) and len(clients[c.outputs[0]]) <= 1:
+                [(c, _)] = clients[c.outputs[0]]
+            if c.op in self.ops:
                 return False
 
         # Here we make the canonical version of the graph around this node
         # See the documentation of get_num_denum and simplify
-        orig_num, orig_denum = self.get_num_denum(node.outputs[0])
+        orig_num, orig_denum = self.get_num_denum(out)
         num, denum = self.simplify(list(orig_num), list(orig_denum), out.type)
 
         def same(x, y):
-            return len(x) == len(y) and all(
-                np.all(xe == ye) for xe, ye in zip(x, y, strict=True)
-            )
+            return len(x) == len(y) and all(np.all(xe == ye) for xe, ye in zip(x, y))
 
         if (
             same(orig_num, num)
@@ -2645,7 +2622,7 @@ def add_calculate(num, denum, aslist=False, out_type=None):
     else:
         v = reduce(np.add, num, zero) - reduce(np.add, denum, zero)
     if aslist:
-        if np.all(v == 0):
+        if (v == 0).all():
             return []
         else:
             return [v]
