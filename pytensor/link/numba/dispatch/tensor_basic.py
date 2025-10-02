@@ -110,10 +110,7 @@ def alloc(val, {", ".join(shape_var_names)}):
         {**globals(), **global_env},
     )
 
-    return (
-        pytensor.link.numba.compile.numba_njit(alloc_fn),
-        hash_from_code(alloc_def_src),
-    )
+    return pytensor.link.numba.compile.numba_njit(alloc_fn)
 
 
 @numba_funcify.register(ARange)

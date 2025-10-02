@@ -16,7 +16,6 @@ from pytensor.tensor.subtensor import (
     Subtensor,
 )
 from pytensor.tensor.type_other import NoneTypeT, SliceType
-from pytensor.utils import hash_from_code
 
 
 @numba_funcify.register(Subtensor)
@@ -102,7 +101,7 @@ def {function_name}({", ".join(input_names)}):
         function_name=function_name,
         global_env=globals() | {"np": np},
     )
-    return numba_njit(func, boundscheck=True), hash_from_code(subtensor_def_src)
+    return numba_njit(func, boundscheck=True)
 
 
 @numba_funcify.register(AdvancedSubtensor)

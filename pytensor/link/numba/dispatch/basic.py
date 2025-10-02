@@ -270,9 +270,15 @@ def numba_funcify_FunctionGraph(
     jit_nodes: bool = False,
     **kwargs,
 ):
+    def numba_funcify_wrapper(*args, **kwargs):
+        result = numba_funcify(*args, **kwargs)
+        if isinstance(result, tuple):
+            return result[0]
+        return result
+
     return fgraph_to_python(
         fgraph,
-        op_conversion_fn=numba_funcify_njit if jit_nodes else numba_funcify,
+        op_conversion_fn=numba_funcify_njit if jit_nodes else numba_funcify_wrapper,
         type_conversion_fn=numba_typify,
         fgraph_name=fgraph_name,
         **kwargs,
