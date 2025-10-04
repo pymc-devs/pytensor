@@ -52,6 +52,7 @@ from pytensor.tensor.slinalg import (
     Solve,
     SolveBase,
     SolveTriangular,
+    TriangularInv,
     _bilinear_solve_discrete_lyapunov,
     block_diag,
     cholesky,
@@ -1015,3 +1016,45 @@ def scalar_solve_to_division(fgraph, node):
     copy_stack_trace(old_out, new_out)
 
     return [new_out]
+
+
+def _find_triangular_op(var):
+    """
+    Inspects a variable to see if it's triangular.
+
+    Returns a tuple (is_lower, is_upper) if triangular, otherwise None.
+    """
+
+    is_lower = getattr(var.tag, "lower_triangular", False)
+    is_upper = getattr(var.tag, "upper_triangular", False)
+
+    if is_lower or is_upper:
+        return (is_lower, is_upper)
+
+    if var.owner and isinstance(var.owner.op, Blockwise):
+        core_op = var.owner.op.core_op
+        if isinstance(core_op, Cholesky):
+            return (core_op.lower, not core_op.lower)
+
+    return None
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
+def rewrite_inv_to_triangular_solve(fgraph, node):
+    """
+    This rewrite takes advantage of the fact that the inverse of a triangular
+    matrix can be computed more efficiently than the inverse of a general
+    matrix by using a triangular solve instead of a general matrix inverse.
+    """
+
+    A = node.inputs[0]
+    triangular_info = _find_triangular_op(A)
+    if triangular_info is None:
+        return None
+
+    is_lower, is_upper = triangular_info
+    if is_lower or is_upper:
+        new_op = TriangularInv(lower=is_lower)
+        return [new_op(A)]
