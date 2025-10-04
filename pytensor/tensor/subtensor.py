@@ -3369,10 +3369,10 @@ def flip(
     if axis is None:
         index = ((slice(None, None, -1)),) * arr.ndim
     else:
-        axis = normalize_axis_tuple(axis, arr.ndim)
+        normalized_axis = normalize_axis_tuple(axis, arr.ndim)
         index = tuple(
             [
-                slice(None, None, -1) if i in axis else slice(None, None, None)
+                slice(None, None, -1) if i in normalized_axis else slice(None, None, None)
                 for i in range(arr.ndim)
             ]
         )
