@@ -3372,7 +3372,9 @@ def flip(
         normalized_axis = normalize_axis_tuple(axis, arr.ndim)
         index = tuple(
             [
-                slice(None, None, -1) if i in normalized_axis else slice(None, None, None)
+                slice(None, None, -1)
+                if i in normalized_axis
+                else slice(None, None, None)
                 for i in range(arr.ndim)
             ]
         )
@@ -3381,9 +3383,9 @@ def flip(
 
 
 __all__ = [
-    "take",
     "flip",
-    "slice_at_axis",
     "inc_subtensor",
     "set_subtensor",
+    "slice_at_axis",
+    "take",
 ]
