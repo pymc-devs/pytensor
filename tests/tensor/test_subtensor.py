@@ -3147,17 +3147,6 @@ def test_flip(size: tuple[int]):
         f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
         np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
 
-
-@pytest.mark.parametrize(
-    "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
-)
-def test_flip_negative_axis(size: tuple[int]):
-    """Test that flip handles negative axis values correctly."""
-    ATOL = RTOL = 1e-8 if config.floatX == "float64" else 1e-4
-
-    x = np.random.normal(size=size).astype(config.floatX)
-    x_pt = pytensor.tensor.tensor(shape=size, name="x")
-
     # Test single negative axis
     for axis in range(-x.ndim, 0):
         expected = np.flip(x, axis=axis)
