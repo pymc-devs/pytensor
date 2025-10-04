@@ -7,6 +7,7 @@ pytest.importorskip("xarray")
 import inspect
 
 import numpy as np
+from scipy.special import logsumexp as scipy_logsumexp
 from xarray import DataArray
 
 import pytensor.scalar as ps
@@ -14,7 +15,7 @@ import pytensor.xtensor.math as pxm
 from pytensor import function
 from pytensor.scalar import ScalarOp
 from pytensor.xtensor.basic import rename
-from pytensor.xtensor.math import add, exp
+from pytensor.xtensor.math import add, exp, logsumexp
 from pytensor.xtensor.type import xtensor
 from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
 
@@ -150,6 +151,28 @@ def test_cast():
     yc64 = x.astype("complex64")
     with pytest.raises(TypeError, match="Casting from complex to real is ambiguous"):
         yc64.astype("float64")
+
+
+@pytest.mark.parametrize(
+    ["shape", "dims", "axis"],
+    [
+        ((3, 4), ("a", "b"), None),
+        ((3, 4), "a", 0),
+        ((3, 4), "b", 1),
+    ],
+)
+def test_logsumexp(shape, dims, axis):
+    scipy_inp = np.zeros(shape)
+    scipy_out = scipy_logsumexp(scipy_inp, axis=axis)
+
+    pytensor_inp = DataArray(scipy_inp, dims=("a", "b"))
+    f = function([], logsumexp(pytensor_inp, dim=dims))
+    pytensor_out = f()
+
+    np.testing.assert_array_almost_equal(
+        pytensor_out,
+        scipy_out,
+    )
 
 
 def test_dot():

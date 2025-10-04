@@ -512,6 +512,11 @@ def softmax(x, dim=None):
     return exp_x / exp_x.sum(dim=dim)
 
 
+def logsumexp(x, dim=None):
+    """Compute the logsumexp of an XTensorVariable along a specified dimension."""
+    return log(exp(x).sum(dim=dim))
+
+
 class Dot(XOp):
     """Matrix multiplication between two XTensorVariables.
 
