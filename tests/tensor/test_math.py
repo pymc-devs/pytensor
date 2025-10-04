@@ -24,7 +24,6 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
 from pytensor.graph.traversal import ancestors, applys_between
 from pytensor.link.c.basic import DualLinker
-from pytensor.npy_2_compat import using_numpy_2
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
 from pytensor.tensor import blas, blas_c
@@ -399,10 +398,7 @@ TestAbsBroadcast = makeBroadcastTester(
 
 # in numpy >= 2.0, negating a uint raises an error
 neg_good = _good_broadcast_unary_normal.copy()
-if using_numpy_2:
-    neg_bad = {"uint8": neg_good.pop("uint8"), "uint16": neg_good.pop("uint16")}
-else:
-    neg_bad = None
+neg_bad = {"uint8": neg_good.pop("uint8"), "uint16": neg_good.pop("uint16")}
 
 TestNegBroadcast = makeBroadcastTester(
     op=neg,

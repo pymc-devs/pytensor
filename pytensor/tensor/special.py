@@ -6,7 +6,6 @@ import scipy
 from pytensor.graph.basic import Apply
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
-from pytensor.npy_2_compat import npy_2_compat_header
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.math import gamma, gammaln, log, neg, sum
@@ -61,11 +60,7 @@ class SoftmaxGrad(COp):
         return [shape[1]]
 
     def c_code_cache_version(self):
-        return (5,)
-
-    def c_support_code_apply(self, node: Apply, name: str) -> str:
-        # return super().c_support_code_apply(node, name)
-        return npy_2_compat_header()
+        return (6,)
 
     def c_code(self, node, name, inp, out, sub):
         dy, sm = inp
@@ -296,10 +291,6 @@ class Softmax(COp):
     def c_headers(self, **kwargs):
         return ["<cmath>"]
 
-    def c_support_code_apply(self, node: Apply, name: str) -> str:
-        """Needed to define NPY_RAVEL_AXIS"""
-        return npy_2_compat_header()
-
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
         (sm,) = out
@@ -495,7 +486,7 @@ class Softmax(COp):
 
     @staticmethod
     def c_code_cache_version():
-        return (5,)
+        return (6,)
 
 
 def softmax(c, axis=None):
@@ -554,10 +545,6 @@ class LogSoftmax(COp):
 
     def c_headers(self, **kwargs):
         return ["<cmath>"]
-
-    def c_support_code_apply(self, node: Apply, name: str) -> str:
-        """Needed to define NPY_RAVEL_AXIS"""
-        return npy_2_compat_header()
 
     def c_code(self, node, name, inp, out, sub):
         (x,) = inp
@@ -750,7 +737,7 @@ class LogSoftmax(COp):
 
     @staticmethod
     def c_code_cache_version():
-        return (2,)
+        return (3,)
 
 
 def log_softmax(c, axis=None):

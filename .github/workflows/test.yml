@@ -54,7 +54,7 @@ jobs:
     if: ${{ needs.changes.outputs.changes == 'true' }}
     strategy:
       matrix:
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -65,7 +65,7 @@ jobs:
       - uses: pre-commit/action@v3.0.1
 
   test:
-    name: "${{ matrix.os }} test py${{ matrix.python-version }} numpy${{ matrix.numpy-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
+    name: "${{ matrix.os }} test py${{ matrix.python-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
     needs:
       - changes
       - style
@@ -75,8 +75,7 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest"]
-        python-version: ["3.10", "3.13"]
-        numpy-version: ["~=1.26.0", ">=2.0"]
+        python-version: ["3.11", "3.13"]
         fast-compile: [0, 1]
         float32: [0, 1]
         install-numba: [0]
@@ -92,23 +91,16 @@ jobs:
           - "tests/tensor/test_basic.py tests/tensor/test_inplace.py tests/tensor/conv"
           - "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
         exclude:
-          - python-version: "3.10"
+          - python-version: "3.11"
             fast-compile: 1
-          - python-version: "3.10"
+          - python-version: "3.11"
             float32: 1
           - fast-compile: 1
             float32: 1
-          - numpy-version: "~=1.26.0"
-            fast-compile: 1
-          - numpy-version: "~=1.26.0"
-            float32: 1
-          - numpy-version: "~=1.26.0"
-            python-version: "3.13"
         include:
           - os: "ubuntu-latest"
             part: "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link --ignore=pytensor/ipython.py"
             python-version: "3.12"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             install-numba: 0
@@ -117,56 +109,48 @@ jobs:
             install-xarray: 0
           - install-numba: 1
             os: "ubuntu-latest"
-            python-version: "3.10"
-            numpy-version: "~=2.1.0"
+            python-version: "3.11"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"
           - install-numba: 1
             os: "ubuntu-latest"
             python-version: "3.13"
-            numpy-version: "~=2.1.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"
           - install-numba: 1
             os: "ubuntu-latest"
             python-version: "3.13"
-            numpy-version: "~=2.1.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/numba/test_slinalg.py"
           - install-jax: 1
             os: "ubuntu-latest"
-            python-version: "3.10"
-            numpy-version: ">=2.0"
+            python-version: "3.11"
             fast-compile: 0
             float32: 0
             part: "tests/link/jax"
           - install-jax: 1
             os: "ubuntu-latest"
             python-version: "3.13"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             part: "tests/link/jax"
           - install-torch: 1
             os: "ubuntu-latest"
-            python-version: "3.10"
-            numpy-version: ">=2.0"
+            python-version: "3.11"
             fast-compile: 0
             float32: 0
             part: "tests/link/pytorch"
           - install-xarray: 1
             os: "ubuntu-latest"
             python-version: "3.13"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             part: "tests/xtensor"
           - os: macos-15
             python-version: "3.13"
-            numpy-version: ">=2.0"
             fast-compile: 0
             float32: 0
             install-numba: 0
@@ -222,7 +206,6 @@ jobs:
           fi
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
-          NUMPY_VERSION: ${{ matrix.numpy-version }}
           INSTALL_NUMBA: ${{ matrix.install-numba }}
           INSTALL_JAX: ${{ matrix.install-jax }}
           INSTALL_TORCH: ${{ matrix.install-torch}}
@@ -265,7 +248,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Set up Python 3.10
+      - name: Set up Python 3.11
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: pytensor-test
@@ -281,7 +264,7 @@ jobs:
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
           python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"'
         env:
-          PYTHON_VERSION: 3.10
+          PYTHON_VERSION: 3.11
       - name: Download previous benchmark data
         uses: actions/cache@v4
         with:

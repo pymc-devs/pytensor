@@ -2,12 +2,12 @@ from collections.abc import Iterable, Sequence
 from typing import cast
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
 from pytensor import Variable
 from pytensor.compile import optdb
 from pytensor.graph import Constant, FunctionGraph, node_rewriter, vectorize_graph
 from pytensor.graph.rewriting.basic import NodeRewriter, copy_stack_trace
-from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.scalar import basic as ps
 from pytensor.tensor.basic import (
     Alloc,

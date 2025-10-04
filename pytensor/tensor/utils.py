@@ -5,10 +5,10 @@ from typing import cast
 
 import numpy as np
 from numpy import nditer
+from numpy.lib.array_utils import normalize_axis_tuple
 
 import pytensor
 from pytensor.graph import FunctionGraph, Variable
-from pytensor.npy_2_compat import normalize_axis_tuple
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.utils import hash_from_code
 

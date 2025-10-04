@@ -2,6 +2,7 @@ import warnings
 from collections.abc import Collection, Iterable
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_index
 
 import pytensor
 import pytensor.scalar.basic as ps
@@ -17,12 +18,7 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import EnumList, Generic
-from pytensor.npy_2_compat import (
-    normalize_axis_index,
-    npy_2_compat_header,
-    numpy_axis_is_none_flag,
-    old_np_unique,
-)
+from pytensor.npy_2_compat import old_np_unique
 from pytensor.raise_op import Assert
 from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
@@ -51,7 +47,7 @@ from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes, vector
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
-from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
+from pytensor.utils import LOCAL_BITWIDTH, NPY_RAVEL_AXIS, PYTHON_INT_BITWIDTH
 
 
 class CpuContiguous(COp):
@@ -308,7 +304,7 @@ class CumOp(COp):
     @property
     def c_axis(self) -> int:
         if self.axis is None:
-            return numpy_axis_is_none_flag
+            return NPY_RAVEL_AXIS
         return self.axis
 
     def make_node(self, x):
@@ -365,10 +361,6 @@ class CumOp(COp):
             return [(prod(shapes[0]),)]  # Flatten
 
         return shapes
-
-    def c_support_code_apply(self, node: Apply, name: str) -> str:
-        """Needed to define NPY_RAVEL_AXIS"""
-        return npy_2_compat_header()
 
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
@@ -428,7 +420,7 @@ class CumOp(COp):
         return code
 
     def c_code_cache_version(self):
-        return (9,)
+        return (10,)
 
     def __str__(self):
         return f"{self.__class__.__name__}{{{self.axis}, {self.mode}}}"
