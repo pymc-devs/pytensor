@@ -107,28 +107,30 @@ def {function_name}({", ".join(input_names)}):
 @numba_funcify.register(AdvancedIncSubtensor)
 def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     if isinstance(op, AdvancedSubtensor):
-        x, y, idxs = node.inputs[0], None, node.inputs[1:]
+        x, y, tensor_inputs = node.inputs[0], None, node.inputs[1:]
     else:
-        x, y, *idxs = node.inputs
+        x, y, *tensor_inputs = node.inputs
 
-    basic_idxs = [
-        idx
-        for idx in idxs
-        if (
-            isinstance(idx.type, NoneTypeT)
-            or (isinstance(idx.type, SliceType) and not is_full_slice(idx))
-        )
-    ]
-    adv_idxs = [
-        {
-            "axis": i,
-            "dtype": idx.type.dtype,
-            "bcast": idx.type.broadcastable,
-            "ndim": idx.type.ndim,
-        }
-        for i, idx in enumerate(idxs)
-        if isinstance(idx.type, TensorType)
-    ]
+    # Reconstruct indexing information from idx_list and tensor inputs
+    basic_idxs = []
+    adv_idxs = []
+    input_idx = 0
+    
+    for i, entry in enumerate(op.idx_list):
+        if isinstance(entry, slice):
+            # Basic slice index
+            basic_idxs.append(entry)
+        elif isinstance(entry, Type):
+            # Advanced tensor index
+            if input_idx < len(tensor_inputs):
+                idx_input = tensor_inputs[input_idx]
+                adv_idxs.append({
+                    "axis": i,
+                    "dtype": idx_input.type.dtype,
+                    "bcast": idx_input.type.broadcastable,
+                    "ndim": idx_input.type.ndim,
+                })
+                input_idx += 1
 
     # Special implementation for consecutive integer vector indices
     if (
