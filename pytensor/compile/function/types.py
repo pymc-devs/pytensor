@@ -950,32 +950,27 @@ class Function:
 
                     except Exception as e:
                         i = input_storage.index(arg_container)
-                        function_name = "pytensor function"
-                        argument_name = "argument"
-                        if self.name:
-                            function_name += ' with name "' + self.name + '"'
-                        if hasattr(arg, "name") and arg.name:
-                            argument_name += ' with name "' + arg.name + '"'
-                        where = get_variable_trace_string(self.maker.inputs[i].variable)
-                        if len(e.args) == 1:
-                            e.args = (
-                                "Bad input "
-                                + argument_name
-                                + " to "
-                                + function_name
-                                + f" at index {int(i)} (0-based). {where}"
-                                + e.args[0],
+                        function_name = (
+                            "pytensor function"
+                            if self.name
+                            else f"pytensor function '{self.name}'"
+                        )
+                        argument_name = (
+                            f"argument {arg.name}"
+                            if hasattr(arg, "name")
+                            else "argument"
+                        )
+                        where = (
+                            ""
+                            if config.exception_verbosity == "low"
+                            else get_variable_trace_string(
+                                self.maker.inputs[i].variable
                             )
-                        else:
-                            e.args = (
-                                "Bad input "
-                                + argument_name
-                                + " to "
-                                + function_name
-                                + f" at index {int(i)} (0-based). {where}"
-                            ) + e.args
-                        self._restore_defaults()
-                        raise
+                        )
+                        e.add_note(
+                            f"\nInvalid {argument_name} to {function_name} at index {i}.{where}"
+                        )
+                        raise e
                 arg_container.provided += 1
 
         # Set keyword arguments
