@@ -2,9 +2,14 @@ from textwrap import indent
 
 import numpy as np
 
+import pytensor.link.numba.compile
+from pytensor.link.numba.compile import (
+    compile_and_cache_numba_function_src,
+    create_tuple_string,
+)
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import create_tuple_string, numba_funcify
-from pytensor.link.utils import compile_function_src, unique_name_generator
+from pytensor.link.numba.dispatch.basic import numba_funcify
+from pytensor.link.utils import unique_name_generator
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -17,6 +22,7 @@ from pytensor.tensor.basic import (
     Split,
     TensorFromScalar,
 )
+from pytensor.utils import hash_from_code
 
 
 @numba_funcify.register(AllocEmpty)
@@ -49,11 +55,16 @@ def allocempty({", ".join(shape_var_names)}):
     return np.empty(scalar_shape, dtype)
     """
 
-    alloc_fn = compile_function_src(
-        alloc_def_src, "allocempty", {**globals(), **global_env}
+    alloc_fn = compile_and_cache_numba_function_src(
+        alloc_def_src,
+        "allocempty",
+        {**globals(), **global_env},
     )
 
-    return numba_basic.numba_njit(alloc_fn)
+    return (
+        pytensor.link.numba.compile.numba_njit(alloc_fn),
+        hash_from_code(alloc_def_src),
+    )
 
 
 @numba_funcify.register(Alloc)
@@ -93,21 +104,25 @@ def alloc(val, {", ".join(shape_var_names)}):
     res[...] = val
     return res
     """
-    alloc_fn = compile_function_src(alloc_def_src, "alloc", {**globals(), **global_env})
+    alloc_fn = compile_and_cache_numba_function_src(
+        alloc_def_src,
+        "alloc",
+        {**globals(), **global_env},
+    )
 
-    return numba_basic.numba_njit(alloc_fn)
+    return pytensor.link.numba.compile.numba_njit(alloc_fn)
 
 
 @numba_funcify.register(ARange)
 def numba_funcify_ARange(op, **kwargs):
     dtype = np.dtype(op.dtype)
 
-    @numba_basic.numba_njit(inline="always")
+    @pytensor.link.numba.compile.numba_njit
     def arange(start, stop, step):
         return np.arange(
-            numba_basic.to_scalar(start),
-            numba_basic.to_scalar(stop),
-            numba_basic.to_scalar(step),
+            start.item(),
+            stop.item(),
+            step.item(),
             dtype=dtype,
         )
 
@@ -116,7 +131,7 @@ def numba_funcify_ARange(op, **kwargs):
 
 @numba_funcify.register(Join)
 def numba_funcify_Join(op, **kwargs):
-    @numba_basic.numba_njit
+    @pytensor.link.numba.compile.numba_njit
     def join(axis, *tensors):
         return np.concatenate(tensors, axis.item())
 
@@ -125,7 +140,7 @@ def numba_funcify_Join(op, **kwargs):
 
 @numba_funcify.register(Split)
 def numba_funcify_Split(op, **kwargs):
-    @numba_basic.numba_njit
+    @pytensor.link.numba.compile.numba_njit
     def split(tensor, axis, indices):
         return np.split(tensor, np.cumsum(indices)[:-1], axis=axis.item())
 
@@ -139,7 +154,7 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
 
     if node.inputs[0].type.ndim == 2:
 
-        @numba_basic.numba_njit(inline="always")
+        @pytensor.link.numba.compile.numba_njit(inline="always")
         def extract_diag(x):
             out = np.diag(x, k=offset)
 
@@ -154,7 +169,7 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
         leading_dims = (slice(None),) * axis1
         middle_dims = (slice(None),) * (axis2 - axis1 - 1)
 
-        @numba_basic.numba_njit(inline="always")
+        @pytensor.link.numba.compile.numba_njit
         def extract_diag(x):
             if offset >= 0:
                 diag_len = min(x.shape[axis1], max(0, x.shape[axis2] - offset))
@@ -179,7 +194,7 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
 def numba_funcify_Eye(op, **kwargs):
     dtype = np.dtype(op.dtype)
 
-    @numba_basic.numba_njit(inline="always")
+    @pytensor.link.numba.compile.numba_njit(inline="always")
     def eye(N, M, k):
         return np.eye(
             numba_basic.to_scalar(N),
@@ -212,16 +227,19 @@ def makevector({", ".join(input_names)}):
     return np.array({create_list_string(input_names)}, dtype=dtype)
     """
 
-    makevector_fn = compile_function_src(
-        makevector_def_src, "makevector", {**globals(), **global_env}
+    makevector_fn = compile_and_cache_numba_function_src(
+        makevector_def_src,
+        "makevector",
+        {**globals(), **global_env},
     )
-
-    return numba_basic.numba_njit(makevector_fn)
+    return pytensor.link.numba.compile.numba_njit(makevector_fn), hash_from_code(
+        makevector_def_src
+    )
 
 
 @numba_funcify.register(TensorFromScalar)
 def numba_funcify_TensorFromScalar(op, **kwargs):
-    @numba_basic.numba_njit(inline="always")
+    @pytensor.link.numba.compile.numba_njit
     def tensor_from_scalar(x):
         return np.array(x)
 
@@ -230,8 +248,8 @@ def numba_funcify_TensorFromScalar(op, **kwargs):
 
 @numba_funcify.register(ScalarFromTensor)
 def numba_funcify_ScalarFromTensor(op, **kwargs):
-    @numba_basic.numba_njit(inline="always")
+    @pytensor.link.numba.compile.numba_njit
     def scalar_from_tensor(x):
-        return numba_basic.to_scalar(x)
+        return x.item()
 
-    return scalar_from_tensor
+    return scalar_from_tensor, 0

@@ -3,7 +3,8 @@ import warnings
 import numpy as np
 
 from pytensor import config
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
+from pytensor.link.numba.compile import numba_njit
+from pytensor.link.numba.dispatch.basic import numba_funcify
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
 from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
     _lu_1,
@@ -118,7 +119,7 @@ def numba_funcify_LU(op, node, **kwargs):
     if dtype in complex_dtypes:
         NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
-    @numba_njit(inline="always")
+    @numba_njit
     def lu(a):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):

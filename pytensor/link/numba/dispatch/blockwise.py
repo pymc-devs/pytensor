@@ -4,7 +4,8 @@ from typing import cast
 from numba.core.extending import overload
 from numba.np.unsafe.ndarray import to_fixed_tuple
 
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
+from pytensor.link.numba.compile import numba_njit
+from pytensor.link.numba.dispatch.basic import numba_funcify
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
