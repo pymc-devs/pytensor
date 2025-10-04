@@ -213,26 +213,14 @@ def test_RavelMultiIndex(arr, shape, mode, order, exc):
     "x, repeats, axis, exc",
     [
         (
-            (pt.lscalar(), np.array(1, dtype="int64")),
-            (pt.lscalar(), np.array(0, dtype="int64")),
-            None,
-            None,
-        ),
-        (
-            (pt.lmatrix(), np.zeros((2, 2), dtype="int64")),
-            (pt.lscalar(), np.array(1, dtype="int64")),
-            None,
-            None,
-        ),
-        (
             (pt.lvector(), np.arange(2, dtype="int64")),
-            (pt.lvector(), np.array([1, 1], dtype="int64")),
-            None,
+            (pt.lvector(), np.array([1, 3], dtype="int64")),
+            0,
             None,
         ),
         (
             (pt.lmatrix(), np.zeros((2, 2), dtype="int64")),
-            (pt.lscalar(), np.array(1, dtype="int64")),
+            (pt.lvector(), np.array([1, 3], dtype="int64")),
             0,
             UserWarning,
         ),

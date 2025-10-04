@@ -34,7 +34,6 @@ By "architecture", we mean the size of memory pointers (size_t in C),
 
 Note that according to Python documentation, `platform.architecture()` is
 not reliable on OS X with universal binaries.
-Also, sys.maxsize does not exist in Python < 2.6.
 'P' denotes a void*, and the size is expressed in bytes.
 """
 

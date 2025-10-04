@@ -530,7 +530,7 @@ class TestRepeat(utt.InferShapeTester):
     def setup_method(self):
         super().setup_method()
         self.op_class = Repeat
-        self.op = Repeat()
+        self.op = Repeat(axis=0)
         # uint64 always fails
         # int64 and uint32 also fail if python int are 32-bit
         if LOCAL_BITWIDTH == 64:
@@ -595,43 +595,30 @@ class TestRepeat(utt.InferShapeTester):
     def test_infer_shape(self, ndim, dtype):
         rng = np.random.default_rng(4282)
 
-        x = TensorType(config.floatX, shape=(None,) * ndim)()
+        a_var = TensorType(config.floatX, shape=(None,) * ndim)("a")
+        r_var = vector("r", dtype=dtype)
+
         shp = (np.arange(ndim) + 1) * 3
         a = rng.random(shp).astype(config.floatX)
 
         for axis in self._possible_axis(ndim):
-            if axis is not None and axis < 0:
-                # Operator does not support negative axis
+            if dtype in self.numpy_unsupported_dtypes:
+                with pytest.raises(TypeError):
+                    repeat(a_var, r_var, axis=axis)
                 continue
 
-            r_var = scalar(dtype=dtype)
-            r = np.asarray(3, dtype=dtype)
-            if dtype in self.numpy_unsupported_dtypes:
-                r_var = vector(dtype=dtype)
-                with pytest.raises(TypeError):
-                    repeat(x, r_var)
-            else:
-                self._compile_and_check(
-                    [x, r_var],
-                    [Repeat(axis=axis)(x, r_var)],
-                    [a, r],
-                    self.op_class,
-                )
+            if axis is None or axis < 0:
+                # Operator Repeat does not support None or negative axis
+                continue
 
-                r_var = vector(dtype=dtype)
-                if axis is None:
-                    r = rng.integers(1, 6, size=a.size).astype(dtype)
-                elif a.size > 0:
-                    r = rng.integers(1, 6, size=a.shape[axis]).astype(dtype)
-                else:
-                    r = rng.integers(1, 6, size=(10,)).astype(dtype)
+            r = rng.integers(1, 6, size=a.shape[axis]).astype(dtype)
 
-                self._compile_and_check(
-                    [x, r_var],
-                    [Repeat(axis=axis)(x, r_var)],
-                    [a, r],
-                    self.op_class,
-                )
+            self._compile_and_check(
+                [a_var, r_var],
+                [Repeat(axis=axis)(a_var, r_var)],
+                [a, r],
+                self.op_class,
+            )
 
     @pytest.mark.parametrize("x_ndim", [2, 3], ids=lambda x: f"x_ndim={x}")
     @pytest.mark.parametrize("repeats_ndim", [0, 1], ids=lambda r: f"repeats_ndim={r}")
@@ -647,18 +634,38 @@ class TestRepeat(utt.InferShapeTester):
             repeats_size = (x_test.shape[axis] if axis is not None else x_test.size,)
         repeats = rng.integers(1, 6, size=repeats_size)
         utt.verify_grad(
-            lambda x: Repeat(axis=axis)(x, repeats),
+            lambda x: repeat(x, repeats, axis=axis),
             [x_test],
         )
 
-    def test_broadcastable(self):
-        x = TensorType(config.floatX, shape=(None, 1, None))()
-        r = Repeat(axis=1)(x, 2)
-        assert r.broadcastable == (False, False, False)
-        r = Repeat(axis=1)(x, 1)
-        assert r.broadcastable == (False, True, False)
-        r = Repeat(axis=0)(x, 2)
-        assert r.broadcastable == (False, True, False)
+    def test_static_shape(self):
+        x = TensorType(config.floatX, shape=(None, 1, 3))()
+        symbolic_r = scalar(dtype="int32")
+
+        r = repeat(x, 2, axis=0)
+        assert r.type.shape == (None, 1, 3)
+
+        r = repeat(x, 2, axis=1)
+        assert r.type.shape == (None, 2, 3)
+
+        r = repeat(x, [2], axis=1)
+        assert r.type.shape == (None, 2, 3)
+
+        r = repeat(x, symbolic_r, axis=1)
+        assert r.type.shape == (None, None, 3)
+
+        r = repeat(x, 1, axis=1)
+        assert r.type.shape == (None, 1, 3)
+
+        r = repeat(x, 2, axis=2)
+        assert r.type.shape == (None, 1, 6)
+
+        r = repeat(x, [2, 2, 2], axis=2)
+        assert r.type.shape == (None, 1, 6)
+
+        # This case could be implemented in the future
+        r = repeat(x, [1, 2, 4], axis=2)
+        assert r.type.shape == (None, 1, None)
 
 
 class TestBartlett(utt.InferShapeTester):
