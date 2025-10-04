@@ -19,7 +19,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
-from pytensor.scalar import Abs
+from pytensor.scalar import Abs, gt
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -29,8 +29,10 @@ from pytensor.tensor.basic import (
     cast,
     constant,
     expand_dims,
+    fill,
     get_underlying_scalar_constant_value,
     moveaxis,
+    ones,
     ones_like,
     register_infer_shape,
     split,
@@ -56,6 +58,7 @@ from pytensor.tensor.math import (
     deg2rad,
     digamma,
     dot,
+    eq,
     erf,
     erfc,
     exp,
@@ -69,6 +72,7 @@ from pytensor.tensor.math import (
     log1mexp,
     log1p,
     log1pexp,
+    lt,
     makeKeepDims,
     maximum,
     mul,
@@ -121,6 +125,7 @@ from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
 )
+from pytensor.xtensor.math import minimum
 
 
 def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
@@ -1529,15 +1534,32 @@ def local_elemwise_sub_zeros(fgraph, node):
 @register_specialize
 @register_stabilize
 @register_canonicalize
+@node_rewriter([lt, le, gt, ge, eq, minimum, maximum])
+def local_useless_comparison_same_input(fgraph, node):
+    [x, y] = node.inputs
+    if x is y:
+        out = node.outputs[0]
+        dtype = node.outputs[0].type.dtype
+        if isinstance(node.op.scalar_op, ps.LT | ps.GT):
+            res = zeros((), dtype=dtype)
+        elif isinstance(node.op.scalar_op, ps.LE | ps.GE | ps.EQ):
+            res = ones((), dtype=dtype)
+        else:  # isinstance(node.op, (minimum, maximum))
+            res = x
+        if res.type.broadcastable != out.type.broadcastable:
+            res = fill(y, res)
+        # Copy over stacktrace from previous output.
+        copy_stack_trace(out, res)
+        return [res]
+
+
+@register_useless
+@register_specialize
+@register_stabilize
+@register_canonicalize
 @node_rewriter([Elemwise])
-def local_useless_elemwise_comparison(fgraph, node):
-    """...
-
-    # Comparing to itself is constant
-    Elemwise[{LT,GT}](X, X) -> Elemwise[zeros](X)
-    Elemwise[{LE,GE}](X, X) -> Elemwise[ones](X)
-    Elemwise[{minimum,maximum}](X, X) -> X
-
+def local_useless_elemwise_shape_comparison(fgraph, node):
+    """
     # Comparing shape to 0 can be constant
     Elemwise[LT](X.shape[i], 0) -> Elemwise[zeros](X)
     Elemwise[GE](X.shape[i], 0) -> Elemwise[ones](X)
@@ -1567,37 +1589,6 @@ def local_useless_elemwise_comparison(fgraph, node):
 
     dtype = node.outputs[0].type.dtype
     out_bcast = node.outputs[0].type.broadcastable
-
-    # Elemwise[{LT,GT}](X, X) -> Elemwise[zeros](X)
-    if (
-        isinstance(node.op.scalar_op, ps.LT | ps.GT)
-        and node.inputs[0] is node.inputs[1]
-    ):
-        res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
-        # Copy over stacktrace from previous output.
-        copy_stack_trace(node.outputs, res)
-        return [res]
-
-    # Elemwise[{LE,GE}](X, X) -> Elemwise[ones](X)
-    if (
-        isinstance(node.op.scalar_op, ps.LE | ps.GE)
-        and node.inputs[0] is node.inputs[1]
-    ):
-        res = ones_like(node.inputs[0], dtype=dtype, opt=True)
-
-        # Copy over stacktrace from previous output.
-        copy_stack_trace(node.outputs, res)
-        return [res]
-
-    # Elemwise[{minimum,maximum}](X, X) -> X
-    if (
-        isinstance(node.op.scalar_op, ps.ScalarMinimum | ps.ScalarMaximum)
-        and node.inputs[0] is node.inputs[1]
-    ):
-        res = node.inputs[0]
-        # Copy over stacktrace from previous output.
-        copy_stack_trace(node.outputs, res)
-        return [res]
 
     # Elemwise[LT](X.shape[i], 0) -> Elemwise[zeros](X)
     if (
