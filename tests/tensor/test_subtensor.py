@@ -3147,6 +3147,27 @@ def test_flip(size: tuple[int]):
         f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
         np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
 
+    # Test single negative axis
+    for axis in range(-x.ndim, 0):
+        expected = np.flip(x, axis=axis)
+        z = flip(x_pt, axis=axis)
+        f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
+        np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
+
+    # Test tuple with negative axes
+    if x.ndim > 1:
+        expected = np.flip(x, axis=(-1, -2))
+        z = flip(x_pt, axis=(-1, -2))
+        f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
+        np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
+
+    # Test mixed positive and negative axes
+    if x.ndim >= 2:
+        expected = np.flip(x, axis=(0, -1))
+        z = flip(x_pt, axis=(0, -1))
+        f = pytensor.function([x_pt], z, mode="FAST_COMPILE")
+        np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
+
 
 class TestBenchmarks:
     @pytest.mark.parametrize(

@@ -18,7 +18,7 @@ from pytensor.graph.type import Type
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
-from pytensor.npy_2_compat import numpy_version, using_numpy_2
+from pytensor.npy_2_compat import normalize_axis_tuple, numpy_version, using_numpy_2
 from pytensor.printing import Printer, pprint, set_precedence
 from pytensor.scalar.basic import ScalarConstant, ScalarVariable
 from pytensor.tensor import (
@@ -3369,11 +3369,12 @@ def flip(
     if axis is None:
         index = ((slice(None, None, -1)),) * arr.ndim
     else:
-        if isinstance(axis, int):
-            axis = (axis,)
+        normalized_axis = normalize_axis_tuple(axis, arr.ndim)
         index = tuple(
             [
-                slice(None, None, -1) if i in axis else slice(None, None, None)
+                slice(None, None, -1)
+                if i in normalized_axis
+                else slice(None, None, None)
                 for i in range(arr.ndim)
             ]
         )
@@ -3382,9 +3383,9 @@ def flip(
 
 
 __all__ = [
-    "take",
     "flip",
-    "slice_at_axis",
     "inc_subtensor",
     "set_subtensor",
+    "slice_at_axis",
+    "take",
 ]
