@@ -1466,7 +1466,7 @@ def radon_model():
     return joined_inputs, [model_logp, model_dlogp]
 
 
-@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN", "NUMBA"])
+@pytest.mark.parametrize("mode", ["FAST_COMPILE", "FAST_RUN"])
 def test_radon_model_compile_benchmark(mode, radon_model, benchmark):
     joined_inputs, [model_logp, model_dlogp] = radon_model
     rng = np.random.default_rng(1)

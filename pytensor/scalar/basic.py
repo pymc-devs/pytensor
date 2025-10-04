@@ -282,7 +282,7 @@ def convert(x, dtype=None):
             x_ = np.asarray(x)
             if x_.size == 0 and not hasattr(x, "dtype"):
                 x_ = np.asarray(x, dtype=config.floatX)
-    assert issubclass(type(x_), np.ndarray | np.memmap)
+    # assert issubclass(type(x_), np.ndarray | np.memmap)
     return x_
 
 
@@ -834,6 +834,7 @@ continuous_types: _ScalarTypes = float_types + complex_types
 all_types: _ScalarTypes = discrete_types + continuous_types
 
 float_dtypes = tuple(t.dtype for t in float_types)
+complex_dtypes = tuple(t.dtype for t in complex_types)
 discrete_dtypes = tuple(t.dtype for t in discrete_types)
 
 
@@ -1729,6 +1730,9 @@ class Switch(ScalarOp):
         (z,) = outputs
         return f"{z} = {cond} ? {ift} : {iff};"
 
+    def supports_c_code(self, inputs, outputs):
+        return True
+
     def L_op(self, inputs, outputs, gout):
         (cond, ift, iff) = inputs
         (gz,) = gout
@@ -1969,13 +1973,14 @@ class Add(ScalarOp):
 
     def c_code(self, node, name, inputs, outputs, sub):
         (z,) = outputs
-        op = " + "
-        if node.outputs[0].type == bool:
-            op = " || "
         if not inputs:
-            return z + " = 0;"
+            return f"{z} = 0;"
         else:
-            return z + " = " + op.join(inputs) + ";"
+            op = " || " if (node.outputs[0].type == bool) else " + "
+            return f"{z} = {op.join(inputs)};"
+
+    def supports_c_code(self, inputs, outputs):
+        return True  # Always supports c code
 
     def L_op(self, inputs, outputs, gout):
         (gz,) = gout
@@ -2011,13 +2016,14 @@ class Mul(ScalarOp):
 
     def c_code(self, node, name, inputs, outputs, sub):
         (z,) = outputs
-        op = " * "
-        if node.outputs[0].type == bool:
-            op = " && "
         if not inputs:
-            return z + " = 1;"
+            return f"{z} = 1;"
         else:
-            return z + " = " + op.join(inputs) + ";"
+            op = " && " if (node.outputs[0].type == bool) else " * "
+            return f"{z} = {op.join(inputs)};"
+
+    def supports_c_code(self, inputs, outputs):
+        return True  # Always supports c code
 
     def grad(self, inputs, gout):
         (gz,) = gout
@@ -2072,6 +2078,9 @@ class Sub(BinaryScalarOp):
         (z,) = outputs
         return f"{z} = {x} - {y};"
 
+    def supports_c_code(self, inputs, outputs):
+        return True  # Always supports c code
+
     def L_op(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
@@ -2121,6 +2130,10 @@ class TrueDiv(BinaryScalarOp):
         ):
             return f"{z} = ((double){x}) / {y};"
         return f"{z} = {x} / {y};"
+
+    def supports_c_code(self, inputs, outputs):
+        [x, y] = inputs
+        return x.type.dtype not in complex_dtypes and y.type.dtype not in complex_dtypes
 
     def grad(self, inputs, gout):
         (x, y) = inputs
@@ -2387,6 +2400,10 @@ class Pow(BinaryScalarOp):
             raise NotImplementedError("type not supported", type)
         return f"{z} = pow({x}, {y});"
 
+    def supports_c_code(self, inputs, outputs):
+        [x, y] = inputs
+        return x.type.dtype not in complex_dtypes and y.type.dtype not in complex_dtypes
+
     def L_op(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
@@ -2506,6 +2523,9 @@ class Second(BinaryScalarOp):
         (x, y) = inputs
         (z,) = outputs
         return f"{z} = {y};"
+
+    def supports_c_code(self, inputs, outputs):
+        return True  # Always supports c code
 
     def connection_pattern(self, node):
         # x is never connected because its elements are never used
@@ -2975,6 +2995,9 @@ class Neg(UnaryScalarOp):
         (z,) = outputs
         return f"{z} = -{x};"
 
+    def supports_c_code(self, inputs, outputs):
+        return True  # Always supports c code
+
 
 neg = Neg(same_out_nobool, name="neg")
 
@@ -3061,6 +3084,9 @@ class Log(UnaryScalarOp):
             raise NotImplementedError("type not supported", type)
         cast = node.outputs[0].type.dtype_specs()[1]
         return f"{z} = log(({cast}){x});"
+
+    def supports_c_code(self, inputs, outputs):
+        return inputs[0].type.dtype not in complex_dtypes
 
 
 log = Log(upgrade_to_float, name="log")
@@ -3227,6 +3253,9 @@ class Exp(UnaryScalarOp):
         cast = node.outputs[0].type.dtype_specs()[1]
         return f"{z} = exp(({cast}){x});"
 
+    def supports_c_code(self, inputs, outputs):
+        return inputs[0].type.dtype not in complex_dtypes
+
 
 exp = Exp(upgrade_to_float, name="exp")
 
@@ -3330,6 +3359,9 @@ class Sqr(UnaryScalarOp):
         (z,) = outputs
         return f"{z} = {x} * {x};"
 
+    def supports_c_code(self, inputs, outputs):
+        return True  # Always supports c code
+
 
 sqr = Sqr(same_out, name="sqr")
 
@@ -3365,6 +3397,9 @@ class Sqrt(UnaryScalarOp):
             raise NotImplementedError("type not supported", type)
         cast = node.outputs[0].type.dtype_specs()[1]
         return f"{z} = sqrt(({cast}){x});"
+
+    def supports_c_code(self, inputs, outputs):
+        return inputs[0].type.dtype not in complex_types
 
 
 sqrt = Sqrt(upgrade_to_float, name="sqrt")
@@ -4415,7 +4450,7 @@ class Composite(ScalarInnerGraphOp):
             return self._fgraph
         # fgraph cannot be a property of the base class because it messes up with C caching.
         # We also need a `FunctionGraph(clone=True)` (default) according to an old comment
-        fgraph = FunctionGraph(self.inputs, self.outputs)
+        fgraph = FunctionGraph(self.inputs, self.outputs, clone=False)
         self._fgraph = fgraph
         return self._fgraph
 

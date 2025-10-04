@@ -182,12 +182,14 @@ def rebuild_collect_shared(
         stack = [v]
         try:
             while True:
-                v = stack.pop()
+                v = stack[-1]
                 if v in clone_d:
+                    stack.pop()
                     continue
                 if (apply := v.owner) is not None:
                     if all(i in clone_d for i in apply.inputs):
                         # all inputs have been cloned, we can clone this node
+                        stack.pop()
                         clone_node_and_cache(
                             apply,
                             clone_d,
@@ -198,6 +200,7 @@ def rebuild_collect_shared(
                         # expand on the inputs
                         stack.extend(apply.inputs)
                 else:
+                    stack.pop()
                     clone_d[v] = v if copy_inputs_over else v.clone()
 
                     # Special handling of SharedVariables

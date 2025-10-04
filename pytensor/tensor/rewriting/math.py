@@ -19,6 +19,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
+from pytensor.scalar import Abs
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -1014,10 +1015,13 @@ class AlgebraicCanonizer(NodeRewriter):
         self.main = main
         self.inverse = inverse_fn
         self.reciprocal = reciprocal_fn
-        self.ops = (self.main, self.inverse, self.reciprocal)
+        self.scalar_ops = (
+            main.scalar_op,
+            inverse_fn.scalar_op,
+            reciprocal_fn.scalar_op,
+        )
         self.calculate = calculate
         self.use_reciprocal = use_reciprocal
-
         self.external_simplifiers = []
 
     def add_simplifier(self, simplifier, reason):
@@ -1054,46 +1058,47 @@ class AlgebraicCanonizer(NodeRewriter):
         # internal data nodes all have the dtype of the 'input'
         # argument. The leaf-Variables of the graph covered by the
         # recursion may be of any Variable type.
-        parent = inp.owner
-        if parent is None or parent.op not in self.ops:
-            if (
-                parent is not None
-                and isinstance(ds_op := parent.op, DimShuffle)
-                and ds_op.is_left_expand_dims
-            ):
+        if (parent := inp.owner) is not None:
+            if isinstance(ds_op := parent.op, DimShuffle) and ds_op.is_left_expand_dims:
                 # If input is a left_expand_dims DimShuffle,
                 # the kind of which is inserted automatically by Elemwise
                 # we return the num_denum of the dimshuffled input.
                 return self.get_num_denum(parent.inputs[0])
-            else:
-                return [inp], []
 
-        # We get the (num, denum) pairs for each input
-        # pairs = [self.get_num_denum(input2) if input2.type.dtype ==
-        # input.type.dtype else ([input2], []) for input2 in
-        # parent.inputs]
-        pairs = [self.get_num_denum(input2) for input2 in parent.inputs]
+            if isinstance(parent.op, Elemwise):
+                try:
+                    kind = self.scalar_ops.index(parent.op.scalar_op)
+                except ValueError:
+                    pass
+                else:
+                    # We get the (num, denum) pairs for each input
+                    # pairs = [self.get_num_denum(input2) if input2.type.dtype ==
+                    # input.type.dtype else ([input2], []) for input2 in
+                    # parent.inputs]
+                    pairs = [self.get_num_denum(input2) for input2 in parent.inputs]
 
-        if parent.op == self.main:
-            # If we have main(x, y, ...), numx, denumx, numy, denumy, ...
-            # then num is concat(numx, numy, num...) and denum is
-            # concat(denumx, denumy, denum...) note that main() can have any
-            # number of arguments >= 0 concat is list concatenation
-            list_concat = list.__iadd__
-            num = reduce(list_concat, map(itemgetter(0), pairs))
-            denum = reduce(list_concat, map(itemgetter(1), pairs))
-        elif parent.op == self.inverse:
-            # If we have inverse(x, y), numx, denumx, numy and denumy
-            # then num is concat(numx, denumy) and denum is
-            # concat(denumx, numy) note that inverse() is binary
-            num = pairs[0][0] + pairs[1][1]
-            denum = pairs[0][1] + pairs[1][0]
-        else:  # parent.op == self.reciprocal:
-            # If we have reciprocal(x), numx, denumx
-            # then num is denumx and denum is numx
-            # note that reciprocal() is unary
-            denum, num = pairs[0]
-        return num, denum
+                    if kind == 0:
+                        # If we have main(x, y, ...), numx, denumx, numy, denumy, ...
+                        # then num is concat(numx, numy, num...) and denum is
+                        # concat(denumx, denumy, denum...) note that main() can have any
+                        # number of arguments >= 0 concat is list concatenation
+                        list_concat = list.__iadd__
+                        num = reduce(list_concat, map(itemgetter(0), pairs))
+                        denum = reduce(list_concat, map(itemgetter(1), pairs))
+                    elif kind == 1:
+                        # If we have inverse(x, y), numx, denumx, numy and denumy
+                        # then num is concat(numx, denumy) and denum is
+                        # concat(denumx, numy) note that inverse() is binary
+                        num = pairs[0][0] + pairs[1][1]
+                        denum = pairs[0][1] + pairs[1][0]
+                    else:  # parent.op == self.reciprocal:
+                        # If we have reciprocal(x), numx, denumx
+                        # then num is denumx and denum is numx
+                        # note that reciprocal() is unary
+                        denum, num = pairs[0]
+                    return num, denum
+
+        return [inp], []  # fall back case
 
     def merge_num_denum(self, num, denum):
         r"""
@@ -1253,43 +1258,45 @@ class AlgebraicCanonizer(NodeRewriter):
             # does it for us?
             ct = [self.calculate(numct, denumct, aslist=False, out_type=out_type)]
 
-        # Wrapping ct in a Constant with the right dtype
-        ct = [constant(c, dtype=out_type.dtype) for c in ct]
+        if not ct:
+            # ct is empty if the constant is the neutral element
+            # (e.g. 1 for multiplication, 0 for addition)
+            # In that case we just return num and denum
+            return num, denum
 
-        if orig_num and len(numct) == 1 and len(denumct) == 0 and ct:
-            # In that case we should only have one constant in `ct`.
-            [var_ct] = ct
+        [c] = ct
+        if orig_num and (not denumct) and len(numct) == 1:
+            # Check for useless simplification
+            # If it so happens that:
+            # * there's exactly one constant on the numerator and none on the denominator
+            # * it's not the neutral element (ct is an empty list in that case)
+            # * the constant is the same as the first argument in the
+            #   numerator (we only check the first argument because the
+            #   canonizer puts the computed constants first)
+            # -> then we return the original num/denum.
+            # If we don't do that the rewrite will just loop
+            # infinitely replacing something by the same thing...
+            # Note that it is important to use `values_eq` instead of
+            # the == operator, to handle NaN values correctly.
             first_num_var = orig_num[0]
             first_num_ct = (
                 first_num_var.unique_value
                 if isinstance(first_num_var, TensorConstant)
                 else None
             )
-            if first_num_ct is not None and var_ct.type.values_eq(
-                var_ct.data, first_num_ct
+            if first_num_ct is not None and first_num_var.type.values_eq(
+                c, first_num_ct
             ):
-                # This is an important trick :( if it so happens that:
-                # * there's exactly one constant on the numerator and none on
-                #   the denominator
-                # * it's not the neutral element (ct is an empty list in that
-                #   case)
-                # * the constant is the same as the first argument in the
-                #   numerator (we only check the first argument because the
-                #   canonizer puts the computed constants first)
-                # -> then we return very exactly the original num/denum.
-                # If we don't do that the rewrite will just loop
-                # infinitely because it will not catch on that there are
-                # no changes to be made and every time it will want to
-                # replace something by the same thing...
-                # Note that it is important to use `values_eq` instead of
-                # the == operator, to handle NaN values correctly.
                 return orig_num, orig_denum
 
-        return ct + num, denum
+        # Convert c back to a Constant with the right dtype and append remaining numerator
+        return [constant(c, dtype=out_type.dtype), *num], denum
 
     def transform(self, fgraph, node, enforce_tracks=True):
         op = node.op
-        if enforce_tracks and (op not in self.ops):
+        if enforce_tracks and not (
+            isinstance(op, Elemwise) and op.scalar_op in self.scalar_ops
+        ):
             return False
 
         [out] = node.outputs
@@ -1309,7 +1316,7 @@ class AlgebraicCanonizer(NodeRewriter):
         for c, c_idx in out_clients:
             while isinstance(c.op, DimShuffle) and len(clients[c.outputs[0]]) <= 1:
                 [(c, _)] = clients[c.outputs[0]]
-            if c.op in self.ops:
+            if isinstance(c.op, Elemwise) and c.op.scalar_op in self.scalar_ops:
                 return False
 
         # Here we make the canonical version of the graph around this node
@@ -1317,25 +1324,25 @@ class AlgebraicCanonizer(NodeRewriter):
         orig_num, orig_denum = self.get_num_denum(out)
         num, denum = self.simplify(list(orig_num), list(orig_denum), out.type)
 
-        def same(x, y):
-            return len(x) == len(y) and all(np.all(xe == ye) for xe, ye in zip(x, y))
-
         if (
-            same(orig_num, num)
-            and same(orig_denum, denum)
-            and
+            (
+                len(orig_num) == len(num)
+                and all(xe is ye for xe, ye in zip(orig_num, num))
+            )
+            and (
+                len(orig_denum) == len(denum)
+                and all(xe is ye for xe, ye in zip(orig_denum, denum))
+            )
             # Check to see if we've collapsed some nested ops.
-            not (
+            and not (
                 len(orig_denum) == 0
-                and
                 # Make sure this change would increase the number of vector
                 # arguments--decreasing the number of unnecessary `self.main`
                 # nodes.
-                len(node.inputs) < len(orig_num)
+                and len(node.inputs) < len(orig_num)
             )
-            and
             # Do a similar check for the reciprocal op.
-            not (
+            and not (
                 self.use_reciprocal
                 and node.op == self.reciprocal
                 and len(orig_num) == 0
@@ -1372,10 +1379,7 @@ class AlgebraicCanonizer(NodeRewriter):
 def mul_calculate(num, denum, aslist=False, out_type=None):
     if not num and not denum:
         # Smallest 1 possible.
-        if aslist:
-            return []
-        else:
-            return np.int8(1)
+        return [] if aslist else np.int8(1)
 
     # Make sure we do not accidentally upcast data types.
     if out_type is None:
@@ -1384,12 +1388,11 @@ def mul_calculate(num, denum, aslist=False, out_type=None):
         out_dtype = out_type.dtype
     one = np.asarray(1, dtype=out_dtype)
 
-    v = reduce(np.multiply, num, one) / reduce(np.multiply, denum, one)
+    v = reduce(np.multiply, num, one) if num else one
+    if denum:
+        v /= reduce(np.multiply, denum, one)
     if aslist:
-        if np.all(v == 1):
-            return []
-        else:
-            return [v]
+        return [] if (v == 1).all() else [v]
     return v
 
 
@@ -2060,8 +2063,6 @@ def local_mul_zero(fgraph, node):
     with zero.
 
     """
-    otype = node.outputs[0].type
-
     for i in node.inputs:
         try:
             value = get_underlying_scalar_constant_value(i)
@@ -2070,6 +2071,7 @@ def local_mul_zero(fgraph, node):
         # print 'MUL by value', value, node.inputs
         if value == 0:
             # print '... returning zeros'
+            otype = node.outputs[0].type
             return [broadcast_arrays(np.asarray(0, dtype=otype.dtype), *node.inputs)[0]]
 
 
@@ -2358,38 +2360,26 @@ def local_mul_specialize(fgraph, node):
 @register_specialize
 @node_rewriter([add])
 def local_add_remove_zeros(fgraph, node):
-    new_inputs = []
-    for inp in node.inputs:
-        try:
-            y = get_underlying_scalar_constant_value(inp)
-        except NotScalarConstantError:
-            y = inp
-        if y == 0.0:
-            continue
-        new_inputs.append(inp)
+    is_zeros = [
+        get_underlying_scalar_constant_value(inp, raise_not_constant=False) == 0.0
+        for inp in node.inputs
+    ]
 
-    if len(new_inputs) == len(node.inputs):
-        return False
+    if not any(is_zeros):
+        return None
 
+    new_inputs = [inp for inp, is_zero in zip(node.inputs, is_zeros) if not is_zero]
     node_output = node.outputs[0]
     dtype = node_output.type.dtype
 
-    if len(new_inputs) == 0:
-        # we got rid of the entire expression!
-        ndim = node_output.type.ndim
-        # Reuse call to constant for cache()
-        cst = constant(np.zeros((1,) * ndim, dtype=dtype))
-        assert cst.type.broadcastable == (True,) * ndim
-        return [alloc_like(cst, node_output, fgraph)]
-
-    ret = [alloc_like(variadic_add(*new_inputs), node_output, fgraph)]
+    ret = alloc_like(variadic_add(*new_inputs), node_output, fgraph)
 
     # The dtype should not be changed. It can happen if the input
     # that was forcing upcasting was equal to 0.
-    if ret[0].dtype != dtype:
-        ret = [cast(ret[0], dtype)]
+    if ret.type.dtype != dtype:
+        ret = cast(ret, dtype)
 
-    return ret
+    return [ret]
 
 
 mul_canonizer = in2out(
@@ -2411,7 +2401,8 @@ def check_for_x_over_absX(numerators, denominators):
     for den in original_denominators:
         if (
             (den_node := den.owner) is not None
-            and den_node.op == pt_abs
+            and isinstance(den_node.op, Elemwise)
+            and isinstance(den_node.op.scalar_op, Abs)
             and (num_index := numerators.index(num := den_node.inputs[0])) >= 0
             and not num.type.dtype.startswith("complex")
         ):
@@ -2602,13 +2593,21 @@ def local_log_sum_exp(fgraph, node):
 
 def add_calculate(num, denum, aslist=False, out_type=None):
     # TODO: make sure that this function and mul_calculate are similar
+    if not num and not denum:
+        return (
+            []
+            if aslist
+            else (0.0 if out_type is None else np.asarray(0, dtype=out_type.dtype))
+        )
+
     if out_type is None:
         zero = 0.0
     else:
         zero = np.asarray(0, dtype=out_type.dtype)
+
     # zero = 0.0 if out_type is None else np.asarray(0,
     # dtype=out_type.dtype)
-    if out_type and out_type.dtype == "bool":
+    if out_type is not None and out_type.dtype == "bool":
         if len(denum) == 0:
             # NumPy 1.14 do not accept to do "bool - bool"
             v = reduce(np.add, num, zero)
@@ -2618,12 +2617,11 @@ def add_calculate(num, denum, aslist=False, out_type=None):
                 " an earlier error should have been raised"
             )
     else:
-        v = reduce(np.add, num, zero) - reduce(np.add, denum, zero)
+        v = reduce(np.add, num, zero) if num else zero
+        if denum:
+            v -= reduce(np.add, denum, zero)
     if aslist:
-        if (v == 0).all():
-            return []
-        else:
-            return [v]
+        return [] if (v == 0).all() else [v]
     return v
 
 

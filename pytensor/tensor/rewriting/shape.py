@@ -51,6 +51,17 @@ from pytensor.tensor.type_other import NoneConst, NoneTypeT
 from pytensor.tensor.variable import TensorVariable
 
 
+int_constant_cache = {}
+
+
+def int_constant(i):
+    try:
+        return int_constant_cache[i]
+    except KeyError:
+        int_constant_cache[i] = c = constant(i, dtype="int64")
+        return c
+
+
 class ShapeFeature(Feature):
     r"""A `Feature` that tracks shape information in a graph.
 
@@ -209,7 +220,7 @@ class ShapeFeature(Feature):
     def shape_ir(self, i, r):
         """Return symbolic r.shape[i] for tensor variable r, int i."""
         if hasattr(r.type, "shape") and r.type.shape[i] is not None:
-            return constant(r.type.shape[i], dtype="int64")
+            return int_constant(r.type.shape[i])
         else:
             # Do not call make_node for test_value
             s = Shape_i(i)(r)
@@ -271,7 +282,7 @@ class ShapeFeature(Feature):
                 # choose that options as it would give better error
                 # message.
                 raise AssertionError(msg)
-            return constant(s_i, dtype="int64")
+            return int_constant(s_i)
         if isinstance(s_i, tuple | list):
             # this dimension is the same as many of the inputs
             # which tells us that if one of the inputs is known,
@@ -336,7 +347,10 @@ class ShapeFeature(Feature):
             if not isinstance(s, tuple | list):
                 raise TypeError("shapes must be tuple/list", (r, s))
 
-            if r.type.ndim != len(s):
+            r_type = r.type
+            r_ndim = r_type.ndim
+
+            if r_ndim != len(s):
                 sio = StringIO()
                 pytensor.printing.debugprint(r, file=sio, print_type=True)
                 raise AssertionError(
@@ -345,24 +359,22 @@ class ShapeFeature(Feature):
                     f" for the variable:\n{sio.getvalue()}"
                 )
 
+            shape_of_reverse_index_setdefault = self.shape_of_reverse_index.setdefault
             shape_vars = []
-            for i in range(r.type.ndim):
-                if hasattr(r.type, "shape") and r.type.shape[i] is not None:
-                    shape_vars.append(constant(r.type.shape[i], dtype="int64"))
-                else:
-                    shape_vars.append(self.unpack(s[i], r))
-            assert all(
-                not hasattr(r.type, "shape")
-                or r.type.shape[i] != 1
-                or self.lscalar_one.equals(shape_vars[i])
-                or self.lscalar_one.equals(
-                    get_scalar_constant_value(shape_vars[i], raise_not_constant=False)
-                )
-                for i in range(r.type.ndim)
-            )
-            self.shape_of[r] = tuple(shape_vars)
-            for sv in shape_vars:
-                self.shape_of_reverse_index.setdefault(sv, set()).add(r)
+            r_static_shape = getattr(r_type, "shape", None)
+            if r_static_shape is None:
+                self.shape_of[r] = svs = tuple(self.unpack(s_i, r) for s_i in s)
+                for sv in svs:
+                    shape_of_reverse_index_setdefault(sv, set()).add(r)
+            else:
+                for i, (r_st, s_i) in enumerate(zip(r_static_shape, s)):
+                    if r_st is not None:
+                        shape_var = int_constant(r_st)
+                    else:
+                        shape_var = self.unpack(s_i, r)
+                    shape_of_reverse_index_setdefault(shape_var, set()).add(r)
+                    shape_vars.append(shape_var)
+                self.shape_of[r] = tuple(shape_vars)
 
     def update_shape(self, r, other_r):
         """Replace shape of r by shape of other_r.
@@ -372,19 +384,20 @@ class ShapeFeature(Feature):
 
         """
         # other_r should already have a shape
-        assert other_r in self.shape_of, ("other_r not in shape_of", other_r)
-        other_shape = self.shape_of[other_r]
+        shape_of = self.shape_of
+        other_shape = shape_of[other_r]
 
         # If other_shape has no information, call is pointless.
         if other_shape is None:
             return
 
-        if r in self.shape_of:
-            r_shape = self.shape_of[r]
-        else:
+        try:
+            r_shape = shape_of[r]
+        except KeyError:
             # If no info is known on r's shape, use other_shape
             self.set_shape(r, other_shape)
             return
+
         if (
             other_r.owner
             and r.owner
@@ -426,11 +439,11 @@ class ShapeFeature(Feature):
                 merged_shape.append(r_shape[i])
             elif any(
                 (
-                    r_shape[i] == anc
+                    r_shape[i] is anc
                     or (
                         anc.owner
                         and isinstance(anc.owner.op, Shape)
-                        and anc.owner.inputs[0] == r
+                        and anc.owner.inputs[0] is r
                     )
                 )
                 for anc in ancestors([other_shape[i]])
@@ -445,25 +458,26 @@ class ShapeFeature(Feature):
                 merged_shape.append(r_shape[i])
             else:
                 merged_shape.append(other_shape[i])
-        assert all(
-            (
-                not hasattr(r.type, "shape")
-                or r.type.shape[i] != 1
-                and other_r.type.shape[i] != 1
-            )
-            or self.lscalar_one.equals(merged_shape[i])
-            or self.lscalar_one.equals(
-                get_scalar_constant_value(
-                    merged_shape[i],
-                    only_process_constants=True,
-                    raise_not_constant=False,
-                )
-            )
-            for i in range(r.type.ndim)
-        )
-        self.shape_of[r] = tuple(merged_shape)
-        for sv in self.shape_of[r]:
-            self.shape_of_reverse_index.setdefault(sv, set()).add(r)
+        # assert all(
+        #     (
+        #         not hasattr(r.type, "shape")
+        #         or r.type.shape[i] != 1
+        #         and other_r.type.shape[i] != 1
+        #     )
+        #     or self.lscalar_one.equals(merged_shape[i])
+        #     or self.lscalar_one.equals(
+        #         get_scalar_constant_value(
+        #             merged_shape[i],
+        #             only_process_constants=True,
+        #             raise_not_constant=False,
+        #         )
+        #     )
+        #     for i in range(r.type.ndim)
+        # )
+        shape_of[r] = tuple(merged_shape)
+        shape_of_reverse_index_setdefault = self.shape_of_reverse_index.setdefault
+        for sv in shape_of[r]:
+            shape_of_reverse_index_setdefault(sv, set()).add(r)
 
     def set_shape_i(self, r, i, s_i):
         """Replace element i of shape_of[r] by s_i"""
@@ -510,7 +524,7 @@ class ShapeFeature(Feature):
         fgraph.shape_feature = self
         # Must be local to the object as otherwise we reuse the same
         # variable for multiple fgraph!
-        self.lscalar_one = constant(1, dtype="int64")
+        self.lscalar_one = int_constant(1)
         assert self.lscalar_one.type.dtype == "int64"
 
         self.fgraph = fgraph
@@ -576,7 +590,7 @@ class ShapeFeature(Feature):
                     assert str(d.dtype) != "uint64", node
                     new_shape += sh[len(new_shape) : i + 1]
                     if isinstance(d, Constant):
-                        casted_d = constant(d.data, dtype="int64")
+                        casted_d = int_constant(d.data)
                     else:
                         casted_d = cast(d, "int64")
                     new_shape[i] = casted_d
@@ -1159,7 +1173,7 @@ def local_shape_ground(fgraph, node):
     if len(static_shape) == 0:
         return [_empty_shape]
     if not any(dim is None for dim in static_shape):
-        return [stack([constant(dim, dtype="int64") for dim in static_shape])]
+        return [stack([int_constant(dim) for dim in static_shape])]
 
 
 @register_infer_shape

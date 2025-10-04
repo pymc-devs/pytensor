@@ -701,7 +701,9 @@ class AtomicVariable(Variable[_TypeType, None]):
         This does what `__eq__` would normally do, but `Variable` and `Apply`
         should always be hashable by `id`.
         """
-        return isinstance(other, type(self)) and self.signature() == other.signature()
+        return self is other or (
+            isinstance(other, type(self)) and self.signature() == other.signature()
+        )
 
     @property
     def owner(self):

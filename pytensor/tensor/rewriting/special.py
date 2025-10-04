@@ -108,7 +108,11 @@ def local_logsoftmax_grad(fgraph, node):
 
 
 def softmax_simplifier(numerators, denominators):
-    for numerator in list(numerators):
+    if not numerators or not denominators:
+        return numerators, denominators
+
+    orig_numerators = numerators
+    for numerator in orig_numerators:
         if not numerator.type.dtype.startswith("float"):
             continue
 
@@ -165,6 +169,8 @@ def softmax_simplifier(numerators, denominators):
         if matching_denom is not None:
             softmax = Softmax(axis=sum_axis)(numerator.owner.inputs[0])
             copy_stack_trace(numerator, softmax)
+            if numerators is orig_numerators:
+                numerators = numerators.copy()
             numerators.remove(numerator)
             denominators.remove(matching_denom)
             numerators.append(softmax)
