@@ -1057,7 +1057,7 @@ class TriangularInv(MatrixInverse):
         if not allowed_inplace_inputs:
             return self
 
-        new_props = self._props_dict()
+        new_props = self._props_dict()  # type: ignore
         new_props["overwrite_a"] = True
         return type(self)(**new_props)
 
