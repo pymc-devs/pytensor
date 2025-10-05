@@ -1071,13 +1071,13 @@ def test_scalar_solve_to_division_rewrite(
 @pytest.mark.parametrize("lower", [True, False])
 def test_triangular_inv_op(lower):
     """Tests the TriangularInv Op directly."""
-    x = matrix("x")
+    x = matrix("x", dtype=config.floatX)
     f = function([x], TriangularInv(lower=lower)(x))
 
     if lower:
-        a = np.tril(np.random.rand(5, 5) + 0.1)
+        a = np.tril(np.random.rand(5, 5) + 0.1).astype(config.floatX)
     else:
-        a = np.triu(np.random.rand(5, 5) + 0.1)
+        a = np.triu(np.random.rand(5, 5) + 0.1).astype(config.floatX)
 
     a_inv = f(a)
     expected_inv = np.linalg.inv(a)
@@ -1099,12 +1099,13 @@ def test_triangular_inv_op_nan_on_error():
     """
     Tests the `on_error='nan'` functionality of the TriangularInv Op.
     """
-    x = matrix("x")
+    x = matrix("x", dtype=config.floatX)
     f_nan = function([x], TriangularInv(on_error="nan")(x))
 
     # Create a singular triangular matrix (zero on the diagonal)
     a_singular = np.tril(np.random.rand(5, 5))
     a_singular[2, 2] = 0
+    a_singular = a_singular.astype(config.floatX)
 
     res = f_nan(a_singular)
     assert np.all(np.isnan(res))
@@ -1159,7 +1160,7 @@ def test_inv_to_triangular_inv_rewrite(case):
     """
     Tests the rewrite of inv(triangular) -> TriangularInv.
     """
-    x = matrix("x")
+    x = matrix("x", dtype=config.floatX)
     build_tri, _ = rewrite_cases[case]
     x_tri = build_tri(x)
     y_inv = inv(x_tri)
@@ -1179,7 +1180,9 @@ def test_inv_to_triangular_inv_rewrite(case):
 
     # Check numerical correctness
     a = np.random.rand(5, 5)
-    a = np.dot(a, a.T) + np.eye(5)  # Make positive definite for Cholesky
+    a = (np.dot(a, a.T) + np.eye(5)).astype(
+        config.floatX
+    )  # Make positive definite for Cholesky
     pytensor_result = f(a)
     _, numpy_tri_func = rewrite_cases[case]
     numpy_result = np.linalg.inv(numpy_tri_func(a))
