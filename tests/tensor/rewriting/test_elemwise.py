@@ -1426,6 +1426,43 @@ class TestFusion:
                 np.log(1 - np.exp(-2)),
             )
 
+    def test_joint_circular_dependency(self):
+        # Test a case where fused subgraphs could induce a circular dependency
+        x = matrix("x")
+        neg = pt.neg(x)
+        eq = pt.eq(x.sum(axis=0), 0)
+        sub = pt.sub(eq, neg)
+        exp = pt.exp(neg.sum(axis=0))
+        # We test arbitrary add and output orders, to make sure our algorithm
+        # is robust to valid toposort variations.
+        for add_order in [(exp, eq), (eq, exp)]:
+            add = pt.add(*add_order)
+
+            # The naive fused graphs to consider are {sub, neg} and {add, exp, eq},
+            # which is not valid because sub depends on eq, while add/exp depends on neg.
+            # Instead, we can either fuse both {sub, neg} and {add, exp} or just {add, exp, eq}
+
+            for out_order in [(sub, add), (add, sub)]:
+                fgraph = FunctionGraph([x], out_order, clone=True)
+                _, nb_fused, nb_replaced, *_ = FusionOptimizer().apply(fgraph)
+                # (nb_fused, nb_replaced) would be (2, 5) if we did the invalid fusion
+                assert (nb_fused, nb_replaced) in ((2, 4), (1, 3))
+                fused_nodes = {
+                    frozenset(
+                        scalar_n.op for scalar_n in n.op.scalar_op.fgraph.apply_nodes
+                    )
+                    for n in fgraph.apply_nodes
+                    if isinstance(n.op, Elemwise)
+                    and isinstance(n.op.scalar_op, Composite)
+                }
+                if nb_fused == 1:
+                    assert fused_nodes == {frozenset((ps.add, ps.exp, ps.eq))}
+                else:
+                    assert fused_nodes == {
+                        frozenset((ps.sub, ps.neg)),
+                        frozenset((ps.add, ps.exp)),
+                    }
+
 
 class TimesN(ps.basic.UnaryScalarOp):
     """

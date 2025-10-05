@@ -652,7 +652,7 @@ class FusionOptimizer(GraphRewriter):
             # `ancestors_bitset[C] & (node_bitset[A] | node_bitset[B]) != 0`
             nodes_bitflags = {node: 1 << i for i, node in enumerate(fgraph.toposort())}
             # Root variables have `None` as owner, which we can handle with a bitset of 0
-            ancestors_bitsets = {None: 0}
+            ancestors_bitsets: dict[Apply | None, int] = {None: 0}
             for node, node_bitflag in nodes_bitflags.items():
                 # The bitset of each node is the union of the bitsets of its inputs, plus its own bit flag
                 ancestors_bitsets[node] = reduce(
@@ -694,9 +694,13 @@ class FusionOptimizer(GraphRewriter):
                 # For simplicity, we always want to visit ancestors before clients
                 # For ancestors, we want to visit the later nodes first (those that have more dependencies)
                 # whereas for clients we want to visit earlier nodes first (those that have fewer dependencies)
-                # To achieve this we use the bitflag as the sorting key (which encodes the topological order)
-                # and negate it for ancestors.
-                fuseables_nodes_queue = [(-starting_bitflag, starting_node)]
+                # To achieve this we use the ancestors_bitset as the sorting key (which encodes the topological order)
+                # and negate it for ancestors. We use the ancestors_bitset instead of the node bitflag because we
+                # update the former when we find a fuseable subgraph, emulating the effect of recomputing the
+                # topological order on the remaining nodes.
+                fuseables_nodes_queue = [
+                    (-ancestors_bitsets[starting_node], starting_bitflag, starting_node)
+                ]
                 heapify(fuseables_nodes_queue)
 
                 # We keep 3 bitsets during the exploration of a new subgraph:
@@ -715,10 +719,12 @@ class FusionOptimizer(GraphRewriter):
                 unfuseable_clients_bitset = 0
 
                 while fuseables_nodes_queue:
-                    node_bitflag, node = heappop(fuseables_nodes_queue)
-                    is_ancestor = node_bitflag < 0
+                    node_ancestors_bitset, node_bitflag, node = heappop(
+                        fuseables_nodes_queue
+                    )
+                    is_ancestor = node_ancestors_bitset < 0
                     if is_ancestor:
-                        node_bitflag = -node_bitflag
+                        node_ancestors_bitset = -node_ancestors_bitset
 
                     if node_bitflag & subgraph_bitset:
                         # Already part of the subgraph
@@ -728,7 +734,7 @@ class FusionOptimizer(GraphRewriter):
                         if node_bitflag & unfuseable_ancestors_bitset:
                             # An unfuseable ancestor of the subgraph depends on this node, can't fuse
                             continue
-                    elif ancestors_bitsets[node] & unfuseable_clients_bitset:
+                    elif node_ancestors_bitset & unfuseable_clients_bitset:
                         # This node depends on an unfuseable client of the subgraph, can't fuse
                         continue
 
@@ -749,7 +755,11 @@ class FusionOptimizer(GraphRewriter):
                         if node in fuseable_clients.get(ancestor_node, ()):
                             heappush(
                                 fuseables_nodes_queue,
-                                (-ancestor_bitflag, ancestor_node),
+                                (
+                                    -ancestors_bitsets[ancestor_node],
+                                    ancestor_bitflag,
+                                    ancestor_node,
+                                ),
                             )
                         else:
                             # If the node is not in the ancestor's fuseable clients set, it's not fuseable with it,
@@ -764,16 +774,17 @@ class FusionOptimizer(GraphRewriter):
                         if is_ancestor and (client_bitflag & subgraph_bitset):
                             continue
                         if client in next_fuseable_clients:
-                            heappush(fuseables_nodes_queue, (client_bitflag, client))
+                            heappush(
+                                fuseables_nodes_queue,
+                                (ancestors_bitsets[client], client_bitflag, client),
+                            )
                         else:
                             # If a client is not in the node's fuseable clients set, it's nto fuseable with it,
                             # nor any of its clients. But we don't need to keep track of those as any downstream
                             # client we may consider later will also depend on this unfuseable client and be rejected
                             unfuseable_clients_bitset |= client_bitflag
 
-                # Finished exploring this subgraph
-                all_subgraphs_bitset |= subgraph_bitset
-
+                # Finished expansion of subgraph
                 if subgraph_bitset == starting_bitflag:
                     # We ended were we started, no fusion possible
                     continue
@@ -816,6 +827,18 @@ class FusionOptimizer(GraphRewriter):
                 for out in subgraph_outputs:
                     fuseable_clients.pop(out.owner, None)
 
+                # When we fuse multi-output subgraphs, we also need to fuse the dependencies of successor nodes.
+                # Nodes that previously depended on a subset of the fused outputs, now depend on all of them.
+                if len(subgraph_outputs) > 1:
+                    subgraph_and_ancestors = (
+                        subgraph_bitset | unfuseable_ancestors_bitset
+                    )
+                    ancestors_bitsets |= (
+                        (node, node_ancestors_bitset | subgraph_and_ancestors)
+                        for node, node_ancestors_bitset in ancestors_bitsets.items()
+                        if node_ancestors_bitset & subgraph_bitset
+                    )
+
                 # Add new subgraph to sorted_subgraphs
                 # Because we start from sink nodes in reverse topological order, most times new subgraphs
                 # don't depend on previous subgraphs, so we can just append them at the end.
@@ -828,8 +851,7 @@ class FusionOptimizer(GraphRewriter):
                 else:
                     # But not here, so we need to find the right position for insertion.
                     # We iterate through the previous subgraphs in topological order (reverse of the stored order).
-                    # We exclude cumulatively exclude each subgraph_bitset and perform the same dependency check again.
-                    # The (index + 1) of the firs iteration where the check passes is the correct insertion position.
+                    # We cumulatively exclude each subgraph_bitset and perform the same dependency check again, until it passes.
                     remaining_subgraphs_bitset = all_subgraphs_bitset
                     for index, (other_subgraph_bitset, _) in enumerate(
                         reversed(sorted_subgraphs)
@@ -840,12 +862,20 @@ class FusionOptimizer(GraphRewriter):
                             unfuseable_ancestors_bitset & remaining_subgraphs_bitset
                         ):
                             break  # bingo
+                    else:  # no-break
+                        raise RuntimeError(
+                            "Failed to find insertion point for fused subgraph"
+                        )
                     sorted_subgraphs.insert(
                         -(index + 1),
                         (subgraph_bitset, (subgraph_inputs, subgraph_outputs)),
                     )
 
-            # yield from sorted_subgraphs, discarding the subgraph_bitset
+                # Add subgraph to all_subgraphs_bitset
+                all_subgraphs_bitset |= subgraph_bitset
+
+            # Finished exploring the whole graph
+            # Yield from sorted_subgraphs, discarding the subgraph_bitset
             yield from (io for _, io in sorted_subgraphs)
 
         max_operands = elemwise_max_operands_fct(None)
