@@ -8,6 +8,7 @@ from pytensor import Variable
 from pytensor import tensor as pt
 from pytensor.compile import optdb
 from pytensor.graph import Apply, FunctionGraph
+from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     dfs_rewriter,
@@ -15,11 +16,14 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Abs, Log, Mul, Sign
+from pytensor.scalar.basic import Mul as ScalarMul
+from pytensor.scalar.basic import Sub as ScalarSub
 from pytensor.tensor.basic import (
     AllocDiag,
     ExtractDiag,
     Eye,
     TensorVariable,
+    Tri,
     concatenate,
     diag,
     diagonal,
@@ -46,9 +50,12 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.slinalg import (
+    LU,
+    QR,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
+    LUFactor,
     Solve,
     SolveBase,
     SolveTriangular,
@@ -1026,17 +1033,69 @@ def _find_triangular_op(var):
 
     Returns a tuple (is_lower, is_upper) if triangular, otherwise None.
     """
-
+    # Case 1: Check for an explicit tag
     is_lower = getattr(var.tag, "lower_triangular", False)
     is_upper = getattr(var.tag, "upper_triangular", False)
-
     if is_lower or is_upper:
         return (is_lower, is_upper)
 
-    if var.owner and isinstance(var.owner.op, Blockwise):
-        core_op = var.owner.op.core_op
-        if isinstance(core_op, Cholesky):
-            return (core_op.lower, not core_op.lower)
+    if not var.owner:
+        return None
+
+    op = var.owner.op
+    core_op = op.core_op if isinstance(op, Blockwise) else op
+
+    # Case 2: Check for direct creator Ops
+    if isinstance(core_op, Cholesky):
+        return (core_op.lower, not core_op.lower)
+
+    if isinstance(core_op, LU | LUFactor):
+        if var.owner.outputs[1] == var:
+            return (True, False)
+        if var.owner.outputs[2] == var:
+            return (False, True)
+
+    if isinstance(core_op, QR):
+        if var.owner.outputs[1] == var:
+            return (False, True)
+
+    # pt.tri will get constant folded so no point re-writing ?
+    # if isinstance(core_op, Tri):
+    #     k_node = var.owner.inputs[2]
+    #     if isinstance(k_node, Constant) and k_node.data == 0:
+    #         print('re-writing ... ')
+    #         return (True, False)
+
+    # Case 3: tril/triu patterns which are implemented as Mul
+    if isinstance(core_op, Elemwise) and isinstance(core_op.scalar_op, ScalarMul):
+        other_inp = next(
+            (i for i in var.owner.inputs if i != var.owner.inputs[0]), None
+        )
+
+        if other_inp is not None and other_inp.owner:
+            # Check for tril pattern: Mul(x, Tri(...))
+            if isinstance(other_inp.owner.op, Tri):
+                k_node = other_inp.owner.inputs[2]
+                if isinstance(k_node, Constant) and k_node.data == 0:
+                    return (True, False)  # It's tril
+
+            # Check for triu pattern: Mul(x, Sub(1, Tri(k=-1)))
+            sub_op = other_inp.owner.op
+            if isinstance(sub_op, Elemwise) and isinstance(sub_op.scalar_op, ScalarSub):
+                sub_inputs = other_inp.owner.inputs
+                const_one = next(
+                    (i for i in sub_inputs if isinstance(i, Constant) and i.data == 1),
+                    None,
+                )
+                tri_inp = next(
+                    (i for i in sub_inputs if i.owner and isinstance(i.owner.op, Tri)),
+                    None,
+                )
+
+                if const_one is not None and tri_inp is not None:
+                    k_node = tri_inp.owner.inputs[2]
+                    if isinstance(k_node, Constant) and k_node.data == -1:
+                        return (False, True)  # It's triu
 
     return None
 
@@ -1059,4 +1118,6 @@ def rewrite_inv_to_triangular_solve(fgraph, node):
     is_lower, is_upper = triangular_info
     if is_lower or is_upper:
         new_op = TriangularInv(lower=is_lower)
-        return [new_op(A)]
+        new_inv = new_op(A)
+        copy_stack_trace(node.outputs[0], new_inv)
+        return [new_inv]

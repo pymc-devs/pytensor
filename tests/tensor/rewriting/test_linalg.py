@@ -11,8 +11,10 @@ from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph import ancestors
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
+from pytensor.tensor.basic import tril, triu
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, matmul
@@ -38,6 +40,8 @@ from pytensor.tensor.slinalg import (
     TriangularInv,
     cho_solve,
     cholesky,
+    lu,
+    qr,
     solve,
     solve_triangular,
 )
@@ -1064,42 +1068,121 @@ def test_scalar_solve_to_division_rewrite(
     )
 
 
-def test_triangular_inv_op():
+@pytest.mark.parametrize("lower", [True, False])
+def test_triangular_inv_op(lower):
+    """Tests the TriangularInv Op directly."""
     x = matrix("x")
-    f_lower = function([x], Blockwise(TriangularInv(lower=True))(x))
-    f_upper = function([x], Blockwise(TriangularInv(lower=False))(x))
+    f = function([x], TriangularInv(lower=lower)(x))
 
-    # Test lower
-    a = np.tril(np.random.rand(5, 5) + 0.1)
-    a_inv = f_lower(a)
+    if lower:
+        a = np.tril(np.random.rand(5, 5) + 0.1)
+    else:
+        a = np.triu(np.random.rand(5, 5) + 0.1)
+
+    a_inv = f(a)
     expected_inv = np.linalg.inv(a)
-    np.testing.assert_allclose(
-        np.tril(a_inv), np.tril(expected_inv), rtol=1e-5, atol=1e-7
+
+    # Clean the NumPy result before comparing.
+    if lower:
+        expected_inv = np.tril(expected_inv)
+    else:
+        expected_inv = np.triu(expected_inv)
+
+    # The inverse of a triangular matrix is also triangular.
+    # We should check the full matrix, not just a part of it.
+    assert_allclose(
+        a_inv, expected_inv, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
 
-    # Test upper
-    a = np.triu(np.random.rand(5, 5) + 0.1)
-    a_inv = f_upper(a)
-    expected_inv = np.linalg.inv(a)
-    np.testing.assert_allclose(
-        np.triu(a_inv), np.triu(expected_inv), rtol=1e-5, atol=1e-7
-    )
 
-
-def test_inv_to_triangular_inv_rewrite():
+def test_triangular_inv_op_nan_on_error():
+    """
+    Tests the `on_error='nan'` functionality of the TriangularInv Op.
+    """
     x = matrix("x")
+    f_nan = function([x], TriangularInv(on_error="nan")(x))
 
-    x_chol = cholesky(x)
-    y_chol = inv(x_chol)
-    f_chol = function([x], y_chol)
-    assert any(
-        isinstance(node.op, TriangularInv)
-        or (hasattr(node.op, "core_op") and isinstance(node.op.core_op, TriangularInv))
-        for node in f_chol.maker.fgraph.apply_nodes
+    # Create a singular triangular matrix (zero on the diagonal)
+    a_singular = np.tril(np.random.rand(5, 5))
+    a_singular[2, 2] = 0
+
+    res = f_nan(a_singular)
+    assert np.all(np.isnan(res))
+
+
+def _check_op_in_graph(fgraph, op_type, present=True):
+    """Helper to check if an Op is in a graph."""
+
+    # We use type() instead of isinstance() to avoid matching subclasses
+    # (e.g., finding TriangularInv when we're looking for MatrixInverse).
+    found = any(
+        type(node.op) is op_type
+        or (hasattr(node.op, "core_op") and type(node.op.core_op) is op_type)
+        for node in fgraph.apply_nodes
     )
+    if present:
+        assert found, f"{op_type.__name__} not found in graph"
+    else:
+        assert not found, f"{op_type.__name__} unexpectedly found in graph"
 
+
+rewrite_cases = {
+    "tril": (
+        lambda x: tril(x),
+        lambda a: np.tril(a),
+    ),
+    "triu": (
+        lambda x: triu(x),
+        lambda a: np.triu(a),
+    ),
+    "cholesky": (
+        lambda x: cholesky(x),
+        lambda a: np.linalg.cholesky(a),
+    ),
+    "lu_L": (
+        lambda x: lu(x)[1],
+        lambda a: scipy.linalg.lu(a)[1],
+    ),
+    "lu_U": (
+        lambda x: lu(x)[2],
+        lambda a: scipy.linalg.lu(a)[2],
+    ),
+    "qr_R": (
+        lambda x: qr(x)[1],
+        lambda a: np.linalg.qr(a)[1],
+    ),
+}
+
+
+@pytest.mark.parametrize("case", rewrite_cases.keys())
+def test_inv_to_triangular_inv_rewrite(case):
+    """
+    Tests the rewrite of inv(triangular) -> TriangularInv.
+    """
+    x = matrix("x")
+    build_tri, _ = rewrite_cases[case]
+    x_tri = build_tri(x)
+    y_inv = inv(x_tri)
+
+    # Check graph BEFORE compilation
+    pre_compile_fgraph = FunctionGraph([x], [y_inv], clone=False)
+    _check_op_in_graph(pre_compile_fgraph, MatrixInverse, present=True)
+    _check_op_in_graph(pre_compile_fgraph, TriangularInv, present=False)
+
+    # Trigger the rewrite
+    f = function([x], y_inv)
+
+    # Check graph AFTER compilation
+    post_compile_fgraph = f.maker.fgraph
+    _check_op_in_graph(post_compile_fgraph, TriangularInv, present=True)
+    _check_op_in_graph(post_compile_fgraph, MatrixInverse, present=False)
+
+    # Check numerical correctness
     a = np.random.rand(5, 5)
-    a = np.dot(a, a.T) + np.eye(5) * 0.1  # ensure positive definite
-    np.testing.assert_allclose(
-        f_chol(a), np.linalg.inv(np.linalg.cholesky(a)), rtol=1e-5, atol=1e-7
+    a = np.dot(a, a.T) + np.eye(5)  # Make positive definite for Cholesky
+    pytensor_result = f(a)
+    _, numpy_tri_func = rewrite_cases[case]
+    numpy_result = np.linalg.inv(numpy_tri_func(a))
+    assert_allclose(
+        pytensor_result, numpy_result, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
