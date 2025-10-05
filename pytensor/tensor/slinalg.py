@@ -1021,23 +1021,45 @@ class TriangularInv(MatrixInverse):
     Computes the inverse of a triangular matrix.
     """
 
-    __props__ = ("lower",)
+    __props__ = ("lower", "on_error", "overwrite_a")
 
-    def __init__(self, lower=True):
+    def __init__(self, lower=True, on_error="raise", overwrite_a=False):
         self.lower = lower
+        if on_error not in ("raise", "nan"):
+            raise ValueError('on_error must be one of "raise" or "nan"')
+        self.on_error = on_error
+        self.overwrite_a = overwrite_a
+
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
 
     def perform(self, node, inputs, outputs):
         (x,) = inputs
         (z,) = outputs
         (dtrtri,) = get_lapack_funcs(("trtri",), (x,))
         inv, info = dtrtri(x, lower=self.lower, overwrite_c=True)
-        if info > 0:
-            raise np.linalg.LinAlgError("Singular matrix")
-        elif info < 0:
-            raise ValueError(
-                "illegal value in %d-th argument of internal trtri" % -info
-            )
+        if info != 0:
+            if self.on_error == "nan":
+                z[0] = np.full_like(x, np.nan)
+                return
+            elif info > 0:
+                raise np.linalg.LinAlgError("Singular matrix")
+            elif info < 0:
+                raise ValueError(
+                    f"illegal value in {-info}-th argument of internal trtri"
+                )
         z[0] = inv
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        """
+        Allows this Op to overwrite its input buffer with its output.
+        """
+        if not allowed_inplace_inputs:
+            return self
+
+        new_props = self._props_dict()
+        new_props["overwrite_a"] = True
+        return type(self)(**new_props)
 
 
 class Solve(SolveBase):
