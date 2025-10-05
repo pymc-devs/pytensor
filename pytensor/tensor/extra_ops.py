@@ -1566,7 +1566,7 @@ def broadcast_shape_iter(
             (one,) * (max_dims - len(a))
             + tuple(
                 one
-                if sh == 1 or isinstance(sh, Constant) and sh.value == 1
+                if sh == 1 or isinstance(sh, Constant) and sh.data == 1
                 else (ps.as_scalar(sh) if not isinstance(sh, Variable) else sh)
                 for sh in a
             )
@@ -1605,7 +1605,7 @@ def broadcast_shape_iter(
             const_nb_shapes: set[Variable] = set()
             for shape in non_bcast_shapes:
                 if isinstance(shape, Constant):
-                    const_nb_shapes.add(shape.value.item())
+                    const_nb_shapes.add(shape.data.item())
                 else:
                     nonconst_nb_shapes.add(shape)
 

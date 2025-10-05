@@ -507,7 +507,7 @@ class Function:
                         # there is no need to refeed the default value.
                         assert not refeed
                     else:
-                        c.value = value
+                        c.data = value
                 c.required = required
                 c.implicit = input.implicit
                 # this is a count of how many times the input has been
@@ -530,7 +530,7 @@ class Function:
         self.inv_finder = inv_finder
 
         # this class is important in overriding the square-bracket notation:
-        #     fn.value[x]
+        #     fn.data[x]
         # self reference is available via the closure on the class
         class ValueAttribute:
             def __getitem__(self, item):
@@ -545,7 +545,7 @@ class Function:
                         "for duplicates."
                     )
                 if isinstance(s, Container):
-                    return s.value
+                    return s.data
                 else:
                     raise NotImplementedError
 
@@ -563,7 +563,7 @@ class Function:
                         "for duplicates."
                     )
                 if isinstance(s, Container):
-                    s.value = value
+                    s.data = value
                     s.provided += 1
                 else:
                     s(value)
@@ -1625,11 +1625,11 @@ class FunctionMaker:
         self.name = name
         self.trust_input = trust_input
 
-        self.required = [(i.value is None) for i in self.inputs]
+        self.required = [(i.data is None) for i in self.inputs]
         self.refeed = [
             (
-                i.value is not None
-                and not isinstance(i.value, Container)
+                i.data is not None
+                and not isinstance(i.data, Container)
                 and i.update is None
             )
             for i in self.inputs
@@ -1899,10 +1899,10 @@ def convert_function_input(input):
             if len(input) == 1:
                 return input[0]
             elif len(input) == 2:
-                input, value = input
+                input, data = input
                 if name is not None:
                     input.name = name
-                input.value = value
+                input.data = data
                 return input
         else:
             raise TypeError(f"The input specification is not valid: {input}")
