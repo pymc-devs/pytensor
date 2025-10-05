@@ -84,7 +84,7 @@ jobs:
         install-mlx: [0]
         install-xarray: [0]
         part:
-          - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/xtensor"
+          - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/xtensor --ignore=tests/link/mlx"
           - "tests/scan"
           - "tests/tensor --ignore=tests/tensor/rewriting --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_inplace.py --ignore=tests/tensor/conv --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math_scipy.py"
           - "tests/tensor/rewriting"
@@ -152,7 +152,7 @@ jobs:
             float32: 0
             part: "tests/xtensor"
           - install-mlx: 1
-            os: "ubuntu-latest"
+            os: "macos-15"
             python-version: "3.10"
             numpy-version: ">=2.0"
             fast-compile: 0
@@ -178,7 +178,7 @@ jobs:
           environment-name: pytensor-test
           micromamba-version: "1.5.10-0" # until https://github.com/mamba-org/setup-micromamba/issues/225 is resolved
           init-shell: bash
-          post-cleanup: "all"
+          post-cleanup: "none"
           create-args: python=${{ matrix.python-version }}
 
       - name: Create matrix id
@@ -266,7 +266,7 @@ jobs:
           environment-name: pytensor-test
           micromamba-version: "1.5.10-0" # until https://github.com/mamba-org/setup-micromamba/issues/225 is resolved
           init-shell: bash
-          post-cleanup: "all"
+          post-cleanup: "none"
       - name: Install dependencies
         shell: micromamba-shell {0}
         run: |
