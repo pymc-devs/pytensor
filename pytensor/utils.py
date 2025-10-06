@@ -201,9 +201,8 @@ def hash_from_code(msg: str | bytes) -> str:
     # but Python 3 (unicode) strings don't.
     if isinstance(msg, str):
         msg = msg.encode()
-    # Python 3 does not like module names that start with
-    # a digit.
-    return "m" + hashlib.sha256(msg).hexdigest()
+    # Python 3 does not like module names that start with a digit.
+    return f"m{hashlib.sha256(msg).hexdigest()}"
 
 
 def uniq(seq: Sequence) -> list:
