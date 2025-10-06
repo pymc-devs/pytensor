@@ -240,5 +240,5 @@ jobs:
           name: universal_wheel
           path: dist
 
-      - uses: pypa/gh-action-pypi-publish@v1.12.4
+      - uses: pypa/gh-action-pypi-publish@v1.13.0
         # Implicitly attests that the packages were uploaded in the context of this workflow.
