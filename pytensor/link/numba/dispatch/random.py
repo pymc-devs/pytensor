@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from copy import copy, deepcopy
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent
 
 import numba
@@ -12,6 +13,7 @@ from numba.core.extending import overload
 import pytensor.tensor.random.basic as ptr
 from pytensor.graph import Apply
 from pytensor.graph.op import Op
+from pytensor.link.numba.cache import register_funcify_and_cache_key
 from pytensor.link.numba.compile import numba_njit
 from pytensor.link.numba.dispatch.basic import direct_cast, numba_funcify
 from pytensor.link.numba.dispatch.vectorize_codegen import (
@@ -91,7 +93,7 @@ def numba_core_rv_default(op, node):
 def numba_core_BernoulliRV(op, node):
     out_dtype = node.outputs[1].type.numpy_dtype
 
-    @numba_njit()
+    @numba_njit
     def random(rng, p):
         return (
             direct_cast(0, out_dtype)
@@ -395,7 +397,7 @@ def numba_funcify_RandomVariable_core(op: RandomVariable, **kwargs):
     )
 
 
-@numba_funcify.register
+@register_funcify_and_cache_key(RandomVariableWithCoreShape)
 def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs):
     core_shape = node.inputs[0]
 
@@ -447,4 +449,15 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     def ov_random(core_shape, rng, size, *dist_params):
         return random_wrapper
 
-    return random
+    rv_op_props_dict = rv_op.props_dict() if hasattr(rv_op, "props_dict") else {}
+    random_rv_key_contents = (
+        type(op),
+        type(rv_op),
+        rv_op,
+        tuple(rv_op_props_dict.items()),
+        size_len,
+        core_shape_len,
+        inplace,
+    )
+    random_rv_key = sha256(str(random_rv_key_contents).encode()).hexdigest()
+    return random, random_rv_key

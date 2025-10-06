@@ -290,7 +290,7 @@ def test_ExtractDiag_exhaustive(k, axis1, axis2, reverse_axis):
     out = pt.diagonal(x, k, axis1, axis2)
     numba_fn = numba_funcify(out.owner.op, out.owner)
 
-    @numba_njit(no_cpython_wrapper=False)
+    @numba_njit(final_function=True)
     def wrap(x):
         return numba_fn(x)
 

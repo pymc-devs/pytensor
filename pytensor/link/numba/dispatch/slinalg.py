@@ -3,6 +3,9 @@ import warnings
 import numpy as np
 
 from pytensor import config
+from pytensor.link.numba.cache import (
+    register_funcify_default_op_cache_key,
+)
 from pytensor.link.numba.compile import numba_njit
 from pytensor.link.numba.dispatch.basic import numba_funcify
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
@@ -119,7 +122,7 @@ def numba_funcify_LU(op, node, **kwargs):
     if dtype in complex_dtypes:
         NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
-    @numba_njit(inline="always")
+    @numba_njit
     def lu(a):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
@@ -181,11 +184,10 @@ def numba_funcify_LUFactor(op, node, **kwargs):
     return lu_factor
 
 
-@numba_funcify.register(BlockDiagonal)
+@register_funcify_default_op_cache_key(BlockDiagonal)
 def numba_funcify_BlockDiagonal(op, node, **kwargs):
     dtype = node.outputs[0].dtype
 
-    # TODO: Why do we always inline all functions? It doesn't work with starred args, so can't use it in this case.
     @numba_njit
     def block_diag(*arrs):
         shapes = np.array([a.shape for a in arrs], dtype="int")
@@ -251,7 +253,8 @@ def numba_funcify_Solve(op, node, **kwargs):
         res = solve_fn(a, b, lower, overwrite_a, overwrite_b, check_finite, transposed)
         return res
 
-    return solve
+    # We cannot cache LAPACK functions
+    return solve, None
 
 
 @numba_funcify.register(SolveTriangular)
@@ -292,7 +295,8 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
         return res
 
-    return solve_triangular
+    # We cannot cache LAPACK functions
+    return solve_triangular, None
 
 
 @numba_funcify.register(CholeskySolve)
@@ -321,7 +325,8 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
             c, b, lower=lower, overwrite_b=overwrite_b, check_finite=check_finite
         )
 
-    return cho_solve
+    # We cannot cache LAPACK functions
+    return cho_solve, None
 
 
 @numba_funcify.register(QR)
@@ -414,4 +419,5 @@ def numba_funcify_QR(op, node, **kwargs):
                 f"QR mode={mode}, pivoting={pivoting} not supported in numba mode."
             )
 
-    return qr
+    # We cannot cache LAPACK functions
+    return qr, None

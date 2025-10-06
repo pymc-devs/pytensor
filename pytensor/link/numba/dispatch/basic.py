@@ -1,7 +1,10 @@
 import operator
 import sys
 import warnings
+from collections.abc import Callable
 from functools import singledispatch
+from hashlib import sha256
+from pickle import dumps
 
 import numba
 import numpy as np
@@ -16,10 +19,18 @@ from pytensor.compile import NUMBA
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.ops import DeepCopyOp
+from pytensor.graph import Constant
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.op import Op
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.cache import (
+    numba_njit_and_cache,
+    register_funcify_and_cache_key,
+    register_funcify_default_op_cache_key,
+)
 from pytensor.link.numba.compile import (
     get_numba_type,
+    numba_funcify,
     numba_njit,
 )
 from pytensor.link.utils import fgraph_to_python
@@ -211,15 +222,59 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
     return perform
 
 
-@singledispatch
-def numba_funcify(op, node=None, storage_map=None, **kwargs):
-    """Generate a numba function for a given op and apply node.
-
-    The resulting function will usually use the `no_cpython_wrapper`
-    argument in numba, so it can not be called directly from python,
-    but only from other jit functions.
-    """
+@numba_funcify.register(Op)
+def numba_funcify_fallback(
+    op, node=None, storage_map=None, **kwargs
+) -> Callable | tuple[Callable, str | int | None]:
     return generate_fallback_impl(op, node, storage_map, **kwargs)
+
+
+def key_for_constant(data):
+    """Create a cache key for a constant value."""
+    # TODO: This is just a placeholder
+    if isinstance(data, (int | float | bool | type(None))):
+        return str(data)
+    try:
+        # For NumPy arrays
+        return sha256(data.tobytes()).hexdigest()
+    except AttributeError:
+        # Fallback for other types
+        return sha256(dumps(data)).hexdigest()
+
+
+@register_funcify_and_cache_key(FunctionGraph)
+def numba_funcify_FunctionGraph(
+    fgraph,
+    node=None,
+    fgraph_name="numba_funcified_fgraph",
+    **kwargs,
+):
+    cache_keys = []
+
+    def op_conversion_and_key_collection(*args, **kwargs):
+        func, key = numba_njit_and_cache(*args, **kwargs)
+        cache_keys.append(key)
+        return func
+
+    def type_conversion_and_key_collection(value, variable, **kwargs):
+        if isinstance(variable, Constant):
+            cache_keys.append(key_for_constant(value))
+        return numba_typify(value, variable=variable, **kwargs)
+
+    py_func = fgraph_to_python(
+        fgraph,
+        op_conversion_fn=op_conversion_and_key_collection,
+        type_conversion_fn=type_conversion_and_key_collection,
+        fgraph_name=fgraph_name,
+        **kwargs,
+    )
+    if any(key is None for key in cache_keys):
+        fgraph_key = None
+    else:
+        fgraph_key = sha256(
+            str((tuple(cache_keys), len(fgraph.inputs), len(fgraph.outputs))).encode()
+        ).hexdigest()
+    return numba_njit(py_func), fgraph_key
 
 
 @numba_funcify.register(OpFromGraph)
@@ -254,23 +309,7 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
     return opfromgraph
 
 
-@numba_funcify.register(FunctionGraph)
-def numba_funcify_FunctionGraph(
-    fgraph,
-    node=None,
-    fgraph_name="numba_funcified_fgraph",
-    **kwargs,
-):
-    return fgraph_to_python(
-        fgraph,
-        numba_funcify,
-        type_conversion_fn=numba_typify,
-        fgraph_name=fgraph_name,
-        **kwargs,
-    )
-
-
-@numba_funcify.register(DeepCopyOp)
+@register_funcify_default_op_cache_key(DeepCopyOp)
 def numba_funcify_DeepCopyOp(op, node, **kwargs):
     if isinstance(node.inputs[0].type, TensorType):
 
@@ -287,7 +326,7 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
     return deepcopy_fn
 
 
-@numba_funcify.register(MakeSlice)
+@register_funcify_default_op_cache_key(MakeSlice)
 def numba_funcify_MakeSlice(op, **kwargs):
     @numba_njit
     def makeslice(*x):
@@ -296,7 +335,7 @@ def numba_funcify_MakeSlice(op, **kwargs):
     return makeslice
 
 
-@numba_funcify.register(SortOp)
+@register_funcify_default_op_cache_key(SortOp)
 def numba_funcify_SortOp(op, node, **kwargs):
     @numba_njit
     def sort_f(a, axis):
@@ -320,29 +359,8 @@ def numba_funcify_SortOp(op, node, **kwargs):
     return sort_f
 
 
-@numba_funcify.register(ArgSortOp)
+@register_funcify_default_op_cache_key(ArgSortOp)
 def numba_funcify_ArgSortOp(op, node, **kwargs):
-    def argsort_f_kind(kind):
-        @numba_njit
-        def argort_vec(X, axis):
-            axis = axis.item()
-
-            Y = np.swapaxes(X, axis, 0)
-            result = np.empty_like(Y, dtype="int64")
-
-            indices = list(np.ndindex(Y.shape[1:]))
-
-            for idx in indices:
-                result[(slice(None), *idx)] = np.argsort(
-                    Y[(slice(None), *idx)], kind=kind
-                )
-
-            result = np.swapaxes(result, 0, axis)
-
-            return result
-
-        return argort_vec
-
     kind = op.kind
 
     if kind not in ["quicksort", "mergesort"]:
@@ -355,10 +373,26 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
             UserWarning,
         )
 
-    return argsort_f_kind(kind)
+    @numba_njit
+    def argort(X, axis):
+        axis = axis.item()
+
+        Y = np.swapaxes(X, axis, 0)
+        result = np.empty_like(Y, dtype="int64")
+
+        indices = list(np.ndindex(Y.shape[1:]))
+
+        for idx in indices:
+            result[(slice(None), *idx)] = np.argsort(Y[(slice(None), *idx)], kind=kind)
+
+        result = np.swapaxes(result, 0, axis)
+
+        return result
+
+    return argort
 
 
-@numba_funcify.register(Dot)
+@register_funcify_default_op_cache_key(Dot)
 def numba_funcify_Dot(op, node, **kwargs):
     # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
     x, y = node.inputs
@@ -405,7 +439,7 @@ def numba_funcify_Dot(op, node, **kwargs):
     return dot_with_cast
 
 
-@numba_funcify.register(BatchedDot)
+@register_funcify_default_op_cache_key(BatchedDot)
 def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
 
@@ -423,7 +457,7 @@ def numba_funcify_BatchedDot(op, node, **kwargs):
     return batched_dot
 
 
-@numba_funcify.register(IfElse)
+@register_funcify_default_op_cache_key(IfElse)
 def numba_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
 
@@ -452,7 +486,7 @@ def numba_funcify_IfElse(op, **kwargs):
     return ifelse
 
 
-@numba_funcify.register(Nonzero)
+@register_funcify_default_op_cache_key(Nonzero)
 def numba_funcify_Nonzero(op, node, **kwargs):
     @numba_njit
     def nonzero(a):

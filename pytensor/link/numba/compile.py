@@ -1,4 +1,6 @@
 import warnings
+from collections.abc import Callable
+from functools import singledispatch
 
 import numba
 import numpy as np
@@ -8,7 +10,6 @@ from numba.core.extending import register_jitable
 
 from pytensor import config
 from pytensor.graph import Apply, FunctionGraph, Type
-from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.scalar import ScalarType
 from pytensor.sparse import SparseTensorType
 from pytensor.tensor import TensorType
@@ -55,6 +56,19 @@ def numba_njit(*args, fastmath=None, final_function: bool = False, **kwargs):
         return func(*args, fastmath=fastmath, **kwargs)
 
 
+@singledispatch
+def numba_funcify(
+    typ, node=None, storage_map=None, **kwargs
+) -> Callable | tuple[Callable, str | int | None]:
+    """Generate a numba function for a given op and apply node (or Fgraph).
+
+    The resulting function will usually use the `no_cpython_wrapper`
+    argument in numba, so it can not be called directly from python,
+    but only from other jit functions.
+    """
+    raise NotImplementedError(f"Numba funcify not implemented for type {typ}")
+
+
 def get_numba_type(
     pytensor_type: Type,
     layout: str = "A",
@@ -88,6 +102,8 @@ def get_numba_type(
         numba_dtype = numba.from_dtype(dtype)
         return numba_dtype
     elif isinstance(pytensor_type, SparseTensorType):
+        from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
+
         dtype = pytensor_type.numpy_dtype
         numba_dtype = numba.from_dtype(dtype)
         if pytensor_type.format == "csr":

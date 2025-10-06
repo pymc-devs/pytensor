@@ -48,7 +48,7 @@ def numba_funcify_Det(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)
 
-    @numba_njit(inline="always")
+    @numba_njit
     def det(x):
         return np.array(np.linalg.det(inputs_cast(x))).astype(out_dtype)
 
@@ -115,7 +115,7 @@ def numba_funcify_Eigh(op, node, **kwargs):
 
     else:
 
-        @numba_njit(inline="always")
+        @numba_njit
         def eigh(x):
             return np.linalg.eigh(x)
 
@@ -127,7 +127,7 @@ def numba_funcify_MatrixInverse(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)
 
-    @numba_njit(inline="always")
+    @numba_njit
     def matrix_inverse(x):
         return np.linalg.inv(inputs_cast(x)).astype(out_dtype)
 
@@ -139,7 +139,7 @@ def numba_funcify_MatrixPinv(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)
 
-    @numba_njit(inline="always")
+    @numba_njit
     def matrixpinv(x):
         return np.linalg.pinv(inputs_cast(x)).astype(out_dtype)
 
