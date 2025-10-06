@@ -3,6 +3,10 @@ import os
 import pytest
 
 
+# Using pytest_plugins causes `tests/link/c/test_cmodule.py::test_cache_versioning` to fail
+# pytest_plugins = ["tests.fixtures"]
+
+
 def pytest_sessionstart(session):
     os.environ["PYTENSOR_FLAGS"] = ",".join(
         [

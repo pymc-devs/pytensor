@@ -13,6 +13,7 @@ from pytensor.compile.mode import Mode
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.tensor.math import Max
+from tests.fixtures import *  # noqa: F403
 
 
 opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
@@ -75,3 +76,72 @@ def test_careduce_performance(careduce_fn, numpy_fn, axis, inputs, input_vals):
 
     # FIXME: Why are we asserting >=? Numba could be doing worse than numpy!
     assert mean_numba_time / mean_numpy_time >= 0.75
+
+
+@pytest.mark.parametrize("cache", (False, True))
+def test_radon_model_compile_repeatedly_numba_benchmark(cache, radon_model, benchmark):
+    joined_inputs, [model_logp, model_dlogp] = radon_model
+    rng = np.random.default_rng(1)
+    x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
+
+    def compile_and_call_once():
+        with config.change_flags(numba__cache=cache):
+            fn = function(
+                [joined_inputs],
+                [model_logp, model_dlogp],
+                mode="NUMBA",
+                trust_input=True,
+            )
+            fn(x)
+
+    benchmark.pedantic(compile_and_call_once, rounds=5, iterations=1)
+
+
+@pytest.mark.parametrize("cache", (False, True))
+def test_radon_model_compile_variants_numba_benchmark(
+    cache, radon_model, radon_model_variants, benchmark
+):
+    """Test compilation speed when a slightly variant of a function is compiled each time.
+
+    This test more realistically simulates a use case where a model is recompiled
+    multiple times with small changes, such as in an interactive environment.
+
+    NOTE: For this test to be meaningful on subsequent runs, the cache must be cleared
+    """
+    joined_inputs, [model_logp, model_dlogp] = radon_model
+    rng = np.random.default_rng(1)
+    x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
+
+    # Compile base function once to populate the cache
+    fn = function(
+        [joined_inputs], [model_logp, model_dlogp], mode="NUMBA", trust_input=True
+    )
+    fn(x)
+
+    def compile_and_call_once():
+        with config.change_flags(numba__cache=cache):
+            for joined_inputs, [model_logp, model_dlogp] in radon_model_variants:
+                fn = function(
+                    [joined_inputs],
+                    [model_logp, model_dlogp],
+                    mode="NUMBA",
+                    trust_input=True,
+                )
+                fn(x)
+
+    benchmark.pedantic(compile_and_call_once, rounds=1, iterations=1)
+
+
+@pytest.mark.parametrize("cache", (False, True))
+def test_radon_model_call_numba_benchmark(cache, radon_model, benchmark):
+    joined_inputs, [model_logp, model_dlogp] = radon_model
+
+    with config.change_flags(numba__cache=cache):
+        fn = function(
+            [joined_inputs], [model_logp, model_dlogp], mode="NUMBA", trust_input=True
+        )
+        rng = np.random.default_rng(1)
+    x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
+    fn(x)  # warmup
+
+    benchmark.pedantic(fn, (x,), rounds=10_000, iterations=10)

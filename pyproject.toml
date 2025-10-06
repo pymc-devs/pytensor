@@ -150,7 +150,7 @@ lines-after-imports = 2
 "pytensor/misc/check_duplicate_key.py" = ["T201"]
 "pytensor/misc/check_blas.py" = ["T201"]
 "pytensor/bin/pytensor_cache.py" = ["T201"]
-# For the tests we skip because `pytest.importorskip` is used:
+# For the tests we skip `E402` because `pytest.importorskip` is used:
 "tests/link/jax/test_scalar.py" = ["E402"]
 "tests/link/jax/test_tensor_basic.py" = ["E402"]
 "tests/link/numba/test_basic.py" = ["E402"]
