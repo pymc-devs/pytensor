@@ -380,12 +380,12 @@ def add_compile_configvars():
             "vm_nogc",
             "cvm_nogc",
             "jax",
-            "numba",
+            "numba_vm",
         ]
     else:
         # g++ is not present or the user disabled it,
         # linker should default to python only.
-        linker_options = ["py", "vm", "vm_nogc", "jax", "numba"]
+        linker_options = ["py", "vm", "vm_nogc", "cvm" "jax", "numba", "numba_vm"]
         if type(config).cxx.is_default:
             # If the user provided an empty value for cxx, do not warn.
             _logger.warning(

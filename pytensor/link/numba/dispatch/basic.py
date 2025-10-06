@@ -280,7 +280,7 @@ def numba_funcify_FunctionGraph(
     # TODO: Create hash key for whole graph
     return fgraph_to_python(
         fgraph,
-        op_conversion_fn=numba_funcify_njit if jit_nodes else numba_funcify_wrapper,
+        op_conversion_fn=numba_funcify_njit,  # if jit_nodes else numba_funcify_wrapper,
         type_conversion_fn=numba_typify,
         fgraph_name=fgraph_name,
         **kwargs,
