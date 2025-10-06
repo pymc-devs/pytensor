@@ -6,6 +6,7 @@ import pytensor.tensor as pt
 import pytensor.tensor.basic as ptb
 from pytensor import config, function
 from pytensor.compile import get_mode
+from pytensor.link.numba.compile import numba_njit
 from pytensor.scalar import Add
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
@@ -280,8 +281,6 @@ def test_ExtractDiag(val, offset):
 )
 @pytest.mark.parametrize("reverse_axis", (False, True))
 def test_ExtractDiag_exhaustive(k, axis1, axis2, reverse_axis):
-    from pytensor.link.numba.dispatch.basic import numba_njit
-
     if reverse_axis:
         axis1, axis2 = axis2, axis1
 

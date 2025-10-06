@@ -4,7 +4,7 @@ import base64
 import pickle
 from collections.abc import Callable, Sequence
 from textwrap import indent
-from typing import Any, cast
+from typing import Any
 
 import numba
 import numpy as np
@@ -15,7 +15,7 @@ from numba.core.base import BaseContext
 from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
-from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.compile import numba_njit
 from pytensor.link.utils import compile_function_src
 
 
@@ -55,7 +55,7 @@ def store_core_outputs({inp_signature}, {out_signature}):
     func = compile_function_src(
         func_src, "store_core_outputs", {**globals(), **global_env}
     )
-    return cast(Callable, numba_basic.numba_njit(func))
+    return numba_njit(func)
 
 
 _jit_options = {
@@ -74,7 +74,7 @@ _jit_options = {
 @numba.extending.intrinsic(jit_options=_jit_options, prefer_literal=True)
 def _vectorized(
     typingctx,
-    scalar_func,
+    core_func,
     input_bc_patterns,
     output_bc_patterns,
     output_dtypes,
@@ -85,7 +85,7 @@ def _vectorized(
     size_type,
 ):
     arg_types = [
-        scalar_func,
+        core_func,
         input_bc_patterns,
         output_bc_patterns,
         output_dtypes,
@@ -173,16 +173,6 @@ def _vectorized(
         )
         out_types[output_idx] = output_type
 
-    core_signature = typingctx.resolve_function_type(
-        scalar_func,
-        [
-            *constant_inputs_types,
-            *core_input_types,
-            *core_out_types,
-        ],
-        {},
-    )
-
     ret_type = types.Tuple(out_types)
 
     if len(output_dtypes) == 1:
@@ -239,11 +229,21 @@ def _vectorized(
             output_core_shapes,
         )
 
+        core_signature = typingctx.resolve_function_type(
+            core_func,
+            [
+                *constant_inputs_types,
+                *core_input_types,
+                *core_out_types,
+            ],
+            {},
+        )
+
         make_loop_call(
             typingctx,
             ctx,
             builder,
-            scalar_func,
+            core_func,
             core_signature,
             iter_shape,
             constant_inputs,

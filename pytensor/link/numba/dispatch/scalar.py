@@ -4,9 +4,9 @@ import numpy as np
 
 from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Variable
+from pytensor.link.numba.compile import create_numba_signature, numba_njit
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    create_numba_signature,
     generate_fallback_impl,
     numba_funcify,
 )
@@ -134,7 +134,7 @@ def {scalar_op_fn_name}({", ".join(input_names)}):
 
     signature = create_numba_signature(node, force_scalar=True)
 
-    return numba_basic.numba_njit(
+    return numba_njit(
         signature,
         # Functions that call a function pointer can't be cached
         cache=False,
@@ -143,7 +143,7 @@ def {scalar_op_fn_name}({", ".join(input_names)}):
 
 @numba_funcify.register(Switch)
 def numba_funcify_Switch(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def switch(condition, x, y):
         if condition:
             return x
@@ -174,7 +174,7 @@ def numba_funcify_Add(op, node, **kwargs):
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "add", "+")
 
-    return numba_basic.numba_njit(signature)(nary_add_fn)
+    return numba_njit(signature)(nary_add_fn)
 
 
 @numba_funcify.register(Mul)
@@ -182,14 +182,14 @@ def numba_funcify_Mul(op, node, **kwargs):
     signature = create_numba_signature(node, force_scalar=True)
     nary_add_fn = binary_to_nary_func(node.inputs, "mul", "*")
 
-    return numba_basic.numba_njit(signature)(nary_add_fn)
+    return numba_njit(signature)(nary_add_fn)
 
 
 @numba_funcify.register(Cast)
 def numba_funcify_Cast(op, node, **kwargs):
     dtype = np.dtype(op.o_type.dtype)
 
-    @numba_basic.numba_njit
+    @numba_njit
     def cast(x):
         return numba_basic.direct_cast(x, dtype)
 
@@ -199,7 +199,7 @@ def numba_funcify_Cast(op, node, **kwargs):
 @numba_funcify.register(Identity)
 @numba_funcify.register(TypeCastingOp)
 def numba_funcify_type_casting(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def identity(x):
         return x
 
@@ -208,7 +208,7 @@ def numba_funcify_type_casting(op, **kwargs):
 
 @numba_funcify.register(Clip)
 def numba_funcify_Clip(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def clip(x, min_val, max_val):
         x = numba_basic.to_scalar(x)
         min_scalar = numba_basic.to_scalar(min_val)
@@ -230,7 +230,7 @@ def numba_funcify_Composite(op, node, **kwargs):
 
     _ = kwargs.pop("storage_map", None)
 
-    composite_fn = numba_basic.numba_njit(signature)(
+    composite_fn = numba_njit(signature)(
         numba_funcify(op.fgraph, squeeze_output=True, **kwargs)
     )
     return composite_fn
@@ -238,7 +238,7 @@ def numba_funcify_Composite(op, node, **kwargs):
 
 @numba_funcify.register(Second)
 def numba_funcify_Second(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def second(x, y):
         return y
 
@@ -247,7 +247,7 @@ def numba_funcify_Second(op, node, **kwargs):
 
 @numba_funcify.register(Reciprocal)
 def numba_funcify_Reciprocal(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def reciprocal(x):
         # TODO FIXME: This isn't really the behavior or `numpy.reciprocal` when
         # `x` is an `int`
@@ -258,7 +258,7 @@ def numba_funcify_Reciprocal(op, node, **kwargs):
 
 @numba_funcify.register(Sigmoid)
 def numba_funcify_Sigmoid(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def sigmoid(x):
         return 1 / (1 + np.exp(-x))
 
@@ -267,7 +267,7 @@ def numba_funcify_Sigmoid(op, node, **kwargs):
 
 @numba_funcify.register(GammaLn)
 def numba_funcify_GammaLn(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def gammaln(x):
         return math.lgamma(x)
 
@@ -276,7 +276,7 @@ def numba_funcify_GammaLn(op, node, **kwargs):
 
 @numba_funcify.register(Log1mexp)
 def numba_funcify_Log1mexp(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def logp1mexp(x):
         if x < np.log(0.5):
             return np.log1p(-np.exp(x))
@@ -288,7 +288,7 @@ def numba_funcify_Log1mexp(op, node, **kwargs):
 
 @numba_funcify.register(Erf)
 def numba_funcify_Erf(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def erf(x):
         return math.erf(x)
 
@@ -297,7 +297,7 @@ def numba_funcify_Erf(op, **kwargs):
 
 @numba_funcify.register(Erfc)
 def numba_funcify_Erfc(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def erfc(x):
         return math.erfc(x)
 
@@ -308,7 +308,7 @@ def numba_funcify_Erfc(op, **kwargs):
 def numba_funcify_Softplus(op, node, **kwargs):
     out_dtype = np.dtype(node.outputs[0].type.dtype)
 
-    @numba_basic.numba_njit
+    @numba_njit
     def softplus(x):
         if x < -37.0:
             value = np.exp(x)
