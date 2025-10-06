@@ -269,25 +269,18 @@ def numba_funcify_Elemwise(op, node, **kwargs):
 
     scalar_inputs = [get_scalar_type(dtype=input.dtype)() for input in node.inputs]
     scalar_node = op.scalar_op.make_node(*scalar_inputs)
-    scalar_op_fn = numba_funcify(
+    scalar_op_fn_and_key = numba_funcify(
         op.scalar_op,
         node=scalar_node,
         parent_node=node,
         **kwargs,
     )
+    if isinstance(scalar_op_fn_and_key, tuple):
+        scalar_op_fn, scalar_op_key = scalar_op_fn_and_key
+    else:
+        # Assume op can be cached
+        scalar_op_fn, scalar_op_key = scalar_op_fn_and_key, 0
 
-    # TODO: Proper key
-    core_op_key = "_".join(
-        map(
-            str,
-            (
-                op,
-                op.scalar_op,
-                tuple(op.inplace_pattern.items()),
-                tuple(getattr(op.scalar_op, "props_dict", lambda: {})().items()),
-            ),
-        )
-    )
     core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
@@ -339,7 +332,23 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     def ov_elemwise(*inputs):
         return elemwise_wrapper
 
-    elemwise_key = sha256(f"Elemwise2{core_op_key}".encode()).hexdigest()
+    if scalar_op_key is None:
+        # We were told the scalar op cannot be cached
+        elemwise_key = None
+    else:
+        elemwise_key = "_".join(
+            map(
+                str,
+                (
+                    type(op),
+                    type(op.scalar_op),
+                    tuple(op.inplace_pattern.items()),
+                    tuple(getattr(op.scalar_op, "props_dict", lambda: {})().items()),
+                    scalar_op_key,
+                ),
+            )
+        )
+        elemwise_key = sha256(elemwise_key.encode()).hexdigest()
     return elemwise, elemwise_key
 
 

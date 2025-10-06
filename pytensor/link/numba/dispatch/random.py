@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from copy import copy, deepcopy
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent
 
 import numba
@@ -408,7 +409,13 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     core_shape_len = get_vector_length(core_shape)
     inplace = rv_op.inplace
 
-    core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
+    core_rv_fn_and_key = numba_core_rv_funcify(rv_op, rv_node)
+    if isinstance(core_rv_fn_and_key, tuple):
+        core_rv_fn, core_rv_key = core_rv_fn_and_key
+    else:
+        # Assume we can cache core_op_fn
+        core_rv_fn, core_rv_key = core_rv_fn_and_key, 0
+
     nin = 1 + len(dist_params)  # rng + params
     core_op_fn = store_core_outputs(core_rv_fn, nin=nin, nout=1)
 
@@ -448,8 +455,20 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     def ov_random(core_shape, rng, size, *dist_params):
         return random_wrapper
 
-    return random, str(
-        type(
-            rv_op,
+    if core_rv_key is None:
+        random_rv_key = None
+    else:
+        random_rv_key = "_".join(
+            map(
+                str,
+                (
+                    type(op),
+                    type(rv_op),
+                    tuple(getattr(rv_op, "props_dict", lambda: {})().items()),
+                    core_rv_key,
+                ),
+            )
         )
-    )
+        random_rv_key = sha256(random_rv_key.encode()).hexdigest()
+
+    return random, random_rv_key

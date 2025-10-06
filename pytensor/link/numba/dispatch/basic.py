@@ -213,7 +213,8 @@ def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
             ret = py_perform_return(inputs)
         return ret
 
-    return perform
+    # Assume we can't cache python functions
+    return perform, None
 
 
 @singledispatch
@@ -276,6 +277,7 @@ def numba_funcify_FunctionGraph(
             return result[0]
         return result
 
+    # TODO: Create hash key for whole graph
     return fgraph_to_python(
         fgraph,
         op_conversion_fn=numba_funcify_njit if jit_nodes else numba_funcify_wrapper,

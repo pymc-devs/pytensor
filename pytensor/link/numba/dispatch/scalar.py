@@ -62,6 +62,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
     output_inner_dtype = None
 
     # Cython functions might have an additional argument
+    cython_func = None
     has_pyx_skip_dispatch = False
 
     if scalar_func_path.startswith("scipy.special"):
@@ -137,9 +138,9 @@ def {scalar_op_fn_name}({', '.join(input_names)}):
         {**globals(), **global_env},
     )
 
-    # signature = create_numba_signature(node, force_scalar=True)
-
-    return pytensor.link.numba.compile.numba_njit(scalar_op_fn)
+    # Functions that call a function pointer can't be cached
+    cache_key = None if cython_func else 0
+    return pytensor.link.numba.compile.numba_njit(scalar_op_fn), cache_key
 
 
 @numba_funcify.register(Switch)

@@ -461,7 +461,7 @@ FAST_COMPILE = Mode(
     ),
 )
 FAST_RUN = Mode(
-    "numba_vm",
+    "numba",
     RewriteDatabaseQuery(
         include=["fast_run", "numba"],
         exclude=["cxx_only", "BlasOpt", "local_careduce_fusion"],
