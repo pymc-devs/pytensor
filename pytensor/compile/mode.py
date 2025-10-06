@@ -459,8 +459,11 @@ else:
         RewriteDatabaseQuery(include=["fast_run", "py_only"]),
     )
 
+C = Mode("c", "fast_run")
+C_VM = Mode("cvm", "fast_run")
+
 NUMBA = Mode(
-    NumbaLinker(),
+    "numba",
     RewriteDatabaseQuery(
         include=["fast_run", "numba"],
         exclude=[
@@ -473,7 +476,7 @@ NUMBA = Mode(
 )
 
 JAX = Mode(
-    JAXLinker(),
+    "jax",
     RewriteDatabaseQuery(
         include=["fast_run", "jax"],
         exclude=[
@@ -489,7 +492,7 @@ JAX = Mode(
     ),
 )
 PYTORCH = Mode(
-    PytorchLinker(),
+    "pytorch",
     RewriteDatabaseQuery(
         include=["fast_run"],
         exclude=[
@@ -508,6 +511,8 @@ PYTORCH = Mode(
 predefined_modes = {
     "FAST_COMPILE": FAST_COMPILE,
     "FAST_RUN": FAST_RUN,
+    "C": C,
+    "C_VM": C_VM,
     "JAX": JAX,
     "NUMBA": NUMBA,
     "PYTORCH": PYTORCH,
