@@ -1,18 +1,47 @@
-steps:
-  - name: "Set up Micromamba"
-    uses: mamba-org/setup-micromamba@v2
-    with:
-      environment-name: pytensor-test
-      micromamba-version: "1.5.10-0"
-      init-shell: bash
-      post-cleanup: "all"
-      create-args: python=3.13
+name: "Copilot Setup Steps"
 
-  - name: "Install dependencies"
-    shell: micromamba-shell {0}
-    run: |
-      micromamba install --yes -q -c conda-forge python=3.13 mkl "numpy>=2.0" scipy pip mkl-service graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx
-      micromamba install --yes -q -c conda-forge "numba>=0.57"
-      micromamba install --yes -q -c conda-forge jax jaxlib numpyro equinox
-      pip install tfp-nightly
-      pip install -e ./
+# Automatically run the setup steps when they are changed to allow for easy validation, and
+# allow manual testing through the repository's "Actions" tab
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/copilot-setup-steps.yml
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+
+    # Set the permissions to the lowest permissions possible needed for your steps.
+    # Copilot will be given its own token for its operations.
+    permissions:
+      # If you want to clone the repository as part of your setup steps, for example to install dependencies, you'll need the `contents: read` permission. If you don't clone the repository in your setup steps, Copilot will do this for you automatically after the steps complete.
+      contents: read
+
+    # You can define any steps you want, and they will run before the agent starts.
+    # If you do not check out your code, Copilot will do this for you.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: "Set up Micromamba"
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: pytensor-test
+          micromamba-version: "1.5.10-0"
+          init-shell: bash
+          post-cleanup: "all"
+          create-args: python=3.13
+
+      - name: "Install dependencies"
+        shell: micromamba-shell {0}
+        run: |
+          micromamba install --yes -q -c conda-forge python=3.13 mkl "numpy>=2.0" scipy pip mkl-service graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx
+          micromamba install --yes -q -c conda-forge "numba>=0.57"
+          micromamba install --yes -q -c conda-forge jax jaxlib numpyro equinox
+          pip install tfp-nightly
+          pip install -e ./
