@@ -9,7 +9,7 @@ exclude: |
     )$
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: debug-statements
         exclude: |
@@ -27,7 +27,7 @@ repos:
     - id: sphinx-lint 
       args: ["."]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.3
+    rev: v0.13.3
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
