@@ -32,7 +32,6 @@ jobs:
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: pytensor-test
-          micromamba-version: "1.5.10-0"
           init-shell: bash
           post-cleanup: "all"
           create-args: python=3.13
