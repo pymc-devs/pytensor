@@ -198,6 +198,11 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
       - name: Check SDist
         run: |
           mkdir -p test-sdist
