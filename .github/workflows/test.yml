@@ -167,7 +167,6 @@ jobs:
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: pytensor-test
-          micromamba-version: "1.5.10-0" # until https://github.com/mamba-org/setup-micromamba/issues/225 is resolved
           init-shell: bash
           post-cleanup: "all"
           create-args: python=${{ matrix.python-version }}
@@ -252,7 +251,6 @@ jobs:
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: pytensor-test
-          micromamba-version: "1.5.10-0" # until https://github.com/mamba-org/setup-micromamba/issues/225 is resolved
           init-shell: bash
           post-cleanup: "all"
       - name: Install dependencies
