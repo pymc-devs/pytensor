@@ -6,8 +6,8 @@ from numba.np.linalg import ensure_lapack
 from numpy import ndarray
 from scipy import linalg
 
+from pytensor.link.numba.compile import numba_njit
 from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
     _get_underlying_float,

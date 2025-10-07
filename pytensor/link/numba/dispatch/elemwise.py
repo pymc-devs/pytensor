@@ -1,4 +1,5 @@
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent, indent
 
 import numba
@@ -6,19 +7,18 @@ import numpy as np
 from numba.core.extending import overload
 from numpy.lib.stride_tricks import as_strided
 
+import pytensor.link.numba.compile
 from pytensor.graph.op import Op
+from pytensor.link.numba.compile import compile_and_cache_numba_function_src, numba_njit
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     numba_funcify,
-    numba_njit,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
-    _jit_options,
     _vectorized,
     encode_literals,
     store_core_outputs,
 )
-from pytensor.link.utils import compile_function_src
 from pytensor.npy_2_compat import normalize_axis_index, normalize_axis_tuple
 from pytensor.scalar.basic import (
     AND,
@@ -237,7 +237,7 @@ def create_multiaxis_reducer(
     careduce_def_src += "\n\n"
     careduce_def_src += indent(f"return {return_obj}", " " * 4)
 
-    careduce_fn = compile_function_src(
+    careduce_fn = compile_and_cache_numba_function_src(
         careduce_def_src, careduce_fn_name, {**globals(), **global_env}
     )
 
@@ -249,7 +249,7 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 
     reaxis_first = (*(i for i in range(ndim) if i != axis), axis)
 
-    @numba_basic.numba_njit(boundscheck=False)
+    @pytensor.link.numba.compile.numba_njit(boundscheck=False)
     def axis_apply_fn(x):
         x_reaxis = x.transpose(reaxis_first)
 
@@ -264,18 +264,23 @@ def create_axis_apply_fn(fn, axis, ndim, dtype):
 
 @numba_funcify.register(Elemwise)
 def numba_funcify_Elemwise(op, node, **kwargs):
+    nin = len(node.inputs)
+    nout = len(node.outputs)
+
     scalar_inputs = [get_scalar_type(dtype=input.dtype)() for input in node.inputs]
     scalar_node = op.scalar_op.make_node(*scalar_inputs)
-
-    scalar_op_fn = numba_funcify(
+    scalar_op_fn_and_key = numba_funcify(
         op.scalar_op,
         node=scalar_node,
         parent_node=node,
         **kwargs,
     )
+    if isinstance(scalar_op_fn_and_key, tuple):
+        scalar_op_fn, scalar_op_key = scalar_op_fn_and_key
+    else:
+        # Assume op can be cached
+        scalar_op_fn, scalar_op_key = scalar_op_fn_and_key, 0
 
-    nin = len(node.inputs)
-    nout = len(node.outputs)
     core_op_fn = store_core_outputs(scalar_op_fn, nin=nin, nout=nout)
 
     input_bc_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
@@ -305,39 +310,46 @@ def numba_funcify_Elemwise(op, node, **kwargs):
 
     # Pure python implementation, that will be used in tests
     def elemwise(*inputs):
-        inputs = [np.asarray(input) for input in inputs]
+        Elemwise._check_runtime_broadcast(node, inputs)
         inputs_bc = np.broadcast_arrays(*inputs)
-        shape = inputs[0].shape
-        for input, bc in zip(inputs, input_bc_patterns, strict=True):
-            for length, allow_bc, iter_length in zip(
-                input.shape, bc, shape, strict=True
-            ):
-                if length == 1 and shape and iter_length != 1 and not allow_bc:
-                    raise ValueError("Broadcast not allowed.")
+        shape = inputs_bc[0].shape
 
-        outputs = [np.empty(shape, dtype=dtype) for dtype in output_dtypes]
+        if len(output_dtypes) == 1:
+            output = np.empty(shape, dtype=output_dtypes[0])
+            for idx in np.ndindex(shape):
+                output[idx] = scalar_op_fn(*(inp[idx] for inp in inputs_bc))
+            return output
 
-        for idx in np.ndindex(shape):
-            vals = [input[idx] for input in inputs_bc]
-            outs = scalar_op_fn(*vals)
-            if not isinstance(outs, tuple):
-                outs = (outs,)
-            for out, out_val in zip(outputs, outs, strict=True):
-                out[idx] = out_val
+        else:
+            outputs = [np.empty(shape, dtype=dtype) for dtype in output_dtypes]
+            for idx in np.ndindex(shape):
+                outs_vals = scalar_op_fn(*(inp[idx] for inp in inputs_bc))
+                for out, out_val in zip(outputs, outs_vals):
+                    out[idx] = out_val
+            return outputs
 
-        outputs_summed = []
-        for output, bc in zip(outputs, output_bc_patterns, strict=True):
-            axes = tuple(np.nonzero(bc)[0])
-            outputs_summed.append(output.sum(axes, keepdims=True))
-        if len(outputs_summed) != 1:
-            return tuple(outputs_summed)
-        return outputs_summed[0]
-
-    @overload(elemwise, jit_options=_jit_options)
+    @overload(elemwise)
     def ov_elemwise(*inputs):
         return elemwise_wrapper
 
-    return elemwise
+    if scalar_op_key is None:
+        # We were told the scalar op cannot be cached
+        elemwise_key = None
+    else:
+        elemwise_key = "_".join(
+            map(
+                str,
+                (
+                    type(op),
+                    type(op.scalar_op),
+                    tuple(op.inplace_pattern.items()),
+                    tuple(getattr(op.scalar_op, "props_dict", lambda: {})().items()),
+                    scalar_op_key,
+                ),
+            )
+        )
+        elemwise_key = sha256(elemwise_key.encode()).hexdigest()
+    return elemwise, elemwise_key
 
 
 @numba_funcify.register(Sum)
@@ -421,7 +433,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
     if new_order == ():
         # Special case needed because of https://github.com/numba/numba/issues/9933
 
-        @numba_basic.numba_njit
+        @pytensor.link.numba.compile.numba_njit
         def squeeze_to_0d(x):
             return as_strided(x, shape=(), strides=())
 
@@ -429,7 +441,7 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit
+        @pytensor.link.numba.compile.numba_njit
         def dimshuffle(x):
             old_shape = x.shape
             old_strides = x.strides
@@ -464,7 +476,7 @@ def numba_funcify_Softmax(op, node, **kwargs):
             add_as, 0.0, (axis,), x_at.ndim, x_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
+        jit_fn = pytensor.link.numba.compile.numba_njit(boundscheck=False)
         reduce_max = jit_fn(reduce_max_py)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
@@ -496,7 +508,7 @@ def numba_funcify_SoftmaxGrad(op, node, **kwargs):
             add_as, 0.0, (axis,), sm_at.ndim, sm_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
+        jit_fn = pytensor.link.numba.compile.numba_njit(boundscheck=False)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
         reduce_sum = np.sum
@@ -533,7 +545,7 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
             add_as, 0.0, (axis,), x_at.ndim, x_dtype, keepdims=True
         )
 
-        jit_fn = numba_basic.numba_njit(boundscheck=False)
+        jit_fn = pytensor.link.numba.compile.numba_njit(boundscheck=False)
         reduce_max = jit_fn(reduce_max_py)
         reduce_sum = jit_fn(reduce_sum_py)
     else:
@@ -559,7 +571,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
 
     if x_ndim == 0:
 
-        @numba_basic.numba_njit(inline="always")
+        @pytensor.link.numba.compile.numba_njit
         def argmax(x):
             return np.array(0, dtype="int64")
 
@@ -579,7 +591,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
         sl1 = slice(None, len(keep_axes))
         sl2 = slice(len(keep_axes), None)
 
-        @numba_basic.numba_njit
+        @pytensor.link.numba.compile.numba_njit
         def argmax(x):
             # Not-reduced axes in front
             transposed_x = np.ascontiguousarray(np.transpose(x, reaxis_order))

@@ -1838,7 +1838,6 @@ def orig_function(
             profile.compile_time += t2 - t1
             # TODO: append
             profile.nb_nodes = len(fn.maker.fgraph.apply_nodes)
-
     return fn
 
 

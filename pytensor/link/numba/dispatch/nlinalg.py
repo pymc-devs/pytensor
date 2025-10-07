@@ -3,9 +3,9 @@ import warnings
 import numba
 import numpy as np
 
-from pytensor.link.numba.dispatch import basic as numba_basic
+import pytensor.link.numba.compile
+from pytensor.link.numba.compile import get_numba_type
 from pytensor.link.numba.dispatch.basic import (
-    get_numba_type,
     int_to_float_fn,
     numba_funcify,
 )
@@ -30,14 +30,14 @@ def numba_funcify_SVD(op, node, **kwargs):
 
     if not compute_uv:
 
-        @numba_basic.numba_njit()
+        @pytensor.link.numba.compile.numba_njit()
         def svd(x):
             _, ret, _ = np.linalg.svd(inputs_cast(x), full_matrices)
             return ret
 
     else:
 
-        @numba_basic.numba_njit()
+        @pytensor.link.numba.compile.numba_njit()
         def svd(x):
             return np.linalg.svd(inputs_cast(x), full_matrices)
 
@@ -49,7 +49,7 @@ def numba_funcify_Det(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)
 
-    @numba_basic.numba_njit(inline="always")
+    @pytensor.link.numba.compile.numba_njit
     def det(x):
         return np.array(np.linalg.det(inputs_cast(x))).astype(out_dtype)
 
@@ -63,7 +63,7 @@ def numba_funcify_SLogDet(op, node, **kwargs):
 
     inputs_cast = int_to_float_fn(node.inputs, out_dtype_1)
 
-    @numba_basic.numba_njit
+    @pytensor.link.numba.compile.numba_njit
     def slogdet(x):
         sign, det = np.linalg.slogdet(inputs_cast(x))
         return (
@@ -81,7 +81,7 @@ def numba_funcify_Eig(op, node, **kwargs):
 
     inputs_cast = int_to_float_fn(node.inputs, out_dtype_1)
 
-    @numba_basic.numba_njit
+    @pytensor.link.numba.compile.numba_njit
     def eig(x):
         out = np.linalg.eig(inputs_cast(x))
         return (out[0].astype(out_dtype_1), out[1].astype(out_dtype_2))
@@ -107,7 +107,7 @@ def numba_funcify_Eigh(op, node, **kwargs):
             [get_numba_type(node.outputs[0].type), get_numba_type(node.outputs[1].type)]
         )
 
-        @numba_basic.numba_njit
+        @pytensor.link.numba.compile.numba_njit
         def eigh(x):
             with numba.objmode(ret=ret_sig):
                 out = np.linalg.eigh(x, UPLO=uplo)
@@ -116,7 +116,7 @@ def numba_funcify_Eigh(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit(inline="always")
+        @pytensor.link.numba.compile.numba_njit(inline="always")
         def eigh(x):
             return np.linalg.eigh(x)
 
@@ -128,7 +128,7 @@ def numba_funcify_MatrixInverse(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)
 
-    @numba_basic.numba_njit(inline="always")
+    @pytensor.link.numba.compile.numba_njit
     def matrix_inverse(x):
         return np.linalg.inv(inputs_cast(x)).astype(out_dtype)
 
@@ -140,7 +140,7 @@ def numba_funcify_MatrixPinv(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)
 
-    @numba_basic.numba_njit(inline="always")
+    @pytensor.link.numba.compile.numba_njit
     def matrixpinv(x):
         return np.linalg.pinv(inputs_cast(x)).astype(out_dtype)
 

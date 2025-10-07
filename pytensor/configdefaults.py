@@ -370,11 +370,22 @@ def add_compile_configvars():
 
     if rc == 0 and config.cxx != "":
         # Keep the default linker the same as the one for the mode FAST_RUN
-        linker_options = ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
+        linker_options = [
+            "cvm",
+            "c|py",
+            "py",
+            "c",
+            "c|py_nogc",
+            "vm",
+            "vm_nogc",
+            "cvm_nogc",
+            "jax",
+            "numba_vm",
+        ]
     else:
         # g++ is not present or the user disabled it,
         # linker should default to python only.
-        linker_options = ["py", "vm_nogc"]
+        linker_options = ["py", "vm", "vm_nogc", "cvm" "jax", "numba", "numba_vm"]
         if type(config).cxx.is_default:
             # If the user provided an empty value for cxx, do not warn.
             _logger.warning(
@@ -388,7 +399,7 @@ def add_compile_configvars():
         "linker",
         "Default linker used if the pytensor flags mode is Mode",
         # Not mutable because the default mode is cached after the first use.
-        EnumStr("cvm", linker_options, mutable=False),
+        EnumStr("numba_vm", linker_options, mutable=False),
         in_c_key=False,
     )
 
