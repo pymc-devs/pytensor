@@ -1323,7 +1323,7 @@ class ProfileStats:
         )
         print_stats(stats[1], stats[3])
 
-        (max_node_memory_size, _, _, _) = stats[0]
+        (_max_node_memory_size, _, _, _) = stats[0]
         (new_max_node_memory_size, _, _, _) = stats[2]
         print(
             "    Max peak memory if allow_gc=False (linker don't make a difference)",

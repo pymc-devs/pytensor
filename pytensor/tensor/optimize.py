@@ -559,7 +559,7 @@ class MinimizeOp(ScipyWrapperOp):
 
     def L_op(self, inputs, outputs, output_grads):
         x, *args = inputs
-        x_star, success = outputs
+        x_star, _success = outputs
         output_grad, _ = output_grads
 
         inner_x, *inner_args = self.fgraph.inputs

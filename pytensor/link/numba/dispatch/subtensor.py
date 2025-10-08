@@ -107,9 +107,9 @@ def {function_name}({", ".join(input_names)}):
 @numba_funcify.register(AdvancedIncSubtensor)
 def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     if isinstance(op, AdvancedSubtensor):
-        x, y, idxs = node.inputs[0], None, node.inputs[1:]
+        _x, _y, idxs = node.inputs[0], None, node.inputs[1:]
     else:
-        x, y, *idxs = node.inputs
+        _x, _y, *idxs = node.inputs
 
     basic_idxs = [
         idx
@@ -286,7 +286,7 @@ def numba_funcify_multiple_integer_vector_indexing(
 def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
     inplace = op.inplace
     set_instead_of_inc = op.set_instead_of_inc
-    x, vals, idxs = node.inputs
+    x, vals, _idxs = node.inputs
     broadcast_with_index = vals.type.ndim < x.type.ndim or vals.type.broadcastable[0]
     # TODO: Add runtime_broadcast check
 

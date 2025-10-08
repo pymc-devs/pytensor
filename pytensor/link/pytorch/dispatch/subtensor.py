@@ -24,7 +24,7 @@ def check_negative_steps(indices):
 @pytorch_funcify.register(Subtensor)
 def pytorch_funcify_Subtensor(op, node, **kwargs):
     idx_list = op.idx_list
-    x, *idxs = node.inputs
+    _x, *idxs = node.inputs
 
     if all(isinstance(idx, Constant) for idx in idxs):
         # Use constant indices to avoid graph break

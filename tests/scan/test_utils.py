@@ -159,7 +159,7 @@ def test_ScanArgs_basics_mit_sot():
         Y_t = srng.normal(mus_t[S_tm1], sigma_t, name="Y_t")
         return S_t, Y_t
 
-    (S_rv, Y_rv), scan_updates = pytensor.scan(
+    (S_rv, Y_rv), _scan_updates = pytensor.scan(
         fn=scan_fn,
         sequences=[mus_pt, sigmas_pt],
         non_sequences=[Gamma_rv],

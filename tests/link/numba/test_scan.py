@@ -343,7 +343,7 @@ def test_scan_multiple_none_output():
 
 def test_grad_sitsot():
     def get_sum_of_grad(inp):
-        scan_outputs, updates = scan(
+        scan_outputs, _updates = scan(
             fn=lambda x: x * 2, outputs_info=[inp], n_steps=5, mode="NUMBA"
         )
         return grad(scan_outputs.sum(), inp).sum()

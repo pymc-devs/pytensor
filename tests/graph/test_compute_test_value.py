@@ -219,7 +219,7 @@ class TestComputeTestValue:
             return prior_result * A
 
         # Symbolic description of the result
-        result, updates = pytensor.scan(
+        result, _updates = pytensor.scan(
             fn=fx, outputs_info=pt.ones_like(A), non_sequences=A, n_steps=k
         )
 

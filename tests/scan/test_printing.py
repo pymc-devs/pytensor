@@ -15,7 +15,7 @@ def test_debugprint_sitsot():
     A = dvector("A")
 
     # Symbolic description of the result
-    result, updates = pytensor.scan(
+    result, _updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
         outputs_info=pt.ones_like(A),
         non_sequences=A,
@@ -72,7 +72,7 @@ def test_debugprint_sitsot_no_extra_info():
     A = dvector("A")
 
     # Symbolic description of the result
-    result, updates = pytensor.scan(
+    result, _updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
         outputs_info=pt.ones_like(A),
         non_sequences=A,
@@ -132,7 +132,7 @@ def test_debugprint_nitsot():
     max_coefficients_supported = 10000
 
     # Generate the components of the polynomial
-    components, updates = pytensor.scan(
+    components, _updates = pytensor.scan(
         fn=lambda coefficient, power, free_variable: coefficient
         * (free_variable**power),
         outputs_info=None,
@@ -202,7 +202,7 @@ def test_debugprint_nested_scans():
     A = dvector("A")
 
     def compute_A_k(A, k):
-        result, updates = pytensor.scan(
+        result, _updates = pytensor.scan(
             fn=lambda prior_result, A: prior_result * A,
             outputs_info=pt.ones_like(A),
             non_sequences=A,
@@ -213,7 +213,7 @@ def test_debugprint_nested_scans():
 
         return A_k
 
-    components, updates = pytensor.scan(
+    components, _updates = pytensor.scan(
         fn=lambda c, power, some_A, some_k: c * (compute_A_k(some_A, some_k) ** power),
         outputs_info=None,
         sequences=[c, pt.arange(n)],
@@ -487,7 +487,7 @@ def test_debugprint_mitmot():
     A = dvector("A")
 
     # Symbolic description of the result
-    result, updates = pytensor.scan(
+    result, _updates = pytensor.scan(
         fn=lambda prior_result, A: prior_result * A,
         outputs_info=pt.ones_like(A),
         non_sequences=A,

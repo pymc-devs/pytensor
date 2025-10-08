@@ -407,7 +407,7 @@ class Mode:
             optimizations.
         """
 
-        link, opt = self.get_linker_optimizer(
+        _link, opt = self.get_linker_optimizer(
             self.provided_linker, self.provided_optimizer
         )
         return self.clone(optimizer=opt.register(*optimizations))

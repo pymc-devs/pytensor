@@ -90,7 +90,7 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             """
             (
                 inner_mit_sot,
-                inner_sit_sot,
+                _inner_sit_sot,
                 inner_shared,
                 inner_non_seqs,
             ) = old_carry
@@ -184,10 +184,10 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             These outputs cannot be traced in PyTensor Scan
             """
             (
-                inner_out_mit_sot,
-                inner_out_sit_sot,
+                _inner_out_mit_sot,
+                _inner_out_sit_sot,
                 inner_out_shared,
-                inner_in_non_seqs,
+                _inner_in_non_seqs,
             ) = final_carry
 
             shared_outs = inner_out_shared[: info.n_shared_outs]

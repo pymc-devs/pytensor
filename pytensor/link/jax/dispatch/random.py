@@ -288,7 +288,7 @@ def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
     """JAX implementation of `ChoiceRV`."""
 
     batch_ndim = op.batch_ndim(node)
-    a_core_ndim, *p_core_ndim, _ = op.ndims_params
+    a_core_ndim, *_p_core_ndim, _ = op.ndims_params
 
     if batch_ndim and a_core_ndim == 0:
         raise NotImplementedError(

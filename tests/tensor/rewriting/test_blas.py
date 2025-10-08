@@ -164,7 +164,7 @@ def test_gemm_canonicalize():
 
 
 def test_res_is_a():
-    X, Y, Z, a, b = XYZab()
+    _X, _Y, _Z, a, _b = XYZab()
 
     assert not res_is_a(None, a, sqrt)
     assert not res_is_a(None, a + a, sqrt)

@@ -792,7 +792,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
         x = scalar(dtype="bool")
         y = bscalar()
         z = x * y
-        dx, dy = pytensor.grad(z, [x, y])
+        _dx, _dy = pytensor.grad(z, [x, y])
 
     def test_infer_shape(self):
         for s_left, s_right in [
@@ -881,7 +881,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
 
         custom_elemwise = CustomElemwise(ps.add)
 
-        z_1, z_2 = custom_elemwise(
+        z_1, _z_2 = custom_elemwise(
             as_tensor_variable(np.eye(1)),
             as_tensor_variable(np.eye(1)),
         )
@@ -891,7 +891,7 @@ class TestElemwise(unittest_tools.InferShapeTester):
             assert out[0].eval() == 1
             assert out[1].eval() == 1
 
-        z_1, z_2 = custom_elemwise(
+        z_1, _z_2 = custom_elemwise(
             as_tensor_variable(np.eye(1)), as_tensor_variable(np.eye(3))
         )
         in_2_shape = (ps.constant(3), ps.constant(3))
@@ -977,7 +977,7 @@ def test_not_implemented_elemwise_grad():
             return x * n
 
         def grad(self, inputs, gout):
-            (n, x) = inputs
+            (n, _x) = inputs
             (gz,) = gout
             dy_dx = n
             return [pytensor.gradient.grad_not_implemented(self, 0, n), gz * dy_dx]

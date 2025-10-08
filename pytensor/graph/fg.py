@@ -559,7 +559,7 @@ class FunctionGraph(MetaObject):
 
             out_clients = clients.get(out, ())
             while out_clients:
-                out_client, out_idx = out_clients.pop()
+                out_client, _out_idx = out_clients.pop()
 
                 if isinstance(out_client.op, Output):
                     self.remove_output(out_client.op.idx, remove_client=False)

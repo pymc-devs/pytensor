@@ -113,7 +113,7 @@ class TestDimshuffleLift:
         assert check_stack_trace(g, ops_to_check="all")
 
     def test_elim3(self):
-        x, y, z = inputs()
+        x, _y, _z = inputs()
         e = ds(ds(ds(x, (0, "x", 1)), (2, 0, "x", 1)), (1, 0))
         g = FunctionGraph([x], [e], clone=False)
         assert isinstance(g.outputs[0].owner.op, DimShuffle)

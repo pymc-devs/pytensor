@@ -321,13 +321,13 @@ class TestPushOutNonSeqScan:
                 K = XX + XX.T
                 return K.sum()
 
-            beta, K_updts = scan(
+            beta, _K_updts = scan(
                 init_K, sequences=pt.arange(E), non_sequences=[inputs, targets]
             )
 
             # mean
             def predict_mean_i(i, x_star, s_star, X, beta, h):
-                n, D = shape(X)
+                _n, D = shape(X)
                 # rescale every dimension by the corresponding inverse lengthscale
                 iL = pt.diag(h[i, :D])
                 inp = (X - x_star).dot(iL)
@@ -341,7 +341,7 @@ class TestPushOutNonSeqScan:
                 Mi = pt_sum(lb) * h[i, D]
                 return Mi
 
-            (M), M_updts = scan(
+            (M), _M_updts = scan(
                 predict_mean_i,
                 sequences=pt.arange(E),
                 non_sequences=[x_star, s_star, inputs, beta, hyp],
@@ -377,7 +377,7 @@ class TestPushOutNonSeqScan:
         expected_output = dfdm(X, Y, test_m, test_s)
 
         # equivalent code for the jacobian using scan
-        dMdm, dMdm_updts = scan(
+        dMdm, _dMdm_updts = scan(
             lambda i, M, x: grad(M[i], x),
             sequences=pt.arange(M.shape[0]),
             non_sequences=[M, x_star],
@@ -475,7 +475,7 @@ class TestPushOutNonSeqScan:
             vect_squared = vect**2
             return dot(vect_squared, mat), vect_squared
 
-        outputs, updates = pytensor.scan(
+        outputs, _updates = pytensor.scan(
             fn=inner_fct, outputs_info=[None] * 2, sequences=a, non_sequences=b
         )
 
@@ -523,7 +523,7 @@ class TestPushOutNonSeqScan:
             output2 = dot(output1, nonseq1)
             return output1, output2
 
-        outputs, updates = pytensor.scan(
+        outputs, _updates = pytensor.scan(
             fn=inner_fct, outputs_info=[a[0], None], sequences=a, non_sequences=b
         )
 
@@ -822,38 +822,38 @@ class TestScanMerge:
         def sum(s):
             return s + 1
 
-        sx, upx = scan(sum, sequences=[x])
-        sy, upy = scan(sum, sequences=[y])
+        sx, _upx = scan(sum, sequences=[x])
+        sy, _upy = scan(sum, sequences=[y])
 
         f = function([x, y], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 2
 
-        sx, upx = scan(sum, sequences=[x], n_steps=2)
-        sy, upy = scan(sum, sequences=[y], n_steps=3)
+        sx, _upx = scan(sum, sequences=[x], n_steps=2)
+        sy, _upy = scan(sum, sequences=[y], n_steps=3)
 
         f = function([x, y], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 2
 
-        sx, upx = scan(sum, sequences=[x], n_steps=4)
-        sy, upy = scan(sum, sequences=[y], n_steps=4)
+        sx, _upx = scan(sum, sequences=[x], n_steps=4)
+        sy, _upy = scan(sum, sequences=[y], n_steps=4)
 
         f = function([x, y], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 1
 
-        sx, upx = scan(sum, sequences=[x])
-        sy, upy = scan(sum, sequences=[x])
+        sx, _upx = scan(sum, sequences=[x])
+        sy, _upy = scan(sum, sequences=[x])
 
         f = function([x], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 1
 
-        sx, upx = scan(sum, sequences=[x])
-        sy, upy = scan(sum, sequences=[x], mode="FAST_COMPILE")
+        sx, _upx = scan(sum, sequences=[x])
+        sy, _upy = scan(sum, sequences=[x], mode="FAST_COMPILE")
 
         f = function([x], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 1
 
-        sx, upx = scan(sum, sequences=[x])
-        sy, upy = scan(sum, sequences=[x], truncate_gradient=1)
+        sx, _upx = scan(sum, sequences=[x])
+        sy, _upy = scan(sum, sequences=[x], truncate_gradient=1)
 
         f = function([x], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 2
@@ -870,11 +870,11 @@ class TestScanMerge:
         def sum(s):
             return s + 1
 
-        sx, upx = scan(sum, sequences=[x], n_steps=4, name="X")
+        sx, _upx = scan(sum, sequences=[x], n_steps=4, name="X")
         # We need to use an expression of y rather than y so the toposort
         # comes up with the 'Y' scan last.
-        sy, upy = scan(sum, sequences=[2 * y + 2], n_steps=4, name="Y")
-        sz, upz = scan(sum, sequences=[sx], n_steps=4, name="Z")
+        sy, _upy = scan(sum, sequences=[2 * y + 2], n_steps=4, name="Y")
+        sz, _upz = scan(sum, sequences=[sx], n_steps=4, name="Z")
 
         f = function([x, y], [sy, sz], mode=self.mode)
         assert self.count_scans(f) == 2
@@ -922,20 +922,20 @@ class TestScanMerge:
         def sub_alt(s):
             return s - 1, until(s > 4)
 
-        sx, upx = scan(add, sequences=[x])
-        sy, upy = scan(sub, sequences=[y])
+        sx, _upx = scan(add, sequences=[x])
+        sy, _upy = scan(sub, sequences=[y])
 
         f = function([x, y], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 2
 
-        sx, upx = scan(add, sequences=[x])
-        sy, upy = scan(sub, sequences=[x])
+        sx, _upx = scan(add, sequences=[x])
+        sy, _upy = scan(sub, sequences=[x])
 
         f = function([x], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 1
 
-        sx, upx = scan(add, sequences=[x])
-        sy, upy = scan(sub_alt, sequences=[x])
+        sx, _upx = scan(add, sequences=[x])
+        sy, _upy = scan(sub_alt, sequences=[x])
 
         f = function([x], [sx, sy], mode=self.mode)
         assert self.count_scans(f) == 2
@@ -1277,7 +1277,7 @@ class TestSaveMem:
             v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
             v_y[i] = np.dot(v_x[i - 1], vWout) + v_y[i - 1]
 
-        (pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
+        (_pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
 
         utt.assert_allclose(pytensor_x, v_x[-1:])
         utt.assert_allclose(pytensor_y, v_y[-1:])
@@ -1399,7 +1399,7 @@ class TestSaveMem:
         x20 = scalar("x20")
         x30 = vector("x30")
         x40 = scalar("x40")
-        [x1, x2, x3, x4, x5, x6, x7], updates = scan(
+        [x1, x2, x3, x4, x5, _x6, _x7], updates = scan(
             step,
             u,
             [
@@ -1442,7 +1442,9 @@ class TestSaveMem:
             node for node in f.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
         ]
         # x6 and x7 are dropped because they are not used
-        [n_steps, seq, x4_buffer, x5_buffer, x1_len, x2_len, x3_len] = scan_node.inputs
+        [_n_steps, _seq, x4_buffer, x5_buffer, x1_len, x2_len, x3_len] = (
+            scan_node.inputs
+        )
         [x4_underlying_alloc] = [
             var
             for var in ancestors([x4_buffer])
@@ -1491,7 +1493,7 @@ class TestSaveMem:
 
     def test_savemem_opt(self, benchmark):
         y0 = shared(np.ones((2, 10)))
-        [y1, y2], updates = scan(
+        [_y1, y2], _updates = scan(
             lambda y: [y, y],
             outputs_info=[dict(initial=y0, taps=[-2]), None],
             n_steps=5,
@@ -1846,7 +1848,7 @@ def test_opt_order():
     x = matrix("x")
     A = matrix("A")
 
-    z, updates = scan(dot, sequences=[], non_sequences=[x, A], n_steps=2)
+    z, _updates = scan(dot, sequences=[], non_sequences=[x, A], n_steps=2)
     f = function([x, A], z, mode="FAST_RUN")
     topo = f.maker.fgraph.toposort()
 

@@ -896,7 +896,7 @@ def test_inplace0():
 
 
 def test_inplace1():
-    X, Y, Z, a, b = XYZab()
+    X, Y, Z, _a, _b = XYZab()
     # with > 2 terms in the overall addition
     f = inplace_func([X, Y, Z], [Z + Z + dot(X, Y)], mode="FAST_RUN")
     # pytensor.printing.debugprint(f)
@@ -1438,7 +1438,7 @@ class BaseGemv:
 
     def test_default_beta_y(self):
         vs = self.get_data()
-        alpha_v, beta_v, a_v, x_v, y_v = vs
+        _alpha_v, _beta_v, a_v, x_v, _y_v = vs
         a = shared(a_v)
         x = shared(x_v)
 
@@ -1582,7 +1582,7 @@ class BaseGemv:
         # an incorrect dtype, and forces upcasting of the result
         # We put this test in this class to test it on the gpu too.
         vs = self.get_data()
-        alpha_v, beta_v, a_v, x_v, y_v = vs
+        alpha_v, _beta_v, a_v, x_v, y_v = vs
         alpha_v = alpha_v.astype("float64")
         a_v = a_v.astype("float32")
         x_v = x_v.astype("float32")

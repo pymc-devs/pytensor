@@ -258,7 +258,7 @@ class ConvolutionIndices(Op):
     def perform(self, node, inputs, outputs):
         (inshp, kshp) = inputs
         (out_indices, out_indptr, spmat_shape) = outputs
-        indices, indptr, spmatshp, outshp = self.evaluate(inshp, kshp)
+        indices, indptr, spmatshp, _outshp = self.evaluate(inshp, kshp)
         out_indices[0] = indices
         out_indptr[0] = indptr
         spmat_shape[0] = np.asarray(spmatshp)

@@ -124,8 +124,8 @@ class Binomial(Op):
         return [[True], [True], [False]]
 
     def grad(self, inputs, gout):
-        (n, p, shape) = inputs
-        (gz,) = gout
+        (n, p, _shape) = inputs
+        (_gz,) = gout
         comment_n = "No gradient exists for the number of samples in class\
                      Binomial of pytensor/sparse/sandbox/sp2.py"
         comment_p = "No gradient exists for the prob of success in class\

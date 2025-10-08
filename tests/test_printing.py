@@ -486,7 +486,7 @@ def test_Print(capsys):
 
     fn()
 
-    stdout, stderr = capsys.readouterr()
+    stdout, _stderr = capsys.readouterr()
     assert "hello" in stdout
 
 

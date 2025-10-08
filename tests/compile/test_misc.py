@@ -62,7 +62,7 @@ def test_nnet():
         for x in data:
             input = x[0:3]
             target = x[3:]
-            output, cost = nnet.sgd_step(input, target)
+            _output, cost = nnet.sgd_step(input, target)
             mean_cost += cost
         mean_cost /= float(len(data))
         # print(f"Mean cost at epoch {epoch}: {mean_cost}")

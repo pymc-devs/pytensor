@@ -448,7 +448,7 @@ def local_useless_fill(fgraph, node):
     rewrite.
 
     """
-    r, v = node.inputs
+    _r, v = node.inputs
     out_type = node.outputs[0].type
 
     if (

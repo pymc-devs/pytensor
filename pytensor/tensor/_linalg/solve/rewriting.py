@@ -190,7 +190,7 @@ def _scan_split_non_sequence_decomposition_and_solve(
                 and isinstance(inner_node.op.core_op, Solve)
                 and inner_node.op.core_op.assume_a in allowed_assume_a
             ):
-                A, b = inner_node.inputs
+                A, _b = inner_node.inputs
                 if all(
                     (isinstance(root_inp, Constant) or (root_inp in non_sequences))
                     for root_inp in graph_inputs([A])

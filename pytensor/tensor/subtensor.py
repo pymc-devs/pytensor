@@ -1154,7 +1154,7 @@ class Subtensor(COp):
         subtensor_init = "\n".join(init_cmds)
 
         (x,) = inputs[:1]
-        (z,) = outputs
+        (_z,) = outputs
 
         if view_ndim:
             rval = f"""
@@ -2028,7 +2028,7 @@ class IncSubtensor(COp):
 
 class IncSubtensorPrinter(SubtensorPrinter):
     def process(self, r, pstate):
-        x, y, *idx_args = r.owner.inputs
+        x, _y, *idx_args = r.owner.inputs
 
         res = self._process(r.owner.op.idx_list, [x, *idx_args], pstate)
 
@@ -2487,7 +2487,7 @@ class AdvancedIncSubtensor1(COp):
         output_storage[0][0] = x
 
     def infer_shape(self, fgraph, node, ishapes):
-        x, y, ilist = ishapes
+        x, _y, _ilist = ishapes
         return [x]
 
     def R_op(self, inputs, eval_points):

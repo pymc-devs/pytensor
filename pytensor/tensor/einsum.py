@@ -388,7 +388,7 @@ def _contraction_list_from_path(
         )
 
         contract_tuple = _find_contraction(contract_inds, input_sets, output_set)
-        out_inds, input_sets, idx_removed, idx_contract = contract_tuple
+        out_inds, input_sets, idx_removed, _idx_contract = contract_tuple
 
         tmp_inputs = [input_list.pop(x) for x in contract_inds]
 

@@ -212,7 +212,7 @@ class SearchsortedOp(COp):
     def grad(self, inputs, output_gradients):
         num_ins = len(inputs)
         if num_ins == 3:
-            x, v, sorter = inputs
+            x, v, _sorter = inputs
         else:
             x, v = inputs
 
@@ -994,7 +994,7 @@ class FillDiagonal(Op):
         The gradient is currently implemented for matrices only.
 
         """
-        a, val = inp
+        a, _val = inp
         grad = cost_grad[0]
         if a.dtype.startswith("complex"):
             return [None, None]
@@ -1120,7 +1120,7 @@ class FillDiagonalOffset(Op):
         -----
         The gradient is currently implemented for matrices only.
         """
-        a, val, offset = inp
+        a, _val, offset = inp
         grad = cost_grad[0]
         height, width = grad.shape
 

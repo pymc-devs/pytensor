@@ -1738,7 +1738,7 @@ class _CThunk:
     def __call__(self):
         failure = self.run_cthunk(self.cthunk)
         if failure:
-            task, taskname, id = self.find_task(failure)
+            task, _taskname, _id = self.find_task(failure)
             try:
                 trace = task.trace
             except AttributeError:
@@ -1980,7 +1980,7 @@ class DualLinker(Linker):
             .make_all(**kwargs)
         )
         kwargs.pop("input_storage", None)
-        _f, i2, o2, thunks2, order2 = (
+        _f, i2, _o2, thunks2, order2 = (
             OpWiseCLinker(schedule=self.schedule)
             .accept(fgraph, no_recycling=no_recycling)
             .make_all(**kwargs)

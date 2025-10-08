@@ -509,7 +509,7 @@ class WrapLinker(Linker):
         kwargs.pop("input_storage", None)
         make_all += [x.make_all(**kwargs) for x in self.linkers[1:]]
 
-        fns, input_lists, output_lists, thunk_lists, order_lists = zip(
+        _fns, input_lists, output_lists, thunk_lists, order_lists = zip(
             *make_all, strict=True
         )
 

@@ -591,7 +591,7 @@ def construct_pfunc_ins_and_outs(
             clone_inner_graphs=True,
         )
         input_variables, cloned_extended_outputs, other_stuff = output_vars
-        clone_d, update_d, update_expr, shared_inputs = other_stuff
+        clone_d, update_d, _update_expr, shared_inputs = other_stuff
 
         # Recover only the clones of the original outputs
         if outputs is None:

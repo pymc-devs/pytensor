@@ -1691,7 +1691,7 @@ class InRange(LogicalComparison):
 
     def L_op(self, inputs, outputs, gout):
         (x, low, hi) = inputs
-        (gz,) = gout
+        (_gz,) = gout
         grads = [self.get_grad(elem) for elem in [x, low, hi]]
         return grads
 
@@ -1730,7 +1730,7 @@ class Switch(ScalarOp):
         return (condition_grad, first_part, second_part)
 
     def output_types(self, types):
-        (cond_t, ift_t, iff_t) = types
+        (_cond_t, ift_t, iff_t) = types
         return upcast_out(ift_t, iff_t)
 
 
@@ -2486,7 +2486,7 @@ class Second(BinaryScalarOp):
         return y
 
     def c_code(self, node, name, inputs, outputs, sub):
-        (x, y) = inputs
+        (_x, y) = inputs
         (z,) = outputs
         return f"{z} = {y};"
 
@@ -2497,7 +2497,7 @@ class Second(BinaryScalarOp):
         return [[False], [True]]
 
     def grad(self, inputs, gout):
-        (x, y) = inputs
+        (_x, y) = inputs
         (gz,) = gout
         if y.type in continuous_types:
             # x is disconnected because the elements of x are not used
@@ -2706,7 +2706,7 @@ class Sign(UnaryScalarOp):
 
     def grad(self, inputs, gout):
         (x,) = inputs
-        (gz,) = gout
+        (_gz,) = gout
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -2747,7 +2747,7 @@ class Ceil(UnaryScalarOp):
 
     def grad(self, inputs, gout):
         (x,) = inputs
-        (gz,) = gout
+        (_gz,) = gout
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -2773,7 +2773,7 @@ class Floor(UnaryScalarOp):
 
     def grad(self, inputs, gout):
         (x,) = inputs
-        (gz,) = gout
+        (_gz,) = gout
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -2799,7 +2799,7 @@ class Trunc(UnaryScalarOp):
 
     def grad(self, inputs, gout):
         (x,) = inputs
-        (gz,) = gout
+        (_gz,) = gout
         return [x.zeros_like(dtype=config.floatX)]
 
     def c_code(self, node, name, inputs, outputs, sub):
@@ -2827,7 +2827,7 @@ class RoundHalfToEven(UnaryScalarOp):
 
     def grad(self, inputs, gout):
         (x,) = inputs
-        (gz,) = gout
+        (_gz,) = gout
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -2913,7 +2913,7 @@ class RoundHalfAwayFromZero(UnaryScalarOp):
 
     def grad(self, inputs, gout):
         (x,) = inputs
-        (gz,) = gout
+        (_gz,) = gout
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -3934,7 +3934,7 @@ class Real(UnaryScalarOp):
         return np.real(x)
 
     def grad(self, inputs, gout):
-        (x,) = inputs
+        (_x,) = inputs
         (gz,) = gout
         return [complex(gz, 0)]
 

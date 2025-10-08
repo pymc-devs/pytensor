@@ -1882,7 +1882,7 @@ def hyp2f1_grad(a, b, c, z, wrt: tuple[int, ...]):
     # We have to pass the converges flag to interrupt the loop, as the switch is not lazy
     z_is_zero = eq(z, 0)
     converges = check_2f1_converges(a, b, c, z)
-    *grads, grad_converges = _grad_2f1_loop(
+    *grads, _grad_converges = _grad_2f1_loop(
         a, b, c, z, skip_loop=z_is_zero | (~converges), wrt=wrt, dtype=dtype
     )
 

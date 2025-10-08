@@ -274,7 +274,7 @@ class Softmax(COp):
         z[0] = scipy.special.softmax(x, axis=self.axis)
 
     def L_op(self, inp, outputs, grads):
-        (x,) = inp
+        (_x,) = inp
         (g_sm,) = grads
         return [SoftmaxGrad(axis=self.axis)(g_sm, outputs[0])]
 

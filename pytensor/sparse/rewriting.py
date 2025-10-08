@@ -982,7 +982,7 @@ class CSMGradC(_NoPythonCOp):
 
     def c_code(self, node, name, inputs, outputs, sub):
         # retrieve dtype number
-        (a_val, a_ind, a_ptr, a_dim, b_val, b_ind, b_ptr, b_dim) = inputs
+        (a_val, a_ind, a_ptr, a_dim, b_val, b_ind, b_ptr, _b_dim) = inputs
         (z,) = outputs
         typenum_z = node.outputs[0].type.dtype_specs()[2]
         if node.inputs[0].type.dtype in ("complex64", "complex128"):
