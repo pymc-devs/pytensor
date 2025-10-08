@@ -1272,7 +1272,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
                         if len(inc_shape) == len(data_shape) and (
                             len(inc_shapes) == 0 or inc_shape[0] != 1
                         ):
-                            inc_shape = (n_to_inc,) + inc_shape[1:]
+                            inc_shape = (n_to_inc, *inc_shape[1:])
 
                         # Symbolic variable with increment value.
                         inc_var_static_shape = tuple(
@@ -2822,15 +2822,15 @@ test_idx = np.ix_(np.array([True, True]), np.array([True]), np.array([True, True
         (np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)), test_idx[:2]),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            test_idx[:2] + (slice(None, None),),
+            (*test_idx[:2], slice(None, None)),
         ),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            (slice(None, None),) + test_idx[:1],
+            (slice(None, None), *test_idx[:1]),
         ),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            (slice(None, None), None) + test_idx[1:2],
+            (slice(None, None), None, *test_idx[1:2]),
         ),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
@@ -2842,15 +2842,15 @@ test_idx = np.ix_(np.array([True, True]), np.array([True]), np.array([True, True
         ),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            test_idx[:1] + (slice(None, None),) + test_idx[1:2],
+            (*test_idx[:1], slice(None, None), *test_idx[1:2]),
         ),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            test_idx[:1] + (slice(None, None),) + test_idx[1:2] + (slice(None, None),),
+            (*test_idx[:1], slice(None, None), *test_idx[1:2], slice(None, None)),
         ),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            test_idx[:1] + (None,) + test_idx[1:2],
+            (*test_idx[:1], None, *test_idx[1:2]),
         ),
         (np.arange(np.prod((5, 4))).reshape((5, 4)), ([1, 3, 2], slice(1, 3))),
         (np.arange(np.prod((5, 4))).reshape((5, 4)), (slice(1, 3), [1, 3, 2])),

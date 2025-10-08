@@ -1019,7 +1019,7 @@ class TestRavelMultiIndex(utt.InferShapeTester):
             )
             # create some invalid indices to test the mode
             if mode in ("wrap", "clip"):
-                multi_index = (multi_index[0] - 1,) + multi_index[1:]
+                multi_index = (multi_index[0] - 1, *multi_index[1:])
             # test with scalars and higher-dimensional indices
             if index_ndim == 0:
                 multi_index = tuple(i[-1] for i in multi_index)

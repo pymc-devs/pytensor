@@ -244,7 +244,7 @@ def get_conv_gradweights_shape(
             for i in range(len(subsample))
         )
     if unshared:
-        return (nchan,) + top_shape[2:] + (nkern,) + out_shp
+        return (nchan, *top_shape[2:], nkern, *out_shp)
     else:
         return (nchan, nkern, *out_shp)
 
@@ -2906,9 +2906,9 @@ class AbstractConv_gradWeights(BaseAbstractConv):
         def correct_for_groups(mat):
             mshp0 = mat.shape[0] // self.num_groups
             mshp1 = mat.shape[1] * self.num_groups
-            mat = mat.reshape((self.num_groups, mshp0) + mat.shape[1:])
+            mat = mat.reshape((self.num_groups, mshp0, *mat.shape[1:]))
             mat = mat.transpose((1, 0, 2, *range(3, 3 + self.convdim)))
-            mat = mat.reshape((mshp0, mshp1) + mat.shape[-self.convdim :])
+            mat = mat.reshape((mshp0, mshp1, *mat.shape[-self.convdim :]))
             return mat
 
         if self.num_groups > 1:
@@ -3283,7 +3283,7 @@ class AbstractConv_gradInputs(BaseAbstractConv):
         def correct_for_groups(mat):
             mshp0 = mat.shape[0] // self.num_groups
             mshp1 = mat.shape[-self.convdim - 1] * self.num_groups
-            mat = mat.reshape((self.num_groups, mshp0) + mat.shape[1:])
+            mat = mat.reshape((self.num_groups, mshp0, *mat.shape[1:]))
             if self.unshared:
                 # for 2D -> (1, 2, 3, 0, 4, 5, 6)
                 mat = mat.transpose(
@@ -3294,14 +3294,16 @@ class AbstractConv_gradInputs(BaseAbstractConv):
                     )
                 )
                 mat = mat.reshape(
-                    (mshp0,)
-                    + mat.shape[1 : 1 + self.convdim]
-                    + (mshp1,)
-                    + mat.shape[-self.convdim :]
+                    (
+                        mshp0,
+                        *mat.shape[1 : 1 + self.convdim],
+                        mshp1,
+                        *mat.shape[-self.convdim :],
+                    )
                 )
             else:
                 mat = mat.transpose((1, 0, 2, *range(3, 3 + self.convdim)))
-                mat = mat.reshape((mshp0, mshp1) + mat.shape[-self.convdim :])
+                mat = mat.reshape((mshp0, mshp1, *mat.shape[-self.convdim :]))
             return mat
 
         kern = correct_for_groups(kern)
