@@ -421,7 +421,7 @@ def test_VMLinker_exception():
 
     z = BadOp()(a)
 
-    with pytest.raises(Exception, match=".*Apply node that caused the error.*"):
+    with pytest.raises(Exception, match=r".*Apply node that caused the error.*"):
         function([a], z, mode=Mode(optimizer=None, linker=linker))
 
 
@@ -433,7 +433,7 @@ def test_VM_exception():
     a = scalar()
     fg = FunctionGraph(outputs=[SomeOp()(a)])
 
-    with pytest.raises(ValueError, match="`nodes` and `thunks`.*"):
+    with pytest.raises(ValueError, match=r"`nodes` and `thunks`.*"):
         SomeVM(fg, fg.apply_nodes, [], [])
 
 
@@ -453,7 +453,7 @@ def test_Loop_exception():
 
     thunks = [node.op.make_thunk(node, storage_map, compute_map, []) for node in nodes]
 
-    with pytest.raises(ValueError, match="`nodes`, `thunks` and `post_thunk_clear`.*"):
+    with pytest.raises(ValueError, match=r"`nodes`, `thunks` and `post_thunk_clear`.*"):
         Loop(
             fg,
             fg.apply_nodes,

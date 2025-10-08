@@ -411,7 +411,7 @@ def test_adv_index_update(mode, idx_dtype):
     else:
         with pytest.raises(
             IndexError,
-            match="Boolean indexer should be unlabeled or on the same dimension to the indexed array.",
+            match="Boolean indexer should be unlabeled or on the same dimension to the indexed array\\.",
         ):
             getattr(x[idx.rename(a="b"), :3], mode)(y)
         vectorized_update = x

@@ -335,9 +335,9 @@ class TestIfelse(utt.OptimizationTestMixin):
         z = matrix("csr", dtype=self.dtype, name="z")
         cond = iscalar("cond")
 
-        with pytest.raises(TypeError, match=".*do not match."):
+        with pytest.raises(TypeError, match=r".*do not match."):
             ifelse(cond, x, y)
-        with pytest.raises(TypeError, match=".*do not match."):
+        with pytest.raises(TypeError, match=r".*do not match."):
             ifelse(cond, y, x)
         with pytest.raises(TypeError):
             ifelse(cond, x, z)

@@ -115,7 +115,7 @@ def test_filter_variable():
     with pytest.raises(TypeError):
         test_type.filter(np.empty((0, 1), dtype=config.floatX))
 
-    with pytest.raises(TypeError, match=".*not aligned.*"):
+    with pytest.raises(TypeError, match=r".*not aligned.*"):
         test_val = np.empty((1, 2), dtype=config.floatX)
         test_val.flags.aligned = False
         test_type.filter(test_val)

@@ -1364,12 +1364,12 @@ class TestSubtensor(utt.OptimizationTestMixin):
         f(np.ones((20, 5)))  # Fine
         with pytest.raises(
             ValueError,
-            match="Runtime broadcasting not allowed. AdvancedIncSubtensor1 was asked",
+            match="Runtime broadcasting not allowed\\. AdvancedIncSubtensor1 was asked",
         ):
             f(np.ones((1, 5)))
         with pytest.raises(
             ValueError,
-            match="Runtime broadcasting not allowed. AdvancedIncSubtensor1 was asked",
+            match="Runtime broadcasting not allowed\\. AdvancedIncSubtensor1 was asked",
         ):
             f(np.ones((20, 1)))
 
@@ -2903,7 +2903,7 @@ def test_get_vector_length():
     assert get_vector_length(lvector()[1:1]) == 0
     assert get_vector_length(lvector()[-1:-1:3]) == 0
 
-    with pytest.raises(ValueError, match="^Length of .*"):
+    with pytest.raises(ValueError, match=r"^Length of .*"):
         get_vector_length(x[lscalar() :])
 
 

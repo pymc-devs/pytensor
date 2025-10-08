@@ -1374,7 +1374,7 @@ def test_concat_with_broadcast():
 
     with pytest.raises(
         TypeError,
-        match="Only tensors with the same number of dimensions can be concatenated.",
+        match="Only tensors with the same number of dimensions can be concatenated\\.",
     ):
         a = pt.tensor("a", shape=(1, 3, 5))
         b = pt.tensor("b", shape=(3, 5))

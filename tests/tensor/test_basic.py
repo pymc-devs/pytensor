@@ -589,7 +589,7 @@ class TestAsTensorVariable:
 
     def test_ndim_incompatible(self):
         x = TensorType(config.floatX, shape=(1, None))("x")
-        with pytest.raises(ValueError, match="^Tensor of type.*"):
+        with pytest.raises(ValueError, match=r"^Tensor of type.*"):
             as_tensor_variable(x, ndim=0)
 
     def test_bool(self):
@@ -898,7 +898,7 @@ class TestAlloc:
 
 
 def test_infer_static_shape():
-    with pytest.raises(TypeError, match="^Shapes must be scalar integers.*"):
+    with pytest.raises(TypeError, match=r"^Shapes must be scalar integers.*"):
         infer_static_shape([constant(1.0)])
 
     with (
@@ -907,7 +907,7 @@ def test_infer_static_shape():
     ):
         infer_static_shape([dscalar("x")])
 
-    with pytest.raises(ValueError, match=".*could not be cast to have 0 dimensions"):
+    with pytest.raises(ValueError, match=r".*could not be cast to have 0 dimensions"):
         infer_static_shape((as_tensor_variable([[1, 2]]),))
 
     constant_size = constant([1])
@@ -1269,7 +1269,7 @@ def test_get_vector_length():
         as_tensor_variable([1, 2], ndim=1),
         as_tensor_variable([3, 4], ndim=1),
     )
-    with pytest.raises(ValueError, match="^Length of .*"):
+    with pytest.raises(ValueError, match=r"^Length of .*"):
         get_vector_length(z)
 
     # Test `MakeVector`s
@@ -1329,13 +1329,13 @@ class TestJoinAndSplit:
         return variables
 
     def test_input_validation(self):
-        with pytest.raises(TypeError, match=".*integer.*"):
+        with pytest.raises(TypeError, match=r".*integer.*"):
             Split(2)(matrix(), dscalar(), [1, 1])
 
-        with pytest.raises(TypeError, match=".*integer.*"):
+        with pytest.raises(TypeError, match=r".*integer.*"):
             Split(2)(matrix(), ivector(), [1, 1])
 
-        with pytest.raises(TypeError, match=".*integer.*"):
+        with pytest.raises(TypeError, match=r".*integer.*"):
             join(dscalar(), matrix(), matrix())
 
     def test_join_scalar(self):
@@ -3131,7 +3131,7 @@ def test_default():
     assert f(None, 2) == 2
     assert f(1, None) == 1
 
-    with pytest.raises(TypeError, match=".*compatible types.*"):
+    with pytest.raises(TypeError, match=r".*compatible types.*"):
         default(x, vector())
 
 
@@ -3622,7 +3622,7 @@ class TestDiag:
     @pytest.mark.parametrize("inp", (scalar, tensor3))
     def test_diag_invalid_input_ndim(self, inp):
         x = inp()
-        with pytest.raises(ValueError, match="Input must be 1- or 2-d."):
+        with pytest.raises(ValueError, match="Input must be 1- or 2-d\\."):
             diag(x)
 
 

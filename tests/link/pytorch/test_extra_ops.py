@@ -24,9 +24,9 @@ def test_pytorch_CumOp(axis, dtype):
 
     # Create the output variable
     if isinstance(axis, tuple):
-        with pytest.raises(TypeError, match="axis must be an integer or None."):
+        with pytest.raises(TypeError, match="axis must be an integer or None\\."):
             out = pt.cumsum(a, axis=axis)
-        with pytest.raises(TypeError, match="axis must be an integer or None."):
+        with pytest.raises(TypeError, match="axis must be an integer or None\\."):
             out = pt.cumprod(a, axis=axis)
     else:
         out = pt.cumsum(a, axis=axis)
