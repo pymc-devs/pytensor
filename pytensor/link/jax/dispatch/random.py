@@ -324,7 +324,7 @@ def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
             batch_sampling_keys = jax.random.split(rng_key, np.prod(size))
 
             # Ravel the batch dimensions because vmap only works along a single axis
-            raveled_batch_a = a.reshape((-1,) + a.shape[batch_ndim:])
+            raveled_batch_a = a.reshape((-1, *a.shape[batch_ndim:]))
             if p is None:
                 raveled_sample = jax.vmap(
                     lambda key, a: jax.random.choice(
@@ -332,7 +332,7 @@ def jax_funcify_choice(op: ptr.ChoiceWithoutReplacement, node):
                     )
                 )(batch_sampling_keys, raveled_batch_a)
             else:
-                raveled_batch_p = p.reshape((-1,) + p.shape[batch_ndim:])
+                raveled_batch_p = p.reshape((-1, *p.shape[batch_ndim:]))
                 raveled_sample = jax.vmap(
                     lambda key, a, p: jax.random.choice(
                         key, a, shape=core_shape, replace=False, p=p
@@ -363,7 +363,7 @@ def jax_sample_fn_permutation(op, node):
                 x = jax.numpy.broadcast_to(x, size + x.shape[batch_ndim:])
 
             batch_sampling_keys = jax.random.split(rng_key, np.prod(size))
-            raveled_batch_x = x.reshape((-1,) + x.shape[batch_ndim:])
+            raveled_batch_x = x.reshape((-1, *x.shape[batch_ndim:]))
             raveled_sample = jax.vmap(lambda key, x: jax.random.permutation(key, x))(
                 batch_sampling_keys, raveled_batch_x
             )

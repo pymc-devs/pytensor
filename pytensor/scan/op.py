@@ -2104,7 +2104,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     # are read and written.
                     # This way, there will be no information overwritten
                     # before it is read (as it used to happen).
-                    shape = (pdx,) + output_storage[idx][0].shape[1:]
+                    shape = (pdx, *output_storage[idx][0].shape[1:])
                     tmp = np.empty(shape, dtype=node.outputs[idx].type.dtype)
                     tmp[:] = output_storage[idx][0][:pdx]
                     output_storage[idx][0][: store_steps[idx] - pdx] = output_storage[
@@ -2113,7 +2113,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     output_storage[idx][0][store_steps[idx] - pdx :] = tmp
                     del tmp
                 else:
-                    shape = (store_steps[idx] - pdx,) + output_storage[idx][0].shape[1:]
+                    shape = (store_steps[idx] - pdx, *output_storage[idx][0].shape[1:])
                     tmp = np.empty(shape, dtype=node.outputs[idx].type.dtype)
                     tmp[:] = output_storage[idx][0][pdx:]
                     output_storage[idx][0][store_steps[idx] - pdx :] = output_storage[
@@ -2304,7 +2304,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 if x is None:
                     scan_outs.append(None)
                 else:
-                    scan_outs.append((Shape_i(0)(o),) + x[1:])
+                    scan_outs.append((Shape_i(0)(o), *x[1:]))
         return scan_outs
 
     def connection_pattern(self, node):

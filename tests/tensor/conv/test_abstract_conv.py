@@ -266,7 +266,7 @@ class TestConvGradInputsShape:
                         computed_image_shape = get_conv_gradinputs_shape(
                             kernel_shape, output_shape, b, (2, 3), (d, d)
                         )
-                        image_shape_with_None = image_shape[:2] + (None, None)
+                        image_shape_with_None = (*image_shape[:2], None, None)
                         assert computed_image_shape == image_shape_with_None
 
                         # compute the kernel_shape given this output_shape
@@ -276,7 +276,7 @@ class TestConvGradInputsShape:
 
                         # if border_mode == 'half', the shape should be None
                         if b == "half":
-                            kernel_shape_with_None = kernel_shape[:2] + (None, None)
+                            kernel_shape_with_None = (*kernel_shape[:2], None, None)
                             assert computed_kernel_shape == kernel_shape_with_None
                         else:
                             assert computed_kernel_shape == kernel_shape
@@ -285,7 +285,7 @@ class TestConvGradInputsShape:
                         computed_kernel_shape = get_conv_gradweights_shape(
                             kernel_shape, output_shape, b, (2, 3), (d, d)
                         )
-                        kernel_shape_with_None = kernel_shape[:2] + (None, None)
+                        kernel_shape_with_None = (*kernel_shape[:2], None, None)
                         assert computed_kernel_shape == kernel_shape_with_None
 
 

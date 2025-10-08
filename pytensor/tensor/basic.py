@@ -4051,8 +4051,8 @@ def alloc_diag(diag, offset=0, axis1=0, axis2=1):
         # Re-order axes so they correspond to diagonals at axis1, axis2
         axes = list(range(diag.type.ndim - 1))
         last_idx = axes[-1]
-        axes = axes[:axis1] + [last_idx + 1] + axes[axis1:]
-        axes = axes[:axis2] + [last_idx + 2] + axes[axis2:]
+        axes = [*axes[:axis1], last_idx + 1, *axes[axis1:]]
+        axes = [*axes[:axis2], last_idx + 2, *axes[axis2:]]
         result = result.transpose(axes)
 
     return AllocDiag(
@@ -4525,7 +4525,7 @@ def _make_along_axis_idx(arr_shape, indices, axis):
         if dim is None:
             fancy_index.append(indices)
         else:
-            ind_shape = shape_ones[:dim] + (-1,) + shape_ones[dim + 1 :]
+            ind_shape = (*shape_ones[:dim], -1, *shape_ones[dim + 1 :])
             fancy_index.append(arange(n).reshape(ind_shape))
 
     return tuple(fancy_index)

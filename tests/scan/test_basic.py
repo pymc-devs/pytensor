@@ -144,12 +144,12 @@ class multiple_outputs_numeric_grad:
                         t = t.flatten()
                         t[pos] += _eps
                         t = t.reshape(pt[i].shape)
-                        f_eps = f(*(pt[:i] + [t] + pt[i + 1 :]))
+                        f_eps = f(*([*pt[:i], t, *pt[i + 1 :]]))
                         _g.append(np.asarray((f_eps - f_x) / _eps))
                     gx.append(np.asarray(_g).reshape(pt[i].shape))
                 else:
                     t = np.array(pt[i] + _eps)
-                    f_eps = f(*(pt[:i] + [t] + pt[i + 1 :]))
+                    f_eps = f(*([*pt[:i], t, *pt[i + 1 :]]))
                     gx.append(np.asarray((f_eps - f_x) / _eps))
         self.gx = gx
 
