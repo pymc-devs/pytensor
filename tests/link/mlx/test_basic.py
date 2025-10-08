@@ -5,7 +5,6 @@ Basic tests for the MLX backend.
 from collections.abc import Callable, Iterable
 from functools import partial
 
-import mlx.core as mx
 import numpy as np
 import pytest
 
@@ -16,12 +15,11 @@ from pytensor.compile.mode import MLX, Mode
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Variable
 from pytensor.link.mlx import MLXLinker
-from pytensor.link.mlx.dispatch.core import (
-    mlx_funcify_Alloc,
-)
 from pytensor.raise_op import assert_op
 from pytensor.tensor.basic import Alloc
 
+
+mx = pytest.importorskip("mlx.core")
 
 optimizer = RewriteDatabaseQuery(include=["mlx"], exclude=MLX._optimizer.exclude)
 mlx_mode = Mode(linker=MLXLinker(), optimizer=optimizer)
@@ -196,6 +194,9 @@ def test_alloc_with_different_shape_types():
     This addresses the TypeError that occurred when shape parameters
     contained MLX arrays instead of Python integers.
     """
+    from pytensor.link.mlx.dispatch.core import (
+        mlx_funcify_Alloc,
+    )
 
     # Create a mock node (we don't need a real node for this test)
     class MockNode:

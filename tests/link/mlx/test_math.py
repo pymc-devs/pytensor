@@ -1,4 +1,3 @@
-import mlx.core as mx
 import numpy as np
 import pytest
 
@@ -6,6 +5,9 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor.tensor.math import Argmax, Max
 from tests.link.mlx.test_basic import compare_mlx_and_py
+
+
+mx = pytest.importorskip("mlx.core")
 
 
 def test_dot():
