@@ -108,12 +108,12 @@ def failure_code(sub, use_goto=True):
         be careful to avoid executing incorrect code.
 
     """
-    if use_goto:
-        goto_statement = "goto __label_%(id)i;" % sub
-    else:
-        goto_statement = ""
     id = sub["id"]
     failure_var = sub["failure_var"]
+    if use_goto:
+        goto_statement = f"goto __label_{id};"
+    else:
+        goto_statement = ""
     return f"""{{
         {failure_var} = {id};
         if (!PyErr_Occurred()) {{

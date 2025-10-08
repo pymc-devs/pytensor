@@ -1076,7 +1076,7 @@ class TestFusion:
 
     def test_fusion_35_inputs(self):
         r"""Make sure we don't fuse too many `Op`\s and go past the 31 function arguments limit."""
-        inpts = vectors(["i%i" % i for i in range(35)])
+        inpts = vectors([f"i{i}" for i in range(35)])
 
         # Make an elemwise graph looking like:
         # sin(i34 + sin(i33 + sin(... i1 + sin(i0) ...)))

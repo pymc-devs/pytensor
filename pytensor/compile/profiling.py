@@ -514,14 +514,12 @@ class ProfileStats:
             # While this carries over less information, it is arranged such
             # that it is way more readable than the previous output of the
             # profiler
+        nb_classes = max(0, len(otimes) - N)
+        percent_total = sum(f for f, t, a, ci, nb_call, nb_op in otimes[N:])
+        time_total = sum(t for f, t, a, ci, nb_call, nb_op in otimes[N:])
         print(
-            "   ... (remaining %i Classes account for %6.2f%%(%.2fs) of "
-            "the runtime)"
-            % (
-                max(0, len(otimes) - N),
-                sum(f for f, t, a, ci, nb_call, nb_op in otimes[N:]),
-                sum(t for f, t, a, ci, nb_call, nb_op in otimes[N:]),
-            ),
+            f"   ... (remaining {nb_classes} Classes account for "
+            f"{percent_total:6.2f}%%({time_total:.2f}s) of the runtime)",
             file=file,
         )
         print("", file=file)
@@ -607,14 +605,12 @@ class ProfileStats:
             # While this carries over less information, it is arranged such
             # that it is way more readable than the previous output of the
             # profiler
+        nb_ops = max(0, len(otimes) - N)
+        percent_total = sum(f for f, t, a, ci, nb_call, nb_op in otimes[N:])
+        time_total = sum(t for f, t, a, ci, nb_call, nb_op in otimes[N:])
         print(
-            "   ... (remaining %i Ops account for %6.2f%%(%.2fs) of "
-            "the runtime)"
-            % (
-                max(0, len(otimes) - N),
-                sum(f for f, t, a, ci, nb_call, nb_op in otimes[N:]),
-                sum(t for f, t, a, ci, nb_call, nb_op in otimes[N:]),
-            ),
+            f"   ... (remaining {nb_ops} Ops account for "
+            f"{percent_total:6.2f}%%({time_total:.2f}s) of the runtime)",
             file=file,
         )
         print("", file=file)
