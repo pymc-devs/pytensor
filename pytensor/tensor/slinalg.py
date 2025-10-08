@@ -2088,18 +2088,18 @@ def qr(
 
 
 __all__ = [
-    "cholesky",
-    "solve",
-    "eigvalsh",
-    "expm",
-    "solve_discrete_lyapunov",
-    "solve_continuous_lyapunov",
-    "solve_discrete_are",
-    "solve_triangular",
     "block_diag",
     "cho_solve",
+    "cholesky",
+    "eigvalsh",
+    "expm",
     "lu",
     "lu_factor",
     "lu_solve",
     "qr",
+    "solve",
+    "solve_continuous_lyapunov",
+    "solve_discrete_are",
+    "solve_discrete_lyapunov",
+    "solve_triangular",
 ]

@@ -215,7 +215,7 @@ def add_supervisor_to_fgraph(
             input
             for spec, input in zip(input_specs, fgraph.inputs, strict=True)
             if not (
-                spec.mutable or has_destroy_handler and fgraph.has_destroyers([input])
+                spec.mutable or (has_destroy_handler and fgraph.has_destroyers([input]))
             )
         )
     )

@@ -821,7 +821,7 @@ class Elemwise(OpenMPOp):
         # for each input:
         # same as range(ndim), but with 'x' at all broadcastable positions
         orders = [
-            [s == 1 and "x" or i for i, s in enumerate(input.type.shape)]
+            [(s == 1 and "x") or i for i, s in enumerate(input.type.shape)]
             for input in inputs
         ]
 

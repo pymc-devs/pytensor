@@ -812,11 +812,11 @@ def betaln(a, b):
 
 
 __all__ = [
-    "softmax",
-    "log_softmax",
-    "poch",
-    "factorial",
-    "logit",
     "beta",
     "betaln",
+    "factorial",
+    "log_softmax",
+    "logit",
+    "poch",
+    "softmax",
 ]

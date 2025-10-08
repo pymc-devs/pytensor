@@ -1558,7 +1558,7 @@ def broadcast_shape_iter(
             (one,) * (max_dims - len(a))
             + tuple(
                 one
-                if sh == 1 or isinstance(sh, Constant) and sh.value == 1
+                if sh == 1 or (isinstance(sh, Constant) and sh.value == 1)
                 else (ps.as_scalar(sh) if not isinstance(sh, Variable) else sh)
                 for sh in a
             )
@@ -2067,25 +2067,25 @@ def concat_with_broadcast(tensor_list, axis=0):
 
 
 __all__ = [
-    "searchsorted",
-    "cumsum",
-    "cumprod",
-    "diff",
-    "bincount",
-    "squeeze",
-    "compress",
-    "repeat",
     "bartlett",
-    "fill_diagonal",
-    "fill_diagonal_offset",
-    "unique",
-    "unravel_index",
-    "ravel_multi_index",
+    "bincount",
+    "broadcast_arrays",
     "broadcast_shape",
     "broadcast_to",
+    "compress",
     "concat_with_broadcast",
+    "cumprod",
+    "cumsum",
+    "diff",
+    "fill_diagonal",
+    "fill_diagonal_offset",
     "geomspace",
-    "logspace",
     "linspace",
-    "broadcast_arrays",
+    "logspace",
+    "ravel_multi_index",
+    "repeat",
+    "searchsorted",
+    "squeeze",
+    "unique",
+    "unravel_index",
 ]

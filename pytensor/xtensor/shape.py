@@ -491,7 +491,7 @@ def expand_dims(x, dim=None, create_index_for_new_dim=None, axis=None, **dim_kwa
     if isinstance(dim, str):
         dims_dict = {dim: 1}
     elif isinstance(dim, Sequence) and not isinstance(dim, dict):
-        dims_dict = {d: 1 for d in dim}
+        dims_dict = dict.fromkeys(dim, 1)
     elif isinstance(dim, dict):
         dims_dict = {}
         for name, val in dim.items():

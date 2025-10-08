@@ -651,10 +651,10 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                 )
             else:
                 # Default to 5 for head and tail
-                indexers = {dim: 5 for dim in self.type.dims}
+                indexers = dict.fromkeys(self.type.dims, 5)
 
         elif not isinstance(indexers, dict):
-            indexers = {dim: indexers for dim in self.type.dims}
+            indexers = dict.fromkeys(self.type.dims, indexers)
 
         if kind == "head":
             indices = {dim: slice(None, value) for dim, value in indexers.items()}
