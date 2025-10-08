@@ -1298,22 +1298,22 @@ class ProfileStats:
 
             print(
                 (
-                    f"        CPU: {int(round(new_max_running_max_memory_size[1] / 1024.0))}KB "
-                    f"({int(round(max_running_max_memory_size[1] / 1024.0))}KB)"
+                    f"        CPU: {round(new_max_running_max_memory_size[1] / 1024.0)}KB "
+                    f"({round(max_running_max_memory_size[1] / 1024.0)}KB)"
                 ),
                 file=file,
             )
             print(
                 (
-                    f"        GPU: {int(round(new_max_running_max_memory_size[2] / 1024.0))}KB "
-                    f"({int(round(max_running_max_memory_size[2] / 1024.0))}KB)"
+                    f"        GPU: {round(new_max_running_max_memory_size[2] / 1024.0)}KB "
+                    f"({round(max_running_max_memory_size[2] / 1024.0)}KB)"
                 ),
                 file=file,
             )
             print(
                 (
-                    f"        CPU + GPU: {int(round(new_max_running_max_memory_size[0] / 1024.0))}KB "
-                    f"({int(round(max_running_max_memory_size[0] / 1024.0))}KB)"
+                    f"        CPU + GPU: {round(new_max_running_max_memory_size[0] / 1024.0)}KB "
+                    f"({round(max_running_max_memory_size[0] / 1024.0)}KB)"
                 ),
                 file=file,
             )
@@ -1334,15 +1334,15 @@ class ProfileStats:
             file=file,
         )
         print(
-            f"        CPU: {int(round(new_max_node_memory_size[1] / 1024.0))}KB",
+            f"        CPU: {round(new_max_node_memory_size[1] / 1024.0)}KB",
             file=file,
         )
         print(
-            f"        GPU: {int(round(new_max_node_memory_size[2] / 1024.0))}KB",
+            f"        GPU: {round(new_max_node_memory_size[2] / 1024.0)}KB",
             file=file,
         )
         print(
-            f"        CPU + GPU: {int(round(new_max_node_memory_size[0] / 1024.0))}KB",
+            f"        CPU + GPU: {round(new_max_node_memory_size[0] / 1024.0)}KB",
             file=file,
         )
         print("---", file=file)
@@ -1350,7 +1350,7 @@ class ProfileStats:
         if min_max_peak:
             print(
                 "    Minimum peak from all valid apply node order is "
-                f"{int(round(min_max_peak / 1024.0))}KB(took {min_peak_time:3f}s to compute)",
+                f"{round(min_max_peak / 1024.0)}KB(took {min_peak_time:3f}s to compute)",
                 file=file,
             )
 
