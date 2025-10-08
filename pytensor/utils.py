@@ -14,16 +14,16 @@ import numpy as np
 
 
 __all__ = [
+    "LOCAL_BITWIDTH",
+    "NDARRAY_C_VERSION",
+    "NPY_RAVEL_AXIS",
+    "PYTHON_INT_BITWIDTH",
+    "NoDuplicateOptWarningFilter",
+    "call_subprocess_Popen",
     "get_unbound_function",
     "maybe_add_to_os_environ_pathlist",
-    "subprocess_Popen",
-    "call_subprocess_Popen",
     "output_subprocess_Popen",
-    "LOCAL_BITWIDTH",
-    "PYTHON_INT_BITWIDTH",
-    "NPY_RAVEL_AXIS",
-    "NDARRAY_C_VERSION",
-    "NoDuplicateOptWarningFilter",
+    "subprocess_Popen",
 ]
 
 

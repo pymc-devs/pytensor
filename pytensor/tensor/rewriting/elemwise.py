@@ -392,7 +392,7 @@ def local_dimshuffle_lift(fgraph, node):
         ret = inode.op(*new_inputs, return_list=True)
         return ret
     if inode and isinstance(inode.op, DimShuffle):
-        new_order = [x == "x" and "x" or inode.op.new_order[x] for x in new_order]
+        new_order = [(x == "x" and "x") or inode.op.new_order[x] for x in new_order]
         inp = inode.inputs[0]
 
     if is_dimshuffle_useless(new_order, inp):

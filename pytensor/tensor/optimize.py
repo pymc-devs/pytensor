@@ -999,4 +999,4 @@ def root(
     return solution, success
 
 
-__all__ = ["minimize_scalar", "minimize", "root_scalar", "root"]
+__all__ = ["minimize", "minimize_scalar", "root", "root_scalar"]

@@ -481,7 +481,7 @@ class EnumType(CType, dict):
         return tuple(sorted(self.aliases))
 
     def __repr__(self):
-        names_to_aliases = {constant_name: "" for constant_name in self}
+        names_to_aliases = dict.fromkeys(self, "")
         for alias in self.aliases:
             names_to_aliases[self.aliases[alias]] = f"({alias})"
         args = ", ".join(f"{k}{names_to_aliases[k]}:{self[k]}" for k in sorted(self))

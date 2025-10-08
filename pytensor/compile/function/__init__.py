@@ -12,7 +12,7 @@ from pytensor.compile.profiling import ProfileStats
 from pytensor.graph import Variable
 
 
-__all__ = ["types", "pfunc"]
+__all__ = ["pfunc", "types"]
 
 __docformat__ = "restructuredtext en"
 _logger = logging.getLogger("pytensor.compile.function")
