@@ -307,7 +307,7 @@ class ScalarLoop(ScalarInnerGraphOp):
 
         # Output until flag
         if self.is_while:
-            _c_code += f"%(o{len(fgraph.outputs)-1})s = until;\n"
+            _c_code += f"%(o{len(fgraph.outputs) - 1})s = until;\n"
 
         _c_code += "}\n"
 

@@ -328,8 +328,7 @@ def rebuild_collect_shared(
             cloned_outputs = []  # TODO: get Function.__call__ to return None
         else:
             raise TypeError(
-                "output must be an PyTensor Variable or Out "
-                "instance (or list of them)",
+                "output must be an PyTensor Variable or Out instance (or list of them)",
                 outputs,
             )
 

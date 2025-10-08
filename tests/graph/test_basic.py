@@ -205,9 +205,9 @@ class TestEval:
         assert self.w.eval({self.x: 1.0, self.y: 2.0}) == 6.0
         assert self.w.eval({self.z: 3}) == 6.0
         assert hasattr(self.w, "_fn_cache"), "variable must have cache after eval"
-        assert not hasattr(
-            pickle.loads(pickle.dumps(self.w)), "_fn_cache"
-        ), "temporary functions must not be serialized"
+        assert not hasattr(pickle.loads(pickle.dumps(self.w)), "_fn_cache"), (
+            "temporary functions must not be serialized"
+        )
 
     def test_eval_with_strings(self):
         assert self.w.eval({"x": 1.0, self.y: 2.0}) == 6.0

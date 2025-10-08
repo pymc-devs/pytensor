@@ -2214,7 +2214,7 @@ class Split(COp):
         self.view_map = {i: [0] for i in range(self.len_splits)}
 
     def __str__(self):
-        return f"{self.__class__.__name__ }{{{self.len_splits}}}"
+        return f"{self.__class__.__name__}{{{self.len_splits}}}"
 
     def make_node(self, x, axis, splits):
         """WRITEME"""
@@ -2599,7 +2599,7 @@ class Join(COp):
 
         code = f"""
         int axis = {axis_def}
-        PyArrayObject* arrays[{n}] = {{{','.join(arrays)}}};
+        PyArrayObject* arrays[{n}] = {{{",".join(arrays)}}};
         int out_is_valid = {out} != NULL;
 
         {axis_check}
@@ -3874,7 +3874,7 @@ class ExtractDiag(COp):
             PyArrayObject *{out_name}_copy = (PyArrayObject*) PyArray_Copy({out_name});
             Py_DECREF({out_name});
             if (!{out_name}_copy) {{
-                {sub['fail']};  // Error already set by Numpy
+                {sub["fail"]};  // Error already set by Numpy
             }}
             {out_name} = {out_name}_copy;
         }}

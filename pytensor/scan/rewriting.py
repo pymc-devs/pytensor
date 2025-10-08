@@ -846,8 +846,7 @@ def scan_push_out_add(fgraph, node):
     add_of_dot_nodes = [
         n
         for n in op.fgraph.apply_nodes
-        if
-        (
+        if (
             # We have an Add
             isinstance(n.op, Elemwise)
             and isinstance(n.op.scalar_op, ps.Add)

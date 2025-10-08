@@ -350,7 +350,11 @@ class EnumType(CType, dict):
         .. code-block:: python
 
             enum = EnumType(
-                CONSTANT_1=0, CONSTANT_2=1, CONSTANT_3=2, ctype="size_t", cname="MyEnumName"
+                CONSTANT_1=0,
+                CONSTANT_2=1,
+                CONSTANT_3=2,
+                ctype="size_t",
+                cname="MyEnumName",
             )
 
     **Example with aliases**
@@ -674,7 +678,9 @@ class EnumList(EnumType):
 
     .. code-block:: python
 
-        enum = EnumList(("A", "alpha"), ("B", "beta"), "C", "D", "E", "F", ("G", "gamma"))
+        enum = EnumList(
+            ("A", "alpha"), ("B", "beta"), "C", "D", "E", "F", ("G", "gamma")
+        )
 
     See test class :class:`tests.graph.test_types.TestOpEnumList` for a working example.
 

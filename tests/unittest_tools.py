@@ -43,8 +43,7 @@ def fetch_seed(pseed=None):
             seed = None
     except ValueError:
         warnings.warn(
-            "Error: config.unittests__rseed contains "
-            "invalid seed, using None instead"
+            "Error: config.unittests__rseed contains invalid seed, using None instead"
         )
         seed = None
 

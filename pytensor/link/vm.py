@@ -83,16 +83,16 @@ def calculate_reallocate_info(
             ins = None
             if dmap and idx_o in dmap:
                 idx_v = dmap[idx_o]
-                assert (
-                    len(idx_v) == 1
-                ), "Here we only support the possibility to destroy one input"
+                assert len(idx_v) == 1, (
+                    "Here we only support the possibility to destroy one input"
+                )
                 ins = node.inputs[idx_v[0]]
             if vmap and idx_o in vmap:
                 assert ins is None
                 idx_v = vmap[idx_o]
-                assert (
-                    len(idx_v) == 1
-                ), "Here we only support the possibility to view one input"
+                assert len(idx_v) == 1, (
+                    "Here we only support the possibility to view one input"
+                )
                 ins = node.inputs[idx_v[0]]
             if ins is not None:
                 assert isinstance(ins, Variable)

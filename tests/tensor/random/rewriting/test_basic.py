@@ -76,9 +76,9 @@ def apply_local_rewrite_to_rv(
     ).owner.outputs
     dist_st = op_fn(rv)
 
-    assert (
-        count_rv_nodes_in_graph([dist_st, next_rng]) == 1
-    ), "Function expects a single RV in the graph"
+    assert count_rv_nodes_in_graph([dist_st, next_rng]) == 1, (
+        "Function expects a single RV in the graph"
+    )
 
     f_inputs = [
         p
@@ -97,9 +97,9 @@ def apply_local_rewrite_to_rv(
     )
 
     new_rv, new_next_rng = f_rewritten.maker.fgraph.outputs
-    assert (
-        count_rv_nodes_in_graph([new_rv, new_next_rng]) == 1
-    ), "Rewritten should have a single RV in the graph"
+    assert count_rv_nodes_in_graph([new_rv, new_next_rng]) == 1, (
+        "Rewritten should have a single RV in the graph"
+    )
 
     return new_rv, f_inputs, dist_st, f_rewritten
 

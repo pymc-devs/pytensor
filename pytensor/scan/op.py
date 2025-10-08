@@ -2453,8 +2453,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             for g_y in g_y_s:
                 if str(g_y.dtype) in integer_dtypes:
                     raise TypeError(
-                        "Gradients may never be integers but g_y "
-                        f"has type {g_y.type}"
+                        f"Gradients may never be integers but g_y has type {g_y.type}"
                     )
 
             out_indices = [get_out_idx(self_outputs.index(y)) for y in y_s]

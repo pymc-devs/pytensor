@@ -16,9 +16,9 @@ def xr_function(*args, **kwargs):
     """Compile and wrap a PyTensor function to return xarray DataArrays."""
     fn = function(*args, **kwargs)
     symbolic_outputs = fn.maker.fgraph.outputs
-    assert all(
-        isinstance(out.type, XTensorType) for out in symbolic_outputs
-    ), "All outputs must be xtensor"
+    assert all(isinstance(out.type, XTensorType) for out in symbolic_outputs), (
+        "All outputs must be xtensor"
+    )
 
     def xfn(*xr_inputs):
         np_inputs = [

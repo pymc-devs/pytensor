@@ -47,9 +47,9 @@ class TestFunction:
     def test_none(self):
         fn = function([], None)  # ok
         rval = fn()
-        assert (
-            rval != []
-        ), "See #254: Using None as function output leads to [] return value"
+        assert rval != [], (
+            "See #254: Using None as function output leads to [] return value"
+        )
         assert rval is None
 
     def test_empty(self):

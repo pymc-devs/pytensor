@@ -207,9 +207,9 @@ def _scan_split_non_sequence_decomposition_and_solve(
                         eager=True,
                         allowed_assume_a=allowed_assume_a,
                     )
-                    assert (
-                        isinstance(replace_dict, dict) and len(replace_dict) > 0
-                    ), "Rewrite failed"
+                    assert isinstance(replace_dict, dict) and len(replace_dict) > 0, (
+                        "Rewrite failed"
+                    )
                     new_scan_fgraph.replace_all(replace_dict.items())
                     changed = True
                     break  # Break to start over with a fresh toposort

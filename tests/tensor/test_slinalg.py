@@ -259,7 +259,7 @@ solve_test_cases = [
     ("tridiagonal", False, True),
 ]
 solve_test_ids = [
-    f'{assume_a}_{"lower" if lower else "upper"}_{"A^T" if transposed else "A"}'
+    f"{assume_a}_{'lower' if lower else 'upper'}_{'A^T' if transposed else 'A'}"
     for assume_a, lower, transposed in solve_test_cases
 ]
 

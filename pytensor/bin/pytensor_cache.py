@@ -24,7 +24,7 @@ _logger = logging.getLogger("pytensor.bin.pytensor-cache")
 
 def print_help(exit_status):
     if exit_status:
-        print(f"command \"{' '.join(sys.argv)}\" not recognized")
+        print(f'command "{" ".join(sys.argv)}" not recognized')
     print('Type "pytensor-cache" to print the cache location')
     print('Type "pytensor-cache help" to print this help')
     print('Type "pytensor-cache clear" to erase the cache')
