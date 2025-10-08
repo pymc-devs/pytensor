@@ -1,10 +1,11 @@
+import mlx.core as mx
 import numpy as np
 import pytest
 
 import pytensor
 import pytensor.tensor as pt
 from pytensor.tensor.math import Argmax, Max
-from tests.link.mlx.test_basic import compare_mlx_and_py, mx
+from tests.link.mlx.test_basic import compare_mlx_and_py
 
 
 def test_dot():
@@ -92,7 +93,6 @@ def test_elemwise_two_inputs(op) -> None:
 
 
 def test_int_div_specific() -> None:
-    """Test integer division with specific test cases"""
     x = pt.vector("x")
     y = pt.vector("y")
     out = pt.int_div(x, y)
@@ -105,18 +105,15 @@ def test_int_div_specific() -> None:
 
 
 def test_isnan() -> None:
-    """Test IsNan operation with various inputs including NaN values"""
     x = pt.vector("x")
     out = pt.isnan(x)
 
-    # Test with mix of normal values, NaN, and infinity
     x_test = mx.array([1.0, np.nan, 3.0, np.inf, -np.nan, 0.0, -np.inf])
 
     compare_mlx_and_py([x], out, [x_test])
 
 
 def test_isnan_edge_cases() -> None:
-    """Test IsNan with edge cases"""
     x = pt.scalar("x")
     out = pt.isnan(x)
 
