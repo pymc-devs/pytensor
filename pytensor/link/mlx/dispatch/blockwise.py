@@ -15,14 +15,10 @@ def funcify_Blockwise(op: Blockwise, node, **kwargs):
 
     # 4) Handle case where no vectorization is needed
     if n_batch == 0:
-
-        def blockwise_fun(*inputs):
-            return core_f(*inputs)
-
-        return blockwise_fun
+        return core_f
 
     # 5) Vectorize using mx.vmap over any batched inputs
-    in_axes = []
+    in_axes: list[int | None] = []
     for inp, sig in zip(node.inputs, op.inputs_sig):
         batch_ndim = inp.type.ndim - len(sig)
         if batch_ndim == 0:
@@ -34,15 +30,6 @@ def funcify_Blockwise(op: Blockwise, node, **kwargs):
         in_axes.append(0 if not all(batch_bcast) else None)
 
     if not any(axis == 0 for axis in in_axes):
+        return core_f
 
-        def blockwise_fun(*inputs):
-            return core_f(*inputs)
-
-        return blockwise_fun
-
-    blockwise_f = mx.vmap(core_f, in_axes=tuple(in_axes))
-
-    def blockwise_fun(*inputs):
-        return blockwise_f(*inputs)
-
-    return blockwise_fun
+    return mx.vmap(core_f, in_axes=tuple(in_axes))
