@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
-from test_basic import compare_mlx_and_py
 
 import pytensor.tensor as pt
 from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor import tensor
+from tests.link.mlx.test_basic import compare_mlx_and_py
 
 
 mx = pytest.importorskip("mlx.core")

@@ -1,8 +1,9 @@
+import mlx.core as mx
 import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from tests.link.mlx.test_basic import compare_mlx_and_py, mx
+from tests.link.mlx.test_basic import compare_mlx_and_py
 
 
 @pytest.mark.parametrize("op", [pt.any, pt.all, pt.max, pt.min])
