@@ -289,7 +289,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
           export PYTENSOR_FLAGS=mode=FAST_COMPILE,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          python -m pytest --runslow --benchmark-only --benchmark-json output.json
+          python -m pytest --runslow --benchmark-only --benchmark-json output.json --ignore tests/link/mlx
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
