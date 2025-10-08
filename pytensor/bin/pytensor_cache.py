@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from pathlib import Path
 
 
 if sys.platform == "win32":
@@ -65,11 +66,7 @@ def main():
             # Print a warning if some cached modules were not removed, so that the
             # user knows he should manually delete them, or call
             # pytensor-cache purge, # to properly clear the cache.
-            items = [
-                item
-                for item in sorted(os.listdir(cache.dirname))
-                if item.startswith("tmp")
-            ]
+            items = list(Path(cache.dirname).glob("tmp*"))
             if items:
                 _logger.warning(
                     "There remain elements in the cache dir that you may "

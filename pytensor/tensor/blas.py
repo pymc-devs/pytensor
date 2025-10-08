@@ -77,7 +77,6 @@ Optimizations associated with these BLAS Ops are in tensor.rewriting.blas
 
 import functools
 import logging
-import os
 import shlex
 import warnings
 from pathlib import Path
@@ -402,9 +401,9 @@ def _ldflags(
             include_dir=False,
         )
         for d in dirs:
-            for f in os.listdir(d.strip('"')):
-                if f.endswith(".so") or f.endswith(".dylib") or f.endswith(".dll"):
-                    if any(f.find(ll) >= 0 for ll in l):
+            for f in Path(d.strip('"')).iterdir():
+                if f.suffix in {".so", ".dylib", ".dll"}:
+                    if any(f.stem.find(ll) >= 0 for ll in l):
                         found_dyn = True
         # Special treatment of clang framework. Specifically for MacOS Accelerate
         if "-framework" in l and "Accelerate" in l:
