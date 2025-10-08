@@ -62,8 +62,8 @@ class TestFunctionGraph:
         with pytest.raises(
             ValueError,
             match=(
-                "One of the provided inputs is the output of an already existing node. "
-                "If that is okay, either discard that input's owner or use graph.clone."
+                "One of the provided inputs is the output of an already existing node\\. "
+                "If that is okay, either discard that input's owner or use graph\\.clone\\."
             ),
         ):
             var3 = op1(var1)
@@ -208,7 +208,7 @@ class TestFunctionGraph:
         assert var5 in fg.variables
         assert var5.owner in fg.apply_nodes
 
-        with pytest.raises(TypeError, match="Computation graph contains.*"):
+        with pytest.raises(TypeError, match=r"Computation graph contains.*"):
             from pytensor.graph.null_type import NullType
 
             fg.import_var(NullType()(), "testing")
@@ -265,7 +265,7 @@ class TestFunctionGraph:
 
         assert var6.tag.test_value.shape != var4.tag.test_value.shape
 
-        with pytest.raises(AssertionError, match="The replacement.*"):
+        with pytest.raises(AssertionError, match=r"The replacement.*"):
             fg.replace(var4, var6)
 
     def test_replace(self):
@@ -342,12 +342,12 @@ class TestFunctionGraph:
         var5 = op3(var4, var2, var2)
         fg = FunctionGraph([var1, var2], [var3, var5], clone=False)
 
-        with pytest.raises(Exception, match="The following nodes are .*"):
+        with pytest.raises(Exception, match=r"The following nodes are .*"):
             fg.apply_nodes.remove(var5.owner)
 
             fg.check_integrity()
 
-        with pytest.raises(Exception, match="Inconsistent clients.*"):
+        with pytest.raises(Exception, match=r"Inconsistent clients.*"):
             fg.apply_nodes.add(var5.owner)
             fg.remove_client(var2, (var5.owner, 1))
 
@@ -355,14 +355,14 @@ class TestFunctionGraph:
 
         fg.add_client(var2, (var5.owner, 1))
 
-        with pytest.raises(Exception, match="The following variables are.*"):
+        with pytest.raises(Exception, match=r"The following variables are.*"):
             fg.variables.remove(var4)
 
             fg.check_integrity()
 
         fg.variables.add(var4)
 
-        with pytest.raises(Exception, match="Undeclared input.*"):
+        with pytest.raises(Exception, match=r"Undeclared input.*"):
             var6 = MyVariable2("var6")
             fg.clients[var6] = [(var5.owner, 3)]
             fg.variables.add(var6)
@@ -376,26 +376,26 @@ class TestFunctionGraph:
         # TODO: What if the index value is greater than 1?  It will throw an
         # `IndexError`, but that doesn't sound like anything we'd want.
         out_node = Output(idx=1).make_node(var4)
-        with pytest.raises(Exception, match="Inconsistent clients list.*"):
+        with pytest.raises(Exception, match=r"Inconsistent clients list.*"):
             fg.add_client(var4, (out_node, 0))
 
             fg.check_integrity()
 
         fg.remove_client(var4, (out_node, 0))
 
-        with pytest.raises(TypeError, match="The first entry of.*"):
+        with pytest.raises(TypeError, match=r"The first entry of.*"):
             fg.add_client(var4, (None, 0))
 
         var7 = op1(var4)
 
-        with pytest.raises(Exception, match="Client not in FunctionGraph.*"):
+        with pytest.raises(Exception, match=r"Client not in FunctionGraph.*"):
             fg.add_client(var4, (var7.owner, 0))
 
             fg.check_integrity()
 
         fg.remove_client(var4, (var7.owner, 0))
 
-        with pytest.raises(Exception, match="Inconsistent clients list.*"):
+        with pytest.raises(Exception, match=r"Inconsistent clients list.*"):
             fg.add_client(var4, (var3.owner, 0))
 
             fg.check_integrity()

@@ -1462,7 +1462,7 @@ class TestMinMax:
 def test_MaxAndArgmax_deprecated():
     with pytest.raises(
         AttributeError,
-        match="The class `MaxandArgmax` has been deprecated. Call `Max` and `Argmax` seperately as an alternative.",
+        match="The class `MaxandArgmax` has been deprecated\\. Call `Max` and `Argmax` seperately as an alternative\\.",
     ):
         pytensor.tensor.math.MaxAndArgmax
 

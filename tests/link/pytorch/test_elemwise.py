@@ -108,7 +108,7 @@ def test_softmax(axis, dtype):
     if dtype == "int64":
         with pytest.raises(
             NotImplementedError,
-            match="Pytorch Softmax is not currently implemented for non-float types.",
+            match="Pytorch Softmax is not currently implemented for non-float types\\.",
         ):
             compare_pytorch_and_py([x], [out], [test_input])
     else:
@@ -125,7 +125,7 @@ def test_logsoftmax(axis, dtype):
     if dtype == "int64":
         with pytest.raises(
             NotImplementedError,
-            match="Pytorch LogSoftmax is not currently implemented for non-float types.",
+            match="Pytorch LogSoftmax is not currently implemented for non-float types\\.",
         ):
             compare_pytorch_and_py([x], [out], [test_input])
     else:

@@ -284,7 +284,7 @@ class TestSharedRandomStream:
 
 
 def test_supp_shape_from_ref_param_shape():
-    with pytest.raises(ValueError, match="^ndim_supp*"):
+    with pytest.raises(ValueError, match=r"^ndim_supp*"):
         supp_shape_from_ref_param_shape(
             ndim_supp=0,
             dist_params=(np.array([1, 2]), 0),
@@ -306,7 +306,7 @@ def test_supp_shape_from_ref_param_shape():
     )
     assert res == (2,)
 
-    with pytest.raises(ValueError, match="^Reference parameter*"):
+    with pytest.raises(ValueError, match=r"^Reference parameter*"):
         supp_shape_from_ref_param_shape(
             ndim_supp=1,
             dist_params=(np.array(1),),

@@ -150,7 +150,9 @@ class TestConfigTypes:
             cp._apply("cuda123")
         with pytest.raises(ValueError, match="It was removed from PyTensor"):
             cp._apply("gpu123")
-        with pytest.raises(ValueError, match='Valid options start with one of "cpu".'):
+        with pytest.raises(
+            ValueError, match='Valid options start with one of "cpu"\\.'
+        ):
             cp._apply("notadevice")
         assert str(cp) == "unnamed (cpu)"
 
@@ -247,7 +249,7 @@ def test_config_pickling():
     )
     with pytest.raises(
         AttributeError,
-        match="Can't (pickle|get) local object 'test_config_pickling.<locals>.<lambda>'",
+        match=r"Can't (pickle|get) local object 'test_config_pickling\.<locals>\.<lambda>'",
     ):
         pickle.dump(root, io.BytesIO())
 

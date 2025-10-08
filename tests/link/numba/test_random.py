@@ -662,7 +662,7 @@ def test_unaligned_RandomVariable(rv_op, dist_args, base_size, cdf_name, params_
             (10, 4),
             pytest.raises(
                 ValueError,
-                match="Vectorized input 0 has an incompatible shape in axis 1.",
+                match="Vectorized input 0 has an incompatible shape in axis 1\\.",
             ),
         ),
     ],

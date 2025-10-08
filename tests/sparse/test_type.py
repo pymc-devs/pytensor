@@ -79,5 +79,5 @@ def test_SparseTensorType_filter():
     x_res = z.type.filter(x.astype("float32"), allow_downcast=True)
     assert x_res.dtype == "float64"
 
-    with pytest.raises(TypeError, match=".*dtype but got.*"):
+    with pytest.raises(TypeError, match=r".*dtype but got.*"):
         w.type.filter(x)

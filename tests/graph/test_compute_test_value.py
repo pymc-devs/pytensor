@@ -264,7 +264,7 @@ class TestComputeTestValue:
                 fn=fx, outputs_info=pt.ones_like(A.T), non_sequences=A, n_steps=k
             )
 
-        with pytest.raises(ValueError, match="^could not broadcast input"):
+        with pytest.raises(ValueError, match=r"^could not broadcast input"):
             pytensor.scan(
                 fn=fx, outputs_info=pt.ones_like(A.T), non_sequences=A, n_steps=k
             )

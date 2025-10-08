@@ -32,7 +32,7 @@ def test_RandomVariable_basics(strict_test_value_flags):
     assert str_res == 'normal_rv{"(),()->()"}'
 
     # `ndims_params` should be a `Sequence` type
-    with pytest.raises(TypeError, match="^Parameter ndims_params*"):
+    with pytest.raises(TypeError, match=r"^Parameter ndims_params*"):
         RandomVariable(
             "normal",
             0,
@@ -42,7 +42,7 @@ def test_RandomVariable_basics(strict_test_value_flags):
         )
 
     # `size` should be a `Sequence` type
-    with pytest.raises(TypeError, match="^Parameter size*"):
+    with pytest.raises(TypeError, match=r"^Parameter size*"):
         RandomVariable(
             "normal",
             0,

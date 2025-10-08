@@ -495,14 +495,14 @@ class TestSpecifyShape(utt.InferShapeTester):
         f = pytensor.function([x, shape], y, mode=Mode("py"))
         assert f([1], (1,)) == [1]
 
-        with pytest.raises(AssertionError, match="SpecifyShape:.*"):
+        with pytest.raises(AssertionError, match=r"SpecifyShape:.*"):
             assert f([1], (2,)) == [1]
 
         x = matrix()
         y = specify_shape(x, (None, 2))
         f = pytensor.function([x], y, mode=Mode("py"))
         assert f(np.zeros((3, 2), dtype=config.floatX)).shape == (3, 2)
-        with pytest.raises(AssertionError, match="SpecifyShape:.*"):
+        with pytest.raises(AssertionError, match=r"SpecifyShape:.*"):
             assert f(np.zeros((3, 3), dtype=config.floatX))
 
     def test_bad_shape(self):
@@ -516,7 +516,7 @@ class TestSpecifyShape(utt.InferShapeTester):
         assert np.array_equal(f(xval), xval)
 
         xval = np.random.random(3).astype(config.floatX)
-        with pytest.raises(AssertionError, match="SpecifyShape:.*"):
+        with pytest.raises(AssertionError, match=r"SpecifyShape:.*"):
             f(xval)
 
         assert isinstance(
@@ -540,14 +540,14 @@ class TestSpecifyShape(utt.InferShapeTester):
 
         for shape_ in [(4, 3), (2, 8)]:
             xval = np.random.random(shape_).astype(config.floatX)
-            with pytest.raises(AssertionError, match="SpecifyShape:.*"):
+            with pytest.raises(AssertionError, match=r"SpecifyShape:.*"):
                 f(xval)
 
         s = iscalar("s")
         f = pytensor.function([x, s], specify_shape(x, None, s), mode=self.mode)
         x_val = np.zeros((3, 2), dtype=config.floatX)
         assert f(x_val, 2).shape == (3, 2)
-        with pytest.raises(AssertionError, match="SpecifyShape:.*"):
+        with pytest.raises(AssertionError, match=r"SpecifyShape:.*"):
             f(xval, 3)
 
     def test_infer_shape(self):

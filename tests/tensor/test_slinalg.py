@@ -240,7 +240,7 @@ class TestSolveBase:
 
 
 def test_solve_raises_on_invalid_assume_a():
-    with pytest.raises(ValueError, match="Invalid assume_a: test. It must be one of"):
+    with pytest.raises(ValueError, match="Invalid assume_a: test\\. It must be one of"):
         Solve(assume_a="test", b_ndim=2)
 
 

@@ -349,11 +349,11 @@ def test_squeeze_errors():
 
     # Non-existent dimension
     x1 = xtensor("x1", dims=("city", "country"), shape=(3, 1))
-    with pytest.raises(ValueError, match="Dimension .* not found"):
+    with pytest.raises(ValueError, match=r"Dimension .* not found"):
         x1.squeeze("time")
 
     # Dimension size > 1
-    with pytest.raises(ValueError, match="has static size .* not 1"):
+    with pytest.raises(ValueError, match=r"has static size .* not 1"):
         x1.squeeze("city")
 
     # Symbolic shape: dim is not 1 at runtime → should raise
@@ -579,7 +579,7 @@ class TestBroadcast:
         y = xtensor("y", dims=("c", "d"), shape=(5, 6))
         z = xtensor("z", dims=("b", "d"), shape=(4, 7))
 
-        with pytest.raises(ValueError, match="Dimension .* has conflicting shapes"):
+        with pytest.raises(ValueError, match=r"Dimension .* has conflicting shapes"):
             broadcast(x, y, z)
 
     def test_broadcast_no_input(self):

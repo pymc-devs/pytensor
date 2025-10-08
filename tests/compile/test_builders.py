@@ -45,7 +45,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
     def test_valid_input(self):
         x, y, z = matrices("xyz")
 
-        with pytest.raises(ValueError, match="Expected at least.*"):
+        with pytest.raises(ValueError, match=r"Expected at least.*"):
             OpFromGraph([x], [x])()
 
         with pytest.raises(ValueError, match=r"Expected 1 input\(s\)"):
