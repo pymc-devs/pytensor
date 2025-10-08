@@ -224,9 +224,9 @@ class ScipyWrapperOp(Op, HasInnerGraph):
     def make_node(self, *inputs):
         assert len(inputs) == len(self.inner_inputs)
         for input, inner_input in zip(inputs, self.inner_inputs):
-            assert (
-                input.type == inner_input.type
-            ), f"Input {input} does not match expected type {inner_input.type}"
+            assert input.type == inner_input.type, (
+                f"Input {input} does not match expected type {inner_input.type}"
+            )
 
         return Apply(self, inputs, [self.inner_inputs[0].type(), ps.bool("success")])
 

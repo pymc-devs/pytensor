@@ -167,9 +167,9 @@ def lower_broadcast(fgraph, node):
                 if dim in broadcast_dims and broadcast_dims[dim] is None:
                     # If the dimension is not excluded, set its shape
                     broadcast_dims[dim] = dim_length
-        assert not any(
-            value is None for value in broadcast_dims.values()
-        ), "All dimensions must have a length"
+        assert not any(value is None for value in broadcast_dims.values()), (
+            "All dimensions must have a length"
+        )
 
         # Create zeros with the broadcast dimensions, to then broadcast each input against
         # PyTensor will rewrite into using only the shapes of the zeros tensor

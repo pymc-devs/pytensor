@@ -427,19 +427,17 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
 
         c = a + b  # create a simple expression
 
-        f = pytensor.function(
-            [b], [c]
-        )  # this works because a has a value associated with it already
+        # this works because a has a value associated with it already
+        f = pytensor.function([b], [c])
 
-        assert 4.0 == f(2.5)  # bind 2.5 to an internal copy of b and evaluate an internal c
+        # bind 2.5 to an internal copy of b and evaluate an internal c
+        assert 4.0 == f(2.5)
 
-        pytensor.function(
-            [a], [c]
-        )  # compilation error because b (required by c) is undefined
+        # compilation error because b (required by c) is undefined
+        pytensor.function([a], [c])
 
-        pytensor.function(
-            [a, b], [c]
-        )  # compilation error because a is constant, it can't be an input
+        # compilation error because a is constant, it can't be an input
+        pytensor.function([a, b], [c])
 
 
     The python variables ``a, b, c`` all refer to instances of type

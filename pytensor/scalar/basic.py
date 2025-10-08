@@ -1005,8 +1005,7 @@ def as_scalar(x: Any, name: str | None = None) -> ScalarVariable:
         #  Also, if we do, why can't we support multiple outputs?
         if len(x.outputs) != 1:
             raise ValueError(
-                "It is ambiguous which output of a multi-output"
-                " Op has to be fetched.",
+                "It is ambiguous which output of a multi-output Op has to be fetched.",
                 x,
             )
         return as_scalar(x.outputs[0])

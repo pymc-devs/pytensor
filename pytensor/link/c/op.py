@@ -588,7 +588,7 @@ class ExternalCOp(COp):
                 {define_macros}
                 {{
                   if ({self.func_name}({self.format_c_function_args(inp, out)}{params}) != 0) {{
-                    {sub['fail']}
+                    {sub["fail"]}
                   }}
                 }}
                 {undef_macros}

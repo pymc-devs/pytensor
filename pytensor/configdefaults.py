@@ -67,8 +67,7 @@ def _warn_cxx(val):
     """We only support clang++ as otherwise we hit strange g++/OSX bugs."""
     if sys.platform == "darwin" and val and "clang++" not in val:
         _logger.warning(
-            "Only clang++ is supported. With g++,"
-            " we end up with strange g++/OSX bugs."
+            "Only clang++ is supported. With g++, we end up with strange g++/OSX bugs."
         )
     return True
 

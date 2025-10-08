@@ -88,7 +88,7 @@ class Cholesky(Op):
         # Squareness check
         if x.shape[0] != x.shape[1]:
             raise ValueError(
-                "Input array is expected to be square but has " f"the shape: {x.shape}."
+                f"Input array is expected to be square but has the shape: {x.shape}."
             )
 
         # Scipy cholesky only makes use of overwrite_a when it is F_CONTIGUOUS

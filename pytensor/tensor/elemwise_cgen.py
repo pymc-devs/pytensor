@@ -691,10 +691,10 @@ def make_reordered_loop_careduce(
     counter = iter(range(inp_ndim))
     unsorted_vars = dedent(
         f"""
-        npy_intp dim_lengths[{inp_ndim}] = {{{','.join(f'{inp_var}_n{i}' for i in range(inp_ndim))}}};
-        npy_intp inp_strides[{inp_ndim}] = {{{','.join(f'{inp_var}_stride{i}' for i in range(inp_ndim))}}};
-        npy_intp acc_strides[{inp_ndim}] = {{{','.join("0" if i in reduction_axes else f'{acc_var}_stride{next(counter)}'for i in range(inp_ndim))}}};
-        bool reduction_axes[{inp_ndim}] = {{{', '.join("1" if i in reduction_axes else "0" for i in range(inp_ndim))}}};\n
+        npy_intp dim_lengths[{inp_ndim}] = {{{",".join(f"{inp_var}_n{i}" for i in range(inp_ndim))}}};
+        npy_intp inp_strides[{inp_ndim}] = {{{",".join(f"{inp_var}_stride{i}" for i in range(inp_ndim))}}};
+        npy_intp acc_strides[{inp_ndim}] = {{{",".join("0" if i in reduction_axes else f"{acc_var}_stride{next(counter)}" for i in range(inp_ndim))}}};
+        bool reduction_axes[{inp_ndim}] = {{{", ".join("1" if i in reduction_axes else "0" for i in range(inp_ndim))}}};\n
         """
     )
 

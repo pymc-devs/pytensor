@@ -2975,10 +2975,7 @@ def check_stack_trace(f_or_fgraph, ops_to_check="last", bug_print="raise"):
         raise ValueError("ops_to_check does not have the right type")
 
     if not apply_nodes_to_check:
-        msg = (
-            "Provided op instances/classes are not in the graph or the "
-            "graph is empty"
-        )
+        msg = "Provided op instances/classes are not in the graph or the graph is empty"
         if bug_print == "warn":
             warnings.warn(msg)
         elif bug_print == "raise":

@@ -935,18 +935,14 @@ class ProfileStats:
                     if dmap and idx2 in dmap:
                         vidx = dmap[idx2]
                         assert len(vidx) == 1, (
-                            "Here we only support the "
-                            "possibility to destroy one "
-                            "input"
+                            "Here we only support the possibility to destroy one input"
                         )
                         ins = node.inputs[vidx[0]]
                     if vmap and idx2 in vmap:
                         assert ins is None
                         vidx = vmap[idx2]
                         assert len(vidx) == 1, (
-                            "Here we only support the "
-                            "possibility to view one "
-                            "input"
+                            "Here we only support the possibility to view one input"
                         )
                         ins = node.inputs[vidx[0]]
                     if ins is not None:
@@ -1093,9 +1089,7 @@ class ProfileStats:
                             assert ins is None
                             vidx = vmap[idx]
                             assert len(vidx) == 1, (
-                                "Here we only support "
-                                "the possibility to "
-                                "view one input"
+                                "Here we only support the possibility to view one input"
                             )
                             ins = node.inputs[vidx[0]]
                         if ins is not None:
@@ -1405,7 +1399,7 @@ class ProfileStats:
         print(
             (
                 f"   ... (remaining {max(0, len(node_mem) - N)} Apply account for "
-                f"{sum_remaining:4d}B/{size_sum_dense :d}B ({p}) of the"
+                f"{sum_remaining:4d}B/{size_sum_dense:d}B ({p}) of the"
                 " Apply with dense outputs sizes)"
             ),
             file=file,
@@ -1545,8 +1539,7 @@ class ProfileStats:
                         return True
                     elif s_op.__class__ not in scalar_op_amdlibm_no_speed_up:
                         print(
-                            "We don't know if amdlibm will accelerate "
-                            "this scalar op.",
+                            "We don't know if amdlibm will accelerate this scalar op.",
                             s_op,
                             file=file,
                         )
