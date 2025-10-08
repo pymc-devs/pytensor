@@ -57,14 +57,14 @@ class TestFunction:
         assert fn() == []
 
     def test_extra_inputs(self):
-        x, s = scalars("xs")
+        x, _s = scalars("xs")
         fn = function([x], [x])
         with pytest.raises(TypeError):
             fn(1, 2)
 
     def test_missing_inputs(self):
         def fn():
-            x, s = scalars("xs")
+            x, _s = scalars("xs")
             function([], [x])
 
         with pytest.raises(MissingInputError):
@@ -162,7 +162,7 @@ class TestFunction:
 
     def test_naming_rule1(self):
         a = scalar()  # the a is for 'anonymous' (un-named).
-        x, s = scalars("xs")
+        _x, s = scalars("xs")
         f = function([a, s], a / s)
         assert f(1, 2) == 0.5
         assert f(2, 1) == 2.0

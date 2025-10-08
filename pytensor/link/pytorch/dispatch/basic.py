@@ -225,7 +225,7 @@ def pytorch_funcify_TensorFromScalar(op, **kwargs):
 
 @pytorch_funcify.register(Split)
 def pytorch_funcify_Split(op, node, **kwargs):
-    x, dim, split_sizes = node.inputs
+    _x, dim, split_sizes = node.inputs
     if isinstance(dim, Constant) and isinstance(split_sizes, Constant):
         dim = int(dim.data)
         split_sizes = tuple(int(size) for size in split_sizes.data)

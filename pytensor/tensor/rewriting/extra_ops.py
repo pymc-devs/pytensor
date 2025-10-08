@@ -51,7 +51,7 @@ def local_Unique_Alloc_lift(fgraph, node):
     if not (alloc_var.owner and isinstance(alloc_var.owner.op, Alloc)):
         return False
 
-    alloced_var, *alloc_shape = alloc_var.owner.inputs
+    alloced_var, *_alloc_shape = alloc_var.owner.inputs
 
     new_unique, *_ = node.op.make_node(alloced_var).outputs
 
@@ -84,7 +84,7 @@ def local_Unique_Repeat_lift(fgraph, node):
     if not (repeat_var.owner and isinstance(repeat_var.owner.op, Repeat)):
         return False
 
-    repeated_var, *repeat_shape = repeat_var.owner.inputs
+    repeated_var, *_repeat_shape = repeat_var.owner.inputs
 
     new_unique, *_ = node.op.make_node(repeated_var).outputs
 
@@ -121,7 +121,7 @@ def local_Unique_second(fgraph, node):
     ):
         return False
 
-    shape_var, seconded_var = second_var.owner.inputs
+    _shape_var, seconded_var = second_var.owner.inputs
 
     new_unique, *_ = node.op.make_node(seconded_var).outputs
 

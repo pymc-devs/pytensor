@@ -1151,7 +1151,7 @@ class TestHyp2F1Grad:
             test_b1,
             test_z,
             *expected_dds,
-            expected_ddz,
+            _expected_ddz,
         ) = self.few_iters_case
 
         a1, a2, b1, z = pt.scalars("a1", "a2", "b1", "z")

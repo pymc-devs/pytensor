@@ -367,7 +367,7 @@ def _get_underlying_scalar_constant_value(
             elif isinstance(op, ps.ScalarOp):
                 if isinstance(v.owner.op, ps.Second):
                     # We don't need both input to be constant for second
-                    shp, val = v.owner.inputs
+                    _shp, val = v.owner.inputs
                     v = val
                     continue
                 if isinstance(v.owner.op, _scalar_constant_value_elemwise_ops):
@@ -384,7 +384,7 @@ def _get_underlying_scalar_constant_value(
             elif isinstance(op, Elemwise):
                 if isinstance(v.owner.op.scalar_op, ps.Second):
                     # We don't need both input to be constant for second
-                    shp, val = v.owner.inputs
+                    _shp, val = v.owner.inputs
                     v = val
                     continue
                 elif elemwise and isinstance(
@@ -691,7 +691,7 @@ class ScalarFromTensor(COp):
         return [()]
 
     def grad(self, inp, grads):
-        (s,) = inp
+        (_s,) = inp
         (dt,) = grads
         return [tensor_from_scalar(dt)]
 
@@ -2273,7 +2273,7 @@ class Split(COp):
     def infer_shape(self, fgraph, node, in_shapes):
         axis = node.inputs[1]
         splits = node.inputs[2]
-        shp_x, shp_axis, shp_splits = in_shapes
+        shp_x, _shp_axis, _shp_splits = in_shapes
         out_shapes = []
         for i in range(self.len_splits):
             temp = as_tensor_variable(shp_x)
@@ -2284,7 +2284,7 @@ class Split(COp):
 
     def L_op(self, inputs, outputs, g_outputs):
         """Join the gradients along the axis that was used to split x."""
-        x, axis, n = inputs
+        _x, axis, n = inputs
 
         # If all the output gradients are disconnected, then so are the inputs
         if builtins.all(isinstance(g.type, DisconnectedType) for g in g_outputs):
@@ -3354,7 +3354,7 @@ class ARange(COp):
         return [[True], [False], [True]]
 
     def L_op(self, inputs, outputs, grads):
-        start, stop, step = inputs
+        start, _stop, step = inputs
         (gz,) = grads
         # `start` and `step` affect the output values
         # but the outputs are integers so there's

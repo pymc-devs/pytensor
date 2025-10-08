@@ -322,7 +322,7 @@ class SolveBase(Op):
           http://eprints.maths.ox.ac.uk/1079/
 
         """
-        A, b = inputs
+        A, _b = inputs
 
         c = outputs[0]
         # C is a scalar representing the entire graph
@@ -1850,7 +1850,7 @@ class QR(Op):
 
     def _call_and_get_lwork(self, fn, *args, lwork, **kwargs):
         if lwork in [-1, None]:
-            *_, work, info = fn(*args, lwork=-1, **kwargs)
+            *_, work, _info = fn(*args, lwork=-1, **kwargs)
             lwork = work.item()
 
         return fn(*args, lwork=lwork, **kwargs)
@@ -1861,13 +1861,13 @@ class QR(Op):
 
         if self.pivoting:
             (geqp3,) = get_lapack_funcs(("geqp3",), (x,))
-            qr, jpvt, tau, *work_info = self._call_and_get_lwork(
+            qr, jpvt, tau, *_work_info = self._call_and_get_lwork(
                 geqp3, x, lwork=-1, overwrite_a=self.overwrite_a
             )
             jpvt -= 1  # geqp3 returns a 1-based index array, so subtract 1
         else:
             (geqrf,) = get_lapack_funcs(("geqrf",), (x,))
-            qr, tau, *work_info = self._call_and_get_lwork(
+            qr, tau, *_work_info = self._call_and_get_lwork(
                 geqrf, x, lwork=-1, overwrite_a=self.overwrite_a
             )
 
@@ -1901,11 +1901,11 @@ class QR(Op):
         (gor_un_gqr,) = get_lapack_funcs(("orgqr",), (qr,))
 
         if M < N:
-            Q, work, info = self._call_and_get_lwork(
+            Q, _work, _info = self._call_and_get_lwork(
                 gor_un_gqr, qr[:, :M], tau, lwork=-1, overwrite_a=1
             )
         elif self.mode == "economic":
-            Q, work, info = self._call_and_get_lwork(
+            Q, _work, _info = self._call_and_get_lwork(
                 gor_un_gqr, qr, tau, lwork=-1, overwrite_a=1
             )
         else:
@@ -1914,7 +1914,7 @@ class QR(Op):
             qqr[:, :N] = qr
 
             # Always overwite qqr -- it's a meaningless intermediate value
-            Q, work, info = self._call_and_get_lwork(
+            Q, _work, _info = self._call_and_get_lwork(
                 gor_un_gqr, qqr, tau, lwork=-1, overwrite_a=1
             )
 

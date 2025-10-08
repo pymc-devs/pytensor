@@ -89,7 +89,7 @@ def test_input_not_aliased_to_update(mode):
         return [x, y]
 
     op = ScalarLoop(init=[x0, y0], constant=[const], update=update(x0, y0))
-    x, y = op(n_steps, x0, y0, const)
+    _x, y = op(n_steps, x0, y0, const)
 
     fn = function([n_steps, x0, y0, const], y, mode=mode)
     np.testing.assert_allclose(fn(n_steps=1, x0=0, y0=0, const=1), 0.0)

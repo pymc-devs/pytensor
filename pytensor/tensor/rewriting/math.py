@@ -2514,7 +2514,7 @@ def local_log1p(fgraph, node):
     # log(1-x) -> log1p(-x)
     (log_arg,) = node.inputs
     if log_arg.owner and log_arg.owner.op == add:
-        scalars, scalar_inputs, nonconsts = scalarconsts_rest(
+        scalars, _scalar_inputs, nonconsts = scalarconsts_rest(
             log_arg.owner.inputs, only_process_constants=True
         )
         # scalar_inputs are potentially dimshuffled and fill'd scalars
@@ -3195,7 +3195,7 @@ def is_1pexp(t, only_process_constants=True):
 
     """
     if t.owner and t.owner.op == add:
-        scalars, scalar_inputs, nonconsts = scalarconsts_rest(
+        scalars, _scalar_inputs, nonconsts = scalarconsts_rest(
             t.owner.inputs, only_process_constants=only_process_constants
         )
         # scalar_inputs are potentially dimshuffled and filled with scalars
@@ -3709,7 +3709,7 @@ def local_reciprocal_1_plus_exp(fgraph, node):
     # so we don't care to check client counts
     reciprocal_arg = node.inputs[0]
     if reciprocal_arg.owner and reciprocal_arg.owner.op == add:
-        scalars_, scalar_inputs, nonconsts = scalarconsts_rest(
+        scalars_, _scalar_inputs, nonconsts = scalarconsts_rest(
             reciprocal_arg.owner.inputs, only_process_constants=True
         )
         # scalar_inputs are potentially dimshuffled and fill'd scalars

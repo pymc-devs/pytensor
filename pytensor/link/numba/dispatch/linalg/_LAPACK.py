@@ -226,7 +226,7 @@ class _LAPACK:
         Determine machine precision for floating point arithmetic.
         """
 
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "lamch")
+        lapack_ptr, _float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "lamch")
         output_dtype = _get_output_ctype(dtype)
         functype = ctypes.CFUNCTYPE(
             output_dtype,  # Output

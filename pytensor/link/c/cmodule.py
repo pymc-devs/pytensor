@@ -1496,7 +1496,7 @@ class ModuleCache:
                 # May happen for broken versioned keys.
                 continue
             for key_idx, key in enumerate(key_data.keys):
-                version, rest = key
+                version, _rest = key
                 if version:
                     # Since the version is included in the module hash,
                     # it should not be possible to mix versioned and
@@ -2243,7 +2243,7 @@ class GCC_compiler(Compiler):
                                 if "target-cpu" in p:
                                     opt = p.split()
                                     if len(opt) == 2:
-                                        opt_name, opt_val = opt
+                                        _opt_name, opt_val = opt
                                         new_flags[i] = f"-march={opt_val}"
 
                             # Some versions of GCC report the native arch
@@ -2474,7 +2474,7 @@ class GCC_compiler(Compiler):
         else:
             # In explicit else because of https://github.com/python/mypy/issues/10773
             def sort_key(lib):
-                name, *numbers, extension = lib.split(".")
+                _name, *numbers, extension = lib.split(".")
                 return (extension == "dll", tuple(map(int, numbers)))
 
             patched_lib_ldflags = []

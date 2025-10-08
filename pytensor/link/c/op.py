@@ -84,7 +84,7 @@ class COp(Op, CLinkerOp):
         outputs = cl.make_thunk(
             input_storage=node_input_storage, output_storage=node_output_storage
         )
-        thunk, node_input_filters, node_output_filters = outputs
+        thunk, _node_input_filters, _node_output_filters = outputs
 
         if compute_map is None:
             rval = is_cthunk_wrapper_type(thunk)

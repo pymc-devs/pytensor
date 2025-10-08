@@ -2827,7 +2827,7 @@ def pre_greedy_node_rewriter(
     else:
         out_index = 0
 
-    final_outs, rewritten_nodes = local_recursive_function(rewrites, out, {}, 0)
+    final_outs, _rewritten_nodes = local_recursive_function(rewrites, out, {}, 0)
     return final_outs[out_index]
 
 

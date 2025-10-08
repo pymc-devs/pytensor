@@ -122,7 +122,7 @@ def construct_nominal_fgraph(
     (
         local_inputs,
         local_outputs,
-        (clone_d, update_d, update_expr, new_shared_inputs),
+        (_clone_d, update_d, update_expr, new_shared_inputs),
     ) = new
 
     assert len(local_inputs) == len(inputs) + len(implicit_shared_inputs)

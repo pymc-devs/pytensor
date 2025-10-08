@@ -912,11 +912,11 @@ def test_infer_static_shape():
 
     constant_size = constant([1])
     specify_size = specify_shape(constant_size, [1])
-    sh, static_shape = infer_static_shape(specify_size)
+    _sh, static_shape = infer_static_shape(specify_size)
     assert static_shape == (1,)
 
     x = scalar("x")
-    sh, static_shape = infer_static_shape([x.size])
+    _sh, static_shape = infer_static_shape([x.size])
     assert static_shape == (1,)
 
 

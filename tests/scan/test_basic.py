@@ -273,7 +273,7 @@ class TestScan:
             r = normal(x, rng=inner_rng)
             return r + y + z, z
 
-        out, out_updates = scan(
+        out, _out_updates = scan(
             inner_fn,
             outputs_info=[pt.as_tensor(0.0, dtype=config.floatX), None],
             n_steps=4,
@@ -784,7 +784,7 @@ class TestScan:
             return s + 1
 
         x = vector("x")
-        sx, upx = scan(fn=incr, sequences=[{"input": x}])
+        sx, _upx = scan(fn=incr, sequences=[{"input": x}])
 
         scan_seqs = sx.owner.op.outer_seqs(sx.owner.inputs)
 
@@ -794,8 +794,8 @@ class TestScan:
     def test_hash(self):
         x = vector()
         y = vector()
-        scan1, updates = scan(lambda _x: _x + 1, x)
-        scan2, updates = scan(lambda _x: _x + 1, y)
+        scan1, _updates = scan(lambda _x: _x + 1, x)
+        scan2, _updates = scan(lambda _x: _x + 1, y)
         assert scan1.owner.op == scan2.owner.op
         assert hash(scan1.owner.op) == hash(scan2.owner.op)
 
@@ -967,7 +967,7 @@ class TestScan:
     def test_shared_updates(self):
         X = shared(np.array(1))
 
-        out, updates = scan(
+        _out, updates = scan(
             lambda: {X: (X + 1)},
             outputs_info=[],
             non_sequences=[],
@@ -983,7 +983,7 @@ class TestScan:
         x = shared(np.array(1))
         y = shared(np.array(1))
 
-        out, updates = scan(
+        _out, updates = scan(
             lambda: {x: x + 1, y: x},
             outputs_info=[],
             non_sequences=[],
@@ -1100,7 +1100,7 @@ class TestScan:
         y.name = "y"
         gy = grad(y, x)
         gy.name = "gy"
-        hy, updates = scan(
+        hy, _updates = scan(
             lambda i, gy, x: grad(gy[i] * fc2, x),
             sequences=pt.arange(gy.shape[0]),
             non_sequences=[gy, x],
@@ -1133,7 +1133,7 @@ class TestScan:
 
     def test_grad_sitsot(self):
         def get_sum_of_grad(inp):
-            scan_outputs, updates = scan(
+            scan_outputs, _updates = scan(
                 fn=lambda x: x * 2, outputs_info=[inp], n_steps=5
             )
 
@@ -1157,7 +1157,7 @@ class TestScan:
         def get_sum_of_grad(input0, input1):
             outputs_info = [dict(initial=input0, taps=[-2]), input1]
 
-            scan_outputs, updates = scan(
+            scan_outputs, _updates = scan(
                 fn=inner_fct, outputs_info=outputs_info, n_steps=3
             )
 
@@ -1200,7 +1200,7 @@ class TestScan:
         a0 = shared(np.arange(2))
         b0 = shared(np.arange(2))
 
-        (a, b), _ = scan(
+        (a, _b), _ = scan(
             fn,
             outputs_info=[
                 {"initial": a0, "taps": [-2, -1]},
@@ -1274,7 +1274,9 @@ class TestScan:
         inputs = [matrix(), vector()]
         outputs_info = [dict(initial=inputs[0], taps=[-2, -1]), inputs[1]]
 
-        scan_outputs, updates = scan(fn=inner_fct, outputs_info=outputs_info, n_steps=5)
+        scan_outputs, _updates = scan(
+            fn=inner_fct, outputs_info=outputs_info, n_steps=5
+        )
 
         # Take the gradient of each output wrt its corresponding initial state
         gradients = [
@@ -1354,7 +1356,7 @@ class TestScan:
         analytic_grad = grad_fn(v_u, v_x0, W_in, W)
 
         num_grad = multiple_outputs_numeric_grad(cost_fn, [v_u, v_x0, W_in, W])
-        max_err, max_err_pos = num_grad.max_err(analytic_grad)
+        max_err, _max_err_pos = num_grad.max_err(analytic_grad)
         assert max_err <= 1e-2
 
     def test_grad_multiple_outs(self):
@@ -1415,7 +1417,7 @@ class TestScan:
             cost_fn, [v_u1, v_u2, v_x0, v_y0, vW_in1]
         )
         analytic_grad = grad_fn(v_u1, v_u2, v_x0, v_y0, vW_in1)
-        max_err, max_err_pos = num_grad.max_err(analytic_grad)
+        max_err, _max_err_pos = num_grad.max_err(analytic_grad)
         assert max_err <= 1e-2
 
     def test_grad_multiple_outs_taps(self):
@@ -1491,7 +1493,7 @@ class TestScan:
         )
 
         analytic_grad = grad_fn(v_u1, v_u2, v_x0, v_y0, vW_in1)
-        max_err, max_err_pos = num_grad.max_err(analytic_grad)
+        max_err, _max_err_pos = num_grad.max_err(analytic_grad)
         assert max_err <= 1e-2
 
     @pytest.mark.slow
@@ -1561,7 +1563,7 @@ class TestScan:
         )
 
         analytic_grad = grad_fn(v_u1, v_u2, v_x0, v_y0, vW_in1)
-        max_err, max_err_pos = num_grad.max_err(analytic_grad)
+        max_err, _max_err_pos = num_grad.max_err(analytic_grad)
         assert max_err <= 1e-2
 
     def test_grad_multiple_outs_some_uncomputable(self):
@@ -1633,7 +1635,7 @@ class TestScan:
             ndarray_mask=[True, False, True, True],
         )
         analytic_grad = reset_rng_grad_fn(v_u, v_u2, v_x0, vW_in)
-        max_err, max_err_pos = num_grad.max_err(analytic_grad)
+        max_err, _max_err_pos = num_grad.max_err(analytic_grad)
         assert max_err <= 1e-2
 
         # Also validate that the mappings outer_inp_from_outer_out and
@@ -1720,7 +1722,7 @@ class TestScan:
         x1 = shared(3.0)
         x1.name = "x1"
         x2 = vector("x2")
-        y, updates = scan(lambda v: pt.cast(v * x1, config.floatX), sequences=x2)
+        y, _updates = scan(lambda v: pt.cast(v * x1, config.floatX), sequences=x2)
         m = grad(y.sum(), x1)
 
         f = function([x2], m, allow_input_downcast=True)
@@ -1731,7 +1733,7 @@ class TestScan:
         x2 = shared(np.array([1, 2, 3, 4, 5]), name="x2")
         K = x2 * x1
 
-        out, updates = scan(
+        out, _updates = scan(
             lambda i, v: grad(K[i], v),
             sequences=pt.arange(K.shape[0]),
             non_sequences=x1,
@@ -1852,7 +1854,7 @@ class TestScan:
         x = scalar("x")
         _max_coefficients_supported = 1000
         full_range = pt.arange(_max_coefficients_supported)
-        components, updates = scan(
+        components, _updates = scan(
             fn=lambda coeff, power, free_var: coeff * (free_var**power),
             outputs_info=None,
             sequences=[c, full_range],
@@ -1872,7 +1874,7 @@ class TestScan:
         x = scalar("x")
         _max_coefficients_supported = 1000
         full_range = pt.arange(_max_coefficients_supported)
-        components, updates = scan(
+        components, _updates = scan(
             fn=lambda coeff, power, free_var: coeff * (free_var**power),
             outputs_info=None,
             sequences=[c, full_range],
@@ -1891,7 +1893,7 @@ class TestScan:
 
         xinit = tensor3("xinit")
         w = matrix("w")
-        (xseq, updates) = scan(
+        (xseq, _updates) = scan(
             n_steps=10,
             fn=onestep,
             outputs_info=[dict(initial=xinit, taps=[-4, -1])],
@@ -1918,7 +1920,7 @@ class TestScan:
         v_w[pos] = -1 * v_w[pos]
         analytic_grad = grad_fn(v_x, v_w)
         num_grad = multiple_outputs_numeric_grad(cost_fn, [v_x, v_w])
-        max_err, max_err_pos = num_grad.max_err(analytic_grad)
+        max_err, _max_err_pos = num_grad.max_err(analytic_grad)
         assert max_err <= 1e-2
 
     def test_grad_numeric_shared(self):
@@ -2061,7 +2063,7 @@ class TestScan:
         fn_rop = function(
             [u, h0, W, eu, eh0, eW], [nwo_u, nwo_h0, nwo_W, o], on_unused_input="ignore"
         )
-        vnu, vnh0, vnW, vno = fn_rop(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
+        vnu, vnh0, vnW, _vno = fn_rop(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
 
         n2o_u, _ = scan(
             lambda i, o, u, h0, W, eu: (grad(o[i], u) * eu).sum(),
@@ -2088,7 +2090,7 @@ class TestScan:
             [u, h0, W, eu, eh0, eW], [n2o_u, n2o_h0, n2o_W, o], on_unused_input="ignore"
         )
 
-        tnu, tnh0, tnW, tno = fn_test(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
+        tnu, tnh0, tnW, _tno = fn_test(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
         np.testing.assert_allclose(vnu, tnu, atol=1e-6)
         np.testing.assert_allclose(vnh0, tnh0, atol=1e-6)
         np.testing.assert_allclose(vnW, tnW, atol=2e-6)
@@ -2473,7 +2475,7 @@ def test_outputs_taps_check():
 def test_inconsistent_broadcast_error():
     x = tensor3()
     initial_x = pt.constant(np.zeros((1, 10)))
-    y, updates = scan(
+    y, _updates = scan(
         fn=lambda x, prev_x: x + prev_x,
         sequences=x,
         outputs_info=[dict(initial=initial_x)],
@@ -2491,7 +2493,7 @@ def test_missing_input_error():
         return pt.zeros(()), {c: c + inc}
 
     with pytest.raises(MissingInputError):
-        _, updates = scan(count_up, n_steps=20)
+        _, _updates = scan(count_up, n_steps=20)
 
 
 class TestGradUntil:
@@ -2561,7 +2563,7 @@ class TestGradUntil:
         )
         g = grad(r.sum(), self.x)
         f = function([self.x, self.threshold], [r, g])
-        pytensor_output, pytensor_gradient = f(self.seq, 6)
+        _pytensor_output, pytensor_gradient = f(self.seq, 6)
 
         # Gradient computed by hand:
         numpy_grad = np.array([0, 0, 0, 5, 6, 10, 4, 5, 0, 0, 0, 0, 0, 0, 0])
@@ -2576,7 +2578,7 @@ def test_mintap_onestep():
         new_sum = prev_sum + seq_t
         return new_sum
 
-    rs, updates = scan(
+    rs, _updates = scan(
         fn=accum, sequences={"input": seq, "taps": [2]}, outputs_info=0, n_steps=1
     )
 
@@ -2662,7 +2664,7 @@ def test_inner_get_vector_length():
 def test_profile_info():
     from pytensor.scan.utils import ScanProfileStats
 
-    z, updates = scan(fn=lambda u: u + 1, sequences=[pt.arange(10)], profile=True)
+    z, _updates = scan(fn=lambda u: u + 1, sequences=[pt.arange(10)], profile=True)
 
     assert isinstance(z.owner.op, Scan)
     fn = z.owner.op.fn
@@ -2671,7 +2673,7 @@ def test_profile_info():
     assert fn.profile.name == "scan_fn"
 
     # Set the `ScanProfileStats` name
-    z, updates = scan(
+    z, _updates = scan(
         fn=lambda u: u + 1, sequences=[pt.arange(10)], profile="profile_name"
     )
 
@@ -2683,7 +2685,7 @@ def test_profile_info():
 
     # Use an existing profile object
     profile = fn.profile
-    z, updates = scan(fn=lambda u: u + 1, sequences=[pt.arange(10)], profile=profile)
+    z, _updates = scan(fn=lambda u: u + 1, sequences=[pt.arange(10)], profile=profile)
 
     assert isinstance(z.owner.op, Scan)
     fn = z.owner.op.fn
@@ -2837,7 +2839,7 @@ class TestExamples:
             v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
             v_y[i] = np.dot(v_x[i - 1], vWout) + v_y[i - 1]
 
-        (pytensor_dump1, pytensor_dump2, pytensor_x, pytensor_y) = benchmark(
+        (_pytensor_dump1, _pytensor_dump2, pytensor_x, pytensor_y) = benchmark(
             f4, v_u1, v_u2, v_x0, v_y0, vW_in1
         )
 
@@ -2912,7 +2914,7 @@ class TestExamples:
         x = scalar()
         seq = vector()
         outputs_info = [x, pt.zeros_like(x)]
-        (out1, out2), updates = scan(
+        (out1, out2), _updates = scan(
             lambda a, b, c: (a + b, b + c),
             sequences=seq,
             outputs_info=outputs_info,
@@ -2951,7 +2953,7 @@ class TestExamples:
         x = dcol()
         seq = dcol()
         outputs_info = [x, pt.zeros_like(x)]
-        (out1, out2), updates = scan(
+        (out1, out2), _updates = scan(
             lambda a, b, c: (a + b, a + c), sequences=seq, outputs_info=outputs_info
         )
 
@@ -2993,7 +2995,7 @@ class TestExamples:
             d = dot(i, W)
             return d, d
 
-        outs, updts = scan(
+        outs, _updts = scan(
             f, sequences=[x], non_sequences=[], outputs_info=[None, memory]
         )
 
@@ -3091,7 +3093,7 @@ class TestExamples:
         seq = matrix()
         initial_value = shared(np.zeros((4, 1), dtype=config.floatX))
         outputs_info = [{"initial": initial_value, "taps": [-4]}, None]
-        results, updates = scan(fn=onestep, sequences=seq, outputs_info=outputs_info)
+        results, _updates = scan(fn=onestep, sequences=seq, outputs_info=outputs_info)
 
         f = function([seq], results[1])
         assert np.all(exp_out == f(inp))
@@ -3242,7 +3244,7 @@ class TestExamples:
         m = matrix("m")
         u0 = pt.zeros((7,))
 
-        [u, m2], _ = scan(lambda _, u: [u, v], sequences=m, outputs_info=[u0, None])
+        [_u, m2], _ = scan(lambda _, u: [u, v], sequences=m, outputs_info=[u0, None])
         # This used to raise an exception with older versions because for a
         # disconnected gradient a non disconnected type was returned
         grad((m * m2).sum(), v)
@@ -3252,7 +3254,7 @@ class TestExamples:
         m = matrix("m")
         u0 = pt.zeros((7,))
 
-        [u, m2], _ = scan(
+        [_u, m2], _ = scan(
             lambda x, u: [x + u, u + v], sequences=m, outputs_info=[u0, None]
         )
         # This used to raise an exception with older versions because
@@ -3273,7 +3275,7 @@ class TestExamples:
             out2 = out1 + 1
             return out1, out2
 
-        [out1, out2], _ = scan(step, sequences=v)
+        [_out1, out2], _ = scan(step, sequences=v)
         gv = grad(out2.sum(), [v])
         f = function([v], gv)
 
@@ -3441,7 +3443,7 @@ class TestExamples:
             pre_h = dot(x, W_x)
             return pre_h
 
-        value, scan_updates = scan(
+        value, _scan_updates = scan(
             _active,
             sequences=X,
             outputs_info=[pt.alloc(floatx(0.0), 1, out_size)],
@@ -3462,11 +3464,11 @@ class TestExamples:
             condition = until(new_value > max_value)
             return [new_value, new_step], condition
 
-        rs, updates = scan(fn=accum, outputs_info=[0, 0], n_steps=n_steps)
+        rs, _updates = scan(fn=accum, outputs_info=[0, 0], n_steps=n_steps)
 
         f = function(inputs=[max_value, n_steps], outputs=rs)
 
-        _sum, total_steps = f(100, 100)
+        _sum, _total_steps = f(100, 100)
 
     @pytest.mark.skip(
         reason="This test fails because not typed outputs_info "
@@ -3482,13 +3484,13 @@ class TestExamples:
 
         # Generate the components of the polynomial
         full_range = pt.arange(max_coefficients_supported)
-        components, updates = scan(
+        components, _updates = scan(
             fn=lambda coeff, power, free_var: coeff * (free_var**power),
             sequences=[coefficients, full_range],
             non_sequences=x,
         )
         polynomial1 = components.sum()
-        polynomial2, updates = scan(
+        polynomial2, _updates = scan(
             fn=lambda coeff, power, prev, free_var: prev + coeff * (free_var**power),
             outputs_info=pt.constant(0, dtype="floatX"),
             sequences=[coefficients, full_range],
@@ -3496,7 +3498,7 @@ class TestExamples:
         )
 
         # python int
-        polynomial3, updates = scan(
+        polynomial3, _updates = scan(
             fn=lambda coeff, power, prev, free_var: prev + coeff * (free_var**power),
             outputs_info=0,
             sequences=[coefficients, full_range],
@@ -3504,7 +3506,7 @@ class TestExamples:
         )
 
         # python float
-        polynomial4, updates = scan(
+        polynomial4, _updates = scan(
             fn=lambda coeff, power, prev, free_var: prev + coeff * (free_var**power),
             outputs_info=0.0,
             sequences=[coefficients, full_range],
@@ -3553,7 +3555,7 @@ class TestExamples:
             rand_nums = rand_stream.binomial(1, 0.5, size=pooled.shape)
             return pooled + rand_nums, updates_inner
 
-        out, updates_outer = scan(unit_dropout, sequences=[pt.arange(inp.shape[0])])
+        out, _updates_outer = scan(unit_dropout, sequences=[pt.arange(inp.shape[0])])
 
         with pytest.raises(NullTypeGradError):
             grad(out.sum(), inp)
@@ -3571,7 +3573,7 @@ class TestExamples:
             # o = v + 1  # <-- this line works
             return o
 
-        OS, updates = scan(
+        OS, _updates = scan(
             fn=one_step, sequences=V, outputs_info=[None], non_sequences=[W]
         )
 
@@ -3602,7 +3604,7 @@ class TestExamples:
             ValueError,
             match=r".*Sequence 0 has shape \(10,\) but the Scan's required number of steps is 20.*",
         ):
-            out1, out2 = f(vx)
+            _out1, _out2 = f(vx)
 
         # Even though the graph is nonsense, this could be correct somehow?
         out_shape1, out_shape2 = f_shape(vx)
@@ -3626,7 +3628,7 @@ class TestExamples:
                 m + trng.uniform(size=[3]),
             ]
 
-        [o1, o2], updates = scan(
+        [o1, _o2], updates = scan(
             lm,
             sequences=x,
             n_steps=None,
@@ -3704,7 +3706,7 @@ class TestExamples:
             v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
             v_y[i] = np.dot(v_x[i - 1], vWout) + v_y[i - 1]
 
-        (pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
+        (_pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
 
         utt.assert_allclose(pytensor_x, v_x[-2:])
         utt.assert_allclose(pytensor_y, v_y[-4:])
@@ -3723,7 +3725,7 @@ class TestExamples:
             condition = until(previous_val > 5)
             return new_val, condition
 
-        out, updates = scan(inner_fct, outputs_info=x, n_steps=10)
+        out, _updates = scan(inner_fct, outputs_info=x, n_steps=10)
 
         g_out = grad(out.sum(), x)
         fct = function([x], [out, g_out])
@@ -3758,7 +3760,7 @@ class TestExamples:
             )
             return next_sitsot_val, next_mitsot_val, nitsot_out
 
-        out, updates = scan(
+        out, _updates = scan(
             fn=step,
             sequences=seq,
             outputs_info=[
@@ -3960,7 +3962,7 @@ class TestExamples:
             return [h_t, y_t]
 
         # hidden and outputs of the entire sequence
-        [h, y], _ = scan(
+        [_h, y], _ = scan(
             fn=one_step,
             sequences=dict(input=x),
             # corresponds to the return type of one_step
@@ -4152,7 +4154,7 @@ def test_output_storage_reuse(linker_mode):
 
         return s_in_y.sum()
 
-    s_y, updates = scan(
+    s_y, _updates = scan(
         fn=fn,
         outputs_info=[None],
         sequences=[pt.as_tensor([3, 2, 1], dtype=np.int64)],

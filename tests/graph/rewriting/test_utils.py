@@ -29,7 +29,7 @@ class TestIsSameGraph:
     def test_single_var(self):
         # Test `is_same_graph` with some trivial graphs (one Variable).
 
-        x, y, z = vectors("x", "y", "z")
+        x, y, _z = vectors("x", "y", "z")
         self.check(
             [
                 (x, x, (({}, True),)),

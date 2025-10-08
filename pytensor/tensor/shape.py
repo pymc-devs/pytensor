@@ -469,7 +469,7 @@ class SpecifyShape(COp):
         return [[True], *[[False]] * len(node.inputs[1:])]
 
     def grad(self, inp, grads):
-        x, *shape = inp
+        _x, *shape = inp
         (gz,) = grads
         return [specify_shape(gz, shape)] + [
             pytensor.gradient.DisconnectedType()() for _ in range(len(shape))
@@ -706,7 +706,7 @@ class Reshape(COp):
         return [[True], [False]]
 
     def grad(self, inp, grads):
-        x, shp = inp
+        x, _shp = inp
         (g_out,) = grads
         return [reshape(g_out, shape(x), ndim=x.ndim), DisconnectedType()()]
 

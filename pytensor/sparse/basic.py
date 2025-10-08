@@ -616,7 +616,7 @@ class CSMProperties(Op):
         if isinstance(g[0].type, DisconnectedType):
             return [csm.zeros_like()]
 
-        data, indices, indptr, _shape = csm_properties(csm)
+        _data, indices, indptr, _shape = csm_properties(csm)
         return [CSM(csm.format)(g[0], indices, indptr, _shape)]
 
 
@@ -845,7 +845,7 @@ class CSMGrad(Op):
             g_data,
             g_indices,
             g_indptr,
-            g_shape,
+            _g_shape,
         ) = inputs
         (g_out,) = outputs
         if len(x_indptr) - 1 == x_shape[0]:
@@ -1598,7 +1598,7 @@ class ColScaleCSC(Op):
     def perform(self, node, inputs, outputs):
         (x, s) = inputs
         (z,) = outputs
-        M, N = x.shape
+        _M, N = x.shape
         assert x.format == "csc"
         assert s.shape == (N,)
 
@@ -1878,7 +1878,7 @@ class Diag(Op):
         z[0] = x.diagonal()
 
     def grad(self, inputs, gout):
-        (x,) = inputs
+        (_x,) = inputs
         (gz,) = gout
         return [square_diagonal(gz)]
 
@@ -3019,7 +3019,7 @@ class Remove0(Op):
         z[0] = c
 
     def grad(self, inputs, gout):
-        (x,) = inputs
+        (_x,) = inputs
         (gz,) = gout
         return [gz]
 
@@ -4250,7 +4250,7 @@ class ConstructSparseFromList(Op):
 
     def grad(self, inputs, grads):
         (g_output,) = grads
-        x, y = inputs[:2]
+        _x, _y = inputs[:2]
         idx_list = inputs[2:]
 
         gx = g_output

@@ -88,8 +88,8 @@ class TestGradSourcesInputs:
                 return Apply(self, inputs, outputs)
 
             def grad(self, inp, grads):
-                (x,) = inp
-                (gz,) = grads
+                (_x,) = inp
+                (_gz,) = grads
 
             def perform(self, *args, **kwargs):
                 raise NotImplementedError()
@@ -157,8 +157,8 @@ class TestGradSourcesInputs:
                 return Apply(self, inputs, outputs)
 
             def grad(self, inp, grads):
-                (x,) = inp
-                gz1, gz2 = grads
+                (_x,) = inp
+                _gz1, _gz2 = grads
                 return (gval,)
 
             def perform(self, *args, **kwargs):
@@ -182,8 +182,8 @@ class TestGradSourcesInputs:
                 return Apply(self, inputs, outputs)
 
             def grad(self, inp, grads):
-                x0, x1 = inp
-                (gz,) = grads
+                _x0, _x1 = inp
+                (_gz,) = grads
                 return (gval0, gval1)
 
             def perform(self, *args, **kwargs):
@@ -231,8 +231,8 @@ class TestGrad:
             return Apply(self, inputs, outputs)
 
         def grad(self, inp, grads):
-            x0, x1 = inp
-            gz0, gz1 = grads
+            _x0, _x1 = inp
+            _gz0, _gz1 = grads
             return self.gval0, self.gval1
 
         def perform(self, *args, **kwargs):

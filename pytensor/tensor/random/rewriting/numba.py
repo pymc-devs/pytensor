@@ -55,7 +55,7 @@ def introduce_explicit_core_shape_rv(fgraph, node):
     """
     op: RandomVariable = node.op
 
-    next_rng, rv = node.outputs
+    _next_rng, rv = node.outputs
     shape_feature: ShapeFeature | None = getattr(fgraph, "shape_feature", None)
     if shape_feature:
         core_shape = [

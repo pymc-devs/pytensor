@@ -43,7 +43,7 @@ from tests.graph.utils import MyVariable
 
 class TestOpFromGraph(unittest_tools.InferShapeTester):
     def test_valid_input(self):
-        x, y, z = matrices("xyz")
+        x, _y, _z = matrices("xyz")
 
         with pytest.raises(ValueError, match=r"Expected at least.*"):
             OpFromGraph([x], [x])()
@@ -61,7 +61,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             OpFromGraph([x], [x], updates={})
 
     def test_clone(self):
-        x, y, z = matrices("xyz")
+        x, _y, _z = matrices("xyz")
 
         ofg = OpFromGraph([x], [2 * x])
 
@@ -227,12 +227,12 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         # list override case
         def go1(inps, gs):
-            x, w, b = inps
+            _x, w, _b = inps
             g = gs[0]
             return g * w * 2
 
         def go2(inps, gs):
-            x, w, b = inps
+            x, _w, _b = inps
             g = gs[0]
             return g * x * 1.5
 

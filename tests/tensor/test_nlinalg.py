@@ -218,7 +218,7 @@ class TestSvd(utt.InferShapeTester):
                 NotImplementedError,
                 match="Gradient of svd not implemented for full_matrices=True",
             ):
-                U, s, V = svd(
+                _U, s, _V = svd(
                     self.A, compute_uv=compute_uv, full_matrices=full_matrices
                 )
                 pytensor.grad(s.sum(), self.A)

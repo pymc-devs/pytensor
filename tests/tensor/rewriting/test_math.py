@@ -285,7 +285,7 @@ class TestAlgebraicCanonizer:
         # Test with and without DimShuffle
         shp = (5, 5)
         fx, fy, fz = fmatrices("xyz")
-        dx, dy, dz = dmatrices("xyz")
+        _dx, _dy, _dz = dmatrices("xyz")
         # fv = fvector('r').dimshuffle('x', 0)
         # dv = dvector('s').dimshuffle('x', 0)
         fxv = np.asarray(np.random.random(shp), dtype="float32")
@@ -1272,7 +1272,7 @@ class TestLocalUselessElemwiseComparison:
         # The following case is what made me discover those cases.
         X = matrix("X")
         Y = vector("Y")
-        X_sum, updates = pytensor.scan(
+        X_sum, _updates = pytensor.scan(
             fn=lambda x: x.sum(), outputs_info=None, sequences=[X], non_sequences=None
         )
         Z = X_sum + Y

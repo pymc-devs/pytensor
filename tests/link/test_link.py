@@ -147,26 +147,26 @@ class TestPerformLinker:
         assert fn(1.0, 2.0, 3.0) == 1.5
 
     def test_constant(self):
-        x, y, z = inputs()
+        x, y, _z = inputs()
         y = Constant(tdouble, 2.0)
         e = mul(add(x, y), div(x, y))
         fn = make_function(perform_linker(FunctionGraph([x], [e])))
         assert fn(1.0) == 1.5
 
     def test_input_output_same(self):
-        x, y, z = inputs()
+        x, _y, _z = inputs()
         fn = make_function(perform_linker(FunctionGraph([x], [x])))
         assert 1.0 == fn(1.0)
 
     def test_input_dependency0(self):
-        x, y, z = inputs()
+        x, y, _z = inputs()
         a, d = add(x, y), div(x, y)
         e = mul(a, d)
         fn = make_function(perform_linker(FunctionGraph(*clone([x, y, a], [e]))))
         assert fn(1.0, 2.0, 9.0) == 4.5
 
     def test_skiphole(self):
-        x, y, z = inputs()
+        x, y, _z = inputs()
         a = add(x, y)
         r = raise_err(a)
         e = add(r, a)

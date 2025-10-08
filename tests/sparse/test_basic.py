@@ -2115,7 +2115,7 @@ class TestSpSum(utt.InferShapeTester):
         for format in sparse.sparse_formats:
             for axis in self.possible_axis:
                 for struct in [True, False]:
-                    variable, data = sparse_random_inputs(format, shape=(9, 10))
+                    _variable, data = sparse_random_inputs(format, shape=(9, 10))
                     verify_grad_sparse(
                         self.op_class(axis=axis, sparse_grad=struct),
                         data,
@@ -2151,7 +2151,7 @@ class TestDiag(utt.InferShapeTester):
 
     def test_grad(self):
         for format in sparse.sparse_formats:
-            variable, data = sparse_random_inputs(format, shape=(10, 10))
+            _variable, data = sparse_random_inputs(format, shape=(10, 10))
             verify_grad_sparse(self.op, data, structured=False)
 
 
@@ -2221,7 +2221,7 @@ class TestEnsureSortedIndices(utt.InferShapeTester):
     def test_grad(self):
         for format in sparse.sparse_formats:
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
-                variable, data = sparse_random_inputs(format, shape=shape)
+                _variable, data = sparse_random_inputs(format, shape=shape)
                 verify_grad_sparse(self.op, data, structured=False)
 
 
@@ -2252,7 +2252,7 @@ class TestClean(utt.InferShapeTester):
     def test_grad(self):
         for format in sparse.sparse_formats:
             for shape in zip(range(5, 9), range(3, 7)[::-1], strict=True):
-                variable, data = sparse_random_inputs(format, shape=shape)
+                _variable, data = sparse_random_inputs(format, shape=shape)
                 verify_grad_sparse(self.op, data, structured=False)
 
 
@@ -2377,7 +2377,7 @@ class TestGetItem:
         def op_with_fixed_index(x):
             return op(x, index=np.asarray([0, 1]))
 
-        x, x_val = sparse_random_inputs("csr", (4, 5))
+        _x, x_val = sparse_random_inputs("csr", (4, 5))
 
         try:
             verify_grad_sparse(op_with_fixed_index, x_val)
@@ -2421,7 +2421,7 @@ class TestGetItem:
         def op_with_fixed_index(x):
             return op(x, ind1=np.asarray([0, 1]), ind2=np.asarray([2, 3]))
 
-        x, x_val = sparse_random_inputs("csr", (4, 5))
+        _x, x_val = sparse_random_inputs("csr", (4, 5))
 
         verify_grad_sparse(op_with_fixed_index, x_val)
 
@@ -2978,7 +2978,7 @@ def elemwise_checker(
             def test_grad(self):
                 for format in sparse.sparse_formats:
                     for dtype in sparse.float_dtypes:
-                        variable, data = sparse_random_inputs(
+                        _variable, data = sparse_random_inputs(
                             format, shape=(4, 7), out_dtype=dtype, gap=self.gap_grad
                         )
 
@@ -3308,10 +3308,10 @@ class TestTrueDot(utt.InferShapeTester):
     def test_grad(self):
         for format in sparse.sparse_formats:
             for dtype in sparse.float_dtypes:
-                (x,), (x_value,) = sparse_random_inputs(
+                (_x,), (x_value,) = sparse_random_inputs(
                     format, shape=(9, 10), out_dtype=dtype, p=0.1
                 )
-                (y,), (y_value,) = sparse_random_inputs(
+                (_y,), (y_value,) = sparse_random_inputs(
                     format, shape=(10, 24), out_dtype=dtype, p=0.1
                 )
                 data = [x_value, y_value]

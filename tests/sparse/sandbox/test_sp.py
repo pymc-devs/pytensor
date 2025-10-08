@@ -41,7 +41,7 @@ class TestSP:
             ttot, ntot = 0, 0
             for conv_mode in convmodes:
                 for ss in ssizes:
-                    output, outshp = sp.convolve(
+                    output, _outshp = sp.convolve(
                         kerns, kshp, nkern, input, imshp, ss, bias=bias, mode=conv_mode
                     )
                     f = function([kerns, bias, input], output, mode=mode)
@@ -157,7 +157,7 @@ class TestSP:
                     l1hidval = l1propup(l1kernvals, img1d)
 
                     # actual values
-                    l2hid, l2shp = sp.convolve(
+                    l2hid, _l2shp = sp.convolve(
                         kerns[1],
                         kshp[1],
                         nkerns[1],
@@ -222,7 +222,7 @@ class TestSP:
             assert np.all(output_val == my_output_val)
 
             def mp(input):
-                output, outshp = sp.max_pool(input, imval.shape[1:], maxpoolshp)
+                output, _outshp = sp.max_pool(input, imval.shape[1:], maxpoolshp)
                 return output
 
             utt.verify_grad(mp, [imval.reshape(imval.shape[0], -1)])

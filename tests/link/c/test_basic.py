@@ -200,7 +200,7 @@ def test_cthunk_str():
     y = double("y")
     e = add(x, y)
     lnk = CLinker().accept(FunctionGraph([x, y], [e]))
-    cthunk, input_storage, output_storage = lnk.make_thunk()
+    cthunk, _input_storage, _output_storage = lnk.make_thunk()
     assert str(cthunk).startswith("_CThunk")
     assert "module" in str(cthunk)
 
@@ -253,7 +253,7 @@ def test_clinker_literal_cache():
     not config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_clinker_single_node():
-    x, y, z = inputs()
+    x, y, _z = inputs()
     node = add.make_node(x, y)
     lnk = CLinker().accept(FunctionGraph(node.inputs, node.outputs))
     fn = make_function(lnk)
@@ -265,7 +265,7 @@ def test_clinker_single_node():
 )
 def test_clinker_dups():
     # Testing that duplicate inputs are allowed.
-    x, y, z = inputs()
+    x, _y, _z = inputs()
     e = add(x, x)
     lnk = CLinker().accept(FunctionGraph([x, x], [e]))
     fn = make_function(lnk)

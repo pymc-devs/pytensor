@@ -841,7 +841,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
                 mv = np.asarray(random(*m_shape), dtype=self.dtype)
 
                 t = op(n[:z, :z], m)
-                gn, gm = pytensor.grad(pt_sum(t), [n, m])
+                _gn, _gm = pytensor.grad(pt_sum(t), [n, m])
                 utt.verify_grad(lambda m: op(n[:z, :z], m), [mv], mode=self.mode)
                 utt.verify_grad(lambda nn: op(nn[:z, :z], mv), [data], mode=self.mode)
 
@@ -2880,7 +2880,7 @@ def test_indexed_result_shape(test_array, test_idx):
 
 def test_symbolic_slice():
     x = tensor4("x")
-    a, b = x.shape[:2]
+    a, _b = x.shape[:2]
     output = a.eval({x: np.zeros((5, 4, 3, 2), dtype=config.floatX)})
     assert output == np.array(5)
 

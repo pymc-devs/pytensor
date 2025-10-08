@@ -63,7 +63,7 @@ from tests.link.test_link import make_function
 
 
 def test_mul_add_true():
-    x, y, z = floats("xyz")
+    x, y, _z = floats("xyz")
     e = mul(add(x, y), true_div(x, y))
     g = FunctionGraph([x, y], [e])
     fn = make_function(DualLinker().accept(g))
@@ -109,7 +109,7 @@ class TestComposite:
         assert not has_f16(nc)
 
     def test_straightforward(self):
-        x, y, z = floats("xyz")
+        x, y, _z = floats("xyz")
         e = mul(add(x, y), true_div(x, y))
         C = Composite([x, y], [e])
         c = C.make_node(x, y)
@@ -132,7 +132,7 @@ class TestComposite:
 
     @pytest.mark.parametrize("literal_value", (70.0, -np.inf, np.float32("nan")))
     def test_with_constants(self, literal_value):
-        x, y, z = floats("xyz")
+        x, y, _z = floats("xyz")
         e = mul(add(literal_value, y), true_div(x, y))
         comp_op = Composite([x, y], [e])
         comp_node = comp_op.make_node(x, y)
@@ -249,71 +249,71 @@ class TestComposite:
 
 class TestLogical:
     def test_gt(self):
-        x, y, z = floats("xyz")
+        x, y, _z = floats("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [x > y])))
         for a, b in ((3.0, 9), (3, 0.9), (3, 3)):
             assert fn(a, b) == (a > b)
 
     def test_lt(self):
-        x, y, z = floats("xyz")
+        x, y, _z = floats("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [x < y])))
         for a, b in ((3.0, 9), (3, 0.9), (3, 3)):
             assert fn(a, b) == (a < b)
 
     def test_le(self):
-        x, y, z = floats("xyz")
+        x, y, _z = floats("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [x <= y])))
         for a, b in ((3.0, 9), (3, 0.9), (3, 3)):
             assert fn(a, b) == (a <= b)
 
     def test_ge(self):
-        x, y, z = floats("xyz")
+        x, y, _z = floats("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [x >= y])))
         for a, b in ((3.0, 9), (3, 0.9), (3, 3)):
             assert fn(a, b) == (a >= b)
 
     def test_eq(self):
-        x, y, z = floats("xyz")
+        x, y, _z = floats("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [eq(x, y)])))
         for a, b in ((3.0, 9), (3, 0.9), (3, 3)):
             assert fn(a, b) == (a == b)
 
     def test_neq(self):
-        x, y, z = floats("xyz")
+        x, y, _z = floats("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [neq(x, y)])))
         for a, b in ((3.0, 9), (3, 0.9), (3, 3)):
             assert fn(a, b) == (a != b)
 
     def test_or(self):
-        x, y, z = ints("xyz")
+        x, y, _z = ints("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [x | y])))
         for a, b in ((0, 1), (0, 0), (1, 0), (1, 1)):
             assert fn(a, b) == (a | b), (a, b)
 
     def test_xor(self):
-        x, y, z = ints("xyz")
+        x, y, _z = ints("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [x ^ y])))
         for a, b in ((0, 1), (0, 0), (1, 0), (1, 1)):
             assert fn(a, b) == (a ^ b), (a, b)
 
     def test_and(self):
-        x, y, z = ints("xyz")
+        x, y, _z = ints("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [and_(x, y)])))
         for a, b in ((0, 1), (0, 0), (1, 0), (1, 1)):
             assert fn(a, b) == (a & b), (a, b)
 
-        x, y, z = ints("xyz")
+        x, y, _z = ints("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [x & y])))
         for a, b in ((0, 1), (0, 0), (1, 0), (1, 1)):
             assert fn(a, b) == (a & b), (a, b)
 
     def test_not(self):
-        x, y, z = ints("xyz")
+        x, y, _z = ints("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [invert(x)])))
         for a, b in ((0, 1), (0, 0), (1, 0), (1, 1)):
             assert fn(a, b) == ~a, (a,)
 
-        x, y, z = ints("xyz")
+        x, y, _z = ints("xyz")
         fn = make_function(DualLinker().accept(FunctionGraph([x, y], [~x])))
         for a, b in ((0, 1), (0, 0), (1, 0), (1, 1)):
             assert fn(a, b) == ~a, (a,)

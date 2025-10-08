@@ -21,7 +21,7 @@ def _pivot_to_permutation(p, dtype):
 
 @numba_njit
 def _lu_factor_to_lu(a, dtype, overwrite_a):
-    A_copy, IPIV, INFO = _getrf(a, overwrite_a=overwrite_a)
+    A_copy, IPIV, _INFO = _getrf(a, overwrite_a=overwrite_a)
 
     L = np.eye(A_copy.shape[-1], dtype=dtype)
     L += np.tril(A_copy, k=-1)

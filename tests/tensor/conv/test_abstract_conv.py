@@ -1531,7 +1531,7 @@ class TestBilinearUpsampling:
             The array upsampled by using bilinear interpolation. Array
             is of shape (batch size, num channels, 2*ratio, 2*ratio).
         """
-        kern, shp = self.numerical_upsampling_multiplier(ratio)
+        kern, _shp = self.numerical_upsampling_multiplier(ratio)
         up_1D = two_by_two[:, :, :, :1] * kern[::-1] + two_by_two[:, :, :, 1:] * kern
         up_2D = (
             up_1D[:, :, :1, :] * kern[::-1][:, np.newaxis]

@@ -312,7 +312,7 @@ def test_badoptimization_opt_err():
     with pytest.raises(TypeError):
         e = einfo.value
         new_e = e.__class__("TTT" + str(e))
-        exc_type, exc_value, exc_trace = sys.exc_info()
+        _exc_type, exc_value, exc_trace = sys.exc_info()
         exc_value = new_e
         raise exc_value.with_traceback(exc_trace)
 
@@ -395,7 +395,7 @@ class TestViewMap:
             return Apply(self, [a, b], [c])
 
         def perform(self, node, inp, out):
-            a, b = inp
+            _a, b = inp
             (c,) = out
             c[0] = b
 
@@ -405,7 +405,7 @@ class TestViewMap:
             return Apply(self, [a, b], [c])
 
         def perform(self, node, inp, out):
-            a, b = inp
+            _a, b = inp
             (c,) = out
             c[0] = b[1:3]
 
@@ -453,7 +453,7 @@ class TestViewMap:
                 return Apply(self, [a, b], [c, d])
 
             def perform(self, node, inp, out):
-                a, b = inp
+                a, _b = inp
                 c, d = out
                 c[0] = a
                 d[0] = a[1:]
@@ -477,7 +477,7 @@ class TestViewMap:
                 return Apply(self, [a, b], [c, d])
 
             def perform(self, node, inp, out):
-                a, b = inp
+                a, _b = inp
                 c, d = out
                 r = a * 2
                 c[0] = r
@@ -503,7 +503,7 @@ class TestViewMap:
                 return Apply(self, [a, b], [c, d])
 
             def perform(self, node, inp, out):
-                a, b = inp
+                a, _b = inp
                 c, d = out
                 r = a * 1
                 c[0] = r
@@ -528,7 +528,7 @@ class TestViewMap:
                 return Apply(self, [a, b], [c, d])
 
             def perform(self, node, inp, out):
-                a, b = inp
+                a, _b = inp
                 c, d = out
                 r = a * 1
                 c[0] = r[:-1]

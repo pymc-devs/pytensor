@@ -133,7 +133,7 @@ def test_inplace_rewrites(rv_op):
         mode="FAST_RUN",
     )
 
-    (new_out, new_rng) = f.maker.fgraph.outputs
+    (new_out, _new_rng) = f.maker.fgraph.outputs
     assert new_out.type == out.type
     new_node = new_out.owner
     new_op = new_node.op
@@ -201,7 +201,7 @@ def test_inplace_rewrites(rv_op):
 def test_local_rv_size_lift(dist_op, dist_params, size):
     rng = shared(np.random.default_rng(1233532), borrow=False)
 
-    new_out, f_inputs, dist_st, f_rewritten = apply_local_rewrite_to_rv(
+    new_out, _f_inputs, _dist_st, _f_rewritten = apply_local_rewrite_to_rv(
         local_rv_size_lift,
         lambda rv: rv,
         dist_op,
