@@ -1,5 +1,4 @@
 import warnings
-from copy import copy
 from functools import singledispatch
 
 import numba
@@ -7,7 +6,6 @@ import numpy as np
 from numba import types
 from numba.core.errors import NumbaWarning, TypingError
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
-from numba.extending import overload
 
 from pytensor import In, config
 from pytensor.compile import NUMBA
@@ -296,21 +294,21 @@ def numba_funcify_FunctionGraph(
     )
 
 
-def deepcopyop(x):
-    return copy(x)
-
-
-@overload(deepcopyop)
-def dispatch_deepcopyop(x):
-    if isinstance(x, types.Array):
-        return lambda x: np.copy(x)
-
-    return lambda x: x
-
-
 @numba_funcify.register(DeepCopyOp)
 def numba_funcify_DeepCopyOp(op, node, **kwargs):
-    return deepcopyop
+    if isinstance(node.inputs[0].type, TensorType):
+
+        @numba_njit
+        def deepcopy(x):
+            return np.copy(x)
+
+    else:
+
+        @numba_njit
+        def deepcopy(x):
+            return x
+
+    return deepcopy
 
 
 @numba.extending.intrinsic
