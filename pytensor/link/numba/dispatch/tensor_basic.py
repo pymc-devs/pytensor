@@ -28,18 +28,17 @@ from pytensor.tensor.basic import (
 def numba_funcify_AllocEmpty(op, node, **kwargs):
     global_env = {
         "np": np,
-        "to_scalar": numba_basic.to_scalar,
         "dtype": np.dtype(op.dtype),
     }
 
     unique_names = unique_name_generator(
-        ["np", "to_scalar", "dtype", "allocempty", "scalar_shape"], suffix_sep="_"
+        ["np", "dtype", "allocempty", "scalar_shape"], suffix_sep="_"
     )
     shape_var_names = [unique_names(v, force_unique=True) for v in node.inputs]
     shape_var_item_names = [f"{name}_item" for name in shape_var_names]
     shapes_to_items_src = indent(
         "\n".join(
-            f"{item_name} = to_scalar({shape_name})"
+            f"{item_name} = {shape_name}.item()"
             for item_name, shape_name in zip(
                 shape_var_item_names, shape_var_names, strict=True
             )
@@ -63,10 +62,10 @@ def allocempty({", ".join(shape_var_names)}):
 
 @numba_funcify.register(Alloc)
 def numba_funcify_Alloc(op, node, **kwargs):
-    global_env = {"np": np, "to_scalar": numba_basic.to_scalar}
+    global_env = {"np": np}
 
     unique_names = unique_name_generator(
-        ["np", "to_scalar", "alloc", "val_np", "val", "scalar_shape", "res"],
+        ["np", "alloc", "val_np", "val", "scalar_shape", "res"],
         suffix_sep="_",
     )
     shape_var_names = [unique_names(v, force_unique=True) for v in node.inputs[1:]]
@@ -110,9 +109,9 @@ def numba_funcify_ARange(op, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def arange(start, stop, step):
         return np.arange(
-            numba_basic.to_scalar(start),
-            numba_basic.to_scalar(stop),
-            numba_basic.to_scalar(step),
+            start.item(),
+            stop.item(),
+            step.item(),
             dtype=dtype,
         )
 
@@ -187,9 +186,9 @@ def numba_funcify_Eye(op, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def eye(N, M, k):
         return np.eye(
-            numba_basic.to_scalar(N),
-            numba_basic.to_scalar(M),
-            numba_basic.to_scalar(k),
+            N.item(),
+            M.item(),
+            k.item(),
             dtype=dtype,
         )
 
@@ -200,16 +199,16 @@ def numba_funcify_Eye(op, **kwargs):
 def numba_funcify_MakeVector(op, node, **kwargs):
     dtype = np.dtype(op.dtype)
 
-    global_env = {"np": np, "to_scalar": numba_basic.to_scalar, "dtype": dtype}
+    global_env = {"np": np, "dtype": dtype}
 
     unique_names = unique_name_generator(
-        ["np", "to_scalar"],
+        ["np"],
         suffix_sep="_",
     )
     input_names = [unique_names(v, force_unique=True) for v in node.inputs]
 
     def create_list_string(x):
-        args = ", ".join([f"to_scalar({i})" for i in x] + ([""] if len(x) == 1 else []))
+        args = ", ".join([f"{i}.item()" for i in x] + ([""] if len(x) == 1 else []))
         return f"[{args}]"
 
     makevector_def_src = f"""
@@ -237,7 +236,7 @@ def numba_funcify_TensorFromScalar(op, **kwargs):
 def numba_funcify_ScalarFromTensor(op, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def scalar_from_tensor(x):
-        return numba_basic.to_scalar(x)
+        return x.item()
 
     return scalar_from_tensor
 
