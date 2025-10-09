@@ -1,10 +1,8 @@
 import warnings
 from copy import copy
 from functools import singledispatch
-from textwrap import dedent
 
 import numba
-import numba.np.unsafe.ndarray as numba_ndarray
 import numpy as np
 from numba import types
 from numba.core.errors import NumbaWarning, TypingError
@@ -22,7 +20,6 @@ from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.link.utils import (
-    compile_function_src,
     fgraph_to_python,
 )
 from pytensor.scalar.basic import ScalarType
@@ -30,10 +27,8 @@ from pytensor.sparse import SparseTensorType
 from pytensor.tensor.basic import Nonzero
 from pytensor.tensor.blas import BatchedDot
 from pytensor.tensor.math import Dot
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.tensor.sort import ArgSortOp, SortOp
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.type_other import NoneConst
 
 
 def numba_njit(*args, fastmath=None, **kwargs):
@@ -322,26 +317,6 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
     return deepcopyop
 
 
-@numba_funcify.register(Shape)
-def numba_funcify_Shape(op, **kwargs):
-    @numba_njit
-    def shape(x):
-        return np.asarray(np.shape(x))
-
-    return shape
-
-
-@numba_funcify.register(Shape_i)
-def numba_funcify_Shape_i(op, **kwargs):
-    i = op.i
-
-    @numba_njit
-    def shape_i(x):
-        return np.asarray(np.shape(x)[i])
-
-    return shape_i
-
-
 @numba_funcify.register(SortOp)
 def numba_funcify_SortOp(op, node, **kwargs):
     @numba_njit
@@ -421,54 +396,6 @@ def direct_cast(typingctx, val, typ):
         return val
 
     return sig, codegen
-
-
-@numba_funcify.register(Reshape)
-def numba_funcify_Reshape(op, **kwargs):
-    ndim = op.ndim
-
-    if ndim == 0:
-
-        @numba_njit
-        def reshape(x, shape):
-            return np.asarray(x.item())
-
-    else:
-
-        @numba_njit
-        def reshape(x, shape):
-            # TODO: Use this until https://github.com/numba/numba/issues/7353 is closed.
-            return np.reshape(
-                np.ascontiguousarray(np.asarray(x)),
-                numba_ndarray.to_fixed_tuple(shape, ndim),
-            )
-
-    return reshape
-
-
-@numba_funcify.register(SpecifyShape)
-def numba_funcify_SpecifyShape(op, node, **kwargs):
-    shape_inputs = node.inputs[1:]
-    shape_input_names = ["shape_" + str(i) for i in range(len(shape_inputs))]
-
-    func_conditions = [
-        f"assert x.shape[{i}] == {shape_input_names}"
-        for i, (shape_input, shape_input_names) in enumerate(
-            zip(shape_inputs, shape_input_names, strict=True)
-        )
-        if shape_input is not NoneConst
-    ]
-
-    func = dedent(
-        f"""
-        def specify_shape(x, {create_arg_string(shape_input_names)}):
-            {"; ".join(func_conditions)}
-            return x
-        """
-    )
-
-    specify_shape = compile_function_src(func, "specify_shape", globals())
-    return numba_njit(specify_shape)
 
 
 def int_to_float_fn(inputs, out_dtype):
