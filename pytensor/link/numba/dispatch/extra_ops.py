@@ -26,7 +26,7 @@ from pytensor.tensor.extra_ops import (
 def numba_funcify_Bartlett(op, **kwargs):
     @numba_basic.numba_njit(inline="always")
     def bartlett(x):
-        return np.bartlett(numba_basic.to_scalar(x))
+        return np.bartlett(x.item())
 
     return bartlett
 
@@ -112,12 +112,12 @@ def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
     @numba_basic.numba_njit
     def filldiagonaloffset(a, val, offset):
         height, width = a.shape
-
+        offset_item = offset.item()
         if offset >= 0:
-            start = numba_basic.to_scalar(offset)
+            start = offset_item
             num_of_step = min(min(width, height), width - offset)
         else:
-            start = -numba_basic.to_scalar(offset) * a.shape[1]
+            start = -offset_item * a.shape[1]
             num_of_step = min(min(width, height), height + offset)
 
         step = a.shape[1] + 1

@@ -134,12 +134,6 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
         ll[i] = v
         return tuple(ll)
 
-    def py_to_scalar(x):
-        if isinstance(x, np.ndarray):
-            return x.item()
-        else:
-            return x
-
     def njit_noop(*args, **kwargs):
         if len(args) == 1 and callable(args[0]):
             return args[0]
@@ -155,7 +149,6 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
         mock.patch(
             "pytensor.link.numba.dispatch.basic.direct_cast", lambda x, dtype: x
         ),
-        mock.patch("pytensor.link.numba.dispatch.basic.to_scalar", py_to_scalar),
         mock.patch(
             "pytensor.link.numba.dispatch.basic.numba.np.numpy_support.from_dtype",
             lambda dtype: dtype,
