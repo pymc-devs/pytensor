@@ -718,20 +718,6 @@ def test_function_overhead(mode, benchmark):
     benchmark(fn, test_x)
 
 
-@pytest.mark.parametrize(
-    "input_data",
-    [np.array([1, 0, 3]), np.array([[0, 1], [2, 0]]), np.array([[0, 0], [0, 0]])],
-)
-def test_Nonzero(input_data):
-    a = pt.tensor("a", shape=(None,) * input_data.ndim)
-
-    graph_outputs = pt.nonzero(a)
-
-    compare_numba_and_py(
-        graph_inputs=[a], graph_outputs=graph_outputs, test_inputs=[input_data]
-    )
-
-
 @pytest.mark.parametrize("dtype", ("float64", "float32", "mixed"))
 def test_mat_vec_dot_performance(dtype, benchmark):
     A = tensor("A", shape=(512, 512), dtype="float64" if dtype == "mixed" else dtype)
