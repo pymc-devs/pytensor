@@ -119,20 +119,22 @@ def jax_funcify_Split(op: Split, node, **kwargs):
     def split(x, axis, splits):
         if constant_axis is not None:
             axis = constant_axis
+            if len(splits) != op.len_splits:
+                raise ValueError("Length of splits is not equal to n_splits")
+
         if constant_splits is not None:
             splits = constant_splits
             cumsum_splits = np.cumsum(splits[:-1])
+            if (splits < 0).any():
+                raise ValueError("Split sizes cannot be negative")
         else:
             cumsum_splits = jnp.cumsum(splits[:-1])
 
-        if len(splits) != op.len_splits:
-            raise ValueError("Length of splits is not equal to n_splits")
-        if np.sum(splits) != x.shape[axis]:
-            raise ValueError(
-                f"Split sizes do not sum up to input length along axis: {x.shape[axis]}"
-            )
-        if np.any(splits < 0):
-            raise ValueError("Split sizes cannot be negative")
+        if constant_axis is not None and constant_splits is not None:
+            if splits.sum() != x.shape[axis]:
+                raise ValueError(
+                    f"Split sizes do not sum up to input length along axis: {x.shape[axis]}"
+                )
 
         return jnp.split(x, cumsum_splits, axis=axis)
 

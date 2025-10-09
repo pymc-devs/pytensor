@@ -182,16 +182,17 @@ class TestJaxSplit:
             UserWarning, match="Split node does not have constant split positions."
         ):
             fn = pytensor.function([a], a_splits, mode="JAX")
-        # It raises an informative ConcretizationTypeError, but there's an AttributeError that surpasses it
-        with pytest.raises(AttributeError):
+        # This test used to raise AttributeError in previous versions of JAX.
+        # Now it raises `TracerIntegerConversionError`.
+        # We accept both errors for backwards compatibility.
+        with pytest.raises((AttributeError, errors.TracerIntegerConversionError)):
             fn(np.zeros((6, 4), dtype=pytensor.config.floatX))
 
         split_axis = iscalar("split_axis")
         a_splits = ptb.split(a, splits_size=[2, 4], n_splits=2, axis=split_axis)
         with pytest.warns(UserWarning, match="Split node does not have constant axis."):
             fn = pytensor.function([a, split_axis], a_splits, mode="JAX")
-        # Same as above, an AttributeError surpasses the `TracerIntegerConversionError`
-        # Both errors are included for backwards compatibility
+        # Same reasoning as above to accept both errors.
         with pytest.raises((AttributeError, errors.TracerIntegerConversionError)):
             fn(np.zeros((6, 6), dtype=pytensor.config.floatX), 0)
 
