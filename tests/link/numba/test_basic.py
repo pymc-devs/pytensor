@@ -1,5 +1,4 @@
 import contextlib
-import inspect
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -151,30 +150,6 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
         else:
             return lambda x: x
 
-    def vectorize_noop(*args, **kwargs):
-        def wrap(fn):
-            # `numba.vectorize` allows an `out` positional argument.  We need
-            # to account for that
-            sig = inspect.signature(fn)
-            nparams = len(sig.parameters)
-
-            def inner_vec(*args):
-                if len(args) > nparams:
-                    # An `out` argument has been specified for an in-place
-                    # operation
-                    out = args[-1]
-                    out[...] = np.vectorize(fn)(*args[:nparams])
-                    return out
-                else:
-                    return np.vectorize(fn)(*args)
-
-            return inner_vec
-
-        if len(args) == 1 and callable(args[0]):
-            return wrap(args[0], **kwargs)
-        else:
-            return wrap
-
     def py_global_numba_func(func):
         if hasattr(func, "py_func"):
             return func.py_func
@@ -182,7 +157,6 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
 
     mocks = [
         mock.patch("numba.njit", njit_noop),
-        mock.patch("numba.vectorize", vectorize_noop),
         mock.patch(
             "pytensor.link.numba.dispatch.basic.global_numba_func",
             py_global_numba_func,
@@ -191,9 +165,6 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
             "pytensor.link.numba.dispatch.basic.tuple_setitem", py_tuple_setitem
         ),
         mock.patch("pytensor.link.numba.dispatch.basic.numba_njit", njit_noop),
-        mock.patch(
-            "pytensor.link.numba.dispatch.basic.numba_vectorize", vectorize_noop
-        ),
         mock.patch(
             "pytensor.link.numba.dispatch.basic.direct_cast", lambda x, dtype: x
         ),
