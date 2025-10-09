@@ -3,8 +3,7 @@ from functools import singledispatch
 
 import numba
 import numpy as np
-from numba import types
-from numba.core.errors import NumbaWarning, TypingError
+from numba.core.errors import NumbaWarning
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 
 from pytensor import In, config
@@ -133,20 +132,6 @@ def create_numba_signature(
         return output_types[0](*input_types)
     else:
         return numba.types.void(*input_types)
-
-
-def to_scalar(x):
-    return np.asarray(x).item()
-
-
-@numba.extending.overload(to_scalar)
-def impl_to_scalar(x):
-    if isinstance(x, numba.types.Number | numba.types.Boolean):
-        return lambda x: x
-    elif isinstance(x, numba.types.Array):
-        return lambda x: x.item()
-    else:
-        raise TypingError(f"{x} must be a scalar compatible type.")
 
 
 def create_tuple_creator(f, n):
