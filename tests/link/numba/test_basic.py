@@ -14,7 +14,6 @@ numba = pytest.importorskip("numba")
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-import pytensor.tensor.math as ptm
 from pytensor import config, shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -29,7 +28,6 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
-from pytensor.tensor import blas, tensor
 from pytensor.tensor.elemwise import Elemwise
 
 
@@ -407,86 +405,6 @@ def test_perform_type_convert():
     compare_numba_and_py([x], out, [x_test_value])
 
 
-@pytest.mark.parametrize(
-    "x, y",
-    [
-        (
-            (pt.matrix(), rng.random(size=(3, 2)).astype(config.floatX)),
-            (pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
-        ),
-        (
-            (pt.matrix(dtype="float64"), rng.random(size=(3, 2)).astype("float64")),
-            (pt.vector(dtype="float32"), rng.random(size=(2,)).astype("float32")),
-        ),
-        (
-            (pt.lmatrix(), rng.poisson(size=(3, 2))),
-            (pt.fvector(), rng.random(size=(2,)).astype("float32")),
-        ),
-        (
-            (pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
-            (pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
-        ),
-        (
-            (pt.vector(dtype="int16"), rng.random(size=(2,)).astype(np.int16)),
-            (pt.vector(dtype="uint8"), rng.random(size=(2,)).astype(np.uint8)),
-        ),
-    ],
-)
-def test_Dot(x, y):
-    x, x_test_value = x
-    y, y_test_value = y
-
-    g = ptm.dot(x, y)
-
-    compare_numba_and_py(
-        [x, y],
-        [g],
-        [x_test_value, y_test_value],
-    )
-
-
-@pytest.mark.parametrize(
-    "x, y, exc",
-    [
-        (
-            (
-                pt.dtensor3(),
-                rng.random(size=(2, 3, 3)).astype("float64"),
-            ),
-            (
-                pt.dtensor3(),
-                rng.random(size=(2, 3, 3)).astype("float64"),
-            ),
-            None,
-        ),
-        (
-            (
-                pt.dtensor3(),
-                rng.random(size=(2, 3, 3)).astype("float64"),
-            ),
-            (
-                pt.ltensor3(),
-                rng.poisson(size=(2, 3, 3)).astype("int64"),
-            ),
-            None,
-        ),
-    ],
-)
-def test_BatchedDot(x, y, exc):
-    x, x_test_value = x
-    y, y_test_value = y
-
-    g = blas.BatchedDot()(x, y)
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x, y],
-            g,
-            [x_test_value, y_test_value],
-        )
-
-
 def test_shared():
     a = shared(np.array([1, 2, 3], dtype=config.floatX))
 
@@ -716,18 +634,3 @@ def test_function_overhead(mode, benchmark):
     assert np.sum(fn(test_x)) == 1000
 
     benchmark(fn, test_x)
-
-
-@pytest.mark.parametrize("dtype", ("float64", "float32", "mixed"))
-def test_mat_vec_dot_performance(dtype, benchmark):
-    A = tensor("A", shape=(512, 512), dtype="float64" if dtype == "mixed" else dtype)
-    x = tensor("x", shape=(512,), dtype="float32" if dtype == "mixed" else dtype)
-    out = ptm.dot(A, x)
-
-    fn = function([A, x], out, mode="NUMBA", trust_input=True)
-
-    rng = np.random.default_rng(948)
-    A_test = rng.standard_normal(size=A.type.shape, dtype=A.type.dtype)
-    x_test = rng.standard_normal(size=x.type.shape, dtype=x.type.dtype)
-    np.testing.assert_allclose(fn(A_test, x_test), np.dot(A_test, x_test), atol=1e-4)
-    benchmark(fn, A_test, x_test)
