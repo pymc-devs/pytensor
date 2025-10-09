@@ -211,9 +211,9 @@ def test_mlx_float64_auto_casting():
         dtype_warnings = [
             msg for msg in warning_messages if "float64" in msg and "float32" in msg
         ]
-        assert (
-            len(dtype_warnings) > 0
-        ), f"Expected dtype warning, got warnings: {warning_messages}"
+        assert len(dtype_warnings) > 0, (
+            f"Expected dtype warning, got warnings: {warning_messages}"
+        )
 
 
 def test_mlx_float64_complex_operations():
