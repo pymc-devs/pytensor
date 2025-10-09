@@ -29,23 +29,6 @@ def test_dot():
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
 
 
-@pytest.mark.parametrize(
-    "op",
-    [
-        pytest.param(pt.exp, id="exp"),
-        pytest.param(pt.log, id="log"),
-        pytest.param(pt.sin, id="sin"),
-        pytest.param(pt.cos, id="cos"),
-        pytest.param(pt.sigmoid, id="sigmoid"),
-    ],
-)
-def test_elemwise_one_input(op) -> None:
-    x = pt.vector("x")
-    out = op(x)
-    x_test = mx.array([1.0, 2.0, 3.0])
-    compare_mlx_and_py([x], out, [x_test])
-
-
 def test_switch() -> None:
     x = pt.vector("x")
     y = pt.vector("y")
@@ -55,42 +38,6 @@ def test_switch() -> None:
     x_test = mx.array([-1.0, 2.0, 3.0])
     y_test = mx.array([4.0, 5.0, 6.0])
 
-    compare_mlx_and_py([x, y], out, [x_test, y_test])
-
-
-@pytest.mark.parametrize("op", [pt.sum, pt.prod])
-def test_input(op) -> None:
-    x = pt.vector("x")
-    y = pt.vector("y")
-    out = op([x, y, x + y])
-    x_test = mx.array([1.0, 2.0, 3.0])
-    y_test = mx.array([4.0, 5.0, 6.0])
-    compare_mlx_and_py([x, y], out, [x_test, y_test])
-
-
-@pytest.mark.parametrize(
-    "op",
-    [
-        pytest.param(pt.add, id="add"),
-        pytest.param(pt.sub, id="sub"),
-        pytest.param(pt.mul, id="mul"),
-        pytest.param(pt.power, id="power"),
-        pytest.param(pt.le, id="le"),
-        pytest.param(pt.lt, id="lt"),
-        pytest.param(pt.ge, id="ge"),
-        pytest.param(pt.gt, id="gt"),
-        pytest.param(pt.eq, id="eq"),
-        pytest.param(pt.neq, id="neq"),
-        pytest.param(pt.true_div, id="true_div"),
-        pytest.param(pt.int_div, id="int_div"),
-    ],
-)
-def test_elemwise_two_inputs(op) -> None:
-    x = pt.vector("x")
-    y = pt.vector("y")
-    out = op(x, y)
-    x_test = mx.array([1.0, 2.0, 3.0])
-    y_test = mx.array([4.0, 5.0, 6.0])
     compare_mlx_and_py([x, y], out, [x_test, y_test])
 
 

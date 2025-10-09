@@ -4,9 +4,29 @@ import scipy
 
 from pytensor import config, function
 from pytensor.tensor.basic import switch
+from pytensor.tensor.math import (
+    add,
+    cos,
+    eq,
+    exp,
+    ge,
+    gt,
+    int_div,
+    isinf,
+    le,
+    log,
+    lt,
+    mul,
+    neq,
+    power,
+    prod,
+    sigmoid,
+    sin,
+    sub,
+    true_div,
+)
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import any as pt_any
-from pytensor.tensor.math import exp, isinf, log, mul, prod
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.math import sum as pt_sum
@@ -103,3 +123,60 @@ def test_multiple_input_multiply():
     x, y, z = vectors("xyz")
     out = mul(x, y, z)
     compare_mlx_and_py([x, y, z], [out], test_inputs=[[1.5], [2.5], [3.5]])
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        pytest.param(exp, id="exp"),
+        pytest.param(log, id="log"),
+        pytest.param(sin, id="sin"),
+        pytest.param(cos, id="cos"),
+        pytest.param(sigmoid, id="sigmoid"),
+    ],
+)
+def test_elemwise_one_input(op) -> None:
+    x = vector("x")
+    out = op(x)
+    x_test = mx.array([1.0, 2.0, 3.0])
+    compare_mlx_and_py([x], out, [x_test])
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        add,
+        sub,
+        mul,
+        power,
+        le,
+        lt,
+        ge,
+        gt,
+        eq,
+        neq,
+        true_div,
+        int_div,
+    ],
+    ids=[
+        "add",
+        "sub",
+        "mul",
+        "power",
+        "le",
+        "lt",
+        "ge",
+        "gt",
+        "eq",
+        "neq",
+        "true_div",
+        "int_div",
+    ],
+)
+def test_elemwise_two_inputs(op) -> None:
+    x = vector("x")
+    y = vector("y")
+    out = op(x, y)
+    x_test = mx.array([1.0, 2.0, 3.0])
+    y_test = mx.array([4.0, 5.0, 6.0])
+    compare_mlx_and_py([x, y], out, [x_test, y_test])
