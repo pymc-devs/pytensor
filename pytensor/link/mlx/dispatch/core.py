@@ -1,16 +1,3 @@
-"""
-pytensor/link/mlx/dispatch/basic.py
------------------------------------
-
-First-cut MLX translations for the most common tensor Ops.
-
-The structure intentionally follows pytensor's JAX dispatcher so that
-once these kernels stabilise they can be optimised further (e.g. fusing
-element-wise graphs, adding in-place updates, RNG thinning, etc.).
-"""
-
-from __future__ import annotations
-
 import mlx.core as mx
 import numpy as np
 
