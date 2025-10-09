@@ -2,7 +2,6 @@ import math
 
 import numpy as np
 
-from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -197,7 +196,6 @@ def numba_funcify_Cast(op, node, **kwargs):
 
 
 @numba_funcify.register(Identity)
-@numba_funcify.register(TypeCastingOp)
 def numba_funcify_type_casting(op, **kwargs):
     @numba_basic.numba_njit
     def identity(x):
