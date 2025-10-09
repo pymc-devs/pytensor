@@ -247,18 +247,29 @@ def mlx_funcify_Tri(op, node, **kwargs):
 
 
 @mlx_funcify.register(AllocEmpty)
-def mlx_funcify_AllocEmpty(op, **kwargs):
+def mlx_funcify_AllocEmpty(op, node, **kwargs):
     dtype = convert_dtype_to_mlx(op.dtype)
+    node_inputs = node.inputs
+    static_dims = (
+        _extract_static_dims(node_inputs)
+        if node_inputs and len(node_inputs) > 1
+        else None
+    )
 
     def allocempty(*shape):
-        return mx.zeros(shape, dtype=dtype)
+        resolved_shape = (
+            _resolve_shape(static_dims, shape)
+            if static_dims is not None
+            else tuple(_coerce_to_int(dim) for dim in shape)
+        )
+        return mx.zeros(resolved_shape, dtype=dtype)
 
     return allocempty
 
 
 @mlx_funcify.register(Alloc)
 def mlx_funcify_Alloc(op, node, **kwargs):
-    node_inputs = getattr(node, "inputs", None)
+    node_inputs = node.inputs
     static_dims = (
         _extract_static_dims(node_inputs[1:])
         if node_inputs and len(node_inputs) > 1
