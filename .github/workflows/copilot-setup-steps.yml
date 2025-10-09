@@ -34,7 +34,7 @@ jobs:
           environment-name: pytensor-test
           micromamba-version: "1.5.10-0"
           init-shell: bash
-          post-cleanup: "all"
+          post-cleanup: "none"
           create-args: python=3.13
 
       - name: "Install dependencies"
