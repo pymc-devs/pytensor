@@ -36,11 +36,11 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
     shape_input_names = ["shape_" + str(i) for i in range(len(shape_inputs))]
 
     func_conditions = [
-        f"assert x.shape[{i}] == {shape_input_names}"
-        for i, (shape_input, shape_input_names) in enumerate(
+        f"assert x.shape[{i}] == {eval_dim_name}, f'SpecifyShape: dim {{{i}}} of input has shape {{x.shape[{i}]}}, expected {{{eval_dim_name}.item()}}.'"
+        for i, (node_dim_input, eval_dim_name) in enumerate(
             zip(shape_inputs, shape_input_names, strict=True)
         )
-        if shape_input is not NoneConst
+        if node_dim_input is not NoneConst
     ]
 
     func = dedent(
