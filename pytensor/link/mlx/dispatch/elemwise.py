@@ -38,7 +38,7 @@ def mlx_funcify_DimShuffle(op, **kwargs):
 
 # Second-level dispatch for scalar operations in CAReduce
 @singledispatch
-def mlx_funcify_CAReduce_scalar_op(scalar_op):
+def mlx_funcify_CAReduce_scalar_op(scalar_op, axis):
     raise NotImplementedError(
         f"MLX does not support CAReduce with scalar op {scalar_op}"
     )
@@ -46,59 +46,52 @@ def mlx_funcify_CAReduce_scalar_op(scalar_op):
 
 @mlx_funcify.register(CAReduce)
 def mlx_funcify_CAReduce(op, **kwargs):
-    # Dispatch to the appropriate scalar op handler
-    scalar_reduce_fn = mlx_funcify_CAReduce_scalar_op(op.scalar_op)
-    axis = op.axis
-
-    def reduce(x):
-        return scalar_reduce_fn(x, axis)
-
-    return reduce
+    return mlx_funcify_CAReduce_scalar_op(op.scalar_op, op.axis)
 
 
 @mlx_funcify_CAReduce_scalar_op.register(Add)
-def mlx_funcify_Elemwise_scalar_Add(scalar_op):
-    def sum_reduce(x, axis):
+def mlx_funcify_Elemwise_scalar_Add(scalar_op, axis):
+    def sum_reduce(x):
         return mx.sum(x, axis=axis)
 
     return sum_reduce
 
 
 @mlx_funcify_CAReduce_scalar_op.register(Mul)
-def mlx_funcify_Elemwise_scalar_Mul(scalar_op):
-    def prod_reduce(x, axis):
+def mlx_funcify_Elemwise_scalar_Mul(scalar_op, axis):
+    def prod_reduce(x):
         return mx.prod(x, axis=axis)
 
     return prod_reduce
 
 
 @mlx_funcify_CAReduce_scalar_op.register(AND)
-def mlx_funcify_Elemwise_scalar_AND(scalar_op):
-    def all_reduce(x, axis):
+def mlx_funcify_Elemwise_scalar_AND(scalar_op, axis):
+    def all_reduce(x):
         return x.all(axis=axis)
 
     return all_reduce
 
 
 @mlx_funcify_CAReduce_scalar_op.register(OR)
-def mlx_funcify_CARreduce_OR(scalar_op):
-    def any_reduce(x, axis):
+def mlx_funcify_CARreduce_OR(scalar_op, axis):
+    def any_reduce(x):
         return mx.any(x, axis=axis)
 
     return any_reduce
 
 
 @mlx_funcify_CAReduce_scalar_op.register(ScalarMaximum)
-def mlx_funcify_CARreduce_Maximum(scalar_op):
-    def max_reduce(x, axis):
+def mlx_funcify_CARreduce_Maximum(scalar_op, axis):
+    def max_reduce(x):
         return mx.max(x, axis=axis)
 
     return max_reduce
 
 
 @mlx_funcify_CAReduce_scalar_op.register(ScalarMinimum)
-def mlx_funcify_CARreduce_Minimum(scalar_op):
-    def min_reduce(x, axis):
+def mlx_funcify_CARreduce_Minimum(scalar_op, axis):
+    def min_reduce(x):
         return mx.min(x, axis=axis)
 
     return min_reduce
