@@ -46,6 +46,7 @@ jobs:
           micromamba install --yes -q -c conda-forge mypy types-setuptools scipy-stubs pandas pre-commit
           pip install tfp-nightly
           pip install -e ./
+          pre-commit install
           micromamba list && pip freeze
           python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
           python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"';
