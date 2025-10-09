@@ -24,8 +24,6 @@ from pytensor.link.utils import (
 )
 from pytensor.scalar.basic import ScalarType
 from pytensor.sparse import SparseTensorType
-from pytensor.tensor.blas import BatchedDot
-from pytensor.tensor.math import Dot
 from pytensor.tensor.type import TensorType
 
 
@@ -362,71 +360,6 @@ def int_to_float_fn(inputs, out_dtype):
             return x.astype(args_dtype)
 
     return inputs_cast
-
-
-@numba_funcify.register(Dot)
-def numba_funcify_Dot(op, node, **kwargs):
-    # Numba's `np.dot` does not support integer dtypes, so we need to cast to float.
-    x, y = node.inputs
-    [out] = node.outputs
-
-    x_dtype = x.type.dtype
-    y_dtype = y.type.dtype
-    dot_dtype = f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
-    out_dtype = out.type.dtype
-
-    if x_dtype == dot_dtype and y_dtype == dot_dtype:
-
-        @numba_njit
-        def dot(x, y):
-            return np.asarray(np.dot(x, y))
-
-    elif x_dtype == dot_dtype and y_dtype != dot_dtype:
-
-        @numba_njit
-        def dot(x, y):
-            return np.asarray(np.dot(x, y.astype(dot_dtype)))
-
-    elif x_dtype != dot_dtype and y_dtype == dot_dtype:
-
-        @numba_njit
-        def dot(x, y):
-            return np.asarray(np.dot(x.astype(dot_dtype), y))
-
-    else:
-
-        @numba_njit()
-        def dot(x, y):
-            return np.asarray(np.dot(x.astype(dot_dtype), y.astype(dot_dtype)))
-
-    if out_dtype == dot_dtype:
-        return dot
-
-    else:
-
-        @numba_njit
-        def dot_with_cast(x, y):
-            return dot(x, y).astype(out_dtype)
-
-    return dot_with_cast
-
-
-@numba_funcify.register(BatchedDot)
-def numba_funcify_BatchedDot(op, node, **kwargs):
-    dtype = node.outputs[0].type.numpy_dtype
-
-    @numba_njit
-    def batched_dot(x, y):
-        # Numba does not support 3D matmul
-        # https://github.com/numba/numba/issues/3804
-        shape = x.shape[:-1] + y.shape[2:]
-        z0 = np.empty(shape, dtype=dtype)
-        for i in range(z0.shape[0]):
-            z0[i] = np.dot(x[i], y[i])
-
-        return z0
-
-    return batched_dot
 
 
 @numba_funcify.register(IfElse)
