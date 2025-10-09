@@ -43,6 +43,7 @@ jobs:
           micromamba install --yes -q -c conda-forge python=3.13 mkl "numpy>=2.0" scipy pip mkl-service graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx
           micromamba install --yes -q -c conda-forge "numba>=0.57"
           micromamba install --yes -q -c conda-forge jax jaxlib numpyro equinox
+          micromamba install --yes -q -c conda-forge mypy types-setuptools scipy-stubs pandas pre-commit
           pip install tfp-nightly
           pip install -e ./
           micromamba list && pip freeze
