@@ -10,7 +10,7 @@ from pytensor import In, config
 from pytensor.compile import NUMBA
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function.types import add_supervisor_to_fgraph
-from pytensor.compile.ops import DeepCopyOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
@@ -326,6 +326,15 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
             return fgraph_fn(*inputs)
 
     return opfromgraph
+
+
+@numba_funcify.register(TypeCastingOp)
+def numba_funcify_type_casting(op, **kwargs):
+    @numba_njit
+    def identity(x):
+        return x
+
+    return identity
 
 
 @numba_funcify.register(DeepCopyOp)
