@@ -20,6 +20,7 @@ from pytensor.scalar.basic import (
     Exp,
     IntDiv,
     Invert,
+    IsInf,
     IsNan,
     Log,
     Log1p,
@@ -138,7 +139,7 @@ def mlx_funcify_Elemwise_scalar_op(scalar_op):
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Add)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_Add(scalar_op):
     def add(*args):
         result = args[0]
         for arg in args[1:]:
@@ -149,15 +150,12 @@ def _(scalar_op):
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Sub)
-def _(scalar_op):
-    def sub(x, y):
-        return mx.subtract(x, y)
-
-    return sub
+def mlx_funcify_Elemwise_scalar_Sub(scalar_op):
+    return mx.subtract
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Mul)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_Mul(scalar_op):
     def mul(*args):
         result = args[0]
         for arg in args[1:]:
@@ -168,206 +166,133 @@ def _(scalar_op):
 
 
 @mlx_funcify_Elemwise_scalar_op.register(TrueDiv)
-def _(scalar_op):
-    def true_div(x, y):
-        return mx.divide(x, y)
-
-    return true_div
+def mlx_funcify_Elemwise_scalar_TrueDiv(scalar_op):
+    return mx.divide
 
 
 @mlx_funcify_Elemwise_scalar_op.register(IntDiv)
-def _(scalar_op):
-    def int_div(x, y):
-        return mx.floor_divide(x, y)
-
-    return int_div
+def mlx_funcify_Elemwise_scalar_IntDiv(scalar_op):
+    return mx.floor_divide
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Pow)
-def _(scalar_op):
-    def pow(x, y):
-        return mx.power(x, y)
-
-    return pow
+def mlx_funcify_Elemwise_scalar_Pow(scalar_op):
+    return mx.power
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Exp)
-def _(scalar_op):
-    def exp(x):
-        return mx.exp(x)
-
-    return exp
+def mlx_funcify_Elemwise_scalar_Exp(scalar_op):
+    return mx.exp
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Log)
-def _(scalar_op):
-    def log(x):
-        return mx.log(x)
-
-    return log
+def mlx_funcify_Elemwise_scalar_Log(scalar_op):
+    return mx.log
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Log1p)
-def _(scalar_op):
-    def log1p(x):
-        return mx.log1p(x)
-
-    return log1p
+def mlx_funcify_Elemwise_scalar_Log1p(scalar_op):
+    return mx.log1p
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Sin)
-def _(scalar_op):
-    def sin(x):
-        return mx.sin(x)
-
-    return sin
+def mlx_funcify_Elemwise_scalar_Sin(scalar_op):
+    return mx.sin
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Cos)
-def _(scalar_op):
-    def cos(x):
-        return mx.cos(x)
-
-    return cos
+def mlx_funcify_Elemwise_scalar_Cos(scalar_op):
+    return mx.cos
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Sqrt)
-def _(scalar_op):
-    def sqrt(x):
-        return mx.sqrt(x)
-
-    return sqrt
+def mlx_funcify_Elemwise_scalar_Sqrt(scalar_op):
+    return mx.sqrt
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Sqr)
-def _(scalar_op):
-    def sqr(x):
-        return mx.square(x)
-
-    return sqr
+def mlx_funcify_Elemwise_scalar_Sqr(scalar_op):
+    return mx.square
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Abs)
-def _(scalar_op):
-    def abs(x):
-        return mx.abs(x)
-
-    return abs
+def mlx_funcify_Elemwise_scalar_Abs(scalar_op):
+    return mx.abs
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Neg)
-def _(scalar_op):
-    def neg(x):
-        return mx.negative(x)
-
-    return neg
+def mlx_funcify_Elemwise_scalar_Neg(scalar_op):
+    return mx.negative
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Sign)
-def _(scalar_op):
-    def sign(x):
-        return mx.sign(x)
-
-    return sign
+def mlx_funcify_Elemwise_scalar_Sign(scalar_op):
+    return mx.sign
 
 
 @mlx_funcify_Elemwise_scalar_op.register(LE)
-def _(scalar_op):
-    def le(x, y):
-        return mx.less_equal(x, y)
-
-    return le
+def mlx_funcify_Elemwise_scalar_LE(scalar_op):
+    return mx.less_equal
 
 
 @mlx_funcify_Elemwise_scalar_op.register(LT)
-def _(scalar_op):
-    def lt(x, y):
-        return mx.less(x, y)
-
-    return lt
+def mlx_funcify_Elemwise_scalar_LT(scalar_op):
+    return mx.less
 
 
 @mlx_funcify_Elemwise_scalar_op.register(GE)
-def _(scalar_op):
-    def ge(x, y):
-        return mx.greater_equal(x, y)
-
-    return ge
+def mlx_funcify_Elemwise_scalar_GE(scalar_op):
+    return mx.greater_equal
 
 
 @mlx_funcify_Elemwise_scalar_op.register(GT)
-def _(scalar_op):
-    def gt(x, y):
-        return mx.greater(x, y)
-
-    return gt
+def mlx_funcify_Elemwise_scalar_GT(scalar_op):
+    return mx.greater
 
 
 @mlx_funcify_Elemwise_scalar_op.register(EQ)
-def _(scalar_op):
-    def eq(x, y):
-        return mx.equal(x, y)
-
-    return eq
+def mlx_funcify_Elemwise_scalar_EQ(scalar_op):
+    return mx.equal
 
 
 @mlx_funcify_Elemwise_scalar_op.register(NEQ)
-def _(scalar_op):
-    def neq(x, y):
-        return mx.not_equal(x, y)
-
-    return neq
+def mlx_funcify_Elemwise_scalar_NEQ(scalar_op):
+    return mx.not_equal
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Switch)
-def _(scalar_op):
-    def switch(cond, x, y):
-        return mx.where(cond, x, y)
-
-    return switch
+def mlx_funcify_Elemwise_scalar_Switch(scalar_op):
+    return mx.where
 
 
 @mlx_funcify_Elemwise_scalar_op.register(AND)
-def _(scalar_op):
-    def bitwise_and(x, y):
-        return mx.bitwise_and(x, y)
-
-    return bitwise_and
+def mlx_funcify_Elemwise_scalar_AND(scalar_op):
+    return mx.bitwise_and
 
 
 @mlx_funcify_Elemwise_scalar_op.register(OR)
-def _(scalar_op):
-    def bitwise_or(x, y):
-        return mx.bitwise_or(x, y)
-
-    return bitwise_or
+def mlx_funcify_Elemwise_scalar_OR(scalar_op):
+    return mx.bitwise_or
 
 
 @mlx_funcify_Elemwise_scalar_op.register(ScalarMaximum)
-def _(scalar_op):
-    def maximum(x, y):
-        return mx.maximum(x, y)
-
-    return maximum
+def mlx_funcify_Elemwise_scalar_ScalarMaximum(scalar_op):
+    return mx.maximum
 
 
 @mlx_funcify_Elemwise_scalar_op.register(ScalarMinimum)
-def _(scalar_op):
-    def minimum(x, y):
-        return mx.minimum(x, y)
-
-    return minimum
+def mlx_funcify_Elemwise_scalar_ScalarMinimum(scalar_op):
+    return mx.minimum
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Cast)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_Cast(scalar_op):
     def cast(x):
         dtype = convert_dtype_to_mlx(scalar_op.o_type.dtype)
         try:
             return x.astype(dtype)
         except ValueError as e:
             if "is not supported on the GPU" in str(e):
-                # MLX GPU limitation - try auto-casting with warning
                 import warnings
 
                 warnings.warn(
@@ -375,44 +300,38 @@ def _(scalar_op):
                     UserWarning,
                     stacklevel=2,
                 )
-                # Get the auto-cast version
                 fallback_dtype = convert_dtype_to_mlx(
                     scalar_op.o_type.dtype, auto_cast_unsupported=True
                 )
                 return x.astype(fallback_dtype)
             else:
-                # Re-raise other ValueError exceptions
-                raise
+                raise e
 
     return cast
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Sigmoid)
-def _(scalar_op):
-    def sigmoid(x):
-        return mx.sigmoid(x)
-
-    return sigmoid
+def mlx_funcify_Elemwise_scalar_Sigmoid(scalar_op):
+    return mx.sigmoid
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Invert)
-def _(scalar_op):
-    def invert(x):
-        return mx.bitwise_invert(x)
-
-    return invert
+def mlx_funcify_Elemwise_scalar_Invert(scalar_op):
+    return mx.bitwise_invert
 
 
 @mlx_funcify_Elemwise_scalar_op.register(IsNan)
-def _(scalar_op):
-    def isnan(x):
-        return mx.isnan(x)
+def mlx_funcify_Elemwise_scalar_IsNan(scalar_op):
+    return mx.isnan
 
-    return isnan
+
+@mlx_funcify_Elemwise_scalar_op.register(IsInf)
+def mlx_funcify_Elemwise_scalar_IsInf(scalar_op):
+    return mx.isinf
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Erfc)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_Erfc(scalar_op):
     def erfc(x):
         return 1.0 - mx.erf(x)
 
@@ -420,7 +339,7 @@ def _(scalar_op):
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Erfcx)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_Erfcx(scalar_op):
     def erfcx(x):
         return mx.exp(x * x) * (1.0 - mx.erf(x))
 
@@ -428,7 +347,7 @@ def _(scalar_op):
 
 
 @mlx_funcify_Elemwise_scalar_op.register(Softplus)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_softplus(scalar_op):
     def softplus(x):
         # Numerically stable implementation of log(1 + exp(x))
         # Following the same logic as the original PyTensor implementation
@@ -445,10 +364,4 @@ def _(scalar_op):
 
 @mlx_funcify.register(Elemwise)
 def mlx_funcify_Elemwise(op, node, **kwargs):
-    # Dispatch to the appropriate scalar op handler
-    scalar_func = mlx_funcify_Elemwise_scalar_op(op.scalar_op)
-
-    def elemwise(*inputs):
-        return scalar_func(*inputs)
-
-    return elemwise
+    return mlx_funcify_Elemwise_scalar_op(op.scalar_op)

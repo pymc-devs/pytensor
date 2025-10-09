@@ -57,7 +57,7 @@ def mlx_funcify_CAReduce(op, **kwargs):
 
 
 @mlx_funcify_CAReduce_scalar_op.register(Add)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_Add(scalar_op):
     def sum_reduce(x, axis):
         return mx.sum(x, axis=axis)
 
@@ -65,7 +65,7 @@ def _(scalar_op):
 
 
 @mlx_funcify_CAReduce_scalar_op.register(Mul)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_Mul(scalar_op):
     def prod_reduce(x, axis):
         return mx.prod(x, axis=axis)
 
@@ -73,7 +73,7 @@ def _(scalar_op):
 
 
 @mlx_funcify_CAReduce_scalar_op.register(AND)
-def _(scalar_op):
+def mlx_funcify_Elemwise_scalar_AND(scalar_op):
     def all_reduce(x, axis):
         return x.all(axis=axis)
 
@@ -81,7 +81,7 @@ def _(scalar_op):
 
 
 @mlx_funcify_CAReduce_scalar_op.register(OR)
-def _(scalar_op):
+def mlx_funcify_CARreduce_OR(scalar_op):
     def any_reduce(x, axis):
         return mx.any(x, axis=axis)
 
@@ -89,7 +89,7 @@ def _(scalar_op):
 
 
 @mlx_funcify_CAReduce_scalar_op.register(ScalarMaximum)
-def _(scalar_op):
+def mlx_funcify_CARreduce_Maximum(scalar_op):
     def max_reduce(x, axis):
         return mx.max(x, axis=axis)
 
@@ -97,7 +97,7 @@ def _(scalar_op):
 
 
 @mlx_funcify_CAReduce_scalar_op.register(ScalarMinimum)
-def _(scalar_op):
+def mlx_funcify_CARreduce_Minimum(scalar_op):
     def min_reduce(x, axis):
         return mx.min(x, axis=axis)
 
