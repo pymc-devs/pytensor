@@ -42,14 +42,6 @@ from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import MakeSlice, NoneConst
 
 
-def global_numba_func(func):
-    """Use to return global numba functions in numba_funcify_*.
-
-    This allows tests to remove the compilation using mock.
-    """
-    return func
-
-
 def numba_njit(*args, fastmath=None, **kwargs):
     kwargs.setdefault("cache", config.numba__cache)
     kwargs.setdefault("no_cpython_wrapper", True)
