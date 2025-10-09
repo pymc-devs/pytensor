@@ -87,13 +87,6 @@ def numba_njit(*args, fastmath=None, **kwargs):
     return numba.njit(*args, fastmath=fastmath, **kwargs)
 
 
-def numba_vectorize(*args, **kwargs):
-    if len(args) > 0 and callable(args[0]):
-        return numba.vectorize(*args[1:], cache=config.numba__cache, **kwargs)(args[0])
-
-    return numba.vectorize(*args, cache=config.numba__cache, **kwargs)
-
-
 def get_numba_type(
     pytensor_type: Type,
     layout: str = "A",
