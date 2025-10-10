@@ -1,8 +1,8 @@
 import numpy as np
 from numba.np.arraymath import _get_inner_prod
 
+from pytensor.link.numba.compile import numba_njit
 from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.tensor.signal.conv import Convolve1d
 
 

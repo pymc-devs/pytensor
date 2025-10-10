@@ -1,10 +1,15 @@
 import sys
+from hashlib import sha256
 from typing import cast
 
 from numba.core.extending import overload
 from numba.np.unsafe.ndarray import to_fixed_tuple
 
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
+from pytensor.link.numba.cache import (
+    numba_funcify_and_cache_key,
+    register_funcify_and_cache_key,
+)
+from pytensor.link.numba.compile import numba_njit
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
@@ -16,7 +21,7 @@ from pytensor.tensor import TensorVariable, get_vector_length
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 
 
-@numba_funcify.register(BlockwiseWithCoreShape)
+@register_funcify_and_cache_key(BlockwiseWithCoreShape)
 def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
     [blockwise_node] = op.fgraph.apply_nodes
     blockwise_op: Blockwise = blockwise_node.op
@@ -29,7 +34,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         cast(tuple[TensorVariable], node.inputs[:nin]),
         propagate_unbatched_core_inputs=True,
     )
-    core_op_fn = numba_funcify(
+    core_op_fn, core_op_key = numba_funcify_and_cache_key(
         core_op,
         node=core_node,
         parent_node=node,
@@ -89,4 +94,22 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
     def ov_blockwise(*inputs_and_core_shapes):
         return blockwise_wrapper
 
-    return blockwise
+    if core_op_key is None:
+        # We were told the scalar op cannot be cached
+        blockwise_key = None
+    else:
+        blockwise_key = "_".join(
+            map(
+                str,
+                (
+                    type(op),
+                    type(blockwise_op),
+                    tuple(blockwise_op.inplace_pattern.items()),
+                    blockwise_op.signature,
+                    core_op_key,
+                ),
+            )
+        )
+        blockwise_key = sha256(blockwise_key.encode()).hexdigest()
+
+    return blockwise, blockwise_key

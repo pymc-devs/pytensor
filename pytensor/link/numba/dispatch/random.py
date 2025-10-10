@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from copy import copy, deepcopy
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent
 
 import numba
@@ -12,7 +13,8 @@ from numba.core.extending import overload
 import pytensor.tensor.random.basic as ptr
 from pytensor.graph import Apply
 from pytensor.graph.op import Op
-from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.cache import register_funcify_and_cache_key
+from pytensor.link.numba.compile import numba_njit
 from pytensor.link.numba.dispatch.basic import direct_cast, numba_funcify
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
@@ -84,14 +86,14 @@ def numba_core_rv_default(op, node):
     """)
 
     func = compile_function_src(func_src, name, {**globals()})
-    return numba_basic.numba_njit(func)
+    return numba_njit(func)
 
 
 @numba_core_rv_funcify.register(ptr.BernoulliRV)
 def numba_core_BernoulliRV(op, node):
     out_dtype = node.outputs[1].type.numpy_dtype
 
-    @numba_basic.numba_njit()
+    @numba_njit
     def random(rng, p):
         return (
             direct_cast(0, out_dtype)
@@ -104,7 +106,7 @@ def numba_core_BernoulliRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.StudentTRV)
 def numba_core_StudentTRV(op, node):
-    @numba_basic.numba_njit
+    @numba_njit
     def random_fn(rng, df, loc, scale):
         return loc + scale * rng.standard_t(df)
 
@@ -113,7 +115,7 @@ def numba_core_StudentTRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.HalfNormalRV)
 def numba_core_HalfNormalRV(op, node):
-    @numba_basic.numba_njit
+    @numba_njit
     def random_fn(rng, loc, scale):
         return loc + scale * np.abs(rng.standard_normal())
 
@@ -122,7 +124,7 @@ def numba_core_HalfNormalRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.CauchyRV)
 def numba_core_CauchyRV(op, node):
-    @numba_basic.numba_njit
+    @numba_njit
     def random(rng, loc, scale):
         return (loc + rng.standard_cauchy()) / scale
 
@@ -131,7 +133,7 @@ def numba_core_CauchyRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.ParetoRV)
 def numba_core_ParetoRV(op, node):
-    @numba_basic.numba_njit
+    @numba_njit
     def random(rng, b, scale):
         # Follows scipy implementation
         U = rng.random()
@@ -142,7 +144,7 @@ def numba_core_ParetoRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.InvGammaRV)
 def numba_core_InvGammaRV(op, node):
-    @numba_basic.numba_njit
+    @numba_njit
     def random(rng, shape, scale):
         return 1 / rng.gamma(shape, 1 / scale)
 
@@ -151,7 +153,7 @@ def numba_core_InvGammaRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.CategoricalRV)
 def core_CategoricalRV(op, node):
-    @numba_basic.numba_njit
+    @numba_njit
     def random_fn(rng, p):
         unif_sample = rng.uniform(0, 1)
         return np.searchsorted(np.cumsum(p), unif_sample)
@@ -163,7 +165,7 @@ def core_CategoricalRV(op, node):
 def core_MultinomialRV(op, node):
     dtype = op.dtype
 
-    @numba_basic.numba_njit
+    @numba_njit
     def random_fn(rng, n, p):
         n_cat = p.shape[0]
         draws = np.zeros(n_cat, dtype=dtype)
@@ -186,7 +188,7 @@ def core_MultinomialRV(op, node):
 def core_MvNormalRV(op, node):
     method = op.method
 
-    @numba_basic.numba_njit
+    @numba_njit
     def random_fn(rng, mean, cov):
         if method == "cholesky":
             A = np.linalg.cholesky(cov)
@@ -209,7 +211,7 @@ def core_MvNormalRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.DirichletRV)
 def core_DirichletRV(op, node):
-    @numba_basic.numba_njit
+    @numba_njit
     def random_fn(rng, alpha):
         y = np.empty_like(alpha)
         for i in range(len(alpha)):
@@ -226,7 +228,7 @@ def core_GumbelRV(op, node):
     https://github.com/numpy/numpy/blob/6f6be042c6208815b15b90ba87d04159bfa25fd3/numpy/random/src/distributions/distributions.c#L502-L511
     """
 
-    @numba_basic.numba_njit
+    @numba_njit
     def random_fn(rng, loc, scale):
         U = 1.0 - rng.random()
         if U < 1.0:
@@ -244,7 +246,7 @@ def core_VonMisesRV(op, node):
     https://github.com/numpy/numpy/blob/6f6be042c6208815b15b90ba87d04159bfa25fd3/numpy/random/src/distributions/distributions.c#L855-L925
     """
 
-    @numba_basic.numba_njit
+    @numba_njit
     def random_fn(rng, mu, kappa):
         if np.isnan(kappa):
             return np.nan
@@ -310,7 +312,7 @@ def core_ChoiceWithoutReplacement(op: ptr.ChoiceWithoutReplacement, node):
 
     if op.has_p_param:
 
-        @numba_basic.numba_njit
+        @numba_njit
         def random_fn(rng, a, p, core_shape):
             # Adapted from Numpy: https://github.com/numpy/numpy/blob/2a9b9134270371b43223fc848b753fceab96b4a5/numpy/random/_generator.pyx#L922-L941
             size = np.prod(core_shape)
@@ -363,7 +365,7 @@ def core_ChoiceWithoutReplacement(op: ptr.ChoiceWithoutReplacement, node):
 
     else:
 
-        @numba_basic.numba_njit
+        @numba_njit
         def random_fn(rng, a, core_shape):
             # Until Numba supports generator.choice we use a poor implementation
             # that permutates the whole arange array and takes the first `size` elements
@@ -395,7 +397,7 @@ def numba_funcify_RandomVariable_core(op: RandomVariable, **kwargs):
     )
 
 
-@numba_funcify.register
+@register_funcify_and_cache_key(RandomVariableWithCoreShape)
 def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs):
     core_shape = node.inputs[0]
 
@@ -447,4 +449,15 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     def ov_random(core_shape, rng, size, *dist_params):
         return random_wrapper
 
-    return random
+    rv_op_props_dict = rv_op.props_dict() if hasattr(rv_op, "props_dict") else {}
+    random_rv_key_contents = (
+        type(op),
+        type(rv_op),
+        rv_op,
+        tuple(rv_op_props_dict.items()),
+        size_len,
+        core_shape_len,
+        inplace,
+    )
+    random_rv_key = sha256(str(random_rv_key_contents).encode()).hexdigest()
+    return random, random_rv_key
