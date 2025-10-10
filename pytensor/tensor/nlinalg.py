@@ -107,7 +107,7 @@ class MatrixInverse(Op):
 
     """
 
-    __props__ = ()
+    __props__: tuple[str, ...] = ()
     gufunc_signature = "(m,m)->(m,m)"
     gufunc_spec = ("numpy.linalg.inv", 1, 1)
 
