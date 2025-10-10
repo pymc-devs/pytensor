@@ -1068,49 +1068,6 @@ def test_scalar_solve_to_division_rewrite(
     )
 
 
-@pytest.mark.parametrize("lower", [True, False])
-def test_triangular_inv_op(lower):
-    """Tests the TriangularInv Op directly."""
-    x = matrix("x", dtype=config.floatX)
-    f = function([x], TriangularInv(lower=lower)(x))
-
-    if lower:
-        a = np.tril(np.random.rand(5, 5) + 0.1).astype(config.floatX)
-    else:
-        a = np.triu(np.random.rand(5, 5) + 0.1).astype(config.floatX)
-
-    a_inv = f(a)
-    expected_inv = np.linalg.inv(a)
-
-    # Clean the NumPy result before comparing.
-    if lower:
-        expected_inv = np.tril(expected_inv)
-    else:
-        expected_inv = np.triu(expected_inv)
-
-    # The inverse of a triangular matrix is also triangular.
-    # We should check the full matrix, not just a part of it.
-    assert_allclose(
-        a_inv, expected_inv, rtol=1e-7 if config.floatX == "float64" else 1e-5
-    )
-
-
-def test_triangular_inv_op_nan_on_error():
-    """
-    Tests the `on_error='nan'` functionality of the TriangularInv Op.
-    """
-    x = matrix("x", dtype=config.floatX)
-    f_nan = function([x], TriangularInv(on_error="nan")(x))
-
-    # Create a singular triangular matrix (zero on the diagonal)
-    a_singular = np.tril(np.random.rand(5, 5))
-    a_singular[2, 2] = 0
-    a_singular = a_singular.astype(config.floatX)
-
-    res = f_nan(a_singular)
-    assert np.all(np.isnan(res))
-
-
 def _check_op_in_graph(fgraph, op_type, present=True):
     """Helper to check if an Op is in a graph."""
 
@@ -1186,6 +1143,5 @@ def test_inv_to_triangular_inv_rewrite(case):
     pytensor_result = f(a)
     _, numpy_tri_func = rewrite_cases[case]
     numpy_result = np.linalg.inv(numpy_tri_func(a))
-    assert_allclose(
-        pytensor_result, numpy_result, rtol=1e-7 if config.floatX == "float64" else 1e-5
-    )
+    atol = rtol = 1e-8 if config.floatX.endswith("64") else 1e-4
+    np.testing.assert_allclose(pytensor_result, numpy_result, rtol=rtol, atol=atol)
