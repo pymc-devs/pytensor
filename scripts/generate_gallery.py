@@ -118,6 +118,13 @@ class NotebookGenerator:
         return None
 
     def gen_previews(self):
+        if self.png_path.exists():
+            logger.info(
+                f"Custom thumbnail already exists for {self.basename}, skipping extraction",
+                type="thumbnail_extractor",
+            )
+            return
+
         preview = self.extract_preview_pic()
         if preview is not None:
             with self.png_path.open("wb") as buff:
