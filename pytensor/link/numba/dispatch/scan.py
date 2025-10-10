@@ -445,6 +445,7 @@ def scan({", ".join(outer_in_names)}):
     }
     global_env["np"] = np
 
+    print(scan_op_src)
     scan_op_fn = compile_function_src(scan_op_src, "scan", {**globals(), **global_env})
 
     return numba_basic.numba_njit(scan_op_fn, boundscheck=False)
