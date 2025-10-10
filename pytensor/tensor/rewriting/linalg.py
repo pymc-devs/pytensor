@@ -1107,7 +1107,7 @@ def rewrite_inv_to_triangular_solve(fgraph, node):
     """
     This rewrite takes advantage of the fact that the inverse of a triangular
     matrix can be computed more efficiently than the inverse of a general
-    matrix by using a triangular solve instead of a general matrix inverse.
+    matrix by using a triangular inv instead of a general matrix inverse.
     """
 
     A = node.inputs[0]
