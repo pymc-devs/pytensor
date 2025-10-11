@@ -15,7 +15,6 @@ numba = pytest.importorskip("numba")
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-import pytensor.tensor.math as ptm
 from pytensor import config, shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -30,10 +29,7 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
-from pytensor.tensor import blas, tensor
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
-from pytensor.tensor.sort import ArgSortOp, SortOp
 
 
 if TYPE_CHECKING:
@@ -139,12 +135,6 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
         ll[i] = v
         return tuple(ll)
 
-    def py_to_scalar(x):
-        if isinstance(x, np.ndarray):
-            return x.item()
-        else:
-            return x
-
     def njit_noop(*args, **kwargs):
         if len(args) == 1 and callable(args[0]):
             return args[0]
@@ -175,29 +165,15 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
         else:
             return wrap
 
-    def py_global_numba_func(func):
-        if hasattr(func, "py_func"):
-            return func.py_func
-        return func
-
     mocks = [
         mock.patch("numba.njit", njit_noop),
-        mock.patch("numba.vectorize", vectorize_noop),
-        mock.patch(
-            "pytensor.link.numba.dispatch.basic.global_numba_func",
-            py_global_numba_func,
-        ),
         mock.patch(
             "pytensor.link.numba.dispatch.basic.tuple_setitem", py_tuple_setitem
         ),
         mock.patch("pytensor.link.numba.dispatch.basic.numba_njit", njit_noop),
         mock.patch(
-            "pytensor.link.numba.dispatch.basic.numba_vectorize", vectorize_noop
-        ),
-        mock.patch(
             "pytensor.link.numba.dispatch.basic.direct_cast", lambda x, dtype: x
         ),
-        mock.patch("pytensor.link.numba.dispatch.basic.to_scalar", py_to_scalar),
         mock.patch(
             "pytensor.link.numba.dispatch.basic.numba.np.numpy_support.from_dtype",
             lambda dtype: dtype,
@@ -370,161 +346,6 @@ def test_create_numba_signature(v, expected, force_scalar):
     assert res == expected
 
 
-@pytest.mark.parametrize(
-    "x, i",
-    [
-        (np.zeros((20, 3)), 1),
-    ],
-)
-def test_Shape(x, i):
-    g = Shape()(pt.as_tensor_variable(x))
-
-    compare_numba_and_py([], [g], [])
-
-    g = Shape_i(i)(pt.as_tensor_variable(x))
-
-    compare_numba_and_py([], [g], [])
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        [],  # Empty list
-        [3, 2, 1],  # Simple list
-        np.random.randint(0, 10, (3, 2, 3, 4, 4)),  # Multi-dimensional array
-    ],
-)
-@pytest.mark.parametrize("axis", [0, -1, None])
-@pytest.mark.parametrize(
-    ("kind", "exc"),
-    [
-        ["quicksort", None],
-        ["mergesort", UserWarning],
-        ["heapsort", UserWarning],
-        ["stable", UserWarning],
-    ],
-)
-def test_Sort(x, axis, kind, exc):
-    if axis:
-        g = SortOp(kind)(pt.as_tensor_variable(x), axis)
-    else:
-        g = SortOp(kind)(pt.as_tensor_variable(x))
-
-    cm = contextlib.suppress() if not exc else pytest.warns(exc)
-
-    with cm:
-        compare_numba_and_py([], [g], [])
-
-
-@pytest.mark.parametrize(
-    "x",
-    [
-        [],  # Empty list
-        [3, 2, 1],  # Simple list
-        None,  # Multi-dimensional array (see below)
-    ],
-)
-@pytest.mark.parametrize("axis", [0, -1, None])
-@pytest.mark.parametrize(
-    ("kind", "exc"),
-    [
-        ["quicksort", None],
-        ["heapsort", None],
-        ["stable", UserWarning],
-    ],
-)
-def test_ArgSort(x, axis, kind, exc):
-    if x is None:
-        x = np.arange(5 * 5 * 5 * 5)
-        np.random.shuffle(x)
-        x = np.reshape(x, (5, 5, 5, 5))
-
-    if axis:
-        g = ArgSortOp(kind)(pt.as_tensor_variable(x), axis)
-    else:
-        g = ArgSortOp(kind)(pt.as_tensor_variable(x))
-
-    cm = contextlib.suppress() if not exc else pytest.warns(exc)
-
-    with cm:
-        compare_numba_and_py([], [g], [])
-
-
-@pytest.mark.parametrize(
-    "v, shape, ndim",
-    [
-        ((pt.vector(), np.array([4], dtype=config.floatX)), ((), None), 0),
-        ((pt.vector(), np.arange(4, dtype=config.floatX)), ((2, 2), None), 2),
-        (
-            (pt.vector(), np.arange(4, dtype=config.floatX)),
-            (pt.lvector(), np.array([2, 2], dtype="int64")),
-            2,
-        ),
-    ],
-)
-def test_Reshape(v, shape, ndim):
-    v, v_test_value = v
-    shape, shape_test_value = shape
-
-    g = Reshape(ndim)(v, shape)
-    inputs = [v] if not isinstance(shape, Variable) else [v, shape]
-    test_values = (
-        [v_test_value]
-        if not isinstance(shape, Variable)
-        else [v_test_value, shape_test_value]
-    )
-    compare_numba_and_py(
-        inputs,
-        [g],
-        test_values,
-    )
-
-
-def test_Reshape_scalar():
-    v = pt.vector()
-    v_test_value = np.array([1.0], dtype=config.floatX)
-    g = Reshape(1)(v[0], (1,))
-
-    compare_numba_and_py(
-        [v],
-        g,
-        [v_test_value],
-    )
-
-
-@pytest.mark.parametrize(
-    "v, shape, fails",
-    [
-        (
-            (pt.matrix(), np.array([[1.0]], dtype=config.floatX)),
-            (1, 1),
-            False,
-        ),
-        (
-            (pt.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
-            (1, 1),
-            True,
-        ),
-        (
-            (pt.matrix(), np.array([[1.0, 2.0]], dtype=config.floatX)),
-            (1, None),
-            False,
-        ),
-    ],
-)
-def test_SpecifyShape(v, shape, fails):
-    v, v_test_value = v
-    g = SpecifyShape()(v, *shape)
-    cm = contextlib.suppress() if not fails else pytest.raises(AssertionError)
-
-    with cm:
-        compare_numba_and_py(
-            [v],
-            [g],
-            [v_test_value],
-        )
-
-
 def test_ViewOp():
     v = pt.vector()
     v_test_value = np.arange(4, dtype=config.floatX)
@@ -600,86 +421,6 @@ def test_perform_type_convert():
     out = assert_op(x.sum(), np.array(True))
 
     compare_numba_and_py([x], out, [x_test_value])
-
-
-@pytest.mark.parametrize(
-    "x, y",
-    [
-        (
-            (pt.matrix(), rng.random(size=(3, 2)).astype(config.floatX)),
-            (pt.vector(), rng.random(size=(2,)).astype(config.floatX)),
-        ),
-        (
-            (pt.matrix(dtype="float64"), rng.random(size=(3, 2)).astype("float64")),
-            (pt.vector(dtype="float32"), rng.random(size=(2,)).astype("float32")),
-        ),
-        (
-            (pt.lmatrix(), rng.poisson(size=(3, 2))),
-            (pt.fvector(), rng.random(size=(2,)).astype("float32")),
-        ),
-        (
-            (pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
-            (pt.lvector(), rng.random(size=(2,)).astype(np.int64)),
-        ),
-        (
-            (pt.vector(dtype="int16"), rng.random(size=(2,)).astype(np.int16)),
-            (pt.vector(dtype="uint8"), rng.random(size=(2,)).astype(np.uint8)),
-        ),
-    ],
-)
-def test_Dot(x, y):
-    x, x_test_value = x
-    y, y_test_value = y
-
-    g = ptm.dot(x, y)
-
-    compare_numba_and_py(
-        [x, y],
-        [g],
-        [x_test_value, y_test_value],
-    )
-
-
-@pytest.mark.parametrize(
-    "x, y, exc",
-    [
-        (
-            (
-                pt.dtensor3(),
-                rng.random(size=(2, 3, 3)).astype("float64"),
-            ),
-            (
-                pt.dtensor3(),
-                rng.random(size=(2, 3, 3)).astype("float64"),
-            ),
-            None,
-        ),
-        (
-            (
-                pt.dtensor3(),
-                rng.random(size=(2, 3, 3)).astype("float64"),
-            ),
-            (
-                pt.ltensor3(),
-                rng.poisson(size=(2, 3, 3)).astype("int64"),
-            ),
-            None,
-        ),
-    ],
-)
-def test_BatchedDot(x, y, exc):
-    x, x_test_value = x
-    y, y_test_value = y
-
-    g = blas.BatchedDot()(x, y)
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x, y],
-            g,
-            [x_test_value, y_test_value],
-        )
 
 
 def test_shared():
@@ -921,32 +662,3 @@ def test_function_overhead(mode, benchmark):
     assert np.sum(fn(test_x)) == 1000
 
     benchmark(fn, test_x)
-
-
-@pytest.mark.parametrize(
-    "input_data",
-    [np.array([1, 0, 3]), np.array([[0, 1], [2, 0]]), np.array([[0, 0], [0, 0]])],
-)
-def test_Nonzero(input_data):
-    a = pt.tensor("a", shape=(None,) * input_data.ndim)
-
-    graph_outputs = pt.nonzero(a)
-
-    compare_numba_and_py(
-        graph_inputs=[a], graph_outputs=graph_outputs, test_inputs=[input_data]
-    )
-
-
-@pytest.mark.parametrize("dtype", ("float64", "float32", "mixed"))
-def test_mat_vec_dot_performance(dtype, benchmark):
-    A = tensor("A", shape=(512, 512), dtype="float64" if dtype == "mixed" else dtype)
-    x = tensor("x", shape=(512,), dtype="float32" if dtype == "mixed" else dtype)
-    out = ptm.dot(A, x)
-
-    fn = function([A, x], out, mode="NUMBA", trust_input=True)
-
-    rng = np.random.default_rng(948)
-    A_test = rng.standard_normal(size=A.type.shape, dtype=A.type.dtype)
-    x_test = rng.standard_normal(size=x.type.shape, dtype=x.type.dtype)
-    np.testing.assert_allclose(fn(A_test, x_test), np.dot(A_test, x_test), atol=1e-4)
-    benchmark(fn, A_test, x_test)

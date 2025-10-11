@@ -2,7 +2,6 @@ import math
 
 import numpy as np
 
-from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Variable
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
@@ -197,7 +196,6 @@ def numba_funcify_Cast(op, node, **kwargs):
 
 
 @numba_funcify.register(Identity)
-@numba_funcify.register(TypeCastingOp)
 def numba_funcify_type_casting(op, **kwargs):
     @numba_basic.numba_njit
     def identity(x):
@@ -210,14 +208,10 @@ def numba_funcify_type_casting(op, **kwargs):
 def numba_funcify_Clip(op, **kwargs):
     @numba_basic.numba_njit
     def clip(x, min_val, max_val):
-        x = numba_basic.to_scalar(x)
-        min_scalar = numba_basic.to_scalar(min_val)
-        max_scalar = numba_basic.to_scalar(max_val)
-
-        if x < min_scalar:
-            return min_scalar
-        elif x > max_scalar:
-            return max_scalar
+        if x < min_val:
+            return min_val
+        elif x > max_val:
+            return max_val
         else:
             return x
 

@@ -365,7 +365,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
             storage_alloc_stmts.append(
                 dedent(
                     f"""
-                {storage_size_name} = to_numba_scalar({outer_in_name})
+                {storage_size_name} = ({outer_in_name}).item()
                 {storage_name} = np.empty({storage_shape}, dtype=np.{storage_dtype})
                 """
                 ).strip()
@@ -435,10 +435,9 @@ def scan({", ".join(outer_in_names)}):
     """
 
     global_env = {
+        "np": np,
         "scan_inner_func": scan_inner_func,
-        "to_numba_scalar": numba_basic.to_scalar,
     }
-    global_env["np"] = np
 
     scan_op_fn = compile_function_src(scan_op_src, "scan", {**globals(), **global_env})
 
