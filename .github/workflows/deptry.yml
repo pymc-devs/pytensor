@@ -1,0 +1,33 @@
+name: deptry
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  deptry:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v1
+        with:
+          micromamba-version: "latest" # any version from https://github.com/mamba-org/micromamba-releases
+          environment-file: environment.yml
+          init-shell: bash
+          cache-environment: true
+          post-cleanup: "all"
+      - name: Install pytensor and deptry dependencies
+        run: |
+          pip install -e .
+          pip install deptry
+          python --version
+          deptry --version
+        shell: micromamba-shell {0}
+      - name: Run deptry
+        run: |
+          deptry .
+        shell: micromamba-shell {0}
