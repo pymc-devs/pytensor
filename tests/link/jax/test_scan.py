@@ -3,16 +3,19 @@ import re
 import numpy as np
 import pytest
 
+import pytensor
 import pytensor.tensor as pt
 from pytensor import function, shared
 from pytensor.compile import get_mode
 from pytensor.configdefaults import config
+from pytensor.graph import Apply, Op
+from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.scan import until
 from pytensor.scan.basic import scan
 from pytensor.scan.op import Scan
 from pytensor.tensor import random
 from pytensor.tensor.math import gammaln, log
-from pytensor.tensor.type import dmatrix, dvector, lscalar, matrix, scalar, vector
+from pytensor.tensor.type import dmatrix, dvector, matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -98,16 +101,26 @@ def test_scan_nit_sot(view):
     assert len(scan_nodes) == 1
 
 
-@pytest.mark.xfail(raises=NotImplementedError)
 def test_scan_mit_mot():
-    xs = pt.vector("xs", shape=(10,))
-    ys, _ = scan(
-        lambda xtm2, xtm1: (xtm2 + xtm1),
-        outputs_info=[{"initial": xs, "taps": [-2, -1]}],
+    def step(xtm1, ytm3, ytm1, rho):
+        return (xtm1 + ytm1) * rho, ytm3 * (1 - rho) + ytm1 * rho
+
+    rho = pt.scalar("rho", dtype="float64")
+    x0 = pt.vector("xs", shape=(2,))
+    y0 = pt.vector("ys", shape=(3,))
+    [outs, _], _ = scan(
+        step,
+        outputs_info=[x0, {"initial": y0, "taps": [-3, -1]}],
+        non_sequences=[rho],
         n_steps=10,
     )
-    grads_wrt_xs = pt.grad(ys.sum(), wrt=xs)
-    compare_jax_and_py([xs], [grads_wrt_xs], [np.arange(10)])
+    grads = pt.grad(outs.sum(), wrt=[x0, y0, rho])
+    compare_jax_and_py(
+        [x0, y0, rho],
+        grads,
+        [np.arange(2), np.array([0.5, 0.5, 0.5]), np.array(0.95)],
+        jax_mode=get_mode("JAX"),
+    )
 
 
 def test_scan_update():
@@ -125,7 +138,8 @@ def test_scan_update():
         n_steps=7,
     )
 
-    jax_fn = function([], xs, updates=update, mode="JAX")
+    jax_fn = function([], xs, updates=update, mode=get_mode("JAX").excluding("scan"))
+    jax_fn.dprint(print_op_info=True)
     np.testing.assert_array_equal(jax_fn(), np.array([1, 2, 4, 8, 16, 32, 64]) + 0.0)
 
     sh_static.set_value(1.0)
@@ -187,96 +201,6 @@ def test_scan_while():
     )
 
     compare_jax_and_py([], [xs], [])
-
-
-def test_scan_SEIR():
-    """Test a scan implementation of a SEIR model.
-
-    SEIR model definition:
-    S[t+1] = S[t] - B[t]
-    E[t+1] = E[t] +B[t] - C[t]
-    I[t+1] = I[t+1] + C[t] - D[t]
-
-    B[t] ~ Binom(S[t], beta)
-    C[t] ~ Binom(E[t], gamma)
-    D[t] ~ Binom(I[t], delta)
-    """
-
-    def binomln(n, k):
-        return gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
-
-    def binom_log_prob(n, p, value):
-        return binomln(n, value) + value * log(p) + (n - value) * log(1 - p)
-
-    # sequences
-    at_C = vector("C_t", dtype="int32", shape=(8,))
-    at_D = vector("D_t", dtype="int32", shape=(8,))
-    # outputs_info (initial conditions)
-    st0 = lscalar("s_t0")
-    et0 = lscalar("e_t0")
-    it0 = lscalar("i_t0")
-    logp_c = scalar("logp_c")
-    logp_d = scalar("logp_d")
-    # non_sequences
-    beta = scalar("beta")
-    gamma = scalar("gamma")
-    delta = scalar("delta")
-
-    # TODO: Use random streams when their JAX conversions are implemented.
-    # trng = pytensor.tensor.random.RandomStream(1234)
-
-    def seir_one_step(ct0, dt0, st0, et0, it0, logp_c, logp_d, beta, gamma, delta):
-        # bt0 = trng.binomial(n=st0, p=beta)
-        bt0 = st0 * beta
-        bt0 = bt0.astype(st0.dtype)
-
-        logp_c1 = binom_log_prob(et0, gamma, ct0).astype(logp_c.dtype)
-        logp_d1 = binom_log_prob(it0, delta, dt0).astype(logp_d.dtype)
-
-        st1 = st0 - bt0
-        et1 = et0 + bt0 - ct0
-        it1 = it0 + ct0 - dt0
-        return st1, et1, it1, logp_c1, logp_d1
-
-    (st, et, it, logp_c_all, logp_d_all), _ = scan(
-        fn=seir_one_step,
-        sequences=[at_C, at_D],
-        outputs_info=[st0, et0, it0, logp_c, logp_d],
-        non_sequences=[beta, gamma, delta],
-    )
-    st.name = "S_t"
-    et.name = "E_t"
-    it.name = "I_t"
-    logp_c_all.name = "C_t_logp"
-    logp_d_all.name = "D_t_logp"
-
-    s0, e0, i0 = 100, 50, 25
-    logp_c0 = np.array(0.0, dtype=config.floatX)
-    logp_d0 = np.array(0.0, dtype=config.floatX)
-    beta_val, gamma_val, delta_val = (
-        np.array(val, dtype=config.floatX) for val in [0.277792, 0.135330, 0.108753]
-    )
-    C = np.array([3, 5, 8, 13, 21, 26, 10, 3], dtype=np.int32)
-    D = np.array([1, 2, 3, 7, 9, 11, 5, 1], dtype=np.int32)
-
-    test_input_vals = [
-        C,
-        D,
-        s0,
-        e0,
-        i0,
-        logp_c0,
-        logp_d0,
-        beta_val,
-        gamma_val,
-        delta_val,
-    ]
-    compare_jax_and_py(
-        [at_C, at_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],
-        [st, et, it, logp_c_all, logp_d_all],
-        test_input_vals,
-        jax_mode="JAX",
-    )
 
 
 def test_scan_mitsot_with_nonseq():
@@ -413,10 +337,184 @@ def test_default_mode_excludes_incompatible_rewrites():
 
 
 def test_dynamic_sequence_length():
-    x = pt.tensor("x", shape=(None,))
-    out, _ = scan(lambda x: x + 1, sequences=[x])
+    class IncWithoutStaticShape(Op):
+        def make_node(self, x):
+            x = pt.as_tensor_variable(x)
+            return Apply(self, [x], [pt.tensor(shape=(None,) * x.type.ndim)])
 
+        def perform(self, node, inputs, outputs):
+            outputs[0][0] = inputs[0] + 1
+
+    @jax_funcify.register(IncWithoutStaticShape)
+    def _(op, **kwargs):
+        return lambda x: x + 1
+
+    inc_without_static_shape = IncWithoutStaticShape()
+
+    x = pt.tensor("x", shape=(None, 3))
+
+    out, _ = scan(
+        lambda x: inc_without_static_shape(x), outputs_info=[None], sequences=[x]
+    )
     f = function([x], out, mode=get_mode("JAX").excluding("scan"))
     assert sum(isinstance(node.op, Scan) for node in f.maker.fgraph.apply_nodes) == 1
-    np.testing.assert_allclose(f([]), [])
-    np.testing.assert_allclose(f([1, 2, 3]), np.array([2, 3, 4]))
+    np.testing.assert_allclose(f([[1, 2, 3]]), np.array([[2, 3, 4]]))
+
+    with pytest.raises(ValueError):
+        f(np.zeros((0, 3)))
+
+    # But should be fine with static shape
+    out2, _ = scan(
+        lambda x: pt.specify_shape(inc_without_static_shape(x), x.shape),
+        outputs_info=[None],
+        sequences=[x],
+    )
+    f2 = function([x], out2, mode=get_mode("JAX").excluding("scan"))
+    np.testing.assert_allclose(f2([[1, 2, 3]]), np.array([[2, 3, 4]]))
+    np.testing.assert_allclose(f2(np.zeros((0, 3))), np.empty((0, 3)))
+
+
+@pytest.mark.parametrize("gradient_backend", ["PYTENSOR", "JAX"])
+@pytest.mark.parametrize("mode", ("forward", "backward", "both"))
+def test_scan_SEIR(mode, gradient_backend, benchmark):
+    """Test a Scan implementation of a SEIR model.
+
+    SEIR model definition:
+    S[t+1] = S[t] - B[t]
+    E[t+1] = E[t] +B[t] - C[t]
+    I[t+1] = I[t+1] + C[t] - D[t]
+
+    B[t] ~ Binom(S[t], beta)
+    C[t] ~ Binom(E[t], gamma)
+    D[t] ~ Binom(I[t], delta)
+    """
+
+    def binomln(n, k):
+        return gammaln(n + 1) - gammaln(k + 1) - gammaln(n - k + 1)
+
+    def binom_log_prob(n, p, value):
+        return binomln(n, value) + value * log(p) + (n - value) * log(1 - p)
+
+    # sequences
+    at_C = vector("C_t", dtype="int32", shape=(800,))
+    at_D = vector("D_t", dtype="int32", shape=(800,))
+    # outputs_info (initial conditions)
+    st0 = scalar("s_t0")
+    et0 = scalar("e_t0")
+    it0 = scalar("i_t0")
+    # non_sequences
+    beta = scalar("beta")
+    gamma = scalar("gamma")
+    delta = scalar("delta")
+
+    def seir_one_step(ct0, dt0, st0, et0, it0, beta, gamma, delta):
+        # bt0 = trng.binomial(n=st0, p=beta)
+        bt0 = st0 * beta
+        bt0 = bt0.astype(st0.dtype)
+
+        logp_c1 = binom_log_prob(et0, gamma, ct0)
+        logp_d1 = binom_log_prob(it0, delta, dt0)
+
+        st1 = st0 - bt0
+        et1 = et0 + bt0 - ct0
+        it1 = it0 + ct0 - dt0
+        return st1, et1, it1, logp_c1, logp_d1
+
+    (st, et, it, logp_c_all, logp_d_all), _ = scan(
+        fn=seir_one_step,
+        sequences=[at_C, at_D],
+        outputs_info=[st0, et0, it0, None, None],
+        non_sequences=[beta, gamma, delta],
+    )
+    st.name = "S_t"
+    et.name = "E_t"
+    it.name = "I_t"
+    logp_c_all.name = "C_t_logp"
+    logp_d_all.name = "D_t_logp"
+
+    s0, e0, i0 = np.array(100.0), np.array(50.0), np.array(25.0)
+    beta_val, gamma_val, delta_val = (
+        np.array(0.277792),
+        np.array(0.135330),
+        np.array(0.108753),
+    )
+    C = np.array([3, 5, 8, 13, 21, 26, 10, 3] * 100, dtype=np.int32)
+    D = np.array([1, 2, 3, 7, 9, 11, 5, 1] * 100, dtype=np.int32)
+
+    test_input_vals = [
+        C,
+        D,
+        s0,
+        e0,
+        i0,
+        beta_val,
+        gamma_val,
+        delta_val,
+    ]
+
+    graph_inputs = [at_C, at_D, st0, et0, it0, beta, gamma, delta]
+    loss_graph = logp_c_all.sum() + logp_d_all.sum()
+
+    if gradient_backend == "PYTENSOR":
+        backward_loss = pt.grad(
+            loss_graph,
+            wrt=[st0, et0, it0, beta, gamma, delta],
+        )
+
+        match mode:
+            # TODO: Restore original test separately
+            case "forward":
+                graph_outputs = [loss_graph]
+            case "backward":
+                graph_outputs = backward_loss
+            case "both":
+                graph_outputs = [loss_graph, *backward_loss]
+            case _:
+                raise ValueError(f"Unknown mode: {mode}")
+
+        jax_fn, _ = compare_jax_and_py(
+            graph_inputs,
+            graph_outputs,
+            test_input_vals,
+            jax_mode="JAX",
+        )
+        jax_fn.trust_input = True
+
+    else:  # gradient_backend == "JAX"
+        import jax
+
+        loss_fn_tuple = pytensor.function(
+            graph_inputs, loss_graph, mode="JAX"
+        ).vm.jit_fn
+
+        def loss_fn(*args):
+            return loss_fn_tuple(*args)[0]
+
+        match mode:
+            case "forward":
+                jax_fn = jax.jit(loss_fn_tuple)
+            case "backward":
+                jax_fn = jax.jit(
+                    jax.grad(loss_fn, argnums=tuple(range(len(graph_inputs))[2:]))
+                )
+            case "both":
+                value_and_grad_fn = jax.value_and_grad(
+                    loss_fn, argnums=tuple(range(len(graph_inputs))[2:])
+                )
+
+                @jax.jit
+                def jax_fn(*args):
+                    loss, grads = value_and_grad_fn(*args)
+                    return loss, *grads
+
+            case _:
+                raise ValueError(f"Unknown mode: {mode}")
+
+    def block_until_ready(*inputs, jax_fn=jax_fn):
+        return [o.block_until_ready() for o in jax_fn(*inputs)]
+
+    block_until_ready(*test_input_vals)  # Warmup
+
+    benchmark.pedantic(
+        block_until_ready, args=test_input_vals, iterations=5, rounds=200
+    )

@@ -148,7 +148,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     # Inner-inputs are ordered as follows:
     # sequences + mit-mot-inputs + mit-sot-inputs + sit-sot-inputs +
     # shared-inputs + non-sequences.
-    temp_scalar_storage_alloc_stmts: list[str] = []
+    temp_0d_storage_alloc_stmts: list[str] = []
     inner_in_exprs_scalar: list[str] = []
     inner_in_exprs: list[str] = []
 
@@ -164,9 +164,9 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
             indexed_inner_in_str_scalar = idx_to_str(
                 storage_name, tap_offset, size=storage_size_var, allow_scalar=True
             )
-            temp_storage = f"{storage_name}_temp_scalar_{tap_offset}"
+            temp_storage = f"{storage_name}_temp_0d_{tap_offset}"
             storage_dtype = outer_in_var.type.numpy_dtype.name
-            temp_scalar_storage_alloc_stmts.append(
+            temp_0d_storage_alloc_stmts.append(
                 f"{temp_storage} = np.empty((), dtype=np.{storage_dtype})"
             )
             inner_in_exprs_scalar.append(
@@ -178,7 +178,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 storage_name
                 if tap_offset is None
                 else idx_to_str(
-                    storage_name, tap_offset, size=storage_size_var, allow_scalar=False
+                    storage_name, tap_offset, size=storage_size_var, allow_scalar=True
                 )
             )
         inner_in_exprs.append(indexed_inner_in_str)
@@ -401,9 +401,12 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
 
     inner_scalar_in_args_to_temp_storage = "\n".join(inner_in_exprs_scalar)
     inner_in_args = create_arg_string(inner_in_exprs)
+    if len(inner_in_exprs) > 5:
+        # Break inputs in new lines, just for readability of the source code
+        inner_in_args = f",\n{' ' * 12}".join(inner_in_args.split(", "))
     inner_outputs = create_tuple_string(inner_output_names)
     input_storage_block = "\n".join(storage_alloc_stmts)
-    input_temp_scalar_storage_block = "\n".join(temp_scalar_storage_alloc_stmts)
+    input_temp_0d_storage_block = "\n".join(temp_0d_storage_alloc_stmts)
     output_storage_post_processing_block = "\n".join(output_storage_post_proc_stmts)
     inner_out_post_processing_block = "\n".join(inner_out_post_processing_stmts)
 
@@ -417,14 +420,16 @@ def scan({", ".join(outer_in_names)}):
 
 {indent(input_storage_block, " " * 4)}
 
-{indent(input_temp_scalar_storage_block, " " * 4)}
+{indent(input_temp_0d_storage_block, " " * 4)}
 
     i = 0
     cond = np.array(False)
     while i < n_steps and not cond.item():
 {indent(inner_scalar_in_args_to_temp_storage, " " * 8)}
 
-        {inner_outputs} = scan_inner_func({inner_in_args})
+        {inner_outputs} = scan_inner_func(
+            {inner_in_args}
+        )
 {indent(inner_out_post_processing_block, " " * 8)}
 {indent(inner_out_to_outer_out_stmts, " " * 8)}
         i += 1
@@ -440,6 +445,7 @@ def scan({", ".join(outer_in_names)}):
     }
     global_env["np"] = np
 
+    print(scan_op_src)
     scan_op_fn = compile_function_src(scan_op_src, "scan", {**globals(), **global_env})
 
     return numba_basic.numba_njit(scan_op_fn, boundscheck=False)

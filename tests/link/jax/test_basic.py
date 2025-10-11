@@ -87,7 +87,7 @@ def compare_jax_and_py(
     py_res = pytensor_py_fn(*test_inputs)
 
     if isinstance(graph_outputs, list | tuple):
-        for j, p in zip(jax_res, py_res, strict=True):
+        for i, (j, p) in enumerate(zip(jax_res, py_res, strict=True)):
             assert_fn(j, p)
     else:
         assert_fn(jax_res, py_res)
