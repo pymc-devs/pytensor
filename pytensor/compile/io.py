@@ -95,7 +95,7 @@ class SymbolicInput:
         self.implicit = implicit
 
     def __str__(self):
-        if self.update:
+        if self.update is not None:
             return f"In({self.variable} -> {self.update})"
         else:
             return f"In({self.variable})"
