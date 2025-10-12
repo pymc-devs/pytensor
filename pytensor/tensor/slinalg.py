@@ -7,7 +7,7 @@ from typing import Literal, cast
 import numpy as np
 import scipy.linalg as scipy_linalg
 from numpy.exceptions import ComplexWarning
-from scipy.linalg import get_lapack_funcs
+from scipy.linalg import LinAlgError, LinAlgWarning, get_lapack_funcs
 
 import pytensor
 from pytensor import ifelse
@@ -384,15 +384,28 @@ class CholeskySolve(SolveBase):
         return Apply(self, [A, b], [out])
 
     def perform(self, node, inputs, output_storage):
-        C, b = inputs
-        rval = scipy_linalg.cho_solve(
-            (C, self.lower),
-            b,
-            check_finite=self.check_finite,
-            overwrite_b=self.overwrite_b,
-        )
+        c, b = inputs
 
-        output_storage[0][0] = rval
+        (potrs,) = get_lapack_funcs(("potrs",), (c, b))
+
+        if self.check_finite and not (np.isfinite(c).all() and np.isfinite(b).all()):
+            raise ValueError("array must not contain infs or NaNs")
+
+        if c.shape[0] != c.shape[1]:
+            raise ValueError("The factored matrix c is not square.")
+        if c.shape[1] != b.shape[0]:
+            raise ValueError(f"incompatible dimensions ({c.shape} and {b.shape})")
+
+        # Quick return for empty arrays
+        if b.size == 0:
+            output_storage[0][0] = np.empty_like(b, dtype=potrs.dtype)
+            return
+
+        x, info = potrs(c, b, lower=self.lower, overwrite_b=self.overwrite_b)
+        if info != 0:
+            raise ValueError(f"illegal value in {-info}th argument of internal potrs")
+
+        output_storage[0][0] = x
 
     def L_op(self, *args, **kwargs):
         # TODO: Base impl should work, let's try it
@@ -696,9 +709,27 @@ class LUFactor(Op):
     def perform(self, node, inputs, outputs):
         A = inputs[0]
 
-        LU, p = scipy_linalg.lu_factor(
-            A, overwrite_a=self.overwrite_a, check_finite=self.check_finite
-        )
+        # Quick return for empty arrays
+        if A.size == 0:
+            outputs[0][0] = np.empty_like(A)
+            outputs[1][0] = np.array([], dtype=np.int32)
+            return
+
+        if self.check_finite and not np.isfinite(A).all():
+            raise ValueError("array must not contain infs or NaNs")
+
+        (getrf,) = get_lapack_funcs(("getrf",), (A,))
+        LU, p, info = getrf(A, overwrite_a=self.overwrite_a)
+        if info < 0:
+            raise ValueError(
+                f"illegal value in {-info}th argument of internal getrf (lu_factor)"
+            )
+        if info > 0:
+            warnings.warn(
+                f"Diagonal number {info} is exactly zero. Singular matrix.",
+                LinAlgWarning,
+                stacklevel=2,
+            )
 
         outputs[0][0] = LU
         outputs[1][0] = p
@@ -865,15 +896,51 @@ class SolveTriangular(SolveBase):
 
     def perform(self, node, inputs, outputs):
         A, b = inputs
-        outputs[0][0] = scipy_linalg.solve_triangular(
-            A,
-            b,
-            lower=self.lower,
-            trans=0,
-            unit_diagonal=self.unit_diagonal,
-            check_finite=self.check_finite,
-            overwrite_b=self.overwrite_b,
-        )
+
+        if self.check_finite and not (np.isfinite(A).all() and np.isfinite(b).all()):
+            raise ValueError("array must not contain infs or NaNs")
+
+        if len(A.shape) != 2 or A.shape[0] != A.shape[1]:
+            raise ValueError("expected square matrix")
+
+        if A.shape[0] != b.shape[0]:
+            raise ValueError(f"shapes of a {A.shape} and b {b.shape} are incompatible")
+
+        (trtrs,) = get_lapack_funcs(("trtrs",), (A, b))
+
+        # Quick return for empty arrays
+        if b.size == 0:
+            outputs[0][0] = np.empty_like(b, dtype=trtrs.dtype)
+            return
+
+        if A.flags["F_CONTIGUOUS"]:
+            x, info = trtrs(
+                A,
+                b,
+                overwrite_b=self.overwrite_b,
+                lower=self.lower,
+                trans=0,
+                unitdiag=self.unit_diagonal,
+            )
+        else:
+            # transposed system is solved since trtrs expects Fortran ordering
+            x, info = trtrs(
+                A.T,
+                b,
+                overwrite_b=self.overwrite_b,
+                lower=not self.lower,
+                trans=1,
+                unitdiag=self.unit_diagonal,
+            )
+
+        if info > 0:
+            raise LinAlgError(
+                f"singular matrix: resolution failed at diagonal {info-1}"
+            )
+        elif info < 0:
+            raise ValueError(f"illegal value in {-info}-th argument of internal trtrs")
+
+        outputs[0][0] = x
 
     def L_op(self, inputs, outputs, output_gradients):
         res = super().L_op(inputs, outputs, output_gradients)
