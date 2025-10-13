@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytensor"
 dynamic = ['version']
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 authors = [{ name = "pymc-devs", email = "pymc.devs@gmail.com" }]
 description = "Optimizing compiler for evaluating mathematical expressions on CPUs and GPUs."
 readme = "README.rst"
@@ -33,6 +33,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 keywords = [
