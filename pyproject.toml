@@ -76,6 +76,7 @@ tests = [
     "pytest-benchmark",
     "pytest-mock",
     "pytest-sphinx",
+    "tomlkit",
 ]
 rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot"]
 jax = ["jax", "jaxlib"]

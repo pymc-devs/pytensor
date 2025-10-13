@@ -46,6 +46,8 @@ jobs:
             - 'setup.cfg'
             - 'requirements.txt'
             - '.pre-commit-config.yaml'
+            - 'pixi.toml'
+            - 'pixi.lock'
 
   style:
     name: Check code style
@@ -63,6 +65,17 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - uses: pre-commit/action@v3.0.1
+      # Check that pixi stuff is consistent
+      - uses: prefix-dev/setup-pixi@v0.8.11
+        with:
+          run-install: false
+      - name: Check that the pixi.lock is consistent with pixi.toml
+        run: |
+          pixi run --no-install --locked echo "All good!"
+      - name: Check that pixi.toml is consistent with environment.yml and pyproject.toml
+        run: |
+          pip install tomlkit
+          python scripts/generate-pixi-toml.py --verify-only
 
   test:
     name: "${{ matrix.os }} test py${{ matrix.python-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
