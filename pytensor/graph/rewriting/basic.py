@@ -1073,6 +1073,7 @@ class OpToRewriterTracker:
             defaultdict(lambda: defaultdict(list))
         )
         self.untracked_rewrites: list[NodeRewriter] = []
+        self.get_trackers = functools.cache(self._get_trackers)
         self._cached_composed_mro = None
 
     def add_tracker(self, rw: NodeRewriter):
@@ -1080,6 +1081,7 @@ class OpToRewriterTracker:
         if self._cached_composed_mro is not None:
             # We shouldn't actually add_trackers after the first call to get_trackers
             # But just to be safe we kill the cache here
+            self.get_trackers = functools.cache(self._get_trackers)
             self._cached_composed_mro = None
 
         tracks = rw.tracks()
@@ -1107,8 +1109,7 @@ class OpToRewriterTracker:
                 else:
                     self.tracked_instances[c].append(rw)
 
-    @functools.cache
-    def get_trackers(self, op: Op) -> list[NodeRewriter]:
+    def _get_trackers(self, op: Op) -> list[NodeRewriter]:
         """Get all the rewrites applicable to an `Op`."""
 
         if self._cached_composed_mro is None:

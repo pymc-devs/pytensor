@@ -1,6 +1,10 @@
+import gc
+import operator
+
 import pytest
 
 from pytensor.configdefaults import config
+from pytensor.graph import rewrite_graph
 from pytensor.graph.basic import Apply, Constant, equal_computations
 from pytensor.graph.features import Feature
 from pytensor.graph.fg import FunctionGraph
@@ -930,3 +934,44 @@ def test_OpToRewriterTracker():
         local_rewriter_2,
         local_rewriter_1,
     ]
+
+
+def test_rewrite_weakref_leak():
+    """Check we don't have weakref leak on our rewrites"""
+
+    def _growth(limit=10, peak_stats={}):
+        """Vendoring of objgraph.growth
+
+        Source: https://github.com/mgedmin/objgraph/blob/94b1ca61a11109547442701800292dcfc7f59fc8/objgraph.py#L253
+        """
+        gc.collect()
+        objects = gc.get_objects()
+
+        stats = {}
+        for o in objects:
+            n = type(o).__name__
+            stats[n] = stats.get(n, 0) + 1
+
+        deltas = {}
+        for name, count in stats.items():
+            old_count = peak_stats.get(name, 0)
+            if count > old_count:
+                deltas[name] = count - old_count
+                peak_stats[name] = count
+
+        deltas = sorted(deltas.items(), key=operator.itemgetter(1), reverse=True)
+
+        if limit:
+            deltas = deltas[:limit]
+
+        return [(name, stats[name], delta) for name, delta in deltas]
+
+    x = vector("x")
+    y = exp(x)
+
+    for i in range(20):
+        rewrite_graph(y, clone=False)
+        res = _growth()
+        # Only start checking after warmup
+        if i > 15:
+            assert not res, "Object counts are still growing"
