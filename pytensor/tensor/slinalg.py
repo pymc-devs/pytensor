@@ -935,7 +935,7 @@ class SolveTriangular(SolveBase):
 
         if info > 0:
             raise LinAlgError(
-                f"singular matrix: resolution failed at diagonal {info-1}"
+                f"singular matrix: resolution failed at diagonal {info - 1}"
             )
         elif info < 0:
             raise ValueError(f"illegal value in {-info}-th argument of internal trtrs")
