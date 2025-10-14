@@ -2491,7 +2491,9 @@ class MulSV(Op):
 mul_s_v = MulSV()
 
 
-def mul(x, y):
+def multiply(
+    x: SparseTensorType | TensorType, y: SparseTensorType | TensorType
+) -> SparseVariable:
     """
     Multiply elementwise two matrices, at least one of which is sparse.
 
@@ -2499,21 +2501,21 @@ def mul(x, y):
 
     Parameters
     ----------
-    x
+    x: SparseVariable
         A matrix variable.
-    y
+    y: SparseVariable
         A matrix variable.
 
     Returns
     -------
-    A sparse matrix
-        `x` * `y`
+    result: SparseVariable
+        The elementwise multiplication of `x` and `y`.
 
     Notes
     -----
     At least one of `x` and `y` must be a sparse matrix.
-    The grad is regular, i.e. not structured.
 
+    The gradient is regular, i.e. not structured.
     """
 
     x = as_sparse_or_tensor_variable(x)
@@ -2539,6 +2541,20 @@ def mul(x, y):
         return mul_s_d(y, x)
     else:
         raise NotImplementedError()
+
+
+def mul(x, y):
+    warn(
+        "pytensor.sparse.mul is deprecated and will be removed in a future version. Use "
+        "pytensor.sparse.multiply instead.",
+        category=DeprecationWarning,
+        stacklevel=2,
+    )
+
+    return multiply(x, y)
+
+
+mul.__doc__ = multiply.__doc__
 
 
 class __ComparisonOpSS(Op):

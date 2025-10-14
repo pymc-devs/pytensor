@@ -65,8 +65,8 @@ from pytensor.sparse import (
     gt,
     le,
     lt,
-    mul,
     mul_s_v,
+    multiply,
     sampling_dot,
     sp_ones_like,
     square_diagonal,
@@ -724,21 +724,21 @@ class TestAddMul:
 
     def test_MulSS(self):
         self._testSS(
-            mul,
+            multiply,
             np.array([[1.0, 0], [3, 0], [0, 6]]),
             np.array([[1.0, 2], [3, 0], [0, 6]]),
         )
 
     def test_MulSD(self):
         self._testSD(
-            mul,
+            multiply,
             np.array([[1.0, 0], [3, 0], [0, 6]]),
             np.array([[1.0, 2], [3, 0], [0, 6]]),
         )
 
     def test_MulDS(self):
         self._testDS(
-            mul,
+            multiply,
             np.array([[1.0, 0], [3, 0], [0, 6]]),
             np.array([[1.0, 2], [3, 0], [0, 6]]),
         )
@@ -783,7 +783,7 @@ class TestAddMul:
                     assert np.all(val.todense() == array1 + array2)
                     if dtype1.startswith("float") and dtype2.startswith("float"):
                         verify_grad_sparse(op, [a, b], structured=False)
-                elif op is mul:
+                elif op is multiply:
                     assert np.all(val.todense() == array1 * array2)
                     if dtype1.startswith("float") and dtype2.startswith("float"):
                         verify_grad_sparse(op, [a, b], structured=False)
@@ -833,7 +833,7 @@ class TestAddMul:
                             continue
                         if dtype1.startswith("float") and dtype2.startswith("float"):
                             verify_grad_sparse(op, [a, b], structured=True)
-                    elif op is mul:
+                    elif op is multiply:
                         assert _is_sparse_variable(apb)
                         assert np.all(val.todense() == b.multiply(array1))
                         assert np.all(
@@ -887,7 +887,7 @@ class TestAddMul:
                             b = b.data
                         if dtype1.startswith("float") and dtype2.startswith("float"):
                             verify_grad_sparse(op, [a, b], structured=True)
-                    elif op is mul:
+                    elif op is multiply:
                         assert _is_sparse_variable(apb)
                         ans = np.array([[1, 0], [9, 0], [0, 36]])
                         assert np.all(val.todense() == (a.multiply(array2)))
