@@ -23,8 +23,8 @@ from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
 from pytensor.tensor.rewriting.basic import constant_folding
 from pytensor.tensor.rewriting.subtensor import (
-    local_flatten_set_subtensor,
     local_replace_AdvancedSubtensor,
+    local_useless_nested_set_subtensor,
 )
 from pytensor.tensor.shape import (
     SpecifyShape,
@@ -2119,7 +2119,7 @@ def test_local_convert_negative_indices():
 
 
 @pytest.mark.parametrize("inner_broadcasts", [False, True])
-def test_local_flatten_set_subtensor(inner_broadcasts):
+def test_local_useless_nested_set_subtensor(inner_broadcasts):
     y = scalar("y")
     zero = pt.constant(0.0)
     if inner_broadcasts:
@@ -2129,7 +2129,7 @@ def test_local_flatten_set_subtensor(inner_broadcasts):
         out = pt.alloc(zero, 5, 3)[1:].inc(pt.alloc(zero, 4, 3)[-1].inc(y))
 
     fgraph = FunctionGraph(outputs=[out], copy_inputs=False)
-    rewrite = dfs_rewriter(local_flatten_set_subtensor, constant_folding)
+    rewrite = dfs_rewriter(local_useless_nested_set_subtensor, constant_folding)
     rewrite.rewrite(fgraph)
     res = fgraph.outputs[0]
 

@@ -379,7 +379,9 @@ def local_useless_slice(fgraph, node):
         new_out = x[tuple(new_idxs)] if new_idxs else x
 
     else:
-        # Check if we're left only with reversed slices, those are also useless when updating a tensor
+        # Check if we're left only with reversed slices
+        # TODO: Or {0, -1} indices on length 1 dimensions
+        # Otherwise keep it, as we wouldn't be reduce the number of ops
         if all(
             isinstance(idx, slice)
             and idx.step is not None
@@ -391,6 +393,8 @@ def local_useless_slice(fgraph, node):
             # In that case reverse y instead
             # arange(5)[::-1] = y  == y[::-1]
             # arange(5)[::-1] += y  == arange(5) += y[::-1]
+            # TODO: or expand_dims
+            # zeros((5, 1, 5))[:, 0, :] += y[:, :] == zeros((5, 1, 5)) += y[:, None, :]
             y = y[tuple(new_idxs)]
             new_idxs = []
             change_flag = True
@@ -499,6 +503,7 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
     a[0,:,-1,:] -> a.dimshuffle(1,3), when
         a.broadcastable = (True, False, True, False)
 
+    # TODO: Merge this with local_useless_slice
     """
     x, *index_vars = node.inputs
 
@@ -536,35 +541,34 @@ def local_subtensor_inc_subtensor(fgraph, node):
     Subtensor(SetSubtensor(x, y, idx), idx) -> y
 
     """
-    if isinstance(node.op, Subtensor):
-        x = node.inputs[0]
-        if not (x.owner and isinstance(x.owner.op, IncSubtensor)):
-            return
-        if not x.owner.op.set_instead_of_inc:
-            return
+    x = node.inputs[0]
+    if not (x.owner and isinstance(x.owner.op, IncSubtensor)):
+        return
+    if not x.owner.op.set_instead_of_inc:
+        return
 
-        if x.owner.inputs[2:] == node.inputs[1:] and tuple(
-            x.owner.op.idx_list
-        ) == tuple(node.op.idx_list):
-            out = node.outputs[0]
-            y = x.owner.inputs[1]
-            # If the dtypes differ, cast y into x.dtype
-            if x.dtype != y.dtype:
-                y = y.astype(x.dtype)
-            if (
-                out.type.dtype == y.type.dtype
-                and out.type.broadcastable == y.type.broadcastable
-            ):
-                # if x[idx] and y have the same type, directly return y
-                return [y]
-            else:
-                # The difference is related to broadcasting pattern
-                assert out.broadcastable != y.broadcastable
-                # We have to alloc y to the shape of x[idx]
-                x_subtensor = node.op(x.owner.inputs[0], *x.owner.inputs[2:])
-                return [alloc(y, *x_subtensor.shape)]
+    if x.owner.inputs[2:] == node.inputs[1:] and tuple(x.owner.op.idx_list) == tuple(
+        node.op.idx_list
+    ):
+        out = node.outputs[0]
+        y = x.owner.inputs[1]
+        # If the dtypes differ, cast y into x.dtype
+        if x.dtype != y.dtype:
+            y = y.astype(x.dtype)
+        if (
+            out.type.dtype == y.type.dtype
+            and out.type.broadcastable == y.type.broadcastable
+        ):
+            # if x[idx] and y have the same type, directly return y
+            return [y]
         else:
-            return
+            # The difference is related to broadcasting pattern
+            assert out.broadcastable != y.broadcastable
+            # We have to alloc y to the shape of x[idx]
+            x_subtensor = node.op(x.owner.inputs[0], *x.owner.inputs[2:])
+            return [alloc(y, *x_subtensor.shape)]
+    else:
+        return
 
 
 @register_canonicalize
@@ -580,8 +584,7 @@ def local_set_to_inc_subtensor(fgraph, node):
 
     """
     if (
-        isinstance(node.op, AdvancedIncSubtensor1)
-        and node.op.set_instead_of_inc
+        node.op.set_instead_of_inc
         and node.inputs[1].owner
         and isinstance(node.inputs[1].owner.op, Elemwise)
         and isinstance(node.inputs[1].owner.op.scalar_op, Add)
@@ -616,6 +619,8 @@ def local_set_to_inc_subtensor(fgraph, node):
 @node_rewriter([Subtensor])
 def local_useless_subtensor(fgraph, node):
     """Remove `Subtensor` if it takes the full input."""
+    # TODO: This is largely a duplicate of local_useless_slice except it also checks if symbolic stop matches shape_of
+    # from the ShapeFeature. This is unlikely to happen, but anway can be added to `local_useless_slice`.
 
     if not node.op.idx_list:
         return [node.inputs[0]]
@@ -1163,7 +1168,7 @@ def local_setsubtensor_of_constants(fgraph, node):
             return False
 
 
-def local_flatten_set_subtensor(fgraph, node):
+def local_useless_nested_set_subtensor(fgraph, node):
     """Rewrite nested set_subtensor on the same base buffer
 
     alloc(x, outer_shape)[outer_idx].set(
