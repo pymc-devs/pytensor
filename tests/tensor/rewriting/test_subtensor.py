@@ -9,20 +9,27 @@ from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
-from pytensor.graph import rewrite_graph, vectorize_graph
+from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
-from pytensor.graph.rewriting.basic import check_stack_trace, in2out, out2in
+from pytensor.graph.rewriting.basic import (
+    check_stack_trace,
+    dfs_rewriter,
+    in2out,
+    out2in,
+)
 from pytensor.graph.traversal import ancestors
 from pytensor.tensor import as_tensor
 from pytensor.tensor.basic import Alloc, ExtractDiag, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
+from pytensor.tensor.rewriting.basic import constant_folding
 from pytensor.tensor.rewriting.subtensor import (
     _slice_to_arange,
     local_add_of_sparse_write,
     local_adv_idx_to_slice,
     local_replace_AdvancedSubtensor,
+    local_useless_nested_set_subtensor,
     local_useless_slice,
 )
 from pytensor.tensor.shape import (
@@ -2775,3 +2782,40 @@ def test_local_convert_negative_indices():
     # TODO: If Subtensor decides to raise on make_node, this test can be removed
     rewritten_out = rewrite_graph(x[:, :, -2])
     assert equal_computations([rewritten_out], [x[:, :, -2]])
+
+
+@pytest.mark.parametrize(
+    "inner_broadcasts",
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.xfail(
+                reason="Broadcasting inner alloc case is not implemented yet "
+                "(deferred to local_useless_slice integration).",
+                strict=True,
+            ),
+        ),
+    ],
+)
+def test_local_useless_nested_set_subtensor(inner_broadcasts):
+    y = scalar("y")
+    zero = pt.constant(0.0)
+    if inner_broadcasts:
+        # The inner alloc broadcasts along the sliced dimension
+        out = pt.alloc(zero, 5, 3)[1:].inc(pt.alloc(zero, 1, 3)[-1].inc(y))
+    else:
+        out = pt.alloc(zero, 5, 3)[1:].inc(pt.alloc(zero, 4, 3)[-1].inc(y))
+
+    fgraph = FunctionGraph(outputs=[out], copy_inputs=False)
+    rewrite = dfs_rewriter(local_useless_nested_set_subtensor, constant_folding)
+    rewrite.rewrite(fgraph)
+    res = fgraph.outputs[0]
+
+    expected = pt.alloc(zero, 5, 3)[-1].inc(y)
+    utt.assert_equal_computations([res], [expected], original=[out])
+    no_opt_mode = Mode("py", optimizer=None)
+    np.testing.assert_allclose(
+        out.eval({y: 3.0}, mode=no_opt_mode),
+        expected.eval({y: 3.0}, mode=no_opt_mode),
+    )

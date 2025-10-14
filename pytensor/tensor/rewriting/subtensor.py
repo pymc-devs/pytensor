@@ -18,6 +18,7 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.raise_op import Assert
 from pytensor.scalar import Add, ScalarConstant, ScalarMinimum, Sub
 from pytensor.scalar import constant as scalar_constant
+from pytensor.scalar import switch as scalar_switch
 from pytensor.tensor.basic import (
     Alloc,
     ARange,
@@ -2389,6 +2390,84 @@ def local_write_of_write_same_indices(fgraph, node):
     r = new_op(base, new_val, *outer_idx_vars)
     copy_stack_trace(node.outputs[0], r)
     return [r]
+
+
+@node_rewriter([IncSubtensor])
+def local_useless_nested_set_subtensor(fgraph, node):
+    """Rewrite nested set_subtensor on the same base buffer
+
+    alloc(x, outer_shape)[outer_idx].set(
+        alloc(x, inner_shape)[inner_idx].set(y)
+    ) -> alloc(x, outher_shape)[merged_idx].set(y)
+
+    """
+    outer_alloc, inner_inc, *outer_index_vars = node.inputs
+
+    if not (
+        outer_alloc.owner is not None
+        and isinstance(outer_alloc.owner.op, Alloc)
+        and (
+            node.op.set_instead_of_inc
+            # inc on zeros is the same as set
+            or outer_alloc.owner.op.value_is_scalar_zero(outer_alloc.owner.inputs[0])
+        )
+        and inner_inc.owner is not None
+        and isinstance(inner_inc.owner.op, IncSubtensor)
+    ):
+        return None
+
+    bufer_val = outer_alloc.owner.inputs[0]
+
+    inner_alloc, y, *inner_index_vars = inner_inc.owner.inputs
+
+    if not (
+        inner_alloc.owner is not None
+        and isinstance(inner_alloc.owner.op, Alloc)
+        and inner_alloc.owner.inputs[0] is bufer_val
+        and (
+            inner_inc.owner.op.set_instead_of_inc
+            or inner_alloc.owner.op.value_is_scalar_zero(inner_alloc.owner.inputs[0])
+        )
+    ):
+        return None
+
+    # Compute indices so writing is equivalent
+    # This hardcodes some common cases that show up, e.g., in gradient of scan
+    outer_indices = indices_from_subtensor(outer_index_vars, node.op.idx_list)
+    inner_indices = indices_from_subtensor(
+        inner_index_vars, inner_inc.owner.op.idx_list
+    )
+
+    # TODO: Support more cases
+    if (
+        len(inner_indices) == 1
+        and isinstance((outer_slice := outer_indices[0]), slice)
+        and outer_slice.stop is None
+        and outer_slice.step is None
+        and len(inner_indices) == 1
+        and isinstance((inner_index := inner_indices[0]), Variable)
+    ):
+        if inner_alloc.type.broadcastable[0]:
+            # This is a useless inner set_subtensor. We let `local_useless_slices` handle it instead
+            return None
+
+        # If inner_index is positive we add it to the start of the outer slice
+        # Otherwise use it as is.
+        # Alloc(...)[5:].set(Alloc(...)[2].set(y)) -> Alloc(...)[5 + 2].inc(y)
+        # Alloc(...)[5:].set(Alloc(...)[-2].set(y)) -> Alloc(...)[-2].inc(y)
+        # Alloc(...)[-5:].set(Alloc(...)[2].set(y)) -> Alloc(...)[-5 + 2].inc(y)
+        # Alloc(...)[-5:].set(Alloc(...)[-2].set(y)) -> Alloc(...)[-2].inc(y)
+        if outer_slice.start is None:
+            new_index = inner_index
+        else:
+            new_index = scalar_switch(
+                inner_index < 0,
+                inner_index,
+                outer_slice.start + inner_index,
+            )
+        new_out = outer_alloc[new_index].inc(y)
+        copy_stack_trace(node.outputs, new_out)
+        return [new_out]
 
 
 @register_specialize
