@@ -1100,12 +1100,6 @@ def add_scan_configvars():
 
 def add_numba_configvars():
     config.add(
-        "numba__vectorize_target",
-        ("Default target for numba.vectorize."),
-        EnumStr("cpu", ["parallel", "cuda"], mutable=True),
-        in_c_key=False,
-    )
-    config.add(
         "numba__fastmath",
         ("If True, use Numba's fastmath mode."),
         BoolParam(True),

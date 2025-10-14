@@ -769,16 +769,6 @@ def test_IfElse(inputs, cond_fn, true_vals, false_vals):
     compare_numba_and_py(inputs, out, test_values)
 
 
-@pytest.mark.xfail(reason="https://github.com/numba/numba/issues/7409")
-def test_config_options_parallel():
-    x = pt.dvector()
-
-    with config.change_flags(numba__vectorize_target="parallel"):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
-        assert numba_mul_fn.targetoptions["parallel"] is True
-
-
 def test_config_options_fastmath():
     x = pt.dvector()
 
