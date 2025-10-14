@@ -2268,34 +2268,47 @@ def add(x, y):
         raise NotImplementedError()
 
 
-def sub(x, y):
+def subtract(
+    x: SparseVariable | TensorVariable, y: SparseVariable | TensorVariable
+) -> SparseVariable:
     """
     Subtract two matrices, at least one of which is sparse.
 
-    This method will provide the right op according
-    to the inputs.
+    This method will provide the right op according to the inputs.
 
     Parameters
     ----------
-    x
+    x: SparseVariable or TensorVariable
         A matrix variable.
-    y
+    y: SparseVariable or TensorVariable
         A matrix variable.
 
     Returns
     -------
-    A sparse matrix
-        `x` - `y`
+    result: SparseVariable
+        Result of `x - y`, as a sparse matrix.
 
     Notes
     -----
     At least one of `x` and `y` must be a sparse matrix.
 
-    The grad will be structured only when one of the variable will be a dense
-    matrix.
-
+    The grad will be structured only when one of the variable will be a dense matrix.
     """
     return x + (-y)
+
+
+def sub(x, y):
+    warn(
+        "pytensor.sparse.sub is deprecated and will be removed in a future version. Use "
+        "pytensor.sparse.subtract instead.",
+        category=DeprecationWarning,
+        stacklevel=2,
+    )
+
+    return subtract(x, y)
+
+
+sub.__doc__ = subtract.__doc__
 
 
 class MulSS(Op):
