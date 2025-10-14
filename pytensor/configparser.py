@@ -157,7 +157,6 @@ class PyTensorConfigParser:
     scan__allow_gc: bool
     scan__allow_output_prealloc: bool
     # add_numba_configvars
-    numba__vectorize_target: str
     numba__fastmath: bool
     numba__cache: bool
     # add_caching_dir_configvars
