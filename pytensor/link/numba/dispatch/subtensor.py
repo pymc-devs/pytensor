@@ -46,33 +46,43 @@ def enable_slice_boxing():
         """
         start = c.builder.extract_value(val, 0)
         stop = c.builder.extract_value(val, 1)
+        step = c.builder.extract_value(val, 2) if typ.has_step else None
 
+        # Numba uses sys.maxsize and -sys.maxsize-1 to represent None
+        # We want to use None in the Python representation
         none_val = ir.Constant(ir.IntType(64), sys.maxsize)
+        neg_none_val = ir.Constant(ir.IntType(64), -sys.maxsize - 1)
+        none_obj = c.pyapi.get_null_object()
 
-        start_is_none = c.builder.icmp_signed("==", start, none_val)
         start = c.builder.select(
-            start_is_none,
-            c.pyapi.get_null_object(),
+            c.builder.icmp_signed("==", start, none_val),
+            none_obj,
             c.box(types.int64, start),
         )
 
-        stop_is_none = c.builder.icmp_signed("==", stop, none_val)
+        # None stop is represented as neg_none_val when step is negative
+        if step is not None:
+            stop_none_val = c.builder.select(
+                c.builder.icmp_signed(">", step, ir.Constant(ir.IntType(64), 0)),
+                none_val,
+                neg_none_val,
+            )
+        else:
+            stop_none_val = none_val
         stop = c.builder.select(
-            stop_is_none,
-            c.pyapi.get_null_object(),
+            c.builder.icmp_signed("==", stop, stop_none_val),
+            none_obj,
             c.box(types.int64, stop),
         )
 
-        if typ.has_step:
-            step = c.builder.extract_value(val, 2)
-            step_is_none = c.builder.icmp_signed("==", step, none_val)
+        if step is not None:
             step = c.builder.select(
-                step_is_none,
-                c.pyapi.get_null_object(),
+                c.builder.icmp_signed("==", step, none_val),
+                none_obj,
                 c.box(types.int64, step),
             )
         else:
-            step = c.pyapi.get_null_object()
+            step = none_obj
 
         slice_val = slice_new(c.pyapi, start, stop, step)
 
