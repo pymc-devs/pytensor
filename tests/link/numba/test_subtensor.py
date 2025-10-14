@@ -3,7 +3,9 @@ import contextlib
 import numpy as np
 import pytest
 
+import pytensor.scalar as ps
 import pytensor.tensor as pt
+from pytensor import Mode, as_symbolic
 from pytensor.tensor import as_tensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -22,6 +24,45 @@ from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
 
 
 rng = np.random.default_rng(sum(map(ord, "Numba subtensors")))
+
+
+@pytest.mark.parametrize("step", [None, 1, 2, -2, "x"], ids=lambda x: f"step={x}")
+@pytest.mark.parametrize("stop", [None, 10, "x"], ids=lambda x: f"stop={x}")
+@pytest.mark.parametrize("start", [None, 0, 3, "x"], ids=lambda x: f"start={x}")
+def test_slice(start, stop, step):
+    x = ps.int64("x")
+
+    sym_slice = as_symbolic(
+        slice(
+            x if start == "x" else start,
+            x if stop == "x" else stop,
+            x if step == "x" else step,
+        )
+    )
+
+    no_opt_mode = Mode(linker="numba", optimizer=None)
+    evaled_slice = sym_slice.eval({x: -5}, on_unused_input="ignore", mode=no_opt_mode)
+    assert isinstance(evaled_slice, slice)
+    if start == "x":
+        assert evaled_slice.start == -5
+    elif start is None and (evaled_slice.step is None or evaled_slice.step > 0):
+        # Numba can convert to 0 (and sometimes does) in this case
+        assert evaled_slice.start in (None, 0)
+    else:
+        assert evaled_slice.start == start
+
+    if stop == "x":
+        assert evaled_slice.stop == -5
+    else:
+        assert evaled_slice.stop == stop
+
+    if step == "x":
+        assert evaled_slice.step == -5
+    elif step is None:
+        # Numba can convert to 1 (and sometimes does) in this case
+        assert evaled_slice.step in (None, 1)
+    else:
+        assert evaled_slice.step == step
 
 
 @pytest.mark.parametrize(
