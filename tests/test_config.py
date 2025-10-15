@@ -247,9 +247,12 @@ def test_config_pickling():
         configparser.IntParam(5, lambda i: i > 0),
         in_c_key=False,
     )
+    # Python 3.14 emits a pickle.PicklingError
+    # previous versions used to emit an AttributeError
+    # the error string changed a little bit too
     with pytest.raises(
-        AttributeError,
-        match=r"Can't (pickle|get) local object 'test_config_pickling\.<locals>\.<lambda>'",
+        (AttributeError, pickle.PicklingError),
+        match=r"Can't (pickle|get) local object .*test_config_pickling\.<locals>\.<lambda>",
     ):
         pickle.dump(root, io.BytesIO())
 
