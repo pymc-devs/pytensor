@@ -3,7 +3,7 @@ import copy
 import scipy.sparse
 
 from pytensor.compile import shared_constructor
-from pytensor.sparse.basic import SparseTensorType, SparseVariable
+from pytensor.sparse.variable import SparseTensorType, SparseVariable
 from pytensor.tensor.sharedvar import TensorSharedVariable
 
 
