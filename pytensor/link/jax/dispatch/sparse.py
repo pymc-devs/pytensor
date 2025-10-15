@@ -3,7 +3,7 @@ from scipy.sparse import spmatrix
 
 from pytensor.graph.basic import Constant
 from pytensor.link.jax.dispatch import jax_funcify, jax_typify
-from pytensor.sparse.basic import Dot, StructuredDot
+from pytensor.sparse.math import Dot, StructuredDot
 from pytensor.sparse.type import SparseTensorType
 
 
