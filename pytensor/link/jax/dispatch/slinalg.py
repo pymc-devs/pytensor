@@ -10,6 +10,7 @@ from pytensor.tensor.slinalg import (
     Cholesky,
     CholeskySolve,
     Eigvalsh,
+    Expm,
     LUFactor,
     PivotToPermutations,
     Solve,
@@ -179,3 +180,11 @@ def jax_funcify_QR(op, **kwargs):
         return jax.scipy.linalg.qr(x, mode=mode)
 
     return qr
+
+
+@jax_funcify.register(Expm)
+def jax_funcify_Expm(op, **kwargs):
+    def expm(x):
+        return jax.scipy.linalg.expm(x)
+
+    return expm
