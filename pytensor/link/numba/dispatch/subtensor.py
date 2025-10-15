@@ -1,9 +1,13 @@
 import numpy as np
 
 from pytensor.graph import Type
-from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import generate_fallback_impl, numba_njit
-from pytensor.link.utils import compile_function_src, unique_name_generator
+from pytensor.link.numba.cache import (
+    compile_numba_function_src,
+    register_funcify_default_op_cache_key,
+)
+from pytensor.link.numba.compile import numba_njit
+from pytensor.link.numba.dispatch.basic import generate_fallback_impl
+from pytensor.link.utils import unique_name_generator
 from pytensor.tensor import TensorType
 from pytensor.tensor.rewriting.subtensor import is_full_slice
 from pytensor.tensor.subtensor import (
@@ -17,9 +21,9 @@ from pytensor.tensor.subtensor import (
 from pytensor.tensor.type_other import NoneTypeT, SliceType
 
 
-@numba_funcify.register(Subtensor)
-@numba_funcify.register(IncSubtensor)
-@numba_funcify.register(AdvancedSubtensor1)
+@register_funcify_default_op_cache_key(Subtensor)
+@register_funcify_default_op_cache_key(IncSubtensor)
+@register_funcify_default_op_cache_key(AdvancedSubtensor1)
 def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
@@ -95,7 +99,7 @@ def {function_name}({", ".join(input_names)}):
     return np.asarray(z)
     """
 
-    func = compile_function_src(
+    func = compile_numba_function_src(
         subtensor_def_src,
         function_name=function_name,
         global_env=globals() | {"np": np},
@@ -103,8 +107,8 @@ def {function_name}({", ".join(input_names)}):
     return numba_njit(func, boundscheck=True)
 
 
-@numba_funcify.register(AdvancedSubtensor)
-@numba_funcify.register(AdvancedIncSubtensor)
+@register_funcify_default_op_cache_key(AdvancedSubtensor)
+@register_funcify_default_op_cache_key(AdvancedIncSubtensor)
 def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     if isinstance(op, AdvancedSubtensor):
         _x, _y, idxs = node.inputs[0], None, node.inputs[1:]
@@ -282,7 +286,7 @@ def numba_funcify_multiple_integer_vector_indexing(
         return advanced_inc_subtensor_multiple_vector
 
 
-@numba_funcify.register(AdvancedIncSubtensor1)
+@register_funcify_default_op_cache_key(AdvancedIncSubtensor1)
 def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
     inplace = op.inplace
     set_instead_of_inc = op.set_instead_of_inc

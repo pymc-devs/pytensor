@@ -1,12 +1,17 @@
 import warnings
+from hashlib import sha256
 from typing import cast
 
 import numba
 import numpy as np
 
 from pytensor.graph import Apply
+from pytensor.link.numba.cache import (
+    register_funcify_and_cache_key,
+    register_funcify_default_op_cache_key,
+)
+from pytensor.link.numba.compile import get_numba_type, numba_njit
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import get_numba_type, numba_funcify
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.extra_ops import (
@@ -22,16 +27,16 @@ from pytensor.tensor.extra_ops import (
 )
 
 
-@numba_funcify.register(Bartlett)
+@register_funcify_default_op_cache_key(Bartlett)
 def numba_funcify_Bartlett(op, **kwargs):
-    @numba_basic.numba_njit(inline="always")
+    @numba_njit
     def bartlett(x):
         return np.bartlett(numba_basic.to_scalar(x))
 
     return bartlett
 
 
-@numba_funcify.register(CumOp)
+@register_funcify_default_op_cache_key(CumOp)
 def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     axis = op.axis
     mode = op.mode
@@ -49,13 +54,13 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     if mode == "add":
         if axis is None or ndim == 1:
 
-            @numba_basic.numba_njit
+            @numba_njit
             def cumop(x):
                 return np.cumsum(x)
 
         else:
 
-            @numba_basic.numba_njit(boundscheck=False)
+            @numba_njit(boundscheck=False)
             def cumop(x):
                 out_dtype = x.dtype
                 if x.shape[axis] < 2:
@@ -73,13 +78,13 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     else:
         if axis is None or ndim == 1:
 
-            @numba_basic.numba_njit
+            @numba_njit
             def cumop(x):
                 return np.cumprod(x)
 
         else:
 
-            @numba_basic.numba_njit(boundscheck=False)
+            @numba_njit(boundscheck=False)
             def cumop(x):
                 out_dtype = x.dtype
                 if x.shape[axis] < 2:
@@ -97,9 +102,9 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     return cumop
 
 
-@numba_funcify.register(FillDiagonal)
+@register_funcify_default_op_cache_key(FillDiagonal)
 def numba_funcify_FillDiagonal(op, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def filldiagonal(a, val):
         np.fill_diagonal(a, val)
         return a
@@ -107,9 +112,9 @@ def numba_funcify_FillDiagonal(op, **kwargs):
     return filldiagonal
 
 
-@numba_funcify.register(FillDiagonalOffset)
+@register_funcify_default_op_cache_key(FillDiagonalOffset)
 def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
-    @numba_basic.numba_njit
+    @numba_njit
     def filldiagonaloffset(a, val, offset):
         height, width = a.shape
 
@@ -132,7 +137,7 @@ def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
     return filldiagonaloffset
 
 
-@numba_funcify.register(RavelMultiIndex)
+@register_funcify_default_op_cache_key(RavelMultiIndex)
 def numba_funcify_RavelMultiIndex(op, node, **kwargs):
     mode = op.mode
     order = op.order
@@ -144,25 +149,25 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
 
     if mode == "raise":
 
-        @numba_basic.numba_njit
+        @numba_njit
         def mode_fn(*args):
             raise ValueError("invalid entry in coordinates array")
 
     elif mode == "wrap":
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_njit(inline="always")
         def mode_fn(new_arr, i, j, v, d):
             new_arr[i, j] = v % d
 
     elif mode == "clip":
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_njit(inline="always")
         def mode_fn(new_arr, i, j, v, d):
             new_arr[i, j] = min(max(v, 0), d - 1)
 
     if node.inputs[0].ndim == 0:
 
-        @numba_basic.numba_njit
+        @numba_njit
         def ravelmultiindex(*inp):
             shape = inp[-1]
             arr = np.stack(inp[:-1])
@@ -178,7 +183,7 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit
+        @numba_njit
         def ravelmultiindex(*inp):
             shape = inp[-1]
             arr = np.stack(inp[:-1])
@@ -197,7 +202,7 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
     return ravelmultiindex
 
 
-@numba_funcify.register(Repeat)
+@register_funcify_default_op_cache_key(Repeat)
 def numba_funcify_Repeat(op, node, **kwargs):
     axis = op.axis
 
@@ -217,7 +222,7 @@ def numba_funcify_Repeat(op, node, **kwargs):
 
         ret_sig = get_numba_type(node.outputs[0].type)
 
-        @numba_basic.numba_njit
+        @numba_njit
         def repeatop(x, repeats):
             with numba.objmode(ret=ret_sig):
                 ret = np.repeat(x, repeats, axis)
@@ -228,20 +233,20 @@ def numba_funcify_Repeat(op, node, **kwargs):
 
         if repeats_ndim == 0:
 
-            @numba_basic.numba_njit(inline="always")
+            @numba_njit
             def repeatop(x, repeats):
                 return np.repeat(x, repeats.item())
 
         else:
 
-            @numba_basic.numba_njit(inline="always")
+            @numba_njit
             def repeatop(x, repeats):
                 return np.repeat(x, repeats)
 
     return repeatop
 
 
-@numba_funcify.register(Unique)
+@register_funcify_default_op_cache_key(Unique)
 def numba_funcify_Unique(op, node, **kwargs):
     axis = op.axis
 
@@ -259,7 +264,7 @@ def numba_funcify_Unique(op, node, **kwargs):
 
     if not use_python:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_njit
         def unique(x):
             return np.unique(x)
 
@@ -277,7 +282,7 @@ def numba_funcify_Unique(op, node, **kwargs):
         else:
             ret_sig = get_numba_type(node.outputs[0].type)
 
-        @numba_basic.numba_njit
+        @numba_njit
         def unique(x):
             with numba.objmode(ret=ret_sig):
                 ret = np.unique(x, return_index, return_inverse, return_counts, axis)
@@ -286,7 +291,7 @@ def numba_funcify_Unique(op, node, **kwargs):
     return unique
 
 
-@numba_funcify.register(UnravelIndex)
+@register_funcify_default_op_cache_key(UnravelIndex)
 def numba_funcify_UnravelIndex(op, node, **kwargs):
     order = op.order
 
@@ -297,17 +302,17 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
 
     if len(node.outputs) == 1:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_njit
         def maybe_expand_dim(arr):
             return arr
 
     else:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_njit
         def maybe_expand_dim(arr):
             return np.expand_dims(arr, 1)
 
-    @numba_basic.numba_njit
+    @numba_njit
     def unravelindex(arr, shape):
         a = np.ones(len(shape), dtype=np.int64)
         a[1:] = shape[:0:-1]
@@ -321,7 +326,7 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
     return unravelindex
 
 
-@numba_funcify.register(SearchsortedOp)
+@register_funcify_default_op_cache_key(SearchsortedOp)
 def numba_funcify_Searchsorted(op, node, **kwargs):
     side = op.side
 
@@ -340,7 +345,7 @@ def numba_funcify_Searchsorted(op, node, **kwargs):
 
         ret_sig = get_numba_type(node.outputs[0].type)
 
-        @numba_basic.numba_njit
+        @numba_njit
         def searchsorted(a, v, sorter):
             with numba.objmode(ret=ret_sig):
                 ret = np.searchsorted(a, v, side, sorter)
@@ -348,23 +353,24 @@ def numba_funcify_Searchsorted(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_njit
         def searchsorted(a, v):
             return np.searchsorted(a, v, side)
 
     return searchsorted
 
 
-@numba_funcify.register(CheckAndRaise)
+@register_funcify_and_cache_key(CheckAndRaise)
 def numba_funcify_CheckAndRaise(op, node, **kwargs):
     error = op.exc_type
     msg = op.msg
 
-    @numba_basic.numba_njit
+    @numba_njit
     def check_and_raise(x, *conditions):
         for cond in conditions:
             if not cond:
                 raise error(msg)
         return x
 
-    return check_and_raise
+    cache_key = sha256(str(type(op), msg, op.exc_type).encode()).hexdigest()
+    return check_and_raise, cache_key

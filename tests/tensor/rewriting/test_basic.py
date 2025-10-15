@@ -126,7 +126,7 @@ _specialize_rewrites = RewriteDatabaseQuery(include=["fast_run"])
 _specialize_rewrites.position_cutoff = 2.01
 _specialize_rewrites = optdb.query(_specialize_rewrites)
 
-_fast_run_rewrites = RewriteDatabaseQuery(include=["fast_run"])
+_fast_run_rewrites = RewriteDatabaseQuery(include=["fast_run"], exclude=["inplace"])
 _fast_run_rewrites = optdb.query(_fast_run_rewrites)
 
 
