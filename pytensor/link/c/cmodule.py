@@ -2890,7 +2890,7 @@ def default_blas_ldflags() -> str:
     if rpath is not None:
         maybe_add_to_os_environ_pathlist("PATH", rpath)
     try:
-        # 1. Try to use MKL with INTEL OpenMP threading
+        # 1a. Try to use MKL with INTEL OpenMP threading
         _logger.debug("Checking MKL flags with intel threading")
         return _check_libs(
             all_libs,
@@ -2899,6 +2899,24 @@ def default_blas_ldflags() -> str:
                 "mkl_rt",
                 "mkl_intel_thread",
                 "iomp5",
+                "pthread",
+            ],
+            extra_compile_flags=[f"-Wl,-rpath,{rpath}"] if rpath is not None else [],
+            cxx_library_dirs=cxx_library_dirs,
+        )
+    except Exception as e:
+        _logger.debug(e)
+    try:
+        # 1b. Try to use MKL with INTEL OpenMP threading with renamed iomp5 library
+        # Ref: <https://www.intel.com/content/www/us/en/docs/onemkl/developer-guide-windows/2024-1/selecting-libraries-to-link-with.html>
+        _logger.debug("Checking MKL flags with intel threading, iomp5md")
+        return _check_libs(
+            all_libs,
+            required_libs=[
+                "mkl_core",
+                "mkl_rt",
+                "mkl_intel_thread",
+                "iomp5md",
                 "pthread",
             ],
             extra_compile_flags=[f"-Wl,-rpath,{rpath}"] if rpath is not None else [],
