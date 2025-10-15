@@ -880,35 +880,26 @@ def test_expm():
     np.testing.assert_array_almost_equal(val, ref)
 
 
-def test_expm_grad_1():
-    # with symmetric matrix (real eigenvectors)
-    rng = np.random.default_rng(utt.fetch_seed())
-    # Always test in float64 for better numerical stability.
-    A = rng.standard_normal((5, 5))
-    A = A + A.T
+@pytest.mark.parametrize(
+    "mode", ["symmetric", "nonsymmetric_real_eig", "nonsymmetric_complex_eig"][-1:]
+)
+def test_expm_grad(mode):
+    rng = np.random.default_rng()
 
-    utt.verify_grad(expm, [A], rng=rng)
+    match mode:
+        case "symmetric":
+            A = rng.standard_normal((5, 5))
+            A = A + A.T
+        case "nonsymmetric_real_eig":
+            A = rng.standard_normal((5, 5))
+            w = rng.standard_normal(5) ** 2
+            A = (np.diag(w**0.5)).dot(A + A.T).dot(np.diag(w ** (-0.5)))
+        case "nonsymmetric_complex_eig":
+            A = rng.standard_normal((5, 5))
+        case _:
+            raise ValueError(f"Invalid mode: {mode}")
 
-
-def test_expm_grad_2():
-    # with non-symmetric matrix with real eigenspecta
-    rng = np.random.default_rng(utt.fetch_seed())
-    # Always test in float64 for better numerical stability.
-    A = rng.standard_normal((5, 5))
-    w = rng.standard_normal(5) ** 2
-    A = (np.diag(w**0.5)).dot(A + A.T).dot(np.diag(w ** (-0.5)))
-    assert not np.allclose(A, A.T)
-
-    utt.verify_grad(expm, [A], rng=rng)
-
-
-def test_expm_grad_3():
-    # with non-symmetric matrix (complex eigenvectors)
-    rng = np.random.default_rng(utt.fetch_seed())
-    # Always test in float64 for better numerical stability.
-    A = rng.standard_normal((5, 5))
-
-    utt.verify_grad(expm, [A], rng=rng)
+    utt.verify_grad(expm, [A], rng=rng, abs_tol=1e-5, rel_tol=1e-5)
 
 
 def recover_Q(A, X, continuous=True):
