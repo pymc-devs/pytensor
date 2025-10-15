@@ -395,18 +395,18 @@ def test_linking_patch(listdir_mock, platform):
             ]
 
 
+@config.change_flags(on_opt_error="raise", on_shape_error="raise")
+def _f_build_cache_race_condition(factor):
+    # Some of the caching issues arise during constant folding within the
+    # optimization passes, so we need these config changes to prevent the
+    # exceptions from being caught
+    a = pt.vector()
+    f = pytensor.function([a], factor * a)
+    return f(np.array([1], dtype=config.floatX))
+
+
 def test_cache_race_condition():
     with tempfile.TemporaryDirectory() as dir_name:
-
-        @config.change_flags(on_opt_error="raise", on_shape_error="raise")
-        def f_build(factor):
-            # Some of the caching issues arise during constant folding within the
-            # optimization passes, so we need these config changes to prevent the
-            # exceptions from being caught
-            a = pt.vector()
-            f = pytensor.function([a], factor * a)
-            return f(np.array([1], dtype=config.floatX))
-
         ctx = multiprocessing.get_context()
         compiledir_prop = pytensor.config._config_var_dict["compiledir"]
 
@@ -425,7 +425,7 @@ def test_cache_race_condition():
                 # A random, constant input to prevent caching between runs
                 factor = rng.random()
                 procs = [
-                    ctx.Process(target=f_build, args=(factor,))
+                    ctx.Process(target=_f_build_cache_race_condition, args=(factor,))
                     for i in range(num_procs)
                 ]
                 for proc in procs:
