@@ -346,7 +346,7 @@ class Eig(Op):
 
         return [(n,), (n, n)]
 
-    def L_op(self, inputs, outputs, grad_outputs):
+    def L_op(self, inputs, outputs, output_grads):
         raise NotImplementedError(
             "Gradients for Eig is not implemented because it always returns complex values, "
             "for which autodiff is not yet supported in PyTensor (PRs welcome :) ).\n"
@@ -403,7 +403,7 @@ class Eigh(Eig):
         (w, v) = outputs
         w[0], v[0] = np.linalg.eigh(x, self.UPLO)
 
-    def grad(self, inputs, g_outputs):
+    def L_op(self, inputs, outputs, output_grads):
         r"""The gradient function should return
 
            .. math:: \sum_n\left(W_n\frac{\partial\,w_n}
@@ -427,10 +427,9 @@ class Eigh(Eig):
 
         """
         (x,) = inputs
-        w, v = self(x)
-        # Replace gradients wrt disconnected variables with
-        # zeros. This is a work-around for issue #1063.
-        gw, gv = _zero_disconnected([w, v], g_outputs)
+        w, v = outputs
+        gw, gv = _zero_disconnected([w, v], output_grads)
+
         return [EighGrad(self.UPLO)(x, w, v, gw, gv)]
 
 

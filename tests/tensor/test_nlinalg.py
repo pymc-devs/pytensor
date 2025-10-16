@@ -453,6 +453,20 @@ class TestEig(utt.InferShapeTester):
 class TestEigh(TestEig):
     op = staticmethod(eigh)
 
+    def test_eval(self):
+        A = matrix(dtype=self.dtype)
+        fn = function([A], self.op(A))
+
+        # Symmetric input (real eigenvalues)
+        A_val = self.rng.normal(size=(5, 5)).astype(self.dtype)
+        A_val = A_val + A_val.T
+
+        w, v = fn(A_val)
+        w_np, v_np = np.linalg.eigh(A_val)
+        np.testing.assert_allclose(w, w_np)
+        np.testing.assert_allclose(v, v_np)
+        assert_array_almost_equal(np.dot(A_val, v), w * v)
+
     def test_uplo(self):
         S = self.S
         a = matrix(dtype=self.dtype)
