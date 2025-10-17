@@ -1,16 +1,18 @@
 import numpy as np
 import pytest
 
+from pytensor import Out
 from pytensor.compile import shared
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Constant, Variable
+from pytensor.graph.basic import Apply, Constant, NominalVariable, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, DualLinker, OpWiseCLinker
 from pytensor.link.c.op import COp
 from pytensor.link.c.type import CType
+from pytensor.link.vm import VMLinker
 from pytensor.tensor.type import iscalar, matrix, vector
 from tests.link.test_link import make_function
 
@@ -133,6 +135,19 @@ class Add(Binary):
 
 
 add = Add()
+
+
+class Sub(Binary):
+    def c_code(self, node, name, inp, out, sub):
+        x, y = inp
+        (z,) = out
+        return f"{z} = {x} - {y};"
+
+    def impl(self, x, y):
+        return x - y
+
+
+sub = Sub()
 
 
 class BadSub(Binary):
@@ -258,6 +273,125 @@ def test_clinker_single_node():
     lnk = CLinker().accept(FunctionGraph(node.inputs, node.outputs))
     fn = make_function(lnk)
     assert fn(2.0, 7.0) == 9
+
+
+@pytest.mark.skipif(
+    not config.cxx, reason="G++ not available, so we need to skip this test."
+)
+@pytest.mark.parametrize(
+    "linker", [CLinker(), VMLinker(use_cloop=True)], ids=["C", "CVM"]
+)
+@pytest.mark.parametrize("atomic_type", ["constant", "nominal"])
+def test_clinker_atomic_inputs(linker, atomic_type):
+    """Test that compiling variants of the same graph with different order of atomic inputs
+
+    Indirect regression test for https://github.com/pymc-devs/pytensor/issues/1670
+    """
+
+    def call(thunk_out, args):
+        thunk, input_storage, output_storage = thunk_out
+        assert len(input_storage) == len(args)
+        for i, arg in zip(input_storage, args):
+            i.data = arg
+        thunk()
+        assert len(output_storage) == 1, "Helper function assumes one output"
+        return output_storage[0].data
+
+    if atomic_type == "constant":
+        # Put large value to make sure we don't forget to specify it
+        x = Constant(tdouble, 999, name="x")
+        one = Constant(tdouble, 1.0)
+        two = Constant(tdouble, 2.0)
+    else:
+        x = NominalVariable(0, tdouble, name="x")
+        one = NominalVariable(1, tdouble, name="one")
+        two = NominalVariable(1, tdouble, name="two")
+
+    sub_one = sub(x, one)
+    sub_two = sub(x, two)
+
+    # It may seem strange to have a constant as an input,
+    # but that's exactly how C_Ops define a single node FunctionGraph
+    # to be compiled by the CLinker.
+    # FunctionGraph(node.inputs, node.outputs)
+    fg1 = FunctionGraph(inputs=[x, one], outputs=[sub_one])
+    thunk1 = linker.accept(fg1).make_thunk()
+    assert call(thunk1, [10, 1]) == 9
+    # Technically, passing a wrong constant is undefined behavior,
+    # Just checking the current behavior, NOT ENFORCING IT
+    assert call(thunk1, [10, 0]) == 10
+
+    # The old code didn't use to handle a swap of atomic inputs correctly
+    # Because it didn't expect Atomic variables to be in the inputs list
+    # This reordering doesn't usually happen, because C_Ops pass the inputs in the order of the node.
+    # What can happen is that we compile the same FunctionGraph with CLinker and CVMLinker,
+    # The CLinker takes the whole FunctionGraph as is, with the required inputs specified by the user
+    # While the CVMLinker will call the CLinker on its one Op with all inputs (required and constants)
+    # This difference in input signature used to be ignored by the cache key,
+    # but the generated code cared about the number of explicit inputs.
+    # Changing the order of inputs is a smoke thest to make sure we pay attention to the input signature.
+    # The fg4 below tests the actual number of inputs changing.
+    fg2 = FunctionGraph(inputs=[one, x], outputs=[sub_one])
+    thunk2 = linker.accept(fg2).make_thunk()
+    assert call(thunk2, [1, 10]) == 9
+    # Again, technically undefined behavior
+    assert call(thunk2, [0, 10]) == 10
+
+    fg3 = FunctionGraph(inputs=[x, two], outputs=[sub_two])
+    thunk3 = linker.accept(fg3).make_thunk()
+    assert call(thunk3, [10, 2]) == 8
+
+    # For completeness, confirm the CLinker cmodule_key are all different
+    key1 = CLinker().accept(fg1).cmodule_key()
+    key2 = CLinker().accept(fg2).cmodule_key()
+    key3 = CLinker().accept(fg3).cmodule_key()
+
+    if atomic_type == "constant":
+        # Case that only make sense for constant atomic inputs
+
+        # This used to complain that an extra imaginary argument didn't have the right dtype
+        # Because it used to reuse the codegen from the previous examples incorrectly
+        fg4 = FunctionGraph(inputs=[x], outputs=[sub_one])
+        thunk4 = linker.accept(fg4).make_thunk()
+        assert call(thunk4, [10]) == 9
+
+        # Note that fg1 and fg3 are structurally identical, but have distinct constants
+        # Therefore they have distinct module keys.
+        # This behavior could change in the future, to enable more caching reuse:
+        # https://github.com/pymc-devs/pytensor/issues/1672
+        key4 = CLinker().accept(fg4).cmodule_key()
+        assert len({key1, key2, key3, key4}) == 4
+    else:
+        # With nominal inputs, fg1 and fg3 are identical
+        assert key1 != key2
+        assert key1 == key3
+
+
+@pytest.mark.skipif(
+    not config.cxx, reason="G++ not available, so we need to skip this test."
+)
+def test_clinker_cvm_same_function():
+    # Direct regression test for
+    # https://github.com/pymc-devs/pytensor/issues/1670
+    x1 = NominalVariable(0, vector("x", shape=(10,), dtype="float64").type)
+    y1 = NominalVariable(1, vector("y", shape=(10,), dtype="float64").type)
+    const1 = np.arange(10)
+    out = x1 + const1 * y1
+
+    # Without borrow the C / CVM code is different
+    fn = function(
+        [x1, y1], [Out(out, borrow=True)], mode=Mode(linker="c", optimizer="fast_run")
+    )
+    fn(np.zeros(10), np.zeros(10))
+
+    fn = function(
+        [x1, y1],
+        [Out(out, borrow=True)],
+        mode=Mode(linker="cvm", optimizer="fast_run"),
+    )
+    fn(
+        np.zeros(10), np.zeros(10)
+    )  # Used to raise ValueError: expected an ndarray, not None
 
 
 @pytest.mark.skipif(
