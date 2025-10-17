@@ -16,7 +16,15 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.type import Variable, dvector, lscalar, matrix, scalar, vector
+from pytensor.tensor.type import (
+    Variable,
+    dvector,
+    lscalar,
+    matrix,
+    scalar,
+    tensor,
+    vector,
+)
 
 
 class MatrixPinv(Op):
@@ -297,37 +305,78 @@ def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
 class Eig(Op):
     """
     Compute the eigenvalues and right eigenvectors of a square array.
-
     """
 
     __props__: tuple[str, ...] = ()
-    gufunc_signature = "(m,m)->(m),(m,m)"
     gufunc_spec = ("numpy.linalg.eig", 1, 2)
+    gufunc_signature = "(m,m)->(m),(m,m)"
 
     def make_node(self, x):
         x = as_tensor_variable(x)
         assert x.ndim == 2
-        w = vector(dtype=x.dtype)
-        v = matrix(dtype=x.dtype)
+
+        M, N = x.type.shape
+
+        if M is not None and N is not None and M != N:
+            raise ValueError(
+                f"Input to Eig must be a square matrix, got static shape: ({M}, {N})"
+            )
+
+        dtype = np.promote_types(x.dtype, np.complex64)
+
+        w = tensor(dtype=dtype, shape=(M,))
+        v = tensor(dtype=dtype, shape=(M, N))
+
         return Apply(self, [x], [w, v])
 
     def perform(self, node, inputs, outputs):
         (x,) = inputs
-        (w, v) = outputs
-        w[0], v[0] = (z.astype(x.dtype) for z in np.linalg.eig(x))
+        dtype = np.promote_types(x.dtype, np.complex64)
+
+        w, v = np.linalg.eig(x)
+
+        # If the imaginary part of the eigenvalues is zero, numpy automatically casts them to real. We require
+        # a statically known return dtype, so we have to cast back to complex to avoid dtype mismatch.
+        outputs[0][0] = w.astype(dtype, copy=False)
+        outputs[1][0] = v.astype(dtype, copy=False)
 
     def infer_shape(self, fgraph, node, shapes):
-        n = shapes[0][0]
+        (x_shapes,) = shapes
+        n, _ = x_shapes
+
         return [(n,), (n, n)]
 
+    def L_op(self, inputs, outputs, output_grads):
+        raise NotImplementedError(
+            "Gradients for Eig is not implemented because it always returns complex values, "
+            "for which autodiff is not yet supported in PyTensor (PRs welcome :) ).\n"
+            "If you know that your input has strictly real-valued eigenvalues (e.g. it is a "
+            "symmetric matrix), use pt.linalg.eigh instead."
+        )
 
-eig = Blockwise(Eig())
+
+def eig(x: TensorLike):
+    """
+    Return the eigenvalues and right eigenvectors of a square array.
+
+    Note that regardless of the input dtype, the eigenvalues and eigenvectors are returned as complex numbers. As a
+    result, the gradient of this operation is not implemented (because PyTensor does not support autodiff for complex
+    values yet).
+
+    If you know that your input has strictly real-valued eigenvalues (e.g. it is a symmetric matrix), use
+    `pytensor.tensor.linalg.eigh` instead.
+
+    Parameters
+    ----------
+    x: TensorLike
+        Square matrix, or array of such matrices
+    """
+    return Blockwise(Eig())(x)
 
 
 class Eigh(Eig):
     """
     Return the eigenvalues and eigenvectors of a Hermitian or symmetric matrix.
-
     """
 
     __props__ = ("UPLO",)
@@ -354,7 +403,7 @@ class Eigh(Eig):
         (w, v) = outputs
         w[0], v[0] = np.linalg.eigh(x, self.UPLO)
 
-    def grad(self, inputs, g_outputs):
+    def L_op(self, inputs, outputs, output_grads):
         r"""The gradient function should return
 
            .. math:: \sum_n\left(W_n\frac{\partial\,w_n}
@@ -378,10 +427,9 @@ class Eigh(Eig):
 
         """
         (x,) = inputs
-        w, v = self(x)
-        # Replace gradients wrt disconnected variables with
-        # zeros. This is a work-around for issue #1063.
-        gw, gv = _zero_disconnected([w, v], g_outputs)
+        w, v = outputs
+        gw, gv = _zero_disconnected([w, v], output_grads)
+
         return [EighGrad(self.UPLO)(x, w, v, gw, gv)]
 
 

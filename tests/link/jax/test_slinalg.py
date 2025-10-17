@@ -361,3 +361,12 @@ def test_jax_cho_solve(b_shape, lower):
     out = pt_slinalg.cho_solve((c, lower), b, b_ndim=len(b_shape))
 
     compare_jax_and_py([A, b], [out], [A_val, b_val])
+
+
+def test_jax_expm():
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = pt.tensor(name="A", shape=(5, 5))
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    out = pt_slinalg.expm(A)
+
+    compare_jax_and_py([A], [out], [A_val])

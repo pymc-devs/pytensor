@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+from pytensor import config
 from pytensor.tensor import nlinalg
 from tests.link.numba.test_basic import compare_numba_and_py
 
@@ -51,45 +52,24 @@ y = np.array(
 )
 
 
-@pytest.mark.parametrize(
-    "x, exc",
-    [
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(x),
-            ),
-            None,
-        ),
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(y),
-            ),
-            None,
-        ),
-        (
-            (
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            None,
-        ),
-    ],
-)
-def test_Eig(x, exc):
-    x, test_x = x
-    g = nlinalg.Eig()(x)
+@pytest.mark.parametrize("input_dtype", ["float", "int"])
+@pytest.mark.parametrize("symmetric", [True, False], ids=["symmetric", "general"])
+def test_Eig(input_dtype, symmetric):
+    x = pt.dmatrix("x")
+    if input_dtype == "float":
+        x_val = rng.normal(size=(3, 3)).astype(config.floatX)
+    else:
+        x_val = rng.integers(1, 10, size=(3, 3)).astype("int64")
 
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py(
-            [x],
-            g,
-            [test_x],
-        )
+    if symmetric:
+        x_val = x_val + x_val.T
+
+    g = nlinalg.eig(x)
+    compare_numba_and_py(
+        graph_inputs=[x],
+        graph_outputs=g,
+        test_inputs=[x_val],
+    )
 
 
 @pytest.mark.parametrize(

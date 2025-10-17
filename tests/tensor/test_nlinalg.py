@@ -394,11 +394,12 @@ def test_trace():
 
 class TestEig(utt.InferShapeTester):
     op_class = Eig
-    op = eig
     dtype = "float64"
+    op = staticmethod(eig)
 
     def setup_method(self):
         super().setup_method()
+
         self.rng = np.random.default_rng(utt.fetch_seed())
         self.A = matrix(dtype=self.dtype)
         self.X = np.asarray(self.rng.random((5, 5)), dtype=self.dtype)
@@ -418,14 +419,53 @@ class TestEig(utt.InferShapeTester):
 
     def test_eval(self):
         A = matrix(dtype=self.dtype)
-        assert [e.eval({A: [[1]]}) for e in self.op(A)] == [[1.0], [[1.0]]]
-        x = [[0, 1], [1, 0]]
-        w, v = (e.eval({A: x}) for e in self.op(A))
-        assert_array_almost_equal(np.dot(x, v), w * v)
+        fn = function([A], self.op(A))
+
+        # Symmetric input (real eigenvalues)
+        A_val = self.rng.normal(size=(5, 5)).astype(self.dtype)
+        A_val = A_val + A_val.T
+
+        w, v = fn(A_val)
+        w_np, v_np = np.linalg.eig(A_val)
+        np.testing.assert_allclose(w, w_np)
+        np.testing.assert_allclose(v, v_np)
+        assert_array_almost_equal(np.dot(A_val, v), w * v)
+
+        # Asymmetric input (real eigenvalues)
+        z = self.rng.normal(size=(5,)) ** 2
+        A_val = (np.diag(z**0.5)).dot(A_val).dot(np.diag(z ** (-0.5)))
+
+        w, v = fn(A_val)
+        w_np, v_np = np.linalg.eig(A_val)
+        np.testing.assert_allclose(w, w_np)
+        np.testing.assert_allclose(v, v_np)
+        assert_array_almost_equal(np.dot(A_val, v), w * v)
+
+        # Asymmetric input (complex eigenvalues)
+        A_val = self.rng.normal(size=(5, 5))
+        w, v = fn(A_val)
+        w_np, v_np = np.linalg.eig(A_val)
+        np.testing.assert_allclose(w, w_np)
+        np.testing.assert_allclose(v, v_np)
+        assert_array_almost_equal(np.dot(A_val, v), w * v)
 
 
 class TestEigh(TestEig):
     op = staticmethod(eigh)
+
+    def test_eval(self):
+        A = matrix(dtype=self.dtype)
+        fn = function([A], self.op(A))
+
+        # Symmetric input (real eigenvalues)
+        A_val = self.rng.normal(size=(5, 5)).astype(self.dtype)
+        A_val = A_val + A_val.T
+
+        w, v = fn(A_val)
+        w_np, v_np = np.linalg.eigh(A_val)
+        np.testing.assert_allclose(w, w_np)
+        np.testing.assert_allclose(v, v_np)
+        assert_array_almost_equal(np.dot(A_val, v), w * v)
 
     def test_uplo(self):
         S = self.S

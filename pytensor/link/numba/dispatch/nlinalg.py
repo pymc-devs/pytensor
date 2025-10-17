@@ -76,15 +76,12 @@ def numba_funcify_SLogDet(op, node, **kwargs):
 
 @numba_funcify.register(Eig)
 def numba_funcify_Eig(op, node, **kwargs):
-    out_dtype_1 = node.outputs[0].type.numpy_dtype
-    out_dtype_2 = node.outputs[1].type.numpy_dtype
-
-    inputs_cast = int_to_float_fn(node.inputs, out_dtype_1)
+    w_dtype = node.outputs[0].type.numpy_dtype
+    inputs_cast = int_to_float_fn(node.inputs, w_dtype)
 
     @numba_basic.numba_njit
     def eig(x):
-        out = np.linalg.eig(inputs_cast(x))
-        return (out[0].astype(out_dtype_1), out[1].astype(out_dtype_2))
+        return np.linalg.eig(inputs_cast(x))
 
     return eig
 
