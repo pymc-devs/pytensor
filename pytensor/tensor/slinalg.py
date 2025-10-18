@@ -1036,8 +1036,27 @@ class TriangularInv(MatrixInverse):
     def perform(self, node, inputs, outputs):
         (x,) = inputs
         (z,) = outputs
-        (dtrtri,) = get_lapack_funcs(("trtri",), (x,))
-        inv, info = dtrtri(x, lower=self.lower, overwrite_c=True)
+        (trtri,) = get_lapack_funcs(("trtri",), (x,))
+
+        # Check if we want to overwrite and if the input is C-contiguous
+        c_contiguous_input = self.overwrite_a and x.flags["C_CONTIGUOUS"]
+        if c_contiguous_input:
+            # Transpose C-contiguous to F-contiguous
+            x_in = x.T
+            lower_flag = not self.lower
+            overwrite_flag = True
+        else:
+            # Use original matrix and flags
+            x_in = x
+            lower_flag = self.lower
+            overwrite_flag = self.overwrite_a
+
+        # Call trtri with the potentially transposed input and correct flags
+        # Use overwrite_c (LAPACK flag for trtri) based on our logic
+        inv_maybe_transposed, info = trtri(
+            x_in, lower=lower_flag, overwrite_c=overwrite_flag
+        )
+
         if info != 0:
             if self.on_error == "nan":
                 z[0] = np.full_like(x, np.nan)
@@ -1048,7 +1067,7 @@ class TriangularInv(MatrixInverse):
                 raise ValueError(
                     f"illegal value in {-info}-th argument of internal trtri"
                 )
-        z[0] = inv
+        z[0] = inv_maybe_transposed.T if c_contiguous_input else inv_maybe_transposed
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         """
