@@ -77,14 +77,12 @@ def test_sparse_ndim():
 def test_sparse_copy():
     @numba.njit
     def test_fn(x):
-        y = x.copy()
-        return (
-            y is not x and np.all(x.data == y.data) and np.all(x.indices == y.indices)
-        )
+        return x.copy()
 
-    x_val = sp.sparse.csr_matrix(np.eye(100))
+    x = sp.sparse.csr_matrix(np.eye(100))
 
-    assert test_fn(x_val)
+    y = test_fn(x)
+    assert y is not x and np.all(x.data == y.data) and np.all(x.indices == y.indices)
 
 
 def test_sparse_objmode():
