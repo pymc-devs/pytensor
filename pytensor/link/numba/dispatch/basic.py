@@ -220,7 +220,7 @@ def numba_typify(data, dtype=None, **kwargs):
     return data
 
 
-def generate_fallback_impl(op, node=None, storage_map=None, **kwargs):
+def generate_fallback_impl(op, node, storage_map=None, **kwargs):
     """Create a Numba compatible function from a Pytensor `Op`."""
 
     warnings.warn(
