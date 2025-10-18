@@ -127,6 +127,8 @@ class _sparse_py_operators:
     def toarray(self):
         return dense_from_sparse(self)
 
+    todense = toarray
+
     @property
     def shape(self):
         # TODO: The plan is that the ShapeFeature in ptb.opt will do shape
