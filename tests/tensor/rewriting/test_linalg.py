@@ -14,7 +14,7 @@ from pytensor.graph import ancestors
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
-from pytensor.tensor.basic import tril, triu
+from pytensor.tensor.basic import triu
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, matmul
@@ -1085,9 +1085,9 @@ def _check_op_in_graph(fgraph, op_type, present=True):
 
 
 rewrite_cases = {
-    "tril": (
-        lambda x: tril(x),
-        lambda a: np.tril(a),
+    "tri": (
+        lambda x: pt.tri(x.shape[0], x.shape[1], k=0, dtype=x.dtype),
+        lambda a: np.tri(N=a.shape[0], M=a.shape[1], k=0, dtype=a.dtype),
     ),
     "triu": (
         lambda x: triu(x),

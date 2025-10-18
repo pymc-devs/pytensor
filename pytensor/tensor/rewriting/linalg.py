@@ -1031,13 +1031,13 @@ def _find_triangular_op(var):
     """
     Inspects a variable to see if it's triangular.
 
-    Returns a tuple (is_lower, is_upper) if triangular, otherwise None.
+    Returns `True` if lower-triangular, `False` if upper-triangular, otherwise `None`.
     """
     # Case 1: Check for an explicit tag
     is_lower = getattr(var.tag, "lower_triangular", False)
     is_upper = getattr(var.tag, "upper_triangular", False)
     if is_lower or is_upper:
-        return (is_lower, is_upper)
+        return is_lower
 
     if not var.owner:
         return None
@@ -1047,7 +1047,7 @@ def _find_triangular_op(var):
 
     # Case 2: Check for direct creator Ops
     if isinstance(core_op, Cholesky):
-        return (core_op.lower, not core_op.lower)
+        return core_op.lower
 
     if isinstance(core_op, LU | LUFactor):
         if var.owner.outputs[1] == var:
@@ -1060,11 +1060,10 @@ def _find_triangular_op(var):
             return (False, True)
 
     # pt.tri will get constant folded so no point re-writing ?
-    # if isinstance(core_op, Tri):
-    #     k_node = var.owner.inputs[2]
-    #     if isinstance(k_node, Constant) and k_node.data == 0:
-    #         print('re-writing ... ')
-    #         return (True, False)
+    if isinstance(core_op, Tri):
+        k_node = var.owner.inputs[2]
+        if isinstance(k_node, Constant) and k_node.data == 0:
+            return True
 
     # Case 3: tril/triu patterns which are implemented as Mul
     if isinstance(core_op, Elemwise) and isinstance(core_op.scalar_op, ScalarMul):
@@ -1077,7 +1076,7 @@ def _find_triangular_op(var):
             if isinstance(other_inp.owner.op, Tri):
                 k_node = other_inp.owner.inputs[2]
                 if isinstance(k_node, Constant) and k_node.data == 0:
-                    return (True, False)  # It's tril
+                    return True  # It's tril
 
             # Check for triu pattern: Mul(x, Sub(1, Tri(k=-1)))
             sub_op = other_inp.owner.op
@@ -1095,7 +1094,7 @@ def _find_triangular_op(var):
                 if const_one is not None and tri_inp is not None:
                     k_node = tri_inp.owner.inputs[2]
                     if isinstance(k_node, Constant) and k_node.data == -1:
-                        return (False, True)  # It's triu
+                        return False  # It's triu
 
     return None
 
@@ -1111,13 +1110,11 @@ def rewrite_inv_to_triangular_solve(fgraph, node):
     """
 
     A = node.inputs[0]
-    triangular_info = _find_triangular_op(A)
-    if triangular_info is None:
+    is_lower = _find_triangular_op(A)
+    if is_lower is None:
         return None
 
-    is_lower, is_upper = triangular_info
-    if is_lower or is_upper:
-        new_op = TriangularInv(lower=is_lower)
-        new_inv = new_op(A)
-        copy_stack_trace(node.outputs[0], new_inv)
-        return [new_inv]
+    new_op = TriangularInv(lower=is_lower)
+    new_inv = new_op(A)
+    copy_stack_trace(node.outputs[0], new_inv)
+    return [new_inv]
