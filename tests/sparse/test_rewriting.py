@@ -77,7 +77,8 @@ def test_local_mul_s_d():
         f = pytensor.function(inputs, sparse.mul_s_d(*inputs), mode=mode)
 
         assert not any(
-            isinstance(node.op, sparse.MulSD) for node in f.maker.fgraph.toposort()
+            isinstance(node.op, sparse.SparseDenseMultiply)
+            for node in f.maker.fgraph.toposort()
         )
 
 
@@ -94,7 +95,8 @@ def test_local_mul_s_v():
         f = pytensor.function(inputs, sparse.mul_s_v(*inputs), mode=mode)
 
         assert not any(
-            isinstance(node.op, sparse.MulSV) for node in f.maker.fgraph.toposort()
+            isinstance(node.op, sparse.SparseDenseVectorMultiply)
+            for node in f.maker.fgraph.toposort()
         )
 
 
