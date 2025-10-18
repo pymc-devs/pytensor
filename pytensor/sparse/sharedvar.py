@@ -7,7 +7,7 @@ from pytensor.sparse.variable import SparseTensorType, SparseVariable
 from pytensor.tensor.sharedvar import TensorSharedVariable
 
 
-class SparseTensorSharedVariable(TensorSharedVariable, SparseVariable):
+class SparseTensorSharedVariable(TensorSharedVariable, SparseVariable):  # type: ignore[misc]
     @property
     def format(self):
         return self.type.format

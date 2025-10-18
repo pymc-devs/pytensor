@@ -421,7 +421,7 @@ class _sparse_py_operators:
         raise NotImplementedError
 
 
-class SparseVariable(_sparse_py_operators, TensorVariable):
+class SparseVariable(_sparse_py_operators, TensorVariable):  # type: ignore[misc]
     format = property(lambda self: self.type.format)
 
     def __str__(self):
@@ -454,7 +454,7 @@ class SparseConstantSignature(tuple):
         return hash_from_sparse(d)
 
 
-class SparseConstant(SparseVariable, TensorConstant):
+class SparseConstant(SparseVariable, TensorConstant):  # type: ignore[misc]
     format = property(lambda self: self.type.format)
 
     def signature(self):
