@@ -1093,3 +1093,11 @@ def test_gradient_mixed_discrete_output_scalar_op():
         np.ones((12,), dtype=config.floatX),
         strict=True,
     )
+
+
+@pytest.mark.filterwarnings("error")
+def test_numpy_warning_suppressed():
+    x = pt.scalar("x")
+    y = pt.log(x)
+    fn = pytensor.function([x], y, mode=Mode(linker="py"))
+    assert fn(0) == -np.inf

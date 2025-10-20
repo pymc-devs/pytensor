@@ -707,7 +707,8 @@ class Elemwise(OpenMPOp):
 
             nout = ufunc.nout
 
-        variables = ufunc(*ufunc_args, **ufunc_kwargs)
+        with np.errstate(all="ignore"):
+            variables = ufunc(*ufunc_args, **ufunc_kwargs)
 
         if nout == 1:
             variables = [variables]
