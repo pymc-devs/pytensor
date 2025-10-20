@@ -27,7 +27,7 @@ repos:
     - id: sphinx-lint 
       args: ["-i", ".pixi", "."]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.0
+    rev: v0.14.1
     hooks:
       - id: ruff-check
         types_or: [python, pyi, jupyter]
