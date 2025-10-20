@@ -500,19 +500,19 @@ SparseTensorType.constant_type = SparseConstant
 
 
 # for more dtypes, call SparseTensorType(format, dtype)
-def matrix(format, name=None, dtype=None):
+def matrix(format, name=None, dtype=None, shape=None):
     if dtype is None:
         dtype = config.floatX
-    type = SparseTensorType(format=format, dtype=dtype)
+    type = SparseTensorType(format=format, dtype=dtype, shape=shape)
     return type(name)
 
 
-def csc_matrix(name=None, dtype=None):
-    return matrix("csc", name, dtype)
+def csc_matrix(name=None, dtype=None, shape=None):
+    return matrix("csc", name=name, dtype=dtype, shape=shape)
 
 
-def csr_matrix(name=None, dtype=None):
-    return matrix("csr", name, dtype)
+def csr_matrix(name=None, dtype=None, shape=None):
+    return matrix("csr", name=name, dtype=dtype, shape=shape)
 
 
 def bsr_matrix(name=None, dtype=None):
@@ -727,10 +727,22 @@ class CSM(Op):
         if shape.type.ndim != 1 or shape.type.dtype not in discrete_dtypes:
             raise TypeError("n_rows must be integer type", shape, shape.type)
 
+        static_shape = (None, None)
+        if (
+            shape.owner is not None
+            and isinstance(shape.owner.op, CSMProperties)
+            and shape.owner.outputs[3] is shape
+        ):
+            static_shape = shape.owner.inputs[0].type.shape
+
         return Apply(
             self,
             [data, indices, indptr, shape],
-            [SparseTensorType(dtype=data.type.dtype, format=self.format)()],
+            [
+                SparseTensorType(
+                    dtype=data.type.dtype, format=self.format, shape=static_shape
+                )()
+            ],
         )
 
     def perform(self, node, inputs, outputs):
@@ -2298,7 +2310,7 @@ def sub(x, y):
     return x + (-y)
 
 
-class MulSS(Op):
+class SparseSparseMultiply(Op):
     # mul(sparse, sparse)
     # See the doc of mul() for more detail
     __props__ = ()
@@ -2331,12 +2343,15 @@ class MulSS(Op):
         return [shapes[0]]
 
 
-mul_s_s = MulSS()
+mul_s_s = SparseSparseMultiply()
 
 
-class MulSD(Op):
+class SparseDenseMultiply(Op):
     # mul(sparse, dense)
     # See the doc of mul() for more detail
+
+    # We're doing useless copy of indices and indptr, those should be reused
+    # However, PyTensor doesn't support one output -> multiple views...
     __props__ = ()
 
     def make_node(self, x, y):
@@ -2352,64 +2367,42 @@ class MulSD(Op):
         # Broadcasting of the sparse matrix is not supported.
         # We support nd == 0 used by grad of SpSum()
         assert y.type.ndim in (0, 2)
-        out = SparseTensorType(dtype=dtype, format=x.type.format)()
+        out = SparseTensorType(dtype=dtype, format=x.type.format, shape=x.type.shape)()
         return Apply(self, [x, y], [out])
 
     def perform(self, node, inputs, outputs):
         (x, y) = inputs
         (out,) = outputs
+        out_dtype = node.outputs[0].dtype
         assert _is_sparse(x) and _is_dense(y)
-        if len(y.shape) == 0:
-            out_dtype = node.outputs[0].dtype
-            if x.dtype == out_dtype:
-                z = x.copy()
-            else:
-                z = x.astype(out_dtype)
-            out[0] = z
-            out[0].data *= y
-        elif len(y.shape) == 1:
-            raise NotImplementedError()  # RowScale / ColScale
-        elif len(y.shape) == 2:
+
+        if x.dtype == out_dtype:
+            z = x.copy()
+        else:
+            z = x.astype(out_dtype)
+        out[0] = z
+        z_data = z.data
+
+        if y.ndim == 0:
+            z_data *= y
+        else:  # y_ndim == 2
             # if we have enough memory to fit y, maybe we can fit x.asarray()
             # too?
             # TODO: change runtime from O(M*N) to O(nonzeros)
             M, N = x.shape
             assert x.shape == y.shape
-            out_dtype = node.outputs[0].dtype
-
+            indices = x.indices
+            indptr = x.indptr
             if x.format == "csc":
-                indices = x.indices
-                indptr = x.indptr
-                if x.dtype == out_dtype:
-                    z = x.copy()
-                else:
-                    z = x.astype(out_dtype)
-                z_data = z.data
-
                 for j in range(0, N):
                     for i_idx in range(indptr[j], indptr[j + 1]):
                         i = indices[i_idx]
                         z_data[i_idx] *= y[i, j]
-                out[0] = z
             elif x.format == "csr":
-                indices = x.indices
-                indptr = x.indptr
-                if x.dtype == out_dtype:
-                    z = x.copy()
-                else:
-                    z = x.astype(out_dtype)
-                z_data = z.data
-
                 for i in range(0, M):
                     for j_idx in range(indptr[i], indptr[i + 1]):
                         j = indices[j_idx]
                         z_data[j_idx] *= y[i, j]
-                out[0] = z
-            else:
-                warn(
-                    "This implementation of MulSD is deficient: {x.format}",
-                )
-                out[0] = type(x)(x.toarray() * y)
 
     def grad(self, inputs, gout):
         (x, y) = inputs
@@ -2422,11 +2415,13 @@ class MulSD(Op):
         return [shapes[0]]
 
 
-mul_s_d = MulSD()
+mul_s_d = SparseDenseMultiply()
 
 
-class MulSV(Op):
+class SparseDenseVectorMultiply(Op):
     """Element-wise multiplication of sparse matrix by a broadcasted dense vector element wise.
+
+    TODO: Merge with the SparseDenseMultiply Op
 
     Notes
     -----
@@ -2488,7 +2483,7 @@ class MulSV(Op):
         return [ins_shapes[0]]
 
 
-mul_s_v = MulSV()
+mul_s_v = SparseDenseVectorMultiply()
 
 
 def mul(x, y):
@@ -2527,16 +2522,17 @@ def mul(x, y):
         # mul_s_s is not implemented if the types differ
         if y.dtype == "float64" and x.dtype == "float32":
             x = x.astype("float64")
-
         return mul_s_s(x, y)
-    elif x_is_sparse_variable and not y_is_sparse_variable:
+    elif x_is_sparse_variable or y_is_sparse_variable:
+        if y_is_sparse_variable:
+            x, y = y, x
         # mul is unimplemented if the dtypes differ
         if y.dtype == "float64" and x.dtype == "float32":
             x = x.astype("float64")
-
-        return mul_s_d(x, y)
-    elif y_is_sparse_variable and not x_is_sparse_variable:
-        return mul_s_d(y, x)
+        if y.ndim == 1:
+            return mul_s_v(x, y)
+        else:
+            return mul_s_d(x, y)
     else:
         raise NotImplementedError()
 

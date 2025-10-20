@@ -15,13 +15,12 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.ifelse import IfElse
-from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.link.utils import (
     fgraph_to_python,
 )
 from pytensor.scalar.basic import ScalarType
 from pytensor.sparse import SparseTensorType
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import DenseTensorType, TensorType
 
 
 def numba_njit(*args, fastmath=None, **kwargs):
@@ -81,7 +80,7 @@ def get_numba_type(
         Return Numba scalars for zero dimensional :class:`TensorType`\s.
     """
 
-    if isinstance(pytensor_type, TensorType):
+    if isinstance(pytensor_type, DenseTensorType):
         dtype = pytensor_type.numpy_dtype
         numba_dtype = numba.from_dtype(dtype)
         if force_scalar or (
@@ -94,12 +93,14 @@ def get_numba_type(
         numba_dtype = numba.from_dtype(dtype)
         return numba_dtype
     elif isinstance(pytensor_type, SparseTensorType):
+        from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
+
         dtype = pytensor_type.numpy_dtype
-        numba_dtype = numba.from_dtype(dtype)
+        # numba_dtype = numba.from_dtype(dtype)
         if pytensor_type.format == "csr":
-            return CSRMatrixType(numba_dtype)
+            return CSRMatrixType()
         if pytensor_type.format == "csc":
-            return CSCMatrixType(numba_dtype)
+            return CSCMatrixType()
 
         raise NotImplementedError()
     else:
@@ -339,6 +340,7 @@ def numba_funcify_type_casting(op, **kwargs):
 
 @numba_funcify.register(DeepCopyOp)
 def numba_funcify_DeepCopyOp(op, node, **kwargs):
+    # FIXME: SparseTensorType will match on this condition, but `np.copy` doesn't work with them
     if isinstance(node.inputs[0].type, TensorType):
 
         @numba_njit

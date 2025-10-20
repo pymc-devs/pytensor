@@ -32,12 +32,12 @@ from pytensor.sparse import (
     EnsureSortedIndices,
     GetItemScalar,
     HStack,
-    MulSD,
-    MulSS,
     Neg,
     Remove0,
     SamplingDot,
+    SparseDenseMultiply,
     SparseFromDense,
+    SparseSparseMultiply,
     SparseTensorType,
     SquareDiagonal,
     StructuredDot,
@@ -514,7 +514,7 @@ class TestSparseInferShape(utt.InferShapeTester):
                 sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3)),
             ]
             * 2,
-            MulSS,
+            SparseSparseMultiply,
         )
 
     def test_mul_sd(self):
@@ -527,7 +527,7 @@ class TestSparseInferShape(utt.InferShapeTester):
                 sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3)),
                 np.random.standard_normal((10, 40)).astype(config.floatX),
             ],
-            MulSD,
+            SparseDenseMultiply,
             excluding=["local_mul_s_d"],
         )
 
