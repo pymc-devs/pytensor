@@ -1392,7 +1392,8 @@ class CLinker(Linker):
 
             # It is important that a variable (i)
             # yield a 'position' that reflects its role in code_gen()
-            if isinstance(i, AtomicVariable):  # orphans
+            inp_sig = isig = fgraph_inputs_dict.get(i, False)  # inputs
+            if isinstance(i, AtomicVariable):  # orphans or constant inputs
                 if id(i) not in constant_ids:
                     isig = (i.signature(), topological_pos, i_idx)
                     # If the PyTensor constant provides a strong hash
@@ -1412,11 +1413,7 @@ class CLinker(Linker):
                     constant_ids[id(i)] = isig
                 else:
                     isig = constant_ids[id(i)]
-                # print 'SIGNATURE', i.signature()
-                # return i.signature()
-            elif i in fgraph_inputs_dict:  # inputs
-                isig = fgraph_inputs_dict[i]
-            else:
+            elif inp_sig is None:
                 if i.owner is None:
                     assert all(all(out is not None for out in o.outputs) for o in order)
                     assert all(input.owner is None for input in fgraph.inputs)
@@ -1432,7 +1429,7 @@ class CLinker(Linker):
                     )
                 else:
                     isig = (op_pos[i.owner], i.owner.outputs.index(i))  # temps
-            return (isig, i in no_recycling)
+            return (inp_sig, isig, i in no_recycling)
 
         version = []
         for node_pos, node in enumerate(order):
