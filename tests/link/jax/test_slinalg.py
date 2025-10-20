@@ -370,3 +370,15 @@ def test_jax_expm():
     out = pt_slinalg.expm(A)
 
     compare_jax_and_py([A], [out], [A_val])
+
+
+@pytest.mark.parametrize("mode", ["full", "r"])
+def test_jax_qr(mode):
+    # "full" and "r" modes are tested because "full" returns two matrices (Q, R), while (R,) returns only one.
+    # Pytensor does not return a tuple when only one output is expected.
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = pt.tensor(name="A", shape=(5, 5))
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    out = pt_slinalg.qr(A, mode=mode)
+
+    compare_jax_and_py([A], out, [A_val])

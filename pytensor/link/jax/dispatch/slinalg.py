@@ -177,7 +177,8 @@ def jax_funcify_QR(op, **kwargs):
     mode = op.mode
 
     def qr(x, mode=mode):
-        return jax.scipy.linalg.qr(x, mode=mode)
+        res = jax.scipy.linalg.qr(x, mode=mode)
+        return res[0] if len(res) == 1 else res
 
     return qr
 
