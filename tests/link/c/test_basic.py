@@ -283,7 +283,7 @@ def test_clinker_single_node():
 )
 @pytest.mark.parametrize("atomic_type", ["constant", "nominal"])
 def test_clinker_atomic_inputs(linker, atomic_type):
-    """Test that compiling variants of the same graph with different order of atomic inputs
+    """Test that compiling variants of the same graph with different order of atomic inputs works correctly
 
     Indirect regression test for https://github.com/pymc-devs/pytensor/issues/1670
     """
@@ -329,7 +329,7 @@ def test_clinker_atomic_inputs(linker, atomic_type):
     # While the CVMLinker will call the CLinker on its one Op with all inputs (required and constants)
     # This difference in input signature used to be ignored by the cache key,
     # but the generated code cared about the number of explicit inputs.
-    # Changing the order of inputs is a smoke thest to make sure we pay attention to the input signature.
+    # Changing the order of inputs is a smoke test to make sure we pay attention to the input signature.
     # The fg4 below tests the actual number of inputs changing.
     fg2 = FunctionGraph(inputs=[one, x], outputs=[sub_one])
     thunk2 = linker.accept(fg2).make_thunk()
