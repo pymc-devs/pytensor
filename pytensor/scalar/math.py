@@ -32,8 +32,8 @@ from pytensor.scalar.basic import (
     isinf,
     log,
     log1p,
-    reciprocal,
     maximum,
+    reciprocal,
     sqrt,
     switch,
     true_div,
@@ -1585,9 +1585,7 @@ def betainc_grad(p, q, x, wrtp: bool):
             derivative_new = K * (F1 * dK + F2)
 
             errapx = scalar_abs(derivative - derivative_new)
-            d_errapx = errapx / maximum(
-                err_threshold, scalar_abs(derivative_new)
-            )
+            d_errapx = errapx / maximum(err_threshold, scalar_abs(derivative_new))
 
             min_iters_cond = n > (min_iters - 1)
             derivative = switch(
