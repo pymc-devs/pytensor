@@ -1315,7 +1315,7 @@ class Softplus(UnaryScalarOp):
             return v
 
 
-softplus = Softplus(upgrade_to_float, name="scalar_softplus")
+softplus = Softplus(upgrade_to_float)
 
 
 class Log1mexp(UnaryScalarOp):

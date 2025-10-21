@@ -1895,7 +1895,7 @@ class Maximum(BinaryScalarOp):
         return (gx, gy)
 
 
-maximum = Maximum(upcast_out, name="maximum")
+maximum = Maximum(upcast_out)
 
 # Backward compatibility
 ScalarMaximum = Maximum
@@ -1941,7 +1941,7 @@ class Minimum(BinaryScalarOp):
         return (gx, gy)
 
 
-minimum = Minimum(upcast_out, name="minimum")
+minimum = Minimum(upcast_out)
 
 # Backward compatibility
 ScalarMinimum = Minimum

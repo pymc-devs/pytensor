@@ -2755,7 +2755,7 @@ def median(x: TensorLike, axis=None) -> TensorVariable:
     return ifelse(even_k, even_median, odd_median, name="median")
 
 
-@scalar_elemwise(symbolname="maximum")
+@scalar_elemwise
 def maximum(x, y):
     """elemwise maximum. See max for the maximum in one tensor
 
@@ -2791,7 +2791,7 @@ def maximum(x, y):
     # see decorator for function body
 
 
-@scalar_elemwise(symbolname="minimum")
+@scalar_elemwise
 def minimum(x, y):
     """elemwise minimum. See min for the minimum in one tensor
 
