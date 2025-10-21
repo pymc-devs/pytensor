@@ -26,13 +26,13 @@ from pytensor.scalar.basic import (
     XOR,
     Add,
     IntDiv,
+    Maximum,
+    Minimum,
     Mul,
-    ScalarMaximum,
-    ScalarMinimum,
     Sub,
     TrueDiv,
     get_scalar_type,
-    scalar_maximum,
+    maximum,
 )
 from pytensor.scalar.basic import add as add_as
 from pytensor.tensor.blas import BatchedDot
@@ -104,16 +104,16 @@ def scalar_in_place_fn_IntDiv(op, idx, res, arr):
     return f"{res}[{idx}] //= {arr}"
 
 
-@scalar_in_place_fn.register(ScalarMaximum)
-def scalar_in_place_fn_ScalarMaximum(op, idx, res, arr):
+@scalar_in_place_fn.register(Maximum)
+def scalar_in_place_fn_Maximum(op, idx, res, arr):
     return f"""
 if {res}[{idx}] < {arr}:
     {res}[{idx}] = {arr}
 """
 
 
-@scalar_in_place_fn.register(ScalarMinimum)
-def scalar_in_place_fn_ScalarMinimum(op, idx, res, arr):
+@scalar_in_place_fn.register(Minimum)
+def scalar_in_place_fn_Minimum(op, idx, res, arr):
     return f"""
 if {res}[{idx}] > {arr}:
     {res}[{idx}] = {arr}

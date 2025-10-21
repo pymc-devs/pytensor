@@ -357,12 +357,12 @@ fill_inplace = second_inplace
 pprint.assign(fill_inplace, printing.FunctionPrinter(["fill="]))
 
 
-@scalar_elemwise(symbolname="scalar_maximum_inplace")
+@scalar_elemwise(symbolname="maximum_inplace")
 def maximum_inplace(a, b):
     """elementwise addition (inplace on `a`)"""
 
 
-@scalar_elemwise(symbolname="scalar_minimum_inplace")
+@scalar_elemwise(symbolname="minimum_inplace")
 def minimum_inplace(a, b):
     """elementwise addition (inplace on `a`)"""
 

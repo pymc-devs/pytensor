@@ -544,14 +544,14 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             elif scalar_op == ps.mul:
                 for axis in sorted(tosum, reverse=True):
                     zv = np.multiply.reduce(zv, axis)
-            elif scalar_op == ps.scalar_maximum:
+            elif scalar_op == ps.maximum:
                 # There is no identity value for the maximum function
                 # So we can't support shape of dimensions 0.
                 if np.prod(zv.shape) == 0:
                     continue
                 for axis in sorted(tosum, reverse=True):
                     zv = np.maximum.reduce(zv, axis)
-            elif scalar_op == ps.scalar_minimum:
+            elif scalar_op == ps.minimum:
                 # There is no identity value for the minimum function
                 # So we can't support shape of dimensions 0.
                 if np.prod(zv.shape) == 0:
@@ -594,7 +594,7 @@ class TestCAReduce(unittest_tools.InferShapeTester):
                 tosum = list(range(len(xsh)))
             f = pytensor.function([x], e.shape, mode=mode, on_unused_input="ignore")
             if not (
-                scalar_op in [ps.scalar_maximum, ps.scalar_minimum]
+                scalar_op in [ps.maximum, ps.minimum]
                 and (xsh == () or np.prod(xsh) == 0)
             ):
                 assert all(f(xv) == zv.shape)
@@ -606,8 +606,8 @@ class TestCAReduce(unittest_tools.InferShapeTester):
         for dtype in ["bool", "floatX", "complex64", "complex128", "int8", "uint8"]:
             self.with_mode(Mode(linker="py"), ps.add, dtype=dtype)
             self.with_mode(Mode(linker="py"), ps.mul, dtype=dtype)
-            self.with_mode(Mode(linker="py"), ps.scalar_maximum, dtype=dtype)
-            self.with_mode(Mode(linker="py"), ps.scalar_minimum, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.maximum, dtype=dtype)
+            self.with_mode(Mode(linker="py"), ps.minimum, dtype=dtype)
             self.with_mode(Mode(linker="py"), ps.and_, dtype=dtype, tensor_op=pt_all)
             self.with_mode(Mode(linker="py"), ps.or_, dtype=dtype, tensor_op=pt_any)
         for dtype in ["int8", "uint8"]:
@@ -620,10 +620,10 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             self.with_mode(Mode(linker="py"), ps.add, dtype=dtype, test_nan=True)
             self.with_mode(Mode(linker="py"), ps.mul, dtype=dtype, test_nan=True)
             self.with_mode(
-                Mode(linker="py"), ps.scalar_maximum, dtype=dtype, test_nan=True
+                Mode(linker="py"), ps.maximum, dtype=dtype, test_nan=True
             )
             self.with_mode(
-                Mode(linker="py"), ps.scalar_minimum, dtype=dtype, test_nan=True
+                Mode(linker="py"), ps.minimum, dtype=dtype, test_nan=True
             )
             self.with_mode(
                 Mode(linker="py"),
@@ -659,8 +659,8 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             self.with_mode(Mode(linker="c"), ps.add, dtype=dtype)
             self.with_mode(Mode(linker="c"), ps.mul, dtype=dtype)
         for dtype in ["bool", "floatX", "int8", "uint8"]:
-            self.with_mode(Mode(linker="c"), ps.scalar_minimum, dtype=dtype)
-            self.with_mode(Mode(linker="c"), ps.scalar_maximum, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.minimum, dtype=dtype)
+            self.with_mode(Mode(linker="c"), ps.maximum, dtype=dtype)
             self.with_mode(Mode(linker="c"), ps.and_, dtype=dtype, tensor_op=pt_all)
             self.with_mode(Mode(linker="c"), ps.or_, dtype=dtype, tensor_op=pt_any)
         for dtype in ["bool", "int8", "uint8"]:
@@ -679,10 +679,10 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             self.with_mode(Mode(linker="c"), ps.mul, dtype=dtype, test_nan=True)
         for dtype in ["floatX"]:
             self.with_mode(
-                Mode(linker="c"), ps.scalar_minimum, dtype=dtype, test_nan=True
+                Mode(linker="c"), ps.minimum, dtype=dtype, test_nan=True
             )
             self.with_mode(
-                Mode(linker="c"), ps.scalar_maximum, dtype=dtype, test_nan=True
+                Mode(linker="c"), ps.maximum, dtype=dtype, test_nan=True
             )
 
     def test_infer_shape(self, dtype=None, pre_scalar_op=None):

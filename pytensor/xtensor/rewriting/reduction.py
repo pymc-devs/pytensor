@@ -30,9 +30,9 @@ def lower_reduce(fgraph, node):
             tensor_op_class = All
         case ps.or_:
             tensor_op_class = Any
-        case ps.scalar_maximum:
+        case ps.maximum:
             tensor_op_class = Max
-        case ps.scalar_minimum:
+        case ps.minimum:
             tensor_op_class = Min
         case _:
             # Case without known/predefined Ops

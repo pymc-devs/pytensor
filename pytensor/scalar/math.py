@@ -33,7 +33,7 @@ from pytensor.scalar.basic import (
     log,
     log1p,
     reciprocal,
-    scalar_maximum,
+    maximum,
     sqrt,
     switch,
     true_div,
@@ -1585,7 +1585,7 @@ def betainc_grad(p, q, x, wrtp: bool):
             derivative_new = K * (F1 * dK + F2)
 
             errapx = scalar_abs(derivative - derivative_new)
-            d_errapx = errapx / scalar_maximum(
+            d_errapx = errapx / maximum(
                 err_threshold, scalar_abs(derivative_new)
             )
 
@@ -1833,7 +1833,7 @@ def _grad_2f1_loop(a, b, c, z, *, skip_loop, wrt, dtype):
         if len(grad_incs) == 1:
             [max_abs_grad_inc] = grad_incs
         else:
-            max_abs_grad_inc = reduce(scalar_maximum, abs_grad_incs)
+            max_abs_grad_inc = reduce(maximum, abs_grad_incs)
 
         return (
             (*grads, *log_gs, *log_gs_signs, log_t, log_t_sign, sign_zk, k),

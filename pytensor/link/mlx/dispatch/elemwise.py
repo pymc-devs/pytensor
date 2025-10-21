@@ -25,11 +25,11 @@ from pytensor.scalar.basic import (
     IsNan,
     Log,
     Log1p,
+    Maximum,
+    Minimum,
     Mul,
     Neg,
     Pow,
-    ScalarMaximum,
-    ScalarMinimum,
     Sign,
     Sin,
     Sqr,
@@ -105,7 +105,7 @@ def mlx_funcify_CARreduce_OR(scalar_op, axis):
     return any_reduce
 
 
-@mlx_funcify_CAReduce_scalar_op.register(ScalarMaximum)
+@mlx_funcify_CAReduce_scalar_op.register(Maximum)
 def mlx_funcify_CARreduce_Maximum(scalar_op, axis):
     def max_reduce(x):
         return mx.max(x, axis=axis)
@@ -113,7 +113,7 @@ def mlx_funcify_CARreduce_Maximum(scalar_op, axis):
     return max_reduce
 
 
-@mlx_funcify_CAReduce_scalar_op.register(ScalarMinimum)
+@mlx_funcify_CAReduce_scalar_op.register(Minimum)
 def mlx_funcify_CARreduce_Minimum(scalar_op, axis):
     def min_reduce(x):
         return mx.min(x, axis=axis)
@@ -354,13 +354,13 @@ def mlx_funcify_Elemwise_scalar_OR(scalar_op):
     return mx.bitwise_or
 
 
-@mlx_funcify_Elemwise_scalar_op.register(ScalarMaximum)
-def mlx_funcify_Elemwise_scalar_ScalarMaximum(scalar_op):
+@mlx_funcify_Elemwise_scalar_op.register(Maximum)
+def mlx_funcify_Elemwise_scalar_Maximum(scalar_op):
     return mx.maximum
 
 
-@mlx_funcify_Elemwise_scalar_op.register(ScalarMinimum)
-def mlx_funcify_Elemwise_scalar_ScalarMinimum(scalar_op):
+@mlx_funcify_Elemwise_scalar_op.register(Minimum)
+def mlx_funcify_Elemwise_scalar_Minimum(scalar_op):
     return mx.minimum
 
 

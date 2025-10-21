@@ -3889,7 +3889,7 @@ def check_max_log_sum_exp(x, axis, dimshuffle_op=None):
     for node in fgraph:
         if (
             hasattr(node.op, "scalar_op")
-            and node.op.scalar_op == ps.basic.scalar_maximum
+            and node.op.scalar_op == ps.basic.maximum
         ):
             return
 

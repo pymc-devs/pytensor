@@ -1855,7 +1855,7 @@ invert = Invert()
 ##############
 # Arithmetic
 ##############
-class ScalarMaximum(BinaryScalarOp):
+class Maximum(BinaryScalarOp):
     commutative = True
     associative = True
     nfunc_spec = ("maximum", 2, 1)
@@ -1895,10 +1895,14 @@ class ScalarMaximum(BinaryScalarOp):
         return (gx, gy)
 
 
-scalar_maximum = ScalarMaximum(upcast_out, name="maximum")
+maximum = Maximum(upcast_out, name="maximum")
+
+# Backward compatibility
+ScalarMaximum = Maximum
+scalar_maximum = maximum
 
 
-class ScalarMinimum(BinaryScalarOp):
+class Minimum(BinaryScalarOp):
     commutative = True
     associative = True
     nfunc_spec = ("minimum", 2, 1)
@@ -1937,7 +1941,11 @@ class ScalarMinimum(BinaryScalarOp):
         return (gx, gy)
 
 
-scalar_minimum = ScalarMinimum(upcast_out, name="minimum")
+minimum = Minimum(upcast_out, name="minimum")
+
+# Backward compatibility
+ScalarMinimum = Minimum
+scalar_minimum = minimum
 
 
 class Add(ScalarOp):

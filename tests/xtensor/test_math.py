@@ -30,8 +30,8 @@ def test_all_scalar_ops_are_wrapped():
             "round_half_away_from_zero",
             "round_half_to_even",
             "scalar_abs",
-            "scalar_maximum",
-            "scalar_minimum",
+            "maximum",
+            "minimum",
         } or name.startswith("convert_to_"):
             # These are not regular numpy functions or are unusual alias
             continue
