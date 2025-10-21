@@ -2278,9 +2278,9 @@ def subtract(
 
     Parameters
     ----------
-    x: SparseVariable or TensorVariable
+    x : SparseVariable or TensorVariable
         A matrix variable.
-    y: SparseVariable or TensorVariable
+    y : SparseVariable or TensorVariable
         A matrix variable.
 
     Returns
@@ -2514,9 +2514,9 @@ def multiply(
 
     Parameters
     ----------
-    x: SparseVariable
+    x : SparseVariable
         A matrix variable.
-    y: SparseVariable
+    y : SparseVariable
         A matrix variable.
 
     Returns
