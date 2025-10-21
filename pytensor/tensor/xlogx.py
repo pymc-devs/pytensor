@@ -31,7 +31,7 @@ class XlogX(ps.UnaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
 
-scalar_xlogx = XlogX(ps.upgrade_to_float, name="scalar_xlogx")
+scalar_xlogx = XlogX(ps.upgrade_to_float)
 xlogx = Elemwise(scalar_xlogx, name="xlogx")
 
 
@@ -62,5 +62,5 @@ class XlogY0(ps.BinaryScalarOp):
         raise NotImplementedError("only floatingpoint is implemented")
 
 
-scalar_xlogy0 = XlogY0(ps.upgrade_to_float, name="scalar_xlogy0")
+scalar_xlogy0 = XlogY0(ps.upgrade_to_float)
 xlogy0 = Elemwise(scalar_xlogy0, name="xlogy0")

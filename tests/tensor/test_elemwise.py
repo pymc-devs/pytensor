@@ -619,12 +619,8 @@ class TestCAReduce(unittest_tools.InferShapeTester):
         for dtype in ["floatX", "complex64", "complex128"]:
             self.with_mode(Mode(linker="py"), ps.add, dtype=dtype, test_nan=True)
             self.with_mode(Mode(linker="py"), ps.mul, dtype=dtype, test_nan=True)
-            self.with_mode(
-                Mode(linker="py"), ps.maximum, dtype=dtype, test_nan=True
-            )
-            self.with_mode(
-                Mode(linker="py"), ps.minimum, dtype=dtype, test_nan=True
-            )
+            self.with_mode(Mode(linker="py"), ps.maximum, dtype=dtype, test_nan=True)
+            self.with_mode(Mode(linker="py"), ps.minimum, dtype=dtype, test_nan=True)
             self.with_mode(
                 Mode(linker="py"),
                 ps.or_,
@@ -678,12 +674,8 @@ class TestCAReduce(unittest_tools.InferShapeTester):
             self.with_mode(Mode(linker="c"), ps.add, dtype=dtype, test_nan=True)
             self.with_mode(Mode(linker="c"), ps.mul, dtype=dtype, test_nan=True)
         for dtype in ["floatX"]:
-            self.with_mode(
-                Mode(linker="c"), ps.minimum, dtype=dtype, test_nan=True
-            )
-            self.with_mode(
-                Mode(linker="c"), ps.maximum, dtype=dtype, test_nan=True
-            )
+            self.with_mode(Mode(linker="c"), ps.minimum, dtype=dtype, test_nan=True)
+            self.with_mode(Mode(linker="c"), ps.maximum, dtype=dtype, test_nan=True)
 
     def test_infer_shape(self, dtype=None, pre_scalar_op=None):
         if dtype is None:

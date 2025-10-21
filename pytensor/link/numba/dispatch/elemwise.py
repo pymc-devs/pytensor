@@ -459,7 +459,7 @@ def numba_funcify_Softmax(op, node, **kwargs):
     if axis is not None:
         axis = normalize_axis_index(axis, x_at.ndim)
         reduce_max_py = create_multiaxis_reducer(
-            scalar_maximum, -np.inf, axis, x_at.ndim, x_dtype, keepdims=True
+            maximum, -np.inf, axis, x_at.ndim, x_dtype, keepdims=True
         )
         reduce_sum_py = create_multiaxis_reducer(
             add_as, 0.0, (axis,), x_at.ndim, x_dtype, keepdims=True
@@ -523,7 +523,7 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
     if axis is not None:
         axis = normalize_axis_index(axis, x_at.ndim)
         reduce_max_py = create_multiaxis_reducer(
-            scalar_maximum,
+            maximum,
             -np.inf,
             (axis,),
             x_at.ndim,

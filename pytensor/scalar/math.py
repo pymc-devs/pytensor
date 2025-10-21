@@ -1360,7 +1360,7 @@ class Log1mexp(UnaryScalarOp):
             raise NotImplementedError("only floating point is implemented")
 
 
-log1mexp = Log1mexp(upgrade_to_float, name="scalar_log1mexp")
+log1mexp = Log1mexp(upgrade_to_float)
 
 
 class BetaInc(ScalarOp):
