@@ -3,11 +3,11 @@ import warnings
 import numba
 import numpy as np
 
-from pytensor.link.numba.dispatch import basic as numba_basic
+import pytensor.link.numba.dispatch.basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     get_numba_type,
     int_to_float_fn,
-    numba_funcify,
+    register_funcify_default_op_cache_key,
 )
 from pytensor.tensor.nlinalg import (
     SVD,
@@ -20,7 +20,7 @@ from pytensor.tensor.nlinalg import (
 )
 
 
-@numba_funcify.register(SVD)
+@register_funcify_default_op_cache_key(SVD)
 def numba_funcify_SVD(op, node, **kwargs):
     full_matrices = op.full_matrices
     compute_uv = op.compute_uv
@@ -30,21 +30,21 @@ def numba_funcify_SVD(op, node, **kwargs):
 
     if not compute_uv:
 
-        @numba_basic.numba_njit()
+        @numba_basic.numba_njit
         def svd(x):
             _, ret, _ = np.linalg.svd(inputs_cast(x), full_matrices)
             return ret
 
     else:
 
-        @numba_basic.numba_njit()
+        @numba_basic.numba_njit
         def svd(x):
             return np.linalg.svd(inputs_cast(x), full_matrices)
 
     return svd
 
 
-@numba_funcify.register(Det)
+@register_funcify_default_op_cache_key(Det)
 def numba_funcify_Det(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)
@@ -56,7 +56,7 @@ def numba_funcify_Det(op, node, **kwargs):
     return det
 
 
-@numba_funcify.register(SLogDet)
+@register_funcify_default_op_cache_key(SLogDet)
 def numba_funcify_SLogDet(op, node, **kwargs):
     out_dtype_1 = node.outputs[0].type.numpy_dtype
     out_dtype_2 = node.outputs[1].type.numpy_dtype
@@ -74,7 +74,7 @@ def numba_funcify_SLogDet(op, node, **kwargs):
     return slogdet
 
 
-@numba_funcify.register(Eig)
+@register_funcify_default_op_cache_key(Eig)
 def numba_funcify_Eig(op, node, **kwargs):
     w_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, w_dtype)
@@ -86,7 +86,7 @@ def numba_funcify_Eig(op, node, **kwargs):
     return eig
 
 
-@numba_funcify.register(Eigh)
+@register_funcify_default_op_cache_key(Eigh)
 def numba_funcify_Eigh(op, node, **kwargs):
     uplo = op.UPLO
 
@@ -120,7 +120,7 @@ def numba_funcify_Eigh(op, node, **kwargs):
     return eigh
 
 
-@numba_funcify.register(MatrixInverse)
+@register_funcify_default_op_cache_key(MatrixInverse)
 def numba_funcify_MatrixInverse(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)
@@ -132,7 +132,7 @@ def numba_funcify_MatrixInverse(op, node, **kwargs):
     return matrix_inverse
 
 
-@numba_funcify.register(MatrixPinv)
+@register_funcify_default_op_cache_key(MatrixPinv)
 def numba_funcify_MatrixPinv(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     inputs_cast = int_to_float_fn(node.inputs, out_dtype)

@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from copy import copy, deepcopy
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent
 
 import numba
@@ -13,7 +14,11 @@ import pytensor.tensor.random.basic as ptr
 from pytensor.graph import Apply
 from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import direct_cast, numba_funcify
+from pytensor.link.numba.dispatch.basic import (
+    direct_cast,
+    numba_funcify,
+    register_funcify_and_cache_key,
+)
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
@@ -91,7 +96,7 @@ def numba_core_rv_default(op, node):
 def numba_core_BernoulliRV(op, node):
     out_dtype = node.outputs[1].type.numpy_dtype
 
-    @numba_basic.numba_njit()
+    @numba_basic.numba_njit
     def random(rng, p):
         return (
             direct_cast(0, out_dtype)
@@ -224,15 +229,16 @@ def core_GumbelRV(op, node):
     """Code adapted from Numpy Implementation
 
     https://github.com/numpy/numpy/blob/6f6be042c6208815b15b90ba87d04159bfa25fd3/numpy/random/src/distributions/distributions.c#L502-L511
+
+    Non-recursive version to allow numba_njit(final_function=False)
     """
 
-    @numba_basic.numba_njit
+    @numba_basic.numba_njit(final_function=False)
     def random_fn(rng, loc, scale):
-        U = 1.0 - rng.random()
-        if U < 1.0:
-            return loc - scale * np.log(-np.log(U))
-        else:
-            return random_fn(rng, loc, scale)
+        while True:
+            U = 1.0 - rng.random()
+            if U < 1.0:
+                return loc - scale * np.log(-np.log(U))
 
     return random_fn
 
@@ -395,7 +401,7 @@ def numba_funcify_RandomVariable_core(op: RandomVariable, **kwargs):
     )
 
 
-@numba_funcify.register
+@register_funcify_and_cache_key(RandomVariableWithCoreShape)
 def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs):
     core_shape = node.inputs[0]
 
@@ -451,4 +457,16 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
         return impl
 
-    return random
+    rv_op_props_dict = rv_op.props_dict() if hasattr(rv_op, "props_dict") else {}
+    random_rv_key_contents = (
+        type(op),
+        type(rv_op),
+        rv_op,
+        tuple(rv_op_props_dict.items()),
+        size_len,
+        core_shape_len,
+        inplace,
+        input_bc_patterns,
+    )
+    random_rv_key = sha256(str(random_rv_key_contents).encode()).hexdigest()
+    return random, random_rv_key

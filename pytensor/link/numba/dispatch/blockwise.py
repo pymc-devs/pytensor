@@ -1,21 +1,26 @@
+from hashlib import sha256
 from typing import cast
 
 from numba.core.extending import overload
 from numba.np.unsafe.ndarray import to_fixed_tuple
 
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
+from pytensor.link.numba.cache import compile_numba_function_src
+from pytensor.link.numba.dispatch.basic import (
+    numba_funcify_and_cache_key,
+    numba_njit,
+    register_funcify_and_cache_key,
+)
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
     encode_literals,
     store_core_outputs,
 )
-from pytensor.link.utils import compile_function_src
 from pytensor.tensor import TensorVariable, get_vector_length
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 
 
-@numba_funcify.register(BlockwiseWithCoreShape)
+@register_funcify_and_cache_key(BlockwiseWithCoreShape)
 def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
     [blockwise_node] = op.fgraph.apply_nodes
     blockwise_op: Blockwise = blockwise_node.op
@@ -28,7 +33,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         cast(tuple[TensorVariable], node.inputs[:nin]),
         propagate_unbatched_core_inputs=True,
     )
-    core_op_fn = numba_funcify(
+    core_op_fn, core_op_key = numba_funcify_and_cache_key(
         core_op,
         node=core_node,
         parent_node=node,
@@ -56,7 +61,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
     src += ")"
 
     to_tuple = numba_njit(
-        compile_function_src(
+        compile_numba_function_src(
             src,
             "to_tuple",
             global_env={"to_fixed_tuple": to_fixed_tuple},
@@ -90,4 +95,22 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
 
         return impl
 
-    return blockwise
+    if core_op_key is None:
+        # We were told the core op cannot be cached
+        blockwise_key = None
+    else:
+        blockwise_key = "_".join(
+            map(
+                str,
+                (
+                    type(op),
+                    type(blockwise_op),
+                    tuple(blockwise_op.destroy_map.items()),
+                    blockwise_op.signature,
+                    input_bc_patterns,
+                    core_op_key,
+                ),
+            )
+        )
+        blockwise_key = sha256(blockwise_key.encode()).hexdigest()
+    return blockwise, blockwise_key
