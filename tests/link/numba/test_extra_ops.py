@@ -5,6 +5,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config
+from pytensor.raise_op import assert_op
 from pytensor.tensor import extra_ops
 from tests.link.numba.test_basic import compare_numba_and_py
 
@@ -383,3 +384,12 @@ def test_Searchsorted(a, v, side, sorter, exc):
             g,
             [test_a, test_v] if sorter is None else [test_a, test_v, test_sorter],
         )
+
+
+def test_check_and_raise():
+    x = pt.vector()
+    x_test_value = np.array([1.0, 2.0], dtype=config.floatX)
+
+    out = assert_op(x.sum(), np.array(True))
+
+    compare_numba_and_py([x], out, [x_test_value])
