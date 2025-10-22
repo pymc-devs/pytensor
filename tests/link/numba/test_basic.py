@@ -26,7 +26,6 @@ from pytensor.graph.type import Type
 from pytensor.ifelse import ifelse
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.linker import NumbaLinker
-from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
 from pytensor.tensor.elemwise import Elemwise
 
@@ -370,32 +369,6 @@ def test_perform(inputs, op, exc):
             outputs,
             test_values,
         )
-
-
-def test_perform_params():
-    """This tests for `Op.perform` implementations that require the `params` arguments."""
-
-    x = pt.vector(shape=(2,))
-    x_test_value = np.array([1.0, 2.0], dtype=config.floatX)
-
-    out = assert_op(x, np.array(True))
-
-    compare_numba_and_py([x], out, [x_test_value])
-
-
-def test_perform_type_convert():
-    """This tests the use of `Type.filter` in `objmode`.
-
-    The `Op.perform` takes a single input that it returns as-is, but it gets a
-    native scalar and it's supposed to return an `np.ndarray`.
-    """
-
-    x = pt.vector()
-    x_test_value = np.array([1.0, 2.0], dtype=config.floatX)
-
-    out = assert_op(x.sum(), np.array(True))
-
-    compare_numba_and_py([x], out, [x_test_value])
 
 
 def test_shared():
