@@ -388,11 +388,11 @@ def reciprocal(): ...
 def round(): ...
 
 
-@_as_xelemwise(ps.scalar_maximum)
+@_as_xelemwise(ps.maximum)
 def maximum(): ...
 
 
-@_as_xelemwise(ps.scalar_minimum)
+@_as_xelemwise(ps.minimum)
 def minimum(): ...
 
 

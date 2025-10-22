@@ -948,8 +948,8 @@ class Gemm(GemmRelated):
         z_shape, _, x_shape, y_shape, _ = input_shapes
         return [
             (
-                pytensor.scalar.scalar_maximum(z_shape[0], x_shape[0]),
-                pytensor.scalar.scalar_maximum(z_shape[1], y_shape[1]),
+                pytensor.scalar.maximum(z_shape[0], x_shape[0]),
+                pytensor.scalar.maximum(z_shape[1], y_shape[1]),
             )
         ]
 

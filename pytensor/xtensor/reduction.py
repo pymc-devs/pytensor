@@ -63,8 +63,8 @@ def reduce(x, dim: REDUCE_DIM = None, *, binary_op):
 
 sum = partial(reduce, binary_op=ps.add)
 prod = partial(reduce, binary_op=ps.mul)
-max = partial(reduce, binary_op=ps.scalar_maximum)
-min = partial(reduce, binary_op=ps.scalar_minimum)
+max = partial(reduce, binary_op=ps.maximum)
+min = partial(reduce, binary_op=ps.minimum)
 
 
 def bool_reduce(x, dim: REDUCE_DIM = None, *, binary_op):
