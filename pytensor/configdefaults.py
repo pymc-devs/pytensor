@@ -45,6 +45,8 @@ def _filter_mode(val):
         "NanGuardMode",
         "FAST_COMPILE",
         "DEBUG_MODE",
+        "CVM",
+        "C",
         "JAX",
         "NUMBA",
         "PYTORCH",
