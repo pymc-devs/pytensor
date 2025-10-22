@@ -6,15 +6,10 @@ import numpy as np
 from numba.core.errors import NumbaWarning
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 
-from pytensor import In, config
-from pytensor.compile import NUMBA
-from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.function.types import add_supervisor_to_fgraph
-from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
+from pytensor import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
-from pytensor.ifelse import IfElse
 from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.link.utils import (
     fgraph_to_python,
@@ -280,90 +275,3 @@ def numba_funcify_FunctionGraph(
         fgraph_name=fgraph_name,
         **kwargs,
     )
-
-
-@numba_funcify.register(OpFromGraph)
-def numba_funcify_OpFromGraph(op, node=None, **kwargs):
-    _ = kwargs.pop("storage_map", None)
-
-    # Apply inner rewrites
-    # TODO: Not sure this is the right place to do this, should we have a rewrite that
-    #  explicitly triggers the optimization of the inner graphs of OpFromGraph?
-    #  The C-code defers it to the make_thunk phase
-    fgraph = op.fgraph
-    add_supervisor_to_fgraph(
-        fgraph=fgraph,
-        input_specs=[In(x, borrow=True, mutable=False) for x in fgraph.inputs],
-        accept_inplace=True,
-    )
-    NUMBA.optimizer(fgraph)
-    fgraph_fn = numba_njit(numba_funcify(op.fgraph, **kwargs))
-
-    if len(op.fgraph.outputs) == 1:
-
-        @numba_njit
-        def opfromgraph(*inputs):
-            return fgraph_fn(*inputs)[0]
-
-    else:
-
-        @numba_njit
-        def opfromgraph(*inputs):
-            return fgraph_fn(*inputs)
-
-    return opfromgraph
-
-
-@numba_funcify.register(TypeCastingOp)
-def numba_funcify_type_casting(op, **kwargs):
-    @numba_njit
-    def identity(x):
-        return x
-
-    return identity
-
-
-@numba_funcify.register(DeepCopyOp)
-def numba_funcify_DeepCopyOp(op, node, **kwargs):
-    if isinstance(node.inputs[0].type, TensorType):
-
-        @numba_njit
-        def deepcopy(x):
-            return np.copy(x)
-
-    else:
-
-        @numba_njit
-        def deepcopy(x):
-            return x
-
-    return deepcopy
-
-
-@numba_funcify.register(IfElse)
-def numba_funcify_IfElse(op, **kwargs):
-    n_outs = op.n_outs
-
-    if n_outs > 1:
-
-        @numba_njit
-        def ifelse(cond, *args):
-            if cond:
-                res = args[:n_outs]
-            else:
-                res = args[n_outs:]
-
-            return res
-
-    else:
-
-        @numba_njit
-        def ifelse(cond, *args):
-            if cond:
-                res = args[:n_outs]
-            else:
-                res = args[n_outs:]
-
-            return res[0]
-
-    return ifelse
