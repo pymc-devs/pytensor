@@ -11,7 +11,6 @@ from pytensor.link.numba.dispatch.basic import (
     get_numba_type,
     numba_funcify,
 )
-from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.extra_ops import (
     Bartlett,
@@ -325,18 +324,3 @@ def numba_funcify_Searchsorted(op, node, **kwargs):
             return np.searchsorted(a, v, side)
 
     return searchsorted
-
-
-@numba_funcify.register(CheckAndRaise)
-def numba_funcify_CheckAndRaise(op, node, **kwargs):
-    error = op.exc_type
-    msg = op.msg
-
-    @numba_basic.numba_njit
-    def check_and_raise(x, *conditions):
-        for cond in conditions:
-            if not cond:
-                raise error(msg)
-        return x
-
-    return check_and_raise
