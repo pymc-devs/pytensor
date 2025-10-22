@@ -47,6 +47,8 @@ def _filter_mode(val):
         "DEBUG_MODE",
         "JAX",
         "NUMBA",
+        "PYTORCH",
+        "MLX",
     ]
     if val in str_options:
         return val
@@ -367,13 +369,25 @@ def add_compile_configvars():
     )
     del param
 
+    default_linker = "cvm"
+
     if rc == 0 and config.cxx != "":
         # Keep the default linker the same as the one for the mode FAST_RUN
-        linker_options = ["c|py", "py", "c", "c|py_nogc", "vm", "vm_nogc", "cvm_nogc"]
+        linker_options = [
+            "c|py",
+            "py",
+            "c",
+            "c|py_nogc",
+            "vm",
+            "vm_nogc",
+            "cvm_nogc",
+            "numba",
+            "jax",
+        ]
     else:
         # g++ is not present or the user disabled it,
         # linker should default to python only.
-        linker_options = ["py", "vm_nogc"]
+        linker_options = ["py", "vm", "vm_nogc", "numba", "jax"]
         if type(config).cxx.is_default:
             # If the user provided an empty value for cxx, do not warn.
             _logger.warning(
@@ -387,7 +401,7 @@ def add_compile_configvars():
         "linker",
         "Default linker used if the pytensor flags mode is Mode",
         # Not mutable because the default mode is cached after the first use.
-        EnumStr("cvm", linker_options, mutable=False),
+        EnumStr(default_linker, linker_options, mutable=False),
         in_c_key=False,
     )
 
