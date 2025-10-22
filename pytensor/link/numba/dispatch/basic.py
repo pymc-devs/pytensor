@@ -233,37 +233,23 @@ def generate_fallback_impl(op, node, storage_map=None, **kwargs):
         node.dprint(depth=5, print_type=True)
 
     n_outputs = len(node.outputs)
+    single_out = n_outputs == 1
 
-    if n_outputs > 1:
-        ret_sig = numba.types.Tuple([get_numba_type(o.type) for o in node.outputs])
-    else:
+    if single_out:
         ret_sig = get_numba_type(node.outputs[0].type)
-
-    output_types = tuple(out.type for out in node.outputs)
+    else:
+        ret_sig = numba.types.Tuple([get_numba_type(o.type) for o in node.outputs])
 
     def py_perform(inputs):
-        outputs = [[None] for i in range(n_outputs)]
-        op.perform(node, inputs, outputs)
-        return outputs
-
-    if n_outputs == 1:
-
-        def py_perform_return(inputs):
-            return output_types[0].filter(py_perform(inputs)[0][0])
-
-    else:
-
-        def py_perform_return(inputs):
-            # zip strict not specified because we are in a hot loop
-            return tuple(
-                out_type.filter(out[0])
-                for out_type, out in zip(output_types, py_perform(inputs))
-            )
+        output_storage = [[None] for _i in range(n_outputs)]
+        op.perform(node, inputs, output_storage)
+        outputs = tuple(o[0] for o in output_storage)
+        return outputs[0] if single_out else outputs
 
     @numba_njit
     def perform(*inputs):
         with numba.objmode(ret=ret_sig):
-            ret = py_perform_return(inputs)
+            ret = py_perform(inputs)
         return ret
 
     return perform
