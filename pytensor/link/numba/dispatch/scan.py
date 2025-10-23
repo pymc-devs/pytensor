@@ -97,7 +97,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     )
     rewriter(fgraph)
 
-    scan_inner_func = numba_basic.numba_njit(numba_funcify(op.fgraph))
+    scan_inner_func = numba_funcify(op.fgraph)
 
     outer_in_names_to_vars = {
         (f"outer_in_{i}" if i > 0 else "n_steps"): v for i, v in enumerate(node.inputs)
