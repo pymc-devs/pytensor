@@ -228,7 +228,7 @@ Here's an example for :class:`DimShuffle`:
                     # E       No match.
                     # ...(on this line)...
                     # E           shuffle_shape = res.shape[: len(shuffle)]
-                    @numba_basic.numba_njit(inline="always")
+                    @numba_basic.numba_njit
                     def dimshuffle(x):
                         return dimshuffle_inner(np.asarray(x), shuffle)
 

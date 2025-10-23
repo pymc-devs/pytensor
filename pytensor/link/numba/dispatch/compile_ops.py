@@ -30,21 +30,7 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
         accept_inplace=True,
     )
     NUMBA.optimizer(fgraph)
-    fgraph_fn = numba_njit(numba_funcify(op.fgraph, **kwargs))
-
-    if len(op.fgraph.outputs) == 1:
-
-        @numba_basic.numba_njit
-        def opfromgraph(*inputs):
-            return fgraph_fn(*inputs)[0]
-
-    else:
-
-        @numba_basic.numba_njit
-        def opfromgraph(*inputs):
-            return fgraph_fn(*inputs)
-
-    return opfromgraph
+    return numba_funcify(op.fgraph, squeeze_output=True, **kwargs)
 
 
 @numba_funcify.register(TypeCastingOp)

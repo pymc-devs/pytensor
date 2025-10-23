@@ -220,14 +220,9 @@ def numba_funcify_Clip(op, **kwargs):
 
 @numba_funcify.register(Composite)
 def numba_funcify_Composite(op, node, **kwargs):
-    signature = create_numba_signature(op.fgraph, force_scalar=True)
-
     _ = kwargs.pop("storage_map", None)
 
-    composite_fn = numba_basic.numba_njit(signature)(
-        numba_funcify(op.fgraph, squeeze_output=True, **kwargs)
-    )
-    return composite_fn
+    return numba_funcify(op.fgraph, squeeze_output=True, **kwargs)
 
 
 @numba_funcify.register(Second)
