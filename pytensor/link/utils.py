@@ -731,6 +731,8 @@ def fgraph_to_python(
     if global_env is None:
         global_env = {}
 
+    tipifiyed_vars = set()
+
     body_assigns = []
     for node in order:
         compiled_func = op_conversion_fn(
@@ -742,17 +744,29 @@ def fgraph_to_python(
         global_env[local_compiled_func_name] = compiled_func
 
         node_input_names = []
-        for i in node.inputs:
-            local_input_name = unique_name(i)
+        for inp in node.inputs:
+            local_input_name = unique_name(inp)
+            is_constant = isinstance(inp, Constant)
             input_storage = storage_map.setdefault(
-                i, [None if not isinstance(i, Constant) else i.data]
+                inp,
+                [
+                    inp.data  # type: ignore[attr-defined]
+                    if is_constant
+                    else None
+                ],
             )
-            if input_storage[0] is not None or isinstance(i, Constant):
+            if (
+                is_constant or input_storage[0] is not None
+            ) and inp not in tipifiyed_vars:
                 # Constants need to be assigned locally and referenced
+                # FIXME: This is converting shared variables, but these may change later,
+                #  so this one-time conversion is wasteful / not robust
                 global_env[local_input_name] = type_conversion_fn(
-                    input_storage[0], variable=i, storage=input_storage, **kwargs
+                    input_storage[0], variable=inp, storage=input_storage, **kwargs
                 )
+                tipifiyed_vars.add(inp)
                 # TODO: We could attempt to use the storage arrays directly
+                #  Otherwise we're doubling the memory footprint of constants
                 # E.g. `local_input_name = f"{local_input_name}[0]"`
             node_input_names.append(local_input_name)
 
