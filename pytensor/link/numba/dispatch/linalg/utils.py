@@ -14,13 +14,13 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
 )
 
 
-@numba_basic.numba_njit(inline="always")
+@numba_basic.numba_njit
 def _copy_to_fortran_order_even_if_1d(x):
     # Numba's _copy_to_fortran_order doesn't do anything for vectors
     return x.copy() if x.ndim == 1 else _copy_to_fortran_order(x)
 
 
-@numba_basic.numba_njit(inline="always")
+@numba_basic.numba_njit
 def _trans_char_to_int(trans):
     if trans not in [0, 1, 2]:
         raise ValueError('Parameter "trans" should be one of 0, 1, 2')
@@ -53,7 +53,7 @@ def _check_scipy_linalg_matrix(a, func_name):
         raise numba.TypingError(msg, highlighting=False)
 
 
-@numba_basic.numba_njit(inline="always")
+@numba_basic.numba_njit
 def _solve_check(n, info, lamch=False, rcond=None):
     """
     Check arguments during the different steps of the solution phase
@@ -67,6 +67,7 @@ def _solve_check(n, info, lamch=False, rcond=None):
         raise LinAlgError("Matrix is singular.")
 
     if lamch:
+        assert rcond is not None
         E = _xlamch("E")
         if rcond < E:
             # TODO: This should be a warning, but we can't raise warnings in numba mode

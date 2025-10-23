@@ -1,4 +1,3 @@
-import sys
 from typing import cast
 
 from numba.core.extending import overload
@@ -61,32 +60,34 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
             src,
             "to_tuple",
             global_env={"to_fixed_tuple": to_fixed_tuple},
-        ),
-        # cache=True leads to a numba.cloudpickle dump failure in Python 3.10
-        # May be fine in Python 3.11, but I didn't test. It was fine in 3.12
-        cache=sys.version_info >= (3, 12),
+        )
     )
 
-    def blockwise_wrapper(*inputs_and_core_shapes):
-        inputs, core_shapes = inputs_and_core_shapes[:nin], inputs_and_core_shapes[nin:]
-        tuple_core_shapes = to_tuple(core_shapes)
-        return _vectorized(
-            core_op_fn,
-            input_bc_patterns,
-            output_bc_patterns,
-            output_dtypes,
-            inplace_pattern,
-            (),  # constant_inputs
-            inputs,
-            tuple_core_shapes,
-            None,  # size
-        )
-
     def blockwise(*inputs_and_core_shapes):
-        raise NotImplementedError("Non-jitted BlockwiseWithCoreShape not implemented")
+        raise NotImplementedError(
+            "Numba implementation of Blockwise cannot be evaluated in Python (non-JIT) mode."
+        )
 
     @overload(blockwise, jit_options=_jit_options)
     def ov_blockwise(*inputs_and_core_shapes):
-        return blockwise_wrapper
+        def impl(*inputs_and_core_shapes):
+            inputs, core_shapes = (
+                inputs_and_core_shapes[:nin],
+                inputs_and_core_shapes[nin:],
+            )
+            tuple_core_shapes = to_tuple(core_shapes)
+            return _vectorized(
+                core_op_fn,
+                input_bc_patterns,
+                output_bc_patterns,
+                output_dtypes,
+                inplace_pattern,
+                (),  # constant_inputs
+                inputs,
+                tuple_core_shapes,
+                None,  # size
+            )
+
+        return impl
 
     return blockwise

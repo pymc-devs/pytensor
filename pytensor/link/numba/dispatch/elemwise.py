@@ -291,19 +291,6 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     output_dtypes_enc = encode_literals(output_dtypes)
     inplace_pattern_enc = encode_literals(inplace_pattern)
 
-    def elemwise_wrapper(*inputs):
-        return _vectorized(
-            core_op_fn,
-            input_bc_patterns_enc,
-            output_bc_patterns_enc,
-            output_dtypes_enc,
-            inplace_pattern_enc,
-            (),  # constant_inputs
-            inputs,
-            core_output_shapes,  # core_shapes
-            None,  # size
-        )
-
     # Pure python implementation, that will be used in tests
     def elemwise(*inputs):
         inputs = [np.asarray(input) for input in inputs]
@@ -336,7 +323,20 @@ def numba_funcify_Elemwise(op, node, **kwargs):
 
     @overload(elemwise, jit_options=_jit_options)
     def ov_elemwise(*inputs):
-        return elemwise_wrapper
+        def impl(*inputs):
+            return _vectorized(
+                core_op_fn,
+                input_bc_patterns_enc,
+                output_bc_patterns_enc,
+                output_dtypes_enc,
+                inplace_pattern_enc,
+                (),  # constant_inputs
+                inputs,
+                core_output_shapes,  # core_shapes
+                None,  # size
+            )
+
+        return impl
 
     return elemwise
 
@@ -560,7 +560,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
 
     if x_ndim == 0:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def argmax(x):
             return np.array(0, dtype="int64")
 

@@ -58,7 +58,7 @@ def test_slice(start, stop, step):
 
     if step == "x":
         assert evaled_slice.step == -5
-    elif step is None:
+    elif step in (None, 1):
         # Numba can convert to 1 (and sometimes does) in this case
         assert evaled_slice.step in (None, 1)
     else:

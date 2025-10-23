@@ -27,7 +27,7 @@ from pytensor.tensor.extra_ops import (
 
 @numba_funcify.register(Bartlett)
 def numba_funcify_Bartlett(op, **kwargs):
-    @numba_basic.numba_njit(inline="always")
+    @numba_basic.numba_njit
     def bartlett(x):
         return np.bartlett(x.item())
 
@@ -147,13 +147,13 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
 
     elif mode == "wrap":
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def mode_fn(new_arr, i, j, v, d):
             new_arr[i, j] = v % d
 
     elif mode == "clip":
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def mode_fn(new_arr, i, j, v, d):
             new_arr[i, j] = min(max(v, 0), d - 1)
 
@@ -202,7 +202,7 @@ def numba_funcify_Repeat(op, node, **kwargs):
     # Numba only supports axis=None, which in our case is when axis is 0 and the input is a vector
     if axis == 0 and a.type.ndim == 1:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def repeatop(x, repeats):
             return np.repeat(x, repeats)
 
@@ -230,7 +230,7 @@ def numba_funcify_Unique(op, node, **kwargs):
 
     if not use_python:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def unique(x):
             return np.unique(x)
 
@@ -268,13 +268,13 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
 
     if len(node.outputs) == 1:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def maybe_expand_dim(arr):
             return arr
 
     else:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def maybe_expand_dim(arr):
             return np.expand_dims(arr, 1)
 
@@ -319,7 +319,7 @@ def numba_funcify_Searchsorted(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def searchsorted(a, v):
             return np.searchsorted(a, v, side)
 

@@ -423,28 +423,32 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     output_dtypes = encode_literals((rv_node.default_output().type.dtype,))
     inplace_pattern = encode_literals(())
 
-    def random_wrapper(core_shape, rng, size, *dist_params):
-        if not inplace:
-            rng = copy(rng)
-
-        draws = _vectorized(
-            core_op_fn,
-            input_bc_patterns,
-            output_bc_patterns,
-            output_dtypes,
-            inplace_pattern,
-            (rng,),
-            dist_params,
-            (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),
-            None if size_len is None else numba_ndarray.to_fixed_tuple(size, size_len),
-        )
-        return rng, draws
-
     def random(core_shape, rng, size, *dist_params):
-        raise NotImplementedError("Non-jitted random variable not implemented")
+        raise NotImplementedError(
+            "Numba implementation of RandomVariable cannot be evaluated in Python (non-JIT) mode"
+        )
 
     @overload(random, jit_options=_jit_options)
     def ov_random(core_shape, rng, size, *dist_params):
-        return random_wrapper
+        def impl(core_shape, rng, size, *dist_params):
+            if not inplace:
+                rng = copy(rng)
+
+            draws = _vectorized(
+                core_op_fn,
+                input_bc_patterns,
+                output_bc_patterns,
+                output_dtypes,
+                inplace_pattern,
+                (rng,),
+                dist_params,
+                (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),
+                None
+                if size_len is None
+                else numba_ndarray.to_fixed_tuple(size, size_len),
+            )
+            return rng, draws
+
+        return impl
 
     return random

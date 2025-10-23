@@ -11,7 +11,7 @@ from pytensor.link.numba.dispatch.linalg.decomposition.lu_factor import _getrf
 from pytensor.link.numba.dispatch.linalg.utils import _check_scipy_linalg_matrix
 
 
-@numba_njit
+@numba_njit(cache=True)
 def _pivot_to_permutation(p, dtype):
     p_inv = np.arange(len(p)).astype(dtype)
     for i in range(len(p)):

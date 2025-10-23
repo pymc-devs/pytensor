@@ -106,7 +106,7 @@ def alloc(val, {", ".join(shape_var_names)}):
 def numba_funcify_ARange(op, **kwargs):
     dtype = np.dtype(op.dtype)
 
-    @numba_basic.numba_njit(inline="always")
+    @numba_basic.numba_njit
     def arange(start, stop, step):
         return np.arange(
             start.item(),
@@ -143,7 +143,7 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
 
     if node.inputs[0].type.ndim == 2:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def extract_diag(x):
             out = np.diag(x, k=offset)
 
@@ -158,7 +158,7 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
         leading_dims = (slice(None),) * axis1
         middle_dims = (slice(None),) * (axis2 - axis1 - 1)
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def extract_diag(x):
             if offset >= 0:
                 diag_len = min(x.shape[axis1], max(0, x.shape[axis2] - offset))
@@ -183,7 +183,7 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
 def numba_funcify_Eye(op, **kwargs):
     dtype = np.dtype(op.dtype)
 
-    @numba_basic.numba_njit(inline="always")
+    @numba_basic.numba_njit
     def eye(N, M, k):
         return np.eye(
             N.item(),
@@ -225,7 +225,7 @@ def makevector({", ".join(input_names)}):
 
 @numba_funcify.register(TensorFromScalar)
 def numba_funcify_TensorFromScalar(op, **kwargs):
-    @numba_basic.numba_njit(inline="always")
+    @numba_basic.numba_njit
     def tensor_from_scalar(x):
         return np.array(x)
 
@@ -234,7 +234,7 @@ def numba_funcify_TensorFromScalar(op, **kwargs):
 
 @numba_funcify.register(ScalarFromTensor)
 def numba_funcify_ScalarFromTensor(op, **kwargs):
-    @numba_basic.numba_njit(inline="always")
+    @numba_basic.numba_njit
     def scalar_from_tensor(x):
         return x.item()
 
