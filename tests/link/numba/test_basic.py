@@ -319,7 +319,8 @@ def test_get_numba_type(v, expected, force_scalar, not_implemented):
     ],
 )
 def test_create_numba_signature(v, expected, force_scalar):
-    res = numba_basic.create_numba_signature(v, force_scalar=force_scalar)
+    with pytest.warns(FutureWarning, match="deprecated"):
+        res = numba_basic.create_numba_signature(v, force_scalar=force_scalar)
     assert res == expected
 
 
