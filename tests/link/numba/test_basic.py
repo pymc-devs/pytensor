@@ -333,7 +333,7 @@ def test_ViewOp():
 
 
 @pytest.mark.parametrize(
-    "inputs, op, exc",
+    "inputs, op",
     [
         (
             [
@@ -341,7 +341,6 @@ def test_ViewOp():
                 (pt.lmatrix(), rng.poisson(size=(2, 3))),
             ],
             MySingleOut,
-            UserWarning,
         ),
         (
             [
@@ -349,11 +348,10 @@ def test_ViewOp():
                 (pt.lmatrix(), rng.poisson(size=(2, 3))),
             ],
             MyMultiOut,
-            UserWarning,
         ),
     ],
 )
-def test_perform(inputs, op, exc):
+def test_fallback_perform(inputs, op):
     inputs, test_values = zip(*inputs, strict=True)
     g = op()(*inputs)
 
@@ -362,8 +360,7 @@ def test_perform(inputs, op, exc):
     else:
         outputs = [g]
 
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with pytest.warns(UserWarning):
         compare_numba_and_py(
             inputs,
             outputs,
