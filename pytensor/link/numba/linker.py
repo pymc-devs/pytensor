@@ -5,15 +5,17 @@ class NumbaLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using Numba."""
 
     def fgraph_convert(self, fgraph, **kwargs):
-        from pytensor.link.numba.dispatch import numba_funcify
+        # Import numba_njit_and_cache lazily (as numba is an optional dependency)
+        # This is what triggers the registering of the dispatches as well
+        from pytensor.link.numba.dispatch.basic import numba_funcify_ensure_cache
 
-        return numba_funcify(fgraph, **kwargs)
+        return numba_funcify_ensure_cache(fgraph, **kwargs)
 
-    def jit_compile(self, fn):
+    def jit_compile(self, fn_and_cache):
         from pytensor.link.numba.dispatch.basic import numba_njit
 
-        jitted_fn = numba_njit(fn, no_cpython_wrapper=False, no_cfunc_wrapper=False)
-        return jitted_fn
+        fn, cache_key = fn_and_cache
+        return numba_njit(fn.py_func, final_function=True, cache=cache_key is not None)
 
     def create_thunk_inputs(self, storage_map):
         return [storage_map[n] for n in self.fgraph.inputs]
