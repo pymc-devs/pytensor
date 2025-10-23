@@ -111,6 +111,10 @@ def create_numba_signature(
     reduce_to_scalar: bool = False,
 ) -> numba.types.Type:
     """Create a Numba type for the signature of an `Apply` node or `FunctionGraph`."""
+    warnings.warn(
+        "create_numba_signature is deprecated and will be removed in a future release",
+        FutureWarning,
+    )
     input_types = [
         get_numba_type(
             inp.type, force_scalar=force_scalar, reduce_to_scalar=reduce_to_scalar
@@ -138,6 +142,11 @@ def create_tuple_creator(f, n):
 
     See https://github.com/numba/numba/issues/2771#issuecomment-414358902
     """
+    warnings.warn(
+        "create_tuple_creator is deprecated and will be removed in a future release",
+        FutureWarning,
+    )
+
     assert n > 0
 
     f = numba_njit(f)
