@@ -13,3 +13,10 @@ def test_sort(func, axis):
     out = func(x, axis=axis)
     arr = np.array([[1.0, 4.0], [5.0, 2.0]])
     compare_mlx_and_py([x], [out], [arr])
+
+
+def test_sort_invalid_kind_warning():
+    x = matrix("x", shape=(2, 2), dtype="float64")
+    z = sort(x, axis=-1, kind="mergesort")
+    with pytest.warns(UserWarning, match="MLX sort does not support the kind argument"):
+        z.eval({x: np.array([[3.0, 1.0], [2.0, 4.0]])}, mode="MLX")
