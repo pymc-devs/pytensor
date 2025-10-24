@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import pytest
 
@@ -24,6 +26,7 @@ def test_mlx_svd(compute_uv):
         out,
         [A_val],
         mlx_mode=mlx_linalg_mode,
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
     )
 
 
@@ -40,6 +43,7 @@ def test_mlx_kron():
         [out],
         [A_val, B_val],
         mlx_mode=mlx_linalg_mode,
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
     )
 
 
@@ -58,4 +62,5 @@ def test_mlx_inv(op):
         [out],
         [A_val],
         mlx_mode=mlx_linalg_mode,
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
     )

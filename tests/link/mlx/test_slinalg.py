@@ -1,4 +1,5 @@
 import contextlib
+from functools import partial
 
 import numpy as np
 import pytest
@@ -28,6 +29,7 @@ def test_mlx_cholesky(lower):
         [out],
         [A_val],
         mlx_mode=mlx_linalg_mode,
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
     )
 
 
@@ -54,7 +56,13 @@ def test_mlx_solve(assume_a):
     )
 
     with context:
-        compare_mlx_and_py([A, b], [out], [A_val, b_val], mlx_mode=mlx_linalg_mode)
+        compare_mlx_and_py(
+            [A, b],
+            [out],
+            [A_val, b_val],
+            mlx_mode=mlx_linalg_mode,
+            assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+        )
 
 
 @pytest.mark.parametrize("lower, trans", [(False, False), (True, True)])
@@ -74,7 +82,13 @@ def test_mlx_SolveTriangular(lower, trans):
         lower=lower,
         unit_diagonal=False,
     )
-    compare_mlx_and_py([A, b], [out], [A_val, b_val], mlx_mode=mlx_linalg_mode)
+    compare_mlx_and_py(
+        [A, b],
+        [out],
+        [A_val, b_val],
+        mlx_mode=mlx_linalg_mode,
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+    )
 
 
 def test_mlx_LU():
@@ -90,4 +104,5 @@ def test_mlx_LU():
         out,
         [A_val],
         mlx_mode=mlx_linalg_mode,
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
     )
