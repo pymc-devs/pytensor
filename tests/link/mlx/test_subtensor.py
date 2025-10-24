@@ -119,6 +119,19 @@ def test_mlx_IncSubtensor_increment():
     assert not out_pt.owner.op.set_instead_of_inc
     compare_mlx_and_py([], [out_pt], [])
 
+    # Increment slice
+    out_pt = pt_subtensor.inc_subtensor(x_pt[:, :, 2:], st_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    out_pt = pt_subtensor.inc_subtensor(x_pt[:, :, -3:], st_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    out_pt = pt_subtensor.inc_subtensor(x_pt[::2, ::2, ::2], st_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    out_pt = pt_subtensor.inc_subtensor(x_pt[:, :, :], st_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
 
 def test_mlx_AdvancedIncSubtensor_set():
     """Test advanced set operations using AdvancedIncSubtensor."""
