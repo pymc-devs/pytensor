@@ -43,7 +43,50 @@ from pytensor.tensor.type import dmatrix, matrix, tensor, vector
 from tests import unittest_tools as utt
 from tests.test_rop import break_op
 
+from pytensor.tensor.rewriting.linalg import fuse_blockdiagonal 
 
+
+def test_nested_blockdiag_fusion():
+    # Create matrix variables
+    x = pt.matrix("x")
+    y = pt.matrix("y")
+    z = pt.matrix("z")
+
+    # Nested BlockDiagonal
+    inner = BlockDiagonal(2)(x, y)   
+    outer = BlockDiagonal(2)(inner, z)
+
+    # Count number of BlockDiagonal ops before fusion
+    nodes_before = ancestors([outer])
+    initial_count = sum(
+        1 for node in nodes_before
+        if getattr(node, "owner", None) and isinstance(node.owner.op, BlockDiagonal)
+    )
+    assert initial_count > 1, "Setup failed: should have nested BlockDiagonal"
+
+    # Apply the rewrite
+    fused = fuse_blockdiagonal(outer)
+
+    # Count number of BlockDiagonal ops after fusion
+    nodes_after = ancestors([fused])
+    fused_count = sum(
+        1 for node in nodes_after
+        if getattr(node, "owner", None) and isinstance(node.owner.op, BlockDiagonal)
+    )
+    assert fused_count == 1, "Nested BlockDiagonal ops were not fused"
+
+    # Check that all original inputs are preserved
+    fused_inputs = [
+        inp
+        for node in ancestors([fused])
+        if getattr(node, "owner", None) and isinstance(node.owner.op, BlockDiagonal)
+        for inp in node.owner.inputs
+    ]
+    assert set(fused_inputs) == {x, y, z}, "Inputs were not correctly fused"
+
+
+
+    
 def test_matrix_inverse_rop_lop():
     rtol = 1e-7 if config.floatX == "float64" else 1e-5
     mx = matrix("mx")
