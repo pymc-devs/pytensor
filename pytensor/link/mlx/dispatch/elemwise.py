@@ -1,6 +1,7 @@
 from functools import singledispatch
 
 import mlx.core as mx
+import mlx.nn as mlx_nn
 import numpy as np
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
@@ -40,7 +41,7 @@ from pytensor.scalar.basic import (
 )
 from pytensor.scalar.math import Erfc, Erfcx, Sigmoid, Softplus
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
-from pytensor.tensor.special import Softmax, SoftmaxGrad
+from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 
 
 @mlx_funcify.register(DimShuffle)
@@ -140,6 +141,16 @@ def mlx_funcify_SoftmaxGrad(op, **kwargs):
         return dy_times_sm - mx.sum(dy_times_sm, axis=axis, keepdims=True) * sm
 
     return softmax_grad
+
+
+@mlx_funcify.register(LogSoftmax)
+def mlx_funcify_LogSoftmax(op, **kwargs):
+    axis = op.axis
+
+    def log_softmax(x):
+        return mlx_nn.log_softmax(x, axis=axis)
+
+    return log_softmax
 
 
 @mlx_funcify.register(Softplus)

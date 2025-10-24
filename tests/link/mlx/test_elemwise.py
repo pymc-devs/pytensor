@@ -30,7 +30,7 @@ from pytensor.tensor.math import any as pt_any
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.special import SoftmaxGrad, softmax
+from pytensor.tensor.special import SoftmaxGrad, log_softmax, softmax
 from pytensor.tensor.type import matrix, vector, vectors
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
@@ -95,6 +95,15 @@ def test_softmax_grad(axis):
     out = SoftmaxGrad(axis=axis)(dy, sm)
 
     compare_mlx_and_py([dy, sm], [out], [dy_test_value, sm_test_value])
+
+
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_logsoftmax(axis):
+    x = matrix("x")
+    x_test_value = np.arange(6, dtype=config.floatX).reshape(2, 3)
+    out = log_softmax(x, axis=axis)
+
+    compare_mlx_and_py([x], [out], [x_test_value])
 
 
 @pytest.mark.parametrize("size", [(10, 10), (1000, 1000)])

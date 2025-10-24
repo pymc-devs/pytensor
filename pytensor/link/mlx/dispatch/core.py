@@ -61,14 +61,17 @@ def mlx_funcify_Split(op: Split, node, **kwargs):
         # Resolve constants for significant performance improvement (14x speedup)
         if constant_axis is not None:
             axis = int(constant_axis)
+        else:
+            raise ValueError(
+                "Symbolic axis is not supported in MLX Split implementation."
+            )
 
         if constant_splits is not None:
-            splits = constant_splits
-            cumsum_splits = np.cumsum(splits[:-1])
+            splits_arr = mx.array(constant_splits)
         else:
-            # Dynamic case - use MLX operations
             splits_arr = mx.array(splits)
-            cumsum_splits = mx.cumsum(splits_arr[:-1]).tolist()
+
+        cumsum_splits = mx.cumsum(splits_arr[:-1]).tolist()
 
         # Validation checks
         if len(splits) != op.len_splits:
