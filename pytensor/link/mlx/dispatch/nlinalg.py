@@ -8,26 +8,22 @@ from pytensor.tensor.nlinalg import SVD, KroneckerProduct, MatrixInverse, Matrix
 def mlx_funcify_SVD(op, node, **kwargs):
     full_matrices = op.full_matrices
     compute_uv = op.compute_uv
-    otype = (
-        getattr(mx, node.outputs[0].dtype)
-        if not compute_uv
-        else [getattr(mx, output.dtype) for output in node.outputs]
-    )
+
+    X_dtype = getattr(mx, node.inputs[0].dtype)
 
     if not full_matrices:
         raise TypeError("full_matrices=False is not supported in the mlx backend.")
 
     def svd_S_only(x):
-        return mx.linalg.svd(x, compute_uv=False, stream=mx.cpu).astype(
-            otype, stream=mx.cpu
+        return mx.linalg.svd(
+            x.astype(dtype=X_dtype, stream=mx.cpu), compute_uv=False, stream=mx.cpu
         )
 
     def svd_full(x):
-        outputs = mx.linalg.svd(x, compute_uv=True, stream=mx.cpu)
-        return tuple(
-            output.astype(typ, stream=mx.cpu)
-            for output, typ in zip(outputs, otype, strict=True)
+        outputs = mx.linalg.svd(
+            x.astype(dtype=X_dtype, stream=mx.cpu), compute_uv=True, stream=mx.cpu
         )
+        return outputs
 
     if compute_uv:
         return svd_full
@@ -38,30 +34,36 @@ def mlx_funcify_SVD(op, node, **kwargs):
 @mlx_funcify.register(KroneckerProduct)
 def mlx_funcify_KroneckerProduct(op, node, **kwargs):
     otype = node.outputs[0].dtype
-    mx_otype = getattr(mx, otype)
     stream = mx.cpu if otype == "float64" else mx.gpu
 
+    A_dtype = getattr(mx, node.inputs[0].dtype)
+    B_dtype = getattr(mx, node.inputs[1].dtype)
+
     def kron(a, b):
-        return mx.kron(a, b, stream=stream).astype(mx_otype, stream=stream)
+        return mx.kron(
+            a.astype(dtype=A_dtype, stream=stream),
+            b.astype(dtype=B_dtype, stream=stream),
+            stream=stream,
+        )
 
     return kron
 
 
 @mlx_funcify.register(MatrixInverse)
 def mlx_funcify_MatrixInverse(op, node, **kwargs):
-    otype = getattr(mx, node.outputs[0].dtype)
+    X_dtype = getattr(mx, node.inputs[0].dtype)
 
     def inv(x):
-        return mx.linalg.inv(x, stream=mx.cpu).astype(otype, stream=mx.cpu)
+        return mx.linalg.inv(x.astype(dtype=X_dtype, stream=mx.cpu), stream=mx.cpu)
 
     return inv
 
 
 @mlx_funcify.register(MatrixPinv)
 def mlx_funcify_MatrixPinv(op, node, **kwargs):
-    otype = getattr(mx, node.outputs[0].dtype)
+    x_dtype = getattr(mx, node.inputs[0].dtype)
 
     def pinv(x):
-        return mx.linalg.pinv(x, stream=mx.cpu).astype(otype, stream=mx.cpu)
+        return mx.linalg.pinv(x.astype(dtype=x_dtype, stream=mx.cpu), stream=mx.cpu)
 
     return pinv

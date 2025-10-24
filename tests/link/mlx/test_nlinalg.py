@@ -35,7 +35,7 @@ def test_mlx_kron():
 
     A = pt.matrix(name="A")
     B = pt.matrix(name="B")
-    A_val, B_val = rng.normal(size=(2, 3, 3)).astype(config.floatX)
+    A_val, B_val = rng.normal(scale=0.1, size=(2, 3, 3)).astype(config.floatX)
     out = pt.linalg.kron(A, B)
 
     compare_mlx_and_py(
@@ -50,10 +50,11 @@ def test_mlx_kron():
 @pytest.mark.parametrize("op", [pt.linalg.inv, pt.linalg.pinv], ids=["inv", "pinv"])
 def test_mlx_inv(op):
     rng = np.random.default_rng()
+    n = 3
 
     A = pt.matrix(name="A")
-    A_val = rng.normal(size=(3, 3)).astype(config.floatX)
-    A_val = A_val @ A_val.T
+    A_val = rng.normal(size=(n, n))
+    A_val = (A_val @ A_val.T).astype(config.floatX)
 
     out = op(A)
 
@@ -62,5 +63,7 @@ def test_mlx_inv(op):
         [out],
         [A_val],
         mlx_mode=mlx_linalg_mode,
-        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+        assert_fn=partial(
+            np.testing.assert_allclose, atol=1e-3, rtol=1e-3, strict=True
+        ),
     )

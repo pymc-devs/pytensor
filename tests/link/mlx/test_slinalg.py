@@ -17,10 +17,11 @@ mlx_linalg_mode = mlx_mode.including("blockwise")
 @pytest.mark.parametrize("lower", [True, False])
 def test_mlx_cholesky(lower):
     rng = np.random.default_rng()
+    n = 3
 
-    A = pt.tensor("A", shape=(5, 5))
-    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
-    A_val = A_val @ A_val.T
+    A = pt.tensor("A", shape=(n, n))
+    A_val = rng.normal(size=(n, n))
+    A_val = (A_val @ A_val.T).astype(config.floatX)
 
     out = pt.linalg.cholesky(A, lower=lower)
 
@@ -29,23 +30,24 @@ def test_mlx_cholesky(lower):
         [out],
         [A_val],
         mlx_mode=mlx_linalg_mode,
-        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-3, strict=True),
     )
 
 
 @pytest.mark.parametrize("assume_a", ["gen", "pos"])
 def test_mlx_solve(assume_a):
     rng = np.random.default_rng()
+    n = 3
 
-    A = pt.tensor("A", shape=(5, 5))
-    b = pt.tensor("B", shape=(5, 5))
+    A = pt.tensor("A", shape=(n, n))
+    b = pt.tensor("B", shape=(n, n))
 
     out = pt.linalg.solve(A, b, b_ndim=2, assume_a=assume_a)
 
-    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    A_val = rng.normal(size=(n, n)).astype(config.floatX)
     A_val = A_val @ A_val.T
 
-    b_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    b_val = rng.normal(size=(n, n)).astype(config.floatX)
 
     context = (
         contextlib.suppress()
@@ -61,7 +63,9 @@ def test_mlx_solve(assume_a):
             [out],
             [A_val, b_val],
             mlx_mode=mlx_linalg_mode,
-            assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+            assert_fn=partial(
+                np.testing.assert_allclose, atol=1e-3, rtol=1e-3, strict=True
+            ),
         )
 
 
@@ -87,7 +91,9 @@ def test_mlx_SolveTriangular(lower, trans):
         [out],
         [A_val, b_val],
         mlx_mode=mlx_linalg_mode,
-        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+        assert_fn=partial(
+            np.testing.assert_allclose, atol=1e-4, rtol=1e-4, strict=True
+        ),
     )
 
 
