@@ -49,7 +49,7 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
 
             @numba_basic.numba_njit
             def cumop(x):
-                return np.cumsum(x, axis=axis)
+                return np.cumsum(x)
 
         else:
 
@@ -73,7 +73,7 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
 
             @numba_basic.numba_njit
             def cumop(x):
-                return np.cumprod(x, axis=axis)
+                return np.cumprod(x)
 
         else:
 

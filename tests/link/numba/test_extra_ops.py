@@ -372,3 +372,19 @@ def test_Searchsorted(a, v, side, sorter, exc):
             g,
             [test_a, test_v] if sorter is None else [test_a, test_v, test_sorter],
         )
+
+
+@pytest.mark.parametrize(
+    "op", [extra_ops.cumsum, extra_ops.cumprod], ids=["sum", "prod"]
+)
+def test_1d_cumsum_with_axis_arg(op):
+    x = pt.vector()
+    test_x = np.array([1.0, 2.0, 3.0], dtype=config.floatX)
+
+    g = op(x, axis=0)
+
+    compare_numba_and_py(
+        [x],
+        g,
+        [test_x],
+    )
