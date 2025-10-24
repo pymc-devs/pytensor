@@ -64,7 +64,25 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
             return x
 
     def incsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=idx_list):
-        indices = indices_from_subtensor(ilist, idx_list)
+        def get_slice_int(element):
+            if element is None:
+                return None
+            try:
+                return int(element)
+            except Exception:
+                return element
+
+        indices = tuple(
+            [
+                slice(
+                    get_slice_int(s.start), get_slice_int(s.stop), get_slice_int(s.step)
+                )
+                if isinstance(s, slice)
+                else s
+                for s in indices_from_subtensor(ilist, idx_list)
+            ]
+        )
+
         if len(indices) == 1:
             indices = indices[0]
 
