@@ -58,6 +58,17 @@ def test_Bartlett(val):
             1,
             "mul",
         ),
+        # Regression tests for https://github.com/pymc-devs/pytensor/issues/1689
+        (
+            (pt.vector(), np.arange(6, dtype=config.floatX)),
+            0,
+            "add",
+        ),
+        (
+            (pt.vector(), np.arange(6, dtype=config.floatX)),
+            0,
+            "mul",
+        ),
     ],
 )
 def test_CumOp(val, axis, mode):
