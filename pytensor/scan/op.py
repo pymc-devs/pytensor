@@ -307,6 +307,17 @@ class ScanMethodsMixin:
         n_taps = sum(len(x) for x in self.info.mit_mot_out_slices)
         return list_outputs[:n_taps]
 
+    def inner_mitmot_outs_grouped(self, list_outputs):
+        # Like inner_mitmot_outs but returns a list of lists, one per mitmot
+        # Instead of a flat list
+        n_taps = [len(x) for x in self.info.mit_mot_out_slices]
+        grouped_outs = []
+        offset = 0
+        for nt in n_taps:
+            grouped_outs.append(list_outputs[offset : offset + nt])
+            offset += nt
+        return grouped_outs
+
     def outer_mitmot_outs(self, list_outputs):
         return list_outputs[: self.info.n_mit_mot]
 
