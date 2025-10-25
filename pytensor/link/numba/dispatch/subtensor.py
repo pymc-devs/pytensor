@@ -1,5 +1,6 @@
 import operator
 import sys
+from hashlib import sha256
 
 import numba
 import numpy as np
@@ -7,10 +8,17 @@ from llvmlite import ir
 from numba import types
 from numba.core.pythonapi import box
 
+import pytensor.link.numba.dispatch.basic as numba_basic
 from pytensor.graph import Type
-from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import generate_fallback_impl, numba_njit
-from pytensor.link.utils import compile_function_src, unique_name_generator
+from pytensor.link.numba.cache import (
+    compile_numba_function_src,
+)
+from pytensor.link.numba.dispatch.basic import (
+    generate_fallback_impl,
+    register_funcify_and_cache_key,
+    register_funcify_default_op_cache_key,
+)
+from pytensor.link.utils import unique_name_generator
 from pytensor.tensor import TensorType
 from pytensor.tensor.rewriting.subtensor import is_full_slice
 from pytensor.tensor.subtensor import (
@@ -97,18 +105,41 @@ def enable_slice_boxing():
 enable_slice_boxing()
 
 
-@numba_funcify.register(MakeSlice)
+@register_funcify_default_op_cache_key(MakeSlice)
 def numba_funcify_MakeSlice(op, **kwargs):
-    @numba_njit
+    @numba_basic.numba_njit
     def makeslice(*x):
         return slice(*x)
 
     return makeslice
 
 
-@numba_funcify.register(Subtensor)
-@numba_funcify.register(IncSubtensor)
-@numba_funcify.register(AdvancedSubtensor1)
+def subtensor_op_cache_key(op, **extra_fields):
+    key_parts = [type(op), tuple(extra_fields.items())]
+    if hasattr(op, "idx_list"):
+        idx_parts = []
+        for idx in op.idx_list:
+            if isinstance(idx, slice):
+                idx_parts.append(
+                    (
+                        idx.start is None,
+                        idx.stop is None,
+                        idx.step is None,
+                    )
+                )
+            else:
+                idx_parts.append("i")
+        key_parts.append(tuple(idx_parts))
+    if isinstance(op, IncSubtensor | AdvancedIncSubtensor | AdvancedIncSubtensor1):
+        key_parts.append((op.inplace, op.set_instead_of_inc))
+    if isinstance(op, AdvancedIncSubtensor):
+        key_parts.append(op.ignore_duplicates)
+    return sha256(str(tuple(key_parts)).encode()).hexdigest()
+
+
+@register_funcify_and_cache_key(Subtensor)
+@register_funcify_and_cache_key(IncSubtensor)
+@register_funcify_and_cache_key(AdvancedSubtensor1)
 def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
@@ -184,16 +215,17 @@ def {function_name}({", ".join(input_names)}):
     return np.asarray(z)
     """
 
-    func = compile_function_src(
+    func = compile_numba_function_src(
         subtensor_def_src,
         function_name=function_name,
         global_env=globals() | {"np": np},
     )
-    return numba_njit(func, boundscheck=True)
+    cache_key = subtensor_op_cache_key(op, func="numba_funcify_default_subtensor")
+    return numba_basic.numba_njit(func, boundscheck=True), cache_key
 
 
-@numba_funcify.register(AdvancedSubtensor)
-@numba_funcify.register(AdvancedIncSubtensor)
+@register_funcify_and_cache_key(AdvancedSubtensor)
+@register_funcify_and_cache_key(AdvancedIncSubtensor)
 def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     if isinstance(op, AdvancedSubtensor):
         _x, _y, idxs = node.inputs[0], None, node.inputs[1:]
@@ -254,7 +286,9 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
             )
         )
     ):
-        return generate_fallback_impl(op, node, **kwargs)
+        return generate_fallback_impl(op, node, **kwargs), subtensor_op_cache_key(
+            op, func="fallback_impl"
+        )
 
     # What's left should all be supported natively by numba
     return numba_funcify_default_subtensor(op, node, **kwargs)
@@ -294,10 +328,11 @@ def numba_funcify_multiple_integer_vector_indexing(
 
     vector_indices = idxs[first_axis:after_last_axis]
     assert all(v.type.broadcastable == (False,) for v in vector_indices)
+    y_is_broadcasted = False
 
     if isinstance(op, AdvancedSubtensor):
 
-        @numba_njit
+        @numba_basic.numba_njit
         def advanced_subtensor_multiple_vector(x, *idxs):
             none_slices = idxs[:first_axis]
             vec_idxs = idxs[first_axis:after_last_axis]
@@ -312,7 +347,7 @@ def numba_funcify_multiple_integer_vector_indexing(
                 out_buffer[(*none_slices, i)] = x[(*none_slices, *scalar_idxs)]
             return out_buffer
 
-        return advanced_subtensor_multiple_vector
+        ret_func = advanced_subtensor_multiple_vector
 
     else:
         inplace = op.inplace
@@ -328,7 +363,7 @@ def numba_funcify_multiple_integer_vector_indexing(
 
         if op.set_instead_of_inc:
 
-            @numba_njit
+            @numba_basic.numba_njit
             def advanced_set_subtensor_multiple_vector(x, y, *idxs):
                 vec_idxs = idxs[first_axis:after_last_axis]
                 x_shape = x.shape
@@ -346,11 +381,11 @@ def numba_funcify_multiple_integer_vector_indexing(
                         out[(*outer, *scalar_idxs)] = y[(*outer, i)]
                 return out
 
-            return advanced_set_subtensor_multiple_vector
+            ret_func = advanced_set_subtensor_multiple_vector
 
         else:
 
-            @numba_njit
+            @numba_basic.numba_njit
             def advanced_inc_subtensor_multiple_vector(x, y, *idxs):
                 vec_idxs = idxs[first_axis:after_last_axis]
                 x_shape = x.shape
@@ -368,10 +403,17 @@ def numba_funcify_multiple_integer_vector_indexing(
                         out[(*outer, *scalar_idxs)] += y[(*outer, i)]
                 return out
 
-        return advanced_inc_subtensor_multiple_vector
+            ret_func = advanced_inc_subtensor_multiple_vector
+
+    cache_key = subtensor_op_cache_key(
+        op,
+        func="multiple_integer_vector_indexing",
+        y_is_broadcasted=y_is_broadcasted,
+    )
+    return ret_func, cache_key
 
 
-@numba_funcify.register(AdvancedIncSubtensor1)
+@register_funcify_and_cache_key(AdvancedIncSubtensor1)
 def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
     inplace = op.inplace
     set_instead_of_inc = op.set_instead_of_inc
@@ -382,7 +424,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
     if set_instead_of_inc:
         if broadcast_with_index:
 
-            @numba_njit(boundscheck=True)
+            @numba_basic.numba_njit(boundscheck=True)
             def advancedincsubtensor1_inplace(x, val, idxs):
                 if val.ndim == x.ndim:
                     core_val = val[0]
@@ -398,7 +440,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
 
         else:
 
-            @numba_njit(boundscheck=True)
+            @numba_basic.numba_njit(boundscheck=True)
             def advancedincsubtensor1_inplace(x, vals, idxs):
                 if not len(idxs) == len(vals):
                     raise ValueError("The number of indices and values must match.")
@@ -409,7 +451,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
     else:
         if broadcast_with_index:
 
-            @numba_njit(boundscheck=True)
+            @numba_basic.numba_njit(boundscheck=True)
             def advancedincsubtensor1_inplace(x, val, idxs):
                 if val.ndim == x.ndim:
                     core_val = val[0]
@@ -425,7 +467,7 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
 
         else:
 
-            @numba_njit(boundscheck=True)
+            @numba_basic.numba_njit(boundscheck=True)
             def advancedincsubtensor1_inplace(x, vals, idxs):
                 if not len(idxs) == len(vals):
                     raise ValueError("The number of indices and values must match.")
@@ -435,14 +477,20 @@ def numba_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
                     x[idx] += val
                 return x
 
+    cache_key = subtensor_op_cache_key(
+        op,
+        func="numba_funcify_advancedincsubtensor1",
+        broadcast_with_index=broadcast_with_index,
+    )
+
     if inplace:
-        return advancedincsubtensor1_inplace
+        return advancedincsubtensor1_inplace, cache_key
 
     else:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def advancedincsubtensor1(x, vals, idxs):
             x = x.copy()
             return advancedincsubtensor1_inplace(x, vals, idxs)
 
-        return advancedincsubtensor1
+        return advancedincsubtensor1, cache_key

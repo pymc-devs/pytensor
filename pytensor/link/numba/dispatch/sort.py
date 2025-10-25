@@ -2,12 +2,14 @@ import warnings
 
 import numpy as np
 
-from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import numba_njit
+from pytensor.link.numba.dispatch.basic import (
+    numba_njit,
+    register_funcify_default_op_cache_key,
+)
 from pytensor.tensor.sort import ArgSortOp, SortOp
 
 
-@numba_funcify.register(SortOp)
+@register_funcify_default_op_cache_key(SortOp)
 def numba_funcify_SortOp(op, node, **kwargs):
     if op.kind != "quicksort":
         warnings.warn(
@@ -31,7 +33,7 @@ def numba_funcify_SortOp(op, node, **kwargs):
     return sort_f
 
 
-@numba_funcify.register(ArgSortOp)
+@register_funcify_default_op_cache_key(ArgSortOp)
 def numba_funcify_ArgSortOp(op, node, **kwargs):
     kind = op.kind
 
