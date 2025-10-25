@@ -48,7 +48,7 @@ def _lu_1(
     Called when permute_l is True and p_indices is False, and returns a tuple of (perm, L, U), where perm an integer
     array of row swaps, such that L[perm] @ U = A.
     """
-    return linalg.lu(
+    return linalg.lu(  # type: ignore[no-any-return]
         a,
         permute_l=permute_l,
         check_finite=check_finite,
@@ -70,7 +70,7 @@ def _lu_2(
     Called when permute_l is False and p_indices is True, and returns a tuple of (PL, U), where PL is the
     permuted L matrix, PL = P @ L.
     """
-    return linalg.lu(
+    return linalg.lu(  # type: ignore[no-any-return]
         a,
         permute_l=permute_l,
         check_finite=check_finite,
@@ -92,7 +92,7 @@ def _lu_3(
     Called when permute_l is False and p_indices is False, and returns a tuple of (P, L, U), where P is the permutation
     matrix, P @ L @ U = A.
     """
-    return linalg.lu(
+    return linalg.lu(  # type: ignore[no-any-return]
         a,
         permute_l=permute_l,
         check_finite=check_finite,

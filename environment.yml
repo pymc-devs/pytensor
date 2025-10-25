@@ -28,7 +28,6 @@ dependencies:
   - diff-cover
   - mypy
   - types-setuptools
-  - scipy-stubs
   - pytest
   - pytest-cov
   - pytest-xdist
