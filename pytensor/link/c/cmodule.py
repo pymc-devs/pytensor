@@ -806,7 +806,7 @@ class ModuleCache:
                 to_delete_empty.append((args, kwargs))
 
         # add entries that are not in the entry_from_key dictionary
-        time_now = time.perf_counter()
+        time_now = time.time()
         # Go through directories in alphabetical order to ensure consistent
         # behavior.
         try:
@@ -976,7 +976,7 @@ class ModuleCache:
                             # directories in alphabetical order so as to make
                             # sure all new processes only use the first one.
                             if cleanup:
-                                age = time.perf_counter() - last_access_time(entry)
+                                age = time.time() - last_access_time(entry)
                                 if delete_if_problem or age > self.age_thresh_del:
                                     rmtree(
                                         root,
@@ -1528,7 +1528,7 @@ class ModuleCache:
             assert key[0]
 
         to_del = []
-        time_now = time.perf_counter()
+        time_now = time.time()
         for filename in os.listdir(self.dirname):
             if filename.startswith("tmp"):
                 try:
