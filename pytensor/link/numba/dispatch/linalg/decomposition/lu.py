@@ -54,7 +54,7 @@ def _lu_1(
         check_finite=check_finite,
         p_indices=p_indices,
         overwrite_a=overwrite_a,
-    )
+    )  # type: ignore[no-any-return]
 
 
 def _lu_2(
