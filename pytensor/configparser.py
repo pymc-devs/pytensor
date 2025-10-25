@@ -410,7 +410,9 @@ class ConfigParam:
                 f"The config parameter '{self.name}' was registered on a different instance of the PyTensorConfigParser."
                 f" It is not accessible through the instance with id '{id(cls)}' because of safeguarding."
             )
-        if not hasattr(self, "val"):
+        try:
+            return self.val
+        except AttributeError:
             try:
                 val_str = cls.fetch_val_for_key(self.name, delete_key=delete_key)
                 self.is_default = False
