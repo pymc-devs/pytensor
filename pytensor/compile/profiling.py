@@ -1464,7 +1464,6 @@ class ProfileStats:
             ps.GE,
             ps.EQ,
             ps.NEQ,
-            ps.InRange,
             ps.Switch,
             ps.OR,
             ps.XOR,
