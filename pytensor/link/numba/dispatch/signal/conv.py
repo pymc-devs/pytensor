@@ -1,8 +1,8 @@
 import numpy as np
 from numba.np.arraymath import _get_inner_prod
 
+from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.tensor.signal.conv import Convolve1d
 
 
@@ -13,7 +13,7 @@ def numba_funcify_Convolve1d(op, node, **kwargs):
     out_dtype = node.outputs[0].type.dtype
     innerprod = _get_inner_prod(a_dtype, b_dtype)
 
-    @numba_njit
+    @numba_basic.numba_njit
     def valid_convolve1d(x, y):
         nx = len(x)
         ny = len(y)
@@ -30,7 +30,7 @@ def numba_funcify_Convolve1d(op, node, **kwargs):
 
         return ret
 
-    @numba_njit
+    @numba_basic.numba_njit
     def full_convolve1d(x, y):
         nx = len(x)
         ny = len(y)
@@ -59,7 +59,7 @@ def numba_funcify_Convolve1d(op, node, **kwargs):
 
         return ret
 
-    @numba_njit
+    @numba_basic.numba_njit
     def convolve_1d(x, y, mode):
         if mode:
             return full_convolve1d(x, y)

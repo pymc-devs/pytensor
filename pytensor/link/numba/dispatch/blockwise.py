@@ -4,7 +4,8 @@ from typing import cast
 from numba.core.extending import overload
 from numba.np.unsafe.ndarray import to_fixed_tuple
 
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import numba_funcify
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
@@ -56,7 +57,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         src += f"to_fixed_tuple(core_shapes[{i}], {core_shapes_len[i]}),"
     src += ")"
 
-    to_tuple = numba_njit(
+    to_tuple = numba_basic.numba_njit(
         compile_function_src(
             src,
             "to_tuple",

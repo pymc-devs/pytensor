@@ -30,14 +30,14 @@ def numba_funcify_SVD(op, node, **kwargs):
 
     if not compute_uv:
 
-        @numba_basic.numba_njit()
+        @numba_basic.numba_njit
         def svd(x):
             _, ret, _ = np.linalg.svd(inputs_cast(x), full_matrices)
             return ret
 
     else:
 
-        @numba_basic.numba_njit()
+        @numba_basic.numba_njit
         def svd(x):
             return np.linalg.svd(inputs_cast(x), full_matrices)
 

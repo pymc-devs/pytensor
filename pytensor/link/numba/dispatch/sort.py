@@ -2,8 +2,8 @@ import warnings
 
 import numpy as np
 
+from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.tensor.sort import ArgSortOp, SortOp
 
 
@@ -18,7 +18,7 @@ def numba_funcify_SortOp(op, node, **kwargs):
             UserWarning,
         )
 
-    @numba_njit
+    @numba_basic.numba_njit
     def sort_f(a, axis):
         axis = axis.item()
 
@@ -45,7 +45,7 @@ def numba_funcify_ArgSortOp(op, node, **kwargs):
             UserWarning,
         )
 
-    @numba_njit
+    @numba_basic.numba_njit
     def argort_f(X, axis):
         axis = axis.item()
 

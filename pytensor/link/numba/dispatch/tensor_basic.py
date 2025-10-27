@@ -6,7 +6,6 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     create_tuple_string,
     numba_funcify,
-    numba_njit,
 )
 from pytensor.link.utils import compile_function_src, unique_name_generator
 from pytensor.tensor.basic import (
@@ -243,7 +242,7 @@ def numba_funcify_ScalarFromTensor(op, **kwargs):
 
 @numba_funcify.register(Nonzero)
 def numba_funcify_Nonzero(op, node, **kwargs):
-    @numba_njit
+    @numba_basic.numba_njit
     def nonzero(a):
         result_tuple = np.nonzero(a)
         if a.ndim == 1:
