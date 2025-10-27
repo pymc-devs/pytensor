@@ -6,8 +6,8 @@ from numba.np.linalg import ensure_lapack
 from numpy import ndarray
 from scipy import linalg
 
+from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import numba_njit
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
     _get_underlying_float,
@@ -27,7 +27,7 @@ from pytensor.tensor._linalg.solve.tridiagonal import (
 )
 
 
-@numba_njit
+@numba_basic.numba_njit
 def tridiagonal_norm(du, d, dl):
     # Adapted from scipy _matrix_norm_tridiagonal:
     # https://github.com/scipy/scipy/blob/0f1fd4a7268b813fa2b844ca6038e4dfdf90084a/scipy/linalg/_basic.py#L356-L367
@@ -346,7 +346,7 @@ def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
     overwrite_d = op.overwrite_d
     overwrite_du = op.overwrite_du
 
-    @numba_njit(cache=False)
+    @numba_basic.numba_njit(cache=False)
     def lu_factor_tridiagonal(dl, d, du):
         dl, d, du, du2, ipiv, _ = _gttrf(
             dl,
@@ -368,7 +368,7 @@ def numba_funcify_SolveLUFactorTridiagonal(
     overwrite_b = op.overwrite_b
     transposed = op.transposed
 
-    @numba_njit(cache=False)
+    @numba_basic.numba_njit(cache=False)
     def solve_lu_factor_tridiagonal(dl, d, du, du2, ipiv, b):
         x, _ = _gttrs(
             dl,

@@ -91,7 +91,7 @@ def numba_core_rv_default(op, node):
 def numba_core_BernoulliRV(op, node):
     out_dtype = node.outputs[1].type.numpy_dtype
 
-    @numba_basic.numba_njit()
+    @numba_basic.numba_njit
     def random(rng, p):
         return (
             direct_cast(0, out_dtype)
