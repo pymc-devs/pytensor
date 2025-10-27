@@ -359,13 +359,13 @@ def numba_funcify_Sum(op, node, **kwargs):
 
     if ndim_input == len(axes):
         # Slightly faster than `numba_funcify_CAReduce` for this case
-        @numba_njit
+        @numba_basic.numba_njit
         def impl_sum(array):
             return np.asarray(array.sum(), dtype=np_acc_dtype).astype(out_dtype)
 
     elif len(axes) == 0:
         # These cases should be removed by rewrites!
-        @numba_njit
+        @numba_basic.numba_njit
         def impl_sum(array):
             return np.asarray(array, dtype=out_dtype)
 
@@ -615,25 +615,25 @@ def numba_funcify_Dot(op, node, **kwargs):
 
     if x_dtype == dot_dtype and y_dtype == dot_dtype:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def dot(x, y):
             return np.asarray(np.dot(x, y))
 
     elif x_dtype == dot_dtype and y_dtype != dot_dtype:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def dot(x, y):
             return np.asarray(np.dot(x, y.astype(dot_dtype)))
 
     elif x_dtype != dot_dtype and y_dtype == dot_dtype:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def dot(x, y):
             return np.asarray(np.dot(x.astype(dot_dtype), y))
 
     else:
 
-        @numba_njit()
+        @numba_basic.numba_njit
         def dot(x, y):
             return np.asarray(np.dot(x.astype(dot_dtype), y.astype(dot_dtype)))
 
@@ -642,7 +642,7 @@ def numba_funcify_Dot(op, node, **kwargs):
 
     else:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def dot_with_cast(x, y):
             return dot(x, y).astype(out_dtype)
 
@@ -653,7 +653,7 @@ def numba_funcify_Dot(op, node, **kwargs):
 def numba_funcify_BatchedDot(op, node, **kwargs):
     dtype = node.outputs[0].type.numpy_dtype
 
-    @numba_njit
+    @numba_basic.numba_njit
     def batched_dot(x, y):
         # Numba does not support 3D matmul
         # https://github.com/numba/numba/issues/3804

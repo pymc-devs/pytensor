@@ -3,6 +3,7 @@ from textwrap import dedent
 import numpy as np
 from numba.np.unsafe import ndarray as numba_ndarray
 
+from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch import numba_funcify
 from pytensor.link.numba.dispatch.basic import create_arg_string, numba_njit
 from pytensor.link.utils import compile_function_src
@@ -12,7 +13,7 @@ from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 @numba_funcify.register(Shape)
 def numba_funcify_Shape(op, **kwargs):
-    @numba_njit
+    @numba_basic.numba_njit
     def shape(x):
         return np.asarray(np.shape(x))
 
@@ -23,7 +24,7 @@ def numba_funcify_Shape(op, **kwargs):
 def numba_funcify_Shape_i(op, **kwargs):
     i = op.i
 
-    @numba_njit
+    @numba_basic.numba_njit
     def shape_i(x):
         return np.asarray(np.shape(x)[i])
 
@@ -61,13 +62,13 @@ def numba_funcify_Reshape(op, **kwargs):
 
     if ndim == 0:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def reshape(x, shape):
             return np.asarray(x.item())
 
     else:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def reshape(x, shape):
             # TODO: Use this until https://github.com/numba/numba/issues/7353 is closed.
             return np.reshape(
