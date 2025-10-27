@@ -16,7 +16,7 @@ mlx_linalg_mode = mlx_mode.including("blockwise")
 
 @pytest.mark.parametrize("lower", [True, False])
 def test_mlx_cholesky(lower):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(15)
     n = 3
 
     A = pt.tensor("A", shape=(n, n))
@@ -36,7 +36,7 @@ def test_mlx_cholesky(lower):
 
 @pytest.mark.parametrize("assume_a", ["gen", "pos"])
 def test_mlx_solve(assume_a):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(15)
     n = 3
 
     A = pt.tensor("A", shape=(n, n))
@@ -71,7 +71,7 @@ def test_mlx_solve(assume_a):
 
 @pytest.mark.parametrize("lower, trans", [(False, False), (True, True)])
 def test_mlx_SolveTriangular(lower, trans):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(15)
 
     A = pt.tensor("A", shape=(5, 5))
     b = pt.tensor("B", shape=(5, 5))
@@ -98,7 +98,7 @@ def test_mlx_SolveTriangular(lower, trans):
 
 
 def test_mlx_LU():
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(15)
 
     A = pt.tensor("A", shape=(5, 5))
     out = pt.linalg.lu(A, permute_l=False, p_indices=True)

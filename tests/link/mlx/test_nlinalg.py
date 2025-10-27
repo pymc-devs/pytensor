@@ -13,7 +13,7 @@ mlx_linalg_mode = mlx_mode.including("blockwise")
 
 @pytest.mark.parametrize("compute_uv", [True, False])
 def test_mlx_svd(compute_uv):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(15)
 
     A = pt.matrix(name="X")
     A_val = rng.normal(size=(3, 3)).astype(config.floatX)
@@ -31,7 +31,7 @@ def test_mlx_svd(compute_uv):
 
 
 def test_mlx_kron():
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(15)
 
     A = pt.matrix(name="A")
     B = pt.matrix(name="B")
@@ -49,7 +49,7 @@ def test_mlx_kron():
 
 @pytest.mark.parametrize("op", [pt.linalg.inv, pt.linalg.pinv], ids=["inv", "pinv"])
 def test_mlx_inv(op):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(15)
     n = 3
 
     A = pt.matrix(name="A")
