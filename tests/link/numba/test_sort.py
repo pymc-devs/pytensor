@@ -9,7 +9,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
 
 
 @pytest.mark.parametrize(
-    "x",
+    "x_test",
     [
         [],  # Empty list
         [3, 2, 1],  # Simple list
@@ -26,20 +26,21 @@ from tests.link.numba.test_basic import compare_numba_and_py
         ["stable", UserWarning],
     ],
 )
-def test_Sort(x, axis, kind, exc):
+def test_Sort(x_test, axis, kind, exc):
+    x = pt.as_tensor(x_test).type("x")
     if axis:
-        g = SortOp(kind)(pt.as_tensor_variable(x), axis)
+        g = SortOp(kind)(x, axis)
     else:
-        g = SortOp(kind)(pt.as_tensor_variable(x))
+        g = SortOp(kind)(x)
 
     cm = contextlib.suppress() if not exc else pytest.warns(exc)
 
     with cm:
-        compare_numba_and_py([], [g], [])
+        compare_numba_and_py([x], [g], [x_test])
 
 
 @pytest.mark.parametrize(
-    "x",
+    "x_test",
     [
         [],  # Empty list
         [3, 2, 1],  # Simple list
@@ -55,18 +56,19 @@ def test_Sort(x, axis, kind, exc):
         ["stable", UserWarning],
     ],
 )
-def test_ArgSort(x, axis, kind, exc):
-    if x is None:
-        x = np.arange(5 * 5 * 5 * 5)
-        np.random.shuffle(x)
-        x = np.reshape(x, (5, 5, 5, 5))
+def test_ArgSort(x_test, axis, kind, exc):
+    if x_test is None:
+        x_test = np.arange(5 * 5 * 5 * 5)
+        np.random.shuffle(x_test)
+        x_test = np.reshape(x_test, (5, 5, 5, 5))
+    x = pt.as_tensor(x_test).type("x")
 
     if axis:
-        g = ArgSortOp(kind)(pt.as_tensor_variable(x), axis)
+        g = ArgSortOp(kind)(x, axis)
     else:
-        g = ArgSortOp(kind)(pt.as_tensor_variable(x))
+        g = ArgSortOp(kind)(x)
 
     cm = contextlib.suppress() if not exc else pytest.warns(exc)
 
     with cm:
-        compare_numba_and_py([], [g], [])
+        compare_numba_and_py([x], [g], [x_test])
