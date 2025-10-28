@@ -13,7 +13,6 @@ from pytensor.graph.basic import Constant, OptionalApplyType, Variable
 from pytensor.graph.utils import MetaType
 from pytensor.scalar import (
     ComplexError,
-    IntegerDivisionError,
 )
 from pytensor.tensor import _get_vector_length
 from pytensor.tensor.exceptions import AdvancedIndexingError
@@ -138,18 +137,6 @@ class _tensor_py_operators:
         except (NotImplementedError, TypeError):
             return NotImplemented
 
-    def __div__(self, other):
-        # See explanation in __add__ for the error caught
-        # and the return value in that case
-        try:
-            return pt.math.div_proxy(self, other)
-        except IntegerDivisionError:
-            # This is to raise the exception that occurs when trying to divide
-            # two integer arrays (currently forbidden).
-            raise
-        except (NotImplementedError, TypeError):
-            return NotImplemented
-
     def __pow__(self, other):
         # See explanation in __add__ for the error caught
         # and the return value in that case
@@ -209,9 +196,6 @@ class _tensor_py_operators:
 
     def __rmul__(self, other):
         return pt.math.mul(other, self)
-
-    def __rdiv__(self, other):
-        return pt.math.div_proxy(other, self)
 
     def __rmod__(self, other):
         return pt.math.mod(other, self)
