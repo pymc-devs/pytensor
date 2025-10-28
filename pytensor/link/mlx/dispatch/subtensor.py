@@ -22,6 +22,17 @@ def normalize_indices_for_mlx(ilist, idx_list):
     MLX requires index values to be Python int, not np.int64 or other NumPy types.
     """
 
+    def to_int(value, element):
+        """Convert value to Python int with helpful error message."""
+        try:
+            return int(value)
+        except (TypeError, ValueError) as e:
+            raise TypeError(
+                "MLX backend does not support symbolic indices. "
+                "Index values must be concrete (constant) integers, not symbolic variables. "
+                f"Got: {element}"
+            ) from e
+
     def normalize_element(element):
         if element is None:
             return None
@@ -32,23 +43,9 @@ def normalize_indices_for_mlx(ilist, idx_list):
                 normalize_element(element.step),
             )
         elif isinstance(element, mx.array) and element.ndim == 0:
-            try:
-                return int(element.item())
-            except (TypeError, ValueError) as e:
-                raise TypeError(
-                    "MLX backend does not support symbolic indices. "
-                    "Index values must be concrete (constant) integers, not symbolic variables. "
-                    f"Got: {element}"
-                ) from e
+            return to_int(element.item(), element)
         elif isinstance(element, np.integer):
-            try:
-                return int(element)
-            except (TypeError, ValueError) as e:
-                raise TypeError(
-                    "MLX backend does not support symbolic indices. "
-                    "Index values must be concrete (constant) integers, not symbolic variables. "
-                    f"Got: {element}"
-                ) from e
+            return to_int(element, element)
         else:
             return element
 
