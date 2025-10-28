@@ -3,7 +3,6 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-import tests.unittest_tools as utt
 from pytensor.compile.mode import Mode
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.c.basic import DualLinker
@@ -11,7 +10,6 @@ from pytensor.scalar.basic import (
     EQ,
     ComplexError,
     Composite,
-    InRange,
     ScalarType,
     add,
     and_,
@@ -473,32 +471,6 @@ def test_grad_identity():
     y = pytensor.tensor.tensor_copy(x)
     l = y.sum(dtype=pytensor.config.floatX)
     pytensor.gradient.grad(l, x)
-
-
-def test_grad_inrange():
-    for bound_definition in [(True, True), (False, False)]:
-        # Instantiate op, and then take the gradient
-        op = InRange(*bound_definition)
-        x = fscalar("x")
-        low = fscalar("low")
-        high = fscalar("high")
-        out = op(x, low, high)
-        gx, glow, ghigh = pytensor.gradient.grad(out, [x, low, high])
-
-        # We look if the gradient are equal to zero
-        # if x is lower than the lower bound,
-        # equal to the lower bound, between lower and higher bound,
-        # equal to the higher bound and higher than the higher
-        # bound.
-        # Mathematically we should have an infinite gradient when
-        # x is equal to the lower or higher bound but in that case
-        # PyTensor defines the gradient to be zero for stability.
-        f = pytensor.function([x, low, high], [gx, glow, ghigh])
-        utt.assert_allclose(f(0, 1, 5), [0, 0, 0])
-        utt.assert_allclose(f(1, 1, 5), [0, 0, 0])
-        utt.assert_allclose(f(2, 1, 5), [0, 0, 0])
-        utt.assert_allclose(f(5, 1, 5), [0, 0, 0])
-        utt.assert_allclose(f(7, 1, 5), [0, 0, 0])
 
 
 def test_grad_abs():

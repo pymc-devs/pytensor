@@ -1650,56 +1650,6 @@ class IsInf(FixedLogicalComparison):
 isinf = IsInf()
 
 
-class InRange(LogicalComparison):
-    nin = 3
-
-    def __init__(self, openlow, openhi):
-        self.openlow = openlow
-        self.openhi = openhi
-
-    def impl(self, x, low, hi):
-        if self.openlow and x <= low:
-            return False
-        elif not self.openlow and x < low:
-            return False
-        if self.openhi and x >= hi:
-            return False
-        elif not self.openhi and x > hi:
-            return False
-        return True
-
-    def c_code(self, node, name, inputs, outputs, sub):
-        (x, low, hi) = inputs
-        (z,) = outputs
-
-        cmp1 = ">" if self.openlow else ">="
-        cmp2 = "<" if self.openhi else "<="
-
-        return f"{z} = {x} {cmp1} {low} && {x} {cmp2} {hi};"
-
-    def get_grad(self, elem):
-        if elem.type in complex_types:
-            msg = (
-                "No gradient implemented for complex numbers in "
-                "class scalar.basic.InRange"
-            )
-            raise NotImplementedError(msg)
-        elif elem.type in discrete_types:
-            return elem.zeros_like(dtype=config.floatX)
-        else:
-            return elem.zeros_like()
-
-    def L_op(self, inputs, outputs, gout):
-        (x, low, hi) = inputs
-        (_gz,) = gout
-        grads = [self.get_grad(elem) for elem in [x, low, hi]]
-        return grads
-
-
-inopenrange = InRange(True, True)
-inclosedrange = InRange(False, False)
-
-
 class Switch(ScalarOp):
     nin = 3
     nfunc_spec = ("where", 3, 1)
