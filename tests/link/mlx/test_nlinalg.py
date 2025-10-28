@@ -26,7 +26,7 @@ def test_mlx_svd(compute_uv):
         out,
         [A_val],
         mlx_mode=mlx_linalg_mode,
-        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
 
 
@@ -43,7 +43,7 @@ def test_mlx_kron():
         [out],
         [A_val, B_val],
         mlx_mode=mlx_linalg_mode,
-        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
 
 
@@ -64,6 +64,6 @@ def test_mlx_inv(op):
         [A_val],
         mlx_mode=mlx_linalg_mode,
         assert_fn=partial(
-            np.testing.assert_allclose, atol=1e-3, rtol=1e-3, strict=True
+            np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
         ),
     )

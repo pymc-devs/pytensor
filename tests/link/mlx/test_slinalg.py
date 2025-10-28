@@ -30,7 +30,7 @@ def test_mlx_cholesky(lower):
         [out],
         [A_val],
         mlx_mode=mlx_linalg_mode,
-        assert_fn=partial(np.testing.assert_allclose, atol=1e-3, strict=True),
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
 
 
@@ -64,7 +64,7 @@ def test_mlx_solve(assume_a):
             [A_val, b_val],
             mlx_mode=mlx_linalg_mode,
             assert_fn=partial(
-                np.testing.assert_allclose, atol=1e-3, rtol=1e-3, strict=True
+                np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
             ),
         )
 
@@ -92,7 +92,7 @@ def test_mlx_SolveTriangular(lower, trans):
         [A_val, b_val],
         mlx_mode=mlx_linalg_mode,
         assert_fn=partial(
-            np.testing.assert_allclose, atol=1e-4, rtol=1e-4, strict=True
+            np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
         ),
     )
 
@@ -110,5 +110,5 @@ def test_mlx_LU():
         out,
         [A_val],
         mlx_mode=mlx_linalg_mode,
-        assert_fn=partial(np.testing.assert_allclose, atol=1e-4, strict=True),
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
