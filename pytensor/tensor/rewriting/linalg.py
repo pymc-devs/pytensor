@@ -1051,15 +1051,14 @@ def _find_triangular_op(var):
 
     if isinstance(core_op, LU | LUFactor):
         if var.owner.outputs[1] == var:
-            return (True, False)
+            return True
         if var.owner.outputs[2] == var:
-            return (False, True)
+            return False
 
     if isinstance(core_op, QR):
         if var.owner.outputs[1] == var:
-            return (False, True)
+            return False
 
-    # pt.tri will get constant folded so no point re-writing ?
     if isinstance(core_op, Tri):
         k_node = var.owner.inputs[2]
         if isinstance(k_node, Constant) and k_node.data == 0:

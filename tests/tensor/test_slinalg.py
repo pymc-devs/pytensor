@@ -1263,10 +1263,26 @@ class TestTriangularInv:
         atol = rtol = 1e-8 if config.floatX.endswith("64") else 1e-4
         np.testing.assert_allclose(a_inv, expected_inv, rtol=rtol, atol=atol)
 
+    def test_triangular_inv_op_bad_on_error(self):
+        """Tests that a bad `on_error` value raises a ValueError."""
+        with pytest.raises(ValueError, match="on_error must be one of"):
+            TriangularInv(on_error="foo")
+
+    def test_triangular_inv_op_raise_on_error(self):
+        """Tests the default `on_error='raise'` functionality."""
+        x = matrix("x", dtype=config.floatX)
+        f_raise = function([x], TriangularInv()(x))
+
+        # Create a singular triangular matrix (zero on the diagonal)
+        a_singular = np.tril(np.random.rand(5, 5))
+        a_singular[2, 2] = 0
+        a_singular = a_singular.astype(config.floatX)
+
+        with pytest.raises(np.linalg.LinAlgError, match="Singular matrix"):
+            f_raise(a_singular)
+
     def test_triangular_inv_op_nan_on_error(self):
-        """
-        Tests the `on_error='nan'` functionality of the TriangularInv Op.
-        """
+        """Tests the `on_error='nan'` functionality of the TriangularInv Op."""
         x = matrix("x", dtype=config.floatX)
         f_nan = function([x], TriangularInv(on_error="nan")(x))
 

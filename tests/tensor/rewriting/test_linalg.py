@@ -14,7 +14,6 @@ from pytensor.graph import ancestors
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
-from pytensor.tensor.basic import triu
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, matmul
@@ -1089,8 +1088,12 @@ rewrite_cases = {
         lambda x: pt.tri(x.shape[0], x.shape[1], k=0, dtype=x.dtype),
         lambda a: np.tri(N=a.shape[0], M=a.shape[1], k=0, dtype=a.dtype),
     ),
+    "tril": (
+        lambda x: pt.tril(x),
+        lambda a: np.tril(a),
+    ),
     "triu": (
-        lambda x: triu(x),
+        lambda x: pt.triu(x),
         lambda a: np.triu(a),
     ),
     "cholesky": (
