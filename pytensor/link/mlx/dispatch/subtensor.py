@@ -27,6 +27,13 @@ def normalize_indices_for_mlx(ilist, idx_list):
     This function converts all integer-like indices and slice components to Python int
     while preserving None values and passing through array indices unchanged.
 
+    This conversion is necessary because MLX's C++ indexing implementation
+    does not recognize NumPy scalar types, raising ValueError when encountered.
+    Additionally, mlx_typify converts NumPy scalars to MLX arrays, which also
+    need to be converted back to Python int for use in indexing operations.
+    Converting to Python int is zero-cost for Python int inputs and minimal
+    overhead for NumPy scalars and MLX scalar arrays.
+
     Parameters
     ----------
     ilist : tuple
@@ -50,15 +57,6 @@ def normalize_indices_for_mlx(ilist, idx_list):
     ...     (np.int64(0), np.int64(2)), (slice(None, None),)
     ... )
     >>> # After normalization, slice components are Python int
-
-    Notes
-    -----
-    This conversion is necessary because MLX's C++ indexing implementation
-    does not recognize NumPy scalar types, raising ValueError when encountered.
-    Additionally, mlx_typify converts NumPy scalars to MLX arrays, which also
-    need to be converted back to Python int for use in indexing operations.
-    Converting to Python int is zero-cost for Python int inputs and minimal
-    overhead for NumPy scalars and MLX scalar arrays.
     """
     import mlx.core as mx
 
