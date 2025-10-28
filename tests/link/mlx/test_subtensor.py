@@ -245,9 +245,12 @@ def test_mlx_subtensor_edge_cases():
     compare_mlx_and_py([], [out_pt], [])
 
 
-@pytest.mark.xfail(reason="MLX indexing with tuples not yet supported")
 def test_mlx_subtensor_with_variables():
-    """Test subtensor operations with PyTensor variables as inputs."""
+    """Test subtensor operations with PyTensor variables as inputs.
+
+    This test now works thanks to the fix for np.int64 indexing, which also
+    handles the conversion of MLX scalar arrays in slice components.
+    """
     # Test with variable arrays (not constants)
     x_pt = pt.matrix("x", dtype="float32")
     y_pt = pt.vector("y", dtype="float32")
@@ -258,3 +261,150 @@ def test_mlx_subtensor_with_variables():
     # Set operation with variables
     out_pt = pt_subtensor.set_subtensor(x_pt[0, :2], y_pt)
     compare_mlx_and_py([x_pt, y_pt], [out_pt], [x_np, y_np])
+
+
+def test_mlx_subtensor_with_numpy_int64():
+    """Test Subtensor operations with np.int64 indices.
+
+    This tests the fix for MLX's strict requirement that indices must be
+    Python int, not np.int64 or other NumPy integer types.
+    """
+    # Test data
+    x_np = np.arange(12, dtype=np.float32).reshape((3, 4))
+    x_pt = pt.constant(x_np)
+
+    # Single np.int64 index - this was failing before the fix
+    idx = np.int64(1)
+    out_pt = x_pt[idx]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Multiple np.int64 indices
+    out_pt = x_pt[np.int64(1), np.int64(2)]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Negative np.int64 index
+    out_pt = x_pt[np.int64(-1)]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Mixed Python int and np.int64
+    out_pt = x_pt[1, np.int64(2)]
+    compare_mlx_and_py([], [out_pt], [])
+
+
+def test_mlx_subtensor_slices_with_numpy_int64():
+    """Test Subtensor with slices containing np.int64 components.
+
+    This tests that slice start/stop/step values can be np.int64.
+    """
+    x_np = np.arange(20, dtype=np.float32)
+    x_pt = pt.constant(x_np)
+
+    # Slice with np.int64 start
+    out_pt = x_pt[np.int64(2) :]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Slice with np.int64 stop
+    out_pt = x_pt[: np.int64(5)]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Slice with np.int64 start and stop
+    out_pt = x_pt[np.int64(2) : np.int64(8)]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Slice with np.int64 step
+    out_pt = x_pt[:: np.int64(2)]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Slice with all np.int64 components
+    out_pt = x_pt[np.int64(1) : np.int64(10) : np.int64(2)]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Negative np.int64 in slice
+    out_pt = x_pt[np.int64(-5) :]
+    compare_mlx_and_py([], [out_pt], [])
+
+
+def test_mlx_incsubtensor_with_numpy_int64():
+    """Test IncSubtensor (set/inc) with np.int64 indices and slices.
+
+    This is the main test for the reported issue with inc_subtensor.
+    """
+    # Test data
+    x_np = np.arange(12, dtype=np.float32).reshape((3, 4))
+    x_pt = pt.constant(x_np)
+    y_pt = pt.as_tensor_variable(np.array(10.0, dtype=np.float32))
+
+    # Set with np.int64 index
+    out_pt = pt_subtensor.set_subtensor(x_pt[np.int64(1), np.int64(2)], y_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Increment with np.int64 index
+    out_pt = pt_subtensor.inc_subtensor(x_pt[np.int64(1), np.int64(2)], y_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Set with slice containing np.int64 - THE ORIGINAL FAILING CASE
+    out_pt = pt_subtensor.set_subtensor(x_pt[:, : np.int64(2)], y_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Increment with slice containing np.int64 - THE ORIGINAL FAILING CASE
+    out_pt = pt_subtensor.inc_subtensor(x_pt[:, : np.int64(2)], y_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Complex slice with np.int64
+    y2_pt = pt.as_tensor_variable(np.ones((2, 2), dtype=np.float32))
+    out_pt = pt_subtensor.inc_subtensor(
+        x_pt[np.int64(0) : np.int64(2), np.int64(1) : np.int64(3)], y2_pt
+    )
+    compare_mlx_and_py([], [out_pt], [])
+
+
+def test_mlx_incsubtensor_original_issue():
+    """Test the exact example from the issue report.
+
+    This was failing with: ValueError: Slice indices must be integers or None.
+    """
+    x_np = np.arange(9, dtype=np.float64).reshape((3, 3))
+    x_pt = pt.constant(x_np, dtype="float64")
+
+    # The exact failing case from the issue
+    out_pt = pt_subtensor.inc_subtensor(x_pt[:, :2], 10)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Verify it also works with set_subtensor
+    out_pt = pt_subtensor.set_subtensor(x_pt[:, :2], 10)
+    compare_mlx_and_py([], [out_pt], [])
+
+
+def test_mlx_advanced_subtensor_with_numpy_int64():
+    """Test AdvancedSubtensor with np.int64 in mixed indexing."""
+    x_np = np.arange(24, dtype=np.float32).reshape((3, 4, 2))
+    x_pt = pt.constant(x_np)
+
+    # Advanced indexing with list, but other dimensions use np.int64
+    # Note: This creates AdvancedSubtensor, not basic Subtensor
+    out_pt = x_pt[[0, 2], np.int64(1)]
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Mixed advanced and basic indexing with np.int64 in slice
+    out_pt = x_pt[[0, 2], np.int64(1) : np.int64(3)]
+    compare_mlx_and_py([], [out_pt], [])
+
+
+def test_mlx_advanced_incsubtensor_with_numpy_int64():
+    """Test AdvancedIncSubtensor with np.int64."""
+    x_np = np.arange(15, dtype=np.float32).reshape((5, 3))
+    x_pt = pt.constant(x_np)
+
+    # Value to set/increment
+    y_pt = pt.as_tensor_variable(
+        np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+    )
+
+    # Advanced indexing set with array indices
+    indices = [np.int64(0), np.int64(2)]
+    out_pt = pt_subtensor.set_subtensor(x_pt[indices], y_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Advanced indexing increment
+    out_pt = pt_subtensor.inc_subtensor(x_pt[indices], y_pt)
+    compare_mlx_and_py([], [out_pt], [])
