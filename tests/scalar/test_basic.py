@@ -531,3 +531,11 @@ def test_scalar_hash_default_output_type_preference():
     del old_eq.output_types_preference  # mimic old Op
     assert new_eq == old_eq
     assert hash(new_eq) == hash(old_eq)
+
+
+def test_rtruediv():
+    from pytensor.scalar.basic import ScalarType, TrueDiv
+
+    x = ScalarType(dtype="float64")()
+    y = 1.0 / x
+    assert isinstance(y.owner.op, TrueDiv)

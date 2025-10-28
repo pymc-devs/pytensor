@@ -943,6 +943,12 @@ class _scalar_py_operators:
     def __rmul__(self, other):
         return mul(other, self)
 
+    def __rtruediv__(self, other):
+        return true_div(other, self)
+
+    def __rdiv__(self, other):
+        return true_div(other, self)
+
     def __rmod__(self, other):
         return mod(other, self)
 
