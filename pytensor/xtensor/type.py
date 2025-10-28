@@ -308,9 +308,6 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
     def __mul__(self, other):
         return px.math.mul(self, other)
 
-    def __div__(self, other):
-        return px.math.div(self, other)
-
     def __pow__(self, other):
         return px.math.pow(self, other)
 
@@ -340,9 +337,6 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
     def __rmul__(self, other):
         return px.math.mul(other, self)
-
-    def __rdiv__(self, other):
-        return px.math.div_proxy(other, self)
 
     def __rmod__(self, other):
         return px.math.mod(other, self)
