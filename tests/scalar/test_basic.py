@@ -10,7 +10,9 @@ from pytensor.scalar.basic import (
     EQ,
     ComplexError,
     Composite,
+    IntDiv,
     ScalarType,
+    TrueDiv,
     add,
     and_,
     arccos,
@@ -534,8 +536,16 @@ def test_scalar_hash_default_output_type_preference():
 
 
 def test_rtruediv():
-    from pytensor.scalar.basic import ScalarType, TrueDiv
-
     x = ScalarType(dtype="float64")()
     y = 1.0 / x
     assert isinstance(y.owner.op, TrueDiv)
+    assert isinstance(y.type, ScalarType)
+    assert y.eval({x: 2.0}) == 0.5
+
+
+def test_rfloordiv():
+    x = ScalarType(dtype="float64")()
+    y = 5.0 // x
+    assert isinstance(y.owner.op, IntDiv)
+    assert isinstance(y.type, ScalarType)
+    assert y.eval({x: 2.0}) == 2.0
