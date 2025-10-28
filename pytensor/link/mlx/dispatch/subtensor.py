@@ -32,9 +32,23 @@ def normalize_indices_for_mlx(ilist, idx_list):
                 normalize_element(element.step),
             )
         elif isinstance(element, mx.array) and element.ndim == 0:
-            return int(element.item())
+            try:
+                return int(element.item())
+            except (TypeError, ValueError) as e:
+                raise TypeError(
+                    "MLX backend does not support symbolic indices. "
+                    "Index values must be concrete (constant) integers, not symbolic variables. "
+                    f"Got: {element}"
+                ) from e
         elif isinstance(element, np.integer):
-            return int(element)
+            try:
+                return int(element)
+            except (TypeError, ValueError) as e:
+                raise TypeError(
+                    "MLX backend does not support symbolic indices. "
+                    "Index values must be concrete (constant) integers, not symbolic variables. "
+                    f"Got: {element}"
+                ) from e
         else:
             return element
 
