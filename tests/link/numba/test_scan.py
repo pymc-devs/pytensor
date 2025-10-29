@@ -85,7 +85,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
             3,
             [],
             [np.array([0.50100236, 2.16822932, 1.36326596])],
-            lambda op: op.info.n_shared_outs > 0,
+            lambda op: op.info.n_untraced_sit_sot_outs > 0,
         ),
         # mit-sot (that's also a type of sit-sot)
         (

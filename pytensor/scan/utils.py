@@ -370,7 +370,9 @@ def scan_can_remove_outs(op, out_idxs):
         out_ins += [op.inner_inputs[offset : offset + n_ins]]
         offset += n_ins
     out_ins += [[] for k in range(op.info.n_nit_sot)]
-    out_ins += [[op.inner_inputs[offset + k]] for k in range(op.info.n_shared_outs)]
+    out_ins += [
+        [op.inner_inputs[offset + k]] for k in range(op.info.n_untraced_sit_sot_outs)
+    ]
 
     added = True
     out_idxs_mask = [1 for idx in out_idxs]
@@ -409,7 +411,7 @@ def compress_outs(op, not_required, inputs):
         mit_sot_in_slices=(),
         sit_sot_in_slices=(),
         n_nit_sot=0,
-        n_shared_outs=0,
+        n_untraced_sit_sot_outs=0,
         n_non_seqs=0,
         as_while=op_info.as_while,
     )
@@ -515,17 +517,19 @@ def compress_outs(op, not_required, inputs):
             info = dataclasses.replace(info, n_nit_sot=info.n_nit_sot + 1)
             op_outputs += [op.inner_outputs[o_offset]]
             o_offset += 1
-            nit_sot_ins += [inputs[ni_offset + idx + op_info.n_shared_outs]]
+            nit_sot_ins += [inputs[ni_offset + idx + op_info.n_untraced_sit_sot_outs]]
         else:
             o_offset += 1
 
     offset += op_info.n_nit_sot
     shared_ins = []
-    for idx in range(op_info.n_shared_outs):
+    for idx in range(op_info.n_untraced_sit_sot_outs):
         if offset + idx not in not_required:
             map_old_new[offset + idx] = curr_pos
             curr_pos += 1
-            info = dataclasses.replace(info, n_shared_outs=info.n_shared_outs + 1)
+            info = dataclasses.replace(
+                info, n_untraced_sit_sot_outs=info.n_untraced_sit_sot_outs + 1
+            )
             op_outputs += [op.inner_outputs[o_offset]]
             o_offset += 1
             op_inputs += [op.inner_inputs[i_offset]]
@@ -539,7 +543,9 @@ def compress_outs(op, not_required, inputs):
     # other stuff
     op_inputs += op.inner_inputs[i_offset:]
     info = dataclasses.replace(info, n_non_seqs=len(op.inner_inputs[i_offset:]))
-    node_inputs += inputs[ni_offset + op_info.n_shared_outs + op_info.n_nit_sot :]
+    node_inputs += inputs[
+        ni_offset + op_info.n_untraced_sit_sot_outs + op_info.n_nit_sot :
+    ]
     if op_info.as_while:
         op_outputs += [op.inner_outputs[o_offset]]
         map_old_new[o_offset] = len(op_outputs) - 1
@@ -658,11 +664,11 @@ class ScanArgs:
         p += n_sit_sot
         q += n_sit_sot
 
-        n_shared_outs = info.n_shared_outs
-        self.outer_in_shared = list(outer_inputs[p : p + n_shared_outs])
-        self.inner_in_shared = list(inner_inputs[q : q + n_shared_outs])
-        p += n_shared_outs
-        q += n_shared_outs
+        n_untraced_sit_sot_outs = info.n_untraced_sit_sot_outs
+        self.outer_in_shared = list(outer_inputs[p : p + n_untraced_sit_sot_outs])
+        self.inner_in_shared = list(inner_inputs[q : q + n_untraced_sit_sot_outs])
+        p += n_untraced_sit_sot_outs
+        q += n_untraced_sit_sot_outs
 
         n_nit_sot = info.n_nit_sot
         self.outer_in_nit_sot = list(outer_inputs[p : p + n_nit_sot])
@@ -702,10 +708,10 @@ class ScanArgs:
         p += n_nit_sot
         q += n_nit_sot
 
-        self.outer_out_shared = list(outer_outputs[p : p + n_shared_outs])
-        self.inner_out_shared = list(inner_outputs[q : q + n_shared_outs])
-        p += n_shared_outs
-        q += n_shared_outs
+        self.outer_out_shared = list(outer_outputs[p : p + n_untraced_sit_sot_outs])
+        self.inner_out_shared = list(inner_outputs[q : q + n_untraced_sit_sot_outs])
+        p += n_untraced_sit_sot_outs
+        q += n_untraced_sit_sot_outs
 
         assert p == len(outer_outputs)
         assert q == len(inner_outputs)
@@ -816,7 +822,7 @@ class ScanArgs:
             mit_sot_in_slices=tuple(tuple(v) for v in self.mit_sot_in_slices),
             sit_sot_in_slices=((-1,),) * len(self.inner_in_sit_sot),
             n_nit_sot=len(self.outer_in_nit_sot),
-            n_shared_outs=len(self.outer_in_shared),
+            n_untraced_sit_sot_outs=len(self.outer_in_shared),
             n_non_seqs=len(self.inner_in_non_seqs),
             as_while=self.as_while,
         )

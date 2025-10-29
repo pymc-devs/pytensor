@@ -42,11 +42,13 @@ from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import dot, exp, mean, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random import normal
+from pytensor.tensor.random.type import RandomGeneratorType, random_generator_type
 from pytensor.tensor.random.utils import RandomStream
 from pytensor.tensor.shape import Shape_i, reshape, specify_shape
 from pytensor.tensor.sharedvar import SharedVariable
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
+    TensorType,
     dcol,
     dmatrix,
     dscalar,
@@ -4007,7 +4009,7 @@ class TestExamples:
             [{}],
             [],
             3,
-            lambda op: op.info.n_shared_outs > 0,
+            lambda op: op.info.n_untraced_sit_sot_outs > 0,
         ),
         # mit-sot (that's also a type of sit-sot)
         (
@@ -4106,3 +4108,34 @@ def test_output_storage_reuse(linker_mode):
     res = f_cvm()
 
     assert np.array_equal(res, np.array([3, 1, 0]))
+
+
+def test_rng_outputs_info():
+    rng_init = random_generator_type("rng")
+    rng_x0, x0 = pt.random.normal(0, rng=rng_init, dtype="float64").owner.outputs
+
+    def step(prev_x, prev_rng):
+        next_rng, next_x = pt.random.normal(
+            prev_x, rng=prev_rng, dtype="float64"
+        ).owner.outputs
+        return next_x, next_rng
+
+    [xs, rng_final], updates = scan(
+        fn=step,
+        outputs_info=[x0, rng_x0],
+        n_steps=10,
+    )
+    assert isinstance(xs.type, TensorType)
+    assert isinstance(rng_final.type, RandomGeneratorType)
+    assert not updates
+
+    fn = function([rng_init], [xs, rng_final])
+    xs_eval, rng_final_eval = fn(np.random.default_rng(0))
+
+    rng_ref = np.random.default_rng(0)
+    assert not random_generator_type.values_eq(rng_ref, rng_final_eval)
+    xs_ref = [rng_ref.normal(0)]
+    for i in range(10):
+        xs_ref.append(rng_ref.normal(xs_ref[-1]))
+    assert random_generator_type.values_eq(rng_ref, rng_final_eval)
+    np.testing.assert_allclose(xs_eval, xs_ref[1:])

@@ -60,23 +60,23 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             mit_mot_init,
             mit_sot_init,
             sit_sot_init,
-            op.outer_shared(outer_inputs),
+            op.outer_untraced_sit_sot(outer_inputs),
             op.outer_non_seqs(outer_inputs),
         )  # JAX `init`
 
         def jax_args_to_inner_func_args(carry, x):
             """Convert JAX scan arguments into format expected by scan_inner_func.
 
-            scan(carry, x) -> scan_inner_func(seqs, MIT-SOT, SIT-SOT, shared, non_seqs)
+            scan(carry, x) -> scan_inner_func(seqs, MIT-SOT, SIT-SOT, untraced SIT-SOT, non_seqs)
             """
 
-            # `carry` contains all inner taps, shared terms, and non_seqs
+            # `carry` contains all inner taps and non_seqs
             (
                 i,
                 inner_mit_mot,
                 inner_mit_sot,
                 inner_sit_sot,
-                inner_shared,
+                inner_untraced_sit_sot,
                 inner_non_seqs,
             ) = carry
 
@@ -108,7 +108,7 @@ def jax_funcify_Scan(op: Scan, **kwargs):
                 *mit_mot_flatten,
                 *mit_sot_flatten,
                 *inner_sit_sot,
-                *inner_shared,
+                *inner_untraced_sit_sot,
                 *inner_non_seqs,
             )
 
@@ -118,14 +118,14 @@ def jax_funcify_Scan(op: Scan, **kwargs):
         ):
             """Convert inner_scan_func outputs into format expected by JAX scan.
 
-            old_carry + (MIT-SOT_outs, SIT-SOT_outs, NIT-SOT_outs, shared_outs) -> (new_carry, ys)
+            old_carry + (MIT-SOT_outs, SIT-SOT_outs, NIT-SOT_outs, untraced_SIT-SOT_outs) -> (new_carry, ys)
             """
             (
                 i,
                 old_mit_mot,
                 old_mit_sot,
                 _old_sit_sot,
-                _old_shared,
+                _old_untraced_sit_sot,
                 inner_non_seqs,
             ) = old_carry
 
@@ -133,7 +133,7 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             new_mit_sot_vals = op.inner_mitsot_outs(inner_scan_outs)
             new_sit_sot = op.inner_sitsot_outs(inner_scan_outs)
             new_nit_sot = op.inner_nitsot_outs(inner_scan_outs)
-            new_shared = op.inner_shared_outs(inner_scan_outs)
+            new_untraced_sit_sot = op.inner_untraced_sit_sot_outs(inner_scan_outs)
 
             # New carry for next step
             # Update MIT-MOT buffer at positions indicated by output taps
@@ -150,14 +150,14 @@ def jax_funcify_Scan(op: Scan, **kwargs):
                     old_mit_sot, new_mit_sot_vals, strict=True
                 )
             ]
-            # For SIT-SOT, and shared just pass along the new value
+            # For SIT-SOT just pass along the new value
             # Non-sequences remain unchanged
             new_carry = (
                 i + 1,
                 new_mit_mot,
                 new_mit_sot,
                 new_sit_sot,
-                new_shared,
+                new_untraced_sit_sot,
                 inner_non_seqs,
             )
 
@@ -183,7 +183,7 @@ def jax_funcify_Scan(op: Scan, **kwargs):
                 final_mit_mot,
                 _final_mit_sot,
                 _final_sit_sot,
-                final_shared,
+                final_untraced_sit_sot,
                 _final_non_seqs,
             ),
             traces,
@@ -238,7 +238,7 @@ def jax_funcify_Scan(op: Scan, **kwargs):
         scan_outs_final = [
             *final_mit_mot,
             *get_partial_traces(traces),
-            *final_shared,
+            *final_untraced_sit_sot,
         ]
 
         if len(scan_outs_final) == 1:

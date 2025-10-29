@@ -1,3 +1,4 @@
+import typing
 import warnings
 from itertools import chain
 
@@ -11,6 +12,7 @@ from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.op import get_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import explicit_graph_inputs
+from pytensor.graph.type import HasShape
 from pytensor.graph.utils import MissingInputError, TestValueError
 from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.utils import expand_empty, safe_new, until
@@ -20,6 +22,10 @@ from pytensor.tensor.math import minimum
 from pytensor.tensor.shape import shape_padleft
 from pytensor.tensor.type import TensorType, integer_dtypes
 from pytensor.updates import OrderedUpdates
+
+
+if typing.TYPE_CHECKING:
+    from pytensor.tensor.type import TensorVariable
 
 
 def get_updates_and_outputs(ls):
@@ -469,7 +475,7 @@ def scan(
 
     # Make sure we get rid of numpy arrays or ints or anything like that
     # passed as inputs to scan
-    non_seqs = []
+    non_seqs: list[Variable] = []
     for elem in wrap_into_list(non_sequences):
         if not isinstance(elem, Variable):
             non_seqs.append(pt.as_tensor_variable(elem))
@@ -685,10 +691,10 @@ def scan(
 
     # MIT_MOT -- not provided by the user only by the grad function
     n_mit_mot = 0
-    mit_mot_scan_inputs = []
-    mit_mot_inner_inputs = []
-    mit_mot_inner_outputs = []
-    mit_mot_out_slices = []
+    mit_mot_scan_inputs: list[TensorVariable] = []
+    mit_mot_inner_inputs: list[TensorVariable] = []
+    mit_mot_inner_outputs: list[TensorVariable] = []
+    mit_mot_out_slices: list[TensorVariable] = []
 
     # SIT_SOT -- provided by the user
     n_mit_sot = 0
@@ -705,6 +711,12 @@ def scan(
     sit_sot_inner_slices = []
     sit_sot_inner_outputs = []
     sit_sot_rightOrder = []
+
+    n_untraced_sit_sot_outs = 0
+    untraced_sit_sot_scan_inputs = []
+    untraced_sit_sot_inner_inputs = []
+    untraced_sit_sot_inner_outputs = []
+    untraced_sit_sot_rightOrder = []
 
     # go through outputs picking up time slices as needed
     for i, init_out in enumerate(outs_info):
@@ -741,17 +753,35 @@ def scan(
             # We need now to allocate space for storing the output and copy
             # the initial state over. We do this using the expand function
             # defined in scan utils
-            sit_sot_scan_inputs.append(
-                expand_empty(
-                    shape_padleft(actual_arg),
-                    actual_n_steps,
+            if isinstance(actual_arg.type, HasShape):
+                sit_sot_scan_inputs.append(
+                    expand_empty(
+                        shape_padleft(actual_arg),
+                        actual_n_steps,
+                    )
                 )
-            )
+                sit_sot_inner_slices.append(actual_arg)
 
-            sit_sot_inner_slices.append(actual_arg)
-            sit_sot_inner_inputs.append(arg)
-            sit_sot_rightOrder.append(i)
-            n_sit_sot += 1
+                sit_sot_inner_inputs.append(arg)
+                sit_sot_rightOrder.append(i)
+                n_sit_sot += 1
+            else:
+                # Assume variables without shape cannot be stacked (e.g., RNG variables)
+                # Because this is new, issue a warning to inform the user, except for RNG, which were the main reason for this feature
+                from pytensor.tensor.random.type import RandomType
+
+                if not isinstance(arg.type, RandomType):
+                    warnings.warn(
+                        (
+                            f"Output {actual_arg} (index {i}) with type {actual_arg.type} will be treated as untraced variable in scan. "
+                            "Only the last value will be returned, not the entire sequence."
+                        ),
+                        UserWarning,
+                    )
+                untraced_sit_sot_scan_inputs.append(actual_arg)
+                untraced_sit_sot_inner_inputs.append(arg)
+                n_untraced_sit_sot_outs += 1
+                untraced_sit_sot_rightOrder.append(i)
 
         elif init_out.get("taps", None):
             if np.any(np.array(init_out.get("taps", [])) > 0):
@@ -802,10 +832,11 @@ def scan(
         #      a map); in that case we do not have to do anything ..
 
     # Re-order args
-    max_mit_sot = np.max([-1, *mit_sot_rightOrder]) + 1
-    max_sit_sot = np.max([-1, *sit_sot_rightOrder]) + 1
-    n_elems = np.max([max_mit_sot, max_sit_sot])
-    _ordered_args = [[] for x in range(n_elems)]
+    max_mit_sot = max(mit_sot_rightOrder, default=-1) + 1
+    max_sit_sot = max(sit_sot_rightOrder, default=-1) + 1
+    max_untraced_sit_sot_outs = max(untraced_sit_sot_rightOrder, default=-1) + 1
+    n_elems = np.max((max_mit_sot, max_sit_sot, max_untraced_sit_sot_outs))
+    _ordered_args: list[list[Variable]] = [[] for x in range(n_elems)]
     offset = 0
     for idx in range(n_mit_sot):
         n_inputs = len(mit_sot_tap_array[idx])
@@ -824,6 +855,11 @@ def scan(
             _ordered_args[sit_sot_rightOrder[idx]] = [sit_sot_inner_slices[idx]]
         else:
             _ordered_args[sit_sot_rightOrder[idx]] = [sit_sot_inner_inputs[idx]]
+
+    for idx in range(n_untraced_sit_sot_outs):
+        _ordered_args[untraced_sit_sot_rightOrder[idx]] = [
+            untraced_sit_sot_inner_inputs[idx]
+        ]
 
     ordered_args = list(chain.from_iterable(_ordered_args))
     if single_step_requested:
@@ -939,18 +975,19 @@ def scan(
         if "taps" in out and out["taps"] != [-1]:
             mit_sot_inner_outputs.append(outputs[i])
 
-    # Step 5.2 Outputs with tap equal to -1
+    # Step 5.2 Outputs with tap equal to -1 (traced and untraced)
     for i, out in enumerate(outs_info):
         if "taps" in out and out["taps"] == [-1]:
-            sit_sot_inner_outputs.append(outputs[i])
+            output = outputs[i]
+            if isinstance(output.type, HasShape):
+                sit_sot_inner_outputs.append(output)
+            else:
+                untraced_sit_sot_inner_outputs.append(output)
 
     # Step 5.3 Outputs that correspond to update rules of shared variables
+    # This whole special logic for shared variables is deprecated
+    sit_sot_shared: list[Variable] = []
     inner_replacements = {}
-    n_shared_outs = 0
-    shared_scan_inputs = []
-    shared_inner_inputs = []
-    shared_inner_outputs = []
-    sit_sot_shared = []
     no_update_shared_inputs = []
     for input in dummy_inputs:
         if not isinstance(input.variable, SharedVariable):
@@ -976,8 +1013,8 @@ def scan(
 
             new_var = safe_new(input.variable)
 
-            if getattr(input.variable, "name", None) is not None:
-                new_var.name = input.variable.name + "_copy"
+            if input.variable.name is not None:
+                new_var.name = f"{input.variable.name}_copy"
 
             inner_replacements[input.variable] = new_var
 
@@ -1003,10 +1040,10 @@ def scan(
                 sit_sot_shared.append(input.variable)
 
             else:
-                shared_inner_inputs.append(new_var)
-                shared_scan_inputs.append(input.variable)
-                shared_inner_outputs.append(input.update)
-                n_shared_outs += 1
+                untraced_sit_sot_inner_inputs.append(new_var)
+                untraced_sit_sot_scan_inputs.append(input.variable)
+                untraced_sit_sot_inner_outputs.append(input.update)
+                n_untraced_sit_sot_outs += 1
         else:
             no_update_shared_inputs.append(input)
 
@@ -1071,7 +1108,7 @@ def scan(
         + mit_mot_inner_inputs
         + mit_sot_inner_inputs
         + sit_sot_inner_inputs
-        + shared_inner_inputs
+        + untraced_sit_sot_inner_inputs
         + other_shared_inner_args
         + other_inner_args
     )
@@ -1081,7 +1118,7 @@ def scan(
         + mit_sot_inner_outputs
         + sit_sot_inner_outputs
         + nit_sot_inner_outputs
-        + shared_inner_outputs
+        + untraced_sit_sot_inner_outputs
     )
     if condition is not None:
         inner_outs.append(condition)
@@ -1101,7 +1138,7 @@ def scan(
         mit_mot_out_slices=tuple(tuple(v) for v in mit_mot_out_slices),
         mit_sot_in_slices=tuple(tuple(v) for v in mit_sot_tap_array),
         sit_sot_in_slices=tuple((-1,) for x in range(n_sit_sot)),
-        n_shared_outs=n_shared_outs,
+        n_untraced_sit_sot_outs=n_untraced_sit_sot_outs,
         n_nit_sot=n_nit_sot,
         n_non_seqs=len(other_shared_inner_args) + len(other_inner_args),
         as_while=as_while,
@@ -1127,7 +1164,7 @@ def scan(
         + mit_mot_scan_inputs
         + mit_sot_scan_inputs
         + sit_sot_scan_inputs
-        + shared_scan_inputs
+        + untraced_sit_sot_scan_inputs
         + [actual_n_steps for x in range(n_nit_sot)]
         + other_shared_scan_args
         + other_scan_args
@@ -1173,13 +1210,26 @@ def scan(
     nit_sot_outs = remove_dimensions(scan_outs[offset : offset + n_nit_sot])
 
     offset += n_nit_sot
-    for idx, update_rule in enumerate(scan_outs[offset : offset + n_shared_outs]):
-        update_map[shared_scan_inputs[idx]] = update_rule
 
-    _scan_out_list = mit_sot_outs + sit_sot_outs + nit_sot_outs
+    # Support for explicit untraced sit_sot
+    n_explicit_untraced_sit_sot_outs = len(untraced_sit_sot_rightOrder)
+    untraced_sit_sot_outs = scan_outs[
+        offset : offset + n_explicit_untraced_sit_sot_outs
+    ]
+
+    offset += n_explicit_untraced_sit_sot_outs
+    for idx, update_rule in enumerate(scan_outs[offset:]):
+        update_map[untraced_sit_sot_scan_inputs[idx]] = update_rule
+
+    _scan_out_list = mit_sot_outs + sit_sot_outs + nit_sot_outs + untraced_sit_sot_outs
     # Step 10. I need to reorder the outputs to be in the order expected by
     # the user
-    rightOrder = mit_sot_rightOrder + sit_sot_rightOrder + nit_sot_rightOrder
+    rightOrder = (
+        mit_sot_rightOrder
+        + sit_sot_rightOrder
+        + untraced_sit_sot_rightOrder
+        + nit_sot_rightOrder
+    )
     scan_out_list = [None] * len(rightOrder)
     for idx, pos in enumerate(rightOrder):
         if pos >= 0:
