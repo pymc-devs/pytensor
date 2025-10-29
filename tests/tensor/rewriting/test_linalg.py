@@ -1084,6 +1084,14 @@ def _check_op_in_graph(fgraph, op_type, present=True):
 
 
 rewrite_cases = {
+    "lower_tag": (
+        lambda x: (setattr(x.tag, "lower_triangular", True), x)[-1],
+        lambda a: np.tril(a),
+    ),
+    "upper_tag": (
+        lambda x: (setattr(x.tag, "upper_triangular", True), x)[-1],
+        lambda a: np.triu(a),
+    ),
     "tri": (
         lambda x: pt.tri(x.shape[0], x.shape[1], k=0, dtype=x.dtype),
         lambda a: np.tri(N=a.shape[0], M=a.shape[1], k=0, dtype=a.dtype),
@@ -1143,6 +1151,10 @@ def test_inv_to_triangular_inv_rewrite(case):
     a = (np.dot(a, a.T) + np.eye(5)).astype(
         config.floatX
     )  # Make positive definite for Cholesky
+    if case == "lower_tag":
+        a = np.tril(a)
+    elif case == "upper_tag":
+        a = np.triu(a)
     pytensor_result = f(a)
     _, numpy_tri_func = rewrite_cases[case]
     numpy_result = np.linalg.inv(numpy_tri_func(a))
