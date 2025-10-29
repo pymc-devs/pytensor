@@ -546,26 +546,27 @@ def construct_pfunc_ins_and_outs(
                 "variables in the inputs list."
             )
 
-    # Check that we are not using `givens` to replace input variables, because
-    # this typically does nothing, contrary to what one may expect.
-    in_var_set = set(in_variables)
-    try:
-        givens_pairs = list(givens.items())
-    except AttributeError:
-        givens_pairs = givens
-    for x, y in givens_pairs:
-        if x in in_var_set:
-            raise RuntimeError(
-                f"You are trying to replace variable '{x}' through the "
-                "`givens` parameter, but this variable is an input to your "
-                "function. Replacing inputs is currently forbidden because it "
-                "has no effect. One way to modify an input `x` to a function "
-                "evaluating f(x) is to define a new input `y` and use "
-                "`pytensor.function([y], f(x), givens={x: g(y)})`. Another "
-                "solution consists in using `pytensor.clone_replace`, e.g. like this: "
-                "`pytensor.function([x], "
-                "pytensor.clone_replace(f(x), replace={x: g(x)}))`."
-            )
+    if givens:
+        # Check that we are not using `givens` to replace input variables, because
+        # this typically does nothing, contrary to what one may expect.
+        in_var_set = set(in_variables)
+        try:
+            givens_pairs = list(givens.items())
+        except AttributeError:
+            givens_pairs = givens
+        for x, y in givens_pairs:
+            if x in in_var_set:
+                raise RuntimeError(
+                    f"You are trying to replace variable '{x}' through the "
+                    "`givens` parameter, but this variable is an input to your "
+                    "function. Replacing inputs is currently forbidden because it "
+                    "has no effect. One way to modify an input `x` to a function "
+                    "evaluating f(x) is to define a new input `y` and use "
+                    "`pytensor.function([y], f(x), givens={x: g(y)})`. Another "
+                    "solution consists in using `pytensor.clone_replace`, e.g. like this: "
+                    "`pytensor.function([x], "
+                    "pytensor.clone_replace(f(x), replace={x: g(x)}))`."
+                )
 
     if not fgraph:
         # Extend the outputs with the updates on input variables so they are
