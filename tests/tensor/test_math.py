@@ -1409,12 +1409,7 @@ class TestMinMax:
             "uint8",
             "uint16",
             "uint32",
-            pytest.param(
-                "uint64",
-                marks=pytest.mark.xfail(
-                    condition=config.mode != "FAST_COMPILE", reason="Fails due to #770"
-                ),
-            ),
+            "uint64",
         ),
     )
     def test_uint(self, dtype):
