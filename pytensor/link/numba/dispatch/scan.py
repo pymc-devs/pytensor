@@ -108,19 +108,19 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     outer_in_mit_sot_names = op.outer_mitsot(outer_in_names)
     outer_in_sit_sot_names = op.outer_sitsot(outer_in_names)
     outer_in_nit_sot_names = op.outer_nitsot(outer_in_names)
-    outer_in_shared_names = op.outer_shared(outer_in_names)
+    outer_in_untraced_sit_sot_names = op.outer_untraced_sit_sot(outer_in_names)
     outer_in_non_seqs_names = op.outer_non_seqs(outer_in_names)
 
     # These are all the outer-input names that have produce outputs/have output
     # taps (i.e. they have inner-outputs and corresponding outer-outputs).
     # Outer-outputs are ordered as follows:
-    # mit-mot-outputs + mit-sot-outputs + sit-sot-outputs + nit-sots + shared-outputs
+    # mit-mot-outputs + mit-sot-outputs + sit-sot-outputs + nit-sots + untraced-sit-sot-outputs
     outer_in_outtap_names = (
         outer_in_mit_mot_names
         + outer_in_mit_sot_names
         + outer_in_sit_sot_names
         + outer_in_nit_sot_names
-        + outer_in_shared_names
+        + outer_in_untraced_sit_sot_names
     )
 
     # We create distinct variables for/references to the storage arrays for
@@ -138,8 +138,10 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     for outer_in_name in outer_in_nit_sot_names:
         outer_in_to_storage_name[outer_in_name] = f"{outer_in_name}_nitsot_storage"
 
-    for outer_in_name in outer_in_shared_names:
-        outer_in_to_storage_name[outer_in_name] = f"{outer_in_name}_shared_storage"
+    for outer_in_name in outer_in_untraced_sit_sot_names:
+        outer_in_to_storage_name[outer_in_name] = (
+            f"{outer_in_name}_untraced_sit_sot_storage"
+        )
 
     outer_output_names = list(outer_in_to_storage_name.values())
     assert len(outer_output_names) == len(node.outputs)
@@ -147,7 +149,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     # Construct the inner-input expressions (e.g. indexed storage expressions)
     # Inner-inputs are ordered as follows:
     # sequences + mit-mot-inputs + mit-sot-inputs + sit-sot-inputs +
-    # shared-inputs + non-sequences.
+    # untraced-sit-sot-inputs + non-sequences.
     temp_scalar_storage_alloc_stmts: list[str] = []
     inner_in_exprs_scalar: list[str] = []
     inner_in_exprs: list[str] = []
@@ -204,10 +206,8 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
 
     # Inner-outputs consist of:
     # mit-mot-outputs + mit-sot-outputs + sit-sot-outputs + nit-sots +
-    # shared-outputs [+ while-condition]
+    # untraced-sit-sot-outputs [+ while-condition]
     inner_output_names = [f"inner_out_{i}" for i in range(len(op.inner_outputs))]
-
-    # inner_out_shared_names = op.inner_shared_outs(inner_output_names)
 
     # The assignment statements that copy inner-outputs into the outer-outputs
     # storage
