@@ -124,13 +124,13 @@ def test_inplace_rewrites(rv_op):
     out = rv_op(np.e)
     node = out.owner
     op = node.op
-    node.inputs[0].default_update = node.outputs[0]
     assert op.inplace is False
 
     f = function(
         [],
         out,
         mode="FAST_RUN",
+        updates={node.inputs[0]: node.outputs[0]},
     )
 
     (new_out, _new_rng) = f.maker.fgraph.outputs

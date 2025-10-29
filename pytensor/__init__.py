@@ -159,7 +159,7 @@ def get_underlying_scalar_constant(v):
 
 
 # isort: off
-import pytensor.tensor.random.var
+import pytensor.tensor.random.variable
 import pytensor.sparse
 from pytensor.ifelse import ifelse
 from pytensor.scan import checkpoints
