@@ -6,27 +6,6 @@ from pytensor.tensor.blockwise import Blockwise
 
 @mlx_funcify.register(Blockwise)
 def funcify_Blockwise(op: Blockwise, node, **kwargs):
-    """Convert a Blockwise operation to an MLX function.
-
-    This handles vectorized operations by using mx.vmap when there are batch
-    dimensions, or returning the core function directly when there are no
-    batch dimensions to vectorize over.
-
-    Parameters
-    ----------
-    op : Blockwise
-        The Blockwise operation to convert.
-    node : Apply
-        The node containing the operation and its inputs.
-    **kwargs
-        Additional keyword arguments.
-
-    Returns
-    -------
-    callable
-        An MLX function that implements the Blockwise operation, either
-        the core function directly or wrapped with mx.vmap for vectorization.
-    """
     # Get the core python function for this Blockwise operation
     core_node = op._create_dummy_core_node(node.inputs)
     core_f = mlx_funcify(op.core_op, core_node)
