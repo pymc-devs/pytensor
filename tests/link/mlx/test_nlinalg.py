@@ -8,9 +8,6 @@ from pytensor import config
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
-mlx_linalg_mode = mlx_mode.including("blockwise")
-
-
 @pytest.mark.parametrize("compute_uv", [True, False])
 def test_mlx_svd(compute_uv):
     rng = np.random.default_rng(15)
@@ -25,7 +22,7 @@ def test_mlx_svd(compute_uv):
         [A],
         out,
         [A_val],
-        mlx_mode=mlx_linalg_mode,
+        mlx_mode=mlx_mode,
         assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
 
@@ -42,7 +39,7 @@ def test_mlx_kron():
         [A, B],
         [out],
         [A_val, B_val],
-        mlx_mode=mlx_linalg_mode,
+        mlx_mode=mlx_mode,
         assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
 
@@ -62,7 +59,7 @@ def test_mlx_inv(op):
         [A],
         [out],
         [A_val],
-        mlx_mode=mlx_linalg_mode,
+        mlx_mode=mlx_mode,
         assert_fn=partial(
             np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
         ),

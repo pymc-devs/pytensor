@@ -9,11 +9,6 @@ from pytensor import config
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
-# mlx complains about useless vmap (when there are no batch dims), so we need to include
-# local_remove_useless_blockwise rewrite for these tests
-mlx_linalg_mode = mlx_mode.including("blockwise")
-
-
 @pytest.mark.parametrize("lower", [True, False])
 def test_mlx_cholesky(lower):
     rng = np.random.default_rng(15)
@@ -29,7 +24,7 @@ def test_mlx_cholesky(lower):
         [A],
         [out],
         [A_val],
-        mlx_mode=mlx_linalg_mode,
+        mlx_mode=mlx_mode,
         assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
 
@@ -62,7 +57,7 @@ def test_mlx_solve(assume_a):
             [A, b],
             [out],
             [A_val, b_val],
-            mlx_mode=mlx_linalg_mode,
+            mlx_mode=mlx_mode,
             assert_fn=partial(
                 np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
             ),
@@ -90,7 +85,7 @@ def test_mlx_SolveTriangular(lower, trans):
         [A, b],
         [out],
         [A_val, b_val],
-        mlx_mode=mlx_linalg_mode,
+        mlx_mode=mlx_mode,
         assert_fn=partial(
             np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
         ),
@@ -109,6 +104,6 @@ def test_mlx_LU():
         [A],
         out,
         [A_val],
-        mlx_mode=mlx_linalg_mode,
+        mlx_mode=mlx_mode,
         assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
