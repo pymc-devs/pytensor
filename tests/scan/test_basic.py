@@ -3650,67 +3650,6 @@ class TestExamples:
         if config.mode != "FAST_COMPILE":
             assert nb_shape_i == 1
 
-    def test_return_steps(self):
-        rng = np.random.default_rng(utt.fetch_seed())
-
-        vW_in2 = asarrayX(rng.uniform(-0.5, 0.5, size=(2,)))
-        vW = asarrayX(rng.uniform(-0.5, 0.5, size=(2, 2)))
-        vWout = asarrayX(rng.uniform(-0.5, 0.5, size=(2,)))
-        vW_in1 = asarrayX(rng.uniform(-0.5, 0.5, size=(2, 2)))
-        v_u1 = asarrayX(rng.uniform(-0.5, 0.5, size=(8, 2)))
-        v_u2 = asarrayX(rng.uniform(-0.5, 0.5, size=(8,)))
-        v_x0 = asarrayX(rng.uniform(-0.5, 0.5, size=(2,)))
-        v_y0 = asarrayX(rng.uniform(size=(3,)))
-
-        W_in2 = shared(vW_in2, name="win2")
-        W = shared(vW, name="w")
-        W_out = shared(vWout, name="wout")
-        W_in1 = matrix("win")
-        u1 = matrix("u1")
-        u2 = vector("u2")
-        x0 = vector("x0")
-        y0 = vector("y0")
-
-        def f_rnn_cmpl(u1_t, u2_t, x_tm1, y_tm1, y_tm3, W_in1):
-            return [
-                y_tm3 + 1,
-                dot(u1_t, W_in1) + u2_t * W_in2 + dot(x_tm1, W),
-                y_tm1 + dot(x_tm1, W_out),
-            ]
-
-        rval, updates = scan(
-            f_rnn_cmpl,
-            [u1, u2],
-            [None, dict(initial=x0), dict(initial=y0, taps=[-1, -3])],
-            W_in1,
-            n_steps=None,
-            truncate_gradient=-1,
-            go_backwards=False,
-        )
-
-        outputs = []
-        outputs += [rval[0][-3:]]
-        outputs += [rval[1][-2:]]
-        outputs += [rval[2][-4:]]
-        f4 = function(
-            [u1, u2, x0, y0, W_in1], outputs, updates=updates, allow_input_downcast=True
-        )
-
-        # compute the values in numpy
-        v_x = np.zeros((8, 2), dtype=config.floatX)
-        v_y = np.zeros((8,), dtype=config.floatX)
-        v_x[0] = np.dot(v_u1[0], vW_in1) + v_u2[0] * vW_in2 + np.dot(v_x0, vW)
-        v_y[0] = np.dot(v_x0, vWout) + v_y0[2]
-
-        for i in range(1, 8):
-            v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
-            v_y[i] = np.dot(v_x[i - 1], vWout) + v_y[i - 1]
-
-        (_pytensor_dump, pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
-
-        utt.assert_allclose(pytensor_x, v_x[-2:])
-        utt.assert_allclose(pytensor_y, v_y[-4:])
-
     def test_until_random_infer_shape(self):
         """
         Test for a crash in scan.infer_shape when using both
