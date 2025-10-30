@@ -28,11 +28,11 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
-from pytensor.graph.traversal import ancestors
+from pytensor.graph.traversal import ancestors, apply_ancestors
 from pytensor.printing import debugprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor import inplace
-from pytensor.tensor.basic import Alloc, constant, join, second, switch
+from pytensor.tensor.basic import Alloc, Join, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
@@ -3413,14 +3413,20 @@ class TestLocalReduce:
 
 class TestReduceJoin:
     def setup_method(self):
-        self.mode = get_default_mode().including(
-            "canonicalize", "specialize", "uncanonicalize"
-        )
+        self.mode = get_default_mode().including("canonicalize", "specialize")
 
     @pytest.mark.parametrize(
-        "op, nin", [(pt_sum, 3), (pt_max, 2), (pt_min, 2), (prod, 3)]
+        "reduce_op, nin", [(pt_sum, 3), (pt_max, 2), (pt_min, 2), (prod, 3)]
     )
-    def test_local_reduce_join(self, op, nin):
+    @pytest.mark.parametrize(
+        "reduce_axis",
+        (
+            0,
+            pytest.param(1, marks=pytest.mark.xfail(reason="Not implemented yet")),
+            None,
+        ),
+    )
+    def test_local_reduce_join(self, reduce_op, nin, reduce_axis):
         vx = matrix()
         vy = matrix()
         vz = matrix()
@@ -3431,18 +3437,25 @@ class TestReduceJoin:
         inputs = (vx, vy, vz)[:nin]
         test_values = (x, y, z)[:nin]
 
-        out = op(inputs, axis=0)
+        out = reduce_op(inputs, axis=reduce_axis)
+        assert sum(isinstance(node.op, Join) for node in apply_ancestors([out])) == 1
         f = function(inputs, out, mode=self.mode)
+
         np.testing.assert_allclose(
-            f(*test_values), getattr(np, op.__name__)(test_values, axis=0)
+            f(*test_values),
+            getattr(np, reduce_op.__name__)(test_values, axis=reduce_axis),
         )
-        topo = f.maker.fgraph.toposort()
-        assert len(topo) <= 2
-        assert isinstance(topo[-1].op, Elemwise)
+        assert (
+            sum(
+                isinstance(node.op, Join)
+                for node in apply_ancestors(f.maker.fgraph.outputs)
+            )
+            == 0
+        )
 
     def test_type(self):
         # Test different axis for the join and the reduction
-        # We must force the dtype, of otherwise, this tests will fail
+        # We must force the dtype, otherwise, this tests will fail
         # on 32 bit systems
         A = shared(np.array([1, 2, 3, 4, 5], dtype="int64"))
 
@@ -3451,29 +3464,28 @@ class TestReduceJoin:
         topo = f.maker.fgraph.toposort()
         assert isinstance(topo[-1].op, Elemwise)
 
-        # Test a case that was bugged in a old PyTensor bug
+        # Test a case that was bugged in an old PyTensor version
         f = function([], pt_sum(pt.stack([A, A]), axis=1), mode=self.mode)
 
         np.testing.assert_allclose(f(), [15, 15])
         topo = f.maker.fgraph.toposort()
-        assert not isinstance(topo[-1].op, Elemwise)
+        assert sum(isinstance(node.op, Join) for node in topo) == 1
 
-        # This case could be rewritten
+        # This case can be rewritten
         A = shared(np.array([1, 2, 3, 4, 5]).reshape(5, 1))
         f = function([], pt_sum(pt.concatenate((A, A), axis=1), axis=1), mode=self.mode)
         np.testing.assert_allclose(f(), [2, 4, 6, 8, 10])
         topo = f.maker.fgraph.toposort()
-        assert not isinstance(topo[-1].op, Elemwise)
+        assert sum(isinstance(node.op, Join) for node in topo) == 0
 
         A = shared(np.array([1, 2, 3, 4, 5]).reshape(5, 1))
         f = function([], pt_sum(pt.concatenate((A, A), axis=1), axis=0), mode=self.mode)
         np.testing.assert_allclose(f(), [15, 15])
         topo = f.maker.fgraph.toposort()
-        assert not isinstance(topo[-1].op, Elemwise)
+        assert sum(isinstance(node.op, Join) for node in topo) == 1
 
-    def test_not_supported_axis_none(self):
-        # Test that the rewrite does not crash in one case where it
-        # is not applied.  Reported at
+    def test_bug_regression(self):
+        # Test that the rewrite does not crash in one case where it used to
         # https://groups.google.com/d/topic/theano-users/EDgyCU00fFA/discussion
         vx = matrix()
         vy = matrix()
@@ -3484,9 +3496,10 @@ class TestReduceJoin:
 
         out = pt_sum([vx, vy, vz], axis=None)
         f = function([vx, vy, vz], out, mode=self.mode)
+        assert sum(isinstance(node.op, Join) for node in f.maker.fgraph.toposort()) == 0
         np.testing.assert_allclose(f(x, y, z), np.sum([x, y, z]))
 
-    def test_not_supported_unequal_shapes(self):
+    def test_unequal_shapes(self):
         # Not the same shape along the join axis
         vx = matrix(shape=(1, 3))
         vy = matrix(shape=(2, 3))
@@ -3495,6 +3508,7 @@ class TestReduceJoin:
         out = pt_sum(join(0, vx, vy), axis=0)
 
         f = function([vx, vy], out, mode=self.mode)
+        assert sum(isinstance(node.op, Join) for node in f.maker.fgraph.toposort()) == 0
         np.testing.assert_allclose(
             f(x, y), np.sum(np.concatenate([x, y], axis=0), axis=0)
         )
@@ -3514,7 +3528,7 @@ class TestReduceJoin:
 
         fg = FunctionGraph([x], [out], clone=False)
         [rewritten_out] = local_reduce_join.transform(fg, out.owner)
-        expected_out = add(exp(x), log(x))
+        expected_out = add(exp(x[None]).sum(axis=0), log(x[None]).sum(axis=0))
         assert equal_computations([rewritten_out], [expected_out])
 
 
