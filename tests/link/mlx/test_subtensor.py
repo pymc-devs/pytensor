@@ -395,13 +395,16 @@ def test_mlx_advanced_incsubtensor_with_numpy_int64():
     x_np = np.arange(15, dtype=np.float32).reshape((5, 3))
     x_pt = pt.constant(x_np)
 
-    # Value to set/increment
+    # Value to set/increment - using 4 rows now for vector indexing
     y_pt = pt.as_tensor_variable(
-        np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+        np.array(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0], [10.0, 11.0, 12.0]],
+            dtype=np.float32,
+        )
     )
 
-    # Advanced indexing set with array indices
-    indices = [np.int64(0), np.int64(2)]
+    # Advanced indexing set with vector array indices
+    indices = np.array([0, 1, 2, 3], dtype=np.int64)
     out_pt = pt_subtensor.set_subtensor(x_pt[indices], y_pt)
     compare_mlx_and_py([], [out_pt], [])
 

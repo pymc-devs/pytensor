@@ -16,7 +16,7 @@ from pytensor.tensor.subtensor import (
 from pytensor.tensor.type_other import MakeSlice
 
 
-def normalize_indices_for_mlx(ilist, idx_list):
+def normalize_indices_for_mlx(indices):
     """Convert numpy integers to Python integers for MLX indexing.
 
     MLX requires index values to be Python int, not np.int64 or other NumPy types.
@@ -49,18 +49,19 @@ def normalize_indices_for_mlx(ilist, idx_list):
         else:
             return element
 
-    indices = indices_from_subtensor(ilist, idx_list)
     return tuple(normalize_element(idx) for idx in indices)
 
 
 @mlx_funcify.register(Subtensor)
 def mlx_funcify_Subtensor(op, node, **kwargs):
     """MLX implementation of Subtensor."""
-    idx_list = getattr(op, "idx_list", None)
+    idx_list = op.idx_list
 
     def subtensor(x, *ilists):
+        # Convert ilist to indices using idx_list (basic subtensor)
+        indices = indices_from_subtensor(ilists, idx_list)
         # Normalize indices to handle np.int64 and other NumPy types
-        indices = normalize_indices_for_mlx(ilists, idx_list)
+        indices = normalize_indices_for_mlx(indices)
         if len(indices) == 1:
             indices = indices[0]
 
@@ -73,11 +74,11 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
 @mlx_funcify.register(AdvancedSubtensor1)
 def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
     """MLX implementation of AdvancedSubtensor."""
-    idx_list = getattr(op, "idx_list", None)
 
     def advanced_subtensor(x, *ilists):
         # Normalize indices to handle np.int64 and other NumPy types
-        indices = normalize_indices_for_mlx(ilists, idx_list)
+        # Advanced indexing doesn't use idx_list or indices_from_subtensor
+        indices = normalize_indices_for_mlx(ilists)
         if len(indices) == 1:
             indices = indices[0]
 
@@ -87,12 +88,11 @@ def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
 
 
 @mlx_funcify.register(IncSubtensor)
-@mlx_funcify.register(AdvancedIncSubtensor1)
 def mlx_funcify_IncSubtensor(op, node, **kwargs):
     """MLX implementation of IncSubtensor."""
-    idx_list = getattr(op, "idx_list", None)
+    idx_list = op.idx_list
 
-    if getattr(op, "set_instead_of_inc", False):
+    if op.set_instead_of_inc:
 
         def mlx_fn(x, indices, y):
             if not op.inplace:
@@ -109,8 +109,10 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
             return x
 
     def incsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=idx_list):
+        # Convert ilist to indices using idx_list (basic inc_subtensor)
+        indices = indices_from_subtensor(ilist, idx_list)
         # Normalize indices to handle np.int64 and other NumPy types
-        indices = normalize_indices_for_mlx(ilist, idx_list)
+        indices = normalize_indices_for_mlx(indices)
 
         if len(indices) == 1:
             indices = indices[0]
@@ -121,11 +123,11 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
 
 
 @mlx_funcify.register(AdvancedIncSubtensor)
+@mlx_funcify.register(AdvancedIncSubtensor1)
 def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
     """MLX implementation of AdvancedIncSubtensor."""
-    idx_list = getattr(op, "idx_list", None)
 
-    if getattr(op, "set_instead_of_inc", False):
+    if op.set_instead_of_inc:
 
         def mlx_fn(x, indices, y):
             if not op.inplace:
@@ -141,9 +143,10 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
             x[indices] += y
             return x
 
-    def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=idx_list):
+    def advancedincsubtensor(x, y, *ilist, mlx_fn=mlx_fn):
         # Normalize indices to handle np.int64 and other NumPy types
-        indices = normalize_indices_for_mlx(ilist, idx_list)
+        # Advanced indexing doesn't use idx_list or indices_from_subtensor
+        indices = normalize_indices_for_mlx(ilist)
 
         # For advanced indexing, if we have a single tuple of indices, unwrap it
         if len(indices) == 1:
