@@ -170,11 +170,12 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     A = tensor("A", shape=(3, 3))
     x0 = tensor("b", shape=(3, 4))
 
-    xs, _ = scan(
+    xs = scan(
         lambda xtm1, A: solve(A, xtm1, assume_a=assume_a, transposed=transposed),
         outputs_info=[x0],
         non_sequences=[A],
         n_steps=10,
+        return_updates=False,
     )
 
     fn_no_opt = function(

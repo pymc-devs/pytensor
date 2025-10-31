@@ -47,38 +47,47 @@ class TestRemoveConstantsAndUnusedInputsScan:
         """Test the rewrite `remove_constants_and_unused_inputs_scan` for non-sequences."""
         W = matrix(name="W")
         v = ivector(name="v")
-        y1, _ = scan(
-            lambda i, W: W[i], sequences=v, outputs_info=None, non_sequences=[W]
+        y1 = scan(
+            lambda i, W: W[i],
+            sequences=v,
+            outputs_info=None,
+            non_sequences=[W],
+            return_updates=False,
         )
-        y2, _ = scan(
+        y2 = scan(
             lambda i, _, W: W[i],
             sequences=v,
             outputs_info=None,
             non_sequences=[W[0], W],
+            return_updates=False,
         )
-        y3, _ = scan(
+        y3 = scan(
             lambda i, W, _: W[i],
             sequences=v,
             outputs_info=None,
             non_sequences=[W, W[0]],
+            return_updates=False,
         )
-        y4, _ = scan(
+        y4 = scan(
             lambda i, _, _2, W: W[i],
             sequences=v,
             outputs_info=None,
             non_sequences=[W[0], W[0], W],
+            return_updates=False,
         )
-        y5, _ = scan(
+        y5 = scan(
             lambda i, _, W, _2: W[i],
             sequences=v,
             outputs_info=None,
             non_sequences=[W[0], W, W[0]],
+            return_updates=False,
         )
-        y6, _ = scan(
+        y6 = scan(
             lambda i, W, _, _2: W[i],
             sequences=v,
             outputs_info=None,
             non_sequences=[W, W[0], W[0]],
+            return_updates=False,
         )
         # TODO: y7 have problem during run time. I think it should
         # raise an error during the scan construction.
@@ -112,47 +121,61 @@ class TestRemoveConstantsAndUnusedInputsScan:
         W = matrix(name="W")
         v = ivector(name="v")
         vv = matrix(name="vv")
-        y1, _ = scan(
-            lambda i, W: W[i], sequences=v, outputs_info=None, non_sequences=[W]
+        y1 = scan(
+            lambda i, W: W[i],
+            sequences=v,
+            outputs_info=None,
+            non_sequences=[W],
+            return_updates=False,
         )
-        y2, _ = scan(
-            lambda i, _, W: W[i], sequences=[v, v], outputs_info=None, non_sequences=W
+        y2 = scan(
+            lambda i, _, W: W[i],
+            sequences=[v, v],
+            outputs_info=None,
+            non_sequences=W,
+            return_updates=False,
         )
-        y3, _ = scan(
+        y3 = scan(
             lambda i, _, W: W[i],
             sequences=[v, vv[0]],
             outputs_info=None,
             non_sequences=W,
+            return_updates=False,
         )
-        y4, _ = scan(
+        y4 = scan(
             lambda _, i, W: W[i],
             sequences=[vv[0], v],
             outputs_info=None,
             non_sequences=W,
+            return_updates=False,
         )
-        y5, _ = scan(
+        y5 = scan(
             lambda _, i, _2, W: W[i],
             sequences=[vv, v, vv[0]],
             outputs_info=None,
             non_sequences=W,
+            return_updates=False,
         )
-        y6, _ = scan(
+        y6 = scan(
             lambda _, _2, i, W: W[i],
             sequences=[vv[0], vv, v],
             outputs_info=None,
             non_sequences=W,
+            return_updates=False,
         )
-        y7, _ = scan(
+        y7 = scan(
             lambda i, _, _2, W: W[i],
             sequences=[v, vv[0], vv[0]],
             outputs_info=None,
             non_sequences=W,
+            return_updates=False,
         )
-        y8, _ = scan(
+        y8 = scan(
             lambda _, i, W, _2, _3: W[i],
             sequences=[vv[0], v],
             outputs_info=None,
             non_sequences=[W, W[0], W[0]],
+            return_updates=False,
         )
 
         W_val = np.random.normal(size=(3, 3)).astype(config.floatX)
@@ -195,7 +218,7 @@ class TestPushOutDot:
         def lambda_fn(h, W1, W2):
             return dot(h, W1 + W2)
 
-        o, _ = scan(lambda_fn, non_sequences=[h0, W1, W2], n_steps=5)
+        o = scan(lambda_fn, non_sequences=[h0, W1, W2], n_steps=5, return_updates=False)
 
         f = function([h0, W1, W2], o, mode=self.mode)
 
@@ -232,19 +255,24 @@ class TestPushOutDot:
             return dot(W1, W2), until_condition
 
         # Compile a function with the optimization
-        o, _ = scan(
-            lambda_fn, sequences=[step_indices, W1], non_sequences=[W2], n_steps=5
+        o = scan(
+            lambda_fn,
+            sequences=[step_indices, W1],
+            non_sequences=[W2],
+            n_steps=5,
+            return_updates=False,
         )
 
         f = function([W1, W2, step_indices], o, mode=self.mode)
 
         # Compule an pytensor function without the optimization
-        o, _ = scan(
+        o = scan(
             lambda_fn,
             sequences=[step_indices, W1],
             non_sequences=[W2],
             n_steps=5,
             mode="FAST_COMPILE",
+            return_updates=False,
         )
 
         f_ref = function([W1, W2, step_indices], o, mode=self.mode)
@@ -268,7 +296,13 @@ class TestPushOutDot:
         def lambda_fn(h, W1, W2):
             return dot(h, W1 + W2)
 
-        o, _ = scan(lambda_fn, outputs_info=h0, non_sequences=[W1, W2], n_steps=5)
+        o = scan(
+            lambda_fn,
+            outputs_info=h0,
+            non_sequences=[W1, W2],
+            n_steps=5,
+            return_updates=False,
+        )
 
         f = function([h0, W1, W2], o, mode=self.mode)
 
@@ -290,10 +324,11 @@ class TestPushOutDot:
         def fn(i, i_tm1):
             return i + 10, i_tm1
 
-        ([i_t, i_tm1], _) = scan(
+        [i_t, i_tm1] = scan(
             fn,
             sequences=[inp],
             outputs_info=[np.asarray([0.0, 0.0], config.floatX), None],
+            return_updates=False,
         )
         f = function([inp], [i_t, i_tm1])
         val = np.arange(10).reshape(5, 2).astype(config.floatX)
@@ -397,17 +432,18 @@ class TestPushOutNonSeqScan:
     @config.change_flags(on_opt_error="raise")
     def test_pushout_seqs2(self):
         x = matrix()
-        outputs, updates = scan(
+        outputs = scan(
             lambda x: [x * x, pt.constant(0).copy().copy()],
             n_steps=2,
             sequences=[],
             non_sequences=[],
             outputs_info=[x, None],
+            return_updates=False,
         )
 
         # Compile an PyTensor function where any optimization error will lead to
         # an exception being raised
-        function([x], outputs, updates=updates)
+        function([x], outputs)
 
     @config.change_flags(on_opt_error="raise")
     def test_pushout_nonseq(self):
@@ -418,7 +454,9 @@ class TestPushOutNonSeqScan:
         outputs. This led the optimization to raise an exception.
         """
 
-        outputs, _ = scan(lambda x: (x * x, x), non_sequences=[2], n_steps=2)
+        outputs = scan(
+            lambda x: (x * x, x), non_sequences=[2], n_steps=2, return_updates=False
+        )
         f = function(inputs=[], outputs=outputs)
 
         outs = f()
@@ -583,10 +621,12 @@ class TestPushOutNonSeqScan:
         test_ofg = OpFromGraph([], [y])
 
         def inner_func(x):
-            out, _ = pytensor.scan(lambda: test_ofg(), n_steps=x)
+            out = pytensor.scan(lambda: test_ofg(), n_steps=x, return_updates=False)
             return out
 
-        out, _ = pytensor.scan(inner_func, sequences=[pt.arange(1, 2)])
+        out = pytensor.scan(
+            inner_func, sequences=[pt.arange(1, 2)], return_updates=False
+        )
 
         _ = pytensor.function([], test_ofg())
 
@@ -612,10 +652,11 @@ class TestPushOutAddScan:
     def test_sum_dot(self):
         A = matrix("A")
         B = matrix("B")
-        S, _ = scan(
+        S = scan(
             lambda x1, x2, u: u + dot(x1, x2),
             sequences=[A.dimshuffle(0, 1, "x"), B.dimshuffle(0, "x", 1)],
             outputs_info=[pt.zeros_like(A)],
+            return_updates=False,
         )
         # FIXME: This `s.owner.inputs[0][-1]` is a hack, users will never do that.
         #  They will do `s[-1]` which the rewrite fails to identify since it explicitly looks for a `scan_out[-1]`
@@ -636,13 +677,17 @@ class TestPushOutAddScan:
         bv = pt.zeros((5,))
         bh = pt.zeros((4,))
         v = matrix("v")
-        (bv_t, bh_t), _ = scan(
-            lambda _: [bv, bh], sequences=v, outputs_info=[None, None]
+        (bv_t, bh_t) = scan(
+            lambda _: [bv, bh],
+            sequences=v,
+            outputs_info=[None, None],
+            return_updates=False,
         )
-        chain, _ = scan(
+        chain = scan(
             lambda x: dot(dot(x, W) + bh_t, W.T) + bv_t,
             outputs_info=v,
             n_steps=2,
+            return_updates=False,
         )
         # TODO FIXME: Make this a real test and assert something.
         chain_fn = function([v], chain)
@@ -710,26 +755,28 @@ class TestPushOutAddScan:
         # Compile the function twice, once with the optimization and once
         # without
         opt_mode = mode.including("scan")
-        h, _ = pytensor.scan(
+        h = pytensor.scan(
             rnn_step1,
             sequences=[x, ri, zi],
             n_steps=seq_len,
             outputs_info=init,
             name="fpass1",
             mode=opt_mode,
+            return_updates=False,
         )
         cost = h[-1].sum()
         grad1 = grad(cost, [U, V, W])
         f_opt = pytensor.function(inputs=[x, ri, zi], outputs=grad1, mode=opt_mode)
 
         no_opt_mode = mode.excluding("scan_pushout_add")
-        h, _ = pytensor.scan(
+        h = pytensor.scan(
             rnn_step1,
             sequences=[x, ri, zi],
             n_steps=seq_len,
             outputs_info=init,
             name="fpass1",
             mode=no_opt_mode,
+            return_updates=False,
         )
         cost = h[-1].sum()
         grad1 = grad(cost, [U, V, W])
@@ -773,21 +820,23 @@ class TestPushOutAddScan:
 
         # Compile the function twice, once with the optimization and once without
         opt_mode = mode.including("scan")
-        h, _ = pytensor.scan(
+        h = pytensor.scan(
             inner_fct,
             sequences=[input1, input2, input3],
             outputs_info=init,
             mode=opt_mode,
+            return_updates=False,
         )
         output = h[-1]
         f_opt = pytensor.function([input1, input2, input3], output, mode=opt_mode)
 
         no_opt_mode = mode.excluding("scan_pushout_add")
-        h, _ = pytensor.scan(
+        h = pytensor.scan(
             inner_fct,
             sequences=[input1, input2, input3],
             outputs_info=init,
             mode=no_opt_mode,
+            return_updates=False,
         )
         output = h[-1]
         f_no_opt = pytensor.function([input1, input2, input3], output, mode=no_opt_mode)
@@ -892,13 +941,20 @@ class TestScanMerge:
         """
         inps = vector()
         state = scalar()
-        y1, _ = scan(lambda x, y: x * y, sequences=inps, outputs_info=state, n_steps=5)
+        y1 = scan(
+            lambda x, y: x * y,
+            sequences=inps,
+            outputs_info=state,
+            n_steps=5,
+            return_updates=False,
+        )
 
-        y2, _ = scan(
+        y2 = scan(
             lambda x, y: (x + y, until(x > 0)),
             sequences=inps,
             outputs_info=state,
             n_steps=5,
+            return_updates=False,
         )
         scan_node1 = y1.owner.inputs[0].owner
         assert isinstance(scan_node1.op, Scan)
@@ -958,8 +1014,8 @@ class TestScanMerge:
         def sub(s1, s2, const):
             return s1 - 1, until(s2 > const)
 
-        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
-        sy, _ = scan(sub, sequences=[y, -z], non_sequences=[c1])
+        sx = scan(add, sequences=[x, z], non_sequences=[c1], return_updates=False)
+        sy = scan(sub, sequences=[y, -z], non_sequences=[c1], return_updates=False)
 
         f = pytensor.function(inputs=[x, y, z, c1], outputs=[sx, sy], mode=self.mode)
         assert self.count_scans(f) == 2
@@ -972,8 +1028,8 @@ class TestScanMerge:
         np.testing.assert_array_equal(res_sx, [1, 1])
         np.testing.assert_array_equal(res_sy, [-1, -1, -1, -1, -1])
 
-        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
-        sy, _ = scan(sub, sequences=[y, z], non_sequences=[c2])
+        sx = scan(add, sequences=[x, z], non_sequences=[c1], return_updates=False)
+        sy = scan(sub, sequences=[y, z], non_sequences=[c2], return_updates=False)
 
         f = pytensor.function(
             inputs=[x, y, z, c1, c2], outputs=[sx, sy], mode=self.mode
@@ -989,22 +1045,23 @@ class TestScanMerge:
         np.testing.assert_array_equal(res_sx, [1, 1, 1, 1, 1])
         np.testing.assert_array_equal(res_sy, [-1, -1, -1])
 
-        sx, _ = scan(add, sequences=[x, z], non_sequences=[c1])
-        sy, _ = scan(sub, sequences=[y, z], non_sequences=[c1])
+        sx = scan(add, sequences=[x, z], non_sequences=[c1], return_updates=False)
+        sy = scan(sub, sequences=[y, z], non_sequences=[c1], return_updates=False)
 
         f = pytensor.function(inputs=[x, y, z, c1], outputs=[sx, sy], mode=self.mode)
         assert self.count_scans(f) == 1
 
         def nested_scan(c, x, z):
-            sx, _ = scan(add, sequences=[x, z], non_sequences=[c])
-            sy, _ = scan(sub, sequences=[x, z], non_sequences=[c])
+            sx = scan(add, sequences=[x, z], non_sequences=[c], return_updates=False)
+            sy = scan(sub, sequences=[x, z], non_sequences=[c], return_updates=False)
             return sx.sum() + sy.sum()
 
-        sz, _ = scan(
+        sz = scan(
             nested_scan,
             sequences=[stack([c1, c2])],
             non_sequences=[x, z],
             mode=self.mode,
+            return_updates=False,
         )
 
         f = pytensor.function(inputs=[x, z, c1, c2], outputs=sz, mode=mode)
@@ -1023,9 +1080,8 @@ class TestScanInplaceOptimizer:
 
         x = pt.vector("x")
 
-        scan_out, _ = pytensor.scan(
-            lambda x: (x + 1) / 2 + 1,
-            sequences=[x],
+        scan_out = pytensor.scan(
+            lambda x: (x + 1) / 2 + 1, sequences=[x], return_updates=False
         )
 
         fgraph = FunctionGraph(
@@ -1039,10 +1095,8 @@ class TestScanInplaceOptimizer:
         assert equal_computations([scan_out], fgraph.outputs)
 
     def test_inplace_basic(self):
-        scan_out, _ = pytensor.scan(
-            lambda x: x + 1,
-            outputs_info=[pt.zeros(1)],
-            n_steps=3,
+        scan_out = pytensor.scan(
+            lambda x: x + 1, outputs_info=[pt.zeros(1)], n_steps=3, return_updates=False
         )
 
         fgraph = FunctionGraph(
@@ -1089,7 +1143,7 @@ class TestScanInplaceOptimizer:
                 u0_t * W_in + x1_tm1 * W + u1_t + u2_t,
             ]
 
-        outputs, updates = scan(
+        outputs = scan(
             f_rnn_shared,
             [u0, u1, u2],
             [dict(initial=x0, inplace=u2), dict(initial=x1, inplace=u1)],
@@ -1098,12 +1152,12 @@ class TestScanInplaceOptimizer:
             truncate_gradient=-1,
             go_backwards=False,
             mode=self.mode,
+            return_updates=False,
         )
 
         f9 = function(
             [mu0, mu1, mu2, x0, x1],
             outputs,
-            updates=updates,
             mode=self.mode,
             allow_input_downcast=True,
         )
@@ -1155,7 +1209,7 @@ class TestScanInplaceOptimizer:
                 u0_t * W_in + x1_tm1 * W + u2_tm1 + u2_t + u2_tp1,
             ]
 
-        outputs, updates = scan(
+        outputs = scan(
             f_rnn_shared,
             [u0, dict(input=u1, taps=[0, 1]), dict(input=u2, taps=[-1, 0, +1])],
             [dict(initial=x0), dict(initial=x1)],
@@ -1164,11 +1218,11 @@ class TestScanInplaceOptimizer:
             truncate_gradient=-1,
             go_backwards=False,
             mode=self.mode,
+            return_updates=False,
         )
         f9 = function(
             [mu0, mu1, mu2, x0, x1],
             outputs,
-            updates=updates,
             mode=self.mode,
             allow_input_downcast=True,
         )
@@ -1202,8 +1256,12 @@ class TestScanInplaceOptimizer:
         vx1 = asarrayX(rng.uniform())
         x0 = shared(vx0)
         x1 = shared(vx1)
-        outputs, updates = scan(
-            lambda x, y: (x + asarrayX(1), y + asarrayX(1)), [], [x0, x1], n_steps=3
+        outputs = scan(
+            lambda x, y: (x + asarrayX(1), y + asarrayX(1)),
+            [],
+            [x0, x1],
+            n_steps=3,
+            return_updates=False,
         )
         x0 = asarrayX(np.zeros((4,)))
         x0[0] = vx0
@@ -1212,7 +1270,7 @@ class TestScanInplaceOptimizer:
         to_replace = outputs[0].owner.inputs[0].owner.inputs[1]
         outputs = clone_replace(outputs, replace=[(to_replace, x0)])
 
-        f9 = function([], outputs, updates=updates, mode=self.mode)
+        f9 = function([], outputs, mode=self.mode)
         scan_node = [x for x in f9.maker.fgraph.toposort() if isinstance(x.op, Scan)]
         assert 0 not in scan_node[0].op.destroy_map
         assert 1 in scan_node[0].op.destroy_map
@@ -1249,7 +1307,7 @@ class TestSaveMem:
                 y_tm1 + dot(x_tm1, W_out),
             ]
 
-        _outputs, updates = scan(
+        outs = scan(
             f_rnn_cmpl,
             [u1, u2],
             [None, dict(initial=x0), dict(initial=y0, taps=[-1, -3])],
@@ -1257,12 +1315,12 @@ class TestSaveMem:
             n_steps=None,
             truncate_gradient=-1,
             go_backwards=False,
+            return_updates=False,
         )
-        outputs = [_outputs[0][-1], _outputs[1][-1], _outputs[2][-1]]
+        outputs = [outs[0][-1], outs[1][-1], outs[2][-1]]
         f4 = function(
             [u1, u2, x0, y0, W_in1],
             outputs,
-            updates=updates,
             allow_input_downcast=True,
             mode=self.mode,
         )
@@ -1297,14 +1355,18 @@ class TestSaveMem:
         u = vector("u")
         idx = iscalar("idx")
         jdx = iscalar("jdx")
-        [x1, x2, x3, x4, x5, x6, x7], updates = scan(
-            f_rnn, u, n_steps=None, truncate_gradient=-1, go_backwards=False
+        [x1, x2, x3, x4, x5, x6, x7] = scan(
+            f_rnn,
+            u,
+            n_steps=None,
+            truncate_gradient=-1,
+            go_backwards=False,
+            return_updates=False,
         )
 
         f2 = function(
             [u, idx, jdx],
             [x1[:2], x2[4], x3[idx], x4[:idx], x5[-10], x6[-jdx], x7[:-jdx]],
-            updates=updates,
             allow_input_downcast=True,
             mode=self.mode.excluding("scan_push_out_seq"),
         )
@@ -1341,10 +1403,8 @@ class TestSaveMem:
 
     def test_save_mem_reduced_number_of_steps_constant(self):
         x0 = pt.scalar("x0")
-        xs, _ = scan(
-            lambda xtm1: xtm1 + 1,
-            outputs_info=[x0],
-            n_steps=10,
+        xs = scan(
+            lambda xtm1: xtm1 + 1, outputs_info=[x0], n_steps=10, return_updates=False
         )
 
         fn = function([x0], xs[:5], mode=self.mode)
@@ -1358,10 +1418,11 @@ class TestSaveMem:
 
     def test_save_mem_cannot_reduce_constant_number_of_steps(self):
         x0 = pt.scalar("x0")
-        [xs, ys], _ = scan(
+        [xs, ys] = scan(
             lambda xtm1, ytm1: (xtm1 + 1, ytm1 - 1),
             outputs_info=[x0, x0],
             n_steps=10,
+            return_updates=False,
         )
 
         # Because of ys[-1] we need all the steps!
@@ -1399,7 +1460,7 @@ class TestSaveMem:
         x20 = scalar("x20")
         x30 = vector("x30")
         x40 = scalar("x40")
-        [x1, x2, x3, x4, x5, _x6, _x7], updates = scan(
+        [x1, x2, x3, x4, x5, _x6, _x7] = scan(
             step,
             u,
             [
@@ -1414,12 +1475,12 @@ class TestSaveMem:
             n_steps=None,
             truncate_gradient=-1,
             go_backwards=False,
+            return_updates=False,
         )
 
         f = function(
             [u, x10, x20, x30, x40],
             [x1[-7], x2[-3:-1], x3[-6:], x4[-1], x5[-1]],
-            updates=updates,
             allow_input_downcast=True,
             mode=self.mode,
         )
@@ -1479,10 +1540,11 @@ class TestSaveMem:
 
     def test_savemem_does_not_duplicate_number_of_scan_nodes(self):
         var = pt.ones(())
-        values, _ = scan(
+        values = scan(
             lambda x: ([x], (), until(x)),
             outputs_info=[var],
             n_steps=2,
+            return_updates=False,
         )
 
         tmp_fn = function([var], values, mode=self.mode)
@@ -1493,10 +1555,11 @@ class TestSaveMem:
 
     def test_savemem_opt(self, benchmark):
         y0 = shared(np.ones((2, 10)))
-        [_y1, y2], _updates = scan(
+        [_y1, y2] = scan(
             lambda y: [y, y],
             outputs_info=[dict(initial=y0, taps=[-2]), None],
             n_steps=5,
+            return_updates=False,
         )
         # TODO FIXME: Make this a real test and assert something.
         fn = function([], y2.sum(), mode=self.mode)
@@ -1515,23 +1578,25 @@ class TestSaveMem:
             return dot(h_tm1, w) + x_t_t
 
         def outer_scan_step(x_t, w):
-            h, _ = scan(
+            h = scan(
                 inner_scan_step,
                 sequences=[x_t[1:]],
                 outputs_info=[x_t[0]],
                 non_sequences=[w],
                 strict=True,
                 name="the_inner_scan",
+                return_updates=False,
             )
             return h
 
         def get_outputs(x, w):
-            features, _ = scan(
+            features = scan(
                 outer_scan_step,
                 sequences=[x],
                 non_sequences=[w],
                 strict=True,
                 name="the_outer_scan",
+                return_updates=False,
             )
 
             return_val = grad(features.sum(), w)
@@ -1571,7 +1636,7 @@ class TestSaveMem:
 
         state = vector("state")
         n_steps = iscalar("nsteps")
-        output, updates = scan(
+        output = scan(
             f_pow2,
             [],
             state,
@@ -1579,13 +1644,13 @@ class TestSaveMem:
             n_steps=n_steps,
             truncate_gradient=-1,
             go_backwards=False,
+            return_updates=False,
         )
         nw_shape = ivector("nw_shape")
         # Note that the output is reshaped to 3 dimensional tensor, and
         my_f = function(
             [state, n_steps, nw_shape],
             [reshape(output, nw_shape, ndim=3)[:-2], output[:-4]],
-            updates=updates,
             allow_input_downcast=True,
         )
         nodes = [x for x in my_f.maker.fgraph.toposort() if isinstance(x.op, Scan)]
@@ -1599,11 +1664,12 @@ class TestSaveMem:
         n_steps = scalar("n_steps", dtype="int64")
         x0 = vector("x0")
 
-        ys, _ = pytensor.scan(
+        ys = pytensor.scan(
             # Fibonacci Sequence
             lambda xtm2, xtm1: (xtm1 + xtm2, {}, until(xtm1 >= 34)),
             outputs_info=[{"initial": x0, "taps": [-2, -1]}],
             n_steps=n_steps,
+            return_updates=False,
         )
         # Save memory is triggered by choosing only last value
         y = ys[-1]
@@ -1629,10 +1695,11 @@ class TestSaveMem:
 
     def test_while_scan_map(self):
         xs = vector("xs")
-        ys, _ = pytensor.scan(
+        ys = pytensor.scan(
             lambda x: (x + 1, {}, until(x + 1 >= 10)),
             outputs_info=[None],
             sequences=[xs],
+            return_updates=False,
         )
         # Save memory is triggered by choosing only last value
         y = ys[-1]
@@ -1656,11 +1723,12 @@ class TestSaveMem:
         n_steps = scalar("n_steps", dtype="int64")
 
         # while loop
-        [ys, zs], _ = pytensor.scan(
+        [ys, zs] = pytensor.scan(
             lambda s, xtm1: ((xtm1 + 1, xtm1 + 1 + s), {}, until(xtm1 >= 99)),
             sequences=[seq],
             outputs_info=[x0, None],
             n_steps=n_steps,
+            return_updates=False,
         )
         # Save memory is triggered by choosing only last value
         y = ys[-1]
@@ -1696,10 +1764,11 @@ class TestSaveMem:
         val_test = np.zeros(val_shape, dtype=val.dtype)
 
         init = pt.full((2,), val)
-        ys, _ = pytensor.scan(
+        ys = pytensor.scan(
             fn=lambda *args: pt.add(*args),
             outputs_info=[{"initial": init, "taps": (-2, -1)}],
             n_steps=100,
+            return_updates=False,
         )
 
         out = ys[:-50] if keep_beginning else ys[-50:]
@@ -1729,12 +1798,13 @@ def test_inner_replace_dot():
 
     mode = get_default_mode().including("scan")  # .excluding("BlasOpt")
 
-    o, _ = scan(
+    o = scan(
         lambda hi, him1, W: (hi, dot(hi + him1, W)),
         outputs_info=[pt.zeros([h.shape[1]]), None],
         sequences=[h],
         non_sequences=[W],
         mode=mode,
+        return_updates=False,
     )
 
     f = function([W, h], o, mode=mode)
@@ -1753,11 +1823,12 @@ def test_alloc_inputs1():
     def lambda_fn(h, W1, W2):
         return dot(h, W1 * W2)
 
-    o, _ = scan(
+    o = scan(
         lambda_fn,
         outputs_info=h0,
         non_sequences=[W1, pt.zeros_like(W2)],
         n_steps=5,
+        return_updates=False,
     )
 
     f = function([h0, W1, W2], o, mode=get_default_mode().including("scan"))
@@ -1786,12 +1857,13 @@ def test_alloc_inputs2():
     def lambda_fn(W1, h, W2):
         return W1 * dot(h, W2)
 
-    o, _ = scan(
+    o = scan(
         lambda_fn,
         sequences=pt.zeros_like(W1),
         outputs_info=h0,
         non_sequences=[pt.zeros_like(W2)],
         n_steps=5,
+        return_updates=False,
     )
 
     f = function([h0, W1, W2], o, mode=get_default_mode().including("scan"))
@@ -1821,12 +1893,13 @@ def test_alloc_inputs3():
     def lambda_fn(W1, h, W2):
         return W1 * dot(h, W2)
 
-    o, _ = scan(
+    o = scan(
         lambda_fn,
         sequences=pt.zeros_like(W1),
         outputs_info=h0,
         non_sequences=[pt.zeros_like(W2)],
         n_steps=5,
+        return_updates=False,
     )
 
     # TODO FIXME: This result depends on unrelated rewrites in the "fast" mode.
@@ -1848,7 +1921,7 @@ def test_opt_order():
     x = matrix("x")
     A = matrix("A")
 
-    z, _updates = scan(dot, sequences=[], non_sequences=[x, A], n_steps=2)
+    z = scan(dot, sequences=[], non_sequences=[x, A], n_steps=2, return_updates=False)
     f = function([x, A], z, mode="FAST_RUN")
     topo = f.maker.fgraph.toposort()
 

@@ -694,10 +694,11 @@ def test_blockwise_grad_core_type():
 def test_scan_gradient_core_type():
     n_steps = 3
     seq = tensor("seq", shape=(n_steps, 1), dtype="float64")
-    out, _ = scan(
+    out = scan(
         lambda s: s,
         sequences=[seq],
         n_steps=n_steps,
+        return_updates=False,
     )
 
     vec_seq = tensor("vec_seq", shape=(None, n_steps, 1), dtype="float64")
