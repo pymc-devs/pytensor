@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import pytensor.tensor as pt
 from pytensor import config, function, grad, shared
@@ -11,24 +12,41 @@ from tests import unittest_tools as utt
 from tests.scan.test_basic import clone_optimized_graph, grab_scan_node
 
 
-def test_reduce():
+@pytest.mark.parametrize("return_updates", [True, False])
+def test_reduce(return_updates):
     v = vector("v")
     s = scalar("s")
-    result, updates = pt_reduce(lambda x, y: x + y, v, s)
+    result_raw = pt_reduce(lambda x, y: x + y, v, s, return_updates=return_updates)
+    if return_updates:
+        result, updates = result_raw
+        assert not updates
+    else:
+        result = result_raw
 
-    f = function([v, s], result, updates=updates, allow_input_downcast=True)
+    f = function([v, s], result, allow_input_downcast=True)
     rng = np.random.default_rng(utt.fetch_seed())
     v_v = rng.uniform(-5.0, 5.0, size=(5,))
     assert abs(np.sum(v_v) - f(v_v, 0.0)) < 1e-3
 
 
-def test_map():
+@pytest.mark.parametrize("return_updates", [True, False])
+def test_map(return_updates):
     v = vector("v")
-    abs_expr, abs_updates = pt_map(
-        lambda x: abs(x), v, [], truncate_gradient=-1, go_backwards=False
+    abs_expr_raw = pt_map(
+        lambda x: abs(x),
+        v,
+        [],
+        truncate_gradient=-1,
+        go_backwards=False,
+        return_updates=return_updates,
     )
+    if return_updates:
+        abs_expr, abs_updates = abs_expr_raw
+        assert not abs_updates
+    else:
+        abs_expr = abs_expr_raw
 
-    f = function([v], abs_expr, updates=abs_updates, allow_input_downcast=True)
+    f = function([v], abs_expr, allow_input_downcast=True)
 
     rng = np.random.default_rng(utt.fetch_seed())
     vals = rng.uniform(-5.0, 5.0, size=(10,))
@@ -39,10 +57,11 @@ def test_map():
 
 def test_reduce_memory_consumption():
     x = shared(np.asarray(np.random.uniform(size=(10,)), dtype=config.floatX))
-    o, _ = pt_reduce(
+    o = pt_reduce(
         lambda v, acc: acc + v,
         x,
         pt.constant(np.asarray(0.0, dtype=config.floatX)),
+        return_updates=False,
     )
     mode = FAST_RUN
     mode = mode.excluding("inplace")
@@ -69,13 +88,20 @@ def test_reduce_memory_consumption():
     utt.assert_allclose(f2(), np.ones((10,)))
 
 
-def test_foldl_memory_consumption():
+@pytest.mark.parametrize("return_updates", [True, False])
+def test_foldl_memory_consumption(return_updates):
     x = shared(np.asarray(np.random.uniform(size=(10,)), dtype=config.floatX))
-    o, _ = foldl(
+    o_raw = foldl(
         lambda v, acc: acc + v,
         x,
         pt.constant(np.asarray(0.0, dtype=config.floatX)),
+        return_updates=return_updates,
     )
+    if return_updates:
+        o, updates = o_raw
+        assert not updates
+    else:
+        o = o_raw
 
     mode = FAST_RUN
     mode = mode.excluding("inplace")
@@ -102,13 +128,20 @@ def test_foldl_memory_consumption():
     utt.assert_allclose(f2(), np.ones((10,)))
 
 
-def test_foldr_memory_consumption():
+@pytest.mark.parametrize("return_updates", [True, False])
+def test_foldr_memory_consumption(return_updates):
     x = shared(np.asarray(np.random.uniform(size=(10,)), dtype=config.floatX))
-    o, _ = foldr(
+    o_raw = foldr(
         lambda v, acc: acc + v,
         x,
         pt.constant(np.asarray(0.0, dtype=config.floatX)),
+        return_updates=return_updates,
     )
+    if return_updates:
+        o, updates = o_raw
+        assert not updates
+    else:
+        o = o_raw
 
     mode = FAST_RUN
     mode = mode.excluding("inplace")

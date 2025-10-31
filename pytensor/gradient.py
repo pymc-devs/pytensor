@@ -2188,7 +2188,7 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
         # It is possible that the inputs are disconnected from expr,
         # even if they are connected to cost.
         # This should not be an error.
-        hess, updates = pytensor.scan(
+        hess = pytensor.scan(
             lambda i, y, x: grad(
                 y[i],
                 x,
@@ -2197,9 +2197,7 @@ def hessian(cost, wrt, consider_constant=None, disconnected_inputs="raise"):
             ),
             sequences=pytensor.tensor.arange(expr.shape[0]),
             non_sequences=[expr, input],
-        )
-        assert not updates, (
-            "Scan has returned a list of updates; this should not happen."
+            return_updates=False,
         )
         hessians.append(hess)
     return as_list_or_tuple(using_list, using_tuple, hessians)

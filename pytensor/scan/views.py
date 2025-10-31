@@ -16,6 +16,7 @@ def map(
     go_backwards=False,
     mode=None,
     name=None,
+    return_updates=True,
 ):
     """Construct a `Scan` `Op` that functions like `map`.
 
@@ -50,6 +51,7 @@ def map(
         go_backwards=go_backwards,
         mode=mode,
         name=name,
+        return_updates=return_updates,
     )
 
 
@@ -61,6 +63,7 @@ def reduce(
     go_backwards=False,
     mode=None,
     name=None,
+    return_updates=True,
 ):
     """Construct a `Scan` `Op` that functions like `reduce`.
 
@@ -97,14 +100,29 @@ def reduce(
         truncate_gradient=-1,
         mode=mode,
         name=name,
+        return_updates=return_updates,
     )
-    if isinstance(rval[0], list | tuple):
-        return [x[-1] for x in rval[0]], rval[1]
+    if return_updates:
+        if isinstance(rval[0], list | tuple):
+            return [x[-1] for x in rval[0]], rval[1]
+        else:
+            return rval[0][-1], rval[1]
     else:
-        return rval[0][-1], rval[1]
+        if isinstance(rval, list | tuple):
+            return [x[-1] for x in rval]
+        else:
+            return rval[-1]
 
 
-def foldl(fn, sequences, outputs_info, non_sequences=None, mode=None, name=None):
+def foldl(
+    fn,
+    sequences,
+    outputs_info,
+    non_sequences=None,
+    mode=None,
+    name=None,
+    return_updates=True,
+):
     """Construct a `Scan` `Op` that functions like Haskell's `foldl`.
 
     Parameters
@@ -135,10 +153,19 @@ def foldl(fn, sequences, outputs_info, non_sequences=None, mode=None, name=None)
         go_backwards=False,
         mode=mode,
         name=name,
+        return_updates=return_updates,
     )
 
 
-def foldr(fn, sequences, outputs_info, non_sequences=None, mode=None, name=None):
+def foldr(
+    fn,
+    sequences,
+    outputs_info,
+    non_sequences=None,
+    mode=None,
+    name=None,
+    return_updates=True,
+):
     """Construct a `Scan` `Op` that functions like Haskell's `foldr`.
 
     Parameters
@@ -169,4 +196,5 @@ def foldr(fn, sequences, outputs_info, non_sequences=None, mode=None, name=None)
         go_backwards=True,
         mode=mode,
         name=name,
+        return_updates=return_updates,
     )

@@ -314,11 +314,12 @@ def _wrap_pad(x: TensorVariable, pad_width: TensorVariable) -> TensorVariable:
 
 
 def _build_padding_one_direction(array, array_flipped, repeats, *, inner_func, axis):
-    [_, parts], _ = scan(
+    [_, parts] = scan(
         inner_func,
         non_sequences=[array, array_flipped],
         outputs_info=[0, None],
         n_steps=repeats,
+        return_updates=False,
     )
 
     parts = moveaxis(parts, 0, axis)
