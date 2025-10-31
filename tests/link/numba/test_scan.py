@@ -206,11 +206,12 @@ def test_scan_multiple_output(benchmark):
         it1 = it0 + ct0 - dt0
         return st1, et1, it1, logp_c1, logp_d1
 
-    (st, et, it, logp_c_all, logp_d_all), _ = scan(
+    (st, et, it, logp_c_all, logp_d_all) = scan(
         fn=seir_one_step,
         sequences=[pt_C, pt_D],
         outputs_info=[st0, et0, it0, logp_c, logp_d],
         non_sequences=[beta, gamma, delta],
+        return_updates=False,
     )
     st.name = "S_t"
     et.name = "E_t"
@@ -268,7 +269,7 @@ def test_scan_tap_output():
         y_t.name = "y_t"
         return x_t, y_t, pt.fill((10,), z_t)
 
-    scan_res, _ = scan(
+    scan_res = scan(
         fn=input_step_fn,
         sequences=[
             {
@@ -297,6 +298,7 @@ def test_scan_tap_output():
         n_steps=5,
         name="yz_scan",
         strict=True,
+        return_updates=False,
     )
 
     test_input_vals = [
@@ -312,11 +314,12 @@ def test_scan_while():
         return previous_power * 2, until(previous_power * 2 > max_value)
 
     max_value = pt.scalar()
-    values, _ = scan(
+    values = scan(
         power_of_2,
         outputs_info=pt.constant(1.0),
         non_sequences=max_value,
         n_steps=1024,
+        return_updates=False,
     )
 
     test_input_vals = [
@@ -331,11 +334,12 @@ def test_scan_multiple_none_output():
     def power_step(prior_result, x):
         return prior_result * x, prior_result * x * x, prior_result * x * x * x
 
-    result, _ = scan(
+    result = scan(
         power_step,
         non_sequences=[A],
         outputs_info=[pt.ones_like(A), None, None],
         n_steps=3,
+        return_updates=False,
     )
     test_input_vals = (np.array([1.0, 2.0]),)
     compare_numba_and_py([A], result, test_input_vals)
@@ -343,8 +347,12 @@ def test_scan_multiple_none_output():
 
 def test_grad_sitsot():
     def get_sum_of_grad(inp):
-        scan_outputs, _updates = scan(
-            fn=lambda x: x * 2, outputs_info=[inp], n_steps=5, mode="NUMBA"
+        scan_outputs = scan(
+            fn=lambda x: x * 2,
+            outputs_info=[inp],
+            n_steps=5,
+            mode="NUMBA",
+            return_updates=False,
         )
         return grad(scan_outputs.sum(), inp).sum()
 
@@ -362,8 +370,11 @@ def test_mitmots_basic():
     def inner_fct(seq, state_old, state_current):
         return state_old * 2 + state_current + seq
 
-    out, _ = scan(
-        inner_fct, sequences=seq, outputs_info={"initial": init_x, "taps": [-2, -1]}
+    out = scan(
+        inner_fct,
+        sequences=seq,
+        outputs_info={"initial": init_x, "taps": [-2, -1]},
+        return_updates=False,
     )
 
     g_outs = grad(out.sum(), [seq, init_x])
@@ -383,10 +394,11 @@ def test_mitmots_basic():
 def test_inner_graph_optimized():
     """Test that inner graph of Scan is optimized"""
     xs = vector("xs")
-    seq, _ = scan(
+    seq = scan(
         fn=lambda x: log(1 + x),
         sequences=[xs],
         mode=get_mode("NUMBA"),
+        return_updates=False,
     )
 
     # Disable scan pushout, in which case the whole scan is replaced by an Elemwise
@@ -421,13 +433,14 @@ def test_vector_taps_benchmark(benchmark):
         sitsot2 = (sitsot1 + mitsot3) / np.sqrt(2)
         return mitsot3, sitsot2
 
-    outs, _ = scan(
+    outs = scan(
         fn=step,
         sequences=[seq1, seq2],
         outputs_info=[
             dict(initial=mitsot_init, taps=[-2, -1]),
             dict(initial=sitsot_init, taps=[-1]),
         ],
+        return_updates=False,
     )
 
     rng = np.random.default_rng(474)
@@ -468,7 +481,7 @@ def test_inplace_taps(n_steps_constant):
         y = ytm1 + 1 + ytm2 + a
         return z, x, z + x + y, y
 
-    [zs, xs, ws, ys], _ = scan(
+    [zs, xs, ws, ys] = scan(
         fn=step,
         outputs_info=[
             dict(initial=z0, taps=[-3, -1]),
@@ -478,6 +491,7 @@ def test_inplace_taps(n_steps_constant):
         ],
         non_sequences=[a],
         n_steps=n_steps,
+        return_updates=False,
     )
     numba_fn, _ = compare_numba_and_py(
         [n_steps] * (not n_steps_constant) + [a, x0, y0, z0],
@@ -529,10 +543,11 @@ def test_inplace_taps(n_steps_constant):
 class TestScanSITSOTBuffer:
     def buffer_tester(self, n_steps, op_size, buffer_size, benchmark=None):
         x0 = pt.vector(shape=(op_size,), dtype="float64")
-        xs, _ = pytensor.scan(
+        xs = pytensor.scan(
             fn=lambda xtm1: (xtm1 + 1),
             outputs_info=[x0],
             n_steps=n_steps - 1,  # 1- makes it easier to align/misalign
+            return_updates=False,
         )
         if buffer_size == "unit":
             xs_kept = xs[-1]  # Only last state is used
@@ -588,12 +603,13 @@ class TestScanMITSOTBuffer:
 
         init_x = pt.vector("init_x", shape=(2,))
         n_steps = pt.iscalar("n_steps")
-        output, _ = scan(
+        output = scan(
             f_pow2,
             sequences=[],
             outputs_info=[{"initial": init_x, "taps": [-2, -1]}],
             non_sequences=[],
             n_steps=n_steps_val if constant_n_steps else n_steps,
+            return_updates=False,
         )
 
         init_x_val = np.array([1.0, 2.0], dtype=init_x.type.dtype)

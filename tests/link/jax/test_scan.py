@@ -23,10 +23,11 @@ jax = pytest.importorskip("jax")
 @pytest.mark.parametrize("view", [None, (-1,), slice(-2, None, None)])
 def test_scan_sit_sot(view):
     x0 = pt.scalar("x0", dtype="float64")
-    xs, _ = scan(
+    xs = scan(
         lambda xtm1: xtm1 + 1,
         outputs_info=[x0],
         n_steps=10,
+        return_updates=False,
     )
     if view:
         xs = xs[view]
@@ -37,10 +38,11 @@ def test_scan_sit_sot(view):
 @pytest.mark.parametrize("view", [None, (-1,), slice(-4, -1, None)])
 def test_scan_mit_sot(view):
     x0 = pt.vector("x0", dtype="float64", shape=(3,))
-    xs, _ = scan(
+    xs = scan(
         lambda xtm3, xtm1: xtm3 + xtm1 + 1,
         outputs_info=[{"initial": x0, "taps": [-3, -1]}],
         n_steps=10,
+        return_updates=False,
     )
     if view:
         xs = xs[view]
@@ -57,13 +59,14 @@ def test_scan_multiple_mit_sot(view_x, view_y):
     def step(xtm3, xtm1, ytm4, ytm2):
         return xtm3 + ytm4 + 1, xtm1 + ytm2 + 2
 
-    [xs, ys], _ = scan(
+    [xs, ys] = scan(
         fn=step,
         outputs_info=[
             {"initial": x0, "taps": [-3, -1]},
             {"initial": y0, "taps": [-4, -2]},
         ],
         n_steps=10,
+        return_updates=False,
     )
     if view_x:
         xs = xs[view_x]
@@ -80,10 +83,8 @@ def test_scan_nit_sot(view):
 
     xs = pt.vector("x0", dtype="float64", shape=(10,))
 
-    ys, _ = scan(
-        lambda x: pt.exp(x),
-        outputs_info=[None],
-        sequences=[xs],
+    ys = scan(
+        lambda x: pt.exp(x), outputs_info=[None], sequences=[xs], return_updates=False
     )
     if view:
         ys = ys[view]
@@ -106,11 +107,12 @@ def test_scan_mit_mot():
     rho = pt.scalar("rho", dtype="float64")
     x0 = pt.vector("xs", shape=(2,))
     y0 = pt.vector("ys", shape=(3,))
-    [outs, _], _ = scan(
+    [outs, _] = scan(
         step,
         outputs_info=[x0, {"initial": y0, "taps": [-3, -1]}],
         non_sequences=[rho],
         n_steps=10,
+        return_updates=False,
     )
     grads = pt.grad(outs.sum(), wrt=[x0, y0, rho])
     compare_jax_and_py(
@@ -191,10 +193,11 @@ def test_scan_rng_update():
 
 @pytest.mark.xfail(raises=NotImplementedError)
 def test_scan_while():
-    xs, _ = scan(
+    xs = scan(
         lambda x: (x + 1, until(x < 10)),
         outputs_info=[pt.zeros(())],
         n_steps=100,
+        return_updates=False,
     )
 
     compare_jax_and_py([], [xs], [])
@@ -210,7 +213,7 @@ def test_scan_mitsot_with_nonseq():
         res.name = "y_t"
         return res
 
-    y_scan_pt, _ = scan(
+    y_scan_pt = scan(
         fn=input_step_fn,
         outputs_info=[
             {
@@ -223,6 +226,7 @@ def test_scan_mitsot_with_nonseq():
         non_sequences=[a_pt],
         n_steps=10,
         name="y_scan",
+        return_updates=False,
     )
     y_scan_pt.name = "y"
     y_scan_pt.owner.inputs[0].name = "y_all"
@@ -241,11 +245,12 @@ def test_nd_scan_sit_sot(x0_func, A_func):
     k = 3
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
-    xs, _ = scan(
+    xs = scan(
         lambda X, A: A @ X,
         non_sequences=[A],
         outputs_info=[x0],
         n_steps=n_steps,
+        return_updates=False,
     )
 
     x0_val = (
@@ -267,11 +272,12 @@ def test_nd_scan_sit_sot_with_seq():
     A = pt.matrix("A", shape=(k, k))
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
-    xs, _ = scan(
+    xs = scan(
         lambda X, A: A @ X,
         non_sequences=[A],
         sequences=[x],
         n_steps=n_steps,
+        return_updates=False,
     )
 
     x_val = np.arange(n_steps * k, dtype=config.floatX).reshape(n_steps, k)
@@ -287,11 +293,12 @@ def test_nd_scan_mit_sot():
     B = pt.matrix("B", shape=(3, 3))
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
-    xs, _ = scan(
+    xs = scan(
         lambda xtm3, xtm1, A, B: A @ xtm3 + B @ xtm1,
         outputs_info=[{"initial": x0, "taps": [-3, -1]}],
         non_sequences=[A, B],
         n_steps=10,
+        return_updates=False,
     )
 
     x0_val = np.arange(9, dtype=config.floatX).reshape(3, 3)
@@ -310,12 +317,13 @@ def test_nd_scan_sit_sot_with_carry():
         return A @ x, x.sum()
 
     # Must specify mode = JAX for the inner func to avoid a GEMM Op in the JAX graph
-    xs, _ = scan(
+    xs = scan(
         step,
         outputs_info=[x0, None],
         non_sequences=[A],
         n_steps=10,
         mode=get_mode("JAX"),
+        return_updates=False,
     )
 
     x0_val = np.arange(3, dtype=config.floatX)
@@ -329,7 +337,13 @@ def test_default_mode_excludes_incompatible_rewrites():
     # See issue #426
     A = matrix("A")
     B = matrix("B")
-    out, _ = scan(lambda a, b: a @ b, outputs_info=[A], non_sequences=[B], n_steps=2)
+    out = scan(
+        lambda a, b: a @ b,
+        outputs_info=[A],
+        non_sequences=[B],
+        n_steps=2,
+        return_updates=False,
+    )
     compare_jax_and_py([A, B], [out], [np.eye(3), np.eye(3)], jax_mode="JAX")
 
 
@@ -353,8 +367,11 @@ def test_dynamic_sequence_length():
 
     x = pt.tensor("x", shape=(None, 3))
 
-    out, _ = scan(
-        lambda x: inc_without_static_shape(x), outputs_info=[None], sequences=[x]
+    out = scan(
+        lambda x: inc_without_static_shape(x),
+        outputs_info=[None],
+        sequences=[x],
+        return_updates=False,
     )
     f = function([x], out, mode=get_mode("JAX").excluding("scan"))
     assert sum(isinstance(node.op, Scan) for node in f.maker.fgraph.apply_nodes) == 1
@@ -364,10 +381,11 @@ def test_dynamic_sequence_length():
     np.testing.assert_allclose(f(np.zeros((0, 3))), np.empty((0, 3)))
 
     # With known static shape we should always manage, regardless of the internal implementation
-    out2, _ = scan(
+    out2 = scan(
         lambda x: pt.specify_shape(inc_without_static_shape(x), x.shape),
         outputs_info=[None],
         sequences=[x],
+        return_updates=False,
     )
     f2 = function([x], out2, mode=get_mode("JAX").excluding("scan"))
     np.testing.assert_allclose(f2([[1, 2, 3]]), np.array([[2, 3, 4]]))
@@ -418,11 +436,12 @@ def SEIR_model_logp():
         it1 = it0 + ct0 - dt0
         return st1, et1, it1, logp_c1, logp_d1
 
-    (st, et, it, logp_c_all, logp_d_all), _ = scan(
+    (st, et, it, logp_c_all, logp_d_all) = scan(
         fn=seir_one_step,
         sequences=[C_t, D_t],
         outputs_info=[st0, et0, it0, None, None],
         non_sequences=[beta, gamma, delta],
+        return_updates=False,
     )
     st.name = "S_t"
     et.name = "E_t"
@@ -511,11 +530,12 @@ def cyclical_reduction():
     max_iter = 100
     tol = 1e-7
 
-    (*_, A1_hat, norm, _n_steps), _ = scan(
+    (*_, A1_hat, norm, _n_steps) = scan(
         step,
         outputs_info=[A, B, C, B, norm, step_num],
         non_sequences=[tol],
         n_steps=max_iter,
+        return_updates=False,
     )
     A1_hat = A1_hat[-1]
 
