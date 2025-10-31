@@ -27,7 +27,7 @@ from pytensor.compile.monitormode import MonitorMode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, Rop, disconnected_grad, grad, hessian
-from pytensor.graph.basic import Apply, equal_computations
+from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.replace import vectorize_graph
@@ -67,6 +67,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
+from tests.unittest_tools import assert_equal_computations
 
 
 if config.mode == "FAST_COMPILE":
@@ -4139,3 +4140,43 @@ def test_rng_outputs_info():
         xs_ref.append(rng_ref.normal(xs_ref[-1]))
     assert random_generator_type.values_eq(rng_ref, rng_final_eval)
     np.testing.assert_allclose(xs_eval, xs_ref[1:])
+
+
+@pytest.mark.filterwarnings("error")
+def test_return_updates_api_change():
+    err_msg = "return_updates=False but Scan produced updates"
+    warn_msg = "Scan return signature will change. Updates dict will not be returned"
+
+    x = shared(np.array(0, dtype="float64"))
+
+    with pytest.warns(DeprecationWarning, match=warn_msg):
+        traced1, updates1 = scan(
+            lambda: {x: x + 1},
+            outputs_info=[],
+            n_steps=5,
+        )
+    assert traced1 is None
+    assert len(updates1) == 1 and x in updates1
+
+    with pytest.warns(DeprecationWarning, match=warn_msg):
+        traced2, updates2 = scan(
+            lambda x: x + 1,
+            outputs_info=[x],
+            n_steps=5,
+        )
+    assert isinstance(traced2, Variable)
+    assert isinstance(updates2, dict) and not updates2
+
+    traced3 = scan(
+        lambda x: x + 1,
+        outputs_info=[x],
+        n_steps=5,
+        return_updates=False,
+    )
+    assert isinstance(traced3, Variable)
+
+    assert_equal_computations(list(updates1.values()), [traced2[-1]])
+    assert_equal_computations([traced2], [traced3])
+
+    with pytest.raises(ValueError, match=err_msg):
+        scan(lambda: {x: x + 1}, outputs_info=[], n_steps=5, return_updates=False)

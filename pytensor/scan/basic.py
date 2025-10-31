@@ -168,6 +168,26 @@ def isNaN_or_Inf_or_None(x):
     return isNone or isNaN or isInf or isStr
 
 
+def _manage_output_api_change(outputs, updates, return_updates):
+    if return_updates:
+        warnings.warn(
+            "Scan return signature will change. Updates dict will not be returned, only the first argument. "
+            "Pass `return_updates=False` to conform to the new API and avoid this warning",
+            DeprecationWarning,
+            # Only meant for developers for now. Switch to FutureWarning to warn users, before removing.
+            stacklevel=3,
+        )
+    else:
+        if updates:
+            raise ValueError(
+                f"return_updates=False but Scan produced updates {updates}. "
+                "Make sure to use outputs_info to handle all recurrent states, and not rely on shared variable updates."
+            )
+        return outputs
+
+    return outputs, updates
+
+
 def scan(
     fn,
     sequences=None,
@@ -182,6 +202,7 @@ def scan(
     allow_gc=None,
     strict=False,
     return_list=False,
+    return_updates: bool = True,
 ):
     r"""This function constructs and applies a `Scan` `Op` to the provided arguments.
 
@@ -900,7 +921,7 @@ def scan(
         if not return_list and len(outputs) == 1:
             outputs = outputs[0]
 
-        return (outputs, updates)
+        return _manage_output_api_change(outputs, updates, return_updates)
 
     ##
     # Step 4. Compile the dummy function
@@ -919,6 +940,8 @@ def scan(
     fake_outputs = clone_replace(
         outputs, replace=dict(zip(non_seqs, fake_nonseqs, strict=True))
     )
+    # TODO: Once we don't treat shared variables specially we should use `truncated_graph_inputs`
+    #  to find implicit inputs in a way that reduces the size of the inner function
     known_inputs = [*args, *fake_nonseqs]
     extra_inputs = [
         x for x in explicit_graph_inputs(fake_outputs) if x not in known_inputs
@@ -1074,7 +1097,7 @@ def scan(
         if not isinstance(arg, SharedVariable | Constant)
     ]
 
-    inner_replacements.update(dict(zip(other_scan_args, other_inner_args, strict=True)))
+    inner_replacements.update(dict(zip(other_scan_args, other_inner_args, strict=True)))  # type: ignore[arg-type]
 
     if strict:
         non_seqs_set = set(non_sequences if non_sequences is not None else [])
@@ -1123,7 +1146,7 @@ def scan(
     if condition is not None:
         inner_outs.append(condition)
 
-    new_outs = clone_replace(inner_outs, replace=inner_replacements)
+    new_outs = clone_replace(inner_outs, replace=inner_replacements)  # type: ignore[arg-type]
 
     ##
     # Step 7. Create the Scan Op
@@ -1211,12 +1234,14 @@ def scan(
 
     offset += n_nit_sot
 
-    # Support for explicit untraced sit_sot
+    # Legacy support for explicit untraced sit_sot and those built with update dictionary
+    # Switch to n_untraced_sit_sot_outs after deprecation period
     n_explicit_untraced_sit_sot_outs = len(untraced_sit_sot_rightOrder)
     untraced_sit_sot_outs = scan_outs[
         offset : offset + n_explicit_untraced_sit_sot_outs
     ]
 
+    # Legacy support: map shared outputs to their updates
     offset += n_explicit_untraced_sit_sot_outs
     for idx, update_rule in enumerate(scan_outs[offset:]):
         update_map[untraced_sit_sot_scan_inputs[idx]] = update_rule
@@ -1245,8 +1270,8 @@ def scan(
             update_map[sit_sot_shared[abs(pos) - 1]] = _scan_out_list[idx][-1]
     scan_out_list = [x for x in scan_out_list if x is not None]
     if not return_list and len(scan_out_list) == 1:
-        scan_out_list = scan_out_list[0]
+        scan_out_list = scan_out_list[0]  # type: ignore[assignment]
     elif len(scan_out_list) == 0:
-        scan_out_list = None
+        scan_out_list = None  # type: ignore[assignment]
 
-    return scan_out_list, update_map
+    return _manage_output_api_change(scan_out_list, update_map, return_updates)
