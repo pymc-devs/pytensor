@@ -1474,7 +1474,10 @@ class TestPack:
         y = pt.tensor("y", shape=(5,))
         z = pt.tensor("z", shape=(3, 3))
 
-        input_dict = {variable: np.zeros(variable.type.shape) for variable in [x, y, z]}
+        input_dict = {
+            variable: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
 
         # Simple case, reduce all axes, equivalent to einops '*'
         packed_tensor, packed_shapes = pack(x, y, z, axes=None)
@@ -1504,7 +1507,10 @@ class TestPack:
         y = pt.tensor("y", shape=(3, 5))
         z = pt.tensor("z", shape=(3, 3, 3))
         packed_tensor, packed_shapes = pack(x, y, z, axes=0)
-        input_dict = {variable: np.zeros(variable.type.shape) for variable in [x, y, z]}
+        input_dict = {
+            variable: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
         assert packed_tensor.type.shape == (3, 15)
         for tensor, packed_shape in zip([x, y, z], packed_shapes):
             assert packed_shape.type.shape == (tensor.ndim - 1,)
@@ -1526,7 +1532,10 @@ class TestPack:
 
         z = pt.tensor("z", shape=(3, 1, 7, 2))
         packed_tensor, packed_shapes = pack(x, y, z, axes=[0, 3])
-        input_dict = {variable: np.zeros(variable.type.shape) for variable in [x, y, z]}
+        input_dict = {
+            variable: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
         assert packed_tensor.type.shape == (3, 13, 2)
         for tensor, packed_shape in zip([x, y, z], packed_shapes):
             assert packed_shape.type.shape == (tensor.ndim - 2,)
@@ -1546,7 +1555,9 @@ class TestPack:
 
         fn = pytensor.function([x, y, z], new_outputs, mode="FAST_COMPILE")
 
-        input_vals = [rng.normal(size=var.type.shape) for var in [x, y, z]]
+        input_vals = [
+            rng.normal(size=var.type.shape).astype(config.floatX) for var in [x, y, z]
+        ]
         output_vals = fn(*input_vals)
 
         for input_val, output_val in zip(input_vals, output_vals, strict=True):
