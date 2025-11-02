@@ -8,6 +8,7 @@ from numpy.lib.array_utils import normalize_axis_index
 
 import pytensor
 import pytensor.scalar.basic as ps
+from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import (
     DisconnectedType,
     _float_zeros_like,
@@ -44,7 +45,7 @@ from pytensor.tensor.math import (
 )
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.shape import Shape_i
+from pytensor.tensor.shape import Shape_i, specify_shape
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
 from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
@@ -2012,11 +2013,10 @@ def concat_with_broadcast(tensor_list, axis=0):
     return join(axis, *bcast_tensor_inputs)
 
 
-class Pack(Op):
-    __props__ = ("axes",)
-
+class PackHelper:
     def __init__(self, axes: int | Sequence[int] | None):
         self.axes = tuple(axes) if isinstance(axes, list) else axes
+        self.op_name = "Pack{axes=" + str(self.axes) + "}"
 
     def _analyze_axes_list(self) -> tuple[int, int, int, int | None]:
         """
@@ -2192,22 +2192,30 @@ class Pack(Op):
 
         return n_before, n_after, min_axes, max_axes
 
-    def make_node(self, *tensors: TensorVariable):
+    def validate_inputs(self, tensors: list[TensorLike]):
         tensors = [ptb.as_tensor_variable(t) for t in tensors]
-        n_axes_before, n_axes_after, min_axes, max_axes = self._analyze_axes_list()
+        _, _, min_axes, max_axes = self._analyze_axes_list()
 
         if min([t.ndim for t in tensors]) < min_axes:
             raise ValueError(
-                f"All input tensors to {self!s} must have at least {min_axes} dimensions, but the minimum "
+                f"All input tensors to {self.op_name} must have at least {min_axes} dimensions, but the minimum "
                 f"number of dimensions found was {min([t.ndim for t in tensors])}."
             )
 
         max_ndim = max([t.ndim for t in tensors])
-        if max_axes is not None and max_ndim > max_axes:
+        if (
+            max_axes is not None
+            and max_ndim > max_axes
+            and not any(t.ndim == max_axes for t in tensors)
+        ):
             raise ValueError(
-                f"All input tensors to {self!s} must have at most {max_axes} dimensions, but the maximum "
+                f"All input tensors to {self.op_name} must have at most {max_axes} dimensions, but the maximum "
                 f"number of dimensions found was {max_ndim}."
             )
+
+    def infer_shape(self, tensors: list[TensorLike]) -> tuple[int | None, ...]:
+        tensors = [ptb.as_tensor_variable(t) for t in tensors]
+        n_axes_before, n_axes_after, _, _ = self._analyze_axes_list()
 
         def _coalesce_dim(shapes: list[int | None], axis: int) -> int | None:
             unique_shapes = {s for s in shapes if s is not None}
@@ -2242,55 +2250,12 @@ class Pack(Op):
             )
             for i in range(n_axes_after)
         ]
-        out_shape = (*prefix_shapes, packed_shape, *suffix_shapes)
 
-        packed_output = ptb.tensor(dtype=tensors[0].dtype, shape=out_shape)
-        packed_shapes = [
-            ptb.tensor(dtype="int64", shape=(len(shapes),)) for shapes in shapes_to_pack
-        ]
+        return (*prefix_shapes, packed_shape, *suffix_shapes)
 
-        return Apply(self, tensors, [packed_output, *packed_shapes])
 
-    def perform(self, node, inputs, outputs):
-        tensors = inputs
-        packed_output, *packed_shapes = outputs
-
-        reshaped_tensors = []
-        tmp_shapes = []
-
-        n_axes_before, n_axes_after, min_axes, max_axes = self._analyze_axes_list()
-
-        if (
-            max_axes is not None
-            and any(t.ndim > max_axes for t in tensors)
-            and not any(t.ndim == max_axes for t in tensors)
-        ):
-            raise ValueError(
-                f"All input tensors must have at most {max_axes} axes, and at least one input tensor must have exactly "
-                f"{max_axes} axes to resolve ambiguities in the interpretation of the axes list {self.axes}. A less"
-                f"ambiguous axes list can be used to avoid this restriction, usually by including 0 or -1 in the axes "
-                f"list."
-            )
-
-        for i, tensor in enumerate(tensors):
-            shape = tensor.shape
-            ndim = tensor.ndim
-            if tensor.ndim < min_axes:
-                raise ValueError(
-                    f"packed tensor #{i} (enumeration starts with 0) has shape {shape}, "
-                    f"while pattern {self.axes} assumes at least {min_axes} axes"
-                )
-            axis_after_packed_axes = ndim - n_axes_after
-            tmp_shapes.append(shape[n_axes_before:axis_after_packed_axes])
-            reshaped_tensors.append(
-                tensor.reshape(
-                    (*shape[:n_axes_before], -1, *shape[axis_after_packed_axes:])
-                )
-            )
-
-        packed_output[0] = np.concatenate(reshaped_tensors, axis=n_axes_before)
-        for i, packed_shape in enumerate(tmp_shapes):
-            packed_shapes[i][0] = np.array(packed_shape).astype("int64")
+class Pack(OpFromGraph):
+    "Wrapper for the Pack Op"
 
 
 def pack(
@@ -2317,10 +2282,44 @@ def pack(
     if not tensors:
         raise ValueError("Cannot pack an empty list of tensors.")
 
-    pack_op = Pack(axes=axes)
-    packed_tensor, *packed_shapes = pack_op(*tensors)
+    tensors = [ptb.as_tensor(tensor) for tensor in tensors]
 
-    return packed_tensor, packed_shapes
+    pack_helper = PackHelper(axes=axes)
+
+    reshaped_tensors = []
+    tmp_shapes = []
+
+    n_axes_before, n_axes_after, _, _ = pack_helper._analyze_axes_list()
+    pack_helper.validate_inputs(tensors)
+    output_shape = pack_helper.infer_shape(tensors)
+
+    for i, tensor in enumerate(tensors):
+        shape = tensor.shape
+        ndim = tensor.ndim
+        axis_after_packed_axes = ndim - n_axes_after
+        tmp_shapes.append(shape[n_axes_before:axis_after_packed_axes])
+        reshaped_tensors.append(
+            tensor.reshape(
+                (*shape[:n_axes_before], -1, *shape[axis_after_packed_axes:])
+            )
+        )
+
+    packed_output_tensor = specify_shape(
+        ptb.join(n_axes_before, *reshaped_tensors), output_shape
+    )
+    packed_output_shapes = [
+        ptb.as_tensor_variable(packed_shape).astype("int64")
+        for i, packed_shape in enumerate(tmp_shapes)
+    ]
+
+    pack_op = Pack(
+        inputs=tensors,
+        outputs=[packed_output_tensor, *packed_output_shapes],
+        name="Pack{axes=" + str(axes) + "}",
+    )
+
+    outputs = pack_op(*tensors)
+    return outputs[0], outputs[1:]
 
 
 def unpack(

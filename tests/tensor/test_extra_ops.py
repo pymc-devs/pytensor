@@ -21,7 +21,7 @@ from pytensor.tensor.extra_ops import (
     CumOp,
     FillDiagonal,
     FillDiagonalOffset,
-    Pack,
+    PackHelper,
     RavelMultiIndex,
     Repeat,
     SearchsortedOp,
@@ -1421,52 +1421,52 @@ class TestPack:
         ],
     )
     def test_analyze_axes_list_valid(self, axes, expected):
-        op = Pack(axes)
-        outputs = op._analyze_axes_list()
+        helper = PackHelper(axes)
+        outputs = helper._analyze_axes_list()
         names = ["n_before", "n_after", "min_axes", "max_axes"]
         for out, exp, name in zip(outputs, expected, names, strict=True):
             assert out == exp, f"Expected {exp}, got {out} for {name}"
 
     def test_analyze_axes_list_invalid(self):
         # Two explicit holes
-        op = Pack([0, 2, -1])
+        helper = PackHelper([0, 2, -1])
         with pytest.raises(ValueError, match="Too many holes"):
-            op._analyze_axes_list()
+            helper._analyze_axes_list()
 
         # Explict hole + two implicit holes
-        op = Pack([1, 3])
+        helper = PackHelper([1, 3])
         with pytest.raises(ValueError, match="Too many holes"):
-            op._analyze_axes_list()
+            helper._analyze_axes_list()
 
         # Two explicit holes, all positive
-        op = Pack([0, 2, 4])
+        helper = PackHelper([0, 2, 4])
         with pytest.raises(ValueError, match="Too many holes"):
-            op._analyze_axes_list()
+            helper._analyze_axes_list()
 
         # Explicit hole + two implicit hole, all negative
-        op = Pack([-4, -2])
+        helper = PackHelper([-4, -2])
         with pytest.raises(ValueError, match="Too many holes"):
-            op._analyze_axes_list()
+            helper._analyze_axes_list()
 
         # Two explicit holes + implicit hole, all negative
-        op = Pack([-5, -3, -1])
+        helper = PackHelper([-5, -3, -1])
         with pytest.raises(ValueError, match="Too many holes"):
-            op._analyze_axes_list()
+            helper._analyze_axes_list()
 
         # Duplicate axes
-        op = Pack([0, 0])
+        helper = PackHelper([0, 0])
         with pytest.raises(ValueError, match="axes must have no duplicates"):
-            op._analyze_axes_list()
+            helper._analyze_axes_list()
 
         # Not monotonic
-        op = Pack([0, 2, 1])
+        helper = PackHelper([0, 2, 1])
         with pytest.raises(ValueError, match="Axes must be strictly increasing"):
-            op._analyze_axes_list()
+            helper._analyze_axes_list()
 
         # Negative before positive
-        op = Pack([-1, 0])
+        helper = PackHelper([-1, 0])
         with pytest.raises(ValueError, match="Negative axes must come after positive"):
-            op._analyze_axes_list()
+            helper._analyze_axes_list()
 
     def test_pack_basic(self):
         # rng = np.random.default_rng()
