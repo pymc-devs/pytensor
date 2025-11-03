@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
@@ -8,14 +10,15 @@ from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.ifelse import IfElse
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    numba_funcify,
-    numba_njit,
+    numba_funcify_and_cache_key,
+    register_funcify_and_cache_key,
+    register_funcify_default_op_cache_key,
 )
 from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor.type import TensorType
 
 
-@numba_funcify.register(OpFromGraph)
+@register_funcify_and_cache_key(OpFromGraph)
 def numba_funcify_OpFromGraph(op, node=None, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
@@ -30,10 +33,27 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
         accept_inplace=True,
     )
     NUMBA.optimizer(fgraph)
-    return numba_funcify(op.fgraph, squeeze_output=True, **kwargs)
+    fgraph_fn, fgraph_cache_key = numba_funcify_and_cache_key(
+        op.fgraph, squeeze_output=True, **kwargs
+    )
+
+    if fgraph_cache_key is None:
+        # Can't cache the inner graph
+        ofg_cache_key = None
+    else:
+        ofg_cache_key = sha256(
+            str(
+                (
+                    type(op),
+                    fgraph_cache_key,
+                )
+            ).encode()
+        ).hexdigest()
+
+    return fgraph_fn, ofg_cache_key
 
 
-@numba_funcify.register(TypeCastingOp)
+@register_funcify_default_op_cache_key(TypeCastingOp)
 def numba_funcify_type_casting(op, **kwargs):
     @numba_basic.numba_njit
     def identity(x):
@@ -42,7 +62,7 @@ def numba_funcify_type_casting(op, **kwargs):
     return identity
 
 
-@numba_funcify.register(DeepCopyOp)
+@register_funcify_default_op_cache_key(DeepCopyOp)
 def numba_funcify_DeepCopyOp(op, node, **kwargs):
     if isinstance(node.inputs[0].type, TensorType):
 
@@ -59,7 +79,7 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
     return deepcopy
 
 
-@numba_funcify.register(IfElse)
+@register_funcify_default_op_cache_key(IfElse)
 def numba_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
 
@@ -88,7 +108,7 @@ def numba_funcify_IfElse(op, **kwargs):
     return ifelse
 
 
-@numba_funcify.register(CheckAndRaise)
+@register_funcify_and_cache_key(CheckAndRaise)
 def numba_funcify_CheckAndRaise(op, node, **kwargs):
     error = op.exc_type
     msg = op.msg
@@ -100,4 +120,5 @@ def numba_funcify_CheckAndRaise(op, node, **kwargs):
                 raise error(msg)
         return x
 
-    return check_and_raise
+    cache_key = sha256(str((type(op), error, msg)).encode()).hexdigest()
+    return check_and_raise, cache_key

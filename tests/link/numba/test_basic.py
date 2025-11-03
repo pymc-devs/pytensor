@@ -402,7 +402,9 @@ def test_config_options_fastmath():
 
     with config.change_flags(numba__fastmath=True):
         pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
+        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
+            "jitable_func"
+        ].py_func.__globals__["impl_sum"]
         assert numba_sum_fn.targetoptions["fastmath"] == {
             "afn",
             "arcp",
@@ -413,7 +415,9 @@ def test_config_options_fastmath():
 
     with config.change_flags(numba__fastmath=False):
         pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
+        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
+            "jitable_func"
+        ].py_func.__globals__["impl_sum"]
         assert numba_sum_fn.targetoptions["fastmath"] is False
 
 
@@ -422,9 +426,10 @@ def test_config_options_cached():
 
     with config.change_flags(numba__cache=True):
         pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
-        # Caching is disabled unless the dispatched function returns an explicit cache key
-        assert isinstance(numba_sum_fn._cache, numba.core.caching.NullCache)
+        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
+            "jitable_func"
+        ].py_func.__globals__["impl_sum"]
+        assert not isinstance(numba_sum_fn._cache, numba.core.caching.NullCache)
 
     with config.change_flags(numba__cache=False):
         pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)

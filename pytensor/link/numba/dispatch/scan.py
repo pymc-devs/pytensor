@@ -1,3 +1,4 @@
+from hashlib import sha256
 from textwrap import dedent, indent
 
 import numpy as np
@@ -7,13 +8,14 @@ from numba.extending import overload
 from pytensor import In
 from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.mode import NUMBA, get_mode
+from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     create_arg_string,
     create_tuple_string,
-    numba_funcify,
+    numba_funcify_and_cache_key,
+    register_funcify_and_cache_key,
 )
-from pytensor.link.utils import compile_function_src
 from pytensor.scan.op import Scan
 from pytensor.tensor.type import TensorType
 
@@ -54,7 +56,7 @@ def array0d_range(x):
         return range_arr
 
 
-@numba_funcify.register(Scan)
+@register_funcify_and_cache_key(Scan)
 def numba_funcify_Scan(op: Scan, node, **kwargs):
     # Apply inner rewrites
     # TODO: Not sure this is the right place to do this, should we have a rewrite that
@@ -97,7 +99,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     )
     rewriter(fgraph)
 
-    scan_inner_func = numba_funcify(op.fgraph)
+    scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(op.fgraph)
 
     outer_in_names_to_vars = {
         (f"outer_in_{i}" if i > 0 else "n_steps"): v for i, v in enumerate(node.inputs)
@@ -439,6 +441,18 @@ def scan({", ".join(outer_in_names)}):
         "scan_inner_func": scan_inner_func,
     }
 
-    scan_op_fn = compile_function_src(scan_op_src, "scan", {**globals(), **global_env})
+    scan_op_fn = compile_numba_function_src(
+        scan_op_src,
+        "scan",
+        {**globals(), **global_env},
+    )
 
-    return numba_basic.numba_njit(scan_op_fn, boundscheck=False)
+    if inner_func_cache_key is None:
+        # If we can't cache the inner function, we can't cache the Scan either
+        scan_cache_key = None
+    else:
+        scan_cache_key = sha256(
+            f"({scan_op_src}, {inner_func_cache_key})".encode()
+        ).hexdigest()
+
+    return numba_basic.numba_njit(scan_op_fn, boundscheck=False), scan_cache_key

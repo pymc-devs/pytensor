@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from copy import copy, deepcopy
 from functools import singledispatch
+from hashlib import sha256
 from textwrap import dedent
 
 import numba
@@ -13,7 +14,11 @@ import pytensor.tensor.random.basic as ptr
 from pytensor.graph import Apply
 from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import direct_cast, numba_funcify
+from pytensor.link.numba.dispatch.basic import (
+    direct_cast,
+    numba_funcify,
+    register_funcify_and_cache_key,
+)
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
@@ -395,7 +400,7 @@ def numba_funcify_RandomVariable_core(op: RandomVariable, **kwargs):
     )
 
 
-@numba_funcify.register
+@register_funcify_and_cache_key(RandomVariableWithCoreShape)
 def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs):
     core_shape = node.inputs[0]
 
@@ -423,28 +428,44 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     output_dtypes = encode_literals((rv_node.default_output().type.dtype,))
     inplace_pattern = encode_literals(())
 
-    def random_wrapper(core_shape, rng, size, *dist_params):
-        if not inplace:
-            rng = copy(rng)
-
-        draws = _vectorized(
-            core_op_fn,
-            input_bc_patterns,
-            output_bc_patterns,
-            output_dtypes,
-            inplace_pattern,
-            (rng,),
-            dist_params,
-            (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),
-            None if size_len is None else numba_ndarray.to_fixed_tuple(size, size_len),
-        )
-        return rng, draws
-
     def random(core_shape, rng, size, *dist_params):
-        raise NotImplementedError("Non-jitted random variable not implemented")
+        raise NotImplementedError(
+            "Numba implementation of RandomVariable cannot be evaluated in Python (non-JIT) mode"
+        )
 
     @overload(random, jit_options=_jit_options)
     def ov_random(core_shape, rng, size, *dist_params):
-        return random_wrapper
+        def impl(core_shape, rng, size, *dist_params):
+            if not inplace:
+                rng = copy(rng)
 
-    return random
+            draws = _vectorized(
+                core_op_fn,
+                input_bc_patterns,
+                output_bc_patterns,
+                output_dtypes,
+                inplace_pattern,
+                (rng,),
+                dist_params,
+                (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),
+                None
+                if size_len is None
+                else numba_ndarray.to_fixed_tuple(size, size_len),
+            )
+            return rng, draws
+
+        return impl
+
+    rv_op_props_dict = rv_op.props_dict() if hasattr(rv_op, "props_dict") else {}
+    random_rv_key_contents = (
+        type(op),
+        type(rv_op),
+        rv_op,
+        tuple(rv_op_props_dict.items()),
+        size_len,
+        core_shape_len,
+        inplace,
+        input_bc_patterns,
+    )
+    random_rv_key = sha256(str(random_rv_key_contents).encode()).hexdigest()
+    return random, random_rv_key
