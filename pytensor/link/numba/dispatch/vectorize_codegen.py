@@ -4,7 +4,7 @@ import base64
 import pickle
 from collections.abc import Callable, Sequence
 from textwrap import indent
-from typing import Any, cast
+from typing import Any
 
 import numba
 import numpy as np
@@ -15,8 +15,8 @@ from numba.core.base import BaseContext
 from numba.core.types.misc import NoneType
 from numba.np import arrayobj
 
+from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.utils import compile_function_src
 
 
 def encode_literals(literals: Sequence) -> str:
@@ -52,10 +52,13 @@ def store_core_outputs({inp_signature}, {out_signature}):
 {indent(store_outputs, " " * 4)}
 """
     global_env = {"core_op_fn": core_op_fn}
-    func = compile_function_src(
-        func_src, "store_core_outputs", {**globals(), **global_env}
+
+    func = compile_numba_function_src(
+        func_src,
+        "store_core_outputs",
+        {**globals(), **global_env},
     )
-    return cast(Callable, numba_basic.numba_njit(func))
+    return numba_basic.numba_njit(func)
 
 
 _jit_options = {
@@ -74,7 +77,7 @@ _jit_options = {
 @numba.extending.intrinsic(jit_options=_jit_options, prefer_literal=True)
 def _vectorized(
     typingctx,
-    scalar_func,
+    core_func,
     input_bc_patterns,
     output_bc_patterns,
     output_dtypes,
@@ -85,7 +88,7 @@ def _vectorized(
     size_type,
 ):
     arg_types = [
-        scalar_func,
+        core_func,
         input_bc_patterns,
         output_bc_patterns,
         output_dtypes,
@@ -173,16 +176,6 @@ def _vectorized(
         )
         out_types[output_idx] = output_type
 
-    core_signature = typingctx.resolve_function_type(
-        scalar_func,
-        [
-            *constant_inputs_types,
-            *core_input_types,
-            *core_out_types,
-        ],
-        {},
-    )
-
     ret_type = types.Tuple(out_types)
 
     if len(output_dtypes) == 1:
@@ -239,11 +232,21 @@ def _vectorized(
             output_core_shapes,
         )
 
+        core_signature = typingctx.resolve_function_type(
+            core_func,
+            [
+                *constant_inputs_types,
+                *core_input_types,
+                *core_out_types,
+            ],
+            {},
+        )
+
         make_loop_call(
             typingctx,
             ctx,
             builder,
-            scalar_func,
+            core_func,
             core_signature,
             iter_shape,
             constant_inputs,
@@ -416,8 +419,8 @@ def make_loop_call(
     typingctx,
     context: numba.core.base.BaseContext,
     builder: ir.IRBuilder,
-    scalar_func: Any,
-    scalar_signature: types.FunctionType,
+    core_func: Any,
+    core_signature: types.FunctionType,
     iter_shape: tuple[ir.Instruction, ...],
     constant_inputs: tuple[ir.Instruction, ...],
     inputs: tuple[ir.Instruction, ...],
@@ -557,10 +560,10 @@ def make_loop_call(
         val = core_array._getvalue()
         output_slices.append(val)
 
-    inner_codegen = context.get_function(scalar_func, scalar_signature)
+    inner_codegen = context.get_function(core_func, core_signature)
 
-    if isinstance(scalar_signature.args[0], types.StarArgTuple | types.StarArgUniTuple):
-        input_vals = [context.make_tuple(builder, scalar_signature.args[0], input_vals)]
+    if isinstance(core_signature.args[0], types.StarArgTuple | types.StarArgUniTuple):
+        input_vals = [context.make_tuple(builder, core_signature.args[0], input_vals)]
 
     inner_codegen(builder, [*constant_inputs, *input_vals, *output_slices])
 

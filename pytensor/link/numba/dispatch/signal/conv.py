@@ -2,11 +2,13 @@ import numpy as np
 from numba.np.arraymath import _get_inner_prod
 
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch import numba_funcify
+from pytensor.link.numba.dispatch.basic import (
+    register_funcify_default_op_cache_key,
+)
 from pytensor.tensor.signal.conv import Convolve1d
 
 
-@numba_funcify.register(Convolve1d)
+@register_funcify_default_op_cache_key(Convolve1d)
 def numba_funcify_Convolve1d(op, node, **kwargs):
     # This specialized version is faster than the overloaded numba np.convolve
     a_dtype, b_dtype = node.inputs[0].type.dtype, node.inputs[1].type.dtype
