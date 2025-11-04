@@ -60,24 +60,23 @@ from pytensor.tensor.slinalg import (
     solve_triangular,
 )
 
-from pytensor.tensor.slinalg import BlockDiagonal
 
 logger = logging.getLogger(__name__)
 MATRIX_INVERSE_OPS = (MatrixInverse, MatrixPinv)
 
 
-from pytensor.tensor.slinalg import BlockDiagonal
-from pytensor.graph import Apply
+@register_canonicalize
+@node_rewriter([BlockDiagonal])
+def fuse_blockdiagonal(fgraph, node):
+    """Fuse nested BlockDiagonal ops into a single BlockDiagonal."""
 
-def fuse_blockdiagonal(node):
-    # Only process if this node is a BlockDiagonal
-    if not isinstance(node.owner.op, BlockDiagonal):
-        return node
+    if not isinstance(node.op, BlockDiagonal):
+        return None
 
     new_inputs = []
     changed = False
-    for inp in node.owner.inputs:
-        # If input is itself a BlockDiagonal, flatten its inputs
+
+    for inp in node.inputs:
         if inp.owner and isinstance(inp.owner.op, BlockDiagonal):
             new_inputs.extend(inp.owner.inputs)
             changed = True
@@ -85,9 +84,11 @@ def fuse_blockdiagonal(node):
             new_inputs.append(inp)
 
     if changed:
-        # Return a new fused BlockDiagonal with all inputs
-        return BlockDiagonal(len(new_inputs))(*new_inputs)
-    return node
+        fused_op = BlockDiagonal(len(new_inputs))
+        new_output = fused_op(*new_inputs)
+        return [new_output]
+
+    return None
 
 
 def is_matrix_transpose(x: TensorVariable) -> bool:
