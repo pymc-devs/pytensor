@@ -910,7 +910,6 @@ def local_join_make_vector(fgraph, node):
         return [ret]
 
 
-@register_specialize
 @register_canonicalize
 @node_rewriter([Join])
 def local_join_to_repeat(fgraph, node):
@@ -923,9 +922,6 @@ def local_join_to_repeat(fgraph, node):
     --------
     concatenate([x, x, x], axis=0) -> repeat(x, 3, axis=0)
     """
-    if not isinstance(node.op, Join):
-        return
-
     # Extract axis and the tensors being joined
     axis, *tensors = node.inputs
 
