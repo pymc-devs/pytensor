@@ -1259,7 +1259,9 @@ def test_local_join_to_repeat():
     # Check numerical correctness
     test_val = np.array([1.0, 2.0, 3.0], dtype=config.floatX)
     result = f(test_val)
-    expected = np.array([1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0], dtype=config.floatX)
+    expected = np.array(
+        [1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0], dtype=config.floatX
+    )
     assert np.allclose(result, expected)
 
     # Check that Join was replaced with Repeat

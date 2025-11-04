@@ -909,6 +909,7 @@ def local_join_make_vector(fgraph, node):
         copy_stack_trace(node.outputs, ret)
         return [ret]
 
+
 @register_specialize
 @register_canonicalize
 @node_rewriter([Join])
@@ -943,6 +944,7 @@ def local_join_to_repeat(fgraph, node):
     copy_stack_trace(node.outputs[0], result)
 
     return [result]
+
 
 @register_specialize
 @register_canonicalize
