@@ -35,6 +35,7 @@ from pytensor.tensor.basic import (
     tile,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.extra_ops import Repeat
 from pytensor.tensor.math import (
     add,
     bitwise_and,
@@ -1245,6 +1246,84 @@ def test_local_join_1():
     e = f.maker.fgraph.toposort()
     assert len([n for n in e if isinstance(n.op, Join)]) == 1
     assert f.maker.fgraph.outputs[0].dtype == config.floatX
+
+
+def test_local_join_to_repeat():
+    """Test that Join(axis, x, x, ...) gets rewritten to repeat(x, n, axis)"""
+
+    # Test with vector - concatenate same vector 3 times along axis 0
+    x = vector("x")
+    s = join(0, x, x, x)
+    f = function([x], s, mode=rewrite_mode)
+
+    # Check numerical correctness
+    test_val = np.array([1.0, 2.0, 3.0], dtype=config.floatX)
+    result = f(test_val)
+    expected = np.array([1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0], dtype=config.floatX)
+    assert np.allclose(result, expected)
+
+    # Check that Join was replaced with Repeat
+    ops = f.maker.fgraph.toposort()
+    assert len([n for n in ops if isinstance(n.op, Join)]) == 0
+    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 1
+
+    # Test with matrix - concatenate same matrix along axis 0
+    a = matrix("a")
+    s = join(0, a, a, a, a)
+    f = function([a], s, mode=rewrite_mode)
+
+    test_mat = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
+    result = f(test_mat)
+    expected = np.vstack([test_mat, test_mat, test_mat, test_mat])
+    assert np.allclose(result, expected)
+
+    # Check optimization applied
+    ops = f.maker.fgraph.toposort()
+    assert len([n for n in ops if isinstance(n.op, Join)]) == 0
+    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 1
+
+    # Test with matrix - concatenate along axis 1
+    s = join(1, a, a)
+    f = function([a], s, mode=rewrite_mode)
+
+    result = f(test_mat)
+    expected = np.hstack([test_mat, test_mat])
+    assert np.allclose(result, expected)
+
+    # Check optimization applied
+    ops = f.maker.fgraph.toposort()
+    assert len([n for n in ops if isinstance(n.op, Join)]) == 0
+    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 1
+
+    # Test that it does NOT apply when tensors are different
+    b = matrix("b")
+    s = join(0, a, b)
+    f = function([a, b], s, mode=rewrite_mode)
+
+    test_mat1 = np.array([[1.0, 2.0]], dtype=config.floatX)
+    test_mat2 = np.array([[3.0, 4.0]], dtype=config.floatX)
+    result = f(test_mat1, test_mat2)
+    expected = np.vstack([test_mat1, test_mat2])
+    assert np.allclose(result, expected)
+
+    # Join should still be present (not optimized to Repeat)
+    ops = f.maker.fgraph.toposort()
+    assert len([n for n in ops if isinstance(n.op, Join)]) == 1
+    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 0
+
+    # Test with 5 repetitions to ensure it works with larger counts
+    s = join(0, x, x, x, x, x)
+    f = function([x], s, mode=rewrite_mode)
+
+    test_val = np.array([1.0, 2.0], dtype=config.floatX)
+    result = f(test_val)
+    expected = np.tile(test_val, 5)
+    assert np.allclose(result, expected)
+
+    # Check optimization applied
+    ops = f.maker.fgraph.toposort()
+    assert len([n for n in ops if isinstance(n.op, Join)]) == 0
+    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 1
 
 
 def test_local_join_empty():

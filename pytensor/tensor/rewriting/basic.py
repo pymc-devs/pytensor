@@ -82,7 +82,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.extra_ops import broadcast_arrays
+from pytensor.tensor.extra_ops import broadcast_arrays, repeat
 from pytensor.tensor.math import Sum, add, eq, variadic_add
 from pytensor.tensor.shape import Shape_i, shape_padleft
 from pytensor.tensor.type import DenseTensorType, TensorType
@@ -909,6 +909,40 @@ def local_join_make_vector(fgraph, node):
         copy_stack_trace(node.outputs, ret)
         return [ret]
 
+@register_specialize
+@register_canonicalize
+@node_rewriter([Join])
+def local_join_to_repeat(fgraph, node):
+    """Join(axis, x, x, x, ...) -> repeat(x, n, axis)
+
+    When the same tensor is concatenated multiple times,
+    replace with a single repeat operation which is more efficient.
+
+    Examples
+    --------
+    concatenate([x, x, x], axis=0) -> repeat(x, 3, axis=0)
+    """
+    if not isinstance(node.op, Join):
+        return
+
+    # Extract axis and the tensors being joined
+    axis, *tensors = node.inputs
+
+    # Need at least 2 tensors to consider optimization
+    if len(tensors) <= 1:
+        return
+
+    # Check if all tensors are identical
+    if not all(t == tensors[0] for t in tensors[1:]):
+        return
+
+    # Replace with repeat operation
+    result = repeat(tensors[0], len(tensors), axis)
+
+    # Preserve debugging information
+    copy_stack_trace(node.outputs[0], result)
+
+    return [result]
 
 @register_specialize
 @register_canonicalize
