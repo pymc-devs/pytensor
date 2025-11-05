@@ -35,7 +35,6 @@ from pytensor.tensor.basic import (
     tile,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.extra_ops import Repeat
 from pytensor.tensor.math import (
     add,
     bitwise_and,
@@ -1249,83 +1248,103 @@ def test_local_join_1():
 
 
 def test_local_join_to_repeat():
-    """Test that Join(axis, x, x, ...) gets rewritten to repeat(x, n, axis)"""
+    """Test that Join(axis, x, x, ...) gets rewritten to repeat(x, n, axis)
 
-    # Test with vector - concatenate same vector 3 times along axis 0
+    This optimization applies when joining the same tensor multiple times
+    along an axis where it has size 1 (e.g., after ExpandDims).
+    """
+
+    # Test with vector expanded to (1, n) - concatenate along axis 0
     x = vector("x")
-    s = join(0, x, x, x)
+    x_expanded = x[None]  # Shape: (1, n)
+    s = join(0, x_expanded, x_expanded, x_expanded)  # Shape: (3, n)
     f = function([x], s, mode=rewrite_mode)
 
     # Check numerical correctness
     test_val = np.array([1.0, 2.0, 3.0], dtype=config.floatX)
     result = f(test_val)
     expected = np.array(
-        [1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0], dtype=config.floatX
+        [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [1.0, 2.0, 3.0]], dtype=config.floatX
     )
     assert np.allclose(result, expected)
 
-    # Check that Join was replaced with Repeat
+    # Check that Join was replaced with Alloc (repeat with scalar repeats becomes Alloc)
     ops = f.maker.fgraph.toposort()
     assert len([n for n in ops if isinstance(n.op, Join)]) == 0
-    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 1
+    assert len([n for n in ops if isinstance(n.op, Alloc)]) >= 1
 
-    # Test with matrix - concatenate same matrix along axis 0
-    a = matrix("a")
-    s = join(0, a, a, a, a)
+    # Test with matrix - add dimension and concatenate along new axis
+    a = matrix("a")  # Shape: (m, n)
+    a_expanded = a[None, :, :]  # Shape: (1, m, n)
+    s = join(0, a_expanded, a_expanded, a_expanded, a_expanded)  # Shape: (4, m, n)
     f = function([a], s, mode=rewrite_mode)
 
     test_mat = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
     result = f(test_mat)
-    expected = np.vstack([test_mat, test_mat, test_mat, test_mat])
+    expected = np.array([test_mat, test_mat, test_mat, test_mat])
     assert np.allclose(result, expected)
 
     # Check optimization applied
     ops = f.maker.fgraph.toposort()
     assert len([n for n in ops if isinstance(n.op, Join)]) == 0
-    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 1
+    assert len([n for n in ops if isinstance(n.op, Alloc)]) >= 1
 
-    # Test with matrix - concatenate along axis 1
-    s = join(1, a, a)
+    # Test with matrix - expand along axis 1 and concatenate
+    a_expanded_ax1 = a[:, None, :]  # Shape: (m, 1, n)
+    s = join(1, a_expanded_ax1, a_expanded_ax1)  # Shape: (m, 2, n)
     f = function([a], s, mode=rewrite_mode)
 
     result = f(test_mat)
-    expected = np.hstack([test_mat, test_mat])
+    expected = np.array([[[1.0, 2.0], [1.0, 2.0]], [[3.0, 4.0], [3.0, 4.0]]])
     assert np.allclose(result, expected)
 
     # Check optimization applied
     ops = f.maker.fgraph.toposort()
     assert len([n for n in ops if isinstance(n.op, Join)]) == 0
-    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 1
+    assert len([n for n in ops if isinstance(n.op, Alloc)]) >= 1
 
     # Test that it does NOT apply when tensors are different
-    b = matrix("b")
-    s = join(0, a, b)
-    f = function([a, b], s, mode=rewrite_mode)
+    y = vector("y")
+    s = join(0, x[None], y[None])
+    f = function([x, y], s, mode=rewrite_mode)
 
-    test_mat1 = np.array([[1.0, 2.0]], dtype=config.floatX)
-    test_mat2 = np.array([[3.0, 4.0]], dtype=config.floatX)
-    result = f(test_mat1, test_mat2)
-    expected = np.vstack([test_mat1, test_mat2])
+    test_vec1 = np.array([1.0, 2.0], dtype=config.floatX)
+    test_vec2 = np.array([3.0, 4.0], dtype=config.floatX)
+    result = f(test_vec1, test_vec2)
+    expected = np.array([[1.0, 2.0], [3.0, 4.0]])
     assert np.allclose(result, expected)
 
-    # Join should still be present (not optimized to Repeat)
+    # Join should still be present (not optimized)
     ops = f.maker.fgraph.toposort()
     assert len([n for n in ops if isinstance(n.op, Join)]) == 1
-    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 0
 
-    # Test with 5 repetitions to ensure it works with larger counts
-    s = join(0, x, x, x, x, x)
+    # Test that it does NOT apply when tensor doesn't have size 1 along join axis
+    # (regular concatenation without ExpandDims)
+    s = join(0, x, x, x)  # Shape: (3n,) not using ExpandDims
     f = function([x], s, mode=rewrite_mode)
 
     test_val = np.array([1.0, 2.0], dtype=config.floatX)
     result = f(test_val)
-    expected = np.tile(test_val, 5)
+    expected = np.array([1.0, 2.0, 1.0, 2.0, 1.0, 2.0], dtype=config.floatX)
+    assert np.allclose(result, expected)
+
+    # Join should still be present (optimization doesn't apply)
+    ops = f.maker.fgraph.toposort()
+    assert len([n for n in ops if isinstance(n.op, Join)]) == 1
+
+    # Test with 5 repetitions to ensure it works with larger counts
+    s = join(0, x[None], x[None], x[None], x[None], x[None])
+    f = function([x], s, mode=rewrite_mode)
+
+    test_val = np.array([1.0, 2.0], dtype=config.floatX)
+    result = f(test_val)
+    expected = np.array([[1.0, 2.0]] * 5, dtype=config.floatX)
     assert np.allclose(result, expected)
 
     # Check optimization applied
     ops = f.maker.fgraph.toposort()
     assert len([n for n in ops if isinstance(n.op, Join)]) == 0
-    assert len([n for n in ops if isinstance(n.op, Repeat)]) == 1
+    assert len([n for n in ops if isinstance(n.op, Alloc)]) >= 1
 
 
 def test_local_join_empty():

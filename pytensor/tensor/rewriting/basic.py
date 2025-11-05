@@ -30,7 +30,7 @@ from numpy.lib.array_utils import normalize_axis_index
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph, Op
-from pytensor.graph.basic import Constant
+from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
@@ -82,7 +82,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.extra_ops import broadcast_arrays, repeat
+from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq, variadic_add
 from pytensor.tensor.shape import Shape_i, shape_padleft
 from pytensor.tensor.type import DenseTensorType, TensorType
@@ -915,26 +915,52 @@ def local_join_make_vector(fgraph, node):
 def local_join_to_repeat(fgraph, node):
     """Join(axis, x, x, x, ...) -> repeat(x, n, axis)
 
-    When the same tensor is concatenated multiple times,
-    replace with a single repeat operation which is more efficient.
+    When the same tensor is concatenated multiple times along an axis
+    where it has size 1, replace with a repeat operation which is more efficient.
 
     Examples
     --------
-    concatenate([x, x, x], axis=0) -> repeat(x, 3, axis=0)
+    concatenate([x[None], x[None], x[None]], axis=0) -> repeat(x[None], 3, axis=0)
     """
     # Extract axis and the tensors being joined
-    axis, *tensors = node.inputs
+    axis_sym, *tensors = node.inputs
 
     # Need at least 2 tensors to consider optimization
     if len(tensors) <= 1:
-        return
+        return None
 
-    # Check if all tensors are identical
-    if not all(t == tensors[0] for t in tensors[1:]):
-        return
+    # Extract (and normalize) axis as Python int
+    try:
+        axis_val = int(get_scalar_constant_value(axis_sym, only_process_constants=True))
+    except NotScalarConstantError:
+        return None
+
+    # Get first tensor and check if ndim is known
+    first = tensors[0]
+    ndim = first.ndim
+    if ndim is None:
+        return None
+
+    # Normalize negative axes (e.g., -1 -> ndim-1)
+    axis_val = axis_val % ndim
+
+    # All inputs must be structurally the same tensor
+    # Use equal_computations to check structural equality, not symbolic ==
+    for t in tensors[1:]:
+        if not equal_computations([t], [first]):
+            return None
+
+    # Only apply when size along join axis is statically 1
+    # (e.g., x[None] has a guaranteed 1 at that axis)
+    shp = first.type.shape  # tuple of ints/None
+    if shp is None or axis_val >= len(shp) or shp[axis_val] != 1:
+        return None
 
     # Replace with repeat operation
-    result = repeat(tensors[0], len(tensors), axis)
+    from pytensor.tensor.extra_ops import repeat
+
+    n = len(tensors)
+    result = repeat(first, n, axis=axis_val)
 
     # Preserve debugging information
     copy_stack_trace(node.outputs[0], result)
