@@ -60,15 +60,24 @@ After Phases 1-3, we'll have:
 - Basic math: Exp, Log, Sqrt, Pow, Floor, Ceil, Round
 - Infrastructure: Constant, Cast, Identity
 
-✅ **Comprehensive Testing**:
+✅ **Scalable Testing Architecture** (Hypothesis-based):
+- **Operation registry** (`ONNX_OPERATIONS` dict) mapping ops to test configurations
+- **Hypothesis strategies module** (`tests/link/onnx/strategies/`) for input generation
+- **~4-6 property tests** that automatically test all 20 operations:
+  - Correctness: ONNX matches PyTensor output
+  - Shape preservation: Broadcasting works correctly
+  - Dtype preservation: Types handled correctly
+  - Edge cases: No crashes on empty/scalar/large values
+- **~8-12 infrastructure tests** (linker, dispatch, export API, imports)
+- **~5-8 targeted regression tests** (for specific bugs discovered during implementation)
+- **Total: ~20-25 tests instead of 40+ manual tests**
 - `compare_onnx_and_py` utility for validation
-- Test fixtures and utilities
-- 20+ passing tests for Tier 1 operations
 
 ✅ **Validation**:
 - Can export basic arithmetic expressions to ONNX
 - ONNX Runtime can execute exported models
 - Outputs match Python reference implementation
+- Adding new operations requires only registry entry + optional custom strategy
 
 ## What We're NOT Testing/Implementing
 
@@ -1010,33 +1019,65 @@ def test_export_function_onnx(tmp_path):
 
 ---
 
-## Phase 2: Test Failure Verification
+## Phase 2: Test Failure Verification (Hypothesis + Infrastructure)
 
 ### Overview
 
-Run all tests and verify they fail in expected, diagnostic ways. This ensures our tests are actually testing the right things and will catch regressions.
+Verify Hypothesis setup works and that all tests fail in expected, diagnostic ways. This ensures our property tests and infrastructure tests are actually testing the right things.
 
-### Verification Steps
+### Phase 2.1: Verify Hypothesis Setup
+
+**Before implementing ANY ONNX code**, verify Hypothesis infrastructure works:
+
+1. **Verify strategies import**:
+   ```bash
+   uv run python -c "from tests.link.onnx.strategies import ONNX_OPERATIONS; print(len(ONNX_OPERATIONS))"
+   ```
+   - Should print "20" (20 operations registered)
+
+2. **Verify can generate examples**:
+   ```bash
+   uv run python -c "from tests.link.onnx.strategies import onnx_tensor; print(onnx_tensor().example())"
+   ```
+   - Should print a numpy array
+
+3. **Verify Hypothesis profiles work**:
+   ```bash
+   uv run pytest tests/link/onnx/ --collect-only --hypothesis-profile=dev
+   ```
+   - Should collect tests without errors
+
+**If any fail**: Fix Hypothesis setup before proceeding
+
+### Phase 2.2: Verify Infrastructure Tests Fail Correctly
 
 1. **Run full test suite**:
    ```bash
-   pytest tests/link/onnx/ -v --tb=short
+   uv run pytest tests/link/onnx/ -v --tb=short
    ```
 
 2. **Verify test discovery**:
    ```bash
-   pytest --collect-only tests/link/onnx/
+   uv run pytest --collect-only tests/link/onnx/
    ```
-   - Should collect 40+ tests
+   - Should collect ~16 tests (not 40+ with Hypothesis approach)
    - Should show all test files
 
 3. **Check import errors first**:
    ```bash
-   pytest tests/link/onnx/test_imports.py -v
+   uv run pytest tests/link/onnx/test_imports.py -v
    ```
    - All should fail with `ModuleNotFoundError`
 
-4. **Document failure patterns**:
+4. **Check property tests fail correctly**:
+   ```bash
+   uv run pytest tests/link/onnx/test_properties.py::test_onnx_matches_pytensor -v --hypothesis-profile=dev
+   ```
+   - Should fail with `NotImplementedError: No ONNX conversion available for: Elemwise`
+   - Verify Hypothesis runs (tries multiple examples)
+   - Verify failure message is clear
+
+5. **Document failure patterns**:
    Create a checklist of what we see vs what we expect
 
 ### Expected Failures
@@ -1080,11 +1121,24 @@ Run all tests and verify they fail in expected, diagnostic ways. This ensures ou
   - Expected: `ImportError`
   - Status: ❌ (correct failure)
 
-#### Elemwise Tests (test_elemwise.py):
-- **All arithmetic tests** (test_add_vectors, test_mul_vectors, etc.):
-  - Expected: `ModuleNotFoundError` initially
-  - After infrastructure: `NotImplementedError: No ONNX conversion available for: Elemwise`
-  - Status: ❌ (correct failure progression)
+#### Property Tests (test_properties.py):
+- **test_onnx_matches_pytensor**:
+  - Expected: `NotImplementedError: No ONNX conversion available for: Elemwise`
+  - Should try multiple operations from registry
+  - Hypothesis should run 10 examples (dev profile)
+  - Status: ❌ (correct failure)
+
+- **test_elemwise_preserves_broadcast_shape**:
+  - Expected: `NotImplementedError` (same as above)
+  - Status: ❌ (correct failure)
+
+- **test_operation_preserves_dtype**:
+  - Expected: `NotImplementedError` (same as above)
+  - Status: ❌ (correct failure)
+
+- **test_operation_handles_edge_cases**:
+  - Expected: `NotImplementedError` (same as above)
+  - Status: ❌ (correct failure)
 
 #### Export API Tests (test_export.py):
 - **All export tests**:
@@ -1094,9 +1148,11 @@ Run all tests and verify they fail in expected, diagnostic ways. This ensures ou
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] All tests discovered: `pytest --collect-only tests/link/onnx/ | grep -c "test_"` shows 40+
-- [ ] All tests fail: `pytest tests/link/onnx/ -v | grep FAILED | wc -l` equals test count
-- [ ] No syntax errors: `pytest tests/link/onnx/ --tb=line` shows no SyntaxError
+- [ ] Hypothesis imports: `uv run python -c "import hypothesis; print(hypothesis.__version__)"`
+- [ ] Strategies work: `uv run python -c "from tests.link.onnx.strategies import ONNX_OPERATIONS; print(len(ONNX_OPERATIONS))"`
+- [ ] All tests discovered: `uv run pytest --collect-only tests/link/onnx/ | grep -c "test_"` shows ~16
+- [ ] All tests fail: `uv run pytest tests/link/onnx/ -v | grep FAILED | wc -l` equals test count
+- [ ] No syntax errors: `uv run pytest tests/link/onnx/ --tb=line` shows no SyntaxError
 - [ ] No unexpected exceptions: Review output for unexpected error types
 
 #### Manual Verification:
@@ -1106,6 +1162,36 @@ Run all tests and verify they fail in expected, diagnostic ways. This ensures ou
 - [ ] No cryptic error messages
 - [ ] Failure output would guide implementation
 
+### Phase 2.3: Verify Hypothesis Shrinking (Optional but Recommended)
+
+Test that Hypothesis shrinking works by injecting a deliberate bug:
+
+1. **Temporarily modify compare_onnx_and_py** to fail on specific shapes:
+   ```python
+   def compare_onnx_and_py(...):
+       if any(x.shape == (3, 2) for x in test_inputs):
+           raise AssertionError("Deliberate bug for shape (3, 2)")
+       # ... rest of implementation
+   ```
+
+2. **Run property test**:
+   ```bash
+   uv run pytest tests/link/onnx/test_properties.py::test_onnx_matches_pytensor --hypothesis-profile=dev -v
+   ```
+
+3. **Expected behavior**:
+   - Hypothesis finds the bug (may try many shapes first)
+   - **Shrinking happens**: Reduces to minimal failing example
+   - Output shows: `Falsifying example: test_onnx_matches_pytensor(op_name='add', data=...)`
+   - Hypothesis saves failure to `.hypothesis/examples/`
+
+4. **Verify saved examples**:
+   ```bash
+   ls .hypothesis/examples/
+   ```
+
+5. **Remove the deliberate bug** after verification
+
 ### Failure Mode Documentation
 
 Create `tests/link/onnx/EXPECTED_FAILURES.md`:
@@ -1113,21 +1199,29 @@ Create `tests/link/onnx/EXPECTED_FAILURES.md`:
 ```markdown
 # Expected Test Failures (Before Implementation)
 
-## Phase 1: No Module (Initial State)
+## Stage 1: No Module (Initial State)
 All tests fail with `ModuleNotFoundError: No module named 'pytensor.link.onnx'`
 
-## Phase 2: Module Structure Created
+Run: `uv run pytest tests/link/onnx/ -v`
+
+## Stage 2: Module Structure Created
 Import tests pass, others fail with:
 - `ImportError: cannot import name 'ONNXLinker'`
 - `ImportError: cannot import name 'onnx_funcify'`
 
-## Phase 3: Dispatch System Created
-Infrastructure tests pass, operation tests fail with:
-- `NotImplementedError: No ONNX conversion available for: Elemwise`
-- `NotImplementedError: Elemwise scalar op not supported: Add`
+Run: `uv run pytest tests/link/onnx/test_imports.py -v` (should pass)
+Run: `uv run pytest tests/link/onnx/test_dispatch_basic.py -v` (should fail)
 
-## Phase 4: Operations Implemented
+## Stage 3: Dispatch System Created
+Infrastructure tests pass, property tests fail with:
+- `NotImplementedError: No ONNX conversion available for: Elemwise`
+
+Run: `uv run pytest tests/link/onnx/test_properties.py -v --hypothesis-profile=dev` (should fail)
+
+## Stage 4: Operations Implemented
 All tests should pass
+
+Run: `uv run pytest tests/link/onnx/ -v --hypothesis-profile=dev` (all pass)
 ```
 
 ### Adjustment Phase
@@ -1154,806 +1248,206 @@ If tests don't fail as expected:
 
 ---
 
-## Phase 3: Feature Implementation (Red → Green)
+## Phase 3: Feature Implementation (Infrastructure → Operations → Automatic Coverage)
 
 ### Overview
 
-Implement features by making tests pass, one group at a time. Work like you're debugging - let test failures guide you.
+Implement features by making tests pass, guided by property test failures. The key insight: **implement infrastructure once, add operations in bulk via mapping, property tests validate everything automatically**.
+
+### Workflow Transformation
+
+**Old approach (Manual Tests):**
+1. test_add_vectors fails → implement Add → test passes
+2. test_mul_vectors fails → implement Mul → test passes
+3. Repeat 15+ times...
+
+**New approach (Hypothesis):**
+1. Property tests fail → implement dispatch infrastructure → infrastructure tests pass
+2. Property tests still fail → add SCALAR_OP_TO_ONNX mapping (all 20 ops) → **ALL property tests pass automatically**
+3. Done! 20 operations × 10 examples = 200+ scenarios validated with 4 property tests
 
 ### Implementation Order
 
-1. Module structure (make import tests pass)
-2. Dispatch system (make dispatch tests pass)
-3. ONNXLinker basic (make linker tests pass)
-4. Testing utilities (make test_basic tests pass)
-5. Tier 1 operations (make elemwise tests pass)
-6. Export API (make export tests pass)
+1. **Module structure** → Import tests pass
+2. **Dispatch system** → Dispatch tests pass
+3. **ONNXLinker** → Linker tests pass
+4. **Testing utilities** → Property tests can run (but fail on operations)
+5. **Elemwise operations (bulk)** → ALL property tests pass at once! ✨
+6. **Export API** → Export tests pass
+7. **Full integration** → All ~16 tests pass
 
 ---
 
-### Implementation 1: Module Structure
+### Implementation 3.1: Module Structure
 
-**Target Tests**: `tests/link/onnx/test_imports.py`
-**Current Failures**: `ModuleNotFoundError: No module named 'pytensor.link.onnx'`
+**Goal**: Make import tests pass
+**Target**: `uv run pytest tests/link/onnx/test_imports.py -v`
 
-#### Changes Required
+#### Steps:
 
-**Step 1.1**: Create directory structure
+1. **Create directory structure**:
+   ```bash
+   mkdir -p pytensor/link/onnx/dispatch
+   touch pytensor/link/onnx/__init__.py
+   touch pytensor/link/onnx/dispatch/__init__.py
+   ```
 
-```bash
-mkdir -p pytensor/link/onnx/dispatch
-touch pytensor/link/onnx/__init__.py
-touch pytensor/link/onnx/dispatch/__init__.py
-```
+2. **Create stub `__init__.py` files** with empty `__all__ = []`
 
-**Step 1.2**: Create stub files
+3. **Verify**:
+   ```bash
+   uv run python -c "import pytensor.link.onnx"
+   uv run pytest tests/link/onnx/test_imports.py::test_onnx_module_exists -v
+   ```
+   Should pass ✅
 
-**File**: `pytensor/link/onnx/__init__.py`
-```python
-"""ONNX backend for PyTensor."""
-
-# Placeholder exports - will implement later
-__all__ = []
-```
-
-**File**: `pytensor/link/onnx/dispatch/__init__.py`
-```python
-"""ONNX dispatch system."""
-
-# Placeholder - will implement later
-__all__ = []
-```
-
-#### Debugging Approach
-
-1. Run: `pytest tests/link/onnx/test_imports.py::test_onnx_module_exists -v`
-2. Should now pass (module exists)
-3. Run: `pytest tests/link/onnx/test_imports.py::test_onnx_public_api -v`
-4. Should fail with `ImportError: cannot import name 'ONNXLinker'`
-5. This is progress - we've moved from ModuleNotFoundError to ImportError
-
-#### Success Criteria
-
-##### Automated Verification:
-- [ ] Module imports: `python -c "import pytensor.link.onnx"`
-- [ ] test_onnx_module_exists passes: `pytest tests/link/onnx/test_imports.py::test_onnx_module_exists -v`
-- [ ] Directory structure exists: `ls pytensor/link/onnx/dispatch/`
-
-##### Manual Verification:
-- [ ] Clean directory structure
-- [ ] __init__.py files present
-- [ ] No circular imports
+**Progress check**: `test_onnx_module_exists` passes, `test_onnx_public_api` fails with `ImportError`
 
 ---
 
-### Implementation 2: Core Dispatch System
+### Implementation 3.2: Core Dispatch System
 
-**Target Tests**: `tests/link/onnx/test_dispatch_basic.py`, part of `test_imports.py`
-**Current Failures**: `ImportError: cannot import name 'onnx_funcify'`
+**Goal**: Make dispatch tests pass
+**Target**: `uv run pytest tests/link/onnx/test_dispatch_basic.py -v`
 
-#### Changes Required
+#### Key Files to Create:
 
 **File**: `pytensor/link/onnx/dispatch/basic.py`
 
-```python
-"""Core ONNX dispatch system."""
+Implement:
+- `onnx_funcify` - singledispatch function (raises NotImplementedError by default)
+- `onnx_typify` - singledispatch for type conversion
+- `onnx_typify.register(np.ndarray)` - converts ndarray → TensorProto
+- `make_value_info(var, name)` - creates ONNX ValueInfoProto
+- `onnx_funcify.register(Constant)` - handles constants as initializers
+- `onnx_funcify.register(FunctionGraph)` - converts full graph to ModelProto
 
-from functools import singledispatch
-from typing import Dict
-import numpy as np
+**Note**: This is the longest implementation (~200 lines). See original plan lines 1330-1497 for full code. Key points:
+- Uses `singledispatch` pattern like JAX backend
+- FunctionGraph converter does topological sort and calls onnx_funcify on each node
+- Creates ONNX ModelProto with inputs, outputs, nodes, and initializers
 
-try:
-    import onnx
-    from onnx import helper, TensorProto, numpy_helper
-except ImportError as e:
-    raise ImportError(
-        "ONNX export requires the 'onnx' package. "
-        "Install it with: pip install onnx"
-    ) from e
+3. **Update `pytensor/link/onnx/dispatch/__init__.py`** to export functions
 
-from pytensor.graph.basic import Variable, Constant
-from pytensor.graph.fg import FunctionGraph
+4. **Verify**:
+   ```bash
+   uv run pytest tests/link/onnx/test_dispatch_basic.py -v
+   ```
+   All 3 dispatch tests should pass ✅
 
-# Target ONNX opset version
-ONNX_OPSET_VERSION = 18
-
-
-@singledispatch
-def onnx_funcify(op, node=None, **kwargs):
-    """Convert PyTensor Op to ONNX node(s).
-
-    Parameters
-    ----------
-    op : Op or FunctionGraph
-        The operation to convert
-    node : Apply, optional
-        The Apply node containing the op
-    **kwargs
-        Additional conversion parameters
-
-    Returns
-    -------
-    onnx.NodeProto or List[onnx.NodeProto]
-        ONNX node(s) representing the operation
-
-    Raises
-    ------
-    NotImplementedError
-        If no converter is registered for this Op type
-    """
-    raise NotImplementedError(
-        f"No ONNX conversion available for: {type(op).__name__}\n"
-        f"Op: {op}\n"
-        f"This operation is not yet supported for ONNX export.\n\n"
-        f"To add support, register a converter:\n"
-        f"  @onnx_funcify.register({type(op).__name__})\n"
-        f"  def onnx_funcify_{type(op).__name__}(op, node, **kwargs):\n"
-        f"      # Return onnx.NodeProto\n"
-    )
-
-
-@singledispatch
-def onnx_typify(data, dtype=None, **kwargs):
-    """Convert Python/NumPy data to ONNX-compatible types.
-
-    Parameters
-    ----------
-    data : Any
-        Data to convert
-    dtype : str, optional
-        Target dtype
-
-    Returns
-    -------
-    onnx.TensorProto or data
-        ONNX tensor or original data
-    """
-    if dtype is None:
-        return data
-    else:
-        return np.array(data, dtype=dtype)
-
-
-@onnx_typify.register(np.ndarray)
-def onnx_typify_ndarray(data, dtype=None, name="", **kwargs):
-    """Convert numpy array to ONNX TensorProto."""
-    if dtype is not None:
-        data = data.astype(dtype)
-    return numpy_helper.from_array(data, name=name)
-
-
-def make_value_info(var: Variable, name: str) -> onnx.ValueInfoProto:
-    """Create ONNX ValueInfoProto from PyTensor Variable.
-
-    Parameters
-    ----------
-    var : Variable
-        PyTensor variable
-    name : str
-        Name for the ONNX value
-
-    Returns
-    -------
-    onnx.ValueInfoProto
-        ONNX value info with type and shape
-    """
-    # Map PyTensor dtype to ONNX dtype
-    dtype_map = {
-        "float32": TensorProto.FLOAT,
-        "float64": TensorProto.DOUBLE,
-        "int32": TensorProto.INT32,
-        "int64": TensorProto.INT64,
-        "uint8": TensorProto.UINT8,
-        "int8": TensorProto.INT8,
-        "int16": TensorProto.INT16,
-        "uint16": TensorProto.UINT16,
-        "bool": TensorProto.BOOL,
-        "complex64": TensorProto.COMPLEX64,
-        "complex128": TensorProto.COMPLEX128,
-    }
-
-    dtype_str = str(var.type.dtype)
-    onnx_dtype = dtype_map.get(dtype_str, TensorProto.FLOAT)
-
-    # Get shape (handle symbolic dimensions)
-    if hasattr(var.type, 'shape'):
-        shape = []
-        for i, dim in enumerate(var.type.shape):
-            if dim is None or (isinstance(dim, int) and dim < 0):
-                # Dynamic dimension
-                shape.append(f"dim_{i}")
-            else:
-                shape.append(int(dim))
-    else:
-        shape = None
-
-    # Create tensor type
-    tensor_type = helper.make_tensor_type_proto(
-        elem_type=onnx_dtype, shape=shape
-    )
-
-    return helper.make_value_info(name, tensor_type)
-
-
-@onnx_funcify.register(Constant)
-def onnx_funcify_Constant(op, node, **kwargs):
-    """Constants are handled as initializers, not nodes."""
-    return None
-
-
-@onnx_funcify.register(FunctionGraph)
-def onnx_funcify_FunctionGraph(
-    fgraph: FunctionGraph,
-    node=None,
-    opset_version: int = ONNX_OPSET_VERSION,
-    model_name: str = "pytensor_model",
-    **kwargs,
-) -> onnx.ModelProto:
-    """Convert FunctionGraph to ONNX ModelProto.
-
-    Parameters
-    ----------
-    fgraph : FunctionGraph
-        The graph to convert
-    opset_version : int
-        ONNX opset version
-    model_name : str
-        Model name
-
-    Returns
-    -------
-    onnx.ModelProto
-        Complete ONNX model
-    """
-    from typing import List
-
-    # Track nodes and initializers
-    onnx_nodes: List[onnx.NodeProto] = []
-    initializers: List[onnx.TensorProto] = []
-
-    # Variable naming
-    var_names: Dict[Variable, str] = {}
-    name_counter = 0
-
-    def get_var_name(var: Variable) -> str:
-        """Get or create unique name for variable."""
-        nonlocal name_counter
-        if var not in var_names:
-            if hasattr(var, 'name') and var.name:
-                base_name = var.name
-                if base_name in var_names.values():
-                    base_name = f"{base_name}_{name_counter}"
-                    name_counter += 1
-                var_names[var] = base_name
-            else:
-                var_names[var] = f"var_{name_counter}"
-                name_counter += 1
-        return var_names[var]
-
-    # Convert constants to initializers
-    for node in fgraph.apply_nodes:
-        for inp in node.inputs:
-            if isinstance(inp, Constant):
-                name = get_var_name(inp)
-                if name not in [init.name for init in initializers]:
-                    tensor = numpy_helper.from_array(
-                        np.asarray(inp.data), name=name
-                    )
-                    initializers.append(tensor)
-
-    # Convert ops in topological order
-    for node in fgraph.toposort():
-        onnx_node_or_nodes = onnx_funcify(
-            node.op,
-            node=node,
-            var_names=var_names,
-            get_var_name=get_var_name,
-            opset_version=opset_version,
-            **kwargs,
-        )
-
-        if onnx_node_or_nodes is not None:
-            if isinstance(onnx_node_or_nodes, list):
-                onnx_nodes.extend(onnx_node_or_nodes)
-            else:
-                onnx_nodes.append(onnx_node_or_nodes)
-
-    # Create inputs (non-constant only)
-    input_protos = []
-    for inp in fgraph.inputs:
-        if not isinstance(inp, Constant):
-            name = get_var_name(inp)
-            input_protos.append(make_value_info(inp, name))
-
-    # Create outputs
-    output_protos = []
-    for out in fgraph.outputs:
-        name = get_var_name(out)
-        output_protos.append(make_value_info(out, name))
-
-    # Create graph
-    graph = helper.make_graph(
-        nodes=onnx_nodes,
-        name=f"{model_name}_graph",
-        inputs=input_protos,
-        outputs=output_protos,
-        initializer=initializers,
-    )
-
-    # Create model
-    model = helper.make_model(
-        graph,
-        producer_name="PyTensor",
-        opset_imports=[helper.make_opsetid("", opset_version)],
-    )
-
-    # Validate
-    try:
-        onnx.checker.check_model(model)
-    except Exception as e:
-        raise ValueError(f"Generated ONNX model is invalid: {e}") from e
-
-    return model
-```
-
-**File**: `pytensor/link/onnx/dispatch/__init__.py`
-
-```python
-"""ONNX dispatch system."""
-
-from pytensor.link.onnx.dispatch.basic import (
-    onnx_funcify,
-    onnx_typify,
-    ONNX_OPSET_VERSION,
-)
-
-__all__ = [
-    "onnx_funcify",
-    "onnx_typify",
-    "ONNX_OPSET_VERSION",
-]
-```
-
-#### Debugging Approach
-
-1. Run: `pytest tests/link/onnx/test_dispatch_basic.py::test_onnx_funcify_unregistered_op -v`
-2. Should now pass (dispatch raises NotImplementedError correctly)
-3. Run: `pytest tests/link/onnx/test_dispatch_basic.py::test_onnx_typify_ndarray -v`
-4. Should pass (typify converts numpy arrays)
-5. Run: `pytest tests/link/onnx/test_dispatch_basic.py::test_make_value_info_basic -v`
-6. Should pass (make_value_info creates ValueInfo)
-
-#### Success Criteria
-
-##### Automated Verification:
-- [ ] Dispatch tests pass: `pytest tests/link/onnx/test_dispatch_basic.py -v`
-- [ ] Can import dispatch: `python -c "from pytensor.link.onnx.dispatch import onnx_funcify"`
-- [ ] singledispatch works: Test unregistered op raises NotImplementedError
-
-##### Manual Verification:
-- [ ] Error messages are helpful
-- [ ] Type mappings are correct
-- [ ] Variable naming works correctly
+**Progress check**: Dispatch infrastructure works, can convert basic graphs
 
 ---
 
-### Implementation 3: ONNXLinker
 
-**Target Tests**: `tests/link/onnx/test_linker.py`
-**Current Failures**: `ImportError: cannot import name 'ONNXLinker'`
+### Implementation 3.3: ONNXLinker
 
-#### Changes Required
+**Goal**: Make linker tests pass
+**Target**: `uv run pytest tests/link/onnx/test_linker.py -v`
+
+#### Key File to Create:
 
 **File**: `pytensor/link/onnx/linker.py`
 
-```python
-"""ONNX Linker for PyTensor."""
+Implement `ONNXLinker` class (inherits from `JITLinker`):
+- `__init__(opset_version=18)` - initialize with ONNX opset version
+- `fgraph_convert()` - calls `onnx_funcify(fgraph)` to get ModelProto, returns ONNX Runtime function
+- `_create_onnx_runtime_function()` - wraps ONNX Runtime InferenceSession
+- `export_to_file()` - saves model to .onnx file
 
-from pytensor.link.basic import JITLinker
-from pytensor.link.onnx.dispatch import onnx_funcify
+**Update**: `pytensor/link/onnx/__init__.py` to export `ONNXLinker`
 
-try:
-    import onnx
-    import onnxruntime as ort
-except ImportError as e:
-    raise ImportError(
-        "ONNX backend requires 'onnx' and 'onnxruntime'. "
-        "Install with: pip install onnx onnxruntime"
-    ) from e
-
-
-class ONNXLinker(JITLinker):
-    """Linker that converts PyTensor graphs to ONNX models.
-
-    Parameters
-    ----------
-    opset_version : int, optional
-        ONNX opset version to target (default: 18)
-    """
-
-    def __init__(self, opset_version=18, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.opset_version = opset_version
-        self.onnx_model = None
-
-    def fgraph_convert(self, fgraph, input_storage, storage_map, **kwargs):
-        """Convert FunctionGraph to ONNX ModelProto.
-
-        Parameters
-        ----------
-        fgraph : FunctionGraph
-            Graph to convert
-        input_storage : list
-            Input storage
-        storage_map : dict
-            Storage map
-
-        Returns
-        -------
-        callable
-            Function that executes via ONNX Runtime
-        """
-        # Convert graph to ONNX
-        self.onnx_model = onnx_funcify(
-            fgraph,
-            input_storage=input_storage,
-            storage_map=storage_map,
-            opset_version=self.opset_version,
-            **kwargs
-        )
-
-        # Return ONNX Runtime executor
-        return self._create_onnx_runtime_function(self.onnx_model)
-
-    def _create_onnx_runtime_function(self, onnx_model):
-        """Create ONNX Runtime inference session.
-
-        Parameters
-        ----------
-        onnx_model : onnx.ModelProto
-            ONNX model
-
-        Returns
-        -------
-        callable
-            Function that runs inference
-        """
-        # Serialize model
-        model_bytes = onnx_model.SerializeToString()
-
-        # Create session
-        session = ort.InferenceSession(model_bytes)
-
-        def onnx_runtime_fn(*inputs):
-            """Execute ONNX model via ONNX Runtime."""
-            # Map inputs to ONNX names
-            input_names = [inp.name for inp in session.get_inputs()]
-            input_dict = {name: inp for name, inp in zip(input_names, inputs)}
-
-            # Run inference
-            output_names = [out.name for out in session.get_outputs()]
-            outputs = session.run(output_names, input_dict)
-
-            return outputs if len(outputs) > 1 else outputs[0]
-
-        return onnx_runtime_fn
-
-    def jit_compile(self, fn):
-        """No-op for ONNX (already compiled as static graph)."""
-        return fn
-
-    def create_thunk_inputs(self, storage_map):
-        """Standard input preparation."""
-        return [storage_map[n] for n in self.fgraph.inputs]
-
-    def export_to_file(self, filename):
-        """Export ONNX model to file.
-
-        Parameters
-        ----------
-        filename : str
-            Path to save model
-        """
-        if self.onnx_model is None:
-            raise RuntimeError("No ONNX model has been generated yet")
-
-        onnx.save(self.onnx_model, filename)
+**Verify**:
+```bash
+uv run pytest tests/link/onnx/test_linker.py -v
 ```
+All 3 linker tests should pass ✅
 
-**File**: `pytensor/link/onnx/__init__.py` (update)
-
-```python
-"""ONNX backend for PyTensor."""
-
-from pytensor.link.onnx.linker import ONNXLinker
-from pytensor.link.onnx.dispatch import (
-    onnx_funcify,
-    onnx_typify,
-    ONNX_OPSET_VERSION,
-)
-
-__all__ = [
-    "ONNXLinker",
-    "onnx_funcify",
-    "onnx_typify",
-    "ONNX_OPSET_VERSION",
-]
-```
-
-#### Debugging Approach
-
-1. Run: `pytest tests/link/onnx/test_linker.py::test_linker_instantiation -v`
-2. Should pass (linker can be created)
-3. Run: `pytest tests/link/onnx/test_linker.py::test_linker_empty_graph -v`
-4. May fail with NotImplementedError for Identity op
-5. Need to implement Identity first, then re-test
-
-#### Success Criteria
-
-##### Automated Verification:
-- [ ] Linker instantiates: `pytest tests/link/onnx/test_linker.py::test_linker_instantiation -v`
-- [ ] Can import: `python -c "from pytensor.link.onnx import ONNXLinker"`
-- [ ] Inherits from JITLinker correctly
-
-##### Manual Verification:
-- [ ] Linker follows PyTensor linker patterns
-- [ ] ONNX Runtime integration works
-- [ ] Model export method exists
+**Progress check**: Can compile simple graphs with ONNX backend
 
 ---
 
-### Implementation 4: Testing Utilities
+### Implementation 3.4: Testing Utilities
 
-**Target Tests**: `tests/link/onnx/test_basic.py`
-**Current Failures**: `ImportError: cannot import name 'compare_onnx_and_py'`
+**Goal**: Enable property tests to run
+**Target**: Property tests can execute (but will fail on unimplemented operations)
 
-#### Changes Required
+#### Key Files to Create:
 
 **File**: `tests/link/onnx/test_basic.py`
 
+Implement core testing utilities:
+
 ```python
-"""Core testing utilities for ONNX backend."""
-
-import numpy as np
-import pytest
-from functools import partial
-
-# Import ONNX and skip tests if not available
-onnx = pytest.importorskip("onnx")
-ort = pytest.importorskip("onnxruntime")
-
-import pytensor
-import pytensor.tensor as pt
-from pytensor.compile.mode import Mode
-from pytensor.link.onnx.linker import ONNXLinker
-from pytensor.graph import RewriteDatabaseQuery
-
-
-# Configure ONNX mode for testing
-optimizer = RewriteDatabaseQuery(include=["onnx"], exclude=["cxx_only", "BlasOpt"])
-onnx_mode = Mode(linker=ONNXLinker(), optimizer=optimizer)
-py_mode = Mode(linker="py", optimizer=None)
-
-
 def compare_onnx_and_py(
-    graph_inputs,
-    graph_outputs,
-    test_inputs,
-    *,
-    assert_fn=None,
-    must_validate=True,
-    onnx_mode=onnx_mode,
-    py_mode=py_mode,
-    opset_version=None,
+    graph_inputs, graph_outputs, test_inputs,
+    *, assert_fn=None, must_validate=True, **kwargs
 ):
     """Compare ONNX Runtime output to Python reference.
 
-    Parameters
-    ----------
-    graph_inputs : list of Variable
-        Symbolic input variables
-    graph_outputs : Variable or list of Variable
-        Symbolic output variables
-    test_inputs : list
-        Concrete test values
-    assert_fn : callable, optional
-        Custom assertion function
-    must_validate : bool, optional
-        Whether ONNX model must pass validation
-    onnx_mode : Mode, optional
-        ONNX compilation mode
-    py_mode : Mode, optional
-        Python reference mode
-    opset_version : int, optional
-        ONNX opset version
-
-    Returns
-    -------
-    onnx_fn : Function
-        Compiled ONNX function
-    onnx_res : array or list
-        ONNX results
-
-    Raises
-    ------
-    AssertionError
-        If outputs don't match
+    1. Compile graph with ONNX backend
+    2. Compile graph with Python backend
+    3. Execute both with test_inputs
+    4. Assert outputs match
+    5. Validate ONNX model
     """
-    if assert_fn is None:
-        assert_fn = partial(np.testing.assert_allclose, rtol=1e-4, atol=1e-6)
+    # Compile with ONNX
+    onnx_fn = pytensor.function(graph_inputs, graph_outputs, mode=onnx_mode)
+    onnx_res = onnx_fn(*test_inputs)
 
-    # Validate inputs are root variables
-    if any(inp.owner is not None for inp in graph_inputs):
-        raise ValueError("Inputs must be root variables (no owner)")
+    # Compile with Python reference
+    py_fn = pytensor.function(graph_inputs, graph_outputs, mode=py_mode)
+    py_res = py_fn(*test_inputs)
 
-    # Compile with ONNX backend
-    pytensor_onnx_fn = pytensor.function(graph_inputs, graph_outputs, mode=onnx_mode)
+    # Compare
+    assert_fn(onnx_res, py_res)  # default: np.testing.assert_allclose
 
-    # Execute with ONNX Runtime
-    onnx_res = pytensor_onnx_fn(*test_inputs)
-
-    # Validate ONNX model if required
+    # Validate ONNX model
     if must_validate:
-        onnx_model = pytensor_onnx_fn.maker.linker.onnx_model
-        try:
-            onnx.checker.check_model(onnx_model)
-        except Exception as e:
-            pytest.fail(f"ONNX model validation failed: {e}")
+        onnx.checker.check_model(onnx_fn.maker.linker.onnx_model)
 
-    # Compile with Python backend (reference)
-    pytensor_py_fn = pytensor.function(graph_inputs, graph_outputs, mode=py_mode)
-    py_res = pytensor_py_fn(*test_inputs)
-
-    # Compare results
-    if isinstance(graph_outputs, (list, tuple)):
-        assert len(onnx_res) == len(py_res), "Output count mismatch"
-        for i, (o, p) in enumerate(zip(onnx_res, py_res, strict=True)):
-            try:
-                assert_fn(o, p)
-            except AssertionError as e:
-                raise AssertionError(f"Output {i} mismatch: {e}") from e
-    else:
-        assert_fn(onnx_res, py_res)
-
-    return pytensor_onnx_fn, onnx_res
+    return onnx_fn, onnx_res
 
 
 def get_onnx_node_types(fn):
-    """Get list of ONNX node types in compiled function.
-
-    Parameters
-    ----------
-    fn : Function
-        Compiled PyTensor function with ONNX backend
-
-    Returns
-    -------
-    list of str
-        ONNX operator types
-    """
-    onnx_model = fn.maker.linker.onnx_model
-    return [node.op_type for node in onnx_model.graph.node]
-
-
-def get_onnx_node_by_type(fn, op_type):
-    """Get ONNX node by operator type.
-
-    Parameters
-    ----------
-    fn : Function
-        Compiled function
-    op_type : str
-        ONNX operator type
-
-    Returns
-    -------
-    onnx.NodeProto or None
-        First matching node
-    """
-    onnx_model = fn.maker.linker.onnx_model
-    for node in onnx_model.graph.node:
-        if node.op_type == op_type:
-            return node
-    return None
-
-
-# Module-level fixtures
-@pytest.fixture(scope="module", autouse=True)
-def set_pytensor_flags():
-    """Configure PyTensor for ONNX testing."""
-    with pytensor.config.change_flags(cxx="", compute_test_value="ignore"):
-        yield
-
-
-@pytest.fixture
-def rng():
-    """Seeded random number generator."""
-    return np.random.default_rng(42)
+    """Get list of ONNX node types in compiled function."""
+    return [node.op_type for node in fn.maker.linker.onnx_model.graph.node]
 ```
 
 **File**: `tests/link/onnx/conftest.py`
 
-```python
-"""Shared pytest fixtures for ONNX backend tests."""
+Already created in Phase 1 with Hypothesis profiles.
 
-import numpy as np
-import pytest
-import pytensor
-
-
-@pytest.fixture
-def rng():
-    """Seeded random number generator."""
-    return np.random.default_rng(42)
-
-
-@pytest.fixture
-def float32_data(rng):
-    """Common float32 test data."""
-    return rng.normal(size=(3, 4)).astype('float32')
-
-
-@pytest.fixture
-def matrix_pair(rng):
-    """Pair of compatible matrices for operations like dot."""
-    A = rng.normal(size=(3, 4)).astype('float32')
-    B = rng.normal(size=(4, 5)).astype('float32')
-    return A, B
-
-
-@pytest.fixture(scope="module", autouse=True)
-def configure_pytensor():
-    """Module-level PyTensor configuration."""
-    with pytensor.config.change_flags(
-        cxx="",
-        compute_test_value="ignore",
-        floatX="float32"
-    ):
-        yield
+**Verify**:
+```bash
+uv run python -c "from tests.link.onnx.test_basic import compare_onnx_and_py"
 ```
 
-#### Debugging Approach
-
-1. Run: `pytest tests/link/onnx/test_basic.py -v`
-2. Utilities should work (but dependent tests will still fail)
-3. Can now use compare_onnx_and_py in other tests
-
-#### Success Criteria
-
-##### Automated Verification:
-- [ ] Utilities importable: `python -c "from tests.link.onnx.test_basic import compare_onnx_and_py"`
-- [ ] Fixtures work: `pytest tests/link/onnx/conftest.py --collect-only`
-
-##### Manual Verification:
-- [ ] compare_onnx_and_py follows JAX pattern
-- [ ] Error messages are clear
-- [ ] Fixtures are useful
+**Progress check**: Test utilities work, property tests can run (but fail on operations)
 
 ---
 
-### Implementation 5: Tier 1 Operations - Elemwise
+### Implementation 3.5: Elemwise Operations (Bulk Implementation) ⭐
 
-**Target Tests**: `tests/link/onnx/test_elemwise.py`
-**Current Failures**: `NotImplementedError: No ONNX conversion for: Elemwise`
+**Goal**: Make ALL property tests pass at once!
+**Target**: `uv run pytest tests/link/onnx/test_properties.py -v --hypothesis-profile=dev`
 
-#### Changes Required
+#### This is THE KEY MOMENT 🎯
 
-**File**: `pytensor/link/onnx/dispatch/elemwise.py`
+You implement ALL 20 operations with ONE mapping dictionary!
+
+**File**: `pytensor/link/onnx/dispatch/elemwise.py` (new)
 
 ```python
 """ONNX conversion for elementwise operations."""
 
 from pytensor.link.onnx.dispatch.basic import onnx_funcify
-from pytensor.tensor.elemwise import Elemwise, DimShuffle
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.scalar import basic as scalar
-
-try:
-    from onnx import helper
-except ImportError as e:
-    raise ImportError("ONNX package required for export") from e
+from onnx import helper
 
 
-# Mapping from PyTensor scalar ops to ONNX op types
+# ⭐ THE MAGIC MAPPING - All 20 operations in one dict!
 SCALAR_OP_TO_ONNX = {
     # Arithmetic (Tier 1)
     scalar.Add: "Add",
@@ -1961,7 +1455,7 @@ SCALAR_OP_TO_ONNX = {
     scalar.Sub: "Sub",
     scalar.TrueDiv: "Div",
     scalar.Neg: "Neg",
-    scalar.IntDiv: "Div",  # Map to Div with type casting
+    scalar.IntDiv: "Div",
 
     # Math (Tier 1)
     scalar.Abs: "Abs",
@@ -1983,15 +1477,13 @@ SCALAR_OP_TO_ONNX = {
 def onnx_funcify_Elemwise(op, node, var_names, get_var_name, **kwargs):
     """Convert Elemwise op to ONNX node.
 
-    Elemwise ops perform element-wise operations on tensors.
-    They map directly to ONNX ops like Add, Mul, etc.
+    This ONE function handles ALL 20 operations!
     """
     scalar_op_type = type(op.scalar_op)
 
     if scalar_op_type not in SCALAR_OP_TO_ONNX:
         raise NotImplementedError(
-            f"Elemwise scalar op not supported for ONNX export: {scalar_op_type.__name__}\n"
-            f"Supported scalar ops: {', '.join(op.__name__ for op in SCALAR_OP_TO_ONNX.keys())}"
+            f"Elemwise scalar op not supported: {scalar_op_type.__name__}"
         )
 
     onnx_op_type = SCALAR_OP_TO_ONNX[scalar_op_type]
@@ -2001,323 +1493,257 @@ def onnx_funcify_Elemwise(op, node, var_names, get_var_name, **kwargs):
     output_names = [get_var_name(out) for out in node.outputs]
 
     # Create ONNX node
-    onnx_node = helper.make_node(
+    return helper.make_node(
         onnx_op_type,
         inputs=input_names,
         outputs=output_names,
         name=f"{onnx_op_type}_{output_names[0]}",
     )
-
-    return onnx_node
 ```
 
-**File**: `pytensor/link/onnx/dispatch/__init__.py` (update)
+**Update**: `pytensor/link/onnx/dispatch/__init__.py`
 
 ```python
-"""ONNX dispatch system."""
-
-from pytensor.link.onnx.dispatch.basic import (
-    onnx_funcify,
-    onnx_typify,
-    ONNX_OPSET_VERSION,
-)
-
-# Import dispatch modules to trigger registration
+# Import to trigger registration
 import pytensor.link.onnx.dispatch.elemwise  # noqa: F401
-
-__all__ = [
-    "onnx_funcify",
-    "onnx_typify",
-    "ONNX_OPSET_VERSION",
-]
 ```
 
-#### Debugging Approach
+#### The Magic Moment 🎉
 
-1. Run: `pytest tests/link/onnx/test_elemwise.py::test_add_vectors -v`
-2. Should now pass (Add is implemented)
-3. Run each elemwise test one at a time
-4. All Tier 1 elemwise tests should pass
+**Run property tests**:
+```bash
+uv run pytest tests/link/onnx/test_properties.py::test_onnx_matches_pytensor -v --hypothesis-profile=dev
+```
 
-#### Success Criteria
+**What happens**:
+```
+test_onnx_matches_pytensor[add-data0] PASSED
+test_onnx_matches_pytensor[add-data1] PASSED
+...
+test_onnx_matches_pytensor[mul-data0] PASSED
+test_onnx_matches_pytensor[mul-data1] PASSED
+...
+test_onnx_matches_pytensor[sqrt-data9] PASSED
 
-##### Automated Verification:
-- [ ] All Tier 1 elemwise tests pass: `pytest tests/link/onnx/test_elemwise.py -v -k "test_add or test_mul or test_sub or test_div or test_neg or test_abs or test_exp or test_log or test_sqrt or test_pow or test_floor or test_ceil or test_round or test_maximum or test_minimum"`
-- [ ] Chained operations work: `pytest tests/link/onnx/test_elemwise.py::test_chained_arithmetic -v`
+========== 200 passed in 5.23s ==========
+```
 
-##### Manual Verification:
-- [ ] ONNX nodes are correct types
-- [ ] Broadcasting works correctly
-- [ ] Output values match Python reference
+**You just validated 20 operations × 10 examples = 200+ test scenarios with:**
+- One 20-line dict
+- One 30-line function
+- Zero manual tests!
+
+#### Debugging Property Test Failures
+
+If a property test fails:
+
+```bash
+uv run pytest tests/link/onnx/test_properties.py::test_onnx_matches_pytensor -v --hypothesis-profile=dev
+```
+
+**Hypothesis tells you exactly what failed**:
+```
+Falsifying example: test_onnx_matches_pytensor(
+    op_name='log',
+    data=<data that generated negative values>
+)
+AssertionError: ONNX produced nan, Python produced -inf
+```
+
+**Fix approaches**:
+1. **Add input filtering** in property test (for `log`, `sqrt` - need positive values)
+2. **Fix implementation** if there's a real bug
+3. **Add to SCALAR_OP_TO_ONNX** if operation is missing
+
+**Example fix** in `tests/link/onnx/test_properties.py`:
+```python
+@given(...)
+def test_onnx_matches_pytensor(op_name, data):
+    ...
+    # Filter invalid inputs
+    if op_name == "log":
+        inputs_tuple = tuple(np.abs(x) + 1e-6 for x in inputs_tuple)
+    elif op_name == "sqrt":
+        inputs_tuple = tuple(np.abs(x) for x in inputs_tuple)
+    elif op_name == "div":
+        x, y = inputs_tuple
+        y = np.where(np.abs(y) < 1e-6, 1.0, y)  # Avoid division by zero
+        inputs_tuple = (x, y)
+    ...
+```
+
+**Verify all property tests pass**:
+```bash
+uv run pytest tests/link/onnx/test_properties.py -v --hypothesis-profile=dev
+```
+
+**Progress check**: ALL 4 property tests pass! 20 operations fully tested! ✅
 
 ---
 
-### Implementation 6: Export API
+### Implementation 3.6: Export API
 
-**Target Tests**: `tests/link/onnx/test_export.py`
-**Current Failures**: `ImportError: cannot import name 'export_onnx'`
+**Goal**: Make export tests pass
+**Target**: `uv run pytest tests/link/onnx/test_export.py -v`
 
-#### Changes Required
+#### Key File to Create:
 
 **File**: `pytensor/link/onnx/export.py`
 
+Implement user-facing export functions:
+
 ```python
-"""User-facing API for ONNX export."""
+def export_onnx(inputs, outputs, filename, *, opset_version=18, **kwargs):
+    """Export PyTensor graph to ONNX file.
 
-from pathlib import Path
-from typing import Iterable, Union
-import onnx
-
-from pytensor.graph.basic import Variable
-from pytensor.graph.fg import FunctionGraph
-from pytensor.compile.function import function
-from pytensor.link.onnx.linker import ONNXLinker
-from pytensor.link.onnx.dispatch import onnx_funcify
-
-
-def export_onnx(
-    inputs: Iterable[Variable],
-    outputs: Union[Variable, Iterable[Variable]],
-    filename: Union[str, Path],
-    *,
-    opset_version: int = 18,
-    model_name: str = "pytensor_model",
-    doc_string: str = "",
-    optimize: bool = True,
-) -> onnx.ModelProto:
-    """Export a PyTensor computation graph to ONNX format.
-
-    Parameters
-    ----------
-    inputs : list of Variable
-        Input variables
-    outputs : Variable or list of Variable
-        Output variables
-    filename : str or Path
-        Path to save ONNX model
-    opset_version : int, optional
-        ONNX opset version (default: 18)
-    model_name : str, optional
-        Model name (default: "pytensor_model")
-    doc_string : str, optional
-        Documentation string
-    optimize : bool, optional
-        Apply optimizations (default: True)
-
-    Returns
-    -------
-    onnx.ModelProto
-        The exported ONNX model
+    1. Create FunctionGraph from inputs/outputs
+    2. Convert to ONNX ModelProto via onnx_funcify
+    3. Save to file
+    4. Return model
     """
-    # Validate inputs
-    if not isinstance(inputs, (list, tuple)):
-        raise ValueError("inputs must be a list or tuple of Variables")
-
-    if not isinstance(outputs, (list, tuple)):
-        outputs = [outputs]
-
-    # Create FunctionGraph
-    from pytensor.compile.builders import construct_nominal_fgraph
-
     fgraph = construct_nominal_fgraph(inputs, outputs)
-
-    # Apply optimizations if requested
-    if optimize:
-        # Basic optimizations only (no CXX-specific)
-        from pytensor.graph.rewriting.basic import GraphRewriter
-        from pytensor.tensor.rewriting.basic import register_canonicalize
-
-        optimizer = GraphRewriter()
-        fgraph = optimizer.rewrite(fgraph)
-
-    # Convert to ONNX
-    onnx_model = onnx_funcify(
-        fgraph,
-        opset_version=opset_version,
-        model_name=model_name,
-    )
-
-    # Add doc string
-    if doc_string:
-        onnx_model.doc_string = doc_string
-
-    # Save to file
-    onnx.save(onnx_model, str(filename))
-
-    print(f"ONNX model exported to: {filename}")
-    print(f"  Opset version: {opset_version}")
-    print(f"  Inputs: {len(onnx_model.graph.input)}")
-    print(f"  Outputs: {len(onnx_model.graph.output)}")
-    print(f"  Nodes: {len(onnx_model.graph.node)}")
-
+    onnx_model = onnx_funcify(fgraph, opset_version=opset_version, ...)
+    onnx.save(onnx_model, filename)
     return onnx_model
 
 
-def export_function_onnx(
-    fn,
-    filename: Union[str, Path],
-    *,
-    opset_version: int = 18,
-) -> onnx.ModelProto:
-    """Export a compiled PyTensor function to ONNX.
+def compile_onnx(inputs, outputs, *, opset_version=18, **kwargs):
+    """Compile PyTensor graph using ONNX backend.
 
-    Parameters
-    ----------
-    fn : pytensor.compile.function_module.Function
-        Compiled PyTensor function
-    filename : str or Path
-        Path to save model
-    opset_version : int, optional
-        ONNX opset version (default: 18)
-
-    Returns
-    -------
-    onnx.ModelProto
-        The exported ONNX model
+    Returns function that executes via ONNX Runtime.
     """
-    # Extract FunctionGraph
-    fgraph = fn.maker.fgraph
-
-    # Get inputs and outputs
-    inputs = fgraph.inputs
-    outputs = fgraph.outputs
-
-    # Convert to ONNX
-    onnx_model = onnx_funcify(
-        fgraph,
-        opset_version=opset_version,
-        model_name="pytensor_function",
-    )
-
-    # Save
-    onnx.save(onnx_model, str(filename))
-
-    return onnx_model
-
-
-def compile_onnx(
-    inputs: Iterable[Variable],
-    outputs: Union[Variable, Iterable[Variable]],
-    *,
-    opset_version: int = 18,
-    **kwargs
-):
-    """Compile a PyTensor graph using ONNX backend.
-
-    This returns a function that executes via ONNX Runtime.
-
-    Parameters
-    ----------
-    inputs : list of Variable
-        Input variables
-    outputs : Variable or list of Variable
-        Output variables
-    opset_version : int, optional
-        ONNX opset version (default: 18)
-    **kwargs
-        Additional arguments passed to pytensor.function()
-
-    Returns
-    -------
-    Function
-        Compiled function that executes via ONNX Runtime
-    """
-    from pytensor.compile.mode import Mode
-
-    # Use ONNX linker
     onnx_linker = ONNXLinker(opset_version=opset_version)
     onnx_mode = Mode(linker=onnx_linker, optimizer=None)
-
     return function(inputs, outputs, mode=onnx_mode, **kwargs)
+
+
+def export_function_onnx(fn, filename, *, opset_version=18):
+    """Export already-compiled PyTensor function to ONNX."""
+    fgraph = fn.maker.fgraph
+    onnx_model = onnx_funcify(fgraph, opset_version=opset_version)
+    onnx.save(onnx_model, filename)
+    return onnx_model
 ```
 
-**File**: `pytensor/link/onnx/__init__.py` (final update)
+**Update**: `pytensor/link/onnx/__init__.py` to export these functions
 
-```python
-"""ONNX backend for PyTensor."""
-
-from pytensor.link.onnx.linker import ONNXLinker
-from pytensor.link.onnx.export import (
-    export_onnx,
-    export_function_onnx,
-    compile_onnx,
-)
-from pytensor.link.onnx.dispatch import (
-    onnx_funcify,
-    onnx_typify,
-    ONNX_OPSET_VERSION,
-)
-
-__all__ = [
-    "ONNXLinker",
-    "export_onnx",
-    "export_function_onnx",
-    "compile_onnx",
-    "onnx_funcify",
-    "onnx_typify",
-    "ONNX_OPSET_VERSION",
-]
+**Verify**:
+```bash
+uv run pytest tests/link/onnx/test_export.py -v
 ```
+All 3 export tests should pass ✅
 
-#### Debugging Approach
-
-1. Run: `pytest tests/link/onnx/test_export.py::test_export_onnx_basic -v`
-2. Should pass (can export to file)
-3. Run: `pytest tests/link/onnx/test_export.py::test_compile_onnx_basic -v`
-4. Should pass (can compile and execute)
-5. Run all export tests
-
-#### Success Criteria
-
-##### Automated Verification:
-- [ ] All export tests pass: `pytest tests/link/onnx/test_export.py -v`
-- [ ] Can import export functions: `python -c "from pytensor.link.onnx import export_onnx, compile_onnx"`
-- [ ] Exported files are valid: ONNX checker validates them
-
-##### Manual Verification:
-- [ ] Export API is user-friendly
-- [ ] Error messages are helpful
-- [ ] Documentation strings are clear
+**Progress check**: Can export PyTensor graphs to .onnx files
 
 ---
 
-### Complete Feature Implementation
+### Implementation 3.7: Full Integration & Verification
 
-#### Final Integration Test
+**Goal**: Verify all tests pass
+**Target**: `uv run pytest tests/link/onnx/ -v --hypothesis-profile=dev`
 
-Run full test suite to ensure everything works together:
+#### Full Test Run:
 
 ```bash
-pytest tests/link/onnx/ -v
+uv run pytest tests/link/onnx/ -v --hypothesis-profile=dev
 ```
 
-#### Expected Results
+**Expected results**:
+```
+tests/link/onnx/test_imports.py::test_onnx_module_exists PASSED
+tests/link/onnx/test_imports.py::test_onnx_public_api PASSED
+tests/link/onnx/test_imports.py::test_dispatch_module_structure PASSED
+tests/link/onnx/test_dispatch_basic.py::test_onnx_funcify_unregistered_op PASSED
+tests/link/onnx/test_dispatch_basic.py::test_onnx_typify_ndarray PASSED
+tests/link/onnx/test_dispatch_basic.py::test_make_value_info_basic PASSED
+tests/link/onnx/test_linker.py::test_linker_instantiation PASSED
+tests/link/onnx/test_linker.py::test_linker_empty_graph PASSED
+tests/link/onnx/test_linker.py::test_linker_constant_graph PASSED
+tests/link/onnx/test_properties.py::test_onnx_matches_pytensor[add-...] PASSED (×10)
+tests/link/onnx/test_properties.py::test_onnx_matches_pytensor[mul-...] PASSED (×10)
+... (all 20 operations × 10 examples)
+tests/link/onnx/test_properties.py::test_elemwise_preserves_broadcast_shape[...] PASSED (×10)
+tests/link/onnx/test_properties.py::test_operation_preserves_dtype[...] PASSED (×10)
+tests/link/onnx/test_properties.py::test_operation_handles_edge_cases[...] PASSED (×10)
+tests/link/onnx/test_export.py::test_export_onnx_basic PASSED
+tests/link/onnx/test_export.py::test_compile_onnx_basic PASSED
+tests/link/onnx/test_export.py::test_export_function_onnx PASSED
 
-All tests should pass:
-- ✅ Import tests (3 tests)
-- ✅ Dispatch tests (3 tests)
-- ✅ Linker tests (3 tests)
-- ✅ Testing utility tests (2 tests)
-- ✅ Elemwise tests (15+ tests for all Tier 1 ops)
-- ✅ Export API tests (3 tests)
+========== ~16 tests, 240+ total assertions passed in ~10s ==========
+```
 
-**Total**: 29+ passing tests
+**Test Count Breakdown**:
+- ✅ Import tests: 3 tests
+- ✅ Dispatch tests: 3 tests
+- ✅ Linker tests: 3 tests
+- ✅ Property tests: 4 tests (but validate 200+ scenarios!)
+- ✅ Export tests: 3 tests
+
+**Total: ~16 focused tests instead of 40+ manual tests**
+
+#### Run with More Examples (CI Profile):
+
+```bash
+HYPOTHESIS_PROFILE=ci uv run pytest tests/link/onnx/ -v
+```
+
+This runs 100 examples per property test = 2000+ test scenarios!
+
+#### Manual Validation:
+
+1. **Export a simple model**:
+   ```bash
+   uv run python -c "
+   import pytensor.tensor as pt
+   import numpy as np
+   from pytensor.link.onnx import export_onnx
+
+   x = pt.vector('x', dtype='float32')
+   y = (x + 1) * 2
+
+   export_onnx([x], y, 'test_model.onnx')
+   print('Model exported!')
+   "
+   ```
+
+2. **Verify with ONNX tools**:
+   ```bash
+   uv run python -c "import onnx; onnx.checker.check_model(onnx.load('test_model.onnx'))"
+   ```
+
+3. **Run with ONNX Runtime**:
+   ```bash
+   uv run python -c "
+   import onnxruntime as ort
+   import numpy as np
+
+   session = ort.InferenceSession('test_model.onnx')
+   x = np.array([1, 2, 3], dtype='float32')
+   result = session.run(None, {'x': x})
+   print('Result:', result)
+   print('Expected:', (x + 1) * 2)
+   "
+   ```
 
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] All tests pass: `pytest tests/link/onnx/ -v | grep "passed"`
-- [ ] No regressions: `pytest` (full suite) shows no new failures
-- [ ] Linting passes: `make lint` or `black pytensor/link/onnx/ tests/link/onnx/`
-- [ ] ONNX models validate: All exported models pass `onnx.checker.check_model`
+- [ ] All tests pass: `uv run pytest tests/link/onnx/ -v --hypothesis-profile=dev`
+- [ ] Property tests with 100 examples pass: `HYPOTHESIS_PROFILE=ci uv run pytest tests/link/onnx/test_properties.py -v`
+- [ ] Can export to ONNX: Manual validation above succeeds
+- [ ] ONNX models validate: `onnx.checker.check_model()` passes
+- [ ] ONNX Runtime executes: Manual validation above succeeds
+- [ ] Outputs match Python: No assertion failures
 
 #### Manual Verification:
-- [ ] Can export basic arithmetic expressions
-- [ ] ONNX Runtime executes exported models correctly
+- [ ] Can export basic arithmetic expressions to ONNX
+- [ ] ONNX Runtime successfully executes exported models
 - [ ] Outputs match Python reference implementation
 - [ ] Error messages are clear and actionable
 - [ ] Code follows PyTensor conventions
+- [ ] Adding new operations only requires adding to SCALAR_OP_TO_ONNX dict
 
+---
 ---
 
 ## Phase 4: Refactoring & Cleanup
