@@ -4,7 +4,8 @@ import numpy as np
 from onnx import helper, numpy_helper
 
 from pytensor.link.onnx.dispatch.basic import onnx_funcify
-from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape, Reshape
+from pytensor.graph.basic import Constant
 
 
 @onnx_funcify.register(type(None))
@@ -197,3 +198,61 @@ try:
 except ImportError:
     # DimShuffle not available
     pass
+
+
+@onnx_funcify.register(Reshape)
+def onnx_funcify_Reshape(op, node, get_var_name, **kwargs):
+    """Convert Reshape op to ONNX Reshape node.
+
+    Reshape changes tensor dimensions without changing data.
+    ONNX Reshape takes two inputs:
+    1. data - the tensor to reshape
+    2. shape - target shape (as 1D int64 tensor)
+
+    The shape can be constant or computed dynamically.
+    """
+    data_name = get_var_name(node.inputs[0])
+    output_name = get_var_name(node.outputs[0])
+
+    # The second input is the target shape
+    # It may be a constant or computed from other tensors
+    shape_input = node.inputs[1]
+
+    if isinstance(shape_input, Constant):
+        # Shape is constant - create ONNX Constant node
+        shape_data = np.array(shape_input.data, dtype=np.int64)
+        shape_name = f"{output_name}_shape"
+
+        shape_constant = helper.make_node(
+            'Constant',
+            inputs=[],
+            outputs=[shape_name],
+            name=f"Constant_{shape_name}",
+            value=helper.make_tensor(
+                name=f"{shape_name}_value",
+                data_type=helper.TensorProto.INT64,
+                dims=[len(shape_data)],
+                vals=shape_data.tolist(),
+            )
+        )
+
+        reshape_node = helper.make_node(
+            'Reshape',
+            inputs=[data_name, shape_name],
+            outputs=[output_name],
+            name=f"Reshape_{output_name}",
+        )
+
+        return [shape_constant, reshape_node]
+    else:
+        # Shape is computed - use its name directly
+        shape_name = get_var_name(shape_input)
+
+        reshape_node = helper.make_node(
+            'Reshape',
+            inputs=[data_name, shape_name],
+            outputs=[output_name],
+            name=f"Reshape_{output_name}",
+        )
+
+        return reshape_node

@@ -44,7 +44,9 @@ def export_onnx(inputs, outputs, filename, *, opset_version=18, **kwargs):
     # Create a FunctionGraph (without cloning to preserve structure)
     from pytensor.compile.builders import construct_nominal_fgraph
 
-    fgraph = construct_nominal_fgraph(inputs, outputs)
+    # construct_nominal_fgraph returns a tuple: (fgraph, updates, unused_inputs, unused_outputs)
+    result = construct_nominal_fgraph(inputs, outputs)
+    fgraph = result[0] if isinstance(result, tuple) else result
 
     # Convert to ONNX ModelProto
     onnx_model = onnx_funcify(fgraph, opset_version=opset_version, **kwargs)

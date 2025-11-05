@@ -205,7 +205,17 @@ def onnx_funcify_FunctionGraph(
         if isinstance(var, Constant):
             name = get_var_name(var)
             # Convert constant to ONNX initializer
-            tensor_proto = onnx_typify(var.data, name=name)
+            # Special handling: if constant is a scalar int type and is used in operations
+            # with float tensors, upcast to float32 to avoid type mismatches
+            data = var.data
+            if data.ndim == 0 and np.issubdtype(data.dtype, np.integer):
+                # Check if this constant is used with float operations
+                # For now, we'll upcast all scalar integer constants to float32
+                # This is a simplification but handles the common case of: x * 2
+                # where x is float and 2 is an int scalar
+                data = data.astype('float32')
+
+            tensor_proto = onnx_typify(data, name=name)
             initializers.append(tensor_proto)
 
     # Process each node in topological order
