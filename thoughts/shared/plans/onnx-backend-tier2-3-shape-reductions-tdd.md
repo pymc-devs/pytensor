@@ -1,7 +1,8 @@
 ---
 date: 2025-11-04
-status: ready
+status: updated-for-phase1-3-implementation
 phase: "tier-2-3"
+updated: 2025-11-04
 coverage: "Shape Operations (Tier 2) & Reductions/Allocation (Tier 3)"
 timeline: "Weeks 4-6"
 tags: [tdd, onnx, backend, shape, reductions, tier2, tier3]
@@ -14,9 +15,30 @@ prerequisites:
   - "Tier 1 complete: 20 basic elemwise operations passing"
   - "Infrastructure: ONNXLinker, dispatch system, export API"
   - "Testing utilities: compare_onnx_and_py, get_onnx_node_types"
+updates:
+  - "2025-11-04: Updated after Phase 1-3 implementation"
+  - "Added Phase 0: Dispatcher extension for multi-node operations"
+  - "Fixed all return patterns to match actual infrastructure"
+  - "Expanded IncSubtensor implementation details (ScatterND/ScatterElements)"
+  - "Added negative indexing conversion details for Subtensor"
+  - "Documented handler return patterns (list, tuple, single node, None)"
 ---
 
 # ONNX Backend Tier 2-3: Shape Operations & Reductions - TDD Implementation Plan
+
+## ⚠️ IMPORTANT: Phase 0 Required First
+
+**Before implementing Tier 2-3 operations**, you MUST complete Phase 0 (Dispatcher Extension). Many Tier 2-3 operations return multiple ONNX nodes, which requires extending the Phase 1-3 dispatcher.
+
+**Phase 0 is quick** (~30 minutes):
+1. Extend dispatcher to handle list returns (4 lines of code)
+2. Add docstring documenting return patterns
+3. Add test for multi-node returns
+4. Verify no regressions
+
+See [Phase 0 section](#phase-0-dispatcher-extension-for-multi-node-operations) below for details.
+
+---
 
 ## Overview
 
@@ -26,6 +48,8 @@ This TDD plan covers **Tier 2 (Shape Operations, 15 ops)** and **Tier 3 (Reducti
 
 **Total Operations**: 31 operations across two tiers
 **Timeline**: 2.5-3.5 weeks (1.5-2 weeks Tier 2, 1-1.5 weeks Tier 3)
+
+**Updated**: This plan has been updated based on Phase 1-3 implementation to ensure compatibility with actual infrastructure.
 
 ## Current State Analysis
 
@@ -143,6 +167,289 @@ def test_shape_operations_match_pytensor(op_name, data):
 1. Add entry to registry dict (operation name → configuration)
 2. Optionally add custom Hypothesis strategy if needed
 3. Property tests automatically validate it!
+
+---
+
+## Phase 0: Dispatcher Extension for Multi-Node Operations
+
+### Overview
+
+**PREREQUISITE**: Before implementing Tier 2-3 operations, extend the Phase 1-3 dispatcher to support operations that compile to multiple ONNX nodes.
+
+**Why Needed**: Many Tier 2-3 operations require multiple ONNX nodes:
+- **Shape_i**: Shape → Gather → output (2 nodes + 1 constant)
+- **DimShuffle**: Squeeze → Transpose → Unsqueeze (up to 3 nodes)
+- **Reshape with constants**: Constant → Reshape (2 nodes)
+- **MakeVector**: Multiple Unsqueeze → Concat (n+1 nodes)
+
+**Current Limitation**: Phase 1-3 dispatcher only handles:
+- Single `NodeProto`
+- Tuple: `(NodeProto, [initializers])`
+- `None`
+
+**Does NOT handle**: Lists of `NodeProto`
+
+---
+
+### Step 0.1: Extend Dispatcher to Handle Lists
+
+**File**: `pytensor/link/onnx/dispatch/basic.py`
+
+**Location**: Lines 195-205 (in `onnx_funcify_FunctionGraph`)
+
+**Current Code**:
+```python
+# Handle both single node and (node, initializers) tuple returns
+if result is not None:
+    if isinstance(result, tuple):
+        # Returned (node, additional_initializers)
+        onnx_node, node_initializers = result
+        if onnx_node is not None:
+            nodes.append(onnx_node)
+        if node_initializers:
+            initializers.extend(node_initializers)
+    else:
+        # Returned single node
+        nodes.append(result)
+```
+
+**Updated Code**:
+```python
+# Handle multiple return patterns from operation handlers
+if result is not None:
+    if isinstance(result, list):
+        # Multiple nodes - add all to graph
+        # Used for operations that compile to multiple ONNX ops
+        # Example: Shape_i returns [Constant, Shape, Gather]
+        for item in result:
+            if item is not None:
+                nodes.append(item)
+    elif isinstance(result, tuple):
+        # Returned (node, additional_initializers)
+        # Used for operations with constant initializers
+        # Example: DimShuffle returns (Transpose, [axes_tensor])
+        onnx_node, node_initializers = result
+        if onnx_node is not None:
+            nodes.append(onnx_node)
+        if node_initializers:
+            initializers.extend(node_initializers)
+    else:
+        # Returned single node (most common case)
+        # Example: Add returns single Add node
+        nodes.append(result)
+```
+
+**Change Summary**:
+- Added `isinstance(result, list)` check **before** tuple check
+- List handling extends nodes with all non-None items
+- Added comments documenting each pattern with examples
+
+---
+
+### Step 0.2: Document Return Patterns
+
+**File**: `pytensor/link/onnx/dispatch/basic.py`
+
+Add to `onnx_funcify_FunctionGraph` docstring (around line 156):
+
+```python
+def onnx_funcify_FunctionGraph(fgraph, opset_version=18, **kwargs):
+    """Convert FunctionGraph to ONNX ModelProto.
+
+    Operation Handler Return Patterns
+    ----------------------------------
+    Handlers registered via @onnx_funcify.register can return:
+
+    1. **Single node** (most common):
+       return helper.make_node('Add', inputs=[...], outputs=[...])
+
+    2. **Multiple nodes** (operations requiring intermediate steps):
+       return [
+           helper.make_node('Shape', ...),
+           helper.make_node('Gather', ...),
+           helper.make_node('Slice', ...),
+       ]
+
+    3. **Node with initializers** (operations with constant data):
+       return (
+           helper.make_node('Transpose', ...),
+           [axes_initializer],  # List of TensorProto initializers
+       )
+
+    4. **None** (no-op, pass-through):
+       return None
+
+    Notes:
+    - List items can be None (will be filtered out)
+    - Tuple pattern is (node, [initializers]), not (node, initializer)
+    - Cannot mix patterns: either list OR tuple, not both
+
+    Parameters
+    ----------
+    fgraph : FunctionGraph
+        PyTensor function graph to convert
+    opset_version : int, optional
+        ONNX opset version (default: 18)
+    **kwargs
+        Additional arguments passed to operation handlers
+
+    Returns
+    -------
+    onnx.ModelProto
+        ONNX model containing the converted graph
+    """
+```
+
+---
+
+### Step 0.3: Add Test for Multi-Node Returns
+
+**File**: `tests/link/onnx/test_dispatch_basic.py`
+
+Add new test:
+
+```python
+def test_onnx_funcify_multi_node_return():
+    """Test that handlers can return lists of multiple nodes."""
+    import pytensor.tensor as pt
+    import numpy as np
+    from pytensor.link.onnx.dispatch import onnx_funcify
+    from pytensor.link.onnx import compile_onnx
+    from tests.link.onnx.test_basic import get_onnx_node_types
+    from onnx import helper
+
+    # Create a custom op that returns multiple nodes
+    # We'll use Shape operation which returns single node in Phase 1-3
+    # but this validates the infrastructure works for multi-node returns
+
+    x = pt.vector('x', dtype='float32')
+
+    # For now, test with existing Shape op (single node)
+    # This test will be more meaningful once Shape_i is implemented
+    y = x.shape[0]
+
+    x_val = np.array([1, 2, 3, 4, 5], dtype='float32')
+
+    fn = compile_onnx([x], y)
+    result = fn(x_val)
+
+    # Should execute without errors
+    assert result == 5
+
+    # Verify multiple ONNX nodes can be generated
+    # (This will be more comprehensive once Tier 2-3 ops are implemented)
+    node_types = get_onnx_node_types(fn)
+    assert 'Shape' in node_types
+
+
+def test_onnx_funcify_list_with_none():
+    """Test that None items in lists are filtered out."""
+    from pytensor.link.onnx.dispatch.basic import onnx_funcify_FunctionGraph
+    from pytensor.graph.basic import Apply
+    from pytensor.tensor.type import vector
+
+    # This is a lower-level test that will be more useful
+    # once we have operations that conditionally return nodes
+    # For now, we document the expected behavior
+
+    # When an operation returns [node1, None, node2]:
+    # - node1 and node2 should be added to graph
+    # - None should be filtered out
+    # - No errors should be raised
+
+    # This will be validated by DimShuffle implementation
+    # which conditionally includes Squeeze, Transpose, Unsqueeze
+    pass  # Placeholder for future test
+```
+
+---
+
+### Step 0.4: Verification Steps
+
+Run these commands to verify the dispatcher extension works:
+
+1. **Test import**:
+   ```bash
+   uv run python -c "from pytensor.link.onnx.dispatch.basic import onnx_funcify_FunctionGraph; print('✅ Import successful')"
+   ```
+
+2. **Run new test**:
+   ```bash
+   uv run pytest tests/link/onnx/test_dispatch_basic.py::test_onnx_funcify_multi_node_return -v
+   ```
+
+3. **Run all dispatch tests**:
+   ```bash
+   uv run pytest tests/link/onnx/test_dispatch_basic.py -v
+   ```
+
+4. **Verify no regressions**:
+   ```bash
+   uv run pytest tests/link/onnx/ -v
+   ```
+   All Tier 1 tests should still pass ✅
+
+---
+
+### Success Criteria
+
+#### Automated Verification:
+- [ ] Dispatcher code compiles without errors
+- [ ] New test `test_onnx_funcify_multi_node_return` passes
+- [ ] All existing tests still pass (no regressions)
+- [ ] Can import updated dispatcher module
+
+#### Manual Verification:
+- [ ] Code change is minimal (add 4 lines for list handling)
+- [ ] Pattern is clear from comments and docstring
+- [ ] Backward compatible (existing handlers unchanged)
+
+---
+
+### Return Pattern Reference for Tier 2-3 Implementation
+
+When implementing Tier 2-3 operations, use these patterns:
+
+```python
+# ✅ CORRECT: Multiple nodes as list
+@onnx_funcify.register(Shape_i)
+def onnx_funcify_Shape_i(op, node, get_var_name, **kwargs):
+    idx_constant = helper.make_node('Constant', ...)
+    shape_node = helper.make_node('Shape', ...)
+    gather_node = helper.make_node('Gather', ...)
+    return [idx_constant, shape_node, gather_node]
+
+# ✅ CORRECT: Single node with initializers
+@onnx_funcify.register(Reshape)
+def onnx_funcify_Reshape(op, node, get_var_name, **kwargs):
+    if constant_shape:
+        return (reshape_node, [shape_constant_initializer])
+    else:
+        return reshape_node
+
+# ✅ CORRECT: Conditional multiple nodes
+@onnx_funcify.register(DimShuffle)
+def onnx_funcify_DimShuffle(op, node, get_var_name, **kwargs):
+    nodes = []
+    if needs_squeeze:
+        nodes.append(squeeze_node)
+    if needs_transpose:
+        nodes.append(transpose_node)
+    if needs_unsqueeze:
+        nodes.append(unsqueeze_node)
+    return nodes if nodes else None
+
+# ✅ CORRECT: No-op pass-through
+@onnx_funcify.register(SpecifyShape)
+def onnx_funcify_SpecifyShape(op, node, get_var_name, **kwargs):
+    return None
+
+# ❌ WRONG: Mixing list and tuple
+return ([node1, node2], [initializer])  # Not supported!
+
+# ❌ WRONG: Single initializer not in list
+return (node, initializer)  # Must be (node, [initializer])
+```
 
 ---
 
@@ -2059,22 +2366,404 @@ def onnx_funcify_Eye(op, node, var_names, get_var_name, **kwargs):
 
 ---
 
-### Implementation 5-8: Join/Split, Subtensor, AdvancedSubtensor, IncSubtensor
+### Implementation 5: Subtensor (Basic Slicing)
 
-Due to length constraints, these implementations follow similar patterns:
+**Target Tests**: `test_subtensor_*`
+**Current Failures**: `NotImplementedError: No ONNX conversion available for: Subtensor`
 
-1. **Join/Split**: Use ONNX Concat and Split nodes
-2. **Subtensor**: Map slicing to ONNX Slice node (handle negative indices, steps)
-3. **AdvancedSubtensor**: Use ONNX Gather node for integer array indexing
-4. **IncSubtensor**: Use ONNX ScatterND or ScatterElements (most complex)
+#### Key Challenge: Negative Index Conversion
 
-Each implementation should:
-- Create dispatch file (e.g., `dispatch/subtensor.py`)
-- Register handlers for each Op
-- Handle edge cases
-- Return appropriate ONNX nodes
+ONNX Slice doesn't natively handle negative indices. Must convert:
+- Python: `x[-3:]` means "last 3 elements"
+- ONNX: Requires computing `size - 3` dynamically
 
-**Success criteria for each**:
+**File**: `pytensor/link/onnx/dispatch/subtensor.py` (new file)
+
+```python
+"""ONNX conversion for subtensor (slicing) operations."""
+
+from pytensor.link.onnx.dispatch.basic import onnx_funcify
+from pytensor.tensor.subtensor import Subtensor
+from onnx import helper
+import numpy as np
+
+
+@onnx_funcify.register(Subtensor)
+def onnx_funcify_Subtensor(op, node, get_var_name, **kwargs):
+    """Convert Subtensor (slicing) to ONNX Slice node.
+
+    Subtensor performs array slicing like x[start:stop:step].
+
+    ONNX Slice parameters:
+    - starts: starting indices for each axis
+    - ends: ending indices for each axis
+    - axes: which axes to slice (optional)
+    - steps: step size for each axis (optional)
+
+    Negative indices must be converted:
+    - If index < 0: compute shape[axis] + index using Shape + Add ops
+    """
+    input_name = get_var_name(node.inputs[0])
+    output_name = get_var_name(node.outputs[0])
+
+    # Get slicing parameters from op
+    idx_list = op.idx_list  # List of slice objects
+
+    # Extract starts, ends, steps, axes
+    starts = []
+    ends = []
+    steps = []
+    axes = []
+
+    has_negative_indices = False
+
+    for axis, idx in enumerate(idx_list):
+        if isinstance(idx, slice):
+            start = idx.start if idx.start is not None else 0
+            stop = idx.stop  # None means "to end"
+            step = idx.step if idx.step is not None else 1
+
+            # Check for negative indices
+            if start < 0 or (stop is not None and stop < 0):
+                has_negative_indices = True
+
+            starts.append(start)
+            ends.append(stop if stop is not None else sys.maxsize)
+            steps.append(step)
+            axes.append(axis)
+
+    if not has_negative_indices:
+        # Simple case: all indices are non-negative
+        slice_node = helper.make_node(
+            'Slice',
+            inputs=[input_name],
+            outputs=[output_name],
+            name=f"Slice_{output_name}",
+            starts=starts,
+            ends=ends,
+            axes=axes,
+            steps=steps,
+        )
+        return slice_node
+
+    else:
+        # Complex case: need to convert negative indices
+        # Strategy:
+        # 1. Get shape via Shape node
+        # 2. For each negative index: compute shape[axis] + index
+        # 3. Create Slice with converted indices
+
+        nodes = []
+
+        # Node 1: Get shape
+        shape_name = f"{output_name}_shape"
+        shape_node = helper.make_node(
+            'Shape',
+            inputs=[input_name],
+            outputs=[shape_name],
+            name=f"Shape_{shape_name}",
+        )
+        nodes.append(shape_node)
+
+        # Node 2-N: Convert negative indices
+        converted_starts = []
+        converted_ends = []
+
+        for i, (start, end, axis) in enumerate(zip(starts, ends, axes)):
+            # Convert negative start
+            if start < 0:
+                # Compute shape[axis] + start
+                axis_size_name = f"{output_name}_axis{axis}_size"
+                axis_size_node = helper.make_node(
+                    'Gather',
+                    inputs=[shape_name, f"{output_name}_axis{axis}_idx"],
+                    outputs=[axis_size_name],
+                    name=f"Gather_{axis_size_name}",
+                    axis=0,
+                )
+                nodes.append(axis_size_node)
+
+                # Add axis index constant
+                # (In practice, might need to handle this via initializers)
+
+                converted_start_name = f"{output_name}_start{i}_converted"
+                add_node = helper.make_node(
+                    'Add',
+                    inputs=[axis_size_name, f"{output_name}_start{i}_const"],
+                    outputs=[converted_start_name],
+                    name=f"Add_{converted_start_name}",
+                )
+                nodes.append(add_node)
+                converted_starts.append(converted_start_name)
+            else:
+                converted_starts.append(start)
+
+            # Similar logic for negative ends...
+            converted_ends.append(end)
+
+        # Final Slice node with converted indices
+        slice_node = helper.make_node(
+            'Slice',
+            inputs=[input_name],
+            outputs=[output_name],
+            name=f"Slice_{output_name}",
+            # Use converted indices here
+        )
+        nodes.append(slice_node)
+
+        return nodes
+
+
+# Note: Full implementation of negative index handling is complex
+# May want to start with non-negative indices only and expand later
+```
+
+---
+
+### Implementation 6: AdvancedSubtensor (Integer Array Indexing)
+
+**Target Tests**: `test_advanced_subtensor_*`
+
+**File**: `pytensor/link/onnx/dispatch/subtensor.py` (continue)
+
+```python
+from pytensor.tensor.subtensor import AdvancedSubtensor1
+
+@onnx_funcify.register(AdvancedSubtensor1)
+def onnx_funcify_AdvancedSubtensor1(op, node, get_var_name, **kwargs):
+    """Convert AdvancedSubtensor1 to ONNX Gather node.
+
+    AdvancedSubtensor1 performs integer array indexing like x[[0, 2, 5]].
+    Maps directly to ONNX Gather operation.
+    """
+    data_name = get_var_name(node.inputs[0])
+    indices_name = get_var_name(node.inputs[1])
+    output_name = get_var_name(node.outputs[0])
+
+    gather_node = helper.make_node(
+        'Gather',
+        inputs=[data_name, indices_name],
+        outputs=[output_name],
+        name=f"Gather_{output_name}",
+        axis=0,  # Default to axis 0
+    )
+
+    return gather_node
+```
+
+---
+
+### Implementation 7: IncSubtensor (Set/Increment) - MOST COMPLEX
+
+**Target Tests**: `test_inc_subtensor_*`, `test_set_subtensor_*`
+**Current Failures**: `NotImplementedError: No ONNX conversion available for: IncSubtensor`
+
+#### Key Challenges
+
+1. **No in-place operations in ONNX**: Must create new tensor
+2. **Two operation types**:
+   - `set_subtensor(x[i:j], values)` - replace values
+   - `inc_subtensor(x[i:j], values)` - add to existing values
+3. **ONNX Scatter variants**:
+   - `ScatterND`: Updates at arbitrary indices (more flexible)
+   - `ScatterElements`: Updates along single axis (simpler)
+
+#### Decision Tree: ScatterND vs ScatterElements
+
+```python
+if basic_slicing:  # x[2:5] = values
+    use ScatterElements
+elif advanced_indexing:  # x[[0, 2, 5]] = values
+    use ScatterND
+elif multi_dimensional:  # x[1:3, 2:4] = values
+    use ScatterND (more complex)
+```
+
+**File**: `pytensor/link/onnx/dispatch/subtensor.py` (continue)
+
+```python
+from pytensor.tensor.subtensor import IncSubtensor
+
+
+@onnx_funcify.register(IncSubtensor)
+def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
+    """Convert IncSubtensor to ONNX Scatter operations.
+
+    IncSubtensor has two modes:
+    1. set_subtensor: x[indices] = values (set.inplace=True)
+    2. inc_subtensor: x[indices] += values (set.inplace=False)
+
+    ONNX doesn't have in-place ops, so we:
+    1. For set_subtensor: Use ScatterElements or ScatterND
+    2. For inc_subtensor: Read current values + Add + Scatter
+    """
+    input_name = get_var_name(node.inputs[0])  # Original tensor
+    indices_input = node.inputs[1]  # Indices (may be slice)
+    values_name = get_var_name(node.inputs[2])  # Values to set/add
+    output_name = get_var_name(node.outputs[0])
+
+    # Determine if this is set or increment
+    is_set = op.set_instead_of_inc
+
+    # Determine indexing pattern
+    idx_list = op.idx_list
+
+    # Simple case: basic 1D slicing
+    if len(idx_list) == 1 and isinstance(idx_list[0], slice):
+        slice_obj = idx_list[0]
+        start = slice_obj.start if slice_obj.start is not None else 0
+        end = slice_obj.stop
+        step = slice_obj.step if slice_obj.step is not None else 1
+
+        if is_set:
+            # set_subtensor: Use ScatterElements directly
+            # Need to convert slice to indices: [start, start+step, ..., end)
+
+            nodes = []
+
+            # Create indices tensor
+            indices_name = f"{output_name}_indices"
+            # Use ARange to create indices
+            arange_node = helper.make_node(
+                'Range',
+                inputs=[f"{output_name}_start", f"{output_name}_end", f"{output_name}_step"],
+                outputs=[indices_name],
+                name=f"Range_{indices_name}",
+            )
+            nodes.append(arange_node)
+
+            # ScatterElements to set values
+            scatter_node = helper.make_node(
+                'ScatterElements',
+                inputs=[input_name, indices_name, values_name],
+                outputs=[output_name],
+                name=f"ScatterElements_{output_name}",
+                axis=0,
+                reduction='none',  # Replace values
+            )
+            nodes.append(scatter_node)
+
+            return nodes
+
+        else:
+            # inc_subtensor: Read + Add + Scatter
+            nodes = []
+
+            # Step 1: Create indices (same as above)
+            # Step 2: Gather existing values
+            existing_values_name = f"{output_name}_existing"
+            gather_node = helper.make_node(
+                'Gather',
+                inputs=[input_name, indices_name],
+                outputs=[existing_values_name],
+                name=f"Gather_{existing_values_name}",
+                axis=0,
+            )
+            nodes.append(gather_node)
+
+            # Step 3: Add new values to existing
+            summed_values_name = f"{output_name}_summed"
+            add_node = helper.make_node(
+                'Add',
+                inputs=[existing_values_name, values_name],
+                outputs=[summed_values_name],
+                name=f"Add_{summed_values_name}",
+            )
+            nodes.append(add_node)
+
+            # Step 4: Scatter summed values back
+            scatter_node = helper.make_node(
+                'ScatterElements',
+                inputs=[input_name, indices_name, summed_values_name],
+                outputs=[output_name],
+                name=f"ScatterElements_{output_name}",
+                axis=0,
+                reduction='none',
+            )
+            nodes.append(scatter_node)
+
+            return nodes
+
+    else:
+        # Complex case: multi-dimensional or advanced indexing
+        raise NotImplementedError(
+            f"IncSubtensor with complex indexing not yet implemented. "
+            f"idx_list: {idx_list}"
+        )
+
+
+# Note: This is a simplified implementation
+# Full implementation needs to handle:
+# - Multi-dimensional slicing
+# - Advanced integer array indexing
+# - Negative indices (convert using Shape + Add as in Subtensor)
+# - Dynamic shapes
+```
+
+#### Implementation Strategy for IncSubtensor
+
+**Phase 1**: Basic 1D slicing only
+- `x[2:5] = values`
+- `x[2:5] += values`
+
+**Phase 2**: Advanced 1D indexing
+- `x[[0, 2, 5]] = values`
+
+**Phase 3**: Multi-dimensional (future)
+- `x[1:3, 2:4] = values`
+
+**Tests should start with Phase 1 patterns only**
+
+---
+
+### Implementation 8: Join/Split
+
+**File**: `pytensor/link/onnx/dispatch/shape.py` (continue)
+
+```python
+from pytensor.tensor.basic import Join, Stack, Split
+
+@onnx_funcify.register(Join)
+def onnx_funcify_Join(op, node, get_var_name, **kwargs):
+    """Convert Join to ONNX Concat."""
+    axis = op.view  # Join axis
+
+    input_names = [get_var_name(inp) for inp in node.inputs]
+    output_name = get_var_name(node.outputs[0])
+
+    concat_node = helper.make_node(
+        'Concat',
+        inputs=input_names,
+        outputs=[output_name],
+        name=f"Concat_{output_name}",
+        axis=axis,
+    )
+
+    return concat_node
+
+
+@onnx_funcify.register(Split)
+def onnx_funcify_Split(op, node, get_var_name, **kwargs):
+    """Convert Split to ONNX Split."""
+    axis = op.axis
+    splits = op.splits  # Sizes of each split
+
+    input_name = get_var_name(node.inputs[0])
+    output_names = [get_var_name(out) for out in node.outputs]
+
+    split_node = helper.make_node(
+        'Split',
+        inputs=[input_name],
+        outputs=output_names,
+        name=f"Split_{output_names[0]}",
+        axis=axis,
+        split=splits,
+    )
+
+    return split_node
+```
+
+**Success criteria**:
 - All related tests pass
 - ONNX models validate
 - Outputs match Python reference
