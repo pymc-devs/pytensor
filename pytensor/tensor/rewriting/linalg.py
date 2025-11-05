@@ -1098,7 +1098,6 @@ def _find_triangular_op(var):
     return None
 
 
-@register_canonicalize
 @register_stabilize
 @node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
 def rewrite_inv_to_triangular_solve(fgraph, node):
