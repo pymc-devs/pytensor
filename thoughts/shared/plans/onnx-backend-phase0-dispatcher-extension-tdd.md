@@ -481,18 +481,18 @@ Run these commands to verify the dispatcher extension works:
 ## Success Criteria
 
 ### Automated Verification:
-- [ ] Dispatcher code compiles without errors
-- [ ] All Shape tests pass: `pytest tests/link/onnx/test_shape.py -v`
-- [ ] Shape_i tests pass (multi-node pattern): `test_shape_i_*`
-- [ ] SpecifyShape test passes (None pattern): `test_specify_shape_removed`
-- [ ] All existing Tier 1 tests still pass (no regressions)
-- [ ] Can import updated dispatcher module
+- [x] Dispatcher code compiles without errors
+- [x] All Shape tests pass: `pytest tests/link/onnx/test_shape.py -v`
+- [x] Shape_i tests pass (multi-node pattern): `test_shape_i_*`
+- [x] SpecifyShape test passes (None pattern): `test_specify_shape_passthrough`
+- [x] All existing Tier 1 tests still pass (no regressions)
+- [x] Can import updated dispatcher module
 
 ### Manual Verification:
-- [ ] Code change is minimal (~10 lines added)
-- [ ] Pattern is clear from comments and docstring
-- [ ] Backward compatible (existing handlers unchanged)
-- [ ] Shape_i demonstrates multi-node pattern clearly
+- [x] Code change is minimal (~10 lines added to dispatcher, ~100 to shape.py)
+- [x] Pattern is clear from comments and docstring
+- [x] Backward compatible (existing handlers unchanged)
+- [x] Shape_i demonstrates multi-node pattern clearly
 
 ---
 
