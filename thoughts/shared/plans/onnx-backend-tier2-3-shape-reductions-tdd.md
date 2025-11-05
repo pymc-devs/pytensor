@@ -1,42 +1,45 @@
 ---
 date: 2025-11-04
-status: updated-for-phase1-3-implementation
+status: ready-to-implement
 phase: "tier-2-3"
 updated: 2025-11-04
 coverage: "Shape Operations (Tier 2) & Reductions/Allocation (Tier 3)"
-timeline: "Weeks 4-6"
+timeline: "2.5-3.5 weeks"
 tags: [tdd, onnx, backend, shape, reductions, tier2, tier3]
 related_research:
   - thoughts/shared/research/2025-11-04_11-52-15_onnx-backend-infrastructure-roadmap.md
   - thoughts/shared/research/2025-11-04_11-34-58_onnx-backend-production-roadmap.md
 related_plans:
   - thoughts/shared/plans/onnx-backend-phase1-3-infrastructure-tdd.md
+  - thoughts/shared/plans/onnx-backend-phase0-dispatcher-extension-tdd.md
 prerequisites:
+  - "Phase 0 complete: Dispatcher extension for multi-node operations"
   - "Tier 1 complete: 20 basic elemwise operations passing"
   - "Infrastructure: ONNXLinker, dispatch system, export API"
   - "Testing utilities: compare_onnx_and_py, get_onnx_node_types"
+  - "Shape operations: Shape, Shape_i, SpecifyShape implemented (from Phase 0)"
 updates:
-  - "2025-11-04: Updated after Phase 1-3 implementation"
-  - "Added Phase 0: Dispatcher extension for multi-node operations"
-  - "Fixed all return patterns to match actual infrastructure"
-  - "Expanded IncSubtensor implementation details (ScatterND/ScatterElements)"
-  - "Added negative indexing conversion details for Subtensor"
-  - "Documented handler return patterns (list, tuple, single node, None)"
+  - "2025-11-04: Split Phase 0 into separate plan"
+  - "Updated prerequisites to require Phase 0 completion"
+  - "Removed Shape_i from implementation (now in Phase 0)"
+  - "Updated timeline to reflect actual implementation scope"
 ---
 
 # ONNX Backend Tier 2-3: Shape Operations & Reductions - TDD Implementation Plan
 
-## ⚠️ IMPORTANT: Phase 0 Required First
+## ⚠️ PREREQUISITE: Phase 0 Must Be Complete
 
-**Before implementing Tier 2-3 operations**, you MUST complete Phase 0 (Dispatcher Extension). Many Tier 2-3 operations return multiple ONNX nodes, which requires extending the Phase 1-3 dispatcher.
+**Before starting this plan**, you MUST complete Phase 0 (Dispatcher Extension).
 
-**Phase 0 is quick** (~30 minutes):
-1. Extend dispatcher to handle list returns (4 lines of code)
-2. Add docstring documenting return patterns
-3. Add test for multi-node returns
-4. Verify no regressions
+📋 **See**: `thoughts/shared/plans/onnx-backend-phase0-dispatcher-extension-tdd.md`
 
-See [Phase 0 section](#phase-0-dispatcher-extension-for-multi-node-operations) below for details.
+Phase 0 extends the dispatcher to handle multi-node operations and implements Shape, Shape_i, and SpecifyShape as reference implementations. This takes ~30 minutes and is required for all Tier 2-3 operations.
+
+✅ **Phase 0 Complete When**:
+- Dispatcher handles list returns
+- Shape, Shape_i, SpecifyShape operations working
+- All tests passing (including multi-node test)
+- No regressions in Tier 1 tests
 
 ---
 
@@ -80,11 +83,11 @@ This TDD plan covers **Tier 2 (Shape Operations, 15 ops)** and **Tier 3 (Reducti
 
 ## Desired End State
 
-After Tier 2-3 completion:
+After Tier 2-3 completion (with Phase 0 prerequisites):
 
 ✅ **Shape Operations Working** (Tier 2 - 15 ops):
+- ✅ Shape inspection (Shape, Shape_i, SpecifyShape) - *from Phase 0*
 - Reshape, DimShuffle (transpose/squeeze/unsqueeze)
-- Shape inspection (Shape, Shape_i, SpecifyShape)
 - Join/Stack/Split operations
 - Basic and advanced indexing (Subtensor, IncSubtensor)
 
@@ -167,289 +170,6 @@ def test_shape_operations_match_pytensor(op_name, data):
 1. Add entry to registry dict (operation name → configuration)
 2. Optionally add custom Hypothesis strategy if needed
 3. Property tests automatically validate it!
-
----
-
-## Phase 0: Dispatcher Extension for Multi-Node Operations
-
-### Overview
-
-**PREREQUISITE**: Before implementing Tier 2-3 operations, extend the Phase 1-3 dispatcher to support operations that compile to multiple ONNX nodes.
-
-**Why Needed**: Many Tier 2-3 operations require multiple ONNX nodes:
-- **Shape_i**: Shape → Gather → output (2 nodes + 1 constant)
-- **DimShuffle**: Squeeze → Transpose → Unsqueeze (up to 3 nodes)
-- **Reshape with constants**: Constant → Reshape (2 nodes)
-- **MakeVector**: Multiple Unsqueeze → Concat (n+1 nodes)
-
-**Current Limitation**: Phase 1-3 dispatcher only handles:
-- Single `NodeProto`
-- Tuple: `(NodeProto, [initializers])`
-- `None`
-
-**Does NOT handle**: Lists of `NodeProto`
-
----
-
-### Step 0.1: Extend Dispatcher to Handle Lists
-
-**File**: `pytensor/link/onnx/dispatch/basic.py`
-
-**Location**: Lines 195-205 (in `onnx_funcify_FunctionGraph`)
-
-**Current Code**:
-```python
-# Handle both single node and (node, initializers) tuple returns
-if result is not None:
-    if isinstance(result, tuple):
-        # Returned (node, additional_initializers)
-        onnx_node, node_initializers = result
-        if onnx_node is not None:
-            nodes.append(onnx_node)
-        if node_initializers:
-            initializers.extend(node_initializers)
-    else:
-        # Returned single node
-        nodes.append(result)
-```
-
-**Updated Code**:
-```python
-# Handle multiple return patterns from operation handlers
-if result is not None:
-    if isinstance(result, list):
-        # Multiple nodes - add all to graph
-        # Used for operations that compile to multiple ONNX ops
-        # Example: Shape_i returns [Constant, Shape, Gather]
-        for item in result:
-            if item is not None:
-                nodes.append(item)
-    elif isinstance(result, tuple):
-        # Returned (node, additional_initializers)
-        # Used for operations with constant initializers
-        # Example: DimShuffle returns (Transpose, [axes_tensor])
-        onnx_node, node_initializers = result
-        if onnx_node is not None:
-            nodes.append(onnx_node)
-        if node_initializers:
-            initializers.extend(node_initializers)
-    else:
-        # Returned single node (most common case)
-        # Example: Add returns single Add node
-        nodes.append(result)
-```
-
-**Change Summary**:
-- Added `isinstance(result, list)` check **before** tuple check
-- List handling extends nodes with all non-None items
-- Added comments documenting each pattern with examples
-
----
-
-### Step 0.2: Document Return Patterns
-
-**File**: `pytensor/link/onnx/dispatch/basic.py`
-
-Add to `onnx_funcify_FunctionGraph` docstring (around line 156):
-
-```python
-def onnx_funcify_FunctionGraph(fgraph, opset_version=18, **kwargs):
-    """Convert FunctionGraph to ONNX ModelProto.
-
-    Operation Handler Return Patterns
-    ----------------------------------
-    Handlers registered via @onnx_funcify.register can return:
-
-    1. **Single node** (most common):
-       return helper.make_node('Add', inputs=[...], outputs=[...])
-
-    2. **Multiple nodes** (operations requiring intermediate steps):
-       return [
-           helper.make_node('Shape', ...),
-           helper.make_node('Gather', ...),
-           helper.make_node('Slice', ...),
-       ]
-
-    3. **Node with initializers** (operations with constant data):
-       return (
-           helper.make_node('Transpose', ...),
-           [axes_initializer],  # List of TensorProto initializers
-       )
-
-    4. **None** (no-op, pass-through):
-       return None
-
-    Notes:
-    - List items can be None (will be filtered out)
-    - Tuple pattern is (node, [initializers]), not (node, initializer)
-    - Cannot mix patterns: either list OR tuple, not both
-
-    Parameters
-    ----------
-    fgraph : FunctionGraph
-        PyTensor function graph to convert
-    opset_version : int, optional
-        ONNX opset version (default: 18)
-    **kwargs
-        Additional arguments passed to operation handlers
-
-    Returns
-    -------
-    onnx.ModelProto
-        ONNX model containing the converted graph
-    """
-```
-
----
-
-### Step 0.3: Add Test for Multi-Node Returns
-
-**File**: `tests/link/onnx/test_dispatch_basic.py`
-
-Add new test:
-
-```python
-def test_onnx_funcify_multi_node_return():
-    """Test that handlers can return lists of multiple nodes."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from pytensor.link.onnx.dispatch import onnx_funcify
-    from pytensor.link.onnx import compile_onnx
-    from tests.link.onnx.test_basic import get_onnx_node_types
-    from onnx import helper
-
-    # Create a custom op that returns multiple nodes
-    # We'll use Shape operation which returns single node in Phase 1-3
-    # but this validates the infrastructure works for multi-node returns
-
-    x = pt.vector('x', dtype='float32')
-
-    # For now, test with existing Shape op (single node)
-    # This test will be more meaningful once Shape_i is implemented
-    y = x.shape[0]
-
-    x_val = np.array([1, 2, 3, 4, 5], dtype='float32')
-
-    fn = compile_onnx([x], y)
-    result = fn(x_val)
-
-    # Should execute without errors
-    assert result == 5
-
-    # Verify multiple ONNX nodes can be generated
-    # (This will be more comprehensive once Tier 2-3 ops are implemented)
-    node_types = get_onnx_node_types(fn)
-    assert 'Shape' in node_types
-
-
-def test_onnx_funcify_list_with_none():
-    """Test that None items in lists are filtered out."""
-    from pytensor.link.onnx.dispatch.basic import onnx_funcify_FunctionGraph
-    from pytensor.graph.basic import Apply
-    from pytensor.tensor.type import vector
-
-    # This is a lower-level test that will be more useful
-    # once we have operations that conditionally return nodes
-    # For now, we document the expected behavior
-
-    # When an operation returns [node1, None, node2]:
-    # - node1 and node2 should be added to graph
-    # - None should be filtered out
-    # - No errors should be raised
-
-    # This will be validated by DimShuffle implementation
-    # which conditionally includes Squeeze, Transpose, Unsqueeze
-    pass  # Placeholder for future test
-```
-
----
-
-### Step 0.4: Verification Steps
-
-Run these commands to verify the dispatcher extension works:
-
-1. **Test import**:
-   ```bash
-   uv run python -c "from pytensor.link.onnx.dispatch.basic import onnx_funcify_FunctionGraph; print('✅ Import successful')"
-   ```
-
-2. **Run new test**:
-   ```bash
-   uv run pytest tests/link/onnx/test_dispatch_basic.py::test_onnx_funcify_multi_node_return -v
-   ```
-
-3. **Run all dispatch tests**:
-   ```bash
-   uv run pytest tests/link/onnx/test_dispatch_basic.py -v
-   ```
-
-4. **Verify no regressions**:
-   ```bash
-   uv run pytest tests/link/onnx/ -v
-   ```
-   All Tier 1 tests should still pass ✅
-
----
-
-### Success Criteria
-
-#### Automated Verification:
-- [ ] Dispatcher code compiles without errors
-- [ ] New test `test_onnx_funcify_multi_node_return` passes
-- [ ] All existing tests still pass (no regressions)
-- [ ] Can import updated dispatcher module
-
-#### Manual Verification:
-- [ ] Code change is minimal (add 4 lines for list handling)
-- [ ] Pattern is clear from comments and docstring
-- [ ] Backward compatible (existing handlers unchanged)
-
----
-
-### Return Pattern Reference for Tier 2-3 Implementation
-
-When implementing Tier 2-3 operations, use these patterns:
-
-```python
-# ✅ CORRECT: Multiple nodes as list
-@onnx_funcify.register(Shape_i)
-def onnx_funcify_Shape_i(op, node, get_var_name, **kwargs):
-    idx_constant = helper.make_node('Constant', ...)
-    shape_node = helper.make_node('Shape', ...)
-    gather_node = helper.make_node('Gather', ...)
-    return [idx_constant, shape_node, gather_node]
-
-# ✅ CORRECT: Single node with initializers
-@onnx_funcify.register(Reshape)
-def onnx_funcify_Reshape(op, node, get_var_name, **kwargs):
-    if constant_shape:
-        return (reshape_node, [shape_constant_initializer])
-    else:
-        return reshape_node
-
-# ✅ CORRECT: Conditional multiple nodes
-@onnx_funcify.register(DimShuffle)
-def onnx_funcify_DimShuffle(op, node, get_var_name, **kwargs):
-    nodes = []
-    if needs_squeeze:
-        nodes.append(squeeze_node)
-    if needs_transpose:
-        nodes.append(transpose_node)
-    if needs_unsqueeze:
-        nodes.append(unsqueeze_node)
-    return nodes if nodes else None
-
-# ✅ CORRECT: No-op pass-through
-@onnx_funcify.register(SpecifyShape)
-def onnx_funcify_SpecifyShape(op, node, get_var_name, **kwargs):
-    return None
-
-# ❌ WRONG: Mixing list and tuple
-return ([node1, node2], [initializer])  # Not supported!
-
-# ❌ WRONG: Single initializer not in list
-return (node, initializer)  # Must be (node, [initializer])
-```
 
 ---
 
@@ -1509,133 +1229,24 @@ Implement operations by making tests pass, one category at a time.
 
 ---
 
-### Implementation 1: Shape Operations
+### Implementation 1: ~~Shape Operations~~ (✅ Completed in Phase 0)
 
-**Target Tests**: `test_shape_basic`, `test_shape_i`
-**Current Failures**: `NotImplementedError: No ONNX conversion available for: Shape`
+**Note**: Shape, Shape_i, and SpecifyShape operations were implemented in Phase 0 as part of the dispatcher extension. These operations are already complete and tested.
 
-#### Changes Required
+**File**: `pytensor/link/onnx/dispatch/shape.py` (created in Phase 0)
 
-**File**: `pytensor/link/onnx/dispatch/shape.py` (new file)
+**Operations Implemented**:
+- ✅ **Shape**: Returns shape tensor
+- ✅ **Shape_i**: Extracts specific dimension (demonstrates multi-node pattern)
+- ✅ **SpecifyShape**: No-op pass-through (demonstrates None return)
 
-```python
-"""ONNX conversion for shape operations."""
-
-from pytensor.link.onnx.dispatch.basic import onnx_funcify
-from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
-from pytensor.graph.basic import Constant
-
-try:
-    from onnx import helper
-    import numpy as np
-except ImportError as e:
-    raise ImportError("ONNX package required for export") from e
-
-
-@onnx_funcify.register(Shape)
-def onnx_funcify_Shape(op, node, var_names, get_var_name, **kwargs):
-    """Convert Shape op to ONNX Shape node."""
-    input_name = get_var_name(node.inputs[0])
-    output_name = get_var_name(node.outputs[0])
-
-    onnx_node = helper.make_node(
-        'Shape',
-        inputs=[input_name],
-        outputs=[output_name],
-        name=f"Shape_{output_name}",
-    )
-
-    return onnx_node
-
-
-@onnx_funcify.register(Shape_i)
-def onnx_funcify_Shape_i(op, node, var_names, get_var_name, **kwargs):
-    """Convert Shape_i op to ONNX Shape + Gather nodes.
-
-    Shape_i extracts a specific dimension from a tensor's shape.
-    This requires two ONNX nodes:
-    1. Shape - get full shape
-    2. Gather - extract the specific index
-    """
-    input_name = get_var_name(node.inputs[0])
-    output_name = get_var_name(node.outputs[0])
-
-    # Create intermediate name for full shape
-    shape_name = f"{output_name}_shape"
-
-    # Node 1: Get full shape
-    shape_node = helper.make_node(
-        'Shape',
-        inputs=[input_name],
-        outputs=[shape_name],
-        name=f"Shape_{shape_name}",
-    )
-
-    # Node 2: Gather the specific index
-    # op.i contains the axis index
-    axis_idx = op.i
-    gather_node = helper.make_node(
-        'Gather',
-        inputs=[shape_name, f"{shape_name}_idx"],
-        outputs=[output_name],
-        name=f"Gather_{output_name}",
-        axis=0,  # Gather from dimension 0 of shape tensor
-    )
-
-    # We need to create a constant for the index
-    # This will be added to initializers
-    # For now, we'll assume the index is embedded in the node
-    # In practice, you may need to handle this differently
-
-    # Simplified: Create Constant node for index
-    idx_constant = helper.make_node(
-        'Constant',
-        inputs=[],
-        outputs=[f"{shape_name}_idx"],
-        name=f"Constant_{shape_name}_idx",
-        value=helper.make_tensor(
-            name=f"{shape_name}_idx_value",
-            data_type=helper.TensorProto.INT64,
-            dims=[],
-            vals=[axis_idx],
-        )
-    )
-
-    return [idx_constant, shape_node, gather_node]
-
-
-@onnx_funcify.register(SpecifyShape)
-def onnx_funcify_SpecifyShape(op, node, var_names, get_var_name, **kwargs):
-    """SpecifyShape is just a hint - pass through input.
-
-    SpecifyShape doesn't change the tensor data, it just provides
-    shape information for optimization. In ONNX export, we can
-    safely ignore it and just pass the input through.
-    """
-    # Return None - no ONNX node needed
-    # The input will be directly connected to uses of the output
-    return None
+**Verification**:
+```bash
+# These tests should already pass from Phase 0
+pytest tests/link/onnx/test_shape.py -v
 ```
 
-**Debugging Approach**:
-1. Run: `pytest tests/link/onnx/test_shape.py::test_shape_basic -v`
-2. Should pass (Shape creates ONNX Shape node)
-3. Run: `pytest tests/link/onnx/test_shape.py::test_shape_i -v`
-4. May need to adjust Constant handling for index
-5. Run: `pytest tests/link/onnx/test_shape.py::test_specify_shape -v`
-6. Should pass (SpecifyShape returns None)
-
-#### Success Criteria
-
-##### Automated Verification:
-- [ ] Shape tests pass: `pytest tests/link/onnx/test_shape.py::test_shape_basic -v`
-- [ ] Shape_i tests pass: `pytest tests/link/onnx/test_shape.py::test_shape_i -v`
-- [ ] SpecifyShape test passes: `pytest tests/link/onnx/test_shape.py::test_specify_shape -v`
-
-##### Manual Verification:
-- [ ] ONNX model validates with `onnx.checker.check_model`
-- [ ] Correct ONNX node types generated
-- [ ] Shape values match NumPy reference
+**Skip to Implementation 2** below to continue with Reshape and DimShuffle operations.
 
 ---
 
