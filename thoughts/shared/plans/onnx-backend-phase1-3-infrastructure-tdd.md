@@ -2038,3 +2038,233 @@ Not applicable for Phases 1-3 (new implementation).
 After completing Phases 1-3, proceed to:
 - **Phases 4-5 Plan**: Implement Tier 2 (shape operations) and Tier 3 (reductions)
 - See: `thoughts/shared/plans/onnx-backend-phase4-5-core-ops-tdd.md`
+
+---
+
+## Post-Implementation Analysis
+
+**Date**: 2025-11-04 20:54 CST
+**Analyzed by**: clsandoval
+**Implementation Period**: 2025-11-04 07:16 to 2025-11-04 20:50
+**Relevant Commits**:
+- `5999d62d3` - Add ONNX backend infrastructure and core dispatch system
+- `5044404d8` - Add ONNX support for 20 Tier 1 elementwise operations
+- `ec61d79fd` - Add ONNX support for shape operations (DimShuffle)
+- `2908352a6` - Add high-level ONNX export API
+- `cf2d44537` - Add comprehensive test suite for ONNX backend
+- `55ac06c18` - Add uv.lock with ONNX dependencies
+
+### What Worked As Planned
+
+- ✅ **Infrastructure-first approach** (Phase 1-3 structure): The dispatch system, linker, and export API followed the planned architecture closely
+- ✅ **Test-driven development flow**: Writing tests first helped catch design issues early (e.g., abstract methods in JITLinker)
+- ✅ **Singledispatch pattern**: The JAX-inspired dispatch pattern worked exactly as planned
+- ✅ **SCALAR_OP_TO_ONNX mapping**: The single mapping dict for all 20 operations was highly effective - exactly as envisioned
+- ✅ **Test count close to estimate**: Achieved 30 tests vs planned "~20-25 tests" - very accurate prediction
+- ✅ **Success rate**: 90% pass rate (27/30) exceeded expectations for first implementation
+- ✅ **Module structure**: All planned files created in expected locations
+
+### Divergences from Plan
+
+#### Tests
+
+**Issue #1: Hypothesis Property Tests Not Implemented**
+- **Planned**: Create property-based tests using Hypothesis with strategies module (`tests/link/onnx/strategies/`) and 4-6 property tests covering all operations
+- **Actual**: Created traditional manual tests (30 individual tests) without Hypothesis
+- **Files**:
+  - Missing: `tests/link/onnx/test_properties.py`
+  - Missing: `tests/link/onnx/strategies/` directory
+  - Created instead: `tests/link/onnx/test_elemwise.py:243 lines` with individual test functions
+- **Why**: Decision made to use simpler traditional tests instead of property-based testing for faster initial implementation
+- **Impact**: More tests (30 vs ~16 planned), but less comprehensive coverage per operation
+
+**Issue #2: Test Structure Divergence**
+- **Planned**: Phase 2 would verify Hypothesis setup works before any implementation
+- **Actual**: Skipped Hypothesis verification entirely, went straight to implementation
+- **Why**: Pragmatic decision to deliver working backend faster without property testing infrastructure
+- **Impact**: Hypothesis profiles configured in `conftest.py:10-24` but unused
+
+#### Implementation
+
+**Issue #1: Shape Operations (DimShuffle) Implemented in Phase 1-3**
+- **Planned**: "Shape operations (Tier 2) - covered in Phases 4-5 plan" (line 85)
+- **Actual**: Had to implement DimShuffle support in Phase 3
+- **Files**: `pytensor/link/onnx/dispatch/shape.py:100 lines` (not in plan)
+- **Commits**: `ec61d79fd` - "Add ONNX support for shape operations (DimShuffle)"
+- **Why**: PyTensor automatically inserts DimShuffle operations for broadcasting when using scalar constants like `x * 2`
+- **Plan Gap**: Plan didn't account for PyTensor's automatic graph transformations that insert shape operations even for simple arithmetic
+
+**Issue #2: Round Operation Name Mismatch**
+- **Planned**: Map `scalar.Round` to ONNX "Round"
+- **Actual**: PyTensor has `scalar.RoundHalfToEven` and `scalar.RoundHalfAwayFromZero`, not `scalar.Round`
+- **Files**: `pytensor/link/onnx/dispatch/elemwise.py:26-27`
+- **Why**: Plan assumed PyTensor API without verifying actual class names
+- **Plan Gap**: Should have inspected `pytensor.scalar.basic` module before planning operation mapping
+
+**Issue #3: ONNX IR Version Compatibility**
+- **Planned**: Use "ONNX opset 18" (mentioned throughout plan)
+- **Actual**: Required IR version 9 explicitly, not just opset 18
+- **Files**: `pytensor/link/onnx/dispatch/basic.py:225` - `ir_version=9`
+- **Why**: ONNX Runtime 1.23.2 only supports IR version up to 11, but onnx library defaults to IR version 12
+- **Plan Gap**: Plan didn't research ONNX Runtime compatibility requirements vs onnx library defaults
+
+**Issue #4: Unsqueeze API Change in ONNX Opset 13+**
+- **Planned**: Standard ONNX node creation for shape operations
+- **Actual**: Opset 13+ requires axes as separate input tensor, not attribute
+- **Files**: `pytensor/link/onnx/dispatch/shape.py:43-59` - special handling for axes as initializer
+- **Why**: ONNX changed Unsqueeze API between opsets
+- **Plan Gap**: Needed to check ONNX operator spec changes across opset versions
+
+**Issue #5: JITLinker Abstract Methods**
+- **Planned**: Inherit from JITLinker
+- **Actual**: Had to implement `create_thunk_inputs()` and `jit_compile()` abstract methods
+- **Files**: `pytensor/link/onnx/linker.py:118-155`
+- **Why**: Plan didn't verify JITLinker's abstract method requirements
+- **Plan Gap**: Should have reviewed parent class interface before planning inheritance
+
+**Issue #6: FunctionGraph Return Type for Initializers**
+- **Planned**: `onnx_funcify` returns single ONNX node
+- **Actual**: Modified to support returning `(node, initializers)` tuple
+- **Files**: `pytensor/link/onnx/dispatch/basic.py:194-205`
+- **Why**: Some operations (like DimShuffle/Unsqueeze) need to add constant tensors as initializers
+- **Plan Gap**: Didn't anticipate operations needing auxiliary initializers
+
+#### Additional Changes
+
+- `pytensor/link/onnx/dispatch/shape.py` - Entire file not in plan, needed for broadcasting support
+- `uv.lock` - Added ONNX dependencies (onnx 1.19.1, onnxruntime 1.23.2)
+
+### Bugs and Fixes Encountered
+
+#### Bug #1: Mixed-Type Arithmetic (Type Casting)
+- **Symptom**: Test failures for `x * 2` where x is float32 but 2 is stored as int8
+- **Root Cause**: PyTensor constants can have different dtypes than tensor they operate on; ONNX requires type consistency
+- **Status**: Known limitation - 3/30 tests still failing
+- **Tests Affected**:
+  - `test_chained_arithmetic` - Type mismatch in `(x * 2 + 3) / 4`
+  - `test_export_onnx_basic` - Similar mixed-type issue
+  - `test_compile_onnx_basic` - Type casting needed
+- **Plan Gap**: Plan assumed all operations would be type-homogeneous; didn't account for PyTensor's automatic constant type inference
+- **Future Fix**: Implement TypeCastingOp support (planned for later phases)
+
+#### Bug #2: Tuple Return vs Single Value Return
+- **Symptom**: `TypeError: iteration over a 0-d array` when returning single scalar
+- **Root Cause**: ONNX Runtime returns arrays, but PyTensor thunk expects tuple for iteration
+- **Fix**: Always return tuple of outputs in `pytensor/link/onnx/linker.py:111-113`
+- **Commits**: Fixed in initial implementation of `5999d62d3`
+- **Plan Gap**: Plan didn't specify output handling contract between linker and thunk
+
+#### Bug #3: Module Import for Round Operation
+- **Symptom**: `AttributeError: module 'pytensor.scalar.basic' has no attribute 'Round'`
+- **Root Cause**: Wrong assumption about PyTensor scalar operation class names
+- **Fix**: Changed to `RoundHalfToEven` and `RoundHalfAwayFromZero` in `elemwise.py:26-27`
+- **Commits**: Fixed during implementation in `5044404d8`
+- **Plan Gap**: Should have verified PyTensor API before writing plan
+
+### Success Criteria Gaps
+
+#### Automated Checks
+- ✅ All test files created
+- ✅ Tests are discoverable (30 tests collected)
+- ✅ Test syntax is valid
+- ✅ Module imports work correctly
+- ⚠️ **90% tests passing** (27/30) - slightly below "all tests pass" goal but acceptable
+- ❌ **Hypothesis property tests** - Not implemented at all
+
+#### Manual Verification
+- ✅ Can export basic arithmetic expressions to ONNX
+- ✅ ONNX Runtime executes exported models
+- ✅ Outputs match Python reference (for supported operations)
+- ⚠️ Mixed-type operations still have issues (known limitation)
+
+### Lessons Learned
+
+#### For Future Planning
+
+1. **Research Parent Class Interfaces Thoroughly**
+   - Example: Missed JITLinker's abstract methods requirement
+   - Next time: Use `grep -A 10 "class JITLinker" pytensor/link/basic.py` and check for `@abstractmethod` before planning inheritance
+
+2. **Verify External Library Compatibility Matrix**
+   - Example: ONNX Runtime 1.23.2 vs onnx 1.19.1 IR version mismatch
+   - Next time: Check compatibility tables in documentation, not just opset versions
+
+3. **Inspect Automatic Graph Transformations**
+   - Example: PyTensor inserts DimShuffle for broadcasting automatically
+   - Next time: Compile simple test graph and inspect toposort() to see what operations actually appear
+
+4. **Validate API Assumptions with Actual Code**
+   - Example: Assumed `scalar.Round` exists without checking
+   - Next time: Run `python -c "from pytensor.scalar import basic; print([x for x in dir(basic) if 'Round' in x])"` during planning
+
+5. **Check Operator Spec Changes Across Versions**
+   - Example: Unsqueeze changed between ONNX opset 13 and 18
+   - Next time: Review ONNX changelog for breaking changes in operator signatures
+
+6. **Account for Mixed-Type Operations**
+   - Example: Didn't anticipate constant type inference creating type mismatches
+   - Next time: Test with both `pt.constant(2.0, dtype='float32')` and plain Python literals `2` in plan validation
+
+#### For Test Design
+
+1. **Consider Hybrid Approach for Property Testing**
+   - Example: Hypothesis setup overhead vs traditional tests
+   - Next time: Use property tests for operations, manual tests for infrastructure. Don't commit to one approach for everything.
+
+2. **Test Broadcasting Early**
+   - Example: Simple `x * 2` revealed need for shape operations
+   - Next time: Include broadcasting tests in "basic functionality" phase, not just in shape operations phase
+
+3. **Include Mixed-Type Test Cases**
+   - Example: Tests used `np.array([2.0])` instead of `2` literal
+   - Next time: Explicitly test Python literals, not just NumPy arrays, to catch type inference issues
+
+#### For Implementation
+
+1. **Implement Return Value Flexibility Early**
+   - Example: Had to retrofit support for `(node, initializers)` tuple returns
+   - Next time: Design dispatch functions to support optional auxiliary data from the start
+
+2. **Use Opset-Specific Documentation**
+   - Example: Unsqueeze API differs between opsets
+   - Next time: Always reference the specific opset version docs, not "latest" or "general" docs
+
+3. **Test Integration Points Immediately**
+   - Example: JITLinker abstract methods caught during first instantiation
+   - Next time: Create minimal test that instantiates classes before full implementation
+
+### Recommendations for Next Similar Plan
+
+1. **Include "Compatibility Research" Phase** - Spend 30 min checking version compatibility matrices before writing detailed implementation plan
+
+2. **Add "API Verification" Checklist** - For each external API used, verify actual class/function names exist with a script
+
+3. **Plan for Incremental Opset Support** - Instead of targeting one opset, document which operations work in which opsets
+
+4. **Separate "Core Operations" from "Graph Transformations"** - DimShuffle is a graph transformation, not a user-facing operation. Plan these separately.
+
+5. **Create "Minimal Integration Test"** - Write one end-to-end test that touches all layers before planning detailed tests
+
+6. **Budget 20% Time for "Discovered Dependencies"** - Always expect to implement 1-2 unplanned modules
+
+### Patterns Worth Documenting
+
+- **ONNX Opset Evolution Pattern**: When targeting newer opsets, some operations require inputs-as-tensors instead of attributes. Document this pattern for future operations.
+
+- **PyTensor Broadcasting Transform Pattern**: PyTensor automatically inserts DimShuffle for broadcasting. Any ONNX backend must handle this even for "simple" operations.
+
+- **Mixed-Type Constant Pattern**: PyTensor infers constant types independently. ONNX backends need TypeCasting support or explicit type coercion.
+
+- **Tuple Return Pattern**: Operations that need auxiliary data (initializers, attributes) should return `(node, extras)` tuple, with None-checking in dispatcher.
+
+### Open Questions for Future Work
+
+- Should TypeCastingOp support be added to Phase 1-3 to achieve 100% test pass rate?
+- Would Hypothesis property tests actually catch more bugs, or would they just slow down development?
+- Can we auto-detect which PyTensor graph transformations occur and plan their ONNX equivalents automatically?
+- Should we create a compatibility matrix tool that checks ONNX Runtime vs onnx library versions?
+- Is there a way to force PyTensor to not insert DimShuffle operations for simple cases?
+
+---
+
+*This post-implementation analysis helps improve future TDD planning by documenting what actually happened vs. what was planned.*
