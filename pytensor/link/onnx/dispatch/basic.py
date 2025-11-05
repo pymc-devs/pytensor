@@ -137,6 +137,34 @@ def onnx_funcify_FunctionGraph(
     3. Collects constants as initializers
     4. Creates ONNX ModelProto with inputs, outputs, and nodes
 
+    Operation Handler Return Patterns
+    ----------------------------------
+    Handlers registered via @onnx_funcify.register can return:
+
+    1. **Single node** (most common):
+       return helper.make_node('Add', inputs=[...], outputs=[...])
+
+    2. **Multiple nodes** (operations requiring intermediate steps):
+       return [
+           helper.make_node('Shape', ...),
+           helper.make_node('Gather', ...),
+           helper.make_node('Slice', ...),
+       ]
+
+    3. **Node with initializers** (operations with constant data):
+       return (
+           helper.make_node('Transpose', ...),
+           [axes_initializer],  # List of TensorProto initializers
+       )
+
+    4. **None** (no-op, pass-through):
+       return None
+
+    Notes:
+    - List items can be None (will be filtered out)
+    - Tuple pattern is (node, [initializers]), not (node, initializer)
+    - Cannot mix patterns: either list OR tuple, not both
+
     Parameters
     ----------
     fgraph : FunctionGraph
@@ -191,18 +219,40 @@ def onnx_funcify_FunctionGraph(
             **kwargs,
         )
 
-        # Handle both single node and (node, initializers) tuple returns
+        # Handle multiple return patterns from operation handlers
         if result is not None:
-            if isinstance(result, tuple):
+            if isinstance(result, list):
+                # Multiple nodes - add all to graph
+                # Used for operations that compile to multiple ONNX ops
+                # Example: Shape_i returns [Constant, Shape, Gather]
+                for item in result:
+                    if item is not None:
+                        nodes.append(item)
+            elif isinstance(result, tuple):
                 # Returned (node, additional_initializers)
+                # Used for operations with constant initializers
+                # Example: DimShuffle returns (Transpose, [axes_tensor])
                 onnx_node, node_initializers = result
                 if onnx_node is not None:
                     nodes.append(onnx_node)
                 if node_initializers:
                     initializers.extend(node_initializers)
             else:
-                # Returned single node
+                # Returned single node (most common case)
+                # Example: Add returns single Add node
                 nodes.append(result)
+        else:
+            # Handler returned None - this is a no-op operation
+            # Map output variables to input variables (pass-through)
+            # This is used for operations like SpecifyShape that don't
+            # change the data, only provide shape hints for optimization
+            if len(node.outputs) == 1 and len(node.inputs) > 0:
+                # For single-output ops, alias output to first input
+                output_var = node.outputs[0]
+                input_var = node.inputs[0]
+                # Map the output to use the same name as the input
+                if output_var not in var_names:
+                    var_names[output_var] = get_var_name(input_var)
 
     # Create input ValueInfos
     inputs = []

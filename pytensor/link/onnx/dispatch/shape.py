@@ -4,11 +4,110 @@ import numpy as np
 from onnx import helper, numpy_helper
 
 from pytensor.link.onnx.dispatch.basic import onnx_funcify
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
 
 
 @onnx_funcify.register(type(None))
 def onnx_funcify_None(op, **kwargs):
     """Handle None ops (used in some graph optimizations)."""
+    return None
+
+
+@onnx_funcify.register(Shape)
+def onnx_funcify_Shape(op, node, get_var_name, **kwargs):
+    """Convert Shape op to ONNX Shape node.
+
+    Returns tensor containing shape of input.
+    """
+    input_name = get_var_name(node.inputs[0])
+    output_name = get_var_name(node.outputs[0])
+
+    onnx_node = helper.make_node(
+        'Shape',
+        inputs=[input_name],
+        outputs=[output_name],
+        name=f"Shape_{output_name}",
+    )
+
+    return onnx_node
+
+
+@onnx_funcify.register(Shape_i)
+def onnx_funcify_Shape_i(op, node, get_var_name, **kwargs):
+    """Convert Shape_i op to ONNX Shape + Gather nodes.
+
+    Shape_i extracts a specific dimension from a tensor's shape.
+    This requires multiple ONNX nodes:
+    1. Constant - create index constant
+    2. Shape - get full shape tensor
+    3. Gather - extract the specific dimension
+
+    This operation demonstrates the multi-node return pattern.
+
+    Example:
+        x = pt.matrix('x')
+        dim0 = x.shape[0]  # Shape_i with i=0
+
+        ONNX graph:
+            Constant(value=0) → idx
+            Shape(x) → shape_tensor
+            Gather(shape_tensor, idx, axis=0) → dim0
+    """
+    input_name = get_var_name(node.inputs[0])
+    output_name = get_var_name(node.outputs[0])
+
+    # Get dimension index from op
+    axis_idx = op.i
+
+    # Create intermediate names
+    shape_name = f"{output_name}_shape"
+    idx_name = f"{output_name}_idx"
+
+    # Node 1: Create constant for index
+    idx_constant = helper.make_node(
+        'Constant',
+        inputs=[],
+        outputs=[idx_name],
+        name=f"Constant_{idx_name}",
+        value=helper.make_tensor(
+            name=f"{idx_name}_value",
+            data_type=helper.TensorProto.INT64,
+            dims=[],
+            vals=[axis_idx],
+        )
+    )
+
+    # Node 2: Get full shape
+    shape_node = helper.make_node(
+        'Shape',
+        inputs=[input_name],
+        outputs=[shape_name],
+        name=f"Shape_{shape_name}",
+    )
+
+    # Node 3: Gather specific dimension
+    gather_node = helper.make_node(
+        'Gather',
+        inputs=[shape_name, idx_name],
+        outputs=[output_name],
+        name=f"Gather_{output_name}",
+        axis=0,  # Gather from dimension 0 of shape tensor
+    )
+
+    # Return list of nodes - this is the key pattern!
+    return [idx_constant, shape_node, gather_node]
+
+
+@onnx_funcify.register(SpecifyShape)
+def onnx_funcify_SpecifyShape(op, node, get_var_name, **kwargs):
+    """SpecifyShape is just a hint - pass through input.
+
+    SpecifyShape doesn't change the tensor data, it just provides
+    shape information for optimization. In ONNX export, we can
+    safely ignore it and just pass the input through.
+    """
+    # Return None - no ONNX node needed
+    # The input will be directly connected to uses of the output
     return None
 
 
