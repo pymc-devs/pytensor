@@ -69,10 +69,20 @@ After Tier 2-3 completion:
 - Allocation: Alloc, AllocEmpty, MakeVector, ARange, Eye
 - Scalar/tensor conversion operations
 
-✅ **Comprehensive Testing**:
-- 45+ new tests (15 for Tier 2, 15 for Tier 3, plus integration tests)
-- Dynamic shape handling validated
-- Static shape inference preserved
+✅ **Scalable Testing Architecture** (Hypothesis-based):
+- **Operation registries** for shape ops, reductions, and allocations
+- **Hypothesis strategies module** for generating valid shape/reduction test cases
+- **~8-12 property tests** that automatically test all 31 operations:
+  - Shape operations correctness (Reshape, DimShuffle, Shape, Join/Split)
+  - Reduction operations correctness (Sum, Prod, Max, Min, Argmax, Argmin, All, Any)
+  - Allocation operations correctness (Alloc, ARange, Eye, MakeVector)
+  - Subtensor operations correctness (slicing, advanced indexing)
+  - IncSubtensor operations correctness (set/increment)
+  - Dynamic shape handling
+  - Axis parameter handling
+  - Edge cases (empty arrays, zero dims)
+- **~5-8 targeted regression tests** (for specific bugs discovered during implementation)
+- **Total: ~15-20 tests instead of 45+ manual tests**
 - All operations compared against Python reference
 
 ✅ **Validation**:
@@ -95,566 +105,846 @@ After Tier 2-3 completion:
 ## TDD Approach
 
 ### Test Design Philosophy:
-1. **Test static and dynamic shapes separately**: ONNX has different code paths
-2. **Test axis specifications thoroughly**: None, single, multiple, negative indices
-3. **Test edge cases explicitly**: Empty arrays, zero dimensions, out of bounds
-4. **Compare against NumPy behavior**: Ensure PyTensor → ONNX → Result matches NumPy
-5. **Test ONNX node types**: Verify correct ONNX operators are generated
+1. **Property-Based Testing**: Use Hypothesis to generate diverse test cases automatically
+2. **Operation Registry Pattern**: Define operations once, test all automatically
+3. **Test static and dynamic shapes**: ONNX has different code paths for each
+4. **Test axis specifications**: None, single, multiple, negative indices
+5. **Test edge cases**: Empty arrays, zero dimensions, broadcasting edge cases
+6. **Compare against NumPy behavior**: Ensure PyTensor → ONNX → Result matches NumPy
+7. **Verify ONNX node types**: Correct ONNX operators are generated
+
+### Testing Strategy (Hypothesis-Based):
+
+```python
+# Core pattern: Property test for operation categories
+
+@given(
+    op_name=st.sampled_from(SHAPE_OPERATIONS.keys()),
+    data=st.data(),
+)
+def test_shape_operations_match_pytensor(op_name, data):
+    """Property test: All shape operations produce correct results."""
+    op_config = SHAPE_OPERATIONS[op_name]
+
+    # Generate appropriate test inputs based on operation
+    inputs = data.draw(op_config['strategy'])
+
+    # Build graph
+    graph_inputs, graph_outputs = op_config['build_graph'](*inputs)
+
+    # Compare ONNX output to Python reference
+    compare_onnx_and_py(graph_inputs, graph_outputs, inputs)
+
+    # Verify correct ONNX nodes generated
+    assert op_config['expected_onnx_op'] in get_onnx_node_types(fn)
+```
+
+**Key Insight**: With operation registries, adding a new operation only requires:
+1. Add entry to registry dict (operation name → configuration)
+2. Optionally add custom Hypothesis strategy if needed
+3. Property tests automatically validate it!
 
 ---
 
-## Phase 1: Test Design & Implementation
+## Phase 1: Test Design & Implementation (Hypothesis-Based)
 
 ### Overview
-Write comprehensive, informative tests that define shape operations and reductions completely. Tests should fail in expected, diagnostic ways.
+
+Write comprehensive property-based tests using Hypothesis that automatically generate diverse test cases for shape operations and reductions. Tests define expected behavior through operation registries and fail in diagnostic ways.
 
 ---
 
-### Test Category 1: Shape Inspection Operations
+### Step 1.1: Operation Registries Setup
 
-**Test File**: `tests/link/onnx/test_shape.py`
-**Purpose**: Test Shape, Shape_i, and SpecifyShape operations
+**File**: `tests/link/onnx/strategies.py` (create new)
 
-#### Test: `test_shape_basic`
-**Purpose**: Test Shape op returns tensor shape
-
-**Test Data**: Matrix with known shape (3, 4)
-
-**Expected Behavior**: Shape operation returns [3, 4]
+Define operation registries that map operation names to their configurations:
 
 ```python
-def test_shape_basic():
-    """Test that Shape operation returns correct shape tensor."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
+"""Hypothesis strategies and operation registries for ONNX backend testing."""
 
-    x = pt.matrix('x', dtype='float32')
-    s = x.shape
+from hypothesis import strategies as st
+from hypothesis.extra.numpy import arrays, array_shapes
+import numpy as np
+import pytensor.tensor as pt
+from typing import Dict, Callable, Any
 
-    x_val = np.random.randn(3, 4).astype('float32')
 
-    fn, result = compare_onnx_and_py([x], s, [x_val])
+# ============================================================================
+# SHAPE OPERATIONS REGISTRY (Tier 2)
+# ============================================================================
 
-    # Verify ONNX node type
-    from tests.link.onnx.test_basic import get_onnx_node_types
+SHAPE_OPERATIONS: Dict[str, Dict[str, Any]] = {
+    # Shape inspection
+    "shape": {
+        "build_graph": lambda x: ([x], x.shape),
+        "strategy": st.builds(
+            lambda shape: np.random.randn(*shape).astype('float32'),
+            shape=array_shapes(min_dims=1, max_dims=4, min_side=1, max_side=10)
+        ),
+        "expected_onnx_ops": ['Shape'],
+        "description": "Get tensor shape"
+    },
+
+    "shape_i": {
+        "build_graph": lambda x, i: ([x], x.shape[i]),
+        "strategy": st.builds(
+            lambda shape, i: (np.random.randn(*shape).astype('float32'), i),
+            shape=array_shapes(min_dims=2, max_dims=4, min_side=1, max_side=10),
+            i=st.integers(0, 3)
+        ),
+        "expected_onnx_ops": ['Shape', 'Gather'],
+        "description": "Get specific dimension"
+    },
+
+    # Reshape operations
+    "reshape": {
+        "build_graph": lambda x, new_shape: ([x], x.reshape(new_shape)),
+        "strategy": reshape_strategy(),  # Custom strategy
+        "expected_onnx_ops": ['Reshape'],
+        "description": "Reshape tensor"
+    },
+
+    "transpose": {
+        "build_graph": lambda x: ([x], x.T),
+        "strategy": st.builds(
+            lambda shape: np.random.randn(*shape).astype('float32'),
+            shape=st.tuples(st.integers(2, 10), st.integers(2, 10))
+        ),
+        "expected_onnx_ops": ['Transpose'],
+        "description": "Transpose matrix"
+    },
+
+    "dimshuffle_add_dim": {
+        "build_graph": lambda x: ([x], x.dimshuffle('x', 0)),
+        "strategy": st.builds(
+            lambda size: np.random.randn(size).astype('float32'),
+            size=st.integers(2, 20)
+        ),
+        "expected_onnx_ops": ['Unsqueeze'],
+        "description": "Add dimension via dimshuffle"
+    },
+
+    "dimshuffle_squeeze": {
+        "build_graph": lambda x: ([x], x.dimshuffle(0, 2)),
+        "strategy": st.builds(
+            lambda s1, s2: np.random.randn(s1, 1, s2).astype('float32'),
+            s1=st.integers(2, 10),
+            s2=st.integers(2, 10)
+        ),
+        "expected_onnx_ops": ['Squeeze'],
+        "description": "Remove dimension via dimshuffle"
+    },
+
+    # Join/Split operations
+    "concatenate": {
+        "build_graph": lambda a, b, axis: ([a, b], pt.concatenate([a, b], axis=axis)),
+        "strategy": concatenate_strategy(),  # Custom strategy
+        "expected_onnx_ops": ['Concat'],
+        "description": "Concatenate tensors"
+    },
+
+    "stack": {
+        "build_graph": lambda a, b: ([a, b], pt.stack([a, b], axis=0)),
+        "strategy": st.builds(
+            lambda shape: (
+                np.random.randn(*shape).astype('float32'),
+                np.random.randn(*shape).astype('float32')
+            ),
+            shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10)
+        ),
+        "expected_onnx_ops": ['Concat', 'Unsqueeze'],
+        "description": "Stack tensors"
+    },
+}
+
+
+# ============================================================================
+# REDUCTION OPERATIONS REGISTRY (Tier 3)
+# ============================================================================
+
+REDUCTION_OPERATIONS: Dict[str, Dict[str, Any]] = {
+    "sum": {
+        "build_graph": lambda x, axis: ([x], pt.sum(x, axis=axis)),
+        "strategy": tensor_with_axis_strategy(),
+        "expected_onnx_ops": ['ReduceSum'],
+        "description": "Sum reduction"
+    },
+
+    "prod": {
+        "build_graph": lambda x, axis: ([x], pt.prod(x, axis=axis)),
+        "strategy": tensor_with_axis_strategy(),
+        "expected_onnx_ops": ['ReduceProd'],
+        "description": "Product reduction"
+    },
+
+    "max": {
+        "build_graph": lambda x, axis: ([x], pt.max(x, axis=axis)),
+        "strategy": tensor_with_axis_strategy(),
+        "expected_onnx_ops": ['ReduceMax'],
+        "description": "Max reduction"
+    },
+
+    "min": {
+        "build_graph": lambda x, axis: ([x], pt.min(x, axis=axis)),
+        "strategy": tensor_with_axis_strategy(),
+        "expected_onnx_ops": ['ReduceMin'],
+        "description": "Min reduction"
+    },
+
+    "argmax": {
+        "build_graph": lambda x, axis: ([x], pt.argmax(x, axis=axis)),
+        "strategy": tensor_with_axis_strategy(allow_none=False),
+        "expected_onnx_ops": ['ArgMax'],
+        "description": "Argmax reduction"
+    },
+
+    "argmin": {
+        "build_graph": lambda x, axis: ([x], pt.argmin(x, axis=axis)),
+        "strategy": tensor_with_axis_strategy(allow_none=False),
+        "expected_onnx_ops": ['ArgMin'],
+        "description": "Argmin reduction"
+    },
+
+    "all": {
+        "build_graph": lambda x, axis: ([x], pt.all(x, axis=axis)),
+        "strategy": tensor_with_axis_strategy(dtype='bool'),
+        "expected_onnx_ops": ['ReduceMin'],  # All maps to ReduceMin for bool
+        "description": "Logical all reduction"
+    },
+
+    "any": {
+        "build_graph": lambda x, axis: ([x], pt.any(x, axis=axis)),
+        "strategy": tensor_with_axis_strategy(dtype='bool'),
+        "expected_onnx_ops": ['ReduceMax'],  # Any maps to ReduceMax for bool
+        "description": "Logical any reduction"
+    },
+}
+
+
+# ============================================================================
+# ALLOCATION OPERATIONS REGISTRY (Tier 3)
+# ============================================================================
+
+ALLOCATION_OPERATIONS: Dict[str, Dict[str, Any]] = {
+    "alloc_scalar": {
+        "build_graph": lambda val, *shape: ([], pt.alloc(val, *shape)),
+        "strategy": alloc_strategy(),
+        "expected_onnx_ops": ['Expand'],
+        "description": "Allocate tensor from scalar"
+    },
+
+    "alloc_empty": {
+        "build_graph": lambda *shape: ([], pt.AllocEmpty('float32')(*shape)),
+        "strategy": st.tuples(st.integers(2, 10), st.integers(2, 10)),
+        "expected_onnx_ops": ['ConstantOfShape'],
+        "description": "Allocate uninitialized tensor"
+    },
+
+    "make_vector": {
+        "build_graph": lambda a, b, c: ([a, b, c], pt.make_vector(a, b, c)),
+        "strategy": st.builds(
+            lambda: tuple(np.random.randn(3)),
+
+        ),
+        "expected_onnx_ops": ['Concat', 'Unsqueeze'],
+        "description": "Create vector from scalars"
+    },
+
+    "arange": {
+        "build_graph": lambda start, stop, step: ([], pt.arange(start, stop, step, dtype='int64')),
+        "strategy": arange_strategy(),
+        "expected_onnx_ops": ['Range'],
+        "description": "Create range tensor"
+    },
+}
+
+
+# ============================================================================
+# SUBTENSOR OPERATIONS REGISTRY
+# ============================================================================
+
+SUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
+    "slice_basic": {
+        "build_graph": lambda x: ([x], x[2:5]),
+        "strategy": st.builds(
+            lambda size: np.arange(size, dtype='float32'),
+            size=st.integers(10, 20)
+        ),
+        "expected_onnx_ops": ['Slice'],
+        "description": "Basic slicing"
+    },
+
+    "slice_multidim": {
+        "build_graph": lambda x: ([x], x[1:3, 2:4]),
+        "strategy": st.builds(
+            lambda s1, s2: np.arange(s1 * s2).reshape(s1, s2).astype('float32'),
+            s1=st.integers(5, 10),
+            s2=st.integers(5, 10)
+        ),
+        "expected_onnx_ops": ['Slice'],
+        "description": "Multi-dimensional slicing"
+    },
+
+    "slice_with_step": {
+        "build_graph": lambda x: ([x], x[::2]),
+        "strategy": st.builds(
+            lambda size: np.arange(size, dtype='float32'),
+            size=st.integers(10, 20)
+        ),
+        "expected_onnx_ops": ['Slice'],
+        "description": "Slicing with step"
+    },
+
+    "advanced_index": {
+        "build_graph": lambda x, indices: ([x], x[indices]),
+        "strategy": advanced_index_strategy(),
+        "expected_onnx_ops": ['Gather'],
+        "description": "Advanced indexing with integer array"
+    },
+}
+
+
+# ============================================================================
+# INCSUBTENSOR OPERATIONS REGISTRY
+# ============================================================================
+
+INCSUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
+    "set_subtensor": {
+        "build_graph": lambda x, values: ([x], pt.set_subtensor(x[2:5], values)),
+        "strategy": set_subtensor_strategy(),
+        "expected_onnx_ops": ['ScatterND', 'ScatterElements'],
+        "description": "Set subtensor values"
+    },
+
+    "inc_subtensor": {
+        "build_graph": lambda x, values: ([x], pt.inc_subtensor(x[2:5], values)),
+        "strategy": set_subtensor_strategy(),
+        "expected_onnx_ops": ['ScatterND', 'ScatterElements', 'Add'],
+        "description": "Increment subtensor values"
+    },
+}
+
+
+# ============================================================================
+# HYPOTHESIS STRATEGIES (Custom Helpers)
+# ============================================================================
+
+def tensor_with_axis_strategy(dtype='float32', allow_none=True):
+    """Generate tensor and valid axis for reduction operations."""
+    @st.composite
+    def strategy(draw):
+        # Generate shape
+        shape = draw(array_shapes(min_dims=2, max_dims=4, min_side=2, max_side=10))
+
+        # Generate tensor
+        if dtype == 'bool':
+            x = draw(arrays(dtype=np.bool_, shape=shape))
+        else:
+            x = draw(arrays(dtype=getattr(np, dtype), shape=shape))
+
+        # Generate axis
+        if allow_none:
+            axis = draw(st.one_of(
+                st.none(),
+                st.integers(0, len(shape) - 1),
+                st.lists(st.integers(0, len(shape) - 1), min_size=1, max_size=len(shape), unique=True)
+            ))
+        else:
+            axis = draw(st.integers(0, len(shape) - 1))
+
+        return x, axis
+
+    return strategy()
+
+
+def reshape_strategy():
+    """Generate tensor and compatible reshape target."""
+    @st.composite
+    def strategy(draw):
+        # Original shape
+        shape = draw(array_shapes(min_dims=2, max_dims=3, min_side=2, max_side=6))
+        total_size = int(np.prod(shape))
+
+        # Generate tensor
+        x = np.random.randn(*shape).astype('float32')
+
+        # Generate compatible new shape (same total size)
+        # For simplicity, use factorization of total_size
+        new_shape = draw(compatible_shape_for_size(total_size))
+
+        return x, new_shape
+
+    return strategy()
+
+
+def compatible_shape_for_size(total_size):
+    """Generate shapes compatible with given total size."""
+    # Simple factorizations
+    factors = factorize(total_size)
+    return st.sampled_from([
+        (total_size,),
+        (1, total_size),
+        (total_size, 1),
+        tuple(factors[:2]) if len(factors) >= 2 else (total_size,),
+    ])
+
+
+def factorize(n):
+    """Simple factorization for shape generation."""
+    factors = []
+    d = 2
+    while d * d <= n:
+        while n % d == 0:
+            factors.append(d)
+            n //= d
+        d += 1
+    if n > 1:
+        factors.append(n)
+    return factors if factors else [n]
+
+
+def concatenate_strategy():
+    """Generate tensors and axis for concatenation."""
+    @st.composite
+    def strategy(draw):
+        # Generate base shape
+        shape = draw(array_shapes(min_dims=2, max_dims=3, min_side=2, max_side=8))
+        axis = draw(st.integers(0, len(shape) - 1))
+
+        # Generate two tensors with same shape except along axis
+        a = np.random.randn(*shape).astype('float32')
+
+        b_shape = list(shape)
+        b_shape[axis] = draw(st.integers(2, 8))  # Different size along axis
+        b = np.random.randn(*b_shape).astype('float32')
+
+        # Create PyTensor variables with correct shapes
+        a_var = pt.tensor(f'a', dtype='float32', shape=(None,) * len(shape))
+        b_var = pt.tensor(f'b', dtype='float32', shape=(None,) * len(b_shape))
+
+        return a, b, axis
+
+    return strategy()
+
+
+def alloc_strategy():
+    """Generate scalar value and shape for Alloc."""
+    return st.builds(
+        lambda val, s1, s2: (val, s1, s2),
+        val=st.floats(-10, 10, allow_nan=False, allow_infinity=False),
+        s1=st.integers(2, 10),
+        s2=st.integers(2, 10)
+    )
+
+
+def arange_strategy():
+    """Generate valid start, stop, step for arange (constant only)."""
+    @st.composite
+    def strategy(draw):
+        start = draw(st.integers(0, 5))
+        stop = draw(st.integers(start + 2, start + 20))
+        step = draw(st.integers(1, 3))
+        return start, stop, step
+
+    return strategy()
+
+
+def set_subtensor_strategy():
+    """Generate tensor and values for set_subtensor."""
+    @st.composite
+    def strategy(draw):
+        size = draw(st.integers(10, 20))
+        x = np.arange(size, dtype='float32')
+        values = draw(arrays(dtype=np.float32, shape=(3,)))
+        return x, values
+
+    return strategy()
+
+
+def advanced_index_strategy():
+    """Generate tensor and integer indices for advanced indexing."""
+    @st.composite
+    def strategy(draw):
+        size = draw(st.integers(10, 20))
+        x = np.arange(size, dtype='float32')
+        indices = draw(st.lists(st.integers(0, size - 1), min_size=1, max_size=5))
+        return x, np.array(indices, dtype='int64')
+
+    return strategy()
+```
+
+
+---
+
+### Step 1.2: Property Tests Implementation
+
+**File**: `tests/link/onnx/test_properties_tier23.py` (create new)
+
+Implement property-based tests that use the operation registries - this replaces 36+ individual manual tests with 9 comprehensive property tests!
+
+```python
+"""Property-based tests for ONNX Tier 2-3 operations using Hypothesis."""
+
+import pytest
+import numpy as np
+import pytensor
+import pytensor.tensor as pt
+from hypothesis import given, strategies as st, settings
+
+# Import ONNX and skip if not available
+onnx = pytest.importorskip("onnx")
+ort = pytest.importorskip("onnxruntime")
+
+from tests.link.onnx.test_basic import compare_onnx_and_py, get_onnx_node_types
+from tests.link.onnx.strategies import (
+    SHAPE_OPERATIONS,
+    REDUCTION_OPERATIONS,
+    ALLOCATION_OPERATIONS,
+    SUBTENSOR_OPERATIONS,
+    INCSUBTENSOR_OPERATIONS,
+)
+
+
+# ============================================================================
+# PROPERTY TEST 1: Shape Operations
+# ============================================================================
+
+@given(
+    op_name=st.sampled_from(list(SHAPE_OPERATIONS.keys())),
+    data=st.data(),
+)
+@settings(max_examples=10, deadline=None)
+def test_shape_operations_correctness(op_name, data):
+    """Property test: All shape operations produce correct ONNX results.
+
+    Tests: reshape, transpose, dimshuffle, shape, join, stack, split
+    Total: ~8 operations × 10 examples = 80 test scenarios
+    """
+    op_config = SHAPE_OPERATIONS[op_name]
+
+    # Generate test inputs
+    test_data = data.draw(op_config['strategy'])
+    inputs_tuple = test_data if isinstance(test_data, tuple) else (test_data,)
+
+    # Build graph
+    graph_inputs, graph_output = op_config['build_graph'](*inputs_tuple)
+    if not isinstance(graph_inputs, list):
+        graph_inputs = [graph_inputs]
+
+    # Compare ONNX vs PyTensor
+    fn, result = compare_onnx_and_py(graph_inputs, graph_output, list(inputs_tuple))
+
+    # Verify ONNX nodes
     node_types = get_onnx_node_types(fn)
-    assert 'Shape' in node_types, \
-        f"Expected 'Shape' node in ONNX graph, got {node_types}"
+    expected_ops = op_config['expected_onnx_ops']
+    assert any(op in node_types for op in expected_ops), \
+        f"{op_name}: Expected {expected_ops}, got {node_types}"
 
-    # Verify shape is correct
-    assert tuple(result) == (3, 4), \
-        f"Expected shape (3, 4), got {tuple(result)}"
+
+# ============================================================================
+# PROPERTY TEST 2: Reduction Operations
+# ============================================================================
+
+@given(
+    op_name=st.sampled_from(list(REDUCTION_OPERATIONS.keys())),
+    data=st.data(),
+)
+@settings(max_examples=10, deadline=None)
+def test_reduction_operations_correctness(op_name, data):
+    """Property test: All reduction operations produce correct ONNX results.
+
+    Tests: sum, prod, max, min, argmax, argmin, all, any
+    Total: 8 operations × 10 examples = 80 test scenarios
+    """
+    op_config = REDUCTION_OPERATIONS[op_name]
+
+    # Generate tensor and axis
+    test_data = data.draw(op_config['strategy'])
+
+    # Build graph
+    graph_inputs, graph_output = op_config['build_graph'](*test_data)
+
+    # Compare ONNX vs PyTensor
+    fn, result = compare_onnx_and_py(graph_inputs, graph_output, [test_data[0]])
+
+    # Verify ONNX nodes
+    node_types = get_onnx_node_types(fn)
+    expected_ops = op_config['expected_onnx_ops']
+    assert any(op in node_types for op in expected_ops), \
+        f"{op_name}: Expected {expected_ops}, got {node_types}"
+
+
+# ============================================================================
+# PROPERTY TEST 3: Allocation Operations
+# ============================================================================
+
+@given(
+    op_name=st.sampled_from(list(ALLOCATION_OPERATIONS.keys())),
+    data=st.data(),
+)
+@settings(max_examples=10, deadline=None)
+def test_allocation_operations_correctness(op_name, data):
+    """Property test: All allocation operations produce correct ONNX results.
+
+    Tests: alloc, alloc_empty, make_vector, arange, eye
+    Total: ~4 operations × 10 examples = 40 test scenarios
+    """
+    op_config = ALLOCATION_OPERATIONS[op_name]
+
+    # Generate test data
+    test_data = data.draw(op_config['strategy'])
+    inputs_tuple = test_data if isinstance(test_data, tuple) else (test_data,)
+
+    # Build graph
+    graph_inputs, graph_output = op_config['build_graph'](*inputs_tuple)
+
+    # Prepare test inputs (many allocation ops have no inputs)
+    test_inputs = []
+
+    # Special handling for AllocEmpty (only check shape/dtype)
+    if op_name == "alloc_empty":
+        def assert_shape_dtype(a, b):
+            assert a.shape == b.shape
+            assert a.dtype == b.dtype
+
+        fn, result = compare_onnx_and_py(
+            graph_inputs, graph_output, test_inputs,
+            assert_fn=assert_shape_dtype
+        )
+    else:
+        fn, result = compare_onnx_and_py(graph_inputs, graph_output, test_inputs)
+
+    # Verify ONNX nodes
+    node_types = get_onnx_node_types(fn)
+    expected_ops = op_config['expected_onnx_ops']
+    assert any(op in node_types for op in expected_ops), \
+        f"{op_name}: Expected {expected_ops}, got {node_types}"
+
+
+# ============================================================================
+# PROPERTY TEST 4: Subtensor Operations
+# ============================================================================
+
+@given(
+    op_name=st.sampled_from(list(SUBTENSOR_OPERATIONS.keys())),
+    data=st.data(),
+)
+@settings(max_examples=10, deadline=None)
+def test_subtensor_operations_correctness(op_name, data):
+    """Property test: All subtensor operations produce correct ONNX results.
+
+    Tests: slice (basic, multidim, with step), advanced indexing
+    Total: 4 operations × 10 examples = 40 test scenarios
+    """
+    op_config = SUBTENSOR_OPERATIONS[op_name]
+
+    # Generate test data
+    test_data = data.draw(op_config['strategy'])
+    inputs_tuple = test_data if isinstance(test_data, tuple) else (test_data,)
+
+    # Build graph
+    graph_inputs, graph_output = op_config['build_graph'](*inputs_tuple)
+
+    # Test input is just the tensor
+    test_inputs = [inputs_tuple[0]]
+
+    # Compare ONNX vs PyTensor
+    fn, result = compare_onnx_and_py(graph_inputs, graph_output, test_inputs)
+
+    # Verify ONNX nodes
+    node_types = get_onnx_node_types(fn)
+    expected_ops = op_config['expected_onnx_ops']
+    assert any(op in node_types for op in expected_ops), \
+        f"{op_name}: Expected {expected_ops}, got {node_types}"
+
+
+# ============================================================================
+# PROPERTY TEST 5: IncSubtensor Operations
+# ============================================================================
+
+@given(
+    op_name=st.sampled_from(list(INCSUBTENSOR_OPERATIONS.keys())),
+    data=st.data(),
+)
+@settings(max_examples=10, deadline=None)
+def test_incsubtensor_operations_correctness(op_name, data):
+    """Property test: All inc/set_subtensor operations work correctly.
+
+    Tests: set_subtensor, inc_subtensor
+    Total: 2 operations × 10 examples = 20 test scenarios
+    """
+    op_config = INCSUBTENSOR_OPERATIONS[op_name]
+
+    # Generate test data
+    test_data = data.draw(op_config['strategy'])
+
+    # Build graph
+    graph_inputs, graph_output = op_config['build_graph'](*test_data)
+
+    # Test input (just the tensor)
+    test_inputs = [test_data[0]]
+
+    # Compare ONNX vs PyTensor
+    fn, result = compare_onnx_and_py(graph_inputs, graph_output, test_inputs)
+
+    # Verify ONNX nodes
+    node_types = get_onnx_node_types(fn)
+    expected_ops = op_config['expected_onnx_ops']
+    assert any(op in node_types for op in expected_ops), \
+        f"{op_name}: Expected {expected_ops}, got {node_types}"
+
+
+# ============================================================================
+# PROPERTY TEST 6: Dynamic Shape Handling
+# ============================================================================
+
+@given(data=st.data())
+@settings(max_examples=10, deadline=None)
+def test_dynamic_shape_handling(data):
+    """Property test: Operations handle dynamic shapes correctly."""
+    shape = data.draw(st.tuples(
+        st.integers(2, 10),
+        st.integers(2, 10),
+        st.integers(2, 10)
+    ))
+
+    # Dynamic shape tensor
+    x = pt.tensor('x', dtype='float32', shape=(None, None, None))
+    y = x.reshape((-1, shape[1] * shape[2]))
+    z = pt.sum(y, axis=1)
+
+    x_val = np.random.randn(*shape).astype('float32')
+
+    fn, result = compare_onnx_and_py([x], z, [x_val])
+
+    assert result.shape == (shape[0],)
+
+
+# ============================================================================
+# PROPERTY TEST 7: Axis Parameter Variations
+# ============================================================================
+
+@pytest.mark.parametrize("axis", [None, 0, 1, [0, 1], [1, 2]])
+def test_reduction_axis_variations(axis):
+    """Test reductions with different axis specifications."""
+    x = pt.tensor3('x', dtype='float32')
+    y = pt.sum(x, axis=axis)
+
+    x_val = np.random.randn(3, 4, 5).astype('float32')
+
+    fn, result = compare_onnx_and_py([x], y, [x_val])
+
+    assert 'ReduceSum' in get_onnx_node_types(fn)
+
+
+# ============================================================================
+# PROPERTY TEST 8: Edge Cases
+# ============================================================================
+
+def test_empty_array_handling():
+    """Test operations handle empty arrays correctly."""
+    x = pt.vector('x', dtype='float32')
+    y = x + 1
+
+    x_val = np.array([], dtype='float32')
+
+    fn, result = compare_onnx_and_py([x], y, [x_val])
+
+    assert result.shape == (0,)
+
+
+# ============================================================================
+# PROPERTY TEST 9: Broadcasting Preservation
+# ============================================================================
+
+@given(data=st.data())
+@settings(max_examples=10, deadline=None)
+def test_broadcasting_preserved(data):
+    """Property test: Broadcasting semantics preserved through ONNX."""
+    base_size = data.draw(st.integers(3, 8))
+
+    a = pt.vector('a', dtype='float32')
+    b = pt.matrix('b', dtype='float32')
+    c = a + b
+
+    a_val = np.random.randn(base_size).astype('float32')
+    b_val = np.random.randn(base_size, 1).astype('float32')
+
+    fn, result = compare_onnx_and_py([a, b], c, [a_val, b_val])
+
+    expected_shape = (base_size, base_size)
+    assert result.shape == expected_shape
 ```
 
-**Expected Failure Mode**:
-- Error type: `NotImplementedError`
-- Expected message: `No ONNX conversion available for: Shape`
+**Key Insight**: These 9 property tests replace 36+ individual manual tests and validate **~260 test scenarios** automatically!
 
-#### Test: `test_shape_i`
-**Purpose**: Test Shape_i extracts specific dimension
+---
 
-```python
-def test_shape_i():
-    """Test that Shape_i extracts specific dimension."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
+### Step 1.3: Targeted Infrastructure Tests
 
-    x = pt.matrix('x', dtype='float32')
-    s0 = x.shape[0]  # First dimension
-    s1 = x.shape[1]  # Second dimension
+**File**: `tests/link/onnx/test_tier23_infrastructure.py` (create new)
 
-    x_val = np.random.randn(3, 4).astype('float32')
-
-    # Test first dimension
-    fn0, result0 = compare_onnx_and_py([x], s0, [x_val])
-    assert result0 == 3, f"Expected dimension 0 to be 3, got {result0}"
-
-    # Test second dimension
-    fn1, result1 = compare_onnx_and_py([x], s1, [x_val])
-    assert result1 == 4, f"Expected dimension 1 to be 4, got {result1}"
-
-    # Verify ONNX uses Shape + Gather
-    node_types = get_onnx_node_types(fn0)
-    assert 'Shape' in node_types and 'Gather' in node_types, \
-        f"Expected 'Shape' and 'Gather' nodes, got {node_types}"
-```
-
-**Expected Failure Mode**: `NotImplementedError` for Shape_i
-
-#### Test: `test_specify_shape`
-**Purpose**: Test SpecifyShape for optimization hints
+Add targeted tests for specific edge cases:
 
 ```python
-def test_specify_shape():
-    """Test that SpecifyShape is handled (typically removed in ONNX export)."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
+"""Targeted infrastructure tests for Tier 2-3 operations."""
+
+import pytest
+import numpy as np
+import pytensor.tensor as pt
+
+onnx = pytest.importorskip("onnx")
+ort = pytest.importorskip("onnxruntime")
+
+from tests.link.onnx.test_basic import compare_onnx_and_py, get_onnx_node_types
+
+
+def test_specify_shape_is_removed():
+    """SpecifyShape should not create ONNX nodes."""
     from pytensor.tensor.shape import specify_shape
 
     x = pt.tensor('x', shape=(None, None), dtype='float32')
-    # Specify that x has shape (3, 4)
     x_specified = specify_shape(x, (3, 4))
-    y = x_specified + 1  # Use in computation
+    y = x_specified + 1
 
     x_val = np.random.randn(3, 4).astype('float32')
 
     fn, result = compare_onnx_and_py([x], y, [x_val])
 
-    # SpecifyShape should not create ONNX nodes (it's just a hint)
     node_types = get_onnx_node_types(fn)
-    # Should only have Add (for +1), no SpecifyShape node
-    assert 'Add' in node_types, f"Expected 'Add' node, got {node_types}"
-```
+    assert 'SpecifyShape' not in node_types
+    assert 'Add' in node_types
 
-**Expected Failure Mode**: May pass if SpecifyShape is already handled by graph rewrites
 
----
-
-### Test Category 2: Reshape Operations
-
-**Test File**: `tests/link/onnx/test_shape.py` (continued)
-**Purpose**: Test Reshape and DimShuffle operations
-
-#### Test: `test_reshape_basic`
-**Purpose**: Test basic reshape operation
-
-```python
-def test_reshape_basic():
-    """Test basic reshape operation."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.matrix('x', dtype='float32')
-    # Reshape from (2, 6) to (3, 4)
-    y = x.reshape((3, 4))
-
-    x_val = np.arange(12).reshape(2, 6).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    assert result.shape == (3, 4), \
-        f"Expected shape (3, 4), got {result.shape}"
-
-    # Verify ONNX uses Reshape
-    node_types = get_onnx_node_types(fn)
-    assert 'Reshape' in node_types, \
-        f"Expected 'Reshape' node, got {node_types}"
-```
-
-**Expected Failure Mode**: `NotImplementedError` for Reshape
-
-#### Test: `test_reshape_with_minus_one`
-**Purpose**: Test reshape with inferred dimension (-1)
-
-```python
 def test_reshape_with_minus_one():
-    """Test reshape with inferred dimension using -1."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
+    """Reshape with -1 (inferred dimension)."""
     x = pt.tensor('x', shape=(None, None, None), dtype='float32')
-
-    # Flatten to 1D (infer size)
-    y1 = x.reshape((-1,))
-
-    # Reshape to (6, -1) - infer second dimension
-    y2 = x.reshape((6, -1))
+    y = x.reshape((-1,))
 
     x_val = np.random.randn(2, 3, 4).astype('float32')
 
-    # Test flatten
-    fn1, result1 = compare_onnx_and_py([x], y1, [x_val])
-    assert result1.shape == (24,), \
-        f"Expected shape (24,), got {result1.shape}"
-
-    # Test inferred dimension
-    fn2, result2 = compare_onnx_and_py([x], y2, [x_val])
-    assert result2.shape == (6, 4), \
-        f"Expected shape (6, 4), got {result2.shape}"
-```
-
-**Expected Failure Mode**: May fail with handling of -1 dimension
-
-#### Test: `test_reshape_dynamic_shape`
-**Purpose**: Test reshape using another tensor's shape
-
-```python
-def test_reshape_dynamic_shape():
-    """Test reshape using dynamic shape from another tensor."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.vector('x', dtype='float32')
-    target = pt.matrix('target', dtype='float32')
-
-    # Reshape x to match target's shape
-    y = x.reshape(target.shape)
-
-    x_val = np.arange(12).astype('float32')
-    target_val = np.zeros((3, 4), dtype='float32')
-
-    fn, result = compare_onnx_and_py([x, target], y, [x_val, target_val])
-
-    assert result.shape == (3, 4), \
-        f"Expected shape (3, 4), got {result.shape}"
-```
-
-**Expected Failure Mode**: May fail with dynamic shape handling
-
-#### Test: `test_dimshuffle_transpose`
-**Purpose**: Test DimShuffle for transpose
-
-```python
-def test_dimshuffle_transpose():
-    """Test DimShuffle transpose operation."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.matrix('x', dtype='float32')
-    # Transpose
-    y = x.T
-
-    x_val = np.random.randn(3, 4).astype('float32')
-
     fn, result = compare_onnx_and_py([x], y, [x_val])
 
-    assert result.shape == (4, 3), \
-        f"Expected shape (4, 3), got {result.shape}"
+    assert result.shape == (24,)
+    assert 'Reshape' in get_onnx_node_types(fn)
 
-    # Verify ONNX uses Transpose
-    node_types = get_onnx_node_types(fn)
-    assert 'Transpose' in node_types, \
-        f"Expected 'Transpose' node, got {node_types}"
-```
 
-**Expected Failure Mode**: `NotImplementedError` for DimShuffle
+def test_arange_requires_constants():
+    """ARange requires constant inputs (ONNX limitation)."""
+    x = pt.arange(0, 10, 2, dtype='int64')
 
-#### Test: `test_dimshuffle_add_dim`
-**Purpose**: Test DimShuffle adding dimensions
+    fn, result = compare_onnx_and_py([], x, [])
 
-```python
-def test_dimshuffle_add_dim():
-    """Test DimShuffle adding dimensions (unsqueeze)."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.vector('x', dtype='float32')
-    # Add dimension at start
-    y = x.dimshuffle('x', 0)
-
-    x_val = np.random.randn(5).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    assert result.shape == (1, 5), \
-        f"Expected shape (1, 5), got {result.shape}"
-
-    # Verify ONNX uses Unsqueeze
-    node_types = get_onnx_node_types(fn)
-    assert 'Unsqueeze' in node_types, \
-        f"Expected 'Unsqueeze' node, got {node_types}"
-```
-
-**Expected Failure Mode**: May fail with 'x' notation handling
-
-#### Test: `test_dimshuffle_squeeze`
-**Purpose**: Test DimShuffle removing dimensions
-
-```python
-def test_dimshuffle_squeeze():
-    """Test DimShuffle removing dimensions (squeeze)."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    # Tensor with known broadcastable dimension
-    x = pt.tensor('x', shape=(None, 1, None), dtype='float32')
-    # Drop the middle dimension
-    y = x.dimshuffle(0, 2)
-
-    x_val = np.random.randn(3, 1, 4).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    assert result.shape == (3, 4), \
-        f"Expected shape (3, 4), got {result.shape}"
-
-    # Verify ONNX uses Squeeze
-    node_types = get_onnx_node_types(fn)
-    assert 'Squeeze' in node_types, \
-        f"Expected 'Squeeze' node, got {node_types}"
-```
-
-**Expected Failure Mode**: May fail with broadcastable dimension handling
-
-#### Test: `test_dimshuffle_complex`
-**Purpose**: Test complex DimShuffle (transpose + add/remove dims)
-
-```python
-@pytest.mark.parametrize("shuffle,input_shape,expected_shape", [
-    ((1, 'x', 0), (2, 3), (3, 1, 2)),           # Transpose + add dim
-    ((2, 1, 0), (2, 3, 4), (4, 3, 2)),          # Full transpose
-    (('x', 2, 1, 0, 'x'), (2, 3, 4), (1, 4, 3, 2, 1)),  # Complex
-])
-def test_dimshuffle_complex(shuffle, input_shape, expected_shape):
-    """Test complex DimShuffle patterns."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-    from pytensor.tensor.elemwise import DimShuffle
-
-    x = pt.tensor('x', shape=input_shape, dtype='float32')
-    y = DimShuffle(len(input_shape), shuffle)(x)
-
-    x_val = np.random.randn(*input_shape).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    assert result.shape == expected_shape, \
-        f"Expected shape {expected_shape}, got {result.shape}"
-```
-
-**Expected Failure Mode**: May fail with complex pattern handling
-
----
-
-### Test Category 3: Join/Split Operations
-
-**Test File**: `tests/link/onnx/test_shape.py` (continued)
-**Purpose**: Test Join, Stack, and Split operations
-
-#### Test: `test_join_vectors`
-**Purpose**: Test joining vectors
-
-```python
-def test_join_vectors():
-    """Test joining vectors along axis 0."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    a = pt.vector('a', dtype='float32')
-    b = pt.vector('b', dtype='float32')
-    c = pt.concatenate([a, b], axis=0)
-
-    a_val = np.array([1, 2, 3], dtype='float32')
-    b_val = np.array([4, 5, 6], dtype='float32')
-
-    fn, result = compare_onnx_and_py([a, b], c, [a_val, b_val])
-
-    expected = np.array([1, 2, 3, 4, 5, 6], dtype='float32')
+    expected = np.arange(0, 10, 2, dtype='int64')
     np.testing.assert_array_equal(result, expected)
+    assert 'Range' in get_onnx_node_types(fn)
 
-    # Verify ONNX uses Concat
-    node_types = get_onnx_node_types(fn)
-    assert 'Concat' in node_types, \
-        f"Expected 'Concat' node, got {node_types}"
-```
 
-**Expected Failure Mode**: `NotImplementedError` for Join
-
-#### Test: `test_join_matrices`
-**Purpose**: Test joining matrices along different axes
-
-```python
-@pytest.mark.parametrize("axis", [0, 1])
-def test_join_matrices(axis):
-    """Test joining matrices along different axes."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    a = pt.matrix('a', dtype='float32')
-    b = pt.matrix('b', dtype='float32')
-    c = pt.concatenate([a, b], axis=axis)
-
-    if axis == 0:
-        # Join vertically
-        a_val = np.array([[1, 2], [3, 4]], dtype='float32')
-        b_val = np.array([[5, 6]], dtype='float32')
-        expected_shape = (3, 2)
-    else:
-        # Join horizontally
-        a_val = np.array([[1, 2], [3, 4]], dtype='float32')
-        b_val = np.array([[5], [6]], dtype='float32')
-        expected_shape = (2, 3)
-
-    fn, result = compare_onnx_and_py([a, b], c, [a_val, b_val])
-
-    assert result.shape == expected_shape, \
-        f"Expected shape {expected_shape}, got {result.shape}"
-```
-
-**Expected Failure Mode**: May fail with axis handling
-
-#### Test: `test_stack`
-**Purpose**: Test stacking tensors (adds new dimension)
-
-```python
-def test_stack():
-    """Test stacking tensors to create new dimension."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    a = pt.vector('a', dtype='float32')
-    b = pt.vector('b', dtype='float32')
-    c = pt.stack([a, b], axis=0)
-
-    a_val = np.array([1, 2, 3], dtype='float32')
-    b_val = np.array([4, 5, 6], dtype='float32')
-
-    fn, result = compare_onnx_and_py([a, b], c, [a_val, b_val])
-
-    expected = np.array([[1, 2, 3], [4, 5, 6]], dtype='float32')
-    np.testing.assert_array_equal(result, expected)
-    assert result.shape == (2, 3), \
-        f"Expected shape (2, 3), got {result.shape}"
-```
-
-**Expected Failure Mode**: May fail - Stack may use Join + Reshape
-
-#### Test: `test_split`
-**Purpose**: Test splitting tensor
-
-```python
-def test_split():
-    """Test splitting tensor into parts."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
+def test_negative_indexing():
+    """Slicing with negative indices."""
     x = pt.vector('x', dtype='float32')
-    # Split into 3 parts
-    splits = pt.split(x, [2, 4], 3, axis=0)
-
-    x_val = np.array([1, 2, 3, 4, 5, 6], dtype='float32')
-
-    fn, results = compare_onnx_and_py([x], splits, [x_val])
-
-    # Should have 3 outputs
-    assert len(results) == 3, \
-        f"Expected 3 outputs, got {len(results)}"
-
-    expected_0 = np.array([1, 2], dtype='float32')
-    expected_1 = np.array([3, 4], dtype='float32')
-    expected_2 = np.array([5, 6], dtype='float32')
-
-    np.testing.assert_array_equal(results[0], expected_0)
-    np.testing.assert_array_equal(results[1], expected_1)
-    np.testing.assert_array_equal(results[2], expected_2)
-
-    # Verify ONNX uses Split
-    node_types = get_onnx_node_types(fn)
-    assert 'Split' in node_types, \
-        f"Expected 'Split' node, got {node_types}"
-```
-
-**Expected Failure Mode**: `NotImplementedError` for Split
-
----
-
-### Test Category 4: Subtensor (Indexing) Operations
-
-**Test File**: `tests/link/onnx/test_subtensor.py`
-**Purpose**: Test basic and advanced indexing operations
-
-#### Test: `test_subtensor_simple_slice`
-**Purpose**: Test basic slicing
-
-```python
-def test_subtensor_simple_slice():
-    """Test basic slicing operation."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.vector('x', dtype='float32')
-    y = x[2:5]  # Simple slice
-
-    x_val = np.arange(10, dtype='float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = np.array([2, 3, 4], dtype='float32')
-    np.testing.assert_array_equal(result, expected)
-
-    # Verify ONNX uses Slice
-    node_types = get_onnx_node_types(fn)
-    assert 'Slice' in node_types, \
-        f"Expected 'Slice' node, got {node_types}"
-```
-
-**Expected Failure Mode**: `NotImplementedError` for Subtensor
-
-#### Test: `test_subtensor_multi_dim_slice`
-**Purpose**: Test multi-dimensional slicing
-
-```python
-def test_subtensor_multi_dim_slice():
-    """Test multi-dimensional slicing."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.matrix('x', dtype='float32')
-    y = x[1:3, 2:4]  # Slice both dimensions
-
-    x_val = np.arange(20).reshape(4, 5).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = x_val[1:3, 2:4]
-    np.testing.assert_array_equal(result, expected)
-    assert result.shape == (2, 2), \
-        f"Expected shape (2, 2), got {result.shape}"
-```
-
-**Expected Failure Mode**: May fail with multi-dim slicing
-
-#### Test: `test_subtensor_with_step`
-**Purpose**: Test slicing with step
-
-```python
-def test_subtensor_with_step():
-    """Test slicing with step parameter."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.vector('x', dtype='float32')
-    y = x[::2]  # Every other element
-
-    x_val = np.arange(10, dtype='float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = np.array([0, 2, 4, 6, 8], dtype='float32')
-    np.testing.assert_array_equal(result, expected)
-```
-
-**Expected Failure Mode**: May fail with step handling
-
-#### Test: `test_subtensor_negative_indices`
-**Purpose**: Test negative indexing
-
-```python
-def test_subtensor_negative_indices():
-    """Test negative indexing (from end)."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.vector('x', dtype='float32')
-    y = x[-3:]  # Last 3 elements
+    y = x[-3:]
 
     x_val = np.arange(10, dtype='float32')
 
@@ -662,533 +952,43 @@ def test_subtensor_negative_indices():
 
     expected = np.array([7, 8, 9], dtype='float32')
     np.testing.assert_array_equal(result, expected)
-```
 
-**Expected Failure Mode**: May fail with negative index handling
 
-#### Test: `test_advanced_subtensor_list`
-**Purpose**: Test advanced indexing with list
-
-```python
-def test_advanced_subtensor_list():
-    """Test advanced indexing with integer list."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-    from pytensor.tensor.subtensor import advanced_subtensor1
-
-    x = pt.vector('x', dtype='float32')
-    indices = [1, 3, 5]
-    y = advanced_subtensor1(x, indices)
-
-    x_val = np.arange(10, dtype='float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = np.array([1, 3, 5], dtype='float32')
-    np.testing.assert_array_equal(result, expected)
-
-    # Verify ONNX uses Gather
-    node_types = get_onnx_node_types(fn)
-    assert 'Gather' in node_types, \
-        f"Expected 'Gather' node, got {node_types}"
-```
-
-**Expected Failure Mode**: `NotImplementedError` for AdvancedSubtensor1
-
----
-
-### Test Category 5: IncSubtensor Operations
-
-**Test File**: `tests/link/onnx/test_subtensor.py` (continued)
-**Purpose**: Test set/increment subtensor operations
-
-#### Test: `test_set_subtensor_slice`
-**Purpose**: Test set_subtensor with slice
-
-```python
-def test_set_subtensor_slice():
-    """Test set_subtensor operation with slice."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-    from pytensor.tensor.subtensor import set_subtensor
-
-    x = pt.vector('x', dtype='float32')
-    y = set_subtensor(x[2:5], np.array([10, 20, 30], dtype='float32'))
-
-    x_val = np.arange(10, dtype='float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = x_val.copy()
-    expected[2:5] = [10, 20, 30]
-    np.testing.assert_array_equal(result, expected)
-
-    # Verify ONNX uses ScatterND or ScatterElements
-    node_types = get_onnx_node_types(fn)
-    assert any(op in node_types for op in ['ScatterND', 'ScatterElements']), \
-        f"Expected 'ScatterND' or 'ScatterElements' node, got {node_types}"
-```
-
-**Expected Failure Mode**: `NotImplementedError` for IncSubtensor
-
-#### Test: `test_inc_subtensor_slice`
-**Purpose**: Test inc_subtensor (increment values)
-
-```python
-def test_inc_subtensor_slice():
-    """Test inc_subtensor operation (increment)."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-    from pytensor.tensor.subtensor import inc_subtensor
-
-    x = pt.vector('x', dtype='float32')
-    y = inc_subtensor(x[2:5], np.array([10, 20, 30], dtype='float32'))
-
-    x_val = np.arange(10, dtype='float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = x_val.copy()
-    expected[2:5] += [10, 20, 30]
-    np.testing.assert_array_equal(result, expected)
-```
-
-**Expected Failure Mode**: May fail with increment handling
-
----
-
-### Test Category 6: Reduction Operations
-
-**Test File**: `tests/link/onnx/test_math.py`
-**Purpose**: Test reduction operations (Sum, Prod, Max, Min, etc.)
-
-#### Test: `test_sum_basic`
-**Purpose**: Test sum reduction
-
-```python
-@pytest.mark.parametrize("axis", [None, 0, 1])
-def test_sum_basic(axis):
-    """Test sum reduction with different axes."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
+def test_reduction_keepdims():
+    """Reduction with keepdims parameter."""
     x = pt.matrix('x', dtype='float32')
-    y = pt.sum(x, axis=axis)
+    y = pt.sum(x, axis=1, keepdims=True)
 
     x_val = np.random.randn(3, 4).astype('float32')
 
     fn, result = compare_onnx_and_py([x], y, [x_val])
 
-    expected = np.sum(x_val, axis=axis)
-    np.testing.assert_allclose(result, expected, rtol=1e-5)
-
-    # Verify ONNX uses ReduceSum
-    node_types = get_onnx_node_types(fn)
-    assert 'ReduceSum' in node_types, \
-        f"Expected 'ReduceSum' node, got {node_types}"
+    assert result.shape == (3, 1)
 ```
-
-**Expected Failure Mode**: `NotImplementedError` for Sum/CAReduce
-
-#### Test: `test_prod`
-**Purpose**: Test product reduction
-
-```python
-def test_prod():
-    """Test product reduction."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.matrix('x', dtype='float32')
-    y = pt.prod(x, axis=1)
-
-    x_val = np.random.randn(3, 4).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = np.prod(x_val, axis=1)
-    np.testing.assert_allclose(result, expected, rtol=1e-5)
-
-    node_types = get_onnx_node_types(fn)
-    assert 'ReduceProd' in node_types
-```
-
-**Expected Failure Mode**: `NotImplementedError` for Prod
-
-#### Test: `test_max_min_reductions`
-**Purpose**: Test max/min reductions
-
-```python
-@pytest.mark.parametrize("op,onnx_op", [
-    (pt.max, 'ReduceMax'),
-    (pt.min, 'ReduceMin'),
-])
-def test_max_min_reductions(op, onnx_op):
-    """Test max and min reductions."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.matrix('x', dtype='float32')
-    y = op(x, axis=0)
-
-    x_val = np.random.randn(3, 4).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    if op == pt.max:
-        expected = np.max(x_val, axis=0)
-    else:
-        expected = np.min(x_val, axis=0)
-
-    np.testing.assert_array_equal(result, expected)
-
-    node_types = get_onnx_node_types(fn)
-    assert onnx_op in node_types
-```
-
-**Expected Failure Mode**: `NotImplementedError` for Max/Min
-
-#### Test: `test_argmax_argmin`
-**Purpose**: Test argmax/argmin operations
-
-```python
-@pytest.mark.parametrize("op,onnx_op", [
-    (pt.argmax, 'ArgMax'),
-    (pt.argmin, 'ArgMin'),
-])
-def test_argmax_argmin(op, onnx_op):
-    """Test argmax and argmin operations."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.matrix('x', dtype='float32')
-    y = op(x, axis=1)
-
-    x_val = np.random.randn(3, 4).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    if op == pt.argmax:
-        expected = np.argmax(x_val, axis=1)
-    else:
-        expected = np.argmin(x_val, axis=1)
-
-    np.testing.assert_array_equal(result, expected)
-
-    # Verify output dtype is int64
-    assert result.dtype == np.int64, \
-        f"Expected dtype int64, got {result.dtype}"
-
-    node_types = get_onnx_node_types(fn)
-    assert onnx_op in node_types
-```
-
-**Expected Failure Mode**: `NotImplementedError` for Argmax/Argmin
-
-#### Test: `test_logical_reductions`
-**Purpose**: Test All/Any reductions
-
-```python
-@pytest.mark.parametrize("op,np_op,onnx_op", [
-    (pt.all, np.all, 'ReduceMin'),
-    (pt.any, np.any, 'ReduceMax'),
-])
-def test_logical_reductions(op, np_op, onnx_op):
-    """Test All and Any logical reductions."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.matrix('x', dtype='bool')
-    y = op(x, axis=1)
-
-    x_val = np.random.rand(3, 4) > 0.5  # Random boolean array
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = np_op(x_val, axis=1)
-    np.testing.assert_array_equal(result, expected)
-
-    node_types = get_onnx_node_types(fn)
-    # All/Any map to ReduceMin/ReduceMax for boolean types
-    assert onnx_op in node_types
-```
-
-**Expected Failure Mode**: `NotImplementedError` for All/Any
-
-#### Test: `test_multiple_axes_reduction`
-**Purpose**: Test reduction over multiple axes
-
-```python
-def test_multiple_axes_reduction():
-    """Test reduction over multiple axes."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.tensor3('x', dtype='float32')
-    y = pt.sum(x, axis=[0, 2])  # Sum over first and last axes
-
-    x_val = np.random.randn(2, 3, 4).astype('float32')
-
-    fn, result = compare_onnx_and_py([x], y, [x_val])
-
-    expected = np.sum(x_val, axis=(0, 2))
-    np.testing.assert_allclose(result, expected, rtol=1e-5)
-```
-
-**Expected Failure Mode**: May fail with multi-axis handling
 
 ---
 
-### Test Category 7: Allocation Operations
+### Step 1.4: Integration Tests
 
-**Test File**: `tests/link/onnx/test_tensor_basic.py`
-**Purpose**: Test tensor allocation operations
+**File**: `tests/link/onnx/test_tier23_integration.py` (create new)
 
-#### Test: `test_alloc_scalar`
-**Purpose**: Test Alloc broadcasting scalar to shape
+Test realistic combined operations:
 
 ```python
-def test_alloc_scalar():
-    """Test Alloc broadcasting scalar to shape."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
+"""Integration tests for Tier 2-3 operations."""
 
-    # Broadcast scalar 5.0 to shape (3, 4)
-    x = pt.alloc(5.0, 3, 4)
+import pytest
+import numpy as np
+import pytensor.tensor as pt
 
-    fn, result = compare_onnx_and_py([], x, [])
+onnx = pytest.importorskip("onnx")
+ort = pytest.importorskip("onnxruntime")
 
-    expected = np.full((3, 4), 5.0, dtype='float64')
-    np.testing.assert_array_equal(result, expected)
+from tests.link.onnx.test_basic import compare_onnx_and_py
 
-    # Verify ONNX uses Expand or ConstantOfShape
-    node_types = get_onnx_node_types(fn)
-    assert any(op in node_types for op in ['Expand', 'ConstantOfShape']), \
-        f"Expected 'Expand' or 'ConstantOfShape' node, got {node_types}"
-```
 
-**Expected Failure Mode**: `NotImplementedError` for Alloc
-
-#### Test: `test_alloc_with_scalar_input`
-**Purpose**: Test Alloc with scalar input variable
-
-```python
-def test_alloc_with_scalar_input():
-    """Test Alloc with scalar input variable."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    a = pt.scalar('a', dtype='float32')
-    x = pt.alloc(a, 2, 3)
-
-    a_val = np.array(7.0, dtype='float32')
-
-    fn, result = compare_onnx_and_py([a], x, [a_val])
-
-    expected = np.full((2, 3), 7.0, dtype='float32')
-    np.testing.assert_array_equal(result, expected)
-```
-
-**Expected Failure Mode**: May fail with dynamic value allocation
-
-#### Test: `test_alloc_empty`
-**Purpose**: Test AllocEmpty (uninitialized allocation)
-
-```python
-def test_alloc_empty():
-    """Test AllocEmpty creates array with correct shape and dtype."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.AllocEmpty('float32')(3, 4)
-
-    # Custom assertion: only check shape and dtype, not values
-    def assert_shape_dtype(a, b):
-        assert a.shape == b.shape, f"Shape mismatch: {a.shape} vs {b.shape}"
-        assert a.dtype == b.dtype, f"Dtype mismatch: {a.dtype} vs {b.dtype}"
-
-    fn, result = compare_onnx_and_py([], x, [], assert_fn=assert_shape_dtype)
-
-    assert result.shape == (3, 4)
-    assert result.dtype == np.float32
-```
-
-**Expected Failure Mode**: `NotImplementedError` for AllocEmpty
-
-#### Test: `test_make_vector`
-**Purpose**: Test MakeVector creating vector from scalars
-
-```python
-def test_make_vector():
-    """Test MakeVector creates vector from scalars."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    a = pt.scalar('a', dtype='float32')
-    b = pt.scalar('b', dtype='float32')
-    c = pt.scalar('c', dtype='float32')
-
-    x = pt.make_vector(a, b, c)
-
-    a_val = np.array(1.0, dtype='float32')
-    b_val = np.array(2.0, dtype='float32')
-    c_val = np.array(3.0, dtype='float32')
-
-    fn, result = compare_onnx_and_py([a, b, c], x, [a_val, b_val, c_val])
-
-    expected = np.array([1.0, 2.0, 3.0], dtype='float32')
-    np.testing.assert_array_equal(result, expected)
-
-    # Verify ONNX uses Concat or similar
-    node_types = get_onnx_node_types(fn)
-    # May use Concat, Reshape, or custom pattern
-```
-
-**Expected Failure Mode**: `NotImplementedError` for MakeVector
-
-#### Test: `test_arange_basic`
-**Purpose**: Test ARange with constant parameters
-
-```python
-def test_arange_basic():
-    """Test ARange with constant parameters."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    # ARange requires constant inputs in ONNX
-    x = pt.arange(0, 10, 2, dtype='int64')
-
-    fn, result = compare_onnx_and_py([], x, [])
-
-    expected = np.arange(0, 10, 2, dtype='int64')
-    np.testing.assert_array_equal(result, expected)
-
-    # Verify ONNX uses Range
-    node_types = get_onnx_node_types(fn)
-    assert 'Range' in node_types, \
-        f"Expected 'Range' node, got {node_types}"
-```
-
-**Expected Failure Mode**: `NotImplementedError` for ARange
-
-#### Test: `test_arange_negative_step`
-**Purpose**: Test ARange with negative step (descending)
-
-```python
-def test_arange_negative_step():
-    """Test ARange with negative step (descending)."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.arange(10, 0, -2, dtype='int64')
-
-    fn, result = compare_onnx_and_py([], x, [])
-
-    expected = np.arange(10, 0, -2, dtype='int64')
-    np.testing.assert_array_equal(result, expected)
-```
-
-**Expected Failure Mode**: May fail with negative step
-
-#### Test: `test_arange_empty`
-**Purpose**: Test ARange with empty range
-
-```python
-def test_arange_empty():
-    """Test ARange with empty range."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    # Empty range: stop < start with positive step
-    x = pt.arange(10, 5, 1, dtype='int64')
-
-    fn, result = compare_onnx_and_py([], x, [])
-
-    expected = np.arange(10, 5, 1, dtype='int64')
-    assert result.shape == (0,), f"Expected empty array, got shape {result.shape}"
-```
-
-**Expected Failure Mode**: May fail with empty range handling
-
-#### Test: `test_eye_basic`
-**Purpose**: Test Eye creating identity matrix
-
-```python
-def test_eye_basic():
-    """Test Eye creates identity matrix."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    x = pt.eye(4, dtype='float32')
-
-    fn, result = compare_onnx_and_py([], x, [])
-
-    expected = np.eye(4, dtype='float32')
-    np.testing.assert_array_equal(result, expected)
-
-    # Verify ONNX uses EyeLike or custom pattern
-    node_types = get_onnx_node_types(fn)
-    # May use various patterns depending on implementation
-```
-
-**Expected Failure Mode**: `NotImplementedError` for Eye
-
-#### Test: `test_eye_non_square`
-**Purpose**: Test Eye with non-square matrix
-
-```python
-def test_eye_non_square():
-    """Test Eye with non-square matrix."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
-    # 3 rows, 5 columns
-    x = pt.eye(3, 5, dtype='float32')
-
-    fn, result = compare_onnx_and_py([], x, [])
-
-    expected = np.eye(3, 5, dtype='float32')
-    np.testing.assert_array_equal(result, expected)
-    assert result.shape == (3, 5)
-```
-
-**Expected Failure Mode**: May fail with non-square handling
-
----
-
-### Test Category 8: Integration Tests
-
-**Test File**: `tests/link/onnx/test_integration.py`
-**Purpose**: Test combined operations in realistic scenarios
-
-#### Test: `test_mean_variance`
-**Purpose**: Test computing mean and variance (uses multiple ops)
-
-```python
-def test_mean_variance():
-    """Test computing mean and variance using reductions."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
+def test_mean_variance_computation():
+    """Compute mean and variance using reductions."""
     x = pt.matrix('x', dtype='float32')
     mean = pt.mean(x, axis=0)
     var = pt.var(x, axis=0)
@@ -1204,48 +1004,25 @@ def test_mean_variance():
 
     np.testing.assert_allclose(mean_result, expected_mean, rtol=1e-5)
     np.testing.assert_allclose(var_result, expected_var, rtol=1e-5)
-```
 
-**Expected Failure Mode**: May fail if reductions not implemented
 
-#### Test: `test_normalize_rows`
-**Purpose**: Test normalizing matrix rows (reshape + reductions)
-
-```python
 def test_normalize_rows():
-    """Test normalizing matrix rows using reshape and reductions."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
+    """Normalize matrix rows."""
     x = pt.matrix('x', dtype='float32')
-    # Normalize each row: x / sum(x, axis=1, keepdims=True)
     row_sums = pt.sum(x, axis=1, keepdims=True)
     normalized = x / row_sums
 
-    x_val = np.random.rand(5, 10).astype('float32') + 0.1  # Avoid zeros
+    x_val = np.random.rand(5, 10).astype('float32') + 0.1
 
     fn, result = compare_onnx_and_py([x], normalized, [x_val])
 
-    # Verify each row sums to 1
     row_sums_result = np.sum(result, axis=1)
     np.testing.assert_allclose(row_sums_result, np.ones(5), rtol=1e-5)
-```
 
-**Expected Failure Mode**: May fail with keepdims handling
 
-#### Test: `test_reshape_and_slice`
-**Purpose**: Test combined reshape and slicing
-
-```python
 def test_reshape_and_slice():
-    """Test combined reshape and slicing operations."""
-    import pytensor.tensor as pt
-    import numpy as np
-    from tests.link.onnx.test_basic import compare_onnx_and_py
-
+    """Combined reshape and slicing."""
     x = pt.vector('x', dtype='float32')
-    # Reshape to 3x4, then take middle 2 rows
     reshaped = x.reshape((3, 4))
     sliced = reshaped[1:3, :]
 
@@ -1255,9 +1032,26 @@ def test_reshape_and_slice():
 
     expected = np.arange(12).reshape(3, 4)[1:3, :].astype('float32')
     np.testing.assert_array_equal(result, expected)
-```
 
-**Expected Failure Mode**: May fail if either reshape or slicing fails
+
+def test_softmax_implementation():
+    """Softmax using Tier 2-3 ops."""
+    x = pt.matrix('x', dtype='float32')
+
+    x_max = pt.max(x, axis=1, keepdims=True)
+    x_shifted = x - x_max
+    exp_x = pt.exp(x_shifted)
+    sum_exp = pt.sum(exp_x, axis=1, keepdims=True)
+    softmax = exp_x / sum_exp
+
+    x_val = np.random.randn(5, 10).astype('float32')
+
+    fn, result = compare_onnx_and_py([x], softmax, [x_val])
+
+    row_sums = np.sum(result, axis=1)
+    np.testing.assert_allclose(row_sums, np.ones(5), rtol=1e-5)
+    assert np.all(result >= 0) and np.all(result <= 1)
+```
 
 ---
 
