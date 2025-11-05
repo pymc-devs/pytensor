@@ -107,3 +107,106 @@ def test_specify_shape_passthrough():
 
     expected = x_val * 2.0
     np.testing.assert_allclose(result, expected, rtol=1e-5)
+
+
+def test_concatenate_axis0():
+    """Test concatenate operation along axis 0."""
+    x = pt.matrix('x', dtype='float32')
+    y = pt.matrix('y', dtype='float32')
+    z = pt.concatenate([x, y], axis=0)
+
+    x_val = np.random.randn(2, 3).astype('float32')
+    y_val = np.random.randn(4, 3).astype('float32')
+
+    fn, result = compare_onnx_and_py([x, y], z, [x_val, y_val])
+
+    expected = np.concatenate([x_val, y_val], axis=0)
+    np.testing.assert_allclose(result, expected, rtol=1e-5)
+
+    node_types = get_onnx_node_types(fn)
+    assert 'Concat' in node_types
+
+
+def test_concatenate_axis1():
+    """Test concatenate operation along axis 1."""
+    x = pt.matrix('x', dtype='float32')
+    y = pt.matrix('y', dtype='float32')
+    z = pt.concatenate([x, y], axis=1)
+
+    x_val = np.random.randn(3, 2).astype('float32')
+    y_val = np.random.randn(3, 4).astype('float32')
+
+    fn, result = compare_onnx_and_py([x, y], z, [x_val, y_val])
+
+    expected = np.concatenate([x_val, y_val], axis=1)
+    np.testing.assert_allclose(result, expected, rtol=1e-5)
+
+    node_types = get_onnx_node_types(fn)
+    assert 'Concat' in node_types
+
+
+def test_stack_axis0():
+    """Test stack operation along axis 0."""
+    x = pt.vector('x', dtype='float32')
+    y = pt.vector('y', dtype='float32')
+    z = pt.stack([x, y], axis=0)
+
+    x_val = np.array([1.0, 2.0, 3.0], dtype='float32')
+    y_val = np.array([4.0, 5.0, 6.0], dtype='float32')
+
+    fn, result = compare_onnx_and_py([x, y], z, [x_val, y_val])
+
+    expected = np.stack([x_val, y_val], axis=0)
+    np.testing.assert_allclose(result, expected, rtol=1e-5)
+
+    node_types = get_onnx_node_types(fn)
+    # Stack uses Join which maps to Concat, along with Unsqueeze
+    assert 'Concat' in node_types or 'Unsqueeze' in node_types
+
+
+def test_split_equal():
+    """Test split operation with equal sizes."""
+    from pytensor.tensor.basic import split
+
+    x = pt.vector('x', dtype='float32')
+    splits_var = pt.constant([2, 2, 2], dtype='int64')
+    a, b, c = split(x, splits_var, n_splits=3, axis=0)
+
+    x_val = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype='float32')
+
+    fn, results = compare_onnx_and_py([x], [a, b, c], [x_val])
+
+    expected_a = x_val[:2]
+    expected_b = x_val[2:4]
+    expected_c = x_val[4:]
+
+    np.testing.assert_allclose(results[0], expected_a, rtol=1e-5)
+    np.testing.assert_allclose(results[1], expected_b, rtol=1e-5)
+    np.testing.assert_allclose(results[2], expected_c, rtol=1e-5)
+
+    node_types = get_onnx_node_types(fn)
+    assert 'Split' in node_types
+
+
+def test_split_unequal():
+    """Test split operation with unequal sizes."""
+    from pytensor.tensor.basic import split
+
+    x = pt.vector('x', dtype='float32')
+    splits_var = pt.constant([3, 2, 1], dtype='int64')
+    a, b, c = split(x, splits_var, n_splits=3, axis=0)
+
+    x_val = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], dtype='float32')
+
+    fn, results = compare_onnx_and_py([x], [a, b, c], [x_val])
+
+    expected_a = x_val[:3]
+    expected_b = x_val[3:5]
+    expected_c = x_val[5:]
+
+    np.testing.assert_allclose(results[0], expected_a, rtol=1e-5)
+    np.testing.assert_allclose(results[1], expected_b, rtol=1e-5)
+    np.testing.assert_allclose(results[2], expected_c, rtol=1e-5)
+
+    node_types = get_onnx_node_types(fn)
+    assert 'Split' in node_types

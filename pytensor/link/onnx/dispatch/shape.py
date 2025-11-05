@@ -5,7 +5,10 @@ from onnx import helper, numpy_helper
 
 from pytensor.link.onnx.dispatch.basic import onnx_funcify
 from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape, Reshape
+from pytensor.tensor.basic import Join, Split
 from pytensor.graph.basic import Constant
+from pytensor.tensor.exceptions import NotScalarConstantError
+from pytensor.tensor.basic import get_scalar_constant_value
 
 
 @onnx_funcify.register(type(None))
@@ -256,3 +259,115 @@ def onnx_funcify_Reshape(op, node, get_var_name, **kwargs):
         )
 
         return reshape_node
+
+
+@onnx_funcify.register(Join)
+def onnx_funcify_Join(op, node, get_var_name, **kwargs):
+    """Convert Join op to ONNX Concat node.
+
+    Join concatenates tensors along a specified axis.
+    The first input (node.inputs[0]) is the axis (as a scalar tensor).
+    The remaining inputs (node.inputs[1:]) are the tensors to concatenate.
+
+    ONNX Concat requires the axis as an attribute (not input), so we need
+    to extract the constant axis value.
+    """
+    axis_input = node.inputs[0]
+    tensor_inputs = node.inputs[1:]
+
+    # Extract axis value - it must be constant
+    try:
+        axis = get_scalar_constant_value(axis_input)
+        axis = int(axis)
+    except NotScalarConstantError:
+        raise NotImplementedError(
+            "Join with non-constant axis is not supported for ONNX export. "
+            "The axis must be a constant integer value."
+        )
+
+    # Get tensor input names
+    input_names = [get_var_name(inp) for inp in tensor_inputs]
+    output_name = get_var_name(node.outputs[0])
+
+    # Create ONNX Concat node
+    concat_node = helper.make_node(
+        'Concat',
+        inputs=input_names,
+        outputs=[output_name],
+        name=f"Concat_{output_name}",
+        axis=axis,
+    )
+
+    return concat_node
+
+
+@onnx_funcify.register(Split)
+def onnx_funcify_Split(op, node, get_var_name, **kwargs):
+    """Convert Split op to ONNX Split node.
+
+    Split partitions a tensor along a specified axis.
+    PyTensor Split takes: (tensor, axis, splits_size) as inputs
+    where splits_size defines the size of each output chunk.
+
+    ONNX Split takes the tensor as input and axis/split as attributes.
+    """
+    # Get input tensor
+    input_tensor = node.inputs[0]
+    axis_input = node.inputs[1]
+    splits_input = node.inputs[2]
+
+    input_name = get_var_name(input_tensor)
+    output_names = [get_var_name(out) for out in node.outputs]
+
+    # Extract axis - must be constant
+    try:
+        axis = get_scalar_constant_value(axis_input)
+        axis = int(axis)
+    except NotScalarConstantError:
+        raise NotImplementedError(
+            "Split with non-constant axis is not supported for ONNX export."
+        )
+
+    # Extract splits - must be constant
+    # splits_input is typically a 1D array of split sizes
+    # In ONNX opset 13+, split is provided as a second input tensor (not attribute)
+    if isinstance(splits_input, Constant):
+        splits_data = splits_input.data
+        if np.isscalar(splits_data):
+            # If it's a scalar, it means uniform split
+            # Number of splits = number of outputs
+            splits = np.array([int(splits_data)] * len(node.outputs), dtype=np.int64)
+        else:
+            # It's an array of split sizes
+            splits = np.array([int(s) for s in splits_data], dtype=np.int64)
+    else:
+        raise NotImplementedError(
+            "Split with non-constant split sizes is not supported for ONNX export. "
+            "The split sizes must be constant values."
+        )
+
+    # Create constant node for split sizes (required in opset 13+)
+    split_name = f"{output_names[0]}_split"
+    split_constant = helper.make_node(
+        'Constant',
+        inputs=[],
+        outputs=[split_name],
+        name=f"Constant_{split_name}",
+        value=helper.make_tensor(
+            name=f"{split_name}_value",
+            data_type=helper.TensorProto.INT64,
+            dims=[len(splits)],
+            vals=splits.tolist(),
+        )
+    )
+
+    # Create ONNX Split node with split as an input
+    split_node = helper.make_node(
+        'Split',
+        inputs=[input_name, split_name],
+        outputs=output_names,
+        name=f"Split_{output_names[0]}",
+        axis=axis,
+    )
+
+    return [split_constant, split_node]
