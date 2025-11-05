@@ -30,7 +30,7 @@ from numpy.lib.array_utils import normalize_axis_index
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph, Op
-from pytensor.graph.basic import Constant, equal_computations
+from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
@@ -923,44 +923,32 @@ def local_join_to_repeat(fgraph, node):
     concatenate([x[None], x[None], x[None]], axis=0) -> repeat(x[None], 3, axis=0)
     """
     # Extract axis and the tensors being joined
-    axis_sym, *tensors = node.inputs
+    axis, *tensors = node.inputs
+
+    # Optimization only applies when axis is constant
+    if not isinstance(axis, Constant):
+        return None
+
+    # Extract the Python integer from the constant
+    axis_val = axis.data
 
     # Need at least 2 tensors to consider optimization
     if len(tensors) <= 1:
-        return None
+        return
 
-    # Extract (and normalize) axis as Python int
-    try:
-        axis_val = int(get_scalar_constant_value(axis_sym, only_process_constants=True))
-    except NotScalarConstantError:
-        return None
+    # Check if all tensors are identical
+    if not all(t == tensors[0] for t in tensors[1:]):
+        return
 
-    # Get first tensor and check if ndim is known
-    first = tensors[0]
-    ndim = first.ndim
-    if ndim is None:
-        return None
-
-    # Normalize negative axes (e.g., -1 -> ndim-1)
-    axis_val = axis_val % ndim
-
-    # All inputs must be structurally the same tensor
-    # Use equal_computations to check structural equality, not symbolic ==
-    for t in tensors[1:]:
-        if not equal_computations([t], [first]):
-            return None
-
-    # Only apply when size along join axis is statically 1
-    # (e.g., x[None] has a guaranteed 1 at that axis)
-    shp = first.type.shape  # tuple of ints/None
-    if shp is None or axis_val >= len(shp) or shp[axis_val] != 1:
-        return None
+    # Only optimize if the tensor has size 1 along the join axis
+    first_tensor = tensors[0]
+    if first_tensor.type.shape[axis_val] != 1:
+        return
 
     # Replace with repeat operation
     from pytensor.tensor.extra_ops import repeat
 
-    n = len(tensors)
-    result = repeat(first, n, axis=axis_val)
+    result = repeat(first_tensor, len(tensors), axis_val)
 
     # Preserve debugging information
     copy_stack_trace(node.outputs[0], result)
