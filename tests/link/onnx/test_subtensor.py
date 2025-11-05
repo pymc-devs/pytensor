@@ -138,11 +138,10 @@ class TestSubtensorNegativeIndices:
 
 
 class TestAdvancedSubtensor:
-    """Test advanced indexing (when implemented)."""
+    """Test advanced indexing."""
 
-    @pytest.mark.skip(reason="AdvancedSubtensor1 needs testing")
     def test_integer_array_indexing(self):
-        """Test integer array indexing: x[[0, 2, 5]]"""
+        """Test integer array indexing: x[indices]"""
         x = pt.vector('x', dtype='float32')
         indices = pt.vector('indices', dtype='int64')
         y = x[indices]
@@ -153,6 +152,27 @@ class TestAdvancedSubtensor:
         fn, result = compare_onnx_and_py([x, indices], y, [x_val, indices_val])
         expected = x_val[indices_val]
         np.testing.assert_array_equal(result, expected)
+
+        # Verify ONNX uses Gather operation
+        node_types = get_onnx_node_types(fn)
+        assert 'Gather' in node_types, f"Expected 'Gather' in {node_types}"
+
+    def test_integer_array_indexing_2d(self):
+        """Test integer array indexing on 2D array: x[indices, :]"""
+        x = pt.matrix('x', dtype='float32')
+        indices = pt.vector('indices', dtype='int64')
+        y = x[indices]
+
+        x_val = np.arange(20, dtype='float32').reshape(4, 5)
+        indices_val = np.array([0, 2], dtype='int64')
+
+        fn, result = compare_onnx_and_py([x, indices], y, [x_val, indices_val])
+        expected = x_val[indices_val]
+        np.testing.assert_array_equal(result, expected)
+
+        # Verify ONNX uses Gather operation
+        node_types = get_onnx_node_types(fn)
+        assert 'Gather' in node_types, f"Expected 'Gather' in {node_types}"
 
 
 class TestIncSubtensor:

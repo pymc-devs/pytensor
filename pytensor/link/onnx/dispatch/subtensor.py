@@ -5,7 +5,7 @@ import numpy as np
 from onnx import helper, numpy_helper
 
 from pytensor.link.onnx.dispatch.basic import onnx_funcify
-from pytensor.tensor.subtensor import Subtensor, AdvancedSubtensor1, IncSubtensor
+from pytensor.tensor.subtensor import Subtensor, AdvancedSubtensor, AdvancedSubtensor1, IncSubtensor
 from pytensor.graph.basic import Constant
 
 
@@ -183,6 +183,50 @@ def onnx_funcify_AdvancedSubtensor1(op, node, get_var_name, **kwargs):
         outputs=[output_name],
         name=f"Gather_{output_name}",
         axis=0,  # AdvancedSubtensor1 operates on axis 0
+    )
+
+    return gather_node
+
+
+@onnx_funcify.register(AdvancedSubtensor)
+def onnx_funcify_AdvancedSubtensor(op, node, get_var_name, **kwargs):
+    """Convert AdvancedSubtensor to ONNX Gather or GatherND node.
+
+    AdvancedSubtensor implements NumPy's advanced indexing.
+
+    For simple cases (single integer array on axis 0), this maps to Gather.
+    For complex multi-dimensional indexing, this would require GatherND.
+
+    For now, we handle the simple case: x[indices] where indices is a vector.
+    This is the most common case and matches AdvancedSubtensor1 behavior.
+
+    Example:
+        x = pt.vector('x')
+        indices = pt.vector('indices', dtype='int64')
+        y = x[indices]  # AdvancedSubtensor (gets optimized to AdvancedSubtensor1 in normal mode)
+
+        ONNX: Gather(x, indices, axis=0)
+    """
+    # For now, we only handle the simple case that matches AdvancedSubtensor1
+    # More complex cases would need GatherND or multiple operations
+
+    if len(node.inputs) != 2:
+        raise NotImplementedError(
+            f"AdvancedSubtensor with {len(node.inputs)} inputs not supported. "
+            f"Only simple integer array indexing (2 inputs) is currently supported."
+        )
+
+    data_name = get_var_name(node.inputs[0])
+    indices_name = get_var_name(node.inputs[1])
+    output_name = get_var_name(node.outputs[0])
+
+    # Use Gather for simple indexing on axis 0
+    gather_node = helper.make_node(
+        'Gather',
+        inputs=[data_name, indices_name],
+        outputs=[output_name],
+        name=f"Gather_{output_name}",
+        axis=0,  # Simple indexing operates on axis 0
     )
 
     return gather_node
