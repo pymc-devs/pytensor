@@ -242,9 +242,195 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
 
     ONNX doesn't have in-place ops, so we use ScatterElements or ScatterND.
 
-    This is complex and not yet implemented.
+    For basic slicing (e.g., x[2:5] = values), we implement this as:
+    1. Extract the slice range as indices using ONNX Range
+    2. Use ScatterElements to scatter the values at those indices
+    3. For inc_subtensor, first extract current values, add, then scatter
+
+    This implementation handles the basic slicing case with constant bounds.
+    Advanced cases (negative indices, dynamic bounds, multi-dim) are not yet supported.
     """
-    raise NotImplementedError(
-        "IncSubtensor (set_subtensor/inc_subtensor) not yet implemented for ONNX export. "
-        "This operation requires ScatterElements or ScatterND which is complex to implement."
+    from pytensor.tensor.subtensor import indices_from_subtensor
+
+    # Inputs: [data, values, ...slice_bounds...]
+    # Output: modified data
+    data_name = get_var_name(node.inputs[0])
+    values_name = get_var_name(node.inputs[1])
+    output_name = get_var_name(node.outputs[0])
+
+    # Reconstruct the actual slice objects from op.idx_list and node.inputs[2:]
+    actual_indices = indices_from_subtensor(node.inputs[2:], op.idx_list)
+
+    # For now, only handle simple 1D slicing on the first axis
+    # x[start:stop] = values
+    if len(actual_indices) != 1 or not isinstance(actual_indices[0], slice):
+        raise NotImplementedError(
+            f"IncSubtensor only supports basic 1D slicing for ONNX export. "
+            f"Got indices: {actual_indices}. "
+            f"Only single-axis slice objects (e.g., x[2:5]) are supported."
+        )
+
+    slice_obj = actual_indices[0]
+    start = slice_obj.start
+    stop = slice_obj.stop
+    step = slice_obj.step
+
+    # Extract constant values
+    if start is None:
+        start_val = 0
+    elif isinstance(start, Constant):
+        start_val = int(start.data)
+    elif isinstance(start, int):
+        start_val = start
+    else:
+        raise NotImplementedError(
+            "IncSubtensor with dynamic start index not yet supported"
+        )
+
+    if stop is None:
+        raise NotImplementedError(
+            "IncSubtensor with unbounded stop not yet supported"
+        )
+    elif isinstance(stop, Constant):
+        stop_val = int(stop.data)
+    elif isinstance(stop, int):
+        stop_val = stop
+    else:
+        raise NotImplementedError(
+            "IncSubtensor with dynamic stop index not yet supported"
+        )
+
+    if step is None:
+        step_val = 1
+    elif isinstance(step, Constant):
+        step_val = int(step.data)
+    elif isinstance(step, int):
+        step_val = step
+    else:
+        raise NotImplementedError(
+            "IncSubtensor with dynamic step not yet supported"
+        )
+
+    if step_val != 1:
+        raise NotImplementedError(
+            "IncSubtensor with step != 1 not yet supported"
+        )
+
+    if start_val < 0 or stop_val < 0:
+        raise NotImplementedError(
+            "IncSubtensor with negative indices not yet supported"
+        )
+
+    # Build ONNX graph:
+    # 1. Create indices tensor: [start, start+1, ..., stop-1]
+    # 2. For set_subtensor: ScatterElements(data, indices, values, axis=0)
+    # 3. For inc_subtensor: current = Gather(data, indices),
+    #                       new_values = Add(current, values),
+    #                       ScatterElements(data, indices, new_values, axis=0)
+
+    nodes = []
+
+    # Create Range node to generate indices [start, start+1, ..., stop-1]
+    indices_name = f"{output_name}_indices"
+    start_name = f"{output_name}_start"
+    stop_name = f"{output_name}_stop"
+    step_name = f"{output_name}_step"
+
+    # Create Constant nodes for start, stop, step
+    start_const = helper.make_node(
+        'Constant',
+        inputs=[],
+        outputs=[start_name],
+        name=f"Constant_{start_name}",
+        value=helper.make_tensor(
+            name=f"{start_name}_value",
+            data_type=helper.TensorProto.INT64,
+            dims=[],
+            vals=[start_val],
+        )
     )
+    nodes.append(start_const)
+
+    stop_const = helper.make_node(
+        'Constant',
+        inputs=[],
+        outputs=[stop_name],
+        name=f"Constant_{stop_name}",
+        value=helper.make_tensor(
+            name=f"{stop_name}_value",
+            data_type=helper.TensorProto.INT64,
+            dims=[],
+            vals=[stop_val],
+        )
+    )
+    nodes.append(stop_const)
+
+    step_const = helper.make_node(
+        'Constant',
+        inputs=[],
+        outputs=[step_name],
+        name=f"Constant_{step_name}",
+        value=helper.make_tensor(
+            name=f"{step_name}_value",
+            data_type=helper.TensorProto.INT64,
+            dims=[],
+            vals=[step_val],
+        )
+    )
+    nodes.append(step_const)
+
+    # Range node: creates [start, start+1, ..., stop-1]
+    range_node = helper.make_node(
+        'Range',
+        inputs=[start_name, stop_name, step_name],
+        outputs=[indices_name],
+        name=f"Range_{indices_name}",
+    )
+    nodes.append(range_node)
+
+    # Handle set_subtensor vs inc_subtensor
+    if op.set_instead_of_inc:
+        # set_subtensor: directly scatter the new values
+        scatter_node = helper.make_node(
+            'ScatterElements',
+            inputs=[data_name, indices_name, values_name],
+            outputs=[output_name],
+            name=f"ScatterElements_{output_name}",
+            axis=0,
+        )
+        nodes.append(scatter_node)
+    else:
+        # inc_subtensor: gather current, add, then scatter
+        # 1. Gather current values
+        current_values_name = f"{output_name}_current"
+        gather_node = helper.make_node(
+            'Gather',
+            inputs=[data_name, indices_name],
+            outputs=[current_values_name],
+            name=f"Gather_{current_values_name}",
+            axis=0,
+        )
+        nodes.append(gather_node)
+
+        # 2. Add current + new values
+        sum_values_name = f"{output_name}_sum"
+        add_node = helper.make_node(
+            'Add',
+            inputs=[current_values_name, values_name],
+            outputs=[sum_values_name],
+            name=f"Add_{sum_values_name}",
+        )
+        nodes.append(add_node)
+
+        # 3. Scatter the summed values
+        scatter_node = helper.make_node(
+            'ScatterElements',
+            inputs=[data_name, indices_name, sum_values_name],
+            outputs=[output_name],
+            name=f"ScatterElements_{output_name}",
+            axis=0,
+        )
+        nodes.append(scatter_node)
+
+    # Return list of nodes
+    return nodes

@@ -176,9 +176,8 @@ class TestAdvancedSubtensor:
 
 
 class TestIncSubtensor:
-    """Test set_subtensor and inc_subtensor (when implemented)."""
+    """Test set_subtensor and inc_subtensor."""
 
-    @pytest.mark.skip(reason="IncSubtensor not yet implemented")
     def test_set_subtensor(self):
         """Test set_subtensor: x[2:5] = values"""
         x = pt.vector('x', dtype='float32')
@@ -193,3 +192,28 @@ class TestIncSubtensor:
         expected = x_val.copy()
         expected[2:5] = values_val
         np.testing.assert_array_equal(result, expected)
+
+        # Verify ONNX uses ScatterElements operation
+        node_types = get_onnx_node_types(fn)
+        assert 'ScatterElements' in node_types, f"Expected 'ScatterElements' in {node_types}"
+
+    def test_inc_subtensor(self):
+        """Test inc_subtensor: x[2:5] += values"""
+        x = pt.vector('x', dtype='float32')
+        values = pt.vector('values', dtype='float32')
+        y = pt.inc_subtensor(x[2:5], values)
+
+        x_val = np.arange(10, dtype='float32')
+        values_val = np.array([1, 2, 3], dtype='float32')
+
+        fn, result = compare_onnx_and_py([x, values], y, [x_val, values_val])
+
+        expected = x_val.copy()
+        expected[2:5] += values_val
+        np.testing.assert_array_equal(result, expected)
+
+        # Verify ONNX uses Gather, Add, and ScatterElements operations
+        node_types = get_onnx_node_types(fn)
+        assert 'Gather' in node_types, f"Expected 'Gather' in {node_types}"
+        assert 'Add' in node_types, f"Expected 'Add' in {node_types}"
+        assert 'ScatterElements' in node_types, f"Expected 'ScatterElements' in {node_types}"
