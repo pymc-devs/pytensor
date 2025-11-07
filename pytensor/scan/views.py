@@ -170,3 +170,46 @@ def foldr(fn, sequences, outputs_info, non_sequences=None, mode=None, name=None)
         mode=mode,
         name=name,
     )
+
+
+def filter(
+    fn,
+    sequences,
+    non_sequences=None,
+    go_backwards=False,
+    mode=None,
+    name=None,
+):
+    """Construct a `Scan` `Op` that functions like `filter`.
+
+    Parameters
+    ----------
+    fn : callable
+        Predicate function returning a boolean tensor.
+    sequences : list
+        Sequences to filter.
+    non_sequences : list
+        Non-iterated arguments passed to `fn`.
+    go_backwards : bool
+        Whether to iterate in reverse.
+    mode : str or None
+        See ``scan``.
+    name : str or None
+        See ``scan``.
+    """
+    mask, _ = scan(
+        fn=fn,
+        sequences=sequences,
+        outputs_info=None,
+        non_sequences=non_sequences,
+        go_backwards=go_backwards,
+        mode=mode,
+        name=f"{name or ''}_mask",
+    )
+
+    if isinstance(sequences, (list, tuple)):
+        filtered_sequences = [seq[mask] for seq in sequences]
+    else:
+        filtered_sequences = sequences[mask]
+
+    return filtered_sequences

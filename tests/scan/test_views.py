@@ -133,3 +133,23 @@ def test_foldr_memory_consumption():
     gx = grad(o, x)
     f2 = function([], gx)
     utt.assert_allclose(f2(), np.ones((10,)))
+
+
+def test_filter():
+    import pytensor.tensor as pt
+
+    v = pt.vector("v")
+
+    def fn(x):
+        return pt.eq(x % 2, 0)
+
+    from pytensor.scan.views import filter as pt_filter
+
+    filtered = pt_filter(fn, v)
+    f = function([v], filtered, allow_input_downcast=True)
+
+    rng = np.random.default_rng(utt.fetch_seed())
+    vals = rng.integers(0, 10, size=(10,))
+    expected = vals[vals % 2 == 0]
+    result = f(vals)
+    utt.assert_allclose(expected, result)
