@@ -1,0 +1,1100 @@
+# Phase 1: Elemwise Operations Registry TDD Implementation Plan
+
+## Overview
+
+Create the `ELEMWISE_OPERATIONS` registry and associated Hypothesis strategies for 18 element-wise operations. This phase establishes the infrastructure for property-based testing of elemwise operations without writing the actual tests yet.
+
+## Current State Analysis
+
+### Current Testing Landscape:
+- Testing framework: pytest with Hypothesis (configured in tests/link/onnx/conftest.py)
+- Available test utilities:
+  - `compare_onnx_and_py()` at tests/link/onnx/test_basic.py:30
+  - `get_onnx_node_types()` at tests/link/onnx/test_basic.py:107
+- Existing registry pattern: tests/link/onnx/strategies.py with REDUCTION_OPERATIONS and ALLOCATION_OPERATIONS
+- Test fixtures/mocks: Hypothesis strategies for tensor generation
+
+### Current Elemwise Implementation:
+- 18 elemwise operations implemented via single dispatcher at pytensor/link/onnx/dispatch/elemwise.py:34
+- Mapping: `SCALAR_OP_TO_ONNX` dictionary at pytensor/link/onnx/dispatch/elemwise.py:10-31
+- Operations: Add, Mul, Sub, TrueDiv, IntDiv, Neg, Abs, Exp, Log, Sqrt, Pow, Floor, Ceil, RoundHalfToEven, RoundHalfAwayFromZero, Maximum, Minimum, Clip
+
+### Current Elemwise Tests:
+- 14 manual tests in tests/link/onnx/test_elemwise.py
+- Test coverage: binary ops (add, mul, sub, div), unary ops (neg, abs, exp, log, sqrt), rounding ops (floor, ceil, round), comparison ops (maximum, minimum)
+- Missing property-based tests
+
+## Desired End State
+
+A complete `ELEMWISE_OPERATIONS` registry in tests/link/onnx/strategies.py with:
+- 18 operation configurations following the established registry pattern
+- Supporting Hypothesis strategies for generating compatible test data
+- Proper categorization of operations (binary, unary, special constraints)
+- Comprehensive documentation of each operation's expected behavior
+
+### Key Discoveries:
+- Registry pattern established at tests/link/onnx/strategies.py:248-304
+- Each registry entry requires: build_graph, strategy, expected_onnx_ops, description
+- Composite strategies use `@st.composite` decorator at tests/link/onnx/strategies.py:44
+
+## What We're NOT Testing/Implementing
+
+- Not implementing the actual property tests (that's Phase 2)
+- Not testing broadcasting behavior yet (Phase 2)
+- Not modifying ONNX backend implementation (only test infrastructure)
+- Not testing complex dtype interactions (focus on float32)
+- Not implementing validation logic (just registry structure)
+
+## TDD Approach
+
+### Test Design Philosophy:
+- Tests verify that registry entries are well-formed and usable
+- Each registry entry should be testable in isolation
+- Strategies should generate valid, diverse test data
+- Registry structure should match existing patterns exactly
+
+---
+
+## Phase 1: Test Design & Implementation
+
+### Overview
+Write comprehensive tests that validate the registry structure before implementing it. These tests will fail initially because the registry doesn't exist yet.
+
+### Test Categories:
+
+#### 1. Registry Structure Tests
+**Test File**: `tests/link/onnx/test_strategies.py` (new file)
+**Purpose**: Validate that the ELEMWISE_OPERATIONS registry is well-formed and complete
+
+**Test Cases to Write:**
+
+##### Test: `test_elemwise_registry_exists`
+**Purpose**: Verify the ELEMWISE_OPERATIONS registry exists and is importable
+**Test Data**: N/A (import test)
+**Expected Behavior**: Registry should be importable from strategies module
+**Assertions**: Registry exists and is a dictionary
+
+```python
+def test_elemwise_registry_exists():
+    """
+    Test that ELEMWISE_OPERATIONS registry exists and is accessible.
+
+    This test verifies:
+    - Registry is defined in strategies module
+    - Registry is a dictionary
+    - Registry is not empty
+    """
+    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+
+    assert isinstance(ELEMWISE_OPERATIONS, dict), \
+        "ELEMWISE_OPERATIONS should be a dictionary"
+    assert len(ELEMWISE_OPERATIONS) > 0, \
+        "ELEMWISE_OPERATIONS should not be empty"
+```
+
+**Expected Failure Mode**:
+- Error type: ImportError or AttributeError
+- Expected message: "cannot import name 'ELEMWISE_OPERATIONS'" or "module has no attribute 'ELEMWISE_OPERATIONS'"
+
+##### Test: `test_elemwise_registry_completeness`
+**Purpose**: Verify all 18 elemwise operations are registered
+**Test Data**: List of expected operation names
+**Expected Behavior**: Registry contains all required operations
+**Assertions**: Each operation name is present in registry
+
+```python
+def test_elemwise_registry_completeness():
+    """
+    Test that all 18 elemwise operations are registered.
+
+    This test verifies:
+    - All expected operations are present
+    - No unexpected operations are present (optional)
+    - Operation names follow naming conventions
+    """
+    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+
+    expected_ops = {
+        # Binary operations
+        'add', 'mul', 'sub', 'div', 'int_div', 'pow',
+        # Unary operations
+        'neg', 'abs', 'exp', 'log', 'sqrt',
+        # Rounding operations
+        'floor', 'ceil', 'round',
+        # Element-wise comparison operations
+        'maximum', 'minimum', 'clip'
+    }
+
+    actual_ops = set(ELEMWISE_OPERATIONS.keys())
+    missing_ops = expected_ops - actual_ops
+    extra_ops = actual_ops - expected_ops
+
+    assert missing_ops == set(), \
+        f"Missing operations in registry: {missing_ops}"
+    # Note: extra_ops is OK, but document why if present
+```
+
+**Expected Failure Mode**:
+- Error type: AssertionError
+- Expected message: "Missing operations in registry: {'add', 'mul', ...}"
+
+##### Test: `test_elemwise_registry_entry_structure`
+**Purpose**: Verify each registry entry has required fields
+**Test Data**: N/A (structure validation)
+**Expected Behavior**: Each entry has build_graph, strategy, expected_onnx_ops, description
+**Assertions**: All required fields present with correct types
+
+```python
+@pytest.mark.parametrize("op_name", [
+    'add', 'mul', 'sub', 'div', 'int_div', 'pow',
+    'neg', 'abs', 'exp', 'log', 'sqrt',
+    'floor', 'ceil', 'round',
+    'maximum', 'minimum', 'clip'
+])
+def test_elemwise_registry_entry_structure(op_name):
+    """
+    Test that each registry entry has required fields with correct types.
+
+    This test verifies:
+    - Entry has 'build_graph' (callable)
+    - Entry has 'strategy' (hypothesis strategy)
+    - Entry has 'expected_onnx_ops' (list of strings)
+    - Entry has 'description' (string)
+    """
+    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+
+    entry = ELEMWISE_OPERATIONS[op_name]
+
+    # Check all required fields present
+    required_fields = {'build_graph', 'strategy', 'expected_onnx_ops', 'description'}
+    actual_fields = set(entry.keys())
+    missing_fields = required_fields - actual_fields
+
+    assert missing_fields == set(), \
+        f"{op_name}: Missing required fields: {missing_fields}"
+
+    # Check field types
+    assert callable(entry['build_graph']), \
+        f"{op_name}: 'build_graph' should be callable"
+    assert isinstance(entry['expected_onnx_ops'], list), \
+        f"{op_name}: 'expected_onnx_ops' should be a list"
+    assert all(isinstance(op, str) for op in entry['expected_onnx_ops']), \
+        f"{op_name}: 'expected_onnx_ops' should contain strings"
+    assert isinstance(entry['description'], str), \
+        f"{op_name}: 'description' should be a string"
+```
+
+**Expected Failure Mode**:
+- Error type: KeyError or AssertionError
+- Expected message: "KeyError: 'add'" or "Missing required fields: {'build_graph', ...}"
+
+#### 2. Strategy Validation Tests
+**Test File**: `tests/link/onnx/test_strategies.py`
+**Purpose**: Validate that Hypothesis strategies generate valid test data
+
+**Test Cases to Write:**
+
+##### Test: `test_binary_op_strategy_generates_valid_data`
+**Purpose**: Verify strategy generates two compatible tensors for binary ops
+**Test Data**: Generated from strategy
+**Expected Behavior**: Strategy produces two float32 arrays
+**Assertions**: Arrays have correct dtype and compatible shapes
+
+```python
+@given(data=st.data())
+@settings(max_examples=5, deadline=None)
+def test_binary_op_strategy_generates_valid_data(data):
+    """
+    Test that binary operation strategies generate valid tensor pairs.
+
+    This test verifies:
+    - Strategy generates two arrays
+    - Arrays have float32 dtype
+    - Arrays have compatible shapes (for broadcasting)
+    - Arrays contain finite values
+    """
+    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+
+    # Test with 'add' as representative binary op
+    op_config = ELEMWISE_OPERATIONS['add']
+    test_inputs = data.draw(op_config['strategy'])
+
+    assert isinstance(test_inputs, tuple), \
+        "Binary op strategy should return tuple"
+    assert len(test_inputs) >= 2, \
+        "Binary op strategy should return at least 2 arrays"
+
+    x_val, y_val = test_inputs[0], test_inputs[1]
+
+    assert x_val.dtype == np.float32, \
+        f"Expected float32, got {x_val.dtype}"
+    assert y_val.dtype == np.float32, \
+        f"Expected float32, got {y_val.dtype}"
+    assert np.all(np.isfinite(x_val)), \
+        "Generated data should be finite"
+    assert np.all(np.isfinite(y_val)), \
+        "Generated data should be finite"
+```
+
+**Expected Failure Mode**:
+- Error type: KeyError, AttributeError, or AssertionError
+- Expected message: "KeyError: 'add'" or "'strategy' is not a valid Hypothesis strategy"
+
+##### Test: `test_unary_op_strategy_generates_valid_data`
+**Purpose**: Verify strategy generates one tensor for unary ops
+**Test Data**: Generated from strategy
+**Expected Behavior**: Strategy produces one float32 array
+**Assertions**: Array has correct dtype
+
+```python
+@given(data=st.data())
+@settings(max_examples=5, deadline=None)
+def test_unary_op_strategy_generates_valid_data(data):
+    """
+    Test that unary operation strategies generate valid tensors.
+
+    This test verifies:
+    - Strategy generates one array (or tuple with one array)
+    - Array has float32 dtype
+    - Array contains finite values
+    """
+    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+
+    # Test with 'neg' as representative unary op
+    op_config = ELEMWISE_OPERATIONS['neg']
+    test_inputs = data.draw(op_config['strategy'])
+
+    # Handle both tuple and direct array returns
+    if isinstance(test_inputs, tuple):
+        x_val = test_inputs[0]
+    else:
+        x_val = test_inputs
+
+    assert x_val.dtype == np.float32, \
+        f"Expected float32, got {x_val.dtype}"
+    assert np.all(np.isfinite(x_val)), \
+        "Generated data should be finite"
+```
+
+**Expected Failure Mode**:
+- Error type: KeyError or AssertionError
+- Expected message: "KeyError: 'neg'"
+
+##### Test: `test_constrained_op_strategies_respect_constraints`
+**Purpose**: Verify strategies for operations with constraints (log, sqrt, pow) generate valid inputs
+**Test Data**: Generated from strategy
+**Expected Behavior**: Strategies respect operation constraints
+**Assertions**: Data satisfies operation preconditions
+
+```python
+@given(data=st.data())
+@settings(max_examples=10, deadline=None)
+def test_log_strategy_generates_positive_values(data):
+    """
+    Test that log strategy generates positive values.
+
+    This test verifies:
+    - Strategy generates positive values (log requires x > 0)
+    - Values are not too close to zero (numerical stability)
+    """
+    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+
+    op_config = ELEMWISE_OPERATIONS['log']
+    test_inputs = data.draw(op_config['strategy'])
+
+    if isinstance(test_inputs, tuple):
+        x_val = test_inputs[0]
+    else:
+        x_val = test_inputs
+
+    assert np.all(x_val > 0), \
+        "Log operation requires positive inputs"
+    assert np.all(x_val > 1e-6), \
+        "Values should not be too close to zero for numerical stability"
+
+
+@given(data=st.data())
+@settings(max_examples=10, deadline=None)
+def test_sqrt_strategy_generates_non_negative_values(data):
+    """
+    Test that sqrt strategy generates non-negative values.
+
+    This test verifies:
+    - Strategy generates non-negative values (sqrt requires x >= 0)
+    """
+    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+
+    op_config = ELEMWISE_OPERATIONS['sqrt']
+    test_inputs = data.draw(op_config['strategy'])
+
+    if isinstance(test_inputs, tuple):
+        x_val = test_inputs[0]
+    else:
+        x_val = test_inputs
+
+    assert np.all(x_val >= 0), \
+        "Sqrt operation requires non-negative inputs"
+```
+
+**Expected Failure Mode**:
+- Error type: KeyError or AssertionError
+- Expected message: "KeyError: 'log'" or "Log operation requires positive inputs"
+
+#### 3. Build Graph Validation Tests
+**Test File**: `tests/link/onnx/test_strategies.py`
+**Purpose**: Validate that build_graph functions produce valid PyTensor graphs
+
+**Test Cases to Write:**
+
+##### Test: `test_build_graph_returns_valid_structure`
+**Purpose**: Verify build_graph returns (inputs, output) tuple
+**Test Data**: Sample arrays
+**Expected Behavior**: build_graph returns tuple of (list of Variables, Variable)
+**Assertions**: Return structure is correct
+
+```python
+def test_build_graph_returns_valid_structure():
+    """
+    Test that build_graph functions return valid graph structure.
+
+    This test verifies:
+    - build_graph returns a tuple
+    - First element is a list of PyTensor Variables (inputs)
+    - Second element is a PyTensor Variable (output)
+    """
+    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+    import pytensor.tensor as pt
+
+    # Test with 'add' as representative
+    op_config = ELEMWISE_OPERATIONS['add']
+
+    # Create dummy inputs
+    x_val = np.array([1, 2, 3], dtype='float32')
+    y_val = np.array([4, 5, 6], dtype='float32')
+
+    # Call build_graph
+    result = op_config['build_graph'](x_val, y_val)
+
+    assert isinstance(result, tuple), \
+        "build_graph should return a tuple"
+    assert len(result) == 2, \
+        "build_graph should return (inputs, output)"
+
+    graph_inputs, graph_output = result
+
+    assert isinstance(graph_inputs, list), \
+        "First element should be list of inputs"
+    assert all(isinstance(inp, pt.Variable) for inp in graph_inputs), \
+        "All inputs should be PyTensor Variables"
+    assert isinstance(graph_output, pt.Variable), \
+        "Output should be PyTensor Variable"
+```
+
+**Expected Failure Mode**:
+- Error type: KeyError, TypeError, or AssertionError
+- Expected message: "KeyError: 'add'" or "build_graph should return a tuple"
+
+### Test Implementation Steps:
+
+1. **Create test file**: `tests/link/onnx/test_strategies.py`
+
+2. **Import necessary testing utilities**:
+   ```python
+   import pytest
+   import numpy as np
+   import pytensor.tensor as pt
+   from hypothesis import given, strategies as st, settings
+   ```
+
+3. **Implement each test case** as specified above
+
+4. **Add test documentation**: Ensure each test has clear docstrings
+
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] Test file created at tests/link/onnx/test_strategies.py
+- [ ] Tests are discoverable: `uv run pytest --collect-only tests/link/onnx/test_strategies.py`
+- [ ] Test code follows project conventions: `make lint-tests`
+
+#### Manual Verification:
+- [ ] Each test has clear, informative docstring
+- [ ] Test names clearly describe what they test
+- [ ] Assertion messages are diagnostic
+- [ ] Test code is readable and maintainable
+
+---
+
+## Phase 2: Test Failure Verification
+
+### Overview
+Run the tests and verify they fail in expected, diagnostic ways before implementing the registry.
+
+### Verification Steps:
+
+1. **Run the test suite**:
+   ```bash
+   uv run pytest tests/link/onnx/test_strategies.py -v
+   ```
+
+2. **For each test, verify**:
+   - Test fails (not passes or errors unexpectedly)
+   - Failure message is informative
+   - Failure points to the missing registry
+   - Error type matches expectations
+
+3. **Document failure modes**:
+   Create a checklist of expected vs actual failure behavior
+
+### Expected Failures:
+
+- **test_elemwise_registry_exists**:
+  - Expected: `ImportError` or `AttributeError: module 'tests.link.onnx.strategies' has no attribute 'ELEMWISE_OPERATIONS'`
+  - Points to: strategies.py module
+
+- **test_elemwise_registry_completeness**:
+  - Expected: `ImportError` (same as above, can't even run)
+  - Points to: Missing registry definition
+
+- **test_elemwise_registry_entry_structure**:
+  - Expected: `ImportError` or pytest collection error
+  - Points to: Missing registry entries
+
+- **test_binary_op_strategy_generates_valid_data**:
+  - Expected: `KeyError: 'add'` or similar
+  - Points to: Missing operation in registry
+
+- **test_unary_op_strategy_generates_valid_data**:
+  - Expected: `KeyError: 'neg'`
+  - Points to: Missing operation in registry
+
+- **test_constrained_op_strategies**:
+  - Expected: `KeyError: 'log'` / `KeyError: 'sqrt'`
+  - Points to: Missing operations
+
+- **test_build_graph_returns_valid_structure**:
+  - Expected: `KeyError: 'add'`
+  - Points to: Missing operation
+
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] All tests run and are discovered: `uv run pytest --collect-only tests/link/onnx/test_strategies.py`
+- [ ] All tests fail (none pass): `uv run pytest tests/link/onnx/test_strategies.py --tb=short`
+- [ ] No unexpected errors (syntax errors): `uv run pytest tests/link/onnx/test_strategies.py --tb=line`
+
+#### Manual Verification:
+- [ ] Each test fails with expected error type
+- [ ] Failure messages clearly indicate what's missing (ELEMWISE_OPERATIONS registry)
+- [ ] Failure messages would help during implementation
+- [ ] Stack traces point to strategies.py
+- [ ] No cryptic or misleading error messages
+
+### Adjustment Phase:
+
+If tests don't fail properly:
+- [ ] Fix tests that pass unexpectedly (shouldn't happen, registry doesn't exist)
+- [ ] Fix tests with confusing error messages
+- [ ] Fix tests that error instead of fail (import errors, missing dependencies)
+- [ ] Improve assertion messages for clarity
+
+---
+
+## Phase 3: Feature Implementation (Red → Green)
+
+### Overview
+Implement the ELEMWISE_OPERATIONS registry and supporting strategies by making tests pass, one category at a time.
+
+### Implementation Strategy:
+
+**Order of Implementation:**
+1. Start with basic registry structure (make structure tests pass)
+2. Then implement helper strategies (for data generation)
+3. Then implement simple binary operations (add, mul, sub, div)
+4. Then implement unary operations (neg, abs, exp)
+5. Then implement constrained operations (log, sqrt, pow)
+6. Finally implement remaining operations (floor, ceil, round, maximum, minimum, clip)
+
+### Implementation Steps:
+
+#### Implementation 1: Make `test_elemwise_registry_exists` Pass
+
+**Target Test**: `test_elemwise_registry_exists`
+**Current Failure**: `AttributeError: module has no attribute 'ELEMWISE_OPERATIONS'`
+
+**Changes Required:**
+
+**File**: `tests/link/onnx/strategies.py`
+**Changes**: Add empty ELEMWISE_OPERATIONS registry at end of file
+
+```python
+# ============================================================================
+# ELEMWISE OPERATIONS REGISTRY
+# ============================================================================
+
+ELEMWISE_OPERATIONS: Dict[str, Dict[str, Any]] = {
+    # Will be populated in subsequent steps
+}
+```
+
+**Debugging Approach:**
+1. Run the test: `uv run pytest tests/link/onnx/test_strategies.py::test_elemwise_registry_exists -v`
+2. Verify ImportError is resolved
+3. Test will now fail on empty registry assertion
+4. Add a placeholder entry to pass the "not empty" assertion (will be proper entry later)
+
+**Success Criteria:**
+
+##### Automated Verification:
+- [ ] Target test passes: `uv run pytest tests/link/onnx/test_strategies.py::test_elemwise_registry_exists -v`
+- [ ] No new linting errors: `make lint`
+- [ ] Import works: `python -c "from tests.link.onnx.strategies import ELEMWISE_OPERATIONS"`
+
+##### Manual Verification:
+- [ ] Registry is properly typed (Dict[str, Dict[str, Any]])
+- [ ] Registry location is appropriate (end of strategies.py)
+- [ ] Code follows project conventions
+
+#### Implementation 2: Create Helper Strategies
+
+**Target Tests**: `test_binary_op_strategy_generates_valid_data`, `test_unary_op_strategy_generates_valid_data`
+**Current Failure**: KeyError when accessing operation strategies
+
+**Changes Required:**
+
+**File**: `tests/link/onnx/strategies.py`
+**Changes**: Add helper strategy functions before registry definition
+
+```python
+def binary_float32_arrays_strategy():
+    """Generate two float32 arrays for binary operations."""
+    @st.composite
+    def strategy(draw):
+        # Generate compatible shapes for broadcasting
+        shape = draw(array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10))
+
+        # Generate two arrays with same shape
+        x = draw(arrays(
+            dtype=np.float32,
+            shape=shape,
+            elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+        ))
+        y = draw(arrays(
+            dtype=np.float32,
+            shape=shape,
+            elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+        ))
+
+        return x, y
+
+    return strategy()
+
+
+def unary_float32_array_strategy():
+    """Generate one float32 array for unary operations."""
+    return arrays(
+        dtype=np.float32,
+        shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
+        elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+    )
+
+
+def positive_float32_array_strategy():
+    """Generate positive float32 arrays for log, etc."""
+    return arrays(
+        dtype=np.float32,
+        shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
+        elements=st.floats(1e-3, 10, allow_nan=False, allow_infinity=False)
+    )
+
+
+def non_negative_float32_array_strategy():
+    """Generate non-negative float32 arrays for sqrt, etc."""
+    return arrays(
+        dtype=np.float32,
+        shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
+        elements=st.floats(0, 10, allow_nan=False, allow_infinity=False)
+    )
+```
+
+**Debugging Approach:**
+1. Add strategy functions one at a time
+2. Test each with simple pytest test to verify it generates valid data
+3. Check that strategies follow existing patterns in the file
+
+**Success Criteria:**
+
+##### Automated Verification:
+- [ ] Helper functions defined without errors
+- [ ] Strategies generate valid data when drawn
+- [ ] No linting errors: `make lint`
+- [ ] Type checking passes (if applicable)
+
+##### Manual Verification:
+- [ ] Strategy functions follow @st.composite pattern where needed
+- [ ] Generated arrays have correct dtypes and shapes
+- [ ] Constraints are enforced (positive for log, non-negative for sqrt)
+
+#### Implementation 3: Implement Binary Operations Registry Entries
+
+**Target Tests**: `test_elemwise_registry_completeness`, `test_elemwise_registry_entry_structure` (binary ops)
+**Current Failure**: Missing operations: {'add', 'mul', ...}
+
+**Changes Required:**
+
+**File**: `tests/link/onnx/strategies.py`
+**Changes**: Add binary operation entries to ELEMWISE_OPERATIONS
+
+```python
+ELEMWISE_OPERATIONS: Dict[str, Dict[str, Any]] = {
+    # Binary arithmetic operations
+    "add": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x + y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Add'],
+        "description": "Element-wise addition"
+    },
+
+    "mul": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x * y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Mul'],
+        "description": "Element-wise multiplication"
+    },
+
+    "sub": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x - y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Sub'],
+        "description": "Element-wise subtraction"
+    },
+
+    "div": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x / y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Div'],
+        "description": "Element-wise division"
+    },
+
+    "int_div": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x // y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Div', 'Floor'],  # Integer division is div + floor
+        "description": "Element-wise integer division"
+    },
+
+    "maximum": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], pt.maximum(x, y))
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Max'],
+        "description": "Element-wise maximum"
+    },
+
+    "minimum": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], pt.minimum(x, y))
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Min'],
+        "description": "Element-wise minimum"
+    },
+}
+```
+
+**Debugging Approach:**
+1. Add operations one at a time
+2. Run tests after each addition: `uv run pytest tests/link/onnx/test_strategies.py::test_elemwise_registry_entry_structure[add] -v`
+3. Verify each entry structure is correct
+4. Check build_graph returns valid PyTensor graph
+
+**Success Criteria:**
+
+##### Automated Verification:
+- [ ] Binary operation tests pass: `uv run pytest tests/link/onnx/test_strategies.py -k binary -v`
+- [ ] Registry structure tests pass for these operations
+- [ ] No linting errors: `make lint`
+
+##### Manual Verification:
+- [ ] Each operation follows registry pattern consistently
+- [ ] build_graph lambdas are correct for each operation
+- [ ] expected_onnx_ops match ONNX spec
+- [ ] Descriptions are clear and accurate
+
+#### Implementation 4: Implement Unary Operations Registry Entries
+
+**Target Tests**: `test_elemwise_registry_completeness`, `test_unary_op_strategy_generates_valid_data`
+**Current Failure**: Missing unary operations
+
+**Changes Required:**
+
+**File**: `tests/link/onnx/strategies.py`
+**Changes**: Add unary operation entries (similar pattern to binary ops)
+
+```python
+# Add to ELEMWISE_OPERATIONS dictionary:
+
+    # Unary operations
+    "neg": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], -x)
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Neg'],
+        "description": "Element-wise negation"
+    },
+
+    "abs": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.abs(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Abs'],
+        "description": "Element-wise absolute value"
+    },
+
+    "exp": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.exp(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Exp'],
+        "description": "Element-wise exponential"
+    },
+
+    # Add floor, ceil, round similarly
+```
+
+**Debugging Approach:**
+1. Add each unary operation
+2. Test with: `uv run pytest tests/link/onnx/test_strategies.py::test_elemwise_registry_entry_structure[neg] -v`
+3. Verify strategies generate single arrays
+4. Check build_graph works with single input
+
+**Success Criteria:**
+
+##### Automated Verification:
+- [ ] Unary operation tests pass: `uv run pytest tests/link/onnx/test_strategies.py -k unary -v`
+- [ ] Entry structure tests pass for unary ops
+- [ ] No linting errors
+
+##### Manual Verification:
+- [ ] Unary operations use correct strategy (single array)
+- [ ] build_graph lambdas work with single input
+- [ ] All unary ops added to registry
+
+#### Implementation 5: Implement Constrained Operations
+
+**Target Tests**: `test_constrained_op_strategies_respect_constraints`
+**Current Failure**: Missing log, sqrt, pow operations
+
+**Changes Required:**
+
+**File**: `tests/link/onnx/strategies.py`
+**Changes**: Add operations with input constraints
+
+```python
+# Add to ELEMWISE_OPERATIONS:
+
+    "log": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.log(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": positive_float32_array_strategy(),
+        "expected_onnx_ops": ['Log'],
+        "description": "Element-wise natural logarithm"
+    },
+
+    "sqrt": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.sqrt(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": non_negative_float32_array_strategy(),
+        "expected_onnx_ops": ['Sqrt'],
+        "description": "Element-wise square root"
+    },
+
+    "pow": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x ** y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),  # Could add constraints for negative base
+        "expected_onnx_ops": ['Pow'],
+        "description": "Element-wise power"
+    },
+```
+
+**Debugging Approach:**
+1. Implement constraint-respecting strategies first
+2. Add registry entries using those strategies
+3. Run constraint tests: `uv run pytest tests/link/onnx/test_strategies.py::test_log_strategy_generates_positive_values -v`
+4. Verify generated data meets constraints
+
+**Success Criteria:**
+
+##### Automated Verification:
+- [ ] Constrained operation tests pass
+- [ ] Generated data respects constraints
+- [ ] No assertion failures on constraint violations
+
+##### Manual Verification:
+- [ ] log uses positive_float32_array_strategy
+- [ ] sqrt uses non_negative_float32_array_strategy
+- [ ] Constraints are appropriate for operations
+
+#### Implementation 6: Implement Remaining Operations
+
+**Target Tests**: `test_elemwise_registry_completeness` (final check)
+**Current Failure**: Missing some operations
+
+**Changes Required:**
+
+**File**: `tests/link/onnx/strategies.py`
+**Changes**: Add remaining operations (floor, ceil, round, clip)
+
+```python
+# Add final operations to complete registry:
+
+    "floor": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.floor(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Floor'],
+        "description": "Element-wise floor"
+    },
+
+    "ceil": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.ceil(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Ceil'],
+        "description": "Element-wise ceiling"
+    },
+
+    "round": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.round(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Round'],
+        "description": "Element-wise rounding"
+    },
+
+    "clip": {
+        "build_graph": lambda x_val, min_val, max_val: (
+            lambda x: ([x], pt.clip(x, min_val, max_val))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": st.builds(
+            lambda x, min_v, max_v: (x, float(min_v), float(max_v)),
+            x=unary_float32_array_strategy(),
+            min_v=st.floats(-5, 0),
+            max_v=st.floats(0, 5)
+        ),
+        "expected_onnx_ops": ['Clip'],
+        "description": "Element-wise clipping"
+    },
+```
+
+**Debugging Approach:**
+1. Add final operations
+2. Run full registry test: `uv run pytest tests/link/onnx/test_strategies.py::test_elemwise_registry_completeness -v`
+3. Verify all 17-18 operations present
+4. Check no operations missing
+
+**Success Criteria:**
+
+##### Automated Verification:
+- [ ] All registry tests pass: `uv run pytest tests/link/onnx/test_strategies.py -v`
+- [ ] No missing operations
+- [ ] No linting errors: `make lint`
+
+##### Manual Verification:
+- [ ] All 18 operations documented in research are present
+- [ ] Registry is complete and well-organized
+- [ ] All entries follow consistent pattern
+
+### Complete Feature Implementation:
+
+Once all individual tests pass:
+
+**Final Integration:**
+- Run full test suite: `uv run pytest tests/link/onnx/test_strategies.py -v`
+- Verify registry can be used in downstream tests
+- Check existing tests still pass
+
+**Success Criteria:**
+
+##### Automated Verification:
+- [ ] All new tests pass: `uv run pytest tests/link/onnx/test_strategies.py -v`
+- [ ] No regressions in existing tests: `uv run pytest tests/link/onnx/`
+- [ ] Linting passes: `make lint`
+- [ ] Type checking passes (if applicable): `make typecheck`
+
+##### Manual Verification:
+- [ ] Registry is complete with 18 operations
+- [ ] All operations have valid strategies
+- [ ] Code is maintainable and clear
+- [ ] Documentation is comprehensive
+
+---
+
+## Phase 4: Refactoring & Cleanup
+
+### Overview
+Now that tests are green, refactor to improve code quality while keeping tests passing.
+
+### Refactoring Targets:
+
+1. **Code Duplication**:
+   - Extract common lambda patterns for build_graph
+   - Create helper function for tensor variable creation
+
+2. **Code Clarity**:
+   - Group operations by category (binary, unary, constrained)
+   - Add comments explaining each group
+   - Improve variable names if needed
+
+3. **Strategy Quality**:
+   - Ensure strategies generate diverse test cases
+   - Add comments explaining constraint rationale
+   - Consider edge cases (zero, negative, etc.)
+
+4. **Documentation**:
+   - Add module-level docstring for ELEMWISE_OPERATIONS
+   - Document each helper strategy
+   - Add examples if helpful
+
+### Refactoring Steps:
+
+1. **Ensure all tests pass before starting**: `uv run pytest tests/link/onnx/test_strategies.py -v`
+
+2. **Extract helper for tensor creation**:
+   ```python
+   def create_tensor_var(name: str, dtype: str, ndim: int) -> pt.TensorVariable:
+       """Create PyTensor tensor variable with dynamic shape."""
+       return pt.tensor(name, dtype=dtype, shape=(None,) * ndim)
+   ```
+
+3. **Refactor build_graph to use helper**:
+   - Make the change
+   - Run tests: `uv run pytest tests/link/onnx/test_strategies.py -v`
+   - Commit if tests pass
+
+4. **Add grouping comments**:
+   ```python
+   # =================================================================
+   # BINARY ARITHMETIC OPERATIONS
+   # =================================================================
+   "add": { ... },
+   "mul": { ... },
+   # ...
+
+   # =================================================================
+   # UNARY OPERATIONS
+   # =================================================================
+   "neg": { ... },
+   # ...
+   ```
+
+5. **Add documentation**:
+   - Module docstring explaining registry purpose
+   - Comments on constrained operations
+   - Usage examples in docstrings
+
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] All tests still pass: `uv run pytest tests/link/onnx/test_strategies.py -v`
+- [ ] Linting passes: `make lint`
+- [ ] Type checking passes: `make typecheck`
+- [ ] No performance regressions
+
+#### Manual Verification:
+- [ ] Code is more readable after refactoring
+- [ ] Registry entries are well-organized
+- [ ] Comments explain "why" not "what"
+- [ ] Code follows project patterns
+
+---
+
+## Testing Strategy Summary
+
+### Test Coverage Goals:
+- [ ] Registry structure validated (exists, complete, well-formed)
+- [ ] Strategies generate valid data (dtypes, shapes, constraints)
+- [ ] build_graph functions return valid PyTensor graphs
+- [ ] All 18 operations registered and testable
+
+### Test Organization:
+- Test files: tests/link/onnx/test_strategies.py
+- Registry: tests/link/onnx/strategies.py (ELEMWISE_OPERATIONS)
+- Strategies: tests/link/onnx/strategies.py (helper functions)
+
+### Running Tests:
+
+```bash
+# Run all strategy tests
+uv run pytest tests/link/onnx/test_strategies.py -v
+
+# Run specific test
+uv run pytest tests/link/onnx/test_strategies.py::test_elemwise_registry_exists -v
+
+# Run tests for specific operation
+uv run pytest tests/link/onnx/test_strategies.py::test_elemwise_registry_entry_structure[add] -v
+
+# Check test collection
+uv run pytest --collect-only tests/link/onnx/test_strategies.py
+```
+
+## Performance Considerations
+
+No significant performance concerns for this phase. Strategies generate small test arrays (max 10 elements per dimension) for fast test execution.
+
+## Migration Notes
+
+This phase only adds new infrastructure, no migration needed. Existing manual elemwise tests in test_elemwise.py will remain and can be gradually replaced in Phase 2.
+
+## References
+
+- Original research: `thoughts/shared/research/2025-11-07_12-08-07_hypothesis-property-based-onnx-testing.md`
+- Existing registry pattern: `tests/link/onnx/strategies.py:248-304`
+- Test utilities: `tests/link/onnx/test_basic.py:30` (compare_onnx_and_py)
+- Elemwise dispatcher: `pytensor/link/onnx/dispatch/elemwise.py:34`
+- Existing elemwise tests: `tests/link/onnx/test_elemwise.py`
