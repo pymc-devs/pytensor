@@ -9,5 +9,7 @@ import pytensor.link.onnx.dispatch.shape  # noqa: F401
 import pytensor.link.onnx.dispatch.math  # noqa: F401
 import pytensor.link.onnx.dispatch.tensor_basic  # noqa: F401
 import pytensor.link.onnx.dispatch.subtensor  # noqa: F401
+import pytensor.link.onnx.dispatch.nlinalg  # noqa: F401
+import pytensor.link.onnx.dispatch.nnet  # noqa: F401
 
 # isort: on
