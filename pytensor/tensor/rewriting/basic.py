@@ -77,6 +77,7 @@ from pytensor.tensor.basic import (
     register_infer_shape,
     switch,
     tensor_copy,
+    tile,
     zeros,
     zeros_like,
 )
@@ -913,14 +914,15 @@ def local_join_make_vector(fgraph, node):
 @register_canonicalize
 @node_rewriter([Join])
 def local_join_to_repeat(fgraph, node):
-    """Join(axis, x, x, x, ...) -> repeat(x, n, axis)
+    """Join(axis, x, x, x, ...) -> tile(x, reps)
 
-    When the same tensor is concatenated multiple times along an axis
-    where it has size 1, replace with a repeat operation which is more efficient.
+    When the same tensor is concatenated multiple times along an axis,
+    replace with a single tile operation which is more efficient.
 
     Examples
     --------
-    concatenate([x[None], x[None], x[None]], axis=0) -> repeat(x[None], 3, axis=0)
+    join(0, x, x, x) -> tile(x, (3, 1, 1, ...))
+    join(1, x, x) -> tile(x, (1, 2, 1, ...))
     """
     # Extract axis and the tensors being joined
     axis, *tensors = node.inputs
@@ -940,19 +942,19 @@ def local_join_to_repeat(fgraph, node):
     if not all(t == tensors[0] for t in tensors[1:]):
         return
 
-    # Only optimize if the tensor has size 1 along the join axis
+    n_reps = len(tensors)
     first_tensor = tensors[0]
-    if first_tensor.type.shape[axis_val] != 1:
-        return
+    ndim = first_tensor.ndim
 
-    # Replace with repeat operation
-    from pytensor.tensor.extra_ops import repeat
+    # Build reps tuple to repeat only along the join axis
+    # For shape (a, b, c) joining at axis 1: reps = (1, n_reps, 1)
+    # This directly concatenates n_reps copies along axis_val
+    reps = tuple(n_reps if i == axis_val else 1 for i in range(ndim))
 
-    result = repeat(first_tensor, len(tensors), axis_val)
+    result = tile(first_tensor, reps)
 
     # Preserve debugging information
     copy_stack_trace(node.outputs[0], result)
-
     return [result]
 
 
