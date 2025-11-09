@@ -1255,12 +1255,12 @@ def test_local_join_to_tile():
     the Join/concatenate with a single Tile op.
     """
 
-    # Helpers to inspect the graph without depending on concrete Op classes
-    def count_op(ops, cls_name):
-        return sum(1 for n in ops if n.op.__class__.__name__ == cls_name)
+    # Helpers to inspect the graph
+    def count_join_ops(ops):
+        return sum(1 for n in ops if isinstance(n.op, Join))
 
     def has_no_join(fgraph_ops):
-        return count_op(fgraph_ops, "Join") == 0
+        return count_join_ops(fgraph_ops) == 0
 
     # ---- Case 1: vector expanded to (1, n), concat along axis 0 ----
     x = vector("x")
@@ -1321,7 +1321,7 @@ def test_local_join_to_tile():
 
     ops = f.maker.fgraph.toposort()
     # Join should still be present since inputs aren't identical
-    assert count_op(ops, "Join") == 1
+    assert count_join_ops(ops) == 1
 
     # ---- Case 5: plain concat without ExpandDims should now optimize ----
     s = join(0, x, x, x)  # (3n,)
@@ -1349,46 +1349,26 @@ def test_local_join_to_tile():
 
 
 def test_local_join_empty():
-    # Vector case - empty tensors should be removed and join optimized
+    # Vector case - empty tensors should be removed
     empty_vec = np.asarray([], dtype=config.floatX)
     vec = vector("vec")
     s = pt.join(0, vec, vec, empty_vec)
     new_s = rewrite_graph(s)
-    # Verify dtype is preserved
     assert new_s.dtype == s.dtype
-    # Verify no Join in the optimized graph
-    f = function([vec], new_s, mode=rewrite_mode)
-    ops = f.maker.fgraph.toposort()
-    assert len([n for n in ops if isinstance(n.op, Join)]) == 0
-    # Verify numerical correctness
-    test_vec = np.array([1.0, 2.0, 3.0], dtype=config.floatX)
-    result = f(test_vec)
-    expected = np.array([1.0, 2.0, 3.0, 1.0, 2.0, 3.0], dtype=config.floatX)
-    assert np.allclose(result, expected)
+    # Compare to the expected form (also rewritten, since join itself gets optimized)
+    expected = rewrite_graph(pt.join(0, vec, vec))
+    assert equal_computations([new_s], [expected])
 
-    # Matrix case - empty tensors should be removed and join optimized
+    # Matrix case - empty tensors should be removed
     empty_mat = np.zeros((2, 0), dtype=config.floatX)
     empty_sym_mat = matrix("m", shape=(2, 0))
     mat = matrix("mat", shape=(2, 10))
     s = join(1, empty_mat, mat, empty_sym_mat, mat, mat)
     new_s = rewrite_graph(s)
-    # Verify dtype is preserved
     assert new_s.dtype == s.dtype
-    # Verify no Join in the optimized graph
-    f = function([mat], new_s, mode=rewrite_mode)
-    ops = f.maker.fgraph.toposort()
-    assert len([n for n in ops if isinstance(n.op, Join)]) == 0
-    # Verify numerical correctness
-    test_mat = np.array(
-        [
-            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
-            [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0],
-        ],
-        dtype=config.floatX,
-    )
-    result = f(test_mat)
-    expected = np.concatenate([test_mat, test_mat, test_mat], axis=1)
-    assert np.allclose(result, expected)
+    # Compare to the expected form (also rewritten, since join itself gets optimized)
+    expected = rewrite_graph(join(1, mat, mat, mat))
+    assert equal_computations([new_s], [expected])
 
     # Join can be completely removed, but casting and specify_shape are propagated
     int_mat = matrix("int_mat", dtype=int)
