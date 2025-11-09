@@ -83,7 +83,7 @@ Write individual property-based tests for each subtensor operation using existin
     op_name=st.sampled_from(['slice_basic', 'slice_multidim', 'slice_with_step']),
     data=st.data(),
 )
-@settings(max_examples=10, deadline=None)
+@settings(max_examples=20, deadline=None)  # Higher count for slicing edge cases
 def test_subtensor_basic_slicing_correctness(op_name, data):
     """
     Property test: Basic subtensor slicing operations produce correct results.
@@ -229,8 +229,13 @@ def test_set_subtensor_operation_correctness(data):
     assert any(op in node_types for op in expected_ops), \
         f"Expected one of {expected_ops}, got {node_types}"
 
+    # Use Hypothesis assume() to filter edge case where new values equal old
+    # This avoids false failures when values_val happens to equal x_val[2:5]
+    from hypothesis import assume
+    assume(not np.array_equal(values_val, x_val[2:5]))
+
     # Validate that slice was modified
-    # (values at indices 2:5 should be different from original)
+    # (This assertion is now guaranteed to be meaningful)
     assert not np.array_equal(result[2:5], x_val[2:5]), \
         "Slice should have been modified"
 
@@ -291,7 +296,13 @@ def test_inc_subtensor_operation_correctness(data):
     assert 'ScatterElements' in node_types or 'ScatterND' in node_types, \
         "Expected scatter operation"
 
+    # Use Hypothesis assume() to filter edge case where increment values are zero
+    # This avoids false failures when values_val is all zeros
+    from hypothesis import assume
+    assume(not np.allclose(values_val, 0))
+
     # Validate that slice was modified
+    # (This assertion is now guaranteed to be meaningful)
     assert not np.array_equal(result[2:5], x_val[2:5]), \
         "Slice should have been modified"
 
@@ -565,6 +576,33 @@ Refactor test code for clarity and organization.
    - Explain why negative index tests are skipped
    - Reference limitation documentation
    - Note when feature might be implemented
+
+5. **Add @pytest.mark.xfail tests for negative indices** (optional but recommended):
+   ```python
+   @pytest.mark.xfail(reason="Negative indices not yet supported in ONNX backend - see subtensor.py:122-127")
+   def test_slice_negative_indices_future():
+       """
+       Test for negative indices - currently expected to fail.
+
+       This test documents the expected behavior once negative indices
+       are implemented. Remove @pytest.mark.xfail when feature is ready.
+
+       See: pytensor/link/onnx/dispatch/subtensor.py:122-127 for limitation docs
+       GitHub Issue: [link to issue tracking negative index support]
+       """
+       x_val = np.array([1, 2, 3, 4, 5], dtype='float32')
+       x = pt.tensor('x', dtype='float32', shape=(None,))
+       y = x[-2:]  # Should return [4, 5]
+
+       fn, result = compare_onnx_and_py([x], y, [x_val])
+       np.testing.assert_array_equal(result, np.array([4, 5], dtype='float32'))
+   ```
+
+   Benefits of xfail tests:
+   - Documents expected behavior for future implementation
+   - Provides ready-made test when feature is implemented
+   - Tracks known limitations in test suite
+   - Can link to GitHub issues for tracking
 
 ### Success Criteria:
 

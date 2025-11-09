@@ -40,11 +40,13 @@ A comprehensive property-based test suite in tests/link/onnx/test_elemwise.py wi
 
 ## What We're NOT Testing/Implementing
 
-- Not testing broadcasting yet (will add in separate phase if needed)
+- **Broadcasting validation deferred to Phase 2B** (optional enhancement): Strategies generate same-shaped arrays initially. Broadcasting tests should be added as a follow-up to validate operations correctly handle mismatched but compatible shapes (e.g., (5,1) × (1,3) → (5,3))
 - Not testing mixed dtypes (focus on float32)
 - Not testing complex compositions (single operations only)
 - Not modifying ONNX backend implementation (only tests)
 - Not removing all manual tests (keep edge case tests)
+- Not covering Core operations (Constant, DeepCopyOp, FunctionGraph) - these are tested via system-level tests and are not suitable for property-based testing (see research doc lines 529-530)
+- Not covering Tier 4-5 operations in this phase (Trigonometric, Hyperbolic, Comparison, Logical, Special operations) - these will be addressed in future phases
 
 ## TDD Approach
 
@@ -67,10 +69,19 @@ Write property-based tests that use the ELEMWISE_OPERATIONS registry. Tests will
 **Test File**: `tests/link/onnx/test_elemwise.py`
 **Purpose**: Validate correctness of elemwise operations without special input constraints
 
-**Operations Covered**:
-- Binary: add, mul, sub, div, int_div, maximum, minimum
-- Unary: neg, abs, exp, floor, ceil, round
-- Total: ~13 operations
+**Operations Covered** (13 unconstrained Tier 1 operations):
+- Binary arithmetic: add, mul, sub, div, int_div (5)
+- Binary min/max: maximum, minimum (2)
+- Unary: neg, abs, exp (3)
+- Rounding: floor, ceil, round, round_away (Note: both round operations can be in main test) (3-4)
+- Total: 13 operations
+
+**Operations NOT in this test** (5 constrained operations requiring separate tests):
+- pow (negative base with fractional exponent issues)
+- log (requires positive inputs)
+- sqrt (requires non-negative inputs)
+- clip (requires min/max bounds)
+- (Note: round_away may be in main test or separate, depending on whether it behaves identically to round)
 
 **Test Cases to Write:**
 
@@ -83,10 +94,15 @@ Write property-based tests that use the ELEMWISE_OPERATIONS registry. Tests will
 ```python
 @given(
     op_name=st.sampled_from([
+        # Binary arithmetic (5)
         'add', 'mul', 'sub', 'div', 'int_div',
-        'neg', 'abs', 'exp',
-        'floor', 'ceil', 'round',
+        # Binary min/max (2)
         'maximum', 'minimum',
+        # Unary (3)
+        'neg', 'abs', 'exp',
+        # Rounding (3 or 4 - include round_away if behavior differs from round)
+        'floor', 'ceil', 'round',
+        # Total: 13 unconstrained operations
     ]),
     data=st.data(),
 )
@@ -100,9 +116,16 @@ def test_elemwise_operations_correctness(op_name, data):
     - Correct ONNX node types are generated
     - Operations handle diverse inputs correctly
 
-    Operations tested: add, mul, sub, div, int_div, neg, abs, exp,
-                       floor, ceil, round, maximum, minimum
-    Total: ~13 operations × 10 examples = 130 test scenarios
+    Operations tested (13 unconstrained Tier 1 operations):
+    - Binary arithmetic: add, mul, sub, div, int_div (5)
+    - Binary min/max: maximum, minimum (2)
+    - Unary: neg, abs, exp (3)
+    - Rounding: floor, ceil, round (3)
+
+    Total: 13 operations × 10 examples = 130 test scenarios
+
+    Constrained operations tested separately:
+    - pow, log, sqrt, clip (separate tests with constrained strategies)
     """
     # Get operation configuration from registry
     op_config = ELEMWISE_OPERATIONS[op_name]
@@ -154,7 +177,7 @@ def test_elemwise_operations_correctness(op_name, data):
 
 ```python
 @given(data=st.data())
-@settings(max_examples=10, deadline=None)
+@settings(max_examples=50, deadline=None)  # Higher count for critical operation
 def test_log_operation_correctness(data):
     """
     Property test: Log operation produces correct ONNX results.
@@ -165,7 +188,8 @@ def test_log_operation_correctness(data):
     - Correct ONNX node type (Log) is generated
 
     Note: Uses positive_float32_array_strategy to ensure valid inputs
-          (log requires x > 0)
+          (log requires x > 0). Uses 50 examples (vs standard 10) due to
+          numerical sensitivity.
     """
     op_config = ELEMWISE_OPERATIONS['log']
 
@@ -179,10 +203,11 @@ def test_log_operation_correctness(data):
     # Build graph
     graph_inputs, graph_output = op_config['build_graph'](test_data)
 
-    # Compare ONNX vs PyTensor with relaxed tolerance for log
+    # Compare ONNX vs PyTensor with log-specific tolerance
+    # Uses LOG_TOLERANCE (rtol=1e-4, atol=1e-6) - see tolerance constants
     fn, result = compare_onnx_and_py(
         graph_inputs, graph_output, [test_data],
-        assert_fn=partial(np.testing.assert_allclose, rtol=1e-4, atol=1e-6)
+        assert_fn=partial(np.testing.assert_allclose, **LOG_TOLERANCE)
     )
 
     # Verify ONNX node type
@@ -251,7 +276,7 @@ def test_sqrt_operation_correctness(data):
 
 ```python
 @given(data=st.data())
-@settings(max_examples=10, deadline=None)
+@settings(max_examples=50, deadline=None)  # Higher count for critical operation
 def test_pow_operation_correctness(data):
     """
     Property test: Pow operation produces correct ONNX results.
@@ -262,7 +287,8 @@ def test_pow_operation_correctness(data):
     - Correct ONNX node type (Pow) is generated
 
     Note: May have numerical precision issues with negative bases
-          and fractional exponents. Using relaxed tolerance.
+          and fractional exponents. Using relaxed tolerance. Uses
+          50 examples (vs standard 10) due to numerical complexity.
     """
     op_config = ELEMWISE_OPERATIONS['pow']
 
@@ -274,9 +300,11 @@ def test_pow_operation_correctness(data):
     graph_inputs, graph_output = op_config['build_graph'](x_val, y_val)
 
     # Compare ONNX vs PyTensor with relaxed tolerance
+    # Uses RELAXED_TOLERANCE (rtol=1e-3, atol=1e-5) - see tolerance constants
+    # Rationale: Pow with negative base + fractional exponent amplifies errors
     fn, result = compare_onnx_and_py(
         graph_inputs, graph_output, [x_val, y_val],
-        assert_fn=partial(np.testing.assert_allclose, rtol=1e-3, atol=1e-5)
+        assert_fn=partial(np.testing.assert_allclose, **RELAXED_TOLERANCE)
     )
 
     # Verify ONNX node type
@@ -351,11 +379,30 @@ def test_clip_operation_correctness(data):
 
 1. **Modify existing test file**: `tests/link/onnx/test_elemwise.py`
 
-2. **Add imports at top of file**:
+2. **Add imports and tolerance constants at top of file**:
    ```python
    from hypothesis import given, strategies as st, settings
    from functools import partial
    from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
+
+   # ============================================================================
+   # NUMERICAL TOLERANCE CONSTANTS
+   # ============================================================================
+   # These tolerances account for numerical precision differences between
+   # PyTensor and ONNX implementations. Documented rationale for each:
+
+   # Standard tolerance for stable operations (add, mul, sub, etc.)
+   STANDARD_TOLERANCE = {'rtol': 1e-5, 'atol': 1e-8}
+
+   # Relaxed tolerance for numerically unstable operations
+   # Used for: pow (negative base + fractional exponent), exp (large values)
+   # Rationale: These operations amplify floating-point errors
+   RELAXED_TOLERANCE = {'rtol': 1e-3, 'atol': 1e-5}
+
+   # Log-specific tolerance (between standard and relaxed)
+   # Used for: log (values near zero are numerically sensitive)
+   # Rationale: log(x) for small x has larger relative error
+   LOG_TOLERANCE = {'rtol': 1e-4, 'atol': 1e-6}
    ```
 
 3. **Add main property test** (test_elemwise_operations_correctness)
@@ -573,7 +620,15 @@ Now that property tests pass, refactor test code and remove redundant manual tes
    - Keep unique edge case tests
    - Document why remaining manual tests are kept
 
-4. **Documentation**:
+4. **Broadcasting Validation (Future Enhancement)**:
+   - Note: Research decision #7 (lines 690-694) recommends explicit broadcasting tests
+   - Current implementation may generate compatible shapes but doesn't validate broadcasting
+   - Consider adding dedicated broadcast tests in future phase:
+     - Generate arrays with different but compatible shapes (e.g., (5,1) and (1,3))
+     - Verify output shape matches broadcast result (e.g., (5,3))
+     - Test common broadcast patterns (scalar×array, vector×matrix, etc.)
+
+5. **Documentation**:
    - Add module docstring explaining test strategy
    - Document which operations are tested where
    - Add comments on tolerance choices
@@ -721,3 +776,108 @@ uv run pytest tests/link/onnx/test_elemwise.py -v --hypothesis-profile=ci
 - Test utilities: `tests/link/onnx/test_basic.py:30` (compare_onnx_and_py)
 - ELEMWISE_OPERATIONS registry: `tests/link/onnx/strategies.py` (from Phase 1)
 - Elemwise dispatcher: `pytensor/link/onnx/dispatch/elemwise.py:34`
+
+---
+
+## Phase 2B (Optional): Broadcasting Validation Tests
+
+### Overview
+
+This optional enhancement adds explicit tests for broadcasting behavior. Current Phase 2 tests use same-shaped arrays. Broadcasting tests validate that operations correctly handle mismatched but compatible shapes.
+
+**Rationale**: Research decision #7 (lines 690-694) recommends explicit broadcasting tests. This phase should be implemented after Phase 2 core tests pass.
+
+### Broadcasting Test Design
+
+#### Test: `test_elemwise_broadcasting_correctness`
+**Purpose**: Validate binary operations correctly broadcast mismatched shapes
+**Test Data**: Pairs of arrays with compatible but different shapes
+**Expected Behavior**: Output shape matches NumPy broadcasting rules
+**Assertions**: Shape correctness, numerical correctness
+
+```python
+@given(
+    op_name=st.sampled_from(['add', 'mul', 'sub', 'div', 'maximum', 'minimum']),
+    data=st.data(),
+)
+@settings(max_examples=20, deadline=None)  # More examples for shape combinations
+def test_elemwise_broadcasting_correctness(op_name, data):
+    """
+    Property test: Binary operations correctly broadcast mismatched shapes.
+
+    This test verifies:
+    - Operations handle broadcasting per NumPy rules
+    - Output shape matches expected broadcast shape
+    - Numerical results match NumPy reference
+    - Common broadcast patterns work (scalar×array, vector×matrix, etc.)
+
+    Broadcasting examples tested:
+    - (5, 1) × (1, 3) → (5, 3)
+    - (4,) × (3, 4) → (3, 4)
+    - (2, 1, 4) × (3, 1) → (2, 3, 4)
+    - scalar × array → array
+    """
+    op_config = ELEMWISE_OPERATIONS[op_name]
+
+    # Generate broadcastable shape pairs
+    # Strategy: Create base shape, then derive compatible broadcast shape
+    base_shape = data.draw(array_shapes(min_dims=2, max_dims=3, min_side=2, max_side=5))
+
+    # Create broadcast shape by replacing some dimensions with 1
+    broadcast_shape = tuple(
+        1 if data.draw(st.booleans()) and dim > 1 else dim
+        for dim in base_shape
+    )
+
+    # Ensure shapes are different
+    assume(base_shape != broadcast_shape)
+
+    # Generate arrays with these shapes
+    x_val = data.draw(arrays(
+        dtype=np.float32,
+        shape=base_shape,
+        elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+    ))
+    y_val = data.draw(arrays(
+        dtype=np.float32,
+        shape=broadcast_shape,
+        elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+    ))
+
+    # Build graph
+    graph_inputs, graph_output = op_config['build_graph'](x_val, y_val)
+
+    # Compare ONNX vs PyTensor
+    fn, result = compare_onnx_and_py(graph_inputs, graph_output, [x_val, y_val])
+
+    # Verify output shape matches NumPy broadcasting
+    expected_shape = np.broadcast_shapes(x_val.shape, y_val.shape)
+    assert result.shape == expected_shape, \
+        f"Expected broadcast shape {expected_shape}, got {result.shape}"
+
+    # Verify ONNX node type
+    node_types = get_onnx_node_types(fn)
+    expected_ops = op_config['expected_onnx_ops']
+    assert any(op in node_types for op in expected_ops), \
+        f"{op_name}: Expected one of {expected_ops}, got {node_types}"
+```
+
+### Implementation Steps for Phase 2B:
+
+1. **Only implement after Phase 2 core tests pass**
+2. **Add broadcasting test** to test_elemwise.py
+3. **Run broadcasting tests**: `uv run pytest tests/link/onnx/test_elemwise.py::test_elemwise_broadcasting_correctness -v`
+4. **Fix any broadcasting bugs** in ONNX backend if tests fail
+5. **Document broadcasting support** in registry or operation descriptions
+
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] Broadcasting test passes for all operations
+- [ ] Output shapes match NumPy broadcasting rules
+- [ ] No regressions in existing tests
+
+#### Manual Verification:
+- [ ] Common broadcast patterns tested (scalar×array, etc.)
+- [ ] Broadcasting failures are diagnostic
+- [ ] Documentation updated to reflect broadcasting support

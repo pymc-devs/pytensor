@@ -487,6 +487,13 @@ Refactor test code for clarity and organization.
    - **Option B**: Remove argmax from reduction test (avoid duplication)
    - **Recommendation**: Keep in both - small overhead, provides consistency check
 
+   **Rationale for keeping argmax in both tests**:
+   - **Consistency check**: If argmax passes in reduction test but fails in dedicated test (or vice versa), it indicates a test infrastructure issue
+   - **Different validation**: Reduction test validates argmax behaves like other reductions; dedicated test validates index-specific behavior
+   - **Low cost**: 10 extra examples is negligible overhead (~1 second)
+   - **Documentation**: Having both tests clearly signals that argmax has dual nature (reduction + index operation)
+   - **Regression protection**: If someone accidentally breaks index handling, both tests catch it
+
 5. **Consider consolidating manual tests**:
    - test_argmax_argmin → Covered by property tests (can remove)
    - Keep if it tests unique patterns not in property test

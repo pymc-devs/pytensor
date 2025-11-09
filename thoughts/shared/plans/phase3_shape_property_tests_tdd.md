@@ -2,7 +2,7 @@
 
 ## Overview
 
-Create individual property-based tests for 8 shape operations using strategies from the `SHAPE_OPERATIONS` registry. Unlike elemwise operations, shape operations have diverse behaviors requiring separate test functions for each operation.
+Create individual property-based tests for 9 shape operations using strategies from the `SHAPE_OPERATIONS` registry. Unlike elemwise operations, shape operations have diverse behaviors requiring separate test functions for each operation.
 
 ## Current State Analysis
 
@@ -27,9 +27,9 @@ Create individual property-based tests for 8 shape operations using strategies f
 ## Desired End State
 
 A comprehensive property-based test suite with:
-- **8 individual property test functions** (one per shape operation)
+- **9 individual property test functions** (one per shape operation)
 - **Retained manual tests** for specific edge cases
-- **80+ test scenarios** (8 operations × 10 examples minimum)
+- **90+ test scenarios** (9 operations × 10 examples minimum)
 - **Clear validation** for each operation's unique behavior
 
 ### Key Discoveries:
@@ -45,6 +45,7 @@ A comprehensive property-based test suite with:
 - Not testing all dimshuffle permutations (focus on common patterns)
 - Not modifying ONNX backend implementation (only tests)
 - Not testing shape operations with non-float32 dtypes yet
+- Not covering Core operations (Constant, DeepCopyOp, FunctionGraph) - these are tested via system-level tests and are not suitable for property-based testing (see research doc lines 529-530)
 
 ## TDD Approach
 
@@ -204,6 +205,12 @@ def test_specify_shape_passthrough_correctness(data):
 - Error type: AssertionError
 - Expected message: Numerical mismatch OR SpecifyShape appears in graph
 - Points to: SpecifyShape dispatcher or pass-through logic
+
+**Additional Considerations for SpecifyShape**:
+- Consider testing that SpecifyShape doesn't affect gradients (if applicable to ONNX backend)
+- Consider testing that SpecifyShape correctly propagates type information
+- Consider adding manual test for shape mismatch detection (should fail appropriately)
+- These are edge cases beyond property test scope - document as future work if not critical
 
 #### 2. Reshape Operations
 
@@ -506,6 +513,86 @@ def test_stack_operation_correctness(data):
 - Expected message: Arrays not equal or dimension mismatch
 - Points to: Stack/Join implementation
 
+##### Test: `test_split_operation_correctness`
+**Purpose**: Property test for split operation
+**Test Data**: Tensor with compatible split sizes
+**Expected Behavior**: Correct splitting along specified axis
+**Assertions**: Number of outputs, shape correctness, element values
+
+```python
+@given(data=st.data())
+@settings(max_examples=10, deadline=None)
+def test_split_operation_correctness(data):
+    """
+    Property test: Split correctly splits tensors along axis.
+
+    This test verifies:
+    - Split divides tensor into correct number of parts
+    - Each part has correct shape
+    - Element values correctly distributed
+    - Correct ONNX node type (Split)
+
+    Note: This test uses equal-sized splits. Unequal splits tested separately
+          in manual tests.
+    """
+    # Generate tensor with size divisible along split axis
+    # For simplicity, split into 2 equal parts along axis 0
+    shape = data.draw(array_shapes(min_dims=2, max_dims=3, min_side=4, max_side=10))
+    # Ensure first dimension is even for equal split
+    shape = (shape[0] if shape[0] % 2 == 0 else shape[0] + 1,) + shape[1:]
+
+    x_val = data.draw(arrays(
+        dtype=np.float32,
+        shape=shape,
+        elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+    ))
+
+    # Build graph - split into 2 equal parts along axis 0
+    x = pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)
+    y = pt.split(x, 2, n_splits=2, axis=0)  # Returns tuple of 2 tensors
+
+    # Compare ONNX vs PyTensor
+    # Note: split returns multiple outputs
+    fn, results = compare_onnx_and_py([x], y, [x_val])
+
+    # Validate split
+    expected_size = x_val.shape[0] // 2
+    expected_part1 = x_val[:expected_size]
+    expected_part2 = x_val[expected_size:]
+
+    assert isinstance(results, (list, tuple)), \
+        "Split should return multiple outputs"
+    assert len(results) == 2, \
+        f"Expected 2 split parts, got {len(results)}"
+
+    np.testing.assert_allclose(results[0], expected_part1, rtol=1e-5)
+    np.testing.assert_allclose(results[1], expected_part2, rtol=1e-5)
+
+    # Verify shapes
+    assert results[0].shape[0] == expected_size, \
+        f"First part should have size {expected_size} along axis 0"
+    assert results[1].shape[0] == expected_size, \
+        f"Second part should have size {expected_size} along axis 0"
+
+    # Verify ONNX node type
+    node_types = get_onnx_node_types(fn)
+    assert 'Split' in node_types, \
+        f"Expected 'Split' node, got {node_types}"
+```
+
+**Expected Failure Mode**:
+- Error type: AssertionError
+- Expected message: Arrays not equal or wrong number of outputs
+- Points to: Split implementation
+
+**Note**: This test will require adding a 'split' entry to the SHAPE_OPERATIONS registry in strategies.py. The strategy should generate tensors with dimensions divisible by the split count.
+
+**IMPORTANT**: This is a prerequisite for Phase 3. Before writing property tests, ensure 'split' is added to SHAPE_OPERATIONS registry with:
+- build_graph function that calls pt.split()
+- strategy that generates tensors with even dimensions for clean splitting
+- expected_onnx_ops: ['Split']
+- description documenting the split behavior
+
 ### Test Implementation Steps:
 
 1. **Modify existing test file**: `tests/link/onnx/test_shape.py`
@@ -525,9 +612,27 @@ def test_stack_operation_correctness(data):
    # ============================================================================
    ```
 
-4. **Implement each property test** as specified above
+4. **Implement each property test** as specified above (9 tests total):
+   - test_shape_operation_correctness
+   - test_shape_i_operation_correctness
+   - test_specify_shape_passthrough_correctness
+   - test_reshape_operation_correctness
+   - test_transpose_operation_correctness
+   - test_dimshuffle_add_dim_correctness
+   - test_dimshuffle_squeeze_correctness
+   - test_concatenate_operation_correctness
+   - test_stack_operation_correctness
+   - test_split_operation_correctness
 
 5. **Keep existing manual tests** below property tests for reference and edge cases
+
+6. **Add 'split' to SHAPE_OPERATIONS registry** in strategies.py (if not already present)
+
+7. **Verify multi-output handling** in compare_onnx_and_py:
+   - Split returns multiple outputs (tuple/list)
+   - Ensure compare_onnx_and_py consistently handles this across the codebase
+   - Test with: `isinstance(results, (list, tuple))` after calling compare_onnx_and_py
+   - If compare_onnx_and_py doesn't handle multi-output, update test to unpack correctly
 
 ### Success Criteria:
 

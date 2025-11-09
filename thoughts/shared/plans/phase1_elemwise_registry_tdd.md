@@ -15,9 +15,10 @@ Create the `ELEMWISE_OPERATIONS` registry and associated Hypothesis strategies f
 - Test fixtures/mocks: Hypothesis strategies for tensor generation
 
 ### Current Elemwise Implementation:
-- 18 elemwise operations implemented via single dispatcher at pytensor/link/onnx/dispatch/elemwise.py:34
-- Mapping: `SCALAR_OP_TO_ONNX` dictionary at pytensor/link/onnx/dispatch/elemwise.py:10-31
-- Operations: Add, Mul, Sub, TrueDiv, IntDiv, Neg, Abs, Exp, Log, Sqrt, Pow, Floor, Ceil, RoundHalfToEven, RoundHalfAwayFromZero, Maximum, Minimum, Clip
+- 40+ elemwise operations implemented via single dispatcher at pytensor/link/onnx/dispatch/elemwise.py:34
+- Mapping: `SCALAR_OP_TO_ONNX` dictionary at pytensor/link/onnx/dispatch/elemwise.py:10-60
+- **This phase focuses on Tier 1 operations (18 ops)**: Add, Mul, Sub, TrueDiv, IntDiv, Neg, Abs, Exp, Log, Sqrt, Pow, Floor, Ceil, RoundHalfToEven, RoundHalfAwayFromZero, Maximum, Minimum, Clip
+- **Future phases will cover Tier 4-5 operations**: Trigonometric (6 ops), Hyperbolic (6 ops), Comparison (5 ops), Logical (4 ops), Special (2 ops)
 
 ### Current Elemwise Tests:
 - 14 manual tests in tests/link/onnx/test_elemwise.py
@@ -44,6 +45,7 @@ A complete `ELEMWISE_OPERATIONS` registry in tests/link/onnx/strategies.py with:
 - Not modifying ONNX backend implementation (only test infrastructure)
 - Not testing complex dtype interactions (focus on float32)
 - Not implementing validation logic (just registry structure)
+- Not covering Core operations (Constant, DeepCopyOp, FunctionGraph) - these are tested via system-level tests and are not suitable for property-based testing (see research doc lines 529-530)
 
 ## TDD Approach
 
@@ -58,7 +60,9 @@ A complete `ELEMWISE_OPERATIONS` registry in tests/link/onnx/strategies.py with:
 ## Phase 1: Test Design & Implementation
 
 ### Overview
-Write comprehensive tests that validate the registry structure before implementing it. These tests will fail initially because the registry doesn't exist yet.
+Write comprehensive tests that validate the registry structure before implementing it. These tests will fail initially because the ELEMWISE_OPERATIONS registry doesn't exist yet.
+
+**Note**: Other registries (SHAPE_OPERATIONS, SUBTENSOR_OPERATIONS, INCSUBTENSOR_OPERATIONS, REDUCTION_OPERATIONS, ALLOCATION_OPERATIONS) already exist in tests/link/onnx/strategies.py and are functional. This phase focuses solely on creating the ELEMWISE_OPERATIONS registry.
 
 ### Test Categories:
 
@@ -105,33 +109,48 @@ def test_elemwise_registry_exists():
 ```python
 def test_elemwise_registry_completeness():
     """
-    Test that all 18 elemwise operations are registered.
+    Test that all 18 Tier 1 elemwise operations are registered.
 
     This test verifies:
-    - All expected operations are present
+    - All expected Tier 1 operations are present
     - No unexpected operations are present (optional)
     - Operation names follow naming conventions
+
+    Tier 1 Operations from SCALAR_OP_TO_ONNX (pytensor/link/onnx/dispatch/elemwise.py:10-30):
+    - Binary arithmetic: Add, Mul, Sub, TrueDiv, IntDiv, Pow (6)
+    - Unary math: Neg, Abs, Exp, Log, Sqrt (5)
+    - Rounding: Floor, Ceil, RoundHalfToEven, RoundHalfAwayFromZero (4)
+    - Min/Max: Maximum, Minimum (2)
+    - Special: Clip (1)
+    Total: 18 operations
+
+    Note: Both RoundHalfToEven and RoundHalfAwayFromZero should be in registry as 'round'
+    and 'round_away' to enable testing both behaviors.
     """
     from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
 
     expected_ops = {
-        # Binary operations
+        # Binary arithmetic operations (6)
         'add', 'mul', 'sub', 'div', 'int_div', 'pow',
-        # Unary operations
+        # Unary math operations (5)
         'neg', 'abs', 'exp', 'log', 'sqrt',
-        # Rounding operations
-        'floor', 'ceil', 'round',
-        # Element-wise comparison operations
-        'maximum', 'minimum', 'clip'
+        # Rounding operations (4 - two Python operations, both mapped to ONNX "Round")
+        'floor', 'ceil', 'round', 'round_away',
+        # Element-wise min/max operations (2)
+        'maximum', 'minimum',
+        # Special operations (1)
+        'clip'
     }
 
     actual_ops = set(ELEMWISE_OPERATIONS.keys())
     missing_ops = expected_ops - actual_ops
     extra_ops = actual_ops - expected_ops
 
+    assert len(expected_ops) == 18, \
+        f"Expected ops count should be 18 Tier 1 operations, got {len(expected_ops)}"
     assert missing_ops == set(), \
         f"Missing operations in registry: {missing_ops}"
-    # Note: extra_ops is OK, but document why if present
+    # Note: extra_ops is OK if we're testing additional Tier 4-5 operations
 ```
 
 **Expected Failure Mode**:
@@ -565,9 +584,26 @@ ELEMWISE_OPERATIONS: Dict[str, Dict[str, Any]] = {
 **File**: `tests/link/onnx/strategies.py`
 **Changes**: Add helper strategy functions before registry definition
 
+**Important Note on Strategy Design**: These functions return Hypothesis strategies (lazy evaluation)
+rather than eagerly evaluating them. This is the correct pattern for Hypothesis because:
+- Strategies are composable and reusable
+- Hypothesis can apply optimizations and shrinking
+- Each test run generates fresh random data
+
 ```python
 def binary_float32_arrays_strategy():
-    """Generate two float32 arrays for binary operations."""
+    """
+    Generate two float32 arrays for binary operations.
+
+    Returns a Hypothesis strategy (lazy evaluation) that generates pairs of
+    arrays with identical shapes. Arrays are compatible for element-wise
+    operations but not tested for broadcasting in this phase.
+
+    Shape range: 1-3 dimensions, 2-10 elements per dimension
+    Value range: [-10, 10] (finite values only)
+
+    Note: Broadcasting validation is deferred to Phase 2.
+    """
     @st.composite
     def strategy(draw):
         # Generate compatible shapes for broadcasting
@@ -591,7 +627,14 @@ def binary_float32_arrays_strategy():
 
 
 def unary_float32_array_strategy():
-    """Generate one float32 array for unary operations."""
+    """
+    Generate one float32 array for unary operations.
+
+    Returns a Hypothesis strategy for single array generation.
+
+    Shape range: 1-3 dimensions, 2-10 elements per dimension
+    Value range: [-10, 10] (finite values only)
+    """
     return arrays(
         dtype=np.float32,
         shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
@@ -600,7 +643,19 @@ def unary_float32_array_strategy():
 
 
 def positive_float32_array_strategy():
-    """Generate positive float32 arrays for log, etc."""
+    """
+    Generate positive float32 arrays for operations requiring x > 0.
+
+    Used for: log (requires positive inputs)
+
+    Constraint rationale:
+    - Lower bound 1e-3 (not 0) for numerical stability
+    - Avoids values too close to zero where log becomes unstable
+    - Upper bound 10 keeps values in reasonable range
+
+    Shape range: 1-3 dimensions, 2-10 elements per dimension
+    Value range: [1e-3, 10] (strictly positive, finite values only)
+    """
     return arrays(
         dtype=np.float32,
         shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
@@ -609,7 +664,19 @@ def positive_float32_array_strategy():
 
 
 def non_negative_float32_array_strategy():
-    """Generate non-negative float32 arrays for sqrt, etc."""
+    """
+    Generate non-negative float32 arrays for operations requiring x >= 0.
+
+    Used for: sqrt (requires non-negative inputs)
+
+    Constraint rationale:
+    - Lower bound 0 (inclusive) is mathematically valid for sqrt
+    - No numerical stability issues at zero for sqrt
+    - Upper bound 10 keeps values in reasonable range
+
+    Shape range: 1-3 dimensions, 2-10 elements per dimension
+    Value range: [0, 10] (non-negative, finite values only)
+    """
     return arrays(
         dtype=np.float32,
         shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
@@ -704,6 +771,10 @@ ELEMWISE_OPERATIONS: Dict[str, Dict[str, Any]] = {
             pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
         ),
         "strategy": binary_float32_arrays_strategy(),
+        # NOTE: expected_onnx_ops couples test to implementation details
+        # This specifies HOW int_div is implemented (div + floor) rather than
+        # just testing correctness. This is intentional for ONNX backend validation
+        # but makes tests brittle if implementation changes.
         "expected_onnx_ops": ['Div', 'Floor'],  # Integer division is div + floor
         "description": "Element-wise integer division"
     },
@@ -921,6 +992,11 @@ ELEMWISE_OPERATIONS: Dict[str, Dict[str, Any]] = {
         "build_graph": lambda x_val, min_val, max_val: (
             lambda x: ([x], pt.clip(x, min_val, max_val))
         )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        # Strategy ensures min_v < max_v by construction:
+        # min_v from [-5, 0] and max_v from [0, 5] guarantees min_v <= 0 <= max_v
+        # Edge case: min_v == max_v == 0 is possible but rare
+        # This edge case (all values clipped to same value) is worth testing
+        # separately in Phase 2 manual tests if needed
         "strategy": st.builds(
             lambda x, min_v, max_v: (x, float(min_v), float(max_v)),
             x=unary_float32_array_strategy(),
