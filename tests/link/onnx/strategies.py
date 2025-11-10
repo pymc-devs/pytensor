@@ -152,6 +152,99 @@ def advanced_index_strategy():
     return strategy()
 
 
+def binary_float32_arrays_strategy():
+    """
+    Generate two float32 arrays for binary operations.
+
+    Returns a Hypothesis strategy (lazy evaluation) that generates pairs of
+    arrays with identical shapes. Arrays are compatible for element-wise
+    operations but not tested for broadcasting in this phase.
+
+    Shape range: 1-3 dimensions, 2-10 elements per dimension
+    Value range: [-10, 10] (finite values only)
+
+    Note: Broadcasting validation is deferred to Phase 2.
+    """
+    @st.composite
+    def strategy(draw):
+        # Generate compatible shapes for broadcasting
+        shape = draw(array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10))
+
+        # Generate two arrays with same shape
+        x = draw(arrays(
+            dtype=np.float32,
+            shape=shape,
+            elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+        ))
+        y = draw(arrays(
+            dtype=np.float32,
+            shape=shape,
+            elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+        ))
+
+        return x, y
+
+    return strategy()
+
+
+def unary_float32_array_strategy():
+    """
+    Generate one float32 array for unary operations.
+
+    Returns a Hypothesis strategy for single array generation.
+
+    Shape range: 1-3 dimensions, 2-10 elements per dimension
+    Value range: [-10, 10] (finite values only)
+    """
+    return arrays(
+        dtype=np.float32,
+        shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
+        elements=st.floats(-10, 10, allow_nan=False, allow_infinity=False)
+    )
+
+
+def positive_float32_array_strategy():
+    """
+    Generate positive float32 arrays for operations requiring x > 0.
+
+    Used for: log (requires positive inputs)
+
+    Constraint rationale:
+    - Lower bound 1e-3 (not 0) for numerical stability
+    - Avoids values too close to zero where log becomes unstable
+    - Upper bound 10 keeps values in reasonable range
+
+    Shape range: 1-3 dimensions, 2-10 elements per dimension
+    Value range: [1e-3, 10] (strictly positive, finite values only)
+    """
+    return arrays(
+        dtype=np.float32,
+        shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
+        elements=st.floats(1e-3, 10, allow_nan=False, allow_infinity=False)
+    )
+
+
+def non_negative_float32_array_strategy():
+    """
+    Generate non-negative float32 arrays for operations requiring x >= 0.
+
+    Used for: sqrt (requires non-negative inputs)
+
+    Constraint rationale:
+    - Lower bound 0 (inclusive) is mathematically valid for sqrt
+    - No numerical stability issues at zero for sqrt
+    - Upper bound 10 keeps values in reasonable range
+
+    Shape range: 1-3 dimensions, 2-10 elements per dimension
+    Value range: [0, 10] (non-negative, finite values only)
+    """
+    return arrays(
+        dtype=np.float32,
+        shape=array_shapes(min_dims=1, max_dims=3, min_side=2, max_side=10),
+        elements=st.floats(0, 10, allow_nan=False, allow_infinity=False)
+    )
+
+
 # ============================================================================
 # SHAPE OPERATIONS REGISTRY (Tier 2)
 # ============================================================================
@@ -403,5 +496,230 @@ INCSUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
         "strategy": set_subtensor_strategy(),
         "expected_onnx_ops": ['ScatterND', 'ScatterElements', 'Add'],
         "description": "Increment subtensor values"
+    },
+}
+
+
+# ============================================================================
+# ELEMWISE OPERATIONS REGISTRY (Tier 1)
+# ============================================================================
+
+ELEMWISE_OPERATIONS: Dict[str, Dict[str, Any]] = {
+    # =================================================================
+    # BINARY ARITHMETIC OPERATIONS
+    # =================================================================
+    "add": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x + y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Add'],
+        "description": "Element-wise addition"
+    },
+
+    "mul": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x * y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Mul'],
+        "description": "Element-wise multiplication"
+    },
+
+    "sub": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x - y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Sub'],
+        "description": "Element-wise subtraction"
+    },
+
+    "div": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x / y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Div'],
+        "description": "Element-wise division"
+    },
+
+    "int_div": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x // y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        # NOTE: expected_onnx_ops couples test to implementation details
+        # This specifies HOW int_div is implemented (div + floor) rather than
+        # just testing correctness. This is intentional for ONNX backend validation
+        # but makes tests brittle if implementation changes.
+        "expected_onnx_ops": ['Div', 'Floor'],  # Integer division is div + floor
+        "description": "Element-wise integer division"
+    },
+
+    "pow": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], x ** y)
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Pow'],
+        "description": "Element-wise power"
+    },
+
+    # =================================================================
+    # ELEMENT-WISE MIN/MAX OPERATIONS
+    # =================================================================
+    "maximum": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], pt.maximum(x, y))
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Max'],
+        "description": "Element-wise maximum"
+    },
+
+    "minimum": {
+        "build_graph": lambda x_val, y_val: (
+            lambda x, y: ([x, y], pt.minimum(x, y))
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('y', dtype='float32', shape=(None,) * y_val.ndim)
+        ),
+        "strategy": binary_float32_arrays_strategy(),
+        "expected_onnx_ops": ['Min'],
+        "description": "Element-wise minimum"
+    },
+
+    # =================================================================
+    # UNARY OPERATIONS
+    # =================================================================
+    "neg": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], -x)
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Neg'],
+        "description": "Element-wise negation"
+    },
+
+    "abs": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.abs(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Abs'],
+        "description": "Element-wise absolute value"
+    },
+
+    "exp": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.exp(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Exp'],
+        "description": "Element-wise exponential"
+    },
+
+    # =================================================================
+    # CONSTRAINED UNARY OPERATIONS
+    # =================================================================
+    "log": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.log(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": positive_float32_array_strategy(),
+        "expected_onnx_ops": ['Log'],
+        "description": "Element-wise natural logarithm"
+    },
+
+    "sqrt": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.sqrt(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": non_negative_float32_array_strategy(),
+        "expected_onnx_ops": ['Sqrt'],
+        "description": "Element-wise square root"
+    },
+
+    # =================================================================
+    # ROUNDING OPERATIONS
+    # =================================================================
+    "floor": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.floor(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Floor'],
+        "description": "Element-wise floor"
+    },
+
+    "ceil": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.ceil(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Ceil'],
+        "description": "Element-wise ceiling"
+    },
+
+    "round": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.round(x))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Round'],
+        "description": "Element-wise rounding (half to even)"
+    },
+
+    "round_away": {
+        "build_graph": lambda x_val: (
+            lambda x: ([x], pt.round(x, mode='half_away_from_zero'))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        "strategy": unary_float32_array_strategy(),
+        "expected_onnx_ops": ['Round'],
+        "description": "Element-wise rounding (half away from zero)"
+    },
+
+    # =================================================================
+    # SPECIAL OPERATIONS
+    # =================================================================
+    "clip": {
+        "build_graph": lambda x_val, min_val, max_val: (
+            lambda x: ([x], pt.clip(x, min_val, max_val))
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
+        # Strategy ensures min_v < max_v by construction:
+        # min_v from [-5, 0] and max_v from [0, 5] guarantees min_v <= 0 <= max_v
+        # Edge case: min_v == max_v == 0 is possible but rare
+        # This edge case (all values clipped to same value) is worth testing
+        # separately in Phase 2 manual tests if needed
+        "strategy": st.builds(
+            lambda x, min_v, max_v: (x, float(min_v), float(max_v)),
+            x=unary_float32_array_strategy(),
+            min_v=st.floats(-5, 0),
+            max_v=st.floats(0, 5)
+        ),
+        "expected_onnx_ops": ['Clip'],
+        "description": "Element-wise clipping"
     },
 }
