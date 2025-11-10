@@ -8,7 +8,15 @@ import pytensor.tensor as pt
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.blas import Ger
 from pytensor.tensor.blas_c import CGemv, CGer, must_initialize_y_gemv
-from pytensor.tensor.type import dmatrix, dvector, matrix, scalar, tensor, vector
+from pytensor.tensor.type import (
+    dmatrix,
+    dscalar,
+    dvector,
+    matrix,
+    scalar,
+    tensor,
+    vector,
+)
 from tests import unittest_tools
 from tests.tensor.test_blas import BaseGemv, TestBlasStrides
 from tests.unittest_tools import OptimizationTestMixin
@@ -143,19 +151,21 @@ class TestCGemv(OptimizationTestMixin):
     def test_nan_beta_0(self, inplace):
         mode = self.mode.including()
         mode.check_isfinite = False
+        beta = self.a.type("beta")
         f = pytensor.function(
-            [self.A, self.x, pytensor.In(self.y, mutable=inplace), self.a],
-            self.a * self.y + pt.dot(self.A, self.x),
+            [self.A, self.x, pytensor.In(self.y, mutable=inplace), beta],
+            beta * self.y + pt.dot(self.A, self.x),
             mode=mode,
         )
         [node] = f.maker.fgraph.apply_nodes
         assert isinstance(node.op, CGemv) and node.op.inplace == inplace
-        for rows in (3, 1):
-            Aval = np.ones((rows, 1), dtype=self.dtype)
-            xval = np.ones((1,), dtype=self.dtype)
-            yval = np.full((rows,), np.nan, dtype=self.dtype)
-            zval = f(Aval, xval, yval, 0)
-            assert not np.isnan(zval).any()
+        for rows in (3, 1, 0):
+            for cols in (1, 0):
+                Aval = np.ones((rows, cols), dtype=self.dtype)
+                xval = np.ones((cols,), dtype=self.dtype)
+                yval = np.full((rows,), np.nan, dtype=self.dtype)
+                zval = f(Aval, xval, yval, beta=0)
+                assert not np.isnan(zval).any(), f"{rows=}, {cols=}"
 
     def test_optimizations_vm(self):
         skip_if_blas_ldflags_empty()
@@ -293,6 +303,26 @@ class TestCGemv(OptimizationTestMixin):
             len([n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, AllocEmpty)])
             == 2
         )
+
+    def test_empty_A(self):
+        A = dmatrix("A")
+        x = dvector("x")
+        y = dvector("y")
+        alpha = 1.0
+        beta = dscalar("beta")
+        gemv = CGemv(inplace=True)(y, alpha, A, x, beta)
+        fn = pytensor.function(
+            [A, x, y, beta],
+            gemv,
+            accept_inplace=True,
+        )
+        test_A = np.empty((10, 0))
+        test_x = np.empty((0,))
+        test_y = np.random.random((10,))
+        for test_beta in [0.0, 1.0, 2.0]:
+            out = fn(test_A, test_x, test_y.copy(), test_beta)
+            expected = test_beta * test_y
+            np.testing.assert_allclose(out, expected)
 
 
 class TestCGemvFloat32(BaseGemv, OptimizationTestMixin):
