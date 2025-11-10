@@ -3,6 +3,7 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor import config, function, grad, shared
 from pytensor.compile.mode import FAST_RUN
+from pytensor.scan.views import filter as pt_filter
 from pytensor.scan.views import foldl, foldr
 from pytensor.scan.views import map as pt_map
 from pytensor.scan.views import reduce as pt_reduce
@@ -136,14 +137,10 @@ def test_foldr_memory_consumption():
 
 
 def test_filter():
-    import pytensor.tensor as pt
-
     v = pt.vector("v")
 
     def fn(x):
         return pt.eq(x % 2, 0)
-
-    from pytensor.scan.views import filter as pt_filter
 
     filtered = pt_filter(fn, v)
     f = function([v], filtered, allow_input_downcast=True)
@@ -153,3 +150,26 @@ def test_filter():
     expected = vals[vals % 2 == 0]
     result = f(vals)
     utt.assert_allclose(expected, result)
+
+
+def test_filter_multiple_masks():
+    v1 = pt.vector("v1")
+    v2 = pt.vector("v2")
+
+    def fn(x1, x2):
+        # Mask v1 for even numbers, mask v2 for numbers > 5
+        return pt.eq(x1 % 2, 0), pt.gt(x2, 5)
+
+    filtered_v1, filtered_v2 = pt_filter(fn, [v1, v2])
+    f = function([v1, v2], [filtered_v1, filtered_v2], allow_input_downcast=True)
+
+    vals1 = np.arange(10)
+    vals2 = np.arange(10)
+
+    expected_v1 = vals1[vals1 % 2 == 0]
+    expected_v2 = vals2[vals2 > 5]
+
+    result_v1, result_v2 = f(vals1, vals2)
+
+    utt.assert_allclose(expected_v1, result_v1)
+    utt.assert_allclose(expected_v2, result_v2)

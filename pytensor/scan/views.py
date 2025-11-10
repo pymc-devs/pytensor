@@ -196,6 +196,12 @@ def filter(
         See ``scan``.
     name : str or None
         See ``scan``.
+
+    Notes
+    -----
+    If the predicate function `fn` returns multiple boolean masks (one per sequence),
+    each mask will be applied to its corresponding sequence. If it returns a single mask,
+    that mask will be broadcast to all sequences.
     """
     mask, _ = scan(
         fn=fn,
@@ -204,12 +210,23 @@ def filter(
         non_sequences=non_sequences,
         go_backwards=go_backwards,
         mode=mode,
-        name=f"{name or ''}_mask",
+        name=name,
     )
 
-    if isinstance(sequences, (list, tuple)):
-        filtered_sequences = [seq[mask] for seq in sequences]
+    if isinstance(mask, (list, tuple)):
+        # One mask per sequence
+        if not isinstance(sequences, (list, tuple)):
+            raise TypeError(
+                "If multiple masks are returned, sequences must be a list or tuple."
+            )
+        if len(mask) != len(sequences):
+            raise ValueError("Number of masks must match number of sequences.")
+        filtered_sequences = [seq[m] for seq, m in zip(sequences, mask)]
     else:
-        filtered_sequences = sequences[mask]
+        # Single mask applied to all sequences
+        if isinstance(sequences, (list, tuple)):
+            filtered_sequences = [seq[mask] for seq in sequences]
+        else:
+            filtered_sequences = sequences[mask]
 
     return filtered_sequences
