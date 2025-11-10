@@ -417,20 +417,6 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, must_initialize_y=False, params=N
         }
     }
 
-    if (%(must_initialize_y)d && dbeta == 0)
-    {
-        // Most BLAS implementations of GEMV ignore y=nan when beta=0
-        // PyTensor considers that the correct behavior,
-        // and even exploits it to avoid copying or initializing outputs.
-        // By deciding to exploit this, however, it becomes our responsibility
-        // to ensure the behavior even in the rare cases BLAS deviates,
-        // or users will get errors, even for graphs that had no nan to begin with.
-        PyObject *zero = PyFloat_FromDouble(0.);
-        if (zero == NULL) %(fail)s;
-        if (PyArray_FillWithScalar(%(z)s, zero) != 0) %(fail)s;
-        Py_DECREF(zero);
-    }
-
     {
         int NA0 = PyArray_DIMS(%(A)s)[0];
         int NA1 = PyArray_DIMS(%(A)s)[1];
@@ -438,6 +424,17 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, must_initialize_y=False, params=N
         if (NA0 * NA1)
         {
             // Non-empty A matrix
+
+            if (%(must_initialize_y)d && dbeta == 0)
+            {
+                // Most BLAS implementations of GEMV ignore y=nan when beta=0
+                // PyTensor considers that the correct behavior,
+                // and even exploits it to avoid copying or initializing outputs.
+                // By deciding to exploit this, however, it becomes our responsibility
+                // to ensure the behavior even in the rare cases BLAS deviates,
+                // or users will get errors, even for graphs that had no nan to begin with.
+                PyArray_FILLWBYTE(%(z)s, 0);
+            }
 
             /* In the case where A is actually a row or column matrix,
              * the strides corresponding to the dummy dimension don't matter,
@@ -567,6 +564,18 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, must_initialize_y=False, params=N
                                 "A is neither C nor F-contiguous, it should have been copied into a memory-contiguous array;");
                 %(fail)s
             }
+        } else
+        {
+            // Empty A matrix, just scale y by beta
+            if (dbeta != 1.0)
+            {
+                npy_intp Sz = PyArray_STRIDES(%(z)s)[0] / elemsize;
+                dtype_%(z)s* z_data = (dtype_%(z)s*) PyArray_DATA(%(z)s);
+                for (npy_intp i = 0; i < NA0; ++i)
+                {
+                    z_data[i * Sz] = (dbeta == 0.0) ? 0 : z_data[i * Sz] * dbeta;
+                }
+            }
         }
     }
     """
@@ -598,7 +607,7 @@ class CGemv(BaseBLAS, Gemv):
         return code
 
     def c_code_cache_version(self):
-        return (17, blas_header_version(), must_initialize_y_gemv())
+        return (18, blas_header_version(), must_initialize_y_gemv())
 
 
 cgemv_inplace = CGemv(inplace=True)
