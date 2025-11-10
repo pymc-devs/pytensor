@@ -3,7 +3,6 @@ from types import NoneType
 
 import numpy as np
 import torch
-import torch.compiler
 
 from pytensor import In
 from pytensor.compile import PYTORCH
