@@ -458,7 +458,9 @@ ALLOCATION_OPERATIONS: Dict[str, Dict[str, Any]] = {
 
 SUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
     "slice_basic": {
-        "build_graph": lambda x: ([x], x[2:5]),
+        "build_graph": lambda x_val: (
+            lambda x: ([x], x[2:5])
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
         "strategy": st.builds(
             lambda size: np.arange(size, dtype='float32'),
             size=st.integers(10, 20)
@@ -468,7 +470,9 @@ SUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
     },
 
     "slice_multidim": {
-        "build_graph": lambda x: ([x], x[1:3, 2:4]),
+        "build_graph": lambda x_val: (
+            lambda x: ([x], x[1:3, 2:4])
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
         "strategy": st.builds(
             lambda s1, s2: np.arange(s1 * s2).reshape(s1, s2).astype('float32'),
             s1=st.integers(5, 10),
@@ -479,7 +483,9 @@ SUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
     },
 
     "slice_with_step": {
-        "build_graph": lambda x: ([x], x[::2]),
+        "build_graph": lambda x_val: (
+            lambda x: ([x], x[::2])
+        )(pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim)),
         "strategy": st.builds(
             lambda size: np.arange(size, dtype='float32'),
             size=st.integers(10, 20)
@@ -489,7 +495,12 @@ SUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
     },
 
     "advanced_index": {
-        "build_graph": lambda x, indices: ([x], x[indices]),
+        "build_graph": lambda x_val, indices_val: (
+            lambda x, indices: ([x, indices], x[indices])
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,) * x_val.ndim),
+            pt.tensor('indices', dtype='int64', shape=(None,))
+        ),
         "strategy": advanced_index_strategy(),
         "expected_onnx_ops": ['Gather'],
         "description": "Advanced indexing with integer array"
@@ -503,14 +514,24 @@ SUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
 
 INCSUBTENSOR_OPERATIONS: Dict[str, Dict[str, Any]] = {
     "set_subtensor": {
-        "build_graph": lambda x, values: ([x], pt.set_subtensor(x[2:5], values)),
+        "build_graph": lambda x_val, values_val: (
+            lambda x, values: ([x, values], pt.set_subtensor(x[2:5], values))
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,)),
+            pt.tensor('values', dtype='float32', shape=(None,))
+        ),
         "strategy": set_subtensor_strategy(),
         "expected_onnx_ops": ['ScatterND', 'ScatterElements'],
         "description": "Set subtensor values"
     },
 
     "inc_subtensor": {
-        "build_graph": lambda x, values: ([x], pt.inc_subtensor(x[2:5], values)),
+        "build_graph": lambda x_val, values_val: (
+            lambda x, values: ([x, values], pt.inc_subtensor(x[2:5], values))
+        )(
+            pt.tensor('x', dtype='float32', shape=(None,)),
+            pt.tensor('values', dtype='float32', shape=(None,))
+        ),
         "strategy": set_subtensor_strategy(),
         "expected_onnx_ops": ['ScatterND', 'ScatterElements', 'Add'],
         "description": "Increment subtensor values"
