@@ -15,7 +15,7 @@ SCALAR_OP_TO_ONNX = {
     scalar.Sub: "Sub",
     scalar.TrueDiv: "Div",
     scalar.Neg: "Neg",
-    scalar.IntDiv: "Div",
+    # Note: IntDiv handled specially in onnx_funcify_Elemwise as Div + Floor
     # Math (Tier 1)
     scalar.Abs: "Abs",
     scalar.Exp: "Exp",
@@ -59,7 +59,7 @@ SCALAR_OP_TO_ONNX = {
     scalar_math.Sigmoid: "Sigmoid",
     scalar_math.Softplus: "Softplus",
     scalar_math.Erf: "Erf",
-    scalar.Clip: "Clip",
+    # Note: Clip handled specially in onnx_funcify_Elemwise (requires scalar min/max)
     # Conditional
     scalar.Switch: "Where",
 }
@@ -90,6 +90,70 @@ def onnx_funcify_Elemwise(op, node, get_var_name, **kwargs):
     scalar_op_type = type(op.scalar_op)
 
     # Special handling for operations that need to be composed
+    # Clip(x, min, max) - ONNX requires scalar min/max, but PyTensor may provide tensors
+    if scalar_op_type == scalar.Clip:
+        input_names = [get_var_name(inp) for inp in node.inputs]
+        output_name = get_var_name(node.outputs[0])
+
+        # Input 0 is the array to clip, inputs 1 and 2 are min/max
+        # ONNX Clip expects scalars for min/max, but PyTensor may have added dimensions
+        # We need to squeeze them if they're not scalars
+        x_name = input_names[0]
+        min_name = input_names[1]
+        max_name = input_names[2]
+
+        # Create Squeeze nodes for min and max to ensure they're scalars
+        # ONNX Squeeze with empty axes removes all dimensions of size 1
+        min_scalar_name = f"{output_name}_min_scalar"
+        min_squeeze = helper.make_node(
+            "Squeeze",
+            inputs=[min_name],
+            outputs=[min_scalar_name],
+            name=f"Squeeze_{min_scalar_name}",
+        )
+
+        max_scalar_name = f"{output_name}_max_scalar"
+        max_squeeze = helper.make_node(
+            "Squeeze",
+            inputs=[max_name],
+            outputs=[max_scalar_name],
+            name=f"Squeeze_{max_scalar_name}",
+        )
+
+        # Clip with scalar min/max
+        clip_node = helper.make_node(
+            "Clip",
+            inputs=[x_name, min_scalar_name, max_scalar_name],
+            outputs=[output_name],
+            name=f"Clip_{output_name}",
+        )
+
+        return [min_squeeze, max_squeeze, clip_node]
+
+    # IntDiv(x, y) = Floor(Div(x, y))
+    if scalar_op_type == scalar.IntDiv:
+        input_names = [get_var_name(inp) for inp in node.inputs]
+        output_name = get_var_name(node.outputs[0])
+
+        # Div(x, y)
+        div_name = f"{output_name}_div"
+        div_node = helper.make_node(
+            "Div",
+            inputs=input_names,
+            outputs=[div_name],
+            name=f"Div_{div_name}",
+        )
+
+        # Floor(Div(x, y))
+        floor_node = helper.make_node(
+            "Floor",
+            inputs=[div_name],
+            outputs=[output_name],
+            name=f"Floor_{output_name}",
+        )
+
+        return [div_node, floor_node]
+
     # NEQ(x, y) = Not(Equal(x, y))
     if scalar_op_type == scalar.NEQ:
         input_names = [get_var_name(inp) for inp in node.inputs]

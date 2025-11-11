@@ -183,13 +183,23 @@ try:
             axes_to_keep = set(new_order)
             axes_to_squeeze = [i for i in range(input_ndim) if i not in axes_to_keep]
 
-            return helper.make_node(
+            # In ONNX opset 13+, Squeeze requires axes as a separate input (not attribute)
+            # Create a constant tensor for axes
+            axes_tensor_name = f"{output_names[0]}_axes"
+            axes_tensor = numpy_helper.from_array(
+                np.array(axes_to_squeeze, dtype=np.int64), name=axes_tensor_name
+            )
+
+            # Create the Squeeze node
+            node = helper.make_node(
                 "Squeeze",
-                inputs=input_names,
+                inputs=[input_names[0], axes_tensor_name],
                 outputs=output_names,
                 name=f"Squeeze_{output_names[0]}",
-                axes=axes_to_squeeze,
             )
+
+            # Return (node, [initializers])
+            return (node, [axes_tensor])
 
         else:
             raise NotImplementedError(
