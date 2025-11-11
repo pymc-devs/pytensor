@@ -34,8 +34,21 @@ def compatible_shape_for_size(total_size):
         (1, total_size),
         (total_size, 1),
     ]
+    # Generate valid shapes from factors
+    # For 2-factor shapes, use pairs that multiply to total_size
     if len(factors) >= 2:
-        shapes.append(tuple(factors[:2]))
+        # Use first factor and product of remaining factors
+        factor1 = factors[0]
+        remaining_product = total_size // factor1
+        shapes.append((factor1, remaining_product))
+
+        # Also try middle split if we have at least 2 factors
+        if len(factors) >= 2:
+            mid = len(factors) // 2
+            left_product = int(np.prod(factors[:mid]))
+            right_product = int(np.prod(factors[mid:]))
+            shapes.append((left_product, right_product))
+
     return st.sampled_from(shapes)
 
 
@@ -262,7 +275,12 @@ SHAPE_OPERATIONS: Dict[str, Dict[str, Any]] = {
     },
 
     "shape_i": {
-        "build_graph": lambda x, i: ([x], x.shape[i]),
+        "build_graph": lambda x, i: (
+            [x],
+            # Use Shape_i directly instead of x.shape[i] to avoid Subtensor
+            # Shape_i is imported from pytensor.tensor.shape
+            __import__('pytensor.tensor.shape', fromlist=['Shape_i']).Shape_i(i)(x)
+        ),
         "strategy": st.builds(
             lambda shape, i: (np.random.randn(*shape).astype('float32'), min(i, len(shape)-1)),
             shape=array_shapes(min_dims=2, max_dims=4, min_side=1, max_side=10),
