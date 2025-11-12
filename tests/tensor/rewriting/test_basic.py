@@ -1237,13 +1237,13 @@ def test_local_join_1():
     assert len([n for n in e if isinstance(n.op, Join)]) == 0
     assert f.maker.fgraph.outputs[0].dtype == config.floatX
 
-    # Test that join with 2 identical inputs gets optimized to tile
-    s = join(1, a, a)
+    # Test that join with 2 different inputs remains (not optimized away)
+    s = join(1, a, a[:, ::-1])
     f = function([a], s, mode=rewrite_mode)
-    val = f([[1]])
-    assert np.all(val == [[1, 1]])  # joined along axis 1
+    val = f([[1, 2]])
+    assert np.all(val == [[1, 2, 2, 1]])  # joined along axis 1
     e = f.maker.fgraph.toposort()
-    assert len([n for n in e if isinstance(n.op, Join)]) == 0  # optimized away
+    assert len([n for n in e if isinstance(n.op, Join)]) == 1  # join remains
     assert f.maker.fgraph.outputs[0].dtype == config.floatX
 
 
