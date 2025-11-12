@@ -1237,7 +1237,7 @@ def test_local_join_1():
     assert len([n for n in e if isinstance(n.op, Join)]) == 0
     assert f.maker.fgraph.outputs[0].dtype == config.floatX
 
-    # test that join with 2 identical inputs now gets optimized to tile
+    # Test that join with 2 identical inputs gets optimized to tile
     s = join(1, a, a)
     f = function([a], s, mode=rewrite_mode)
     val = f([[1]])
@@ -1315,7 +1315,7 @@ def test_local_join_empty():
     s = pt.join(0, vec, vec[::-1], empty_vec)
     new_s = rewrite_graph(s)
     assert new_s.dtype == s.dtype
-    # Compare to the expected form (without rewriting expected)
+    # Verify that empty tensors are removed from the join
     expected = pt.join(0, vec, vec[::-1])
     assert equal_computations([new_s], [expected])
 
@@ -1326,7 +1326,7 @@ def test_local_join_empty():
     s = join(1, empty_mat, mat, empty_sym_mat, mat[:, ::-1])
     new_s = rewrite_graph(s)
     assert new_s.dtype == s.dtype
-    # Compare to the expected form (without rewriting expected)
+    # Verify that empty tensors are removed from the join
     expected = join(1, mat, mat[:, ::-1])
     assert equal_computations([new_s], [expected])
 
