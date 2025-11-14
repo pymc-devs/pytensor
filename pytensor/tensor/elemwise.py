@@ -1375,7 +1375,7 @@ class CAReduce(COp):
             axis=axis,
             dtype=dtype,
             acc_dtype=acc_dtype,
-            upcast_discrete_output=None,
+            upcast_discrete_output=upcast_discrete_output,
             **kwargs,
         )
 
