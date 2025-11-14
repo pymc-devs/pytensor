@@ -77,6 +77,7 @@ from pytensor.tensor.basic import (
     register_infer_shape,
     switch,
     tensor_copy,
+    tile,
     zeros,
     zeros_like,
 )
@@ -908,6 +909,53 @@ def local_join_make_vector(fgraph, node):
         # by an error in the old join op.
         copy_stack_trace(node.outputs, ret)
         return [ret]
+
+
+@register_canonicalize
+@node_rewriter([Join])
+def local_join_to_repeat(fgraph, node):
+    """Join(axis, x, x, x, ...) -> tile(x, reps)
+
+    When the same tensor is concatenated multiple times along an axis,
+    replace with a single tile operation which is more efficient.
+
+    Examples
+    --------
+    join(0, x, x, x) -> tile(x, (3, 1, 1, ...))
+    join(1, x, x) -> tile(x, (1, 2, 1, ...))
+    """
+    # Extract axis and the tensors being joined
+    axis, *tensors = node.inputs
+
+    # Optimization only applies when axis is constant
+    if not isinstance(axis, Constant):
+        return None
+
+    # Extract the Python integer from the constant
+    axis_val = axis.data
+
+    # Need at least 2 tensors to consider optimization
+    if len(tensors) <= 1:
+        return
+
+    # Check if all tensors are identical
+    if not all(t == tensors[0] for t in tensors[1:]):
+        return
+
+    n_reps = len(tensors)
+    first_tensor = tensors[0]
+    ndim = first_tensor.ndim
+
+    # Build reps tuple to repeat only along the join axis
+    # For shape (a, b, c) joining at axis 1: reps = (1, n_reps, 1)
+    # This directly concatenates n_reps copies along axis_val
+    reps = tuple(n_reps if i == axis_val else 1 for i in range(ndim))
+
+    result = tile(first_tensor, reps)
+
+    # Preserve debugging information
+    copy_stack_trace(node.outputs[0], result)
+    return [result]
 
 
 @register_specialize

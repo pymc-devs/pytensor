@@ -2020,25 +2020,6 @@ class TestJoinAndSplit:
         # This line used to crash.
         ptb.concatenate([x, -u], axis=2)
 
-    def test_concatenate_same(self):
-        # Test that we can concatenate the same tensor multiple time.
-
-        # In the past it was broken on the GPU.
-        rng = np.random.default_rng(seed=utt.fetch_seed())
-        T_shared = self.shared(rng.random((3, 4)).astype(self.floatX))
-        Tout = ptb.concatenate([T_shared, T_shared])
-        f = function([], Tout, mode=self.mode)
-        out = f()
-        if config.mode != "FAST_COMPILE":
-            assert [
-                True
-                for node in f.maker.fgraph.toposort()
-                if isinstance(node.op, type(self.join_op))
-            ]
-        assert np.allclose(
-            out, np.concatenate([T_shared.get_value(), T_shared.get_value()])
-        )
-
     def test_mixed_ndim_error(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
         v = self.shared(rng.random(4).astype(self.floatX))
