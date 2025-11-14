@@ -1,4 +1,5 @@
 import warnings
+from hashlib import sha256
 from typing import cast
 
 import numba
@@ -9,9 +10,9 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
     get_numba_type,
-    numba_funcify,
+    register_funcify_and_cache_key,
+    register_funcify_default_op_cache_key,
 )
-from pytensor.raise_op import CheckAndRaise
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.extra_ops import (
     Bartlett,
@@ -26,16 +27,16 @@ from pytensor.tensor.extra_ops import (
 )
 
 
-@numba_funcify.register(Bartlett)
+@register_funcify_default_op_cache_key(Bartlett)
 def numba_funcify_Bartlett(op, **kwargs):
-    @numba_basic.numba_njit(inline="always")
+    @numba_basic.numba_njit
     def bartlett(x):
         return np.bartlett(x.item())
 
     return bartlett
 
 
-@numba_funcify.register(CumOp)
+@register_funcify_default_op_cache_key(CumOp)
 def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     axis = op.axis
     mode = op.mode
@@ -95,7 +96,7 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
     return cumop
 
 
-@numba_funcify.register(FillDiagonal)
+@register_funcify_default_op_cache_key(FillDiagonal)
 def numba_funcify_FillDiagonal(op, **kwargs):
     @numba_basic.numba_njit
     def filldiagonal(a, val):
@@ -105,7 +106,7 @@ def numba_funcify_FillDiagonal(op, **kwargs):
     return filldiagonal
 
 
-@numba_funcify.register(FillDiagonalOffset)
+@register_funcify_default_op_cache_key(FillDiagonalOffset)
 def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
     @numba_basic.numba_njit
     def filldiagonaloffset(a, val, offset):
@@ -130,7 +131,7 @@ def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
     return filldiagonaloffset
 
 
-@numba_funcify.register(RavelMultiIndex)
+@register_funcify_default_op_cache_key(RavelMultiIndex)
 def numba_funcify_RavelMultiIndex(op, node, **kwargs):
     mode = op.mode
     order = op.order
@@ -195,7 +196,7 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
     return ravelmultiindex
 
 
-@numba_funcify.register(Repeat)
+@register_funcify_default_op_cache_key(Repeat)
 def numba_funcify_Repeat(op, node, **kwargs):
     axis = op.axis
     a, _ = node.inputs
@@ -203,7 +204,7 @@ def numba_funcify_Repeat(op, node, **kwargs):
     # Numba only supports axis=None, which in our case is when axis is 0 and the input is a vector
     if axis == 0 and a.type.ndim == 1:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def repeatop(x, repeats):
             return np.repeat(x, repeats)
 
@@ -213,7 +214,7 @@ def numba_funcify_Repeat(op, node, **kwargs):
         return generate_fallback_impl(op, node)
 
 
-@numba_funcify.register(Unique)
+@register_funcify_default_op_cache_key(Unique)
 def numba_funcify_Unique(op, node, **kwargs):
     axis = op.axis
 
@@ -231,7 +232,7 @@ def numba_funcify_Unique(op, node, **kwargs):
 
     if not use_python:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def unique(x):
             return np.unique(x)
 
@@ -258,7 +259,7 @@ def numba_funcify_Unique(op, node, **kwargs):
     return unique
 
 
-@numba_funcify.register(UnravelIndex)
+@register_funcify_and_cache_key(UnravelIndex)
 def numba_funcify_UnravelIndex(op, node, **kwargs):
     order = op.order
 
@@ -290,10 +291,14 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
         # unpacked into a `tuple`, so this discrepancy shouldn't really matter
         return ((maybe_expand_dim(arr) // a) % shape).T
 
-    return unravelindex
+    cache_key = sha256(
+        str((type(op), op.order, len(node.outputs))).encode()
+    ).hexdigest()
+
+    return unravelindex, cache_key
 
 
-@numba_funcify.register(SearchsortedOp)
+@register_funcify_default_op_cache_key(SearchsortedOp)
 def numba_funcify_Searchsorted(op, node, **kwargs):
     side = op.side
 
@@ -320,23 +325,8 @@ def numba_funcify_Searchsorted(op, node, **kwargs):
 
     else:
 
-        @numba_basic.numba_njit(inline="always")
+        @numba_basic.numba_njit
         def searchsorted(a, v):
             return np.searchsorted(a, v, side)
 
     return searchsorted
-
-
-@numba_funcify.register(CheckAndRaise)
-def numba_funcify_CheckAndRaise(op, node, **kwargs):
-    error = op.exc_type
-    msg = op.msg
-
-    @numba_basic.numba_njit
-    def check_and_raise(x, *conditions):
-        for cond in conditions:
-            if not cond:
-                raise error(msg)
-        return x
-
-    return check_and_raise

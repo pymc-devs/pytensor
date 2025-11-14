@@ -8,6 +8,7 @@ import pytest
 import scipy
 
 from pytensor.compile import SymbolicInput
+from pytensor.tensor.utils import hash_from_ndarray
 
 
 numba = pytest.importorskip("numba")
@@ -15,18 +16,15 @@ numba = pytest.importorskip("numba")
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import config, shared
-from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
-from pytensor.compile.ops import ViewOp
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.type import Type
-from pytensor.ifelse import ifelse
 from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import cache_key_for_constant
 from pytensor.link.numba.linker import NumbaLinker
-from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import ScalarOp, as_scalar
 from pytensor.tensor.elemwise import Elemwise
 
@@ -135,10 +133,14 @@ def eval_python_only(fn_inputs, fn_outputs, inputs, mode=numba_mode):
         return tuple(ll)
 
     def njit_noop(*args, **kwargs):
+        def add_py_func_attr(x):
+            x.py_func = x
+            return x
+
         if len(args) == 1 and callable(args[0]):
-            return args[0]
+            return add_py_func_attr(args[0])
         else:
-            return lambda x: x
+            return lambda x: add_py_func_attr(x)
 
     mocks = [
         mock.patch("numba.njit", njit_noop),
@@ -317,24 +319,13 @@ def test_get_numba_type(v, expected, force_scalar, not_implemented):
     ],
 )
 def test_create_numba_signature(v, expected, force_scalar):
-    res = numba_basic.create_numba_signature(v, force_scalar=force_scalar)
+    with pytest.warns(FutureWarning, match="deprecated"):
+        res = numba_basic.create_numba_signature(v, force_scalar=force_scalar)
     assert res == expected
 
 
-def test_ViewOp():
-    v = pt.vector()
-    v_test_value = np.arange(4, dtype=config.floatX)
-    g = ViewOp()(v)
-
-    compare_numba_and_py(
-        [v],
-        [g],
-        [v_test_value],
-    )
-
-
 @pytest.mark.parametrize(
-    "inputs, op, exc",
+    "inputs, op",
     [
         (
             [
@@ -342,7 +333,6 @@ def test_ViewOp():
                 (pt.lmatrix(), rng.poisson(size=(2, 3))),
             ],
             MySingleOut,
-            UserWarning,
         ),
         (
             [
@@ -350,11 +340,10 @@ def test_ViewOp():
                 (pt.lmatrix(), rng.poisson(size=(2, 3))),
             ],
             MyMultiOut,
-            UserWarning,
         ),
     ],
 )
-def test_perform(inputs, op, exc):
+def test_fallback_perform(inputs, op):
     inputs, test_values = zip(*inputs, strict=True)
     g = op()(*inputs)
 
@@ -363,39 +352,12 @@ def test_perform(inputs, op, exc):
     else:
         outputs = [g]
 
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
+    with pytest.warns(UserWarning):
         compare_numba_and_py(
             inputs,
             outputs,
             test_values,
         )
-
-
-def test_perform_params():
-    """This tests for `Op.perform` implementations that require the `params` arguments."""
-
-    x = pt.vector(shape=(2,))
-    x_test_value = np.array([1.0, 2.0], dtype=config.floatX)
-
-    out = assert_op(x, np.array(True))
-
-    compare_numba_and_py([x], out, [x_test_value])
-
-
-def test_perform_type_convert():
-    """This tests the use of `Type.filter` in `objmode`.
-
-    The `Op.perform` takes a single input that it returns as-is, but it gets a
-    native scalar and it's supposed to return an `np.ndarray`.
-    """
-
-    x = pt.vector()
-    x_test_value = np.array([1.0, 2.0], dtype=config.floatX)
-
-    out = assert_op(x.sum(), np.array(True))
-
-    compare_numba_and_py([x], out, [x_test_value])
 
 
 def test_shared():
@@ -436,91 +398,15 @@ def test_shared_updates():
     assert a.get_value() == 7
 
 
-# We were seeing some weird results in CI where the following two almost
-# sign-swapped results were being return from Numba and Python, respectively.
-# The issue might be related to https://github.com/numba/numba/issues/4519.
-# Regardless, I was not able to reproduce anything like it locally after
-# extensive testing.
-x = np.array(
-    [
-        [-0.60407637, -0.71177603, -0.35842241],
-        [-0.07735968, 0.50000561, -0.86256007],
-        [-0.7931628, 0.49332471, 0.35710434],
-    ],
-    dtype=np.float64,
-)
-
-y = np.array(
-    [
-        [0.60407637, 0.71177603, -0.35842241],
-        [0.07735968, -0.50000561, -0.86256007],
-        [0.7931628, -0.49332471, 0.35710434],
-    ],
-    dtype=np.float64,
-)
-
-
-@pytest.mark.parametrize(
-    "inputs, cond_fn, true_vals, false_vals",
-    [
-        ([], lambda: np.array(True), np.r_[1, 2, 3], np.r_[-1, -2, -3]),
-        (
-            [(pt.dscalar(), np.array(0.2, dtype=np.float64))],
-            lambda x: x < 0.5,
-            np.r_[1, 2, 3],
-            np.r_[-1, -2, -3],
-        ),
-        (
-            [
-                (pt.dscalar(), np.array(0.3, dtype=np.float64)),
-                (pt.dscalar(), np.array(0.5, dtype=np.float64)),
-            ],
-            lambda x, y: x > y,
-            x,
-            y,
-        ),
-        (
-            [
-                (pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
-                (pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
-            ],
-            lambda x, y: pt.all(x > y),
-            x,
-            y,
-        ),
-        (
-            [
-                (pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
-                (pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
-            ],
-            lambda x, y: pt.all(x > y),
-            [x, 2 * x],
-            [y, 3 * y],
-        ),
-        (
-            [
-                (pt.dvector(), np.array([0.5, 0.9], dtype=np.float64)),
-                (pt.dvector(), np.array([0.3, 0.1], dtype=np.float64)),
-            ],
-            lambda x, y: pt.all(x > y),
-            [x, 2 * x],
-            [y, 3 * y],
-        ),
-    ],
-)
-def test_IfElse(inputs, cond_fn, true_vals, false_vals):
-    inputs, test_values = zip(*inputs, strict=True) if inputs else ([], [])
-    out = ifelse(cond_fn(*inputs), true_vals, false_vals)
-    compare_numba_and_py(inputs, out, test_values)
-
-
 def test_config_options_fastmath():
     x = pt.dvector()
 
     with config.change_flags(numba__fastmath=True):
         pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
-        assert numba_mul_fn.targetoptions["fastmath"] == {
+        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
+            "jitable_func"
+        ].py_func.__globals__["impl_sum"]
+        assert numba_sum_fn.targetoptions["fastmath"] == {
             "afn",
             "arcp",
             "contract",
@@ -528,19 +414,29 @@ def test_config_options_fastmath():
             "reassoc",
         }
 
+    with config.change_flags(numba__fastmath=False):
+        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
+        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
+            "jitable_func"
+        ].py_func.__globals__["impl_sum"]
+        assert numba_sum_fn.targetoptions["fastmath"] is False
+
 
 def test_config_options_cached():
     x = pt.dvector()
 
     with config.change_flags(numba__cache=True):
         pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
-        assert not isinstance(numba_mul_fn._cache, numba.core.caching.NullCache)
+        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
+            "jitable_func"
+        ].py_func.__globals__["impl_sum"]
+        assert not isinstance(numba_sum_fn._cache, numba.core.caching.NullCache)
 
     with config.change_flags(numba__cache=False):
         pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_mul_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
-        assert isinstance(numba_mul_fn._cache, numba.core.caching.NullCache)
+        # Without caching we don't wrap the function in jitable_func
+        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
+        assert isinstance(numba_sum_fn._cache, numba.core.caching.NullCache)
 
 
 def test_scalar_return_value_conversion():
@@ -552,54 +448,6 @@ def test_scalar_return_value_conversion():
         mode=numba_mode,
     )
     assert isinstance(x_fn(1.0), np.ndarray)
-
-
-def test_OpFromGraph():
-    x, y, z = pt.matrices("xyz")
-    ofg_1 = OpFromGraph([x, y], [x + y], inline=False)
-    ofg_2 = OpFromGraph([x, y], [x * y, x - y], inline=False)
-
-    o1, o2 = ofg_2(y, z)
-    out = ofg_1(x, o1) + o2
-
-    xv = np.ones((2, 2), dtype=config.floatX)
-    yv = np.ones((2, 2), dtype=config.floatX) * 3
-    zv = np.ones((2, 2), dtype=config.floatX) * 5
-
-    compare_numba_and_py([x, y, z], [out], [xv, yv, zv])
-
-
-@pytest.mark.filterwarnings("error")
-def test_ofg_inner_inplace():
-    x = pt.vector("x")
-    set0 = x[0].set(1)  # SetSubtensor should not inplace on x
-    exp_x = pt.exp(x)
-    set1 = exp_x[0].set(1)  # SetSubtensor should inplace on exp_x
-    ofg0 = OpFromGraph([x], [set0])
-    ofg1 = OpFromGraph([x], [set1])
-
-    y, z = pt.vectors("y", "z")
-    fn = function([y, z], [ofg0(y), ofg1(z)], mode="NUMBA")
-
-    fn_ofg0 = fn.maker.fgraph.outputs[0].owner.op
-    assert isinstance(fn_ofg0, OpFromGraph)
-    fn_set0 = fn_ofg0.fgraph.outputs[0]
-    assert fn_set0.owner.op.destroy_map == {}
-
-    fn_ofg1 = fn.maker.fgraph.outputs[1].owner.op
-    assert isinstance(fn_ofg1, OpFromGraph)
-    fn_set1 = fn_ofg1.fgraph.outputs[0]
-    assert fn_set1.owner.op.destroy_map == {0: [0]}
-
-    x_test = np.array([0, 1, 1], dtype=config.floatX)
-    y_test = np.array([0, 1, 1], dtype=config.floatX)
-    res0, res1 = fn(x_test, y_test)
-    # Check inputs were not mutated
-    np.testing.assert_allclose(x_test, [0, 1, 1])
-    np.testing.assert_allclose(y_test, [0, 1, 1])
-    # Check outputs are correct
-    np.testing.assert_allclose(res0, [1, 1, 1])
-    np.testing.assert_allclose(res1, [1, np.e, np.e])
 
 
 @pytest.mark.filterwarnings("error")
@@ -627,3 +475,180 @@ def test_function_overhead(mode, benchmark):
     assert np.sum(fn(test_x)) == 1000
 
     benchmark(fn, test_x)
+
+
+class ComplexType:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+
+class TestKeyForConstant:
+    def test_numpy_scalars(self):
+        key_float64_0 = cache_key_for_constant(np.float64(0))
+        key_float64_0_again = cache_key_for_constant(np.float64(0))
+        key_int64_0 = cache_key_for_constant(np.float32(0))
+        assert key_float64_0 == key_float64_0_again
+        assert key_float64_0 != key_int64_0
+
+    def test_None(self):
+        key_none_1 = cache_key_for_constant(None)
+        key_none_2 = cache_key_for_constant(None)
+        assert key_none_1 == key_none_2
+
+    def test_python_scalars(self):
+        key_int_0 = cache_key_for_constant(0)
+        key_int_0_again = cache_key_for_constant(0)
+        key_float_0 = cache_key_for_constant(0.0)
+        assert key_int_0 == key_int_0_again
+        assert key_int_0 != key_float_0
+
+    def test_numpy_arrays(self):
+        # Jest check we are using hash_from_ndarary and trust that is working
+        # If we change our implementation we may need more exhaustive tests here
+        arr1 = np.array([1, 2, 3], dtype=np.float32)
+        arr2 = np.array([1, 3, 2], dtype=np.float32)
+
+        key_arr1 = cache_key_for_constant(arr1)
+        expected_key_arr1 = hash_from_ndarray(arr1)
+
+        key_arr2 = cache_key_for_constant(arr2)
+        expected_key_arr2 = hash_from_ndarray(arr2)
+
+        assert key_arr1 == expected_key_arr1
+        assert key_arr2 == expected_key_arr2
+        assert key_arr1 != key_arr2
+
+    def test_complex_types(self):
+        obj1 = ComplexType(1, 2)
+        ob1_again = ComplexType(1, 2)
+        obj2 = ComplexType(3, 4)
+
+        key_obj1 = cache_key_for_constant(obj1)
+        key_obj1_again = cache_key_for_constant(ob1_again)
+        key_obj2 = cache_key_for_constant(obj2)
+
+        assert key_obj1 == key_obj1_again
+        assert key_obj1 != key_obj2
+
+
+def test_funcify_dispatch_interop():
+    """Test that the different funcify registration decorators work together as expected."""
+
+    class BaseOp(Op):
+        itypes = [pt.dscalar]
+        otypes = [pt.dscalar]
+
+    class FuncifiedOp(BaseOp):
+        def perform(self, node, inputs, outputs):
+            outputs[0][0] = inputs[0] + 1
+
+    class FuncifiedAndCachedOp(BaseOp):
+        def perform(self, node, inputs, outputs):
+            outputs[0][0] = inputs[0] * 2
+
+    class FuncifiedAndDefaultCachedOp(BaseOp):
+        __props__ = ()
+
+        def perform(self, node, inputs, outputs):
+            outputs[0][0] = inputs[0] - 3
+
+    @numba_basic.numba_funcify.register(FuncifiedOp)
+    def _(op, node, **kwargs):
+        @numba_basic.numba_njit
+        def impl(x):
+            return x + 1
+
+        return impl
+
+    @numba_basic.register_funcify_and_cache_key(FuncifiedAndCachedOp)
+    def _(op, node, **kwargs):
+        @numba_basic.numba_njit
+        def impl(x):
+            return x * 2
+
+        return impl, "sushi-hash"
+
+    @numba_basic.register_funcify_default_op_cache_key(FuncifiedAndDefaultCachedOp)
+    def _(op, node, **kwargs):
+        @numba_basic.numba_njit
+        def impl(x):
+            return x - 3
+
+        return impl
+
+    x = pt.scalar("x", dtype="float64")
+    outs = [
+        FuncifiedOp()(x),
+        FuncifiedAndCachedOp()(x),
+        FuncifiedAndDefaultCachedOp()(x),
+    ]
+    test_x = np.array(5.0)
+
+    compare_numba_and_py(
+        [x],
+        outs,
+        [test_x],
+    )
+
+    # Test we can use numba_funcify_ensure_cache
+    fn0, cache0 = numba_basic.numba_funcify_ensure_cache(
+        outs[0].owner.op, outs[0].owner
+    )
+    assert cache0 is None
+    assert numba.njit(lambda x: fn0(x))(test_x) == 6
+    fn1, cache1 = numba_basic.numba_funcify_ensure_cache(
+        outs[1].owner.op, outs[1].owner
+    )
+    assert cache1 == "sushi-hash"
+    assert numba.njit(lambda x: fn1(x))(test_x) == 10
+    fn2, cache2 = numba_basic.numba_funcify_ensure_cache(
+        outs[2].owner.op, outs[2].owner
+    )
+    assert cache2 is not None
+    assert numba.njit(lambda x: fn2(x))(test_x) == 2
+    fn2_again, cache2_again = numba_basic.numba_funcify_ensure_cache(
+        outs[2].owner.op, outs[2].owner
+    )
+    assert cache2 == cache2_again
+    assert numba.njit(lambda x: fn2_again(x))(test_x) == 2
+
+    # Test we can use numba_funcify directly
+    fn0 = numba_basic.numba_funcify(outs[0].owner.op, outs[0].owner)
+    assert numba.njit(lambda x: fn0(x))(test_x) == 6
+    fn1 = numba_basic.numba_funcify(outs[1].owner.op, outs[1].owner)
+    assert numba.njit(lambda x: fn1(x))(test_x) == 10
+    fn2 = numba_basic.numba_funcify(outs[2].owner.op, outs[2].owner)
+    assert numba.njit(lambda x: fn2(x))(test_x) == 2
+
+    # Test we can use numba_funcify_and_cache_key directly
+    fn0, cache0 = numba_basic.numba_funcify_and_cache_key(
+        outs[0].owner.op, outs[0].owner
+    )
+    assert cache0 is None
+    assert numba.njit(lambda x: fn0(x))(test_x) == 6
+    fn1, cache1 = numba_basic.numba_funcify_and_cache_key(
+        outs[1].owner.op, outs[1].owner
+    )
+    assert cache1 == "sushi-hash"
+    assert numba.njit(lambda x: fn1(x))(test_x) == 10
+    fn2, cache2 = numba_basic.numba_funcify_and_cache_key(
+        outs[2].owner.op, outs[2].owner
+    )
+    assert cache2 is not None
+    assert numba.njit(lambda x: fn2(x))(test_x) == 2
+    fn2_again, cache2_again = numba_basic.numba_funcify_and_cache_key(
+        outs[2].owner.op, outs[2].owner
+    )
+    assert cache2 == cache2_again
+    assert numba.njit(lambda x: fn2_again(x))(test_x) == 2
+
+    # Test numba_funcify_default_op_cache_key works as expected
+    with pytest.raises(NotImplementedError):
+        numba_basic.numba_funcify_default_op_cache_key(outs[0].owner.op, outs[0].owner)
+    with pytest.raises(NotImplementedError):
+        numba_basic.numba_funcify_default_op_cache_key(outs[1].owner.op, outs[1].owner)
+    fn2_def_cached = numba_basic.numba_funcify_default_op_cache_key(
+        outs[2].owner.op, outs[2].owner
+    )
+    assert numba.njit(lambda x: fn2_def_cached(x))(test_x) == 2

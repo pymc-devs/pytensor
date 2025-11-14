@@ -3,7 +3,11 @@ import warnings
 import numpy as np
 
 from pytensor import config
-from pytensor.link.numba.dispatch.basic import numba_funcify, numba_njit
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import (
+    numba_funcify,
+    register_funcify_default_op_cache_key,
+)
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
 from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
     _lu_1,
@@ -63,7 +67,7 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     if dtype in complex_dtypes:
         raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
-    @numba_njit
+    @numba_basic.numba_njit
     def cholesky(a):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
@@ -90,12 +94,12 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     return cholesky
 
 
-@numba_funcify.register(PivotToPermutations)
+@register_funcify_default_op_cache_key(PivotToPermutations)
 def pivot_to_permutation(op, node, **kwargs):
     inverse = op.inverse
     dtype = node.outputs[0].dtype
 
-    @numba_njit
+    @numba_basic.numba_njit
     def numba_pivot_to_permutation(piv):
         p_inv = _pivot_to_permutation(piv, dtype)
 
@@ -118,7 +122,7 @@ def numba_funcify_LU(op, node, **kwargs):
     if dtype in complex_dtypes:
         NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
-    @numba_njit(inline="always")
+    @numba_basic.numba_njit
     def lu(a):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
@@ -165,7 +169,7 @@ def numba_funcify_LUFactor(op, node, **kwargs):
     if dtype in complex_dtypes:
         NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
-    @numba_njit
+    @numba_basic.numba_njit
     def lu_factor(a):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
@@ -180,12 +184,11 @@ def numba_funcify_LUFactor(op, node, **kwargs):
     return lu_factor
 
 
-@numba_funcify.register(BlockDiagonal)
+@register_funcify_default_op_cache_key(BlockDiagonal)
 def numba_funcify_BlockDiagonal(op, node, **kwargs):
     dtype = node.outputs[0].dtype
 
-    # TODO: Why do we always inline all functions? It doesn't work with starred args, so can't use it in this case.
-    @numba_njit
+    @numba_basic.numba_njit
     def block_diag(*arrs):
         shapes = np.array([a.shape for a in arrs], dtype="int")
         out_shape = [int(s) for s in np.sum(shapes, axis=0)]
@@ -235,7 +238,7 @@ def numba_funcify_Solve(op, node, **kwargs):
         )
         solve_fn = _solve_gen
 
-    @numba_njit
+    @numba_basic.numba_njit
     def solve(a, b):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
@@ -267,7 +270,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
             _COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op="Solve Triangular")
         )
 
-    @numba_njit
+    @numba_basic.numba_njit
     def solve_triangular(a, b):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
@@ -304,7 +307,7 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     if dtype in complex_dtypes:
         raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
-    @numba_njit
+    @numba_basic.numba_njit
     def cho_solve(c, b):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(c), np.isnan(c))):
@@ -337,7 +340,7 @@ def numba_funcify_QR(op, node, **kwargs):
     integer_input = dtype in integer_dtypes
     in_dtype = config.floatX if integer_input else dtype
 
-    @numba_njit(cache=False)
+    @numba_basic.numba_njit
     def qr(a):
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):

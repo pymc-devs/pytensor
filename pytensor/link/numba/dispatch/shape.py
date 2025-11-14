@@ -3,34 +3,37 @@ from textwrap import dedent
 import numpy as np
 from numba.np.unsafe import ndarray as numba_ndarray
 
-from pytensor.link.numba.dispatch import numba_funcify
-from pytensor.link.numba.dispatch.basic import create_arg_string, numba_njit
+from pytensor.link.numba.dispatch import basic as numba_basic
+from pytensor.link.numba.dispatch.basic import (
+    create_arg_string,
+    register_funcify_default_op_cache_key,
+)
 from pytensor.link.utils import compile_function_src
 from pytensor.tensor import NoneConst
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
-@numba_funcify.register(Shape)
+@register_funcify_default_op_cache_key(Shape)
 def numba_funcify_Shape(op, **kwargs):
-    @numba_njit
+    @numba_basic.numba_njit
     def shape(x):
         return np.asarray(np.shape(x))
 
     return shape
 
 
-@numba_funcify.register(Shape_i)
+@register_funcify_default_op_cache_key(Shape_i)
 def numba_funcify_Shape_i(op, **kwargs):
     i = op.i
 
-    @numba_njit
+    @numba_basic.numba_njit
     def shape_i(x):
         return np.asarray(np.shape(x)[i])
 
     return shape_i
 
 
-@numba_funcify.register(SpecifyShape)
+@register_funcify_default_op_cache_key(SpecifyShape)
 def numba_funcify_SpecifyShape(op, node, **kwargs):
     shape_inputs = node.inputs[1:]
     shape_input_names = ["shape_" + str(i) for i in range(len(shape_inputs))]
@@ -52,22 +55,22 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
     )
 
     specify_shape = compile_function_src(func, "specify_shape", globals())
-    return numba_njit(specify_shape)
+    return numba_basic.numba_njit(specify_shape)
 
 
-@numba_funcify.register(Reshape)
+@register_funcify_default_op_cache_key(Reshape)
 def numba_funcify_Reshape(op, **kwargs):
     ndim = op.ndim
 
     if ndim == 0:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def reshape(x, shape):
             return np.asarray(x.item())
 
     else:
 
-        @numba_njit
+        @numba_basic.numba_njit
         def reshape(x, shape):
             # TODO: Use this until https://github.com/numba/numba/issues/7353 is closed.
             return np.reshape(
