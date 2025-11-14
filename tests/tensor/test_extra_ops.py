@@ -21,6 +21,7 @@ from pytensor.tensor.extra_ops import (
     CumOp,
     FillDiagonal,
     FillDiagonalOffset,
+    PackHelper,
     RavelMultiIndex,
     Repeat,
     SearchsortedOp,
@@ -38,11 +39,13 @@ from pytensor.tensor.extra_ops import (
     diff,
     fill_diagonal,
     fill_diagonal_offset,
+    pack,
     ravel_multi_index,
     repeat,
     searchsorted,
     squeeze,
     to_one_hot,
+    unpack,
     unravel_index,
 )
 from pytensor.tensor.type import (
@@ -1387,3 +1390,200 @@ def test_concat_with_broadcast():
         a = pt.tensor("a", shape=(1, 3, 5))
         b = pt.tensor("b", shape=(3, 5))
         pt.concat_with_broadcast([a, b], axis=1)
+
+
+class TestPack:
+    @pytest.mark.parametrize(
+        "axes, expected",
+        [
+            ([0, 1], [2, 0, 2, None]),  # 'i j *'
+            ([-1], [0, 1, 1, None]),  # '* k'
+            ([0, 1, 3], [2, 1, 3, 4]),  # 'i j * k'
+            ([-3, -1], [1, 1, 2, 3]),  # '* i j'
+            ([2, 3], [0, 2, 2, 4]),  # '* i j'
+            ([-3, -2], [2, 0, 2, 3]),  # 'i j *'
+            ([0, -1], [1, 1, 2, None]),  # 'i * k'
+            ([0, 1, 2, -1], [3, 1, 4, None]),  # 'i j k * l'
+            ([0, 1, 4], [2, 1, 3, 5]),
+            ([-4, -1], [1, 1, 2, 4]),
+        ],
+        ids=[
+            "basic",
+            "keep_last",
+            "ravel_middle_implicit_end",
+            "implicit_start",
+            "ravel_start",
+            "implicit_end",
+            "mix_pos_neg",
+            "ravel_middle_explicit_end",
+            "pos_internal_bigger_gap",
+            "neg_internal_bigger_gap",
+        ],
+    )
+    def test_analyze_axes_list_valid(self, axes, expected):
+        helper = PackHelper(axes)
+        outputs = helper._analyze_axes_list()
+        names = ["n_before", "n_after", "min_axes", "max_axes"]
+        for out, exp, name in zip(outputs, expected, names, strict=True):
+            assert out == exp, f"Expected {exp}, got {out} for {name}"
+
+    def test_analyze_axes_list_invalid(self):
+        # Two explicit holes
+        helper = PackHelper([0, 2, -1])
+        with pytest.raises(ValueError, match="Too many holes"):
+            helper._analyze_axes_list()
+
+        # Explict hole + two implicit holes
+        helper = PackHelper([1, 3])
+        with pytest.raises(ValueError, match="Too many holes"):
+            helper._analyze_axes_list()
+
+        # Two explicit holes, all positive
+        helper = PackHelper([0, 2, 4])
+        with pytest.raises(ValueError, match="Too many holes"):
+            helper._analyze_axes_list()
+
+        # Explicit hole + two implicit hole, all negative
+        helper = PackHelper([-4, -2])
+        with pytest.raises(ValueError, match="Too many holes"):
+            helper._analyze_axes_list()
+
+        # Two explicit holes + implicit hole, all negative
+        helper = PackHelper([-5, -3, -1])
+        with pytest.raises(ValueError, match="Too many holes"):
+            helper._analyze_axes_list()
+
+        # Duplicate axes
+        helper = PackHelper([0, 0])
+        with pytest.raises(ValueError, match="axes must have no duplicates"):
+            helper._analyze_axes_list()
+
+        # Not monotonic
+        helper = PackHelper([0, 2, 1])
+        with pytest.raises(ValueError, match="Axes must be strictly increasing"):
+            helper._analyze_axes_list()
+
+        # Negative before positive
+        helper = PackHelper([-1, 0])
+        with pytest.raises(ValueError, match="Negative axes must come after positive"):
+            helper._analyze_axes_list()
+
+    def test_pack_basic(self):
+        # rng = np.random.default_rng()
+        x = pt.tensor("x", shape=())
+        y = pt.tensor("y", shape=(5,))
+        z = pt.tensor("z", shape=(3, 3))
+
+        input_dict = {
+            variable: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
+
+        # Simple case, reduce all axes, equivalent to einops '*'
+        packed_tensor, packed_shapes = pack(x, y, z, axes=None)
+        assert packed_tensor.type.shape == (15,)
+        for tensor, packed_shape in zip([x, y, z], packed_shapes):
+            assert packed_shape.type.shape == (tensor.ndim,)
+            np.testing.assert_allclose(packed_shape.eval(input_dict), tensor.type.shape)
+
+        # To preserve an axis, all inputs need at least one dimension, and the preserved axis has to agree.
+        # x is scalar, so pack will raise:
+        with pytest.raises(
+            ValueError,
+            match=r"All input tensors to Pack{axes=0} must have at least 1 dimensions",
+        ):
+            pack(x, y, z, axes=0)
+
+        # With valid x, pack should still raise, because the axis of concatenation doesn't agree across all inputs
+        x = pt.tensor("x", shape=(3,))
+        with pytest.raises(
+            ValueError,
+            match=r"Input tensors to Pack op have incompatible sizes on dimension 0 : "
+            r"\[3, 5, 3\]",
+        ):
+            pack(x, y, z, axes=0)
+
+        # Valid case, preserve first axis, equivalent to einops 'i *'
+        y = pt.tensor("y", shape=(3, 5))
+        z = pt.tensor("z", shape=(3, 3, 3))
+        packed_tensor, packed_shapes = pack(x, y, z, axes=0)
+        input_dict = {
+            variable: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
+        assert packed_tensor.type.shape == (3, 15)
+        for tensor, packed_shape in zip([x, y, z], packed_shapes):
+            assert packed_shape.type.shape == (tensor.ndim - 1,)
+            np.testing.assert_allclose(
+                packed_shape.eval(input_dict), tensor.type.shape[1:]
+            )
+        # More complex case, preserve last axis implicitly, equivalent to einops 'i * k'. This introduces a max
+        # dimension condition on the input shapes
+        x = pt.tensor("x", shape=(3, 2))
+        y = pt.tensor("y", shape=(3, 5, 2))
+        z = pt.tensor("z", shape=(3, 1, 7, 5, 2))
+
+        with pytest.raises(
+            ValueError,
+            match=r"All input tensors to Pack{axes=\(0, 3\)} must have at most 4 "
+            r"dimensions, but the maximum number of dimensions found was 5",
+        ):
+            pack(x, y, z, axes=[0, 3])
+
+        z = pt.tensor("z", shape=(3, 1, 7, 2))
+        packed_tensor, packed_shapes = pack(x, y, z, axes=[0, 3])
+        input_dict = {
+            variable: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
+        assert packed_tensor.type.shape == (3, 13, 2)
+        for tensor, packed_shape in zip([x, y, z], packed_shapes):
+            assert packed_shape.type.shape == (tensor.ndim - 2,)
+            np.testing.assert_allclose(
+                packed_shape.eval(input_dict), tensor.type.shape[1:-1]
+            )
+
+    def test_pack_unpack_round_trip(self):
+        rng = np.random.default_rng()
+
+        x = pt.tensor("x", shape=(5,))
+        y = pt.tensor("y", shape=(3, 3))
+        z = pt.tensor("z", shape=())
+
+        flat_packed, packed_shapes = pack(x, y, z, axes=None)
+        new_outputs = unpack(flat_packed, packed_shapes)
+
+        fn = pytensor.function([x, y, z], new_outputs, mode="FAST_COMPILE")
+
+        input_vals = [
+            rng.normal(size=var.type.shape).astype(config.floatX) for var in [x, y, z]
+        ]
+        output_vals = fn(*input_vals)
+
+        for input_val, output_val in zip(input_vals, output_vals, strict=True):
+            np.testing.assert_allclose(input_val, output_val)
+
+
+def test_make_replacements_with_pack_unpack():
+    rng = np.random.default_rng()
+
+    x = pt.tensor("x", shape=())
+    y = pt.tensor("y", shape=(5,))
+    z = pt.tensor("z", shape=(3, 3))
+
+    loss = (x + y.sum() + z.sum()) ** 2
+
+    flat_packed, packed_shapes = pack(x, y, z, axes=None)
+    new_input = flat_packed.type()
+    new_outputs = unpack(new_input, packed_shapes)
+
+    loss = pytensor.graph.graph_replace(loss, dict(zip([x, y, z], new_outputs)))
+    fn = pytensor.function([new_input, x, y, z], loss, mode="FAST_COMPILE")
+
+    input_vals = [
+        rng.normal(size=(var.type.shape)).astype(config.floatX) for var in [x, y, z]
+    ]
+    flat_inputs = np.concatenate([input.ravel() for input in input_vals], axis=0)
+    output_val = fn(flat_inputs, *input_vals)
+
+    assert np.allclose(output_val, sum([input.sum() for input in input_vals]) ** 2)
