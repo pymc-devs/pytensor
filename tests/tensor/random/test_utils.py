@@ -1,3 +1,6 @@
+import timeit
+from copy import deepcopy
+
 import numpy as np
 import pytest
 
@@ -7,6 +10,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor.random.utils import (
     RandomStream,
     broadcast_params,
+    custom_deepcopy,
     supp_shape_from_ref_param_shape,
 )
 from pytensor.tensor.type import matrix, tensor
@@ -327,3 +331,39 @@ def test_supp_shape_from_ref_param_shape():
         ref_param_idx=1,
     )
     assert res == (3, 4)
+
+
+def test_custom_deepcopy_matches_deepcopy():
+    rng = np.random.default_rng(123)
+
+    dp = deepcopy(rng).bit_generator
+    fc = custom_deepcopy(rng).bit_generator
+
+    # Same state
+    assert dp.state == fc.state
+    # Same seed sequence
+    assert dp.seed_seq.state == fc.seed_seq.state
+
+
+def test_custom_deepcopy_output_identical():
+    rng = np.random.default_rng(123)
+
+    rng1 = deepcopy(rng)
+    rng2 = custom_deepcopy(rng)
+
+    # Generate numbers from each
+    x1 = rng1.normal(size=10)
+    x2 = rng2.normal(size=10)
+
+    assert np.allclose(x1, x2)
+
+
+@pytest.mark.performance
+def test_custom_deepcopy_faster_than_deepcopy():
+    rng = np.random.default_rng()
+
+    t_dp = timeit.timeit(lambda: deepcopy(rng), number=2000)
+    t_fc = timeit.timeit(lambda: custom_deepcopy(rng), number=2000)
+
+    # Fast copy should be at least 20% faster
+    assert t_fc < t_dp * 0.8
