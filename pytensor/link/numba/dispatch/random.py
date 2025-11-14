@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from copy import deepcopy
 from functools import singledispatch
 from hashlib import sha256
 from textwrap import dedent
@@ -32,6 +31,7 @@ from pytensor.link.utils import (
 )
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
+from pytensor.tensor.random.utils import custom_rng_deepcopy
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.utils import _parse_gufunc_signature
 
@@ -42,7 +42,7 @@ def numba_deepcopy_random_generator(x):
 
         def random_generator_deepcopy(x):
             with numba.objmode(new_rng=types.npy_rng):
-                new_rng = deepcopy(x)
+                new_rng = custom_rng_deepcopy(x)
             return new_rng
 
         return random_generator_deepcopy
