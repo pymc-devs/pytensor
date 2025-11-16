@@ -47,6 +47,13 @@ def mlx_funcify_Split(op: Split, node, **kwargs):
     except NotScalarConstantError:
         constant_axis = None
 
+    # Reject symbolic axes at dispatch time so that unsupported configurations
+    # do not produce Python exceptions from inside MLX-compiled regions.
+    # This mirrors the existing limitation but avoids the CI abort seen in
+    # https://github.com/pymc-devs/pytensor/issues/1724.
+    if constant_axis is None:
+        raise ValueError("Symbolic axis is not supported in MLX Split implementation.")
+
     try:
         constant_splits = np.array(
             [
@@ -59,28 +66,26 @@ def mlx_funcify_Split(op: Split, node, **kwargs):
 
     def split(x, axis, splits):
         # Resolve constants for significant performance improvement (14x speedup)
-        if constant_axis is not None:
-            axis = int(constant_axis)
-        else:
-            raise ValueError(
-                "Symbolic axis is not supported in MLX Split implementation."
-            )
+        axis = int(constant_axis)
 
         if constant_splits is not None:
             splits_arr = mx.array(constant_splits)
+            splits_for_validation = constant_splits
         else:
             splits_arr = mx.array(splits)
+            splits_for_validation = splits
 
         cumsum_splits = mx.cumsum(splits_arr[:-1]).tolist()
 
         # Validation checks
-        if len(splits) != op.len_splits:
+        splits_np = np.asarray(splits_for_validation)
+        if len(splits_np) != op.len_splits:
             raise ValueError("Length of 'splits' is not equal to n_splits")
-        if np.sum(np.asarray(splits)) != x.shape[axis]:
+        if np.sum(splits_np) != x.shape[axis]:
             raise ValueError(
                 "Split sizes do not sum to the input length on the chosen axis."
             )
-        if np.any(np.asarray(splits) < 0):
+        if np.any(splits_np < 0):
             raise ValueError("Split sizes cannot be negative.")
 
         return mx.split(x, cumsum_splits, axis=axis)

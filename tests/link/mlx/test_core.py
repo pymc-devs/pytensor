@@ -164,3 +164,12 @@ def test_split_dynamic_axis_const_splits():
         ValueError, match="Symbolic axis is not supported in MLX Split implementation"
     ):
         compare_mlx_and_py([x, axis], outs, [test_input, np.array(1)])
+
+
+def test_split_invalid_splits_len_mlx():
+    x = pt.vector("x")
+    # len_splits=3, but only provide 2 split sizes
+    splits = [2, 2]
+    # The core Split op itself raises a ValueError at graph construction time
+    with pytest.raises(ValueError, match="Number of splits is larger than splits size"):
+        pt.split(x, splits, 3, axis=0)
