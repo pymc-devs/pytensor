@@ -1654,7 +1654,7 @@ def _largest_common_dtype(tensors: Sequence[TensorVariable]) -> np.dtype:
 
 
 class BaseBlockDiagonal(Op):
-    __props__ = ("n_inputs",)
+    __props__: tuple[str, ...] = ("n_inputs",)
 
     def __init__(self, n_inputs):
         input_sig = ",".join(f"(m{i},n{i})" for i in range(n_inputs))

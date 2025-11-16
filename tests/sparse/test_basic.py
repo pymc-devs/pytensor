@@ -1,57 +1,45 @@
-import time
-from itertools import product
-
 import numpy as np
 import pytest
+import scipy.sparse as scipy_sparse
 from packaging import version
+from scipy import __version__ as scipy_version
 
 import pytensor
+import pytensor.sparse.math
 import pytensor.tensor as pt
 from pytensor import sparse
 from pytensor.compile.function import function
-from pytensor.compile.io import In, Out
+from pytensor.compile.io import In
 from pytensor.configdefaults import config
 from pytensor.gradient import GradientError
-from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
-from pytensor.graph.traversal import applys_between
-from pytensor.sparse import (
+from pytensor.sparse.basic import (
     CSC,
     CSM,
     CSR,
-    AddSD,
-    AddSS,
-    AddSSData,
     Cast,
     ConstructSparseFromList,
     CSMGrad,
     CSMProperties,
     DenseFromSparse,
     Diag,
-    Dot,
     EnsureSortedIndices,
     GetItemScalar,
     HStack,
-    MulSD,
-    MulSS,
     Neg,
     Remove0,
-    SamplingDot,
     SparseFromDense,
     SparseTensorType,
     SquareDiagonal,
-    StructuredDot,
-    StructuredDotGradCSC,
-    StructuredDotGradCSR,
     Transpose,
-    TrueDot,
-    Usmm,
     VStack,
-    add,
-    add_s_s_data,
+    _is_sparse,
+    _is_sparse_variable,
+    _mtypes,
+    all_dtypes,
     as_sparse_or_tensor_variable,
     as_sparse_variable,
-    block_diag,
     cast,
     clean,
     construct_sparse_from_list,
@@ -61,74 +49,40 @@ from pytensor.sparse import (
     dense_from_sparse,
     diag,
     ensure_sorted_indices,
-    ge,
-    gt,
-    le,
-    lt,
-    mul_s_v,
-    multiply,
-    sampling_dot,
     sp_ones_like,
+    sparse_formats,
     square_diagonal,
-    structured_add,
-    structured_add_s_v,
-    structured_dot,
-    structured_maximum,
-    structured_minimum,
     transpose,
-    true_dot,
-)
-from pytensor.sparse.basic import (
-    SparseConstant,
-    _is_dense_variable,
-    _is_sparse,
-    _is_sparse_variable,
-    _mtypes,
 )
 from pytensor.sparse.rewriting import (
-    AddSD_ccode,
     CSMGradC,
-    StructuredDotCSC,
-    UsmmCscDense,
 )
+from pytensor.sparse.variable import SparseConstant
 from pytensor.tensor.basic import MakeVector
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor1,
-    Subtensor,
 )
 from pytensor.tensor.type import (
     TensorType,
     float_dtypes,
-    fscalar,
     iscalar,
     ivector,
     lvector,
     matrix,
-    scalar,
     tensor,
     vector,
 )
 from tests import unittest_tools as utt
-from tests.tensor.test_sharedvar import makeSharedTester
-
-
-sp = pytest.importorskip("scipy", minversion="0.7.0")
-
-
-# Probability distributions are currently tested in test_sp2.py
-# from pytensor.sparse import (
-#    Poisson, poisson, Binomial, Multinomial, multinomial)
 
 
 def as_sparse_format(data, format):
     if format == "csc":
-        return sp.sparse.csc_matrix(data)
+        return scipy_sparse.csc_matrix(data)
     elif format == "csr":
-        return sp.sparse.csr_matrix(data)
+        return scipy_sparse.csr_matrix(data)
     else:
         raise NotImplementedError()
 
@@ -147,7 +101,7 @@ def as_ndarray(val):
 
 
 def random_lil(shape, dtype, nnz):
-    rval = sp.sparse.lil_matrix(shape, dtype=dtype)
+    rval = scipy_sparse.lil_matrix(shape, dtype=dtype)
     huge = 2**30
     for k in range(nnz):
         # set non-zeros in random locations (row x, col y)
@@ -231,7 +185,7 @@ def sparse_random_inputs(
         getattr(pytensor.sparse, format + "_matrix")(dtype=out_dtype) for k in range(n)
     ]
     data = [
-        getattr(sp.sparse, format + "_matrix")(_rand(), dtype=out_dtype)
+        getattr(scipy_sparse, format + "_matrix")(_rand(), dtype=out_dtype)
         for k in range(n)
     ]
     if unsorted_indices:
@@ -239,11 +193,11 @@ def sparse_random_inputs(
             d = data[idx]
             # these flip the matrix, but it's random anyway
             if format == "csr":
-                d = sp.sparse.csr_matrix(
+                d = scipy_sparse.csr_matrix(
                     (d.data, d.shape[1] - 1 - d.indices, d.indptr), shape=d.shape
                 )
             if format == "csc":
-                d = sp.sparse.csc_matrix(
+                d = scipy_sparse.csc_matrix(
                     (d.data, d.shape[0] - 1 - d.indices, d.indptr), shape=d.shape
                 )
             assert not d.has_sorted_indices
@@ -254,7 +208,7 @@ def sparse_random_inputs(
             d_idx = np.random.default_rng().integers(data[idx].nnz)
             data[idx].data[d_idx] = 0
 
-    # numpy 1.5.0 with scipy 0.9.0 have sp.sparse.XXX_matrix return
+    # numpy 1.5.0 with scipy 0.9.0 have scipy_sparse.XXX_matrix return
     # typenum 10(ulonglong) instead of 8(uint64) event if they are the same!
     # PyTensor don't like ulonglong type_num
     dtype = np.dtype(out_dtype)  # Convert into dtype object.
@@ -379,19 +333,19 @@ class TestVerifyGradSparse:
         with pytest.raises(GradientError):
             verify_grad_sparse(
                 self.FailOp(structured=False),
-                [sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
+                [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
             )
 
         with pytest.raises(GradientError):
             verify_grad_sparse(
                 self.FailOp(structured=True),
-                [sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
+                [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
             )
 
 
 class TestTranspose:
     def test_transpose_csc(self):
-        spe = sp.sparse.csc_matrix(sp.sparse.eye(5, 3))
+        spe = scipy_sparse.csc_matrix(scipy_sparse.eye(5, 3))
         a = as_sparse_variable(spe)
         assert a.data is not spe
         assert a.data.shape == (5, 3)
@@ -405,7 +359,7 @@ class TestTranspose:
         assert vta.shape == (3, 5)
 
     def test_transpose_csr(self):
-        a = as_sparse_variable(sp.sparse.csr_matrix(sp.sparse.eye(5, 3)))
+        a = as_sparse_variable(scipy_sparse.csr_matrix(scipy_sparse.eye(5, 3)))
         assert a.data.shape == (5, 3)
         assert a.type.dtype == "float64"
         assert a.type.format == "csr"
@@ -427,7 +381,7 @@ class TestSparseInferShape(utt.InferShapeTester):
         self._compile_and_check(
             [x],
             [x[2, 2]],
-            [sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
+            [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
             GetItemScalar,
         )
 
@@ -437,7 +391,7 @@ class TestSparseInferShape(utt.InferShapeTester):
             y = ivector()
             z = ivector()
             s = ivector()
-            call = getattr(sp.sparse, sparsetype + "_matrix")
+            call = getattr(scipy_sparse, sparsetype + "_matrix")
             spm = call(random_lil((300, 400), config.floatX, 5))
             out = CSM(sparsetype)(x, y, z, s)
             self._compile_and_check(
@@ -450,7 +404,7 @@ class TestSparseInferShape(utt.InferShapeTester):
             y = ivector()
             z = ivector()
             s = ivector()
-            call = getattr(sp.sparse, sparsetype + "_matrix")
+            call = getattr(scipy_sparse, sparsetype + "_matrix")
             spm = call(random_lil((300, 400), config.floatX, 5))
             out = pytensor.grad(dense_from_sparse(CSM(sparsetype)(x, y, z, s)).sum(), x)
             self._compile_and_check(
@@ -465,7 +419,7 @@ class TestSparseInferShape(utt.InferShapeTester):
         self._compile_and_check(
             [x],
             [x.T],
-            [sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
+            [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
             Transpose,
         )
 
@@ -474,61 +428,8 @@ class TestSparseInferShape(utt.InferShapeTester):
         self._compile_and_check(
             [x],
             [-x],
-            [sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
+            [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
             Neg,
-        )
-
-    def test_add_ss(self):
-        x = SparseTensorType("csr", dtype=config.floatX)()
-        y = SparseTensorType("csr", dtype=config.floatX)()
-        self._compile_and_check(
-            [x, y],
-            [x + y],
-            [
-                sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3)),
-                sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3)),
-            ],
-            AddSS,
-        )
-
-    def test_add_sd(self):
-        x = SparseTensorType("csr", dtype=config.floatX)()
-        y = matrix()
-        self._compile_and_check(
-            [x, y],
-            [x + y],
-            [
-                sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3)),
-                np.random.standard_normal((10, 40)).astype(config.floatX),
-            ],
-            (AddSD, AddSD_ccode),
-        )
-
-    def test_mul_ss(self):
-        x = SparseTensorType("csr", dtype=config.floatX)()
-        y = SparseTensorType("csr", dtype=config.floatX)()
-        self._compile_and_check(
-            [x, y],
-            [x * y],
-            [
-                sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3)),
-            ]
-            * 2,
-            MulSS,
-        )
-
-    def test_mul_sd(self):
-        x = SparseTensorType("csr", dtype=config.floatX)()
-        y = matrix()
-        self._compile_and_check(
-            [x, y],
-            [x * y],
-            [
-                sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3)),
-                np.random.standard_normal((10, 40)).astype(config.floatX),
-            ],
-            MulSD,
-            excluding=["local_mul_s_d"],
         )
 
     def test_remove0(self):
@@ -536,90 +437,16 @@ class TestSparseInferShape(utt.InferShapeTester):
         self._compile_and_check(
             [x],
             [Remove0()(x)],
-            [sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
+            [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
             Remove0,
         )
-
-    def test_dot(self):
-        x = SparseTensorType("csc", dtype=config.floatX)()
-        y = SparseTensorType("csc", dtype=config.floatX)()
-        self._compile_and_check(
-            [x, y],
-            [Dot()(x, y)],
-            [
-                sp.sparse.csc_matrix(random_lil((4, 5), config.floatX, 3)),
-                sp.sparse.csc_matrix(random_lil((5, 3), config.floatX, 3)),
-            ],
-            Dot,
-        )
-
-    def test_dot_broadcast(self):
-        for x, y in [
-            (SparseTensorType("csr", "float32")(), vector()[:, None]),
-            (SparseTensorType("csr", "float32")(), vector()[None, :]),
-            (SparseTensorType("csr", "float32")(), matrix()),
-            (vector()[:, None], SparseTensorType("csr", "float32")()),
-            (vector()[None, :], SparseTensorType("csr", "float32")()),
-            (matrix(), SparseTensorType("csr", "float32")()),
-        ]:
-            sparse_out = pt.dot(x, y)
-            if isinstance(x, sparse.SparseVariable):
-                x = matrix()
-            if isinstance(y, sparse.SparseVariable):
-                y = matrix()
-            dense_out = pt.dot(x, y)
-            assert dense_out.broadcastable == sparse_out.broadcastable
-
-    def test_structured_dot(self):
-        x = SparseTensorType("csc", dtype=config.floatX)()
-        y = SparseTensorType("csc", dtype=config.floatX)()
-        self._compile_and_check(
-            [x, y],
-            [structured_dot(x, y)],
-            [
-                sp.sparse.csc_matrix(random_lil((4, 5), config.floatX, 3)),
-                sp.sparse.csc_matrix(random_lil((5, 3), config.floatX, 3)),
-            ],
-            StructuredDot,
-        )
-
-    @pytest.mark.skip(
-        reason="infer_shape not implemented for the grad of structured_dot"
-    )
-    def test_structured_dot_grad(self):
-        # We also need the grad of CSM to be implemetned.
-        for format, op in [
-            ("csc", StructuredDotGradCSC),
-            ("csr", StructuredDotGradCSR),
-        ]:
-            x = SparseTensorType(format, dtype=config.floatX)()
-            y = SparseTensorType(format, dtype=config.floatX)()
-            grads = pytensor.grad(dense_from_sparse(structured_dot(x, y)).sum(), [x, y])
-            self._compile_and_check(
-                [x, y],
-                [grads[0]],
-                [
-                    as_sparse_format(random_lil((4, 5), config.floatX, 3), format),
-                    as_sparse_format(random_lil((5, 3), config.floatX, 3), format),
-                ],
-                op,
-            )
-            self._compile_and_check(
-                [x, y],
-                [grads[1]],
-                [
-                    as_sparse_format(random_lil((4, 5), config.floatX, 3), format),
-                    as_sparse_format(random_lil((5, 3), config.floatX, 3), format),
-                ],
-                op,
-            )
 
     def test_dense_from_sparse(self):
         x = SparseTensorType("csr", dtype=config.floatX)()
         self._compile_and_check(
             [x],
             [dense_from_sparse(x)],
-            [sp.sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
+            [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
             dense_from_sparse.__class__,
         )
 
@@ -712,312 +539,6 @@ class TestConstructSparseFromList:
                 pytensor.grad(sub.sum(), t)
 
 
-class TestAddMul:
-    def test_AddSS(self):
-        self._testSS(add)
-
-    def test_AddSD(self):
-        self._testSD(add)
-
-    def test_AddDS(self):
-        self._testDS(add)
-
-    def test_MulSS(self):
-        self._testSS(
-            multiply,
-            np.array([[1.0, 0], [3, 0], [0, 6]]),
-            np.array([[1.0, 2], [3, 0], [0, 6]]),
-        )
-
-    def test_MulSD(self):
-        self._testSD(
-            multiply,
-            np.array([[1.0, 0], [3, 0], [0, 6]]),
-            np.array([[1.0, 2], [3, 0], [0, 6]]),
-        )
-
-    def test_MulDS(self):
-        self._testDS(
-            multiply,
-            np.array([[1.0, 0], [3, 0], [0, 6]]),
-            np.array([[1.0, 2], [3, 0], [0, 6]]),
-        )
-
-    def _testSS(
-        self,
-        op,
-        array1=None,
-        array2=None,
-    ):
-        if array1 is None:
-            array1 = np.array([[1.0, 0], [3, 0], [0, 6]])
-        if array2 is None:
-            array2 = np.asarray([[0, 2.0], [0, 4], [5, 0]])
-
-        for mtype1, mtype2 in product(_mtypes, _mtypes):
-            for dtype1, dtype2 in [
-                ("float64", "int8"),
-                ("int8", "float64"),
-                ("float64", "float64"),
-            ]:
-                a = mtype1(array1).astype(dtype1)
-                aR = as_sparse_variable(a)
-                assert aR.data is not a
-                assert _is_sparse(a)
-                assert _is_sparse_variable(aR)
-
-                b = mtype2(array2).astype(dtype2)
-                bR = as_sparse_variable(b)
-                assert bR.data is not b
-                assert _is_sparse(b)
-                assert _is_sparse_variable(bR)
-
-                apb = op(aR, bR)
-                assert _is_sparse_variable(apb)
-
-                assert apb.type.format == aR.type.format, apb.type.format
-
-                val = eval_outputs([apb])
-                assert val.shape == (3, 2)
-                if op is add:
-                    assert np.all(val.todense() == array1 + array2)
-                    if dtype1.startswith("float") and dtype2.startswith("float"):
-                        verify_grad_sparse(op, [a, b], structured=False)
-                elif op is multiply:
-                    assert np.all(val.todense() == array1 * array2)
-                    if dtype1.startswith("float") and dtype2.startswith("float"):
-                        verify_grad_sparse(op, [a, b], structured=False)
-
-    def _testSD(
-        self,
-        op,
-        array1=None,
-        array2=None,
-    ):
-        if array1 is None:
-            array1 = np.array([[1.0, 0], [3, 0], [0, 6]])
-        if array2 is None:
-            array2 = np.asarray([[0, 2.0], [0, 4], [5, 0]])
-
-        for mtype in _mtypes:
-            for a in [
-                np.array(array1),
-                pt.as_tensor_variable(array1),
-                pytensor.shared(array1),
-            ]:
-                for dtype1, dtype2 in [
-                    ("float64", "int8"),
-                    ("int8", "float64"),
-                    # Needed to test the grad
-                    ("float32", "float64"),
-                ]:
-                    a = a.astype(dtype1)
-                    b = mtype(array2).astype(dtype2)
-                    bR = as_sparse_variable(b)
-                    assert bR.data is not b  # constants are copied
-                    assert _is_sparse(b)
-                    assert _is_sparse_variable(bR)
-
-                    apb = op(a, bR)
-
-                    val = eval_outputs([apb])
-                    assert val.shape == (3, 2)
-                    if op is add:
-                        assert _is_dense_variable(apb)
-                        assert np.all(val == array1 + b)
-                        ans = np.array([[1.0, 2], [3, 4], [5, 6]])
-                        assert np.all(val == ans)
-                        if isinstance(a, Constant):
-                            a = a.data
-                        if getattr(a, "owner", None):
-                            continue
-                        if dtype1.startswith("float") and dtype2.startswith("float"):
-                            verify_grad_sparse(op, [a, b], structured=True)
-                    elif op is multiply:
-                        assert _is_sparse_variable(apb)
-                        assert np.all(val.todense() == b.multiply(array1))
-                        assert np.all(
-                            val.todense() == np.array([[1, 0], [9, 0], [0, 36]])
-                        )
-                        if isinstance(a, Constant):
-                            a = a.data
-                        if getattr(a, "owner", None):
-                            continue
-                        if dtype1.startswith("float") and dtype2.startswith("float"):
-                            verify_grad_sparse(op, [a, b], structured=False)
-
-    def _testDS(
-        self,
-        op,
-        array1=None,
-        array2=None,
-    ):
-        if array1 is None:
-            array1 = np.array([[1.0, 0], [3, 0], [0, 6]])
-        if array2 is None:
-            array2 = np.asarray([[0, 2.0], [0, 4], [5, 0]])
-
-        for mtype in _mtypes:
-            for b in [
-                np.asarray(array2),
-                pt.as_tensor_variable(array2),
-                pytensor.shared(array2),
-            ]:
-                for dtype1, dtype2 in [
-                    ("float64", "int8"),
-                    ("int8", "float64"),
-                ]:
-                    a = mtype(array1).astype(dtype1)
-                    aR = as_sparse_variable(a)
-                    assert aR.data is not a
-                    assert _is_sparse(a)
-                    assert _is_sparse_variable(aR)
-                    b = b.astype(dtype2)
-
-                    apb = op(aR, b)
-
-                    val = eval_outputs([apb])
-                    assert val.shape == (3, 2)
-                    if op is add:
-                        assert _is_dense_variable(apb)
-                        assert np.all(val == a + array2)
-                        ans = np.array([[1.0, 2], [3, 4], [5, 6]])
-                        assert np.all(val == ans)
-                        if isinstance(b, Constant):
-                            b = b.data
-                        if dtype1.startswith("float") and dtype2.startswith("float"):
-                            verify_grad_sparse(op, [a, b], structured=True)
-                    elif op is multiply:
-                        assert _is_sparse_variable(apb)
-                        ans = np.array([[1, 0], [9, 0], [0, 36]])
-                        assert np.all(val.todense() == (a.multiply(array2)))
-                        assert np.all(val.todense() == ans)
-                        if isinstance(b, Constant):
-                            b = b.data
-                        if dtype1.startswith("float") and dtype2.startswith("float"):
-                            verify_grad_sparse(op, [a, b], structured=False)
-
-
-class TestComparison:
-    # took from tensor basic_test.py
-    def _rand_ranged(self, min, max, shape):
-        return np.asarray(
-            np.random.random(shape) * (max - min) + min, dtype=config.floatX
-        )
-
-    tests = [
-        lambda x, y: x > y,
-        lambda x, y: x < y,
-        lambda x, y: x >= y,
-        lambda x, y: x <= y,
-    ]
-
-    testsDic = {
-        gt: lambda x, y: x > y,
-        lt: lambda x, y: x < y,
-        ge: lambda x, y: x >= y,
-        le: lambda x, y: x <= y,
-    }
-
-    @pytest.mark.skipif(
-        version.parse(sp.__version__) < version.parse("0.13"),
-        reason="Comparison operators need newer release of scipy",
-    )
-    def __generalized_ss_test(self, pytensorp, symbolicType, testOp, scipyType):
-        x = symbolicType()
-        y = symbolicType()
-
-        op = pytensorp(x, y)
-
-        f = pytensor.function([x, y], op)
-
-        m1 = scipyType(random_lil((10, 40), config.floatX, 3))
-        m2 = scipyType(random_lil((10, 40), config.floatX, 3))
-
-        assert np.array_equal(f(m1, m2).data, testOp(m1, m2).data)
-
-    @pytest.mark.skipif(
-        version.parse(sp.__version__) < version.parse("0.13"),
-        reason="Comparison operators need newer release of scipy",
-    )
-    def __generalized_sd_test(self, pytensorp, symbolicType, testOp, scipyType):
-        x = symbolicType()
-        y = matrix()
-
-        op = pytensorp(x, y)
-
-        f = pytensor.function([x, y], op)
-
-        m1 = scipyType(random_lil((10, 40), config.floatX, 3))
-        m2 = self._rand_ranged(1000, -1000, [10, 40])
-
-        assert np.array_equal(f(m1, m2).data, testOp(m1, m2).data)
-
-    @pytest.mark.skipif(
-        version.parse(sp.__version__) < version.parse("0.13"),
-        reason="Comparison operators need newer release of scipy",
-    )
-    def __generalized_ds_test(self, pytensorp, symbolicType, testOp, scipyType):
-        x = symbolicType()
-        y = matrix()
-
-        op = pytensorp(y, x)
-
-        f = pytensor.function([y, x], op)
-
-        m1 = scipyType(random_lil((10, 40), config.floatX, 3))
-        m2 = self._rand_ranged(1000, -1000, [10, 40])
-
-        assert np.array_equal(f(m2, m1).data, testOp(m2, m1).data)
-
-    def test_ss_csr_comparison(self):
-        for op in self.tests:
-            self.__generalized_ss_test(op, sparse.csr_matrix, op, sp.sparse.csr_matrix)
-
-    def test_ss_csc_comparison(self):
-        for op in self.tests:
-            self.__generalized_ss_test(op, sparse.csc_matrix, op, sp.sparse.csc_matrix)
-
-    def test_sd_csr_comparison(self):
-        for op in self.tests:
-            self.__generalized_sd_test(op, sparse.csr_matrix, op, sp.sparse.csr_matrix)
-
-    def test_sd_csc_comparison(self):
-        for op in self.tests:
-            self.__generalized_sd_test(op, sparse.csc_matrix, op, sp.sparse.csc_matrix)
-
-    def test_ds_csc_comparison(self):
-        for op in self.testsDic:
-            self.__generalized_ds_test(
-                op, sparse.csc_matrix, self.testsDic[op], sp.sparse.csc_matrix
-            )
-
-    def test_ds_csr_comparison(self):
-        for op in self.testsDic:
-            self.__generalized_ds_test(
-                op, sparse.csr_matrix, self.testsDic[op], sp.sparse.csr_matrix
-            )
-
-    @pytest.mark.skipif(
-        version.parse(sp.__version__) < version.parse("0.13"),
-        reason="Comparison operators need newer release of scipy",
-    )
-    def test_equality_case(self):
-        # Test assuring normal behaviour when values
-        # in the matrices are equal
-        x = sparse.csc_matrix()
-        y = matrix()
-
-        m1 = sp.sparse.csc_matrix((2, 2), dtype=pytensor.config.floatX)
-        m2 = np.asarray([[0, 0], [0, 0]], dtype=pytensor.config.floatX)
-
-        for func in self.testsDic:
-            op = func(y, x)
-            f = pytensor.function([y, x], op)
-
-            assert np.array_equal(f(m2, m1), self.testsDic[func](m2, m1))
-
-
 class TestConversion:
     def test_basic(self):
         test_val = np.random.random((5,)).astype(config.floatX)
@@ -1034,34 +555,22 @@ class TestConversion:
         assert val.format == "csr"
 
         test_val = np.eye(3).astype(config.floatX)
-        a = sp.sparse.csr_matrix(test_val)
+        a = scipy_sparse.csr_matrix(test_val)
         s = as_sparse_or_tensor_variable(a)
         res = pt.as_tensor_variable(s)
         assert isinstance(res, SparseConstant)
 
-        a = sp.sparse.csr_matrix(test_val)
+        a = scipy_sparse.csr_matrix(test_val)
         s = as_sparse_or_tensor_variable(a)
         from pytensor.tensor.exceptions import NotScalarConstantError
 
         with pytest.raises(NotScalarConstantError):
             pt.get_underlying_scalar_constant_value(s, only_process_constants=True)
 
-    # TODO:
-    # def test_sparse_as_tensor_variable(self):
-    #     csr = sp.sparse.csr_matrix(np.eye(3))
-    #     val = aet.as_tensor_variable(csr)
-    #     assert str(val.dtype) == config.floatX
-    #     assert val.format == "csr"
-    #
-    #     csr = sp.sparse.csc_matrix(np.eye(3))
-    #     val = aet.as_tensor_variable(csr)
-    #     assert str(val.dtype) == config.floatX
-    #     assert val.format == "csc"
-
     def test_dense_from_sparse(self):
         # call dense_from_sparse
         for t in _mtypes:
-            s = t(sp.sparse.identity(5))
+            s = t(scipy_sparse.identity(5))
             s = as_sparse_variable(s)
             d = dense_from_sparse(s)
             val = eval_outputs([d])
@@ -1071,7 +580,7 @@ class TestConversion:
     def test_todense(self):
         # call sparse_var.todense()
         for t in _mtypes:
-            s = t(sp.sparse.identity(5))
+            s = t(scipy_sparse.identity(5))
             s = as_sparse_variable(s)
             d = s.toarray()
             val = eval_outputs([d])
@@ -1104,7 +613,7 @@ class TestConversion:
 
 class TestCsmProperties:
     def test_csm_properties_grad(self):
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
+        sp_types = {"csc": scipy_sparse.csc_matrix, "csr": scipy_sparse.csr_matrix}
 
         for format in ("csc", "csr"):
             for dtype in ("float32", "float64"):
@@ -1127,7 +636,7 @@ class TestCsmProperties:
                 )
 
     def test_csm_properties(self):
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
+        sp_types = {"csc": scipy_sparse.csc_matrix, "csr": scipy_sparse.csr_matrix}
 
         for format in ("csc", "csr"):
             for dtype in ("float32", "float64"):
@@ -1146,7 +655,7 @@ class TestCsmProperties:
 
 class TestCsm:
     def test_csm_grad(self):
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
+        sp_types = {"csc": scipy_sparse.csc_matrix, "csr": scipy_sparse.csr_matrix}
 
         for format in ("csc", "csr"):
             for dtype in ("float32", "float64"):
@@ -1161,13 +670,13 @@ class TestCsm:
                 )
 
     @pytest.mark.skipif(
-        version.parse(sp.__version__) >= version.parse("1.16.0"),
+        version.parse(scipy_version) >= version.parse("1.16.0"),
         reason="Scipy 1.16 introduced some changes that make this test fail",
     )
     def test_csm_sparser(self):
         # Test support for gradients sparser than the input.
 
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
+        sp_types = {"csc": scipy_sparse.csc_matrix, "csr": scipy_sparse.csr_matrix}
 
         for format in ("csc", "csr"):
             for dtype in ("float32", "float64"):
@@ -1197,7 +706,7 @@ class TestCsm:
                 assert len(spmat.data) == len(res)
 
     @pytest.mark.skipif(
-        version.parse(sp.__version__) >= version.parse("1.16.0"),
+        version.parse(scipy_version) >= version.parse("1.16.0"),
         reason="Scipy 1.16 introduced some changes that make this test fail",
     )
     def test_csm_unsorted(self):
@@ -1224,7 +733,7 @@ class TestCsm:
                 verify_grad_sparse(my_op, [a.data])
 
     def test_csm(self):
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
+        sp_types = {"csc": scipy_sparse.csc_matrix, "csr": scipy_sparse.csr_matrix}
 
         for format in ("csc", "csr"):
             for dtype in ("float32", "float64"):
@@ -1249,636 +758,11 @@ class TestCsm:
                 assert np.all(res.shape == spmat.shape)
 
 
-class TestStructuredDot:
-    def test_structureddot_csc_grad(self):
-        # shortcut: testing csc in float32, testing csr in float64
-
-        # allocate a random sparse matrix
-        spmat = sp.sparse.csc_matrix(random_lil((4, 3), "float32", 3))
-
-        mat = np.asarray(np.random.standard_normal((3, 2)), "float32")
-
-        verify_grad_sparse(structured_dot, [spmat, mat], structured=True)
-
-        def buildgraph_T(spmat, mat):
-            return structured_dot(mat.T, spmat.T)
-
-        verify_grad_sparse(buildgraph_T, [spmat, mat], structured=True)
-
-    def test_structureddot_csr_grad(self):
-        # shortcut: testing csc in float32, testing csr in float64
-
-        # allocate a random sparse matrix
-        spmat = sp.sparse.csr_matrix(random_lil((4, 3), "float64", 3))
-
-        mat = np.asarray(np.random.standard_normal((3, 2)), "float64")
-
-        verify_grad_sparse(structured_dot, [spmat, mat], structured=True)
-
-        def buildgraph_T(spmat, mat):
-            return structured_dot(mat.T, spmat.T)
-
-        verify_grad_sparse(buildgraph_T, [spmat, mat], structured=True)
-
-    def test_upcast(self):
-        typenames = (
-            "float32",
-            "int64",
-            "int8",
-            "int32",
-            "int16",
-            "float64",
-            "complex64",
-            "complex128",
-        )
-        for dense_dtype in typenames:
-            for sparse_dtype in typenames:
-                correct_dtype = pytensor.scalar.upcast(sparse_dtype, dense_dtype)
-                a = SparseTensorType("csc", dtype=sparse_dtype)()
-                b = matrix(dtype=dense_dtype)
-                d = structured_dot(a, b)
-                assert d.type.dtype == correct_dtype
-
-                # compile and run a function
-
-                f = pytensor.function([a, b], d)
-
-                M, N, K, nnz = (4, 3, 5, 3)
-                spmat = sp.sparse.csc_matrix(random_lil((M, N), sparse_dtype, nnz))
-                # the following madness is necessary to workaround
-                # an intc vs. int32 bug.
-                # The lil makes an intc on my computer when sparse_dtype
-                # is int32.
-                spmat.dtype = np.dtype(sparse_dtype)
-                mat = np.asarray(
-                    np.random.standard_normal((N, K)) * 9, dtype=dense_dtype
-                )
-                # print 'DTYPES', sparse_dtype, dense_dtype
-                # print 'sym types', a.type, b.type
-                # print 'dtype strings', spmat.dtype, mat.dtype
-                # print 'numpy dtype num', mat.dtype.num
-                # print 'scipy dtype num', spmat.data.dtype.num
-                pytensor_result = f(spmat, mat)
-                scipy_result = spmat * mat
-                assert pytensor_result.shape == scipy_result.shape
-                assert pytensor_result.dtype == scipy_result.dtype
-                utt.assert_allclose(scipy_result, pytensor_result)
-
-    def test_opt_unpack(self):
-        #
-        # Test that a graph involving
-        # structured_dot(assembled_csc_matrix) is optimized to be just
-        # a structured_dot_csc Op and no assembly of a csc_matrix.
-        #
-        # The optimization from structured_dot -> structured_dot_csc
-        # is currently disabled, So this test is not expected to pass
-
-        return
-        #
-        kerns = TensorType(dtype="int64", shape=(None,))("kerns")
-        spmat = sp.sparse.lil_matrix((4, 6), dtype="int64")
-        for i in range(5):
-            # set non-zeros in random locations (row x, col y)
-            x = np.floor(np.random.random() * spmat.shape[0])
-            y = np.floor(np.random.random() * spmat.shape[1])
-            spmat[x, y] = np.random.random() * 10
-        spmat = sp.sparse.csc_matrix(spmat)
-
-        images = TensorType(dtype="float32", shape=(None, None))("images")
-
-        cscmat = CSC(kerns, spmat.indices[: spmat.size], spmat.indptr, spmat.shape)
-        f = pytensor.function([kerns, images], structured_dot(cscmat, images.T))
-
-        sdcscpresent = False
-        for node in f.maker.fgraph.toposort():
-            # print node.op
-            assert not isinstance(node.op, CSM)
-            assert not isinstance(node.op, CSMProperties)
-            if isinstance(f.maker.fgraph.toposort()[1].op, StructuredDotCSC):
-                sdcscpresent = True
-        assert sdcscpresent
-
-        kernvals = np.array(spmat.data[: spmat.size])
-        # print 'kdtype', kernvals.dtype, kernvals.shape,
-        # print kernvals.ndim, kernvals.dtype.num
-        # print 'type of kernvals = ', kernvals.dtype
-        bsize = 3
-        imvals = 1.0 * np.array(
-            np.arange(bsize * spmat.shape[1]).reshape(bsize, spmat.shape[1]),
-            dtype="float32",
-        )
-        f(kernvals, imvals)
-        # print outvals
-
-    def test_dot_sparse_sparse(self):
-        # test dot for 2 input sparse matrix
-        sparse_dtype = "float64"
-        sp_mat = {
-            "csc": sp.sparse.csc_matrix,
-            "csr": sp.sparse.csr_matrix,
-            "bsr": sp.sparse.csr_matrix,
-        }
-
-        for sparse_format_a in ["csc", "csr", "bsr"]:
-            for sparse_format_b in ["csc", "csr", "bsr"]:
-                a = SparseTensorType(sparse_format_a, dtype=sparse_dtype)()
-                b = SparseTensorType(sparse_format_b, dtype=sparse_dtype)()
-                d = pt.dot(a, b)
-                f = pytensor.function([a, b], Out(d, borrow=True))
-                for M, N, K, nnz in [
-                    (4, 3, 2, 3),
-                    (40, 30, 20, 3),
-                    (40, 30, 20, 30),
-                    (400, 3000, 200, 6000),
-                ]:
-                    a_val = sp_mat[sparse_format_a](
-                        random_lil((M, N), sparse_dtype, nnz)
-                    )
-                    b_val = sp_mat[sparse_format_b](
-                        random_lil((N, K), sparse_dtype, nnz)
-                    )
-                    f(a_val, b_val)
-
-    def test_csc_correct_output_faster_than_scipy(self):
-        sparse_dtype = "float64"
-        dense_dtype = "float64"
-
-        a = SparseTensorType("csc", dtype=sparse_dtype)()
-        b = matrix(dtype=dense_dtype)
-        d = pt.dot(a, b)
-        f = pytensor.function([a, b], Out(d, borrow=True))
-
-        for M, N, K, nnz in [
-            (4, 3, 2, 3),
-            (40, 30, 20, 3),
-            (40, 30, 20, 30),
-            (400, 3000, 200, 6000),
-        ]:
-            spmat = sp.sparse.csc_matrix(random_lil((M, N), sparse_dtype, nnz))
-            mat = np.asarray(np.random.standard_normal((N, K)), dense_dtype)
-            pytensor_times = []
-            scipy_times = []
-            for i in range(5):
-                t0 = time.perf_counter()
-                pytensor_result = f(spmat, mat)
-                t1 = time.perf_counter()
-                scipy_result = spmat * mat
-                t2 = time.perf_counter()
-
-                pytensor_times.append(t1 - t0)
-                scipy_times.append(t2 - t1)
-
-            pytensor_time = np.min(pytensor_times)
-            scipy_time = np.min(scipy_times)
-
-            # speedup = scipy_time / pytensor_time
-            # print scipy_times
-            # print pytensor_times
-            # print ('M=%(M)s N=%(N)s K=%(K)s nnz=%(nnz)s pytensor_time'
-            #       '=%(pytensor_time)s speedup=%(speedup)s') % locals()
-
-            # fail if PyTensor is slower than scipy by more than a certain amount
-            overhead_tol = 0.003  # seconds overall
-            overhead_rtol = 1.2  # times as long
-            utt.assert_allclose(scipy_result, pytensor_result)
-            if pytensor.config.mode == "FAST_RUN" and pytensor.config.cxx:
-                assert pytensor_time <= overhead_rtol * scipy_time + overhead_tol
-
-    def test_csr_correct_output_faster_than_scipy(self):
-        # contrast with test_grad, we put csr in float32, csc in float64
-
-        sparse_dtype = "float32"
-        dense_dtype = "float32"
-
-        a = SparseTensorType("csr", dtype=sparse_dtype)()
-        b = matrix(dtype=dense_dtype)
-        d = pt.dot(a, b)
-        f = pytensor.function([a, b], d)
-
-        for M, N, K, nnz in [
-            (4, 3, 2, 3),
-            (40, 30, 20, 3),
-            (40, 30, 20, 30),
-            (400, 3000, 200, 6000),
-        ]:
-            spmat = sp.sparse.csr_matrix(random_lil((M, N), sparse_dtype, nnz))
-            mat = np.asarray(np.random.standard_normal((N, K)), dense_dtype)
-            t0 = time.perf_counter()
-            pytensor_result = f(spmat, mat)
-            t1 = time.perf_counter()
-            scipy_result = spmat * mat
-            t2 = time.perf_counter()
-
-            pytensor_time = t1 - t0
-            scipy_time = t2 - t1
-            # print 'pytensor took', pytensor_time,
-            # print 'scipy took', scipy_time
-            overhead_tol = 0.002  # seconds
-            overhead_rtol = 1.1  # times as long
-            utt.assert_allclose(scipy_result, pytensor_result)
-            if pytensor.config.mode == "FAST_RUN" and pytensor.config.cxx:
-                assert pytensor_time <= overhead_rtol * scipy_time + overhead_tol, (
-                    pytensor_time,
-                    overhead_rtol * scipy_time + overhead_tol,
-                    scipy_time,
-                    overhead_rtol,
-                    overhead_tol,
-                )
-
-
-class TestDots(utt.InferShapeTester):
-    def setup_method(self):
-        super().setup_method()
-        x_size = (10, 100)
-        y_size = (100, 1000)
-
-        self.x_csr = sp.sparse.csr_matrix(
-            np.random.binomial(1, 0.5, x_size), dtype=pytensor.config.floatX
-        )
-        self.x_csc = sp.sparse.csc_matrix(
-            np.random.binomial(1, 0.5, x_size), dtype=pytensor.config.floatX
-        )
-        self.y = np.asarray(
-            np.random.uniform(-1, 1, y_size), dtype=pytensor.config.floatX
-        )
-        self.y_csr = sp.sparse.csr_matrix(
-            np.random.binomial(1, 0.5, y_size), dtype=pytensor.config.floatX
-        )
-        self.y_csc = sp.sparse.csc_matrix(
-            np.random.binomial(1, 0.5, y_size), dtype=pytensor.config.floatX
-        )
-        self.v_10 = np.asarray(
-            np.random.uniform(-1, 1, 10), dtype=pytensor.config.floatX
-        )
-        self.v_100 = np.asarray(
-            np.random.uniform(-1, 1, 100), dtype=pytensor.config.floatX
-        )
-
-    def test_csr_dense(self):
-        x = sparse.csr_matrix("x")
-        y = matrix("y")
-        v = vector("v")
-
-        for x, y, x_v, y_v in [
-            (x, y, self.x_csr, self.y),
-            (x, v, self.x_csr, self.v_100),
-            (v, x, self.v_10, self.x_csr),
-        ]:
-            f_a = pytensor.function([x, y], sparse.dot(x, y))
-
-            def f_b(x, y):
-                return x * y
-
-            utt.assert_allclose(f_a(x_v, y_v), f_b(x_v, y_v))
-
-            # Test infer_shape
-            self._compile_and_check(
-                [x, y], [sparse.dot(x, y)], [x_v, y_v], (Dot, Usmm, UsmmCscDense)
-            )
-
-    def test_csc_dense(self):
-        x = sparse.csc_matrix("x")
-        y = matrix("y")
-        v = vector("v")
-
-        for x, y, x_v, y_v in [
-            (x, y, self.x_csc, self.y),
-            (x, v, self.x_csc, self.v_100),
-            (v, x, self.v_10, self.x_csc),
-        ]:
-            f_a = pytensor.function([x, y], sparse.dot(x, y))
-
-            def f_b(x, y):
-                return x * y
-
-            utt.assert_allclose(f_a(x_v, y_v), f_b(x_v, y_v))
-
-            # Test infer_shape
-            self._compile_and_check(
-                [x, y], [sparse.dot(x, y)], [x_v, y_v], (Dot, Usmm, UsmmCscDense)
-            )
-
-    def test_sparse_sparse(self):
-        for d1, d2 in [
-            ("float32", "float32"),
-            ("float32", "float64"),
-            ("float64", "float32"),
-            ("float64", "float64"),
-            ("float32", "int16"),
-            ("float32", "complex64"),
-        ]:
-            for x_f, y_f in [
-                ("csc", "csc"),
-                ("csc", "csr"),
-                ("csr", "csc"),
-                ("csr", "csr"),
-            ]:
-                x = sparse.SparseTensorType(format=x_f, dtype=d1)("x")
-                y = sparse.SparseTensorType(format=x_f, dtype=d2)("x")
-
-                def f_a(x, y):
-                    return x * y
-
-                f_b = pytensor.function([x, y], sparse.dot(x, y))
-
-                vx = getattr(self, "x_" + x_f).astype(d1)
-                vy = getattr(self, "y_" + y_f).astype(d2)
-                utt.assert_allclose(f_a(vx, vy).toarray(), f_b(vx, vy))
-
-                # Test infer_shape
-                f_a = pytensor.function([x, y], sparse.dot(x, y).shape)
-
-                def f_b(x, y):
-                    return (x * y).shape
-
-                assert np.all(f_a(vx, vy) == f_b(vx, vy))
-                topo = f_a.maker.fgraph.toposort()
-                assert not any(
-                    isinstance(node.op, Dot | Usmm | UsmmCscDense) for node in topo
-                )
-
-    def test_int32_dtype(self):
-        # Reported on the theano-user mailing-list:
-        # https://groups.google.com/d/msg/theano-users/MT9ui8LtTsY/rwatwEF9zWAJ
-        size = 9
-        intX = "int32"
-
-        C = matrix("C", dtype=intX)
-        I = matrix("I", dtype=intX)
-
-        fI = I.flatten()
-        data = pt.ones_like(fI)
-        indptr = pt.arange(data.shape[0] + 1, dtype="int32")
-
-        m1 = sparse.CSR(data, fI, indptr, (8, size))
-        m2 = sparse.dot(m1, C)
-        y = m2.reshape(shape=(2, 4, 9), ndim=3)
-
-        f = pytensor.function(inputs=[I, C], outputs=y)
-        i = np.asarray([[4, 3, 7, 7], [2, 8, 4, 5]], dtype=intX)
-        a = np.asarray(
-            np.random.default_rng().integers(0, 100, (size, size)), dtype=intX
-        )
-        f(i, a)
-
-    def test_tensor_dot_types(self):
-        x = sparse.csc_matrix("x")
-        x_d = pt.matrix("x_d")
-        y = sparse.csc_matrix("y")
-
-        res = pt.dot(x, y)
-        op_types = {type(n.op) for n in applys_between([x, y], [res])}
-        assert sparse.basic.StructuredDot in op_types
-        assert pt.math.Dot not in op_types
-
-        res = pt.dot(x_d, y)
-        op_types = {type(n.op) for n in applys_between([x, y], [res])}
-        assert sparse.basic.StructuredDot in op_types
-        assert pt.math.Dot not in op_types
-
-        res = pt.dot(x, x_d)
-        op_types = {type(n.op) for n in applys_between([x, y], [res])}
-        assert sparse.basic.StructuredDot in op_types
-        assert pt.math.Dot not in op_types
-
-        res = pt.dot(pt.second(1, x), y)
-        op_types = {type(n.op) for n in applys_between([x, y], [res])}
-        assert sparse.basic.StructuredDot in op_types
-        assert pt.math.Dot not in op_types
-
-    def test_csr_dense_grad(self):
-        # shortcut: testing csc in float32, testing csr in float64
-
-        # allocate a random sparse matrix
-        spmat = sp.sparse.csr_matrix(random_lil((4, 3), "float64", 3))
-
-        mat = np.asarray(np.random.standard_normal((2, 4)), "float64")
-
-        def buildgraph_T(mat):
-            return Dot()(mat, spmat)
-
-        utt.verify_grad(buildgraph_T, [mat])
-
-
-class TestUsmm:
-    """
-    Test the Usmm and UsmmCscDense class and related optimization
-    """
-
-    def setup_method(self):
-        x_size = (10, 100)
-        y_size = (100, 200)
-        z_size = (x_size[0], y_size[1])
-
-        self.rng = np.random.default_rng(seed=utt.fetch_seed())
-        self.x = np.asarray(
-            self.rng.binomial(1, 0.5, x_size), dtype=pytensor.config.floatX
-        )
-        self.y = np.asarray(
-            self.rng.uniform(-1, 1, y_size), dtype=pytensor.config.floatX
-        )
-        self.z = np.asarray(
-            self.rng.uniform(-1, 1, z_size), dtype=pytensor.config.floatX
-        )
-
-    @pytest.mark.slow
-    def test_basic(self):
-        # this is slow, but it's the only test for the op.
-        def mat(format, name, dtype):
-            if format == "dense":
-                return matrix(name, dtype=dtype)
-            else:
-                return sparse.matrix(format, name, dtype=dtype)
-
-        params = product(
-            *(
-                [["float32", "float64", "int16", "complex64"]] * 4
-                + [["dense", "csc", "csr"]] * 2
-            )
-        )
-
-        # All test are too slow, so we randomly take 100 of them.
-        # The buildbot change the seed, so we will finish by running them all.
-        # As of this writing they where all passing.
-        # params = self.rng.permutation(list(params))[:500]
-
-        for dtype1, dtype2, dtype3, dtype4, format1, format2 in params:
-            if format1 == "dense" and format2 == "dense":
-                # Usmm won't be used!
-                continue
-            x = mat(format1, "x", dtype1)
-            y = mat(format2, "y", dtype2)
-            a = scalar("a", dtype=dtype3)
-            z = pytensor.shared(np.asarray(self.z, dtype=dtype4).copy())
-
-            def f_b(z, a, x, y):
-                return z - a * (x * y)
-
-            x_data = np.asarray(self.x, dtype=dtype1)
-            if format1 != "dense":
-                x_data = as_sparse_format(x_data, format1)
-            y_data = np.asarray(self.y, dtype=dtype2)
-            if format2 != "dense":
-                y_data = as_sparse_format(y_data, format2)
-            a_data = np.asarray(1.5, dtype=dtype3)
-            z_data = np.asarray(self.z, dtype=dtype4)
-
-            f_b_out = f_b(z_data, a_data, x_data, y_data)
-
-            # Can it work inplace?
-            inplace = dtype4 == pytensor.scalar.upcast(dtype1, dtype2, dtype3)
-
-            # To make it easier to check the toposort
-            mode = pytensor.compile.mode.get_default_mode().excluding("fusion")
-
-            if inplace:
-                updates = [(z, z - a * sparse.dot(x, y))]
-                f_a = pytensor.function([a, x, y], [], updates=updates, mode=mode)
-                f_a(a_data, x_data, y_data)
-                f_a_out = z.get_value(borrow=True)
-            else:
-                f_a = pytensor.function([a, x, y], z - a * sparse.dot(x, y), mode=mode)
-                # In DebugMode there is a strange difference with complex
-                # So we raise a little the threshold a little.
-                try:
-                    orig_atol = pytensor.tensor.math.float64_atol
-                    orig_rtol = pytensor.tensor.math.float64_rtol
-                    pytensor.tensor.math.float64_atol = 1e-7
-                    pytensor.tensor.math.float64_rtol = 1e-6
-                    f_a_out = f_a(a_data, x_data, y_data)
-                finally:
-                    pytensor.tensor.math.float64_atol = orig_atol
-                    pytensor.tensor.math.float64_rtol = orig_rtol
-
-            # As we do a dot product of 2 vector of 100 element,
-            # This mean we can have 2*100*eps abs error.
-            if f_a_out.dtype in ["float64", "complex128"]:
-                atol = 3e-8
-                rtol = 1e-5
-            else:
-                atol = None
-                rtol = None
-            utt.assert_allclose(f_a_out, f_b_out, rtol=rtol, atol=atol)
-            topo = f_a.maker.fgraph.toposort()
-            up = pytensor.scalar.upcast(dtype1, dtype2, dtype3, dtype4)
-
-            fast_compile = pytensor.config.mode == "FAST_COMPILE"
-
-            if not pytensor.config.blas__ldflags:
-                # Usmm should not be inserted, because it relies on BLAS
-                assert len(topo) == 4, topo
-                assert isinstance(topo[0].op, sparse.Dot)
-                assert isinstance(topo[1].op, DimShuffle)
-                assert isinstance(topo[2].op, Elemwise) and isinstance(
-                    topo[2].op.scalar_op, pytensor.scalar.Mul
-                )
-                assert isinstance(topo[3].op, Elemwise) and isinstance(
-                    topo[3].op.scalar_op, pytensor.scalar.Sub
-                )
-            elif (
-                y.type.dtype == up
-                and format1 == "csc"
-                and format2 == "dense"
-                and not fast_compile
-                and pytensor.config.cxx
-                and up in ("float32", "float64")
-            ):
-                # The op UsmmCscDense should be inserted
-                assert (
-                    sum(
-                        isinstance(node.op, Elemwise)
-                        and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
-                        for node in topo
-                    )
-                    == len(topo) - 5
-                )
-                new_topo = [
-                    node
-                    for node in topo
-                    if not (
-                        isinstance(node.op, Elemwise)
-                        and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
-                    )
-                ]
-                topo = new_topo
-                assert len(topo) == 5, topo
-                # Usmm is tested at the same time in debugmode
-                # Check if the optimization local_usmm and local_usmm_csx is
-                # applied
-
-                def check_once(x):
-                    assert sum(isinstance(n.op, x) for n in topo) == 1
-
-                check_once(sparse.basic.CSMProperties)
-                check_once(DimShuffle)
-                check_once(Subtensor)
-                check_once(UsmmCscDense)
-                check_once(Elemwise)
-                if inplace:
-                    assert topo[4].op.inplace
-            elif not fast_compile:
-                # The op Usmm should be inserted
-                assert len(topo) == 3, topo
-                assert isinstance(topo[0].op, DimShuffle)
-                assert topo[1].op == pytensor.tensor.neg
-                assert isinstance(topo[2].op, sparse.Usmm)
-
-    def test_infer_shape(self):
-        def mat(format, name, dtype):
-            if format == "dense":
-                return matrix(name, dtype=dtype)
-            else:
-                return sparse.matrix(format, name, dtype=dtype)
-
-        params = [
-            ("float32", "float64", "int16", "complex64", "csc", "dense"),
-            ("float32", "float64", "int16", "complex64", "csr", "dense"),
-        ]
-        for dtype1, dtype2, dtype3, dtype4, format1, format2 in params:
-            if format1 == "dense" and format2 == "dense":
-                # Usmm won't be used!
-                continue
-            x = mat(format1, "x", dtype1)
-            y = mat(format2, "y", dtype2)
-            a = scalar("a", dtype=dtype3)
-            z = pytensor.shared(np.asarray(self.z, dtype=dtype4).copy())
-
-            def f_b(z, a, x, y):
-                return z - a * (x * y)
-
-            x_data = np.asarray(self.x, dtype=dtype1)
-            if format1 != "dense":
-                x_data = as_sparse_format(x_data, format1)
-            y_data = np.asarray(self.y, dtype=dtype2)
-            if format2 != "dense":
-                y_data = as_sparse_format(y_data, format2)
-            a_data = np.asarray(1.5, dtype=dtype3)
-            z_data = np.asarray(self.z, dtype=dtype4)
-
-            f_b_out = f_b(z_data, a_data, x_data, y_data)
-
-            # Can it work inplace?
-            # inplace = dtype4 == pytensor.scalar.upcast(dtype1, dtype2, dtype3)
-
-            # To make it easier to check the toposort
-            mode = pytensor.compile.mode.get_default_mode().excluding("fusion")
-
-            # test infer_shape of Dot got applied
-            f_shape = pytensor.function(
-                [a, x, y], (z - a * sparse.dot(x, y)).shape, mode=mode
-            )
-            assert all(f_shape(a_data, x_data, y_data) == f_b_out.shape)
-            topo = f_shape.maker.fgraph.toposort()
-            assert not any(
-                isinstance(node.op, Dot | Usmm | UsmmCscDense) for node in topo
-            )
-
-
 class TestZerosLike:
     def test(self):
         x = sparse.csr_matrix()
         f = pytensor.function([x], sparse.sp_zeros_like(x))
-        vx = sp.sparse.csr_matrix(
+        vx = scipy_sparse.csr_matrix(
             np.asarray(
                 np.random.binomial(1, 0.5, (100, 100)), dtype=pytensor.config.floatX
             )
@@ -1895,7 +779,7 @@ def test_shape_i():
 
     a = SparseTensorType("csr", dtype=sparse_dtype)()
     f = pytensor.function([a], a.shape[1])
-    assert f(sp.sparse.csr_matrix(random_lil((100, 10), sparse_dtype, 3))) == 10
+    assert f(scipy_sparse.csr_matrix(random_lil((100, 10), sparse_dtype, 3))) == 10
 
 
 def test_shape():
@@ -1906,7 +790,7 @@ def test_shape():
     a = SparseTensorType("csr", dtype=sparse_dtype)()
     f = pytensor.function([a], a.shape)
     assert np.all(
-        f(sp.sparse.csr_matrix(random_lil((100, 10), sparse_dtype, 3))) == (100, 10)
+        f(scipy_sparse.csr_matrix(random_lil((100, 10), sparse_dtype, 3))) == (100, 10)
     )
     if pytensor.config.mode != "FAST_COMPILE":
         topo = f.maker.fgraph.toposort()
@@ -1917,8 +801,8 @@ def test_shape():
 
 
 def test_may_share_memory():
-    a = sp.sparse.csc_matrix(sp.sparse.eye(5, 3))
-    b = sp.sparse.csc_matrix(sp.sparse.eye(4, 3))
+    a = scipy_sparse.csc_matrix(scipy_sparse.eye(5, 3))
+    b = scipy_sparse.csc_matrix(scipy_sparse.eye(4, 3))
 
     def as_ar(a):
         return np.asarray(a, dtype="int32")
@@ -1964,7 +848,7 @@ def test_sparse_shared_memory():
     x = SparseTensorType("csr", dtype="float32")()
     y = SparseTensorType("csr", dtype="float32")()
 
-    sdot = sparse.structured_dot
+    sdot = sparse.math.structured_dot
     z = sdot(x * 3, m1) + sdot(y * 2, m2)
 
     f = pytensor.function(
@@ -1985,7 +869,7 @@ def test_size():
 
     for sparse_type in ("csc_matrix", "csr_matrix"):
         x = getattr(pytensor.sparse, sparse_type)()
-        y = getattr(sp.sparse, sparse_type)((5, 7)).astype(config.floatX)
+        y = getattr(scipy_sparse, sparse_type)((5, 7)).astype(config.floatX)
         get_size = pytensor.function([x], x.size)
 
         def check():
@@ -2072,55 +956,6 @@ class TestRowScaleCSC(utt.InferShapeTester):
             data.append(np.random.random(8).astype(config.floatX))
 
             verify_grad_sparse(self.op, data, structured=True)
-
-
-class TestSpSum(utt.InferShapeTester):
-    possible_axis = [None, 0, 1]
-
-    def setup_method(self):
-        super().setup_method()
-        self.op_class = sparse.SpSum
-        self.op = sparse.sp_sum
-
-    @pytest.mark.parametrize("op_type", ["func", "method"])
-    def test_op(self, op_type):
-        for format in sparse.sparse_formats:
-            for axis in self.possible_axis:
-                variable, data = sparse_random_inputs(format, shape=(10, 10))
-
-                if op_type == "func":
-                    z = sparse.sp_sum(variable[0], axis=axis)
-                if op_type == "method":
-                    z = variable[0].sum(axis=axis)
-
-                if axis is None:
-                    assert z.type.broadcastable == ()
-                else:
-                    assert z.type.broadcastable == (False,)
-
-                f = pytensor.function(variable, self.op(variable[0], axis=axis))
-                tested = f(*data)
-                expected = data[0].todense().sum(axis).ravel()
-                utt.assert_allclose(expected, tested)
-
-    def test_infer_shape(self):
-        for format in sparse.sparse_formats:
-            for axis in self.possible_axis:
-                variable, data = sparse_random_inputs(format, shape=(9, 10))
-                self._compile_and_check(
-                    variable, [self.op(variable[0], axis=axis)], data, self.op_class
-                )
-
-    def test_grad(self):
-        for format in sparse.sparse_formats:
-            for axis in self.possible_axis:
-                for struct in [True, False]:
-                    _variable, data = sparse_random_inputs(format, shape=(9, 10))
-                    verify_grad_sparse(
-                        self.op_class(axis=axis, sparse_grad=struct),
-                        data,
-                        structured=struct,
-                    )
 
 
 class TestDiag(utt.InferShapeTester):
@@ -2264,8 +1099,8 @@ class TestRemove0(utt.InferShapeTester):
     def test_remove0(self):
         configs = [
             # structure type, numpy matching class
-            ("csc", sp.sparse.csc_matrix),
-            ("csr", sp.sparse.csr_matrix),
+            ("csc", scipy_sparse.csc_matrix),
+            ("csr", scipy_sparse.csr_matrix),
         ]
 
         for format, matrix_class in configs:
@@ -2323,21 +1158,21 @@ class TestRemove0(utt.InferShapeTester):
         mat[0, 1] = mat[1, 0] = mat[2, 2] = 0
 
         x_csc = sparse.csc_matrix(dtype=pytensor.config.floatX)
-        mat_csc = sp.sparse.csc_matrix(mat, dtype=pytensor.config.floatX)
+        mat_csc = scipy_sparse.csc_matrix(mat, dtype=pytensor.config.floatX)
         self._compile_and_check([x_csc], [Remove0()(x_csc)], [mat_csc], self.op_class)
 
         x_csr = sparse.csr_matrix(dtype=pytensor.config.floatX)
-        mat_csr = sp.sparse.csr_matrix(mat, dtype=pytensor.config.floatX)
+        mat_csr = scipy_sparse.csr_matrix(mat, dtype=pytensor.config.floatX)
         self._compile_and_check([x_csr], [Remove0()(x_csr)], [mat_csr], self.op_class)
 
     def test_grad(self):
         mat = (np.arange(9) + 1).reshape((3, 3))
         mat[0, 1] = mat[1, 0] = mat[2, 2] = 0
 
-        mat_csc = sp.sparse.csc_matrix(mat, dtype=pytensor.config.floatX)
+        mat_csc = scipy_sparse.csc_matrix(mat, dtype=pytensor.config.floatX)
         verify_grad_sparse(Remove0(), [mat_csc])
 
-        mat_csr = sp.sparse.csr_matrix(mat, dtype=pytensor.config.floatX)
+        mat_csr = scipy_sparse.csr_matrix(mat, dtype=pytensor.config.floatX)
         verify_grad_sparse(Remove0(), [mat_csr])
 
 
@@ -2357,8 +1192,8 @@ class TestGetItem:
         t_geta = fa(A[0]).todense()
         t_getb = fb(B[0]).todense()
 
-        s_geta = sp.sparse.csr_matrix(A[0])[[0, 1, 2, 3, 1]].todense()
-        s_getb = sp.sparse.csc_matrix(B[0])[[0, 1, 2, 3, 1]].todense()
+        s_geta = scipy_sparse.csr_matrix(A[0])[[0, 1, 2, 3, 1]].todense()
+        s_getb = scipy_sparse.csc_matrix(B[0])[[0, 1, 2, 3, 1]].todense()
 
         utt.assert_allclose(t_geta, s_geta)
         utt.assert_allclose(t_getb, s_getb)
@@ -2396,8 +1231,8 @@ class TestGetItem:
         t_geta = fa(A[0])
         t_getb = fb(B[0])
 
-        s_geta = np.asarray(sp.sparse.csr_matrix(A[0])[[0, 0, 1, 3], [0, 1, 2, 4]])
-        s_getb = np.asarray(sp.sparse.csc_matrix(B[0])[[0, 0, 1, 3], [0, 1, 2, 4]])
+        s_geta = np.asarray(scipy_sparse.csr_matrix(A[0])[[0, 0, 1, 3], [0, 1, 2, 4]])
+        s_getb = np.asarray(scipy_sparse.csc_matrix(B[0])[[0, 0, 1, 3], [0, 1, 2, 4]])
 
         utt.assert_allclose(t_geta, s_geta)
         utt.assert_allclose(t_getb, s_getb)
@@ -2426,8 +1261,6 @@ class TestGetItem:
         verify_grad_sparse(op_with_fixed_index, x_val)
 
     def test_GetItem2D(self):
-        is_supported_version = version.parse(sp.__version__) >= version.parse("0.14")
-
         sparse_formats = ("csc", "csr")
         for format in sparse_formats:
             x = sparse.matrix(format, name="x")
@@ -2443,12 +1276,8 @@ class TestGetItem:
             n = 5
             p = 10
             q = 15
-            if is_supported_version:
-                j = 2
-                k = 3
-            else:
-                j = None
-                k = None
+            j = 2
+            k = 3
 
             vx = as_sparse_format(self.rng.binomial(1, 0.5, (100, 97)), format).astype(
                 pytensor.config.floatX
@@ -2457,14 +1286,10 @@ class TestGetItem:
             # mode_no_debug = pytensor.compile.mode.get_default_mode()
             # if isinstance(mode_no_debug, pytensor.compile.debugmode.DebugMode):
             #    mode_no_debug = 'FAST_RUN'
-            if is_supported_version:
-                f1 = pytensor.function([x, a, b, c, d, e, f], x[a:b:e, c:d:f])
-                r1 = f1(vx, m, n, p, q, j, k)
-                t1 = vx[m:n:j, p:q:k]
-            else:
-                f1 = pytensor.function([x, a, b, c, d], x[a:b, c:d])
-                r1 = f1(vx, m, n, p, q)
-                t1 = vx[m:n, p:q]
+            f1 = pytensor.function([x, a, b, c, d, e, f], x[a:b:e, c:d:f])
+            r1 = f1(vx, m, n, p, q, j, k)
+            t1 = vx[m:n:j, p:q:k]
+
             assert r1.shape == t1.shape
             assert np.all(t1.toarray() == r1.toarray())
 
@@ -2499,14 +1324,10 @@ class TestGetItem:
             assert r7.shape == t7.shape
             assert np.all(r7.toarray() == t7.toarray())
             """
-            if is_supported_version:
-                f4 = pytensor.function([x, a, b, e], x[a:b:e])
-                r4 = f4(vx, m, n, j)
-                t4 = vx[m:n:j]
-            else:
-                f4 = pytensor.function([x, a, b], x[a:b])
-                r4 = f4(vx, m, n)
-                t4 = vx[m:n]
+            f4 = pytensor.function([x, a, b, e], x[a:b:e])
+            r4 = f4(vx, m, n, j)
+            t4 = vx[m:n:j]
+
             assert r4.shape == t4.shape
             assert np.all(t4.toarray() == r4.toarray())
 
@@ -2520,14 +1341,10 @@ class TestGetItem:
 
             # ----------------------------------------------------------
             # test cases with indexing both with pytensor variable and int
-            if is_supported_version:
-                f8 = pytensor.function([x, a, b, e], x[a:b:e, 10:20:1])
-                r8 = f8(vx, m, n, j)
-                t8 = vx[m:n:j, 10:20:1]
-            else:
-                f8 = pytensor.function([x, a, b], x[a:b, 10:20])
-                r8 = f8(vx, m, n)
-                t8 = vx[m:n, 10:20]
+            f8 = pytensor.function([x, a, b, e], x[a:b:e, 10:20:1])
+            r8 = f8(vx, m, n, j)
+            t8 = vx[m:n:j, 10:20:1]
+
             assert r8.shape == t8.shape
             assert np.all(r8.toarray() == t8.toarray())
 
@@ -2566,24 +1383,6 @@ class TestGetItem:
             # x[a:b] is not accepted because we don't have sparse vectors
             with pytest.raises(NotImplementedError):
                 x.__getitem__((slice(a, b), c))
-
-            # x[a:b:step, c:d] is not accepted because scipy silently drops
-            # the step (!)
-            if not is_supported_version:
-                with pytest.raises(ValueError):
-                    x.__getitem__((slice(a, b, -1), slice(c, d)))
-                with pytest.raises(ValueError):
-                    x.__getitem__((slice(a, b), slice(c, d, 2)))
-
-                # Advanced indexing is not supported
-                with pytest.raises(ValueError):
-                    x.__getitem__((ivector("l"), slice(a, b)))
-
-                # Indexing with random things is not supported either
-                with pytest.raises(ValueError):
-                    x.__getitem__(slice(fscalar("f"), None))
-                with pytest.raises(ValueError):
-                    x.__getitem__((slice(None), slice([1, 3, 4], None)))
 
     def test_GetItemScalar(self):
         sparse_formats = ("csc", "csr")
@@ -2701,7 +1500,7 @@ def _format_info(nb):
 
     for format in sparse.sparse_formats:
         variable = getattr(pytensor.sparse, format + "_matrix")
-        spa = getattr(sp.sparse, format + "_matrix")
+        spa = getattr(scipy_sparse, format + "_matrix")
 
         x[format] = [variable() for t in range(nb)]
         mat[format] = [
@@ -2719,9 +1518,9 @@ class _TestHVStack(utt.InferShapeTester):
     x, mat = _format_info(nb)
 
     def test_op(self):
-        for format in sparse.sparse_formats:
-            for out_f in sparse.sparse_formats:
-                for dtype in sparse.all_dtypes:
+        for format in sparse_formats:
+            for out_f in sparse_formats:
+                for dtype in all_dtypes:
                     blocks = self.mat[format]
 
                     f = pytensor.function(
@@ -2779,222 +1578,8 @@ def _hv_switch(op, expected_function):
     return TestXStack
 
 
-TestHStack = _hv_switch(HStack, sp.sparse.hstack)
-TestVStack = _hv_switch(VStack, sp.sparse.vstack)
-
-
-class TestAddSSData(utt.InferShapeTester):
-    x = {}
-    a = {}
-
-    def setup_method(self):
-        super().setup_method()
-        self.op_class = AddSSData
-
-        for format in sparse.sparse_formats:
-            variable = getattr(pytensor.sparse, format + "_matrix")
-
-            a_val = np.array(
-                np.random.default_rng(utt.fetch_seed()).integers(1, 4, size=(3, 4)) - 1,
-                dtype=pytensor.config.floatX,
-            )
-            constant = as_sparse_format(a_val, format)
-
-            self.x[format] = [variable() for t in range(2)]
-            self.a[format] = [constant for t in range(2)]
-
-    def test_op(self):
-        for format in sparse.sparse_formats:
-            f = pytensor.function(self.x[format], add_s_s_data(*self.x[format]))
-
-            tested = f(*self.a[format])
-            expected = 2 * self.a[format][0]
-
-            utt.assert_allclose(expected.toarray(), tested.toarray())
-            assert tested.format == expected.format
-            assert tested.dtype == expected.dtype
-
-    def test_infer_shape(self):
-        for format in sparse.sparse_formats:
-            self._compile_and_check(
-                self.x[format],
-                [add_s_s_data(*self.x[format])],
-                self.a[format],
-                self.op_class,
-            )
-
-    def test_grad(self):
-        for format in sparse.sparse_formats:
-            verify_grad_sparse(self.op_class(), self.a[format], structured=True)
-
-
-def elemwise_checker(
-    op, expected_f, gap=None, test_dtypes=None, grad_test=True, name=None, gap_grad=None
-):
-    """
-    Return the appropriate test class for the elemwise on sparse.
-
-    :param op: Op to test.
-    :expected_f: Function use to compare. This function must act
-                 on dense matrix. If the op is structured
-                 see the `structure_function` decorator to make
-                 this function structured.
-    :param gap: Tuple for the range of the random sample. When
-                length is 1, it is assumed to be the exclusive
-                max, when `gap` = (`a`, `b`) it provide a sample
-                from [a, b[. If `None` is used, it provide [0, 1]
-                for float dtypes and [0, 50[ for integer dtypes.
-    :param test_dtypes: Particular dtypes for testing the op.
-                        If `None`, this is set to the most common
-                        dtypes.
-    :param grad_test: True for testing the grad. False will
-                      skip this test.
-    :param gap_grad: If None, we reuse gap. Otherwise it is the same as gap
-                     but for testing the gradiant of the op.
-
-    :return: The class that perform the tests, not an instance
-             of the class.
-    """
-
-    if test_dtypes is None:
-        test_dtypes = sparse.all_dtypes
-
-    class TestElemwise:
-        def setup_method(self):
-            super().setup_method()
-            self.op = op
-            self.expected_f = expected_f
-            self.gap = gap
-            if gap_grad is not None:
-                self.gap_grad = gap_grad
-            else:
-                self.gap_grad = gap
-            # Ensure the test's name is correct.
-            assert eval(self.__class__.__name__) is self.__class__
-
-        def test_op(self):
-            for format in sparse.sparse_formats:
-                for dtype in test_dtypes:
-                    if dtype == "int8" or dtype == "uint8":
-                        continue
-
-                    # When testing with unsigned integers,
-                    # we must check if the gap contains
-                    # negative numbers.
-                    if dtype.startswith("uint"):
-                        if self.gap and len(self.gap) == 2 and self.gap[0] < 0:
-                            if self.gap[1] >= 1:
-                                self.gap = (0, self.gap[1])
-                            else:
-                                raise TypeError(
-                                    "Gap not suitable for", dtype, self.__name__
-                                )
-
-                    variable, data = sparse_random_inputs(
-                        format, shape=(4, 7), out_dtype=dtype, gap=self.gap
-                    )
-
-                    f = pytensor.function(variable, self.op(*variable))
-
-                    tested = f(*data)
-                    data = [m.toarray() for m in data]
-                    expected = self.expected_f(*data)
-
-                    assert tested.format == format
-                    tested = tested.toarray()
-
-                    try:
-                        utt.assert_allclose(expected, tested)
-                    except AssertionError:
-                        raise AssertionError(self.__name__)
-
-                # Test with int8 as dtype
-                # These tests are not in the loop for two reasons.
-                # First, in recent version of numpy, when a numpy
-                # function have int8 as input dtype, it returns a
-                # float16 as output dtype. Since this does not provide
-                # enough precision, we upcast the data before we apply the
-                # function.
-                # Second, the tolerance for the checkup in DebugMode
-                # is too high.
-                for dtype in ["int8", "uint8"]:
-                    if dtype in test_dtypes:
-                        if self.gap:
-                            domain = self.gap
-                            # When testing with unsigned integers,
-                            # we must check if the gap contains
-                            # negative numbers.
-                            if dtype == "uint8":
-                                if len(domain) == 2 and domain[0] < 0:
-                                    if domain[1] >= 1:
-                                        domain = (0, domain[1])
-                                    else:
-                                        raise TypeError(
-                                            "Gap not suitable for", dtype, self.__name__
-                                        )
-
-                        else:
-                            domain = (0, 5)
-
-                        variable, data = sparse_random_inputs(
-                            format, shape=(4, 7), out_dtype=dtype, gap=domain
-                        )
-
-                        f = pytensor.function(variable, self.op(*variable))
-
-                        old_value = (
-                            tensor.math.float32_atol,
-                            tensor.math.float32_rtol,
-                            tensor.math.float64_atol,
-                            tensor.math.float64_rtol,
-                        )
-                        tensor.math.float32_atol = 1e-4
-                        tensor.math.float32_rtol = 1e-3
-                        tensor.math.float64_atol = 1e-3
-                        tensor.math.float64_rtol = 1e-4
-                        try:
-                            tested = f(*data)
-                        finally:
-                            (
-                                tensor.math.float32_atol,
-                                tensor.math.float32_rtol,
-                                tensor.math.float64_atol,
-                                tensor.math.float64_rtol,
-                            ) = old_value
-
-                        data = [m.toarray().astype("float32") for m in data]
-                        expected = self.expected_f(*data)
-
-                        assert tested.format == format
-                        tested = tested.toarray()
-
-                        try:
-                            utt.assert_allclose(tested, expected, rtol=1e-2)
-                        except AssertionError:
-                            raise AssertionError(self.__name__)
-
-        if grad_test:
-
-            def test_grad(self):
-                for format in sparse.sparse_formats:
-                    for dtype in sparse.float_dtypes:
-                        _variable, data = sparse_random_inputs(
-                            format, shape=(4, 7), out_dtype=dtype, gap=self.gap_grad
-                        )
-
-                        verify_grad_sparse(self.op, data, structured=True)
-
-    # Set proper class name to uniquely identify tests.
-    # Note that it is important to run this code *outside* of the `Tester`
-    # class itself, otherwise it will not work properly for some reason.
-    if name is None:
-        name = op.__name__.capitalize() + "Tester"
-    TestElemwise.__name__ = name
-    if hasattr(TestElemwise, "__qualname__"):
-        TestElemwise.__qualname__ = name
-    assert "Roundhalftoeven" not in TestElemwise.__name__
-
-    return TestElemwise
+TestHStack = _hv_switch(HStack, scipy_sparse.hstack)
+TestVStack = _hv_switch(VStack, scipy_sparse.vstack)
 
 
 def test_hstack_vstack():
@@ -3021,399 +1606,3 @@ def test_hstack_vstack():
             stacked_blocks = stack_function(blocks, dtype=to_dtype)
             expected_dtype = get_expected_dtype(blocks, to_dtype)
             assert stacked_blocks.dtype == expected_dtype
-
-
-def structure_function(f, index=0):
-    """
-    Decorator to structure a function which
-    apply on dense matrix.
-
-    Here, the inputs of the function must be
-    dense matrix. The sparse pattern is
-    determined by finding the zeros.
-
-    :param index: The index of the parameter
-                  from which the function must
-                  be structured.
-
-    :return: The structured function for its
-             `index` parameter.
-    """
-
-    def structured_function(*args):
-        pattern = args[index]
-        evaluated = f(*args)
-        evaluated[pattern == 0] = 0
-        return evaluated
-
-    return structured_function
-
-
-StructuredSigmoidTester = elemwise_checker(
-    sparse.structured_sigmoid,
-    structure_function(lambda x: 1.0 / (1.0 + np.exp(-x))),
-    test_dtypes=[
-        m
-        for m in sparse.all_dtypes
-        if (m not in sparse.complex_dtypes and not m.startswith("uint"))
-    ],
-    gap=(-5, 5),
-    name="StructuredSigmoidTester",
-)
-
-StructuredExpTester = elemwise_checker(
-    sparse.structured_exp, structure_function(np.exp), name="StructuredExpTester"
-)
-
-StructuredLogTester = elemwise_checker(
-    sparse.structured_log,
-    structure_function(np.log),
-    gap=(0.5, 10),
-    name="StructuredLogTester",
-)
-
-StructuredPowTester = elemwise_checker(
-    lambda x: sparse.structured_pow(x, 2),
-    structure_function(lambda x: np.power(x, 2)),
-    name="StructuredPowTester",
-)
-
-StructuredMinimumTester = elemwise_checker(
-    lambda x: structured_minimum(x, 2),
-    structure_function(lambda x: np.minimum(x, 2)),
-    name="StructuredMinimumTester",
-)
-
-StructuredMaximumTester = elemwise_checker(
-    lambda x: structured_maximum(x, 2),
-    structure_function(lambda x: np.maximum(x, 2)),
-    name="StructuredMaximumTester",
-)
-
-StructuredAddTester = elemwise_checker(
-    lambda x: structured_add(x, 2),
-    structure_function(lambda x: np.add(x, 2)),
-    name="StructuredAddTester",
-)
-
-SinTester = elemwise_checker(sparse.sin, np.sin)
-
-TanTester = elemwise_checker(sparse.tan, np.tan, gap=(-1, 1))
-
-ArcsinTester = elemwise_checker(
-    sparse.arcsin, np.arcsin, gap=(-1, 1), gap_grad=(-0.99, 0.99)
-)
-
-ArctanTester = elemwise_checker(sparse.arctan, np.arctan)
-
-SinhTester = elemwise_checker(sparse.sinh, np.sinh)
-
-ArcsinhTester = elemwise_checker(sparse.arcsinh, np.arcsinh, gap=(-1, 1))
-
-TanhTester = elemwise_checker(sparse.tanh, np.tanh, gap=(-1, 1))
-
-ArctanhTester = elemwise_checker(
-    sparse.arctanh, np.arctanh, gap=(-0.9, 1), gap_grad=(-0.9, 0.95)
-)
-
-RintTester = elemwise_checker(
-    sparse.rint, np.rint, grad_test=False, test_dtypes=sparse.float_dtypes
-)
-
-SgnTester = elemwise_checker(
-    sparse.sign,
-    np.sign,
-    grad_test=False,
-    test_dtypes=[
-        m
-        for m in sparse.all_dtypes
-        if (m not in sparse.complex_dtypes and not m.startswith("uint"))
-    ],
-)
-
-CeilTester = elemwise_checker(
-    sparse.ceil,
-    np.ceil,
-    grad_test=False,
-    test_dtypes=[m for m in sparse.all_dtypes if m not in sparse.complex_dtypes],
-)
-
-FloorTester = elemwise_checker(
-    sparse.floor,
-    np.floor,
-    grad_test=False,
-    test_dtypes=[m for m in sparse.all_dtypes if m not in sparse.complex_dtypes],
-)
-
-Log1pTester = elemwise_checker(sparse.log1p, np.log1p, gap=(0.5, 10))
-
-Expm1Tester = elemwise_checker(sparse.expm1, np.expm1)
-
-Deg2radTester = elemwise_checker(
-    sparse.deg2rad,
-    np.deg2rad,
-    test_dtypes=[m for m in sparse.all_dtypes if m not in sparse.complex_dtypes],
-)
-
-Rad2degTester = elemwise_checker(
-    sparse.rad2deg,
-    np.rad2deg,
-    test_dtypes=[m for m in sparse.all_dtypes if m not in sparse.complex_dtypes],
-)
-
-
-TruncTester = elemwise_checker(
-    sparse.trunc,
-    np.trunc,
-    test_dtypes=[m for m in sparse.all_dtypes if m not in sparse.complex_dtypes],
-    grad_test=False,
-)
-
-
-SqrTester = elemwise_checker(sparse.sqr, lambda x: x * x)
-
-SqrtTester = elemwise_checker(sparse.sqrt, np.sqrt, gap=(0, 10))
-
-ConjTester = elemwise_checker(sparse.conj, np.conj, grad_test=False)
-
-
-def test_useless_conj():
-    x = sparse.SparseTensorType("csr", dtype="complex128")()
-    assert x.conj() is not x
-
-    # No conjugate when the data type isn't complex
-    x = sparse.SparseTensorType("csr", dtype="float64")()
-    assert x.conj() is x
-
-
-class TestMulSV:
-    def test_mul_s_v_grad(self):
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
-
-        for format in ("csr", "csc"):
-            for dtype in ("float32", "float64"):
-                spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random(3), dtype=dtype)
-
-                verify_grad_sparse(mul_s_v, [spmat, mat], structured=True)
-
-    def test_mul_s_v(self):
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
-
-        for format in ("csr", "csc"):
-            for dtype in ("float32", "float64"):
-                x = sparse.SparseTensorType(format, dtype=dtype)()
-                y = vector(dtype=dtype)
-                f = pytensor.function([x, y], mul_s_v(x, y))
-
-                spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random(3), dtype=dtype)
-
-                out = f(spmat, mat)
-
-                utt.assert_allclose(spmat.toarray() * mat, out.toarray())
-
-
-class TestStructuredAddSV:
-    def test_structured_add_s_v_grad(self):
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
-
-        for format in ("csr", "csc"):
-            for dtype in ("float32", "float64"):
-                spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                mat = np.asarray(np.random.random(3), dtype=dtype)
-
-                verify_grad_sparse(structured_add_s_v, [spmat, mat], structured=True)
-
-    def test_structured_add_s_v(self):
-        sp_types = {"csc": sp.sparse.csc_matrix, "csr": sp.sparse.csr_matrix}
-
-        for format in ("csr", "csc"):
-            for dtype in ("float32", "float64"):
-                x = sparse.SparseTensorType(format, dtype=dtype)()
-                y = vector(dtype=dtype)
-                f = pytensor.function([x, y], structured_add_s_v(x, y))
-
-                spmat = sp_types[format](random_lil((4, 3), dtype, 3))
-                spones = spmat.copy()
-                spones.data = np.ones_like(spones.data)
-                mat = np.asarray(np.random.random(3), dtype=dtype)
-
-                out = f(spmat, mat)
-
-                utt.assert_allclose(
-                    as_ndarray(spones.multiply(spmat + mat)), out.toarray()
-                )
-
-
-class TestTrueDot(utt.InferShapeTester):
-    def setup_method(self):
-        super().setup_method()
-        self.op = true_dot
-        self.op_class = TrueDot
-
-    def test_op_ss(self):
-        for format in sparse.sparse_formats:
-            for dtype in sparse.all_dtypes:
-                variable, data = sparse_random_inputs(
-                    format, shape=(10, 10), out_dtype=dtype, n=2, p=0.1
-                )
-
-                f = pytensor.function(variable, self.op(*variable))
-
-                tested = f(*data)
-
-                x, y = (m.toarray() for m in data)
-                expected = np.dot(x, y)
-
-                assert tested.format == format
-                assert tested.dtype == expected.dtype
-                tested = tested.toarray()
-                utt.assert_allclose(tested, expected)
-
-    def test_op_sd(self):
-        for format in sparse.sparse_formats:
-            for dtype in sparse.all_dtypes:
-                variable, data = sparse_random_inputs(
-                    format, shape=(10, 10), out_dtype=dtype, n=2, p=0.1
-                )
-                variable[1] = TensorType(dtype=dtype, shape=(None, None))()
-                data[1] = data[1].toarray()
-
-                f = pytensor.function(variable, self.op(*variable))
-
-                tested = f(*data)
-                expected = np.dot(data[0].toarray(), data[1])
-
-                assert tested.format == format
-                assert tested.dtype == expected.dtype
-                tested = tested.toarray()
-                utt.assert_allclose(tested, expected)
-
-    def test_infer_shape(self):
-        for format in sparse.sparse_formats:
-            for dtype in sparse.all_dtypes:
-                (x,), (x_value,) = sparse_random_inputs(
-                    format, shape=(9, 10), out_dtype=dtype, p=0.1
-                )
-                (y,), (y_value,) = sparse_random_inputs(
-                    format, shape=(10, 24), out_dtype=dtype, p=0.1
-                )
-                variable = [x, y]
-                data = [x_value, y_value]
-                self._compile_and_check(
-                    variable, [self.op(*variable)], data, self.op_class
-                )
-
-    def test_grad(self):
-        for format in sparse.sparse_formats:
-            for dtype in sparse.float_dtypes:
-                (_x,), (x_value,) = sparse_random_inputs(
-                    format, shape=(9, 10), out_dtype=dtype, p=0.1
-                )
-                (_y,), (y_value,) = sparse_random_inputs(
-                    format, shape=(10, 24), out_dtype=dtype, p=0.1
-                )
-                data = [x_value, y_value]
-                verify_grad_sparse(self.op, data, structured=False)
-
-
-class TestSamplingDot(utt.InferShapeTester):
-    x = [matrix() for t in range(2)]
-    x.append(sparse.csr_matrix())
-    # unsquare shape
-    a = [
-        np.array(
-            np.random.default_rng().integers(1, 6, size=(4, 3)) - 1,
-            dtype=pytensor.config.floatX,
-        ),
-        np.array(
-            np.random.default_rng().integers(1, 6, size=(5, 3)) - 1,
-            dtype=pytensor.config.floatX,
-        ),
-        np.array(
-            np.random.default_rng().integers(1, 3, size=(4, 5)) - 1,
-            dtype=pytensor.config.floatX,
-        ),
-    ]
-    a[2] = sp.sparse.csr_matrix(a[2])
-
-    def setup_method(self):
-        super().setup_method()
-        self.op_class = SamplingDot
-
-    def test_op(self):
-        f = pytensor.function(self.x, sampling_dot(*self.x))
-
-        tested = f(*self.a)
-        x, y, p = self.a
-        expected = p.multiply(np.dot(x, y.T))
-
-        utt.assert_allclose(as_ndarray(expected), tested.toarray())
-        assert tested.format == "csr"
-        assert tested.dtype == expected.dtype
-
-    def test_negative_stride(self):
-        f = pytensor.function(self.x, sampling_dot(*self.x))
-
-        a2 = [self.a[0][::-1, :], self.a[1][:, ::-1], self.a[2]]
-        tested = f(*a2)
-        x, y, p = a2
-        expected = p.multiply(np.dot(x, y.T))
-
-        utt.assert_allclose(as_ndarray(expected), tested.toarray())
-        assert tested.format == "csr"
-        assert tested.dtype == expected.dtype
-
-    def test_infer_shape(self):
-        self._compile_and_check(
-            self.x,
-            [sampling_dot(*self.x)],
-            self.a,
-            self.op_class,
-            excluding=["local_sampling_dot_csr"],
-        )
-
-    def test_grad(self):
-        def _helper(x, y):
-            return sampling_dot(x, y, self.a[2])
-
-        verify_grad_sparse(_helper, self.a[:2])
-
-
-@makeSharedTester(
-    shared_constructor_=sparse.shared,
-    dtype_="float64",
-    get_value_borrow_true_alias_=True,
-    shared_borrow_true_alias_=True,
-    set_value_borrow_true_alias_=True,
-    set_value_inplace_=False,
-    set_cast_value_inplace_=False,
-    shared_constructor_accept_ndarray_=False,
-    internal_type_=sp.sparse.csc_matrix,
-    check_internal_type_=sp.sparse.issparse,
-    pytensor_fct_=lambda a: dense_from_sparse(a * 2.0),
-    ref_fct_=lambda a: np.asarray((a * 2).todense()),
-    cast_value_=sp.sparse.csr_matrix,
-    expect_fail_fast_shape_inplace=False,
-)
-class TestSharedOptions:
-    pass
-
-
-@pytest.mark.parametrize("format", ["csc", "csr"], ids=["csc", "csr"])
-@pytest.mark.parametrize("sparse_input", [True, False], ids=["sparse", "dense"])
-def test_block_diagonal(format, sparse_input):
-    from scipy import sparse as sp_sparse
-
-    f_array = sp_sparse.csr_matrix if sparse_input else np.array
-    A = f_array([[1, 2], [3, 4]]).astype(config.floatX)
-    B = f_array([[5, 6], [7, 8]]).astype(config.floatX)
-
-    result = block_diag(A, B, format=format)
-    assert result.owner.op._props_dict() == {"n_inputs": 2, "format": format}
-
-    sp_result = sp_sparse.block_diag([A, B], format=format)
-
-    assert isinstance(result.eval(), type(sp_result))
-    np.testing.assert_allclose(result.eval().toarray(), sp_result.toarray())

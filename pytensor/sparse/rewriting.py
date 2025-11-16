@@ -3,6 +3,8 @@ import scipy
 
 import pytensor
 import pytensor.scalar as ps
+import pytensor.sparse.basic as sparse
+import pytensor.sparse.math as spm
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply
 from pytensor.graph.rewriting.basic import (
@@ -11,17 +13,8 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.link.c.op import COp, _NoPythonCOp
-from pytensor.sparse import basic as sparse
-from pytensor.sparse.basic import (
-    CSC,
-    CSR,
-    csm_data,
-    csm_grad,
-    csm_indices,
-    csm_indptr,
-    csm_properties,
-    usmm,
-)
+from pytensor.sparse.basic import csm_properties
+from pytensor.sparse.math import usmm
 from pytensor.tensor import blas
 from pytensor.tensor.basic import as_tensor_variable, cast
 from pytensor.tensor.math import mul, neg, sub
@@ -34,25 +27,22 @@ _is_sparse_variable = sparse._is_sparse_variable
 _is_dense = sparse._is_dense
 
 
-@node_rewriter([csm_properties])
+@register_specialize
+@node_rewriter([sparse.csm_properties])
 def local_csm_properties_csm(fgraph, node):
     """
     If we find csm_properties(CSM(*args)), then we can replace that with the
     *args directly.
 
     """
-    if node.op == csm_properties:
+    if node.op == sparse.csm_properties:
         (csm,) = node.inputs
-        if csm.owner and (csm.owner.op == CSC or csm.owner.op == CSR):
+        if csm.owner and (csm.owner.op == sparse.CSC or csm.owner.op == sparse.CSR):
             return csm.owner.inputs
 
     return False
 
 
-register_specialize(local_csm_properties_csm)
-
-
-# This is tested in tests/test_basic.py:test_remove0
 @node_rewriter([sparse.Remove0])
 def local_inplace_remove0(fgraph, node):
     """Rewrite to insert inplace versions of `Remove0`."""
@@ -120,7 +110,11 @@ class AddSD_ccode(_NoPythonCOp):
         if self.inplace:
             assert out_dtype == y.dtype
 
-        indices, indptr, data = csm_indices(x), csm_indptr(x), csm_data(x)
+        indices, indptr, data = (
+            sparse.csm_indices(x),
+            sparse.csm_indptr(x),
+            sparse.csm_data(x),
+        )
         # We either use CSC or CSR depending on the format of input
         assert self.format == x.type.format
         # The magic number two here arises because L{scipy.sparse}
@@ -189,10 +183,10 @@ class AddSD_ccode(_NoPythonCOp):
         return (3,)
 
 
-@node_rewriter([sparse.AddSD])
+@node_rewriter([spm.AddSD])
 def local_inplace_addsd_ccode(fgraph, node):
     """Rewrite to insert inplace versions of `AddSD`."""
-    if isinstance(node.op, sparse.AddSD) and config.cxx:
+    if isinstance(node.op, spm.AddSD) and config.cxx:
         out_dtype = ps.upcast(*[inp.type.dtype for inp in node.inputs])
         if out_dtype != node.inputs[1].dtype:
             return
@@ -225,13 +219,13 @@ def local_dense_from_sparse_sparse_from_dense(fgraph, node):
             return inp.owner.inputs
 
 
-@node_rewriter([sparse.AddSD])
+@node_rewriter([spm.AddSD])
 def local_addsd_ccode(fgraph, node):
     """
     Convert AddSD to faster AddSD_ccode.
 
     """
-    if isinstance(node.op, sparse.AddSD) and config.cxx:
+    if isinstance(node.op, spm.AddSD) and config.cxx:
         new_node = AddSD_ccode(format=node.inputs[0].type.format)(*node.inputs)
         return [new_node]
     return False
@@ -624,9 +618,9 @@ sd_csr = StructuredDotCSR()
 
 # register a specialization to replace StructuredDot -> StructuredDotCSx
 # This is tested in tests/test_basic.py:792
-@node_rewriter([sparse._structured_dot])
+@node_rewriter([spm._structured_dot])
 def local_structured_dot(fgraph, node):
-    if node.op == sparse._structured_dot:
+    if node.op == spm._structured_dot:
         a, b = node.inputs
         if a.type.format == "csc":
             a_val, a_ind, a_ptr, a_shape = csm_properties(a)
@@ -918,10 +912,10 @@ local_usmm = PatternNodeRewriter(
                     all(s == 1 for s in expr.type.shape) and config.blas__ldflags
                 ),
             },
-            (sparse._dot, "x", "y"),
+            (spm._dot, "x", "y"),
         ),
     ),
-    (usmm, (neg, "alpha"), "x", "y", "z"),
+    (spm.usmm, (neg, "alpha"), "x", "y", "z"),
 )
 register_specialize(local_usmm, name="local_usmm")
 
@@ -938,7 +932,7 @@ register_specialize(local_usmm_csc_dense_inplace, "cxx_only", "inplace")
 
 
 # This is tested in tests/test_basic.py:UsmmTests
-@node_rewriter([usmm])
+@node_rewriter([spm.usmm])
 def local_usmm_csx(fgraph, node):
     """
     usmm -> usmm_csc_dense
@@ -1094,13 +1088,13 @@ class CSMGradC(_NoPythonCOp):
 csm_grad_c = CSMGradC()
 
 
-@node_rewriter([csm_grad(None)])
+@node_rewriter([sparse.csm_grad(None)])
 def local_csm_grad_c(fgraph, node):
     """
     csm_grad(None) -> csm_grad_c
 
     """
-    if node.op == csm_grad(None):
+    if node.op == sparse.csm_grad(None):
         return [csm_grad_c(*node.inputs)]
     return False
 
@@ -1386,9 +1380,9 @@ mul_s_d_csr = MulSDCSR()
 
 
 # register a specialization to replace MulSD -> MulSDCSX
-@node_rewriter([sparse.mul_s_d])
+@node_rewriter([spm.mul_s_d])
 def local_mul_s_d(fgraph, node):
-    if node.op == sparse.mul_s_d:
+    if node.op == spm.mul_s_d:
         x, y = node.inputs
 
         x_is_sparse_variable = _is_sparse_variable(x)
@@ -1572,9 +1566,9 @@ mul_s_v_csr = MulSVCSR()
 
 
 # register a specialization to replace MulSV -> MulSVCSR
-@node_rewriter([sparse.mul_s_v])
+@node_rewriter([spm.mul_s_v])
 def local_mul_s_v(fgraph, node):
-    if node.op == sparse.mul_s_v:
+    if node.op == spm.mul_s_v:
         x, y = node.inputs
 
         x_is_sparse_variable = _is_sparse_variable(x)
@@ -1753,9 +1747,9 @@ structured_add_s_v_csr = StructuredAddSVCSR()
 
 # register a specialization to replace
 # structured_add_s_v -> structured_add_s_v_csr
-@node_rewriter([sparse.structured_add_s_v])
+@node_rewriter([spm.structured_add_s_v])
 def local_structured_add_s_v(fgraph, node):
-    if node.op == sparse.structured_add_s_v:
+    if node.op == spm.structured_add_s_v:
         x, y = node.inputs
 
         x_is_sparse_variable = _is_sparse_variable(x)
@@ -2044,12 +2038,12 @@ sampling_dot_csr = SamplingDotCSR()
 
 
 # register a specialization to replace SamplingDot -> SamplingDotCsr
-@node_rewriter([sparse.sampling_dot])
+@node_rewriter([spm.sampling_dot])
 def local_sampling_dot_csr(fgraph, node):
     if not config.blas__ldflags:
         # The C implementation of SamplingDotCsr relies on BLAS routines
         return
-    if node.op == sparse.sampling_dot:
+    if node.op == spm.sampling_dot:
         x, y, p = node.inputs
         if p.type.format == "csr":
             p_data, p_ind, p_ptr, p_shape = sparse.csm_properties(p)
