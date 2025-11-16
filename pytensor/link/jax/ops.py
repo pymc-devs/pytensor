@@ -9,7 +9,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Op, Variable
-from pytensor.tensor.basic import infer_static_shape
+from pytensor.tensor.basic import as_tensor, infer_static_shape
 from pytensor.tensor.type import TensorType
 
 
@@ -384,7 +384,7 @@ def _find_output_types(
         try:
             shape_evaluation_function = function(
                 [],
-                resolved_input_shapes,
+                [as_tensor(s, dtype="int64") for s in resolved_input_shapes],
                 on_unused_input="ignore",
                 mode=Mode(linker="py", optimizer="fast_compile"),
             )
@@ -394,7 +394,7 @@ def _find_output_types(
                 "Please provide inputs with fully determined shapes by "
                 "calling pt.specify_shape."
             ) from e
-        resolved_input_shapes = shape_evaluation_function()
+        resolved_input_shapes = [tuple(s) for s in shape_evaluation_function()]
 
     # Determine output types using jax.eval_shape with dummy inputs
     output_metadata_storage = {}
@@ -422,6 +422,7 @@ def _find_output_types(
     output_static = output_metadata_storage["output_static"]
 
     # If we used shape evaluation, set all output shapes to unknown
+    # TODO: This is throwing away potential static shape information.
     if requires_shape_evaluation:
         output_types = [
             TensorType(
