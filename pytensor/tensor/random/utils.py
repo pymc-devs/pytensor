@@ -203,7 +203,11 @@ def normalize_size_param(
     return shape
 
 
-def custom_deepcopy(rng):
+# NOTE:
+# This helper exists because copying numpy.random.Generator via deepcopy is slow.
+# NumPy may implement a faster clone/copy API in the future:
+# https://github.com/numpy/numpy/issues/24086
+def custom_rng_deepcopy(rng):
     old_bitgen = rng.bit_generator
     new_bitgen = type(old_bitgen)(deepcopy(old_bitgen._seed_seq))
     new_bitgen.state = old_bitgen.state

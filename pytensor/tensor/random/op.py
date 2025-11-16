@@ -22,7 +22,7 @@ from pytensor.tensor.blockwise import OpWithCoreShape
 from pytensor.tensor.random.type import RandomGeneratorType, RandomType
 from pytensor.tensor.random.utils import (
     compute_batch_shape,
-    custom_deepcopy,
+    custom_rng_deepcopy,
     explicit_expand_dims,
     normalize_size_param,
 )
@@ -421,7 +421,7 @@ class RandomVariable(RNGConsumerOp):
 
         # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng` otherwise.
         if not self.inplace:
-            rng = custom_deepcopy(rng)
+            rng = custom_rng_deepcopy(rng)
 
         outputs[0][0] = rng
         outputs[1][0] = np.asarray(
