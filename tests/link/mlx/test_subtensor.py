@@ -411,3 +411,29 @@ def test_mlx_advanced_incsubtensor_with_numpy_int64():
     # Advanced indexing increment
     out_pt = pt_subtensor.inc_subtensor(x_pt[indices], y_pt)
     compare_mlx_and_py([], [out_pt], [])
+
+    # Advanced indexing with array + scalar np.int64
+    # The array forces Advanced indexing, and we test that scalar np.int64 is handled
+    x_np_3d = np.arange(24, dtype=np.float32).reshape((3, 4, 2))
+    x_pt_3d = pt.constant(x_np_3d)
+    y_scalar_pt = pt.as_tensor_variable(np.ones((2, 2), dtype=np.float32))
+
+    scalar_idx = np.int64(1)
+    out_pt = pt_subtensor.set_subtensor(x_pt_3d[[0, 2], scalar_idx], y_scalar_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Advanced indexing increment with array + scalar np.int64
+    out_pt = pt_subtensor.inc_subtensor(x_pt_3d[[0, 2], scalar_idx], y_scalar_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Advanced indexing set with array + slice containing np.int64
+    # The array forces Advanced indexing, and we test that slice with np.int64 is handled
+    y_slice_pt = pt.as_tensor_variable(np.ones((2, 2, 2), dtype=np.float32))
+    start = np.int64(0)
+    stop = np.int64(2)
+    out_pt = pt_subtensor.set_subtensor(x_pt_3d[[0, 2], start:stop], y_slice_pt)
+    compare_mlx_and_py([], [out_pt], [])
+
+    # Advanced indexing increment with array + slice containing np.int64
+    out_pt = pt_subtensor.inc_subtensor(x_pt_3d[[0, 2], start:stop], y_slice_pt)
+    compare_mlx_and_py([], [out_pt], [])
