@@ -12,7 +12,6 @@ from pytensor import config
 from pytensor.gradient import grad_not_implemented
 from pytensor.graph import Apply, Op
 from pytensor.link.c.op import COp
-from pytensor.sparse.basic import SparseTensorType
 from pytensor.tensor import TensorType, Variable, specify_broadcastable, tensor
 from pytensor.tensor.type import complex_dtypes
 
@@ -667,9 +666,7 @@ def add(x, y):
         raise NotImplementedError()
 
 
-def subtract(
-    x: SparseTensorType | TensorType, y: SparseTensorType | TensorType
-) -> SparseTensorType:
+def subtract(x, y):
     """
     Subtract two matrices, at least one of which is sparse.
 
@@ -907,9 +904,7 @@ class MulSV(Op):
 mul_s_v = MulSV()
 
 
-def multiply(
-    x: SparseTensorType | TensorType, y: SparseTensorType | TensorType
-) -> SparseTensorType:
+def multiply(x, y):
     """
     Multiply elementwise two matrices, at least one of which is sparse.
 
