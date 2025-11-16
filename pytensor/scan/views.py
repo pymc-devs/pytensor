@@ -198,3 +198,63 @@ def foldr(
         name=name,
         return_updates=return_updates,
     )
+
+
+def filter(
+    fn,
+    sequences,
+    non_sequences=None,
+    go_backwards=False,
+    mode=None,
+    name=None,
+):
+    """Construct a `Scan` `Op` that functions like `filter`.
+
+    Parameters
+    ----------
+    fn : callable
+        Predicate function returning a boolean tensor.
+    sequences : list
+        Sequences to filter.
+    non_sequences : list
+        Non-iterated arguments passed to `fn`.
+    go_backwards : bool
+        Whether to iterate in reverse.
+    mode : str or None
+        See ``scan``.
+    name : str or None
+        See ``scan``.
+
+    Notes
+    -----
+    If the predicate function `fn` returns multiple boolean masks (one per sequence),
+    each mask will be applied to its corresponding sequence. If it returns a single mask,
+    that mask will be broadcast to all sequences.
+    """
+    mask, _ = scan(
+        fn=fn,
+        sequences=sequences,
+        outputs_info=None,
+        non_sequences=non_sequences,
+        go_backwards=go_backwards,
+        mode=mode,
+        name=name,
+    )
+
+    if isinstance(mask, (list, tuple)):
+        # One mask per sequence
+        if not isinstance(sequences, (list, tuple)):
+            raise TypeError(
+                "If multiple masks are returned, sequences must be a list or tuple."
+            )
+        if len(mask) != len(sequences):
+            raise ValueError("Number of masks must match number of sequences.")
+        filtered_sequences = [seq[m] for seq, m in zip(sequences, mask)]
+    else:
+        # Single mask applied to all sequences
+        if isinstance(sequences, (list, tuple)):
+            filtered_sequences = [seq[mask] for seq in sequences]
+        else:
+            filtered_sequences = sequences[mask]
+
+    return filtered_sequences
