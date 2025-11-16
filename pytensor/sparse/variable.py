@@ -24,34 +24,8 @@ from pytensor.sparse.math import (
     lt,
     mul,
     sp_sum,
-    structured_abs,
-    structured_arccos,
-    structured_arccosh,
-    structured_arcsin,
-    structured_arcsinh,
-    structured_arctan,
-    structured_arctanh,
-    structured_ceil,
     structured_conjugate,
-    structured_cos,
-    structured_cosh,
-    structured_deg2rad,
     structured_dot,
-    structured_exp,
-    structured_exp2,
-    structured_expm1,
-    structured_floor,
-    structured_log,
-    structured_log1p,
-    structured_log2,
-    structured_log10,
-    structured_rad2deg,
-    structured_sin,
-    structured_sinh,
-    structured_sqrt,
-    structured_tan,
-    structured_tanh,
-    structured_trunc,
     sub,
 )
 from pytensor.sparse.type import SparseTensorType
@@ -201,20 +175,25 @@ class _sparse_py_operators:
     def conj(self):
         return structured_conjugate(self)
 
+    @override_dense
     def __abs__(self):
-        return structured_abs(self)
+        raise NotImplementedError
 
+    @override_dense
     def __ceil__(self):
-        return structured_ceil(self)
+        raise NotImplementedError
 
+    @override_dense
     def __floor__(self):
-        return structured_floor(self)
+        raise NotImplementedError
 
+    @override_dense
     def __trunc__(self):
-        return structured_trunc(self)
+        raise NotImplementedError
 
+    @override_dense
     def transpose(self):
-        return transpose(self)
+        raise NotImplementedError
 
     @override_dense
     def any(self, axis=None, keepdims=False):
@@ -240,77 +219,101 @@ class _sparse_py_operators:
     def ravel(self):
         raise NotImplementedError
 
+    @override_dense
     def arccos(self):
-        return structured_arccos(self)
+        raise NotImplementedError
 
+    @override_dense
     def arcsin(self):
-        return structured_arcsin(self)
+        raise NotImplementedError
 
+    @override_dense
     def arctan(self):
-        return structured_arctan(self)
+        raise NotImplementedError
 
+    @override_dense
     def arccosh(self):
-        return structured_arccosh(self)
+        raise NotImplementedError
 
+    @override_dense
     def arcsinh(self):
-        return structured_arcsinh(self)
+        raise NotImplementedError
 
+    @override_dense
     def arctanh(self):
-        return structured_arctanh(self)
+        raise NotImplementedError
 
+    @override_dense
     def ceil(self):
-        return structured_ceil(self)
+        raise NotImplementedError
 
+    @override_dense
     def cos(self):
-        return structured_cos(self)
+        raise NotImplementedError
 
+    @override_dense
     def cosh(self):
-        return structured_cosh(self)
+        raise NotImplementedError
 
+    @override_dense
     def deg2rad(self):
-        return structured_deg2rad(self)
+        raise NotImplementedError
 
+    @override_dense
     def exp(self):
-        return structured_exp(self)
+        raise NotImplementedError
 
+    @override_dense
     def exp2(self):
-        return structured_exp2(self)
+        raise NotImplementedError
 
+    @override_dense
     def expm1(self):
-        return structured_expm1(self)
+        raise NotImplementedError
 
+    @override_dense
     def floor(self):
-        return structured_floor(self)
+        raise NotImplementedError
 
+    @override_dense
     def log(self):
-        return structured_log(self)
+        raise NotImplementedError
 
+    @override_dense
     def log10(self):
-        return structured_log10(self)
+        raise NotImplementedError
 
+    @override_dense
     def log1p(self):
-        return structured_log1p(self)
+        raise NotImplementedError
 
+    @override_dense
     def log2(self):
-        return structured_log2(self)
+        raise NotImplementedError
 
+    @override_dense
     def rad2deg(self):
-        return structured_rad2deg(self)
+        raise NotImplementedError
 
+    @override_dense
     def sin(self):
-        return structured_sin(self)
+        raise NotImplementedError
 
+    @override_dense
     def sinh(self):
-        return structured_sinh(self)
+        raise NotImplementedError
 
+    @override_dense
     def sqrt(self):
-        return structured_sqrt(self)
+        raise NotImplementedError
 
+    @override_dense
     def tan(self):
-        return structured_tan(self)
+        raise NotImplementedError
 
+    @override_dense
     def tanh(self):
-        return structured_tanh(self)
+        raise NotImplementedError
 
     @override_dense
     def copy(self, name=None):
