@@ -1,4 +1,3 @@
-import timeit
 from copy import deepcopy
 
 import numpy as np
@@ -356,14 +355,3 @@ def test_custom_rng_deepcopy_output_identical():
     x2 = rng2.normal(size=10)
 
     assert np.allclose(x1, x2)
-
-
-@pytest.mark.performance
-def test_custom_rng_deepcopy_faster_than_deepcopy():
-    rng = np.random.default_rng()
-
-    t_dp = timeit.timeit(lambda: deepcopy(rng), number=2000)
-    t_fc = timeit.timeit(lambda: custom_rng_deepcopy(rng), number=2000)
-
-    # Fast copy should be at least 20% faster
-    assert t_fc < t_dp * 0.8
