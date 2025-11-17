@@ -1,1 +1,1 @@
-from pytensor.link.numba.dispatch.sparse import basic, variable
+from pytensor.link.numba.dispatch.sparse import basic, math, variable

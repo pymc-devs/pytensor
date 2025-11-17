@@ -200,16 +200,12 @@ def test_sparse_constant(format, cache):
 
     y_test = np.array([np.pi, np.e, np.euler_gamma])
     with config.change_flags(numba__cache=cache):
-        with pytest.warns(
-            UserWarning,
-            match=r"Numba will use object mode to run SparseDenseVectorMultiply's perform method",
-        ):
-            compare_numba_and_py_sparse(
-                [y],
-                [out],
-                [y_test],
-                eval_obj_mode=False,
-            )
+        compare_numba_and_py_sparse(
+            [y],
+            [out],
+            [y_test],
+            eval_obj_mode=False,
+        )
 
 
 @pytest.mark.parametrize("format", ["csc", "csr"])
@@ -254,15 +250,11 @@ def test_simple_graph(format):
     x_test = sp.sparse.random(3, 3, density=0.5, format=format, random_state=rng)
     y_test = rng.normal(size=(3,))
 
-    with pytest.warns(
-        UserWarning,
-        match=r"Numba will use object mode to run SparseDenseVectorMultiply's perform method",
-    ):
-        compare_numba_and_py_sparse(
-            [x, y],
-            z,
-            [x_test, y_test],
-        )
+    compare_numba_and_py_sparse(
+        [x, y],
+        z,
+        [x_test, y_test],
+    )
 
 
 @pytest.mark.parametrize("format", ("csr", "csc"))
