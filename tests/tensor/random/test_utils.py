@@ -7,9 +7,11 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor.random.utils import (
     RandomStream,
     broadcast_params,
+    normalize_size_param,
     supp_shape_from_ref_param_shape,
 )
-from pytensor.tensor.type import matrix, tensor
+from pytensor.tensor.type import TensorType, matrix, tensor
+from pytensor.tensor.type_other import NoneTypeT, none_type_t
 from tests import unittest_tools as utt
 
 
@@ -327,3 +329,22 @@ def test_supp_shape_from_ref_param_shape():
         ref_param_idx=1,
     )
     assert res == (3, 4)
+
+
+def test_normalize_size_param():
+    assert normalize_size_param(None).type == NoneTypeT()
+
+    sym_none_size = none_type_t()
+    assert normalize_size_param(sym_none_size) is sym_none_size
+
+    empty_size = normalize_size_param(())
+    assert empty_size.type == TensorType(dtype="int64", shape=(0,))
+
+    int_size = normalize_size_param(5)
+    assert int_size.type == TensorType(dtype="int64", shape=(1,))
+
+    seq_int_size = normalize_size_param((5, 3, 4))
+    assert seq_int_size.type == TensorType(dtype="int64", shape=(3,))
+
+    sym_tensor_size = tensor(shape=(3,), dtype="int64")
+    assert normalize_size_param(sym_tensor_size) is sym_tensor_size

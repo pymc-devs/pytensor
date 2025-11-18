@@ -385,7 +385,9 @@ class RandomVariable(RNGConsumerOp):
         dist_params = explicit_expand_dims(
             dist_params,
             self.ndims_params,
-            size_length=None if NoneConst.equals(size) else get_vector_length(size),
+            size_length=None
+            if isinstance(size.type, NoneTypeT)
+            else get_vector_length(size),
         )
 
         inputs = (rng, size, *dist_params)

@@ -47,7 +47,7 @@ from pytensor.tensor.shape import (
 )
 from pytensor.tensor.subtensor import Subtensor, get_idx_list
 from pytensor.tensor.type import TensorType, discrete_dtypes, integer_dtypes
-from pytensor.tensor.type_other import NoneConst, NoneTypeT
+from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -1137,7 +1137,7 @@ def local_merge_consecutive_specify_shape(fgraph, node):
 
     inner_obj, *shape = obj.owner.inputs
     for dim, sh in enumerate(node.inputs[1:]):
-        if not NoneConst.equals(sh):
+        if not isinstance(sh.type, NoneTypeT):
             shape[dim] = sh
 
     # TODO: We could make sure that the overlapping shapes of the two `SpecifyShape`s are
@@ -1183,7 +1183,7 @@ def local_Shape_of_SpecifyShape(fgraph, node):
 
     # Replace `NoneConst` by `shape_i`
     for i, sh in enumerate(shape):
-        if NoneConst.equals(sh):
+        if isinstance(sh.type, NoneTypeT):
             shape[i] = x.shape[i]
 
     return [stack(shape).astype(np.int64)]
@@ -1219,7 +1219,7 @@ def local_specify_shape_lift(fgraph, node):
                 for i, (dim, bcast) in enumerate(
                     zip(shape, out_broadcastable, strict=True)
                 )
-                if (not bcast and not NoneConst.equals(dim))
+                if (not bcast and not isinstance(dim.type, NoneTypeT))
             }
             new_elem_inps = elem_inps.copy()
             for i, elem_inp in enumerate(elem_inps):

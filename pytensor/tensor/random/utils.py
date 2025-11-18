@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pytensor.compile.sharedvalue import shared
-from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.basic import Variable
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor import NoneConst, get_vector_length
 from pytensor.tensor.basic import as_tensor_variable, cast
@@ -15,6 +15,7 @@ from pytensor.tensor.extra_ops import broadcast_arrays, broadcast_to
 from pytensor.tensor.math import maximum
 from pytensor.tensor.shape import shape_padleft, specify_shape
 from pytensor.tensor.type import int_dtypes
+from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.utils import faster_broadcast_to
 from pytensor.tensor.variable import TensorVariable
 
@@ -178,24 +179,26 @@ def normalize_size_param(
     shape: int | np.ndarray | Variable | Sequence | None,
 ) -> Variable:
     """Create an PyTensor value for a ``RandomVariable`` ``size`` parameter."""
-    if shape is None or NoneConst.equals(shape):
+    if shape is None:
         return NoneConst
-    elif isinstance(shape, int):
+    if isinstance(shape, Variable) and isinstance(shape.type, NoneTypeT):
+        return shape
+
+    if isinstance(shape, int):
         shape = as_tensor_variable([shape], ndim=1)
-    elif not isinstance(shape, np.ndarray | Variable | Sequence):
-        raise TypeError(
-            "Parameter size must be None, an integer, or a sequence with integers."
-        )
     else:
+        if not isinstance(shape, Sequence | Variable | np.ndarray):
+            raise TypeError(
+                "Parameter size must be None, an integer, or a sequence with integers."
+            )
         shape = cast(as_tensor_variable(shape, ndim=1, dtype="int64"), "int64")
 
-        if not isinstance(shape, Constant):
+        if shape.type.shape == (None,):
             # This should help ensure that the length of non-constant `size`s
-            # will be available after certain types of cloning (e.g. the kind
-            # `Scan` performs)
+            # will be available after certain types of cloning (e.g. the kind `Scan` performs)
             shape = specify_shape(shape, (get_vector_length(shape),))
 
-    assert not any(s is None for s in shape.type.shape)
+    assert shape.type.shape != (None,)
     assert shape.dtype in int_dtypes
 
     return shape
