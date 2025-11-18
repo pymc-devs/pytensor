@@ -77,7 +77,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
             except NotImplementedError:
                 pass
             else:
-                has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch
+                has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch()
                 input_inner_dtypes = scalar_func_numba.numpy_arg_dtypes()
                 output_inner_dtype = scalar_func_numba.numpy_output_dtype()
 
