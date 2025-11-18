@@ -89,20 +89,28 @@ class TestSparseVariable:
             [x], z, on_unused_input="ignore", allow_input_downcast=True
         )
 
-        res = f([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
+        input_value = np.array([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
+        res = f(input_value)
 
         if not isinstance(res, list):
             res_outs = [res]
         else:
             res_outs = res
 
-        # TODO: Make a separate test for methods that always reduce to dense (only sum for now)
         if getattr(method_to_call, "_is_dense_override", False) or method == "sum":
             assert all(isinstance(out.type, DenseTensorType) for out in z_outs)
             assert all(isinstance(out, np.ndarray) for out in res_outs)
+
         else:
             assert all(isinstance(out.type, SparseTensorType) for out in z_outs)
             assert all(isinstance(out, csr_matrix) for out in res_outs)
+
+            # If a built-in method returns sparse, its using a "structured" function. These ignore the zeros
+            # for performance, but should have the same result as calling the normal version on a dense matrix.
+            # (That is, we must have f(0) = 0 for these functions)
+            if method not in ["__neg__", "zeros_like", "ones_like", "copy"]:
+                f_np = getattr(np, method.replace("_", ""))
+                np.testing.assert_allclose(res.todense(), f_np(input_value))
 
     @pytest.mark.parametrize(
         "method",
