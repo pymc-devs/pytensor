@@ -1,8 +1,4 @@
 import numpy as np
-import pytest
-
-
-sp = pytest.importorskip("scipy", minversion="0.7.0")
 
 from pytensor.sparse.utils import hash_from_sparse
 from tests.sparse.test_basic import as_sparse_format
