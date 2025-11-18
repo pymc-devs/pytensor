@@ -9,7 +9,7 @@ from pytensor.graph.rewriting.basic import (
     dfs_rewriter,
     node_rewriter,
 )
-from pytensor.tensor import NoneConst, TensorVariable
+from pytensor.tensor import TensorVariable
 from pytensor.tensor.basic import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import broadcast_to
@@ -20,7 +20,7 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     AdvancedSubtensor1,
     Subtensor,
-    get_idx_list,
+    indices_from_subtensor,
 )
 from pytensor.tensor.type import integer_dtypes
 from pytensor.tensor.type_other import NoneTypeT, SliceType
@@ -237,17 +237,20 @@ def local_subtensor_rv_lift(fgraph, node):
         return False
 
     # Parse indices
-    indices = get_idx_list(node.inputs, getattr(subtensor_op, "idx_list", None))
-
-    # The rewrite doesn't apply if advanced indexing could broadcast the samples (leading to duplicates)
-    # Note: For simplicity this also excludes subtensor-related expand_dims (np.newaxis).
-    #  If we wanted to support that we could rewrite it as subtensor + dimshuffle
-    #  and make use of the dimshuffle lift rewrite
-    if any(
-        is_nd_advanced_idx(idx, integer_dtypes) or NoneConst.equals(idx)
-        for idx in indices
-    ):
-        return False
+    if isinstance(subtensor_op, Subtensor):
+        indices = indices_from_subtensor(node.inputs[1:], subtensor_op.idx_list)
+    else:
+        indices = node.inputs[1:]
+        # The rewrite doesn't apply if advanced indexing could broadcast the samples (leading to duplicates)
+        # Note: For simplicity this also excludes subtensor-related expand_dims (np.newaxis).
+        #  If we wanted to support that we could rewrite it as subtensor + dimshuffle
+        #  and make use of the dimshuffle lift rewrite
+        # TODO: This rewrite is aborting with dummy indexing dimensions which aren't a problem
+        if any(
+            is_nd_advanced_idx(idx, integer_dtypes) or isinstance(idx.type, NoneTypeT)
+            for idx in indices
+        ):
+            return False
 
     # Check that indexing does not act on support dims
     batch_ndims = rv_op.batch_ndim(rv_node)
@@ -267,7 +270,7 @@ def local_subtensor_rv_lift(fgraph, node):
         for idx in supp_indices:
             if not (
                 isinstance(idx.type, SliceType)
-                and all(NoneConst.equals(i) for i in idx.owner.inputs)
+                and all(isinstance(i.type, NoneTypeT) for i in idx.owner.inputs)
             ):
                 return False
         n_discarded_idxs = len(supp_indices)

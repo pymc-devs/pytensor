@@ -11,6 +11,7 @@ from pytensor.tensor.random.basic import NormalRV
 from pytensor.tensor.random.op import RandomVariable, default_rng
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import iscalar, tensor
+from pytensor.tensor.type_other import none_type_t
 
 
 @pytest.fixture(scope="function", autouse=False)
@@ -317,3 +318,12 @@ def test_size_none_vs_empty():
         ValueError, match="Size length is incompatible with batched dimensions"
     ):
         rv([0], [1], size=())
+
+
+def test_non_constant_none_size():
+    # Regression test for https://github.com/pymc-devs/pymc/issues/7901#issuecomment-3528479876
+    loc = pt.vector("loc", dtype="float64")
+    size = none_type_t("none_size")
+
+    rv = normal(loc, size=size)
+    rv.eval({loc: np.arange(5, dtype="float64"), size: None}, mode="FAST_COMPILE")

@@ -408,7 +408,9 @@ class SpecifyShape(COp):
 
         shape = tuple(
             NoneConst
-            if (s is None or NoneConst.equals(s))
+            if (
+                s is None or (isinstance(s, Variable) and isinstance(s.type, NoneTypeT))
+            )
             else ptb.as_tensor_variable(s, ndim=0)
             for s in shape
         )
@@ -506,7 +508,7 @@ class SpecifyShape(COp):
         for i, (shp_name, shp) in enumerate(
             zip(shape_names, node.inputs[1:], strict=True)
         ):
-            if NoneConst.equals(shp):
+            if isinstance(shp.type, NoneTypeT):
                 continue
             code += dedent(
                 f"""
@@ -594,7 +596,10 @@ def _vectorize_specify_shape(op, node, x, *shape):
     if any(
         as_tensor_variable(dim).type.ndim != 0
         for dim in shape
-        if not (NoneConst.equals(dim) or dim is None)
+        if not (
+            (isinstance(dim, Variable) and isinstance(dim.type, NoneTypeT))
+            or dim is None
+        )
     ):
         raise NotImplementedError(
             "It is not possible to vectorize the shape argument of SpecifyShape"
