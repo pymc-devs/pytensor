@@ -149,27 +149,21 @@ lines-after-imports = 2
 # TODO: Get rid of these:
 "**/__init__.py" = ["F401", "E402", "F403"]
 "pytensor/tensor/linalg.py" = ["F403"]
+# Modules that use print-statements, skip "T201"
 "pytensor/link/c/cmodule.py" = ["PTH", "T201"]
 "pytensor/misc/elemwise_time_test.py" = ["T201"]
 "pytensor/misc/elemwise_openmp_speedup.py" = ["T201"]
 "pytensor/misc/check_duplicate_key.py" = ["T201"]
 "pytensor/misc/check_blas.py" = ["T201"]
 "pytensor/bin/pytensor_cache.py" = ["T201"]
-# For the tests we skip `E402` because `pytest.importorskip` is used:
-"tests/link/jax/test_scalar.py" = ["E402"]
-"tests/link/jax/test_tensor_basic.py" = ["E402"]
-"tests/link/numba/test_basic.py" = ["E402"]
-"tests/link/numba/test_cython_support.py" = ["E402"]
-"tests/link/numba/test_performance.py" = ["E402"]
-"tests/link/numba/test_sparse.py" = ["E402"]
-"tests/link/numba/test_tensor_basic.py" = ["E402"]
-"tests/tensor/test_math_scipy.py" = ["E402"]
-"tests/sparse/test_basic.py" = ["E402"]
-"tests/sparse/test_sp2.py" = ["E402"]
-"tests/sparse/test_utils.py" = ["E402"]
-"tests/sparse/sandbox/test_sp.py" = ["E402", "F401"]
 "tests/compile/test_monitormode.py" = ["T201"]
 "scripts/run_mypy.py" = ["T201"]
+# Test modules of optional backends that use `pytest.importorskip`, skip "E402"
+"tests/link/jax/**/test_*.py" = ["E402"]
+"tests/link/numba/**/test_*.py" = ["E402"]
+"tests/link/pytorch/**/test_*.py" = ["E402"]
+"tests/link/mlx/**/test_*.py" = ["E402"]
+
 
 
 [tool.mypy]
