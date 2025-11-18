@@ -73,7 +73,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
             scalar_func_numba = wrap_cython_function(
                 cython_func, output_dtype, input_dtypes
             )
-            has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch
+            has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch()
             input_inner_dtypes = scalar_func_numba.numpy_arg_dtypes()
             output_inner_dtype = scalar_func_numba.numpy_output_dtype()
 
