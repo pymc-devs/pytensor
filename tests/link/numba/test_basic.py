@@ -25,6 +25,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.type import Type
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
+    _filter_numba_warnings,
     cache_key_for_constant,
     numba_funcify_and_cache_key,
 )
@@ -455,14 +456,46 @@ def test_scalar_return_value_conversion():
     assert isinstance(x_fn(1.0), np.ndarray)
 
 
-@pytest.mark.filterwarnings("error")
-def test_cache_warning_suppressed():
-    x = pt.vector("x", shape=(5,), dtype="float64")
-    out = pt.psi(x) * 2
-    fn = function([x], out, mode="NUMBA")
+class TestNumbaWarnings:
+    def setup_method(self, method):
+        # Pytest messes up with the package filters, reenable here for testing
+        _filter_numba_warnings()
 
-    x_test = np.random.uniform(size=5)
-    np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test) * 2)
+    @pytest.mark.filterwarnings("error")
+    def test_cache_pointer_func_warning_suppressed(self):
+        x = pt.vector("x", shape=(5,), dtype="float64")
+        out = pt.psi(x) * 2
+        fn = function([x], out, mode="NUMBA")
+
+        x_test = np.random.uniform(size=5)
+        np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test) * 2)
+
+    @pytest.mark.filterwarnings("error")
+    def test_cache_large_global_array_warning_suppressed(self):
+        rng = np.random.default_rng(458)
+        large_constant = rng.normal(size=(100000, 5))
+
+        x = pt.vector("x", shape=(5,), dtype="float64")
+        out = x * large_constant
+        fn = function([x], out, mode="NUMBA")
+
+        x_test = rng.uniform(size=5)
+        np.testing.assert_allclose(fn(x_test), x_test * large_constant)
+
+    @pytest.mark.filterwarnings("error")
+    def test_contiguous_array_dot_warning_suppressed(self):
+        A = pt.matrix("A")
+        b = pt.vector("b")
+        out = pt.dot(A, b[:, None])
+        # Cached functions won't reemit the warning, so we have to disable it
+        with config.change_flags(numba__cache=False):
+            fn = function([A, b], out, mode="NUMBA")
+
+        A_test = np.ones((5, 5))
+        # Numba actually warns even on contiguous arrays: https://github.com/numba/numba/issues/10086
+        # But either way we don't want this warning for users as they have little control over strides
+        b_test = np.ones((10,))[::2]
+        np.testing.assert_allclose(fn(A_test, b_test), np.dot(A_test, b_test[:, None]))
 
 
 @pytest.mark.parametrize("mode", ("default", "trust_input", "direct"))
