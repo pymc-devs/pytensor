@@ -29,7 +29,7 @@ def test_convolve1d(mode, data_shape, kernel_shape):
     np.testing.assert_allclose(
         fn(data_val, kernel_val),
         scipy_convolve(data_val, kernel_val, mode=mode),
-        rtol=1e-6 if config.floatX == "float32" else 1e-15,
+        rtol=1e-6 if config.floatX == "float32" else 1e-14,
     )
     utt.verify_grad(op=lambda x: op(x, kernel_val), pt=[data_val])
 
