@@ -899,7 +899,7 @@ def test_expm():
     ],
 )
 def test_expm_grad(mode):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng([898, sum(map(ord, mode))])
 
     match mode:
         case "symmetric":
