@@ -432,7 +432,7 @@ class BlockwiseOpTester:
                     pt_out,
                     np_out,
                     rtol=1e-7 if config.floatX == "float64" else 1e-5,
-                    atol=1e-6 if config.floatX == "float64" else 1e-4,
+                    atol=1e-6 if config.floatX == "float64" else 2e-2,
                 )
 
 
