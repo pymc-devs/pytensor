@@ -18,6 +18,7 @@ from pytensor.gradient import grad, hessian
 from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.op import Op
 from pytensor.graph.replace import clone_replace
+from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import Assert
 from pytensor.scalar import autocast_float, autocast_float_as
 from pytensor.tensor import NoneConst, vectorize
@@ -2193,15 +2194,19 @@ def test_ScalarFromTensor(cast_policy):
         assert ss.owner.op is scalar_from_tensor
         assert ss.type.dtype == tc.type.dtype
 
-        v = eval_outputs([ss])
+        mode = get_default_mode()
+        v = eval_outputs([ss], mode=mode)
 
         assert v == 56
-        assert v.shape == ()
-
-        if cast_policy == "custom":
-            assert isinstance(v, np.int8)
-        elif cast_policy == "numpy+floatX":
-            assert isinstance(v, np.int64)
+        if isinstance(mode.linker, NumbaLinker):
+            # Numba doesn't return numpy scalars
+            assert isinstance(v, int)
+        else:
+            assert v.shape == ()
+            if cast_policy == "custom":
+                assert isinstance(v, np.int8)
+            elif cast_policy == "numpy+floatX":
+                assert isinstance(v, np.int64)
 
         pts = lscalar()
         ss = scalar_from_tensor(pts)
@@ -2209,8 +2214,11 @@ def test_ScalarFromTensor(cast_policy):
         fff = function([pts], ss)
         v = fff(np.asarray(5))
         assert v == 5
-        assert isinstance(v, np.int64)
-        assert v.shape == ()
+        if isinstance(mode.linker, NumbaLinker):
+            assert isinstance(v, int)
+        else:
+            assert isinstance(v, np.int64)
+            assert v.shape == ()
 
         with pytest.raises(TypeError):
             scalar_from_tensor(vector())

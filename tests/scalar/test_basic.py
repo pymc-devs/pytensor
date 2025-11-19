@@ -6,6 +6,7 @@ import pytensor.tensor as pt
 from pytensor.compile.mode import Mode
 from pytensor.graph.fg import FunctionGraph
 from pytensor.link.c.basic import DualLinker
+from pytensor.link.numba import NumbaLinker
 from pytensor.scalar.basic import (
     EQ,
     ComplexError,
@@ -368,7 +369,9 @@ class TestUpgradeToFloat:
             outi = fi(x_val)
             outf = ff(x_val)
 
-            assert outi.dtype == outf.dtype, "incorrect dtype"
+            if not isinstance(ff.maker.linker, NumbaLinker):
+                # Numba doesn't return numpy scalars
+                assert outi.dtype == outf.dtype, "incorrect dtype"
             assert np.allclose(outi, outf), "insufficient precision"
 
     @staticmethod
@@ -389,7 +392,9 @@ class TestUpgradeToFloat:
                 outi = fi(x_val, y_val)
                 outf = ff(x_val, y_val)
 
-                assert outi.dtype == outf.dtype, "incorrect dtype"
+                if not isinstance(ff.maker.linker, NumbaLinker):
+                    # Numba doesn't return numpy scalars
+                    assert outi.dtype == outf.dtype, "incorrect dtype"
                 assert np.allclose(outi, outf), "insufficient precision"
 
     def test_true_div(self):
@@ -414,7 +419,9 @@ class TestUpgradeToFloat:
                 outi = fi(x_val, y_val)
                 outf = ff(x_val, y_val)
 
-                assert outi.dtype == outf.dtype, "incorrect dtype"
+                if not isinstance(ff.maker.linker, NumbaLinker):
+                    # Numba doesn't return numpy scalars
+                    assert outi.dtype == outf.dtype, "incorrect dtype"
                 assert np.allclose(outi, outf), "insufficient precision"
 
     def test_unary(self):
