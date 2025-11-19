@@ -352,7 +352,14 @@ class Mode:
         if isinstance(optimizer, str) or optimizer is None:
             optimizer = predefined_optimizers[optimizer]
         if isinstance(optimizer, RewriteDatabaseQuery):
+            # TODO: From the __init__ signature this should always be the case
+            # But some tests and internal logic allow passing a GraphRewriter directly as optimizer
+            # Cleanup!
             self.provided_optimizer = optimizer
+            if r := linker.required_rewrites:
+                optimizer = optimizer.including(*r)
+            if r := linker.incompatible_rewrites:
+                optimizer = optimizer.excluding(*r)
         self._optimizer = optimizer
         self.call_time = 0
         self.fn_time = 0
@@ -365,13 +372,12 @@ class Mode:
             f"optdb={self.optdb})"
         )
 
-    def __get_optimizer(self):
+    @property
+    def optimizer(self):
         if isinstance(self._optimizer, RewriteDatabaseQuery):
             return self.optdb.query(self._optimizer)
         else:
             return self._optimizer
-
-    optimizer = property(__get_optimizer)
 
     def get_linker_optimizer(self, linker, optimizer):
         if isinstance(linker, str) or linker is None:
@@ -466,61 +472,21 @@ C_VM = Mode("cvm", "fast_run")
 
 NUMBA = Mode(
     NumbaLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run", "numba"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "local_careduce_fusion",
-            "scan_save_mem_prealloc",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run", "numba"]),
 )
 
 JAX = Mode(
     JAXLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run", "jax"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-            # There are specific variants for the LU decompositions supported by JAX
-            "reuse_lu_decomposition_multiple_solves",
-            "scan_split_non_sequence_lu_decomposition_solve",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run", "jax"]),
 )
 PYTORCH = Mode(
     PytorchLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-            "reuse_lu_decomposition_multiple_solves",
-            "scan_split_non_sequence_lu_decomposition_solve",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run"]),
 )
 
 MLX = Mode(
     MLXLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run"]),
 )
 
 
