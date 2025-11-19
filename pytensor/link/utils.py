@@ -735,14 +735,6 @@ def fgraph_to_python(
 
     body_assigns = []
     for node in order:
-        compiled_func = op_conversion_fn(
-            node.op, node=node, storage_map=storage_map, **kwargs
-        )
-
-        # Create a local alias with a unique name
-        local_compiled_func_name = unique_name(compiled_func)
-        global_env[local_compiled_func_name] = compiled_func
-
         node_input_names = []
         for inp in node.inputs:
             local_input_name = unique_name(inp)
@@ -771,6 +763,13 @@ def fgraph_to_python(
             node_input_names.append(local_input_name)
 
         node_output_names = [unique_name(v) for v in node.outputs]
+
+        compiled_func = op_conversion_fn(
+            node.op, node=node, storage_map=storage_map, **kwargs
+        )
+        # Create a local alias with a unique name
+        local_compiled_func_name = unique_name(compiled_func)
+        global_env[local_compiled_func_name] = compiled_func
 
         assign_str = f"{', '.join(node_output_names)} = {local_compiled_func_name}({', '.join(node_input_names)})"
         assign_comment_str = f"{indent(str(node), '# ')}"

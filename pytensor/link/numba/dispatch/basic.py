@@ -9,7 +9,7 @@ from numba import njit as _njit
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 
 from pytensor import config
-from pytensor.graph.basic import Apply, Constant
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.link.numba.cache import compile_numba_function_src, hash_from_pickle_dump
@@ -498,36 +498,46 @@ def numba_funcify_FunctionGraph(
 ):
     # Collect cache keys of every Op/Constant in the FunctionGraph
     # so we can create a global cache key for the whole FunctionGraph
+    fgraph_can_be_cached = [True]
     cache_keys = []
     toposort = fgraph.toposort()
-    clients = fgraph.clients
-    toposort_indices = {node: i for i, node in enumerate(toposort)}
-    # Add dummy output clients which are not included of the toposort
-    toposort_indices |= {
-        clients[out][0][0]: i
-        for i, out in enumerate(fgraph.outputs, start=len(toposort))
+    toposort_coords: dict[Variable, tuple[int, int | str]] = {
+        inp: (0, i) for i, inp in enumerate(fgraph.inputs)
+    }
+    toposort_coords |= {
+        out: (i, j)
+        for i, node in enumerate(toposort, start=1)
+        for j, out in enumerate(node.outputs)
     }
 
-    def op_conversion_and_key_collection(*args, **kwargs):
+    def op_conversion_and_key_collection(op, *args, node, **kwargs):
         # Convert an Op to a funcified function and store the cache_key
 
         # We also Cache each Op so Numba can do less work next time it sees it
-        func, key = numba_funcify_ensure_cache(*args, **kwargs)
-        cache_keys.append(key)
+        func, key = numba_funcify_ensure_cache(op, node=node, *args, **kwargs)
+        if key is None:
+            fgraph_can_be_cached[0] = False
+        else:
+            # Add graph coordinate information (input edges and node location)
+            cache_keys.append(
+                (
+                    tuple(toposort_coords[inp] for inp in node.inputs),
+                    key,
+                )
+            )
         return func
 
     def type_conversion_and_key_collection(value, variable, **kwargs):
         # Convert a constant type to a numba compatible one and compute a cache key for it
 
-        # We need to know where in the graph the constants are used
-        # Otherwise we would hash stack(x, 5.0, 7.0), and stack(5.0, x, 7.0) the same
         # FIXME: It doesn't make sense to call type_conversion on non-constants,
-        #  but that's what fgraph_to_python currently does. We appease it, but don't consider for caching
+        #  but that's what fgraph_to_python currently does.
+        #  We appease it, but don't consider for caching
         if isinstance(variable, Constant):
-            client_indices = tuple(
-                (toposort_indices[node], inp_idx) for node, inp_idx in clients[variable]
-            )
-            cache_keys.append((client_indices, cache_key_for_constant(value)))
+            # Store unique key in toposort_coords. It will be included by whichever nodes make use of the constant
+            constant_cache_key = cache_key_for_constant(value)
+            assert constant_cache_key is not None
+            toposort_coords[variable] = (-1, constant_cache_key)
         return numba_typify(value, variable=variable, **kwargs)
 
     py_func = fgraph_to_python(
@@ -537,12 +547,15 @@ def numba_funcify_FunctionGraph(
         fgraph_name=fgraph_name,
         **kwargs,
     )
-    if any(key is None for key in cache_keys):
+    if not fgraph_can_be_cached[0]:
         # If a single element couldn't be cached, we can't cache the whole FunctionGraph either
         fgraph_key = None
     else:
+        # Add graph coordinate information for fgraph outputs
+        fgraph_output_ancestors = tuple(toposort_coords[out] for out in fgraph.outputs)
+
         # Compose individual cache_keys into a global key for the FunctionGraph
         fgraph_key = sha256(
-            f"({type(fgraph)}, {tuple(cache_keys)}, {len(fgraph.inputs)}, {len(fgraph.outputs)})".encode()
+            f"({type(fgraph)}, {tuple(cache_keys)}, {len(fgraph.inputs)}, {fgraph_output_ancestors})".encode()
         ).hexdigest()
     return numba_njit(py_func), fgraph_key
