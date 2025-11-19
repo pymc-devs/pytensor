@@ -10,6 +10,7 @@ from pytensor.scalar import Add
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
     compare_shape_dtype,
+    numba_mode,
 )
 from tests.tensor.test_basic import check_alloc_runtime_broadcast
 
@@ -243,6 +244,18 @@ def test_Split_view():
         fn(test_x1, test_x2, test_v).copy(),
         fn(test_x1, test_x2, test_v).copy(),
     )
+
+
+def test_split_errors():
+    x = pt.dvector("x", shape=(5,))
+    splits = pt.tensor(shape=(3,), dtype="int64")
+    outs = pt.split(x, splits)
+    fn = function([x, splits], outs, mode=numba_mode)
+    test_x = np.zeros((5,))
+    with pytest.raises(ValueError, match="Split sizes sum to 4; expected 5"):
+        fn(test_x, np.array([1, 2, 1], dtype="int64"))
+    with pytest.raises(ValueError, match="Split sizes cannot be negative"):
+        fn(test_x, np.array([2, 4, -1], dtype="int64"))
 
 
 @pytest.mark.parametrize(
