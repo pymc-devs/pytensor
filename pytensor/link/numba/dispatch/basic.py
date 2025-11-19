@@ -5,6 +5,7 @@ from hashlib import sha256
 
 import numba
 import numpy as np
+from numba import NumbaPerformanceWarning, NumbaWarning
 from numba import njit as _njit
 from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 
@@ -21,6 +22,35 @@ from pytensor.scalar.basic import ScalarType
 from pytensor.sparse import SparseTensorType
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.utils import hash_from_ndarray
+
+
+def _filter_numba_warnings():
+    # Suppress large global arrays cache warning for internal functions
+    # We have to add an ansi escape code for optional bold text by numba
+    # TODO: We could avoid inlining large constants and pass them at runtime
+    warnings.filterwarnings(
+        "ignore",
+        message=(
+            "(\x1b\\[1m)*"  # ansi escape code for bold text
+            'Cannot cache compiled function "numba_funcified_fgraph" as it uses dynamic globals'
+        ),
+        category=NumbaWarning,
+    )
+
+    # Disable loud / incorrect warnings from Numba
+    # https://github.com/numba/numba/issues/10086
+    # TODO: Would be much better if we could disable only for our functions
+    warnings.filterwarnings(
+        "ignore",
+        message=(
+            "(\x1b\\[1m)*"  # ansi escape code for bold text
+            r"np\.dot\(\) is faster on contiguous arrays"
+        ),
+        category=NumbaPerformanceWarning,
+    )
+
+
+_filter_numba_warnings()
 
 
 def numba_njit(
