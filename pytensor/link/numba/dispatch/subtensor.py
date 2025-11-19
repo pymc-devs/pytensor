@@ -409,6 +409,8 @@ def numba_funcify_multiple_integer_vector_indexing(
         op,
         func="multiple_integer_vector_indexing",
         y_is_broadcasted=y_is_broadcasted,
+        first_axis=first_axis,
+        last_axis=last_axis,
     )
     return ret_func, cache_key
 
