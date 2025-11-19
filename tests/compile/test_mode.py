@@ -55,11 +55,15 @@ def test_NoOutputFromInplace():
 
 
 def test_including():
-    mode = Mode(optimizer="merge")
-    assert set(mode._optimizer.include) == {"merge"}
+    mode = Mode(linker="py", optimizer="merge")
+    assert set(mode._optimizer.include) == {"minimum_compile", "merge"}
 
     new_mode = mode.including("fast_compile")
-    assert set(new_mode._optimizer.include) == {"merge", "fast_compile"}
+    assert set(new_mode._optimizer.include) == {
+        "minimum_compile",
+        "merge",
+        "fast_compile",
+    }
 
 
 class TestBunchOfModes:
