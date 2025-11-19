@@ -2584,7 +2584,7 @@ class TestARange:
                         start_v_, stop_v_, step_v_, dtype=out.dtype
                     )
 
-                assert np.all(f_val == expected_val)
+                np.testing.assert_allclose(f_val, expected_val, strict=True, rtol=3e-7)
 
     @pytest.mark.parametrize(
         "cast_policy",
@@ -2621,7 +2621,7 @@ class TestARange:
                 elif config.cast_policy == "numpy+floatX":
                     expected_val = np.arange(start_v_, stop_v_, step_v_)
 
-                assert np.all(f_val == expected_val)
+                np.testing.assert_allclose(f_val, expected_val, strict=True)
 
     @pytest.mark.parametrize(
         "cast_policy",

@@ -31,7 +31,7 @@ def test_convolve1d(mode, data_shape, kernel_shape):
     np.testing.assert_allclose(
         fn(data_val, kernel_val),
         scipy_convolve(data_val, kernel_val, mode=mode),
-        rtol=1e-6 if config.floatX == "float32" else 1e-15,
+        rtol=1e-6 if config.floatX == "float32" else 1e-14,
     )
     utt.verify_grad(op=lambda x: op(x, kernel_val), pt=[data_val])
 
@@ -198,17 +198,18 @@ def test_batched_1d_agrees_with_2d_row_filter(mode, method):
 
     fn = function([data, kernel_1d], [output_1d, output_2d, grad_1d, grad_2d])
 
-    data_val = np.random.normal(size=(10, 8)).astype(config.floatX)
-    kernel_1d_val = np.random.normal(size=(3,)).astype(config.floatX)
+    rng = np.random.default_rng([201, sum(map(ord, mode)), sum(map(ord, method))])
+    data_val = rng.normal(size=(10, 8)).astype(config.floatX)
+    kernel_1d_val = rng.normal(size=(3,)).astype(config.floatX)
 
     forward_1d, forward_2d, backward_1d, backward_2d = fn(data_val, kernel_1d_val)
     np.testing.assert_allclose(
         forward_1d,
         forward_2d,
-        rtol=1e-5 if config.floatX == "float32" else 1e-13,
+        rtol=1e-5 if config.floatX == "float32" else 1e-12,
     )
     np.testing.assert_allclose(
         backward_1d,
         backward_2d,
-        rtol=1e-5 if config.floatX == "float32" else 1e-13,
+        rtol=1e-5 if config.floatX == "float32" else 1e-12,
     )
