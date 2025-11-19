@@ -124,10 +124,16 @@ def numba_funcify_Join(op, **kwargs):
 @register_funcify_default_op_cache_key(Split)
 def numba_funcify_Split(op, **kwargs):
     @numba_basic.numba_njit
-    def split(tensor, axis, indices):
-        return np.split(tensor, np.cumsum(indices)[:-1], axis=axis.item())
+    def split(tensor, axis, sizes):
+        if (sizes < 0).any():
+            raise ValueError("Split sizes must be non-negative")
+        axis = axis.item()
+        split_indices = np.cumsum(sizes)
+        if split_indices[-1] != tensor.shape[axis]:
+            raise ValueError("Split sizes do not add up to the length of the tensor.")
+        return np.split(tensor, split_indices[:-1], axis=axis)
 
-    return split
+    return split, 1
 
 
 @register_funcify_default_op_cache_key(ExtractDiag)
