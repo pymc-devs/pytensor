@@ -1453,8 +1453,7 @@ def eye(n, m=None, k=0, dtype=None):
         dtype = config.floatX
     if m is None:
         m = n
-    localop = Eye(dtype)
-    return localop(n, m, k)
+    return Eye(dtype)(n, m, k)
 
 
 def identity_like(x, dtype: str | np.generic | np.dtype | None = None):
