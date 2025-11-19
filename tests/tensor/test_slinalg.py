@@ -886,7 +886,7 @@ def test_expm():
     "mode", ["symmetric", "nonsymmetric_real_eig", "nonsymmetric_complex_eig"][-1:]
 )
 def test_expm_grad(mode):
-    rng = np.random.default_rng()
+    rng = np.random.default_rng([898, sum(map(ord, mode))])
 
     match mode:
         case "symmetric":

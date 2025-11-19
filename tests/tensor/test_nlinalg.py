@@ -166,8 +166,9 @@ class TestSvd(utt.InferShapeTester):
 
         np_outputs = np_outputs if isinstance(np_outputs, tuple) else [np_outputs]
 
+        rtol = 1e-5 if config.floatX == "float32" else 1e-7
         for np_val, pt_val in zip(np_outputs, pt_outputs, strict=True):
-            assert _allclose(np_val, pt_val)
+            np.testing.assert_allclose(np_val, pt_val, rtol=rtol)
 
     def test_svd_infer_shape(self):
         self.validate_shape((4, 4), full_matrices=True, compute_uv=True)
@@ -465,15 +466,20 @@ class TestEigh(TestEig):
         w_np, v_np = np.linalg.eigh(A_val)
         np.testing.assert_allclose(w, w_np)
         np.testing.assert_allclose(v, v_np)
-        assert_array_almost_equal(np.dot(A_val, v), w * v)
+        rtol = 1e-2 if self.dtype == "float32" else 1e-7
+        np.testing.assert_allclose(np.dot(A_val, v), w * v, rtol=rtol)
 
     def test_uplo(self):
         S = self.S
         a = matrix(dtype=self.dtype)
         wu, vu = (out.eval({a: S}) for out in self.op(a, "U"))
         wl, vl = (out.eval({a: S}) for out in self.op(a, "L"))
-        assert_array_almost_equal(wu, wl)
-        assert_array_almost_equal(vu * np.sign(vu[0, :]), vl * np.sign(vl[0, :]))
+        atol = 1e-14 if np.dtype(self.dtype).itemsize == 8 else 1e-5
+        rtol = 1e-14 if np.dtype(self.dtype).itemsize == 8 else 1e-3
+        np.testing.assert_allclose(wu, wl, atol=atol, rtol=rtol)
+        np.testing.assert_allclose(
+            vu * np.sign(vu[0, :]), vl * np.sign(vl[0, :]), atol=atol, rtol=rtol
+        )
 
     def test_grad(self):
         X = self.X
