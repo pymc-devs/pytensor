@@ -10,7 +10,6 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
-from pytensor.link.utils import unique_name_generator
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -28,15 +27,7 @@ from pytensor.tensor.basic import (
 
 @register_funcify_default_op_cache_key(AllocEmpty)
 def numba_funcify_AllocEmpty(op, node, **kwargs):
-    global_env = {
-        "np": np,
-        "dtype": np.dtype(op.dtype),
-    }
-
-    unique_names = unique_name_generator(
-        ["np", "dtype", "allocempty", "scalar_shape"], suffix_sep="_"
-    )
-    shape_var_names = [unique_names(v, force_unique=True) for v in node.inputs]
+    shape_var_names = [f"sh{i}" for i in range(len(node.inputs))]
     shape_var_item_names = [f"{name}_item" for name in shape_var_names]
     shapes_to_items_src = indent(
         "\n".join(
@@ -56,7 +47,7 @@ def allocempty({", ".join(shape_var_names)}):
     """
 
     alloc_fn = compile_numba_function_src(
-        alloc_def_src, "allocempty", {**globals(), **global_env}
+        alloc_def_src, "allocempty", globals() | {"np": np, "dtype": np.dtype(op.dtype)}
     )
 
     return numba_basic.numba_njit(alloc_fn)
@@ -64,13 +55,7 @@ def allocempty({", ".join(shape_var_names)}):
 
 @register_funcify_and_cache_key(Alloc)
 def numba_funcify_Alloc(op, node, **kwargs):
-    global_env = {"np": np}
-
-    unique_names = unique_name_generator(
-        ["np", "alloc", "val_np", "val", "scalar_shape", "res"],
-        suffix_sep="_",
-    )
-    shape_var_names = [unique_names(v, force_unique=True) for v in node.inputs[1:]]
+    shape_var_names = [f"sh{i}" for i in range(len(node.inputs) - 1)]
     shape_var_item_names = [f"{name}_item" for name in shape_var_names]
     shapes_to_items_src = indent(
         "\n".join(
@@ -102,7 +87,7 @@ def alloc(val, {", ".join(shape_var_names)}):
     alloc_fn = compile_numba_function_src(
         alloc_def_src,
         "alloc",
-        {**globals(), **global_env},
+        globals() | {"np": np},
     )
 
     cache_key = sha256(
@@ -207,14 +192,7 @@ def numba_funcify_Eye(op, **kwargs):
 @register_funcify_default_op_cache_key(MakeVector)
 def numba_funcify_MakeVector(op, node, **kwargs):
     dtype = np.dtype(op.dtype)
-
-    global_env = {"np": np, "dtype": dtype}
-
-    unique_names = unique_name_generator(
-        ["np"],
-        suffix_sep="_",
-    )
-    input_names = [unique_names(v, force_unique=True) for v in node.inputs]
+    input_names = [f"x{i}" for i in range(len(node.inputs))]
 
     def create_list_string(x):
         args = ", ".join([f"{i}.item()" for i in x] + ([""] if len(x) == 1 else []))
@@ -228,7 +206,7 @@ def makevector({", ".join(input_names)}):
     makevector_fn = compile_numba_function_src(
         makevector_def_src,
         "makevector",
-        {**globals(), **global_env},
+        globals() | {"np": np, "dtype": dtype},
     )
 
     return numba_basic.numba_njit(makevector_fn)
