@@ -77,9 +77,18 @@ class TestBunchOfModes:
 
         # Linkers to use with regular Mode
         if config.cxx:
-            linkers = ["py", "c|py", "c|py_nogc", "vm", "vm_nogc", "cvm", "cvm_nogc"]
+            linkers = [
+                "py",
+                "c|py",
+                "c|py_nogc",
+                "vm",
+                "vm_nogc",
+                "cvm",
+                "cvm_nogc",
+                "numba",
+            ]
         else:
-            linkers = ["py", "c|py", "c|py_nogc", "vm", "vm_nogc"]
+            linkers = ["py", "c|py", "c|py_nogc", "vm", "vm_nogc", "numba"]
         modes = predef_modes + [Mode(linker, "fast_run") for linker in linkers]
 
         for mode in modes:
@@ -93,11 +102,12 @@ class TestBunchOfModes:
 
         # regression check:
         # there should be
+        # - NumbaLinker
         # - `VMLinker`
         # - OpWiseCLinker (FAST_RUN)
         # - PerformLinker (FAST_COMPILE)
         # - DebugMode's Linker  (DEBUG_MODE)
-        assert 4 == len(set(linker_classes_involved))
+        assert 5 == len(set(linker_classes_involved))
 
 
 class TestOldModesProblem:

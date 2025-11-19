@@ -65,7 +65,7 @@ jobs:
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
 
   test:
-    name: "${{ matrix.os }} test py${{ matrix.python-version }} : fast-compile ${{ matrix.fast-compile }} : float32 ${{ matrix.float32 }} : ${{ matrix.part }}"
+    name: "mode ${{ matrix.default-mode }} : py${{ matrix.python-version }} : ${{ matrix.os }} : ${{ matrix.part[0] }}"
     needs:
       - changes
       - style
@@ -74,101 +74,62 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest"]
+        default-mode: ["C", "NUMBA", "FAST_COMPILE"]
         python-version: ["3.11", "3.14"]
-        fast-compile: [0, 1]
-        float32: [0, 1]
-        install-numba: [0]
+        os: ["ubuntu-latest"]
         install-jax: [0]
         install-torch: [0]
         install-mlx: [0]
         install-xarray: [0]
         part:
-          - "tests --ignore=tests/scan --ignore=tests/tensor --ignore=tests/xtensor"
-          - "tests/scan"
-          - "tests/tensor --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/signal --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting --ignore=tests/tensor/linalg --ignore=tests/tensor/test_nlinalg.py --ignore=tests/tensor/test_slinalg.py --ignore=tests/tensor/test_pad.py"
-          - "tests/tensor/test_basic.py tests/tensor/test_elemwise.py"
-          - "tests/tensor/test_math.py"
-          - "tests/tensor/test_math_scipy.py tests/tensor/test_blas.py tests/tensor/signal tests/tensor/conv tests/tensor/test_pad.py"
-          - "tests/tensor/rewriting"
-          - "tests/tensor/linalg tests/tensor/test_nlinalg.py tests/tensor/test_slinalg.py"
+          - [ "*rest", "tests --ignore=tests/scan --ignore=tests/tensor --ignore=tests/xtensor --ignore=tests/link/numba" ]
+          - [ "scan", "tests/scan" ]
+          - [ "tensor *rest", "tests/tensor --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/signal --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting --ignore=tests/tensor/linalg --ignore=tests/tensor/test_nlinalg.py --ignore=tests/tensor/test_slinalg.py --ignore=tests/tensor/test_pad.py" ]
+          - [ "tensor basic+elemwise", "tests/tensor/test_basic.py tests/tensor/test_elemwise.py" ]
+          - [ "tensor math", "tests/tensor/test_math.py" ]
+          - [ "tensor scipy+blas+conv+pad", "tests/tensor/test_math_scipy.py tests/tensor/test_blas.py tests/tensor/signal tests/tensor/conv tests/tensor/test_pad.py" ]
+          - [ "tensor rewriting", "tests/tensor/rewriting" ]
+          - [ "tensor linalg", "tests/tensor/linalg tests/tensor/test_nlinalg.py tests/tensor/test_slinalg.py" ]
         exclude:
           - python-version: "3.11"
-            fast-compile: 1
-          - python-version: "3.11"
-            float32: 1
-          - fast-compile: 1
-            float32: 1
+            default-mode: "FAST_COMPILE"
         include:
-          - os: "ubuntu-latest"
-            part: "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link --ignore=pytensor/ipython.py"
+          - part: ["doctests", "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link --ignore=pytensor/ipython.py"]
+            default-mode: "C"
             python-version: "3.12"
-            fast-compile: 0
-            float32: 0
-            install-numba: 0
-            install-jax: 0
-            install-torch: 0
-            install-mlx: 0
-            install-xarray: 0
-          - install-numba: 1
             os: "ubuntu-latest"
-            python-version: "3.11"
-            fast-compile: 0
-            float32: 0
-            part: "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"
-          - install-numba: 1
+          - part: ["numba link", "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"]
+            default-mode: "C"
+            python-version: "3.12"
             os: "ubuntu-latest"
+          - part: ["numba link slinalg", "tests/link/numba/test_slinalg.py"]
+            default-mode: "C"
+            python-version: "3.13"
+            os: "ubuntu-latest"
+          - part: ["jax link", "tests/link/jax"]
+            install-jax: 1
+            default-mode: "C"
             python-version: "3.14"
-            fast-compile: 0
-            float32: 0
-            part: "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"
-          - install-numba: 1
             os: "ubuntu-latest"
-            python-version: "3.14"
-            fast-compile: 0
-            float32: 0
-            part: "tests/link/numba/test_slinalg.py"
-          - install-jax: 1
-            os: "ubuntu-latest"
+          - part: ["pytorch link", "tests/link/pytorch"]
+            install-torch: 1
+            default-mode: "C"
             python-version: "3.11"
-            fast-compile: 0
-            float32: 0
-            part: "tests/link/jax"
-          - install-jax: 1
             os: "ubuntu-latest"
+          - part: ["xtensor", "tests/xtensor"]
+            install-xarray: 1
+            default-mode: "C"
             python-version: "3.14"
-            fast-compile: 0
-            float32: 0
-            part: "tests/link/jax"
-          - install-torch: 1
             os: "ubuntu-latest"
-            python-version: "3.11"
-            fast-compile: 0
-            float32: 0
-            part: "tests/link/pytorch"
-          - install-xarray: 1
-            os: "ubuntu-latest"
-            python-version: "3.14"
-            fast-compile: 0
-            float32: 0
-            part: "tests/xtensor"
-          - os: "macos-15"
-            python-version: "3.11"
-            fast-compile: 0
-            float32: 0
+          - part: ["mlx link", "tests/link/mlx"]
             install-mlx: 1
-            install-numba: 0
-            install-jax: 0
-            install-torch: 0
-            part: "tests/link/mlx"
-          - os: "macos-15"
+            default-mode: "C"
+            python-version: "3.11"
+            os: "macos-15"
+          - part: ["macos smoke test", "tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py tests/tensor/test_blas.py"]
+            default-mode: "C"
             python-version: "3.14"
-            fast-compile: 0
-            float32: 0
-            install-numba: 0
-            install-jax: 0
-            install-torch: 0
-            part: "tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py tests/tensor/test_blas.py"
+            os: "macos-15"
 
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -199,11 +160,10 @@ jobs:
         run: |
 
           if [[ $OS == "macos-15" ]]; then
-            micromamba install --yes -q "python~=${PYTHON_VERSION}" "numpy${NUMPY_VERSION}" scipy pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate;
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy scipy "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate;
           else
-            micromamba install --yes -q "python~=${PYTHON_VERSION}" mkl "numpy${NUMPY_VERSION}" scipy pip mkl-service graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx;
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy scipy "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service;
           fi
-          if [[ $INSTALL_NUMBA == "1" ]]; then pip install "numba>=0.63"; fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" jax jaxlib numpyro equinox && pip install tfp-nightly; fi
           if [[ $INSTALL_TORCH == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" pytorch pytorch-cuda=12.1 "mkl<=2024.0" -c pytorch -c nvidia; fi
           if [[ $INSTALL_MLX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" "mlx<0.29.4"; fi
@@ -219,9 +179,8 @@ jobs:
           fi
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
-          INSTALL_NUMBA: ${{ matrix.install-numba }}
           INSTALL_JAX: ${{ matrix.install-jax }}
-          INSTALL_TORCH: ${{ matrix.install-torch}}
+          INSTALL_TORCH: ${{ matrix.install-torch }}
           INSTALL_XARRAY: ${{ matrix.install-xarray }}
           INSTALL_MLX: ${{ matrix.install-mlx }}
           OS: ${{ matrix.os}}
@@ -229,8 +188,8 @@ jobs:
       - name: Run tests
         shell: micromamba-shell {0}
         run: |
-          if [[ $FAST_COMPILE == "1" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,mode=FAST_COMPILE; fi
-          if [[ $FLOAT32 == "1" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,floatX=float32; fi
+          if [[ $DEFAULT_MODE == "FAST_COMPILE" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,mode=FAST_COMPILE; fi
+          if [[ $DEFAULT_MODE == "NUMBA" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,linker=numba; fi
           export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
           python -m pytest -r A --verbose --runslow --durations=50 --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART --benchmark-skip
         env:
@@ -238,9 +197,8 @@ jobs:
           MKL_THREADING_LAYER: GNU
           MKL_NUM_THREADS: 1
           OMP_NUM_THREADS: 1
-          PART: ${{ matrix.part }}
-          FAST_COMPILE: ${{ matrix.fast-compile }}
-          FLOAT32: ${{ matrix.float32 }}
+          PART: ${{ matrix.part[1] }}
+          DEFAULT_MODE: ${{ matrix.default-mode }}
 
       - name: Upload coverage file
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
