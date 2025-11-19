@@ -14,7 +14,6 @@ from pytensor.link.numba.dispatch.basic import (
 from pytensor.link.numba.dispatch.cython_support import wrap_cython_function
 from pytensor.link.utils import (
     get_name_for_object,
-    unique_name_generator,
 )
 from pytensor.scalar.basic import (
     Add,
@@ -81,23 +80,21 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
         scalar_func_numba = generate_fallback_impl(op, node, **kwargs)
 
     scalar_op_fn_name = get_name_for_object(scalar_func_numba)
-
+    prefix = "x" if scalar_func_name != "x" else "y"
+    input_names = [f"{prefix}{i}" for i in range(len(node.inputs))]
+    input_signature = ", ".join(input_names)
     global_env = {"scalar_func_numba": scalar_func_numba}
 
     if input_inner_dtypes is None and output_inner_dtype is None:
-        unique_names = unique_name_generator(
-            [scalar_op_fn_name, "scalar_func_numba"], suffix_sep="_"
-        )
-        input_names = ", ".join(unique_names(v, force_unique=True) for v in node.inputs)
         if not has_pyx_skip_dispatch:
             scalar_op_src = f"""
-def {scalar_op_fn_name}({input_names}):
-    return scalar_func_numba({input_names})
+def {scalar_op_fn_name}({input_signature}):
+    return scalar_func_numba({input_signature})
             """
         else:
             scalar_op_src = f"""
-def {scalar_op_fn_name}({input_names}):
-    return scalar_func_numba({input_names}, np.intc(1))
+def {scalar_op_fn_name}({input_signature}):
+    return scalar_func_numba({input_signature}, np.intc(1))
             """
 
     else:
@@ -108,13 +105,6 @@ def {scalar_op_fn_name}({input_names}):
             for i, i_dtype in enumerate(input_inner_dtypes)
         }
         global_env.update(input_tmp_dtype_names)
-
-        unique_names = unique_name_generator(
-            [scalar_op_fn_name, "scalar_func_numba", *global_env.keys()],
-            suffix_sep="_",
-        )
-
-        input_names = [unique_names(v, force_unique=True) for v in node.inputs]
         converted_call_args = ", ".join(
             f"direct_cast({i_name}, {i_tmp_dtype_name})"
             for i_name, i_tmp_dtype_name in zip(
@@ -123,19 +113,19 @@ def {scalar_op_fn_name}({input_names}):
         )
         if not has_pyx_skip_dispatch:
             scalar_op_src = f"""
-def {scalar_op_fn_name}({", ".join(input_names)}):
+def {scalar_op_fn_name}({input_signature}):
     return direct_cast(scalar_func_numba({converted_call_args}), output_dtype)
             """
         else:
             scalar_op_src = f"""
-def {scalar_op_fn_name}({", ".join(input_names)}):
+def {scalar_op_fn_name}({input_signature}):
     return direct_cast(scalar_func_numba({converted_call_args}, np.intc(1)), output_dtype)
             """
 
     scalar_op_fn = compile_numba_function_src(
         scalar_op_src,
         scalar_op_fn_name,
-        {**globals(), **global_env},
+        globals() | global_env,
     )
 
     # Functions that call a function pointer can't be cached
@@ -157,8 +147,8 @@ def numba_funcify_Switch(op, node, **kwargs):
 
 def binary_to_nary_func(inputs: list[Variable], binary_op_name: str, binary_op: str):
     """Create a Numba-compatible N-ary function from a binary function."""
-    unique_names = unique_name_generator(["binary_op_name"], suffix_sep="_")
-    input_names = [unique_names(v, force_unique=True) for v in inputs]
+    var_prefix = "x" if binary_op_name != "x" else "y"
+    input_names = [f"{var_prefix}{i}" for i in range(len(inputs))]
     input_signature = ", ".join(input_names)
     output_expr = binary_op.join(input_names)
 
