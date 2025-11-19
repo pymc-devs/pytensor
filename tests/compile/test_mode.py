@@ -93,11 +93,12 @@ class TestBunchOfModes:
 
         # regression check:
         # there should be
+        # - NumbaLinker
         # - `VMLinker`
         # - OpWiseCLinker (FAST_RUN)
         # - PerformLinker (FAST_COMPILE)
         # - DebugMode's Linker  (DEBUG_MODE)
-        assert 4 == len(set(linker_classes_involved))
+        assert 5 == len(set(linker_classes_involved))
 
 
 class TestOldModesProblem:
