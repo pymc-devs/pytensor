@@ -3,6 +3,7 @@ import sys
 import warnings
 from copy import copy, deepcopy
 from functools import wraps
+from numbers import Number
 
 import numpy as np
 import pytest
@@ -259,6 +260,10 @@ class InferShapeTester:
         numeric_outputs = outputs_function(*numeric_inputs)
         numeric_shapes = shapes_function(*numeric_inputs)
         for out, shape in zip(numeric_outputs, numeric_shapes, strict=True):
+            if not hasattr(out, "shape"):
+                # Numba downcasts scalars to native Python types, which don't have shape
+                assert isinstance(out, Number)
+                out = np.asarray(out)
             assert np.all(out.shape == shape), (out.shape, shape)
 
 
