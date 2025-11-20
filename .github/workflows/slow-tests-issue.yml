@@ -6,7 +6,7 @@ name: Slow Tests Issue Body
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: "0 */6 * * *"
 
 permissions:
   issues: write
@@ -24,6 +24,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Trigger the script
+        continue-on-error: true
         working-directory: scripts/slowest_tests
         shell: zsh {0}
         run: source update-slowest-times-issue.sh
