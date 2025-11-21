@@ -198,6 +198,49 @@ html_static_path = ["images", "library/d3viz/examples"]
 # using the given strftime format.
 html_last_updated_fmt = "%b %d, %Y"
 
+
+# Function to get git dates for a file
+def get_git_dates(source_file):
+    """Get the creation and last modification dates from git history."""
+    dates = {}
+    try:
+        # Get last modified date
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%ai", "--", source_file],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if result.stdout.strip():
+            git_date = datetime.strptime(result.stdout.strip()[:19], "%Y-%m-%d %H:%M:%S")
+            dates["last_updated"] = git_date.strftime(html_last_updated_fmt)
+        
+        # Get creation date (first commit)
+        result = subprocess.run(
+            ["git", "log", "--diff-filter=A", "--format=%ai", "--", source_file],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if result.stdout.strip():
+            # Get the last line (first commit)
+            first_commit = result.stdout.strip().split('\n')[-1]
+            git_date = datetime.strptime(first_commit[:19], "%Y-%m-%d %H:%M:%S")
+            dates["date_created"] = git_date.strftime(html_last_updated_fmt)
+    except (subprocess.CalledProcessError, ValueError):
+        pass
+    
+    # Fallback to build date if git fails
+    build_date = datetime.now().strftime(html_last_updated_fmt)
+    if "last_updated" not in dates:
+        dates["last_updated"] = build_date
+    if "date_created" not in dates:
+        dates["date_created"] = build_date
+    
+    return dates
+
 # If true, SmartyPants will be used to convert quotes and dashes to
 # typographically correct entities.
 html_use_smartypants = True
