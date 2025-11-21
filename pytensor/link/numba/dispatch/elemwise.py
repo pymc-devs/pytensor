@@ -8,6 +8,7 @@ from numba.core.extending import overload
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 from numpy.lib.stride_tricks import as_strided
 
+from pytensor import config
 from pytensor.graph.op import Op
 from pytensor.link.numba.cache import (
     compile_numba_function_src,
@@ -608,37 +609,54 @@ def numba_funcify_Dot(op, node, **kwargs):
     x, y = node.inputs
     [out] = node.outputs
 
-    x_dtype = x.type.dtype
-    y_dtype = y.type.dtype
-    dot_dtype = f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
-    out_dtype = out.type.dtype
+    x_dtype = x.type.numpy_dtype
+    y_dtype = y.type.numpy_dtype
 
-    if x_dtype == dot_dtype and y_dtype == dot_dtype:
+    numba_dot_dtype = out_dtype = out.type.numpy_dtype
+    if out_dtype.kind not in "fc":
+        # Numba alawys returns non-integral outputs, we need to cast to float
+        numba_dot_dtype = np.dtype(
+            f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
+        )
+
+    if config.compiler_verbose and not (
+        x_dtype == y_dtype == out_dtype == numba_dot_dtype
+    ):
+        print(  # noqa: T201
+            "Numba Dot requires a type casting of inputs and/or output: "
+            f"{x_dtype=}, {y_dtype=}, {out_dtype=}, {numba_dot_dtype=}"
+        )
+
+    if x_dtype == numba_dot_dtype and y_dtype == numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
             return np.asarray(np.dot(x, y))
 
-    elif x_dtype == dot_dtype and y_dtype != dot_dtype:
+    elif x_dtype == numba_dot_dtype and y_dtype != numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x, y.astype(dot_dtype)))
+            return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
 
-    elif x_dtype != dot_dtype and y_dtype == dot_dtype:
+    elif x_dtype != numba_dot_dtype and y_dtype == numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x.astype(dot_dtype), y))
+            return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
 
     else:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x.astype(dot_dtype), y.astype(dot_dtype)))
+            return np.asarray(
+                np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype))
+            )
 
-    if out_dtype == dot_dtype:
-        return dot
+    cache_version = 1
+
+    if out_dtype == numba_dot_dtype:
+        return dot, cache_version
 
     else:
 
@@ -646,7 +664,7 @@ def numba_funcify_Dot(op, node, **kwargs):
         def dot_with_cast(x, y):
             return dot(x, y).astype(out_dtype)
 
-    return dot_with_cast
+        return dot_with_cast, cache_version
 
 
 @register_funcify_default_op_cache_key(BatchedDot)
