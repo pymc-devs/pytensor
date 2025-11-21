@@ -539,6 +539,11 @@ def test_Max(x, axes, exc):
             [0, 1],
             None,
         ),
+        (
+            (pt.dmatrix(), rng.random(size=(3, 2)).astype("float64")),
+            None,
+            None,
+        ),
     ],
 )
 def test_Argmax(x, axes, exc):
