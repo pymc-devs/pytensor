@@ -1909,13 +1909,10 @@ def test_alloc_inputs3():
     assert len(scan_node.op.inner_inputs) == 1
 
 
+@pytest.mark.xfail(reason="Numba mode doesn't include BlasOpt")
 def test_opt_order():
     """
-    Verify that scan optimizations are applied before blas
-    optimizations.
-
-    This is needed as otherwise, the dot won't become a dot22
-    so it will be slower and won't get transferred to the gpu.
+    Verify that expressions hoisted from Scan can be optimized into Blas
     """
 
     x = matrix("x")

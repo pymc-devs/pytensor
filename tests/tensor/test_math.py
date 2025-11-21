@@ -3769,6 +3769,7 @@ class TestMatMul:
         sol = self.op([1, 2, 3], [3, 2, 1], dtype=dtype)
         assert sol.eval().dtype == dtype
 
+    @pytest.mark.xfail(reason="Numba mode doesn't include BlasOpt")
     def test_dot22_opt(self):
         x, y = matrices("xy")
         fn = function([x, y], x @ y, mode="FAST_RUN")
