@@ -594,36 +594,43 @@ def numba_funcify_Dot(op, node, **kwargs):
     x, y = node.inputs
     [out] = node.outputs
 
-    x_dtype = x.type.dtype
-    y_dtype = y.type.dtype
-    dot_dtype = f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
-    out_dtype = out.type.dtype
+    x_dtype = x.type.numpy_dtype
+    y_dtype = y.type.numpy_dtype
 
-    if x_dtype == dot_dtype and y_dtype == dot_dtype:
+    numba_dot_dtype = out_dtype = out.type.numpy_dtype
+    if out_dtype.kind not in "fc":
+        # Numba alawys returns non-integral outputs, we need to cast to float
+        numba_dot_dtype = np.dtype(
+            f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
+        )
+
+    if x_dtype == numba_dot_dtype and y_dtype == numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
             return np.asarray(np.dot(x, y))
 
-    elif x_dtype == dot_dtype and y_dtype != dot_dtype:
+    elif x_dtype == numba_dot_dtype and y_dtype != numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x, y.astype(dot_dtype)))
+            return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
 
-    elif x_dtype != dot_dtype and y_dtype == dot_dtype:
+    elif x_dtype != numba_dot_dtype and y_dtype == numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x.astype(dot_dtype), y))
+            return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
 
     else:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x.astype(dot_dtype), y.astype(dot_dtype)))
+            return np.asarray(
+                np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype))
+            )
 
-    if out_dtype == dot_dtype:
+    if out_dtype == numba_dot_dtype:
         return dot
 
     else:
