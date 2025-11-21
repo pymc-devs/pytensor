@@ -60,7 +60,7 @@ def scalar_in_place_fn(op: Op, idx: str, res: str, arr: str):
     arr
         The symbol name for the second input.
     """
-    raise NotImplementedError()
+    raise NotImplementedError(f"No scalar_in_place_fn implemented for {op}")
 
 
 @scalar_in_place_fn.register(Add)
