@@ -215,7 +215,7 @@ def get_git_dates(source_file):
         if result.stdout.strip():
             git_date = datetime.strptime(result.stdout.strip()[:19], "%Y-%m-%d %H:%M:%S")
             dates["last_updated"] = git_date.strftime(html_last_updated_fmt)
-        
+
         # Get creation date (first commit)
         result = subprocess.run(
             ["git", "log", "--diff-filter=A", "--format=%ai", "--", source_file],
@@ -231,14 +231,14 @@ def get_git_dates(source_file):
             dates["date_created"] = git_date.strftime(html_last_updated_fmt)
     except (subprocess.CalledProcessError, ValueError):
         pass
-    
+
     # Fallback to build date if git fails
     build_date = datetime.now().strftime(html_last_updated_fmt)
     if "last_updated" not in dates:
         dates["last_updated"] = build_date
     if "date_created" not in dates:
         dates["date_created"] = build_date
-    
+
     return dates
 
 
