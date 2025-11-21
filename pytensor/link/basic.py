@@ -157,6 +157,9 @@ class Linker(ABC):
         the FunctionGraph.
     """
 
+    required_rewrites = ("minimum_compile",)
+    incompatible_rewrites = ()
+
     def __init__(
         self,
         *,

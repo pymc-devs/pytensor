@@ -9,6 +9,22 @@ from pytensor.link.basic import JITLinker
 class JAXLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using JAX."""
 
+    required_rewrites = (
+        "minimum_compile",
+        "jax",
+    )  # TODO: Distinguish between optional "jax" and "minimum_compile_jax"
+    incompatible_rewrites = (
+        "cxx",
+        "BlasOpt",
+        "local_careduce_fusion",
+        "scan_save_mem_prealloc",
+        # JAX does it his own inplace optimization
+        "inplace",
+        # There are specific variants for the LU decompositions supported by JAX
+        "reuse_lu_decomposition_multiple_solves",
+        "scan_split_non_sequence_lu_decomposition_solve",
+    )
+
     scalar_shape_inputs: tuple[int, ...]
 
     def __init__(self, *args, **kwargs):

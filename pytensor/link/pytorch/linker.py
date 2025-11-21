@@ -5,6 +5,16 @@ from pytensor.link.utils import unique_name_generator
 class PytorchLinker(JITLinker):
     """A `Linker` that compiles NumPy-based operations using torch.compile."""
 
+    incompatible_rewrites = (
+        "cxx_only",
+        "BlasOpt",
+        "fusion",
+        "inplace",
+        "scan_save_mem_prealloc",
+        "reuse_lu_decomposition_multiple_solves",
+        "scan_split_non_sequence_lu_decomposition_solve",
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.gen_functors = []

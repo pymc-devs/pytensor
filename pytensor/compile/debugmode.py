@@ -1331,7 +1331,11 @@ default_make_thunk = [get_unbound_function(COp.make_thunk)]
 # the external requirements of the .linker attribute of a mode
 # 1) it's a class instance
 # 2) it a has a .clone() method
+# 3) it has required_rewrites and incompatible_rewrites class attributes
 class _DummyLinker:
+    required_rewrites = ()
+    incompatible_rewrites = ()
+
     # This is not a real linker anyway
     def clone(self, allow_gc=None):
         return self

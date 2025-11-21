@@ -353,6 +353,10 @@ class Mode:
             optimizer = predefined_optimizers[optimizer]
         if isinstance(optimizer, RewriteDatabaseQuery):
             self.provided_optimizer = optimizer
+        if r := linker.required_rewrites:
+            optimizer = optimizer.including(*r)
+        if r := linker.incompatible_rewrites:
+            optimizer = optimizer.excluding(*r)
         self._optimizer = optimizer
         self.call_time = 0
         self.fn_time = 0
@@ -466,61 +470,21 @@ C_VM = Mode("cvm", "fast_run")
 
 NUMBA = Mode(
     NumbaLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run", "numba"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "local_careduce_fusion",
-            "scan_save_mem_prealloc",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run", "numba"]),
 )
 
 JAX = Mode(
     JAXLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run", "jax"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-            # There are specific variants for the LU decompositions supported by JAX
-            "reuse_lu_decomposition_multiple_solves",
-            "scan_split_non_sequence_lu_decomposition_solve",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run", "jax"]),
 )
 PYTORCH = Mode(
     PytorchLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-            "reuse_lu_decomposition_multiple_solves",
-            "scan_split_non_sequence_lu_decomposition_solve",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run"]),
 )
 
 MLX = Mode(
     MLXLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run"]),
 )
 
 
