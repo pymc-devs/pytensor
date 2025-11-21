@@ -216,3 +216,14 @@ def test_cython_obj_mode_fallback():
             [g],
             [np.array(5, dtype="int64")],
         )
+
+
+def test_erf_complex():
+    x = pt.scalar("x", dtype="complex128")
+    g = pt.erf(x)
+
+    compare_numba_and_py(
+        [x],
+        [g],
+        [np.array(0.5 + 1j, dtype="complex128")],
+    )
