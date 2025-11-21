@@ -258,11 +258,10 @@ def numba_funcify_Second(op, node, **kwargs):
 def numba_funcify_Reciprocal(op, node, **kwargs):
     @numba_basic.numba_njit
     def reciprocal(x):
-        # TODO FIXME: This isn't really the behavior or `numpy.reciprocal` when
-        # `x` is an `int`
-        return 1 / x
+        # This is how the C-backend implementation works
+        return np.divide(np.float32(1.0), x)
 
-    return reciprocal, scalar_op_cache_key(op)
+    return reciprocal, scalar_op_cache_key(op, cache_version=1)
 
 
 @register_funcify_and_cache_key(Sigmoid)
