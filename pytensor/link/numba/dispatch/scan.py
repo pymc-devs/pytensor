@@ -248,6 +248,8 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         # This is needed when the output storage array does not have a length
         # equal to the number of taps plus `n_steps`.
         # If the storage size only allows one entry, there's nothing to rotate
+        # Scan also promises to zero out buffers if we perform less steps than the buffer size
+        # which can happen with truncated gradient (TODO: Does this need to be part of the Op impl?)
         output_storage_post_proc_stmts.append(
             dedent(
                 f"""
@@ -257,6 +259,8 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                         {outer_in_name}_left = {outer_in_name}[:{outer_in_name}_shift]
                         {outer_in_name}_right = {outer_in_name}[{outer_in_name}_shift:]
                         {outer_in_name} = np.concatenate(({outer_in_name}_right, {outer_in_name}_left))
+                elif {storage_size} > (i + {tap_size}):
+                    {outer_in_name}[i + {tap_size}:] = 0
                 """
             ).strip()
         )
@@ -436,15 +440,10 @@ def scan({", ".join(outer_in_names)}):
     return {create_arg_string(outer_output_names)}
     """
 
-    global_env = {
-        "np": np,
-        "scan_inner_func": scan_inner_func,
-    }
-
     scan_op_fn = compile_numba_function_src(
         scan_op_src,
         "scan",
-        {**globals(), **global_env},
+        globals() | {"np": np, "scan_inner_func": scan_inner_func},
     )
 
     if inner_func_cache_key is None:
