@@ -4,6 +4,8 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import config, function
+from pytensor.graph import Apply, Op
+from pytensor.tensor import scalar
 from pytensor.tensor.optimize import minimize, minimize_scalar, root, root_scalar
 from tests import unittest_tools as utt
 
@@ -218,4 +220,31 @@ def test_root_system_of_equations():
 
     utt.verify_grad(
         root_fn, [x0, a_val, b_val], eps=1e-6 if floatX == "float64" else 1e-3
+    )
+
+
+@pytest.mark.parametrize("optimize_op", (minimize, root))
+def test_minimize_0d(optimize_op):
+    # Scipy vector minimizers upcast 0d x to 1d. We need to work-around this
+
+    class AssertScalar(Op):
+        view_map = {0: [0]}
+
+        def make_node(self, x):
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, output_storage):
+            [x] = inputs
+            assert x.ndim == 0
+            output_storage[0][0] = x
+
+        def L_op(self, inputs, outputs, out_grads):
+            return out_grads
+
+    x = scalar("x")
+    x_check = AssertScalar()(x)
+    opt_x, _ = optimize_op(x_check**2, x)
+    opt_x_res = opt_x.eval({x: np.array(5, dtype=x.type.dtype)})
+    np.testing.assert_allclose(
+        opt_x_res, 0, atol=1e-15 if floatX == "float64" else 1e-6
     )
