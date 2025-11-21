@@ -538,10 +538,8 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
 @register_funcify_default_op_cache_key(Argmax)
 def numba_funcify_Argmax(op, node, **kwargs):
     axis = op.axis
-    x_at = node.inputs[0]
-    x_dtype = x_at.type.numpy_dtype
-    x_dtype = numba.np.numpy_support.from_dtype(x_dtype)
-    x_ndim = x_at.ndim
+    x_pt = node.inputs[0]
+    x_ndim = x_pt.ndim
 
     if x_ndim == 0:
 
@@ -550,7 +548,10 @@ def numba_funcify_Argmax(op, node, **kwargs):
             return np.array(0, dtype="int64")
 
     else:
-        axes = tuple(int(ax) for ax in axis)
+        if axis is None:
+            axes = tuple(range(x_ndim))
+        else:
+            axes = tuple(int(ax) for ax in axis)
 
         # NumPy does not support multiple axes for argmax; this is a
         # work-around
@@ -584,7 +585,8 @@ def numba_funcify_Argmax(op, node, **kwargs):
 
             return max_idx_res
 
-    return argmax
+    cache_version = 1
+    return argmax, cache_version
 
 
 @register_funcify_default_op_cache_key(Dot)
