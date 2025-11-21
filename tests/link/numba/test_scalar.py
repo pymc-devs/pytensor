@@ -1,11 +1,14 @@
 import numpy as np
 import pytest
+import scipy
 
 import pytensor.scalar as ps
 import pytensor.scalar.basic as psb
 import pytensor.scalar.math as psm
 import pytensor.tensor as pt
 from pytensor import config, function
+from pytensor.graph import Apply
+from pytensor.scalar import UnaryScalarOp
 from pytensor.scalar.basic import Composite
 from pytensor.tensor import tensor
 from pytensor.tensor.elemwise import Elemwise
@@ -183,4 +186,33 @@ def test_Softplus(dtype):
             numba_fn(test_x),
             strict=True,
             err_msg=f"Failed for value {value}",
+        )
+
+
+def test_cython_obj_mode_fallback():
+    """Test that unsupported cython signatures fallback to obj-mode"""
+
+    # Create a ScalarOp with a non-standard dtype
+    class IntegerGamma(UnaryScalarOp):
+        # We'll try to check for scipy cython impl
+        nfunc_spec = ("scipy.special.gamma", 1, 1)
+
+        def make_node(self, x):
+            x = psb.as_scalar(x)
+            assert x.dtype == "int64"
+            out = x.type()
+            return Apply(self, [x], [out])
+
+        def impl(self, x):
+            return scipy.special.gamma(x).astype("int64")
+
+    x = pt.scalar("x", dtype="int64")
+    g = Elemwise(IntegerGamma())(x)
+    assert g.type.dtype == "int64"
+
+    with pytest.warns(UserWarning, match="Numba will use object mode"):
+        compare_numba_and_py(
+            [x],
+            [g],
+            [np.array(5, dtype="int64")],
         )

@@ -69,15 +69,19 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
 
         cython_func = getattr(scipy.special.cython_special, scalar_func_name, None)
         if cython_func is not None:
-            scalar_func_numba = wrap_cython_function(
-                cython_func, output_dtype, input_dtypes
-            )
-            has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch
-            input_inner_dtypes = scalar_func_numba.numpy_arg_dtypes()
-            output_inner_dtype = scalar_func_numba.numpy_output_dtype()
+            try:
+                scalar_func_numba = wrap_cython_function(
+                    cython_func, output_dtype, input_dtypes
+                )
+            except NotImplementedError:
+                pass
+            else:
+                has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch
+                input_inner_dtypes = scalar_func_numba.numpy_arg_dtypes()
+                output_inner_dtype = scalar_func_numba.numpy_output_dtype()
 
     if scalar_func_numba is None:
-        scalar_func_numba = generate_fallback_impl(op, node, **kwargs)
+        return generate_fallback_impl(op, node, **kwargs), None
 
     scalar_op_fn_name = get_name_for_object(scalar_func_numba)
     prefix = "x" if scalar_func_name != "x" else "y"
