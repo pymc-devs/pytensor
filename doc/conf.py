@@ -241,6 +241,21 @@ def get_git_dates(source_file):
     
     return dates
 
+
+# Hook to set dates per page based on git history
+def html_page_context(app, pagename, templatename, context, doctree):
+    """Add git-based creation and last modified dates to each page context."""
+    if doctree is not None:
+        source_file = app.env.doc2path(pagename)
+        dates = get_git_dates(source_file)
+        context["last_updated"] = dates["last_updated"]
+        context["date_created"] = dates["date_created"]
+
+
+def setup(app):
+    """Setup the Sphinx application."""
+    app.connect("html-page-context", html_page_context)
+
 # If true, SmartyPants will be used to convert quotes and dashes to
 # typographically correct entities.
 html_use_smartypants = True
