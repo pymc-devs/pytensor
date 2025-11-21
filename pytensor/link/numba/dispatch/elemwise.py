@@ -359,7 +359,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
     np_acc_dtype = np.dtype(acc_dtype)
 
     scalar_op_identity = op.scalar_op.identity
-    if np_acc_dtype.kind == "i" and not np.isfinite(scalar_op_identity):
+    if np_acc_dtype.kind in "ui" and not np.isfinite(scalar_op_identity):
         if np.isposinf(scalar_op_identity):
             scalar_op_identity = np.iinfo(np_acc_dtype).max
         else:
