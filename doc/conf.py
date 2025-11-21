@@ -154,7 +154,7 @@ html_theme_options = {
     "secondary_sidebar_items": ["page-toc", "edit-this-page", "sourcelink", "donate"],
     "navbar_start": ["navbar-logo"],
     "article_header_end": ["nb-badges"],
-    "article_footer_items": ["rendered_citation.html"],
+    "article_footer_items": ["page_dates.html", "rendered_citation.html"],
 }
 html_context = {
     "github_url": "https://github.com",
