@@ -296,7 +296,11 @@ def numba_funcify_Log1mexp(op, node, **kwargs):
 
 
 @register_funcify_and_cache_key(Erf)
-def numba_funcify_Erf(op, **kwargs):
+def numba_funcify_Erf(op, node, **kwargs):
+    if node.outputs[0].dtype not in {"int64", "uint64", "float32", "float64"}:
+        # Not supported by numba
+        return numba_funcify_ScalarOp(op, node=node, **kwargs)
+
     @numba_basic.numba_njit
     def erf(x):
         return math.erf(x)
