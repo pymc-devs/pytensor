@@ -718,6 +718,25 @@ class TestsBenchmark:
             (pt.vector(dtype="int16"), rng.random(size=(2,)).astype(np.int16)),
             (pt.vector(dtype="uint8"), rng.random(size=(2,)).astype(np.uint8)),
         ),
+        # Viewing the array with 2 last dimensions as complex128 means
+        # the first entry will be real part and the second entry the imaginary part
+        (
+            (
+                pt.matrix(dtype="complex128"),
+                rng.random(size=(5, 4, 2)).view("complex128").squeeze(-1),
+            ),
+            (
+                pt.matrix(dtype="complex128"),
+                rng.random(size=(4, 3, 2)).view("complex128").squeeze(-1),
+            ),
+        ),
+        (
+            (pt.matrix(dtype="int64"), rng.random(size=(5, 4)).astype("int64")),
+            (
+                pt.matrix(dtype="complex128"),
+                rng.random(size=(4, 3, 2)).view("complex128").squeeze(-1),
+            ),
+        ),
     ],
 )
 def test_Dot(x, y):
