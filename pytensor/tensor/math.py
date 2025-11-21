@@ -357,7 +357,10 @@ def max_and_argmax(a, axis=None, keepdims=False):
 
 class FixedOpCAReduce(CAReduce):
     def __str__(self):
-        return f"{type(self).__name__}{{{self._axis_str()}}}"
+        if self.dtype != self.acc_dtype:
+            return f"{type(self).__name__}{{{self._axis_str()}, acc={self.acc_dtype}}}"
+        else:
+            return f"{type(self).__name__}{{{self._axis_str()}}}"
 
 
 class NonZeroDimsCAReduce(FixedOpCAReduce):
