@@ -138,8 +138,6 @@ if __name__ == "__main__":
             "json",
             "--disable-error-code",
             "annotation-unchecked",
-            "--exclude",
-            "tests",
             "pytensor",
         ],
         capture_output=True,
