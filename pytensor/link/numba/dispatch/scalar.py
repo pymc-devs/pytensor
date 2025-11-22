@@ -16,6 +16,7 @@ from pytensor.link.utils import (
     get_name_for_object,
     unique_name_generator,
 )
+from pytensor.scalar import ScalarLoop
 from pytensor.scalar.basic import (
     Add,
     Cast,
@@ -23,6 +24,7 @@ from pytensor.scalar.basic import (
     Composite,
     Identity,
     Mul,
+    Pow,
     Reciprocal,
     ScalarOp,
     Second,
@@ -73,7 +75,7 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
             scalar_func_numba = wrap_cython_function(
                 cython_func, output_dtype, input_dtypes
             )
-            has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch
+            has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch()
             input_inner_dtypes = scalar_func_numba.numpy_arg_dtypes()
             output_inner_dtype = scalar_func_numba.numpy_output_dtype()
 
@@ -169,6 +171,23 @@ def {binary_op_name}({input_signature}):
     nary_fn = compile_numba_function_src(nary_src, binary_op_name, globals())
 
     return nary_fn
+
+
+@register_funcify_and_cache_key(Pow)
+def numba_funcify_Pow(op, node, **kwargs):
+    pow_dtype = node.inputs[1].type.dtype
+    if pow_dtype.startswith("int"):
+        # Numba power fails when exponents are non 64-bit discrete integers and fasthmath=True
+        # https://github.com/numba/numba/issues/9554
+
+        def pow(x, y):
+            return x ** np.asarray(y, dtype=np.int64).item()
+    else:
+
+        def pow(x, y):
+            return x**y
+
+    return numba_basic.numba_njit(pow), scalar_op_cache_key(op)
 
 
 @register_funcify_and_cache_key(Add)
@@ -318,3 +337,52 @@ def numba_funcify_Softplus(op, node, **kwargs):
         return numba_basic.direct_cast(value, out_dtype)
 
     return softplus, scalar_op_cache_key(op)
+
+
+@register_funcify_and_cache_key(ScalarLoop)
+def numba_funcify_ScalarLoop(op, node, **kwargs):
+    inner_fn, inner_fn_cache_key = numba_funcify_and_cache_key(op.fgraph)
+    if inner_fn_cache_key is None:
+        loop_cache_key = None
+    else:
+        loop_cache_key = sha256(
+            str((type(op), op.is_while, inner_fn_cache_key)).encode()
+        ).hexdigest()
+
+    if op.is_while:
+        n_update = len(op.outputs) - 1
+
+        @numba_basic.numba_njit
+        def while_loop(n_steps, *inputs):
+            carry, constant = inputs[:n_update], inputs[n_update:]
+
+            until = False
+            for i in range(n_steps):
+                outputs = inner_fn(*carry, *constant)
+                carry, until = outputs[:-1], outputs[-1]
+                if until:
+                    break
+
+            return *carry, until
+
+        return while_loop, loop_cache_key
+
+    else:
+        n_update = len(op.outputs)
+
+        @numba_basic.numba_njit
+        def for_loop(n_steps, *inputs):
+            carry, constant = inputs[:n_update], inputs[n_update:]
+
+            if n_steps < 0:
+                raise ValueError("ScalarLoop does not have a termination condition.")
+
+            for i in range(n_steps):
+                carry = inner_fn(*carry, *constant)
+
+            if n_update == 1:
+                return carry[0]
+            else:
+                return carry
+
+        return for_loop, loop_cache_key
