@@ -1,6 +1,5 @@
 from collections.abc import Callable
 from hashlib import sha256
-from pathlib import Path
 from pickle import dump
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -64,8 +63,8 @@ class NumbaPyTensorCacheLocator(_CacheLocator):
     @classmethod
     def from_function(cls, py_func, py_file):
         """Create a locator instance for functions stored in CACHED_SRC_FUNCTIONS."""
-        if config.numba__cache and py_func in CACHED_SRC_FUNCTIONS:
-            return cls(py_func, Path(py_file).parent, CACHED_SRC_FUNCTIONS[py_func])
+        if py_func in CACHED_SRC_FUNCTIONS and config.numba__cache:
+            return cls(py_func, py_file, CACHED_SRC_FUNCTIONS[py_func])
 
 
 # Register our locator at the front of Numba's locator list

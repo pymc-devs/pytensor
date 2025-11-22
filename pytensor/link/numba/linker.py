@@ -2,6 +2,17 @@ from pytensor.link.basic import JITLinker
 
 
 class NumbaLinker(JITLinker):
+    required_rewrites = (
+        "minimum_compile",
+        "numba",
+    )  # TODO: Distinguish between optional "numba" and "minimum_compile_numba"
+    incompatible_rewrites = (
+        "cxx",
+        "BlasOpt",
+        "local_careduce_fusion",
+        "scan_save_mem_prealloc",
+    )
+
     """A `Linker` that JIT-compiles NumPy-based operations using Numba."""
 
     def fgraph_convert(self, fgraph, **kwargs):
@@ -19,3 +30,6 @@ class NumbaLinker(JITLinker):
 
     def create_thunk_inputs(self, storage_map):
         return [storage_map[n] for n in self.fgraph.inputs]
+
+    def __repr__(self):
+        return "NumbaLinker()"

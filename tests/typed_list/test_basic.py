@@ -147,6 +147,7 @@ class TestAppend:
         f = pytensor.function(
             [mySymbolicMatricesList, myMatrix], z, accept_inplace=True
         )
+        f.dprint(print_type=True, print_memory_map=True)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
 
@@ -432,6 +433,7 @@ class TestIndex:
 
         assert f([x, y], y) == 1
 
+    @pytest.mark.skip(reason="Nested list not supported in numba")
     def test_non_tensor_type(self):
         mySymbolicNestedMatricesList = TypedListType(
             TensorType(pytensor.config.floatX, shape=(None, None)), 1
@@ -450,6 +452,9 @@ class TestIndex:
 
         assert f([[x, y], [x, y, y]], [x, y]) == 0
 
+    @pytest.mark.xfail(
+        reason="Sparse equality not implemented. awaiting refactor: https://github.com/pymc-devs/pytensor/pull/1676"
+    )
     def test_sparse(self):
         mySymbolicSparseList = TypedListType(
             sparse.SparseTensorType("csr", pytensor.config.floatX)
@@ -499,6 +504,7 @@ class TestCount:
 
         assert f([x, y], y) == 1
 
+    @pytest.mark.skip(reason="Nested list not supported in numba")
     def test_non_tensor_type(self):
         mySymbolicNestedMatricesList = TypedListType(
             TensorType(pytensor.config.floatX, shape=(None, None)), 1
@@ -517,6 +523,9 @@ class TestCount:
 
         assert f([[x, y], [x, y, y]], [x, y]) == 1
 
+    @pytest.mark.xfail(
+        reason="Sparse equality not implemented. awaiting refactor: https://github.com/pymc-devs/pytensor/pull/1676"
+    )
     def test_sparse(self):
         mySymbolicSparseList = TypedListType(
             sparse.SparseTensorType("csr", pytensor.config.floatX)

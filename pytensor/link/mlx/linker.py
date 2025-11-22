@@ -4,6 +4,14 @@ from pytensor.link.basic import JITLinker
 class MLXLinker(JITLinker):
     """A `Linker` that JIT-compiles NumPy-based operations using Apple's MLX."""
 
+    incompatible_rewrites = (
+        "cxx_only",
+        "BlasOpt",
+        "fusion",
+        "inplace",
+        "scan_save_mem_prealloc",
+    )
+
     def __init__(self, use_compile=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.gen_functors = []

@@ -233,14 +233,8 @@ class ScipyWrapperOp(Op, HasInnerGraph):
 
 class ScipyScalarWrapperOp(ScipyWrapperOp):
     def build_fn(self):
-        """
-        This is overloaded because scipy converts scalar inputs to lists, changing the return type. The
-        wrapper function logic is there to handle this.
-        """
-
-        # We have no control over the inputs to the scipy inner function for scalar_minimize. As a result,
-        # we need to adjust the graph to work with what scipy will be passing into the inner function --
-        # always scalar, and always float64
+        # We need to adjust the graph to work with what scipy will be passing into the inner function --
+        # always scalar array of float64 type
         x, *args = self.inner_inputs
         new_root_x = ps.float64(name="x_scalar")
         new_x = tensor_from_scalar(new_root_x.astype(x.type.dtype))
@@ -252,6 +246,24 @@ class ScipyScalarWrapperOp(ScipyWrapperOp):
         # Do this reassignment to see the compiled graph in the dprint
         # self.fgraph = fn.maker.fgraph
 
+        self._fn_wrapped = LRUCache1(fn)
+
+
+class ScipyVectorWrapperOp(ScipyWrapperOp):
+    def build_fn(self):
+        # We need to adjust the graph to work with what scipy will be passing into the inner function --
+        # always a vector array with size of at least 1
+        x, *args = self.inner_inputs
+        if x.type.shape != ():
+            return super().build_fn()
+
+        new_root_x = x[None].type()
+        new_x = new_root_x.squeeze()
+        new_outputs = graph_replace(self.inner_outputs, {x: new_x})
+        self._fn = fn = function([new_root_x, *args], new_outputs, trust_input=True)
+
+        # Do this reassignment to see the compiled graph in the dprint
+        # self.fgraph = fn.maker.fgraph
         self._fn_wrapped = LRUCache1(fn)
 
 
@@ -474,7 +486,7 @@ def minimize_scalar(
     return solution, success
 
 
-class MinimizeOp(ScipyWrapperOp):
+class MinimizeOp(ScipyVectorWrapperOp):
     def __init__(
         self,
         x: Variable,
@@ -808,7 +820,7 @@ def root_scalar(
     return solution, success
 
 
-class RootOp(ScipyWrapperOp):
+class RootOp(ScipyVectorWrapperOp):
     __props__ = ("method", "jac")
 
     def __init__(

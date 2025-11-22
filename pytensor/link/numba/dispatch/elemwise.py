@@ -59,7 +59,7 @@ def scalar_in_place_fn(op: Op, idx: str, res: str, arr: str):
     arr
         The symbol name for the second input.
     """
-    raise NotImplementedError()
+    raise NotImplementedError(op)
 
 
 @scalar_in_place_fn.register(Add)
@@ -359,7 +359,7 @@ def numba_funcify_CAReduce(op, node, **kwargs):
     np_acc_dtype = np.dtype(acc_dtype)
 
     scalar_op_identity = op.scalar_op.identity
-    if np_acc_dtype.kind == "i" and not np.isfinite(scalar_op_identity):
+    if np_acc_dtype.kind in "ui" and not np.isfinite(scalar_op_identity):
         if np.isposinf(scalar_op_identity):
             scalar_op_identity = np.iinfo(np_acc_dtype).max
         else:
@@ -538,10 +538,8 @@ def numba_funcify_LogSoftmax(op, node, **kwargs):
 @register_funcify_default_op_cache_key(Argmax)
 def numba_funcify_Argmax(op, node, **kwargs):
     axis = op.axis
-    x_at = node.inputs[0]
-    x_dtype = x_at.type.numpy_dtype
-    x_dtype = numba.np.numpy_support.from_dtype(x_dtype)
-    x_ndim = x_at.ndim
+    x_pt = node.inputs[0]
+    x_ndim = x_pt.ndim
 
     if x_ndim == 0:
 
@@ -550,7 +548,10 @@ def numba_funcify_Argmax(op, node, **kwargs):
             return np.array(0, dtype="int64")
 
     else:
-        axes = tuple(int(ax) for ax in axis)
+        if axis is None:
+            axes = tuple(range(x_ndim))
+        else:
+            axes = tuple(int(ax) for ax in axis)
 
         # NumPy does not support multiple axes for argmax; this is a
         # work-around
@@ -584,7 +585,7 @@ def numba_funcify_Argmax(op, node, **kwargs):
 
             return max_idx_res
 
-    return argmax
+    return argmax, 1
 
 
 @register_funcify_default_op_cache_key(Dot)
@@ -593,36 +594,43 @@ def numba_funcify_Dot(op, node, **kwargs):
     x, y = node.inputs
     [out] = node.outputs
 
-    x_dtype = x.type.dtype
-    y_dtype = y.type.dtype
-    dot_dtype = f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
-    out_dtype = out.type.dtype
+    x_dtype = x.type.numpy_dtype
+    y_dtype = y.type.numpy_dtype
 
-    if x_dtype == dot_dtype and y_dtype == dot_dtype:
+    numba_dot_dtype = out_dtype = out.type.numpy_dtype
+    if out_dtype.kind not in "fc":
+        # Numba alawys returns non-integral outputs, we need to cast to float
+        numba_dot_dtype = np.dtype(
+            f"float{max((32, out.type.numpy_dtype.itemsize * 8))}"
+        )
+
+    if x_dtype == numba_dot_dtype and y_dtype == numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
             return np.asarray(np.dot(x, y))
 
-    elif x_dtype == dot_dtype and y_dtype != dot_dtype:
+    elif x_dtype == numba_dot_dtype and y_dtype != numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x, y.astype(dot_dtype)))
+            return np.asarray(np.dot(x, y.astype(numba_dot_dtype)))
 
-    elif x_dtype != dot_dtype and y_dtype == dot_dtype:
+    elif x_dtype != numba_dot_dtype and y_dtype == numba_dot_dtype:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x.astype(dot_dtype), y))
+            return np.asarray(np.dot(x.astype(numba_dot_dtype), y))
 
     else:
 
         @numba_basic.numba_njit
         def dot(x, y):
-            return np.asarray(np.dot(x.astype(dot_dtype), y.astype(dot_dtype)))
+            return np.asarray(
+                np.dot(x.astype(numba_dot_dtype), y.astype(numba_dot_dtype))
+            )
 
-    if out_dtype == dot_dtype:
+    if out_dtype == numba_dot_dtype:
         return dot
 
     else:

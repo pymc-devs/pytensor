@@ -1110,7 +1110,7 @@ class TestScan:
 
         final_result = result[-1]
 
-        f = function(inputs=[A, k], outputs=final_result)
+        f = function(inputs=[A, k], outputs=final_result, mode="C_VM")
         f(np.asarray([2, 3, 0.1, 0, 1], dtype=config.floatX), 4)
 
         # There should be 3 outputs greater than 10: prior_result[0] at step 3,

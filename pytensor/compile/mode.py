@@ -62,9 +62,6 @@ def register_linker(name, linker):
     predefined_linkers[name] = linker
 
 
-# If a string is passed as the optimizer argument in the constructor
-# for Mode, it will be used as the key to retrieve the real optimizer
-# in this dictionary
 exclude = []
 if not config.cxx:
     exclude = ["cxx_only"]
@@ -353,6 +350,10 @@ class Mode:
             optimizer = predefined_optimizers[optimizer]
         if isinstance(optimizer, RewriteDatabaseQuery):
             self.provided_optimizer = optimizer
+        if r := linker.required_rewrites:
+            optimizer = optimizer.including(*r)
+        if r := linker.incompatible_rewrites:
+            optimizer = optimizer.excluding(*r)
         self._optimizer = optimizer
         self.call_time = 0
         self.fn_time = 0
@@ -445,82 +446,32 @@ class Mode:
         return new_mode
 
 
-# If a string is passed as the mode argument in function or
-# FunctionMaker, the Mode will be taken from this dictionary using the
-# string as the key
-# Use VM_linker to allow lazy evaluation by default.
-FAST_COMPILE = Mode(
-    VMLinker(use_cloop=False, c_thunks=False),
-    RewriteDatabaseQuery(include=["fast_compile", "py_only"]),
+NUMBA = Mode(
+    NumbaLinker(),
+    RewriteDatabaseQuery(include=["fast_run", "numba"]),
 )
-if config.cxx:
-    FAST_RUN = Mode("cvm", "fast_run")
-else:
-    FAST_RUN = Mode(
-        "vm",
-        RewriteDatabaseQuery(include=["fast_run", "py_only"]),
-    )
+
+FAST_COMPILE = Mode(
+    NumbaLinker(),
+    RewriteDatabaseQuery(include=["fast_compile"]),
+)
+FAST_RUN = NUMBA
 
 C = Mode("c", "fast_run")
 C_VM = Mode("cvm", "fast_run")
 
-NUMBA = Mode(
-    NumbaLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run", "numba"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "local_careduce_fusion",
-            "scan_save_mem_prealloc",
-        ],
-    ),
-)
-
 JAX = Mode(
     JAXLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run", "jax"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-            # There are specific variants for the LU decompositions supported by JAX
-            "reuse_lu_decomposition_multiple_solves",
-            "scan_split_non_sequence_lu_decomposition_solve",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run", "jax"]),
 )
 PYTORCH = Mode(
     PytorchLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-            "reuse_lu_decomposition_multiple_solves",
-            "scan_split_non_sequence_lu_decomposition_solve",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run"]),
 )
 
 MLX = Mode(
     MLXLinker(),
-    RewriteDatabaseQuery(
-        include=["fast_run"],
-        exclude=[
-            "cxx_only",
-            "BlasOpt",
-            "fusion",
-            "inplace",
-            "scan_save_mem_prealloc",
-        ],
-    ),
+    RewriteDatabaseQuery(include=["fast_run"]),
 )
 
 
