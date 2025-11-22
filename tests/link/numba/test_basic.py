@@ -7,26 +7,30 @@ import numpy as np
 import pytest
 import scipy
 
-from pytensor.compile import SymbolicInput
-from pytensor.tensor.utils import hash_from_ndarray
-
 
 numba = pytest.importorskip("numba")
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import config, shared
+from pytensor.compile import SymbolicInput
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.type import Type
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import cache_key_for_constant
+from pytensor.link.numba.dispatch.basic import (
+    _filter_numba_warnings,
+    cache_key_for_constant,
+    numba_funcify_and_cache_key,
+)
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.scalar.basic import ScalarOp, as_scalar
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.utils import hash_from_ndarray
 
 
 if TYPE_CHECKING:
@@ -450,14 +454,46 @@ def test_scalar_return_value_conversion():
     assert isinstance(x_fn(1.0), np.ndarray)
 
 
-@pytest.mark.filterwarnings("error")
-def test_cache_warning_suppressed():
-    x = pt.vector("x", shape=(5,), dtype="float64")
-    out = pt.psi(x) * 2
-    fn = function([x], out, mode="NUMBA")
+class TestNumbaWarnings:
+    def setup_method(self, method):
+        # Pytest messes up with the package filters, reenable here for testing
+        _filter_numba_warnings()
 
-    x_test = np.random.uniform(size=5)
-    np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test) * 2)
+    @pytest.mark.filterwarnings("error")
+    def test_cache_pointer_func_warning_suppressed(self):
+        x = pt.vector("x", shape=(5,), dtype="float64")
+        out = pt.psi(x) * 2
+        fn = function([x], out, mode="NUMBA")
+
+        x_test = np.random.uniform(size=5)
+        np.testing.assert_allclose(fn(x_test), scipy.special.psi(x_test) * 2)
+
+    @pytest.mark.filterwarnings("error")
+    def test_cache_large_global_array_warning_suppressed(self):
+        rng = np.random.default_rng(458)
+        large_constant = rng.normal(size=(100000, 5))
+
+        x = pt.vector("x", shape=(5,), dtype="float64")
+        out = x * large_constant
+        fn = function([x], out, mode="NUMBA")
+
+        x_test = rng.uniform(size=5)
+        np.testing.assert_allclose(fn(x_test), x_test * large_constant)
+
+    @pytest.mark.filterwarnings("error")
+    def test_contiguous_array_dot_warning_suppressed(self):
+        A = pt.matrix("A")
+        b = pt.vector("b")
+        out = pt.dot(A, b[:, None])
+        # Cached functions won't reemit the warning, so we have to disable it
+        with config.change_flags(numba__cache=False):
+            fn = function([A, b], out, mode="NUMBA")
+
+        A_test = np.ones((5, 5))
+        # Numba actually warns even on contiguous arrays: https://github.com/numba/numba/issues/10086
+        # But either way we don't want this warning for users as they have little control over strides
+        b_test = np.ones((10,))[::2]
+        np.testing.assert_allclose(fn(A_test, b_test), np.dot(A_test, b_test[:, None]))
 
 
 @pytest.mark.parametrize("mode", ("default", "trust_input", "direct"))
@@ -652,3 +688,49 @@ def test_funcify_dispatch_interop():
         outs[2].owner.op, outs[2].owner
     )
     assert numba.njit(lambda x: fn2_def_cached(x))(test_x) == 2
+
+
+def test_fgraph_cache_key():
+    x = pt.scalar("x")
+    log_x = pt.log(x)
+    graphs = [
+        pt.exp(x) / log_x,
+        log_x / pt.exp(x),
+        pt.exp(log_x) / x,
+        x / pt.exp(log_x),
+        pt.exp(log_x) / log_x,
+        log_x / pt.exp(log_x),
+    ]
+
+    def generate_and_validate_key(fg):
+        _, key = numba_funcify_and_cache_key(fg)
+        assert key is not None
+        _, key_again = numba_funcify_and_cache_key(fg)
+        assert key == key_again  # Check its stable
+        return key
+
+    keys = []
+    for graph in graphs:
+        fg = FunctionGraph([x], [graph], clone=False)
+        keys.append(generate_and_validate_key(fg))
+    # Check keys are unique
+    assert len(set(keys)) == len(graphs)
+
+    # Extra unused input should alter the key, because it changes the function signature
+    y = pt.scalar("y")
+    for inputs in [[x, y], [y, x]]:
+        fg = FunctionGraph(inputs, [graphs[0]], clone=False)
+        keys.append(generate_and_validate_key(fg))
+    assert len(set(keys)) == len(graphs) + 2
+
+    # Adding an input as an output should also change the key
+    for outputs in [
+        [graphs[0], x],
+        [x, graphs[0]],
+        [x, x, graphs[0]],
+        [x, graphs[0], x],
+        [graphs[0], x, x],
+    ]:
+        fg = FunctionGraph([x], outputs, clone=False)
+        keys.append(generate_and_validate_key(fg))
+    assert len(set(keys)) == len(graphs) + 2 + 5
