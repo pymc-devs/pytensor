@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
+from typing import cast as type_cast
 
 import numpy as np
 from numpy import convolve as numpy_convolve
@@ -13,7 +14,9 @@ from pytensor.scalar.basic import upcast
 from pytensor.tensor.basic import as_tensor_variable, join, zeros
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.math import maximum, minimum, switch
-from pytensor.tensor.type import matrix, vector
+from pytensor.tensor.pad import pad
+from pytensor.tensor.subtensor import flip
+from pytensor.tensor.type import tensor
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -21,54 +24,69 @@ if TYPE_CHECKING:
     from pytensor.tensor import TensorLike
 
 
-class Convolve1d(COp):
+class AbstractConvolveNd:
     __props__ = ()
-    gufunc_signature = "(n),(k),()->(o)"
+    ndim: int
+
+    @property
+    def gufunc_signature(self):
+        data_signature = ",".join([f"n{i}" for i in range(self.ndim)])
+        kernel_signature = ",".join([f"k{i}" for i in range(self.ndim)])
+        output_signature = ",".join([f"o{i}" for i in range(self.ndim)])
+
+        return f"({data_signature}),({kernel_signature}),()->({output_signature})"
 
     def make_node(self, in1, in2, full_mode):
         in1 = as_tensor_variable(in1)
         in2 = as_tensor_variable(in2)
         full_mode = as_scalar(full_mode)
 
-        if not (in1.ndim == 1 and in2.ndim == 1):
-            raise ValueError("Convolution inputs must be vector (ndim=1)")
+        ndim = self.ndim
+        if not (in1.ndim == ndim and in2.ndim == self.ndim):
+            raise ValueError(
+                f"Convolution inputs must have ndim={ndim}, got: in1={in1.ndim}, in2={in2.ndim}"
+            )
         if not full_mode.dtype == "bool":
-            raise ValueError("Convolution mode must be a boolean type")
+            raise ValueError("Convolution full_mode flag must be a boolean type")
 
-        dtype = upcast(in1.dtype, in2.dtype)
-        n = in1.type.shape[0]
-        k = in2.type.shape[0]
         match full_mode:
             case Constant():
                 static_mode = "full" if full_mode.data else "valid"
             case _:
                 static_mode = None
 
-        if n is None or k is None or static_mode is None:
-            out_shape = (None,)
-        elif static_mode == "full":
-            out_shape = (n + k - 1,)
-        else:  # mode == "valid":
-            out_shape = (max(n, k) - min(n, k) + 1,)
+        if static_mode is None:
+            out_shape = (None,) * ndim
+        else:
+            out_shape = []
+            # TODO: Raise if static shapes are not valid (one input size doesn't dominate the other)
+            for n, k in zip(in1.type.shape, in2.type.shape):
+                if n is None or k is None:
+                    out_shape.append(None)
+                elif static_mode == "full":
+                    out_shape.append(
+                        n + k - 1,
+                    )
+                else:  # mode == "valid":
+                    out_shape.append(
+                        max(n, k) - min(n, k) + 1,
+                    )
+            out_shape = tuple(out_shape)
 
-        out = vector(dtype=dtype, shape=out_shape)
+        dtype = upcast(in1.dtype, in2.dtype)
+
+        out = tensor(dtype=dtype, shape=out_shape)
         return Apply(self, [in1, in2, full_mode], [out])
-
-    def perform(self, node, inputs, outputs):
-        # We use numpy_convolve as that's what scipy would use if method="direct" was passed.
-        # And mode != "same", which this Op doesn't cover anyway.
-        in1, in2, full_mode = inputs
-        outputs[0][0] = numpy_convolve(in1, in2, mode="full" if full_mode else "valid")
 
     def infer_shape(self, fgraph, node, shapes):
         _, _, full_mode = node.inputs
         in1_shape, in2_shape, _ = shapes
-        n = in1_shape[0]
-        k = in2_shape[0]
-        shape_valid = maximum(n, k) - minimum(n, k) + 1
-        shape_full = n + k - 1
-        shape = switch(full_mode, shape_full, shape_valid)
-        return [[shape]]
+        out_shape = [
+            switch(full_mode, n + k - 1, maximum(n, k) - minimum(n, k) + 1)
+            for n, k in zip(in1_shape, in2_shape)
+        ]
+
+        return [out_shape]
 
     def connection_pattern(self, node):
         return [[True], [True], [False]]
@@ -77,21 +95,33 @@ class Convolve1d(COp):
         in1, in2, full_mode = inputs
         [grad] = output_grads
 
-        n = in1.shape[0]
-        k = in2.shape[0]
+        n = in1.shape
+        k = in2.shape
+        # Note: this assumes the shape of one input dominates the other over all dimensions (which is required for a valid forward)
 
         # If mode is "full", or mode is "valid" and k >= n, then in1_bar mode should use "valid" convolve
         # The expression below is equivalent to ~(full_mode | (k >= n))
-        full_mode_in1_bar = ~full_mode & (k < n)
+        full_mode_in1_bar = ~full_mode & (k < n).any()
         # If mode is "full", or mode is "valid" and n >= k, then in2_bar mode should use "valid" convolve
         # The expression below is equivalent to ~(full_mode | (n >= k))
-        full_mode_in2_bar = ~full_mode & (n < k)
+        full_mode_in2_bar = ~full_mode & (n < k).any()
 
         return [
-            self(grad, in2[::-1], full_mode_in1_bar),
-            self(grad, in1[::-1], full_mode_in2_bar),
+            self(grad, flip(in2), full_mode_in1_bar),
+            self(grad, flip(in1), full_mode_in2_bar),
             DisconnectedType()(),
         ]
+
+
+class Convolve1d(AbstractConvolveNd, COp):
+    __props__ = ()
+    ndim = 1
+
+    def perform(self, node, inputs, outputs):
+        # We use numpy_convolve as that's what scipy would use if method="direct" was passed.
+        # And mode != "same", which this Op doesn't cover anyway.
+        in1, in2, full_mode = inputs
+        outputs[0][0] = numpy_convolve(in1, in2, mode="full" if full_mode else "valid")
 
     def c_code_cache_version(self):
         return (2,)
@@ -212,94 +242,29 @@ def convolve1d(
         mode = "valid"
 
     full_mode = as_scalar(np.bool_(mode == "full"))
-    return cast(TensorVariable, blockwise_convolve_1d(in1, in2, full_mode))
+    return type_cast(TensorVariable, blockwise_convolve_1d(in1, in2, full_mode))
 
 
-class Convolve2D(Op):
-    __props__ = ("mode", "boundary", "fillvalue")
-    gufunc_signature = "(n,m),(k,l)->(o,p)"
-
-    def __init__(
-        self,
-        mode: Literal["full", "valid"] = "full",
-        boundary: Literal["fill", "wrap", "symm"] = "fill",
-        fillvalue: float | int = 0,
-    ):
-        if mode not in ("full", "valid"):
-            raise ValueError(f"Invalid mode: {mode}")
-
-        self.mode = mode
-        self.fillvalue = fillvalue
-        self.boundary = boundary
-
-    def make_node(self, in1, in2):
-        in1, in2 = map(as_tensor_variable, (in1, in2))
-
-        assert in1.ndim == 2
-        assert in2.ndim == 2
-
-        dtype = upcast(in1.dtype, in2.dtype)
-
-        n, m = in1.type.shape
-        k, l = in2.type.shape
-
-        if self.mode == "full":
-            shape_1 = None if (n is None or k is None) else n + k - 1
-            shape_2 = None if (m is None or l is None) else m + l - 1
-
-        elif self.mode == "valid":
-            shape_1 = None if (n is None or k is None) else max(n, k) - max(n, k) + 1
-            shape_2 = None if (m is None or l is None) else max(m, l) - min(m, l) + 1
-
-        else:  # mode == "same"
-            shape_1 = n
-            shape_2 = m
-
-        out_shape = (shape_1, shape_2)
-        out = matrix(dtype=dtype, shape=out_shape)
-        return Apply(self, [in1, in2], [out])
+class Convolve2d(AbstractConvolveNd, Op):
+    __props__ = ()
+    ndim = 2
 
     def perform(self, node, inputs, outputs):
-        in1, in2 = inputs
+        in1, in2, full_mode = inputs
 
         # if all(inpt.dtype.kind in ['f', 'c'] for inpt in inputs):
         #     outputs[0][0] = scipy_convolve(in1, in2, mode=self.mode, method='fft')
         #
         # else:
+        # TODO: Why is .item() needed???
         outputs[0][0] = scipy_convolve2d(
-            in1, in2, mode=self.mode, fillvalue=self.fillvalue, boundary=self.boundary
+            in1,
+            in2,
+            mode="full" if full_mode.item() else "valid",
         )
 
-    def infer_shape(self, fgraph, node, shapes):
-        in1_shape, in2_shape = shapes
-        n, m = in1_shape
-        k, l = in2_shape
 
-        if self.mode == "full":
-            shape = (n + k - 1, m + l - 1)
-        elif self.mode == "valid":
-            shape = (
-                maximum(n, k) - minimum(n, k) + 1,
-                maximum(m, l) - minimum(m, l) + 1,
-            )
-        else:  # self.mode == 'same':
-            shape = (n, m)
-
-        return [shape]
-
-    def L_op(self, inputs, outputs, output_grads):
-        in1, in2 = inputs
-        incoming_grads = output_grads[0]
-
-        if self.mode == "full":
-            prop_dict = self._props_dict()
-            prop_dict["mode"] = "valid"
-            conv_valid = type(self)(**prop_dict)
-
-            in1_grad = conv_valid(in2, incoming_grads)
-            in2_grad = conv_valid(in1, incoming_grads)
-
-        return [in1_grad, in2_grad]
+blockwise_convolve_2d = Blockwise(Convolve2d())
 
 
 def convolve2d(
@@ -340,10 +305,28 @@ def convolve2d(
     in1 = as_tensor_variable(in1)
     in2 = as_tensor_variable(in2)
 
-    # TODO: Handle boundaries symbolically
-    # TODO: Handle 'same' symbolically
+    if mode == "same":
+        raise NotImplementedError("same mode not implemented for convolve2d")
 
-    blockwise_convolve = Blockwise(
-        Convolve2D(mode=mode, boundary=boundary, fillvalue=fillvalue)
-    )
-    return cast(TensorVariable, blockwise_convolve(in1, in2))
+    if mode != "valid" and (boundary != "fill" or fillvalue != 0):
+        # We use a valid convolution on an appropriately padded kernel
+        *_, k, l = in2.shape
+        ndim = max(in1.type.ndim, in2.type.ndim)
+
+        pad_width = zeros((ndim, 2), dtype="int64")
+        pad_width = pad_width[-2, :].set(k - 1)
+        pad_width = pad_width[-1, :].set(l - 1)
+        if boundary == "fill":
+            in1 = pad(
+                in1, pad_width=pad_width, mode="constant", constant_values=fillvalue
+            )
+        elif boundary == "wrap":
+            in1 = pad(in1, pad_width=pad_width, mode="wrap")
+
+        elif boundary == "symm":
+            in1 = pad(in1, pad_width=pad_width, mode="symmetric")
+
+        mode = "valid"
+
+    full_mode = as_scalar(np.bool_(mode == "full"))
+    return type_cast(TensorVariable, blockwise_convolve_2d(in1, in2, full_mode))
