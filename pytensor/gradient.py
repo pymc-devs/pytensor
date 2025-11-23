@@ -1951,10 +1951,10 @@ def verify_grad(
         mode_for_cost = mode
 
     cost_fn = fn_maker(tensor_pt, cost, name="gradient.py cost", mode=mode_for_cost)
-
     symbolic_grad = grad(cost, tensor_pt, disconnected_inputs="ignore")
 
     grad_fn = fn_maker(tensor_pt, symbolic_grad, name="gradient.py symbolic grad")
+    grad_fn.dprint(print_shape=True)
 
     for test_num in range(n_tests):
         num_grad = numeric_grad(cost_fn, [p.copy() for p in pt], eps, out_type)
