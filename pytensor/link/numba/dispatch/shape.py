@@ -4,10 +4,7 @@ import numpy as np
 from numba.np.unsafe import ndarray as numba_ndarray
 
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import (
-    create_arg_string,
-    register_funcify_default_op_cache_key,
-)
+from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
 from pytensor.link.utils import compile_function_src
 from pytensor.tensor import NoneConst
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
@@ -48,7 +45,7 @@ def numba_funcify_SpecifyShape(op, node, **kwargs):
 
     func = dedent(
         f"""
-        def specify_shape(x, {create_arg_string(shape_input_names)}):
+        def specify_shape(x, {", ".join(shape_input_names)}):
             {"; ".join(func_conditions)}
             return x
         """
