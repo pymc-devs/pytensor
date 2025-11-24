@@ -11,7 +11,7 @@ import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor.compile.function import function
 from pytensor.compile.io import In
-from pytensor.compile.mode import Mode
+from pytensor.compile.mode import Mode, get_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
@@ -71,15 +71,7 @@ from tests import unittest_tools as utt
 from tests.tensor.utils import inplace_func, makeTester, random
 
 
-if config.mode == "FAST_COMPILE":
-    mode_not_fast_compile = "FAST_RUN"
-else:
-    mode_not_fast_compile = config.mode
-
-mode_blas_opt = pytensor.compile.get_default_mode().including(
-    "BlasOpt", "specialize", "InplaceBlasOpt"
-)
-mode_blas_opt = mode_blas_opt.excluding("c_blas")
+mode_blas_opt = get_mode("CVM").excluding("c_blas")
 
 
 def test_dot_eq():
@@ -214,7 +206,7 @@ class TestGemm:
         f = function(
             [a, b],
             updates=[(s, lr1 * dot(a, b) + l2_reg * lr2 * s)],
-            mode=mode_not_fast_compile,
+            mode="CVM",
         ).maker.fgraph.toposort()
         # [Gemm{inplace}(<TensorType(float64, matrix)>, 0.01,
         # <TensorType(float64, matrix)>, <TensorType(float64, matrix)>,
@@ -226,7 +218,7 @@ class TestGemm:
         f = function(
             [a, b],
             updates=[(s, lr1 * (dot(a, b) - l2_reg * s))],
-            mode=mode_not_fast_compile,
+            mode="CVM",
         ).maker.fgraph.toposort()
         # [Gemm{inplace}(<TensorType(float64, matrix)>, 0.01,
         # <TensorType(float64, matrix)>, <TensorType(float64, matrix)>,
@@ -238,7 +230,7 @@ class TestGemm:
         f = function(
             [a, b],
             updates=[(s, s - lr1 * (s * 0.0002 + dot(a, b)))],
-            mode=mode_not_fast_compile,
+            mode="CVM",
         ).maker.fgraph.toposort()
         # [Gemm{inplace}(<TensorType(float64, matrix)>, -0.01,
         # <TensorType(float64, matrix)>, <TensorType(float64, matrix)>,
@@ -448,7 +440,11 @@ class TestGemmNoFlags:
         B1 = self.get_variable(B, transpose_B, slice_B)
         C1 = self.get_variable(C, transpose_C, slice_C)
 
-        return function([alpha, A, B, beta, C], self.gemm(C1, alpha, A1, B1, beta))
+        return function(
+            [alpha, A, B, beta, C],
+            self.gemm(C1, alpha, A1, B1, beta),
+            mode=mode_blas_opt,
+        )
 
     def generate_value(self, dtype, width, height, to_transpose, to_slice, rng):
         if to_slice:
@@ -583,7 +579,7 @@ def just_gemm(i, o, ishapes=None, max_graphlen=0, expected_nb_gemm=1):
     f = inplace_func(
         [In(ii, mutable=True, allow_downcast=True) for ii in i],
         o,
-        mode="FAST_RUN",
+        mode=mode_blas_opt,
         on_unused_input="ignore",
     )
     nb_gemm = 0
@@ -680,7 +676,7 @@ def test_gemm_opt_double_gemm():
     f = inplace_func(
         [In(ii, mutable=True) for ii in i],
         o,
-        mode="FAST_RUN",
+        mode=mode_blas_opt,
         on_unused_input="ignore",
     )
     for node in f.maker.fgraph.apply_nodes:
@@ -818,10 +814,10 @@ def test_gemm_opt_vector_stuff():
     X, Y, a = matrix(), matrix(), scalar()
     u, v = vector(), vector()
 
-    f = inplace_func([a, u, v], a + dot(u, v), mode="FAST_RUN")
+    f = inplace_func([a, u, v], a + dot(u, v), mode=mode_blas_opt)
     assert gemm_inplace not in [n.op for n in f.maker.fgraph.apply_nodes]
 
-    f = inplace_func([a, u, X, Y], a * u + dot(X, Y), mode="FAST_RUN")
+    f = inplace_func([a, u, X, Y], a * u + dot(X, Y), mode=mode_blas_opt)
     assert gemm_inplace not in [n.op for n in f.maker.fgraph.apply_nodes]
 
 
@@ -886,7 +882,7 @@ def test_inplace0():
     )
     R, S, c = matrix("R"), matrix("S"), scalar("c")
 
-    f = inplace_func([Z, b, R, S], [Z * (Z + b * dot(R, S).T)], mode="FAST_RUN")
+    f = inplace_func([Z, b, R, S], [Z * (Z + b * dot(R, S).T)], mode=mode_blas_opt)
     assert gemm_inplace not in [n.op for n in f.maker.fgraph.apply_nodes]
     assert gemm_no_inplace in [n.op for n in f.maker.fgraph.apply_nodes]
 
@@ -894,7 +890,7 @@ def test_inplace0():
     f = inplace_func(
         [X, Y, Z, a, b, R, S, c],
         [Z * (c * Z + a * dot(X, Y) + b * dot(R, S).T)],
-        mode="FAST_RUN",
+        mode=mode_blas_opt,
     )
     assert gemm_inplace in [n.op for n in f.maker.fgraph.apply_nodes]
 
@@ -902,7 +898,7 @@ def test_inplace0():
 def test_inplace1():
     X, Y, Z, _a, _b = XYZab()
     # with > 2 terms in the overall addition
-    f = inplace_func([X, Y, Z], [Z + Z + dot(X, Y)], mode="FAST_RUN")
+    f = inplace_func([X, Y, Z], [Z + Z + dot(X, Y)], mode=mode_blas_opt)
     # pytensor.printing.debugprint(f)
     # it doesn't work inplace because we didn't mark Z as mutable input
     assert [n.op for n in f.maker.fgraph.apply_nodes] == [gemm_no_inplace]
@@ -1119,7 +1115,7 @@ def test_dot22scalar_cast():
 def test_local_dot22_to_dot22scalar():
     # This test that the bug in gh-1507 is really fixed
     A = dmatrix()
-    mode = pytensor.compile.mode.get_default_mode()
+    mode = get_mode("CVM")
     opt = in2out(local_dot22_to_dot22scalar)
     mode = mode.__class__(optimizer=opt)
 
@@ -1359,7 +1355,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
         beta = shared(np.asarray(1.0, dtype=config.floatX), name="beta")
 
         z = beta * y + alpha * dot(A, x)
-        f = function([A, x, y], z)
+        f = function([A, x, y], z, mode=mode_blas_opt)
 
         # Matrix value
         A_val = np.ones((5, 3), dtype=config.floatX)
@@ -1726,8 +1722,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
     shared = staticmethod(shared)
 
     def setup_method(self):
-        self.mode = pytensor.compile.get_default_mode().including("fast_run")
-        self.mode = self.mode.excluding("c_blas", "scipy_blas")
+        self.mode = get_mode("cvm").excluding("c_blas", "scipy_blas")
         dtype = self.dtype = "float64"  # optimization isn't dtype-dependent
         self.A = tensor(dtype=dtype, shape=(None, None))
         self.a = tensor(dtype=dtype, shape=())
@@ -1940,8 +1935,7 @@ class TestGer(unittest_tools.OptimizationTestMixin):
 
 class TestBlasStrides:
     dtype = "float64"
-    mode = pytensor.compile.get_default_mode()
-    mode = mode.including("fast_run").excluding("gpu", "c_blas", "scipy_blas")
+    mode = get_mode("cvm").excluding("c_blas", "scipy_blas")
 
     def random(self, *shape, rng=None):
         return np.asarray(rng.random(shape), dtype=self.dtype)
@@ -2326,6 +2320,8 @@ class TestBlasStrides:
 
 
 class TestInferShape(unittest_tools.InferShapeTester):
+    mode = mode_blas_opt
+
     def test_dot22(self):
         rng = np.random.default_rng(unittest_tools.fetch_seed())
         x, y = matrices("xy")
@@ -2475,6 +2471,7 @@ TestBatchedDot = makeTester(
         bad_dim1=(random(3, 5, 7, rng=rng), random(3, 5, 7, rng=rng)),
         bad_dim2=(random(3, 5, 7, rng=rng), random(3, 8, 3, rng=rng)),
     ),
+    mode=mode_blas_opt,
 )
 
 
@@ -2536,7 +2533,7 @@ def test_batched_dot_not_contiguous():
 
 def test_batched_dot_blas_flags():
     """Test that BatchedDot works regardless of presence of BLAS flags"""
-    mode = "FAST_RUN"
+    mode = mode_blas_opt
     rng = np.random.default_rng(2708)
 
     x = tensor("x", shape=(2, 5, 3))

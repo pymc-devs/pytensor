@@ -92,21 +92,15 @@ def test_inter_process_cache():
     """
 
     x, y = dvectors("xy")
-    f = function([x, y], [MyOp()(x), MyOp()(y)])
+    f = function([x, y], [MyOp()(x), MyOp()(y)], mode="CVM")
     f(np.arange(60), np.arange(60))
-    if config.mode == "FAST_COMPILE" or config.cxx == "":
-        assert MyOp.nb_called == 0
-    else:
-        assert MyOp.nb_called == 1
+    assert MyOp.nb_called == 1
 
     # What if we compile a new function with new variables?
     x, y = dvectors("xy")
-    f = function([x, y], [MyOp()(x), MyOp()(y)])
+    f = function([x, y], [MyOp()(x), MyOp()(y)], mode="CVM")
     f(np.arange(60), np.arange(60))
-    if config.mode == "FAST_COMPILE" or config.cxx == "":
-        assert MyOp.nb_called == 0
-    else:
-        assert MyOp.nb_called == 1
+    assert MyOp.nb_called == 1
 
 
 @pytest.mark.filterwarnings("error")
@@ -401,7 +395,7 @@ def _f_build_cache_race_condition(factor):
     # optimization passes, so we need these config changes to prevent the
     # exceptions from being caught
     a = pt.vector()
-    f = pytensor.function([a], factor * a)
+    f = pytensor.function([a], factor * a, mode="CVM")
     return f(np.array([1], dtype=config.floatX))
 
 
