@@ -3196,38 +3196,66 @@ class TestExamples:
         f = function([seq], results[1])
         assert np.all(exp_out == f(inp))
 
-    def test_shared_borrow(self):
+    @pytest.mark.parametrize("static_shape", (True, False)[:1])
+    def test_aliased_inner_outputs(self, static_shape):
         """
-        This tests two things. The first is a bug occurring when scan wrongly
-        used the borrow flag. The second thing it that Scan's infer_shape()
-        method will be able to remove the Scan node from the graph in this
-        case.
+            This tests two things. The first is a bug occurring when scan wrongly
+            used the borrow flag. The second thing it that Scan's infer_shape()
+            method will be able to remove the Scan node from the graph in this
+            case.
+
+            Here is pure python equivalent of the problem we want to avoid:
+            ```python
+                def scan(seq, initval):
+                    # Due to memory optimization we override values of mitsot as we iterate
+                    # That's why mitsot has shape (4, 1) and not (14, 1)
+                    mitsot = np.zeros((4, 1))
+                    mitsot[:4] = initval
+                    nitsot = np.zeros((10, 1))
+                    for i, s in enumerate(seq):
+                        # Incorrect results
+                        mitsot[(i+4) % 4], nitsot[i] = s, mitsot[i % 4]
+                        # Correct results
+                        # mitsot[(i + 4) % 4], nitsot[i] = s, mitsot[i % 4].copy()
+
+                    return mitsot[(i + 4) % 4: (i+4 + 1) % 4], nitsot
+
+                scan(np.arange(10), np.zeros((4, 1)))
+        ```
         """
 
-        inp = np.arange(10).reshape(-1, 1).astype(config.floatX)
-        exp_out = np.zeros((10, 1)).astype(config.floatX)
-        exp_out[4:] = inp[:-4]
+        def onestep(seq, seq_tm4):
+            # Recurring output is just each value of seq
+            # And we further map the tap -4 as a new output
+            return seq, seq_tm4
 
-        def onestep(x, x_tm4):
-            return x, x_tm4
-
-        seq = matrix()
-        initial_value = shared(np.zeros((4, 1), dtype=config.floatX))
-        outputs_info = [{"initial": initial_value, "taps": [-4]}, None]
-        results = scan(
-            fn=onestep, sequences=seq, outputs_info=outputs_info, return_updates=False
+        # Outer tensors must be atleast matrix, so that they we have vectors in the inner loop
+        # Otherwise we would be working with scalars and memory alias wouldn't be a concern
+        seq = matrix(shape=(10, 1) if static_shape else (None, None), name="seq")
+        init = matrix(shape=(4, 1) if static_shape else (None, None), name="init")
+        outputs_info = [{"initial": init, "taps": [-4]}, None]
+        [out_seq, out_seq_tm4] = scan(
+            fn=onestep,
+            sequences=seq,
+            outputs_info=outputs_info,
+            return_updates=False,
         )
-        sharedvar = shared(np.zeros((1, 1), dtype=config.floatX))
-        updates = {sharedvar: results[0][-1:]}
 
-        f = function([seq], results[1], updates=updates)
+        f = function([seq, init], [out_seq[-1].ravel(), out_seq_tm4.ravel()])
 
-        # This fails if scan uses wrongly the borrow flag
-        assert np.all(exp_out == f(inp))
+        seq_test_val = np.arange(10, dtype=config.floatX)[:, None]
+        init_test_val = np.zeros((4, 1), dtype=config.floatX)
+
+        res0, res1 = f(seq_test_val, init_test_val)
+        expected_res0 = np.array([9], dtype=config.floatX)
+        expected_res1 = np.zeros(10, dtype=config.floatX)
+        expected_res1[4:] = np.arange(6)
+        np.testing.assert_array_equal(res0, expected_res0)
+        np.testing.assert_array_equal(res1, expected_res1)
 
         # This fails if Scan's infer_shape() is unable to remove the Scan
         # node from the graph.
-        f_infershape = function([seq], results[1].shape, mode="FAST_RUN")
+        f_infershape = function([seq, init], out_seq_tm4[1].shape)
         scan_nodes_infershape = scan_nodes_from_fct(f_infershape)
         assert len(scan_nodes_infershape) == 0
 
