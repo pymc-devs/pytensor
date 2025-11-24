@@ -7,6 +7,8 @@ import scipy
 import pytensor
 import pytensor.typed_list
 from pytensor import sparse
+from pytensor.compile import get_default_mode
+from pytensor.link.numba import NumbaLinker
 from pytensor.tensor.type import (
     TensorType,
     integer_dtypes,
@@ -452,6 +454,10 @@ class TestIndex:
 
         assert f([[x, y], [x, y, y]], [x, y]) == 0
 
+    @pytest.mark.xfail(
+        condition=isinstance(get_default_mode().linker, NumbaLinker),
+        reason="Numba does not support Sparse Ops yet",
+    )
     def test_sparse(self):
         mySymbolicSparseList = TypedListType(
             sparse.SparseTensorType("csr", pytensor.config.floatX)
@@ -519,6 +525,10 @@ class TestCount:
 
         assert f([[x, y], [x, y, y]], [x, y]) == 1
 
+    @pytest.mark.xfail(
+        condition=isinstance(get_default_mode().linker, NumbaLinker),
+        reason="Numba does not support Sparse Ops yet",
+    )
     def test_sparse(self):
         mySymbolicSparseList = TypedListType(
             sparse.SparseTensorType("csr", pytensor.config.floatX)

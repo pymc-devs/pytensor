@@ -4,9 +4,10 @@ import scipy.sparse
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.mode import OPT_FAST_RUN, Mode
+from pytensor.compile.mode import OPT_FAST_RUN, Mode, get_default_mode
 from pytensor.graph import vectorize_graph
 from pytensor.graph.basic import Constant, equal_computations
+from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import Assert, CheckAndRaise, assert_op
 from pytensor.scalar.basic import ScalarType, float64
 from pytensor.sparse import as_sparse_variable
@@ -181,6 +182,10 @@ class TestCheckAndRaiseInferShape(utt.InferShapeTester):
         )
 
 
+@pytest.mark.xfail(
+    condition=isinstance(get_default_mode().linker, NumbaLinker),
+    reason="Numba does not support Sparse Ops yet",
+)
 def test_CheckAndRaise_sparse_variable():
     check_and_raise = CheckAndRaise(ValueError, "sparse_check")
 
