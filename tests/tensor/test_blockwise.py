@@ -12,6 +12,7 @@ from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.gradient import grad
 from pytensor.graph import Apply, FunctionGraph, Op, rewrite_graph
 from pytensor.graph.replace import vectorize_graph, vectorize_node
+from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.tensor import (
     diagonal,
@@ -23,7 +24,11 @@ from pytensor.tensor import (
     tensor,
     vector,
 )
-from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
+from pytensor.tensor.blockwise import (
+    Blockwise,
+    BlockwiseWithCoreShape,
+    vectorize_node_fallback,
+)
 from pytensor.tensor.nlinalg import MatrixInverse, eig
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
 from pytensor.tensor.signal import convolve1d
@@ -39,6 +44,11 @@ from pytensor.tensor.slinalg import (
 from pytensor.tensor.utils import _parse_gufunc_signature
 
 
+@pytest.mark.xfail(
+    condition=isinstance(get_default_mode().linker, NumbaLinker),
+    raises=TypeError,
+    reason="Numba scalar blockwise obj-mode fallback fails: https://github.com/pymc-devs/pytensor/issues/1760",
+)
 def test_perform_method_per_node():
     """Confirm that Blockwise uses one perform method per node.
 
@@ -66,8 +76,13 @@ def test_perform_method_per_node():
     fn = pytensor.function([x, y], [out_x, out_y])
     [op1, op2] = [node.op for node in fn.maker.fgraph.apply_nodes]
     # Confirm both nodes have the same Op
-    assert op1 is blockwise_op
-    assert op1 is op2
+    assert isinstance(op1, Blockwise | BlockwiseWithCoreShape) and isinstance(
+        op1.core_op, NodeDependentPerformOp
+    )
+    assert isinstance(op2, Blockwise | BlockwiseWithCoreShape) and isinstance(
+        op2.core_op, NodeDependentPerformOp
+    )
+    # assert op1 is op2  # Not true in the Numba backend
 
     res_out_x, res_out_y = fn(np.zeros(3, dtype="float32"), np.zeros(3, dtype="int32"))
     np.testing.assert_array_equal(res_out_x, np.ones(3, dtype="float32"))
@@ -120,7 +135,9 @@ def check_blockwise_runtime_broadcasting(mode):
         out,
         mode=get_mode(mode).excluding(specialize_matmul_to_batched_dot.__name__),
     )
-    assert isinstance(fn.maker.fgraph.outputs[0].owner.op, Blockwise)
+    assert isinstance(
+        fn.maker.fgraph.outputs[0].owner.op, Blockwise | BlockwiseWithCoreShape
+    )
 
     for valid_test_values in [
         (
@@ -292,8 +309,8 @@ def test_blockwise_infer_core_shape():
         def perform(self, node, inputs, outputs):
             a, b = inputs
             c, d = outputs
-            c[0] = np.arange(a.size + b.size)
-            d[0] = np.arange(a.sum() + b.sum())
+            c[0] = np.arange(a.size + b.size, dtype=config.floatX)
+            d[0] = np.arange(a.sum() + b.sum(), dtype=config.floatX)
 
         def infer_shape(self, fgraph, node, input_shapes):
             # First output shape depends only on input_shapes
@@ -389,7 +406,13 @@ class BlockwiseOpTester:
             tensor(shape=(None,) * len(param_sig)) for param_sig in self.params_sig
         ]
         core_func = pytensor.function(base_inputs, self.core_op(*base_inputs))
-        np_func = np.vectorize(core_func, signature=self.signature)
+
+        def inp_copy_core_func(*args):
+            # Work-around for https://github.com/numba/numba/issues/10357
+            # numpy vectorize passes non-writeable arrays to the inner function
+            return core_func(*(arg.copy() for arg in args))
+
+        np_func = np.vectorize(inp_copy_core_func, signature=self.signature)
 
         for vec_inputs, vec_inputs_testvals in self.create_batched_inputs():
             pt_func = pytensor.function(vec_inputs, self.block_op(*vec_inputs))
@@ -408,13 +431,26 @@ class BlockwiseOpTester:
         ]
         out = self.core_op(*base_inputs).sum()
         # Create separate numpy vectorized functions for each input
+
+        def copy_inputs_wrapper(fn):
+            # Work-around for https://github.com/numba/numba/issues/10357
+            # numpy vectorize passes non-writeable arrays to the inner function
+            def copy_fn(*args):
+                return fn(*(arg.copy() for arg in args))
+
+            return copy_fn
+
         np_funcs = []
         for i, inp in enumerate(base_inputs):
             core_grad_func = pytensor.function(base_inputs, grad(out, wrt=inp))
             params_sig = self.signature.split("->")[0]
             param_sig = f"({','.join(self.params_sig[i])})"
             grad_sig = f"{params_sig}->{param_sig}"
-            np_func = np.vectorize(core_grad_func, signature=grad_sig)
+
+            np_func = np.vectorize(
+                copy_inputs_wrapper(core_grad_func),
+                signature=grad_sig,
+            )
             np_funcs.append(np_func)
 
         # We test gradient wrt to one batched input at a time
@@ -506,7 +542,9 @@ def test_small_blockwise_performance(benchmark):
     b = dmatrix(shape=(7, 20))
     out = convolve1d(a, b, mode="valid")
     fn = pytensor.function([a, b], out, trust_input=True)
-    assert isinstance(fn.maker.fgraph.outputs[0].owner.op, Blockwise)
+    assert isinstance(
+        fn.maker.fgraph.outputs[0].owner.op, Blockwise | BlockwiseWithCoreShape
+    )
 
     rng = np.random.default_rng(495)
     a_test = rng.normal(size=a.type.shape)
@@ -529,7 +567,10 @@ def test_cop_with_params():
 
     fn = pytensor.function([x], x_shape)
     [fn_out] = fn.maker.fgraph.outputs
-    assert fn_out.owner.op == matrix_assert, "Blockwise should be in final graph"
+    op = fn_out.owner.op
+    assert (
+        isinstance(op, Blockwise | BlockwiseWithCoreShape) and op.core_op == assert_op
+    ), "Blockwise should be in final graph"
 
     np.testing.assert_allclose(
         fn(np.zeros((5, 3, 2))),
@@ -557,7 +598,7 @@ class TestInplace:
             [cholesky_op] = [
                 node.op.core_op
                 for node in f.maker.fgraph.apply_nodes
-                if isinstance(node.op, Blockwise)
+                if isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
                 and isinstance(node.op.core_op, Cholesky)
             ]
         else:
@@ -603,7 +644,9 @@ class TestInplace:
 
         op = fn.maker.fgraph.outputs[0].owner.op
         if batched_A or batched_b:
-            assert isinstance(op, Blockwise) and isinstance(op.core_op, SolveBase)
+            assert isinstance(op, Blockwise | BlockwiseWithCoreShape) and isinstance(
+                op.core_op, SolveBase
+            )
             if batched_A and not batched_b:
                 if solve_fn == solve:
                     assert op.destroy_map == {0: [0]}

@@ -89,7 +89,7 @@ from pytensor.tensor.basic import (
     where,
     zeros_like,
 )
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import dense_dot
@@ -4572,7 +4572,8 @@ def test_vectorize_join(axis, broadcasting_y):
 
     blockwise_needed = isinstance(axis, SharedVariable) or broadcasting_y != "none"
     has_blockwise = any(
-        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+        isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+        for node in vectorize_pt.maker.fgraph.apply_nodes
     )
     assert has_blockwise == blockwise_needed
 
