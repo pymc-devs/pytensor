@@ -5,6 +5,7 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.compile import get_mode
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.blas import Ger
 from pytensor.tensor.blas_c import CGemv, CGer, must_initialize_y_gemv
@@ -22,9 +23,7 @@ from tests.tensor.test_blas import BaseGemv, TestBlasStrides
 from tests.unittest_tools import OptimizationTestMixin
 
 
-mode_blas_opt = pytensor.compile.get_default_mode().including(
-    "BlasOpt", "specialize", "InplaceBlasOpt", "c_blas"
-)
+mode_blas_opt = get_mode("CVM")
 
 
 def skip_if_blas_ldflags_empty(*functions_detected):
@@ -46,7 +45,7 @@ class TestCGer(OptimizationTestMixin):
     def manual_setup_method(self, dtype="float64"):
         # This tests can run even when pytensor.config.blas__ldflags is empty.
         self.dtype = dtype
-        self.mode = pytensor.compile.get_default_mode().including("fast_run")
+        self.mode = mode_blas_opt
         self.A = tensor(dtype=dtype, shape=(None, None))
         self.a = tensor(dtype=dtype, shape=())
         self.x = tensor(dtype=dtype, shape=(None,))
@@ -130,10 +129,9 @@ class TestCGemv(OptimizationTestMixin):
     """
 
     def setup_method(self):
-        # This tests can run even when pytensor.config.blas__ldflags is empty.
         dtype = "float64"
         self.dtype = dtype
-        self.mode = pytensor.compile.get_default_mode().including("fast_run")
+        self.mode = mode_blas_opt
         # matrix
         self.A = tensor("A", dtype=dtype, shape=(None, None))
         self.Aval = np.ones((2, 3), dtype=dtype)

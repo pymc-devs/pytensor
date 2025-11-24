@@ -624,7 +624,7 @@ class TestFunction:
 
     def test_constant_output(self):
         # Test that if the output is a constant, we respect the pytensor memory interface
-        f = function([], pt.constant([4]))
+        f = function([], pt.constant([4]), mode="CVM")
         # print f.maker.fgraph.toposort()
         out = f()
         assert (out == 4).all()
@@ -635,7 +635,7 @@ class TestFunction:
         assert (out2 == 4).all()
 
         # Test that if the output is a constant and borrow, we respect the pytensor memory interface
-        f = function([], Out(pt.constant([4]), borrow=True))
+        f = function([], Out(pt.constant([4]), borrow=True), mode="CVM")
         # print f.maker.fgraph.toposort()
         out = f()
         assert (out == 4).all()

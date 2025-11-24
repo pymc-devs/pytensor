@@ -3752,7 +3752,7 @@ class TestMatMul:
 
     def test_dot22_opt(self):
         x, y = matrices("xy")
-        fn = function([x, y], x @ y, mode="FAST_RUN")
+        fn = function([x, y], x @ y, mode="CVM")
         [node] = fn.maker.fgraph.apply_nodes
         assert isinstance(node.op, Dot22)
 

@@ -73,9 +73,7 @@ def test_cdata():
     i = TensorType("float32", shape=(None,))()
     c = ProdOp()(i)
     i2 = GetOp()(c)
-    mode = None
-    if pytensor.config.mode == "FAST_COMPILE":
-        mode = "FAST_RUN"
+    mode = "CVM"
 
     # This should be a passthrough function for vectors
     f = pytensor.function([i], i2, mode=mode)
@@ -266,7 +264,7 @@ class TestEnumTypes:
         c_sub = MyOpEnumList("-")(a, b)
         c_multiply = MyOpEnumList("*")(a, b)
         c_divide = MyOpEnumList("/")(a, b)
-        f = pytensor.function([a, b], [c_add, c_sub, c_multiply, c_divide])
+        f = pytensor.function([a, b], [c_add, c_sub, c_multiply, c_divide], mode="CVM")
         va = 12
         vb = 15
         ref = [va + vb, va - vb, va * vb, va // vb]
@@ -281,7 +279,7 @@ class TestEnumTypes:
         million = MyOpCEnumType("million")()
         billion = MyOpCEnumType("billion")()
         two_billions = MyOpCEnumType("two_billions")()
-        f = pytensor.function([], [million, billion, two_billions])
+        f = pytensor.function([], [million, billion, two_billions], mode="CVM")
         val_million, val_billion, val_two_billions = f()
         assert val_million == 1000000
         assert val_billion == val_million * 1000
