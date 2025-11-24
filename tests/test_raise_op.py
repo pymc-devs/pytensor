@@ -181,6 +181,7 @@ class TestCheckAndRaiseInferShape(utt.InferShapeTester):
         )
 
 
+@pytest.mark.xfail(reason="Numba does not support Sparse Ops yet")
 def test_CheckAndRaise_sparse_variable():
     check_and_raise = CheckAndRaise(ValueError, "sparse_check")
 
