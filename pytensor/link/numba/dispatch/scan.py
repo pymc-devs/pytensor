@@ -5,13 +5,12 @@ import numpy as np
 from numba import types
 from numba.extending import overload
 
-from pytensor import In
-from pytensor.compile.function.types import add_supervisor_to_fgraph
+from pytensor.compile.function.types import add_supervisor_to_fgraph, insert_deepcopy
+from pytensor.compile.io import In, Out
 from pytensor.compile.mode import NUMBA, get_mode
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    create_arg_string,
     create_tuple_string,
     numba_funcify_and_cache_key,
     register_funcify_and_cache_key,
@@ -89,14 +88,15 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         if outer_mitsot.type.shape[0] == abs(min(taps))
     ]
     destroyable = {*destroyable_sitsot, *destroyable_mitsot}
+    input_specs = [In(x, borrow=True, mutable=x in destroyable) for x in fgraph.inputs]
     add_supervisor_to_fgraph(
         fgraph=fgraph,
-        input_specs=[
-            In(x, borrow=True, mutable=x in destroyable) for x in fgraph.inputs
-        ],
+        input_specs=input_specs,
         accept_inplace=True,
     )
     rewriter(fgraph)
+    output_specs = [Out(x, borrow=False) for x in fgraph.outputs]
+    insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(op.fgraph)
 
