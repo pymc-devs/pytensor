@@ -199,13 +199,10 @@ def create_tuple_creator(f, n):
 
 
 def create_tuple_string(x):
-    args = ", ".join(x + ([""] if len(x) == 1 else []))
-    return f"({args})"
-
-
-def create_arg_string(x):
-    args = ", ".join(x)
-    return args
+    if len(x) == 1:
+        return f"({x[0]},)"
+    else:
+        return f"({', '.join(x)})"
 
 
 @numba.extending.intrinsic
