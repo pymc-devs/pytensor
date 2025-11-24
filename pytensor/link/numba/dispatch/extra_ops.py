@@ -13,6 +13,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
+from pytensor.npy_2_compat import old_np_unique
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.extra_ops import (
     Bartlett,
@@ -241,10 +242,17 @@ def numba_funcify_Unique(op, node, **kwargs):
         @numba_basic.numba_njit
         def unique(x):
             with numba.objmode(ret=ret_sig):
-                ret = np.unique(x, return_index, return_inverse, return_counts, axis)
+                ret = old_np_unique(
+                    x,
+                    return_index=return_index,
+                    return_inverse=return_inverse,
+                    return_counts=return_counts,
+                    axis=axis,
+                )
             return ret
 
-    return unique
+    cache_version = 1
+    return unique, cache_version
 
 
 @register_funcify_and_cache_key(UnravelIndex)
