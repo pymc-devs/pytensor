@@ -6,7 +6,7 @@ import pytensor.tensor as pt
 from pytensor import function, scan, shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.io import In
-from pytensor.compile.mode import get_default_mode
+from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
 from pytensor.graph.basic import Constant, equal_computations
@@ -1796,7 +1796,7 @@ def test_inner_replace_dot():
     W = matrix("W")
     h = matrix("h")
 
-    mode = get_default_mode().including("scan")  # .excluding("BlasOpt")
+    mode = get_mode("CVM").including("scan")  # .excluding("BlasOpt")
 
     o = scan(
         lambda hi, him1, W: (hi, dot(hi + him1, W)),
@@ -1922,7 +1922,7 @@ def test_opt_order():
     A = matrix("A")
 
     z = scan(dot, sequences=[], non_sequences=[x, A], n_steps=2, return_updates=False)
-    f = function([x, A], z, mode="FAST_RUN")
+    f = function([x, A], z, mode="CVM")
     topo = f.maker.fgraph.toposort()
 
     assert any(isinstance(node.op, Dot22) for node in topo)

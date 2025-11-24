@@ -513,6 +513,7 @@ def makeSharedTester(
                 updates=[
                     (s_shared, pytensor.tensor.dot(a_shared, b_shared) + s_shared)
                 ],
+                mode="CVM",
             )
             topo = f.maker.fgraph.toposort()
             f()
@@ -546,6 +547,7 @@ def makeSharedTester(
                         pytensor.tensor.dot(a_shared, b_shared) + s_shared_specify,
                     )
                 ],
+                mode="CVM",
             )
             topo = f.maker.fgraph.toposort()
             shp = f()
@@ -577,6 +579,7 @@ def makeSharedTester(
                         pytensor.tensor.dot(a_shared, b_shared) + s_shared_specify,
                     )
                 ],
+                mode="CVM",
             )
             topo = f.maker.fgraph.toposort()
             shp = f()
