@@ -13,7 +13,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.nlinalg import (
@@ -181,7 +181,10 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
 
     no_cholesky_in_graph = not any(
         isinstance(node.op, Cholesky)
-        or (isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Cholesky))
+        or (
+            isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+            and isinstance(node.op.core_op, Cholesky)
+        )
         for node in f.maker.fgraph.apply_nodes
     )
 
@@ -287,7 +290,7 @@ class TestBatchedVectorBSolveToMatrixBSolve:
     def any_vector_b_solve(fn):
         return any(
             (
-                isinstance(node.op, Blockwise)
+                isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
                 and isinstance(node.op.core_op, SolveBase)
                 and node.op.core_op.b_ndim == 1
             )

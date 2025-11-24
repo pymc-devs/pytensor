@@ -1,6 +1,6 @@
 from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
-from pytensor.graph.rewriting.basic import dfs_rewriter
+from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.tensor import as_tensor, constant
 from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
 from pytensor.tensor.rewriting.shape import ShapeFeature
@@ -69,7 +69,7 @@ def introduce_explicit_core_shape_rv(fgraph, node):
     else:
         core_shape = as_tensor(core_shape)
 
-    return (
+    new_outs = (
         RandomVariableWithCoreShape(
             [core_shape, *node.inputs],
             node.outputs,
@@ -78,6 +78,8 @@ def introduce_explicit_core_shape_rv(fgraph, node):
         .make_node(core_shape, *node.inputs)
         .outputs
     )
+    copy_stack_trace(node.outputs, new_outs)
+    return new_outs
 
 
 optdb.register(

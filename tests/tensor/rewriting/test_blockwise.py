@@ -7,7 +7,7 @@ from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.scalar import log as scalar_log
 from pytensor.tensor import add, alloc, matrix, tensor, tensor3
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.nlinalg import MatrixPinv
 from pytensor.tensor.rewriting.blockwise import local_useless_blockwise
@@ -40,7 +40,9 @@ def test_useless_unbatched_blockwise():
     x = tensor3("x")
     out = blockwise_op(x)
     fn = function([x], out, mode="FAST_COMPILE")
-    assert isinstance(fn.maker.fgraph.outputs[0].owner.op, Blockwise)
+    assert isinstance(
+        fn.maker.fgraph.outputs[0].owner.op, Blockwise | BlockwiseWithCoreShape
+    )
     assert isinstance(fn.maker.fgraph.outputs[0].owner.op.core_op, MatrixPinv)
 
 
