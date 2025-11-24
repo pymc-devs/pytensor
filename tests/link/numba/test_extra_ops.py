@@ -296,6 +296,14 @@ def test_Repeat(x, repeats, axis, exc):
             True,
             UserWarning,
         ),
+        (
+            (pt.lmatrix(), np.array([[1, 1], [1, 1], [2, 2]], dtype="int64")),
+            None,
+            True,
+            True,
+            True,
+            UserWarning,
+        ),
     ],
 )
 def test_Unique(x, axis, return_index, return_inverse, return_counts, exc):
