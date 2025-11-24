@@ -158,8 +158,7 @@ def test_debugprint():
 
     F = D + E
     G = C + F
-    mode = pytensor.compile.get_default_mode().including("fusion")
-    g = pytensor.function([A, B, D, E], G, mode=mode)
+    g = pytensor.function([A, B, D, E], G)
 
     # just test that it work
     s = StringIO()
@@ -250,7 +249,7 @@ def test_debugprint():
     assert s == reference
 
     # Test the `profile` handling when profile data is missing
-    g = pytensor.function([A, B, D, E], G, mode=mode, profile=True)
+    g = pytensor.function([A, B, D, E], G, profile=True)
 
     s = StringIO()
     debugprint(g, file=s, id_type="", print_storage=True)
@@ -291,7 +290,7 @@ def test_debugprint():
     J = dvector()
     s = StringIO()
     debugprint(
-        pytensor.function([A, B, D, J], A + (B.dot(J) - D), mode="FAST_RUN"),
+        pytensor.function([A, B, D, J], A + (B.dot(J) - D), mode="CVM"),
         file=s,
         id_type="",
         print_destroy_map=True,

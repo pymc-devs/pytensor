@@ -339,8 +339,8 @@ class TestParamsType:
         x = matrix(dtype="float64")
         y1 = QuadraticOpFunc(a, b, c)(x)
         y2 = QuadraticCOpFunc(a, b, c)(x)
-        f1 = pytensor.function([x], y1)
-        f2 = pytensor.function([x], y2)
+        f1 = pytensor.function([x], y1, mode="CVM")
+        f2 = pytensor.function([x], y2, mode="CVM")
         shape = (100, 100)
         vx = (
             np.random.normal(size=shape[0] * shape[1]).astype("float64").reshape(*shape)
