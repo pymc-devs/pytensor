@@ -147,11 +147,11 @@ def local_0_dot_x(fgraph, node):
     x, y = node.inputs
     if (
         get_underlying_scalar_constant_value(
-            x, only_process_constants=True, raise_not_constant=False
+            x, only_process_constants=False, raise_not_constant=False
         )
         == 0
         or get_underlying_scalar_constant_value(
-            y, only_process_constants=True, raise_not_constant=False
+            y, only_process_constants=False, raise_not_constant=False
         )
         == 0
     ):
