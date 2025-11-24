@@ -3,6 +3,7 @@ import pickle
 
 import numpy as np
 import pytest
+from numba import TypingError
 
 import pytensor.tensor as pt
 from pytensor.compile import shared
@@ -1001,10 +1002,14 @@ class TestPicklefunction:
                 raise
         assert f.trust_input is g.trust_input
         f(np.asarray(2.0))
-        with pytest.raises((ValueError, AttributeError, InvalidValueError)):
+        with pytest.raises(
+            (ValueError, AttributeError, InvalidValueError, TypingError)
+        ):
             f(2.0)
         g(np.asarray(2.0))
-        with pytest.raises((ValueError, AttributeError, InvalidValueError)):
+        with pytest.raises(
+            (ValueError, AttributeError, InvalidValueError, TypingError)
+        ):
             g(2.0)
 
     def test_output_keys(self):

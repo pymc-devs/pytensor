@@ -335,6 +335,7 @@ def test_dot_errors():
     y_test = DataArray(np.ones((4, 5)), dims=("b", "c"))
     # Doesn't fail until the rewrite
     with pytest.raises(
-        ValueError, match="Input operand 1 has a mismatch in its core dimension 0"
+        ValueError,
+        match=r"(Input operand 1 has a mismatch in its core dimension 0|incompatible array sizes for np.dot)",
     ):
         fn(x_test, y_test)
