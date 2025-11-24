@@ -54,7 +54,6 @@ from pytensor.tensor.type import (
 )
 from tests import unittest_tools as utt
 from tests.sparse.test_basic import (
-    as_ndarray,
     as_sparse_format,
     random_lil,
     sparse_random_inputs,
@@ -1020,7 +1019,7 @@ class TestSamplingDot(utt.InferShapeTester):
         tested = f(*self.a)
         x, y, p = self.a
         expected = p.multiply(np.dot(x, y.T))
-        utt.assert_allclose(as_ndarray(expected), tested.toarray())
+        utt.assert_allclose(expected.toarray(), tested.toarray())
         assert tested.format == "csr"
         assert tested.dtype == expected.dtype
 
@@ -1030,7 +1029,7 @@ class TestSamplingDot(utt.InferShapeTester):
         tested = f(*a2)
         x, y, p = a2
         expected = p.multiply(np.dot(x, y.T))
-        utt.assert_allclose(as_ndarray(expected), tested.toarray())
+        utt.assert_allclose(expected.toarray(), tested.toarray())
         assert tested.format == "csr"
         assert tested.dtype == expected.dtype
 
@@ -1098,7 +1097,7 @@ class TestStructuredAddSV:
 
                 out = f(spmat, mat)
                 utt.assert_allclose(
-                    as_ndarray(spones.multiply(spmat + mat)), out.toarray()
+                    spones.multiply(spmat + mat).toarray(), out.toarray()
                 )
 
 
