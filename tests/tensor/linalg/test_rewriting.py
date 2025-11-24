@@ -13,7 +13,7 @@ from pytensor.tensor._linalg.solve.tridiagonal import (
     LUFactorTridiagonal,
     SolveLUFactorTridiagonal,
 )
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg import solve
 from pytensor.tensor.slinalg import (
     Cholesky,
@@ -33,7 +33,8 @@ class DecompSolveOpCounter:
 
     def check_node_op_or_core_op(self, node, op):
         return isinstance(node.op, op) or (
-            isinstance(node.op, Blockwise) and isinstance(node.op.core_op, op)
+            isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+            and isinstance(node.op.core_op, op)
         )
 
     def count_vanilla_solve_nodes(self, nodes) -> int:
