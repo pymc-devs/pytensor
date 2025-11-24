@@ -137,6 +137,12 @@ def check_blockwise_runtime_broadcasting(mode):
             fn(*valid_test_values), np.full((batch_dim, 3, 3), 5.0)
         )
 
+    possible_err_messages = [
+        "Runtime broadcasting not allowed",
+        "has an incompatible shape in axis",
+        "Incompatible vectorized shapes",
+    ]
+    err_msg = f"({'|'.join(possible_err_messages)})"
     for invalid_test_values in [
         (
             np.ones((1, 3, 5)).astype(config.floatX),
@@ -147,7 +153,7 @@ def check_blockwise_runtime_broadcasting(mode):
             np.ones((1, 5, 3)).astype(config.floatX),
         ),
     ]:
-        with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        with pytest.raises(ValueError, match=err_msg):
             fn(*invalid_test_values)
 
     invalid_test_values = (

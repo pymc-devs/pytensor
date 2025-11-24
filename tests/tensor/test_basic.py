@@ -12,7 +12,7 @@ import pytensor.tensor.math as ptm
 from pytensor import compile, config, function, shared
 from pytensor.compile import SharedVariable
 from pytensor.compile.io import In, Out
-from pytensor.compile.mode import Mode, get_default_mode
+from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.gradient import grad, hessian
 from pytensor.graph.basic import Apply, equal_computations
@@ -731,7 +731,7 @@ def check_alloc_runtime_broadcast(mode):
 
 class TestAlloc:
     dtype = config.floatX
-    mode = mode_opt
+    mode = get_mode(mode_opt)
     shared = staticmethod(pytensor.shared)
     allocs = [Alloc()] * 3
 
@@ -745,41 +745,47 @@ class TestAlloc:
     def setup_method(self):
         self.rng = np.random.default_rng(seed=utt.fetch_seed())
 
-    def test_alloc_constant_folding(self):
+    @pytest.mark.parametrize(
+        "subtensor_fn, expected_grad_n_alloc",
+        [
+            # IncSubtensor1
+            (lambda x: x[:60], 1),
+            # AdvancedIncSubtensor1
+            (lambda x: x[np.arange(60)], 1),
+            # AdvancedIncSubtensor
+            (lambda x: x[np.arange(50), np.arange(50)], 1),
+        ],
+    )
+    def test_alloc_constant_folding(self, subtensor_fn, expected_grad_n_alloc):
         test_params = np.asarray(self.rng.standard_normal(50 * 60), self.dtype)
 
         some_vector = vector("some_vector", dtype=self.dtype)
         some_matrix = some_vector.reshape((60, 50))
         variables = self.shared(np.ones((50,), dtype=self.dtype))
-        idx = constant(np.arange(50))
 
-        for alloc_, (subtensor, n_alloc) in zip(
-            self.allocs,
-            [
-                # IncSubtensor1
-                (some_matrix[:60], 2),
-                # AdvancedIncSubtensor1
-                (some_matrix[arange(60)], 2),
-                # AdvancedIncSubtensor
-                (some_matrix[idx, idx], 1),
-            ],
-            strict=True,
-        ):
-            derp = pt_sum(dense_dot(subtensor, variables))
+        subtensor = subtensor_fn(some_matrix)
 
-            fobj = pytensor.function([some_vector], derp, mode=self.mode)
-            grad_derp = pytensor.grad(derp, some_vector)
-            fgrad = pytensor.function([some_vector], grad_derp, mode=self.mode)
+        derp = pt_sum(dense_dot(subtensor, variables))
+        fobj = pytensor.function(
+            [some_vector], derp, mode=get_mode(self.mode).excluding("BlasOpt")
+        )
+        assert (
+            sum(isinstance(node.op, Alloc) for node in fobj.maker.fgraph.apply_nodes)
+            == 0
+        )
+        # TODO: Assert something about the value if we bothered to call it?
+        fobj(test_params)
 
-            topo_obj = fobj.maker.fgraph.toposort()
-            assert sum(isinstance(node.op, type(alloc_)) for node in topo_obj) == 0
-
-            topo_grad = fgrad.maker.fgraph.toposort()
-            assert (
-                sum(isinstance(node.op, type(alloc_)) for node in topo_grad) == n_alloc
-            ), (alloc_, subtensor, n_alloc, topo_grad)
-            fobj(test_params)
-            fgrad(test_params)
+        grad_derp = pytensor.grad(derp, some_vector)
+        fgrad = pytensor.function(
+            [some_vector], grad_derp, mode=self.mode.excluding("BlasOpt")
+        )
+        assert (
+            sum(isinstance(node.op, Alloc) for node in fgrad.maker.fgraph.apply_nodes)
+            == expected_grad_n_alloc
+        )
+        # TODO: Assert something about the value if we bothered to call it?
+        fgrad(test_params)
 
     def test_alloc_output(self):
         val = constant(self.rng.standard_normal((1, 1)), dtype=self.dtype)

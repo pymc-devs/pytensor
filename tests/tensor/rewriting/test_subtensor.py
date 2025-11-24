@@ -1649,7 +1649,11 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
 
 
 def test_local_uint_constant_indices():
-    mode = get_default_mode().including("specialize", "local_uint_constant_indices")
+    mode = (
+        get_default_mode()
+        .including("specialize", "local_uint_constant_indices")
+        .excluding("bool_idx_to_nonzero")
+    )
     rng = np.random.default_rng(20900)
 
     # Subtensor, don't convert

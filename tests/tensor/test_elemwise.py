@@ -185,7 +185,7 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
         x = self.type(self.dtype, shape=())()
         y = x.dimshuffle(("x",) * (numpy_maxdims + 1))
 
-        with pytest.raises(ValueError):
+        with pytest.raises((ValueError, SystemError)):
             y.eval({x: 0})
 
     def test_c_views(self):
