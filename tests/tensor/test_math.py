@@ -1437,7 +1437,8 @@ class TestMinMax:
             )  # It's not failing in all the CIs but we have XPASS(strict) enabled
 
     @pytest.mark.xfail(
-        condition=config.mode != "FAST_COMPILE", reason="Fails due to #770"
+        condition=getattr(get_default_mode().linker, "c_thunks", False),
+        reason="Fails due to #770",
     )
     def test_uint64_special_value(self):
         """Example from issue #770"""

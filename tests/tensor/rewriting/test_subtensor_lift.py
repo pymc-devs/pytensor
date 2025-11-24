@@ -43,6 +43,7 @@ from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import Dot
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.subtensor_lift import (
     local_subtensor_make_vector,
@@ -241,7 +242,7 @@ def test_local_subtensor_of_dot():
     f = function([m1, m2], pt.dot(m1, m2)[1:2], mode=mode)
     topo = f.maker.fgraph.toposort()
     assert test_equality(f(d1, d2), np.dot(d1, d2)[1:2])
-    assert isinstance(topo[-1].op, Dot22)
+    assert isinstance(topo[-1].op, Dot | Dot22)
 
     m1 = tensor3()
     m2 = tensor3()

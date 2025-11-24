@@ -4,6 +4,7 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import function, scan, shared
+from pytensor.compile import Function
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.io import In
 from pytensor.compile.mode import get_default_mode, get_mode
@@ -13,6 +14,7 @@ from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import ancestors
+from pytensor.link.basic import JITLinker
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import ScanInplaceOptimizer, ScanMerge
 from pytensor.scan.utils import until
@@ -860,7 +862,10 @@ class TestScanMerge:
 
     @staticmethod
     def count_scans(fn):
-        nodes = fn.maker.fgraph.apply_nodes
+        if isinstance(fn, Function):
+            nodes = fn.maker.fgraph.apply_nodes
+        else:
+            nodes = fn.apply_nodes
         scans = [node for node in nodes if isinstance(node.op, Scan)]
         return len(scans)
 
@@ -1068,7 +1073,7 @@ class TestScanMerge:
         [scan_node] = [
             node for node in f.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
         ]
-        inner_f = scan_node.op.fn
+        inner_f = scan_node.op.fgraph
         assert self.count_scans(inner_f) == 1
 
 
@@ -1529,13 +1534,15 @@ class TestSaveMem:
             on_unused_input="ignore",
             allow_input_downcast=True,
         )(v_u, [0, 0], 0, [0, 0], 0)
-        # ScanSaveMem keeps +1 entries to handle taps with preallocated outputs
+        # ScanSaveMem keeps +1 entries to handle taps with preallocated outputs, unless we are using a JITLinker
+        maybe_one = 0 if isinstance(f.maker.linker, JITLinker) else 1
+
         assert [int(i) for i in buffer_lengths] == [
             7,  # entry -7 of a map variable is kept, we need at least that many
             3,  # entries [-3, -2] of a map variable are kept, we need at least 3
             6,  # last six entries of a map variable are kept
-            2 + 1,  # last entry of a double tap variable is kept
-            1 + 1,  # last entry of a single tap variable is kept
+            2 + maybe_one,  # last entry of a double tap variable is kept
+            1 + maybe_one,  # last entry of a single tap variable is kept
         ]
 
     def test_savemem_does_not_duplicate_number_of_scan_nodes(self):

@@ -306,7 +306,10 @@ class TestLocalCanonicalizeAlloc:
             # Error raised by Alloc Op
             with pytest.raises(
                 ValueError,
-                match=r"could not broadcast input array from shape \(3,7\) into shape \(6,7\)",
+                match=(
+                    r"(could not broadcast input array from shape \(3,7\) into shape \(6,7\)"
+                    r"|cannot assign slice of shape \(3, 7\) from input of shape \(6, 7\))"
+                ),
             ):
                 f()
 
