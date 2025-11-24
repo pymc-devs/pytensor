@@ -25,7 +25,7 @@ from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
 from pytensor.tensor import as_tensor, constant, get_vector_length, vectorize
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import exp, isinf, lt, switch
 from pytensor.tensor.math import sum as pt_sum
@@ -3034,7 +3034,8 @@ def test_vectorize_subtensor_without_batch_indices():
         [x, start], vectorize(core_fn, signature=signature)(x, start)
     )
     assert any(
-        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+        isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+        for node in vectorize_pt.maker.fgraph.apply_nodes
     )
     x_test = np.random.normal(size=x.type.shape).astype(x.type.dtype)
     start_test = np.random.randint(0, x.type.shape[-2], size=start.type.shape[0])
@@ -3116,7 +3117,8 @@ def test_vectorize_adv_subtensor(
     )
 
     has_blockwise = any(
-        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+        isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+        for node in vectorize_pt.maker.fgraph.apply_nodes
     )
     assert has_blockwise == uses_blockwise
 

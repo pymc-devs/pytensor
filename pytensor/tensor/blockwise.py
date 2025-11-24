@@ -594,6 +594,11 @@ class OpWithCoreShape(OpFromGraph):
 class BlockwiseWithCoreShape(OpWithCoreShape):
     """Generalizes a Blockwise `Op` to include a core shape parameter."""
 
+    @property
+    def core_op(self):
+        [blockwise_node] = self.fgraph.apply_nodes
+        return cast(Blockwise, blockwise_node.op).core_op
+
     def __str__(self):
         [blockwise_node] = self.fgraph.apply_nodes
         return f"[{blockwise_node.op!s}]"

@@ -497,6 +497,11 @@ def vectorize_random_variable(
 class RandomVariableWithCoreShape(OpWithCoreShape):
     """Generalizes a random variable `Op` to include a core shape parameter."""
 
+    @property
+    def core_op(self):
+        [rv_node] = self.fgraph.apply_nodes
+        return rv_node.op
+
     def __str__(self):
         [rv_node] = self.fgraph.apply_nodes
         return f"[{rv_node.op!s}]"
