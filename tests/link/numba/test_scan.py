@@ -661,3 +661,7 @@ def test_higher_order_derivatives():
 
 def test_grad_until_and_truncate_sequence_taps():
     ScanCompatibilityTests.check_grad_until_and_truncate_sequence_taps(mode="NUMBA")
+
+
+def test_aliased_inner_outputs():
+    ScanCompatibilityTests.check_aliased_inner_outputs(static_shape=True, mode="NUMBA")
