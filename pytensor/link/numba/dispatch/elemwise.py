@@ -397,10 +397,11 @@ def numba_funcify_CAReduce(op, node, **kwargs):
 
 
 @register_funcify_default_op_cache_key(DimShuffle)
-def numba_funcify_DimShuffle(op, node, **kwargs):
+def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
     # We use `as_strided` to achieve the DimShuffle behavior of transposing and expanding/squezing dimensions in one call
     # Numba doesn't currently support multiple expand/squeeze, and reshape is limited to contiguous arrays.
     new_order = tuple(op._new_order)
+    drop = tuple(op.drop)
     shape_template = (1,) * node.outputs[0].ndim
     strides_template = (0,) * node.outputs[0].ndim
 
@@ -409,6 +410,11 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def squeeze_to_0d(x):
+            if not x.size == 1:
+                raise ValueError(
+                    "DimShuffle: Attempting to squeeze axes with size not equal to one"
+                )
+            assert x.size == 1
             return as_strided(x, shape=(), strides=())
 
         return squeeze_to_0d
@@ -428,10 +434,17 @@ def numba_funcify_DimShuffle(op, node, **kwargs):
                     new_strides = numba_basic.tuple_setitem(
                         new_strides, i, old_strides[o]
                     )
+            if drop:
+                for dropped_dim in drop:
+                    if old_shape[dropped_dim] != 1:
+                        raise ValueError(
+                            "DimShuffle: Attempting to squeeze axes with size not equal to one"
+                        )
 
             return as_strided(x, shape=new_shape, strides=new_strides)
 
-    return dimshuffle
+    cache_version = 1
+    return dimshuffle, cache_version
 
 
 @register_funcify_default_op_cache_key(Softmax)

@@ -19,6 +19,7 @@ from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
 from tests.link.numba.test_basic import (
     compare_numba_and_py,
+    numba_mode,
     scalar_my_multi_out,
 )
 from tests.tensor.test_elemwise import (
@@ -215,6 +216,17 @@ def test_Dimshuffle_non_contiguous():
     out = op(pt.specify_shape(x[idx][::2], (1,)))
     func = pytensor.function([x, idx], out, mode="NUMBA")
     assert func(np.zeros(3), np.array([1])).ndim == 0
+
+
+def test_Dimshuffle_squeeze_errors():
+    x = pt.tensor3("x", shape=(4, None, 5))
+    out = pt.squeeze(x, axis=1)
+    assert out.type.shape == (4, 5)
+    fn = function([x], out, mode=numba_mode)
+    with pytest.raises(
+        ValueError, match="Attempting to squeeze axes with size not equal to one"
+    ):
+        fn(np.zeros((4, 2, 5)))
 
 
 @pytest.mark.parametrize(
