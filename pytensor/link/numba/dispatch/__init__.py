@@ -17,6 +17,7 @@ import pytensor.link.numba.dispatch.sort
 import pytensor.link.numba.dispatch.sparse
 import pytensor.link.numba.dispatch.subtensor
 import pytensor.link.numba.dispatch.tensor_basic
+import pytensor.link.numba.dispatch.typed_list
 
 
 # isort: on
