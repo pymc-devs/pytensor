@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from copy import copy, deepcopy
+from copy import deepcopy
 from functools import singledispatch
 from hashlib import sha256
 from textwrap import dedent
@@ -20,6 +20,7 @@ from pytensor.link.numba.dispatch.basic import (
     numba_funcify,
     register_funcify_and_cache_key,
 )
+from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
@@ -35,16 +36,16 @@ from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.utils import _parse_gufunc_signature
 
 
-@overload(copy)
-def copy_NumPyRandomGenerator(rng):
-    def impl(rng):
-        # TODO: Open issue on Numba?
-        with numba.objmode(new_rng=types.npy_rng):
-            new_rng = deepcopy(rng)
+@numba.extending.overload(numba_deepcopy)
+def numba_deepcopy_random_generator(x):
+    if isinstance(x, numba.types.NumPyRandomGeneratorType):
 
-        return new_rng
+        def random_generator_deepcopy(x):
+            with numba.objmode(new_rng=types.npy_rng):
+                new_rng = deepcopy(x)
+            return new_rng
 
-    return impl
+        return random_generator_deepcopy
 
 
 @singledispatch
@@ -449,7 +450,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     def ov_random(core_shape, rng, size, *dist_params):
         def impl(core_shape, rng, size, *dist_params):
             if not inplace:
-                rng = copy(rng)
+                rng = numba_deepcopy(rng)
 
             draws = _vectorized(
                 core_op_fn,
