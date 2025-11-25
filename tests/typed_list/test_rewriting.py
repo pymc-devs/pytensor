@@ -1,9 +1,12 @@
 import numpy as np
+import pytest
 
 import pytensor
 import pytensor.tensor as pt
 import pytensor.typed_list
+from pytensor.compile import get_default_mode
 from pytensor.compile.io import In
+from pytensor.link.numba import NumbaLinker
 from pytensor.tensor.type import TensorType, matrix, scalar
 from pytensor.typed_list.basic import Append, Extend, Insert, Remove, Reverse
 from pytensor.typed_list.type import TypedListType
@@ -146,6 +149,10 @@ class TestInplace:
         assert np.array_equal(f([x, y], y), [x])
 
 
+@pytest.mark.xfail(
+    condition=isinstance(get_default_mode().linker, NumbaLinker),
+    reason="Numba does not supported lists as a global constant: https://github.com/numba/numba/issues/10355",
+)
 def test_constant_folding():
     m = pt.ones((1,), dtype="int8")
     l = pytensor.typed_list.make_list([m, m])
