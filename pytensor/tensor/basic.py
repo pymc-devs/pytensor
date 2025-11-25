@@ -693,6 +693,9 @@ class ScalarFromTensor(COp):
     def grad(self, inp, grads):
         (_s,) = inp
         (dt,) = grads
+
+        if isinstance(dt.type, TensorType):
+            return [dt]
         return [tensor_from_scalar(dt)]
 
     def R_op(self, inputs, eval_points):
