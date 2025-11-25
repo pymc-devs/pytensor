@@ -20,6 +20,7 @@ from pytensor.link.utils import (
 )
 from pytensor.scalar.basic import ScalarType
 from pytensor.sparse import SparseTensorType
+from pytensor.tensor.random.type import RandomGeneratorType
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.utils import hash_from_ndarray
 
@@ -129,8 +130,8 @@ def get_numba_type(
             return CSRMatrixType(numba_dtype)
         if pytensor_type.format == "csc":
             return CSCMatrixType(numba_dtype)
-
-        raise NotImplementedError()
+    elif isinstance(pytensor_type, RandomGeneratorType):
+        return numba.types.NumPyRandomGeneratorType("NumPyRandomGeneratorType")
     else:
         raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 
