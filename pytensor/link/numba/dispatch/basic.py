@@ -23,6 +23,7 @@ from pytensor.sparse import SparseTensorType
 from pytensor.tensor.random.type import RandomGeneratorType
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.utils import hash_from_ndarray
+from pytensor.typed_list import TypedListType
 
 
 def _filter_numba_warnings():
@@ -132,6 +133,8 @@ def get_numba_type(
             return CSCMatrixType(numba_dtype)
     elif isinstance(pytensor_type, RandomGeneratorType):
         return numba.types.NumPyRandomGeneratorType("NumPyRandomGeneratorType")
+    elif isinstance(pytensor_type, TypedListType):
+        return numba.types.List(get_numba_type(pytensor_type.ttype))
     else:
         raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 
@@ -260,7 +263,10 @@ def numba_typify(data, dtype=None, **kwargs):
 
 
 def generate_fallback_impl(op, node, storage_map=None, **kwargs):
-    """Create a Numba compatible function from a Pytensor `Op`."""
+    """Create a Numba compatible function from a Pytensor `Op`.
+
+    Note limitations: https://numba.pydata.org/numba-doc/dev/user/withobjmode.html#the-objmode-context-manager
+    """
 
     warnings.warn(
         f"Numba will use object mode to run {op}'s perform method. "
