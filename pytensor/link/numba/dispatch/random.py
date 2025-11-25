@@ -16,6 +16,7 @@ from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     direct_cast,
+    generate_fallback_impl,
     numba_funcify,
     register_funcify_and_cache_key,
 )
@@ -406,13 +407,24 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
     [rv_node] = op.fgraph.apply_nodes
     rv_op: RandomVariable = rv_node.op
+
+    try:
+        core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
+    except NotImplementedError:
+        py_impl = generate_fallback_impl(rv_op, node=rv_node, **kwargs)
+
+        @numba_basic.numba_njit
+        def fallback_rv(_core_shape, *args):
+            return py_impl(*args)
+
+        return fallback_rv, None
+
     size = rv_op.size_param(rv_node)
     dist_params = rv_op.dist_params(rv_node)
     size_len = None if isinstance(size.type, NoneTypeT) else get_vector_length(size)
     core_shape_len = get_vector_length(core_shape)
     inplace = rv_op.inplace
 
-    core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
     nin = 1 + len(dist_params)  # rng + params
     core_op_fn = store_core_outputs(core_rv_fn, nin=nin, nout=1)
 
