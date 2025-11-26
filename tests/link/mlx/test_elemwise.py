@@ -8,10 +8,13 @@ from pytensor.tensor.math import (
     add,
     cos,
     eq,
+    erfc,
+    erfcx,
     exp,
     ge,
     gt,
     int_div,
+    isnan,
     isinf,
     le,
     log,
@@ -22,6 +25,7 @@ from pytensor.tensor.math import (
     prod,
     sigmoid,
     sin,
+    softplus,
     sub,
     true_div,
 )
@@ -189,3 +193,117 @@ def test_elemwise_two_inputs(op) -> None:
     x_test = mx.array([1.0, 2.0, 3.0])
     y_test = mx.array([4.0, 5.0, 6.0])
     compare_mlx_and_py([x, y], out, [x_test, y_test])
+
+
+# Tests moved from test_math.py (Issue #1730)
+
+
+def test_switch() -> None:
+    x = vector("x")
+    y = vector("y")
+
+    out = switch(x > 0, y, x)
+
+    x_test = mx.array([-1.0, 2.0, 3.0])
+    y_test = mx.array([4.0, 5.0, 6.0])
+
+    compare_mlx_and_py([x, y], out, [x_test, y_test])
+
+
+def test_isnan() -> None:
+    x = vector("x")
+    out = isnan(x)
+
+    x_test = mx.array([1.0, np.nan, 3.0, np.inf, -np.nan, 0.0, -np.inf])
+
+    compare_mlx_and_py([x], out, [x_test])
+
+
+def test_isnan_edge_cases() -> None:
+    from pytensor.tensor.type import scalar
+
+    x = scalar("x")
+    out = isnan(x)
+
+    # Test individual cases
+    test_cases = [0.0, np.nan, np.inf, -np.inf, 1e-10, 1e10]
+
+    for test_val in test_cases:
+        x_test = test_val
+        compare_mlx_and_py([x], out, [x_test])
+
+
+def test_erfc() -> None:
+    """Test complementary error function"""
+    x = vector("x")
+    out = erfc(x)
+
+    # Test with various values including negative, positive, and zero
+    x_test = mx.array([0.0, 0.5, 1.0, -0.5, -1.0, 2.0, -2.0, 0.1])
+
+    compare_mlx_and_py([x], out, [x_test])
+
+
+def test_erfc_extreme_values() -> None:
+    """Test erfc with extreme values"""
+    from functools import partial
+
+    x = vector("x")
+    out = erfc(x)
+
+    # Test with larger values where erfc approaches 0 or 2
+    x_test = mx.array([-3.0, -2.5, 2.5, 3.0])
+
+    # Use relaxed tolerance for extreme values due to numerical precision differences
+    relaxed_assert = partial(np.testing.assert_allclose, rtol=1e-3, atol=1e-6)
+
+    compare_mlx_and_py([x], out, [x_test], assert_fn=relaxed_assert)
+
+
+def test_erfcx() -> None:
+    """Test scaled complementary error function"""
+    x = vector("x")
+    out = erfcx(x)
+
+    # Test with positive values where erfcx is most numerically stable
+    x_test = mx.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
+
+    compare_mlx_and_py([x], out, [x_test])
+
+
+def test_erfcx_small_values() -> None:
+    """Test erfcx with small values"""
+    x = vector("x")
+    out = erfcx(x)
+
+    # Test with small values
+    x_test = mx.array([0.001, 0.01, 0.1, 0.2])
+
+    compare_mlx_and_py([x], out, [x_test])
+
+
+def test_softplus() -> None:
+    """Test softplus (log(1 + exp(x))) function"""
+    x = vector("x")
+    out = softplus(x)
+
+    # Test with normal range values
+    x_test = mx.array([0.0, 1.0, 2.0, -1.0, -2.0, 10.0])
+
+    compare_mlx_and_py([x], out, [x_test])
+
+
+def test_softplus_extreme_values() -> None:
+    """Test softplus with extreme values to verify numerical stability"""
+    from functools import partial
+
+    x = vector("x")
+    out = softplus(x)
+
+    # Test with extreme values where different branches of the implementation are used
+    x_test = mx.array([-40.0, -50.0, 20.0, 30.0, 35.0, 50.0])
+
+    # Use relaxed tolerance for extreme values due to numerical precision differences
+    relaxed_assert = partial(np.testing.assert_allclose, rtol=1e-4, atol=1e-8)
+
+    compare_mlx_and_py([x], out, [x_test], assert_fn=relaxed_assert)
