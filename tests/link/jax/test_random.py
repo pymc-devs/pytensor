@@ -23,7 +23,7 @@ from tests.tensor.random.test_basic import (
 jax = pytest.importorskip("jax")
 
 
-from pytensor.link.jax.dispatch.random import numpyro_available  # noqa: E402
+from pytensor.link.jax.dispatch.random import numpyro_available
 
 
 def compile_random_function(*args, mode=jax_mode, **kwargs):

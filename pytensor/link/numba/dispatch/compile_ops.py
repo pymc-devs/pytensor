@@ -64,6 +64,7 @@ def numba_funcify_type_casting(op, **kwargs):
 
 @register_funcify_default_op_cache_key(DeepCopyOp)
 def numba_funcify_DeepCopyOp(op, node, **kwargs):
+    # FIXME: SparseTensorType will match on this condition, but `np.copy` doesn't work with them
     if isinstance(node.inputs[0].type, TensorType):
 
         @numba_basic.numba_njit
