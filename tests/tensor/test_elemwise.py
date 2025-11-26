@@ -32,6 +32,7 @@ from pytensor.tensor.type import (
     bmatrix,
     bscalar,
     discrete_dtypes,
+    dmatrix,
     lscalar,
     matrix,
     scalar,
@@ -832,7 +833,26 @@ class TestElemwise(unittest_tools.InferShapeTester):
         reason="G++ not available, so we need to skip this test.",
     )
     def test_runtime_broadcast_c(self):
-        check_elemwise_runtime_broadcast(Mode(linker="c"))
+        c_mode = Mode(linker="cvm")
+        check_elemwise_runtime_broadcast(c_mode)
+
+        # Test C-backend specific error formatting
+        x = dmatrix("x")
+        y = dmatrix("y")
+        fn = function([x, y], x * y, mode=c_mode)
+        with pytest.raises(
+            ValueError,
+            match=r"Runtime broadcasting not allowed.*\(input\[0\]\.shape\[1\] = 4, input\[1\]\.shape\[1\] = 1\)",
+        ):
+            fn(np.zeros((5, 4)), np.zeros((5, 1)))
+
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "Input dimension mismatch: (input[0].shape[1] = 4, input[1].shape[1] = 3)"
+            ),
+        ):
+            fn(np.zeros((5, 4)), np.zeros((5, 3)))
 
     def test_str(self):
         op = Elemwise(ps.add, inplace_pattern={0: 0}, name=None)
