@@ -17,7 +17,7 @@ from pytensor.compile.io import In
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
-from pytensor.graph import Constant
+from pytensor.graph import Constant, vectorize_graph
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
@@ -3047,15 +3047,12 @@ def test_vectorize_subtensor_without_batch_indices():
             (2,),
             False,
         ),
-        # (this is currently failing because PyTensor tries to vectorize the slice(None) operation,
-        # due to the exact same None constant being used there and in the np.newaxis)
         pytest.param(
             (lambda x, idx: x[:, idx, None]),
             "(7,5,3),(2)->(7,2,1,3)",
             (11, 7, 5, 3),
             (2,),
             False,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
         ),
         (
             (lambda x, idx: x[:, idx, idx, :]),
@@ -3218,3 +3215,70 @@ class TestBenchmarks:
         )
         fn.vm.allow_gc = gc
         benchmark(fn, x_values)
+
+
+class TestAdvancedIncSubtensorVectorization:
+    def test_vectorize_advanced_inc_subtensor_slice(self):
+        # Regression test for vectorization of AdvancedIncSubtensor with slice inputs
+        x = matrix("x")
+        y = vector("y")
+        idx = as_tensor([0, 1])
+
+        # x[0:2, idx] = y
+        # This uses AdvancedIncSubtensor because of the vector index mixed with slice
+        z = set_subtensor(x[0:2, idx], y)
+
+        # Vectorize over a batch dimension
+        # batched_x: (B, N, M)
+        # batched_y: (B, 2)
+        batched_x = tensor3("bx")
+        batched_y = matrix("by")
+
+        out_batched = vectorize_graph(z, replace={x: batched_x, y: batched_y})
+
+        f = function([batched_x, batched_y], out_batched)
+
+        bx_val = np.zeros((2, 5, 5), dtype=config.floatX)
+        by_val = np.ones((2, 2), dtype=config.floatX)
+
+        res = f(bx_val, by_val)
+
+        # Verify result
+        # For each batch b:
+        # res[b, 0:2, [0, 1]] should be 1
+        assert np.all(res[:, 0:2, [0, 1]] == 1)
+        assert np.all(res[:, 2:, :] == 0)
+
+    def test_vectorize_advanced_inc_subtensor_batched_slice(self):
+        # Regression test for vectorization of AdvancedIncSubtensor with batched slice parameters
+        x = matrix("x")
+        s = lscalar("s")
+        # x[s:, [0, 0]] = 0
+        out = set_subtensor(x[s:, [0, 0]], 0)
+
+        # Vectorize s -> z (vector)
+        z = lvector("z")
+
+        out_batched = vectorize_graph(out, replace={s: z})
+
+        f = function([x, z], out_batched)
+
+        x_val = np.arange(12).reshape((4, 3)).astype(config.floatX)
+        z_val = np.array([1, 2], dtype="int64")
+
+        # For z=1: x[1:, [0,0]] = 0. Rows 1,2,3. Cols 0.
+        # For z=2: x[2:, [0,0]] = 0. Rows 2,3. Cols 0.
+
+        res = f(x_val, z_val)
+
+        # res shape: (2, 4, 3)
+        assert res.shape == (2, 4, 3)
+
+        expected_0 = x_val.copy()
+        expected_0[1:, [0, 0]] = 0
+
+        expected_1 = x_val.copy()
+        expected_1[2:, [0, 0]] = 0
+
+        assert np.allclose(res[0], expected_0)
+        assert np.allclose(res[1], expected_1)
