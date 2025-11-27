@@ -195,9 +195,6 @@ def test_elemwise_two_inputs(op) -> None:
     compare_mlx_and_py([x, y], out, [x_test, y_test])
 
 
-# Tests moved from test_math.py (Issue #1730)
-
-
 def test_switch() -> None:
     x = vector("x")
     y = vector("y")
