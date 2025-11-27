@@ -254,6 +254,17 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                     """
                 ).strip()
             )
+        else:
+            # And regular loops should zero out unused entries of the output buffer
+            # These show up with truncated gradients of while loops
+            output_storage_post_proc_stmts.append(
+                dedent(
+                    f"""
+                    elif {storage_size} > (i + {max_offset}):
+                        {outer_in_name}[i + {max_offset}:] = 0
+                    """
+                ).strip()
+            )
 
     # Special in-loop statements that create (nit-sot) storage arrays after a
     # single iteration is performed.  This is necessary because we don't know
@@ -309,7 +320,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                     )
 
                 if outer_in_name not in outer_in_mit_mot_names:
-                    # MIT-SOT and NIT-SOT may require buffer rolling/truncation after the main loop
+                    # MIT-SOT and NIT-SOT may require buffer rolling/truncation/zeroing after the main loop
                     max_offset_out_tap = max(output_taps) + max_lookback_inp_tap
                     add_output_storage_post_proc_stmt(
                         storage_name, max_offset_out_tap, storage_size_name
