@@ -12,11 +12,13 @@ from pytensor.typed_list.type import TypedListType
 
 
 class _typed_list_py_operators:
+    def __len__(self):
+        raise TypeError(
+            "Cannot call len(TypedList). Use `.length()` method instead for the symbolic equivalent."
+        )
+
     def __getitem__(self, index):
         return getitem(self, index)
-
-    def __len__(self):
-        return length(self)
 
     def append(self, toAppend):
         return append(self, toAppend)
@@ -36,9 +38,12 @@ class _typed_list_py_operators:
     def count(self, elem):
         return count(self, elem)
 
-    # name "index" is already used by an attribute
+    # name "index" is claimed as an attribute of PyTensor Variable(s)
     def ind(self, elem):
         return index_(self, elem)
+
+    def length(self):
+        return length(self)
 
     ttype = property(lambda self: self.type.ttype)
     dtype = property(lambda self: self.type.ttype.dtype)
