@@ -27,9 +27,8 @@ def idx_to_str(
     idx_symbol: str = "i",
     allow_scalar=False,
 ) -> str:
-    if offset < 0:
-        indices = f"{idx_symbol} + {array_name}.shape[0] - {offset}"
-    elif offset > 0:
+    assert offset >= 0
+    if offset > 0:
         indices = f"{idx_symbol} + {offset}"
     else:
         indices = idx_symbol
@@ -226,33 +225,16 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     # storage array like a circular buffer, and that's why we need to track the
     # storage size along with the taps length/indexing offset.
     def add_output_storage_post_proc_stmt(
-        outer_in_name: str, tap_sizes: tuple[int, ...], storage_size: str
+        outer_in_name: str, max_offset: int, storage_size: str
     ):
-        tap_size = max(tap_sizes)
-
-        if op.info.as_while:
-            # While loops need to truncate the output storage to a length given
-            # by the number of iterations performed.
-            output_storage_post_proc_stmts.append(
-                dedent(
-                    f"""
-                    if i + {tap_size} < {storage_size}:
-                        {storage_size} = i + {tap_size}
-                        {outer_in_name} = {outer_in_name}[:{storage_size}]
-                    """
-                ).strip()
-            )
-
-        # Rotate the storage so that the last computed value is at the end of
-        # the storage array.
+        # Rotate the storage so that the last computed value is at the end of the storage array.
         # This is needed when the output storage array does not have a length
         # equal to the number of taps plus `n_steps`.
-        # If the storage size only allows one entry, there's nothing to rotate
         output_storage_post_proc_stmts.append(
             dedent(
                 f"""
-                if 1 < {storage_size} < (i + {tap_size}):
-                    {outer_in_name}_shift = (i + {tap_size}) % ({storage_size})
+                if 1 < {storage_size} < (i + {max_offset}):
+                    {outer_in_name}_shift = (i + {max_offset}) % ({storage_size})
                     if {outer_in_name}_shift > 0:
                         {outer_in_name}_left = {outer_in_name}[:{outer_in_name}_shift]
                         {outer_in_name}_right = {outer_in_name}[{outer_in_name}_shift:]
@@ -260,6 +242,18 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 """
             ).strip()
         )
+
+        if op.info.as_while:
+            # While loops need to truncate the output storage to a length given
+            # by the number of iterations performed.
+            output_storage_post_proc_stmts.append(
+                dedent(
+                    f"""
+                    elif {storage_size} > (i + {max_offset}):
+                        {outer_in_name} = {outer_in_name}[:i + {max_offset}]
+                    """
+                ).strip()
+            )
 
     # Special in-loop statements that create (nit-sot) storage arrays after a
     # single iteration is performed.  This is necessary because we don't know
@@ -288,12 +282,11 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 storage_size_name = f"{outer_in_name}_len"
                 storage_size_stmt = f"{storage_size_name} = {outer_in_name}.shape[0]"
                 input_taps = inner_in_names_to_input_taps[outer_in_name]
-                tap_storage_size = -min(input_taps)
-                assert tap_storage_size >= 0
+                max_lookback_inp_tap = -min(0, min(input_taps))
+                assert max_lookback_inp_tap >= 0
 
                 for in_tap in input_taps:
-                    tap_offset = in_tap + tap_storage_size
-                    assert tap_offset >= 0
+                    tap_offset = max_lookback_inp_tap + in_tap
                     is_vector = outer_in_var.ndim == 1
                     add_inner_in_expr(
                         outer_in_name,
@@ -302,22 +295,25 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                         vector_slice_opt=is_vector,
                     )
 
-                output_taps = inner_in_names_to_output_taps.get(
-                    outer_in_name, [tap_storage_size]
-                )
-                inner_out_to_outer_in_stmts.extend(
-                    idx_to_str(
-                        storage_name,
-                        out_tap,
-                        size=storage_size_name,
-                        allow_scalar=True,
+                output_taps = inner_in_names_to_output_taps.get(outer_in_name, [0])
+                for out_tap in output_taps:
+                    tap_offset = max_lookback_inp_tap + out_tap
+                    assert tap_offset >= 0
+                    inner_out_to_outer_in_stmts.append(
+                        idx_to_str(
+                            storage_name,
+                            tap_offset,
+                            size=storage_size_name,
+                            allow_scalar=True,
+                        )
                     )
-                    for out_tap in output_taps
-                )
 
-                add_output_storage_post_proc_stmt(
-                    storage_name, output_taps, storage_size_name
-                )
+                if outer_in_name not in outer_in_mit_mot_names:
+                    # MIT-SOT and SIT-SOT may require buffer rolling/truncation after the main loop
+                    max_offset_out_tap = max(output_taps) + max_lookback_inp_tap
+                    add_output_storage_post_proc_stmt(
+                        storage_name, max_offset_out_tap, storage_size_name
+                    )
 
             else:
                 storage_size_stmt = ""
@@ -351,7 +347,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
             inner_out_to_outer_in_stmts.append(
                 idx_to_str(storage_name, 0, size=storage_size_name, allow_scalar=True)
             )
-            add_output_storage_post_proc_stmt(storage_name, (0,), storage_size_name)
+            add_output_storage_post_proc_stmt(storage_name, 0, storage_size_name)
 
             # In case of nit-sots we are provided the length of the array in
             # the iteration dimension instead of actual arrays, hence we

@@ -4082,6 +4082,9 @@ class TestExamples:
         # Also, the purpose of this test is not clear.
         self._grad_mout_helper(1, None)
 
+    def test_higher_order_derivatives(self):
+        ScanCompatibilityTests.check_higher_order_derivative(mode=None)
+
 
 @pytest.mark.parametrize(
     "fn, sequences, outputs_info, non_sequences, n_steps, op_check",
@@ -4398,3 +4401,33 @@ def test_scan_mode_compatibility(scan_mode):
 
     # Expected value computed by running correct Scan once
     np.testing.assert_allclose(fn(*numerical_inputs), [44, 38])
+
+
+class ScanCompatibilityTests:
+    """Collection of test of subtle required behaviors of Scan, that can be reused by different backends."""
+
+    @staticmethod
+    def check_higher_order_derivative(mode):
+        """This tests different mit-mot taps signs"""
+        x = pt.dscalar("x")
+
+        # xs[-1] is equivalent to x ** 16
+        xs = scan(
+            fn=lambda xtm1: xtm1**2,
+            outputs_info=[x],
+            n_steps=4,
+            return_updates=False,
+        )
+        r = xs[-1]
+        g = grad(r, x)
+        gg = grad(g, x)
+        ggg = grad(gg, x)
+
+        fn = function([x], [r, g, gg, ggg], mode=mode)
+        x_test = np.array(0.95, dtype=x.type.dtype)
+        r_res, g_res, gg_res, _ggg_res = fn(x_test)
+        np.testing.assert_allclose(r_res, x_test**16)
+        np.testing.assert_allclose(g_res, 16 * x_test**15)
+        np.testing.assert_allclose(gg_res, (16 * 15) * x_test**14)
+        # FIXME: All implementations of Scan seem to get this one wrong!
+        # np.testing.assert_allclose(ggg_res, (16 * 15 * 14) * x_test**13)

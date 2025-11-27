@@ -15,6 +15,7 @@ from pytensor.tensor import random
 from pytensor.tensor.math import gammaln, log
 from pytensor.tensor.type import dmatrix, dvector, matrix, scalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
+from tests.scan.test_basic import ScanCompatibilityTests
 
 
 jax = pytest.importorskip("jax")
@@ -626,3 +627,7 @@ def test_scan_benchmark(model, mode, gradient_backend, benchmark):
     block_until_ready(*test_input_vals)  # Warmup
 
     benchmark.pedantic(block_until_ready, test_input_vals, rounds=200, iterations=1)
+
+
+def test_higher_order_derivatives():
+    ScanCompatibilityTests.check_higher_order_derivative(mode="JAX")
