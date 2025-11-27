@@ -657,3 +657,7 @@ class TestScanMITSOTBuffer:
 
 def test_higher_order_derivatives():
     ScanCompatibilityTests.check_higher_order_derivative(mode="NUMBA")
+
+
+def test_grad_until_and_truncate_sequence_taps():
+    ScanCompatibilityTests.check_grad_until_and_truncate_sequence_taps(mode="NUMBA")

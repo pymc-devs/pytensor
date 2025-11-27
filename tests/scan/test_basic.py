@@ -2621,22 +2621,7 @@ class TestGradUntil:
         utt.assert_allclose(pytensor_gradient, self.numpy_gradient)
 
     def test_grad_until_and_truncate_sequence_taps(self):
-        n = 3
-        r = scan(
-            lambda x, y, u: (x * y, until(y > u)),
-            sequences=dict(input=self.x, taps=[-2, 0]),
-            non_sequences=[self.threshold],
-            truncate_gradient=n,
-            return_updates=False,
-        )
-        g = grad(r.sum(), self.x)
-        f = function([self.x, self.threshold], [r, g])
-        _pytensor_output, pytensor_gradient = f(self.seq, 6)
-
-        # Gradient computed by hand:
-        numpy_grad = np.array([0, 0, 0, 5, 6, 10, 4, 5, 0, 0, 0, 0, 0, 0, 0])
-        numpy_grad = numpy_grad.astype(config.floatX)
-        utt.assert_allclose(pytensor_gradient, numpy_grad)
+        ScanCompatibilityTests.check_grad_until_and_truncate_sequence_taps(mode=None)
 
 
 def test_mintap_onestep():
@@ -4431,3 +4416,26 @@ class ScanCompatibilityTests:
         np.testing.assert_allclose(gg_res, (16 * 15) * x_test**14)
         # FIXME: All implementations of Scan seem to get this one wrong!
         # np.testing.assert_allclose(ggg_res, (16 * 15 * 14) * x_test**13)
+
+
+    @staticmethod
+    def check_grad_until_and_truncate_sequence_taps(mode):
+        """Test case where we need special behavior of zeroing out sequences in Scan"""
+        x = pt.vector("x")
+        threshold = pt.scalar(name="threshold", dtype="int64")
+
+        r = scan(
+            lambda x, y, u: (x * y, until(y > u)),
+            sequences=dict(input=x, taps=[-2, 0]),
+            non_sequences=[threshold],
+            truncate_gradient=3,
+            return_updates=False,
+        )
+        g = grad(r.sum(), x)
+        f = function([x, threshold], [r, g], mode=mode)
+        _, grad_res = f(np.arange(15, dtype=x.dtype), 6)
+
+        # Gradient computed by hand:
+        grad_expected = np.array([0, 0, 0, 5, 6, 10, 4, 5, 0, 0, 0, 0, 0, 0, 0])
+        grad_expected = grad_expected.astype(config.floatX)
+        np.testing.assert_allclose(grad_res, grad_expected)

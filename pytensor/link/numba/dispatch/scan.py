@@ -254,6 +254,17 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                     """
                 ).strip()
             )
+        else:
+            # And regular loops should zero out unused entries of the output buffer
+            # These show up with truncated gradients of while loops
+            output_storage_post_proc_stmts.append(
+                dedent(
+                    f"""
+                    elif {storage_size} > (i + {max_offset}):
+                        {outer_in_name}[i + {max_offset}:] = 0
+                    """
+                ).strip()
+            )
 
     # Special in-loop statements that create (nit-sot) storage arrays after a
     # single iteration is performed.  This is necessary because we don't know
