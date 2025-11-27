@@ -31,7 +31,6 @@ from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
-from pytensor.tensor import inplace
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
@@ -1134,15 +1133,15 @@ def test_log1p():
     f = function([x], log(1 + (x)), mode=m)
     assert [node.op for node in f.maker.fgraph.toposort()] == [log1p]
     f = function([x], log(1 + (-x)), mode=m)
-    assert [node.op for node in f.maker.fgraph.toposort()] == [
-        neg,
-        inplace.log1p_inplace,
+    assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] == [
+        ps.neg,
+        ps.log1p,
     ]
     f = function([x], -log(1 + (-x)), mode=m)
-    assert [node.op for node in f.maker.fgraph.toposort()] == [
-        neg,
-        inplace.log1p_inplace,
-        inplace.neg_inplace,
+    assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] == [
+        ps.neg,
+        ps.log1p,
+        ps.neg,
     ]
 
     # check trickier cases (and use different dtype)
@@ -4035,27 +4034,27 @@ class TestSigmoidRewrites:
         # todo: solve issue #4589 first
         # assert check_stack_trace(
         #     f, ops_to_check=[sigmoid, neg_inplace])
-        assert [node.op for node in f.maker.fgraph.toposort()] == [
-            sigmoid,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] == [
+            ps.sigmoid,
+            ps.neg,
         ]
         f(data)
         f = pytensor.function([x], pt.fill(x, -1.0) / (1 - exp(-x)), mode=m)
-        assert [node.op for node in f.maker.fgraph.toposort()] != [
-            sigmoid,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] != [
+            ps.sigmoid,
+            ps.neg,
         ]
         f(data)
         f = pytensor.function([x], pt.fill(x, -1.0) / (2 + exp(-x)), mode=m)
-        assert [node.op for node in f.maker.fgraph.toposort()] != [
-            sigmoid,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] != [
+            ps.sigmoid,
+            ps.neg,
         ]
         f(data)
         f = pytensor.function([x], pt.fill(x, -1.1) / (1 + exp(-x)), mode=m)
-        assert [node.op for node in f.maker.fgraph.toposort()] != [
-            sigmoid,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] != [
+            ps.sigmoid,
+            ps.neg,
         ]
         f(data)
 
@@ -4077,10 +4076,10 @@ class TestSigmoidRewrites:
             (pt.fill(x, -1.1) * exp(x)) / ((1 + exp(x)) * (1 + exp(-x))),
             mode=m,
         )
-        assert [node.op for node in f.maker.fgraph.toposort()] != [
-            sigmoid,
-            mul,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] != [
+            ps.sigmoid,
+            ps.mul,
+            ps.neg,
         ]
         f(data)
         f = pytensor.function(
@@ -4088,10 +4087,10 @@ class TestSigmoidRewrites:
             (pt.fill(x, -1.0) * exp(x)) / ((2 + exp(x)) * (1 + exp(-x))),
             mode=m,
         )
-        assert [node.op for node in f.maker.fgraph.toposort()] != [
-            sigmoid,
-            mul,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] != [
+            ps.sigmoid,
+            ps.mul,
+            ps.neg,
         ]
         f(data)
         f = pytensor.function(
@@ -4099,10 +4098,10 @@ class TestSigmoidRewrites:
             (pt.fill(x, -1.0) * exp(x)) / ((1 + exp(x)) * (2 + exp(-x))),
             mode=m,
         )
-        assert [node.op for node in f.maker.fgraph.toposort()] != [
-            sigmoid,
-            mul,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] != [
+            ps.sigmoid,
+            ps.mul,
+            ps.neg,
         ]
         f(data)
         f = pytensor.function(
@@ -4110,10 +4109,10 @@ class TestSigmoidRewrites:
             (pt.fill(x, -1.0) * exp(x)) / ((1 + exp(x)) * (1 + exp(x))),
             mode=m,
         )
-        assert [node.op for node in f.maker.fgraph.toposort()] != [
-            sigmoid,
-            mul,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] != [
+            ps.sigmoid,
+            ps.mul,
+            ps.neg,
         ]
         f(data)
         f = pytensor.function(
@@ -4121,10 +4120,10 @@ class TestSigmoidRewrites:
             (pt.fill(x, -1.0) * exp(x)) / ((1 + exp(x)) * (2 + exp(-x))),
             mode=m,
         )
-        assert [node.op for node in f.maker.fgraph.toposort()] != [
-            sigmoid,
-            mul,
-            inplace.neg_inplace,
+        assert [node.op.scalar_op for node in f.maker.fgraph.toposort()] != [
+            ps.sigmoid,
+            ps.mul,
+            ps.neg,
         ]
         f(data)
 

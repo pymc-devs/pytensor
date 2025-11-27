@@ -84,13 +84,13 @@ jobs:
         install-mlx: [0]
         install-xarray: [0]
         part:
-          - "tests --ignore=tests/tensor --ignore=tests/scan --ignore=tests/xtensor"
+          - "tests --ignore=tests/scan --ignore=tests/tensor --ignore=tests/xtensor"
           - "tests/scan"
-          - "tests/tensor --ignore=tests/tensor/rewriting --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_inplace.py --ignore=tests/tensor/conv --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math_scipy.py"
-          - "tests/tensor/rewriting"
+          - "tests/tensor --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting"
+          - "tests/tensor/test_basic.py tests/tensor/test_elemwise.py"
           - "tests/tensor/test_math.py"
-          - "tests/tensor/test_basic.py tests/tensor/test_inplace.py tests/tensor/conv"
-          - "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
+          - "tests/tensor/test_math_scipy.py tests/tensor/test_blas.py tests/tensor/conv"
+          - "tests/tensor/rewriting"
         exclude:
           - python-version: "3.11"
             fast-compile: 1
@@ -167,7 +167,7 @@ jobs:
             install-numba: 0
             install-jax: 0
             install-torch: 0
-            part: "tests/tensor/test_blas.py tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py"
+            part: "tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py tests/tensor/test_blas.py"
 
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
