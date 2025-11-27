@@ -16,6 +16,7 @@ from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.random.utils import RandomStream
 from tests import unittest_tools as utt
 from tests.link.numba.test_basic import compare_numba_and_py
+from tests.scan.test_basic import ScanCompatibilityTests
 
 
 @pytest.mark.parametrize(
@@ -652,3 +653,7 @@ class TestScanMITSOTBuffer:
 
     def test_mit_sot_buffer_benchmark(self, constant_n_steps, n_steps_val, benchmark):
         self.buffer_tester(constant_n_steps, n_steps_val, benchmark=benchmark)
+
+
+def test_higher_order_derivatives():
+    ScanCompatibilityTests.check_higher_order_derivative(mode="NUMBA")

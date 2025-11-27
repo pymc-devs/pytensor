@@ -90,7 +90,7 @@ def jax_funcify_Scan(op: Scan, **kwargs):
                 chain.from_iterable(
                     buffer[(i + np.array(taps))]
                     for buffer, taps in zip(
-                        inner_mit_mot, info.mit_mot_in_slices, strict=True
+                        inner_mit_mot, info.normalized_mit_mot_in_slices, strict=True
                     )
                 )
             )
@@ -140,7 +140,10 @@ def jax_funcify_Scan(op: Scan, **kwargs):
             new_mit_mot = [
                 buffer.at[i + np.array(taps)].set(new_vals)
                 for buffer, new_vals, taps in zip(
-                    old_mit_mot, new_mit_mot_vals, info.mit_mot_out_slices, strict=True
+                    old_mit_mot,
+                    new_mit_mot_vals,
+                    info.normalized_mit_mot_out_slices,
+                    strict=True,
                 )
             ]
             # Discard oldest MIT-SOT and append newest value

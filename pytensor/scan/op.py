@@ -288,6 +288,26 @@ class ScanInfo:
             + self.n_untraced_sit_sot_outs
         )
 
+    @property
+    def normalized_mit_mot_in_slices(self) -> tuple[tuple[int, ...], ...]:
+        """Return mit_mot_in slices normalized as an offset from the oldest tap"""
+        # TODO: Make this the canonical representation
+        res = []
+        for in_slice in self.mit_mot_in_slices:
+            min_tap = -(min(0, min(in_slice)))
+            res.append(tuple(tap + min_tap for tap in in_slice))
+        return tuple(res)
+
+    @property
+    def normalized_mit_mot_out_slices(self) -> tuple[tuple[int, ...], ...]:
+        """Return mit_mot_out slices normalized as an offset from the oldest tap"""
+        # TODO: Make this the canonical representation
+        res = []
+        for out_slice in self.mit_mot_out_slices:
+            min_tap = -(min(0, min(out_slice)))
+            res.append(tuple(tap + min_tap for tap in out_slice))
+        return tuple(res)
+
 
 TensorConstructorType = Callable[
     [Iterable[bool | int | None], str | np.generic], TensorType
