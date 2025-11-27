@@ -652,3 +652,24 @@ class TestScanMITSOTBuffer:
 
     def test_mit_sot_buffer_benchmark(self, constant_n_steps, n_steps_val, benchmark):
         self.buffer_tester(constant_n_steps, n_steps_val, benchmark=benchmark)
+
+
+def test_higher_order_derivatives():
+    """This tests different mit-mot taps signs"""
+    x = pt.scalar("x")
+
+    xs = scan(
+        fn=lambda xtm1: xtm1**2,
+        outputs_info=[x],
+        n_steps=5,
+        return_updates=False,
+    )
+    g = grad(xs[-1], x)
+    gg = grad(g, x)
+    ggg = grad(gg, x)
+
+    compare_numba_and_py(
+        [x],
+        [g, gg, ggg],
+        [np.array(0.95)],
+    )
