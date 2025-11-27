@@ -20,7 +20,7 @@ from pytensor.misc.frozendict import frozendict
 from pytensor.printing import Printer, pprint
 from pytensor.scalar import get_scalar_type
 from pytensor.scalar.basic import identity as scalar_identity
-from pytensor.scalar.basic import int64, transfer_type, upcast
+from pytensor.scalar.basic import int64, upcast
 from pytensor.tensor import elemwise_cgen as cgen
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import _get_vector_length, as_tensor_variable
@@ -1634,17 +1634,12 @@ def scalar_elemwise(*symbol, nfunc=None, nin=None, nout=None, symbolname=None):
         symbolname = symbolname or symbol.__name__
 
         if symbolname.endswith("_inplace"):
-            base_symbol_name = symbolname[: -len("_inplace")]
-            scalar_op = getattr(scalar, base_symbol_name)
-            inplace_scalar_op = scalar_op.__class__(transfer_type(0))
-            rval = Elemwise(
-                inplace_scalar_op,
-                {0: 0},
-                nfunc_spec=(nfunc and (nfunc, nin, nout)),
+            raise ValueError(
+                "Creation of automatic inplace elemwise operations deprecated"
             )
-        else:
-            scalar_op = getattr(scalar, symbolname)
-            rval = Elemwise(scalar_op, nfunc_spec=(nfunc and (nfunc, nin, nout)))
+
+        scalar_op = getattr(scalar, symbolname)
+        rval = Elemwise(scalar_op, nfunc_spec=(nfunc and (nfunc, nin, nout)))
 
         if getattr(symbol, "__doc__"):
             rval.__doc__ = symbol.__doc__

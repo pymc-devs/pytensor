@@ -17,7 +17,6 @@ from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph.rewriting.basic import in2out
 from pytensor.graph.utils import InconsistencyError
-from pytensor.tensor import inplace
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blas import (
     BatchedDot,
@@ -40,6 +39,7 @@ from pytensor.tensor.blas import (
     ger,
     ger_destructive,
 )
+from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Dot, dot, mean, mul, outer, sigmoid
 from pytensor.tensor.rewriting.blas import local_dot22_to_dot22scalar, local_gemm_to_ger
 from pytensor.tensor.type import (
@@ -258,16 +258,20 @@ class TestGemm:
         rng = np.random.default_rng(seed=utt.fetch_seed())
         Z = as_tensor_variable(rng.random((2, 2)))
         A = as_tensor_variable(rng.random((2, 2)))
+        Zt = Z.transpose()
+        assert isinstance(Zt.owner.op, DimShuffle) and Zt.owner.op.view_map == {0: [0]}
         with pytest.raises(InconsistencyError, match=Gemm.E_z_uniq):
-            gemm_inplace(Z, 1.0, A, inplace.transpose_inplace(Z), 1.0)
+            gemm_inplace(Z, 1.0, A, Zt, 1.0)
 
     def test_destroy_map2(self):
         # test that only first input can be overwritten.
         rng = np.random.default_rng(seed=utt.fetch_seed())
         Z = as_tensor_variable(rng.random((2, 2)))
         A = as_tensor_variable(rng.random((2, 2)))
+        Zt = Z.transpose()
+        assert isinstance(Zt.owner.op, DimShuffle) and Zt.owner.op.view_map == {0: [0]}
         with pytest.raises(InconsistencyError, match=Gemm.E_z_uniq):
-            gemm_inplace(Z, 1.0, inplace.transpose_inplace(Z), A, 1.0)
+            gemm_inplace(Z, 1.0, Zt, A, 1.0)
 
     def test_destroy_map3(self):
         # test that only first input can be overwritten

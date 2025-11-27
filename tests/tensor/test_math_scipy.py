@@ -12,13 +12,12 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, verify_grad
 from pytensor.scalar import ScalarLoop
-from pytensor.tensor import gammaincc, inplace, kn, kv, kve, vector
+from pytensor.tensor import gammaincc, kn, kv, kve, vector
 from pytensor.tensor.elemwise import Elemwise
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
     _good_broadcast_unary_chi2sf,
     _good_broadcast_unary_normal,
-    _good_broadcast_unary_normal_float,
     _good_broadcast_unary_normal_float_no_complex,
     _good_broadcast_unary_normal_float_no_complex_small_neg_range,
     _good_broadcast_unary_normal_no_complex,
@@ -85,14 +84,6 @@ TestErfBroadcast = makeBroadcastTester(
     eps=2e-10,
     mode=mode_no_scipy,
 )
-TestErfInplaceBroadcast = makeBroadcastTester(
-    op=inplace.erf_inplace,
-    expected=expected_erf,
-    good=_good_broadcast_unary_normal_float,
-    mode=mode_no_scipy,
-    eps=2e-10,
-    inplace=True,
-)
 
 TestErfcBroadcast = makeBroadcastTester(
     op=pt.erfc,
@@ -102,14 +93,6 @@ TestErfcBroadcast = makeBroadcastTester(
     eps=2e-10,
     mode=mode_no_scipy,
 )
-TestErfcInplaceBroadcast = makeBroadcastTester(
-    op=inplace.erfc_inplace,
-    expected=expected_erfc,
-    good=_good_broadcast_unary_normal_float_no_complex,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
-)
 
 TestErfcxBroadcast = makeBroadcastTester(
     op=pt.erfcx,
@@ -118,14 +101,6 @@ TestErfcxBroadcast = makeBroadcastTester(
     grad=_grad_broadcast_unary_normal_small_neg_range,
     eps=2e-10,
     mode=mode_no_scipy,
-)
-TestErfcxInplaceBroadcast = makeBroadcastTester(
-    op=inplace.erfcx_inplace,
-    expected=expected_erfcx,
-    good=_good_broadcast_unary_normal_float_no_complex_small_neg_range,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 TestErfinvBroadcast = makeBroadcastTester(
@@ -192,14 +167,6 @@ TestOwensTBroadcast = makeBroadcastTester(
     eps=2e-10,
     mode=mode_no_scipy,
 )
-TestOwensTInplaceBroadcast = makeBroadcastTester(
-    op=inplace.owens_t_inplace,
-    expected=expected_owenst,
-    good=_good_broadcast_binary_owenst,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
-)
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
 _good_broadcast_unary_gammaln = dict(
@@ -223,14 +190,6 @@ TestGammaBroadcast = makeBroadcastTester(
     mode=mode_no_scipy,
     eps=1e-5,
 )
-TestGammaInplaceBroadcast = makeBroadcastTester(
-    op=inplace.gamma_inplace,
-    expected=expected_gamma,
-    good=_good_broadcast_unary_gammaln,
-    mode=mode_no_scipy,
-    eps=1e-5,
-    inplace=True,
-)
 
 TestGammalnBroadcast = makeBroadcastTester(
     op=pt.gammaln,
@@ -239,14 +198,6 @@ TestGammalnBroadcast = makeBroadcastTester(
     grad=_grad_broadcast_unary_gammaln,
     eps=2e-10,
     mode=mode_no_scipy,
-)
-TestGammalnInplaceBroadcast = makeBroadcastTester(
-    op=inplace.gammaln_inplace,
-    expected=expected_gammaln,
-    good=_good_broadcast_unary_gammaln,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -265,14 +216,6 @@ TestPsiBroadcast = makeBroadcastTester(
     eps=2e-10,
     mode=mode_no_scipy,
 )
-TestPsiInplaceBroadcast = makeBroadcastTester(
-    op=inplace.psi_inplace,
-    expected=expected_psi,
-    good=_good_broadcast_unary_psi,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
-)
 
 _good_broadcast_unary_tri_gamma = _good_broadcast_unary_psi
 
@@ -282,14 +225,6 @@ TestTriGammaBroadcast = makeBroadcastTester(
     good=_good_broadcast_unary_psi,
     eps=2e-8,
     mode=mode_no_scipy,
-)
-TestTriGammaInplaceBroadcast = makeBroadcastTester(
-    op=inplace.tri_gamma_inplace,
-    expected=expected_tri_gamma,
-    good=_good_broadcast_unary_tri_gamma,
-    eps=2e-8,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 TestChi2SFBroadcast = makeBroadcastTester(
@@ -343,15 +278,6 @@ TestGammaIncBroadcast = makeBroadcastTester(
     mode=mode_no_scipy,
 )
 
-TestGammaIncInplaceBroadcast = makeBroadcastTester(
-    op=inplace.gammainc_inplace,
-    expected=expected_gammainc,
-    good=_good_broadcast_binary_gamma,
-    eps=2e-8,
-    mode=mode_no_scipy,
-    inplace=True,
-)
-
 TestGammaInccBroadcast = makeBroadcastTester(
     op=pt.gammaincc,
     expected=expected_gammaincc,
@@ -359,15 +285,6 @@ TestGammaInccBroadcast = makeBroadcastTester(
     grad=_good_broadcast_binary_gamma_grad,
     eps=2e-8,
     mode=mode_no_scipy,
-)
-
-TestGammaInccInplaceBroadcast = makeBroadcastTester(
-    op=inplace.gammaincc_inplace,
-    expected=expected_gammaincc,
-    good=_good_broadcast_binary_gamma,
-    eps=2e-8,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 
@@ -447,30 +364,12 @@ TestGammaUBroadcast = makeBroadcastTester(
     mode=mode_no_scipy,
 )
 
-TestGammaUInplaceBroadcast = makeBroadcastTester(
-    op=inplace.gammau_inplace,
-    expected=expected_gammau,
-    good=_good_broadcast_binary_gamma,
-    eps=2e-8,
-    mode=mode_no_scipy,
-    inplace=True,
-)
-
 TestGammaLBroadcast = makeBroadcastTester(
     op=pt.gammal,
     expected=expected_gammal,
     good=_good_broadcast_binary_gamma,
     eps=2e-8,
     mode=mode_no_scipy,
-)
-
-TestGammaLInplaceBroadcast = makeBroadcastTester(
-    op=inplace.gammal_inplace,
-    expected=expected_gammal,
-    good=_good_broadcast_binary_gamma,
-    eps=2e-8,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -490,30 +389,12 @@ TestGammaIncInvBroadcast = makeBroadcastTester(
     mode=mode_no_scipy,
 )
 
-TestGammaIncInvInplaceBroadcast = makeBroadcastTester(
-    op=inplace.gammaincinv_inplace,
-    expected=expected_gammaincinv,
-    good=_good_broadcast_binary_gamma,
-    eps=2e-8,
-    mode=mode_no_scipy,
-    inplace=True,
-)
-
 TestGammaInccInvBroadcast = makeBroadcastTester(
     op=pt.gammainccinv,
     expected=expected_gammainccinv,
     good=_good_broadcast_binary_gamma,
     eps=2e-8,
     mode=mode_no_scipy,
-)
-
-TestGammaInccInvInplaceBroadcast = makeBroadcastTester(
-    op=inplace.gammainccinv_inplace,
-    expected=expected_gammainccinv,
-    good=_good_broadcast_binary_gamma,
-    eps=2e-8,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 rng = np.random.default_rng(seed=utt.fetch_seed())
@@ -562,15 +443,6 @@ TestJ0Broadcast = makeBroadcastTester(
     mode=mode_no_scipy,
 )
 
-TestJ0InplaceBroadcast = makeBroadcastTester(
-    op=inplace.j0_inplace,
-    expected=expected_j0,
-    good=_good_broadcast_unary_bessel,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
-)
-
 TestJ1Broadcast = makeBroadcastTester(
     op=pt.j1,
     expected=expected_j1,
@@ -580,30 +452,12 @@ TestJ1Broadcast = makeBroadcastTester(
     mode=mode_no_scipy,
 )
 
-TestJ1InplaceBroadcast = makeBroadcastTester(
-    op=inplace.j1_inplace,
-    expected=expected_j1,
-    good=_good_broadcast_unary_bessel,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
-)
-
 TestJvBroadcast = makeBroadcastTester(
     op=pt.jv,
     expected=expected_jv,
     good=_good_broadcast_binary_bessel,
     eps=2e-10,
     mode=mode_no_scipy,
-)
-
-TestJvInplaceBroadcast = makeBroadcastTester(
-    op=inplace.jv_inplace,
-    expected=expected_jv,
-    good=_good_broadcast_binary_bessel,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 
@@ -628,15 +482,6 @@ TestI0Broadcast = makeBroadcastTester(
     mode=mode_no_scipy,
 )
 
-TestI0InplaceBroadcast = makeBroadcastTester(
-    op=inplace.i0_inplace,
-    expected=expected_i0,
-    good=_good_broadcast_unary_bessel,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
-)
-
 TestI1Broadcast = makeBroadcastTester(
     op=pt.i1,
     expected=expected_i1,
@@ -644,15 +489,6 @@ TestI1Broadcast = makeBroadcastTester(
     grad=_grad_broadcast_unary_bessel,
     eps=2e-10,
     mode=mode_no_scipy,
-)
-
-TestI1InplaceBroadcast = makeBroadcastTester(
-    op=inplace.i1_inplace,
-    expected=expected_i1,
-    good=_good_broadcast_unary_bessel,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 TestIvBroadcast = makeBroadcastTester(
@@ -663,30 +499,12 @@ TestIvBroadcast = makeBroadcastTester(
     mode=mode_no_scipy,
 )
 
-TestIvInplaceBroadcast = makeBroadcastTester(
-    op=inplace.iv_inplace,
-    expected=expected_iv,
-    good=_good_broadcast_binary_bessel,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
-)
-
 TestIveBroadcast = makeBroadcastTester(
     op=pt.ive,
     expected=expected_ive,
     good=_good_broadcast_binary_bessel,
     eps=2e-10,
     mode=mode_no_scipy,
-)
-
-TestIveInplaceBroadcast = makeBroadcastTester(
-    op=inplace.ive_inplace,
-    expected=expected_ive,
-    good=_good_broadcast_binary_bessel,
-    eps=2e-10,
-    mode=mode_no_scipy,
-    inplace=True,
 )
 
 
@@ -721,15 +539,6 @@ TestSigmoidBroadcast = makeBroadcastTester(
     eps=1e-8,
 )
 
-TestSigmoidInplaceBroadcast = makeBroadcastTester(
-    op=inplace.sigmoid_inplace,
-    expected=expected_sigmoid,
-    good=_good_broadcast_unary_normal_no_complex,
-    grad=_grad_broadcast_unary_normal,
-    eps=1e-8,
-    inplace=True,
-)
-
 
 class TestSigmoid:
     def test_elemwise(self):
@@ -756,15 +565,6 @@ TestSoftplusBroadcast = makeBroadcastTester(
     expected=expected_sofplus,
     good=_good_broadcast_unary_softplus,
     eps=1e-8,
-)
-
-TestSoftplusInplaceBroadcast = makeBroadcastTester(
-    op=inplace.softplus_inplace,
-    expected=expected_sofplus,
-    good=_good_broadcast_unary_softplus,
-    grad=_grad_broadcast_unary_normal,
-    eps=1e-8,
-    inplace=True,
 )
 
 
@@ -805,14 +605,6 @@ TestLog1mexpBroadcast = makeBroadcastTester(
     eps=1e-8,
 )
 
-TestLog1mexpInplaceBroadcast = makeBroadcastTester(
-    op=inplace.log1mexp_inplace,
-    expected=expected_log1mexp,
-    good=_good_broadcast_unary_log1mexp,
-    eps=1e-8,
-    inplace=True,
-)
-
 _good_broadcast_ternary_betainc = dict(
     normal=(
         random_ranged(0, 1000, (2, 3)),
@@ -826,14 +618,6 @@ TestBetaincBroadcast = makeBroadcastTester(
     expected=special.betainc,
     good=_good_broadcast_ternary_betainc,
     grad=_good_broadcast_ternary_betainc,
-)
-
-TestBetaincInplaceBroadcast = makeBroadcastTester(
-    op=inplace.betainc_inplace,
-    expected=special.betainc,
-    good=_good_broadcast_ternary_betainc,
-    grad=_good_broadcast_ternary_betainc,
-    inplace=True,
 )
 
 
@@ -926,13 +710,6 @@ TestBetaincinvBroadcast = makeBroadcastTester(
     good=_good_broadcast_ternary_betaincinv,
 )
 
-TestBetaincinvInplaceBroadcast = makeBroadcastTester(
-    op=inplace.betaincinv_inplace,
-    expected=special.betaincinv,
-    good=_good_broadcast_ternary_betaincinv,
-    inplace=True,
-)
-
 _good_broadcast_quaternary_hyp2f1 = dict(
     normal=(
         random_ranged(0, 20, (2, 3)),
@@ -947,13 +724,6 @@ TestHyp2F1Broadcast = makeBroadcastTester(
     expected=expected_hyp2f1,
     good=_good_broadcast_quaternary_hyp2f1,
     grad=_good_broadcast_quaternary_hyp2f1,
-)
-
-TestHyp2F1InplaceBroadcast = makeBroadcastTester(
-    op=inplace.hyp2f1_inplace,
-    expected=expected_hyp2f1,
-    good=_good_broadcast_quaternary_hyp2f1,
-    inplace=True,
 )
 
 
