@@ -26,7 +26,7 @@ from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import alloc, as_tensor, join, second
+from pytensor.tensor.basic import alloc, as_tensor, join, second, split
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
@@ -2196,6 +2196,35 @@ def pack(*tensors: TensorLike, axes: Sequence[int] | int | None = None):
         reshaped_tensors.append(tensor.reshape(new_shape))
 
     return join(n_before, *reshaped_tensors), packed_shapes
+
+
+def unpack(packed_input, axes, packed_shapes):
+    if axes is None:
+        if packed_input.ndim != 1:
+            raise ValueError(
+                "unpack can only be called with keep_axis=None for 1d inputs"
+            )
+        split_axis = 0
+    else:
+        axes = normalize_axis_tuple(axes, ndim=packed_input.ndim)
+        try:
+            [split_axis] = (i for i in range(packed_input.ndim) if i not in axes)
+        except ValueError as err:
+            raise ValueError(
+                "Unpack must have exactly one more dimension that implied by axes"
+            ) from err
+
+    split_inputs = split(
+        packed_input,
+        splits_size=[prod(shape).astype(int) for shape in packed_shapes],
+        n_splits=len(packed_shapes),
+        axis=split_axis,
+    )
+
+    return [
+        split_dims(inp, shape, split_axis)
+        for inp, shape in zip(split_inputs, packed_shapes, strict=True)
+    ]
 
 
 __all__ = [

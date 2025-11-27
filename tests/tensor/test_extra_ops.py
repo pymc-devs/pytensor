@@ -47,6 +47,7 @@ from pytensor.tensor.extra_ops import (
     split_dims,
     squeeze,
     to_one_hot,
+    unpack,
     unravel_index,
 )
 from pytensor.tensor.type import (
@@ -1593,3 +1594,50 @@ class TestPack:
                 packed_shape.eval(input_dict, on_unused_input="ignore"),
                 tensor.type.shape[1:-1],
             )
+
+    @pytest.mark.parametrize("axes", [None, -1, (-2, -1)])
+    def test_pack_unpack_round_trip(self, axes):
+        rng = np.random.default_rng()
+
+        x = pt.tensor("x", shape=(3, 5))
+        y = pt.tensor("y", shape=(3, 3, 5))
+        z = pt.tensor("z", shape=(1, 3, 5))
+
+        flat_packed, packed_shapes = pack(x, y, z, axes=axes)
+        new_outputs = unpack(flat_packed, axes=axes, packed_shapes=packed_shapes)
+
+        fn = pytensor.function([x, y, z], new_outputs, mode="FAST_COMPILE")
+
+        input_dict = {
+            var.name: rng.normal(size=var.type.shape).astype(config.floatX)
+            for var in [x, y, z]
+        }
+        output_vals = fn(**input_dict)
+
+        for input_val, output_val in zip(input_dict.values(), output_vals, strict=True):
+            np.testing.assert_allclose(input_val, output_val)
+
+
+def test_make_replacements_with_pack_unpack():
+    rng = np.random.default_rng()
+
+    x = pt.tensor("x", shape=())
+    y = pt.tensor("y", shape=(5,))
+    z = pt.tensor("z", shape=(3, 3))
+
+    loss = (x + y.sum() + z.sum()) ** 2
+
+    flat_packed, packed_shapes = pack(x, y, z, axes=None)
+    new_input = flat_packed.type()
+    new_outputs = unpack(new_input, axes=None, packed_shapes=packed_shapes)
+
+    loss = pytensor.graph.graph_replace(loss, dict(zip([x, y, z], new_outputs)))
+    fn = pytensor.function([new_input, x, y, z], loss, mode="FAST_COMPILE")
+
+    input_vals = [
+        rng.normal(size=(var.type.shape)).astype(config.floatX) for var in [x, y, z]
+    ]
+    flat_inputs = np.concatenate([input.ravel() for input in input_vals], axis=0)
+    output_val = fn(flat_inputs, *input_vals)
+
+    assert np.allclose(output_val, sum([input.sum() for input in input_vals]) ** 2)
