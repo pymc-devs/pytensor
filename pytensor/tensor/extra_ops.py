@@ -1,5 +1,6 @@
 import warnings
 from collections.abc import Collection, Iterable, Sequence
+from itertools import pairwise
 from textwrap import dedent
 
 import numpy as np
@@ -25,7 +26,7 @@ from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import alloc, join, second
+from pytensor.tensor.basic import alloc, as_tensor, join, second
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import all as pt_all
@@ -2058,6 +2059,143 @@ def split_dims(x, shape: ShapeValueType, axis: int | None = None) -> Variable:
         new_shape.insert(axis, s)
 
     return x.reshape(tuple(new_shape))
+
+
+def _analyze_axes_list(axes) -> tuple[int, int, int]:
+    """
+    Analyze the provided axes list to determine how many axes are before and after the interval to be raveled, as
+    well as the minimum and maximum number of axes that the inputs can have.
+
+    The rules are:
+    - Axes must be strictly increasing in both the positive and negative parts of the list.
+    - Negative axes must come after positive axes.
+    - There can be at most one "hole" in the axes list, which can be either an implicit hole on an endpoint
+      (e.g. [0, 1]) or an explicit hole in the middle (e.g. [0, 2] or [1, -1]).
+
+    Returns
+    -------
+    n_axes_before: int
+        The number of axes before the interval to be raveled.
+    n_axes_after: int
+        The number of axes after the interval to be raveled.
+    min_axes: int
+        The minimum number of axes that the inputs must have.
+    """
+    if axes is None:
+        return 0, 0, 0
+
+    if isinstance(axes, int):
+        axes = [axes]
+    elif not isinstance(axes, Iterable):
+        raise TypeError("axes must be an int, an iterable of ints, or None")
+
+    axes = list(axes)
+
+    if len(axes) == 0:
+        raise ValueError("axes=[] is ambiguous; use None to ravel all")
+
+    if len(set(axes)) != len(axes):
+        raise ValueError("axes must have no duplicates")
+
+    first_negative_idx = next((i for i, a in enumerate(axes) if a < 0), len(axes))
+    positive_axes = list(axes[:first_negative_idx])
+    negative_axes = list(axes[first_negative_idx:])
+
+    if not all(a < 0 for a in negative_axes):
+        raise ValueError("Negative axes must come after positive")
+
+    def strictly_increasing(s):
+        return all(b > a for a, b in pairwise(s))
+
+    if positive_axes and not strictly_increasing(positive_axes):
+        raise ValueError("Axes must be strictly increasing in the positive part")
+    if negative_axes and not strictly_increasing(negative_axes):
+        raise ValueError("Axes must be strictly increasing in the negative part")
+
+    def find_gaps(s):
+        """Return positions where b - a > 1."""
+        return [i for i, (a, b) in enumerate(pairwise(s)) if b - a > 1]
+
+    pos_gaps = find_gaps(positive_axes)
+    neg_gaps = find_gaps(negative_axes)
+
+    if pos_gaps:
+        raise ValueError("Positive axes must be contiguous")
+    if neg_gaps:
+        raise ValueError("Negative axes must be contiguous")
+
+    if positive_axes and positive_axes[0] != 0:
+        raise ValueError(
+            "If positive axes are provided, the first positive axis must be 0 to avoid ambiguity. To ravel indices "
+            "starting from the front, use negative axes only."
+        )
+
+    if negative_axes and negative_axes[-1] != -1:
+        raise ValueError(
+            "If negative axes are provided, the last negative axis must be -1 to avoid ambiguity. To ravel indices "
+            "up to the end, use positive axes only."
+        )
+
+    positive_only = positive_axes and not negative_axes
+    negative_only = negative_axes and not positive_axes
+    mixed_case = positive_axes and negative_axes
+
+    if positive_only:
+        n_before = len(positive_axes)
+        n_after = 0
+        min_axes = n_before
+
+        return n_before, n_after, min_axes
+
+    if negative_only:
+        n_before = 0
+        n_after = len(negative_axes)
+        min_axes = n_after
+
+        return n_before, n_after, min_axes
+
+    if mixed_case:
+        n_before = len(positive_axes)
+        n_after = len(negative_axes)
+        min_axes = n_before + n_after
+
+        return n_before, n_after, min_axes
+
+
+def pack(*tensors: TensorLike, axes: Sequence[int] | int | None = None):
+    n_before, n_after, min_axes = _analyze_axes_list(axes)
+
+    if all([n_before == 0, n_after == 0, min_axes == 0]):
+        # Special case -- we're raveling everything
+        packed_shapes = [tensor.shape for tensor in tensors]
+        reshaped_tensors = [tensor.ravel() for tensor in tensors]
+
+        return join(0, *reshaped_tensors), packed_shapes
+
+    reshaped_tensors: list[TensorLike] = []
+    packed_shapes: list[ShapeValueType] = []
+
+    for i, tensor in enumerate(tensors):
+        n_dim = tensor.ndim
+
+        if n_dim < min_axes:
+            raise ValueError(
+                f"Input {i} (zero indexed) to pack has {n_dim} dimensions, "
+                f"but axes={axes} assumes at least {min_axes} dimension{'s' if min_axes != 1 else ''}."
+            )
+
+        shapes = [
+            shape if shape is not None else symbolic_shape
+            for shape, symbolic_shape in zip(tensor.type.shape, tensor.shape)
+        ]
+        axis_after_packed_axes = n_dim - n_after
+        packed_shapes.append(as_tensor(shapes[n_before:axis_after_packed_axes]))
+
+        new_shape = (*shapes[:n_before], -1, *shapes[axis_after_packed_axes:])
+
+        reshaped_tensors.append(tensor.reshape(new_shape))
+
+    return join(n_before, *reshaped_tensors), packed_shapes
 
 
 __all__ = [

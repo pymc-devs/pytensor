@@ -26,6 +26,7 @@ from pytensor.tensor.extra_ops import (
     SearchsortedOp,
     Unique,
     UnravelIndex,
+    _analyze_axes_list,
     bartlett,
     bincount,
     broadcast_arrays,
@@ -39,6 +40,7 @@ from pytensor.tensor.extra_ops import (
     fill_diagonal,
     fill_diagonal_offset,
     join_dims,
+    pack,
     ravel_multi_index,
     repeat,
     searchsorted,
@@ -1456,3 +1458,138 @@ def test_split_size_zero_shape():
 
     x_split_value = fn(x_value)
     np.testing.assert_allclose(x_split_value, x_value.squeeze(0))
+
+
+class TestPack:
+    @pytest.mark.parametrize(
+        "axes, expected",
+        [
+            (None, [0, 0, 0]),  # '*'
+            ([0, 1], [2, 0, 2]),  # 'i j *'
+            ([-1], [0, 1, 1]),  # '* k'
+            ([-2, -1], [0, 2, 2]),  # '* i j'
+            ([0, -1], [1, 1, 2]),  # 'i * k'
+            ([0, 1, 2, -1], [3, 1, 4]),  # 'i j k * l'
+        ],
+        ids=[
+            "ravel_all",
+            "keep_first_two",
+            "keep_last",
+            "ravel_start",
+            "first_and_last",
+            "complex_case",
+        ],
+    )
+    def test_analyze_axes_list_valid(self, axes, expected):
+        outputs = _analyze_axes_list(axes)
+        names = ["n_before", "n_after", "min_axes"]
+        for out, exp, name in zip(outputs, expected, names, strict=True):
+            assert out == exp, f"Expected {exp}, got {out} for {name}"
+
+    def test_analyze_axes_list_invalid(self):
+        # Positive only but not contiguous
+        with pytest.raises(ValueError, match="Positive axes must be contiguous"):
+            _analyze_axes_list([1, 3])
+
+        # Negative only but not contiguous
+        with pytest.raises(ValueError, match="Negative axes must be contiguous"):
+            _analyze_axes_list([-3, -1])
+
+        # Mixed up positive and negative
+        with pytest.raises(ValueError, match="Negative axes must come after positive"):
+            _analyze_axes_list([0, 1, -2, 4])
+
+        # Duplicate axes
+        with pytest.raises(ValueError, match="axes must have no duplicates"):
+            _analyze_axes_list([0, 0])
+
+        # Not monotonic
+        with pytest.raises(ValueError, match="Axes must be strictly increasing"):
+            _analyze_axes_list([0, 2, 1])
+
+        # Negative before positive
+        with pytest.raises(ValueError, match="Negative axes must come after positive"):
+            _analyze_axes_list([-1, 0])
+
+    def test_pack_basic(self):
+        # rng = np.random.default_rng()
+        x = pt.tensor("x", shape=())
+        y = pt.tensor("y", shape=(5,))
+        z = pt.tensor("z", shape=(3, 3))
+
+        input_dict = {
+            variable.name: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
+
+        # Simple case, reduce all axes, equivalent to einops '*'
+        packed_tensor, packed_shapes = pack(x, y, z, axes=None)
+        assert packed_tensor.type.shape == (15,)
+        for tensor, packed_shape in zip([x, y, z], packed_shapes):
+            assert packed_shape.type.shape == (tensor.ndim,)
+            np.testing.assert_allclose(
+                packed_shape.eval(input_dict, on_unused_input="ignore"),
+                tensor.type.shape,
+            )
+
+        # To preserve an axis, all inputs need at least one dimension, and the preserved axis has to agree.
+        # x is scalar, so pack will raise:
+        with pytest.raises(
+            ValueError,
+            match=r"Input 0 \(zero indexed\) to pack has 0 dimensions, but axes=0 assumes at least 1 dimension\.",
+        ):
+            pack(x, y, z, axes=0)
+
+        # With valid x, pack should still raise, because the axis of concatenation doesn't agree across all inputs
+        x = pt.tensor("x", shape=(3,))
+        input_dict["x"] = np.zeros((3,), dtype=config.floatX)
+
+        with pytest.raises(
+            ValueError,
+            match=r"all input array dimensions other than the specified `axis` \(1\) must match exactly, or be unknown "
+            r"\(None\), but along dimension 0, the inputs shapes are incompatible: \[3 5 3\]",
+        ):
+            packed_tensor, packed_shapes = pack(x, y, z, axes=0)
+            packed_tensor.eval(input_dict)
+
+        # Valid case, preserve first axis, equivalent to einops 'i *'
+        y = pt.tensor("y", shape=(3, 5))
+        z = pt.tensor("z", shape=(3, 3, 3))
+        packed_tensor, packed_shapes = pack(x, y, z, axes=0)
+        input_dict = {
+            variable.name: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
+        assert packed_tensor.type.shape == (3, 15)
+        for tensor, packed_shape in zip([x, y, z], packed_shapes):
+            assert packed_shape.type.shape == (tensor.ndim - 1,)
+            np.testing.assert_allclose(
+                packed_shape.eval(input_dict, on_unused_input="ignore"),
+                tensor.type.shape[1:],
+            )
+
+        # More complex case, preserve last axis implicitly, equivalent to einops 'i * k'. This introduces a max
+        # dimension condition on the input shapes
+        x = pt.tensor("x", shape=(3, 2))
+        y = pt.tensor("y", shape=(3, 5, 2))
+        z = pt.tensor("z", shape=(3, 1, 7, 5, 2))
+
+        with pytest.raises(
+            ValueError,
+            match=r"Positive axes must be contiguous",
+        ):
+            pack(x, y, z, axes=[0, 3])
+
+        z = pt.tensor("z", shape=(3, 1, 7, 2))
+        packed_tensor, packed_shapes = pack(x, y, z, axes=[0, -1])
+        input_dict = {
+            variable.name: np.zeros(variable.type.shape, dtype=config.floatX)
+            for variable in [x, y, z]
+        }
+        assert packed_tensor.type.shape == (3, 13, 2)
+        for tensor, packed_shape in zip([x, y, z], packed_shapes):
+            assert packed_shape.type.shape == (tensor.ndim - 2,)
+            np.testing.assert_allclose(
+                packed_shape.eval(input_dict, on_unused_input="ignore"),
+                tensor.type.shape[1:-1],
+            )
