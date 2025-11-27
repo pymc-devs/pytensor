@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pytest
 import scipy
@@ -551,8 +553,11 @@ class TestLength:
         mySymbolicMatricesList = TypedListType(
             TensorType(pytensor.config.floatX, shape=(None, None))
         )()
-        z = mySymbolicMatricesList.__len__()
-
+        with pytest.raises(
+            TypeError, match=re.escape("Use `.length()` method instead")
+        ):
+            len(mySymbolicMatricesList)
+        z = mySymbolicMatricesList.length()
         f = pytensor.function([mySymbolicMatricesList], z)
 
         x = rand_ranged_matrix(-1000, 1000, [100, 101])
