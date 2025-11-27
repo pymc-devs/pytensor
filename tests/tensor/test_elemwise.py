@@ -1200,3 +1200,28 @@ def test_XOR_inplace():
         _ = gn(l, r)
         # test the in-place stuff
         assert np.all(l == np.asarray([0, 1, 1, 0])), l
+
+
+def test_inplace_dtype_changed():
+    with pytensor.config.change_flags(cast_policy="numpy+floatX", floatX="float64"):
+        x = pt.vector("x", dtype="float32")
+        y = pt.vector("y", dtype="int32")
+        with pytensor.config.change_flags(floatX="float32"):
+            out = pt.add(x, y)
+
+        assert out.dtype == "float32"
+        with pytensor.config.change_flags(floatX="float32"):
+            fn32 = pytensor.function(
+                [In(x, mutable=True), In(y, mutable=True)],
+                out,
+                mode="fast_run",
+            )
+        assert fn32.maker.fgraph.outputs[0].owner.op.destroy_map == {0: [0]}
+
+        with pytensor.config.change_flags(floatX="float64"):
+            fn64 = pytensor.function(
+                [In(x, mutable=True), In(y, mutable=True)],
+                out,
+                mode="fast_run",
+            )
+        assert fn64.maker.fgraph.outputs[0].owner.op.destroy_map == {}

@@ -2797,7 +2797,6 @@ class TestARange:
             out = arange(start, stop, 1)
             f = function([start, stop], out.shape, mode=mode)
             assert len(f.maker.fgraph.toposort()) == 5
-            # 4 [Elemwise{sub,no_inplace}(stop, start), Elemwise{Cast{int64}}(Elemwise{sub,no_inplace}.0), Elemwise{Maximum{output_types_preference=transfer_type{0}}}[(0, 0)](Elemwise{Cast{int64}}.0, 0), MakeVector(Elemwise{Maximum{output_types_preference=transfer_type{0}}}[(0, 0)].0)]
             if config.cast_policy == "custom":
                 assert out.dtype == "int64"
             elif config.cast_policy == "numpy+floatX":

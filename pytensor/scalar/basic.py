@@ -1101,30 +1101,6 @@ def same_out_float_only(type) -> tuple[ScalarType]:
     return (type,)
 
 
-class transfer_type(MetaObject):
-    __props__ = ("transfer",)
-
-    def __init__(self, *transfer):
-        assert all(isinstance(x, int | str) or x is None for x in transfer)
-        self.transfer = transfer
-
-    def __str__(self):
-        return f"transfer_type{self.transfer}"
-
-    def __call__(self, *types):
-        upcast = upcast_out(*types)
-        retval = []
-        for i in self.transfer:
-            if i is None:
-                retval += [upcast]
-            elif isinstance(i, str):
-                retval += [i]
-            else:
-                retval += [types[i]]
-        return retval
-        # return [upcast if i is None else types[i] for i in self.transfer]
-
-
 class specific_out(MetaObject):
     __props__ = ("spec",)
 
@@ -2446,6 +2422,10 @@ clip = Clip(upcast_out_no_complex, name="clip")
 
 
 class Second(BinaryScalarOp):
+    @staticmethod
+    def output_types_preference(_first_type, second_type):
+        return [second_type]
+
     def impl(self, x, y):
         return y
 
@@ -2474,7 +2454,7 @@ class Second(BinaryScalarOp):
             return DisconnectedType()(), y.zeros_like(dtype=config.floatX)
 
 
-second = Second(transfer_type(1), name="second")
+second = Second(name="second")
 
 
 class Identity(UnaryScalarOp):
@@ -2514,18 +2494,6 @@ class Cast(UnaryScalarOp):
         if self.o_type == float16:
             return convert_to_float32
         return self
-
-    def make_new_inplace(self, output_types_preference=None, name=None):
-        """
-        This op.__init__ fct don't have the same parameter as other scalar op.
-        This breaks the insert_inplace_optimizer optimization.
-        This function is a fix to patch this, by ignoring the
-        output_types_preference passed by the optimization, and replacing it
-        by the current output type. This should only be triggered when
-        both input and output have the same dtype anyway.
-
-        """
-        return self.__class__(self.o_type, name)
 
     def impl(self, input):
         return self.ctor(input)
@@ -4321,22 +4289,6 @@ class Composite(ScalarInnerGraphOp):
             self._name = f"Composite{{{outputs_str}}}"
 
         return self._name
-
-    def make_new_inplace(self, output_types_preference=None, name=None):
-        """
-        This op.__init__ fct don't have the same parameter as other scalar op.
-        This break the insert_inplace_optimizer optimization.
-        This fct allow fix patch this.
-
-        """
-        d = {k: getattr(self, k) for k in self.init_param}
-        out = self.__class__(**d)
-        if name:
-            out.name = name
-        else:
-            name = out.name
-        super(Composite, out).__init__(output_types_preference, name)
-        return out
 
     @property
     def fgraph(self):
