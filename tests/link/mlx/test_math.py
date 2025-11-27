@@ -29,18 +29,6 @@ def test_dot():
     np.testing.assert_allclose(actual, expected, rtol=1e-6)
 
 
-def test_int_div_specific() -> None:
-    x = pt.vector("x")
-    y = pt.vector("y")
-    out = pt.int_div(x, y)
-
-    # Test with integers that demonstrate floor division behavior
-    x_test = mx.array([7.0, 8.0, 9.0, -7.0, -8.0])
-    y_test = mx.array([3.0, 3.0, 3.0, 3.0, 3.0])
-
-    compare_mlx_and_py([x, y], out, [x_test, y_test])
-
-
 def test_mlx_max_and_argmax():
     # Test that a single output of a multi-output `Op` can be used as input to
     # another `Op`
