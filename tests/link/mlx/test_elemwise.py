@@ -208,9 +208,9 @@ def test_switch() -> None:
 
 
 def test_int_div_specific() -> None:
-    x = pt.vector("x")
-    y = pt.vector("y")
-    out = pt.int_div(x, y)
+    x = vector("x")      
+    y = vector("y")      
+    out = int_div(x, y)  
 
     # Test with integers that demonstrate floor division behavior
     x_test = mx.array([7.0, 8.0, 9.0, -7.0, -8.0])
