@@ -812,6 +812,10 @@ class VMLinker(LocalLinker):
 
     """
 
+    # We can only set these correctly after `__init__`, as it depends on `c_thunks`
+    required_rewrites: tuple[str, ...] = ("minimum_compile",)
+    incompatible_rewrites: tuple[str, ...] = ()
+
     def __init__(
         self,
         allow_gc=None,
@@ -834,6 +838,9 @@ class VMLinker(LocalLinker):
         self.lazy = lazy
         if c_thunks is None:
             c_thunks = bool(config.cxx)
+        if not c_thunks:
+            self.required_rewrites: tuple[str, ...] = ("minimum_compile", "py_only")
+            self.incompatible_rewrites: tuple[str, ...] = ("cxx",)
         self.c_thunks = c_thunks
         self.allow_partial_eval = allow_partial_eval
         self.updated_vars = {}
