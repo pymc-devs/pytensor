@@ -999,8 +999,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         if n_outer_ins != n_inner_ins:
             raise ValueError(
-                "The number of inputs given to the inner function of scan"
-                " does not match the number of inputs given to scan."
+                f"The number of inputs given to the inner function of scan {n_inner_ins} "
+                f"does not match the number of inputs given to scan {n_outer_ins}."
             )
 
         # Force the inputs to be on the CPU
