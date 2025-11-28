@@ -283,6 +283,9 @@ class PerformLinker(LocalLinker):
 
     """
 
+    required_rewrites: tuple[str, ...] = ("minimum_compile", "py_only")
+    incompatible_rewrites: tuple[str, ...] = ("cxx",)
+
     def __init__(
         self, allow_gc: bool | None = None, schedule: Callable | None = None
     ) -> None:
@@ -583,6 +586,9 @@ class JITLinker(PerformLinker):
     thunk that is run by an PyTensor ``VM``.
 
     """
+
+    required_rewrites: tuple[str, ...] = ("minimum_compile",)
+    incompatible_rewrites: tuple[str, ...] = ()
 
     @abstractmethod
     def fgraph_convert(

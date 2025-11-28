@@ -1787,8 +1787,6 @@ class OpWiseCLinker(LocalLinker):
 
     """
 
-    __cache__: dict = {}
-
     def __init__(
         self, fallback_on_perform=True, allow_gc=None, nice_errors=True, schedule=None
     ):
