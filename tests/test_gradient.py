@@ -11,6 +11,7 @@ from pytensor.gradient import (
     DisconnectedType,
     GradClip,
     GradScale,
+    Lop,
     NullTypeGradError,
     Rop,
     UndefinedGrad,
@@ -32,6 +33,7 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import Op
 from pytensor.graph.traversal import graph_inputs
+from pytensor.scalar import float64
 from pytensor.scan.op import Scan
 from pytensor.tensor.math import add, dot, exp, outer, sigmoid, sqr, sqrt, tanh
 from pytensor.tensor.math import sum as pt_sum
@@ -1207,3 +1209,13 @@ class TestHessianVectorProduct:
         hessp_x_eval, hessp_y_eval = hessp_fn(**test)
         np.testing.assert_allclose(hessp_x_eval, [2, 4, 6])
         np.testing.assert_allclose(hessp_y_eval, [-6, -4, -2])
+
+
+def test_scalar_Lop():
+    xtm1 = float64("xtm1")
+    xt = xtm1**2
+
+    dout_dxt = float64("dout_dxt")
+    dout_dxtm1 = Lop(xt, wrt=xtm1, eval_points=dout_dxt)
+    assert dout_dxtm1.type == dout_dxt.type
+    assert dout_dxtm1.eval({xtm1: 3.0, dout_dxt: 1.5}) == 2 * 3.0 * 1.5
