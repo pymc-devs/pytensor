@@ -559,3 +559,15 @@ class TestDtypes:
                 compare_jax_and_py([x, y], [out, *grad_out], test_values)
             else:
                 compare_jax_and_py([x, y], [out], test_values)
+
+
+def test_mixed_static_shape():
+    x_unknown = shared(np.ones((3,)))
+    x_known = shared(np.ones((4,)), shape=(4,))
+
+    def f(x1, x2):
+        return jax.numpy.concatenate([x1, x2])
+
+    assert wrap_jax(f)(x_known, x_known).type.shape == (8,)
+    assert wrap_jax(f)(x_known, x_unknown).type.shape == (None,)
+    assert wrap_jax(f)(x_unknown, x_known).type.shape == (None,)
