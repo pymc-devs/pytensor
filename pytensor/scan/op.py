@@ -2051,14 +2051,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         old_data = old_inner_output_data[offset_out + j]
                         if old_data is None:
                             output_reused = False
-                        elif isinstance(
-                            self.fn.maker.fgraph.outputs[offset_out + j], TensorVariable
-                        ):
-                            output_reused = new_var.data == old_data
                         else:
-                            raise RuntimeError(
-                                "FIXME: output_reused = new_var.gpudata == old_data"
-                            )
+                            output_reused = new_var.data == old_data
                     else:
                         output_reused = False
 
