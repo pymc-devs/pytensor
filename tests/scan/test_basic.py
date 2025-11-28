@@ -34,10 +34,12 @@ from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import MissingInputError
+from pytensor.link.vm import VMLinker
 from pytensor.raise_op import assert_op
 from pytensor.scan.basic import scan
-from pytensor.scan.op import Scan
+from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.utils import until
+from pytensor.tensor import as_tensor
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import dot, exp, mean, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
@@ -4308,3 +4310,91 @@ def test_return_updates_api_change():
 
     with pytest.raises(ValueError, match=err_msg):
         scan(lambda: {x: x + 1}, outputs_info=[], n_steps=5, return_updates=False)
+
+
+@pytest.mark.parametrize(
+    "scan_mode",
+    [
+        None,
+        "FAST_RUN",
+        "FAST_COMPILE",
+        Mode("cvm", optimizer=None),
+        Mode("vm", optimizer=None),
+        Mode("c", optimizer=None),
+        Mode("py", optimizer=None),
+    ],
+)
+def test_scan_mode_compatibility(scan_mode):
+    # Regression test for case where using Scan with a non-updating VM failed
+
+    # Build a scan with one sequence and two MIT-MOTs
+    info = ScanInfo(
+        n_seqs=1,
+        mit_mot_in_slices=((0, 1), (0, 1)),
+        mit_mot_out_slices=((1,), (1,)),
+        mit_sot_in_slices=(),
+        sit_sot_in_slices=(),
+        n_nit_sot=0,
+        n_untraced_sit_sot_outs=0,
+        n_non_seqs=0,
+        as_while=False,
+    )
+    bool_seq = pt.scalar(dtype="bool")
+    mitmot_A0, mitmot_A1, mitmot_B0, mitmot_B1 = [
+        pt.matrix(shape=(2, 2)) for i in range(4)
+    ]
+    inputs = [
+        bool_seq,
+        mitmot_A0,
+        mitmot_A1,
+        mitmot_B0,
+        mitmot_B1,
+    ]
+    outputs = [
+        pt.add(bool_seq + mitmot_A0, mitmot_A1),
+        pt.add(bool_seq * mitmot_B0, mitmot_B1),
+    ]
+
+    scan_op = Scan(
+        inputs,
+        outputs,
+        info=info,
+        mode=scan_mode,
+    )
+
+    n_steps = 5
+    numerical_inputs = [
+        np.array(n_steps, dtype="int64"),
+        np.array([1, 1, 0, 1, 0], dtype="bool"),
+        np.zeros(n_steps + 1)[:, None, None] * np.eye(2),
+        np.arange(n_steps + 1)[:, None, None] * np.eye(2),
+    ]
+    tensor_inputs = [as_tensor(inp, dtype=inp.dtype).type() for inp in numerical_inputs]
+    tensor_outputs = [o.sum() for o in scan_op(*tensor_inputs)]
+
+    no_opt_mode = Mode(linker="py", optimizer=None)
+    # NotImplementedError should only be triggered when we try to compile the function
+    if (
+        # Abstract modes should never fail
+        scan_mode not in (None, "FAST_RUN", "FAST_COMPILE")
+        # Only if the user tries something specific and incompatible
+        and not isinstance(get_mode(scan_mode).linker, VMLinker)
+    ):
+        with pytest.raises(
+            NotImplementedError,
+            match="Python/Cython implementation of Scan with preallocated MIT-MOT outputs requires a VMLinker",
+        ):
+            function(tensor_inputs, tensor_outputs, mode=no_opt_mode)
+        return
+
+    fn = function(tensor_inputs, tensor_outputs, mode=no_opt_mode)
+
+    # Check we have the expected Scan in the compiled function
+    [fn_scan_op] = [
+        node.op for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+    ]
+    assert fn_scan_op.info == info
+    assert fn_scan_op.mitmots_preallocated == (True, True)
+
+    # Expected value computed by running correct Scan once
+    np.testing.assert_allclose(fn(*numerical_inputs), [44, 38])
