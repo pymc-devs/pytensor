@@ -31,11 +31,18 @@ slice length.
 """
 
 
+@jax_funcify.register(AdvancedSubtensor1)
+def jax_funcify_AdvancedSubtensor1(op, node, **kwargs):
+    def advanced_subtensor1(x, ilist):
+        return x[ilist]
+
+    return advanced_subtensor1
+
+
 @jax_funcify.register(Subtensor)
 @jax_funcify.register(AdvancedSubtensor)
-@jax_funcify.register(AdvancedSubtensor1)
 def jax_funcify_Subtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
+    idx_list = op.idx_list
 
     def subtensor(x, *ilists):
         indices = indices_from_subtensor(ilists, idx_list)
@@ -47,10 +54,24 @@ def jax_funcify_Subtensor(op, node, **kwargs):
     return subtensor
 
 
-@jax_funcify.register(IncSubtensor)
 @jax_funcify.register(AdvancedIncSubtensor1)
+def jax_funcify_AdvancedIncSubtensor1(op, node, **kwargs):
+    if getattr(op, "set_instead_of_inc", False):
+
+        def jax_fn(x, y, ilist):
+            return x.at[ilist].set(y)
+
+    else:
+
+        def jax_fn(x, y, ilist):
+            return x.at[ilist].add(y)
+
+    return jax_fn
+
+
+@jax_funcify.register(IncSubtensor)
 def jax_funcify_IncSubtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
+    idx_list = op.idx_list
 
     if getattr(op, "set_instead_of_inc", False):
 
@@ -77,6 +98,8 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
 
 @jax_funcify.register(AdvancedIncSubtensor)
 def jax_funcify_AdvancedIncSubtensor(op, node, **kwargs):
+    idx_list = op.idx_list
+
     if getattr(op, "set_instead_of_inc", False):
 
         def jax_fn(x, indices, y):
@@ -87,8 +110,11 @@ def jax_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         def jax_fn(x, indices, y):
             return x.at[indices].add(y)
 
-    def advancedincsubtensor(x, y, *ilist, jax_fn=jax_fn):
-        return jax_fn(x, ilist, y)
+    def advancedincsubtensor(x, y, *ilist, jax_fn=jax_fn, idx_list=idx_list):
+        indices = indices_from_subtensor(ilist, idx_list)
+        if len(indices) == 1:
+            indices = indices[0]
+        return jax_fn(x, indices, y)
 
     return advancedincsubtensor
 
