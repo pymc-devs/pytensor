@@ -20,7 +20,6 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.tensor import TensorType
-from pytensor.tensor.rewriting.subtensor import is_full_slice
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -247,7 +246,7 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     basic_idxs = []
     adv_idxs = []
     input_idx = 0
-    
+
     for i, entry in enumerate(op.idx_list):
         if isinstance(entry, slice):
             # Basic slice index
@@ -256,12 +255,14 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
             # Advanced tensor index
             if input_idx < len(tensor_inputs):
                 idx_input = tensor_inputs[input_idx]
-                adv_idxs.append({
-                    "axis": i,
-                    "dtype": idx_input.type.dtype,
-                    "bcast": idx_input.type.broadcastable,
-                    "ndim": idx_input.type.ndim,
-                })
+                adv_idxs.append(
+                    {
+                        "axis": i,
+                        "dtype": idx_input.type.dtype,
+                        "bcast": idx_input.type.broadcastable,
+                        "ndim": idx_input.type.ndim,
+                    }
+                )
                 input_idx += 1
 
     # Special implementation for consecutive integer vector indices

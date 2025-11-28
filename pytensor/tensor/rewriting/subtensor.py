@@ -14,6 +14,7 @@ from pytensor.graph.rewriting.basic import (
     in2out,
     node_rewriter,
 )
+from pytensor.graph.type import Type
 from pytensor.raise_op import Assert
 from pytensor.scalar import Add, ScalarConstant, ScalarType
 from pytensor.scalar import constant as scalar_constant
@@ -229,7 +230,7 @@ def local_replace_AdvancedSubtensor(fgraph, node):
 
     indexed_var = node.inputs[0]
     tensor_inputs = node.inputs[1:]
-    
+
     # Reconstruct indices from idx_list and tensor inputs
     indices = []
     input_idx = 0
@@ -267,7 +268,7 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     res = node.inputs[0]
     val = node.inputs[1]
     tensor_inputs = node.inputs[2:]
-    
+
     # Reconstruct indices from idx_list and tensor inputs
     indices = []
     input_idx = 0
@@ -1112,6 +1113,7 @@ compile.optdb.register(
 def local_inplace_AdvancedIncSubtensor(fgraph, node):
     if isinstance(node.op, AdvancedIncSubtensor) and not node.op.inplace:
         new_op = type(node.op)(
+            node.op.idx_list,
             inplace=True,
             set_instead_of_inc=node.op.set_instead_of_inc,
             ignore_duplicates=node.op.ignore_duplicates,
@@ -1376,6 +1378,7 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
                     z_broad[k]
                     and not same_shape(xi, y, dim_x=k, dim_y=k)
                     and shape_of[y][k] != 1
+                    and shape_of[xi][k] == 1
                 )
             ]
 
@@ -1778,7 +1781,7 @@ def ravel_multidimensional_bool_idx(fgraph, node):
     else:
         x, y = node.inputs[0], node.inputs[1]
         tensor_inputs = node.inputs[2:]
-    
+
     # Reconstruct indices from idx_list and tensor inputs
     idxs = []
     input_idx = 0
@@ -1829,7 +1832,7 @@ def ravel_multidimensional_bool_idx(fgraph, node):
         # Create new AdvancedSubtensor with updated idx_list
         new_idx_list = list(node.op.idx_list)
         new_tensor_inputs = list(tensor_inputs)
-        
+
         # Update the idx_list and tensor_inputs for the raveled boolean index
         input_idx = 0
         for i, entry in enumerate(node.op.idx_list):
@@ -1837,13 +1840,13 @@ def ravel_multidimensional_bool_idx(fgraph, node):
                 if input_idx == bool_idx_pos:
                     new_tensor_inputs[input_idx] = raveled_bool_idx
                 input_idx += 1
-        
+
         new_out = AdvancedSubtensor(new_idx_list)(raveled_x, *new_tensor_inputs)
     else:
         # Create new AdvancedIncSubtensor with updated idx_list
         new_idx_list = list(node.op.idx_list)
         new_tensor_inputs = list(tensor_inputs)
-        
+
         # Update the tensor_inputs for the raveled boolean index
         input_idx = 0
         for i, entry in enumerate(node.op.idx_list):
@@ -1851,14 +1854,14 @@ def ravel_multidimensional_bool_idx(fgraph, node):
                 if input_idx == bool_idx_pos:
                     new_tensor_inputs[input_idx] = raveled_bool_idx
                 input_idx += 1
-        
+
         # The dimensions of y that correspond to the boolean indices
         # must already be raveled in the original graph, so we don't need to do anything to it
         new_out = AdvancedIncSubtensor(
             new_idx_list,
             inplace=node.op.inplace,
             set_instead_of_inc=node.op.set_instead_of_inc,
-            ignore_duplicates=node.op.ignore_duplicates
+            ignore_duplicates=node.op.ignore_duplicates,
         )(raveled_x, y, *new_tensor_inputs)
         # But we must reshape the output to match the original shape
         new_out = new_out.reshape(x_shape)

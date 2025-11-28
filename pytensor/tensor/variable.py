@@ -556,8 +556,22 @@ class _tensor_py_operators:
                     pattern.append("x")
                     new_args.append(slice(None, None, None))
                 else:
-                    pattern.append(counter)
-                    counter += 1
+                    # Check for boolean index which consumes multiple dimensions
+                    consumed_dims = 1
+                    try:
+                        val = pt.subtensor.as_index_variable(arg)
+                        if (
+                            hasattr(val, "type")
+                            and isinstance(val.type, TensorType)
+                            and val.type.dtype == "bool"
+                        ):
+                            consumed_dims = val.type.ndim
+                    except Exception:
+                        pass
+
+                    for _ in range(consumed_dims):
+                        pattern.append(counter)
+                        counter += 1
                     new_args.append(arg)
 
             pattern.extend(list(range(counter, self.ndim)))
