@@ -31,10 +31,10 @@ from pytensor.scalar.basic import (
 from pytensor.scalar.math import Erf, Erfc, GammaLn, Log1mexp, Sigmoid, Softplus
 
 
-def scalar_op_cache_key(op):
+def scalar_op_cache_key(op, **extra_fields):
     # Scalar Ops don't have _props, because of their weird outputs_types_preference function
     # So we create hash differently
-    return sha256(str(type(op)).encode()).hexdigest()
+    return sha256(str((type(op), tuple(extra_fields.items()))).encode()).hexdigest()
 
 
 @register_funcify_and_cache_key(ScalarOp)
@@ -267,11 +267,28 @@ def numba_funcify_Reciprocal(op, node, **kwargs):
 
 @register_funcify_and_cache_key(Sigmoid)
 def numba_funcify_Sigmoid(op, node, **kwargs):
-    @numba_basic.numba_njit
-    def sigmoid(x):
-        return 1 / (1 + np.exp(-x))
+    inp_dtype = node.inputs[0].type.dtype
+    if inp_dtype.startswith("uint"):
+        upcast_uint_dtype = {
+            "uint8": np.float32,  # numpy uses float16, but not Numba
+            "uint16": np.float32,
+            "uint32": np.float64,
+            "uint64": np.float64,
+        }[inp_dtype]
 
-    return sigmoid, scalar_op_cache_key(op)
+        @numba_basic.numba_njit
+        def sigmoid(x):
+            # Can't negate uint
+            float_x = numba_basic.direct_cast(x, upcast_uint_dtype)
+            return 1 / (1 + np.exp(-float_x))
+
+    else:
+
+        @numba_basic.numba_njit
+        def sigmoid(x):
+            return 1 / (1 + np.exp(-x))
+
+    return sigmoid, scalar_op_cache_key(op, cache_version=1)
 
 
 @register_funcify_and_cache_key(GammaLn)
@@ -319,6 +336,16 @@ def numba_funcify_Erfc(op, **kwargs):
 
 @register_funcify_and_cache_key(Softplus)
 def numba_funcify_Softplus(op, node, **kwargs):
+    inp_dtype = node.inputs[0].type.dtype
+    if inp_dtype.startswith("uint"):
+        upcast_uint_dtype = {
+            "uint8": np.float32,  # numpy uses float16, but not Numba
+            "uint16": np.float32,
+            "uint32": np.float64,
+            "uint64": np.float64,
+        }[inp_dtype]
+    else:
+        upcast_uint_dtype = None
     out_dtype = np.dtype(node.outputs[0].type.dtype)
 
     @numba_basic.numba_njit
@@ -328,9 +355,12 @@ def numba_funcify_Softplus(op, node, **kwargs):
         elif x < 18.0:
             value = np.log1p(np.exp(x))
         elif x < 33.3:
+            if upcast_uint_dtype is not None:
+                # Can't negate uint
+                x = numba_basic.direct_cast(x, upcast_uint_dtype)
             value = x + np.exp(-x)
         else:
             value = x
         return numba_basic.direct_cast(value, out_dtype)
 
-    return softplus, scalar_op_cache_key(op)
+    return softplus, scalar_op_cache_key(op, cache_version=1)

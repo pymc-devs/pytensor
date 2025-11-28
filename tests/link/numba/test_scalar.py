@@ -158,15 +158,9 @@ def test_isnan(composite):
 @pytest.mark.parametrize(
     "dtype",
     [
-        pytest.param(
-            "float32",
-            marks=pytest.mark.xfail(reason="Scalar downcasting not supported in numba"),
-        ),
+        "float32",
         "float64",
-        pytest.param(
-            "int16",
-            marks=pytest.mark.xfail(reason="Scalar downcasting not supported in numba"),
-        ),
+        "int16",
         "int64",
         "uint32",
     ],
@@ -183,7 +177,7 @@ def test_Softplus(dtype):
         test_x = np.dtype(dtype).type(value)
         np.testing.assert_allclose(
             py_fn(test_x),
-            numba_fn(test_x),
+            getattr(np, g.dtype)(numba_fn(test_x)),
             strict=True,
             err_msg=f"Failed for value {value}",
         )
