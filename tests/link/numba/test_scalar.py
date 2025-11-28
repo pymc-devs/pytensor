@@ -189,6 +189,16 @@ def test_Softplus(dtype):
         )
 
 
+def test_discrete_power():
+    # Test we don't fail to compile power with discrete exponents due to https://github.com/numba/numba/issues/9554
+    x = pt.scalar("x", dtype="float64")
+    exponent = pt.scalar("exponent", dtype="int8")
+    out = pt.power(x, exponent)
+    compare_numba_and_py(
+        [x, exponent], [out], [np.array(0.5), np.array(2, dtype="int8")]
+    )
+
+
 def test_cython_obj_mode_fallback():
     """Test that unsupported cython signatures fallback to obj-mode"""
 

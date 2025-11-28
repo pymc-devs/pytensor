@@ -22,6 +22,7 @@ from pytensor.scalar.basic import (
     Composite,
     Identity,
     Mul,
+    Pow,
     Reciprocal,
     ScalarOp,
     Second,
@@ -163,6 +164,23 @@ def {binary_op_name}({input_signature}):
     nary_fn = compile_numba_function_src(nary_src, binary_op_name, globals())
 
     return nary_fn
+
+
+@register_funcify_and_cache_key(Pow)
+def numba_funcify_Pow(op, node, **kwargs):
+    pow_dtype = node.inputs[1].type.dtype
+    if pow_dtype.startswith("int"):
+        # Numba power fails when exponents are non 64-bit discrete integers and fasthmath=True
+        # https://github.com/numba/numba/issues/9554
+
+        def pow(x, y):
+            return x ** np.asarray(y, dtype=np.int64).item()
+    else:
+
+        def pow(x, y):
+            return x**y
+
+    return numba_basic.numba_njit(pow), scalar_op_cache_key(op)
 
 
 @register_funcify_and_cache_key(Add)
