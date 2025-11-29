@@ -134,7 +134,7 @@ def get_numba_type(
     elif isinstance(pytensor_type, RandomGeneratorType):
         return numba.types.NumPyRandomGeneratorType("NumPyRandomGeneratorType")
     elif isinstance(pytensor_type, TypedListType):
-        return numba.types.List(get_numba_type(pytensor_type.ttype))
+        return numba.types.ListType(get_numba_type(pytensor_type.ttype))
     else:
         raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 

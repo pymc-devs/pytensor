@@ -23,6 +23,11 @@ from pytensor.typed_list import (
 )
 
 
+@numba_basic.numba_typify.register(list)
+def numba_typify(data, **kwargs):
+    return numba.typed.List(data)
+
+
 def numba_all_equal(x, y):
     if isinstance(x, np.ndarray) or isinstance(y, np.ndarray):
         if not (isinstance(x, np.ndarray) and isinstance(y, np.ndarray)):
