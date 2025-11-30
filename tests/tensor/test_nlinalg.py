@@ -154,7 +154,8 @@ class TestSvd(utt.InferShapeTester):
 
         outputs = svd(A, compute_uv=compute_uv, full_matrices=full_matrix)
         outputs = outputs if isinstance(outputs, list) else [outputs]
-        fn = function(inputs=[A], outputs=outputs)
+        with config.change_flags(compiler_verbose=True):
+            fn = function(inputs=[A], outputs=outputs)
 
         np_fn = np.vectorize(
             partial(np.linalg.svd, compute_uv=compute_uv, full_matrices=full_matrix),
@@ -165,9 +166,31 @@ class TestSvd(utt.InferShapeTester):
         pt_outputs = fn(a)
 
         np_outputs = np_outputs if isinstance(np_outputs, tuple) else [np_outputs]
+        if compute_uv:
+            # In this case we sometimes get a sign flip on some columns in one impl and not the thore
+            # The results are both correct, and we test that by reconstructing the original input
+            U, S, Vh = pt_outputs
+            S_diag = np.expand_dims(S, -2) * np.eye(S.shape[-1])
 
-        for np_val, pt_val in zip(np_outputs, pt_outputs, strict=True):
-            assert _allclose(np_val, pt_val)
+            diff = a.shape[-2] - a.shape[-1]
+            if full_matrix:
+                if diff > 0:
+                    # tall
+                    S_diag = np.pad(S_diag, [(0, 0), (0, diff), (0, 0)][-a.ndim :])
+                elif diff < 0:
+                    # wide
+                    S_diag = np.pad(S_diag, [(0, 0), (0, 0), (0, -diff)][-a.ndim :])
+
+            a_r = U @ S_diag @ Vh
+            np.testing.assert_allclose(a_r, a)
+
+            for np_val, pt_val in zip(np_outputs, pt_outputs, strict=True):
+                # Check values are equivalent up to sign change
+                np.testing.assert_allclose(np.abs(np_val), np.abs(pt_val))
+
+        else:
+            for np_val, pt_val in zip(np_outputs, pt_outputs, strict=True):
+                np.testing.assert_allclose(np_val, pt_val)
 
     def test_svd_infer_shape(self):
         self.validate_shape((4, 4), full_matrices=True, compute_uv=True)
