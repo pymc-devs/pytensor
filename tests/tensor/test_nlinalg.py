@@ -417,6 +417,10 @@ class TestEig(utt.InferShapeTester):
             warn=False,
         )
 
+    @pytest.mark.xfail(
+        raises=ValueError,
+        reason="numba overload of np.linalg.eig raises eig() argument must not cause a domain change.",
+    )
     def test_eval(self):
         A = matrix(dtype=self.dtype)
         fn = function([A], self.op(A))
