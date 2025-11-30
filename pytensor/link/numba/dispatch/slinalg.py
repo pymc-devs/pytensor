@@ -64,11 +64,15 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     on_error = op.on_error
 
     dtype = node.inputs[0].dtype
+    out_dtype = node.outputs[0].dtype
     if dtype in complex_dtypes:
         raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
     @numba_basic.numba_njit
     def cholesky(a):
+        if a.size == 0:
+            return np.zeros(a.shape, dtype=out_dtype)
+
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
                 raise np.linalg.LinAlgError(
@@ -163,6 +167,7 @@ def numba_funcify_LU(op, node, **kwargs):
 @numba_funcify.register(LUFactor)
 def numba_funcify_LUFactor(op, node, **kwargs):
     dtype = node.inputs[0].dtype
+    out_dtype_np = node.outputs[0].type.numpy_dtype
     check_finite = op.check_finite
     overwrite_a = op.overwrite_a
 
@@ -171,6 +176,12 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def lu_factor(a):
+        if a.size == 0:
+            return (
+                np.zeros(a.shape, dtype=out_dtype_np),
+                np.zeros(a.shape[0], dtype="int32"),
+            )
+
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
                 raise np.linalg.LinAlgError(
