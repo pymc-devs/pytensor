@@ -261,41 +261,60 @@ def numba_funcify_Unique(op, node, **kwargs):
 
 @register_funcify_and_cache_key(UnravelIndex)
 def numba_funcify_UnravelIndex(op, node, **kwargs):
-    order = op.order
+    out_ndim = node.outputs[0].type.ndim
 
-    if order != "C":
-        raise NotImplementedError(
-            "Numba does not support the `order` argument in `numpy.unravel_index`"
-        )
+    if out_ndim == 0:
+        # Creating a tuple of 0d arrays in numba is basically impossible without codegen, so just go to obj_mode
+        return generate_fallback_impl(op, node=node), None
+
+    c_order = op.order == "C"
+    inp_ndim = node.inputs[0].type.ndim
+    transpose_axes = (inp_ndim, *range(inp_ndim))
+
+    @numba_basic.numba_njit
+    def unravelindex(indices, shape):
+        a = np.ones(len(shape), dtype=np.int64)
+        if c_order:
+            # C-Order: Reverse shape (ignore dim0), cumulative product, then reverse back
+            # Strides: [dim1*dim2, dim2, 1]
+            a[1:] = shape[:0:-1]
+            a = np.cumprod(a)[::-1]
+        else:
+            # F-Order: Standard shape, cumulative product
+            # Strides: [1, dim0, dim0*dim1]
+            a[1:] = shape[:-1]
+            a = np.cumprod(a)
+
+        # Broadcast with a and shape on the last axis
+        unraveled_coords = (indices[..., None] // a) % shape
+
+        # Then transpose it to the front
+        # Numba doesn't have moveaxis (why would it), so we use transpose
+        # res = np.moveaxis(res, -1, 0)
+        unraveled_coords = unraveled_coords.transpose(transpose_axes)
+
+        # This should be a tuple, but the array can be unpacked
+        # into multiple variables with the same effect by the outer function
+        # (special case for single entry is handled with an outer function below)
+        return unraveled_coords
+
+    cache_version = 1
+    cache_key = sha256(
+        str((type(op), op.order, len(node.outputs), cache_version)).encode()
+    ).hexdigest()
 
     if len(node.outputs) == 1:
 
-        @numba_basic.numba_njit(inline="always")
-        def maybe_expand_dim(arr):
-            return arr
+        @numba_basic.numba_njit
+        def unravel_index_single_item(arr, shape):
+            # Unpack single entry
+            (res,) = unravelindex(arr, shape)
+            return res
+
+        return unravel_index_single_item, cache_key
 
     else:
-
-        @numba_basic.numba_njit(inline="always")
-        def maybe_expand_dim(arr):
-            return np.expand_dims(arr, 1)
-
-    @numba_basic.numba_njit
-    def unravelindex(arr, shape):
-        a = np.ones(len(shape), dtype=np.int64)
-        a[1:] = shape[:0:-1]
-        a = np.cumprod(a)[::-1]
-
-        # PyTensor actually returns a `tuple` of these values, instead of an
-        # `ndarray`; however, this `ndarray` result should be able to be
-        # unpacked into a `tuple`, so this discrepancy shouldn't really matter
-        return ((maybe_expand_dim(arr) // a) % shape).T
-
-    cache_key = sha256(
-        str((type(op), op.order, len(node.outputs))).encode()
-    ).hexdigest()
-
-    return unravelindex, cache_key
+        return unravelindex, cache_key
 
 
 @register_funcify_default_op_cache_key(SearchsortedOp)

@@ -1,4 +1,5 @@
 import contextlib
+from contextlib import nullcontext
 
 import numpy as np
 import pytest
@@ -295,37 +296,48 @@ def test_Unique(x, axis, return_index, return_inverse, return_counts, exc):
 
 
 @pytest.mark.parametrize(
-    "arr, shape, order, exc",
+    "arr, shape, requires_obj_mode",
     [
+        (
+            (pt.lscalar(), np.array(9, dtype="int64")),
+            pt.as_tensor([2, 3, 4]),
+            True,
+        ),
         (
             (pt.lvector(), np.array([9, 15, 1], dtype="int64")),
             pt.as_tensor([2, 3, 4]),
-            "C",
-            None,
+            False,
         ),
         (
             (pt.lvector(), np.array([1, 0], dtype="int64")),
             pt.as_tensor([2]),
-            "C",
-            None,
+            False,
         ),
         (
-            (pt.lvector(), np.array([9, 15, 1], dtype="int64")),
+            (pt.lmatrix(), np.array([[9, 15, 1], [1, 9, 15]], dtype="int64")),
             pt.as_tensor([2, 3, 4]),
-            "F",
-            NotImplementedError,
+            False,
         ),
     ],
 )
-def test_UnravelIndex(arr, shape, order, exc):
+def test_UnravelIndex(arr, shape, requires_obj_mode):
     arr, test_arr = arr
-    g = extra_ops.UnravelIndex(order)(arr, shape)
+    g_c = extra_ops.UnravelIndex("C")(arr, shape)
+    g_f = extra_ops.UnravelIndex("F")(arr, shape)
+    if shape.type.shape == (1,):
+        outputs = [g_c, g_f]
+    else:
+        outputs = [*g_c, *g_f]
 
-    cm = contextlib.suppress() if exc is None else pytest.raises(exc)
+    cm = (
+        pytest.warns(UserWarning, match="object mode")
+        if requires_obj_mode
+        else nullcontext()
+    )
     with cm:
         compare_numba_and_py(
             [arr],
-            g,
+            outputs,
             [test_arr],
         )
 
