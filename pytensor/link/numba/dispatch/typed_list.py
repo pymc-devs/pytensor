@@ -1,5 +1,6 @@
 import numba
 import numpy as np
+from numba.types import Array, Boolean, List, Number
 
 import pytensor.link.numba.dispatch.basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
@@ -37,7 +38,7 @@ def numba_all_equal(x, y):
 def list_all_equal(x, y):
     all_equal = None
 
-    if isinstance(x, numba.types.List) and isinstance(y, numba.types.List):
+    if isinstance(x, List) and isinstance(y, List):
 
         def all_equal(x, y):
             if len(x) != len(y):
@@ -47,12 +48,12 @@ def list_all_equal(x, y):
                     return False
             return True
 
-    if isinstance(x, numba.types.Array) and isinstance(y, numba.types.Array):
+    if isinstance(x, Array) and isinstance(y, Array):
 
         def all_equal(x, y):
             return (x == y).all()
 
-    if isinstance(x, numba.types.Number) and isinstance(y.numba.types.Number):
+    if isinstance(x, Number | Boolean) and isinstance(y, Number | Boolean):
 
         def all_equal(x, y):
             return x == y
@@ -62,7 +63,7 @@ def list_all_equal(x, y):
 
 @numba.extending.overload(numba_deepcopy)
 def numba_deepcopy_list(x):
-    if isinstance(x, numba.types.List):
+    if isinstance(x, List):
 
         def deepcopy_list(x):
             return [numba_deepcopy(xi) for xi in x]
