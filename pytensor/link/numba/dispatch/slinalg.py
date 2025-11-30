@@ -74,6 +74,9 @@ def numba_funcify_Cholesky(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def cholesky(a):
+        if a.size == 0:
+            return np.zeros(a.shape, dtype=out_dtype)
+
         if discrete_inp:
             a = a.astype(out_dtype)
         elif check_finite:
@@ -114,7 +117,8 @@ def pivot_to_permutation(op, node, **kwargs):
 
         return np.argsort(p_inv)
 
-    return numba_pivot_to_permutation
+    cache_key = 1
+    return numba_pivot_to_permutation, cache_key
 
 
 @numba_funcify.register(LU)
@@ -134,6 +138,18 @@ def numba_funcify_LU(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def lu(a):
+        if a.size == 0:
+            L = np.zeros(a.shape, dtype=a.dtype)
+            U = np.zeros(a.shape, dtype=a.dtype)
+            if permute_l:
+                return L, U
+            elif p_indices:
+                P = np.zeros(a.shape[0], dtype="int32")
+                return P, L, U
+            else:
+                P = np.zeros(a.shape, dtype=a.dtype)
+                return P, L, U
+
         if discrete_inp:
             a = a.astype(out_dtype)
         elif check_finite:
@@ -187,6 +203,12 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def lu_factor(a):
+        if a.size == 0:
+            return (
+                np.zeros(a.shape, dtype=out_dtype),
+                np.zeros(a.shape[0], dtype="int32"),
+            )
+
         if discrete_inp:
             a = a.astype(out_dtype)
         elif check_finite:
@@ -226,7 +248,7 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
 
 @numba_funcify.register(Solve)
 def numba_funcify_Solve(op, node, **kwargs):
-    A_dtype, b_dtype = (i.numpy_dtype for i in node.inputs)
+    A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
 
     if A_dtype.kind == "c" or b_dtype.kind == "c":
@@ -269,6 +291,9 @@ def numba_funcify_Solve(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def solve(a, b):
+        if b.size == 0:
+            return np.zeros(b.shape, dtype=out_dtype)
+
         if must_cast_A:
             a = a.astype(out_dtype)
         if must_cast_B:
@@ -297,7 +322,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     overwrite_b = op.overwrite_b
     b_ndim = op.b_ndim
 
-    A_dtype, b_dtype = (i.numpy_dtype for i in node.inputs)
+    A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
 
     if A_dtype.kind == "c" or b_dtype.kind == "c":
@@ -311,6 +336,8 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def solve_triangular(a, b):
+        if b.size == 0:
+            return np.zeros(b.shape, dtype=out_dtype)
         if must_cast_A:
             a = a.astype(out_dtype)
         if must_cast_B:
@@ -360,6 +387,8 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def cho_solve(c, b):
+        if b.size == 0:
+            return np.zeros(b.shape, dtype=out_dtype)
         if must_cast_c:
             c = c.astype(out_dtype)
         if check_finite:
