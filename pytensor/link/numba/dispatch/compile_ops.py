@@ -25,7 +25,7 @@ def numba_deepcopy(x):
 
 @numba.extending.overload(numba_deepcopy)
 def numba_deepcopy_tensor(x):
-    if isinstance(x, numba.types.Number):
+    if isinstance(x, numba.types.Number | numba.types.Boolean):
 
         def number_deepcopy(x):
             return x
