@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import numpy as np
 import pytest
 
@@ -7,6 +9,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.tensor.random.utils import (
     RandomStream,
     broadcast_params,
+    custom_rng_deepcopy,
     normalize_size_param,
     supp_shape_from_ref_param_shape,
 )
@@ -348,3 +351,28 @@ def test_normalize_size_param():
 
     sym_tensor_size = tensor(shape=(3,), dtype="int64")
     assert normalize_size_param(sym_tensor_size) is sym_tensor_size
+
+
+def test_custom_rng_deepcopy_matches_deepcopy():
+    rng = np.random.default_rng(123)
+
+    dp = deepcopy(rng).bit_generator
+    fc = custom_rng_deepcopy(rng).bit_generator
+
+    # Same state
+    assert dp.state == fc.state
+    # Same seed sequence
+    assert dp.seed_seq.state == fc.seed_seq.state
+
+
+def test_custom_rng_deepcopy_output_identical():
+    rng = np.random.default_rng(123)
+
+    rng1 = deepcopy(rng)
+    rng2 = custom_rng_deepcopy(rng)
+
+    # Generate numbers from each
+    x1 = rng1.normal(size=10)
+    x2 = rng2.normal(size=10)
+
+    assert np.allclose(x1, x2)
