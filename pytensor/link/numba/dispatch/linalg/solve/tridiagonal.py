@@ -362,6 +362,15 @@ def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
 
     @numba_basic.numba_njit(cache=False)
     def lu_factor_tridiagonal(dl, d, du):
+        if d.size == 0:
+            return (
+                np.zeros(dl.shape, dtype=out_dtype),
+                np.zeros(d.shape, dtype=out_dtype),
+                np.zeros(du.shape, dtype=out_dtype),
+                np.zeros(d.shape, dtype=out_dtype),
+                np.zeros(d.shape, dtype="int32"),
+            )
+
         if must_cast_inputs[0]:
             d = d.astype(out_dtype)
         if must_cast_inputs[1]:
@@ -389,6 +398,7 @@ def numba_funcify_SolveLUFactorTridiagonal(
         return generate_fallback_impl(op, node=node)
     out_dtype = node.outputs[0].type.numpy_dtype
 
+    b_ndim = op.b_ndim
     overwrite_b = op.overwrite_b
     transposed = op.transposed
 
@@ -401,6 +411,12 @@ def numba_funcify_SolveLUFactorTridiagonal(
 
     @numba_basic.numba_njit(cache=False)
     def solve_lu_factor_tridiagonal(dl, d, du, du2, ipiv, b):
+        if d.size == 0:
+            if b_ndim == 1:
+                return np.zeros(d.shape, dtype=out_dtype)
+            else:
+                return np.zeros((d.shape[0], b.shape[1]), dtype=out_dtype)
+
         if must_cast_inputs[0]:
             dl = dl.astype(out_dtype)
         if must_cast_inputs[1]:

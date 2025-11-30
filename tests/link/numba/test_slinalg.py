@@ -16,6 +16,13 @@ from pytensor.tensor.slinalg import (
     LUFactor,
     Solve,
     SolveTriangular,
+    cho_solve,
+    cholesky,
+    lu,
+    lu_factor,
+    lu_solve,
+    solve,
+    solve_triangular,
 )
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
@@ -483,6 +490,27 @@ class TestSolves:
         # Can never destroy non-contiguous inputs
         np.testing.assert_allclose(b_val_not_contig, b_val)
 
+    @pytest.mark.parametrize(
+        "solve_op",
+        [solve, solve_triangular, cho_solve, lu_solve],
+        ids=lambda x: x.__name__,
+    )
+    def test_empty(self, solve_op):
+        a = pt.matrix("x")
+        b = pt.vector("b")
+        if solve_op is cho_solve:
+            out = solve_op((a, True), b)
+        elif solve_op is lu_solve:
+            out = solve_op((a, b.astype("int32")), b)
+        else:
+            out = solve_op(a, b)
+        compare_numba_and_py(
+            [a, b],
+            [out],
+            [np.zeros((0, 0)), np.zeros(0)],
+            eval_obj_mode=False,  # pivot_to_permutation seems to still be jitted despite the monkey patching
+        )
+
 
 class TestDecompositions:
     @pytest.mark.parametrize("lower", [True, False], ids=lambda x: f"lower={x}")
@@ -749,6 +777,20 @@ class TestDecompositions:
 
         # Cannot destroy non-contiguous input
         np.testing.assert_allclose(val_not_contig, A_val)
+
+    @pytest.mark.parametrize(
+        "decomp_op", (cholesky, lu, lu_factor), ids=lambda x: x.__name__
+    )
+    def test_empty(self, decomp_op):
+        x = pt.matrix("x")
+        outs = decomp_op(x)
+        if not isinstance(outs, tuple | list):
+            outs = [outs]
+        compare_numba_and_py(
+            [x],
+            outs,
+            [np.zeros((0, 0))],
+        )
 
 
 def test_block_diag():
