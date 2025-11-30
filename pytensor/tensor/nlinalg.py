@@ -19,7 +19,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import (
     Variable,
     dvector,
-    lscalar,
+    iscalar,
     matrix,
     scalar,
     tensor,
@@ -737,7 +737,7 @@ class Lstsq(Op):
             [
                 matrix(),
                 dvector(),
-                lscalar(),
+                iscalar(),
                 dvector(),
             ],
         )
@@ -746,7 +746,7 @@ class Lstsq(Op):
         zz = np.linalg.lstsq(inputs[0], inputs[1], inputs[2])
         outputs[0][0] = zz[0]
         outputs[1][0] = zz[1]
-        outputs[2][0] = np.array(zz[2])
+        outputs[2][0] = np.asarray(zz[2])
         outputs[3][0] = zz[3]
 
 
