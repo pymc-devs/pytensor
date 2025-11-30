@@ -5,6 +5,7 @@ import numpy as np
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
+    generate_fallback_impl,
     numba_funcify,
     register_funcify_default_op_cache_key,
 )
@@ -44,12 +45,6 @@ from pytensor.tensor.slinalg import (
 from pytensor.tensor.type import complex_dtypes, integer_dtypes
 
 
-_COMPLEX_DTYPE_NOT_SUPPORTED_MSG = (
-    "Complex dtype for {op} not supported in numba mode. "
-    "If you need this functionality, please open an issue at: https://github.com/pymc-devs/pytensor"
-)
-
-
 @numba_funcify.register(Cholesky)
 def numba_funcify_Cholesky(op, node, **kwargs):
     """
@@ -66,7 +61,7 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     dtype = node.inputs[0].dtype
     out_dtype = node.outputs[0].dtype
     if dtype in complex_dtypes:
-        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+        return generate_fallback_impl(op, node=node, **kwargs)
 
     @numba_basic.numba_njit
     def cholesky(a):
@@ -124,7 +119,7 @@ def numba_funcify_LU(op, node, **kwargs):
 
     dtype = node.inputs[0].dtype
     if dtype in complex_dtypes:
-        NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+        return generate_fallback_impl(op, node=node, **kwargs)
 
     @numba_basic.numba_njit
     def lu(a):
@@ -172,7 +167,7 @@ def numba_funcify_LUFactor(op, node, **kwargs):
     overwrite_a = op.overwrite_a
 
     if dtype in complex_dtypes:
-        NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+        return generate_fallback_impl(op, node=node)
 
     @numba_basic.numba_njit
     def lu_factor(a):
@@ -228,7 +223,7 @@ def numba_funcify_Solve(op, node, **kwargs):
 
     dtype = node.inputs[0].dtype
     if dtype in complex_dtypes:
-        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+        return generate_fallback_impl(op, node=node)
 
     if assume_a == "gen":
         solve_fn = _solve_gen
@@ -277,9 +272,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
     dtype = node.inputs[0].dtype
     if dtype in complex_dtypes:
-        raise NotImplementedError(
-            _COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op="Solve Triangular")
-        )
+        return generate_fallback_impl(op, node=node)
 
     @numba_basic.numba_njit
     def solve_triangular(a, b):
@@ -317,7 +310,7 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
     c, b = node.inputs
     if c.dtype in complex_dtypes or b.dtype in complex_dtypes:
-        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+        return generate_fallback_impl(op, node=node, **kwargs)
 
     must_cast_c = c.type.numpy_dtype.kind in "ibu" or (
         c.type.numpy_dtype.itemsize < out_dtype.itemsize
@@ -368,7 +361,7 @@ def numba_funcify_QR(op, node, **kwargs):
 
     dtype = node.inputs[0].dtype
     if dtype in complex_dtypes:
-        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+        return generate_fallback_impl(op, node=node, **kwargs)
 
     integer_input = dtype in integer_dtypes
     in_dtype = config.floatX if integer_input else dtype
