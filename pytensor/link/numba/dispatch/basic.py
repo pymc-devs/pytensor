@@ -224,36 +224,6 @@ def direct_cast(typingctx, val, typ):
     return sig, codegen
 
 
-def int_to_float_fn(inputs, out_dtype):
-    """Create a Numba function that converts integer and boolean ``ndarray``s to floats."""
-
-    if (
-        all(inp.type.dtype == out_dtype for inp in inputs)
-        and np.dtype(out_dtype).kind == "f"
-    ):
-
-        @numba_njit(inline="always")
-        def inputs_cast(x):
-            return x
-
-    elif any(i.type.numpy_dtype.kind in "uib" for i in inputs):
-        args_dtype = np.dtype(f"f{out_dtype.itemsize}")
-
-        @numba_njit(inline="always")
-        def inputs_cast(x):
-            return x.astype(args_dtype)
-
-    else:
-        args_dtype_sz = max(_arg.type.numpy_dtype.itemsize for _arg in inputs)
-        args_dtype = np.dtype(f"f{args_dtype_sz}")
-
-        @numba_njit(inline="always")
-        def inputs_cast(x):
-            return x.astype(args_dtype)
-
-    return inputs_cast
-
-
 @singledispatch
 def numba_typify(data, dtype=None, **kwargs):
     return data
