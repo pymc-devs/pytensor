@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor import config
 from pytensor.tensor import nlinalg
 from tests.link.numba.test_basic import compare_numba_and_py
 
@@ -52,23 +51,35 @@ y = np.array(
 )
 
 
-@pytest.mark.parametrize("input_dtype", ["float", "int"])
+@pytest.mark.parametrize("input_dtype", ["int64", "float64", "complex128"])
 @pytest.mark.parametrize("symmetric", [True, False], ids=["symmetric", "general"])
 def test_Eig(input_dtype, symmetric):
-    x = pt.dmatrix("x")
-    if input_dtype == "float":
-        x_val = rng.normal(size=(3, 3)).astype(config.floatX)
+    x = pt.matrix("x", dtype=input_dtype)
+    if x.type.numpy_dtype.kind in "fc":
+        x_val = rng.normal(size=(3, 3)).astype(input_dtype)
     else:
         x_val = rng.integers(1, 10, size=(3, 3)).astype("int64")
 
     if symmetric:
         x_val = x_val + x_val.T
 
+    def assert_fn(x, y):
+        # eig can return equivalent values with some sign flips depending on impl, allow for that
+        np.testing.assert_allclose(np.abs(x), np.abs(y), strict=True)
+
     g = nlinalg.eig(x)
-    compare_numba_and_py(
+    _, [eigen_values, eigen_vectors] = compare_numba_and_py(
         graph_inputs=[x],
         graph_outputs=g,
         test_inputs=[x_val],
+        assert_fn=assert_fn,
+    )
+    # Check eig is correct
+    np.testing.assert_allclose(
+        x_val @ eigen_vectors,
+        eigen_vectors @ np.diag(eigen_values),
+        atol=1e-7,
+        rtol=1e-5,
     )
 
 
