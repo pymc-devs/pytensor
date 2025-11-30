@@ -652,3 +652,47 @@ class TestScanMITSOTBuffer:
 
     def test_mit_sot_buffer_benchmark(self, constant_n_steps, n_steps_val, benchmark):
         self.buffer_tester(constant_n_steps, n_steps_val, benchmark=benchmark)
+
+
+def test_higher_order_derivatives():
+    """This tests different mit-mot taps signs"""
+    x = pt.scalar("x")
+
+    xs = scan(
+        fn=lambda xtm1: xtm1**2,
+        outputs_info=[x],
+        n_steps=5,
+        return_updates=False,
+    )
+    g = grad(xs[-1], x)
+    gg = grad(g, x)
+    ggg = grad(gg, x)
+
+    compare_numba_and_py(
+        [x],
+        [g, gg, ggg],
+        [np.array(0.95)],
+    )
+
+
+def test_grad_until_and_truncate_sequence_taps():
+    # This is a case where we need special zero out behavior in Scan
+    # Copied from tests.scan.basic.py::TestGradUntil::test_grad_until_and_truncate_sequence_taps
+    x = pt.vector("x")
+    threshold = pt.scalar(name="threshold", dtype="int64")
+
+    r = scan(
+        lambda x, y, u: (x * y, until(y > u)),
+        sequences=dict(input=x, taps=[-2, 0]),
+        outputs_info=[None],
+        non_sequences=[threshold],
+        truncate_gradient=3,
+        return_updates=False,
+    )
+    g = grad(r.sum(), x)
+
+    compare_numba_and_py(
+        [x, threshold],
+        [r, g],
+        [np.arange(15, dtype=x.dtype), 6],
+    )

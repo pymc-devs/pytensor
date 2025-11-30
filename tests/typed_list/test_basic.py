@@ -452,6 +452,7 @@ class TestIndex:
 
         assert f([[x, y], [x, y, y]], [x, y]) == 0
 
+    @pytest.mark.xfail(reason="Numba does not support Sparse Ops yet")
     def test_sparse(self):
         mySymbolicSparseList = TypedListType(
             sparse.SparseTensorType("csr", pytensor.config.floatX)
@@ -519,6 +520,7 @@ class TestCount:
 
         assert f([[x, y], [x, y, y]], [x, y]) == 1
 
+    @pytest.mark.xfail(reason="Numba does not support Sparse Ops yet")
     def test_sparse(self):
         mySymbolicSparseList = TypedListType(
             sparse.SparseTensorType("csr", pytensor.config.floatX)

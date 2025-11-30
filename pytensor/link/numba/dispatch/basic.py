@@ -134,7 +134,7 @@ def get_numba_type(
     elif isinstance(pytensor_type, RandomGeneratorType):
         return numba.types.NumPyRandomGeneratorType("NumPyRandomGeneratorType")
     elif isinstance(pytensor_type, TypedListType):
-        return numba.types.List(get_numba_type(pytensor_type.ttype))
+        return numba.types.ListType(get_numba_type(pytensor_type.ttype))
     else:
         raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 
@@ -199,13 +199,10 @@ def create_tuple_creator(f, n):
 
 
 def create_tuple_string(x):
-    args = ", ".join(x + ([""] if len(x) == 1 else []))
-    return f"({args})"
-
-
-def create_arg_string(x):
-    args = ", ".join(x)
-    return args
+    if len(x) == 1:
+        return f"({x[0]},)"
+    else:
+        return f"({', '.join(x)})"
 
 
 @numba.extending.intrinsic
@@ -225,36 +222,6 @@ def direct_cast(typingctx, val, typ):
         return val
 
     return sig, codegen
-
-
-def int_to_float_fn(inputs, out_dtype):
-    """Create a Numba function that converts integer and boolean ``ndarray``s to floats."""
-
-    if (
-        all(inp.type.dtype == out_dtype for inp in inputs)
-        and np.dtype(out_dtype).kind == "f"
-    ):
-
-        @numba_njit(inline="always")
-        def inputs_cast(x):
-            return x
-
-    elif any(i.type.numpy_dtype.kind in "uib" for i in inputs):
-        args_dtype = np.dtype(f"f{out_dtype.itemsize}")
-
-        @numba_njit(inline="always")
-        def inputs_cast(x):
-            return x.astype(args_dtype)
-
-    else:
-        args_dtype_sz = max(_arg.type.numpy_dtype.itemsize for _arg in inputs)
-        args_dtype = np.dtype(f"f{args_dtype_sz}")
-
-        @numba_njit(inline="always")
-        def inputs_cast(x):
-            return x.astype(args_dtype)
-
-    return inputs_cast
 
 
 @singledispatch
@@ -368,6 +335,36 @@ def register_funcify_default_op_cache_key(op_type):
     return decorator
 
 
+def default_hash_key_from_props(op, **extra_fields):
+    props_dict = op._props_dict()
+    if not props_dict:
+        # Simple op, just use the type string as key
+        hash = sha256(
+            f"({type(op)}, {tuple(extra_fields.items())})".encode()
+        ).hexdigest()
+    else:
+        # Simple props, can use string representation of props as key
+        simple_types = (str, bool, int, type(None), float)
+        container_types = (tuple, frozenset)
+        if all(
+            isinstance(v, simple_types)
+            or (
+                isinstance(v, container_types)
+                and all(isinstance(i, simple_types) for i in v)
+            )
+            for v in props_dict.values()
+        ):
+            hash = sha256(
+                f"({type(op)}, {tuple(props_dict.items())}, {tuple(extra_fields.items())})".encode()
+            ).hexdigest()
+        else:
+            # Complex props, use pickle to serialize them
+            hash = hash_from_pickle_dump(
+                (str(type(op)), tuple(props_dict.items()), tuple(extra_fields.items())),
+            )
+    return hash
+
+
 @singledispatch
 def numba_funcify_and_cache_key(op, node=None, **kwargs) -> tuple[Callable, str | None]:
     """Funcify an Op and return a unique cache key that can be used by numba caching.
@@ -411,36 +408,12 @@ def numba_funcify_and_cache_key(op, node=None, **kwargs) -> tuple[Callable, str 
     else:
         func, integer_str = func_and_int, "None"
 
-    try:
-        props_dict = op._props_dict()
-    except AttributeError:
+    if not hasattr(op, "__props__"):
         raise ValueError(
             "The function wrapped by `numba_funcify_default_op_cache_key` can only be used with Ops with `_props`, "
             f"but {op} of type {type(op)} has no _props defined (not even empty)."
         )
-    if not props_dict:
-        # Simple op, just use the type string as key
-        hash = sha256(f"({type(op)}, {integer_str})".encode()).hexdigest()
-    else:
-        # Simple props, can use string representation of props as key
-        simple_types = (str, bool, int, type(None), float)
-        container_types = (tuple, frozenset)
-        if all(
-            isinstance(v, simple_types)
-            or (
-                isinstance(v, container_types)
-                and all(isinstance(i, simple_types) for i in v)
-            )
-            for v in props_dict.values()
-        ):
-            hash = sha256(
-                f"({type(op)}, {tuple(props_dict.items())}, {integer_str})".encode()
-            ).hexdigest()
-        else:
-            # Complex props, use pickle to serialize them
-            hash = hash_from_pickle_dump(
-                (str(type(op)), tuple(props_dict.items()), integer_str),
-            )
+    hash = default_hash_key_from_props(op, cache_version=integer_str)
     return func, hash
 
 

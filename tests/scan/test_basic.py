@@ -34,10 +34,12 @@ from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import MissingInputError
+from pytensor.link.vm import VMLinker
 from pytensor.raise_op import assert_op
 from pytensor.scan.basic import scan
-from pytensor.scan.op import Scan
+from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.utils import until
+from pytensor.tensor import as_tensor
 from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import dot, exp, mean, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
@@ -1110,7 +1112,7 @@ class TestScan:
 
         final_result = result[-1]
 
-        f = function(inputs=[A, k], outputs=final_result)
+        f = function(inputs=[A, k], outputs=final_result, mode="CVM")
         f(np.asarray([2, 3, 0.1, 0, 1], dtype=config.floatX), 4)
 
         # There should be 3 outputs greater than 10: prior_result[0] at step 3,
@@ -3194,38 +3196,66 @@ class TestExamples:
         f = function([seq], results[1])
         assert np.all(exp_out == f(inp))
 
-    def test_shared_borrow(self):
+    @pytest.mark.parametrize("static_shape", (True, False)[:1])
+    def test_aliased_inner_outputs(self, static_shape):
         """
-        This tests two things. The first is a bug occurring when scan wrongly
-        used the borrow flag. The second thing it that Scan's infer_shape()
-        method will be able to remove the Scan node from the graph in this
-        case.
+            This tests two things. The first is a bug occurring when scan wrongly
+            used the borrow flag. The second thing it that Scan's infer_shape()
+            method will be able to remove the Scan node from the graph in this
+            case.
+
+            Here is pure python equivalent of the problem we want to avoid:
+            ```python
+                def scan(seq, initval):
+                    # Due to memory optimization we override values of mitsot as we iterate
+                    # That's why mitsot has shape (4, 1) and not (14, 1)
+                    mitsot = np.zeros((4, 1))
+                    mitsot[:4] = initval
+                    nitsot = np.zeros((10, 1))
+                    for i, s in enumerate(seq):
+                        # Incorrect results
+                        mitsot[(i+4) % 4], nitsot[i] = s, mitsot[i % 4]
+                        # Correct results
+                        # mitsot[(i + 4) % 4], nitsot[i] = s, mitsot[i % 4].copy()
+
+                    return mitsot[(i + 4) % 4: (i+4 + 1) % 4], nitsot
+
+                scan(np.arange(10), np.zeros((4, 1)))
+        ```
         """
 
-        inp = np.arange(10).reshape(-1, 1).astype(config.floatX)
-        exp_out = np.zeros((10, 1)).astype(config.floatX)
-        exp_out[4:] = inp[:-4]
+        def onestep(seq, seq_tm4):
+            # Recurring output is just each value of seq
+            # And we further map the tap -4 as a new output
+            return seq, seq_tm4
 
-        def onestep(x, x_tm4):
-            return x, x_tm4
-
-        seq = matrix()
-        initial_value = shared(np.zeros((4, 1), dtype=config.floatX))
-        outputs_info = [{"initial": initial_value, "taps": [-4]}, None]
-        results = scan(
-            fn=onestep, sequences=seq, outputs_info=outputs_info, return_updates=False
+        # Outer tensors must be atleast matrix, so that they we have vectors in the inner loop
+        # Otherwise we would be working with scalars and memory alias wouldn't be a concern
+        seq = matrix(shape=(10, 1) if static_shape else (None, None), name="seq")
+        init = matrix(shape=(4, 1) if static_shape else (None, None), name="init")
+        outputs_info = [{"initial": init, "taps": [-4]}, None]
+        [out_seq, out_seq_tm4] = scan(
+            fn=onestep,
+            sequences=seq,
+            outputs_info=outputs_info,
+            return_updates=False,
         )
-        sharedvar = shared(np.zeros((1, 1), dtype=config.floatX))
-        updates = {sharedvar: results[0][-1:]}
 
-        f = function([seq], results[1], updates=updates)
+        f = function([seq, init], [out_seq[-1].ravel(), out_seq_tm4.ravel()])
 
-        # This fails if scan uses wrongly the borrow flag
-        assert np.all(exp_out == f(inp))
+        seq_test_val = np.arange(10, dtype=config.floatX)[:, None]
+        init_test_val = np.zeros((4, 1), dtype=config.floatX)
+
+        res0, res1 = f(seq_test_val, init_test_val)
+        expected_res0 = np.array([9], dtype=config.floatX)
+        expected_res1 = np.zeros(10, dtype=config.floatX)
+        expected_res1[4:] = np.arange(6)
+        np.testing.assert_array_equal(res0, expected_res0)
+        np.testing.assert_array_equal(res1, expected_res1)
 
         # This fails if Scan's infer_shape() is unable to remove the Scan
         # node from the graph.
-        f_infershape = function([seq], results[1].shape, mode="FAST_RUN")
+        f_infershape = function([seq, init], out_seq_tm4[1].shape)
         scan_nodes_infershape = scan_nodes_from_fct(f_infershape)
         assert len(scan_nodes_infershape) == 0
 
@@ -4308,3 +4338,91 @@ def test_return_updates_api_change():
 
     with pytest.raises(ValueError, match=err_msg):
         scan(lambda: {x: x + 1}, outputs_info=[], n_steps=5, return_updates=False)
+
+
+@pytest.mark.parametrize(
+    "scan_mode",
+    [
+        None,
+        "FAST_RUN",
+        "FAST_COMPILE",
+        Mode("cvm", optimizer=None),
+        Mode("vm", optimizer=None),
+        Mode("c", optimizer=None),
+        Mode("py", optimizer=None),
+    ],
+)
+def test_scan_mode_compatibility(scan_mode):
+    # Regression test for case where using Scan with a non-updating VM failed
+
+    # Build a scan with one sequence and two MIT-MOTs
+    info = ScanInfo(
+        n_seqs=1,
+        mit_mot_in_slices=((0, 1), (0, 1)),
+        mit_mot_out_slices=((1,), (1,)),
+        mit_sot_in_slices=(),
+        sit_sot_in_slices=(),
+        n_nit_sot=0,
+        n_untraced_sit_sot_outs=0,
+        n_non_seqs=0,
+        as_while=False,
+    )
+    bool_seq = pt.scalar(dtype="bool")
+    mitmot_A0, mitmot_A1, mitmot_B0, mitmot_B1 = [
+        pt.matrix(shape=(2, 2)) for i in range(4)
+    ]
+    inputs = [
+        bool_seq,
+        mitmot_A0,
+        mitmot_A1,
+        mitmot_B0,
+        mitmot_B1,
+    ]
+    outputs = [
+        pt.add(bool_seq + mitmot_A0, mitmot_A1),
+        pt.add(bool_seq * mitmot_B0, mitmot_B1),
+    ]
+
+    scan_op = Scan(
+        inputs,
+        outputs,
+        info=info,
+        mode=scan_mode,
+    )
+
+    n_steps = 5
+    numerical_inputs = [
+        np.array(n_steps, dtype="int64"),
+        np.array([1, 1, 0, 1, 0], dtype="bool"),
+        np.zeros(n_steps + 1)[:, None, None] * np.eye(2),
+        np.arange(n_steps + 1)[:, None, None] * np.eye(2),
+    ]
+    tensor_inputs = [as_tensor(inp, dtype=inp.dtype).type() for inp in numerical_inputs]
+    tensor_outputs = [o.sum() for o in scan_op(*tensor_inputs)]
+
+    no_opt_mode = Mode(linker="py", optimizer=None)
+    # NotImplementedError should only be triggered when we try to compile the function
+    if (
+        # Abstract modes should never fail
+        scan_mode not in (None, "FAST_RUN", "FAST_COMPILE")
+        # Only if the user tries something specific and incompatible
+        and not isinstance(get_mode(scan_mode).linker, VMLinker)
+    ):
+        with pytest.raises(
+            NotImplementedError,
+            match="Python/Cython implementation of Scan with preallocated MIT-MOT outputs requires a VMLinker",
+        ):
+            function(tensor_inputs, tensor_outputs, mode=no_opt_mode)
+        return
+
+    fn = function(tensor_inputs, tensor_outputs, mode=no_opt_mode)
+
+    # Check we have the expected Scan in the compiled function
+    [fn_scan_op] = [
+        node.op for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
+    ]
+    assert fn_scan_op.info == info
+    assert fn_scan_op.mitmots_preallocated == (True, True)
+
+    # Expected value computed by running correct Scan once
+    np.testing.assert_allclose(fn(*numerical_inputs), [44, 38])

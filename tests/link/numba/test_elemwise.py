@@ -13,7 +13,7 @@ from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
 from pytensor.scalar import Composite, float64
 from pytensor.scalar import add as scalar_add
-from pytensor.tensor import blas, tensor
+from pytensor.tensor import blas, tensor, vector
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
@@ -349,6 +349,20 @@ def test_CAReduce(careduce_fn, axis, v):
     # fn.dprint()
     [node] = fn.maker.fgraph.apply_nodes
     assert isinstance(node.op, CAReduce)
+
+
+def test_CAReduce_respects_acc_dtype():
+    x = vector("x", dtype="int8")
+    out = x.sum(dtype="int8", acc_dtype="int64")
+    # Choose values that would overflow if accumulated internally in int8
+    max_int8 = np.iinfo(np.int8).max
+    test_x = np.array([max_int8, 5, max_int8, -max_int8, 5, -max_int8], dtype=np.int8)
+    _, [res] = compare_numba_and_py(
+        [x],
+        [out],
+        [test_x],
+    )
+    assert res == 10
 
 
 def test_scalar_Elemwise_Clip():

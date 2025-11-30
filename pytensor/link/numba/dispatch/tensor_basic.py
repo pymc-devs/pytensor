@@ -74,13 +74,13 @@ def numba_funcify_Alloc(op, node, **kwargs):
                 f'if val.shape[{-i - 1}] == 1 and scalar_shape[{-i - 1}] != 1: raise ValueError("{Alloc._runtime_broadcast_error_msg}")'
             )
     check_runtime_broadcast_src = indent("\n".join(check_runtime_broadcast), " " * 4)
-
+    dtype = node.inputs[0].type.dtype
     alloc_def_src = f"""
 def alloc(val, {", ".join(shape_var_names)}):
 {shapes_to_items_src}
     scalar_shape = {create_tuple_string(shape_var_item_names)}
 {check_runtime_broadcast_src}
-    res = np.empty(scalar_shape, dtype=val.dtype)
+    res = np.empty(scalar_shape, dtype=np.{dtype})
     res[...] = val
     return res
     """
@@ -90,8 +90,9 @@ def alloc(val, {", ".join(shape_var_names)}):
         globals() | {"np": np},
     )
 
+    cache_version = 1
     cache_key = sha256(
-        str((type(op), node.inputs[0].type.broadcastable)).encode()
+        str((type(op), node.inputs[0].type.broadcastable, cache_version)).encode()
     ).hexdigest()
     return numba_basic.numba_njit(alloc_fn), cache_key
 
@@ -124,10 +125,16 @@ def numba_funcify_Join(op, **kwargs):
 @register_funcify_default_op_cache_key(Split)
 def numba_funcify_Split(op, **kwargs):
     @numba_basic.numba_njit
-    def split(tensor, axis, indices):
-        return np.split(tensor, np.cumsum(indices)[:-1], axis=axis.item())
+    def split(tensor, axis, sizes):
+        if (sizes < 0).any():
+            raise ValueError("Split sizes must be non-negative")
+        axis = axis.item()
+        split_indices = np.cumsum(sizes)
+        if split_indices[-1] != tensor.shape[axis]:
+            raise ValueError("Split sizes do not add up to the length of the tensor.")
+        return np.split(tensor, split_indices[:-1], axis=axis)
 
-    return split
+    return split, 1
 
 
 @register_funcify_default_op_cache_key(ExtractDiag)

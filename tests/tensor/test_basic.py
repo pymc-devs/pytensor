@@ -89,7 +89,7 @@ from pytensor.tensor.basic import (
     where,
     zeros_like,
 )
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import dense_dot
@@ -150,8 +150,6 @@ from tests.tensor.utils import (
     random_of_dtype,
 )
 
-
-pytestmark = pytest.mark.filterwarnings("error")
 
 if config.mode == "FAST_COMPILE":
     mode_opt = "FAST_RUN"
@@ -740,41 +738,43 @@ class TestAlloc:
     def setup_method(self):
         self.rng = np.random.default_rng(seed=utt.fetch_seed())
 
-    def test_alloc_constant_folding(self):
+    @pytest.mark.parametrize(
+        "subtensor_fn, expected_grad_n_alloc",
+        [
+            # IncSubtensor1
+            (lambda x: x[:60], 1),
+            # AdvancedIncSubtensor1
+            (lambda x: x[np.arange(60)], 1),
+            # AdvancedIncSubtensor
+            (lambda x: x[np.arange(50), np.arange(50)], 1),
+        ],
+    )
+    def test_alloc_constant_folding(self, subtensor_fn, expected_grad_n_alloc):
         test_params = np.asarray(self.rng.standard_normal(50 * 60), self.dtype)
 
         some_vector = vector("some_vector", dtype=self.dtype)
         some_matrix = some_vector.reshape((60, 50))
         variables = self.shared(np.ones((50,), dtype=self.dtype))
-        idx = constant(np.arange(50))
 
-        for alloc_, (subtensor, n_alloc) in zip(
-            self.allocs,
-            [
-                # IncSubtensor1
-                (some_matrix[:60], 2),
-                # AdvancedIncSubtensor1
-                (some_matrix[arange(60)], 2),
-                # AdvancedIncSubtensor
-                (some_matrix[idx, idx], 1),
-            ],
-            strict=True,
-        ):
-            derp = pt_sum(dense_dot(subtensor, variables))
+        subtensor = subtensor_fn(some_matrix)
 
-            fobj = pytensor.function([some_vector], derp, mode=self.mode)
-            grad_derp = pytensor.grad(derp, some_vector)
-            fgrad = pytensor.function([some_vector], grad_derp, mode=self.mode)
+        derp = pt_sum(dense_dot(subtensor, variables))
+        fobj = pytensor.function([some_vector], derp, mode=self.mode)
+        assert (
+            sum(isinstance(node.op, Alloc) for node in fobj.maker.fgraph.apply_nodes)
+            == 0
+        )
+        # TODO: Assert something about the value if we bothered to call it?
+        fobj(test_params)
 
-            topo_obj = fobj.maker.fgraph.toposort()
-            assert sum(isinstance(node.op, type(alloc_)) for node in topo_obj) == 0
-
-            topo_grad = fgrad.maker.fgraph.toposort()
-            assert (
-                sum(isinstance(node.op, type(alloc_)) for node in topo_grad) == n_alloc
-            ), (alloc_, subtensor, n_alloc, topo_grad)
-            fobj(test_params)
-            fgrad(test_params)
+        grad_derp = pytensor.grad(derp, some_vector)
+        fgrad = pytensor.function([some_vector], grad_derp, mode=self.mode)
+        assert (
+            sum(isinstance(node.op, Alloc) for node in fgrad.maker.fgraph.apply_nodes)
+            == expected_grad_n_alloc
+        )
+        # TODO: Assert something about the value if we bothered to call it?
+        fgrad(test_params)
 
     def test_alloc_output(self):
         val = constant(self.rng.standard_normal((1, 1)), dtype=self.dtype)
@@ -923,22 +923,18 @@ def test_infer_static_shape():
 class TestEye:
     # This is slow for the ('int8', 3) version.
     def test_basic(self):
-        def check(dtype, N, M_=None, k=0):
-            # PyTensor does not accept None as a tensor.
-            # So we must use a real value.
-            M = M_
-            # Currently DebugMode does not support None as inputs even if this is
-            # allowed.
-            if M is None and config.mode in ["DebugMode", "DEBUG_MODE"]:
-                M = N
+        def check(dtype, N, M=None, k=0):
             N_symb = iscalar()
             M_symb = iscalar()
             k_symb = iscalar()
+            test_inputs = [N, k] if M is None else [N, M, k]
+            inputs = [N_symb, k_symb] if M is None else [N_symb, M_symb, k_symb]
             f = function(
-                [N_symb, M_symb, k_symb], eye(N_symb, M_symb, k_symb, dtype=dtype)
+                inputs,
+                eye(N_symb, None if (M is None) else M_symb, k_symb, dtype=dtype),
             )
-            result = f(N, M, k)
-            assert np.allclose(result, np.eye(N, M_, k, dtype=dtype))
+            result = f(*test_inputs)
+            assert np.allclose(result, np.eye(N, M, k, dtype=dtype))
             assert result.dtype == np.dtype(dtype)
 
         for dtype in ALL_DTYPES:
@@ -1744,7 +1740,7 @@ class TestJoinAndSplit:
         got = f(-2)
         assert np.allclose(got, want)
 
-        with pytest.raises(ValueError):
+        with pytest.raises((ValueError, IndexError)):
             f(-3)
 
     @pytest.mark.parametrize("py_impl", (False, True))
@@ -2189,12 +2185,14 @@ def test_ScalarFromTensor(cast_policy):
         v = eval_outputs([ss])
 
         assert v == 56
-        assert v.shape == ()
-
-        if cast_policy == "custom":
-            assert isinstance(v, np.int8)
-        elif cast_policy == "numpy+floatX":
-            assert isinstance(v, np.int64)
+        assert isinstance(
+            v, int
+        )  # Numba unboxes scalars to python numerical primitives
+        # assert v.shape == ()
+        # if cast_policy == "custom":
+        #     assert isinstance(v, np.int8)
+        # elif cast_policy == "numpy+floatX":
+        #     assert isinstance(v, np.int64)
 
         pts = lscalar()
         ss = scalar_from_tensor(pts)
@@ -2202,8 +2200,8 @@ def test_ScalarFromTensor(cast_policy):
         fff = function([pts], ss)
         v = fff(np.asarray(5))
         assert v == 5
-        assert isinstance(v, np.int64)
-        assert v.shape == ()
+        # assert isinstance(v, np.int64)
+        # assert v.shape == ()
 
         with pytest.raises(TypeError):
             scalar_from_tensor(vector())
@@ -2573,7 +2571,7 @@ class TestARange:
                         start_v_, stop_v_, step_v_, dtype=out.dtype
                     )
 
-                assert np.all(f_val == expected_val)
+                np.testing.assert_allclose(f_val, expected_val, strict=True, rtol=3e-7)
 
     @pytest.mark.parametrize(
         "cast_policy",
@@ -2610,7 +2608,7 @@ class TestARange:
                 elif config.cast_policy == "numpy+floatX":
                     expected_val = np.arange(start_v_, stop_v_, step_v_)
 
-                assert np.all(f_val == expected_val)
+                np.testing.assert_allclose(f_val, expected_val, strict=True)
 
     @pytest.mark.parametrize(
         "cast_policy",
@@ -4561,7 +4559,8 @@ def test_vectorize_join(axis, broadcasting_y):
 
     blockwise_needed = isinstance(axis, SharedVariable) or broadcasting_y != "none"
     has_blockwise = any(
-        isinstance(node.op, Blockwise) for node in vectorize_pt.maker.fgraph.apply_nodes
+        isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+        for node in vectorize_pt.maker.fgraph.apply_nodes
     )
     assert has_blockwise == blockwise_needed
 

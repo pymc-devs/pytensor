@@ -2,7 +2,11 @@ import numba
 import numpy as np
 
 import pytensor.link.numba.dispatch.basic as numba_basic
-from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
+from pytensor.link.numba.dispatch.basic import (
+    default_hash_key_from_props,
+    register_funcify_and_cache_key,
+    register_funcify_default_op_cache_key,
+)
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.tensor.type_other import SliceType
 from pytensor.typed_list import (
@@ -17,6 +21,11 @@ from pytensor.typed_list import (
     Remove,
     Reverse,
 )
+
+
+@numba_basic.numba_typify.register(list)
+def numba_typify(data, **kwargs):
+    return numba.typed.List(data)
 
 
 def numba_all_equal(x, y):
@@ -70,6 +79,14 @@ def numba_deepcopy_list(x):
         return deepcopy_list
 
 
+def cache_key_if_not_inplace(op, inplace: bool):
+    if inplace:
+        # NUMBA is misbehaving with cached inplace ListType operations
+        return None
+    else:
+        return default_hash_key_from_props(op)
+
+
 @register_funcify_default_op_cache_key(MakeList)
 def numba_funcify_make_list(op, node, **kwargs):
     @numba_basic.numba_njit
@@ -107,7 +124,7 @@ def numba_funcify_list_get_item(op, node, **kwargs):
         return list_get_item_index
 
 
-@register_funcify_default_op_cache_key(Reverse)
+@register_funcify_and_cache_key(Reverse)
 def numba_funcify_list_reverse(op, node, **kwargs):
     inplace = op.inplace
 
@@ -120,10 +137,10 @@ def numba_funcify_list_reverse(op, node, **kwargs):
         z.reverse()
         return z
 
-    return list_reverse
+    return list_reverse, cache_key_if_not_inplace(op, inplace)
 
 
-@register_funcify_default_op_cache_key(Append)
+@register_funcify_and_cache_key(Append)
 def numba_funcify_list_append(op, node, **kwargs):
     inplace = op.inplace
 
@@ -136,10 +153,10 @@ def numba_funcify_list_append(op, node, **kwargs):
         z.append(numba_deepcopy(to_append))
         return z
 
-    return list_append
+    return list_append, cache_key_if_not_inplace(op, inplace)
 
 
-@register_funcify_default_op_cache_key(Extend)
+@register_funcify_and_cache_key(Extend)
 def numba_funcify_list_extend(op, node, **kwargs):
     inplace = op.inplace
 
@@ -152,10 +169,10 @@ def numba_funcify_list_extend(op, node, **kwargs):
         z.extend(numba_deepcopy(to_append))
         return z
 
-    return list_extend
+    return list_extend, cache_key_if_not_inplace(op, inplace)
 
 
-@register_funcify_default_op_cache_key(Insert)
+@register_funcify_and_cache_key(Insert)
 def numba_funcify_list_insert(op, node, **kwargs):
     inplace = op.inplace
 
@@ -168,7 +185,7 @@ def numba_funcify_list_insert(op, node, **kwargs):
         z.insert(index.item(), numba_deepcopy(to_insert))
         return z
 
-    return list_insert
+    return list_insert, cache_key_if_not_inplace(op, inplace)
 
 
 @register_funcify_default_op_cache_key(Index)
@@ -196,7 +213,7 @@ def numba_funcify_list_count(op, node, **kwargs):
     return list_count
 
 
-@register_funcify_default_op_cache_key(Remove)
+@register_funcify_and_cache_key(Remove)
 def numba_funcify_list_remove(op, node, **kwargs):
     inplace = op.inplace
 
@@ -216,4 +233,4 @@ def numba_funcify_list_remove(op, node, **kwargs):
         z.pop(index_to_remove)
         return z
 
-    return list_remove
+    return list_remove, cache_key_if_not_inplace(op, inplace)

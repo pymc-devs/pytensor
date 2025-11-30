@@ -8,7 +8,6 @@ import pytensor
 import pytensor.sparse.math
 import pytensor.tensor as pt
 from pytensor import sparse
-from pytensor.compile.function import function
 from pytensor.compile.io import In
 from pytensor.configdefaults import config
 from pytensor.gradient import GradientError
@@ -85,19 +84,6 @@ def as_sparse_format(data, format):
         return scipy_sparse.csr_matrix(data)
     else:
         raise NotImplementedError()
-
-
-def eval_outputs(outputs):
-    return function([], outputs)()[0]
-
-
-# scipy 0.17 will return sparse values in all cases while previous
-# version sometimes wouldn't.  This will make everything dense so that
-# we can use assert_allclose.
-def as_ndarray(val):
-    if hasattr(val, "toarray"):
-        return val.toarray()
-    return val
 
 
 def random_lil(shape, dtype, nnz):
@@ -355,7 +341,7 @@ class TestTranspose:
         assert ta.type.dtype == "float64", ta.type.dtype
         assert ta.type.format == "csr", ta.type.format
 
-        vta = eval_outputs([ta])
+        vta = ta.eval()
         assert vta.shape == (3, 5)
 
     def test_transpose_csr(self):
@@ -367,7 +353,7 @@ class TestTranspose:
         assert ta.type.dtype == "float64", ta.type.dtype
         assert ta.type.format == "csc", ta.type.format
 
-        vta = eval_outputs([ta])
+        vta = ta.eval()
         assert vta.shape == (3, 5)
 
 
@@ -544,13 +530,13 @@ class TestConversion:
         test_val = np.random.random((5,)).astype(config.floatX)
         a = pt.as_tensor_variable(test_val)
         s = csc_from_dense(a)
-        val = eval_outputs([s])
+        val = s.eval()
         assert str(val.dtype) == config.floatX
         assert val.format == "csc"
 
         a = pt.as_tensor_variable(test_val)
         s = csr_from_dense(a)
-        val = eval_outputs([s])
+        val = s.eval()
         assert str(val.dtype) == config.floatX
         assert val.format == "csr"
 
@@ -573,7 +559,7 @@ class TestConversion:
             s = t(scipy_sparse.identity(5))
             s = as_sparse_variable(s)
             d = dense_from_sparse(s)
-            val = eval_outputs([d])
+            val = d.eval()
             assert str(val.dtype) == s.dtype
             assert np.all(val[0] == [1, 0, 0, 0, 0])
 
@@ -583,7 +569,7 @@ class TestConversion:
             s = t(scipy_sparse.identity(5))
             s = as_sparse_variable(s)
             d = s.toarray()
-            val = eval_outputs([d])
+            val = d.eval()
             assert str(val.dtype) == s.dtype
             assert np.all(val[0] == [1, 0, 0, 0, 0])
 

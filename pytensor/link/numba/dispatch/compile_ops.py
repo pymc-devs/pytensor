@@ -25,7 +25,7 @@ def numba_deepcopy(x):
 
 @numba.extending.overload(numba_deepcopy)
 def numba_deepcopy_tensor(x):
-    if isinstance(x, numba.types.Number):
+    if isinstance(x, numba.types.Number | numba.types.Boolean):
 
         def number_deepcopy(x):
             return x
@@ -61,6 +61,7 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
         input_specs=[In(x, borrow=True, mutable=False) for x in fgraph.inputs],
         accept_inplace=True,
     )
+    # TODO: Prevent output aliasing like we do for Scan/outer function
     NUMBA.optimizer(fgraph)
     fgraph_fn, fgraph_cache_key = numba_funcify_and_cache_key(
         op.fgraph, squeeze_output=True, **kwargs

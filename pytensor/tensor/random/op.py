@@ -447,6 +447,8 @@ class AbstractRNGConstructor(Op):
     def make_node(self, seed=None):
         if seed is None:
             seed = NoneConst
+        elif isinstance(seed, Variable) and isinstance(seed.type, NoneTypeT):
+            pass
         else:
             seed = as_tensor_variable(seed)
         inputs = [seed]
@@ -496,6 +498,11 @@ def vectorize_random_variable(
 
 class RandomVariableWithCoreShape(OpWithCoreShape):
     """Generalizes a random variable `Op` to include a core shape parameter."""
+
+    @property
+    def core_op(self):
+        [rv_node] = self.fgraph.apply_nodes
+        return rv_node.op
 
     def __str__(self):
         [rv_node] = self.fgraph.apply_nodes

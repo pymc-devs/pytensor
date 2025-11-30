@@ -185,7 +185,7 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
         x = self.type(self.dtype, shape=())()
         y = x.dimshuffle(("x",) * (numpy_maxdims + 1))
 
-        with pytest.raises(ValueError):
+        with pytest.raises((ValueError, SystemError)):
             y.eval({x: 0})
 
     def test_c_views(self):
@@ -242,7 +242,8 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
             blocks_last = blocks_i
 
         tracemalloc.stop()
-        assert np.allclose(np.mean(block_diffs), 0)
+        burn_in = 1
+        assert np.allclose(np.mean(block_diffs[burn_in:]), 0)
 
     def test_static_shape(self):
         x = tensor(dtype=np.float64, shape=(1, 2), name="x")

@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy as sp
 
 import pytensor.tensor as pt
 from pytensor.compile import UnusedInputError, get_mode
@@ -9,6 +10,7 @@ from pytensor.compile.io import In
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph.utils import MissingInputError
+from pytensor.sparse import SparseTensorType
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.type import (
     bscalar,
@@ -763,18 +765,15 @@ class TestAliasingRules:
         # rule #2 reading back from pytensor-managed memory
         assert not np.may_share_memory(A.get_value(borrow=False), data_of(A))
 
+    @pytest.mark.xfail(reason="Numba does not support Sparse Ops yet")
     def test_sparse_input_aliasing_affecting_inplace_operations(self):
-        sp = pytest.importorskip("scipy", minversion="0.7.0")
-
-        from pytensor import sparse
-
         # Note: to trigger this bug with pytensor rev 4586:2bc6fc7f218b,
         #        you need to make in inputs mutable (so that inplace
         #        operations are used) and to break the elemwise composition
         #        with some non-elemwise op (here dot)
 
-        x = sparse.SparseTensorType("csc", dtype="float64")()
-        y = sparse.SparseTensorType("csc", dtype="float64")()
+        x = SparseTensorType("csc", dtype="float64")()
+        y = SparseTensorType("csc", dtype="float64")()
         f = function([In(x, mutable=True), In(y, mutable=True)], (x + y) + (x + y))
         # Test 1. If the same variable is given twice
 

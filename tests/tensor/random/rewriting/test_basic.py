@@ -136,7 +136,7 @@ def test_inplace_rewrites(rv_op):
     (new_out, _new_rng) = f.maker.fgraph.outputs
     assert new_out.type == out.type
     new_node = new_out.owner
-    new_op = new_node.op
+    new_op = getattr(new_node.op, "core_op", new_node.op)
     assert isinstance(new_op, type(op))
     assert new_op._props_dict() == (op._props_dict() | {"inplace": True})
     assert all(
