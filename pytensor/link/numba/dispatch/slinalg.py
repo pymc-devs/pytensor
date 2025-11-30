@@ -5,6 +5,7 @@ import numpy as np
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
+    generate_fallback_impl,
     numba_funcify,
     register_funcify_default_op_cache_key,
 )
@@ -172,7 +173,7 @@ def numba_funcify_LUFactor(op, node, **kwargs):
     overwrite_a = op.overwrite_a
 
     if dtype in complex_dtypes:
-        NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+        return generate_fallback_impl(op, node=node)
 
     @numba_basic.numba_njit
     def lu_factor(a):
@@ -228,7 +229,7 @@ def numba_funcify_Solve(op, node, **kwargs):
 
     dtype = node.inputs[0].dtype
     if dtype in complex_dtypes:
-        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+        return generate_fallback_impl(op, node=node)
 
     if assume_a == "gen":
         solve_fn = _solve_gen
@@ -277,9 +278,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
     dtype = node.inputs[0].dtype
     if dtype in complex_dtypes:
-        raise NotImplementedError(
-            _COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op="Solve Triangular")
-        )
+        return generate_fallback_impl(op, node=node)
 
     @numba_basic.numba_njit
     def solve_triangular(a, b):
