@@ -86,11 +86,12 @@ jobs:
         part:
           - "tests --ignore=tests/scan --ignore=tests/tensor --ignore=tests/xtensor"
           - "tests/scan"
-          - "tests/tensor --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting"
+          - "tests/tensor --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/signal --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting --ignore=tests/tensor/linalg --ignore=tests/tensor/test_nlinalg.py --ignore=tests/tensor/test_slinalg.py --ignore=tests/tensor/test_pad.py"
           - "tests/tensor/test_basic.py tests/tensor/test_elemwise.py"
           - "tests/tensor/test_math.py"
-          - "tests/tensor/test_math_scipy.py tests/tensor/test_blas.py tests/tensor/conv"
+          - "tests/tensor/test_math_scipy.py tests/tensor/test_blas.py tests/tensor/signal tests/tensor/conv tests/tensor/test_pad.py"
           - "tests/tensor/rewriting"
+          - "tests/tensor/linalg tests/tensor/test_nlinalg.py tests/tensor/test_slinalg.py"
         exclude:
           - python-version: "3.11"
             fast-compile: 1
