@@ -1304,13 +1304,11 @@ class UnravelIndex(Op):
         if dims.ndim != 1:
             raise TypeError("dims must be a 1D array")
 
+        out_type = indices.type.clone(dtype="int64")
         return Apply(
             self,
             [indices, dims],
-            [
-                TensorType(dtype="int64", shape=(None,) * indices.type.ndim)()
-                for i in range(ptb.get_vector_length(dims))
-            ],
+            [out_type() for _i in range(ptb.get_vector_length(dims))],
         )
 
     def infer_shape(self, fgraph, node, input_shapes):

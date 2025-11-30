@@ -10,7 +10,6 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
     get_numba_type,
-    register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
 from pytensor.npy_2_compat import old_np_unique
@@ -20,11 +19,9 @@ from pytensor.tensor.extra_ops import (
     CumOp,
     FillDiagonal,
     FillDiagonalOffset,
-    RavelMultiIndex,
     Repeat,
     SearchsortedOp,
     Unique,
-    UnravelIndex,
 )
 
 
@@ -132,7 +129,8 @@ def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
     return filldiagonaloffset
 
 
-@register_funcify_default_op_cache_key(RavelMultiIndex)
+# This implementation is broken, as checked against tensor/test_extra_ops.py::TestRavelMultiIndex::test_unravel_index
+# @register_funcify_default_op_cache_key(RavelMultiIndex)
 def numba_funcify_RavelMultiIndex(op, node, **kwargs):
     mode = op.mode
     order = op.order
@@ -266,7 +264,8 @@ def numba_funcify_Unique(op, node, **kwargs):
     return unique, 1
 
 
-@register_funcify_and_cache_key(UnravelIndex)
+# This implementation is broken, as checked against tensor/test_extra_ops.py::TestUnravelIndex::test_unravel_index
+# @register_funcify_and_cache_key(UnravelIndex)
 def numba_funcify_UnravelIndex(op, node, **kwargs):
     order = op.order
 
@@ -293,7 +292,7 @@ def numba_funcify_UnravelIndex(op, node, **kwargs):
         a[1:] = shape[:0:-1]
         a = np.cumprod(a)[::-1]
 
-        # PyTensor actually returns a `tuple` of these values, instead of an
+        # We should return a `tuple` of these values, instead of an
         # `ndarray`; however, this `ndarray` result should be able to be
         # unpacked into a `tuple`, so this discrepancy shouldn't really matter
         return ((maybe_expand_dim(arr) // a) % shape).T
