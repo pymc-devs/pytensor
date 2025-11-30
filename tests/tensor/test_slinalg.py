@@ -884,7 +884,15 @@ def test_expm():
 
 
 @pytest.mark.parametrize(
-    "mode", ["symmetric", "nonsymmetric_real_eig", "nonsymmetric_complex_eig"][-1:]
+    "mode",
+    [
+        "symmetric",
+        "nonsymmetric_real_eig",
+        pytest.mark.param(
+            "nonsymmetric_complex_eig",
+            marks=pytest.mark.xfail(reason="Domain change not supported by numba eig"),
+        ),
+    ],
 )
 def test_expm_grad(mode):
     rng = np.random.default_rng()
