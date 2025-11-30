@@ -102,7 +102,8 @@ def numba_funcify_Eig(op, node, **kwargs):
     def eig(x):
         if discrete_input:
             x = x.astype(w_dtype)
-        return np.linalg.eig(x)
+        w, v = np.linalg.eig(x)
+        return w.astype(w_dtype), v.astype(w_dtype)
 
     cache_version = 1
     return eig, cache_version
