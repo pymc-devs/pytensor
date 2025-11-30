@@ -303,24 +303,46 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     overwrite_b = op.overwrite_b
     check_finite = op.check_finite
 
-    dtype = node.inputs[0].dtype
-    if dtype in complex_dtypes:
+    out_dtype = node.outputs[0].type.numpy_dtype
+    c, b = node.inputs
+    if c.dtype in complex_dtypes or b.dtype in complex_dtypes:
         raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+
+    must_cast_c = c.type.numpy_dtype.kind in "ibu" or (
+        c.type.numpy_dtype.itemsize < out_dtype.itemsize
+    )
+    must_cast_b = b.type.numpy_dtype.kind in "ibu" or (
+        b.type.numpy_dtype.itemsize < out_dtype.itemsize
+    )
+    if must_cast_c and config.compiler_verbose:
+        print(f"CholeskySolve requires casting 0th input (c) to {out_dtype}")  # noqa: T201
+    if must_cast_b and config.compiler_verbose:
+        print(f"CholeskySolve requires casting 1st input (b) to {out_dtype}")  # noqa: T201
 
     @numba_basic.numba_njit
     def cho_solve(c, b):
+        if must_cast_c:
+            c = c.astype(out_dtype)
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(c), np.isnan(c))):
                 raise np.linalg.LinAlgError(
                     "Non-numeric values (nan or inf) in input A to cho_solve"
                 )
+
+        if must_cast_b:
+            b = b.astype(out_dtype)
+        if check_finite:
             if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
                 raise np.linalg.LinAlgError(
                     "Non-numeric values (nan or inf) in input b to cho_solve"
                 )
 
         return _cho_solve(
-            c, b, lower=lower, overwrite_b=overwrite_b, check_finite=check_finite
+            c,
+            b,
+            lower=lower,
+            overwrite_b=overwrite_b,
+            check_finite=check_finite,
         )
 
     return cho_solve
