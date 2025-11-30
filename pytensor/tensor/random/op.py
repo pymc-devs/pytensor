@@ -447,6 +447,8 @@ class AbstractRNGConstructor(Op):
     def make_node(self, seed=None):
         if seed is None:
             seed = NoneConst
+        elif isinstance(seed, Variable) and isinstance(seed.type, NoneTypeT):
+            pass
         else:
             seed = as_tensor_variable(seed)
         inputs = [seed]
