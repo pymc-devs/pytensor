@@ -44,7 +44,7 @@ def try_import_tfp_jax_op(op: ScalarOp, jax_op_name: str | None = None) -> Calla
     except ModuleNotFoundError:
         raise NotImplementedError(
             f"No JAX implementation for Op {op.name}. "
-            "Implementation is available if TensorFlow Probability is installed"
+            "Implementation is available if tfp-nightly is installed"
         )
 
     if jax_op_name is None:
