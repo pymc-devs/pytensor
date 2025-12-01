@@ -260,11 +260,21 @@ def test_Split_view():
             (pt.vector(), np.arange(10, dtype=config.floatX)),
             0,
         ),
+        (
+            (
+                pt.tensor3(dtype="int8"),
+                np.arange(3 * 5 * 5, dtype="int8").reshape((3, 5, 5)),
+            ),
+            1,
+        ),
     ],
 )
 def test_ExtractDiag(val, offset):
     val, val_test = val
-    g = pt.diag(val, offset)
+    if val.ndim <= 2:
+        g = pt.diag(val, offset)
+    else:
+        g = pt.diagonal(val, offset)
 
     compare_numba_and_py(
         [val],
