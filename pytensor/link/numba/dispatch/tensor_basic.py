@@ -160,7 +160,7 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
                 diag_len = min(x.shape[axis2], max(0, x.shape[axis1] + offset))
             base_shape = x.shape[:axis1] + x.shape[axis1p1:axis2] + x.shape[axis2p1:]
             out_shape = (*base_shape, diag_len)
-            out = np.empty(out_shape)
+            out = np.empty(out_shape, dtype=x.dtype)
 
             for i in range(diag_len):
                 if offset >= 0:
@@ -170,7 +170,8 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
                 out[..., i] = new_entry
             return out
 
-    return extract_diag
+    cache_key = 1
+    return extract_diag, cache_key
 
 
 @register_funcify_default_op_cache_key(Eye)
