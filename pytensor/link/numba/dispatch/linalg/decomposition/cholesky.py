@@ -29,20 +29,26 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
 
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
 
-    def impl(A, lower=0, overwrite_a=False, check_finite=True):
+    def impl(A, lower=False, overwrite_a=False, check_finite=True):
         _N = np.int32(A.shape[-1])
         if A.shape[-2] != _N:
             raise linalg.LinAlgError("Last 2 dimensions of A must be square")
+
+        transposed = False
+        if overwrite_a and A.flags.f_contiguous:
+            A_copy = A
+        elif overwrite_a and A.flags.c_contiguous:
+            # We can work on the transpose of A directly
+            A_copy = A.T
+            transposed = True
+            lower = not lower
+        else:
+            A_copy = _copy_to_fortran_order(A)
 
         UPLO = val_to_int_ptr(ord("L") if lower else ord("U"))
         N = val_to_int_ptr(_N)
         LDA = val_to_int_ptr(_N)
         INFO = val_to_int_ptr(0)
-
-        if overwrite_a and A.flags.f_contiguous:
-            A_copy = A
-        else:
-            A_copy = _copy_to_fortran_order(A)
 
         numba_potrf(
             UPLO,
@@ -61,6 +67,10 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
                 for i in range(j + 1, _N):
                     A_copy[i, j] = 0.0
 
-        return A_copy, int_ptr_to_val(INFO)
+        info_int = int_ptr_to_val(INFO)
+
+        if transposed:
+            return A_copy.T, info_int
+        return A_copy, info_int
 
     return impl

@@ -551,8 +551,8 @@ class TestDecompositions:
         val_c_contig = np.copy(val, order="C")
         res_c_contig = fn(val_c_contig)
         np.testing.assert_allclose(res_c_contig, res)
-        # Cannot destroy C-contiguous input
-        np.testing.assert_allclose(val_c_contig, val)
+        # Should always be destroyable
+        assert (val == val_c_contig).all() == (not overwrite_a)
 
         # Test non-contiguous input
         val_not_contig = np.repeat(val, 2, axis=0)[::2]
