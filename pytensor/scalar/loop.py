@@ -136,9 +136,6 @@ class ScalarLoop(ScalarInnerGraphOp):
     def fn(self):
         raise NotImplementedError
 
-    def make_new_inplace(self, output_types_preference=None, name=None):
-        return self.clone(output_types_preference=output_types_preference, name=name)
-
     def make_node(self, n_steps, *inputs):
         assert len(inputs) == self.nin - 1
 

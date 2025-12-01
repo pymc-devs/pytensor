@@ -35,7 +35,6 @@ from pytensor.scalar import (
     Mul,
     ScalarOp,
     get_scalar_type,
-    transfer_type,
     upcast_out,
     upgrade_to_float,
 )
@@ -287,22 +286,17 @@ class InplaceElemwiseOptimizer(InplaceGraphOptimizer):
         op = node.op
         scalar_op = op.scalar_op
         inplace_pattern = {i: o for i, [o] in inplace_pattern.items()}
-        if hasattr(scalar_op, "make_new_inplace"):
-            new_scalar_op = scalar_op.make_new_inplace(
-                transfer_type(
-                    *[
-                        inplace_pattern.get(i, o.dtype)
-                        for i, o in enumerate(node.outputs)
-                    ]
+        try:
+            return type(op)(scalar_op, inplace_pattern).make_node(*node.inputs)
+        except TypeError:
+            # Elemwise raises TypeError if we try to inplace an output on an input of a different dtype
+            if config.optimizer_verbose:
+                print(  # noqa: T201
+                    f"InplaceElemwise failed because the output dtype of {node} changed when rebuilt. "
+                    "Perhaps due to a change in config.floatX or config.cast_policy"
                 )
-            )
-        else:
-            new_scalar_op = type(scalar_op)(
-                transfer_type(
-                    *[inplace_pattern.get(i, None) for i in range(len(node.outputs))]
-                )
-            )
-        return type(op)(new_scalar_op, inplace_pattern).make_node(*node.inputs)
+            # InplaceGraphOptimizer will chug along fine if we return the original node
+            return node
 
 
 optdb.register(

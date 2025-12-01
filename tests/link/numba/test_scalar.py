@@ -1,11 +1,14 @@
 import numpy as np
 import pytest
+import scipy
 
 import pytensor.scalar as ps
 import pytensor.scalar.basic as psb
 import pytensor.scalar.math as psm
 import pytensor.tensor as pt
 from pytensor import config, function
+from pytensor.graph import Apply
+from pytensor.scalar import UnaryScalarOp
 from pytensor.scalar.basic import Composite
 from pytensor.tensor import tensor
 from pytensor.tensor.elemwise import Elemwise
@@ -184,3 +187,53 @@ def test_Softplus(dtype):
             strict=True,
             err_msg=f"Failed for value {value}",
         )
+
+
+def test_discrete_power():
+    # Test we don't fail to compile power with discrete exponents due to https://github.com/numba/numba/issues/9554
+    x = pt.scalar("x", dtype="float64")
+    exponent = pt.scalar("exponent", dtype="int8")
+    out = pt.power(x, exponent)
+    compare_numba_and_py(
+        [x, exponent], [out], [np.array(0.5), np.array(2, dtype="int8")]
+    )
+
+
+def test_cython_obj_mode_fallback():
+    """Test that unsupported cython signatures fallback to obj-mode"""
+
+    # Create a ScalarOp with a non-standard dtype
+    class IntegerGamma(UnaryScalarOp):
+        # We'll try to check for scipy cython impl
+        nfunc_spec = ("scipy.special.gamma", 1, 1)
+
+        def make_node(self, x):
+            x = psb.as_scalar(x)
+            assert x.dtype == "int64"
+            out = x.type()
+            return Apply(self, [x], [out])
+
+        def impl(self, x):
+            return scipy.special.gamma(x).astype("int64")
+
+    x = pt.scalar("x", dtype="int64")
+    g = Elemwise(IntegerGamma())(x)
+    assert g.type.dtype == "int64"
+
+    with pytest.warns(UserWarning, match="Numba will use object mode"):
+        compare_numba_and_py(
+            [x],
+            [g],
+            [np.array(5, dtype="int64")],
+        )
+
+
+def test_erf_complex():
+    x = pt.scalar("x", dtype="complex128")
+    g = pt.erf(x)
+
+    compare_numba_and_py(
+        [x],
+        [g],
+        [np.array(0.5 + 1j, dtype="complex128")],
+    )

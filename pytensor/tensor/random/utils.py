@@ -1,10 +1,12 @@
 from collections.abc import Callable, Sequence
+from copy import deepcopy
 from functools import wraps
 from itertools import zip_longest
 from types import ModuleType
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.random import Generator
 
 from pytensor.compile.sharedvalue import shared
 from pytensor.graph.basic import Variable
@@ -202,6 +204,16 @@ def normalize_size_param(
     assert shape.dtype in int_dtypes
 
     return shape
+
+
+def custom_rng_deepcopy(rng):
+    # This helper exists because copying numpy.random.Generator via deepcopy is slow.
+    # NumPy may implement a faster clone/copy API in the future:
+    # https://github.com/numpy/numpy/issues/24086
+    old_bitgen = rng.bit_generator
+    new_bitgen = type(old_bitgen)(deepcopy(old_bitgen._seed_seq))
+    new_bitgen.state = old_bitgen.state
+    return Generator(new_bitgen)
 
 
 class RandomStream:

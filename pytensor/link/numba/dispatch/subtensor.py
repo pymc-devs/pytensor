@@ -18,6 +18,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
+from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.tensor import TensorType
 from pytensor.tensor.rewriting.subtensor import is_full_slice
 from pytensor.tensor.subtensor import (
@@ -102,6 +103,18 @@ def enable_slice_boxing():
 
 
 enable_slice_boxing()
+
+
+@numba.extending.overload(numba_deepcopy)
+def numba_deepcopy_slice(x):
+    if isinstance(x, types.SliceType):
+
+        def deepcopy_slice(x):
+            return slice(
+                numba_deepcopy(x.start), numba_deepcopy(x.stop), numba_deepcopy(x.step)
+            )
+
+        return deepcopy_slice
 
 
 @register_funcify_default_op_cache_key(MakeSlice)

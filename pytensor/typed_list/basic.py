@@ -2,22 +2,23 @@ import numpy as np
 
 import pytensor.tensor as pt
 from pytensor.compile.debugmode import _lessbroken_deepcopy
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
 from pytensor.link.c.op import COp
-from pytensor.tensor.type import scalar
+from pytensor.tensor.type import lscalar
 from pytensor.tensor.type_other import SliceType
 from pytensor.tensor.variable import TensorVariable
 from pytensor.typed_list.type import TypedListType
 
 
 class _typed_list_py_operators:
+    def __len__(self):
+        raise TypeError(
+            "Cannot call len(TypedList). Use `.length()` method instead for the symbolic equivalent."
+        )
+
     def __getitem__(self, index):
         return getitem(self, index)
-
-    def __len__(self):
-        return length(self)
 
     def append(self, toAppend):
         return append(self, toAppend)
@@ -37,9 +38,12 @@ class _typed_list_py_operators:
     def count(self, elem):
         return count(self, elem)
 
-    # name "index" is already used by an attribute
+    # name "index" is claimed as an attribute of PyTensor Variable(s)
     def ind(self, elem):
         return index_(self, elem)
+
+    def length(self):
+        return length(self)
 
     ttype = property(lambda self: self.type.ttype)
     dtype = property(lambda self: self.type.ttype.dtype)
@@ -508,7 +512,7 @@ class Index(Op):
     def make_node(self, x, elem):
         assert isinstance(x.type, TypedListType)
         assert x.ttype == elem.type
-        return Apply(self, [x, elem], [scalar()])
+        return Apply(self, [x, elem], [lscalar()])
 
     def perform(self, node, inputs, outputs):
         """
@@ -520,7 +524,7 @@ class Index(Op):
         (out,) = outputs
         for y in range(len(x)):
             if node.inputs[0].ttype.values_eq(x[y], elem):
-                out[0] = np.asarray(y, dtype=config.floatX)
+                out[0] = np.asarray(y, dtype="int64")
                 break
 
     def __str__(self):
@@ -537,7 +541,7 @@ class Count(Op):
     def make_node(self, x, elem):
         assert isinstance(x.type, TypedListType)
         assert x.ttype == elem.type
-        return Apply(self, [x, elem], [scalar()])
+        return Apply(self, [x, elem], [lscalar()])
 
     def perform(self, node, inputs, outputs):
         """
@@ -551,7 +555,7 @@ class Count(Op):
         for y in range(len(x)):
             if node.inputs[0].ttype.values_eq(x[y], elem):
                 out[0] += 1
-        out[0] = np.asarray(out[0], dtype=config.floatX)
+        out[0] = np.asarray(out[0], "int64")
 
     def __str__(self):
         return self.__class__.__name__
@@ -583,7 +587,7 @@ class Length(COp):
 
     def make_node(self, x):
         assert isinstance(x.type, TypedListType)
-        return Apply(self, [x], [scalar(dtype="int64")])
+        return Apply(self, [x], [lscalar()])
 
     def perform(self, node, x, outputs):
         (out,) = outputs

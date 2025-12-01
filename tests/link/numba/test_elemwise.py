@@ -6,13 +6,13 @@ import scipy.special
 
 import pytensor
 import pytensor.tensor as pt
-import pytensor.tensor.inplace as pti
 import pytensor.tensor.math as ptm
 from pytensor import config, function
 from pytensor.compile import get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
 from pytensor.scalar import Composite, float64
+from pytensor.scalar import add as scalar_add
 from pytensor.tensor import blas, tensor
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
@@ -29,6 +29,8 @@ from tests.tensor.test_elemwise import (
 
 
 rng = np.random.default_rng(42849)
+
+add_inplace = Elemwise(scalar_add, {0: 0})
 
 
 @pytest.mark.parametrize(
@@ -80,7 +82,7 @@ rng = np.random.default_rng(42849)
                 np.array(1.0, dtype=config.floatX),
                 np.array(1.0, dtype=config.floatX),
             ],
-            lambda x, y: pti.add_inplace(deep_copy_op(x), deep_copy_op(y)),
+            lambda x, y: add_inplace(deep_copy_op(x), deep_copy_op(y)),
         ),
         (
             [pt.vector(), pt.vector()],
@@ -88,7 +90,7 @@ rng = np.random.default_rng(42849)
                 rng.standard_normal(100).astype(config.floatX),
                 rng.standard_normal(100).astype(config.floatX),
             ],
-            lambda x, y: pti.add_inplace(deep_copy_op(x), deep_copy_op(y)),
+            lambda x, y: add_inplace(deep_copy_op(x), deep_copy_op(y)),
         ),
         (
             [pt.vector(), pt.vector()],

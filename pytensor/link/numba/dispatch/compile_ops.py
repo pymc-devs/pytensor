@@ -1,5 +1,7 @@
+from copy import deepcopy
 from hashlib import sha256
 
+import numba
 import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
@@ -15,7 +17,34 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_default_op_cache_key,
 )
 from pytensor.raise_op import CheckAndRaise
-from pytensor.tensor.type import TensorType
+
+
+def numba_deepcopy(x):
+    return deepcopy(x)
+
+
+@numba.extending.overload(numba_deepcopy)
+def numba_deepcopy_tensor(x):
+    if isinstance(x, numba.types.Number):
+
+        def number_deepcopy(x):
+            return x
+
+        return number_deepcopy
+
+    if isinstance(x, numba.types.Array):
+
+        def array_deepcopy(x):
+            return np.copy(x)
+
+        return array_deepcopy
+
+    if isinstance(x, numba.types.UnicodeType):
+
+        def string_deepcopy(x):
+            return x
+
+        return string_deepcopy
 
 
 @register_funcify_and_cache_key(OpFromGraph)
@@ -64,19 +93,11 @@ def numba_funcify_type_casting(op, **kwargs):
 
 @register_funcify_default_op_cache_key(DeepCopyOp)
 def numba_funcify_DeepCopyOp(op, node, **kwargs):
-    if isinstance(node.inputs[0].type, TensorType):
+    @numba_basic.numba_njit
+    def deepcopy(x):
+        return numba_deepcopy(x)
 
-        @numba_basic.numba_njit
-        def deepcopy(x):
-            return np.copy(x)
-
-    else:
-
-        @numba_basic.numba_njit
-        def deepcopy(x):
-            return x
-
-    return deepcopy
+    return deepcopy, 1
 
 
 @register_funcify_default_op_cache_key(IfElse)

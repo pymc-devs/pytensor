@@ -85,7 +85,7 @@ def make_checks(loop_orders, dtypes, sub, compute_stride_jump=True):
     runtime_broadcast_error_msg = (
         "Runtime broadcasting not allowed. "
         "One input had a distinct dimension length of 1, but was not marked as broadcastable: "
-        "(input[%%i].shape[%%i] = %%lld, input[%%i].shape[%%i] = %%lld). "
+        "(input[%i].shape[%i] = %lld, input[%i].shape[%i] = %lld). "
         "If broadcasting was intended, use `specify_broadcastable` on the relevant input."
     )
 
@@ -113,7 +113,7 @@ def make_checks(loop_orders, dtypes, sub, compute_stride_jump=True):
                        (long long int) {sub[f"lv{j}"]}_n{x}
                         );
                     }} else {{
-                        PyErr_Format(PyExc_ValueError, "Input dimension mismatch: (input[%%i].shape[%%i] = %%lld, input[%%i].shape[%%i] = %%lld)",
+                        PyErr_Format(PyExc_ValueError, "Input dimension mismatch: (input[%i].shape[%i] = %lld, input[%i].shape[%i] = %lld)",
                            {j0},
                            {x0},
                            (long long int) {sub[f"lv{j0}"]}_n{x0},

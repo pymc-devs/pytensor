@@ -257,7 +257,7 @@ test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_metho
             ],
             pt.as_tensor([3, 2]),
         ),
-        pytest.param(
+        (
             ptr.hypergeometric,
             [
                 (
@@ -274,7 +274,6 @@ test_mvnormal_cov_decomposition_method = create_mvnormal_cov_decomposition_metho
                 ),
             ],
             pt.as_tensor([3, 2]),
-            marks=pytest.mark.xfail,  # Not implemented
         ),
         (
             ptr.wald,
@@ -722,3 +721,34 @@ def test_repeated_args():
     final_node = fn.maker.fgraph.outputs[0].owner
     assert isinstance(final_node.op, RandomVariableWithCoreShape)
     assert final_node.inputs[-2] is final_node.inputs[-1]
+
+
+def test_rv_fallback():
+    """Test that random variables can fallback to object mode."""
+
+    class CustomRV(ptr.RandomVariable):
+        name = "custom"
+        signature = "()->()"
+        dtype = "float64"
+
+        def rng_fn(self, rng, value, size=None):
+            # Just return the value plus a random number
+            return value + rng.standard_normal(size=size)
+
+    custom_rv = CustomRV()
+
+    rng = shared(np.random.default_rng(123))
+    size = pt.scalar("size", dtype=int)
+    next_rng, x = custom_rv(np.pi, size=(size,), rng=rng).owner.outputs
+
+    fn = function([size], x, updates={rng: next_rng}, mode="NUMBA")
+
+    result1 = fn(1)
+    result2 = fn(1)
+    assert result1.shape == (1,)
+    assert result1 != result2
+
+    large_sample = fn(1000)
+    assert large_sample.shape == (1000,)
+    np.testing.assert_allclose(large_sample.mean(), np.pi, rtol=1e-2)
+    np.testing.assert_allclose(large_sample.std(), 1, rtol=1e-2)

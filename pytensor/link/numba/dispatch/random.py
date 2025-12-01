@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from copy import copy, deepcopy
 from functools import singledispatch
 from hashlib import sha256
 from textwrap import dedent
@@ -16,9 +15,11 @@ from pytensor.graph.op import Op
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     direct_cast,
+    generate_fallback_impl,
     numba_funcify,
     register_funcify_and_cache_key,
 )
+from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.vectorize_codegen import (
     _jit_options,
     _vectorized,
@@ -30,20 +31,21 @@ from pytensor.link.utils import (
 )
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
+from pytensor.tensor.random.utils import custom_rng_deepcopy
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.utils import _parse_gufunc_signature
 
 
-@overload(copy)
-def copy_NumPyRandomGenerator(rng):
-    def impl(rng):
-        # TODO: Open issue on Numba?
-        with numba.objmode(new_rng=types.npy_rng):
-            new_rng = deepcopy(rng)
+@numba.extending.overload(numba_deepcopy)
+def numba_deepcopy_random_generator(x):
+    if isinstance(x, numba.types.NumPyRandomGeneratorType):
 
-        return new_rng
+        def random_generator_deepcopy(x):
+            with numba.objmode(new_rng=types.npy_rng):
+                new_rng = custom_rng_deepcopy(x)
+            return new_rng
 
-    return impl
+        return random_generator_deepcopy
 
 
 @singledispatch
@@ -406,13 +408,24 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
     [rv_node] = op.fgraph.apply_nodes
     rv_op: RandomVariable = rv_node.op
+
+    try:
+        core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
+    except NotImplementedError:
+        py_impl = generate_fallback_impl(rv_op, node=rv_node, **kwargs)
+
+        @numba_basic.numba_njit
+        def fallback_rv(_core_shape, *args):
+            return py_impl(*args)
+
+        return fallback_rv, None
+
     size = rv_op.size_param(rv_node)
     dist_params = rv_op.dist_params(rv_node)
     size_len = None if isinstance(size.type, NoneTypeT) else get_vector_length(size)
     core_shape_len = get_vector_length(core_shape)
     inplace = rv_op.inplace
 
-    core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
     nin = 1 + len(dist_params)  # rng + params
     core_op_fn = store_core_outputs(core_rv_fn, nin=nin, nout=1)
 
@@ -437,7 +450,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     def ov_random(core_shape, rng, size, *dist_params):
         def impl(core_shape, rng, size, *dist_params):
             if not inplace:
-                rng = copy(rng)
+                rng = numba_deepcopy(rng)
 
             draws = _vectorized(
                 core_op_fn,

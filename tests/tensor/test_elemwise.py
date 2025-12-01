@@ -20,6 +20,9 @@ from pytensor.graph.replace import vectorize_node
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.scalar import ScalarOp, float32, float64, int32, int64
+from pytensor.scalar import add as scalar_add
+from pytensor.scalar import exp as scalar_exp
+from pytensor.scalar import xor as scalar_xor
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import get_scalar_constant_value, second
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -32,6 +35,7 @@ from pytensor.tensor.type import (
     bmatrix,
     bscalar,
     discrete_dtypes,
+    dmatrix,
     lscalar,
     matrix,
     scalar,
@@ -42,6 +46,16 @@ from pytensor.tensor.type import (
 )
 from tests import unittest_tools
 from tests.link.test_link import make_function
+from tests.tensor.utils import (
+    _bad_runtime_broadcast_binary_normal,
+    inplace_func,
+    integers,
+    integers_uint16,
+    integers_uint32,
+    makeBroadcastTester,
+    random,
+    random_complex,
+)
 
 
 def reduce_bitwise_and(x, axis=-1, dtype="int8"):
@@ -333,7 +347,7 @@ class TestBroadcast:
 
             x = x_type("x")
             y = y_type("y")
-            e = op(ps.Add(ps.transfer_type(0)), {0: 0})(x, y)
+            e = op(ps.add, {0: 0})(x, y)
             f = make_function(copy(linker).accept(FunctionGraph([x, y], [e])))
             xv = rand_val(xsh)
             yv = rand_val(ysh)
@@ -347,7 +361,7 @@ class TestBroadcast:
             if isinstance(linker, PerformLinker):
                 x = x_type("x")
                 y = y_type("y")
-                e = op(ps.Add(ps.transfer_type(0)), {0: 0})(x, y)
+                e = op(ps.add, {0: 0})(x, y)
                 f = make_function(copy(linker).accept(FunctionGraph([x, y], [e.shape])))
                 xv = rand_val(xsh)
                 yv = rand_val(ysh)
@@ -389,7 +403,10 @@ class TestBroadcast:
         ):
             x = t(pytensor.config.floatX, shape=(None, None))("x")
             y = t(pytensor.config.floatX, shape=(1, 1))("y")
-            e = op(ps.Second(ps.transfer_type(0)), {0: 0})(x, y)
+            op1 = op(ps.second, {0: 0})
+            op2 = op(ps.second, {0: 0})
+            assert op1 == op2
+            e = op(ps.Second(), {0: 0})(x, y)
             f = make_function(linker().accept(FunctionGraph([x, y], [e])))
             xv = rval((5, 5))
             yv = rval((1, 1))
@@ -832,7 +849,26 @@ class TestElemwise(unittest_tools.InferShapeTester):
         reason="G++ not available, so we need to skip this test.",
     )
     def test_runtime_broadcast_c(self):
-        check_elemwise_runtime_broadcast(Mode(linker="c"))
+        c_mode = Mode(linker="cvm")
+        check_elemwise_runtime_broadcast(c_mode)
+
+        # Test C-backend specific error formatting
+        x = dmatrix("x")
+        y = dmatrix("y")
+        fn = function([x, y], x * y, mode=c_mode)
+        with pytest.raises(
+            ValueError,
+            match=r"Runtime broadcasting not allowed.*\(input\[0\]\.shape\[1\] = 4, input\[1\]\.shape\[1\] = 1\)",
+        ):
+            fn(np.zeros((5, 4)), np.zeros((5, 1)))
+
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "Input dimension mismatch: (input[0].shape[1] = 4, input[1].shape[1] = 3)"
+            ),
+        ):
+            fn(np.zeros((5, 4)), np.zeros((5, 3)))
 
     def test_str(self):
         op = Elemwise(ps.add, inplace_pattern={0: 0}, name=None)
@@ -1093,3 +1129,99 @@ def test_numpy_warning_suppressed():
     y = pt.log(x)
     fn = pytensor.function([x], y, mode=Mode(linker="py"))
     assert fn(0) == -np.inf
+
+
+rng = np.random.default_rng(18)
+_good_add_inplace = dict(
+    same_shapes=(random(2, 3, rng=rng), random(2, 3, rng=rng)),
+    not_same_dimensions=(random(2, 2, rng=rng), random(2, rng=rng)),
+    scalar=(random(2, 3, rng=rng), random(1, 1, rng=rng)),
+    row=(random(2, 3, rng=rng), random(1, 3, rng=rng)),
+    column=(random(2, 3, rng=rng), random(2, 1, rng=rng)),
+    integers=(integers(2, 3, rng=rng), integers(2, 3, rng=rng)),
+    uint32=(integers_uint32(2, 3, rng=rng), integers_uint32(2, 3, rng=rng)),
+    uint16=(integers_uint16(2, 3, rng=rng), integers_uint16(2, 3, rng=rng)),
+    # (float32, >int16) upcasts to float64 by default
+    dtype_valid_mixup=(
+        random(2, 3, rng=rng),
+        integers(2, 3, rng=rng).astype(
+            "int16" if config.floatX == "float32" else "int64"
+        ),
+    ),
+    complex1=(random_complex(2, 3, rng=rng), random_complex(2, 3, rng=rng)),
+    complex2=(random_complex(2, 3, rng=rng), random(2, 3, rng=rng)),
+    empty=(np.asarray([], dtype=config.floatX), np.asarray([1], dtype=config.floatX)),
+)
+TestAddInplaceBroadcast = makeBroadcastTester(
+    op=Elemwise(scalar_add, {0: 0}),
+    expected=lambda x, y: x + y,
+    good=_good_add_inplace,
+    # Cannot inplace on first input if it doesn't match output dtype (upcast of inputs)
+    bad_build=dict(dtype_invalid_mixup=_good_add_inplace["dtype_valid_mixup"][::-1]),
+    bad_runtime=_bad_runtime_broadcast_binary_normal,
+    inplace=True,
+)
+
+
+@pytest.mark.xfail(
+    config.cycle_detection == "fast" and config.mode != "FAST_COMPILE",
+    reason="Cycle detection is fast and mode is FAST_COMPILE",
+)
+def test_exp_inplace_grad_1():
+    utt.verify_grad(
+        Elemwise(scalar_exp, {0: 0}),
+        [
+            np.asarray(
+                [
+                    [1.5089518, 1.48439076, -4.7820262],
+                    [2.04832468, 0.50791564, -1.58892269],
+                ]
+            )
+        ],
+    )
+
+
+def test_XOR_inplace():
+    dtype = [
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+    ]
+    xor_inplace = Elemwise(scalar_xor, {0: 0})
+
+    for dtype in dtype:
+        x, y = vector(dtype=dtype), vector(dtype=dtype)
+        l = np.asarray([0, 0, 1, 1], dtype=dtype)
+        r = np.asarray([0, 1, 0, 1], dtype=dtype)
+        ix = x
+        ix = xor_inplace(ix, y)
+        gn = inplace_func([x, y], ix)
+        _ = gn(l, r)
+        # test the in-place stuff
+        assert np.all(l == np.asarray([0, 1, 1, 0])), l
+
+
+def test_inplace_dtype_changed():
+    with pytensor.config.change_flags(cast_policy="numpy+floatX", floatX="float64"):
+        x = pt.vector("x", dtype="float32")
+        y = pt.vector("y", dtype="int32")
+        with pytensor.config.change_flags(floatX="float32"):
+            out = pt.add(x, y)
+
+        assert out.dtype == "float32"
+        with pytensor.config.change_flags(floatX="float32"):
+            fn32 = pytensor.function(
+                [In(x, mutable=True), In(y, mutable=True)],
+                out,
+                mode="fast_run",
+            )
+        assert fn32.maker.fgraph.outputs[0].owner.op.destroy_map == {0: [0]}
+
+        with pytensor.config.change_flags(floatX="float64"):
+            fn64 = pytensor.function(
+                [In(x, mutable=True), In(y, mutable=True)],
+                out,
+                mode="fast_run",
+            )
+        assert fn64.maker.fgraph.outputs[0].owner.op.destroy_map == {}

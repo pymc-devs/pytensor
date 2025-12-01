@@ -22,6 +22,7 @@ from pytensor.scalar.basic import (
     Composite,
     Identity,
     Mul,
+    Pow,
     Reciprocal,
     ScalarOp,
     Second,
@@ -69,15 +70,19 @@ def numba_funcify_ScalarOp(op, node, **kwargs):
 
         cython_func = getattr(scipy.special.cython_special, scalar_func_name, None)
         if cython_func is not None:
-            scalar_func_numba = wrap_cython_function(
-                cython_func, output_dtype, input_dtypes
-            )
-            has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch
-            input_inner_dtypes = scalar_func_numba.numpy_arg_dtypes()
-            output_inner_dtype = scalar_func_numba.numpy_output_dtype()
+            try:
+                scalar_func_numba = wrap_cython_function(
+                    cython_func, output_dtype, input_dtypes
+                )
+            except NotImplementedError:
+                pass
+            else:
+                has_pyx_skip_dispatch = scalar_func_numba.has_pyx_skip_dispatch
+                input_inner_dtypes = scalar_func_numba.numpy_arg_dtypes()
+                output_inner_dtype = scalar_func_numba.numpy_output_dtype()
 
     if scalar_func_numba is None:
-        scalar_func_numba = generate_fallback_impl(op, node, **kwargs)
+        return generate_fallback_impl(op, node, **kwargs), None
 
     scalar_op_fn_name = get_name_for_object(scalar_func_numba)
     prefix = "x" if scalar_func_name != "x" else "y"
@@ -159,6 +164,23 @@ def {binary_op_name}({input_signature}):
     nary_fn = compile_numba_function_src(nary_src, binary_op_name, globals())
 
     return nary_fn
+
+
+@register_funcify_and_cache_key(Pow)
+def numba_funcify_Pow(op, node, **kwargs):
+    pow_dtype = node.inputs[1].type.dtype
+    if pow_dtype.startswith("int"):
+        # Numba power fails when exponents are non 64-bit discrete integers and fasthmath=True
+        # https://github.com/numba/numba/issues/9554
+
+        def pow(x, y):
+            return x ** np.asarray(y, dtype=np.int64).item()
+    else:
+
+        def pow(x, y):
+            return x**y
+
+    return numba_basic.numba_njit(pow), scalar_op_cache_key(op)
 
 
 @register_funcify_and_cache_key(Add)
@@ -274,7 +296,11 @@ def numba_funcify_Log1mexp(op, node, **kwargs):
 
 
 @register_funcify_and_cache_key(Erf)
-def numba_funcify_Erf(op, **kwargs):
+def numba_funcify_Erf(op, node, **kwargs):
+    if node.inputs[0].type.dtype.startswith("complex"):
+        # Complex not supported by numba
+        return numba_funcify_ScalarOp(op, node=node, **kwargs)
+
     @numba_basic.numba_njit
     def erf(x):
         return math.erf(x)
