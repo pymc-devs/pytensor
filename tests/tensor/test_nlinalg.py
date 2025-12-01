@@ -502,12 +502,13 @@ class TestLstsq:
         z = lscalar()
         b = lstsq(x, y, z)
         f = function([x, y, z], b)
+
         TestMatrix1 = np.asarray([[2, 1], [3, 4]])
         TestMatrix2 = np.asarray([[17, 20], [43, 50]])
         TestScalar = np.asarray(1)
-        f = function([x, y, z], b)
-        m = f(TestMatrix1, TestMatrix2, TestScalar)
-        assert np.allclose(TestMatrix2, np.dot(TestMatrix1, m[0]))
+        m0, _, rank, _ = f(TestMatrix1, TestMatrix2, TestScalar)
+        assert rank.dtype == "int32"
+        assert np.allclose(TestMatrix2, np.dot(TestMatrix1, m0))
 
     def test_wrong_coefficient_matrix(self):
         x = vector()
