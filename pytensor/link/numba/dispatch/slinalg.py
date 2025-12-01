@@ -63,13 +63,20 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     check_finite = op.check_finite
     on_error = op.on_error
 
-    dtype = node.inputs[0].dtype
-    if dtype in complex_dtypes:
+    inp_dtype = node.inputs[0].type.numpy_dtype
+    if inp_dtype.kind == "c":
         raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+    discrete_inp = inp_dtype.kind in "ibu"
+    if discrete_inp and config.compiler_verbose:
+        print("Cholesky requires casting discrete input to float")  # noqa: T201
+
+    out_dtype = node.outputs[0].type.numpy_dtype
 
     @numba_basic.numba_njit
     def cholesky(a):
-        if check_finite:
+        if discrete_inp:
+            a = a.astype(out_dtype)
+        elif check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
                 raise np.linalg.LinAlgError(
                     "Non-numeric values (nan or inf) found in input to cholesky"
@@ -112,18 +119,24 @@ def pivot_to_permutation(op, node, **kwargs):
 
 @numba_funcify.register(LU)
 def numba_funcify_LU(op, node, **kwargs):
+    inp_dtype = node.inputs[0].type.numpy_dtype
+    if inp_dtype.kind == "c":
+        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+    discrete_inp = inp_dtype.kind in "ibu"
+    if discrete_inp and config.compiler_verbose:
+        print("LU requires casting discrete input to float")  # noqa: T201
+
+    out_dtype = node.outputs[0].type.numpy_dtype
     permute_l = op.permute_l
     check_finite = op.check_finite
     p_indices = op.p_indices
     overwrite_a = op.overwrite_a
 
-    dtype = node.inputs[0].dtype
-    if dtype in complex_dtypes:
-        NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
-
     @numba_basic.numba_njit
     def lu(a):
-        if check_finite:
+        if discrete_inp:
+            a = a.astype(out_dtype)
+        elif check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
                 raise np.linalg.LinAlgError(
                     "Non-numeric values (nan or inf) found in input to lu"
@@ -161,16 +174,22 @@ def numba_funcify_LU(op, node, **kwargs):
 
 @numba_funcify.register(LUFactor)
 def numba_funcify_LUFactor(op, node, **kwargs):
-    dtype = node.inputs[0].dtype
+    inp_dtype = node.inputs[0].type.numpy_dtype
+    if inp_dtype.kind == "c":
+        NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+    discrete_inp = inp_dtype.kind in "ibu"
+    if discrete_inp and config.compiler_verbose:
+        print("LUFactor requires casting discrete input to float")  # noqa: T201
+
+    out_dtype = node.outputs[0].type.numpy_dtype
     check_finite = op.check_finite
     overwrite_a = op.overwrite_a
 
-    if dtype in complex_dtypes:
-        NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
-
     @numba_basic.numba_njit
     def lu_factor(a):
-        if check_finite:
+        if discrete_inp:
+            a = a.astype(out_dtype)
+        elif check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
                 raise np.linalg.LinAlgError(
                     "Non-numeric values (nan or inf) found in input to cholesky"
@@ -207,16 +226,27 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
 
 @numba_funcify.register(Solve)
 def numba_funcify_Solve(op, node, **kwargs):
+    A_dtype, b_dtype = (i.numpy_dtype for i in node.inputs)
+    out_dtype = node.outputs[0].type.numpy_dtype
+
+    if A_dtype.kind == "c" or b_dtype.kind == "c":
+        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+    must_cast_A = A_dtype != out_dtype
+    if must_cast_A and config.compiler_verbose:
+        print("Solve requires casting first input `A`")  # noqa: T201
+    must_cast_B = b_dtype != out_dtype
+    if must_cast_B and config.compiler_verbose:
+        print("Solve requires casting second input `b`")  # noqa: T201
+
+    check_finite = op.check_finite
+    overwrite_a = op.overwrite_a
+
     assume_a = op.assume_a
     lower = op.lower
     check_finite = op.check_finite
     overwrite_a = op.overwrite_a
     overwrite_b = op.overwrite_b
     transposed = False  # TODO: Solve doesnt currently allow the transposed argument
-
-    dtype = node.inputs[0].dtype
-    if dtype in complex_dtypes:
-        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
 
     if assume_a == "gen":
         solve_fn = _solve_gen
@@ -239,6 +269,10 @@ def numba_funcify_Solve(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def solve(a, b):
+        if must_cast_A:
+            a = a.astype(out_dtype)
+        if must_cast_B:
+            b = b.astype(out_dtype)
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
                 raise np.linalg.LinAlgError(
@@ -263,14 +297,24 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     overwrite_b = op.overwrite_b
     b_ndim = op.b_ndim
 
-    dtype = node.inputs[0].dtype
-    if dtype in complex_dtypes:
-        raise NotImplementedError(
-            _COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op="Solve Triangular")
-        )
+    A_dtype, b_dtype = (i.numpy_dtype for i in node.inputs)
+    out_dtype = node.outputs[0].type.numpy_dtype
+
+    if A_dtype.kind == "c" or b_dtype.kind == "c":
+        raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+    must_cast_A = A_dtype != out_dtype
+    if must_cast_A and config.compiler_verbose:
+        print("SolveTriangular requires casting first input `A`")  # noqa: T201
+    must_cast_B = b_dtype != out_dtype
+    if must_cast_B and config.compiler_verbose:
+        print("SolveTriangular requires casting second input `b`")  # noqa: T201
 
     @numba_basic.numba_njit
     def solve_triangular(a, b):
+        if must_cast_A:
+            a = a.astype(out_dtype)
+        if must_cast_B:
+            b = b.astype(out_dtype)
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
                 raise np.linalg.LinAlgError(
@@ -302,24 +346,42 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     overwrite_b = op.overwrite_b
     check_finite = op.check_finite
 
-    dtype = node.inputs[0].dtype
-    if dtype in complex_dtypes:
+    c_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
+    out_dtype = node.outputs[0].type.numpy_dtype
+
+    if c_dtype.kind == "c" or b_dtype.kind == "c":
         raise NotImplementedError(_COMPLEX_DTYPE_NOT_SUPPORTED_MSG.format(op=op))
+    must_cast_c = c_dtype != out_dtype
+    if must_cast_c and config.compiler_verbose:
+        print("CholeskySolve requires casting first input `c`")  # noqa: T201
+    must_cast_b = b_dtype != out_dtype
+    if must_cast_b and config.compiler_verbose:
+        print("CholeskySolve requires casting second input `b`")  # noqa: T201
 
     @numba_basic.numba_njit
     def cho_solve(c, b):
+        if must_cast_c:
+            c = c.astype(out_dtype)
         if check_finite:
             if np.any(np.bitwise_or(np.isinf(c), np.isnan(c))):
                 raise np.linalg.LinAlgError(
                     "Non-numeric values (nan or inf) in input A to cho_solve"
                 )
+
+        if must_cast_b:
+            b = b.astype(out_dtype)
+        if check_finite:
             if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
                 raise np.linalg.LinAlgError(
                     "Non-numeric values (nan or inf) in input b to cho_solve"
                 )
 
         return _cho_solve(
-            c, b, lower=lower, overwrite_b=overwrite_b, check_finite=check_finite
+            c,
+            b,
+            lower=lower,
+            overwrite_b=overwrite_b,
+            check_finite=check_finite,
         )
 
     return cho_solve

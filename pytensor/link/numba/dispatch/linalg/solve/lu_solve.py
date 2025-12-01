@@ -3,18 +3,19 @@ from typing import Literal, TypeAlias
 
 import numpy as np
 from numba.core.extending import overload
+from numba.core.types import Float, int32
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
-    _get_underlying_float,
     int_ptr_to_val,
     val_to_int_ptr,
 )
 from pytensor.link.numba.dispatch.linalg.solve.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
-    _check_scipy_linalg_matrix,
+    _check_dtypes_match,
+    _check_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
     _solve_check,
     _trans_char_to_int,
@@ -44,10 +45,11 @@ def getrs_impl(
     [np.ndarray, np.ndarray, np.ndarray, _Trans, bool], tuple[np.ndarray, int]
 ]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(LU, "getrs")
-    _check_scipy_linalg_matrix(B, "getrs")
+    _check_linalg_matrix(LU, ndim=2, dtype=Float, func_name="getrs")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="getrs")
+    _check_dtypes_match((LU, B), func_name="getrs")
+    _check_linalg_matrix(IPIV, ndim=1, dtype=int32, func_name="getrs")
     dtype = LU.dtype
-    w_type = _get_underlying_float(dtype)
     numba_getrs = _LAPACK().numba_xgetrs(dtype)
 
     def impl(
@@ -84,10 +86,10 @@ def getrs_impl(
             TRANS,
             N,
             NRHS,
-            LU.view(w_type).ctypes,
+            LU.ctypes,
             LDA,
             IPIV.ctypes,
-            B_copy.view(w_type).ctypes,
+            B_copy.ctypes,
             LDB,
             INFO,
         )
@@ -124,8 +126,10 @@ def lu_solve_impl(
     check_finite: bool,
 ) -> Callable[[np.ndarray, np.ndarray, np.ndarray, _Trans, bool, bool], np.ndarray]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(lu_and_piv[0], "lu_solve")
-    _check_scipy_linalg_matrix(b, "lu_solve")
+    lu, _piv = lu_and_piv
+    _check_linalg_matrix(lu, ndim=2, dtype=Float, func_name="lu_solve")
+    _check_linalg_matrix(b, ndim=(1, 2), dtype=Float, func_name="lu_solve")
+    _check_dtypes_match((lu, b), func_name="lu_solve")
 
     def impl(
         lu: np.ndarray,

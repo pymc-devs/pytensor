@@ -2,12 +2,12 @@ from collections.abc import Callable
 
 import numpy as np
 from numba.core.extending import overload
+from numba.core.types import Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
-    _get_underlying_float,
     int_ptr_to_val,
     val_to_int_ptr,
 )
@@ -16,7 +16,8 @@ from pytensor.link.numba.dispatch.linalg.solve.lu_solve import _getrs
 from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 from pytensor.link.numba.dispatch.linalg.solve.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
-    _check_scipy_linalg_matrix,
+    _check_dtypes_match,
+    _check_linalg_matrix,
     _solve_check,
 )
 
@@ -37,9 +38,8 @@ def xgecon_impl(
     Compute the condition number of a matrix A.
     """
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "gecon")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="gecon")
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     numba_gecon = _LAPACK().numba_xgecon(dtype)
 
     def impl(A: np.ndarray, A_norm: float, norm: str) -> tuple[np.ndarray, int]:
@@ -58,11 +58,11 @@ def xgecon_impl(
         numba_gecon(
             NORM,
             N,
-            A_copy.view(w_type).ctypes,
+            A_copy.ctypes,
             LDA,
-            A_NORM.view(w_type).ctypes,
-            RCOND.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            A_NORM.ctypes,
+            RCOND.ctypes,
+            WORK.ctypes,
             IWORK.ctypes,
             INFO,
         )
@@ -106,8 +106,9 @@ def solve_gen_impl(
     transposed: bool,
 ) -> Callable[[np.ndarray, np.ndarray, bool, bool, bool, bool, bool], np.ndarray]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "solve")
-    _check_scipy_linalg_matrix(B, "solve")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
+    _check_dtypes_match((A, B), "solve")
 
     def impl(
         A: np.ndarray,

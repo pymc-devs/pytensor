@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numba
 from numba.core import types
@@ -32,25 +32,35 @@ def _trans_char_to_int(trans):
         return ord("C")
 
 
-def _check_scipy_linalg_matrix(a, func_name):
+def _check_linalg_matrix(a, *, ndim: int | Sequence[int], dtype, func_name):
     """
     Adapted from https://github.com/numba/numba/blob/bd7ebcfd4b850208b627a3f75d4706000be36275/numba/np/linalg.py#L831
     """
-    prefix = "scipy.linalg"
-    # Unpack optional type
-    if isinstance(a, types.Optional):
-        a = a.type
     if not isinstance(a, types.Array):
-        msg = f"{prefix}.{func_name}() only supported for array types"
+        msg = f"{func_name} only supported for array types"
         raise numba.TypingError(msg, highlighting=False)
-    if a.ndim not in [1, 2]:
-        msg = (
-            f"{prefix}.{func_name}() only supported on 1d or 2d arrays, found {a.ndim}."
-        )
-        raise numba.TypingError(msg, highlighting=False)
-    if not isinstance(a.dtype, types.Float | types.Complex):
-        msg = f"{prefix}.{func_name}() only supported on float and complex arrays."
-        raise numba.TypingError(msg, highlighting=False)
+    ndim_msg = f"{func_name} only supported on {ndim}d arrays, got {a.ndim}."
+    if isinstance(ndim, int):
+        if a.ndim != ndim:
+            raise numba.TypingError(ndim_msg, highlighting=False)
+    elif a.ndim not in ndim:
+        raise numba.TypingError(ndim_msg, highlighting=False)
+
+    dtype_msg = f"{func_name} only supported for {dtype}, got {a.dtype}."
+    if isinstance(dtype, type | tuple):
+        if not isinstance(a.dtype, dtype):
+            raise numba.TypingError(dtype_msg, highlighting=False)
+    elif a.dtype != dtype:
+        raise numba.TypingError(dtype_msg, highlighting=False)
+
+
+def _check_dtypes_match(arrays: Sequence, func_name="cho_solve"):
+    dtypes = [a.dtype for a in arrays]
+    first_dtype = dtypes[0]
+    for other_dtype in dtypes[1:]:
+        if first_dtype != other_dtype:
+            msg = f"{func_name} only supported for matching dtypes, got {dtypes}"
+            raise numba.TypingError(msg, highlighting=False)
 
 
 @numba_basic.numba_njit(inline="always")

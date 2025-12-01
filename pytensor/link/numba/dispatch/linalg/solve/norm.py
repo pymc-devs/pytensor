@@ -2,14 +2,14 @@ from collections.abc import Callable
 
 import numpy as np
 from numba.core.extending import overload
+from numba.core.types import Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
-    _get_underlying_float,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_scipy_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
 
 
 def _xlange(A: np.ndarray, order: str | None = None) -> float:
@@ -28,9 +28,8 @@ def xlange_impl(
     largest absolute value of a matrix A.
     """
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "norm")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="norm")
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     numba_lange = _LAPACK().numba_xlange(dtype)
 
     def impl(A: np.ndarray, order: str | None = None):
@@ -49,9 +48,7 @@ def xlange_impl(
         )
         WORK = np.empty(_M, dtype=dtype)  # type: ignore
 
-        result = numba_lange(
-            NORM, M, N, A_copy.view(w_type).ctypes, LDA, WORK.view(w_type).ctypes
-        )
+        result = numba_lange(NORM, M, N, A_copy.ctypes, LDA, WORK.ctypes)
 
         return result
 

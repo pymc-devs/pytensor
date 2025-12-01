@@ -2,21 +2,24 @@ from collections.abc import Callable
 
 import numpy as np
 from numba.core.extending import overload
+from numba.core.types import Float, int32
 from numba.np.linalg import ensure_lapack
 from numpy import ndarray
 from scipy import linalg
 
+from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch import numba_funcify
+from pytensor.link.numba.dispatch.basic import generate_fallback_impl
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
-    _get_underlying_float,
     int_ptr_to_val,
     val_to_int_ptr,
 )
 from pytensor.link.numba.dispatch.linalg.solve.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
-    _check_scipy_linalg_matrix,
+    _check_dtypes_match,
+    _check_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
     _solve_check,
     _trans_char_to_int,
@@ -63,11 +66,11 @@ def gttrf_impl(
     tuple[ndarray, ndarray, ndarray, ndarray, ndarray, int],
 ]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(dl, "gttrf")
-    _check_scipy_linalg_matrix(d, "gttrf")
-    _check_scipy_linalg_matrix(du, "gttrf")
+    _check_linalg_matrix(dl, ndim=1, dtype=Float, func_name="gttrf")
+    _check_linalg_matrix(d, ndim=1, dtype=Float, func_name="gttrf")
+    _check_linalg_matrix(du, ndim=1, dtype=Float, func_name="gttrf")
+    _check_dtypes_match((dl, d, du), func_name="gttrf")
     dtype = d.dtype
-    w_type = _get_underlying_float(dtype)
     numba_gttrf = _LAPACK().numba_xgttrf(dtype)
 
     def impl(
@@ -94,10 +97,10 @@ def gttrf_impl(
 
         numba_gttrf(
             val_to_int_ptr(n),
-            dl.view(w_type).ctypes,
-            d.view(w_type).ctypes,
-            du.view(w_type).ctypes,
-            du2.view(w_type).ctypes,
+            dl.ctypes,
+            d.ctypes,
+            du.ctypes,
+            du2.ctypes,
             ipiv.ctypes,
             info,
         )
@@ -136,13 +139,14 @@ def gttrs_impl(
     tuple[ndarray, int],
 ]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(dl, "gttrs")
-    _check_scipy_linalg_matrix(d, "gttrs")
-    _check_scipy_linalg_matrix(du, "gttrs")
-    _check_scipy_linalg_matrix(du2, "gttrs")
-    _check_scipy_linalg_matrix(b, "gttrs")
+    _check_linalg_matrix(dl, ndim=1, dtype=Float, func_name="gttrs")
+    _check_linalg_matrix(d, ndim=1, dtype=Float, func_name="gttrs")
+    _check_linalg_matrix(du, ndim=1, dtype=Float, func_name="gttrs")
+    _check_linalg_matrix(du2, ndim=1, dtype=Float, func_name="gttrs")
+    _check_linalg_matrix(b, ndim=(1, 2), dtype=Float, func_name="gttrs")
+    _check_dtypes_match((dl, d, du, du2, b), func_name="gttrs")
+    _check_linalg_matrix(ipiv, ndim=1, dtype=int32, func_name="gttrs")
     dtype = d.dtype
-    w_type = _get_underlying_float(dtype)
     numba_gttrs = _LAPACK().numba_xgttrs(dtype)
 
     def impl(
@@ -181,12 +185,12 @@ def gttrs_impl(
             val_to_int_ptr(_trans_char_to_int(trans)),
             val_to_int_ptr(n),
             val_to_int_ptr(nrhs),
-            dl.view(w_type).ctypes,
-            d.view(w_type).ctypes,
-            du.view(w_type).ctypes,
-            du2.view(w_type).ctypes,
+            dl.ctypes,
+            d.ctypes,
+            du.ctypes,
+            du2.ctypes,
             ipiv.ctypes,
-            b.view(w_type).ctypes,
+            b.ctypes,
             val_to_int_ptr(n),
             info,
         )
@@ -222,12 +226,13 @@ def gtcon_impl(
     [ndarray, ndarray, ndarray, ndarray, ndarray, float, str], tuple[ndarray, int]
 ]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(dl, "gtcon")
-    _check_scipy_linalg_matrix(d, "gtcon")
-    _check_scipy_linalg_matrix(du, "gtcon")
-    _check_scipy_linalg_matrix(du2, "gtcon")
+    _check_linalg_matrix(dl, ndim=1, dtype=Float, func_name="gtcon")
+    _check_linalg_matrix(d, ndim=1, dtype=Float, func_name="gtcon")
+    _check_linalg_matrix(du, ndim=1, dtype=Float, func_name="gtcon")
+    _check_linalg_matrix(du2, ndim=1, dtype=Float, func_name="gtcon")
+    _check_dtypes_match((dl, d, du, du2), func_name="gtcon")
+    _check_linalg_matrix(ipiv, ndim=1, dtype=int32, func_name="gtcon")
     dtype = d.dtype
-    w_type = _get_underlying_float(dtype)
     numba_gtcon = _LAPACK().numba_xgtcon(dtype)
 
     def impl(
@@ -248,14 +253,14 @@ def gtcon_impl(
         numba_gtcon(
             val_to_int_ptr(ord(norm)),
             val_to_int_ptr(n),
-            dl.view(w_type).ctypes,
-            d.view(w_type).ctypes,
-            du.view(w_type).ctypes,
-            du2.view(w_type).ctypes,
+            dl.ctypes,
+            d.ctypes,
+            du.ctypes,
+            du2.ctypes,
             ipiv.ctypes,
-            np.array(anorm, dtype=dtype).view(w_type).ctypes,
-            rcond.view(w_type).ctypes,
-            work.view(w_type).ctypes,
+            np.array(anorm, dtype=dtype).ctypes,
+            rcond.ctypes,
+            work.ctypes,
             iwork.ctypes,
             info,
         )
@@ -300,8 +305,9 @@ def _tridiagonal_solve_impl(
     transposed: bool,
 ) -> Callable[[ndarray, ndarray, bool, bool, bool, bool, bool], ndarray]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "solve")
-    _check_scipy_linalg_matrix(B, "solve")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
+    _check_dtypes_match((A, B), func_name="solve")
 
     def impl(
         A: ndarray,
@@ -342,12 +348,26 @@ def _tridiagonal_solve_impl(
 
 @numba_funcify.register(LUFactorTridiagonal)
 def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
+    if any(i.type.numpy_dtype.kind == "c" for i in node.inputs):
+        return generate_fallback_impl(op, node=node)
+
     overwrite_dl = op.overwrite_dl
     overwrite_d = op.overwrite_d
     overwrite_du = op.overwrite_du
+    out_dtype = node.outputs[1].type.numpy_dtype
+
+    must_cast_inputs = tuple(inp.type.numpy_dtype != out_dtype for inp in node.inputs)
+    if any(must_cast_inputs) and config.compiler_verbose:
+        print("LUFactorTridiagonal requires casting at least one input")  # noqa: T201
 
     @numba_basic.numba_njit(cache=False)
     def lu_factor_tridiagonal(dl, d, du):
+        if must_cast_inputs[0]:
+            d = d.astype(out_dtype)
+        if must_cast_inputs[1]:
+            dl = dl.astype(out_dtype)
+        if must_cast_inputs[2]:
+            du = du.astype(out_dtype)
         dl, d, du, du2, ipiv, _ = _gttrf(
             dl,
             d,
@@ -365,11 +385,34 @@ def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
 def numba_funcify_SolveLUFactorTridiagonal(
     op: SolveLUFactorTridiagonal, node, **kwargs
 ):
+    if any(i.type.numpy_dtype.kind == "c" for i in node.inputs):
+        return generate_fallback_impl(op, node=node)
+    out_dtype = node.outputs[0].type.numpy_dtype
+
     overwrite_b = op.overwrite_b
     transposed = op.transposed
 
+    must_cast_inputs = tuple(
+        inp.type.numpy_dtype != (np.int32 if i == 4 else out_dtype)
+        for i, inp in enumerate(node.inputs)
+    )
+    if any(must_cast_inputs) and config.compiler_verbose:
+        print("SolveLUFactorTridiagonal requires casting at least one input")  # noqa: T201
+
     @numba_basic.numba_njit(cache=False)
     def solve_lu_factor_tridiagonal(dl, d, du, du2, ipiv, b):
+        if must_cast_inputs[0]:
+            dl = dl.astype(out_dtype)
+        if must_cast_inputs[1]:
+            d = d.astype(out_dtype)
+        if must_cast_inputs[2]:
+            du = du.astype(out_dtype)
+        if must_cast_inputs[3]:
+            du2 = du2.astype(out_dtype)
+        if must_cast_inputs[4]:
+            ipiv = ipiv.astype("int32")
+        if must_cast_inputs[5]:
+            b = b.astype(out_dtype)
         x, _ = _gttrs(
             dl,
             d,
