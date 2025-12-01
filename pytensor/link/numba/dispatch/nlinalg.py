@@ -81,9 +81,11 @@ def numba_funcify_Eig(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def eig(x):
-        return np.linalg.eig(inputs_cast(x))
+        w, v = np.linalg.eig(inputs_cast(x))
+        return w.astype(w_dtype), v.astype(w_dtype)
 
-    return eig
+    cache_version = 1
+    return eig, cache_version
 
 
 @register_funcify_default_op_cache_key(Eigh)
