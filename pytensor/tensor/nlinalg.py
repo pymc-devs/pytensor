@@ -325,7 +325,8 @@ class Eig(Op):
     """
 
     __props__: tuple[str, ...] = ()
-    gufunc_spec = ("numpy.linalg.eig", 1, 2)
+    # Can't use numpy directly in Blockwise, because of the dynamic dtype
+    # gufunc_spec = ("numpy.linalg.eig", 1, 2)
     gufunc_signature = "(m,m)->(m),(m,m)"
 
     def make_node(self, x):
