@@ -1,15 +1,15 @@
 import numpy as np
 from numba.core.extending import overload
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
+from numba.types import Float
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
-    _get_underlying_float,
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.utils import _check_scipy_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
 
 
 def _cholesky(a, lower=False, overwrite_a=False, check_finite=True):
@@ -24,9 +24,9 @@ def _cholesky(a, lower=False, overwrite_a=False, check_finite=True):
 @overload(_cholesky)
 def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "cholesky")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="cholesky")
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
+
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
 
     def impl(A, lower=0, overwrite_a=False, check_finite=True):
@@ -47,7 +47,7 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
         numba_potrf(
             UPLO,
             N,
-            A_copy.view(w_type).ctypes,
+            A_copy.ctypes,
             LDA,
             INFO,
         )

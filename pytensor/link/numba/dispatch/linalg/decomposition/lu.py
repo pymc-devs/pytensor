@@ -3,12 +3,13 @@ from typing import Literal
 
 import numpy as np
 from numba.core.extending import overload
+from numba.core.types import Float
 from numba.np.linalg import ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.linalg.decomposition.lu_factor import _getrf
-from pytensor.link.numba.dispatch.linalg.utils import _check_scipy_linalg_matrix
+from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
 
 
 @numba_basic.numba_njit
@@ -116,7 +117,7 @@ def lu_impl_1(
     False. Returns a tuple of (perm, L, U), where perm an integer array of row swaps, such that L[perm] @ U = A.
     """
     ensure_lapack()
-    _check_scipy_linalg_matrix(a, "lu")
+    _check_linalg_matrix(a, ndim=2, dtype=Float, func_name="lu")
     dtype = a.dtype
 
     def impl(
@@ -146,7 +147,7 @@ def lu_impl_2(
     """
 
     ensure_lapack()
-    _check_scipy_linalg_matrix(a, "lu")
+    _check_linalg_matrix(a, ndim=2, dtype=Float, func_name="lu")
     dtype = a.dtype
 
     def impl(
@@ -179,7 +180,7 @@ def lu_impl_3(
     False. Returns a tuple of (P, L, U), such that P @ L @ U = A.
     """
     ensure_lapack()
-    _check_scipy_linalg_matrix(a, "lu")
+    _check_linalg_matrix(a, ndim=2, dtype=Float, func_name="lu")
     dtype = a.dtype
 
     def impl(

@@ -2,19 +2,20 @@ from collections.abc import Callable
 
 import numpy as np
 from numba.core.extending import overload
+from numba.core.types import Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
-    _get_underlying_float,
     int_ptr_to_val,
     val_to_int_ptr,
 )
 from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 from pytensor.link.numba.dispatch.linalg.solve.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
-    _check_scipy_linalg_matrix,
+    _check_dtypes_match,
+    _check_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
     _solve_check,
 )
@@ -49,10 +50,10 @@ def posv_impl(
     tuple[np.ndarray, np.ndarray, int],
 ]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "solve")
-    _check_scipy_linalg_matrix(B, "solve")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
+    _check_dtypes_match((A, B), func_name="solve")
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     numba_posv = _LAPACK().numba_xposv(dtype)
 
     def impl(
@@ -99,9 +100,9 @@ def posv_impl(
             UPLO,
             N,
             NRHS,
-            A_copy.view(w_type).ctypes,
+            A_copy.ctypes,
             LDA,
-            B_copy.view(w_type).ctypes,
+            B_copy.ctypes,
             LDB,
             INFO,
         )
@@ -127,9 +128,8 @@ def pocon_impl(
     A: np.ndarray, anorm: float
 ) -> Callable[[np.ndarray, float], tuple[np.ndarray, int]]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "pocon")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="pocon")
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     numba_pocon = _LAPACK().numba_xpocon(dtype)
 
     def impl(A: np.ndarray, anorm: float):
@@ -148,11 +148,11 @@ def pocon_impl(
         numba_pocon(
             UPLO,
             N,
-            A_copy.view(w_type).ctypes,
+            A_copy.ctypes,
             LDA,
-            ANORM.view(w_type).ctypes,
-            RCOND.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            ANORM.ctypes,
+            RCOND.ctypes,
+            WORK.ctypes,
             IWORK.ctypes,
             INFO,
         )
@@ -196,8 +196,9 @@ def solve_psd_impl(
     transposed: bool,
 ) -> Callable[[np.ndarray, np.ndarray, bool, bool, bool, bool, bool], np.ndarray]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "solve")
-    _check_scipy_linalg_matrix(B, "solve")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
+    _check_dtypes_match((A, B), func_name="solve")
 
     def impl(
         A: np.ndarray,
