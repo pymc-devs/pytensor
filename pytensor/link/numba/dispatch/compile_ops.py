@@ -109,22 +109,28 @@ def numba_funcify_IfElse(op, **kwargs):
         @numba_basic.numba_njit
         def ifelse(cond, *args):
             if cond:
-                res = args[:n_outs]
+                selected = args[:n_outs]
             else:
-                res = args[n_outs:]
+                selected = args[n_outs:]
 
-            return res
+            # Return a tuple of copies
+            out = [None] * n_outs
+            for i in range(n_outs):
+                out[i] = selected[i].copy()
+
+            return tuple(out)
 
     else:
 
         @numba_basic.numba_njit
         def ifelse(cond, *args):
             if cond:
-                res = args[:n_outs]
+                arr = args[0]
             else:
-                res = args[n_outs:]
+                arr = args[1]
 
-            return res[0]
+            # Return a copy
+            return arr.copy()
 
     return ifelse
 
