@@ -1,10 +1,11 @@
 import numpy as np
 import pytest
 
-from pytensor import Mode, OpFromGraph, config, function, ifelse, scan
+from pytensor import In, Mode, OpFromGraph, Out, config, function, ifelse, scan
 from pytensor import tensor as pt
 from pytensor.compile import ViewOp
 from pytensor.graph import vectorize_graph
+from pytensor.ifelse import IfElse
 from pytensor.raise_op import assert_op
 from pytensor.scalar import Add
 from pytensor.scan.op import Scan
@@ -231,3 +232,43 @@ def test_ofg_with_inner_scan_rewrite():
     cholesky_op = scan_op.fgraph.outputs[0].owner.op
     assert isinstance(cholesky_op, Blockwise)
     assert isinstance(cholesky_op.core_op, Cholesky)
+
+
+@pytest.mark.parametrize("as_view", [True, False])
+def test_ifelse_single_output(as_view, single_out=True):
+    x = pt.vector("x")
+    y = pt.vector("y")
+    if single_out:
+        outs = [x]
+    else:
+        outs = [x, y]
+
+    op = IfElse(as_view=as_view, n_outs=len(outs))
+    outs = op(x.sum() > 0, *outs, *outs, return_list=True)
+
+    fn = function(
+        [In(x, borrow=True), In(y, borrow=True)],
+        [Out(out, borrow=True) for out in outs],
+        mode=Mode("numba", optimizer=None),
+        accept_inplace=True,
+        on_unused_input="ignore",
+    )
+
+    # FALSE branch
+    test_x = np.zeros(3)
+    test_y = np.ones(5)
+    res_false = fn(test_x, test_y)
+    for test_inp, res_out in zip([test_x, test_y], res_false, strict=False):
+        np.testing.assert_array_equal(test_inp, res_out)
+        # IfElse only views on the true branch variates
+        assert res_out is not test_inp
+
+    # TRUE branch
+    test_x = np.ones(3)
+    res_true = fn(test_x, test_y)
+    for test_inp, res_out in zip([test_x, test_y], res_true, strict=False):
+        np.testing.assert_array_equal(test_inp, res_out)
+        if as_view:
+            assert res_out is test_inp
+        else:
+            assert res_out is not test_inp

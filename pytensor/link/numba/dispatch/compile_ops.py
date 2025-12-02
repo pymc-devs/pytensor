@@ -1,5 +1,6 @@
 from copy import deepcopy
 from hashlib import sha256
+from textwrap import dedent
 
 import numba
 import numpy as np
@@ -10,6 +11,7 @@ from pytensor.compile.io import In, Out
 from pytensor.compile.mode import NUMBA
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     numba_funcify_and_cache_key,
@@ -106,30 +108,35 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
 @register_funcify_default_op_cache_key(IfElse)
 def numba_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
+    as_view = op.as_view
 
-    if n_outs > 1:
+    true_names = [f"t{i}" for i in range(n_outs)]
+    false_names = [f"f{i}" for i in range(n_outs)]
+    arg_list = ", ".join((*true_names, *false_names))
 
-        @numba_basic.numba_njit
-        def ifelse(cond, *args):
-            if cond:
-                res = args[:n_outs]
-            else:
-                res = args[n_outs:]
-
-            return res
-
+    if as_view:
+        true_returns = ", ".join(true_names)
     else:
+        true_returns = ", ".join(f"{name}.copy()" for name in true_names)
+    # We only ever view (alias) variables from the true branch. False branch variables must always be copied.
+    false_returns = ", ".join(f"{name}.copy()" for name in false_names)
 
-        @numba_basic.numba_njit
-        def ifelse(cond, *args):
-            if cond:
-                res = args[:n_outs]
-            else:
-                res = args[n_outs:]
+    func_src = dedent(
+        f"""
+            def ifelse(cond, {arg_list}):
+                if cond:
+                    return {true_returns}
+                else:
+                    return {false_returns}
+        """
+    )
 
-            return res[0]
+    ifelse_func = numba_basic.numba_njit(
+        compile_numba_function_src(func_src, "ifelse", globals())
+    )
 
-    return ifelse
+    cache_version = 1
+    return ifelse_func, cache_version
 
 
 @register_funcify_and_cache_key(CheckAndRaise)
