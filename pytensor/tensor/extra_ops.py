@@ -1371,8 +1371,7 @@ class RavelMultiIndex(Op):
         self.order = order
 
     def make_node(self, *inp):
-        multi_index = [ptb.as_tensor_variable(i) for i in inp[:-1]]
-        dims = ptb.as_tensor_variable(inp[-1])
+        *multi_index, dims = map(ptb.as_tensor_variable, inp)
 
         for i in multi_index:
             if i.dtype not in int_dtypes:
@@ -1382,19 +1381,20 @@ class RavelMultiIndex(Op):
         if dims.ndim != 1:
             raise TypeError("dims must be a 1D array")
 
+        out_type = multi_index[0].type.clone(dtype="int64")
         return Apply(
             self,
             [*multi_index, dims],
-            [TensorType(dtype="int64", shape=(None,) * multi_index[0].type.ndim)()],
+            [out_type()],
         )
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]]
 
     def perform(self, node, inp, out):
-        multi_index, dims = inp[:-1], inp[-1]
+        *multi_index, dims = inp
         res = np.ravel_multi_index(multi_index, dims, mode=self.mode, order=self.order)
-        out[0][0] = np.asarray(res, node.outputs[0].dtype)
+        out[0][0] = np.asarray(res, "int64")
 
 
 def ravel_multi_index(multi_index, dims, mode="raise", order="C"):

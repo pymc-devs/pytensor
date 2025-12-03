@@ -7,6 +7,7 @@ import pytest
 import pytensor.tensor as pt
 from pytensor import config
 from pytensor.tensor import extra_ops
+from pytensor.tensor.extra_ops import RavelMultiIndex
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -133,35 +134,34 @@ def test_FillDiagonalOffset(a, val, offset):
 
 
 @pytest.mark.parametrize(
-    "arr, shape, mode, order, exc",
+    "arr, shape, mode, exc",
     [
         (
             tuple((pt.lscalar(), v) for v in np.array([0])),
             (pt.lvector(), np.array([2])),
             "raise",
-            "C",
             None,
         ),
         (
             tuple((pt.lscalar(), v) for v in np.array([0, 0, 3])),
             (pt.lvector(), np.array([2, 3, 4])),
             "raise",
-            "C",
             None,
         ),
         (
             tuple((pt.lvector(), v) for v in np.array([[0, 1], [2, 0], [1, 3]])),
             (pt.lvector(), np.array([2, 3, 4])),
             "raise",
-            "C",
             None,
         ),
         (
-            tuple((pt.lvector(), v) for v in np.array([[0, 1], [2, 0], [1, 3]])),
+            tuple(
+                (pt.lmatrix(), np.broadcast_to(v, (3, 2)).copy())
+                for v in np.array([[0, 1], [2, 0], [1, 3]])
+            ),
             (pt.lvector(), np.array([2, 3, 4])),
             "raise",
-            "F",
-            NotImplementedError,
+            None,
         ),
         (
             tuple(
@@ -169,7 +169,6 @@ def test_FillDiagonalOffset(a, val, offset):
             ),
             (pt.lvector(), np.array([2, 3, 4])),
             "raise",
-            "C",
             ValueError,
         ),
         (
@@ -178,7 +177,15 @@ def test_FillDiagonalOffset(a, val, offset):
             ),
             (pt.lvector(), np.array([2, 3, 4])),
             "wrap",
-            "C",
+            None,
+        ),
+        (
+            tuple(
+                (pt.ltensor3(), np.broadcast_to(v, (2, 2, 3)).copy())
+                for v in np.array([[0, 1, 2], [2, 0, 3], [1, 3, 5]])
+            ),
+            (pt.lvector(), np.array([2, 3, 4])),
+            "wrap",
             None,
         ),
         (
@@ -187,21 +194,30 @@ def test_FillDiagonalOffset(a, val, offset):
             ),
             (pt.lvector(), np.array([2, 3, 4])),
             "clip",
-            "C",
+            None,
+        ),
+        (
+            tuple(
+                (pt.lmatrix(), np.broadcast_to(v, (2, 3)).copy())
+                for v in np.array([[0, 1, 2], [2, 0, 3], [1, 3, 5]])
+            ),
+            (pt.lvector(), np.array([2, 3, 4])),
+            "clip",
             None,
         ),
     ],
 )
-def test_RavelMultiIndex(arr, shape, mode, order, exc):
+def test_RavelMultiIndex(arr, shape, mode, exc):
     arr, test_arr = zip(*arr, strict=True)
     shape, test_shape = shape
-    g = extra_ops.RavelMultiIndex(mode, order)(*arr, shape)
+    g_c = RavelMultiIndex(mode, order="C")(*arr, shape)
+    g_f = RavelMultiIndex(mode, order="F")(*arr, shape)
 
     cm = contextlib.suppress() if exc is None else pytest.raises(exc)
     with cm:
         compare_numba_and_py(
             [*arr, shape],
-            g,
+            [g_c, g_f],
             [*test_arr, test_shape],
         )
 
