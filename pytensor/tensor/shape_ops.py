@@ -96,16 +96,10 @@ class SplitDims(Op):
         self.axis = axis
 
     def _make_output_shape(self, input_shape, shape):
-        axis = self.axis
-
+        [axis] = normalize_axis_tuple(self.axis, len(input_shape))
         output_shapes = list(input_shape)
-        shape = list(shape)
 
-        output_shapes[axis] = shape.pop(-1)
-        for s in shape[::-1]:
-            output_shapes.insert(axis, s)
-
-        return tuple(output_shapes)
+        return *output_shapes[:axis], *shape, *output_shapes[axis + 1 :]
 
     def make_node(self, x: Variable, shape: Variable) -> Apply:
         output_shapes = self._make_output_shape(x.type.shape, shape)
