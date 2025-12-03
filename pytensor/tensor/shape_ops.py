@@ -12,7 +12,7 @@ from pytensor.tensor.basic import join, split
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType
 from pytensor.tensor.type import tensor
-from pytensor.tensor.variable import TensorConstant
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 class JoinDims(Op):
@@ -269,7 +269,89 @@ def _analyze_axes_list(axes) -> tuple[int, int, int]:
         return n_before, n_after, min_axes
 
 
-def pack(*tensors: TensorLike, axes: Sequence[int] | int | None = None):
+def pack(
+    *tensors: TensorLike, axes: Sequence[int] | int | None = None
+) -> tuple[TensorVariable, list[ShapeValueType]]:
+    """
+    Combine multiple tensors by preserving the specified axes and raveling the rest into a single axis.
+
+    Parameters
+    ----------
+    *tensors : TensorLike
+        Input tensors to be packed.
+    axes : int, sequence of int, or None, optional
+        Axes to preserve during packing. If None, all axes are raveled. See the Notes section for the rules.
+
+    Returns
+    -------
+    packed_tensor : TensorLike
+        The packed tensor with specified axes preserved and others raveled.
+    packed_shapes : list of ShapeValueType
+        A list containing the shapes of the raveled dimensions for each input tensor.
+
+    Notes
+    -----
+    The `axes` parameter determines which axes are preserved during packing. Axes can be specified using positive or
+    negative indices, but must follow these rules:
+        - If axes is None, all axes are raveled.
+        - If a single integer is provided, it can be positive or negative, and can take any value up to the smallest
+            number of dimensions among the input tensors.
+        - If a list is provided, it can be all positive, all negative, or a combination of positive and negative.
+        - Positive axes must be contiguous and start from 0.
+        - Negative axes must be contiguous and end at -1.
+        - If positive and negative axes are combined, positive axes must come before negative axes, and both 0 and -1
+            must be included.
+
+    Examples
+    --------
+    The easiest way to understand pack is through examples. The simplest case is using axes=None, which is equivalent
+    to ``join(0, *[t.ravel() for t in tensors])``:
+
+    .. code-block:: python
+        import pytensor.tensor as pt
+
+        x = pt.tensor("x", shape=(2, 3))
+        y = pt.tensor("y", shape=(4, 5, 6))
+
+        packed_tensor, packed_shapes = pt.pack(x, y, axes=None)
+        # packed_tensor has shape (6 + 120,) == (126,)
+        # packed_shapes is [(2, 3), (4, 5, 6)]
+
+    If we want to preserve a single axis, we can use either positive or negative indexing. Notice that all tensors
+    must have the same size along the preserved axis. For example, using axes=0:
+
+    .. code-block:: python
+        import pytensor.tensor as pt
+
+        x = pt.tensor("x", shape=(2, 3))
+        y = pt.tensor("y", shape=(2, 5, 6))
+        packed_tensor, packed_shapes = pt.pack(x, y, axes=0)
+        # packed_tensor has shape (2, 3 + 30) == (2, 33)
+        # packed_shapes is [(3,), (5, 6)]
+
+
+    Using negative indexing we can preserve the last two axes:
+
+    .. code-block:: python
+        import pytensor.tensor as pt
+
+        x = pt.tensor("x", shape=(4, 2, 3))
+        y = pt.tensor("y", shape=(5, 2, 3))
+        packed_tensor, packed_shapes = pt.pack(x, y, axes=(-2, -1))
+        # packed_tensor has shape (4 + 5, 2, 3) == (9, 2, 3)
+        # packed_shapes is [(4,), (5,
+
+    Or using a mix of positive and negative axes, we can preserve the first and last axes:
+
+    .. code-block:: python
+        import pytensor.tensor as pt
+
+        x = pt.tensor("x", shape=(2, 4, 3))
+        y = pt.tensor("y", shape=(2, 5, 3))
+        packed_tensor, packed_shapes = pt.pack(x, y, axes=(0, -1))
+        # packed_tensor has shape (2, 4 + 5, 3) == (2, 9, 3)
+        # packed_shapes is [(4,), (5,)]
+    """
     n_before, n_after, min_axes = _analyze_axes_list(axes)
 
     if all([n_before == 0, n_after == 0, min_axes == 0]):
@@ -311,7 +393,35 @@ def pack(*tensors: TensorLike, axes: Sequence[int] | int | None = None):
     return join(n_before, *reshaped_tensors), packed_shapes
 
 
-def unpack(packed_input, axes, packed_shapes):
+def unpack(
+    packed_input: TensorLike,
+    axes: int | Sequence[int] | None,
+    packed_shapes: list[ShapeValueType],
+) -> list[TensorVariable]:
+    """
+    Unpack a packed tensor into multiple tensors by splitting along the specified axes and reshaping.
+
+    The unpacking process reverses the packing operation, restoring the original shapes of the input tensors. `axes`
+    corresponds to the axes that were preserved during packing, and `packed_shapes` contains the shapes of the raveled
+    dimensions for each output tensor (that is, the shapes that were destroyed during packing).
+
+    The signature of unpack is such that the same `axes` should be passed to both `pack` and `unpack` to create a
+    "round-trip" operation. For details on the rules for `axes`, see the documentation for `pack`.
+
+    Parameters
+    ----------
+    packed_input : TensorLike
+        The packed tensor to be unpacked.
+    axes : int, sequence of int, or None
+        Axes that were preserved during packing. If None, the input is assumed to be 1D and axis 0 is used.
+    packed_shapes : list of ShapeValueType
+        A list containing the shapes of the raveled dimensions for each output tensor.
+
+    Returns
+    -------
+    unpacked_tensors : list of TensorLike
+        A list of unpacked tensors with their original shapes restored.
+    """
     if axes is None:
         if packed_input.ndim != 1:
             raise ValueError(
