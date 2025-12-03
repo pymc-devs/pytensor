@@ -131,7 +131,6 @@ from pytensor.tensor.basic import *
 from pytensor.tensor.blas import batched_dot, batched_tensordot
 from pytensor.tensor.extra_ops import *
 from pytensor.tensor.interpolate import interp, interpolate1d
-from pytensor.tensor.io import *
 from pytensor.tensor.math import *
 from pytensor.tensor.pad import pad
 from pytensor.tensor.shape import (
