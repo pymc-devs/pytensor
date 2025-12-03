@@ -233,6 +233,7 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
         np.testing.assert_allclose(
             cholesky_vect_fn(Mv),
             f(Av),
+            rtol=1e-6 if config.floatX == "float32" else 1e-7,
         )
 
 
