@@ -7,6 +7,7 @@ from pytensor.tensor.type import (
     dmatrix,
     dvector,
     float_dtypes,
+    fscalar,
     integer_dtypes,
     lscalar,
     matrix,
@@ -31,6 +32,12 @@ class TestSort:
         self.m_val = self.rng.random((3, 2))
         self.v_val = self.rng.random(4)
 
+    def test_invalid_axis_dtype(self):
+        with pytest.raises(
+            ValueError, match="Sort axis must have an integer dtype, got float32"
+        ):
+            sort(dmatrix(), fscalar())
+
     def test1(self):
         a = dmatrix()
         w = sort(a)
@@ -39,7 +46,7 @@ class TestSort:
 
     def test2(self):
         a = dmatrix()
-        axis = scalar()
+        axis = scalar(dtype="int64")
         w = sort(a, axis)
         f = pytensor.function([a, axis], w)
         for axis_val in 0, 1:
@@ -57,12 +64,12 @@ class TestSort:
 
     def test4(self):
         a = dmatrix()
-        axis = scalar()
+        axis = scalar(dtype="int8")
         l = sort(a, axis, "mergesort")
         f = pytensor.function([a, axis], l)
         for axis_val in 0, 1:
-            gv = f(self.m_val, axis_val)
-            gt = np.sort(self.m_val, axis_val)
+            gv = f(self.m_val, np.array(axis_val, dtype="int8"))
+            gt = np.sort(self.m_val, np.array(axis_val, dtype="int8"))
             utt.assert_allclose(gv, gt)
 
     def test5(self):
@@ -199,12 +206,12 @@ def test_argsort():
 
     # Example 4
     a = dmatrix()
-    axis = lscalar()
+    axis = scalar(dtype="int8")
     l = argsort(a, axis, "mergesort")
     f = pytensor.function([a, axis], l)
     for axis_val in 0, 1:
-        gv = f(m_val, axis_val)
-        gt = np.argsort(m_val, axis_val)
+        gv = f(m_val, np.array(axis_val, dtype="int8"))
+        gt = np.argsort(m_val, np.array(axis_val, dtype="int8"))
         utt.assert_allclose(gv, gt)
 
     # Example 5
@@ -221,6 +228,11 @@ def test_argsort():
     gv = f(m_val)
     gt = np.argsort(m_val, None)
     utt.assert_allclose(gv, gt)
+
+    with pytest.raises(
+        ValueError, match="ArgSort axis must have an integer dtype, got float32"
+    ):
+        argsort(dmatrix(), fscalar())
 
 
 def test_argsort_grad():

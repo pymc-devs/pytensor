@@ -42,13 +42,17 @@ class SortOp(Op):
     def make_node(self, input, axis=-1):
         input = as_tensor_variable(input)
         axis = as_tensor_variable(axis, ndim=0, dtype=int)
+        if axis.type.numpy_dtype.kind != "i":
+            raise ValueError(
+                f"Sort axis must have an integer dtype, got {axis.type.dtype}"
+            )
         out_type = input.type()
         return Apply(self, [input, axis], [out_type])
 
     def perform(self, node, inputs, output_storage):
         a, axis = inputs
         z = output_storage[0]
-        z[0] = np.sort(a, int(axis), self.kind)
+        z[0] = np.sort(a, axis, self.kind)
 
     def infer_shape(self, fgraph, node, inputs_shapes):
         assert node.inputs[0].ndim == node.outputs[0].ndim
@@ -163,6 +167,10 @@ class ArgSortOp(Op):
     def make_node(self, input, axis=-1):
         input = as_tensor_variable(input)
         axis = as_tensor_variable(axis, ndim=0, dtype=int)
+        if axis.type.numpy_dtype.kind != "i":
+            raise ValueError(
+                f"ArgSort axis must have an integer dtype, got {axis.type.dtype}"
+            )
         return Apply(
             self,
             [input, axis],
@@ -173,7 +181,7 @@ class ArgSortOp(Op):
         a, axis = inputs
         z = output_storage[0]
         z[0] = np.asarray(
-            np.argsort(a, int(axis), self.kind),
+            np.argsort(a, axis, self.kind),
             dtype=node.outputs[0].dtype,
         )
 
