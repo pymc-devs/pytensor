@@ -135,65 +135,49 @@ def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
 def numba_funcify_RavelMultiIndex(op, node, **kwargs):
     mode = op.mode
     order = op.order
+    vec_indices = node.inputs[0].type.ndim > 0
 
-    if order != "C":
-        raise NotImplementedError(
-            "Numba does not implement `order` in `numpy.ravel_multi_index`"
-        )
+    @numba_basic.numba_njit
+    def ravelmultiindex(*inp):
+        shape = inp[-1]
+        # Concatenate indices along last axis
+        stacked_indices = np.stack(inp[:-1], axis=-1)
 
-    if mode == "raise":
+        # Manage invalid indices
+        for i, dim_limit in enumerate(shape):
+            if mode == "wrap":
+                stacked_indices[..., i] %= dim_limit
+            elif mode == "clip":
+                dim_indices = stacked_indices[..., i]
+                stacked_indices[..., i] = np.clip(dim_indices, 0, dim_limit - 1)
+            else:  # raise
+                dim_indices = stacked_indices[..., i]
+                invalid_indices = (dim_indices < 0) | (dim_indices >= shape[i])
+                # Cannot call np.any on a boolean
+                if vec_indices:
+                    invalid_indices = invalid_indices.any()
+                if invalid_indices:
+                    raise ValueError("invalid entry in coordinates array")
 
-        @numba_basic.numba_njit
-        def mode_fn(*args):
-            raise ValueError("invalid entry in coordinates array")
+        # Calculate Strides based on Order
+        a = np.ones(len(shape), dtype=np.int64)
+        if order == "C":
+            # C-Order: Last dimension moves fastest (Strides: large -> small -> 1)
+            # For shape (3, 4, 5): Multipliers are (20, 5, 1)
+            if len(shape) > 1:
+                a[:-1] = np.cumprod(shape[:0:-1])[::-1]
+        else:  # order == "F"
+            # F-Order: First dimension moves fastest (Strides: 1 -> small -> large)
+            # For shape (3, 4, 5): Multipliers are (1, 3, 12)
+            if len(shape) > 1:
+                a[1:] = np.cumprod(shape[:-1])
 
-    elif mode == "wrap":
+        # Dot product indices with strides
+        # (allow arbitrary left operand ndim and int dtype, which numba matmul doesn't support)
+        return np.asarray((stacked_indices * a).sum(-1))
 
-        @numba_basic.numba_njit(inline="always")
-        def mode_fn(new_arr, i, j, v, d):
-            new_arr[i, j] = v % d
-
-    elif mode == "clip":
-
-        @numba_basic.numba_njit(inline="always")
-        def mode_fn(new_arr, i, j, v, d):
-            new_arr[i, j] = min(max(v, 0), d - 1)
-
-    if node.inputs[0].ndim == 0:
-
-        @numba_basic.numba_njit
-        def ravelmultiindex(*inp):
-            shape = inp[-1]
-            arr = np.stack(inp[:-1])
-
-            new_arr = arr.T.astype(np.float64).copy()
-            for i, b in enumerate(new_arr):
-                if b < 0 or b >= shape[i]:
-                    mode_fn(new_arr, i, 0, b, shape[i])
-
-            a = np.ones(len(shape), dtype=np.float64)
-            a[: len(shape) - 1] = np.cumprod(shape[-1:0:-1])[::-1]
-            return np.array(a.dot(new_arr.T), dtype=np.int64)
-
-    else:
-
-        @numba_basic.numba_njit
-        def ravelmultiindex(*inp):
-            shape = inp[-1]
-            arr = np.stack(inp[:-1])
-
-            new_arr = arr.T.astype(np.float64).copy()
-            for i, b in enumerate(new_arr):
-                # no strict argument to this zip because numba doesn't support it
-                for j, (d, v) in enumerate(zip(shape, b)):
-                    if v < 0 or v >= d:
-                        mode_fn(new_arr, i, j, v, d)
-
-            a = np.ones(len(shape), dtype=np.float64)
-            a[: len(shape) - 1] = np.cumprod(shape[-1:0:-1])[::-1]
-            return a.dot(new_arr.T).astype(np.int64)
-
-    return ravelmultiindex
+    cache_version = 1
+    return ravelmultiindex, cache_version
 
 
 @register_funcify_default_op_cache_key(Repeat)
