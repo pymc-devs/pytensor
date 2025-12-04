@@ -8,7 +8,7 @@ from pytensor import Variable
 from pytensor.graph import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike, as_tensor_variable
-from pytensor.tensor.basic import join, split
+from pytensor.tensor.basic import expand_dims, join, split
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType
 from pytensor.tensor.type import tensor
@@ -119,7 +119,7 @@ class SplitDims(Op):
 
 def split_dims(
     x: TensorLike, shape: ShapeValueType, axis: int | None = None
-) -> Variable:
+) -> TensorVariable:
     """Split a dimension of a tensor into multiple dimensions.
 
     Parameters
@@ -372,23 +372,31 @@ def pack(
                 f"Input {i} (zero indexed) to pack has {n_dim} dimensions, "
                 f"but axes={axes} assumes at least {min_axes} dimension{'s' if min_axes != 1 else ''}."
             )
+        n_after_packed = n_dim - n_after
+        packed_shapes.append(input_tensor.shape[n_before:n_after_packed])
 
-        axis_after_packed_axes = n_dim - n_after
-        packed_shapes.append(input_tensor.shape[n_before:axis_after_packed_axes])
+        if n_dim == min_axes:
+            # If an input has the minimum number of axes, pack implicitly inserts a new axis based on the pattern
+            # implied by the axes. If n_before == 0, the reshape would be (-1, ...), so we need to expand at axis 0.
+            # If n_after == 0, the reshape would be (..., -1), so we need to expand at axis -1. If both are equal,
+            # the reshape will occur in the center of the tensor.
+            if n_before == 0:
+                input_tensor = expand_dims(input_tensor, axis=0)
+            elif n_after == 0:
+                input_tensor = expand_dims(input_tensor, axis=-1)
+            elif n_before == n_after:
+                input_tensor = expand_dims(input_tensor, axis=n_before)
 
-        new_shape = (
-            *input_tensor.shape[:n_before],
-            -1,
-            *input_tensor.shape[axis_after_packed_axes:],
-        )
-        reshaped_tensors.append(input_tensor.reshape(new_shape))
+            reshaped_tensors.append(input_tensor)
+            continue
 
-        # Using join_dims could look like this, but it does not insert extra shapes when needed. For example, it fails
-        # on pack(pt.tensor("x", shape=(3, )), pt.tensor("y", shape=(3, 3)), axes=0), because the first tensor needs to
-        # have its single dimension expanded before the join.
-
-        # join_axes = {n_before, axis_after_packed_axes - 1}
-        # reshaped_tensors.append(join_dims(input_tensor, tuple(join_axes)))
+        # The reshape we want is (shape[:before], -1, shape[n_after_packed:]). join_dims does (shape[:min(axes)], -1,
+        # shape[max(axes)+1:]). So this will work if we choose axes=(n_before, n_after_packed - 1). Because of the
+        # rules on the axes input, we will always have n_before <= n_after_packed - 1. A set is used here to cover the
+        # corner case when n_before == n_after_packed - 1 (i.e., when there is only one axis to ravel --> do nothing).
+        join_axes = {n_before, n_after_packed - 1}
+        joined = join_dims(input_tensor, tuple(join_axes))
+        reshaped_tensors.append(joined)
 
     return join(n_before, *reshaped_tensors), packed_shapes
 
