@@ -5,8 +5,8 @@ import numba
 import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.function.types import add_supervisor_to_fgraph
-from pytensor.compile.io import In
+from pytensor.compile.function.types import add_supervisor_to_fgraph, insert_deepcopy
+from pytensor.compile.io import In, Out
 from pytensor.compile.mode import NUMBA
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.ifelse import IfElse
@@ -56,14 +56,17 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
     #  explicitly triggers the optimization of the inner graphs of OpFromGraph?
     #  The C-code defers it to the make_thunk phase
     fgraph = op.fgraph
+    input_specs = [In(x, borrow=True, mutable=False) for x in fgraph.inputs]
     add_supervisor_to_fgraph(
         fgraph=fgraph,
-        input_specs=[In(x, borrow=True, mutable=False) for x in fgraph.inputs],
+        input_specs=input_specs,
         accept_inplace=True,
     )
     NUMBA.optimizer(fgraph)
+    output_specs = [Out(o, borrow=False) for o in fgraph.outputs]
+    insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
     fgraph_fn, fgraph_cache_key = numba_funcify_and_cache_key(
-        op.fgraph, squeeze_output=True, **kwargs
+        fgraph, squeeze_output=True, **kwargs
     )
 
     if fgraph_cache_key is None:
