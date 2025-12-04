@@ -106,16 +106,6 @@ def numba_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
     as_view = op.as_view
 
-    if n_outs == 1:
-
-        @numba_basic.numba_njit
-        def ifelse(cond, x_true, x_false):
-            arr = x_true if cond else x_false
-            return arr if as_view else arr.copy()
-
-        cache_version = 3
-        return ifelse, cache_version
-
     true_names = [f"t{i}" for i in range(n_outs)]
     false_names = [f"f{i}" for i in range(n_outs)]
     arg_list = ", ".join(true_names + false_names)
@@ -143,7 +133,7 @@ def ifelse_codegen(cond, {arg_list}):
     # JIT-compile using numba
     ifelse_numba = numba_basic.numba_njit(ifelse_py)
 
-    cache_version = 3
+    cache_version = 1
 
     return ifelse_numba, cache_version
 
