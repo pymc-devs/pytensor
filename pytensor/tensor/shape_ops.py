@@ -127,7 +127,7 @@ class SplitDims(Op):
     view_map = {0: [0]}
 
     def __init__(self, axis: int | None = None):
-        if axis < 0:
+        if axis is not None and axis < 0:
             raise ValueError("SplitDims axis must be non-negative")
         self.axis = axis
 
@@ -221,7 +221,7 @@ def split_dims(
         # (3, ) and (3, 3) to (3, 4)
         return type_cast(TensorVariable, x.squeeze(axis=axis))
 
-    [axis] = normalize_axis_tuple(axis, x.ndim)
+    [axis] = normalize_axis_tuple(axis, x.ndim)  # type: ignore[misc]
     shape = as_tensor_variable(shape)  # type: ignore[arg-type]
     return type_cast(TensorVariable, SplitDims(axis)(x, shape))
 
