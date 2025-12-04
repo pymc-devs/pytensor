@@ -116,8 +116,8 @@ class Fourier(Op):
             l = len(shape_a)
             shape_a = stack(shape_a)
             out_shape = concatenate((shape_a[0:axis], [n], shape_a[axis + 1 :]))
-            n_splits = [1] * l
-            out_shape = split(out_shape, n_splits, l)
+            splits = [1] * l
+            out_shape = split(out_shape, splits, n_splits=l)
             out_shape = [a[0] for a in out_shape]
         return [out_shape]
 

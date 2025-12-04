@@ -148,7 +148,7 @@ def test_empty_dynamic_shape():
 def test_split_const_axis_const_splits_compiled():
     x = pt.vector("x")
     splits = [2, 3]
-    outs = pt.split(x, splits, len(splits), axis=0)
+    outs = pt.split(x, splits, n_splits=len(splits), axis=0)
     compare_mlx_and_py([x], outs, [np.arange(5, dtype="float32")])
 
 
@@ -156,7 +156,7 @@ def test_split_dynamic_axis_const_splits():
     x = pt.matrix("x")
     axis = pt.scalar("axis", dtype="int64")
     splits = [1, 2, 3]
-    outs = pt.split(x, splits, len(splits), axis=axis)
+    outs = pt.split(x, splits, n_splits=len(splits), axis=axis)
 
     test_input = np.arange(12).astype(config.floatX).reshape(2, 6)
 

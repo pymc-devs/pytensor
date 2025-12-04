@@ -518,7 +518,7 @@ rng = np.random.default_rng(42849)
 def test_Split(n_splits, axis, values, sizes):
     i = pt.tensor("i", shape=values.shape, dtype=config.floatX)
     s = pt.vector("s", dtype="int64")
-    g = pt.split(i, s, n_splits, axis=axis)
+    g = pt.split(i, s, n_splits=n_splits, axis=axis)
     assert len(g) == n_splits
     if n_splits == 0:
         return
