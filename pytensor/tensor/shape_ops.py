@@ -39,6 +39,10 @@ class JoinDims(Op):
 
     def make_node(self, x: Variable) -> Apply:  # type: ignore[override]
         static_shapes = x.type.shape
+        if x.type.ndim < max(self.axis) + 1:
+            raise ValueError(
+                f"Input ndim {x.type.ndim} is less than the maximum axis {max(self.axis)} + 1"
+            )
         joined_shape = (
             int(np.prod([static_shapes[i] for i in self.axis]))
             if all(static_shapes[i] is not None for i in self.axis)
