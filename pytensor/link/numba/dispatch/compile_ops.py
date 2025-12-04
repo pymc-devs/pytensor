@@ -10,6 +10,7 @@ from pytensor.compile.io import In
 from pytensor.compile.mode import NUMBA
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.ifelse import IfElse
+from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     numba_funcify_and_cache_key,
@@ -103,36 +104,48 @@ def numba_funcify_DeepCopyOp(op, node, **kwargs):
 @register_funcify_default_op_cache_key(IfElse)
 def numba_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
+    as_view = op.as_view
 
-    if n_outs > 1:
+    if n_outs == 1:
 
         @numba_basic.numba_njit
-        def ifelse(cond, *args):
-            if cond:
-                selected = args[:n_outs]
-            else:
-                selected = args[n_outs:]
+        def ifelse(cond, x_true, x_false):
+            arr = x_true if cond else x_false
+            return arr if as_view else arr.copy()
 
-            # Return a tuple of copies
-            out = [None] * n_outs
-            for i in range(n_outs):
-                out[i] = selected[i].copy()
+        cache_version = 3
+        return ifelse, cache_version
 
-            return tuple(out)
+    true_names = [f"t{i}" for i in range(n_outs)]
+    false_names = [f"f{i}" for i in range(n_outs)]
+    arg_list = ", ".join(true_names + false_names)
 
+    # Build return expressions
+    if as_view:
+        true_returns = ", ".join(true_names)
+        false_returns = ", ".join(false_names)
     else:
+        true_returns = ", ".join(f"{name}.copy()" for name in true_names)
+        false_returns = ", ".join(f"{name}.copy()" for name in false_names)
 
-        @numba_basic.numba_njit
-        def ifelse(cond, *args):
-            if cond:
-                arr = args[0]
-            else:
-                arr = args[1]
+    # Build the code for the function
+    func_src = f"""
+def ifelse_codegen(cond, {arg_list}):
+    if cond:
+        return ({true_returns})
+    else:
+        return ({false_returns})
+"""
 
-            # Return a copy
-            return arr.copy()
+    # Compile the generated source code into a Python function
+    ifelse_py = compile_numba_function_src(func_src, "ifelse_codegen", globals())
 
-    return ifelse
+    # JIT-compile using numba
+    ifelse_numba = numba_basic.numba_njit(ifelse_py)
+
+    cache_version = 3
+
+    return ifelse_numba, cache_version
 
 
 @register_funcify_and_cache_key(CheckAndRaise)
