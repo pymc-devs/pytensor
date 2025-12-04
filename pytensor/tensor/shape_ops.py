@@ -16,7 +16,20 @@ from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 class JoinDims(Op):
+    __props__ = ("axis",)
+    view_map = {0: [0]}
+
     def __init__(self, axis: Sequence[int] | int | None = None):
+        if (isinstance(axis, int) and axis < 0) or (
+            isinstance(axis, Iterable) and any(i < 0 for i in axis)
+        ):
+            raise ValueError("JoinDims axis must be non-negative")
+
+        if len(axis) > 1 and np.diff(axis).max() > 1:
+            raise ValueError(
+                f"join_dims axis must be consecutive, got normalized axis: {axis}"
+            )
+
         self.axis = axis
 
     def make_node(self, x: Variable) -> Apply:
@@ -35,6 +48,17 @@ class JoinDims(Op):
 
         output_type = tensor(shape=output_shapes, dtype=x.type.dtype)
         return Apply(self, [x], [output_type])
+
+    def infer_shape(self, fgraph, node, shapes):
+        [input_shape] = shapes
+        joined_shape = prod([input_shape[i] for i in self.axis])
+        out_shape = (
+            *input_shape[: min(self.axis)],
+            joined_shape,
+            *input_shape[max(self.axis) + 1 :],
+        )
+
+        return [out_shape]
 
     def perform(self, node, inputs, outputs):
         (x,) = inputs
@@ -82,16 +106,13 @@ def join_dims(x: Variable, axis: Sequence[int] | int | None = None) -> Variable:
         return x
 
     axis = normalize_axis_tuple(axis, x.ndim)
-
-    if len(axis) > 1 and np.diff(axis).max() > 1:
-        raise ValueError(
-            f"join_dims axis must be consecutive, got normalized axis: {axis}"
-        )
-
     return JoinDims(axis)(x)
 
 
 class SplitDims(Op):
+    __props__ = ("axis",)
+    view_map = {0: [0]}
+
     def __init__(self, axis: int | None = None):
         self.axis = axis
 
@@ -109,6 +130,13 @@ class SplitDims(Op):
             dtype=x.type.dtype,
         )
         return Apply(self, [x, as_tensor_variable(shape)], [output])
+
+    def infer_shape(self, fgraph, node, shapes):
+        [input_shape, _] = shapes
+        _, shape = node.inputs
+        output_shape = self._make_output_shape(input_shape, shape)
+
+        return [output_shape]
 
     def perform(self, node, inputs, outputs):
         (x, shape) = inputs
