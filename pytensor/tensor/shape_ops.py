@@ -1,5 +1,6 @@
 from collections.abc import Iterable, Sequence
 from itertools import pairwise
+from typing import cast as type_cast
 
 import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_tuple
@@ -8,21 +9,25 @@ from pytensor import Variable
 from pytensor.graph import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike, as_tensor_variable
-from pytensor.tensor.basic import expand_dims, join, split
+from pytensor.tensor.basic import (
+    expand_dims,
+    get_underlying_scalar_constant_value,
+    join,
+    split,
+)
+from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType
 from pytensor.tensor.type import tensor
-from pytensor.tensor.variable import TensorConstant, TensorVariable
+from pytensor.tensor.variable import TensorVariable
 
 
 class JoinDims(Op):
     __props__ = ("axis",)
     view_map = {0: [0]}
 
-    def __init__(self, axis: Sequence[int] | int | None = None):
-        if (isinstance(axis, int) and axis < 0) or (
-            isinstance(axis, Iterable) and any(i < 0 for i in axis)
-        ):
+    def __init__(self, axis: Sequence[int]):
+        if any(i < 0 for i in axis):
             raise ValueError("JoinDims axis must be non-negative")
 
         if len(axis) > 1 and np.diff(axis).max() > 1:
@@ -32,7 +37,7 @@ class JoinDims(Op):
 
         self.axis = axis
 
-    def make_node(self, x: Variable) -> Apply:
+    def make_node(self, x: Variable) -> Apply:  # type: ignore[override]
         static_shapes = x.type.shape
         joined_shape = (
             int(np.prod([static_shapes[i] for i in self.axis]))
@@ -73,7 +78,7 @@ class JoinDims(Op):
         out[0] = x.reshape(tuple(output_shape))
 
 
-def join_dims(x: Variable, axis: Sequence[int] | int | None = None) -> Variable:
+def join_dims(x: TensorLike, axis: Sequence[int] | int | None = None) -> TensorVariable:
     """Join consecutive dimensions of a tensor into a single dimension.
 
     Parameters
@@ -96,17 +101,21 @@ def join_dims(x: Variable, axis: Sequence[int] | int | None = None) -> Variable:
     >>> y.type.shape
     (2, 12, 5)
     """
+    x = as_tensor_variable(x)
+
     if axis is None:
-        axis = range(x.ndim).tolist()
-    if not isinstance(axis, (list, tuple)):
+        axis = list(range(x.ndim))
+    elif isinstance(axis, int):
         axis = [axis]
+    elif not isinstance(axis, list | tuple):
+        raise TypeError("axis must be an int, a list/tuple of ints, or None")
 
     if not axis:
         # The user passed an empty list/tuple, so we return the input as is
         return x
 
     axis = normalize_axis_tuple(axis, x.ndim)
-    return JoinDims(axis)(x)
+    return type_cast(TensorVariable, JoinDims(axis)(x))
 
 
 class SplitDims(Op):
@@ -120,16 +129,25 @@ class SplitDims(Op):
         [axis] = normalize_axis_tuple(self.axis, len(input_shape))
         output_shapes = list(input_shape)
 
-        return *output_shapes[:axis], *shape, *output_shapes[axis + 1 :]
+        def _get_constant_shape(x):
+            try:
+                # get_underling_scalar_constant_value returns a numpy scalar, we need a python int
+                return get_underlying_scalar_constant_value(x).item()
+            except NotScalarConstantError:
+                return x
 
-    def make_node(self, x: Variable, shape: Variable) -> Apply:
+        constant_shape = [_get_constant_shape(x) for x in shape]
+
+        return *output_shapes[:axis], *constant_shape, *output_shapes[axis + 1 :]
+
+    def make_node(self, x: Variable, shape: Variable) -> Apply:  # type: ignore[override]
         output_shapes = self._make_output_shape(x.type.shape, shape)
 
         output = tensor(
             shape=tuple([x if isinstance(x, int) else None for x in output_shapes]),
             dtype=x.type.dtype,
         )
-        return Apply(self, [x, as_tensor_variable(shape)], [output])
+        return Apply(self, [x, shape], [output])
 
     def infer_shape(self, fgraph, node, shapes):
         [input_shape, _] = shapes
@@ -146,7 +164,9 @@ class SplitDims(Op):
 
 
 def split_dims(
-    x: TensorLike, shape: ShapeValueType, axis: int | None = None
+    x: TensorLike,
+    shape: ShapeValueType | Sequence[ShapeValueType],
+    axis: int | None = None,
 ) -> TensorVariable:
     """Split a dimension of a tensor into multiple dimensions.
 
@@ -183,18 +203,17 @@ def split_dims(
 
     if isinstance(shape, int):
         shape = [shape]
-    elif isinstance(shape, TensorConstant):
-        shape = shape.data.tolist()
     else:
-        shape = list(shape)
+        shape = list(shape)  # type: ignore[arg-type]
 
     if not shape:
-        # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for example
-        # when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes (3, ) and
-        # (3, 3) to (3, 4)
-        return x.squeeze(axis=axis)
+        # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
+        # example when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes
+        # (3, ) and (3, 3) to (3, 4)
+        return type_cast(TensorVariable, x.squeeze(axis=axis))
 
-    return SplitDims(axis)(x, shape)
+    shape = as_tensor_variable(shape)  # type: ignore[arg-type]
+    return type_cast(TensorVariable, SplitDims(axis)(x, shape))
 
 
 def _analyze_axes_list(axes) -> tuple[int, int, int]:
@@ -380,19 +399,21 @@ def pack(
         # packed_tensor has shape (2, 4 + 5, 3) == (2, 9, 3)
         # packed_shapes is [(4,), (5,)]
     """
+    tensor_list = [as_tensor_variable(t) for t in tensors]
+
     n_before, n_after, min_axes = _analyze_axes_list(axes)
+
+    reshaped_tensors: list[TensorVariable] = []
+    packed_shapes: list[ShapeValueType] = []
 
     if all([n_before == 0, n_after == 0, min_axes == 0]):
         # Special case -- we're raveling everything
-        packed_shapes = [tensor.shape for tensor in tensors]
-        reshaped_tensors = [tensor.ravel() for tensor in tensors]
+        packed_shapes = [t.shape for t in tensor_list]
+        reshaped_tensors = [t.ravel() for t in tensor_list]
 
         return join(0, *reshaped_tensors), packed_shapes
 
-    reshaped_tensors: list[TensorLike] = []
-    packed_shapes: list[ShapeValueType] = []
-
-    for i, input_tensor in enumerate(tensors):
+    for i, input_tensor in enumerate(tensor_list):
         n_dim = input_tensor.ndim
 
         if n_dim < min_axes:
@@ -458,6 +479,8 @@ def unpack(
     unpacked_tensors : list of TensorLike
         A list of unpacked tensors with their original shapes restored.
     """
+    packed_input = as_tensor_variable(packed_input)
+
     if axes is None:
         if packed_input.ndim != 1:
             raise ValueError(
