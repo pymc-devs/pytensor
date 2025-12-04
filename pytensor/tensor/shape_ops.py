@@ -123,6 +123,8 @@ class SplitDims(Op):
     view_map = {0: [0]}
 
     def __init__(self, axis: int | None = None):
+        if axis < 0:
+            raise ValueError("SplitDims axis must be non-negative")
         self.axis = axis
 
     def _make_output_shape(self, input_shape, shape):
@@ -141,6 +143,9 @@ class SplitDims(Op):
         return *output_shapes[:axis], *constant_shape, *output_shapes[axis + 1 :]
 
     def make_node(self, x: Variable, shape: Variable) -> Apply:  # type: ignore[override]
+        if shape.type.dtype not in ("int8", "int16", "int32", "int64"):
+            raise TypeError("shape must be an integer tensor")
+
         output_shapes = self._make_output_shape(x.type.shape, shape)
 
         output = tensor(
@@ -212,6 +217,7 @@ def split_dims(
         # (3, ) and (3, 3) to (3, 4)
         return type_cast(TensorVariable, x.squeeze(axis=axis))
 
+    [axis] = normalize_axis_tuple(axis, x.ndim)
     shape = as_tensor_variable(shape)  # type: ignore[arg-type]
     return type_cast(TensorVariable, SplitDims(axis)(x, shape))
 
