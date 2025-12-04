@@ -1818,6 +1818,33 @@ class Alloc(COp):
         return True
 
 
+@_vectorize_node.register(Alloc)
+def vectorize_alloc(op: Alloc, node: Apply, batch_val, *batch_shapes):
+    # batch_shapes are usually not batched (they are scalars for the shape)
+    # batch_val is the value being allocated.
+
+    # If shapes are batched, we fall back (complex case)
+    if any(
+        b_shp.type.ndim > shp.type.ndim
+        for b_shp, shp in zip(batch_shapes, node.inputs[1:], strict=True)
+    ):
+        return vectorize_node_fallback(op, node, batch_val, *batch_shapes)
+
+    # If value is batched, we need to prepend batch dims to the output shape
+    val = node.inputs[0]
+    batch_ndim = batch_val.type.ndim - val.type.ndim
+
+    if batch_ndim == 0:
+        return op.make_node(batch_val, *batch_shapes)
+
+    # We need the size of the batch dimensions
+    # batch_val has shape (B1, B2, ..., val_dims...)
+    batch_dims = [batch_val.shape[i] for i in range(batch_ndim)]
+
+    new_shapes = batch_dims + list(batch_shapes)
+    return op.make_node(batch_val, *new_shapes)
+
+
 alloc = Alloc()
 pprint.assign(alloc, printing.FunctionPrinter(["alloc"]))
 
