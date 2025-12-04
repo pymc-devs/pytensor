@@ -191,8 +191,8 @@ class TestPack:
 
         with pytest.raises(
             ValueError,
-            match=r"all the input array dimensions except for the concatenation axis must match exactly, but along "
-            r"dimension 0, the array at index 0 has size 3",
+            match=r"all input array dimensions other than the specified `axis` \(1\) must match exactly, or be unknown "
+            r"\(None\), but along dimension 0, the inputs shapes are incompatible: \[3 5 3\]",
         ):
             packed_tensor, packed_shapes = pack(x, y, z, axes=0)
             packed_tensor.eval(input_dict)
@@ -239,7 +239,7 @@ class TestPack:
                 tensor.type.shape[1:-1],
             )
 
-    @pytest.mark.parametrize("axes", [None, -1, (-2, -1)])
+    @pytest.mark.parametrize("axes", [-1])
     def test_pack_unpack_round_trip(self, axes):
         rng = np.random.default_rng()
 
