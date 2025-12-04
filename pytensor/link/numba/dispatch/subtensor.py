@@ -240,9 +240,9 @@ def {function_name}({", ".join(input_names)}):
 @register_funcify_and_cache_key(AdvancedIncSubtensor)
 def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     if isinstance(op, AdvancedSubtensor):
-        x, y, tensor_inputs = node.inputs[0], None, node.inputs[1:]
+        tensor_inputs = node.inputs[1:]
     else:
-        x, y, *tensor_inputs = node.inputs
+        tensor_inputs = node.inputs[2:]
 
     adv_idxs = [
         {
@@ -275,6 +275,27 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
 #                   "ndim": idx_input.type.ndim,
 #               })
 #               input_idx += 1
+    basic_idxs = []
+    adv_idxs = []
+    input_idx = 0
+
+    for i, entry in enumerate(op.idx_list):
+        if isinstance(entry, slice):
+            # Basic slice index
+            basic_idxs.append(entry)
+        elif isinstance(entry, Type):
+            # Advanced tensor index
+            if input_idx < len(tensor_inputs):
+                idx_input = tensor_inputs[input_idx]
+                adv_idxs.append(
+                    {
+                        "axis": i,
+                        "dtype": idx_input.type.dtype,
+                        "bcast": idx_input.type.broadcastable,
+                        "ndim": idx_input.type.ndim,
+                    }
+                )
+                input_idx += 1
 
     must_ignore_duplicates = (
         isinstance(op, AdvancedIncSubtensor)
