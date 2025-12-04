@@ -5,6 +5,9 @@ from pytensor import OpFromGraph, config, function, ifelse
 from pytensor import tensor as pt
 from pytensor.compile import ViewOp
 from pytensor.raise_op import assert_op
+from pytensor.scalar import Add
+from pytensor.tensor import matrix
+from pytensor.tensor.elemwise import Elemwise
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -144,6 +147,28 @@ def test_ofg_inner_inplace():
     # Check outputs are correct
     np.testing.assert_allclose(res0, [1, 1, 1])
     np.testing.assert_allclose(res1, [1, np.e, np.e])
+
+
+def test_ofg_aliased_outputs():
+    x = matrix("x")
+    # Create multiple views of x
+    outs = OpFromGraph([x], [x, x.T, x[::-1]])(x)
+    # Add one to each x, which when inplace shouldn't propagate across outputs
+    bumped_outs = [o + 1 for o in outs]
+    fn = function([x], bumped_outs, mode="NUMBA")
+    fn.dprint(print_destroy_map=True)
+    # Check our outputs are indeed inplace adds
+    assert all(
+        (
+            isinstance(o.owner.op, Elemwise)
+            and isinstance(o.owner.op.scalar_op, Add)
+            and o.owner.op.destroy_map
+        )
+        for o in fn.maker.fgraph.outputs
+    )
+    x_test = np.zeros((2, 2))
+    for res in fn(x_test):
+        np.testing.assert_allclose(res, np.ones((2, 2)))
 
 
 def test_check_and_raise():
