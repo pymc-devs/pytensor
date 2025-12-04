@@ -9,7 +9,7 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice, SliceType
+from pytensor.tensor.type_other import MakeSlice
 
 
 def check_negative_steps(indices):
@@ -63,8 +63,8 @@ def pytorch_funcify_makeslice(op, **kwargs):
 @pytorch_funcify.register(AdvancedSubtensor1)
 @pytorch_funcify.register(AdvancedSubtensor)
 def pytorch_funcify_AdvSubtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
-    
+    idx_list = op.idx_list
+
     def advsubtensor(x, *flattened_indices):
         indices = indices_from_subtensor(flattened_indices, idx_list)
         check_negative_steps(indices)
@@ -105,7 +105,7 @@ def pytorch_funcify_IncSubtensor(op, node, **kwargs):
 @pytorch_funcify.register(AdvancedIncSubtensor)
 @pytorch_funcify.register(AdvancedIncSubtensor1)
 def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
+    idx_list = op.idx_list
     inplace = op.inplace
     ignore_duplicates = getattr(op, "ignore_duplicates", False)
 
@@ -139,7 +139,9 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
 
     else:
         # Check if we have slice indexing in idx_list
-        has_slice_indexing = any(isinstance(entry, slice) for entry in idx_list) if idx_list else False
+        has_slice_indexing = (
+            any(isinstance(entry, slice) for entry in idx_list) if idx_list else False
+        )
         if has_slice_indexing:
             raise NotImplementedError(
                 "IncSubtensor with potential duplicates indexes and slice indexing not implemented in PyTorch"
