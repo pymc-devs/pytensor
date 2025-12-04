@@ -209,7 +209,7 @@ def test_Join(vals, axis):
 def test_Split(n_splits, axis, values, sizes):
     values, values_test = values
     sizes, sizes_test = sizes
-    g = pt.split(values, sizes, n_splits, axis=axis)
+    g = pt.split(values, sizes, n_splits=n_splits, axis=axis)
     assert len(g) == n_splits
     if n_splits == 0:
         return

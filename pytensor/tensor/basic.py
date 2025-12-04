@@ -2176,9 +2176,13 @@ def matrix_transpose(x: "TensorLike") -> TensorVariable:
     return swapaxes(x, -1, -2)
 
 
-def split(x, splits_size, n_splits, axis=0):
-    the_split = Split(n_splits)
-    return the_split(x, axis, splits_size)
+def split(x, splits_size, *, n_splits=None, axis=0):
+    if n_splits is None:
+        if isinstance(splits_size, Variable):
+            n_splits = get_vector_length(splits_size)
+        else:
+            n_splits = len(splits_size)
+    return Split(n_splits)(x, axis, splits_size)
 
 
 class Split(COp):
