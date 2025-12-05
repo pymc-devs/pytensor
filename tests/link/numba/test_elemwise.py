@@ -117,11 +117,14 @@ add_inplace = Elemwise(scalar_add, {0: 0})
 )
 def test_Elemwise(inputs, input_vals, output_fn):
     outputs = output_fn(*inputs)
+    if not isinstance(outputs, tuple | list):
+        outputs = [outputs]
 
     compare_numba_and_py(
         inputs,
         outputs,
         input_vals,
+        inplace=outputs[0].owner.op.destroy_map,
     )
 
 
