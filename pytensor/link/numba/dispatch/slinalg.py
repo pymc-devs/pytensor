@@ -97,11 +97,10 @@ def numba_funcify_Cholesky(op, node, **kwargs):
 @register_funcify_default_op_cache_key(PivotToPermutations)
 def pivot_to_permutation(op, node, **kwargs):
     inverse = op.inverse
-    dtype = node.outputs[0].dtype
 
     @numba_basic.numba_njit
     def numba_pivot_to_permutation(piv):
-        p_inv = _pivot_to_permutation(piv, dtype)
+        p_inv = _pivot_to_permutation(piv)
 
         if inverse:
             return p_inv
