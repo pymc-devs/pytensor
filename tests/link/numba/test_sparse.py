@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import pytest
 import scipy as sp
@@ -14,6 +16,23 @@ from tests.link.numba.test_basic import compare_numba_and_py
 
 
 pytestmark = pytest.mark.filterwarnings("error")
+
+
+def sparse_assert_fn(a, b):
+    a_is_sparse = sp.sparse.issparse(a)
+    assert a_is_sparse == sp.sparse.issparse(b)
+    if a_is_sparse:
+        assert a.format == b.format
+        assert a.dtype == b.dtype
+        assert a.shape == b.shape
+        np.testing.assert_allclose(a.data, b.data, strict=True)
+        np.testing.assert_allclose(a.indices, b.indices, strict=True)
+        np.testing.assert_allclose(a.indptr, b.indptr, strict=True)
+    else:
+        np.testing.assert_allclose(a, b, strict=True)
+
+
+compare_numba_and_py_sparse = partial(compare_numba_and_py, assert_fn=sparse_assert_fn)
 
 
 def test_sparse_unboxing():
@@ -93,11 +112,15 @@ def test_sparse_objmode():
 
     out = Dot()(x, y)
 
-    x_val = sp.sparse.random(2, 2, density=0.25, dtype=config.floatX)
-    y_val = sp.sparse.random(2, 2, density=0.25, dtype=config.floatX)
+    x_val = sp.sparse.random(2, 2, density=0.25, dtype=config.floatX, format="csc")
+    y_val = sp.sparse.random(2, 2, density=0.25, dtype=config.floatX, format="csc")
 
     with pytest.warns(
         UserWarning,
         match="Numba will use object mode to run SparseDot's perform method",
     ):
-        compare_numba_and_py([x, y], out, [x_val, y_val])
+        compare_numba_and_py_sparse(
+            [x, y],
+            out,
+            [x_val, y_val],
+        )

@@ -1,4 +1,5 @@
 import contextlib
+import copy
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -232,8 +233,19 @@ def compare_numba_and_py(
     ):
         raise ValueError("Inputs must be root variables")
 
+    test_input_deepcopy = None
+    if not inplace:
+        test_input_deepcopy = [
+            i.copy() if isinstance(i, np.ndarray) else copy.deepcopy(i)
+            for i in test_inputs
+        ]
+
     pytensor_py_fn = function(
-        graph_inputs, graph_outputs, mode=py_mode, accept_inplace=True, updates=updates
+        graph_inputs,
+        graph_outputs,
+        mode=py_mode,
+        accept_inplace=inplace,
+        updates=updates,
     )
 
     test_inputs_copy = (inp.copy() for inp in test_inputs) if inplace else test_inputs
@@ -250,11 +262,20 @@ def compare_numba_and_py(
         graph_inputs,
         graph_outputs,
         mode=numba_mode,
-        accept_inplace=True,
+        accept_inplace=inplace,
         updates=updates,
     )
     test_inputs_copy = (inp.copy() for inp in test_inputs) if inplace else test_inputs
     numba_res = pytensor_numba_fn(*test_inputs_copy)
+
+    if not inplace:
+        # Check we did not accidentally modify the inputs inplace
+        for test_input, test_input_copy in zip(test_inputs, test_input_deepcopy):
+            try:
+                assert_fn(test_input, test_input_copy)
+            except AssertionError as e:
+                raise AssertionError("Inputs were modified inplace") from e
+
     if isinstance(graph_outputs, tuple | list):
         for numba_res_i, python_res_i in zip(numba_res, py_res, strict=True):
             assert_fn(numba_res_i, python_res_i)

@@ -84,6 +84,7 @@ def test_CumOp(val, axis, mode):
     )
 
 
+@pytest.mark.xfail(reason="Implementation works inplace!")
 def test_FillDiagonal():
     a = pt.lmatrix("a")
     test_a = np.zeros((10, 2), dtype="int64")

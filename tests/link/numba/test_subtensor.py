@@ -259,7 +259,7 @@ def test_IncSubtensor(x, y, indices):
     x_pt = x.type()
     out_pt = set_subtensor(x_pt[indices], y, inplace=True)
     assert isinstance(out_pt.owner.op, IncSubtensor)
-    compare_numba_and_py([x_pt], [out_pt], [x.data])
+    compare_numba_and_py([x_pt], [out_pt], [x.data], inplace=True)
 
 
 @pytest.mark.parametrize(
@@ -313,13 +313,13 @@ def test_AdvancedIncSubtensor1(x, y, indices):
 
     out_pt = AdvancedIncSubtensor1(inplace=True)(x_pt, y_pt, *indices)
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
-    compare_numba_and_py([x_pt, y_pt], [out_pt], [x.data, y.data])
+    compare_numba_and_py([x_pt, y_pt], [out_pt], [x.data, y.data], inplace=True)
 
     out_pt = AdvancedIncSubtensor1(set_instead_of_inc=True, inplace=True)(
         x_pt, y_pt, *indices
     )
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor1)
-    compare_numba_and_py([x_pt, y_pt], [out_pt], [x.data, y.data])
+    compare_numba_and_py([x_pt, y_pt], [out_pt], [x.data, y.data], inplace=True)
 
 
 @pytest.mark.parametrize(
@@ -526,7 +526,9 @@ def test_AdvancedIncSubtensor(
         if set_requires_objmode
         else contextlib.nullcontext()
     ):
-        fn, _ = compare_numba_and_py([x_pt, y_pt], out_pt, [x, y], numba_mode=mode)
+        fn, _ = compare_numba_and_py(
+            [x_pt, y_pt], out_pt, [x, y], numba_mode=mode, inplace=inplace
+        )
 
     if inplace:
         # Test updates inplace
@@ -546,7 +548,9 @@ def test_AdvancedIncSubtensor(
         if inc_requires_objmode
         else contextlib.nullcontext()
     ):
-        fn, _ = compare_numba_and_py([x_pt, y_pt], out_pt, [x, y], numba_mode=mode)
+        fn, _ = compare_numba_and_py(
+            [x_pt, y_pt], out_pt, [x, y], numba_mode=mode, inplace=inplace
+        )
     if inplace:
         # Test updates inplace
         x_orig = x.copy()
