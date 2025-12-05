@@ -12,8 +12,8 @@ from pytensor.link.numba.dispatch.linalg.utils import _check_scipy_linalg_matrix
 
 
 @numba_basic.numba_njit
-def _pivot_to_permutation(p, dtype):
-    p_inv = np.arange(len(p)).astype(dtype)
+def _pivot_to_permutation(p):
+    p_inv = np.arange(len(p))
     for i in range(len(p)):
         p_inv[i], p_inv[p[i]] = p_inv[p[i]], p_inv[i]
     return p_inv
@@ -29,7 +29,7 @@ def _lu_factor_to_lu(a, dtype, overwrite_a):
 
     # Fortran is 1 indexed, so we need to subtract 1 from the IPIV array
     IPIV = IPIV - 1
-    p_inv = _pivot_to_permutation(IPIV, dtype=dtype)
+    p_inv = _pivot_to_permutation(IPIV)
     perm = np.argsort(p_inv).astype("int32")
 
     return perm, L, U
