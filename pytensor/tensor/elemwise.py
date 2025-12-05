@@ -1391,7 +1391,10 @@ class CAReduce(COp):
             return f"axes={list(axis)}"
 
     def __str__(self):
-        return f"{type(self).__name__}{{{self.scalar_op}, {self._axis_str()}}}"
+        if self.acc_dtype != self.dtype:
+            return f"{type(self).__name__}{{{self.scalar_op}, {self._axis_str()}, acc={self.acc_dtype}}}"
+        else:
+            return f"{type(self).__name__}{{{self.scalar_op}, {self._axis_str()}}}"
 
     def perform(self, node, inp, out):
         (input,) = inp
