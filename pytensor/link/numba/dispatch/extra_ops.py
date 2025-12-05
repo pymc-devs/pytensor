@@ -100,16 +100,19 @@ def numba_funcify_CumOp(op: CumOp, node: Apply, **kwargs):
 def numba_funcify_FillDiagonal(op, **kwargs):
     @numba_basic.numba_njit
     def filldiagonal(a, val):
+        a = a.copy()
         np.fill_diagonal(a, val)
         return a
 
-    return filldiagonal
+    cache_version = 1
+    return filldiagonal, cache_version
 
 
 @register_funcify_default_op_cache_key(FillDiagonalOffset)
 def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
     @numba_basic.numba_njit
     def filldiagonaloffset(a, val, offset):
+        a = a.copy()
         height, width = a.shape
         offset_item = offset.item()
         if offset >= 0:
@@ -128,7 +131,8 @@ def numba_funcify_FillDiagonalOffset(op, node, **kwargs):
         # return a
         return b.reshape(a.shape)
 
-    return filldiagonaloffset
+    cache_version = 1
+    return filldiagonaloffset, cache_version
 
 
 @register_funcify_default_op_cache_key(RavelMultiIndex)
