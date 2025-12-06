@@ -13,7 +13,7 @@ from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
 from pytensor.scalar import Composite, float64
 from pytensor.scalar import add as scalar_add
-from pytensor.tensor import blas, tensor
+from pytensor.tensor import blas, matrix, tensor, tensor3
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
@@ -364,6 +364,45 @@ def test_CAReduce(careduce_fn, axis, v):
     # fn.dprint()
     [node] = fn.maker.fgraph.apply_nodes
     assert isinstance(node.op, CAReduce)
+
+
+@pytest.mark.parametrize("axis", (-1, (0, -1), None))
+def test_CAReduce_respects_acc_dtype(axis):
+    x = tensor3("x", dtype="int8")
+    out = x.sum(dtype="int8", acc_dtype="int64", axis=axis)
+    # Choose values that would overflow if accumulated internally in int8
+    max_int8 = np.iinfo(np.int8).max
+    test_x = np.array([max_int8, 5, max_int8, -max_int8, 5, -max_int8], dtype=np.int8)
+    test_x = np.broadcast_to(test_x, (6, 2, 6)).copy()
+    _, [res] = compare_numba_and_py(
+        [x],
+        [out],
+        [test_x],
+    )
+    if axis == -1:
+        assert np.all(res == 10)
+    elif axis == (0, -1):
+        assert np.all(res == 60)
+    elif axis is None:
+        assert res == 120
+
+
+@pytest.mark.parametrize("axis", (1, None))
+def test_CAReduce_acc_complex_out_float(axis):
+    x = matrix("x", dtype="complex128")
+    out = x.sum(dtype="float64", axis=axis)
+    test_x = np.array([[1 + 0.5j, 2 - 0.5j], [3 + 0.5j, 4 - 0.5j]], dtype="complex128")
+    compare_numba_and_py([x], [out], [test_x])
+
+
+@pytest.mark.parametrize("axis", (-1, (0, -1), None))
+def test_CAReduce_discrete_infinity_identity(axis):
+    rng = np.random.default_rng(337)
+    x = tensor3("x", dtype="int8")
+    out = x.max(axis)
+    compare_numba_and_py(
+        [x], [out], [rng.integers(-127, 127, size=(6, 6, 6)).astype("int8")]
+    )
 
 
 def test_scalar_Elemwise_Clip():
