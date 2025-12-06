@@ -11,11 +11,10 @@ from packaging import version
 import pytensor
 import pytensor.scalar as scal
 import pytensor.tensor.basic as ptb
-from pytensor import function
-from pytensor.compile import DeepCopyOp, shared
+from pytensor import config, function, shared
+from pytensor.compile import DeepCopyOp
 from pytensor.compile.io import In
 from pytensor.compile.mode import Mode
-from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph import Constant
 from pytensor.graph.basic import equal_computations
@@ -622,7 +621,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             (3, DimShuffle, np.index_exp[..., [0, 2, 3]]),
             (1, DimShuffle, np.index_exp[np.newaxis, ...]),
             (
-                1,
+                3,
                 AdvancedSubtensor,
                 np.index_exp[..., np.newaxis, [1, 2]],
             ),
@@ -2946,8 +2945,8 @@ def test_index_vars_to_types():
     with pytest.raises(AdvancedIndexingError):
         index_vars_to_types(x)
 
-    with pytest.raises(TypeError):
-        index_vars_to_types(1)
+    # Integers are now allowed
+    assert index_vars_to_types(1) == 1
 
     res = index_vars_to_types(iscalar)
     assert isinstance(res, scal.ScalarType)
@@ -3055,7 +3054,6 @@ def test_vectorize_subtensor_without_batch_indices():
             (11, 7, 5, 3),
             (2,),
             False,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
         ),
         (
             (lambda x, idx: x[:, idx, idx, :]),
@@ -3071,7 +3069,6 @@ def test_vectorize_subtensor_without_batch_indices():
             (11, 7, 5, 3, 5),
             (2,),
             True,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
         ),
         # Core x, batched idx
         ((lambda x, idx: x[idx]), "(t1),(idx)->(tx)", (7,), (11, 2), True),
@@ -3084,7 +3081,6 @@ def test_vectorize_subtensor_without_batch_indices():
             (11, 7, 5, 3),
             (11, 2),
             True,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
         ),
     ],
 )

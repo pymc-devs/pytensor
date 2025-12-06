@@ -1317,8 +1317,6 @@ class ColScaleCSC(Op):
         z[0] = y
 
     def grad(self, inputs, gout):
-        from pytensor.sparse.math import sp_sum
-
         (x, s) = inputs
         (gz,) = gout
         return [col_scale(gz, s), sp_sum(x * gz, axis=0)]
@@ -1368,8 +1366,6 @@ class RowScaleCSC(Op):
         z[0] = scipy.sparse.csc_matrix((y_data, indices, indptr), (M, N))
 
     def grad(self, inputs, gout):
-        from pytensor.sparse.math import sp_sum
-
         (x, s) = inputs
         (gz,) = gout
         return [row_scale(gz, s), sp_sum(x * gz, axis=1)]
@@ -1433,6 +1429,126 @@ def row_scale(x, s):
 
     """
     return col_scale(x.T, s).T
+
+
+class SpSum(Op):
+    """
+
+    WARNING: judgement call...
+    We are not using the structured in the comparison or hashing
+    because it doesn't change the perform method therefore, we
+    *do* want Sums with different structured values to be merged
+    by the merge optimization and this requires them to compare equal.
+    """
+
+    __props__ = ("axis",)
+
+    def __init__(self, axis=None, sparse_grad=True):
+        super().__init__()
+        self.axis = axis
+        self.structured = sparse_grad
+        if self.axis not in (None, 0, 1):
+            raise ValueError("Illegal value for self.axis.")
+
+    def make_node(self, x):
+        x = as_sparse_variable(x)
+        assert x.format in ("csr", "csc")
+
+        if self.axis is not None:
+            out_shape = (None,)
+        else:
+            out_shape = ()
+
+        z = TensorType(dtype=x.dtype, shape=out_shape)()
+        return Apply(self, [x], [z])
+
+    def perform(self, node, inputs, outputs):
+        (x,) = inputs
+        (z,) = outputs
+        if self.axis is None:
+            z[0] = np.asarray(x.sum())
+        else:
+            z[0] = np.asarray(x.sum(self.axis)).ravel()
+
+    def grad(self, inputs, gout):
+        (x,) = inputs
+        (gz,) = gout
+        if x.dtype not in continuous_dtypes:
+            return [x.zeros_like(dtype=config.floatX)]
+        if self.structured:
+            if self.axis is None:
+                r = gz * sp_ones_like(x)
+            elif self.axis == 0:
+                r = col_scale(sp_ones_like(x), gz)
+            elif self.axis == 1:
+                r = row_scale(sp_ones_like(x), gz)
+            else:
+                raise ValueError("Illegal value for self.axis.")
+        else:
+            o_format = x.format
+            x = dense_from_sparse(x)
+            if _is_sparse_variable(gz):
+                gz = dense_from_sparse(gz)
+            if self.axis is None:
+                r = ptb.second(x, gz)
+            else:
+                ones = ptb.ones_like(x)
+                if self.axis == 0:
+                    r = specify_broadcastable(gz.dimshuffle("x", 0), 0) * ones
+                elif self.axis == 1:
+                    r = specify_broadcastable(gz.dimshuffle(0, "x"), 1) * ones
+                else:
+                    raise ValueError("Illegal value for self.axis.")
+            r = SparseFromDense(o_format)(r)
+        return [r]
+
+    def infer_shape(self, fgraph, node, shapes):
+        r = None
+        if self.axis is None:
+            r = [()]
+        elif self.axis == 0:
+            r = [(shapes[0][1],)]
+        else:
+            r = [(shapes[0][0],)]
+        return r
+
+    def __str__(self):
+        return f"{self.__class__.__name__}{{axis={self.axis}}}"
+
+
+def sp_sum(x, axis=None, sparse_grad=False):
+    """
+    Calculate the sum of a sparse matrix along the specified axis.
+
+    It operates a reduction along the specified axis. When `axis` is `None`,
+    it is applied along all axes.
+
+    Parameters
+    ----------
+    x
+        Sparse matrix.
+    axis
+        Axis along which the sum is applied. Integer or `None`.
+    sparse_grad : bool
+        `True` to have a structured grad.
+
+    Returns
+    -------
+    object
+        The sum of `x` in a dense format.
+
+    Notes
+    -----
+    The grad implementation is controlled with the `sparse_grad` parameter.
+    `True` will provide a structured grad and `False` will provide a regular
+    grad. For both choices, the grad returns a sparse matrix having the same
+    format as `x`.
+
+    This op does not return a sparse matrix, but a dense tensor matrix.
+
+    """
+
+    return SpSum(axis, sparse_grad)(x)
 
 
 class Diag(Op):
