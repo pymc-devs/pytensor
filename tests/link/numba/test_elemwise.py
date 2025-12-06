@@ -609,18 +609,42 @@ def test_elemwise_multiple_inplace_outs():
 
 
 def test_scalar_loop():
-    a = float64("a")
-    scalar_loop = pytensor.scalar.ScalarLoop([a], [a + a])
+    a_scalar = float64("a")
+    const_scalar = float64("const")
+    scalar_loop = pytensor.scalar.ScalarLoop(
+        init=[a_scalar],
+        update=[a_scalar + a_scalar + const_scalar],
+        constant=[const_scalar],
+    )
 
-    x = pt.tensor("x", shape=(3,))
-    elemwise_loop = Elemwise(scalar_loop)(3, x)
+    a = pt.tensor("a", shape=(3,))
+    const = pt.tensor("const", shape=(3,))
+    n_steps = 3
+    elemwise_loop = Elemwise(scalar_loop)(n_steps, a, const)
 
-    with pytest.warns(UserWarning, match="object mode"):
-        compare_numba_and_py(
-            [x],
-            [elemwise_loop],
-            (np.array([1, 2, 3], dtype="float64"),),
-        )
+    compare_numba_and_py(
+        [a, const],
+        [elemwise_loop],
+        [np.array([1, 2, 3], dtype="float64"), np.array([1, 1, 1], dtype="float64")],
+    )
+
+
+def test_gammainc_wrt_k_grad():
+    x = pt.vector("x", dtype="float64")
+    k = pt.vector("k", dtype="float64")
+
+    out = pt.gammainc(k, x)
+    grad_out = grad(out.sum(), k)
+
+    compare_numba_and_py(
+        [x, k],
+        [grad_out],
+        # These values of x and k trigger all the branches in the gradient of gammainc
+        [
+            np.array([0.0, 29.0, 31.0], dtype="float64"),
+            np.array([1.0, 13.0, 11.0], dtype="float64"),
+        ],
+    )
 
 
 class TestsBenchmark:

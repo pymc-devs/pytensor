@@ -293,8 +293,8 @@ def test_gammainc_ddk_tabulated_values():
     # https://github.com/stan-dev/math/blob/21333bb70b669a1bd54d444ecbe1258078d33153/test/unit/math/prim/scal/fun/grad_reg_lower_inc_gamma_test.cpp
     k, x = pt.scalars("k", "x")
     gammainc_out = pt.gammainc(k, x)
-    gammaincc_ddk = pt.grad(gammainc_out, k)
-    f_grad = function([k, x], gammaincc_ddk)
+    gammainc_ddk = pt.grad(gammainc_out, k)
+    f_grad = function([k, x], gammainc_ddk)
 
     rtol = 1e-5 if config.floatX == "float64" else 1e-2
     atol = 1e-10 if config.floatX == "float64" else 1e-6

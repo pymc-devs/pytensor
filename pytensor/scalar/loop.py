@@ -180,7 +180,7 @@ class ScalarLoop(ScalarInnerGraphOp):
         inner_fn = self.py_perform_fn
 
         if self.is_while:
-            until = True
+            until = False
             for i in range(n_steps):
                 *carry, until = inner_fn(*carry, *constant)
                 if until:
