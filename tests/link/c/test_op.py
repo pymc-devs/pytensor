@@ -98,9 +98,7 @@ class TestCOp:
     def test_op_struct(self):
         sop = StructOp()
         c = sop(pytensor.tensor.constant(0))
-        mode = None
-        if config.mode == "FAST_COMPILE":
-            mode = "FAST_RUN"
+        mode = "CVM"
         f = pytensor.function([], c, mode=mode)
         rval = f()
         assert rval == 0

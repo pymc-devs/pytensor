@@ -262,10 +262,21 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
         if isinstance(idx.type, TensorType)
     ]
 
+    must_ignore_duplicates = (
+        isinstance(op, AdvancedIncSubtensor)
+        and not op.set_instead_of_inc
+        and op.ignore_duplicates
+        # Only vector integer indices can have "duplicates", not scalars or boolean vectors
+        and not all(
+            adv_idx["ndim"] == 0 or adv_idx["dtype"] == "bool" for adv_idx in adv_idxs
+        )
+    )
+
     # Special implementation for consecutive integer vector indices
     if (
-        not basic_idxs
-        and len(adv_idxs) >= 2
+        not must_ignore_duplicates
+        and not basic_idxs
+        and len(adv_idxs) >= 1
         # Must be integer vectors
         # Todo: we could allow shape=(1,) if this is the shape of x
         and all(
@@ -275,34 +286,33 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
         # Must be consecutive
         and not op.non_consecutive_adv_indexing(node)
     ):
-        return numba_funcify_multiple_integer_vector_indexing(op, node, **kwargs)
+        # This doesn't ignore duplicates
+        return numba_funcify_integer_vector_indexing(op, node, **kwargs)
 
-    # Other cases not natively supported by Numba (fallback to obj-mode)
+    must_handle_duplicates = (
+        isinstance(op, AdvancedIncSubtensor)
+        and not op.set_instead_of_inc
+        and not op.ignore_duplicates
+        # Only vector integer indices can have "duplicates", not scalars or boolean vectors
+        and not all(
+            adv_idx["ndim"] == 0 or adv_idx["dtype"] == "bool" for adv_idx in adv_idxs
+        )
+    )
+
     if (
-        # Numba does not support indexes with more than one dimension
-        any(idx["ndim"] > 1 for idx in adv_idxs)
-        # Nor multiple vector indexes
-        or sum(idx["ndim"] > 0 for idx in adv_idxs) > 1
         # The default PyTensor implementation does not handle duplicate indices correctly
-        or (
-            isinstance(op, AdvancedIncSubtensor)
-            and not op.set_instead_of_inc
-            and not (
-                op.ignore_duplicates
-                # Only vector integer indices can have "duplicates", not scalars or boolean vectors
-                or all(
-                    adv_idx["ndim"] == 0 or adv_idx["dtype"] == "bool"
-                    for adv_idx in adv_idxs
-                )
-            )
-        )
+        not must_handle_duplicates
+        # Numba does not support indexes with more than one dimension
+        and not any(idx["ndim"] > 1 for idx in adv_idxs)
+        # Nor multiple vector indexes
+        and not (sum(idx["ndim"] > 0 for idx in adv_idxs) > 1)
     ):
-        return generate_fallback_impl(op, node, **kwargs), subtensor_op_cache_key(
-            op, func="fallback_impl"
-        )
+        # This ignores duplicates
+        return numba_funcify_default_subtensor(op, node, **kwargs)
 
-    # What's left should all be supported natively by numba
-    return numba_funcify_default_subtensor(op, node, **kwargs)
+    return generate_fallback_impl(op, node, **kwargs), subtensor_op_cache_key(
+        op, func="fallback_impl"
+    )
 
 
 def _broadcasted_to(x_bcast: tuple[bool, ...], to_bcast: tuple[bool, ...]):
@@ -315,10 +325,15 @@ def _broadcasted_to(x_bcast: tuple[bool, ...], to_bcast: tuple[bool, ...]):
     return False
 
 
-def numba_funcify_multiple_integer_vector_indexing(
+def numba_funcify_integer_vector_indexing(
     op: AdvancedSubtensor | AdvancedIncSubtensor, node, **kwargs
 ):
-    # Special-case implementation for multiple consecutive vector integer indices (and set/incsubtensor)
+    # Special-case implementation for consecutive vector integer indices (and set/incsubtensor), handling duplicates
+    # TODO: Generalize this to non-consecutive and mixed basic indices by:
+    # 1. Transposing x so that all advanced indices are consecutive and at the beginning
+    # 2. Applying the basic indices
+    # 3. Iterating over the advanced indices as done here
+    # 4. Transposing back to the original order
     if isinstance(op, AdvancedSubtensor):
         idxs = node.inputs[1:]
     else:

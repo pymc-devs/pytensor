@@ -259,7 +259,7 @@ class InferShapeTester:
         numeric_outputs = outputs_function(*numeric_inputs)
         numeric_shapes = shapes_function(*numeric_inputs)
         for out, shape in zip(numeric_outputs, numeric_shapes, strict=True):
-            assert np.all(out.shape == shape), (out.shape, shape)
+            assert np.all(np.asarray(out).shape == shape), (out.shape, shape)
 
 
 class WrongValue(Exception):

@@ -24,6 +24,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
 from pytensor.graph.traversal import ancestors, applys_between
 from pytensor.link.c.basic import DualLinker
+from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
 from pytensor.tensor import blas, blas_c
@@ -858,6 +859,10 @@ class TestMaxAndArgmax:
             ([1, 0], None),
         ],
     )
+    @pytest.mark.xfail(
+        condition=isinstance(get_default_mode().linker, NumbaLinker),
+        reason="Numba does not support float16",
+    )
     def test_basic_2_float16(self, axis, np_axis):
         # Test negative values and bigger range to make sure numpy don't do the argmax as on uint16
         data = (random(20, 30).astype("float16") - 0.5) * 20
@@ -1114,6 +1119,10 @@ class TestArgminArgmax:
                 v_shape = eval_outputs(fct(n, axis).shape)
                 assert tuple(v_shape) == nfct(data, np_axis).shape
 
+    @pytest.mark.xfail(
+        condition=isinstance(get_default_mode().linker, NumbaLinker),
+        reason="Numba does not support float16",
+    )
     def test2_float16(self):
         # Test negative values and bigger range to make sure numpy don't do the argmax as on uint16
         data = (random(20, 30).astype("float16") - 0.5) * 20
@@ -1437,7 +1446,8 @@ class TestMinMax:
             )  # It's not failing in all the CIs but we have XPASS(strict) enabled
 
     @pytest.mark.xfail(
-        condition=config.mode != "FAST_COMPILE", reason="Fails due to #770"
+        condition=getattr(get_default_mode().linker, "c_thunks", False),
+        reason="Fails due to #770",
     )
     def test_uint64_special_value(self):
         """Example from issue #770"""
@@ -1980,6 +1990,7 @@ class TestMean:
         res = mean(np.zeros(1))
         assert res.eval() == 0.0
 
+    @pytest.mark.xfail(reason="Numba does not support float16")
     def test_mean_f16(self):
         x = vector(dtype="float16")
         y = x.mean()
@@ -3152,7 +3163,9 @@ class TestSumProdReduceDtype:
     op = CAReduce
     axes = [None, 0, 1, [], [0], [1], [0, 1]]
     methods = ["sum", "prod"]
-    dtypes = list(map(str, ps.all_types))
+    dtypes = tuple(map(str, ps.all_types))
+    if isinstance(mode.linker, NumbaLinker):
+        dtypes = tuple(d for d in dtypes if d != "float16")
 
     # Test the default dtype of a method().
     def test_reduce_default_dtype(self):
@@ -3312,10 +3325,13 @@ class TestSumProdReduceDtype:
 class TestMeanDtype:
     def test_mean_default_dtype(self):
         # Test the default dtype of a mean().
+        is_numba = isinstance(get_default_mode().linker, NumbaLinker)
 
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
         for idx, dtype in enumerate(map(str, ps.all_types)):
+            if is_numba and dtype == "float16":
+                continue
             axis = axes[idx % len(axes)]
             x = matrix(dtype=dtype)
             m = x.mean(axis=axis)
@@ -3336,7 +3352,13 @@ class TestMeanDtype:
             "uint16",
             "int8",
             "int64",
-            "float16",
+            pytest.param(
+                "float16",
+                marks=pytest.mark.xfail(
+                    condition=isinstance(get_default_mode().linker, NumbaLinker),
+                    reason="Numba does not support float16",
+                ),
+            ),
             "float32",
             "float64",
             "complex64",
@@ -3350,7 +3372,13 @@ class TestMeanDtype:
             "uint16",
             "int8",
             "int64",
-            "float16",
+            pytest.param(
+                "float16",
+                marks=pytest.mark.xfail(
+                    condition=isinstance(get_default_mode().linker, NumbaLinker),
+                    reason="Numba does not support float16",
+                ),
+            ),
             "float32",
             "float64",
             "complex64",
@@ -3410,10 +3438,13 @@ class TestProdWithoutZerosDtype:
 
     def test_prod_without_zeros_default_acc_dtype(self):
         # Test the default dtype of a ProdWithoutZeros().
+        is_numba = isinstance(get_default_mode().linker, NumbaLinker)
 
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
         for idx, dtype in enumerate(map(str, ps.all_types)):
+            if is_numba and dtype == "float16":
+                continue
             axis = axes[idx % len(axes)]
             x = matrix(dtype=dtype)
             p = ProdWithoutZeros(axis=axis)(x)
@@ -3441,13 +3472,17 @@ class TestProdWithoutZerosDtype:
     @pytest.mark.slow
     def test_prod_without_zeros_custom_dtype(self):
         # Test ability to provide your own output dtype for a ProdWithoutZeros().
-
+        is_numba = isinstance(get_default_mode().linker, NumbaLinker)
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
         idx = 0
         for input_dtype in map(str, ps.all_types):
+            if is_numba and input_dtype == "float16":
+                continue
             x = matrix(dtype=input_dtype)
             for output_dtype in map(str, ps.all_types):
+                if is_numba and output_dtype == "float16":
+                    continue
                 axis = axes[idx % len(axes)]
                 prod_woz_var = ProdWithoutZeros(axis=axis, dtype=output_dtype)(x)
                 assert prod_woz_var.dtype == output_dtype
@@ -3463,13 +3498,18 @@ class TestProdWithoutZerosDtype:
     @pytest.mark.slow
     def test_prod_without_zeros_custom_acc_dtype(self):
         # Test ability to provide your own acc_dtype for a ProdWithoutZeros().
+        is_numba = isinstance(get_default_mode().linker, NumbaLinker)
 
         # We try multiple axis combinations even though axis should not matter.
         axes = [None, 0, 1, [], [0], [1], [0, 1]]
         idx = 0
         for input_dtype in map(str, ps.all_types):
+            if is_numba and input_dtype == "float16":
+                continue
             x = matrix(dtype=input_dtype)
             for acc_dtype in map(str, ps.all_types):
+                if is_numba and acc_dtype == "float16":
+                    continue
                 axis = axes[idx % len(axes)]
                 # If acc_dtype would force a downcast, we expect a TypeError
                 # We always allow int/uint inputs with float/complex outputs.
@@ -3745,14 +3785,27 @@ class TestMatMul:
         with pytest.raises(ValueError, match="cannot be scalar"):
             self.op(4, [4, 1])
 
-    @pytest.mark.parametrize("dtype", (np.float16, np.float32, np.float64))
+    @pytest.mark.parametrize(
+        "dtype",
+        (
+            pytest.param(
+                np.float16,
+                marks=pytest.mark.xfail(
+                    condition=isinstance(get_default_mode().linker, NumbaLinker),
+                    reason="Numba does not support float16",
+                ),
+            ),
+            np.float32,
+            np.float64,
+        ),
+    )
     def test_dtype_param(self, dtype):
         sol = self.op([1, 2, 3], [3, 2, 1], dtype=dtype)
         assert sol.eval().dtype == dtype
 
     def test_dot22_opt(self):
         x, y = matrices("xy")
-        fn = function([x, y], x @ y, mode="FAST_RUN")
+        fn = function([x, y], x @ y, mode="CVM")
         [node] = fn.maker.fgraph.apply_nodes
         assert isinstance(node.op, Dot22)
 

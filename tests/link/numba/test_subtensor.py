@@ -331,7 +331,7 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             (slice(None, None, 2), [1, 2, 3]),  # Mixed basic and vector index
             False,
             False,
-            False,
+            True,
         ),
         (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
@@ -343,7 +343,7 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             ),  # Mixed basic and broadcasted vector idx
             False,
             False,
-            False,
+            True,
         ),
         (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
@@ -351,7 +351,7 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             (slice(None, None, 2), [1, 2, 3]),  # Mixed basic and vector idx
             False,
             False,
-            False,
+            True,
         ),
         (
             np.arange(3 * 4 * 5).reshape((3, 4, 5)),
@@ -470,7 +470,7 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             (slice(1, 3), [[1, 2], [2, 3]]),  # matrix index, mixed with basic index
             False,
             False,
-            False,
+            True,
         ),
         (
             np.arange(3 * 5).reshape((3, 5)),
@@ -537,7 +537,7 @@ def test_AdvancedIncSubtensor(
         assert not np.all(x == x_orig)
 
     out_pt = inc_subtensor(
-        x_pt[indices], y_pt, ignore_duplicates=not duplicate_indices, inplace=inplace
+        x_pt[indices], y_pt, ignore_duplicates=False, inplace=inplace
     )
     assert isinstance(out_pt.owner.op, AdvancedIncSubtensor)
     with (

@@ -4,6 +4,7 @@ import pytest
 import pytensor.tensor as pt
 from pytensor import config, function, grad, shared
 from pytensor.compile.mode import FAST_RUN
+from pytensor.link.basic import JITLinker
 from pytensor.scan.views import filter as pt_filter
 from pytensor.scan.views import foldl, foldr
 from pytensor.scan.views import map as pt_map
@@ -79,7 +80,8 @@ def test_reduce_memory_consumption():
     # 1) provided to the inner function. Now, because of the memory-reuse
     # feature in Scan it can be 2 because SaveMem needs to keep a
     # larger buffer to avoid aliasing between the inputs and the outputs.
-    if config.scan__allow_output_prealloc:
+    # JIT linkers don't do this optimization so it's still 1
+    if not isinstance(mode.linker, JITLinker) and config.scan__allow_output_prealloc:
         assert f1().shape[0] == 2
     else:
         assert f1().shape[0] == 1
@@ -119,7 +121,8 @@ def test_foldl_memory_consumption(return_updates):
     # 1) provided to the inner function. Now, because of the memory-reuse
     # feature in Scan it can be 2 because SaveMem needs to keep a
     # larger buffer to avoid aliasing between the inputs and the outputs.
-    if config.scan__allow_output_prealloc:
+    # JIT linkers don't do this optimization so it's still 1
+    if not isinstance(mode.linker, JITLinker) and config.scan__allow_output_prealloc:
         assert f1().shape[0] == 2
     else:
         assert f1().shape[0] == 1
@@ -159,7 +162,8 @@ def test_foldr_memory_consumption(return_updates):
     # 1) provided to the inner function. Now, because of the memory-reuse
     # feature in Scan it can be 2 because SaveMem needs to keep a
     # larger buffer to avoid aliasing between the inputs and the outputs.
-    if config.scan__allow_output_prealloc:
+    # JIT linkers don't do this optimization so it's still 1
+    if not isinstance(mode.linker, JITLinker) and config.scan__allow_output_prealloc:
         assert f1().shape[0] == 2
     else:
         assert f1().shape[0] == 1

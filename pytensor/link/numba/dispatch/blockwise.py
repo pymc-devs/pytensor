@@ -36,7 +36,6 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
     core_op_fn, core_op_key = numba_funcify_and_cache_key(
         core_op,
         node=core_node,
-        parent_node=node,
         **kwargs,
     )
     core_op_fn = store_core_outputs(core_op_fn, nin=nin, nout=nout)

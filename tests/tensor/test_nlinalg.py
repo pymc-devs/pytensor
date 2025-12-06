@@ -165,9 +165,33 @@ class TestSvd(utt.InferShapeTester):
         pt_outputs = fn(a)
 
         np_outputs = np_outputs if isinstance(np_outputs, tuple) else [np_outputs]
+        if compute_uv:
+            # In this case we sometimes get a sign flip on some columns in one impl and not the thore
+            # The results are both correct, and we test that by reconstructing the original input
+            U, S, Vh = pt_outputs
+            S_diag = np.expand_dims(S, -2) * np.eye(S.shape[-1])
 
-        for np_val, pt_val in zip(np_outputs, pt_outputs, strict=True):
-            assert _allclose(np_val, pt_val)
+            diff = a.shape[-2] - a.shape[-1]
+            if full_matrix:
+                if diff > 0:
+                    # tall
+                    S_diag = np.pad(S_diag, [(0, 0), (0, diff), (0, 0)][-a.ndim :])
+                elif diff < 0:
+                    # wide
+                    S_diag = np.pad(S_diag, [(0, 0), (0, 0), (0, -diff)][-a.ndim :])
+
+            a_r = U @ S_diag @ Vh
+            rtol = 1e-3 if config.floatX == "float32" else 1e-7
+            np.testing.assert_allclose(a_r, a, rtol=rtol)
+
+            for np_val, pt_val in zip(np_outputs, pt_outputs, strict=True):
+                # Check values are equivalent up to sign change
+                np.testing.assert_allclose(np.abs(np_val), np.abs(pt_val), rtol=rtol)
+
+        else:
+            rtol = 1e-5 if config.floatX == "float32" else 1e-7
+            for np_val, pt_val in zip(np_outputs, pt_outputs, strict=True):
+                np.testing.assert_allclose(np_val, pt_val, rtol=rtol)
 
     def test_svd_infer_shape(self):
         self.validate_shape((4, 4), full_matrices=True, compute_uv=True)
@@ -417,6 +441,10 @@ class TestEig(utt.InferShapeTester):
             warn=False,
         )
 
+    @pytest.mark.xfail(
+        raises=ValueError,
+        reason="numba overload of np.linalg.eig raises eig() argument must not cause a domain change.",
+    )
     def test_eval(self):
         A = matrix(dtype=self.dtype)
         fn = function([A], self.op(A))
@@ -463,17 +491,25 @@ class TestEigh(TestEig):
 
         w, v = fn(A_val)
         w_np, v_np = np.linalg.eigh(A_val)
-        np.testing.assert_allclose(w, w_np)
-        np.testing.assert_allclose(v, v_np)
-        assert_array_almost_equal(np.dot(A_val, v), w * v)
+        # There are multiple valid results up to some sign changes
+        # Check we can reconstruct input
+        rtol = 1e-2 if self.dtype == "float32" else 1e-7
+        np.testing.assert_allclose(np.dot(A_val, v), w * v, rtol=rtol)
+
+        np.testing.assert_allclose(np.abs(w), np.abs(w_np), rtol=rtol)
+        np.testing.assert_allclose(np.abs(v), np.abs(v_np), rtol=rtol)
 
     def test_uplo(self):
         S = self.S
         a = matrix(dtype=self.dtype)
         wu, vu = (out.eval({a: S}) for out in self.op(a, "U"))
         wl, vl = (out.eval({a: S}) for out in self.op(a, "L"))
-        assert_array_almost_equal(wu, wl)
-        assert_array_almost_equal(vu * np.sign(vu[0, :]), vl * np.sign(vl[0, :]))
+        atol = 1e-14 if np.dtype(self.dtype).itemsize == 8 else 1e-5
+        rtol = 1e-14 if np.dtype(self.dtype).itemsize == 8 else 1e-3
+        np.testing.assert_allclose(wu, wl, atol=atol, rtol=rtol)
+        np.testing.assert_allclose(
+            vu * np.sign(vu[0, :]), vl * np.sign(vl[0, :]), atol=atol, rtol=rtol
+        )
 
     def test_grad(self):
         X = self.X
@@ -502,12 +538,13 @@ class TestLstsq:
         z = lscalar()
         b = lstsq(x, y, z)
         f = function([x, y, z], b)
+
         TestMatrix1 = np.asarray([[2, 1], [3, 4]])
         TestMatrix2 = np.asarray([[17, 20], [43, 50]])
         TestScalar = np.asarray(1)
-        f = function([x, y, z], b)
-        m = f(TestMatrix1, TestMatrix2, TestScalar)
-        assert np.allclose(TestMatrix2, np.dot(TestMatrix1, m[0]))
+        m0, _, rank, _ = f(TestMatrix1, TestMatrix2, TestScalar)
+        assert rank.dtype == "int32"
+        assert np.allclose(TestMatrix2, np.dot(TestMatrix1, m0))
 
     def test_wrong_coefficient_matrix(self):
         x = vector()
