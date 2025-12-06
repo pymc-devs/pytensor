@@ -491,20 +491,24 @@ class LU(Op):
                 f"LU only allowed on matrix (2-D) inputs, got {x.type.ndim}-D input"
             )
 
-        real_dtype = "f" if np.dtype(x.type.dtype).char in "fF" else "d"
-        p_dtype = "int32" if self.p_indices else np.dtype(real_dtype)
-
-        L = tensor(shape=x.type.shape, dtype=x.type.dtype)
-        U = tensor(shape=x.type.shape, dtype=x.type.dtype)
+        if x.type.numpy_dtype.kind in "ibu":
+            if x.type.numpy_dtype.itemsize <= 2:
+                out_dtype = "float32"
+            else:
+                out_dtype = "float64"
+        else:
+            out_dtype = x.type.dtype
+        L = tensor(shape=x.type.shape, dtype=out_dtype)
+        U = tensor(shape=x.type.shape, dtype=out_dtype)
 
         if self.permute_l:
             # In this case, L is actually P @ L
             return Apply(self, inputs=[x], outputs=[L, U])
         if self.p_indices:
-            p_indices = tensor(shape=(x.type.shape[0],), dtype=p_dtype)
+            p_indices = tensor(shape=(x.type.shape[0],), dtype="int32")
             return Apply(self, inputs=[x], outputs=[p_indices, L, U])
 
-        P = tensor(shape=x.type.shape, dtype=p_dtype)
+        P = tensor(shape=x.type.shape, dtype=out_dtype)
         return Apply(self, inputs=[x], outputs=[P, L, U])
 
     def perform(self, node, inputs, outputs):

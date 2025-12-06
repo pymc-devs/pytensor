@@ -2,19 +2,20 @@ from collections.abc import Callable
 
 import numpy as np
 from numba.core.extending import overload
+from numba.core.types import Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
     _LAPACK,
-    _get_underlying_float,
     int_ptr_to_val,
     val_to_int_ptr,
 )
 from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 from pytensor.link.numba.dispatch.linalg.solve.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
-    _check_scipy_linalg_matrix,
+    _check_dtypes_match,
+    _check_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
     _solve_check,
 )
@@ -37,10 +38,10 @@ def sysv_impl(
     tuple[np.ndarray, np.ndarray, np.ndarray, int],
 ]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "sysv")
-    _check_scipy_linalg_matrix(B, "sysv")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="sysv")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="sysv")
+    _check_dtypes_match((A, B), func_name="sysv")
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     numba_sysv = _LAPACK().numba_xsysv(dtype)
 
     def impl(
@@ -84,12 +85,12 @@ def sysv_impl(
             UPLO,
             N,
             NRHS,
-            A_copy.view(w_type).ctypes,
+            A_copy.ctypes,
             LDA,
             IPIV.ctypes,
-            B_copy.view(w_type).ctypes,
+            B_copy.ctypes,
             LDB,
-            WORK.view(w_type).ctypes,
+            WORK.ctypes,
             LWORK,
             INFO,
         )
@@ -103,12 +104,12 @@ def sysv_impl(
             UPLO,
             N,
             NRHS,
-            A_copy.view(w_type).ctypes,
+            A_copy.ctypes,
             LDA,
             IPIV.ctypes,
-            B_copy.view(w_type).ctypes,
+            B_copy.ctypes,
             LDB,
-            WORK.view(w_type).ctypes,
+            WORK.ctypes,
             LWORK,
             INFO,
         )
@@ -133,9 +134,8 @@ def sycon_impl(
     A: np.ndarray, ipiv: np.ndarray, anorm: float
 ) -> Callable[[np.ndarray, np.ndarray, float], tuple[np.ndarray, int]]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "sycon")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="sycon")
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     numba_sycon = _LAPACK().numba_xsycon(dtype)
 
     def impl(A: np.ndarray, ipiv: np.ndarray, anorm: float) -> tuple[np.ndarray, int]:
@@ -154,12 +154,12 @@ def sycon_impl(
         numba_sycon(
             UPLO,
             N,
-            A_copy.view(w_type).ctypes,
+            A_copy.ctypes,
             LDA,
             ipiv.ctypes,
-            ANORM.view(w_type).ctypes,
-            RCOND.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            ANORM.ctypes,
+            RCOND.ctypes,
+            WORK.ctypes,
             IWORK.ctypes,
             INFO,
         )
@@ -203,8 +203,9 @@ def solve_symmetric_impl(
     transposed: bool,
 ) -> Callable[[np.ndarray, np.ndarray, bool, bool, bool, bool, bool], np.ndarray]:
     ensure_lapack()
-    _check_scipy_linalg_matrix(A, "solve")
-    _check_scipy_linalg_matrix(B, "solve")
+    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
+    _check_dtypes_match((A, B), func_name="solve")
 
     def impl(
         A: np.ndarray,

@@ -24,7 +24,7 @@ from pytensor.tensor import (
     vector,
 )
 from pytensor.tensor.blockwise import Blockwise, vectorize_node_fallback
-from pytensor.tensor.nlinalg import MatrixInverse
+from pytensor.tensor.nlinalg import MatrixInverse, eig
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
 from pytensor.tensor.signal import convolve1d
 from pytensor.tensor.slinalg import (
@@ -763,3 +763,22 @@ def test_partial_inplace():
     add_supervisor_to_fgraph(fgraph, [In(inp, mutable=True) for inp in fgraph.inputs])
     rewrite_graph(fgraph, include=("inplace",))
     assert fgraph.outputs[0].owner.op.destroy_map == {1: [1]}
+
+
+def test_eig_blockwise():
+    x = tensor("x", shape=(2, 3, 3), dtype="float64")
+    eigen_values, eigen_vectors = eig(x)
+    assert eigen_values.dtype == "complex128"
+    assert eigen_vectors.dtype == "complex128"
+    fn = function([x], [eigen_values, eigen_vectors])
+    eigen_values_res, eigen_vectors_res = fn(np.full((2, 3, 3), np.eye(3)))
+    np.testing.assert_allclose(
+        eigen_values_res,
+        np.ones((2, 3), dtype="complex128"),
+        strict=True,
+    )
+    np.testing.assert_allclose(
+        eigen_vectors_res,
+        np.full((2, 3, 3), np.eye(3), dtype="complex128"),
+        strict=True,
+    )
