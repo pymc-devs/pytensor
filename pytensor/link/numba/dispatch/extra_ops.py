@@ -154,7 +154,11 @@ def numba_funcify_RavelMultiIndex(op, node, **kwargs):
                 stacked_indices[..., i] %= dim_limit
             elif mode == "clip":
                 dim_indices = stacked_indices[..., i]
-                stacked_indices[..., i] = np.clip(dim_indices, 0, dim_limit - 1)
+                # Cannot call np.clip on scalars
+                if vec_indices:
+                    stacked_indices[..., i] = np.clip(dim_indices, 0, dim_limit - 1)
+                else:
+                    stacked_indices[..., i] = max(0, min(dim_indices, dim_limit - 1))
             else:  # raise
                 dim_indices = stacked_indices[..., i]
                 invalid_indices = (dim_indices < 0) | (dim_indices >= shape[i])
