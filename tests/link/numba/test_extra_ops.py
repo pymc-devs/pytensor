@@ -172,6 +172,12 @@ def test_FillDiagonalOffset(a, val, offset):
             ValueError,
         ),
         (
+            tuple((pt.lscalar(), v) for v in np.array([0, 0, 3])),
+            (pt.lvector(), np.array([2, 3, 4])),
+            "wrap",
+            None,
+        ),
+        (
             tuple(
                 (pt.lvector(), v) for v in np.array([[0, 1, 2], [2, 0, 3], [1, 3, 5]])
             ),
@@ -186,6 +192,12 @@ def test_FillDiagonalOffset(a, val, offset):
             ),
             (pt.lvector(), np.array([2, 3, 4])),
             "wrap",
+            None,
+        ),
+        (
+            tuple((pt.lscalar(), v) for v in np.array([0, 0, 3])),
+            (pt.lvector(), np.array([2, 3, 4])),
+            "clip",
             None,
         ),
         (
