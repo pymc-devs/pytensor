@@ -1,9 +1,10 @@
 import numpy as np
 import pytest
 
-from pytensor import OpFromGraph, config, function, ifelse
+from pytensor import Mode, OpFromGraph, config, function, ifelse
 from pytensor import tensor as pt
 from pytensor.compile import ViewOp
+from pytensor.ifelse import IfElse
 from pytensor.raise_op import assert_op
 from pytensor.scalar import Add
 from pytensor.tensor import matrix
@@ -178,3 +179,74 @@ def test_check_and_raise():
     out = assert_op(x.sum(), np.array(True))
 
     compare_numba_and_py([x], out, [x_test_value])
+
+
+@pytest.mark.parametrize("as_view", [True, False])
+def test_ifelse_single_output(as_view):
+    x = pt.vector("x")
+
+    op = IfElse(as_view=as_view, n_outs=1)
+    out = op(x.sum() > 0, [x], [x])[0]  # returns tuple/list
+
+    fn = function([x], out, mode=Mode("numba", optimizer=None), accept_inplace=True)
+
+    # FALSE branch
+    a = np.zeros(3)
+    res_false = fn(a)
+
+    assert np.array_equal(res_false, a)
+    if as_view:
+        assert res_false is a
+    else:
+        assert res_false is not a
+
+    # TRUE branch
+    b = np.ones(3)
+    res_true = fn(b)
+
+    assert np.array_equal(res_true, b)
+    if as_view:
+        assert res_true is b
+    else:
+        assert res_true is not b
+
+
+@pytest.mark.parametrize("as_view", [True, False])
+def test_ifelse_multiple_outputs(as_view):
+    x = pt.vector("x")
+    y = pt.vector("y")
+
+    op = IfElse(as_view=as_view, n_outs=2)
+    out1, out2 = op(x.sum() > 0, x, y, y, x)
+
+    fn = function(
+        [x, y], [out1, out2], mode=Mode("numba", optimizer=None), accept_inplace=True
+    )
+
+    # TRUE branch
+    a = np.ones(3)
+    b = np.zeros(3)
+    r1_true, r2_true = fn(a, b)
+
+    assert np.array_equal(r1_true, a)
+    assert np.array_equal(r2_true, b)
+    if as_view:
+        assert r1_true is a
+        assert r2_true is b
+    else:
+        assert r1_true is not a
+        assert r2_true is not b
+
+    # FALSE branch
+    a2 = np.zeros(3)
+    b2 = np.arange(3)
+    r1_false, r2_false = fn(a2, b2)
+
+    assert np.array_equal(r1_false, b2)
+    assert np.array_equal(r2_false, a2)
+    if as_view:
+        assert r1_false is b2
+        assert r2_false is a2
+    else:
+        assert r1_false is not b2
+        assert r2_false is not a2
