@@ -4,9 +4,10 @@ import pytest
 from pytensor import OpFromGraph, config, function, ifelse
 from pytensor import tensor as pt
 from pytensor.compile import ViewOp
+from pytensor.graph import vectorize_graph
 from pytensor.raise_op import assert_op
 from pytensor.scalar import Add
-from pytensor.tensor import matrix
+from pytensor.tensor import dmatrix, dtensor3, matrix
 from pytensor.tensor.elemwise import Elemwise
 from tests.link.numba.test_basic import compare_numba_and_py
 
@@ -169,6 +170,24 @@ def test_ofg_aliased_outputs():
     x_test = np.zeros((2, 2))
     for res in fn(x_test):
         np.testing.assert_allclose(res, np.ones((2, 2)))
+
+
+def test_ofg_elemwise_regression():
+    # Regression bug for https://github.com/pymc-devs/pytensor/issues/1507
+    x = dmatrix("x", shape=(None, None))
+    z = OpFromGraph(
+        inputs=[x],
+        outputs=[x + 1],
+    )(x)
+
+    x_batched = dtensor3("X_batched", shape=(None, None, None))
+    z_batched = vectorize_graph(z, {x: x_batched})
+    compare_numba_and_py(
+        [x_batched],
+        [z_batched],
+        [np.random.normal(size=(3, 2, 4))],
+        eval_obj_mode=False,
+    )
 
 
 def test_check_and_raise():

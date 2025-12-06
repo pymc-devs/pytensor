@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from pytensor import function
-from pytensor.tensor import tensor, tensor3
-from pytensor.tensor.basic import ARange
+from pytensor.tensor import lvector, tensor, tensor3
+from pytensor.tensor.basic import Alloc, ARange, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.nlinalg import SVD, Det
 from pytensor.tensor.slinalg import Cholesky, cholesky
@@ -70,3 +70,13 @@ def test_repeated_args():
     final_node = fn.maker.fgraph.outputs[0].owner
     assert isinstance(final_node.op, BlockwiseWithCoreShape)
     assert final_node.inputs[0] is final_node.inputs[1]
+
+
+def test_blockwise_alloc():
+    val = lvector("val")
+    out = Blockwise(Alloc(), signature="(),(),()->(2,3)")(
+        val, constant(2, dtype="int64"), constant(3, dtype="int64")
+    )
+    assert out.type.ndim == 3
+
+    compare_numba_and_py([val], [out], [np.arange(5)], eval_obj_mode=False)

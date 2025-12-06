@@ -74,13 +74,13 @@ def numba_funcify_Alloc(op, node, **kwargs):
                 f'if val.shape[{-i - 1}] == 1 and scalar_shape[{-i - 1}] != 1: raise ValueError("{Alloc._runtime_broadcast_error_msg}")'
             )
     check_runtime_broadcast_src = indent("\n".join(check_runtime_broadcast), " " * 4)
-
+    dtype = node.inputs[0].type.dtype
     alloc_def_src = f"""
 def alloc(val, {", ".join(shape_var_names)}):
 {shapes_to_items_src}
     scalar_shape = {create_tuple_string(shape_var_item_names)}
 {check_runtime_broadcast_src}
-    res = np.empty(scalar_shape, dtype=val.dtype)
+    res = np.empty(scalar_shape, dtype=np.{dtype})
     res[...] = val
     return res
     """
@@ -88,10 +88,12 @@ def alloc(val, {", ".join(shape_var_names)}):
         alloc_def_src,
         "alloc",
         globals() | {"np": np},
+        write_to_disk=True,
     )
 
+    cache_version = -1
     cache_key = sha256(
-        str((type(op), node.inputs[0].type.broadcastable)).encode()
+        str((type(op), node.inputs[0].type.broadcastable, cache_version)).encode()
     ).hexdigest()
     return numba_basic.numba_njit(alloc_fn), cache_key
 

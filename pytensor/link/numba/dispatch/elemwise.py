@@ -274,7 +274,6 @@ def numba_funcify_Elemwise(op, node, **kwargs):
     scalar_op_fn, scalar_cache_key = numba_funcify_and_cache_key(
         op.scalar_op,
         node=scalar_node,
-        parent_node=node,
         **kwargs,
     )
 
