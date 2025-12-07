@@ -8,8 +8,8 @@ import pytest
 
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
+
 
 # These will be imported once the ONNX backend is implemented
 # For now, we'll set up the structure so tests can use them
@@ -140,7 +140,7 @@ def test_compare_onnx_and_py_simple():
 
     # Should not raise
     try:
-        fn, result = compare_onnx_and_py([x], y, [x_val])
+        _fn, result = compare_onnx_and_py([x], y, [x_val])
         np.testing.assert_array_equal(result, x_val)
     except Exception as e:
         pytest.fail(f"compare_onnx_and_py raised unexpectedly: {e}")
@@ -153,7 +153,6 @@ def test_get_onnx_node_types():
 
     import pytensor
     import pytensor.tensor as pt
-
     from pytensor.link.onnx.linker import ONNXLinker
 
     # Create a graph with Add operation

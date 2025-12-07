@@ -3,12 +3,11 @@
 import numpy as np
 from onnx import helper, numpy_helper
 
-from pytensor.link.onnx.dispatch.basic import onnx_funcify
-from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape, Reshape
-from pytensor.tensor.basic import Join, Split
 from pytensor.graph.basic import Constant
+from pytensor.link.onnx.dispatch.basic import onnx_funcify
+from pytensor.tensor.basic import Join, Split, get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
-from pytensor.tensor.basic import get_scalar_constant_value
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 
 
 @onnx_funcify.register(type(None))
@@ -27,7 +26,7 @@ def onnx_funcify_Shape(op, node, get_var_name, **kwargs):
     output_name = get_var_name(node.outputs[0])
 
     onnx_node = helper.make_node(
-        'Shape',
+        "Shape",
         inputs=[input_name],
         outputs=[output_name],
         name=f"Shape_{output_name}",
@@ -69,7 +68,7 @@ def onnx_funcify_Shape_i(op, node, get_var_name, **kwargs):
 
     # Node 1: Create constant for index
     idx_constant = helper.make_node(
-        'Constant',
+        "Constant",
         inputs=[],
         outputs=[idx_name],
         name=f"Constant_{idx_name}",
@@ -78,12 +77,12 @@ def onnx_funcify_Shape_i(op, node, get_var_name, **kwargs):
             data_type=helper.TensorProto.INT64,
             dims=[],
             vals=[axis_idx],
-        )
+        ),
     )
 
     # Node 2: Get full shape
     shape_node = helper.make_node(
-        'Shape',
+        "Shape",
         inputs=[input_name],
         outputs=[shape_name],
         name=f"Shape_{shape_name}",
@@ -91,7 +90,7 @@ def onnx_funcify_Shape_i(op, node, get_var_name, **kwargs):
 
     # Node 3: Gather specific dimension
     gather_node = helper.make_node(
-        'Gather',
+        "Gather",
         inputs=[shape_name, idx_name],
         outputs=[output_name],
         name=f"Gather_{output_name}",
@@ -237,7 +236,7 @@ def onnx_funcify_Reshape(op, node, get_var_name, **kwargs):
         shape_name = f"{output_name}_shape"
 
         shape_constant = helper.make_node(
-            'Constant',
+            "Constant",
             inputs=[],
             outputs=[shape_name],
             name=f"Constant_{shape_name}",
@@ -246,11 +245,11 @@ def onnx_funcify_Reshape(op, node, get_var_name, **kwargs):
                 data_type=helper.TensorProto.INT64,
                 dims=[len(shape_data)],
                 vals=shape_data.tolist(),
-            )
+            ),
         )
 
         reshape_node = helper.make_node(
-            'Reshape',
+            "Reshape",
             inputs=[data_name, shape_name],
             outputs=[output_name],
             name=f"Reshape_{output_name}",
@@ -262,7 +261,7 @@ def onnx_funcify_Reshape(op, node, get_var_name, **kwargs):
         shape_name = get_var_name(shape_input)
 
         reshape_node = helper.make_node(
-            'Reshape',
+            "Reshape",
             inputs=[data_name, shape_name],
             outputs=[output_name],
             name=f"Reshape_{output_name}",
@@ -301,7 +300,7 @@ def onnx_funcify_Join(op, node, get_var_name, **kwargs):
 
     # Create ONNX Concat node
     concat_node = helper.make_node(
-        'Concat',
+        "Concat",
         inputs=input_names,
         outputs=[output_name],
         name=f"Concat_{output_name}",
@@ -359,7 +358,7 @@ def onnx_funcify_Split(op, node, get_var_name, **kwargs):
     # Create constant node for split sizes (required in opset 13+)
     split_name = f"{output_names[0]}_split"
     split_constant = helper.make_node(
-        'Constant',
+        "Constant",
         inputs=[],
         outputs=[split_name],
         name=f"Constant_{split_name}",
@@ -368,12 +367,12 @@ def onnx_funcify_Split(op, node, get_var_name, **kwargs):
             data_type=helper.TensorProto.INT64,
             dims=[len(splits)],
             vals=splits.tolist(),
-        )
+        ),
     )
 
     # Create ONNX Split node with split as an input
     split_node = helper.make_node(
-        'Split',
+        "Split",
         inputs=[input_name, split_name],
         outputs=output_names,
         name=f"Split_{output_names[0]}",

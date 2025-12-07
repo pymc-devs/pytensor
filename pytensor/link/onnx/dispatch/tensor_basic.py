@@ -3,9 +3,9 @@
 import numpy as np
 from onnx import helper
 
-from pytensor.link.onnx.dispatch.basic import onnx_funcify
-from pytensor.tensor.basic import Alloc, AllocEmpty, MakeVector, ARange
 from pytensor.graph.basic import Constant
+from pytensor.link.onnx.dispatch.basic import onnx_funcify
+from pytensor.tensor.basic import Alloc, AllocEmpty, ARange, MakeVector
 
 
 @onnx_funcify.register(Alloc)
@@ -36,7 +36,7 @@ def onnx_funcify_Alloc(op, node, get_var_name, **kwargs):
         shape_data = np.array([inp.data for inp in shape_inputs], dtype=np.int64)
 
         shape_constant = helper.make_node(
-            'Constant',
+            "Constant",
             inputs=[],
             outputs=[shape_name],
             name=f"Constant_{shape_name}",
@@ -45,12 +45,12 @@ def onnx_funcify_Alloc(op, node, get_var_name, **kwargs):
                 data_type=helper.TensorProto.INT64,
                 dims=[len(shape_data)],
                 vals=shape_data.tolist(),
-            )
+            ),
         )
         nodes.append(shape_constant)
 
         expand_node = helper.make_node(
-            'Expand',
+            "Expand",
             inputs=[value_name, shape_name],
             outputs=[output_name],
             name=f"Expand_{output_name}",
@@ -67,7 +67,7 @@ def onnx_funcify_Alloc(op, node, get_var_name, **kwargs):
                 # Create constant for this dimension
                 dim_name = f"{shape_name}_dim{i}"
                 dim_constant = helper.make_node(
-                    'Constant',
+                    "Constant",
                     inputs=[],
                     outputs=[dim_name],
                     name=f"Constant_{dim_name}",
@@ -76,7 +76,7 @@ def onnx_funcify_Alloc(op, node, get_var_name, **kwargs):
                         data_type=helper.TensorProto.INT64,
                         dims=[1],
                         vals=[inp.data],
-                    )
+                    ),
                 )
                 nodes.append(dim_constant)
                 unsqueezed_names.append(dim_name)
@@ -88,7 +88,7 @@ def onnx_funcify_Alloc(op, node, get_var_name, **kwargs):
                 # Create axes constant for Unsqueeze
                 axes_name = f"{unsqueezed_name}_axes"
                 axes_constant = helper.make_node(
-                    'Constant',
+                    "Constant",
                     inputs=[],
                     outputs=[axes_name],
                     name=f"Constant_{axes_name}",
@@ -97,12 +97,12 @@ def onnx_funcify_Alloc(op, node, get_var_name, **kwargs):
                         data_type=helper.TensorProto.INT64,
                         dims=[1],
                         vals=[0],
-                    )
+                    ),
                 )
                 nodes.append(axes_constant)
 
                 unsqueeze_node = helper.make_node(
-                    'Unsqueeze',
+                    "Unsqueeze",
                     inputs=[inp_name, axes_name],
                     outputs=[unsqueezed_name],
                     name=f"Unsqueeze_{unsqueezed_name}",
@@ -112,7 +112,7 @@ def onnx_funcify_Alloc(op, node, get_var_name, **kwargs):
 
         # Concatenate shape elements into shape vector
         concat_node = helper.make_node(
-            'Concat',
+            "Concat",
             inputs=unsqueezed_names,
             outputs=[shape_name],
             name=f"Concat_{shape_name}",
@@ -121,7 +121,7 @@ def onnx_funcify_Alloc(op, node, get_var_name, **kwargs):
         nodes.append(concat_node)
 
         expand_node = helper.make_node(
-            'Expand',
+            "Expand",
             inputs=[value_name, shape_name],
             outputs=[output_name],
             name=f"Expand_{output_name}",
@@ -155,7 +155,7 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
         shape_data = np.array([inp.data for inp in shape_inputs], dtype=np.int64)
 
         shape_constant = helper.make_node(
-            'Constant',
+            "Constant",
             inputs=[],
             outputs=[shape_name],
             name=f"Constant_{shape_name}",
@@ -164,7 +164,7 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
                 data_type=helper.TensorProto.INT64,
                 dims=[len(shape_data)],
                 vals=shape_data.tolist(),
-            )
+            ),
         )
         nodes.append(shape_constant)
     else:
@@ -174,7 +174,7 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
             if isinstance(inp, Constant):
                 dim_name = f"{shape_name}_dim{i}"
                 dim_constant = helper.make_node(
-                    'Constant',
+                    "Constant",
                     inputs=[],
                     outputs=[dim_name],
                     name=f"Constant_{dim_name}",
@@ -183,7 +183,7 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
                         data_type=helper.TensorProto.INT64,
                         dims=[1],
                         vals=[inp.data],
-                    )
+                    ),
                 )
                 nodes.append(dim_constant)
                 unsqueezed_names.append(dim_name)
@@ -193,7 +193,7 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
 
                 axes_name = f"{unsqueezed_name}_axes"
                 axes_constant = helper.make_node(
-                    'Constant',
+                    "Constant",
                     inputs=[],
                     outputs=[axes_name],
                     name=f"Constant_{axes_name}",
@@ -202,12 +202,12 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
                         data_type=helper.TensorProto.INT64,
                         dims=[1],
                         vals=[0],
-                    )
+                    ),
                 )
                 nodes.append(axes_constant)
 
                 unsqueeze_node = helper.make_node(
-                    'Unsqueeze',
+                    "Unsqueeze",
                     inputs=[inp_name, axes_name],
                     outputs=[unsqueezed_name],
                     name=f"Unsqueeze_{unsqueezed_name}",
@@ -216,7 +216,7 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
                 unsqueezed_names.append(unsqueezed_name)
 
         concat_node = helper.make_node(
-            'Concat',
+            "Concat",
             inputs=unsqueezed_names,
             outputs=[shape_name],
             name=f"Concat_{shape_name}",
@@ -227,15 +227,15 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
     # ConstantOfShape with value 0
     dtype = op.dtype
     dtype_map = {
-        'float32': helper.TensorProto.FLOAT,
-        'float64': helper.TensorProto.DOUBLE,
-        'int32': helper.TensorProto.INT32,
-        'int64': helper.TensorProto.INT64,
+        "float32": helper.TensorProto.FLOAT,
+        "float64": helper.TensorProto.DOUBLE,
+        "int32": helper.TensorProto.INT32,
+        "int64": helper.TensorProto.INT64,
     }
     onnx_dtype = dtype_map.get(dtype, helper.TensorProto.FLOAT)
 
     constant_of_shape_node = helper.make_node(
-        'ConstantOfShape',
+        "ConstantOfShape",
         inputs=[shape_name],
         outputs=[output_name],
         name=f"ConstantOfShape_{output_name}",
@@ -244,7 +244,7 @@ def onnx_funcify_AllocEmpty(op, node, get_var_name, **kwargs):
             data_type=onnx_dtype,
             dims=[1],
             vals=[0],
-        )
+        ),
     )
     nodes.append(constant_of_shape_node)
 
@@ -272,15 +272,15 @@ def onnx_funcify_MakeVector(op, node, get_var_name, **kwargs):
         # Empty vector
         dtype = op.dtype
         dtype_map = {
-            'float32': helper.TensorProto.FLOAT,
-            'float64': helper.TensorProto.DOUBLE,
-            'int32': helper.TensorProto.INT32,
-            'int64': helper.TensorProto.INT64,
+            "float32": helper.TensorProto.FLOAT,
+            "float64": helper.TensorProto.DOUBLE,
+            "int32": helper.TensorProto.INT32,
+            "int64": helper.TensorProto.INT64,
         }
         onnx_dtype = dtype_map.get(dtype, helper.TensorProto.FLOAT)
 
         empty_constant = helper.make_node(
-            'Constant',
+            "Constant",
             inputs=[],
             outputs=[output_name],
             name=f"Constant_{output_name}",
@@ -289,7 +289,7 @@ def onnx_funcify_MakeVector(op, node, get_var_name, **kwargs):
                 data_type=onnx_dtype,
                 dims=[0],
                 vals=[],
-            )
+            ),
         )
 
         return empty_constant
@@ -305,7 +305,7 @@ def onnx_funcify_MakeVector(op, node, get_var_name, **kwargs):
         # Create axes constant for Unsqueeze
         axes_name = f"{unsqueezed_name}_axes"
         axes_constant = helper.make_node(
-            'Constant',
+            "Constant",
             inputs=[],
             outputs=[axes_name],
             name=f"Constant_{axes_name}",
@@ -314,12 +314,12 @@ def onnx_funcify_MakeVector(op, node, get_var_name, **kwargs):
                 data_type=helper.TensorProto.INT64,
                 dims=[1],
                 vals=[0],
-            )
+            ),
         )
         nodes.append(axes_constant)
 
         unsqueeze_node = helper.make_node(
-            'Unsqueeze',
+            "Unsqueeze",
             inputs=[input_name, axes_name],
             outputs=[unsqueezed_name],
             name=f"Unsqueeze_{unsqueezed_name}",
@@ -329,7 +329,7 @@ def onnx_funcify_MakeVector(op, node, get_var_name, **kwargs):
 
     # Concatenate all elements
     concat_node = helper.make_node(
-        'Concat',
+        "Concat",
         inputs=unsqueezed_names,
         outputs=[output_name],
         name=f"Concat_{output_name}",
@@ -361,7 +361,9 @@ def onnx_funcify_ARange(op, node, get_var_name, **kwargs):
     step_input = node.inputs[2]
 
     # Verify all inputs are constants
-    if not all(isinstance(inp, Constant) for inp in [start_input, stop_input, step_input]):
+    if not all(
+        isinstance(inp, Constant) for inp in [start_input, stop_input, step_input]
+    ):
         raise NotImplementedError(
             "ARange with dynamic (non-constant) inputs is not supported in ONNX. "
             "All start, stop, step values must be constants."
@@ -376,15 +378,15 @@ def onnx_funcify_ARange(op, node, get_var_name, **kwargs):
 
     dtype = op.dtype
     dtype_map = {
-        'int32': helper.TensorProto.INT32,
-        'int64': helper.TensorProto.INT64,
-        'float32': helper.TensorProto.FLOAT,
-        'float64': helper.TensorProto.DOUBLE,
+        "int32": helper.TensorProto.INT32,
+        "int64": helper.TensorProto.INT64,
+        "float32": helper.TensorProto.FLOAT,
+        "float64": helper.TensorProto.DOUBLE,
     }
     onnx_dtype = dtype_map.get(dtype, helper.TensorProto.INT64)
 
     start_constant = helper.make_node(
-        'Constant',
+        "Constant",
         inputs=[],
         outputs=[start_name],
         name=f"Constant_{start_name}",
@@ -392,12 +394,12 @@ def onnx_funcify_ARange(op, node, get_var_name, **kwargs):
             name=f"{start_name}_value",
             data_type=onnx_dtype,
             dims=[],
-            vals=[int(start_input.data) if 'int' in dtype else float(start_input.data)],
-        )
+            vals=[int(start_input.data) if "int" in dtype else float(start_input.data)],
+        ),
     )
 
     stop_constant = helper.make_node(
-        'Constant',
+        "Constant",
         inputs=[],
         outputs=[stop_name],
         name=f"Constant_{stop_name}",
@@ -405,12 +407,12 @@ def onnx_funcify_ARange(op, node, get_var_name, **kwargs):
             name=f"{stop_name}_value",
             data_type=onnx_dtype,
             dims=[],
-            vals=[int(stop_input.data) if 'int' in dtype else float(stop_input.data)],
-        )
+            vals=[int(stop_input.data) if "int" in dtype else float(stop_input.data)],
+        ),
     )
 
     step_constant = helper.make_node(
-        'Constant',
+        "Constant",
         inputs=[],
         outputs=[step_name],
         name=f"Constant_{step_name}",
@@ -418,13 +420,13 @@ def onnx_funcify_ARange(op, node, get_var_name, **kwargs):
             name=f"{step_name}_value",
             data_type=onnx_dtype,
             dims=[],
-            vals=[int(step_input.data) if 'int' in dtype else float(step_input.data)],
-        )
+            vals=[int(step_input.data) if "int" in dtype else float(step_input.data)],
+        ),
     )
 
     # Range node
     range_node = helper.make_node(
-        'Range',
+        "Range",
         inputs=[start_name, stop_name, step_name],
         outputs=[output_name],
         name=f"Range_{output_name}",

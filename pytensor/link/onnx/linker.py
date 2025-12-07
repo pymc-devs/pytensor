@@ -129,10 +129,7 @@ class ONNXLinker(JITLinker):
         list
             List of storage lists for inputs
         """
-        thunk_inputs = []
-        for n in self.fgraph.inputs:
-            thunk_inputs.append(storage_map[n])
-        return thunk_inputs
+        return [storage_map[n] for n in self.fgraph.inputs]
 
     def jit_compile(self, fn):
         """JIT compile a converted FunctionGraph.
@@ -167,8 +164,6 @@ class ONNXLinker(JITLinker):
             If no model has been created yet
         """
         if self.onnx_model is None:
-            raise ValueError(
-                "No ONNX model available. Compile a function first."
-            )
+            raise ValueError("No ONNX model available. Compile a function first.")
 
         onnx.save(self.onnx_model, filename)

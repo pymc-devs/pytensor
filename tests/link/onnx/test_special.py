@@ -112,7 +112,7 @@ def test_comparison_ops(pt_op, np_op, onnx_op):
     x_val = np.array([1, 2, 3, 4, 5], dtype="float32")
     y_val = np.array([2, 2, 2, 2, 2], dtype="float32")
 
-    fn, result = compare_onnx_and_py([x, y], z, [x_val, y_val])
+    _fn, result = compare_onnx_and_py([x, y], z, [x_val, y_val])
 
     expected = np_op(x_val, y_val)
     np.testing.assert_array_equal(result, expected)
@@ -244,7 +244,7 @@ def test_log1p_expm1(pt_op, np_op):
 
     x_val = np.linspace(-0.5, 2, 20).astype("float32")
 
-    fn, result = compare_onnx_and_py([x], y, [x_val])
+    _fn, result = compare_onnx_and_py([x], y, [x_val])
 
     expected = np_op(x_val)
     np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-6)

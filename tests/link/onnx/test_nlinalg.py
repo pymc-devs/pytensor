@@ -46,7 +46,7 @@ def test_dot_1d_2d():
     v_val = np.random.randn(4).astype("float32")
     M_val = np.random.randn(4, 5).astype("float32")
 
-    fn, output = compare_onnx_and_py([v, M], result, [v_val, M_val])
+    _fn, output = compare_onnx_and_py([v, M], result, [v_val, M_val])
 
     expected = np.dot(v_val, M_val)
     np.testing.assert_allclose(output, expected, rtol=1e-5, atol=1e-6)
@@ -133,14 +133,10 @@ def test_svd_not_supported():
     A = pt.matrix("A", dtype="float32")
     U, s, Vt = svd(A, full_matrices=False)
 
-    # Well-conditioned test matrix
-    rng = np.random.default_rng(42)
-    A_val = rng.normal(size=(4, 3)).astype("float32")
-
     # This will raise NotImplementedError
     onnx_mode = Mode(linker=ONNXLinker(), optimizer=None)
     with pytest.raises(NotImplementedError, match="SVD not supported"):
-        fn = pytensor.function([A], [U, s, Vt], mode=onnx_mode)
+        pytensor.function([A], [U, s, Vt], mode=onnx_mode)
 
 
 @pytest.mark.skip(reason="Cholesky not in standard ONNX opset")
@@ -159,14 +155,9 @@ def test_cholesky_not_supported():
     A = pt.matrix("A", dtype="float32")
     L = cholesky(A)
 
-    # Positive definite matrix
-    rng = np.random.default_rng(42)
-    X = rng.normal(size=(4, 4)).astype("float32")
-    A_val = X @ X.T  # Positive definite
-
     onnx_mode = Mode(linker=ONNXLinker(), optimizer=None)
     with pytest.raises(NotImplementedError, match="Cholesky not supported"):
-        fn = pytensor.function([A], L, mode=onnx_mode)
+        pytensor.function([A], L, mode=onnx_mode)
 
 
 # Linear System Solving Tests (Unsupported)
@@ -189,14 +180,9 @@ def test_solve_not_supported():
     B = pt.matrix("B", dtype="float32")
     X = solve(A, B)
 
-    rng = np.random.default_rng(42)
-    A_val = rng.normal(size=(4, 4)).astype("float32")
-    A_val = A_val + 0.5 * np.eye(4, dtype="float32")  # Well-conditioned
-    B_val = rng.normal(size=(4, 3)).astype("float32")
-
     onnx_mode = Mode(linker=ONNXLinker(), optimizer=None)
     with pytest.raises(NotImplementedError, match="Solve not supported"):
-        fn = pytensor.function([A, B], X, mode=onnx_mode)
+        pytensor.function([A, B], X, mode=onnx_mode)
 
 
 # Matrix Properties Tests (Unsupported)
@@ -221,12 +207,9 @@ def test_det_custom_implementation():
     A = pt.matrix("A", dtype="float32")
     d = det(A)
 
-    rng = np.random.default_rng(42)
-    A_val = rng.normal(size=(4, 4)).astype("float32")
-
     onnx_mode = Mode(linker=ONNXLinker(), optimizer=None)
     with pytest.raises(NotImplementedError, match="Det not supported"):
-        fn = pytensor.function([A], d, mode=onnx_mode)
+        pytensor.function([A], d, mode=onnx_mode)
 
 
 @pytest.mark.skip(reason="Matrix inverse not in standard ONNX opset")
@@ -246,13 +229,9 @@ def test_matrix_inverse_not_supported():
     A = pt.matrix("A", dtype="float32")
     A_inv = matrix_inverse(A)
 
-    rng = np.random.default_rng(42)
-    A_val = rng.normal(size=(4, 4)).astype("float32")
-    A_val = A_val + 0.5 * np.eye(4, dtype="float32")
-
     onnx_mode = Mode(linker=ONNXLinker(), optimizer=None)
     with pytest.raises(NotImplementedError, match="Matrix inverse not supported"):
-        fn = pytensor.function([A], A_inv, mode=onnx_mode)
+        pytensor.function([A], A_inv, mode=onnx_mode)
 
 
 # Extract Diagonal Tests
@@ -276,7 +255,7 @@ def test_extract_diag():
 
     A_val = np.random.randn(4, 4).astype("float32")
 
-    fn, result = compare_onnx_and_py([A], d, [A_val])
+    _fn, result = compare_onnx_and_py([A], d, [A_val])
 
     expected = np.diag(A_val)
     np.testing.assert_array_equal(result, expected)

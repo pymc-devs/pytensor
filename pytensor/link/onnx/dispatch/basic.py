@@ -198,7 +198,6 @@ def onnx_funcify_FunctionGraph(
     # Collect all nodes in topological order
     nodes = []
     initializers = []
-    value_infos = []
 
     # Process constants first
     for var in fgraph.variables:
@@ -213,7 +212,7 @@ def onnx_funcify_FunctionGraph(
                 # For now, we'll upcast all scalar integer constants to float32
                 # This is a simplification but handles the common case of: x * 2
                 # where x is float and 2 is an int scalar
-                data = data.astype('float32')
+                data = data.astype("float32")
 
             tensor_proto = onnx_typify(data, name=name)
             initializers.append(tensor_proto)
@@ -235,9 +234,7 @@ def onnx_funcify_FunctionGraph(
                 # Multiple nodes - add all to graph
                 # Used for operations that compile to multiple ONNX ops
                 # Example: Shape_i returns [Constant, Shape, Gather]
-                for item in result:
-                    if item is not None:
-                        nodes.append(item)
+                nodes.extend(item for item in result if item is not None)
             elif isinstance(result, tuple):
                 # Returned (node, additional_initializers)
                 # Used for operations with constant initializers

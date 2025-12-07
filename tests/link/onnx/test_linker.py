@@ -1,7 +1,6 @@
 """Tests for ONNXLinker."""
 
 import numpy as np
-import pytest
 
 from pytensor.compile.mode import Mode
 
@@ -20,7 +19,6 @@ def test_linker_empty_graph():
     """Test that linker can convert a trivial passthrough graph."""
     import pytensor
     import pytensor.tensor as pt
-
     from pytensor.link.onnx.linker import ONNXLinker
 
     # Create identity graph
@@ -35,19 +33,16 @@ def test_linker_empty_graph():
     assert result == 5.0, f"Expected 5.0, got {result}"
 
     # Verify ONNX model exists
-    assert hasattr(
-        fn.maker.linker, "onnx_model"
-    ), "Linker should have onnx_model attribute"
-    assert (
-        fn.maker.linker.onnx_model is not None
-    ), "onnx_model should not be None"
+    assert hasattr(fn.maker.linker, "onnx_model"), (
+        "Linker should have onnx_model attribute"
+    )
+    assert fn.maker.linker.onnx_model is not None, "onnx_model should not be None"
 
 
 def test_linker_constant_graph():
     """Test that linker correctly handles constants as initializers."""
     import pytensor
     import pytensor.tensor as pt
-
     from pytensor.link.onnx.linker import ONNXLinker
 
     # Create graph with constant
@@ -65,6 +60,6 @@ def test_linker_constant_graph():
 
     # Verify ONNX model has initializer for constant
     model = fn.maker.linker.onnx_model
-    assert (
-        len(model.graph.initializer) > 0
-    ), "Model should have at least one initializer for the constant"
+    assert len(model.graph.initializer) > 0, (
+        "Model should have at least one initializer for the constant"
+    )

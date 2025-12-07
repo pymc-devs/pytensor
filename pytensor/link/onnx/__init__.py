@@ -8,15 +8,16 @@ from pytensor.link.onnx.dispatch import onnx_funcify, onnx_typify
 from pytensor.link.onnx.export import compile_onnx, export_function_onnx, export_onnx
 from pytensor.link.onnx.linker import ONNXLinker
 
+
 # ONNX opset version used by default
 ONNX_OPSET_VERSION = 18
 
 __all__ = [
+    "ONNX_OPSET_VERSION",
     "ONNXLinker",
-    "onnx_funcify",
-    "onnx_typify",
-    "export_onnx",
     "compile_onnx",
     "export_function_onnx",
-    "ONNX_OPSET_VERSION",
+    "export_onnx",
+    "onnx_funcify",
+    "onnx_typify",
 ]

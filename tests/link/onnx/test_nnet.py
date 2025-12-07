@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.tensor.special import softmax, log_softmax
+from pytensor.tensor.special import log_softmax, softmax
 from tests.link.onnx.test_basic import compare_onnx_and_py, get_onnx_node_types
 
 
@@ -82,7 +82,9 @@ def test_switch():
     x_val = np.array([1, 2, 3, 4, 5], dtype="float32")
     y_val = np.array([10, 20, 30, 40, 50], dtype="float32")
 
-    fn, output = compare_onnx_and_py([condition, x, y], result, [cond_val, x_val, y_val])
+    fn, output = compare_onnx_and_py(
+        [condition, x, y], result, [cond_val, x_val, y_val]
+    )
 
     expected = np.where(cond_val, x_val, y_val)
     np.testing.assert_array_equal(output, expected)

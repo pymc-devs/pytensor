@@ -7,6 +7,7 @@ from pytensor.scalar import basic as scalar
 from pytensor.scalar import math as scalar_math
 from pytensor.tensor.elemwise import Elemwise
 
+
 # ⭐ THE MAGIC MAPPING - Tier 1 + Tier 4-5 operations
 SCALAR_OP_TO_ONNX = {
     # Arithmetic (Tier 1)

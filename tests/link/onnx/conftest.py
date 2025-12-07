@@ -5,6 +5,7 @@ import pytest
 
 from pytensor.configdefaults import config
 
+
 # Import hypothesis if available
 try:
     from hypothesis import HealthCheck, Phase, Verbosity, settings

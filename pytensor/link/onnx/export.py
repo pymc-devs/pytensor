@@ -4,7 +4,6 @@ import onnx
 
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
-from pytensor.graph.fg import FunctionGraph
 from pytensor.link.onnx.dispatch import onnx_funcify
 from pytensor.link.onnx.linker import ONNXLinker
 
@@ -33,9 +32,9 @@ def export_onnx(inputs, outputs, filename, *, opset_version=18, **kwargs):
     Examples
     --------
     >>> import pytensor.tensor as pt
-    >>> x = pt.vector('x', dtype='float32')
+    >>> x = pt.vector("x", dtype="float32")
     >>> y = x * 2 + 1
-    >>> model = export_onnx([x], y, 'model.onnx')
+    >>> model = export_onnx([x], y, "model.onnx")
     """
     # Ensure outputs is a list
     if not isinstance(outputs, (list, tuple)):
@@ -82,10 +81,10 @@ def compile_onnx(inputs, outputs, *, opset_version=18, **kwargs):
     --------
     >>> import pytensor.tensor as pt
     >>> import numpy as np
-    >>> x = pt.vector('x', dtype='float32')
+    >>> x = pt.vector("x", dtype="float32")
     >>> y = x * 2 + 1
     >>> fn = compile_onnx([x], y)
-    >>> result = fn(np.array([1, 2, 3], dtype='float32'))
+    >>> result = fn(np.array([1, 2, 3], dtype="float32"))
     """
     # Create ONNX mode
     onnx_linker = ONNXLinker(opset_version=opset_version)
@@ -116,10 +115,10 @@ def export_function_onnx(fn, filename, *, opset_version=18):
     --------
     >>> import pytensor
     >>> import pytensor.tensor as pt
-    >>> x = pt.vector('x', dtype='float32')
+    >>> x = pt.vector("x", dtype="float32")
     >>> y = pt.sqrt(x)
     >>> fn = pytensor.function([x], y)
-    >>> model = export_function_onnx(fn, 'sqrt_model.onnx')
+    >>> model = export_function_onnx(fn, "sqrt_model.onnx")
     """
     # Check if the function was already compiled with ONNX linker
     if isinstance(fn.maker.linker, ONNXLinker):

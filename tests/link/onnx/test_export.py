@@ -12,9 +12,9 @@ def test_export_onnx_basic(tmp_path):
     pytest.importorskip("onnx")
     pytest.importorskip("onnxruntime")
 
-    from pytensor.link.onnx import export_onnx
-
     import onnx
+
+    from pytensor.link.onnx import export_onnx
 
     # Define graph
     x = pt.vector("x", dtype="float32")
@@ -61,9 +61,9 @@ def test_export_function_onnx(tmp_path):
     pytest.importorskip("onnx")
     pytest.importorskip("onnxruntime")
 
-    from pytensor.link.onnx import export_function_onnx
-
     import onnx
+
+    from pytensor.link.onnx import export_function_onnx
 
     # Create and compile function
     x = pt.vector("x", dtype="float32")

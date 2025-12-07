@@ -41,11 +41,13 @@ def test_simple_mlp():
     W2_val = rng.normal(size=(20, 3)).astype("float32")
     b2_val = rng.normal(size=(3,)).astype("float32")
 
-    fn, result = compare_onnx_and_py(
+    _fn, result = compare_onnx_and_py(
         [x, W1, b1, W2, b2], output, [x_val, W1_val, b1_val, W2_val, b2_val]
     )
 
     # Verify output is valid probabilities
     assert result.shape == (5, 3), f"Expected shape (5, 3), got {result.shape}"
     assert np.allclose(result.sum(axis=1), 1.0), "Softmax should sum to 1"
-    assert np.all(result >= 0) and np.all(result <= 1), "Probabilities should be in [0, 1]"
+    assert np.all(result >= 0) and np.all(result <= 1), (
+        "Probabilities should be in [0, 1]"
+    )

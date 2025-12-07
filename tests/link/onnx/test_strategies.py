@@ -4,10 +4,12 @@ This module validates the structure and correctness of operation registries
 used for property-based testing of the ONNX backend.
 """
 
-import pytest
 import numpy as np
+import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 import pytensor.tensor as pt
-from hypothesis import given, strategies as st, settings
 
 
 # ============================================================================
@@ -26,10 +28,10 @@ def test_elemwise_registry_exists():
     """
     from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
 
-    assert isinstance(ELEMWISE_OPERATIONS, dict), \
+    assert isinstance(ELEMWISE_OPERATIONS, dict), (
         "ELEMWISE_OPERATIONS should be a dictionary"
-    assert len(ELEMWISE_OPERATIONS) > 0, \
-        "ELEMWISE_OPERATIONS should not be empty"
+    )
+    assert len(ELEMWISE_OPERATIONS) > 0, "ELEMWISE_OPERATIONS should not be empty"
 
 
 def test_elemwise_registry_completeness():
@@ -56,34 +58,62 @@ def test_elemwise_registry_completeness():
 
     expected_ops = {
         # Binary arithmetic operations (6)
-        'add', 'mul', 'sub', 'div', 'int_div', 'pow',
+        "add",
+        "mul",
+        "sub",
+        "div",
+        "int_div",
+        "pow",
         # Unary math operations (5)
-        'neg', 'abs', 'exp', 'log', 'sqrt',
+        "neg",
+        "abs",
+        "exp",
+        "log",
+        "sqrt",
         # Rounding operations (4 - two Python operations, both mapped to ONNX "Round")
-        'floor', 'ceil', 'round', 'round_away',
+        "floor",
+        "ceil",
+        "round",
+        "round_away",
         # Element-wise min/max operations (2)
-        'maximum', 'minimum',
+        "maximum",
+        "minimum",
         # Special operations (1)
-        'clip'
+        "clip",
     }
 
     actual_ops = set(ELEMWISE_OPERATIONS.keys())
     missing_ops = expected_ops - actual_ops
-    extra_ops = actual_ops - expected_ops
 
-    assert len(expected_ops) == 18, \
+    assert len(expected_ops) == 18, (
         f"Expected ops count should be 18 Tier 1 operations, got {len(expected_ops)}"
-    assert missing_ops == set(), \
-        f"Missing operations in registry: {missing_ops}"
-    # Note: extra_ops is OK if we're testing additional Tier 4-5 operations
+    )
+    assert missing_ops == set(), f"Missing operations in registry: {missing_ops}"
+    # Note: extra operations in actual_ops are OK if testing Tier 4-5 operations
 
 
-@pytest.mark.parametrize("op_name", [
-    'add', 'mul', 'sub', 'div', 'int_div', 'pow',
-    'neg', 'abs', 'exp', 'log', 'sqrt',
-    'floor', 'ceil', 'round',
-    'maximum', 'minimum', 'clip'
-])
+@pytest.mark.parametrize(
+    "op_name",
+    [
+        "add",
+        "mul",
+        "sub",
+        "div",
+        "int_div",
+        "pow",
+        "neg",
+        "abs",
+        "exp",
+        "log",
+        "sqrt",
+        "floor",
+        "ceil",
+        "round",
+        "maximum",
+        "minimum",
+        "clip",
+    ],
+)
 def test_elemwise_registry_entry_structure(op_name):
     """
     Test that each registry entry has required fields with correct types.
@@ -99,22 +129,27 @@ def test_elemwise_registry_entry_structure(op_name):
     entry = ELEMWISE_OPERATIONS[op_name]
 
     # Check all required fields present
-    required_fields = {'build_graph', 'strategy', 'expected_onnx_ops', 'description'}
+    required_fields = {"build_graph", "strategy", "expected_onnx_ops", "description"}
     actual_fields = set(entry.keys())
     missing_fields = required_fields - actual_fields
 
-    assert missing_fields == set(), \
+    assert missing_fields == set(), (
         f"{op_name}: Missing required fields: {missing_fields}"
+    )
 
     # Check field types
-    assert callable(entry['build_graph']), \
+    assert callable(entry["build_graph"]), (
         f"{op_name}: 'build_graph' should be callable"
-    assert isinstance(entry['expected_onnx_ops'], list), \
+    )
+    assert isinstance(entry["expected_onnx_ops"], list), (
         f"{op_name}: 'expected_onnx_ops' should be a list"
-    assert all(isinstance(op, str) for op in entry['expected_onnx_ops']), \
+    )
+    assert all(isinstance(op, str) for op in entry["expected_onnx_ops"]), (
         f"{op_name}: 'expected_onnx_ops' should contain strings"
-    assert isinstance(entry['description'], str), \
+    )
+    assert isinstance(entry["description"], str), (
         f"{op_name}: 'description' should be a string"
+    )
 
 
 # ============================================================================
@@ -137,24 +172,18 @@ def test_binary_op_strategy_generates_valid_data(data):
     from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
 
     # Test with 'add' as representative binary op
-    op_config = ELEMWISE_OPERATIONS['add']
-    test_inputs = data.draw(op_config['strategy'])
+    op_config = ELEMWISE_OPERATIONS["add"]
+    test_inputs = data.draw(op_config["strategy"])
 
-    assert isinstance(test_inputs, tuple), \
-        "Binary op strategy should return tuple"
-    assert len(test_inputs) >= 2, \
-        "Binary op strategy should return at least 2 arrays"
+    assert isinstance(test_inputs, tuple), "Binary op strategy should return tuple"
+    assert len(test_inputs) >= 2, "Binary op strategy should return at least 2 arrays"
 
     x_val, y_val = test_inputs[0], test_inputs[1]
 
-    assert x_val.dtype == np.float32, \
-        f"Expected float32, got {x_val.dtype}"
-    assert y_val.dtype == np.float32, \
-        f"Expected float32, got {y_val.dtype}"
-    assert np.all(np.isfinite(x_val)), \
-        "Generated data should be finite"
-    assert np.all(np.isfinite(y_val)), \
-        "Generated data should be finite"
+    assert x_val.dtype == np.float32, f"Expected float32, got {x_val.dtype}"
+    assert y_val.dtype == np.float32, f"Expected float32, got {y_val.dtype}"
+    assert np.all(np.isfinite(x_val)), "Generated data should be finite"
+    assert np.all(np.isfinite(y_val)), "Generated data should be finite"
 
 
 @given(data=st.data())
@@ -171,8 +200,8 @@ def test_unary_op_strategy_generates_valid_data(data):
     from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
 
     # Test with 'neg' as representative unary op
-    op_config = ELEMWISE_OPERATIONS['neg']
-    test_inputs = data.draw(op_config['strategy'])
+    op_config = ELEMWISE_OPERATIONS["neg"]
+    test_inputs = data.draw(op_config["strategy"])
 
     # Handle both tuple and direct array returns
     if isinstance(test_inputs, tuple):
@@ -180,10 +209,8 @@ def test_unary_op_strategy_generates_valid_data(data):
     else:
         x_val = test_inputs
 
-    assert x_val.dtype == np.float32, \
-        f"Expected float32, got {x_val.dtype}"
-    assert np.all(np.isfinite(x_val)), \
-        "Generated data should be finite"
+    assert x_val.dtype == np.float32, f"Expected float32, got {x_val.dtype}"
+    assert np.all(np.isfinite(x_val)), "Generated data should be finite"
 
 
 @given(data=st.data())
@@ -198,18 +225,18 @@ def test_log_strategy_generates_positive_values(data):
     """
     from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
 
-    op_config = ELEMWISE_OPERATIONS['log']
-    test_inputs = data.draw(op_config['strategy'])
+    op_config = ELEMWISE_OPERATIONS["log"]
+    test_inputs = data.draw(op_config["strategy"])
 
     if isinstance(test_inputs, tuple):
         x_val = test_inputs[0]
     else:
         x_val = test_inputs
 
-    assert np.all(x_val > 0), \
-        "Log operation requires positive inputs"
-    assert np.all(x_val > 1e-6), \
+    assert np.all(x_val > 0), "Log operation requires positive inputs"
+    assert np.all(x_val > 1e-6), (
         "Values should not be too close to zero for numerical stability"
+    )
 
 
 @given(data=st.data())
@@ -223,16 +250,15 @@ def test_sqrt_strategy_generates_non_negative_values(data):
     """
     from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
 
-    op_config = ELEMWISE_OPERATIONS['sqrt']
-    test_inputs = data.draw(op_config['strategy'])
+    op_config = ELEMWISE_OPERATIONS["sqrt"]
+    test_inputs = data.draw(op_config["strategy"])
 
     if isinstance(test_inputs, tuple):
         x_val = test_inputs[0]
     else:
         x_val = test_inputs
 
-    assert np.all(x_val >= 0), \
-        "Sqrt operation requires non-negative inputs"
+    assert np.all(x_val >= 0), "Sqrt operation requires non-negative inputs"
 
 
 # ============================================================================
@@ -252,25 +278,22 @@ def test_build_graph_returns_valid_structure():
     from tests.link.onnx.strategies import ELEMWISE_OPERATIONS
 
     # Test with 'add' as representative
-    op_config = ELEMWISE_OPERATIONS['add']
+    op_config = ELEMWISE_OPERATIONS["add"]
 
     # Create dummy inputs
-    x_val = np.array([1, 2, 3], dtype='float32')
-    y_val = np.array([4, 5, 6], dtype='float32')
+    x_val = np.array([1, 2, 3], dtype="float32")
+    y_val = np.array([4, 5, 6], dtype="float32")
 
     # Call build_graph
-    result = op_config['build_graph'](x_val, y_val)
+    result = op_config["build_graph"](x_val, y_val)
 
-    assert isinstance(result, tuple), \
-        "build_graph should return a tuple"
-    assert len(result) == 2, \
-        "build_graph should return (inputs, output)"
+    assert isinstance(result, tuple), "build_graph should return a tuple"
+    assert len(result) == 2, "build_graph should return (inputs, output)"
 
     graph_inputs, graph_output = result
 
-    assert isinstance(graph_inputs, list), \
-        "First element should be list of inputs"
-    assert all(isinstance(inp, pt.Variable) for inp in graph_inputs), \
+    assert isinstance(graph_inputs, list), "First element should be list of inputs"
+    assert all(isinstance(inp, pt.Variable) for inp in graph_inputs), (
         "All inputs should be PyTensor Variables"
-    assert isinstance(graph_output, pt.Variable), \
-        "Output should be PyTensor Variable"
+    )
+    assert isinstance(graph_output, pt.Variable), "Output should be PyTensor Variable"

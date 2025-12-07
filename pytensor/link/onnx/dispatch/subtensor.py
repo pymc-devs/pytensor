@@ -1,12 +1,18 @@
 """ONNX conversion for subtensor (slicing) operations."""
 
 import sys
+
 import numpy as np
 from onnx import helper, numpy_helper
 
-from pytensor.link.onnx.dispatch.basic import onnx_funcify
-from pytensor.tensor.subtensor import Subtensor, AdvancedSubtensor, AdvancedSubtensor1, IncSubtensor
 from pytensor.graph.basic import Constant
+from pytensor.link.onnx.dispatch.basic import onnx_funcify
+from pytensor.tensor.subtensor import (
+    AdvancedSubtensor,
+    AdvancedSubtensor1,
+    IncSubtensor,
+    Subtensor,
+)
 
 
 @onnx_funcify.register(Subtensor)
@@ -149,7 +155,7 @@ def onnx_funcify_Subtensor(op, node, get_var_name, **kwargs):
 
     # Create Slice node with input tensors
     slice_node = helper.make_node(
-        'Slice',
+        "Slice",
         inputs=[input_name, starts_name, ends_name, axes_name, steps_name],
         outputs=[output_name],
         name=f"Slice_{output_name}",
@@ -178,7 +184,7 @@ def onnx_funcify_AdvancedSubtensor1(op, node, get_var_name, **kwargs):
     output_name = get_var_name(node.outputs[0])
 
     gather_node = helper.make_node(
-        'Gather',
+        "Gather",
         inputs=[data_name, indices_name],
         outputs=[output_name],
         name=f"Gather_{output_name}",
@@ -222,7 +228,7 @@ def onnx_funcify_AdvancedSubtensor(op, node, get_var_name, **kwargs):
 
     # Use Gather for simple indexing on axis 0
     gather_node = helper.make_node(
-        'Gather',
+        "Gather",
         inputs=[data_name, indices_name],
         outputs=[output_name],
         name=f"Gather_{output_name}",
@@ -288,9 +294,7 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
         )
 
     if stop is None:
-        raise NotImplementedError(
-            "IncSubtensor with unbounded stop not yet supported"
-        )
+        raise NotImplementedError("IncSubtensor with unbounded stop not yet supported")
     elif isinstance(stop, Constant):
         stop_val = int(stop.data)
     elif isinstance(stop, int):
@@ -307,14 +311,10 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
     elif isinstance(step, int):
         step_val = step
     else:
-        raise NotImplementedError(
-            "IncSubtensor with dynamic step not yet supported"
-        )
+        raise NotImplementedError("IncSubtensor with dynamic step not yet supported")
 
     if step_val != 1:
-        raise NotImplementedError(
-            "IncSubtensor with step != 1 not yet supported"
-        )
+        raise NotImplementedError("IncSubtensor with step != 1 not yet supported")
 
     if start_val < 0 or stop_val < 0:
         raise NotImplementedError(
@@ -338,7 +338,7 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
 
     # Create Constant nodes for start, stop, step
     start_const = helper.make_node(
-        'Constant',
+        "Constant",
         inputs=[],
         outputs=[start_name],
         name=f"Constant_{start_name}",
@@ -347,12 +347,12 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
             data_type=helper.TensorProto.INT64,
             dims=[],
             vals=[start_val],
-        )
+        ),
     )
     nodes.append(start_const)
 
     stop_const = helper.make_node(
-        'Constant',
+        "Constant",
         inputs=[],
         outputs=[stop_name],
         name=f"Constant_{stop_name}",
@@ -361,12 +361,12 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
             data_type=helper.TensorProto.INT64,
             dims=[],
             vals=[stop_val],
-        )
+        ),
     )
     nodes.append(stop_const)
 
     step_const = helper.make_node(
-        'Constant',
+        "Constant",
         inputs=[],
         outputs=[step_name],
         name=f"Constant_{step_name}",
@@ -375,13 +375,13 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
             data_type=helper.TensorProto.INT64,
             dims=[],
             vals=[step_val],
-        )
+        ),
     )
     nodes.append(step_const)
 
     # Range node: creates [start, start+1, ..., stop-1]
     range_node = helper.make_node(
-        'Range',
+        "Range",
         inputs=[start_name, stop_name, step_name],
         outputs=[indices_name],
         name=f"Range_{indices_name}",
@@ -392,7 +392,7 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
     if op.set_instead_of_inc:
         # set_subtensor: directly scatter the new values
         scatter_node = helper.make_node(
-            'ScatterElements',
+            "ScatterElements",
             inputs=[data_name, indices_name, values_name],
             outputs=[output_name],
             name=f"ScatterElements_{output_name}",
@@ -404,7 +404,7 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
         # 1. Gather current values
         current_values_name = f"{output_name}_current"
         gather_node = helper.make_node(
-            'Gather',
+            "Gather",
             inputs=[data_name, indices_name],
             outputs=[current_values_name],
             name=f"Gather_{current_values_name}",
@@ -415,7 +415,7 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
         # 2. Add current + new values
         sum_values_name = f"{output_name}_sum"
         add_node = helper.make_node(
-            'Add',
+            "Add",
             inputs=[current_values_name, values_name],
             outputs=[sum_values_name],
             name=f"Add_{sum_values_name}",
@@ -424,7 +424,7 @@ def onnx_funcify_IncSubtensor(op, node, get_var_name, **kwargs):
 
         # 3. Scatter the summed values
         scatter_node = helper.make_node(
-            'ScatterElements',
+            "ScatterElements",
             inputs=[data_name, indices_name, sum_values_name],
             outputs=[output_name],
             name=f"ScatterElements_{output_name}",

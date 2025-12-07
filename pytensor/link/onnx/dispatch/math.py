@@ -1,24 +1,24 @@
 """ONNX conversion for math operations (reductions)."""
 
 from pytensor.link.onnx.dispatch.basic import onnx_funcify
-from pytensor.tensor.math import CAReduce, Argmax
-from pytensor.scalar.basic import Add, Mul, Maximum, Minimum, AND, OR
+from pytensor.scalar.basic import AND, OR, Add, Maximum, Minimum, Mul
+from pytensor.tensor.math import Argmax, CAReduce
+
 
 try:
     from onnx import helper
-    import numpy as np
 except ImportError as e:
     raise ImportError("ONNX package required for export") from e
 
 
 # Mapping from PyTensor scalar ops to ONNX reduction ops
 REDUCE_OP_MAP = {
-    Add: 'ReduceSum',
-    Mul: 'ReduceProd',
-    Maximum: 'ReduceMax',
-    Minimum: 'ReduceMin',
-    AND: 'ReduceMin',  # For boolean AND
-    OR: 'ReduceMax',   # For boolean OR
+    Add: "ReduceSum",
+    Mul: "ReduceProd",
+    Maximum: "ReduceMax",
+    Minimum: "ReduceMin",
+    AND: "ReduceMin",  # For boolean AND
+    OR: "ReduceMax",  # For boolean OR
 }
 
 
@@ -57,7 +57,7 @@ def onnx_funcify_CAReduce(op, node, get_var_name, **kwargs):
         # For opset 18+, axes must be an input tensor
         axes_name = f"{output_name}_axes"
         axes_constant = helper.make_node(
-            'Constant',
+            "Constant",
             inputs=[],
             outputs=[axes_name],
             name=f"Constant_{axes_name}",
@@ -66,7 +66,7 @@ def onnx_funcify_CAReduce(op, node, get_var_name, **kwargs):
                 data_type=helper.TensorProto.INT64,
                 dims=[len(axes_list)],
                 vals=axes_list,
-            )
+            ),
         )
         nodes.append(axes_constant)
 
@@ -102,7 +102,7 @@ def onnx_funcify_Argmax(op, node, get_var_name, **kwargs):
         # Argmax over all axes - need to flatten first
         flatten_name = f"{output_name}_flat"
         flatten_node = helper.make_node(
-            'Flatten',
+            "Flatten",
             inputs=[input_name],
             outputs=[flatten_name],
             name=f"Flatten_{flatten_name}",
@@ -110,7 +110,7 @@ def onnx_funcify_Argmax(op, node, get_var_name, **kwargs):
         )
 
         argmax_node = helper.make_node(
-            'ArgMax',
+            "ArgMax",
             inputs=[flatten_name],
             outputs=[output_name],
             name=f"ArgMax_{output_name}",
@@ -130,7 +130,7 @@ def onnx_funcify_Argmax(op, node, get_var_name, **kwargs):
             axis = axis[0]
 
         onnx_node = helper.make_node(
-            'ArgMax',
+            "ArgMax",
             inputs=[input_name],
             outputs=[output_name],
             name=f"ArgMax_{output_name}",
@@ -139,5 +139,3 @@ def onnx_funcify_Argmax(op, node, get_var_name, **kwargs):
         )
 
         return onnx_node
-
-

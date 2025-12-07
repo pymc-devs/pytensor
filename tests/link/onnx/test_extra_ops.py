@@ -43,12 +43,10 @@ def test_repeat():
 
     x_val = np.array([1, 2, 3], dtype="float32")
 
-    fn, result = compare_onnx_and_py([x], y, [x_val])
+    _fn, result = compare_onnx_and_py([x], y, [x_val])
 
     expected = np.repeat(x_val, repeats=3, axis=0)
     np.testing.assert_array_equal(result, expected)
-
-    # Repeat in ONNX can be done with Tile or Expand
 
 
 # Unique Tests
@@ -95,7 +93,9 @@ def test_pad():
 
     fn, result = compare_onnx_and_py([x], y, [x_val])
 
-    expected = np.pad(x_val, pad_width=((1, 1), (1, 1)), mode="constant", constant_values=0)
+    expected = np.pad(
+        x_val, pad_width=((1, 1), (1, 1)), mode="constant", constant_values=0
+    )
     np.testing.assert_array_equal(result, expected)
 
     node_types = get_onnx_node_types(fn)
