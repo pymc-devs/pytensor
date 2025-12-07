@@ -1824,7 +1824,10 @@ class QR(Op):
             K = None
 
         in_dtype = x.type.numpy_dtype
-        out_dtype = np.dtype(f"f{in_dtype.itemsize}")
+        if in_dtype.kind in "ibu":
+            out_dtype = "float64" if in_dtype.itemsize > 2 else "float32"
+        else:
+            out_dtype = "float64" if in_dtype.itemsize > 4 else "float32"
 
         match self.mode:
             case "full":

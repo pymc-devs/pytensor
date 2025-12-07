@@ -3,6 +3,7 @@ import ctypes
 import numpy as np
 from numba.core import cgutils, types
 from numba.core.extending import get_cython_function_address, intrinsic
+from numba.core.types import Complex
 from numba.np.linalg import ensure_lapack, get_blas_kind
 
 
@@ -486,8 +487,7 @@ class _LAPACK:
         Used in QR decomposition with pivoting.
         """
         lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "geqp3")
-        functype = ctypes.CFUNCTYPE(
-            None,
+        ctype_args = (
             _ptr_int,  # M
             _ptr_int,  # N
             float_pointer,  # A
@@ -496,8 +496,20 @@ class _LAPACK:
             float_pointer,  # TAU
             float_pointer,  # WORK
             _ptr_int,  # LWORK
+        )
+
+        if isinstance(dtype, Complex):
+            ctype_args = (
+                *ctype_args,
+                float_pointer,  # RWORK)
+            )
+
+        functype = ctypes.CFUNCTYPE(
+            None,
+            *ctype_args,
             _ptr_int,  # INFO
         )
+
         return functype(lapack_ptr)
 
     @classmethod
