@@ -42,7 +42,6 @@ from pytensor.tensor.slinalg import (
     Solve,
     SolveTriangular,
 )
-from pytensor.tensor.type import complex_dtypes, integer_dtypes
 
 
 @numba_funcify.register(Cholesky)
@@ -418,12 +417,12 @@ def numba_funcify_QR(op, node, **kwargs):
     pivoting = op.pivoting
     overwrite_a = op.overwrite_a
 
-    dtype = node.inputs[0].dtype
-    if dtype in complex_dtypes:
-        return generate_fallback_impl(op, node=node, **kwargs)
+    in_dtype = node.inputs[0].type.numpy_dtype
+    integer_input = in_dtype.kind in "ibu"
+    if integer_input and config.compiler_verbose:
+        print("QR requires casting discrete input to float")  # noqa: T201
 
-    integer_input = dtype in integer_dtypes
-    in_dtype = config.floatX if integer_input else dtype
+    out_dtype = node.outputs[0].type.numpy_dtype
 
     @numba_basic.numba_njit
     def qr(a):
@@ -434,7 +433,7 @@ def numba_funcify_QR(op, node, **kwargs):
                 )
 
         if integer_input:
-            a = a.astype(in_dtype)
+            a = a.astype(out_dtype)
 
         if (mode == "full" or mode == "economic") and pivoting:
             Q, R, P = _qr_full_pivot(

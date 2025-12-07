@@ -718,17 +718,21 @@ class TestDecompositions:
         ids=["economic", "full_pivot", "r", "raw_pivot"],
     )
     @pytest.mark.parametrize(
-        "overwrite_a", [True, False], ids=["overwrite_a", "no_overwrite"]
+        "overwrite_a", [False, True], ids=["overwrite_a", "no_overwrite"]
     )
-    def test_qr(self, mode, pivoting, overwrite_a):
+    @pytest.mark.parametrize("complex", (False, True))
+    def test_qr(self, mode, pivoting, overwrite_a, complex):
         shape = (5, 5)
         rng = np.random.default_rng()
         A = pt.tensor(
             "A",
             shape=shape,
-            dtype=config.floatX,
+            dtype="complex128" if complex else "float64",
         )
-        A_val = rng.normal(size=shape).astype(config.floatX)
+        if complex:
+            A_val = rng.normal(size=(*shape, 2)).view(dtype=A.dtype).squeeze(-1)
+        else:
+            A_val = rng.normal(size=shape).astype(A.dtype)
 
         qr_outputs = pt.linalg.qr(A, mode=mode, pivoting=pivoting)
 
