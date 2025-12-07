@@ -2,6 +2,7 @@ import warnings
 from collections.abc import Sequence
 from numbers import Number
 from textwrap import dedent
+from types import EllipsisType
 from typing import TYPE_CHECKING, Union, cast
 from typing import cast as typing_cast
 
@@ -27,7 +28,7 @@ from pytensor.tensor.variable import TensorConstant, TensorVariable
 if TYPE_CHECKING:
     from pytensor.tensor import TensorLike
 
-ShapeValueType = None | np.integer | int | Variable
+ShapeValueType = None | EllipsisType | np.integer | int | Variable
 
 
 def register_shape_c_code(type, code, version=()):
@@ -549,26 +550,37 @@ def specify_shape(
 
     If a dimension's shape value is ``None``, the size of that dimension is not
     considered fixed/static at runtime.
+
+    A single ``Ellipsis`` can be used to imply multiple ``None`` specified dimensions
     """
+    x = as_tensor_variable(x)  # type: ignore[arg-type]
 
     if not isinstance(shape, tuple | list):
         shape = (shape,)
 
     # If shape is a symbolic 1d vector of fixed length, we separate the items into a
     # tuple with one entry per shape dimension
-    if len(shape) == 1 and shape[0] is not None:
-        shape_vector = ptb.as_tensor_variable(shape[0])
+    if len(shape) == 1 and shape[0] not in (None, Ellipsis):
+        shape_vector = ptb.as_tensor_variable(shape[0])  # type: ignore[arg-type]
         if shape_vector.ndim == 1:
             try:
                 shape = tuple(shape_vector)
             except ValueError:
                 raise ValueError("Shape vector must have fixed dimensions")
 
+    if Ellipsis in shape:
+        ellipsis_pos = shape.index(Ellipsis)
+        implied_none = x.type.ndim - (len(shape) - 1)
+        shape = (
+            *shape[:ellipsis_pos],
+            *((None,) * implied_none),
+            *shape[ellipsis_pos + 1 :],
+        )
+        if Ellipsis in shape[ellipsis_pos + 1 :]:
+            raise ValueError("Multiple Ellipsis in specify_shape")
+
     # If the specified shape is already encoded in the input static shape, do nothing
     # This ignores PyTensor constants in shape
-    x = ptb.as_tensor_variable(x)  # type: ignore[arg-type,unused-ignore]
-    # The above is a type error in Python 3.9 but not 3.12.
-    # Thus we need to ignore unused-ignore on 3.12.
     new_shape_info = any(
         s != xts for (s, xts) in zip(shape, x.type.shape, strict=False) if s is not None
     )

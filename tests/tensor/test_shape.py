@@ -480,6 +480,33 @@ class TestSpecifyShape(utt.InferShapeTester):
         y = specify_shape(x, (None, 5))
         assert y.type.shape == (3, 5)
 
+    def test_ellipsis(self):
+        x = tensor("x", shape=(None, None, None, None))
+
+        y = specify_shape(x, ...)
+        assert y.type.shape == (None, None, None, None)
+
+        y = specify_shape(x, (...,))
+        assert y.type.shape == (None, None, None, None)
+
+        y = specify_shape(x, (..., 5))
+        assert y.type.shape == (None, None, None, 5)
+
+        y = specify_shape(x, (5, ...))
+        assert y.type.shape == (5, None, None, None)
+
+        y = specify_shape(x, (5, ..., 3))
+        assert y.type.shape == (5, None, None, 3)
+
+        y = specify_shape(x, (5, ..., 3, None))
+        assert y.type.shape == (5, None, 3, None)
+
+        y = specify_shape(x, (5, 1, ..., 3, None))
+        assert y.type.shape == (5, 1, 3, None)
+
+        with pytest.raises(ValueError, match="Multiple Ellipsis in specify_shape"):
+            specify_shape(x, (..., None, ...))
+
     def test_python_perform(self):
         """Test the Python `Op.perform` implementation."""
         x = scalar()
@@ -583,6 +610,8 @@ class TestSpecifyShape(utt.InferShapeTester):
 
         assert specify_shape(x, (1, 2, None)) is x
         assert specify_shape(x, (None, None, None)) is x
+        assert specify_shape(x, (...,)) is x
+        assert specify_shape(x, (..., None)) is x
 
         assert specify_shape(x, (1, 2, 3)) is not x
         assert specify_shape(x, (None, None, 3)) is not x
