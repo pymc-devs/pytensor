@@ -102,12 +102,13 @@ def test_convolve1d_valid_grad(static_shape):
             "local_useless_unbatched_blockwise",
         ),
     )
-    grad_out.dprint()
+
     [conv_node] = [
         node
         for node in io_toposort([larger, smaller], [grad_out])
         if isinstance(node.op, Convolve1d)
     ]
+
     full_mode = conv_node.inputs[-1]
     # If shape is static we get constant mode == "valid", otherwise it depends on the input shapes
     # ignoring E712 because np.True_ and np.False_ need to be compared with `==` to produce a valid boolean
@@ -148,7 +149,7 @@ def test_convolve1d_grad_benchmark_c(convolve_mode, benchmark):
 @pytest.mark.parametrize(
     "data_shape", [(3, 3), (5, 5), (8, 8)], ids=lambda x: f"data_shape={x}"
 )
-@pytest.mark.parametrize("mode", ["full", "valid", "same"][:-1])
+@pytest.mark.parametrize("mode", ["full", "valid", "same"])
 @pytest.mark.parametrize(
     "boundary, boundary_kwargs",
     [
@@ -181,13 +182,29 @@ def test_convolve2d(kernel_shape, data_shape, mode, boundary, boundary_kwargs):
     utt.verify_grad(lambda k: op(data_val, k).sum(), [kernel_val])
 
 
-def test_batched_1d_agrees_with_diagonal_2d():
+def test_convolve2d_fft():
+    data = matrix("data")
+    kernel = matrix("kernel")
+    out_fft = convolve2d(data, kernel, mode="same", method="fft")
+    out_direct = convolve2d(data, kernel, mode="same", method="direct")
+
+    rng = np.random.default_rng()
+    data_val = rng.normal(size=(7, 5)).astype(config.floatX)
+    kernel_val = rng.normal(size=(3, 2)).astype(config.floatX)
+
+    fn = function([data, kernel], [out_fft, out_direct])
+    fft_res, direct_res = fn(data_val, kernel_val)
+    np.testing.assert_allclose(fft_res, direct_res)
+
+
+@pytest.mark.parametrize("mode", ["full", "valid", "same"])
+def test_batched_1d_agrees_with_2d_row_filter(mode):
     data = matrix("data")
     kernel_1d = vector("kernel_1d")
     kernel_2d = expand_dims(kernel_1d, 0)
 
-    output_1d = convolve1d(data, kernel_1d, mode="valid")
-    output_2d = convolve2d(data, kernel_2d, mode="valid")
+    output_1d = convolve1d(data, kernel_1d, mode=mode)
+    output_2d = convolve2d(data, kernel_2d, mode=mode)
 
     grad_1d = grad(output_1d.sum(), kernel_1d).ravel()
     grad_2d = grad(output_1d.sum(), kernel_1d).ravel()

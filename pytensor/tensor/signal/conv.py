@@ -3,7 +3,7 @@ from typing import cast as type_cast
 
 import numpy as np
 from numpy import convolve as numpy_convolve
-from scipy.signal import convolve2d as scipy_convolve2d
+from scipy.signal import convolve as scipy_convolve
 
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Constant
@@ -113,7 +113,7 @@ class AbstractConvolveNd:
         ]
 
 
-class Convolve1d(AbstractConvolveNd, COp):
+class Convolve1d(AbstractConvolveNd, COp):  # type: ignore[misc]
     __props__ = ()
     ndim = 1
 
@@ -245,26 +245,19 @@ def convolve1d(
     return type_cast(TensorVariable, blockwise_convolve_1d(in1, in2, full_mode))
 
 
-class Convolve2d(AbstractConvolveNd, Op):
-    __props__ = ()
+class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
+    __props__ = ("method",)  # type: ignore[assignment]
     ndim = 2
+
+    def __init__(self, method: Literal["direct", "fft", "auto"] = "auto"):
+        self.method = method
 
     def perform(self, node, inputs, outputs):
         in1, in2, full_mode = inputs
 
-        # if all(inpt.dtype.kind in ['f', 'c'] for inpt in inputs):
-        #     outputs[0][0] = scipy_convolve(in1, in2, mode=self.mode, method='fft')
-        #
-        # else:
-        # TODO: Why is .item() needed???
-        outputs[0][0] = scipy_convolve2d(
-            in1,
-            in2,
-            mode="full" if full_mode.item() else "valid",
-        )
-
-
-blockwise_convolve_2d = Blockwise(Convolve2d())
+        # TODO: Why is .item() needed?
+        mode: Literal["full", "valid", "same"] = "full" if full_mode.item() else "valid"
+        outputs[0][0] = scipy_convolve(in1, in2, mode=mode, method=self.method)
 
 
 def convolve2d(
@@ -273,6 +266,7 @@ def convolve2d(
     mode: Literal["full", "valid", "same"] = "full",
     boundary: Literal["fill", "wrap", "symm"] = "fill",
     fillvalue: float | int = 0,
+    method: Literal["direct", "fft", "auto"] = "auto",
 ) -> TensorVariable:
     """Convolve two two-dimensional arrays.
 
@@ -296,6 +290,10 @@ def convolve2d(
         - 'symm': Symmetrically reflects the input arrays.
     fillvalue : float or int, optional
         The value to use for padding when boundary is 'fill'. Default is 0.
+    method : str, one of 'direct', 'fft', or 'auto'
+        Computation method to use. 'direct' uses direct convolution, 'fft' uses FFT-based convolution,
+        and 'auto' lets the implementation choose the best method at runtime.
+
     Returns
     -------
     out: tensor_variable
@@ -304,29 +302,44 @@ def convolve2d(
     """
     in1 = as_tensor_variable(in1)
     in2 = as_tensor_variable(in2)
+    ndim = max(in1.type.ndim, in2.type.ndim)
+
+    def _pad_input(input_tensor, pad_width):
+        if boundary == "fill":
+            return pad(
+                input_tensor,
+                pad_width=pad_width,
+                mode="constant",
+                constant_values=fillvalue,
+            )
+        if boundary == "wrap":
+            return pad(input_tensor, pad_width=pad_width, mode="wrap")
+        if boundary == "symm":
+            return pad(input_tensor, pad_width=pad_width, mode="symmetric")
+        raise ValueError(f"Unsupported boundary mode: {boundary}")
 
     if mode == "same":
-        raise NotImplementedError("same mode not implemented for convolve2d")
+        # Same mode is implemented as "valid" with a padded input.
+        pad_width = zeros((ndim, 2), dtype="int64")
+        pad_width = pad_width[-2, 0].set(in2.shape[-2] // 2)
+        pad_width = pad_width[-2, 1].set((in2.shape[-2] - 1) // 2)
+        pad_width = pad_width[-1, 0].set(in2.shape[-1] // 2)
+        pad_width = pad_width[-1, 1].set((in2.shape[-1] - 1) // 2)
+        in1 = _pad_input(in1, pad_width)
+        mode = "valid"
 
     if mode != "valid" and (boundary != "fill" or fillvalue != 0):
         # We use a valid convolution on an appropriately padded kernel
         *_, k, l = in2.shape
-        ndim = max(in1.type.ndim, in2.type.ndim)
 
         pad_width = zeros((ndim, 2), dtype="int64")
         pad_width = pad_width[-2, :].set(k - 1)
         pad_width = pad_width[-1, :].set(l - 1)
-        if boundary == "fill":
-            in1 = pad(
-                in1, pad_width=pad_width, mode="constant", constant_values=fillvalue
-            )
-        elif boundary == "wrap":
-            in1 = pad(in1, pad_width=pad_width, mode="wrap")
-
-        elif boundary == "symm":
-            in1 = pad(in1, pad_width=pad_width, mode="symmetric")
+        in1 = _pad_input(in1, pad_width)
 
         mode = "valid"
 
     full_mode = as_scalar(np.bool_(mode == "full"))
-    return type_cast(TensorVariable, blockwise_convolve_2d(in1, in2, full_mode))
+    return type_cast(
+        TensorVariable, Blockwise(Convolve2d(method=method))(in1, in2, full_mode)
+    )
