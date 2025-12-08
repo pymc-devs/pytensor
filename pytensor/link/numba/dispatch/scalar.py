@@ -170,18 +170,17 @@ def {binary_op_name}({input_signature}):
 @register_funcify_and_cache_key(Pow)
 def numba_funcify_Pow(op, node, **kwargs):
     pow_dtype = node.inputs[1].type.dtype
-    if pow_dtype.startswith("int"):
-        # Numba power fails when exponents are non 64-bit discrete integers and fasthmath=True
-        # https://github.com/numba/numba/issues/9554
 
-        def pow(x, y):
-            return x ** np.asarray(y, dtype=np.int64).item()
-    else:
+    def pow(x, y):
+        return x**y
 
-        def pow(x, y):
-            return x**y
+    # Numba power fails when exponents are discrete integers and fasthmath=True
+    # https://github.com/numba/numba/issues/9554
+    fastmath = False if np.dtype(pow_dtype).kind in "ibu" else None
 
-    return numba_basic.numba_njit(pow), scalar_op_cache_key(op)
+    return numba_basic.numba_njit(pow, fastmath=fastmath), scalar_op_cache_key(
+        op, cache_version=1
+    )
 
 
 @register_funcify_and_cache_key(Add)
