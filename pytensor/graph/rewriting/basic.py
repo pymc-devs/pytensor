@@ -1010,7 +1010,7 @@ class FromFunctionNodeRewriter(NodeRewriter):
 
 
 def node_rewriter(
-    tracks: Sequence[Op | type, OpPattern] | None,
+    tracks: Sequence[Op | type | OpPattern] | None,
     inplace: bool = False,
     requirements: tuple[type, ...] | None = (),
 ):
