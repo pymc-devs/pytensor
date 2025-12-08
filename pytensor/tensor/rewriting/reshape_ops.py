@@ -1,0 +1,42 @@
+from pytensor.graph import node_rewriter
+from pytensor.tensor.rewriting.basic import register_canonicalize
+from pytensor.tensor.shape_ops import JoinDims, SplitDims
+
+
+@register_canonicalize
+@node_rewriter([SplitDims])
+def local_split_dims_to_reshape(fgraph, node):
+    """
+    Canonicalize SplitDims Ops to Reshape Ops for further graph reasoning (and dispatch to other backends).
+    """
+
+    x, shape = node.inputs
+    axis = node.op.axis
+
+    output_shape = [
+        *x.shape[:axis],
+        *shape,
+        *x.shape[axis + 1 :],
+    ]
+
+    return [x.reshape(output_shape)]
+
+
+@register_canonicalize
+@node_rewriter([JoinDims])
+def local_join_dims_to_reshape(fgraph, node):
+    """
+    Canonicalize JoinDims Ops to Reshape Ops for further graph reasoning (and dispatch to other backends).
+    """
+
+    (x,) = node.inputs
+    start_axis = node.op.start_axis
+    n_axes = node.op.n_axes
+
+    output_shape = [
+        *x.shape[:start_axis],
+        -1,
+        *x.shape[start_axis + n_axes :],
+    ]
+
+    return [x.reshape(output_shape)]
