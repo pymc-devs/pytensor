@@ -246,7 +246,7 @@ def numba_funcify_Solve(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
 
     if A_dtype.kind == "c" or b_dtype.kind == "c":
-        raise generate_fallback_impl(op, node=node, **kwargs)
+        return generate_fallback_impl(op, node=node, **kwargs)
     must_cast_A = A_dtype != out_dtype
     if must_cast_A and config.compiler_verbose:
         print("Solve requires casting first input `A`")  # noqa: T201
@@ -320,7 +320,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
 
     if A_dtype.kind == "c" or b_dtype.kind == "c":
-        raise generate_fallback_impl(op, node=node, **kwargs)
+        return generate_fallback_impl(op, node=node, **kwargs)
     must_cast_A = A_dtype != out_dtype
     if must_cast_A and config.compiler_verbose:
         print("SolveTriangular requires casting first input `A`")  # noqa: T201
@@ -371,7 +371,7 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     out_dtype = node.outputs[0].type.numpy_dtype
 
     if c_dtype.kind == "c" or b_dtype.kind == "c":
-        raise generate_fallback_impl(op, node=node, **kwargs)
+        return generate_fallback_impl(op, node=node, **kwargs)
     must_cast_c = c_dtype != out_dtype
     if must_cast_c and config.compiler_verbose:
         print("CholeskySolve requires casting first input `c`")  # noqa: T201
