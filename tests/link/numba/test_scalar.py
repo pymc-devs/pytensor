@@ -183,13 +183,23 @@ def test_Softplus(dtype):
         )
 
 
-def test_discrete_power():
+@pytest.mark.parametrize(
+    "test_base",
+    [np.bool(True), np.int16(3), np.uint16(3), np.float32(0.5), np.float64(0.5)],
+)
+@pytest.mark.parametrize(
+    "test_exponent",
+    [np.bool(True), np.int16(2), np.uint16(2), np.float32(2.0), np.float64(2.0)],
+)
+def test_power_fastmath_bug(test_base, test_exponent):
     # Test we don't fail to compile power with discrete exponents due to https://github.com/numba/numba/issues/9554
-    x = pt.scalar("x", dtype="float64")
-    exponent = pt.scalar("exponent", dtype="int8")
-    out = pt.power(x, exponent)
+    base = pt.scalar("base", dtype=test_base.dtype)
+    exponent = pt.scalar("exponent", dtype=test_exponent.dtype)
+    out = pt.power(base, exponent)
     compare_numba_and_py(
-        [x, exponent], [out], [np.array(0.5), np.array(2, dtype="int8")]
+        [base, exponent],
+        [out],
+        [test_base, test_exponent],
     )
 
 
