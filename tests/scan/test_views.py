@@ -3,7 +3,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config, function, grad, shared
-from pytensor.compile.mode import FAST_RUN
+from pytensor.compile.mode import get_mode
 from pytensor.link.basic import JITLinker
 from pytensor.scan.views import filter as pt_filter
 from pytensor.scan.views import foldl, foldr
@@ -65,7 +65,7 @@ def test_reduce_memory_consumption():
         pt.constant(np.asarray(0.0, dtype=config.floatX)),
         return_updates=False,
     )
-    mode = FAST_RUN
+    mode = get_mode("FAST_RUN")
     mode = mode.excluding("inplace")
     f1 = function([], o, mode=mode)
     inputs, outputs = clone_optimized_graph(f1)
@@ -106,7 +106,7 @@ def test_foldl_memory_consumption(return_updates):
     else:
         o = o_raw
 
-    mode = FAST_RUN
+    mode = get_mode("FAST_RUN")
     mode = mode.excluding("inplace")
     f0 = function([], o, mode=mode)
     inputs, outputs = clone_optimized_graph(f0)
@@ -147,7 +147,7 @@ def test_foldr_memory_consumption(return_updates):
     else:
         o = o_raw
 
-    mode = FAST_RUN
+    mode = get_mode("FAST_RUN")
     mode = mode.excluding("inplace")
     f1 = function([], o, mode=mode)
     inputs, outputs = clone_optimized_graph(f1)

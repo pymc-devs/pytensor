@@ -76,6 +76,7 @@ class PyTensorConfigParser:
     unpickle_function: bool
     # add_compile_configvars
     mode: str
+    fast_run_backend: str
     cxx: str
     linker: str
     allow_gc: bool
