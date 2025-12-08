@@ -648,9 +648,9 @@ def test_lu_decomposition(
     dtype = config.floatX if not complex else f"complex{int(config.floatX[-2:]) * 2}"
 
     A = tensor("A", shape=shape, dtype=dtype)
-    out = lu(A, permute_l=permute_l, p_indices=p_indices)
+    pt_out = lu(A, permute_l=permute_l, p_indices=p_indices)
 
-    f = function([A], out)
+    f = function([A], pt_out)
 
     rng = np.random.default_rng(utt.fetch_seed())
     x = rng.normal(size=shape).astype(config.floatX)
@@ -658,6 +658,8 @@ def test_lu_decomposition(
         x = x + 1j * rng.normal(size=shape).astype(config.floatX)
 
     out = f(x)
+    for numerical_out, symbolic_out in zip(out, pt_out):
+        assert numerical_out.dtype == symbolic_out.type.dtype
 
     if permute_l:
         PL, U = out
