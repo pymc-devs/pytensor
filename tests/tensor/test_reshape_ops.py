@@ -4,6 +4,7 @@ import pytest
 import pytensor
 from pytensor import config, function
 from pytensor import tensor as pt
+from pytensor.graph import vectorize_graph
 from pytensor.tensor.shape_ops import (
     _analyze_axes_list,
     join_dims,
@@ -41,6 +42,16 @@ def test_join_dims():
     assert join_dims(x, axis=(1,)).eval({x: x_value}).shape == (2, 3, 4, 5)
     assert join_dims(x, axis=()).eval({x: x_value}).shape == (2, 3, 4, 5)
 
+    x = pt.tensor("x", shape=(3, 5))
+    x_joined = join_dims(x, axis=(0, 1))
+    x_batched = pt.tensor("x_batched", shape=(10, 3, 5))
+    x_joined_batched = vectorize_graph(x_joined, {x: x_batched})
+
+    assert x_joined_batched.type.shape == (10, 15)
+
+    x_batched_val = rng.normal(size=(10, 3, 5)).astype(config.floatX)
+    assert x_joined_batched.eval({x_batched: x_batched_val}).shape == (10, 15)
+
 
 @pytest.mark.parametrize(
     "axis, shape, expected_shape",
@@ -65,6 +76,16 @@ def test_split_dims(axis, shape, expected_shape):
 
     x_split_value = fn(x_value)
     np.testing.assert_allclose(x_split_value, x_value.reshape(expected_shape))
+
+    x = pt.tensor("x", shape=(10,))
+    x_split = split_dims(x, shape=(5, 2), axis=0)
+    x_batched = pt.tensor("x_batched", shape=(3, 10))
+    x_split_batched = vectorize_graph(x_split, {x: x_batched})
+
+    assert x_split_batched.type.shape == (3, 5, 2)
+
+    x_batched_val = rng.normal(size=(3, 10)).astype(config.floatX)
+    assert x_split_batched.eval({x_batched: x_batched_val}).shape == (3, 5, 2)
 
 
 def test_split_size_zero_shape():
