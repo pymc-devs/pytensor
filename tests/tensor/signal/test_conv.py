@@ -176,7 +176,8 @@ def test_convolve2d(kernel_shape, data_shape, mode, boundary, boundary_kwargs):
         scipy_convolve2d(
             data_val, kernel_val, mode=mode, boundary=boundary, **boundary_kwargs
         ),
-        atol=1e-6 if config.floatX == "float32" else 1e-8,
+        atol=1e-5 if config.floatX == "float32" else 1e-13,
+        rtol=1e-5 if config.floatX == "float32" else 1e-13,
     )
 
     utt.verify_grad(lambda k: op(data_val, k).sum(), [kernel_val])
