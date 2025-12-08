@@ -508,7 +508,12 @@ class LU(Op):
             p_indices = tensor(shape=(x.type.shape[0],), dtype="int32")
             return Apply(self, inputs=[x], outputs=[p_indices, L, U])
 
-        P = tensor(shape=x.type.shape, dtype=out_dtype)
+        if out_dtype.startswith("complex"):
+            P_dtype = "float64" if out_dtype == "complex128" else "float32"
+        else:
+            P_dtype = out_dtype
+
+        P = tensor(shape=x.type.shape, dtype=P_dtype)
         return Apply(self, inputs=[x], outputs=[P, L, U])
 
     def perform(self, node, inputs, outputs):
