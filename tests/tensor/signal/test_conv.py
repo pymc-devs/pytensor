@@ -167,7 +167,7 @@ def test_convolve2d(kernel_shape, data_shape, mode, boundary, boundary_kwargs):
 
     fn = function([data, kernel], conv_result)
 
-    rng = np.random.default_rng((26, kernel_shape, data_shape, sum(map(ord, mode))))
+    rng = np.random.default_rng((172, kernel_shape, data_shape, sum(map(ord, mode))))
     data_val = rng.normal(size=data_shape).astype(data.dtype)
     kernel_val = rng.normal(size=kernel_shape).astype(kernel.dtype)
 
