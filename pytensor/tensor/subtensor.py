@@ -2629,9 +2629,13 @@ class AdvancedSubtensor(Op):
         advanced_indices = []
         adv_group_axis = None
         last_adv_group_axis = None
-        expanded_x_shape = tuple(
-            np.insert(np.array(x.type.shape, dtype=object), 1, new_axes)
-        )
+        if new_axes:
+            expanded_x_shape_list = list(x.type.shape)
+            for new_axis in new_axes:
+                expanded_x_shape_list.insert(new_axis, 1)
+            expanded_x_shape = tuple(expanded_x_shape_list)
+        else:
+            expanded_x_shape = x.type.shape
         for i, (idx, dim_length) in enumerate(
             zip_longest(explicit_indices, expanded_x_shape, fillvalue=NoneSliceConst)
         ):
