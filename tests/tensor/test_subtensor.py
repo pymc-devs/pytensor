@@ -1856,6 +1856,7 @@ class TestAdvancedSubtensor:
 
         assert x[idx1].type.shape == (10, None)
         assert x[:, idx1].type.shape == (None, 10)
+        assert x[None, :, idx1].type.shape == (1, None, 10)
         assert x[idx2, :5].type.shape == (3, None, None)
         assert specify_shape(x, (None, 7))[idx2, :5].type.shape == (3, None, 5)
         assert specify_shape(x, (None, 3))[idx2, :5].type.shape == (3, None, 3)
