@@ -1,12 +1,12 @@
 import logging
 import re
 import sys
+from contextlib import nullcontext
 from io import StringIO
 
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
-from packaging import version
 
 import pytensor
 import pytensor.scalar as scal
@@ -14,13 +14,14 @@ import pytensor.tensor.basic as ptb
 from pytensor import function
 from pytensor.compile import DeepCopyOp, shared
 from pytensor.compile.io import In
-from pytensor.compile.mode import Mode
+from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph import Constant
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
+from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
 from pytensor.tensor import as_tensor, constant, get_vector_length, vectorize
@@ -368,7 +369,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             "local_replace_AdvancedSubtensor",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_useless_subtensor",
-        )
+        ).excluding("bool_idx_to_nonzero")
         self.fast_compile = config.mode == "FAST_COMPILE"
 
     def function(
@@ -755,36 +756,46 @@ class TestSubtensor(utt.OptimizationTestMixin):
                 test_array[mask].eval()
             with pytest.raises(IndexError):
                 inc_subtensor(test_array[mask], 1).eval()
-            # - too large, padded with False (this works in NumPy < 0.13.0)
+            # - too large, padded with False
+            # When padded with False converting boolean to nonzero() will not fail
+            # We exclude that rewrite by excluding `shape_unsafe` more generally
+            # However numba doesn't enforce masked array sizes: https://github.com/numba/numba/issues/10374
+            # So the tests that use numba native impl will not fail.
+            shape_safe_mode = get_default_mode().excluding("shape_unsafe")
+            linker_dependent_expectation = (
+                nullcontext()
+                if isinstance(get_default_mode().linker, NumbaLinker)
+                else pytest.raises(IndexError)
+            )
             mask = np.array([True, False, False])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                test_array[mask, ...].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask, ...], 1).eval()
+            with linker_dependent_expectation:
+                test_array[mask].eval(mode=shape_safe_mode)
+            with linker_dependent_expectation:
+                test_array[mask, ...].eval(mode=shape_safe_mode)
+            with linker_dependent_expectation:
+                inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
+            with linker_dependent_expectation:
+                inc_subtensor(test_array[mask, ...], 1).eval(mode=shape_safe_mode)
             mask = np.array([[True, False, False, False], [False, True, False, False]])
             with pytest.raises(IndexError):
-                test_array[mask].eval()
+                test_array[mask].eval(mode=shape_safe_mode)
             with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            # - mask too small (this works in NumPy < 0.13.0)
+                inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
+            # - mask too small
             mask = np.array([True])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                test_array[mask, ...].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask, ...], 1).eval()
+            with linker_dependent_expectation:
+                test_array[mask].eval(mode=shape_safe_mode)
+            with linker_dependent_expectation:
+                test_array[mask, ...].eval(mode=shape_safe_mode)
+            with linker_dependent_expectation:
+                inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
+            with linker_dependent_expectation:
+                inc_subtensor(test_array[mask, ...], 1).eval(mode=shape_safe_mode)
             mask = np.array([[True], [True]])
             with pytest.raises(IndexError):
-                test_array[mask].eval()
+                test_array[mask].eval(mode=shape_safe_mode)
             with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
+                inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
             # - too many dimensions
             mask = np.array([[[True, False, False], [False, True, False]]])
             with pytest.raises(IndexError):
@@ -1348,10 +1359,6 @@ class TestSubtensor(utt.OptimizationTestMixin):
             # you enable the debug code above.
             assert np.allclose(f_out, output_num), (params, f_out, output_num)
 
-    @pytest.mark.skipif(
-        version.parse(np.__version__) < version.parse("2.0"),
-        reason="Legacy C-implementation did not check for runtime broadcast",
-    )
     @pytest.mark.parametrize("func", (advanced_inc_subtensor1, advanced_set_subtensor1))
     def test_advanced1_inc_runtime_broadcast(self, func):
         y = matrix("y", dtype="float64", shape=(None, None))
@@ -1362,14 +1369,22 @@ class TestSubtensor(utt.OptimizationTestMixin):
 
         f = function([y], out)
         f(np.ones((20, 5)))  # Fine
-        with pytest.raises(
-            ValueError,
-            match="Runtime broadcasting not allowed\\. AdvancedIncSubtensor1 was asked",
+        err_message = (
+            "(Runtime broadcasting not allowed\\. AdvancedIncSubtensor1 was asked"
+            "|The number of indices and values must match)"
+        )
+        numba_linker = isinstance(f.maker.linker, NumbaLinker)
+        # Numba implementation does not raise for runtime broadcasting
+        with (
+            nullcontext()
+            if numba_linker
+            else pytest.raises(ValueError, match=err_message)
         ):
             f(np.ones((1, 5)))
-        with pytest.raises(
-            ValueError,
-            match="Runtime broadcasting not allowed\\. AdvancedIncSubtensor1 was asked",
+        with (
+            nullcontext()
+            if numba_linker
+            else pytest.raises(ValueError, match=err_message)
         ):
             f(np.ones((20, 1)))
 
@@ -2393,6 +2408,8 @@ class TestAdvancedSubtensor:
 
 
 class TestInferShape(utt.InferShapeTester):
+    mode = get_default_mode().excluding("bool_idx_to_nonzero")
+
     @staticmethod
     def random_bool_mask(shape, rng=None):
         if rng is None:
