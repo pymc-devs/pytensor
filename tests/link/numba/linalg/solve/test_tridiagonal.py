@@ -112,3 +112,34 @@ def test_tridiagonal_lu_solve(b_ndim, transposed, inplace):
     assert (res_non_contig == res).all()
     # b must be copied when not contiguous so it can't be inplaced
     assert (b_test == b_test_non_contig).all()
+
+
+def test_cast_needed():
+    dl = pt.vector("dl", shape=(4,), dtype="int16")
+    d = pt.vector("d", shape=(5,), dtype="float32")
+    du = pt.vector("du", shape=(4,), dtype="float64")
+    b = pt.vector("b", shape=(5,), dtype="float32")
+
+    lu_factor_outs = LUFactorTridiagonal()(dl, d, du)
+    for i, out in enumerate(lu_factor_outs):
+        if i == 4:
+            assert out.type.dtype == "int32"  # ipiv is int32
+        else:
+            assert out.type.dtype == "float64"
+
+    lu_solve_out = SolveLUFactorTridiagonal(b_ndim=1, transposed=False)(
+        *lu_factor_outs, b
+    )
+    assert lu_solve_out.type.dtype == "float64"
+
+    compare_numba_and_py(
+        [dl, d, du, b],
+        lu_solve_out,
+        test_inputs=[
+            np.array([1, 2, 3, 4], dtype="int16"),
+            np.array([1, 2, 3, 4, 5], dtype="float32"),
+            np.array([1, 2, 3, 4], dtype="float64"),
+            np.array([1, 2, 3, 4, 5], dtype="float32"),
+        ],
+        eval_obj_mode=False,
+    )

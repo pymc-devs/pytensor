@@ -356,8 +356,10 @@ def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
     overwrite_du = op.overwrite_du
     out_dtype = node.outputs[1].type.numpy_dtype
 
-    must_cast_inputs = tuple(inp.type.numpy_dtype != out_dtype for inp in node.inputs)
-    if any(must_cast_inputs) and config.compiler_verbose:
+    cast_inputs = (cast_dl, cast_d, cast_du) = tuple(
+        inp.type.numpy_dtype != out_dtype for inp in node.inputs
+    )
+    if any(cast_inputs) and config.compiler_verbose:
         print("LUFactorTridiagonal requires casting at least one input")  # noqa: T201
 
     @numba_basic.numba_njit(cache=False)
@@ -371,11 +373,11 @@ def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
                 np.zeros(d.shape, dtype="int32"),
             )
 
-        if must_cast_inputs[0]:
+        if cast_d:
             d = d.astype(out_dtype)
-        if must_cast_inputs[1]:
+        if cast_dl:
             dl = dl.astype(out_dtype)
-        if must_cast_inputs[2]:
+        if cast_du:
             du = du.astype(out_dtype)
         dl, d, du, du2, ipiv, _ = _gttrf(
             dl,
@@ -402,7 +404,7 @@ def numba_funcify_SolveLUFactorTridiagonal(
     overwrite_b = op.overwrite_b
     transposed = op.transposed
 
-    must_cast_inputs = tuple(
+    must_cast_inputs = (cast_dl, cast_d, cast_du, cast_du2, cast_ipiv, cast_b) = tuple(
         inp.type.numpy_dtype != (np.int32 if i == 4 else out_dtype)
         for i, inp in enumerate(node.inputs)
     )
@@ -417,17 +419,17 @@ def numba_funcify_SolveLUFactorTridiagonal(
             else:
                 return np.zeros((d.shape[0], b.shape[1]), dtype=out_dtype)
 
-        if must_cast_inputs[0]:
+        if cast_dl:
             dl = dl.astype(out_dtype)
-        if must_cast_inputs[1]:
+        if cast_d:
             d = d.astype(out_dtype)
-        if must_cast_inputs[2]:
+        if cast_du:
             du = du.astype(out_dtype)
-        if must_cast_inputs[3]:
+        if cast_du2:
             du2 = du2.astype(out_dtype)
-        if must_cast_inputs[4]:
-            ipiv = ipiv.astype("int32")
-        if must_cast_inputs[5]:
+        if cast_ipiv:
+            ipiv = ipiv.astype(np.int32)
+        if cast_b:
             b = b.astype(out_dtype)
         x, _ = _gttrs(
             dl,
