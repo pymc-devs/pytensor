@@ -146,9 +146,8 @@ class SolveLUFactorTridiagonal(Op):
                 n = nb
 
         dummy_arrays = [
-            np.zeros((), dtype=inp.type.dtype) for inp in (dl, d, du, du2, ipiv)
+            np.zeros((), dtype=inp.type.dtype) for inp in (dl, d, du, du2, b)
         ]
-        # Seems to always be float64?
         out_dtype = get_lapack_funcs("gttrs", dummy_arrays).dtype
         if self.b_ndim == 1:
             output_shape = (n,)
