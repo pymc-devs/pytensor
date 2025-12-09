@@ -4805,6 +4805,35 @@ def test_local_dot_to_mul(batched, a_shape, b_shape):
     )
 
 
+def test_local_dot_to_mul_unspecified_length_1():
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/1782
+    x = matrix("x", shape=(5, 1), dtype="float64")
+    y = matrix("y", shape=(None, 1), dtype="float64")
+    out = x @ y
+    fn = function([x, y], out)
+    assert all(
+        isinstance(node.op, Elemwise | SpecifyShape)
+        for node in fn.maker.fgraph.apply_nodes
+    )
+    np.testing.assert_allclose(
+        fn(x=np.ones((5, 1)), y=np.ones((1, 1)) * 5),
+        np.ones((5, 1)) * 5,
+    )
+
+    x = matrix("x", shape=(1, None), dtype="float64")
+    y = matrix("y", shape=(1, 5), dtype="float64")
+    out = x @ y
+    fn = function([x, y], out)
+    assert all(
+        isinstance(node.op, Elemwise | SpecifyShape)
+        for node in fn.maker.fgraph.apply_nodes
+    )
+    np.testing.assert_allclose(
+        fn(x=np.ones((1, 1)) * 5, y=np.ones((1, 5))),
+        np.ones((1, 5)) * 5,
+    )
+
+
 @pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
 @pytest.mark.parametrize(
     "batch_blockdiag", [True, False], ids=["batch_blockdiag", "unbatched_blockdiag"]

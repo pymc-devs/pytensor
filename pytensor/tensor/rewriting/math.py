@@ -106,7 +106,7 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.rewriting.linalg import is_matrix_transpose
-from pytensor.tensor.shape import Shape, Shape_i
+from pytensor.tensor.shape import Shape, Shape_i, specify_shape
 from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
@@ -423,6 +423,13 @@ def local_dot_to_mul(fgraph, node):
         a_static_shape[-2] == 1 or b_static_shape[-1] == 1
     ):
         return None
+
+    # Add specify_shape for unknown dimensions that must be 1
+    # To avoid runtime broadcast error by multiply
+    if a.type.shape[-1] != 1:
+        a = specify_shape(a, (..., None, 1))
+    if b.type.shape[-2] != 1:
+        b = specify_shape(b, (..., 1, None))
 
     new_out = mul(a, b)
     copy_stack_trace(node.out, new_out)
