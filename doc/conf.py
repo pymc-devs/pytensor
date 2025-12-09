@@ -1,6 +1,8 @@
 import os
 import inspect
 import sys
+import subprocess
+from datetime import datetime
 
 import pytensor
 from pathlib import Path
@@ -152,7 +154,7 @@ html_theme_options = {
     "secondary_sidebar_items": ["page-toc", "edit-this-page", "sourcelink", "donate"],
     "navbar_start": ["navbar-logo"],
     "article_header_end": ["nb-badges"],
-    "article_footer_items": ["rendered_citation.html"],
+    "article_footer_items": ["page_dates.html", "rendered_citation.html"],
 }
 html_context = {
     "github_url": "https://github.com",
@@ -195,6 +197,64 @@ html_static_path = ["images", "library/d3viz/examples"]
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
 html_last_updated_fmt = "%b %d, %Y"
+
+
+# Function to get git dates for a file
+def get_git_dates(source_file):
+    """Get the creation and last modification dates from git history."""
+    dates = {}
+    try:
+        # Get last modified date
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%ai", "--", source_file],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if result.stdout.strip():
+            git_date = datetime.strptime(result.stdout.strip()[:19], "%Y-%m-%d %H:%M:%S")
+            dates["last_updated"] = git_date.strftime(html_last_updated_fmt)
+
+        # Get creation date (first commit)
+        result = subprocess.run(
+            ["git", "log", "--diff-filter=A", "--format=%ai", "--", source_file],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        if result.stdout.strip():
+            # Get the last line (first commit)
+            first_commit = result.stdout.strip().split('\n')[-1]
+            git_date = datetime.strptime(first_commit[:19], "%Y-%m-%d %H:%M:%S")
+            dates["date_created"] = git_date.strftime(html_last_updated_fmt)
+    except (subprocess.CalledProcessError, ValueError):
+        pass
+
+    # Fallback to build date if git fails
+    build_date = datetime.now().strftime(html_last_updated_fmt)
+    if "last_updated" not in dates:
+        dates["last_updated"] = build_date
+    if "date_created" not in dates:
+        dates["date_created"] = build_date
+
+    return dates
+
+
+# Hook to set dates per page based on git history
+def html_page_context(app, pagename, templatename, context, doctree):
+    """Add git-based creation and last modified dates to each page context."""
+    if doctree is not None:
+        source_file = app.env.doc2path(pagename)
+        dates = get_git_dates(source_file)
+        context["last_updated"] = dates["last_updated"]
+        context["date_created"] = dates["date_created"]
+
+
+def setup(app):
+    """Setup the Sphinx application."""
+    app.connect("html-page-context", html_page_context)
 
 # If true, SmartyPants will be used to convert quotes and dashes to
 # typographically correct entities.
