@@ -23,6 +23,7 @@ from pytensor.tensor.basic import (
     concatenate,
     diag,
     diagonal,
+    ones,
 )
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
@@ -46,9 +47,12 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.slinalg import (
+    LU,
+    QR,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
+    LUFactor,
     Solve,
     SolveBase,
     SolveTriangular,
@@ -63,6 +67,10 @@ from pytensor.tensor.slinalg import (
 
 logger = logging.getLogger(__name__)
 MATRIX_INVERSE_OPS = (MatrixInverse, MatrixPinv)
+
+
+def matrix_diagonal_product(x):
+    return pt.prod(diagonal(x, axis1=-2, axis2=-1), axis=-1)
 
 
 @register_canonicalize
@@ -305,22 +313,6 @@ def cholesky_ldotlt(fgraph, node):
 
 @register_stabilize
 @register_specialize
-@node_rewriter([det])
-def local_det_chol(fgraph, node):
-    """
-    If we have det(X) and there is already an L=cholesky(X)
-    floating around, then we can use prod(diag(L)) to get the determinant.
-
-    """
-    (x,) = node.inputs
-    for cl, xpos in fgraph.clients[x]:
-        if isinstance(cl.op, Blockwise) and isinstance(cl.op.core_op, Cholesky):
-            L = cl.outputs[0]
-            return [prod(diagonal(L, axis1=-2, axis2=-1) ** 2, axis=-1)]
-
-
-@register_stabilize
-@register_specialize
 @node_rewriter([log])
 def local_log_prod_to_sum_log(fgraph, node):
     """Rewrite log(prod(x)) as sum(log(x)), when x is known to be positive."""
@@ -478,6 +470,127 @@ def _find_diag_from_eye_mul(potential_mul_input):
     # Get all non Eye inputs (scalars/matrices/vectors)
     non_eye_inputs = list(set(inputs_to_mul) - {eye_input})
     return eye_input, non_eye_inputs
+
+
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([det])
+def det_of_matrix_factorized_elsewhere(fgraph, node):
+    """
+    If we have det(X) or abs(det(X)) and there is already a nice decomposition(X) floating around,
+    use it to compute it more cheaply
+
+    """
+    [det] = node.outputs
+    [x] = node.inputs
+
+    sign_not_needed = all(
+        isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, (Abs, Sqr))
+        for client, _ in fgraph.clients[det]
+    )
+
+    new_det = None
+    for client, _ in fgraph.clients[x]:
+        core_op = client.op.core_op if isinstance(client.op, Blockwise) else client.op
+        match core_op:
+            case Cholesky():
+                L = client.outputs[0]
+                new_det = matrix_diagonal_product(L) ** 2
+            case LU():
+                U = client.outputs[-1]
+                new_det = matrix_diagonal_product(U)
+            case LUFactor():
+                LU_packed = client.outputs[0]
+                new_det = matrix_diagonal_product(LU_packed)
+            case _:
+                if not sign_not_needed:
+                    continue
+                match core_op:
+                    case SVD():
+                        lmbda = (
+                            client.outputs[1]
+                            if core_op.compute_uv
+                            else client.outputs[0]
+                        )
+                        new_det = prod(lmbda, axis=-1)
+                    case QR():
+                        R = client.outputs[-1]
+                        # if mode == "economic", R may not be square and this rewrite could hide a shape error
+                        # That's why it's tagged as `shape_unsafe`
+                        new_det = matrix_diagonal_product(R)
+
+        if new_det is not None:
+            # found a match
+            break
+    else:  # no-break (i.e., no-match)
+        return None
+
+    [det] = node.outputs
+    copy_stack_trace(det, new_det)
+    return [new_det]
+
+
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter(tracks=[det])
+def det_of_factorized_matrix(fgraph, node):
+    """Introduce special forms for det(decomposition(X)).
+
+    Some cases are only known up to a sign change such as det(QR(X)),
+    and are only introduced if the determinant sign is discarded downstream (e.g., abs, sqr)
+    """
+    [det] = node.outputs
+    [x] = node.inputs
+
+    sign_not_needed = all(
+        isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, (Abs, Sqr))
+        for client, _ in fgraph.clients[det]
+    )
+
+    x_node = x.owner
+    if x_node is None:
+        return None
+
+    x_op = x_node.op
+    core_op = x_op.core_op if isinstance(x_op, Blockwise) else x_op
+
+    new_det = None
+    match core_op:
+        case Cholesky():
+            new_det = matrix_diagonal_product(x)
+        case LU():
+            if x is x_node.outputs[-2]:
+                # x is L
+                new_det = ones(x.shape[:-2], dtype=det.dtype)
+            elif x is x_node.outputs[-1]:
+                # x is U
+                new_det = matrix_diagonal_product(x)
+        case SVD():
+            if not core_op.compute_uv or x is x_node.outputs[1]:
+                # x is lambda
+                new_det = prod(x, axis=-1)
+            elif sign_not_needed:
+                # x is either U or Vt and sign is discarded downstream
+                new_det = ones(x.shape[:-2], dtype=det.dtype)
+        case QR():
+            # if mode == "economic", Q/R may not be square and this rewrite could hide a shape error
+            # That's why it's tagged as `shape_unsafe`
+            if x is x_node.outputs[-1]:
+                # x is R
+                new_det = matrix_diagonal_product(x)
+            elif (
+                sign_not_needed
+                and core_op.mode in ("economic", "full")
+                and x is x_node.outputs[0]
+            ):
+                # x is Q and sign is discarded downstream
+                new_det = ones(x.shape[:-2], dtype=det.dtype)
+
+    if new_det is None:
+        return None
+
+    copy_stack_trace(det, new_det)
+    return [new_det]
 
 
 @register_canonicalize("shape_unsafe")
