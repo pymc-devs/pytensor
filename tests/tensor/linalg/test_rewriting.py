@@ -2,8 +2,10 @@ import numpy as np
 import pytest
 
 from pytensor import config, function, scan
+from pytensor import tensor as pt
 from pytensor.compile.mode import get_default_mode
 from pytensor.gradient import grad
+from pytensor.graph import rewrite_graph
 from pytensor.scan.op import Scan
 from pytensor.tensor._linalg.solve.rewriting import (
     reuse_decomposition_multiple_solves,
@@ -23,6 +25,7 @@ from pytensor.tensor.slinalg import (
     SolveTriangular,
 )
 from pytensor.tensor.type import tensor
+from tests.unittest_tools import assert_equal_computations
 
 
 class DecompSolveOpCounter:
@@ -213,3 +216,70 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     resx1 = fn_opt(A_test, x0_test)
     rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        pytest.param(
+            lambda x: pt.log(pt.prod(pt.abs(x))),
+            lambda x: pt.sum(pt.log(pt.abs(x))),
+            id="log_prod_abs",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(pt.exp(x))), lambda x: pt.sum(x), id="log_prod_exp"
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(x**2)),
+            lambda x: pt.sum(pt.log(pt.sqr(x))),
+            id="log_prod_sqr",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.abs(pt.prod(x))),
+            lambda x: pt.sum(pt.log(pt.abs(x))),
+            id="log_abs_prod",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(pt.abs(x), axis=0)),
+            lambda x: pt.sum(pt.log(pt.abs(x)), axis=0),
+            id="log_prod_abs_axis0",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(pt.exp(x), axis=-1)),
+            lambda x: pt.sum(x, axis=-1),
+            id="log_prod_exp_axis-1",
+        ),
+    ],
+)
+def test_local_log_prod_to_sum_log(original_fn, expected_fn):
+    x = pt.tensor("x", shape=(3, 4))
+    out = original_fn(x)
+    expected = expected_fn(x)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "expected, pos_tag",
+    [
+        pytest.param(
+            lambda x: pt.sum(pt.log(x)),
+            True,
+            id="local_log_prod_to_sum_log_positive_tag",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(x)),
+            False,
+            id="local_log_prod_to_sum_log_no_rewrite",
+        ),
+    ],
+)
+def test_local_log_prod_to_sum_log_positive_tag(expected, pos_tag):
+    x = pt.tensor("x", shape=(3, 4))
+    if pos_tag:
+        x.tag.positive = True
+
+    out = pt.log(pt.prod(x))
+
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected(x)])
