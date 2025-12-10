@@ -309,14 +309,15 @@ def test_local_det_chol():
     det_X = pt.linalg.det(X)
 
     f = function([X], [L, det_X])
-
-    nodes = f.maker.fgraph.toposort()
-    assert not any(isinstance(node, Det) for node in nodes)
+    assert not any(isinstance(node, Det) for node in f.maker.fgraph.apply_nodes)
 
     # This previously raised an error (issue #392)
     f = function([X], [L, det_X, X])
-    nodes = f.maker.fgraph.toposort()
-    assert not any(isinstance(node, Det) for node in nodes)
+    assert not any(isinstance(node, Det) for node in f.maker.fgraph.apply_nodes)
+
+    # Test graph that only has det_X
+    f = function([X], [det_X])
+    assert not any(isinstance(node, Det) for node in f.maker.fgraph.apply_nodes)
 
 
 def test_psd_solve_with_chol():
