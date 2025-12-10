@@ -14,7 +14,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.scalar.basic import Abs, Log, Mul, Sign
+from pytensor.scalar.basic import Abs, Exp, Log, Mul, Sign, Sqr
 from pytensor.tensor.basic import (
     AllocDiag,
     ExtractDiag,
@@ -319,26 +319,40 @@ def local_det_chol(fgraph, node):
             return [prod(diagonal(L, axis1=-2, axis2=-1) ** 2, axis=-1)]
 
 
-@register_canonicalize
 @register_stabilize
 @register_specialize
 @node_rewriter([log])
-def local_log_prod_sqr(fgraph, node):
-    """
-    This utilizes a boolean `positive` tag on matrices.
-    """
-    (x,) = node.inputs
-    if x.owner and isinstance(x.owner.op, Prod):
-        # we cannot always make this substitution because
-        # the prod might include negative terms
-        p = x.owner.inputs[0]
+def local_log_prod_to_sum_log(fgraph, node):
+    """Rewrite log(prod(x)) as sum(log(x)), when x is known to be positive."""
+    [p] = node.inputs
+    p_node = p.owner
 
-        # p is the matrix we're reducing with prod
-        if getattr(p.tag, "positive", None) is True:
-            return [log(p).sum(axis=x.owner.op.axis)]
+    if p_node is None:
+        return None
+
+    p_op = p_node.op
+
+    if isinstance(p_op, Prod):
+        x = p_node.inputs[0]
+
+        # TODO: The product of diagonals of a Cholesky(A) are also strictly positive
+        if (
+            x.owner is not None
+            and isinstance(x.owner.op, Elemwise)
+            and isinstance(x.owner.op.scalar_op, Abs | Sqr | Exp)
+        ) or getattr(x.tag, "positive", False):
+            return [log(x).sum(axis=p_node.op.axis)]
 
         # TODO: have a reduction like prod and sum that simply
         # returns the sign of the prod multiplication.
+
+    # Special case for log(abs(prod(x))) -> sum(log(abs(x))) that shows up in slogdet
+    elif isinstance(p_op, Elemwise) and isinstance(p_op.scalar_op, Abs):
+        [p] = p_node.inputs
+        p_node = p.owner
+        if p_node is not None and isinstance(p_node.op, Prod):
+            [x] = p.owner.inputs
+            return [log(abs(x)).sum(axis=p_node.op.axis)]
 
 
 @register_specialize
