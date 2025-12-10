@@ -3,9 +3,10 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor import config, function
-from pytensor.graph import Apply, Op
-from pytensor.tensor import scalar
+from pytensor import Variable, config, function
+from pytensor.gradient import NullTypeGradError, disconnected_type
+from pytensor.graph import Apply, Op, Type
+from pytensor.tensor import alloc, scalar, scalar_from_tensor, tensor_from_scalar
 from pytensor.tensor.optimize import minimize, minimize_scalar, root, root_scalar
 from tests import unittest_tools as utt
 
@@ -224,7 +225,7 @@ def test_root_system_of_equations():
 
 
 @pytest.mark.parametrize("optimize_op", (minimize, root))
-def test_minimize_0d(optimize_op):
+def test_optimize_0d(optimize_op):
     # Scipy vector minimizers upcast 0d x to 1d. We need to work-around this
 
     class AssertScalar(Op):
@@ -248,3 +249,106 @@ def test_minimize_0d(optimize_op):
     np.testing.assert_allclose(
         opt_x_res, 0, atol=1e-15 if floatX == "float64" else 1e-6
     )
+
+
+@pytest.mark.parametrize("optimize_op", (minimize, minimize_scalar, root, root_scalar))
+def test_optimize_grad_scalar_arg(optimize_op):
+    # Regression test for https://github.com/pymc-devs/pytensor/pull/1744
+    x = scalar("x")
+    theta = scalar("theta")
+    theta_scalar = scalar_from_tensor(theta)
+    obj = tensor_from_scalar((scalar_from_tensor(x) + theta_scalar) ** 2)
+    x0, _ = optimize_op(obj, x)
+
+    # Confirm theta is a direct input to the node
+    assert x0.owner.inputs[1] is theta_scalar
+
+    grad_wrt_theta = pt.grad(x0, theta)
+    np.testing.assert_allclose(grad_wrt_theta.eval({x: np.pi, theta: np.e}), -1)
+
+
+@pytest.mark.parametrize("optimize_op", (minimize, minimize_scalar, root, root_scalar))
+def test_optimize_grad_disconnected_numerical_inp(optimize_op):
+    x = scalar("x", dtype="float64")
+    theta = scalar("theta", dtype="int64")
+    obj = alloc(x**2, theta).sum()  # repeat theta times and sum
+    x0, _ = optimize_op(obj, x)
+
+    # Confirm theta is a direct input to the node
+    assert x0.owner.inputs[1] is theta
+
+    # This should technically raise, but does not right now
+    grad_wrt_theta = pt.grad(x0, theta, disconnected_inputs="raise")
+    np.testing.assert_allclose(grad_wrt_theta.eval({x: np.pi, theta: 5}), 0)
+
+    # This should work even if the previous one raised
+    grad_wrt_theta = pt.grad(x0, theta, disconnected_inputs="ignore")
+    np.testing.assert_allclose(grad_wrt_theta.eval({x: np.pi, theta: 5}), 0)
+
+
+@pytest.mark.parametrize("optimize_op", (minimize, minimize_scalar, root, root_scalar))
+def test_optimize_grad_disconnected_non_numerical_inp(optimize_op):
+    class StrType(Type):
+        def filter(self, x, **kwargs):
+            if isinstance(x, str):
+                return x
+            raise TypeError
+
+    class SmileOrFrown(Op):
+        def make_node(self, x, str_emoji):
+            return Apply(self, [x, str_emoji], [x.type()])
+
+        def perform(self, node, inputs, output_storage):
+            [x, str_emoji] = inputs
+            match str_emoji:
+                case ":)":
+                    out = np.array(x)
+                case ":(":
+                    out = np.array(-x)
+                case _:
+                    ValueError("str_emoji must be a smile or a frown")
+            output_storage[0][0] = out
+
+        def connection_pattern(self, node):
+            # Gradient connected only to first input
+            return [[True], [False]]
+
+        def L_op(self, inputs, outputs, output_gradients):
+            [_x, str_emoji] = inputs
+            [g] = output_gradients
+            return [
+                self(g, str_emoji),
+                disconnected_type(),
+            ]
+
+    # We could try to use real types like NoneTypeT or SliceType, but this is more robust to future API changes
+    str_type = StrType()
+    smile_or_frown = SmileOrFrown()
+
+    x = scalar("x", dtype="float64")
+    num_theta = pt.scalar("num_theta", dtype="float64")
+    str_theta = Variable(str_type, None, None, name="str_theta")
+    obj = (smile_or_frown(x, str_theta) + num_theta) ** 2
+    x_star, _ = optimize_op(obj, x)
+
+    # Confirm thetas are direct inputs to the node
+    assert set(x_star.owner.inputs[1:]) == {num_theta, str_theta}
+
+    # Confirm forward pass works, no point in worrying about gradient otherwise
+    np.testing.assert_allclose(
+        x_star.eval({x: np.pi, num_theta: np.e, str_theta: ":)"}),
+        -np.e,
+    )
+    np.testing.assert_allclose(
+        x_star.eval({x: np.pi, num_theta: np.e, str_theta: ":("}),
+        np.e,
+    )
+
+    with pytest.raises(NullTypeGradError):
+        pt.grad(x_star, str_theta, disconnected_inputs="raise")
+
+    # This could be supported, but it is not right now.
+    with pytest.raises(NullTypeGradError):
+        _grad_wrt_num_theta = pt.grad(x_star, num_theta, disconnected_inputs="raise")
+    # np.testing.assert_allclose(grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":)"}), -1)
+    # np.testing.assert_allclose(grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":("}), 1)

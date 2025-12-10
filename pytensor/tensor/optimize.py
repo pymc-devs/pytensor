@@ -6,21 +6,24 @@ import numpy as np
 
 import pytensor.scalar as ps
 from pytensor.compile.function import function
-from pytensor.gradient import grad, jacobian
+from pytensor.gradient import grad, grad_not_implemented, jacobian
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
 from pytensor.graph.replace import graph_replace
 from pytensor.graph.traversal import ancestors, truncated_graph_inputs
+from pytensor.scalar import ScalarType, ScalarVariable
 from pytensor.tensor.basic import (
     atleast_2d,
     concatenate,
+    scalar_from_tensor,
     tensor,
     tensor_from_scalar,
     zeros_like,
 )
 from pytensor.tensor.math import dot
 from pytensor.tensor.slinalg import solve
+from pytensor.tensor.type import DenseTensorType
 from pytensor.tensor.variable import TensorVariable, Variable
 
 
@@ -143,9 +146,9 @@ def _find_optimization_parameters(
 def _get_parameter_grads_from_vector(
     grad_wrt_args_vector: TensorVariable,
     x_star: TensorVariable,
-    args: Sequence[Variable],
+    args: Sequence[TensorVariable | ScalarVariable],
     output_grad: TensorVariable,
-) -> list[TensorVariable]:
+) -> list[TensorVariable | ScalarVariable]:
     """
     Given a single concatenated vector of objective function gradients with respect to raveled optimization parameters,
     returns the contribution of each parameter to the total loss function, with the unraveled shape of the parameter.
@@ -160,7 +163,10 @@ def _get_parameter_grads_from_vector(
             (*x_star.shape, *arg_shape)
         )
 
-        grad_wrt_args.append(dot(output_grad, arg_grad))
+        grad_wrt_arg = dot(output_grad, arg_grad)
+        if isinstance(arg.type, ScalarType):
+            grad_wrt_arg = scalar_from_tensor(grad_wrt_arg)
+        grad_wrt_args.append(grad_wrt_arg)
 
         cursor += arg_size
 
@@ -267,12 +273,12 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
 def scalar_implict_optimization_grads(
     inner_fx: TensorVariable,
     inner_x: TensorVariable,
-    inner_args: Sequence[Variable],
-    args: Sequence[Variable],
+    inner_args: Sequence[TensorVariable | ScalarVariable],
+    args: Sequence[TensorVariable | ScalarVariable],
     x_star: TensorVariable,
     output_grad: TensorVariable,
     fgraph: FunctionGraph,
-) -> list[Variable]:
+) -> list[TensorVariable | ScalarVariable]:
     df_dx, *df_dthetas = grad(
         inner_fx, [inner_x, *inner_args], disconnected_inputs="ignore"
     )
@@ -291,11 +297,11 @@ def scalar_implict_optimization_grads(
 def implict_optimization_grads(
     df_dx: TensorVariable,
     df_dtheta_columns: Sequence[TensorVariable],
-    args: Sequence[Variable],
+    args: Sequence[TensorVariable | ScalarVariable],
     x_star: TensorVariable,
     output_grad: TensorVariable,
     fgraph: FunctionGraph,
-) -> list[TensorVariable]:
+) -> list[TensorVariable | ScalarVariable]:
     r"""
     Compute gradients of an optimization problem with respect to its parameters.
 
@@ -410,7 +416,19 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         outputs[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
+        # TODO: Handle disconnected inputs
         x, *args = inputs
+        if non_supported_types := tuple(
+            inp.type
+            for inp in inputs
+            if not isinstance(inp.type, DenseTensorType | ScalarType)
+        ):
+            # TODO: Support SparseTensorTypes
+            # TODO: Remaining types are likely just disconnected anyway
+            msg = f"Minimize gradient not implemented due to inputs of type {non_supported_types}"
+            return [
+                grad_not_implemented(self, i, inp, msg) for i, inp in enumerate(inputs)
+            ]
         x_star, _ = outputs
         output_grad, _ = output_grads
 
@@ -560,7 +578,19 @@ class MinimizeOp(ScipyVectorWrapperOp):
         outputs[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
+        # TODO: Handle disconnected inputs
         x, *args = inputs
+        if non_supported_types := tuple(
+            inp.type
+            for inp in inputs
+            if not isinstance(inp.type, DenseTensorType | ScalarType)
+        ):
+            # TODO: Support SparseTensorTypes
+            # TODO: Remaining types are likely just disconnected anyway
+            msg = f"MinimizeOp gradient not implemented due to inputs of type {non_supported_types}"
+            return [
+                grad_not_implemented(self, i, inp, msg) for i, inp in enumerate(inputs)
+            ]
         x_star, _success = outputs
         output_grad, _ = output_grads
 
@@ -727,7 +757,19 @@ class RootScalarOp(ScipyScalarWrapperOp):
         outputs[1][0] = np.bool_(res.converged)
 
     def L_op(self, inputs, outputs, output_grads):
+        # TODO: Handle disconnected inputs
         x, *args = inputs
+        if non_supported_types := tuple(
+            inp.type
+            for inp in inputs
+            if not isinstance(inp.type, DenseTensorType | ScalarType)
+        ):
+            # TODO: Support SparseTensorTypes
+            # TODO: Remaining types are likely just disconnected anyway
+            msg = f"RootScalarOp gradient not implemented due to inputs of type {non_supported_types}"
+            return [
+                grad_not_implemented(self, i, inp, msg) for i, inp in enumerate(inputs)
+            ]
         x_star, _ = outputs
         output_grad, _ = output_grads
 
@@ -908,6 +950,17 @@ class RootOp(ScipyVectorWrapperOp):
     def L_op(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs
         x, *args = inputs
+        if non_supported_types := tuple(
+            inp.type
+            for inp in inputs
+            if not isinstance(inp.type, DenseTensorType | ScalarType)
+        ):
+            # TODO: Support SparseTensorTypes
+            # TODO: Remaining types are likely just disconnected anyway
+            msg = f"RootOp gradient not implemented due to inputs of type {non_supported_types}"
+            return [
+                grad_not_implemented(self, i, inp, msg) for i, inp in enumerate(inputs)
+            ]
         x_star, _ = outputs
         output_grad, _ = output_grads
 
