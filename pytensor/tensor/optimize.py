@@ -831,6 +831,7 @@ class RootOp(ScipyVectorWrapperOp):
             )
 
         self.fgraph = FunctionGraph([variables, *args], [equations])
+        self.use_vectorized_jac = use_vectorized_jac
 
         if jac:
             jac_wrt_x = jacobian(
@@ -914,12 +915,15 @@ class RootOp(ScipyVectorWrapperOp):
         inner_fx = self.fgraph.outputs[0]
 
         df_dx = (
-            jacobian(inner_fx, inner_x, vectorize=True)
+            jacobian(inner_fx, inner_x, vectorize=self.use_vectorized_jac)
             if not self.jac
             else self.fgraph.outputs[1]
         )
         df_dtheta_columns = jacobian(
-            inner_fx, inner_args, disconnected_inputs="ignore", vectorize=True
+            inner_fx,
+            inner_args,
+            disconnected_inputs="ignore",
+            vectorize=self.use_vectorized_jac,
         )
 
         grad_wrt_args = implict_optimization_grads(
