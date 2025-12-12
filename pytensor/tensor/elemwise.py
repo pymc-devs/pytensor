@@ -132,7 +132,7 @@ class DimShuffle(ExternalCOp):
             raise TypeError(f"input_ndim must be an integer, got {type(int)}")
 
         self.input_ndim = input_ndim
-        self.new_order = tuple(new_order)
+        self.new_order = new_order = tuple(new_order)
         self._new_order = [(-1 if x == "x" else x) for x in self.new_order]
 
         for i, j in enumerate(new_order):
@@ -153,28 +153,38 @@ class DimShuffle(ExternalCOp):
                         f"twice in the list of output dimensions: {new_order}"
                     )
 
-        # List of input dimensions to drop
-        drop = [i for i in range(input_ndim) if i not in new_order]
-
-        # This is the list of the original dimensions that we keep
-        self.shuffle = [x for x in new_order if x != "x"]
-        self.transposition = self.shuffle + drop
-        # List of dimensions of the output that are broadcastable and were not
-        # in the original input
-        self.augment = augment = sorted(i for i, x in enumerate(new_order) if x == "x")
-        self.drop = drop
-
-        dims_are_shuffled = sorted(self.shuffle) != self.shuffle
-
-        self.is_transpose = dims_are_shuffled and not augment and not drop
-        self.is_squeeze = drop and not dims_are_shuffled and not augment
-        self.is_expand_dims = augment and not dims_are_shuffled and not drop
-        self.is_left_expand_dims = self.is_expand_dims and (
-            input_ndim == 0 or new_order[-input_ndim:] == list(range(input_ndim))
+        # Tuple of the original dimensions that we keep
+        self.shuffle = tuple(x for x in new_order if x != "x")
+        # Tuple of input dimensions to drop
+        self.drop = drop = tuple(i for i in range(input_ndim) if i not in new_order)
+        # tuple of dimensions of the output that are broadcastable and were not in the original input
+        self.augment = augment = tuple(
+            sorted(i for i, x in enumerate(new_order) if x == "x")
         )
-        self.is_right_expand_dims = self.is_expand_dims and new_order[
-            :input_ndim
-        ] == list(range(input_ndim))
+        n_augment = len(self.augment)
+
+        # Used by perform
+        self._transposition = self.shuffle + drop
+
+        # Classify the type of dimshuffle for rewrite purposes
+        dims_are_shuffled = tuple(sorted(self.shuffle)) != self.shuffle
+        self.is_squeeze = drop and not augment and not dims_are_shuffled
+        self.is_expand_dims = is_expand_dims = (
+            not drop and augment and not dims_are_shuffled
+        )
+        self.is_left_expand_dims = is_expand_dims and new_order[n_augment:] == tuple(
+            range(input_ndim)
+        )
+        self.is_right_expand_dims = is_expand_dims and new_order[:input_ndim] == tuple(
+            range(input_ndim)
+        )
+        self.is_transpose = not drop and not augment and dims_are_shuffled
+        self.is_left_expanded_matrix_transpose = is_left_expanded_matrix_transpose = (
+            dims_are_shuffled
+            and new_order[n_augment:]
+            == (*range(input_ndim - 2), input_ndim - 1, input_ndim - 2)
+        )
+        self.is_matrix_transpose = not augment and is_left_expanded_matrix_transpose
 
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -212,6 +222,8 @@ class DimShuffle(ExternalCOp):
         return Apply(self, [input], [output])
 
     def __str__(self):
+        if self.is_matrix_transpose:
+            return "MatrixTranspose"
         if self.is_expand_dims:
             if len(self.augment) == 1:
                 return f"ExpandDims{{axis={self.augment[0]}}}"
@@ -237,7 +249,7 @@ class DimShuffle(ExternalCOp):
         # )
 
         # Put dropped axis at end
-        res = res.transpose(self.transposition)
+        res = res.transpose(self._transposition)
 
         # Define new shape without dropped axis and including new ones
         new_shape = list(res.shape[: len(self.shuffle)])
@@ -330,6 +342,8 @@ class Elemwise(OpenMPOp):
     """
 
     __props__ = ("scalar_op", "inplace_pattern")
+    # Allow pattern matching on scalar_op positionally
+    __match_args__ = ("scalar_op",)
 
     def __init__(
         self, scalar_op, inplace_pattern=None, name=None, nfunc_spec=None, openmp=None
