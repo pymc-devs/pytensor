@@ -13,7 +13,7 @@ from pytensor.tensor._linalg.solve.tridiagonal import (
     LUFactorTridiagonal,
     SolveLUFactorTridiagonal,
 )
-from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg import solve
 from pytensor.tensor.slinalg import (
     Cholesky,
@@ -33,7 +33,8 @@ class DecompSolveOpCounter:
 
     def check_node_op_or_core_op(self, node, op):
         return isinstance(node.op, op) or (
-            isinstance(node.op, Blockwise) and isinstance(node.op.core_op, op)
+            isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+            and isinstance(node.op.core_op, op)
         )
 
     def count_vanilla_solve_nodes(self, nodes) -> int:
@@ -248,7 +249,11 @@ def test_decomposition_reused_preserves_check_finite(assume_a, counter):
     assert fn_opt(
         A_valid, b1_valid, b2_valid * np.nan
     )  # Should not raise (also fine on most LAPACK implementations?)
-    with pytest.raises(ValueError, match="array must not contain infs or NaNs"):
+    err_msg = (
+        "(array must not contain infs or NaNs"
+        r"|Non-numeric values \(nan or inf\))"
+    )
+    with pytest.raises((ValueError, np.linalg.LinAlgError), match=err_msg):
         assert fn_opt(A_valid, b1_valid * np.nan, b2_valid)
-    with pytest.raises(ValueError, match="array must not contain infs or NaNs"):
+    with pytest.raises((ValueError, np.linalg.LinAlgError), match=err_msg):
         assert fn_opt(A_valid * np.nan, b1_valid, b2_valid)

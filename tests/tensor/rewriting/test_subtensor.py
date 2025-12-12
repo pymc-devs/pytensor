@@ -1448,11 +1448,14 @@ class TestSubtensorAllocRewrites:
                         not isinstance(n.op, Dot) for n in f.maker.fgraph.toposort()
                     )
 
-                    # test that we don't remove shape errors
+                    # test that we don't remove shape errors if we exclude shape_unsafe
+                    f_safe = f = function(
+                        [_e1[0], _e2[0]], o, mode=self.mode.excluding("shape_unsafe")
+                    )
                     with pytest.raises((ValueError, AssertionError)):
-                        f(_e1[1], _e2[2])
+                        f_safe(_e1[1], _e2[2])
                     with pytest.raises((ValueError, AssertionError)):
-                        f(_e1[2], _e2[1])
+                        f_safe(_e1[2], _e2[1])
 
 
 def test_local_IncSubtensor_serialize():
@@ -1649,7 +1652,11 @@ def test_local_join_subtensors(axis, slices_fn, expected_nodes):
 
 
 def test_local_uint_constant_indices():
-    mode = get_default_mode().including("specialize", "local_uint_constant_indices")
+    mode = (
+        get_default_mode()
+        .including("specialize", "local_uint_constant_indices")
+        .excluding("bool_idx_to_nonzero")
+    )
     rng = np.random.default_rng(20900)
 
     # Subtensor, don't convert

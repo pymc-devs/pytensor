@@ -199,13 +199,25 @@ def numba_funcify_Mul(op, node, **kwargs):
 
 @register_funcify_and_cache_key(Cast)
 def numba_funcify_Cast(op, node, **kwargs):
-    dtype = np.dtype(op.o_type.dtype)
+    inp_dtype = np.dtype(node.inputs[0].type.dtype)
+    out_dtype = np.dtype(op.o_type.dtype)
+    complex_to_real = inp_dtype.kind == "c" and out_dtype.kind != "c"
 
-    @numba_basic.numba_njit
-    def cast(x):
-        return numba_basic.direct_cast(x, dtype)
+    if complex_to_real:
+        # Numba doesn't allow casting complex to real types with astype
+        def cast(x):
+            return numba_basic.direct_cast(x.real, out_dtype)
 
-    return cast, sha256(str((type(op), op.o_type.dtype)).encode()).hexdigest()
+    else:
+
+        @numba_basic.numba_njit
+        def cast(x):
+            return numba_basic.direct_cast(x, out_dtype)
+
+    cache_version = 1
+    return cast, sha256(
+        str((type(op), op.o_type.dtype, cache_version)).encode()
+    ).hexdigest()
 
 
 @register_funcify_and_cache_key(Identity)
@@ -258,11 +270,10 @@ def numba_funcify_Second(op, node, **kwargs):
 def numba_funcify_Reciprocal(op, node, **kwargs):
     @numba_basic.numba_njit
     def reciprocal(x):
-        # TODO FIXME: This isn't really the behavior or `numpy.reciprocal` when
-        # `x` is an `int`
-        return 1 / x
+        # This is how the C-backend implementation works
+        return np.divide(np.float32(1.0), x)
 
-    return reciprocal, scalar_op_cache_key(op)
+    return reciprocal, scalar_op_cache_key(op, cache_version=1)
 
 
 @register_funcify_and_cache_key(Sigmoid)

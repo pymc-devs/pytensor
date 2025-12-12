@@ -371,11 +371,12 @@ def add_compile_configvars():
     )
     del param
 
-    default_linker = "cvm"
+    default_linker = "auto"
 
     if rc == 0 and config.cxx != "":
         # Keep the default linker the same as the one for the mode FAST_RUN
         linker_options = [
+            "cvm",
             "c|py",
             "py",
             "c",
@@ -401,9 +402,8 @@ def add_compile_configvars():
 
     config.add(
         "linker",
-        "Default linker used if the pytensor flags mode is Mode",
-        # Not mutable because the default mode is cached after the first use.
-        EnumStr(default_linker, linker_options, mutable=False),
+        "Default linker used if the pytensor flags mode is Mode or FAST_RUN",
+        EnumStr(default_linker, linker_options, mutable=True),
         in_c_key=False,
     )
 

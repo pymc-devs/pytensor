@@ -17,8 +17,8 @@ from pytensor.compile.function.types import (
 )
 from pytensor.compile.io import In, Out, SymbolicInput, SymbolicOutput
 from pytensor.compile.mode import (
+    CVM,
     FAST_COMPILE,
-    FAST_RUN,
     JAX,
     NUMBA,
     OPT_FAST_COMPILE,
@@ -33,6 +33,7 @@ from pytensor.compile.mode import (
     PYTORCH,
     AddDestroyHandler,
     AddFeatureOptimizer,
+    C,
     Mode,
     PrintCurrentFunctionGraph,
     get_default_mode,

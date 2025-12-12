@@ -3,6 +3,7 @@ import pickle
 
 import numpy as np
 import pytest
+from numba import TypingError
 
 import pytensor.tensor as pt
 from pytensor.compile import shared
@@ -36,7 +37,11 @@ from pytensor.tensor.type import (
 from tests.fixtures import *  # noqa: F403
 
 
-pytestmark = pytest.mark.filterwarnings("error")
+pytestmark = pytest.mark.filterwarnings(
+    "error",
+    r"ignore:^Numba will use object mode to run.*perform method\.:UserWarning",
+    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph\".*:numba.NumbaWarning",
+)
 
 
 def PatternOptimizer(p1, p2, ign=True):
@@ -624,7 +629,7 @@ class TestFunction:
 
     def test_constant_output(self):
         # Test that if the output is a constant, we respect the pytensor memory interface
-        f = function([], pt.constant([4]))
+        f = function([], pt.constant([4]), mode="CVM")
         # print f.maker.fgraph.toposort()
         out = f()
         assert (out == 4).all()
@@ -635,7 +640,7 @@ class TestFunction:
         assert (out2 == 4).all()
 
         # Test that if the output is a constant and borrow, we respect the pytensor memory interface
-        f = function([], Out(pt.constant([4]), borrow=True))
+        f = function([], Out(pt.constant([4]), borrow=True), mode="CVM")
         # print f.maker.fgraph.toposort()
         out = f()
         assert (out == 4).all()
@@ -997,10 +1002,14 @@ class TestPicklefunction:
                 raise
         assert f.trust_input is g.trust_input
         f(np.asarray(2.0))
-        with pytest.raises((ValueError, AttributeError, InvalidValueError)):
+        with pytest.raises(
+            (ValueError, AttributeError, InvalidValueError, TypingError)
+        ):
             f(2.0)
         g(np.asarray(2.0))
-        with pytest.raises((ValueError, AttributeError, InvalidValueError)):
+        with pytest.raises(
+            (ValueError, AttributeError, InvalidValueError, TypingError)
+        ):
             g(2.0)
 
     def test_output_keys(self):
@@ -1360,7 +1369,7 @@ def test_minimal_random_function_call_benchmark(trust_input, benchmark):
     benchmark(f, rng_val)
 
 
-@pytest.mark.parametrize("mode", ["C", "C_VM"])
+@pytest.mark.parametrize("mode", ["C", "CVM"])
 def test_radon_model_compile_repeatedly_benchmark(mode, radon_model, benchmark):
     joined_inputs, [model_logp, model_dlogp] = radon_model
     rng = np.random.default_rng(1)
@@ -1375,7 +1384,7 @@ def test_radon_model_compile_repeatedly_benchmark(mode, radon_model, benchmark):
     benchmark.pedantic(compile_and_call_once, rounds=5, iterations=1)
 
 
-@pytest.mark.parametrize("mode", ["C", "C_VM"])
+@pytest.mark.parametrize("mode", ["C", "CVM"])
 def test_radon_model_compile_variants_benchmark(
     mode, radon_model, radon_model_variants, benchmark
 ):
@@ -1406,15 +1415,15 @@ def test_radon_model_compile_variants_benchmark(
     benchmark.pedantic(compile_and_call_once, rounds=1, iterations=1)
 
 
-@pytest.mark.parametrize("mode", ["C", "C_VM", "C_VM_NOGC"])
+@pytest.mark.parametrize("mode", ["C", "CVM", "CVM_NOGC"])
 def test_radon_model_call_benchmark(mode, radon_model, benchmark):
     joined_inputs, [model_logp, model_dlogp] = radon_model
 
-    real_mode = "C_VM" if mode == "C_VM_NOGC" else mode
+    real_mode = "CVM" if mode == "CVM_NOGC" else mode
     fn = function(
         [joined_inputs], [model_logp, model_dlogp], mode=real_mode, trust_input=True
     )
-    if mode == "C_VM_NOGC":
+    if mode == "CVM_NOGC":
         fn.vm.allow_gc = False
 
     rng = np.random.default_rng(1)
