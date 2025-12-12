@@ -525,7 +525,7 @@ def local_subtensor_of_transpose(fgraph, node):
     if not ds_op.is_transpose:
         return None
 
-    transposition = ds_op.transposition
+    transposition = ds_op._transposition
     [x] = ds.owner.inputs
 
     idx_tuple = indices_from_subtensor(idx, node.op.idx_list)

@@ -555,7 +555,7 @@ def test_debugprint_mitmot():
      │  │  │  ├─ Second [id BL]
      │  │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
      │  │  │  │  │  └─ ···
-     │  │  │  │  └─ ExpandDims{axes=[0, 1]} [id BM]
+     │  │  │  │  └─ ExpandDims{axes=(0, 1)} [id BM]
      │  │  │  │     └─ 0.0 [id BN]
      │  │  │  ├─ IncSubtensor{i} [id BO]
      │  │  │  │  ├─ Second [id BP]
@@ -563,7 +563,7 @@ def test_debugprint_mitmot():
      │  │  │  │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
      │  │  │  │  │  │  │  └─ ···
      │  │  │  │  │  │  └─ 1 [id BR]
-     │  │  │  │  │  └─ ExpandDims{axes=[0, 1]} [id BS]
+     │  │  │  │  │  └─ ExpandDims{axes=(0, 1)} [id BS]
      │  │  │  │  │     └─ 0.0 [id BT]
      │  │  │  │  ├─ Second [id BU]
      │  │  │  │  │  ├─ Subtensor{i} [id BV]

@@ -72,7 +72,7 @@ def jax_funcify_CAReduce(op, **kwargs):
 @jax_funcify.register(DimShuffle)
 def jax_funcify_DimShuffle(op, **kwargs):
     def dimshuffle(x):
-        res = jnp.transpose(x, op.transposition)
+        res = jnp.transpose(x, op._transposition)
 
         shape = list(res.shape[: len(op.shuffle)])
 
