@@ -4,7 +4,7 @@ import pytest
 import pytensor
 from pytensor import config, function
 from pytensor import tensor as pt
-from pytensor.graph import vectorize_graph
+from pytensor.graph import rewrite_graph, vectorize_graph
 from pytensor.tensor.shape_ops import (
     _analyze_axes_list,
     join_dims,
@@ -115,13 +115,15 @@ def test_make_replacements_with_pack_unpack():
     new_outputs = unpack(new_input, axes=None, packed_shapes=packed_shapes)
 
     loss = pytensor.graph.graph_replace(loss, dict(zip([x, y, z], new_outputs)))
-    fn = pytensor.function([new_input, x, y, z], loss, mode="FAST_COMPILE")
+    rewrite_graph(loss, include=("ShapeOpt", "specialize"))
+
+    fn = pytensor.function([new_input], loss, mode="FAST_COMPILE")
 
     input_vals = [
         rng.normal(size=(var.type.shape)).astype(config.floatX) for var in [x, y, z]
     ]
     flat_inputs = np.concatenate([input.ravel() for input in input_vals], axis=0)
-    output_val = fn(flat_inputs, *input_vals)
+    output_val = fn(flat_inputs)
 
     assert np.allclose(output_val, sum([input.sum() for input in input_vals]) ** 2)
 
