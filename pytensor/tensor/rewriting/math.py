@@ -105,7 +105,6 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
-from pytensor.tensor.rewriting.linalg import is_matrix_transpose
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
 from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.subtensor import Subtensor
@@ -235,7 +234,10 @@ def local_lift_transpose_through_dot(fgraph, node):
 
     [(client, _)] = clients
 
-    if not (isinstance(client.op, DimShuffle) and is_matrix_transpose(client.out)):
+    if not (
+        isinstance(client.op, DimShuffle)
+        and client.op.is_left_expanded_matrix_transpose
+    ):
         return None
 
     x, y = node.inputs

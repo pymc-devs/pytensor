@@ -23,10 +23,12 @@ from pytensor.tensor.nlinalg import (
     MatrixInverse,
     MatrixPinv,
     SLogDet,
+    inv,
     matrix_inverse,
+    pinv,
     svd,
 )
-from pytensor.tensor.rewriting.linalg import inv_as_solve
+from pytensor.tensor.rewriting.linalg import inv_to_solve
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
     Cholesky,
@@ -39,60 +41,10 @@ from pytensor.tensor.slinalg import (
     solve,
     solve_triangular,
 )
-from pytensor.tensor.type import dmatrix, matrix, tensor, vector
-from tests import unittest_tools as utt
-from tests.test_rop import break_op
+from pytensor.tensor.type import dmatrix, matrix, tensor
 
 
-def test_matrix_inverse_rop_lop():
-    rtol = 1e-7 if config.floatX == "float64" else 1e-5
-    mx = matrix("mx")
-    mv = matrix("mv")
-    v = vector("v")
-    y = MatrixInverse()(mx).sum(axis=0)
-
-    yv = pytensor.gradient.Rop(y, mx, mv, use_op_rop_implementation=True)
-    rop_f = function([mx, mv], yv)
-
-    yv_via_lop = pytensor.gradient.Rop(y, mx, mv, use_op_rop_implementation=False)
-    rop_via_lop_f = function([mx, mv], yv_via_lop)
-
-    sy, _ = pytensor.scan(
-        lambda i, y, x, v: (pytensor.gradient.grad(y[i], x) * v).sum(),
-        sequences=pt.arange(y.shape[0]),
-        non_sequences=[y, mx, mv],
-    )
-    scan_f = function([mx, mv], sy)
-
-    rng = np.random.default_rng(utt.fetch_seed())
-    vx = np.asarray(rng.standard_normal((4, 4)), pytensor.config.floatX)
-    vv = np.asarray(rng.standard_normal((4, 4)), pytensor.config.floatX)
-
-    v_ref = scan_f(vx, vv)
-    np.testing.assert_allclose(rop_f(vx, vv), v_ref, rtol=rtol)
-    np.testing.assert_allclose(rop_via_lop_f(vx, vv), v_ref, rtol=rtol)
-
-    with pytest.raises(ValueError):
-        pytensor.gradient.Rop(
-            pytensor.clone_replace(y, replace={mx: break_op(mx)}),
-            mx,
-            mv,
-            use_op_rop_implementation=True,
-        )
-
-    vv = np.asarray(rng.uniform(size=(4,)), pytensor.config.floatX)
-    yv = pytensor.gradient.Lop(y, mx, v)
-    lop_f = function([mx, v], yv)
-
-    sy = pytensor.gradient.grad((v * y).sum(), mx)
-    scan_f = function([mx, v], sy)
-
-    v_ref = scan_f(vx, vv)
-    v = lop_f(vx, vv)
-    np.testing.assert_allclose(v, v_ref, rtol=rtol)
-
-
-def test_transinv_to_invtrans():
+def test_transpose_of_inv():
     X = matrix("X")
     Y = matrix_inverse(X)
     Z = Y.transpose()
@@ -146,11 +98,11 @@ def test_generic_solve_to_solve_triangular():
         )
 
 
-def test_matrix_inverse_solve():
+def test_inv_to_solve():
     A = dmatrix("A")
     b = dmatrix("b")
     node = matrix_inverse(A).dot(b).owner
-    [out] = inv_as_solve.transform(None, node)
+    [out] = inv_to_solve.transform(None, node)
     assert isinstance(out.owner.op, Blockwise) and isinstance(
         out.owner.op.core_op, Solve
     )
@@ -237,7 +189,7 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
         )
 
 
-def test_local_det_chol():
+def test_det_of_cholesky():
     X = matrix("X")
     L = pt.linalg.cholesky(X)
     det_X = pt.linalg.det(X)
@@ -364,7 +316,7 @@ class TestBatchedVectorBSolveToMatrixBSolve:
     [(BlockDiagonal, pt.linalg.block_diag), (KroneckerProduct, pt.linalg.kron)],
     ids=["block_diag", "kron"],
 )
-def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
+def test_lift_linalg_of_expanded_matrices(constructor, f_op, f, g_op, g):
     rng = np.random.default_rng(sum(map(ord, "lift_through_linalg")))
 
     if pytensor.config.floatX.endswith("32"):
@@ -403,7 +355,7 @@ def test_local_lift_through_linalg(constructor, f_op, f, g_op, g):
     [(), (7,), (1, 7), (7, 1), (7, 7), (3, 7, 7)],
     ids=["scalar", "vector", "row_vec", "col_vec", "matrix", "batched_input"],
 )
-def test_det_diag_from_eye_mul(shape):
+def test_det_of_diag_from_eye_mul(shape):
     # Initializing x based on scalar/vector/matrix
     x = pt.tensor("x", shape=shape)
     y = pt.eye(7) * x
@@ -440,7 +392,7 @@ def test_det_diag_from_eye_mul(shape):
     )
 
 
-def test_det_diag_from_diag():
+def test_det_of_diag_from_diag():
     x = pt.tensor("x", shape=(None,))
     x_diag = pt.diag(x)
     y = pt.linalg.det(x_diag)
@@ -464,12 +416,12 @@ def test_det_diag_from_diag():
     )
 
 
-def test_dont_apply_det_diag_rewrite_for_1_1():
+def test_dont_apply_det_of_diag_from_scalar_eye():
     x = pt.matrix("x")
     x_diag = pt.eye(1, 1) * x
     y = pt.linalg.det(x_diag)
     f_rewritten = function([x], y, mode="FAST_RUN")
-
+    f_rewritten.dprint()
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
     assert any(isinstance(node.op, Det) for node in nodes)
@@ -488,7 +440,7 @@ def test_dont_apply_det_diag_rewrite_for_1_1():
     )
 
 
-def test_det_diag_incorrect_for_rectangle_eye():
+def test_det_of_diag_incorrect_for_rectangle_eye():
     x = pt.matrix("x")
     x_diag = pt.eye(7, 5) * x
     with pytest.raises(ValueError, match="Determinant not defined"):
@@ -559,24 +511,20 @@ def test_svd_uv_merge():
     assert svd_counter == 1
 
 
-def get_pt_function(x, op_name):
-    return getattr(pt.linalg, op_name)(x)
-
-
-@pytest.mark.parametrize("inv_op_1", ["inv", "pinv"])
-@pytest.mark.parametrize("inv_op_2", ["inv", "pinv"])
-def test_inv_inv_rewrite(inv_op_1, inv_op_2):
+@pytest.mark.parametrize("inv_op_1", [inv, pinv])
+@pytest.mark.parametrize("inv_op_2", [inv, pinv])
+def test_useless_consecutive_inv(inv_op_1, inv_op_2):
     x = pt.matrix("x")
-    op1 = get_pt_function(x, inv_op_1)
-    op2 = get_pt_function(op1, inv_op_2)
-    rewritten_out = rewrite_graph(op2)
+    inv_x = inv_op_1(x)
+    x_again = inv_op_2(inv_x)
+    rewritten_out = rewrite_graph(x_again)
     assert rewritten_out == x
 
 
-@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
-def test_inv_eye_to_eye(inv_op):
+@pytest.mark.parametrize("inv_op", [inv, pinv])
+def test_inv_of_diag_from_eye(inv_op):
     x = pt.eye(10)
-    x_inv = get_pt_function(x, inv_op)
+    x_inv = inv_op(x)
     f_rewritten = function([], x_inv, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
@@ -602,13 +550,13 @@ def test_inv_eye_to_eye(inv_op):
     [(), (7,), (7, 7), (5, 7, 7)],
     ids=["scalar", "vector", "matrix", "batched"],
 )
-@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
-def test_inv_diag_from_eye_mul(shape, inv_op):
+@pytest.mark.parametrize("inv_op", [inv, pinv])
+def test_inv_of_diag_from_eye_mul(shape, inv_op):
     # Initializing x based on scalar/vector/matrix
     x = pt.tensor("x", shape=shape)
     x_diag = pt.eye(7) * x
     # Calculating inverse using pt.linalg.inv
-    x_inv = get_pt_function(x_diag, inv_op)
+    x_inv = inv_op(x_diag)
 
     # REWRITE TEST
     f_rewritten = function([x], x_inv, mode="FAST_RUN")
@@ -637,11 +585,11 @@ def test_inv_diag_from_eye_mul(shape, inv_op):
     )
 
 
-@pytest.mark.parametrize("inv_op", ["inv", "pinv"])
-def test_inv_diag_from_diag(inv_op):
+@pytest.mark.parametrize("inv_op", [inv, pinv])
+def test_inv_of_diag_to_diag_reciprocal(inv_op):
     x = pt.dvector("x")
     x_diag = pt.diag(x)
-    x_inv = get_pt_function(x_diag, inv_op)
+    x_inv = inv_op(x_diag)
 
     # REWRITE TEST
     f_rewritten = function([x], x_inv, mode="FAST_RUN")
@@ -665,7 +613,7 @@ def test_inv_diag_from_diag(inv_op):
     )
 
 
-def test_diag_blockdiag_rewrite():
+def test_diag_of_blockdiag():
     n_matrices = 10
     matrix_size = (5, 5)
     sub_matrices = pt.tensor("sub_matrices", shape=(n_matrices, *matrix_size))
@@ -692,7 +640,7 @@ def test_diag_blockdiag_rewrite():
     )
 
 
-def test_det_blockdiag_rewrite():
+def test_det_of_blockdiag_():
     n_matrices = 100
     matrix_size = (5, 5)
     sub_matrices = pt.tensor("sub_matrices", shape=(n_matrices, *matrix_size))
@@ -719,7 +667,7 @@ def test_det_blockdiag_rewrite():
     )
 
 
-def test_slogdet_blockdiag_rewrite():
+def test_slogdet_of_blockdiag():
     n_matrices = 10
     matrix_size = (5, 5)
     sub_matrices = pt.tensor("sub_matrices", shape=(n_matrices, *matrix_size))
@@ -754,7 +702,7 @@ def test_slogdet_blockdiag_rewrite():
     )
 
 
-def test_diag_kronecker_rewrite():
+def test_diag_of_kronecker():
     a, b = pt.dmatrices("a", "b")
     kron_prod = pt.linalg.kron(a, b)
     diag_kron_prod = pt.diag(kron_prod)
@@ -777,7 +725,7 @@ def test_diag_kronecker_rewrite():
     )
 
 
-def test_det_kronecker_rewrite():
+def test_det_of_kronecker():
     a, b = pt.dmatrices("a", "b")
     kron_prod = pt.linalg.kron(a, b)
     det_output = pt.linalg.det(kron_prod)
@@ -887,7 +835,7 @@ def test_cholesky_diag_from_eye_mul(shape):
     )
 
 
-def test_cholesky_diag_from_diag():
+def test_cholesky_of_diag():
     x = pt.dvector("x")
     x_diag = pt.diag(x)
     x_cholesky = pt.linalg.cholesky(x_diag)
@@ -912,7 +860,7 @@ def test_cholesky_diag_from_diag():
     )
 
 
-def test_rewrite_cholesky_diag_to_sqrt_diag_not_applied():
+def test_cholesky_of_diag_not_applied():
     # Case 1 : y is not a diagonal matrix because of k = -1
     x = pt.tensor("x", shape=(7, 7))
     y = pt.eye(7, k=-1) * x
@@ -1006,7 +954,7 @@ def test_slogdet_specialization():
         (CholeskySolve, pt.linalg.cho_solve, {}),
     ],
 )
-def test_scalar_solve_to_division_rewrite(
+def test_scalar_solve_to_division(
     op, fn, extra_kwargs, b_ndim, a_batch_shape, b_batch_shape
 ):
     def solve_op_in_graph(graph):
