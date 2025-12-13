@@ -183,29 +183,15 @@ def test_convolve2d(kernel_shape, data_shape, mode, boundary, boundary_kwargs):
     utt.verify_grad(lambda k: op(data_val, k).sum(), [kernel_val])
 
 
-def test_convolve2d_fft():
-    data = matrix("data")
-    kernel = matrix("kernel")
-    out_fft = convolve2d(data, kernel, mode="same", method="fft")
-    out_direct = convolve2d(data, kernel, mode="same", method="direct")
-
-    rng = np.random.default_rng()
-    data_val = rng.normal(size=(7, 5)).astype(config.floatX)
-    kernel_val = rng.normal(size=(3, 2)).astype(config.floatX)
-
-    fn = function([data, kernel], [out_fft, out_direct])
-    fft_res, direct_res = fn(data_val, kernel_val)
-    np.testing.assert_allclose(fft_res, direct_res)
-
-
 @pytest.mark.parametrize("mode", ["full", "valid", "same"])
-def test_batched_1d_agrees_with_2d_row_filter(mode):
+@pytest.mark.parametrize("method", ["direct", "fft"])
+def test_batched_1d_agrees_with_2d_row_filter(mode, method):
     data = matrix("data")
     kernel_1d = vector("kernel_1d")
     kernel_2d = expand_dims(kernel_1d, 0)
 
     output_1d = convolve1d(data, kernel_1d, mode=mode)
-    output_2d = convolve2d(data, kernel_2d, mode=mode)
+    output_2d = convolve2d(data, kernel_2d, mode=mode, method=method)
 
     grad_1d = grad(output_1d.sum(), kernel_1d).ravel()
     grad_2d = grad(output_1d.sum(), kernel_1d).ravel()
@@ -216,5 +202,13 @@ def test_batched_1d_agrees_with_2d_row_filter(mode):
     kernel_1d_val = np.random.normal(size=(3,)).astype(config.floatX)
 
     forward_1d, forward_2d, backward_1d, backward_2d = fn(data_val, kernel_1d_val)
-    np.testing.assert_allclose(forward_1d, forward_2d)
-    np.testing.assert_allclose(backward_1d, backward_2d)
+    np.testing.assert_allclose(
+        forward_1d,
+        forward_2d,
+        rtol=1e-5 if config.floatX == "float32" else 1e-13,
+    )
+    np.testing.assert_allclose(
+        backward_1d,
+        backward_2d,
+        rtol=1e-5 if config.floatX == "float32" else 1e-13,
+    )
