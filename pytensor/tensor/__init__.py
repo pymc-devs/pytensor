@@ -142,6 +142,7 @@ from pytensor.tensor.shape import (
     specify_broadcastable,
     specify_shape,
 )
+from pytensor.tensor.shape_ops import *
 
 # We import as `_shared` instead of `shared` to avoid confusion between
 # `pytensor.shared` and `tensor._shared`.
