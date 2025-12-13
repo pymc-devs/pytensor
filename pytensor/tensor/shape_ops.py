@@ -11,13 +11,11 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import (
-    atleast_1d,
     expand_dims,
-    get_scalar_constant_value,
+    infer_static_shape,
     join,
     split,
 )
-from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType
 from pytensor.tensor.type import tensor
@@ -31,20 +29,12 @@ class JoinDims(Op):
     )
     view_map = {0: [0]}
 
-    def __init__(self, input_ndims: int, start_axis: int, n_axes: int):
+    def __init__(self, start_axis: int, n_axes: int):
         if start_axis < 0:
             raise ValueError("JoinDims start_axis must be non-negative")
 
         self.start_axis = start_axis
         self.n_axes = n_axes
-        self.input_ndims = input_ndims
-
-        output_ndims = 1 if not start_axis else min(1, input_ndims - n_axes)
-
-        input_signature = ",".join(f"i{i}" for i in range(input_ndims))
-        output_signature = ",".join(f"o{i}" for i in range(output_ndims))
-
-        self.gufunc_signature = f"({input_signature})->({output_signature})"
 
     @property
     def axis_range(self):
@@ -59,11 +49,6 @@ class JoinDims(Op):
 
     def make_node(self, x: Variable) -> Apply:  # type: ignore[override]
         static_shapes = x.type.shape
-        if x.type.ndim != self.input_ndims:
-            raise ValueError(
-                f"Input ndim {x.type.ndim} is not equal to expected ndim {self.input_ndims}"
-            )
-
         axis_range = self.axis_range
 
         joined_shape = (
@@ -88,13 +73,24 @@ class JoinDims(Op):
         (x,) = inputs
         (out,) = outputs
 
-        output_shape = [
+        output_shape = (
             *x.shape[: self.start_axis],
             -1,
             *x.shape[self.start_axis + self.n_axes :],
-        ]
+        )
 
-        out[0] = x.reshape(tuple(output_shape))
+        out[0] = x.reshape(output_shape)
+
+
+@_vectorize_node.register(JoinDims)
+def _vectorize_joindims(op, node, x):
+    [old_x] = node.inputs
+
+    batched_ndims = x.type.ndim - old_x.type.ndim
+    start_axis = op.start_axis
+    n_axes = op.n_axes
+
+    return JoinDims(start_axis + batched_ndims, n_axes).make_node(x)
 
 
 def join_dims(x: TensorLike, axis: Sequence[int] | int | None = None) -> TensorVariable:
@@ -129,16 +125,12 @@ def join_dims(x: TensorLike, axis: Sequence[int] | int | None = None) -> TensorV
     elif not isinstance(axis, list | tuple):
         raise TypeError("axis must be an int, a list/tuple of ints, or None")
 
-    if not axis:
-        # The user passed an empty list/tuple, so we return the input as is
-        return x
-
     axis = normalize_axis_tuple(axis, x.ndim)
 
-    if any(i < 0 for i in axis):
-        raise ValueError("join_dims axis must be non-negative")
+    if len(axis) <= 1:
+        return x
 
-    if len(axis) > 1 and np.diff(axis).max() > 1:
+    if np.diff(axis).max() > 1:
         raise ValueError(
             f"join_dims axis must be consecutive, got normalized axis: {axis}"
         )
@@ -148,7 +140,7 @@ def join_dims(x: TensorLike, axis: Sequence[int] | int | None = None) -> TensorV
 
     return type_cast(
         TensorVariable,
-        JoinDims(input_ndims=x.ndim, start_axis=start_axis, n_axes=n_axes)(x),
+        JoinDims(start_axis=start_axis, n_axes=n_axes)(x),
     )
 
 
@@ -162,17 +154,11 @@ class SplitDims(Op):
         self.axis = axis
 
     def make_node(self, x: Variable, shape: Variable) -> Apply:  # type: ignore[override]
-        if shape.type.dtype not in ("int8", "int16", "int32", "int64"):
+        if shape.type.numpy_dtype.kind not in "iu":
             raise TypeError("shape must be an integer tensor")
 
-        def _get_constant_shape(x):
-            try:
-                return get_scalar_constant_value(x).item()
-            except NotScalarConstantError:
-                return x
-
         axis = self.axis
-        constant_shape = [_get_constant_shape(s) for s in shape]  # type: ignore[attr-defined]
+        _, constant_shape = infer_static_shape(shape)
 
         output_shapes = [
             *x.type.shape[:axis],
@@ -181,7 +167,7 @@ class SplitDims(Op):
         ]
 
         output = tensor(
-            shape=tuple([x if isinstance(x, int) else None for x in output_shapes]),
+            shape=tuple(x if isinstance(x, int) else None for x in output_shapes),
             dtype=x.type.dtype,
         )
         return Apply(self, [x, shape], [output])
@@ -199,11 +185,7 @@ class SplitDims(Op):
         (x, shape) = inputs
         (out,) = outputs
 
-        output_shape = [
-            *x.shape[: self.axis],
-            *shape,
-            *x.shape[self.axis + 1 :],
-        ]
+        output_shape = (*x.shape[: self.axis], *shape, *x.shape[self.axis + 1 :])
 
         out[0] = x.reshape(output_shape)
 
@@ -219,7 +201,7 @@ def _vectorize_splitdims(op, node, x, shape):
         return vectorize_node_fallback(op, node, x, shape)
 
     axis = op.axis
-    return split_dims(x, shape, axis=axis + batched_ndims).owner
+    return SplitDims(axis=axis + batched_ndims).make_node(x, shape)
 
 
 def split_dims(
@@ -272,7 +254,7 @@ def split_dims(
         return type_cast(TensorVariable, x.squeeze(axis=axis))
 
     [axis] = normalize_axis_tuple(axis, x.ndim)  # type: ignore[misc]
-    shape = as_tensor_variable(shape)  # type: ignore[arg-type]
+    shape = as_tensor_variable(shape, dtype="int64")  # type: ignore[arg-type]
 
     split_op = SplitDims(axis=axis)
     return type_cast(TensorVariable, split_op(x, shape))
@@ -468,13 +450,6 @@ def pack(
     reshaped_tensors: list[TensorVariable] = []
     packed_shapes: list[ShapeValueType] = []
 
-    if all([n_before == 0, n_after == 0, min_axes == 0]):
-        # Special case -- we're raveling everything
-        packed_shapes = [t.shape for t in tensor_list]
-        reshaped_tensors = [atleast_1d(join_dims(t, None)) for t in tensor_list]
-
-        return join(0, *reshaped_tensors), packed_shapes
-
     for i, input_tensor in enumerate(tensor_list):
         n_dim = input_tensor.ndim
 
@@ -488,16 +463,8 @@ def pack(
 
         if n_dim == min_axes:
             # If an input has the minimum number of axes, pack implicitly inserts a new axis based on the pattern
-            # implied by the axes. If n_before == 0, the reshape would be (-1, ...), so we need to expand at axis 0.
-            # If n_after == 0, the reshape would be (..., -1), so we need to expand at axis -1. If both are equal,
-            # the reshape will occur in the center of the tensor.
-            if n_before == 0:
-                input_tensor = expand_dims(input_tensor, axis=0)
-            elif n_after == 0:
-                input_tensor = expand_dims(input_tensor, axis=-1)
-            elif n_before == n_after:
-                input_tensor = expand_dims(input_tensor, axis=n_before)
-
+            # implied by the axes.
+            input_tensor = expand_dims(input_tensor, axis=n_before)
             reshaped_tensors.append(input_tensor)
             continue
 
@@ -505,7 +472,7 @@ def pack(
         # shape[max(axes)+1:]). So this will work if we choose axes=(n_before, n_after_packed - 1). Because of the
         # rules on the axes input, we will always have n_before <= n_after_packed - 1. A set is used here to cover the
         # corner case when n_before == n_after_packed - 1 (i.e., when there is only one axis to ravel --> do nothing).
-        join_axes = {n_before, n_after_packed - 1}
+        join_axes = range(n_before, n_after_packed)
         joined = join_dims(input_tensor, tuple(join_axes))
         reshaped_tensors.append(joined)
 
@@ -560,7 +527,7 @@ def unpack(
 
     split_inputs = split(
         packed_input,
-        splits_size=[prod(shape).astype(int) for shape in packed_shapes],
+        splits_size=[prod(shape, dtype=int) for shape in packed_shapes],
         n_splits=len(packed_shapes),
         axis=split_axis,
     )

@@ -1,4 +1,5 @@
 from pytensor.graph import node_rewriter
+from pytensor.graph.rewriting.basic import copy_stack_trace
 from pytensor.tensor.rewriting.basic import register_canonicalize
 from pytensor.tensor.shape_ops import JoinDims, SplitDims
 
@@ -19,7 +20,10 @@ def local_split_dims_to_reshape(fgraph, node):
         *x.shape[axis + 1 :],
     ]
 
-    return [x.reshape(output_shape)]
+    new_x = x.reshape(output_shape)
+    copy_stack_trace(x, new_x)
+
+    return [new_x]
 
 
 @register_canonicalize
@@ -39,4 +43,7 @@ def local_join_dims_to_reshape(fgraph, node):
         *x.shape[start_axis + n_axes :],
     ]
 
-    return [x.reshape(output_shape)]
+    new_x = x.reshape(output_shape)
+
+    copy_stack_trace(x, new_x)
+    return [new_x]
