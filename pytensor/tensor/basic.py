@@ -921,7 +921,7 @@ def zeros_like(model, dtype=None, opt=False):
     return fill(_model, ret)
 
 
-def zeros(shape, dtype=None):
+def zeros(shape, dtype=None) -> TensorVariable:
     """Create a `TensorVariable` filled with zeros, closer to NumPy's syntax than ``alloc``."""
     if not (
         isinstance(shape, np.ndarray | Sequence)
@@ -933,7 +933,7 @@ def zeros(shape, dtype=None):
     return alloc(np.array(0, dtype=dtype), *shape)
 
 
-def ones(shape, dtype=None):
+def ones(shape, dtype=None) -> TensorVariable:
     """Create a `TensorVariable` filled with ones, closer to NumPy's syntax than ``alloc``."""
     if not (
         isinstance(shape, np.ndarray | Sequence)
