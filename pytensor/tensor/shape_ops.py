@@ -128,7 +128,7 @@ def join_dims(x: TensorLike, axis: Sequence[int] | int | None = None) -> TensorV
     axis = normalize_axis_tuple(axis, x.ndim)
 
     if len(axis) <= 1:
-        return x
+        return x  # type: ignore[unreachable]
 
     if np.diff(axis).max() > 1:
         raise ValueError(
