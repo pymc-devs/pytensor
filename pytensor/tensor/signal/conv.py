@@ -254,11 +254,6 @@ class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
 
     def perform(self, node, inputs, outputs):
         in1, in2, full_mode = inputs
-
-        if isinstance(full_mode, np.bool):
-            # Patch for wrong unboxing of bool scalars in C backend
-            # Conditional, because numba will produce a bool, not np.bool_
-            full_mode = full_mode.item()
         mode = "full" if full_mode else "valid"
         outputs[0][0] = scipy_convolve(in1, in2, mode=mode, method=self.method)
 
