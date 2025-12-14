@@ -484,20 +484,32 @@ class ScalarType(CType, HasDataType, HasShape):
     def c_sync(self, name, sub):
         specs = self.dtype_specs()
         fail = sub["fail"]
-        dtype = specs[1]
-        cls = specs[2]
+        (np_dtype, _c_dtype, _cls_name) = specs
+        np_dtype_num = np.dtype(np_dtype).num
+
         return f"""
         Py_XDECREF(py_{name});
-        py_{name} = PyArrayScalar_New({cls});
+
+        PyArray_Descr* {name}_descr = PyArray_DescrFromType({np_dtype_num});  // {np_dtype}
+        if (!{name}_descr) {{
+            PyErr_Format(PyExc_RuntimeError, "Could not get descriptor for {np_dtype_num}={np_dtype}");
+            {fail}
+        }}
+
+        // PyArray_Scalar creates a new scalar object by copying data from the pointer &{name}
+        py_{name} = PyArray_Scalar(&{name}, {name}_descr, NULL);
+
+        // Clean up the descriptor reference (PyArray_DescrFromType returns a new ref)
+        Py_DECREF({name}_descr);
+
         if (!py_{name})
         {{
             Py_XINCREF(Py_None);
             py_{name} = Py_None;
             PyErr_Format(PyExc_MemoryError,
-                "Instantiation of new Python scalar failed ({dtype})");
+                "Instantiation of new Python NumPy scalar failed ({np_dtype_num}={np_dtype})");
             {fail}
         }}
-        PyArrayScalar_ASSIGN(py_{name}, {cls}, {name});
         """
 
     def c_cleanup(self, name, sub):
@@ -731,7 +743,7 @@ class ScalarType(CType, HasDataType, HasShape):
         return ["import_array();"]
 
     def c_code_cache_version(self):
-        return (14, np.__version__)
+        return (15, np.__version__)
 
     def get_shape_info(self, obj):
         return obj.itemsize

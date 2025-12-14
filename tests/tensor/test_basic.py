@@ -2221,6 +2221,13 @@ def test_ScalarFromTensor(cast_policy):
             scalar_from_tensor(vector())
 
 
+def test_bool_scalar_from_tensor():
+    x = scalar("x", dtype="bool")
+    fn = function([x], scalar_from_tensor(x))
+    assert fn(np.array(True, dtype=bool))
+    assert not fn(np.array(False, dtype=bool))
+
+
 def test_op_cache():
     # TODO: What is this actually testing?
     # trigger bug in ticket #162
