@@ -1784,14 +1784,14 @@ class numeric_grad:
 
 def mode_not_slow(mode):
     from pytensor.compile.debugmode import DebugMode
-    from pytensor.compile.mode import FAST_RUN, get_mode
+    from pytensor.compile.mode import get_mode
 
     if mode == "FAST_COMPILE":
-        return FAST_RUN
+        return get_mode("FAST_RUN")
     mode = get_mode(mode)
     if isinstance(mode, DebugMode):
         opt = mode.optimizer
-        return FAST_RUN.clone(optimizer=opt)
+        return get_mode("FAST_RUN").clone(optimizer=opt)
     else:
         return mode
 
