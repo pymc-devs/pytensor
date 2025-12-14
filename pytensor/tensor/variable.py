@@ -438,6 +438,62 @@ class _tensor_py_operators:
     def astype(self, dtype):
         return pt.basic.cast(self, dtype)
 
+    def _getitem_with_newaxis(self, args):
+        """Handle newaxis (None) for both basic and advanced indexing.
+
+        `np.newaxis` (i.e. `None`) in NumPy indexing mean "add a new
+        broadcastable dimension at this location".  Since PyTensor adds
+        new broadcastable dimensions via the `DimShuffle` `Op`, the
+        following code uses said `Op` to add one of the new axes and
+        then uses recursion to apply any other indices and add any
+        remaining new axes.
+        """
+        counter = 0
+        pattern = []
+        new_args = []
+        for arg in args:
+            if arg is np.newaxis or arg is NoneConst:
+                pattern.append("x")
+                new_args.append(slice(None))
+            else:
+                # Check for boolean index which consumes multiple dimensions
+                consumed_dims = 1
+                val = pt.subtensor.as_index_variable(arg)
+                if (
+                    hasattr(val, "type")
+                    and isinstance(val.type, TensorType)
+                    and val.type.dtype == "bool"
+                ):
+                    consumed_dims = val.type.ndim
+
+                pattern.extend(range(counter, counter + consumed_dims))
+                counter += consumed_dims
+                new_args.append(arg)
+
+        pattern.extend(range(counter, self.ndim))
+
+        view = self.dimshuffle(pattern)
+
+        # Check if we can return the view directly if all new_args are full slices
+        # We can't do arg == slice(None, None, None) as in
+        # Python 2.7, this call __lt__ if we have a slice
+        # with some symbolic variable.
+        full_slices = True
+        for arg in new_args:
+            if not (
+                isinstance(arg, slice)
+                and (arg.start is None or arg.start is NoneConst)
+                and (arg.stop is None or arg.stop is NoneConst)
+                and (arg.step is None or arg.step is NoneConst)
+            ):
+                full_slices = False
+                break
+
+        if full_slices:
+            return view
+        else:
+            return view.__getitem__(tuple(new_args))
+
     def __getitem__(self, args):
         def includes_bool(args_el):
             if isinstance(args_el, np.bool_ | bool) or (
@@ -539,55 +595,18 @@ class _tensor_py_operators:
                     else:
                         advanced = True
 
-        if advanced:
+        # Handle newaxis (None) for both basic and advanced indexing
+        if np.newaxis in args or NoneConst in args:
+            return self._getitem_with_newaxis(args)
+        elif advanced:
             return pt.subtensor.advanced_subtensor(self, *args)
         else:
-            if np.newaxis in args or NoneConst in args:
-                # `np.newaxis` (i.e. `None`) in NumPy indexing mean "add a new
-                # broadcastable dimension at this location".  Since PyTensor adds
-                # new broadcastable dimensions via the `DimShuffle` `Op`, the
-                # following code uses said `Op` to add one of the new axes and
-                # then uses recursion to apply any other indices and add any
-                # remaining new axes.
-
-                counter = 0
-                pattern = []
-                new_args = []
-                for arg in args:
-                    if arg is np.newaxis or arg is NoneConst:
-                        pattern.append("x")
-                        new_args.append(slice(None, None, None))
-                    else:
-                        pattern.append(counter)
-                        counter += 1
-                        new_args.append(arg)
-
-                pattern.extend(list(range(counter, self.ndim)))
-
-                view = self.dimshuffle(pattern)
-                full_slices = True
-                for arg in new_args:
-                    # We can't do arg == slice(None, None, None) as in
-                    # Python 2.7, this call __lt__ if we have a slice
-                    # with some symbolic variable.
-                    if not (
-                        isinstance(arg, slice)
-                        and (arg.start is None or arg.start is NoneConst)
-                        and (arg.stop is None or arg.stop is NoneConst)
-                        and (arg.step is None or arg.step is NoneConst)
-                    ):
-                        full_slices = False
-                if full_slices:
-                    return view
-                else:
-                    return view.__getitem__(tuple(new_args))
-            else:
-                return pt.subtensor.Subtensor(args)(
-                    self,
-                    *pt.subtensor.get_slice_elements(
-                        args, lambda entry: isinstance(entry, Variable)
-                    ),
-                )
+            return pt.subtensor.Subtensor(args)(
+                self,
+                *pt.subtensor.get_slice_elements(
+                    args, lambda entry: isinstance(entry, Variable)
+                ),
+            )
 
     def __setitem__(self, key, value):
         raise TypeError(
