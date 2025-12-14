@@ -50,6 +50,7 @@ dependencies = [
     "setuptools>=59.0.0",
     "scipy>=1,<2",
     "numpy>=2.0",
+    "numba>0.57,<1",
     "filelock>=3.15",
     "etuples",
     "logical-unification",
@@ -186,12 +187,12 @@ files = ["pytensor", "tests"]
 build = "*"
 # Uncomment to skip builds that compile but fail when trying to test (maybe due to incompatibility with runner)
 # archs = ["auto64"]
-# Disable any-platform (pp*), and 32-bit builds.
+# Disable any-platform (pp*), 32-bit builds, and free-threaded builds (cp*t-*)
 # Additional options to consider: "*musllinux*"
-skip = ["pp*", "*-win32", "*-manylinux_i686"]
+skip = ["pp*", "*-win32", "*-manylinux_i686", "cp*t-*"]
 build-frontend = "build"
 test-command = 'python -c "import pytensor; print(pytensor.__version__); from pytensor.scan import scan_perform; print(scan_perform.get_version())"'
-test-skip = ["cp37*", "*musllinux*", "*win32*", "*i686*"]
+test-skip = ["*musllinux*", "*i686*"]
 
 # Testing seems to be running into issues locating libs where expected
 # test-requires = ["pytest", "numba", "jax", "jaxlib"]
