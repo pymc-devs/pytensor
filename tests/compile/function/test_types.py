@@ -1360,7 +1360,7 @@ def test_minimal_random_function_call_benchmark(trust_input, benchmark):
     benchmark(f, rng_val)
 
 
-@pytest.mark.parametrize("mode", ["C", "C_VM"])
+@pytest.mark.parametrize("mode", ["C", "CVM"])
 def test_radon_model_compile_repeatedly_benchmark(mode, radon_model, benchmark):
     joined_inputs, [model_logp, model_dlogp] = radon_model
     rng = np.random.default_rng(1)
@@ -1375,7 +1375,7 @@ def test_radon_model_compile_repeatedly_benchmark(mode, radon_model, benchmark):
     benchmark.pedantic(compile_and_call_once, rounds=5, iterations=1)
 
 
-@pytest.mark.parametrize("mode", ["C", "C_VM"])
+@pytest.mark.parametrize("mode", ["C", "CVM"])
 def test_radon_model_compile_variants_benchmark(
     mode, radon_model, radon_model_variants, benchmark
 ):
@@ -1406,15 +1406,15 @@ def test_radon_model_compile_variants_benchmark(
     benchmark.pedantic(compile_and_call_once, rounds=1, iterations=1)
 
 
-@pytest.mark.parametrize("mode", ["C", "C_VM", "C_VM_NOGC"])
+@pytest.mark.parametrize("mode", ["C", "CVM", "CVM_NOGC"])
 def test_radon_model_call_benchmark(mode, radon_model, benchmark):
     joined_inputs, [model_logp, model_dlogp] = radon_model
 
-    real_mode = "C_VM" if mode == "C_VM_NOGC" else mode
+    real_mode = "CVM" if mode == "CVM_NOGC" else mode
     fn = function(
         [joined_inputs], [model_logp, model_dlogp], mode=real_mode, trust_input=True
     )
-    if mode == "C_VM_NOGC":
+    if mode == "CVM_NOGC":
         fn.vm.allow_gc = False
 
     rng = np.random.default_rng(1)

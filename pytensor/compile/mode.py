@@ -468,7 +468,7 @@ else:
     )
 
 C = Mode("c", "fast_run")
-C_VM = Mode("cvm", "fast_run")
+CVM = Mode("cvm", "fast_run")
 
 NUMBA = Mode(
     NumbaLinker(),
@@ -494,7 +494,7 @@ predefined_modes = {
     "FAST_COMPILE": FAST_COMPILE,
     "FAST_RUN": FAST_RUN,
     "C": C,
-    "C_VM": C_VM,
+    "CVM": CVM,
     "JAX": JAX,
     "NUMBA": NUMBA,
     "PYTORCH": PYTORCH,
