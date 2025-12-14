@@ -19,7 +19,6 @@ dependencies:
   - pydeprecate
   # Apple BLAS
   - libblas=*=*accelerate
-  # numba backend
   - numba>=0.57
   # For testing
   - coveralls
