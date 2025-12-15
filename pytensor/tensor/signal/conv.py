@@ -255,8 +255,7 @@ class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
     def perform(self, node, inputs, outputs):
         in1, in2, full_mode = inputs
 
-        # TODO: Why is .item() needed?
-        mode: Literal["full", "valid", "same"] = "full" if full_mode.item() else "valid"
+        mode = "full" if full_mode else "valid"
         outputs[0][0] = scipy_convolve(in1, in2, mode=mode, method=self.method)
 
 
