@@ -112,12 +112,12 @@ def test_as_index_literal():
     res = as_index_literal(ptb.as_tensor(2))
     assert res == 2
 
-    res = as_index_literal(np.newaxis)
-    assert res is np.newaxis
+    res = as_index_literal(None)
+    assert res is None
     res = as_index_literal(NoneConst)
-    assert res is np.newaxis
+    assert res is None
     res = as_index_literal(NoneConst.clone())
-    assert res is np.newaxis
+    assert res is None
 
 
 class TestGetCanonicalFormSlice:
@@ -619,11 +619,11 @@ class TestSubtensor(utt.OptimizationTestMixin):
             (1, Subtensor, np.index_exp[1, ..., 2, 3]),
             (1, Subtensor, np.index_exp[1, 2, 3, ...]),
             (3, DimShuffle, np.index_exp[..., [0, 2, 3]]),
-            (1, DimShuffle, np.index_exp[np.newaxis, ...]),
+            (1, DimShuffle, np.index_exp[None, ...]),
             (
                 3,
                 AdvancedSubtensor,
-                np.index_exp[..., np.newaxis, [1, 2]],
+                np.index_exp[..., None, [1, 2]],
             ),
         ],
     )
@@ -685,10 +685,10 @@ class TestSubtensor(utt.OptimizationTestMixin):
         assert_array_equal(test_array_np[1:, mask], test_array[1:, mask].eval())
         assert_array_equal(test_array_np[:1, mask], test_array[:1, mask].eval())
         assert_array_equal(
-            test_array_np[1:, mask, np.newaxis], test_array[1:, mask, np.newaxis].eval()
+            test_array_np[1:, mask, None], test_array[1:, mask, None].eval()
         )
         assert_array_equal(
-            test_array_np[np.newaxis, 1:, mask], test_array[np.newaxis, 1:, mask].eval()
+            test_array_np[None, 1:, mask], test_array[None, 1:, mask].eval()
         )
         assert_array_equal(
             numpy_inc_subtensor(test_array_np, (0, mask), 1),
@@ -2276,8 +2276,8 @@ class TestAdvancedSubtensor:
         b_idx[0, 1] = 1
         b_idx[1, 1] = 2
 
-        r_idx = np.arange(xx.shape[1])[:, np.newaxis]
-        c_idx = np.arange(xx.shape[2])[np.newaxis, :]
+        r_idx = np.arange(xx.shape[1])[:, None]
+        c_idx = np.arange(xx.shape[2])[None, :]
 
         f = pytensor.function([X], X[b_idx, r_idx, c_idx], mode=self.mode)
         out = f(xx)
@@ -2300,6 +2300,20 @@ class TestAdvancedSubtensor:
             for node in f_shape1.maker.fgraph.toposort()
         )
         assert f_shape1(s) == 3
+
+    def test_adv_sub_boolean(self):
+        # Boolean indexing with consumed_dims > 1 and newaxis
+        # This test catches regressions where boolean masks are assumed to consume only 1 dimension. Mask results in first dim of length 3.
+        mask = np.array([[True, False, True], [False, False, True]])
+        val_data = np.arange(24).reshape((2, 3, 4)).astype(config.floatX)
+        val = tensor("val", shape=(2, 3, 4), dtype=config.floatX)
+
+        z_mask2d = val[mask, None, ..., None]
+        f_mask2d = pytensor.function([val], z_mask2d, mode=self.mode)
+        res_mask2d = f_mask2d(val_data)
+        expected_mask2d = val_data[mask, None, ..., None]
+        assert res_mask2d.shape == (3, 1, 4, 1)
+        utt.assert_allclose(res_mask2d, expected_mask2d)
 
     def test_adv_grouped(self):
         # Reported in https://github.com/Theano/Theano/issues/6152
@@ -2945,7 +2959,6 @@ def test_index_vars_to_types():
     with pytest.raises(AdvancedIndexingError):
         index_vars_to_types(x)
 
-    # Integers are now allowed
     assert index_vars_to_types(1) == 1
 
     res = index_vars_to_types(iscalar)
@@ -3046,8 +3059,6 @@ def test_vectorize_subtensor_without_batch_indices():
             (2,),
             False,
         ),
-        # (this is currently failing because PyTensor tries to vectorize the slice(None) operation,
-        # due to the exact same None constant being used there and in the np.newaxis)
         pytest.param(
             (lambda x, idx: x[:, idx, None]),
             "(7,5,3),(2)->(7,2,1,3)",
@@ -3062,7 +3073,6 @@ def test_vectorize_subtensor_without_batch_indices():
             (2,),
             False,
         ),
-        # (not supported, because fallback Blocwise can't handle slices)
         pytest.param(
             (lambda x, idx: x[:, idx, :, idx]),
             "(7,5,3,5),(2)->(2,7,3)",
@@ -3074,7 +3084,6 @@ def test_vectorize_subtensor_without_batch_indices():
         ((lambda x, idx: x[idx]), "(t1),(idx)->(tx)", (7,), (11, 2), True),
         # Batched x, batched idx
         ((lambda x, idx: x[idx]), "(t1),(idx)->(tx)", (11, 7), (11, 2), True),
-        # (not supported, because fallback Blocwise can't handle slices)
         pytest.param(
             (lambda x, idx: x[:, idx, :]),
             "(t1,t2,t3),(idx)->(t1,tx,t3)",

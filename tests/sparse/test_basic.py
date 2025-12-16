@@ -898,7 +898,7 @@ class TestColScaleCSC(utt.InferShapeTester):
             f = pytensor.function(variable, self.op(*variable))
 
             tested = f(*data)
-            x, s = data[0].toarray(), data[1][np.newaxis, :]
+            x, s = data[0].toarray(), data[1][None, :]
             expected = x * s
 
             assert tested.format == format
@@ -935,7 +935,7 @@ class TestRowScaleCSC(utt.InferShapeTester):
             f = pytensor.function(variable, self.op(*variable))
 
             tested = f(*data)
-            x, s = data[0].toarray(), data[1][:, np.newaxis]
+            x, s = data[0].toarray(), data[1][:, None]
             expected = x * s
 
             assert tested.format == format

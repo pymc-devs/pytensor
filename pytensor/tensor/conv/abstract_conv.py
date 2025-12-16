@@ -1886,9 +1886,7 @@ def frac_bilinear_upsampling(input, frac_ratio):
     pad = double_pad // 2
 
     # build pyramidal kernel
-    kern = bilinear_kernel_2D(ratio=ratio)[np.newaxis, np.newaxis, :, :].astype(
-        config.floatX
-    )
+    kern = bilinear_kernel_2D(ratio=ratio)[None, None, :, :].astype(config.floatX)
 
     # add corresponding padding
     pad_kern = pt.concatenate(
@@ -2019,7 +2017,7 @@ def bilinear_upsampling(
         # upsampling rows
         upsampled_row = conv2d_grad_wrt_inputs(
             output_grad=concat_mat,
-            filters=kern[np.newaxis, np.newaxis, :, np.newaxis],
+            filters=kern[None, None, :, None],
             input_shape=(up_bs, 1, row * ratio, concat_col),
             filter_shape=(1, 1, None, 1),
             border_mode=(pad, 0),
@@ -2030,7 +2028,7 @@ def bilinear_upsampling(
         # upsampling cols
         upsampled_mat = conv2d_grad_wrt_inputs(
             output_grad=upsampled_row,
-            filters=kern[np.newaxis, np.newaxis, np.newaxis, :],
+            filters=kern[None, None, None, :],
             input_shape=(up_bs, 1, row * ratio, col * ratio),
             filter_shape=(1, 1, 1, None),
             border_mode=(0, pad),
@@ -2042,7 +2040,7 @@ def bilinear_upsampling(
         kern = bilinear_kernel_2D(ratio=ratio, normalize=True)
         upsampled_mat = conv2d_grad_wrt_inputs(
             output_grad=concat_mat,
-            filters=kern[np.newaxis, np.newaxis, :, :],
+            filters=kern[None, None, :, :],
             input_shape=(up_bs, 1, row * ratio, col * ratio),
             filter_shape=(1, 1, None, None),
             border_mode=(pad, pad),

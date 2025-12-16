@@ -952,15 +952,15 @@ _good_broadcast_binary_arctan2 = dict(
     integers=(integers(2, 3, rng=rng), integers(2, 3, rng=rng)),
     int8=[
         np.arange(-127, 128, dtype="int8"),
-        np.arange(-127, 128, dtype="int8")[:, np.newaxis],
+        np.arange(-127, 128, dtype="int8")[:, None],
     ],
     uint8=[
         np.arange(0, 128, dtype="uint8"),
-        np.arange(0, 128, dtype="uint8")[:, np.newaxis],
+        np.arange(0, 128, dtype="uint8")[:, None],
     ],
     uint16=[
         np.arange(0, 128, dtype="uint16"),
-        np.arange(0, 128, dtype="uint16")[:, np.newaxis],
+        np.arange(0, 128, dtype="uint16")[:, None],
     ],
     dtype_mixup_1=(random(2, 3, rng=rng), integers(2, 3, rng=rng)),
     dtype_mixup_2=(integers(2, 3, rng=rng), random(2, 3, rng=rng)),

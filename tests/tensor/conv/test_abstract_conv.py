@@ -1534,8 +1534,8 @@ class TestBilinearUpsampling:
         kern, _shp = self.numerical_upsampling_multiplier(ratio)
         up_1D = two_by_two[:, :, :, :1] * kern[::-1] + two_by_two[:, :, :, 1:] * kern
         up_2D = (
-            up_1D[:, :, :1, :] * kern[::-1][:, np.newaxis]
-            + up_1D[:, :, 1:, :] * kern[:, np.newaxis]
+            up_1D[:, :, :1, :] * kern[::-1][:, None]
+            + up_1D[:, :, 1:, :] * kern[:, None]
         )
         num_concat = (ratio - 1) // 2
         for i in range(num_concat):

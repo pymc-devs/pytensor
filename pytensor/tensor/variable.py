@@ -17,7 +17,6 @@ from pytensor.scalar import (
 from pytensor.tensor import _get_vector_length
 from pytensor.tensor.exceptions import AdvancedIndexingError
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.type_other import NoneConst
 from pytensor.tensor.utils import hash_from_ndarray
 
 
@@ -438,62 +437,6 @@ class _tensor_py_operators:
     def astype(self, dtype):
         return pt.basic.cast(self, dtype)
 
-    def _getitem_with_newaxis(self, args):
-        """Handle newaxis (None) for both basic and advanced indexing.
-
-        `np.newaxis` (i.e. `None`) in NumPy indexing mean "add a new
-        broadcastable dimension at this location".  Since PyTensor adds
-        new broadcastable dimensions via the `DimShuffle` `Op`, the
-        following code uses said `Op` to add one of the new axes and
-        then uses recursion to apply any other indices and add any
-        remaining new axes.
-        """
-        counter = 0
-        pattern = []
-        new_args = []
-        for arg in args:
-            if arg is np.newaxis or arg is NoneConst:
-                pattern.append("x")
-                new_args.append(slice(None))
-            else:
-                # Check for boolean index which consumes multiple dimensions
-                consumed_dims = 1
-                val = pt.subtensor.as_index_variable(arg)
-                if (
-                    hasattr(val, "type")
-                    and isinstance(val.type, TensorType)
-                    and val.type.dtype == "bool"
-                ):
-                    consumed_dims = val.type.ndim
-
-                pattern.extend(range(counter, counter + consumed_dims))
-                counter += consumed_dims
-                new_args.append(arg)
-
-        pattern.extend(range(counter, self.ndim))
-
-        view = self.dimshuffle(pattern)
-
-        # Check if we can return the view directly if all new_args are full slices
-        # We can't do arg == slice(None, None, None) as in
-        # Python 2.7, this call __lt__ if we have a slice
-        # with some symbolic variable.
-        full_slices = True
-        for arg in new_args:
-            if not (
-                isinstance(arg, slice)
-                and (arg.start is None or arg.start is NoneConst)
-                and (arg.stop is None or arg.stop is NoneConst)
-                and (arg.step is None or arg.step is NoneConst)
-            ):
-                full_slices = False
-                break
-
-        if full_slices:
-            return view
-        else:
-            return view.__getitem__(tuple(new_args))
-
     def __getitem__(self, args):
         def includes_bool(args_el):
             if isinstance(args_el, np.bool_ | bool) or (
@@ -511,15 +454,12 @@ class _tensor_py_operators:
         elif not isinstance(args, tuple):
             args = (args,)
 
-        # Count the dimensions, check for bools and find ellipses.
         ellipses = []
         index_dim_count = 0
         for i, arg in enumerate(args):
-            if arg is np.newaxis or arg is NoneConst:
-                # no increase in index_dim_count
+            if arg is None or (isinstance(arg, Constant) and arg.data is None):
                 pass
             elif arg is Ellipsis:
-                # no increase in index_dim_count
                 ellipses.append(i)
             elif (
                 isinstance(arg, np.ndarray | Variable)
@@ -561,6 +501,38 @@ class _tensor_py_operators:
                 self.ndim - index_dim_count
             )
 
+        if any(
+            arg is None or (isinstance(arg, Constant) and arg.data is None)
+            for arg in args
+        ):
+            expansion_axes = []
+            new_args = []
+            # Track dims consumed by args and inserted `None`s after ellipsis
+            counter = 0  # Logical position in `self` dims
+            nones = 0  # Number of inserted dims so far
+            for arg in args:
+                if arg is None or (isinstance(arg, Constant) and arg.data is None):
+                    expansion_axes.append(counter + nones)  # Expand here
+                    nones += 1
+                    new_args.append(slice(None))
+                else:
+                    new_args.append(arg)
+                    consumed = 1
+                    if hasattr(arg, "dtype") and arg.dtype == "bool":
+                        consumed = arg.ndim
+                    counter += consumed
+
+            expanded = pt.expand_dims(self, expansion_axes)
+            if all(
+                isinstance(arg, slice)
+                and arg.start is None
+                and arg.stop is None
+                and arg.step is None
+                for arg in new_args
+            ):
+                return expanded
+            return expanded[tuple(new_args)]
+
         def is_empty_array(val):
             return (isinstance(val, tuple | list) and len(val) == 0) or (
                 isinstance(val, np.ndarray) and val.size == 0
@@ -586,7 +558,7 @@ class _tensor_py_operators:
                 advanced = True
                 break
 
-            if arg is not np.newaxis and arg is not NoneConst:
+            if arg is not None:
                 try:
                     pt.subtensor.index_vars_to_types(arg)
                 except AdvancedIndexingError:
@@ -595,10 +567,7 @@ class _tensor_py_operators:
                     else:
                         advanced = True
 
-        # Handle newaxis (None) for both basic and advanced indexing
-        if np.newaxis in args or NoneConst in args:
-            return self._getitem_with_newaxis(args)
-        elif advanced:
+        if advanced:
             return pt.subtensor.advanced_subtensor(self, *args)
         else:
             return pt.subtensor.Subtensor(args)(

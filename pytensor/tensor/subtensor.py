@@ -2577,7 +2577,7 @@ def check_advanced_indexing_dimensions(input, idx_list):
     """
     dim_seen = 0
     for index in idx_list:
-        if index is np.newaxis:
+        if index is None:
             # skip, does not count as an input dimension
             pass
         elif isinstance(index, np.ndarray) and index.dtype == "bool":
@@ -2721,6 +2721,8 @@ class AdvancedSubtensor(Op):
                 else:
                     # Regular numerical index
                     explicit_indices.append(inp)
+            elif entry is None:
+                explicit_indices.append(None)
             else:
                 raise ValueError(f"Invalid entry in idx_list: {entry}")
 

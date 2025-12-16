@@ -955,7 +955,7 @@ class TestUnravelIndex(utt.InferShapeTester):
             if index_ndim == 0:
                 indices = indices[-1]
             elif index_ndim == 2:
-                indices = indices[:, np.newaxis]
+                indices = indices[:, None]
             indices_symb = pytensor.shared(indices)
 
             # reference result
@@ -1032,7 +1032,7 @@ class TestRavelMultiIndex(utt.InferShapeTester):
             if index_ndim == 0:
                 multi_index = tuple(i[-1] for i in multi_index)
             elif index_ndim == 2:
-                multi_index = tuple(i[:, np.newaxis] for i in multi_index)
+                multi_index = tuple(i[:, None] for i in multi_index)
             multi_index_symb = [pytensor.shared(i) for i in multi_index]
 
             # reference result

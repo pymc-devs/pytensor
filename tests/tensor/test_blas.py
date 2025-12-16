@@ -1390,7 +1390,7 @@ class TestGemv(unittest_tools.OptimizationTestMixin):
 def matrixmultiply(a, b):
     if len(b.shape) == 1:
         b_is_vector = True
-        b = b[:, np.newaxis]
+        b = b[:, None]
     else:
         b_is_vector = False
     assert a.shape[1] == b.shape[0]
@@ -2310,7 +2310,7 @@ class TestBlasStrides:
         # test_gemm_non_contiguous: Test if GEMM works well with non-contiguous matrices.
         aval = np.ones((6, 2))
         bval = np.ones((2, 7))
-        cval = np.arange(7) + np.arange(0, 0.6, 0.1)[:, np.newaxis]
+        cval = np.arange(7) + np.arange(0, 0.6, 0.1)[:, None]
 
         a = shared(aval[:3], borrow=True)
         b = shared(bval[:, :5], borrow=True)
