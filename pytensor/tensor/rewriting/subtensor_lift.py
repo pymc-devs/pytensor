@@ -833,7 +833,7 @@ def local_subtensor_shape_constant(fgraph, node):
     except NotScalarConstantError:
         return False
 
-    assert idx_val != np.newaxis
+    assert idx_val is not None
 
     if not isinstance(shape_arg.type, TensorType):
         return False
