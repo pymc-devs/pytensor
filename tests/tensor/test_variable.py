@@ -35,7 +35,7 @@ from pytensor.tensor.type import (
     scalar,
     tensor3,
 )
-from pytensor.tensor.type_other import MakeSlice, NoneConst
+from pytensor.tensor.type_other import NoneConst
 from pytensor.tensor.variable import (
     DenseTensorConstant,
     DenseTensorVariable,
@@ -232,11 +232,11 @@ def test__getitem__AdvancedSubtensor():
 
     z = x[:, i]
     op_types = [type(node.op) for node in io_toposort([x, i], [z])]
-    assert op_types == [MakeSlice, AdvancedSubtensor]
+    assert op_types == [AdvancedSubtensor]
 
     z = x[..., i, None]
     op_types = [type(node.op) for node in io_toposort([x, i], [z])]
-    assert op_types == [MakeSlice, AdvancedSubtensor]
+    assert op_types == [DimShuffle, AdvancedSubtensor]
 
     z = x[i, None]
     op_types = [type(node.op) for node in io_toposort([x, i], [z])]
@@ -253,19 +253,19 @@ def test_print_constant():
 @pytest.mark.parametrize(
     "x, indices, new_order",
     [
-        (tensor3(), (np.newaxis, slice(None), np.newaxis), ("x", 0, "x", 1, 2)),
-        (cscalar(), (np.newaxis,), ("x",)),
+        (tensor3(), (None, slice(None), None), ("x", 0, "x", 1, 2)),
+        (cscalar(), (None,), ("x",)),
         (cscalar(), (NoneConst,), ("x",)),
-        (matrix(), (np.newaxis,), ("x", 0, 1)),
-        (matrix(), (np.newaxis, np.newaxis), ("x", "x", 0, 1)),
-        (matrix(), (np.newaxis, slice(None)), ("x", 0, 1)),
-        (matrix(), (np.newaxis, slice(None), slice(None)), ("x", 0, 1)),
-        (matrix(), (np.newaxis, np.newaxis, slice(None)), ("x", "x", 0, 1)),
-        (matrix(), (slice(None), np.newaxis), (0, "x", 1)),
-        (matrix(), (slice(None), slice(None), np.newaxis), (0, 1, "x")),
+        (matrix(), (None,), ("x", 0, 1)),
+        (matrix(), (None, None), ("x", "x", 0, 1)),
+        (matrix(), (None, slice(None)), ("x", 0, 1)),
+        (matrix(), (None, slice(None), slice(None)), ("x", 0, 1)),
+        (matrix(), (None, None, slice(None)), ("x", "x", 0, 1)),
+        (matrix(), (slice(None), None), (0, "x", 1)),
+        (matrix(), (slice(None), slice(None), None), (0, 1, "x")),
         (
             matrix(),
-            (np.newaxis, slice(None), np.newaxis, slice(None), np.newaxis),
+            (None, slice(None), None, slice(None), None),
             ("x", 0, "x", 1, "x"),
         ),
     ],
