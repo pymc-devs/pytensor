@@ -1072,7 +1072,7 @@ class Elemwise(OpenMPOp):
             """
         return decl, checks, alloc, loop, ""
 
-    def c_code(self, node, nodename, inames, onames, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         if (
             any(i.dtype == "float16" for i in node.inputs)
             or any(o.dtype == "float16" for o in node.outputs)
@@ -1082,7 +1082,7 @@ class Elemwise(OpenMPOp):
         ):
             # Disable C code for float16 vars
             raise NotImplementedError()
-        code = "\n".join(self._c_all(node, nodename, inames, onames, sub))
+        code = "\n".join(self._c_all(node, name, inputs, outputs, sub))
         return code
 
     def c_headers(self, **kwargs):
@@ -1583,8 +1583,8 @@ class CAReduce(COp):
 
         return setup, alloc, loop, cast
 
-    def c_code(self, node, name, inames, onames, sub):
-        code = "\n".join(self._c_all(node, name, inames, onames, sub))
+    def c_code(self, node, name, inputs, outputs, sub):
+        code = "\n".join(self._c_all(node, name, inputs, outputs, sub))
         return code
 
     def c_headers(self, **kwargs):

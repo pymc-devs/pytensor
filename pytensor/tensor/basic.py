@@ -1665,9 +1665,9 @@ class Alloc(COp):
             # reuse the allocated memory.
             out[0][...] = v  # broadcast v to fill us up
 
-    def c_code(self, node, name, inp, out, sub):
-        vv = inp[0]
-        (zz,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        vv = inputs[0]
+        (zz,) = outputs
         fail = sub["fail"]
 
         v_static_shape = node.inputs[0].type.shape
@@ -1675,7 +1675,7 @@ class Alloc(COp):
         v_ndim = len(v_static_shape)
         o_ndim = len(o_static_shape)
         is_zero = self.value_is_scalar_zero(node.inputs[0])
-        assert o_ndim == len(inp[1:])
+        assert o_ndim == len(inputs[1:])
 
         # Declare variables
         code = f"""
@@ -1684,7 +1684,7 @@ class Alloc(COp):
             """
 
         # Initialize shape
-        for i, shp_i in enumerate(inp[1:]):
+        for i, shp_i in enumerate(inputs[1:]):
             code += f"""
                 shape[{i}] = ((dtype_{shp_i}*) PyArray_DATA({shp_i}))[0];
             """
@@ -1924,19 +1924,19 @@ class MakeVector(COp):
     def c_code_cache_version(self):
         return (2,)
 
-    def c_code(self, node, name, inp, out_, props):
-        (out,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        (out,) = outputs
         # Shouldn't use PyArray_TYPE(inp[0]) for the dtype
         # when len(inp) == 0 (we need to support this case.
         # So there will be (1 * nb_dtype) + ((nb len(inp) - 1 ))
         # different c code with the following algo
-        out_shape = len(inp)
+        out_shape = len(inputs)
         out_num = np.dtype(node.outputs[0].dtype).num
         # don't use dtype_%(out)s as when check_input=False, it isn't defined.
         out_dtype = node.outputs[0].type.dtype_specs()[1]
-        if len(inp) > 0:
+        if len(inputs) > 0:
             assert self.dtype == node.inputs[0].dtype
-            out_num = f"PyArray_TYPE({inp[0]})"
+            out_num = f"PyArray_TYPE({inputs[0]})"
 
         ret = f"""
         npy_intp dims[1];
@@ -1946,7 +1946,7 @@ class MakeVector(COp):
             {out} = (PyArrayObject*)PyArray_EMPTY(1, dims, {out_num}, 0);
         }}
         """
-        for idx, i in enumerate(inp):
+        for idx, i in enumerate(inputs):
             ret += f"""
             *(({out_dtype} *)PyArray_GETPTR1({out}, {idx})) = *(({out_dtype} *) PyArray_DATA({i}));
             """
@@ -3334,9 +3334,9 @@ class ARange(COp):
             start.item(), stop.item(), step.item(), dtype=self.dtype
         )
 
-    def c_code(self, node, nodename, input_names, output_names, sub):
-        [start_name, stop_name, step_name] = input_names
-        [out_name] = output_names
+    def c_code(self, node, name, inputs, outputs, sub):
+        [start_name, stop_name, step_name] = inputs
+        [out_name] = outputs
         typenum = np.dtype(self.dtype).num
         return f"""
             double start = ((dtype_{start_name}*)PyArray_DATA({start_name}))[0];
@@ -3858,9 +3858,9 @@ class ExtractDiag(COp):
             out = out.copy()
         output_storage[0][0] = out
 
-    def c_code(self, node, nodename, input_names, output_names, sub):
-        [x_name] = input_names
-        [out_name] = output_names
+    def c_code(self, node, name, inputs, outputs, sub):
+        [x_name] = inputs
+        [out_name] = outputs
         return f"""
         Py_XDECREF({out_name});
 
@@ -4358,8 +4358,8 @@ class AllocEmpty(COp):
         if out[0] is None or out[0].shape != sh:
             out[0] = np.empty(sh, dtype=self.dtype)
 
-    def c_code(self, node, name, inputs, out_, sub):
-        (out,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        (out,) = outputs
         fail = sub["fail"]
         shps = inputs
         nd = len(shps)

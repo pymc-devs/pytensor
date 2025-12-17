@@ -35,10 +35,10 @@ class MyOp(DeepCopyOp):
     def c_code_cache_version(self):
         return ()
 
-    def c_code(self, node, name, inames, onames, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         MyOp.nb_called += 1
-        (iname,) = inames
-        (oname,) = onames
+        (iname,) = inputs
+        (oname,) = outputs
         fail = sub["fail"]
         itype = node.inputs[0].type.__class__
         if itype in self.c_code_and_version:
@@ -46,7 +46,7 @@ class MyOp(DeepCopyOp):
             rand = np.random.random()
             return f'printf("{rand}\\n");{code % locals()}'
         # Else, no C code
-        return super(DeepCopyOp, self).c_code(node, name, inames, onames, sub)
+        return super(DeepCopyOp, self).c_code(node, name, inputs, outputs, sub)
 
 
 class MyAdd(COp):
@@ -60,9 +60,9 @@ class MyAdd(COp):
         (out,) = output_storage
         out[0] = inputs[0][0] + 1
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         return f"{z} = {x} + 1;"
 
 

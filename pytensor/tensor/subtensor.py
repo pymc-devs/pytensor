@@ -2156,7 +2156,7 @@ class AdvancedSubtensor1(COp):
         x, ilist = ishapes
         return [ilist + x[1:]]
 
-    def c_code(self, node, name, input_names, output_names, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         if self.__class__ is not AdvancedSubtensor1:
             raise MethodNotDefined(
                 "c_code defined for AdvancedSubtensor1, not for child class",
@@ -2169,8 +2169,8 @@ class AdvancedSubtensor1(COp):
             # We can know ahead of time that all indices are valid, so we can use a faster mode
             mode = "NPY_WRAP"  # This seems to be faster than NPY_CLIP
 
-        a_name, i_name = input_names[0], input_names[1]
-        output_name = output_names[0]
+        a_name, i_name = inputs[0], inputs[1]
+        output_name = outputs[0]
         fail = sub["fail"]
         if mode == "NPY_RAISE":
             # numpy_take always makes an intermediate copy if NPY_RAISE which is slower than just allocating a new buffer
@@ -2330,9 +2330,9 @@ class AdvancedIncSubtensor1(COp):
         return f"""(PyArrayObject*)PyArray_FromAny(py_{x}, NULL, 0, 0,
                 NPY_ARRAY_ENSURECOPY, NULL)"""
 
-    def c_code(self, node, name, input_names, output_names, sub):
-        x, y, idx = input_names
-        [out] = output_names
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y, idx = inputs
+        [out] = outputs
         copy_of_x = self.copy_of_x(x)
         params = sub["params"]
         fail = sub["fail"]

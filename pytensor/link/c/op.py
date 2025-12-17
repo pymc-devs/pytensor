@@ -571,7 +571,7 @@ class ExternalCOp(COp):
         else:
             return super().c_init_code_struct(node, name, sub)
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         if self.func_name is not None:
             assert "code" not in self.code_sections
 
@@ -587,7 +587,7 @@ class ExternalCOp(COp):
             return f"""
                 {define_macros}
                 {{
-                  if ({self.func_name}({self.format_c_function_args(inp, out)}{params}) != 0) {{
+                  if ({self.func_name}({self.format_c_function_args(inputs, outputs)}{params}) != 0) {{
                     {sub["fail"]}
                   }}
                 }}
@@ -599,7 +599,7 @@ class ExternalCOp(COp):
 
                 def_macros, undef_macros = self.get_c_macros(node, name)
                 def_sub, undef_sub = get_sub_macros(sub)
-                def_io, undef_io = get_io_macros(inp, out)
+                def_io, undef_io = get_io_macros(inputs, outputs)
 
                 return (
                     f"{def_macros}\n{def_sub}\n{def_io}\n{op_code}"

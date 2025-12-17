@@ -690,9 +690,9 @@ class CorrMM(BaseCorrMM):
         )
         return [res]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        bottom, weights = inp
-        (top,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        bottom, weights = inputs
+        (top,) = outputs
         return super().c_code_helper(bottom, weights, top, sub)
 
     def grad(self, inputs, output_grads):
@@ -815,10 +815,10 @@ class CorrMM_gradWeights(BaseCorrMM):
         else:
             return [(nkern, ssize, kH, kW)]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        bottom, top = inp[:2]
-        height, width = inp[2:] or (None, None)
-        (weights,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        bottom, top = inputs[:2]
+        height, width = inputs[2:] or (None, None)
+        (weights,) = outputs
         return super().c_code_helper(bottom, weights, top, sub, height, width)
 
     def grad(self, inputs, output_grads):
@@ -947,10 +947,10 @@ class CorrMM_gradInputs(BaseCorrMM):
         out_shp = (out_shp0, out_shp1)
         return [(bsize, ssize, *out_shp)]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        weights, top = inp[:2]
-        height, width = inp[2:] or (None, None)
-        (bottom,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        weights, top = inputs[:2]
+        height, width = inputs[2:] or (None, None)
+        (bottom,) = outputs
         return super().c_code_helper(bottom, weights, top, sub, height, width)
 
     def grad(self, inputs, output_grads):

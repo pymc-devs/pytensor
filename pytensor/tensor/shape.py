@@ -108,9 +108,9 @@ class Shape(COp):
     def R_op(self, inputs, eval_points):
         return [None]
 
-    def c_code(self, node, name, inames, onames, sub):
-        (iname,) = inames
-        (oname,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (iname,) = inputs
+        (oname,) = outputs
         fail = sub["fail"]
 
         itype = node.inputs[0].type.__class__
@@ -287,9 +287,9 @@ class Shape_i(COp):
 
         return tuple(version)
 
-    def c_code(self, node, name, inames, onames, sub):
-        (iname,) = inames
-        (oname,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (iname,) = inputs
+        (oname,) = outputs
         fail = sub["fail"]
         # i is then 'params->i', not just 'params'.
         i = sub["params"] + "->i"
@@ -484,14 +484,14 @@ class SpecifyShape(COp):
             return [None]
         return self.make_node(eval_points[0], *inputs[1:]).outputs
 
-    def c_code(self, node, name, i_names, o_names, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         if not isinstance(node.inputs[0].type, DenseTensorType):
             raise NotImplementedError(
                 f"Specify_shape c_code not implemented for input type {node.inputs[0].type}"
             )
 
-        x_name, *shape_names = i_names
-        (o_name,) = o_names
+        x_name, *shape_names = inputs
+        (o_name,) = outputs
         fail = sub["fail"]
 
         code = dedent(

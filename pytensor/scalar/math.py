@@ -70,9 +70,9 @@ class Erf(UnaryScalarOp):
         )
         return (gz * cst * exp(-x * x),)
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         if node.inputs[0].type in complex_types:
             raise NotImplementedError("type not supported", type)
         cast = node.outputs[0].type.dtype_specs()[1]
@@ -104,9 +104,9 @@ class Erfc(UnaryScalarOp):
         )
         return (-gz * cst * exp(-x * x),)
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         if node.inputs[0].type in complex_types:
             raise NotImplementedError("type not supported", type)
         cast = node.outputs[0].type.dtype_specs()[1]
@@ -162,9 +162,9 @@ class Erfcx(UnaryScalarOp):
         # Using Faddeeva.cc source file from: http://ab-initio.mit.edu/wiki/index.php/Faddeeva_Package
         return (C_CODE_PATH / "Faddeeva.cc").read_text(encoding="utf-8")
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
 
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
@@ -209,7 +209,7 @@ class Erfinv(UnaryScalarOp):
         )
         return (gz * cst * exp(erfinv(x) ** 2),)
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         # TODO: erfinv() is not provided by the C standard library
         # x, = inp
         # z, = out
@@ -244,7 +244,7 @@ class Erfcinv(UnaryScalarOp):
         )
         return (-gz * cst * exp(erfcinv(x) ** 2),)
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         # TODO: erfcinv() is not provided by the C standard library
         # x, = inp
         # z, = out
@@ -336,9 +336,9 @@ class GammaLn(UnaryScalarOp):
 
         return [gz * psi(x)]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         # no c code for complex
         # [u]int* will be casted to float64 before computation
         if node.inputs[0].type in complex_types:
@@ -439,9 +439,9 @@ class Psi(UnaryScalarOp):
             #endif
             """
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
             return f"{z} = ({dtype}) _psi({x});"
@@ -523,9 +523,9 @@ class TriGamma(UnaryScalarOp):
             #endif
             """
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         if node.inputs[0].type in float_types:
             return f"""{z} =
                 _tri_gamma({x});"""
@@ -597,9 +597,9 @@ class GammaInc(BinaryScalarOp):
     def c_support_code(self, **kwargs):
         return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
-    def c_code(self, node, name, inp, out, sub):
-        k, x = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        k, x = inputs
+        (z,) = outputs
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
             return f"""{z} =
@@ -644,9 +644,9 @@ class GammaIncC(BinaryScalarOp):
     def c_support_code(self, **kwargs):
         return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
-    def c_code(self, node, name, inp, out, sub):
-        k, x = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        k, x = inputs
+        (z,) = outputs
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
             return f"""{z} =
@@ -943,9 +943,9 @@ class GammaU(BinaryScalarOp):
     def c_support_code(self, **kwargs):
         return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
-    def c_code(self, node, name, inp, out, sub):
-        k, x = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        k, x = inputs
+        (z,) = outputs
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
             return f"""{z} =
@@ -975,9 +975,9 @@ class GammaL(BinaryScalarOp):
     def c_support_code(self, **kwargs):
         return (C_CODE_PATH / "gamma.c").read_text(encoding="utf-8")
 
-    def c_code(self, node, name, inp, out, sub):
-        k, x = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        k, x = inputs
+        (z,) = outputs
         if node.inputs[0].type in float_types:
             dtype = "npy_" + node.outputs[0].dtype
             return f"""{z} =
@@ -1034,9 +1034,9 @@ class J1(UnaryScalarOp):
         (gz,) = output_grads
         return [gz * (j0(x) - jv(2, x)) / 2.0]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         if node.inputs[0].type in float_types:
             return f"""{z} =
                 j1({x});"""
@@ -1061,9 +1061,9 @@ class J0(UnaryScalarOp):
         (gz,) = output_grads
         return [gz * -1 * j1(x)]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         if node.inputs[0].type in float_types:
             return f"""{z} =
                 j0({x});"""
@@ -1217,9 +1217,9 @@ class Sigmoid(UnaryScalarOp):
 
         return [rval]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
 
         if node.inputs[0].type in float_types:
             if node.inputs[0].type == float64:
@@ -1280,9 +1280,9 @@ class Softplus(UnaryScalarOp):
         (gz,) = output_grads
         return [gz * sigmoid(x)]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         # We use the same limits for all precisions, which may be suboptimal. The reference
         # paper only looked at double precision
         if node.inputs[0].type in float_types:
@@ -1351,9 +1351,9 @@ class Log1mexp(UnaryScalarOp):
         res = switch(isinf(res), -np.inf, res)
         return [gz * res]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
 
         if node.inputs[0].type in float_types:
             if node.inputs[0].type == float64:
@@ -1396,9 +1396,9 @@ class BetaInc(ScalarOp):
     def c_support_code(self, **kwargs):
         return (C_CODE_PATH / "incbet.c").read_text(encoding="utf-8")
 
-    def c_code(self, node, name, inp, out, sub):
-        (a, b, x) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (a, b, x) = inputs
+        (z,) = outputs
         if (
             node.inputs[0].type in float_types
             and node.inputs[1].type in float_types

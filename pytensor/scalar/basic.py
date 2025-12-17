@@ -1294,7 +1294,7 @@ class ScalarOp(COp):
     def c_code_cache_version(self):
         return (4,)
 
-    def c_code_contiguous(self, node, name, inp, out, sub):
+    def c_code_contiguous(self, node, name, inputs, outputs, sub):
         """
         This function is called by Elemwise when all inputs and outputs are
         c_contiguous. This allows to use the SIMD version of this op.
@@ -4406,15 +4406,15 @@ class Composite(ScalarInnerGraphOp):
 
         return self._c_code
 
-    def c_code(self, node, nodename, inames, onames, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         d = dict(
             chain(
-                zip((f"i{i}" for i in range(len(inames))), inames, strict=True),
-                zip((f"o{i}" for i in range(len(onames))), onames, strict=True),
+                zip((f"i{i}" for i in range(len(inputs))), inputs, strict=True),
+                zip((f"o{i}" for i in range(len(outputs))), outputs, strict=True),
             ),
             **sub,
         )
-        d["nodename"] = nodename
+        d["nodename"] = name
         if "id" not in sub:
             # The use of a dummy id is safe as the code is in a separate block.
             # It won't generate conflicting variable name.

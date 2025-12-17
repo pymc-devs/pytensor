@@ -50,9 +50,9 @@ class TypeCastingOp(COp):
     def __str__(self):
         return f"{self.__class__.__name__}"
 
-    def c_code(self, node, nodename, inp, out, sub):
-        (iname,) = inp
-        (oname,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (iname,) = inputs
+        (oname,) = outputs
         fail = sub["fail"]
 
         itype = node.inputs[0].type.__class__
@@ -192,9 +192,9 @@ class DeepCopyOp(COp):
             version.append(1)
         return tuple(version)
 
-    def c_code(self, node, name, inames, onames, sub):
-        (iname,) = inames
-        (oname,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (iname,) = inputs
+        (oname,) = outputs
         fail = sub["fail"]
 
         itype = node.inputs[0].type.__class__

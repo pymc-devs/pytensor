@@ -61,9 +61,9 @@ class BROKEN_ON_PURPOSE_Add(COp):
     def c_code_cache_version(self):
         return (1,)
 
-    def c_code(self, node, name, inp, out, sub):
-        a, b = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        a, b = inputs
+        (z,) = outputs
         fail = sub["fail"]
         return f"""
         if (PyArray_NDIM({a}) != 1) {{PyErr_SetString(PyExc_NotImplementedError, "rank(a) != 1"); {fail};}}
@@ -148,9 +148,9 @@ class WeirdBrokenOp(COp):
     def c_code_cache_version(self):
         return (2,)
 
-    def c_code(self, node, name, inp, out, sub):
-        (a,) = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (a,) = inputs
+        (z,) = outputs
         if "inplace" in self.behaviour:
             z_code = f"""
             {{Py_XDECREF({z});}}
@@ -629,9 +629,9 @@ class BrokenCImplementationAdd(COp):
     def c_code_cache_version(self):
         return (1,)
 
-    def c_code(self, node, name, inp, out, sub):
-        a, b = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        a, b = inputs
+        (z,) = outputs
         debug = 0
         fail = sub["fail"]
         return f"""

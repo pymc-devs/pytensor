@@ -79,9 +79,9 @@ class CpuContiguous(COp):
     def grad(self, inputs, output_grads):
         return [ptb.as_tensor_variable(output_grads[0])]
 
-    def c_code(self, node, name, inames, onames, sub):
-        (x,) = inames
-        (y,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (y,) = outputs
         code = f"""
             if (!PyArray_CHKFLAGS({x}, NPY_ARRAY_C_CONTIGUOUS)){{
                 // check to see if output is contiguous first
@@ -183,15 +183,15 @@ class SearchsortedOp(COp):
             Py_DECREF(tmp_{name});
         """
 
-    def c_code(self, node, name, inames, onames, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         sorter = None
         if len(node.inputs) == 3:
-            x, v, sorter = inames
+            x, v, sorter = inputs
         else:
-            x, v = inames
+            x, v = inputs
         if not sorter:
             sorter = "NULL"
-        (z,) = onames
+        (z,) = outputs
         fail = sub["fail"]
 
         return f"""
@@ -344,9 +344,9 @@ class CumOp(COp):
     def infer_shape(self, fgraph, node, shapes):
         return shapes
 
-    def c_code(self, node, name, inames, onames, sub):
-        (x,) = inames
-        (z,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         fail = sub["fail"]
         params = sub["params"]
 

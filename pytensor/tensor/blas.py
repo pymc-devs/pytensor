@@ -1096,9 +1096,9 @@ class Gemm(GemmRelated):
         #undef REAL
         """
 
-    def c_code(self, node, name, inp, out, sub):
-        _z, _a, _x, _y, _b = inp
-        (_zout,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        _z, _a, _x, _y, _b = inputs
+        (_zout,) = outputs
         if node.inputs[0].type.dtype.startswith("complex"):
             raise MethodNotDefined(f"{self.__class__.__name__}.c_code")
         full_code = self.build_gemm_call() % dict(locals(), **sub)
@@ -1185,9 +1185,9 @@ class Dot22(GemmRelated):
                 double b = 0.0;
         """
 
-    def c_code(self, node, name, inp, out, sub):  # DEBUG
-        _x, _y = inp
-        (_zout,) = out
+    def c_code(self, node, name, inputs, outputs, sub):  # DEBUG
+        _x, _y = inputs
+        (_zout,) = outputs
         if node.inputs[0].type.dtype.startswith("complex"):
             raise MethodNotDefined(f"{self.__class__.__name__}.c_code")
         if len(self.c_libraries()) <= 0:
@@ -1283,9 +1283,9 @@ class Dot22Scalar(GemmRelated):
         double b = 0.0;
         """
 
-    def c_code(self, node, name, inp, out, sub):
-        _x, _y, _a = inp
-        (_zout,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        _x, _y, _a = inputs
+        (_zout,) = outputs
         if node.inputs[0].type.dtype.startswith("complex"):
             raise MethodNotDefined(f"{self.__class__.__name__}.c_code")
         if len(self.c_libraries()) <= 0:
@@ -1462,13 +1462,13 @@ class BatchedDot(COp):
     def c_header_dirs(self, **kwargs):
         return ldflags(libs=False, include_dir=True)
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         # Can only compile if linked to blas libraries
         if len(self.c_libraries()) <= 0:
             raise NotImplementedError()
 
-        _x, _y = inp
-        (_z,) = out
+        _x, _y = inputs
+        (_z,) = outputs
         fail = sub["fail"]
 
         # generate contiguity condition
