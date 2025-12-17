@@ -9,7 +9,6 @@ pytensor/link/numba/dispatch/elemwise.py
 pytensor/link/numba/dispatch/scan.py
 pytensor/raise_op.py
 pytensor/tensor/basic.py
-pytensor/tensor/blas_c.py
 pytensor/tensor/blas_headers.py
 pytensor/tensor/elemwise.py
 pytensor/tensor/extra_ops.py
