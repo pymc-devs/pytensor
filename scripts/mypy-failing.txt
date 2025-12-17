@@ -7,7 +7,6 @@ pytensor/graph/rewriting/basic.py
 pytensor/ifelse.py
 pytensor/link/numba/dispatch/elemwise.py
 pytensor/link/numba/dispatch/scan.py
-pytensor/printing.py
 pytensor/raise_op.py
 pytensor/tensor/basic.py
 pytensor/tensor/blas_c.py
