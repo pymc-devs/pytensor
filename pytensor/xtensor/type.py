@@ -16,7 +16,7 @@ from pytensor.tensor import (
     as_tensor_variable,
     specify_shape,
 )
-from pytensor.tensor.math import variadic_mul
+from pytensor.tensor.math import divmod, variadic_mul
 
 
 try:
@@ -334,7 +334,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         return px.math.mod(self, other)
 
     def __divmod__(self, other):
-        return px.math.divmod(self, other)
+        return divmod(self, other)
 
     def __truediv__(self, other):
         return px.math.true_div(self, other)
@@ -361,7 +361,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         return px.math.mod(other, self)
 
     def __rdivmod__(self, other):
-        return px.math.divmod(other, self)
+        return divmod(other, self)
 
     def __rpow__(self, other):
         return px.math.pow(other, self)
