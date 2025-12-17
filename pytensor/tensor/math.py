@@ -184,10 +184,10 @@ class Argmax(COp):
                 "You are trying to compile a graph with an old Argmax node.  Either reoptimize your graph or rebuild it to get the new node format."
             )
 
-    def perform(self, node, inp, outs):
-        (x,) = inp
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
         axes = self.axis
-        (max_idx,) = outs
+        (max_idx,) = output_storage
         if axes is None:
             axes = tuple(range(x.ndim))
         # Numpy does not support multiple axes for argmax

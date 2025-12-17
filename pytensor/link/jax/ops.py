@@ -111,18 +111,18 @@ class JAXOp(Op):
         outputs = [output_type() for output_type in self.output_types]
         return Apply(self, filtered_inputs, outputs)
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         """Execute the JAX function and store results in output storage."""
         results = self.jitted_func(*inputs)
         if not isinstance(results, tuple):
             raise TypeError("JAX function must return a tuple of outputs.")
-        if len(results) != len(outputs):
+        if len(results) != len(output_storage):
             raise ValueError(
                 f"JAX function returned {len(results)} outputs, but "
-                f"{len(outputs)} were expected."
+                f"{len(output_storage)} were expected."
             )
         for output_container, result, out_type in zip(
-            outputs, results, self.output_types
+            output_storage, results, self.output_types
         ):
             output_container[0] = np.array(result, dtype=out_type.dtype)
 

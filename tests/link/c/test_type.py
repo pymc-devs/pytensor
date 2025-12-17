@@ -112,10 +112,10 @@ class MyOpEnumList(COp):
     def make_node(self, a, b):
         return Apply(self, [ps.as_scalar(a), ps.as_scalar(b)], [ps.float64()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         op = self.params_type.filter(self.get_params(node))
         a, b = inputs
-        (o,) = outputs
+        (o,) = output_storage
         if op == self.params_type.ADD:
             o[0] = a + b
         elif op == self.params_type.SUB:

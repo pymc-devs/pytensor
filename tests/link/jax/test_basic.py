@@ -109,9 +109,9 @@ def test_jax_FunctionGraph_once():
         def make_node(self, *args):
             return Apply(self, list(args), [x.type() for x in args])
 
-        def perform(self, inputs, outputs):
+        def perform(self, inputs, output_storage):
             for i, inp in enumerate(inputs):
-                outputs[i][0] = inp[0]
+                output_storage[i][0] = inp[0]
 
     @jax_funcify.register(TestOp)
     def jax_funcify_TestOp(op, **kwargs):

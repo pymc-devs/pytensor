@@ -48,9 +48,9 @@ class MatrixPinv(Op):
             [matrix(shape=(x.type.shape[1], x.type.shape[0]), dtype=out_dtype)],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         z[0] = np.linalg.pinv(x, hermitian=self.hermitian)
 
     def L_op(self, inputs, outputs, g_outputs):
@@ -132,9 +132,9 @@ class MatrixInverse(Op):
             out_dtype = x.dtype
         return Apply(self, [x], [matrix(shape=x.type.shape, dtype=out_dtype)])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         z[0] = np.linalg.inv(x)
 
     def grad(self, inputs, g_outputs):
@@ -236,9 +236,9 @@ class Det(Op):
         o = scalar(dtype=out_dtype)
         return Apply(self, [x], [o])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         try:
             z[0] = np.asarray(np.linalg.det(x))
         except Exception as e:
@@ -279,9 +279,9 @@ class SLogDet(Op):
         det = scalar(dtype=out_dtype)
         return Apply(self, [x], [sign, det])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (sign, det) = outputs
+        (sign, det) = output_storage
         try:
             sign[0], det[0] = (np.array(z) for z in np.linalg.slogdet(x))
         except Exception as e:
@@ -351,7 +351,7 @@ class Eig(Op):
 
         return Apply(self, [x], [w, v])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
         dtype = np.promote_types(x.dtype, np.complex64)
 
@@ -359,8 +359,8 @@ class Eig(Op):
 
         # If the imaginary part of the eigenvalues is zero, numpy automatically casts them to real. We require
         # a statically known return dtype, so we have to cast back to complex to avoid dtype mismatch.
-        outputs[0][0] = w.astype(dtype, copy=False)
-        outputs[1][0] = v.astype(dtype, copy=False)
+        output_storage[0][0] = w.astype(dtype, copy=False)
+        output_storage[1][0] = v.astype(dtype, copy=False)
 
     def infer_shape(self, fgraph, node, shapes):
         (x_shapes,) = shapes
@@ -420,9 +420,9 @@ class Eigh(Eig):
         v = matrix(dtype=w_dtype)
         return Apply(self, [x], [w, v])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (w, v) = outputs
+        (w, v) = output_storage
         w[0], v[0] = np.linalg.eigh(x, self.UPLO)
 
     def L_op(self, inputs, outputs, output_grads):
@@ -494,7 +494,7 @@ class EighGrad(Op):
         out = matrix(dtype=out_dtype)
         return Apply(self, [x, w, v, gw, gv], [out])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         """
         Implements the "reverse-mode" gradient for the eigensystem of
         a square matrix.
@@ -525,7 +525,7 @@ class EighGrad(Op):
 
         # Make sure we return the right dtype even if NumPy performed
         # upcasting in self.tri0.
-        outputs[0][0] = np.asarray(out, dtype=node.outputs[0].dtype)
+        output_storage[0][0] = np.asarray(out, dtype=node.outputs[0].dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
@@ -585,14 +585,14 @@ class SVD(Op):
         else:
             return Apply(self, [x], [s])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
         assert x.ndim == 2, "The input of svd function should be a matrix."
         if self.compute_uv:
-            u, s, vt = outputs
+            u, s, vt = output_storage
             u[0], s[0], vt[0] = np.linalg.svd(x, self.full_matrices, self.compute_uv)
         else:
-            (s,) = outputs
+            (s,) = output_storage
             s[0] = np.linalg.svd(x, self.full_matrices, self.compute_uv)
 
     def infer_shape(self, fgraph, node, shapes):
@@ -764,12 +764,12 @@ class Lstsq(Op):
             ],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         zz = np.linalg.lstsq(inputs[0], inputs[1], inputs[2])
-        outputs[0][0] = zz[0]
-        outputs[1][0] = zz[1]
-        outputs[2][0] = np.asarray(zz[2])
-        outputs[3][0] = zz[3]
+        output_storage[0][0] = zz[0]
+        output_storage[1][0] = zz[1]
+        output_storage[2][0] = np.asarray(zz[2])
+        output_storage[3][0] = zz[3]
 
 
 lstsq = Lstsq()
@@ -1033,9 +1033,9 @@ class TensorInv(Op):
         out = a.type()
         return Apply(self, [a], [out])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (a,) = inputs
-        (x,) = outputs
+        (x,) = output_storage
         x[0] = np.linalg.tensorinv(a, self.ind)
 
     def infer_shape(self, fgraph, node, shapes):
@@ -1094,12 +1094,12 @@ class TensorSolve(Op):
         x = matrix(dtype=out_dtype)
         return Apply(self, [a, b], [x])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (
             a,
             b,
         ) = inputs
-        (x,) = outputs
+        (x,) = output_storage
         x[0] = np.linalg.tensorsolve(a, b, self.axes)
 
 

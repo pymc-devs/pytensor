@@ -93,8 +93,8 @@ class MyOp(Op):
     def __str__(self):
         return self.name
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         out[0] = self.impl(*inputs)
 
 

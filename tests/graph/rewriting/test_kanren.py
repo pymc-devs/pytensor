@@ -101,9 +101,9 @@ def test_KanrenRelationSub_multiout():
             outputs = [MyType()(), MyType()()]
             return Apply(self, list(inputs), outputs)
 
-        def perform(self, node, inputs, outputs):
-            outputs[0] = np.array(inputs[0])
-            outputs[1] = np.array(inputs[0])
+        def perform(self, node, inputs, output_storage):
+            output_storage[0] = np.array(inputs[0])
+            output_storage[1] = np.array(inputs[0])
 
     x = MyVariable("x")
     y = MyVariable("y")

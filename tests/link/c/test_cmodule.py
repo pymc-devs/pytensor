@@ -56,8 +56,8 @@ class MyAdd(COp):
         outputs = [vector()]
         return Apply(self, inputs, outputs)
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         out[0] = inputs[0][0] + 1
 
     def c_code(self, node, name, inp, out, sub):

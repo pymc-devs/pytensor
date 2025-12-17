@@ -418,15 +418,15 @@ class RandomVariable(RNGConsumerOp):
         """Return the node inpust corresponding to dist params"""
         return node.inputs[2:]
 
-    def perform(self, node: Apply, inputs, outputs):
+    def perform(self, node: Apply, inputs, output_storage):
         rng, size, *args = inputs
 
         # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng` otherwise.
         if not self.inplace:
             rng = custom_rng_deepcopy(rng)
 
-        outputs[0][0] = rng
-        outputs[1][0] = np.asarray(
+        output_storage[0][0] = rng
+        output_storage[1][0] = np.asarray(
             self.rng_fn(rng, *args, None if size is None else tuple(size)),
             dtype=self.dtype,
         )

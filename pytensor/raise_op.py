@@ -81,8 +81,8 @@ class CheckAndRaise(COp):
             [value.type()],
         )
 
-    def perform(self, node, inputs, outputs):
-        (out,) = outputs
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         val, *conds = inputs
         out[0] = val
         if not all(conds):
