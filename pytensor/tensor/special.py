@@ -44,9 +44,9 @@ class SoftmaxGrad(COp):
         dx = dy_times_sm - np.sum(dy_times_sm, axis=self.axis, keepdims=True) * sm
         output_storage[0][0] = dx
 
-    def grad(self, inp, grads):
-        dy, sm = inp
-        (g,) = grads
+    def grad(self, inputs, output_grads):
+        dy, sm = inputs
+        (g,) = output_grads
 
         tmp = g + neg(sum(g * sm, axis=self.axis, keepdims=True))
         g_dy = tmp * sm
@@ -528,10 +528,12 @@ class LogSoftmax(COp):
         (z,) = output_storage
         z[0] = scipy.special.log_softmax(x, axis=self.axis)
 
-    def grad(self, inp, grads):
-        (x,) = inp
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
         sm = Softmax(axis=self.axis)(x)
-        return [grads[0] - sum(grads[0], axis=self.axis, keepdims=True) * sm]
+        return [
+            output_grads[0] - sum(output_grads[0], axis=self.axis, keepdims=True) * sm
+        ]
 
     def R_op(self, inputs, eval_points):
         # I think the Jacobian is symmetric so the R_op

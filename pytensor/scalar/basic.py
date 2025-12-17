@@ -1253,7 +1253,7 @@ class ScalarOp(COp):
     def impl(self, *inputs):
         raise MethodNotDefined("impl", type(self), self.__class__.__name__)
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         raise MethodNotDefined("grad", type(self), self.__class__.__name__)
 
     def L_op(self, inputs, outputs, output_grads):
@@ -1664,7 +1664,7 @@ class UnaryBitOp(UnaryScalarOp):
                 )
         return upcast_out(*input_types[0])
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         return [inputs[0].zeros_like(dtype=config.floatX)]
 
 
@@ -1682,7 +1682,7 @@ class BinaryBitOp(BinaryScalarOp):
                 )
         return upcast_out(*input_types[0])
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         a, b = inputs
         return [
             a.zeros_like(dtype=config.floatX),
@@ -1923,8 +1923,8 @@ class Mul(ScalarOp):
         else:
             return z + " = " + op.join(inputs) + ";"
 
-    def grad(self, inputs, gout):
-        (gz,) = gout
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         retval = []
 
         # The following 3 lines verify that gz is complex when the
@@ -2026,9 +2026,9 @@ class TrueDiv(BinaryScalarOp):
             return f"{z} = ((double){x}) / {y};"
         return f"{z} = {x} / {y};"
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
 
@@ -2147,7 +2147,7 @@ class IntDiv(BinaryScalarOp):
     def c_code_cache_version(self):
         return (6,)
 
-    def grad(self, inputs, g_output):
+    def grad(self, inputs, output_grads):
         return [inp.zeros_like(dtype=config.floatX) for inp in inputs]
 
 
@@ -2421,9 +2421,9 @@ class Second(BinaryScalarOp):
 
         return [[False], [True]]
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (_x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if y.type in continuous_types:
             # x is disconnected because the elements of x are not used
             return disconnected_type(), gz
@@ -2447,9 +2447,9 @@ class Identity(UnaryScalarOp):
         (z,) = outputs
         return f"{z} = {x};"
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in continuous_types:
             return (gz,)
         else:
@@ -2486,9 +2486,9 @@ class Cast(UnaryScalarOp):
             return f"{z} = ({x}) ? 1 : 0;"
         return f"{z} = ({node.outputs[0].type.dtype_specs()[1]}){x};"
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if self.o_type in continuous_types:
             return [gz]
         else:
@@ -2617,9 +2617,9 @@ class Sign(UnaryScalarOp):
         # casting to output type is handled by filter
         return np.sign(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (_gz,) = gout
+        (_gz,) = output_grads
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -2658,9 +2658,9 @@ class Ceil(UnaryScalarOp):
     def impl(self, x):
         return np.ceil(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (_gz,) = gout
+        (_gz,) = output_grads
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -2684,9 +2684,9 @@ class Floor(UnaryScalarOp):
     def impl(self, x):
         return np.floor(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (_gz,) = gout
+        (_gz,) = output_grads
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -2710,9 +2710,9 @@ class Trunc(UnaryScalarOp):
     def impl(self, x):
         return np.trunc(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (_gz,) = gout
+        (_gz,) = output_grads
         return [x.zeros_like(dtype=config.floatX)]
 
     def c_code(self, node, name, inputs, outputs, sub):
@@ -2738,9 +2738,9 @@ class RoundHalfToEven(UnaryScalarOp):
     def impl(self, x):
         return np.round(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (_gz,) = gout
+        (_gz,) = output_grads
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -2824,9 +2824,9 @@ class RoundHalfAwayFromZero(UnaryScalarOp):
     def impl(self, x):
         return round_half_away_from_zero_vec(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (_gz,) = gout
+        (_gz,) = output_grads
         rval = x.zeros_like()
 
         if rval.type in discrete_types:
@@ -3846,9 +3846,9 @@ class Real(UnaryScalarOp):
     def impl(self, x):
         return np.real(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (_x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         return [complex(gz, 0)]
 
     def c_code(self, *args, **kwargs):
@@ -3864,9 +3864,9 @@ class Imag(UnaryScalarOp):
     def impl(self, x):
         return np.imag(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             return [complex(0, gz)]
         elif x.type in float_types:
@@ -3887,7 +3887,7 @@ class Angle(UnaryScalarOp):
     def impl(self, x):
         return np.angle(x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         # y = x.imag
         # r = sqrt(y**2 + x.real**2)
         # g = y/r
@@ -3899,7 +3899,7 @@ class Angle(UnaryScalarOp):
         #     theta = -numpy.arcsin(g)+numpy.pi
 
         (c,) = inputs
-        (gtheta,) = gout
+        (gtheta,) = output_grads
         x = real(c)
         y = imag(c)
         r = _abs(c)
@@ -3938,9 +3938,9 @@ class Complex(BinaryScalarOp):
     def impl(self, x, y):
         return builtins.complex(x, y)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         return [cast(real(gz), x.type.dtype), cast(imag(gz), y.type.dtype)]
 
     def c_code(self, *args, **kwargs):
@@ -3983,9 +3983,9 @@ class ComplexFromPolar(BinaryScalarOp):
         else:
             return np.complex128(builtins.complex(x, y))
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (r, theta) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         gr = gz * complex_from_polar(1, theta)
         gtheta = gz * complex_from_polar(r, -theta)
         return [gr, gtheta]

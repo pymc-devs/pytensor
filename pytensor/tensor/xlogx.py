@@ -15,9 +15,9 @@ class XlogX(ps.UnaryScalarOp):
             return 0.0
         return x * np.log(x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [gz * (1 + ps.log(x))]
 
     def c_code(self, node, name, inputs, outputs, sub):
@@ -46,9 +46,9 @@ class XlogY0(ps.BinaryScalarOp):
             return 0.0
         return x * np.log(y)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         x, y = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [gz * ps.log(y), gz * x / y]
 
     def c_code(self, node, name, inputs, outputs, sub):

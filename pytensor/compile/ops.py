@@ -92,8 +92,8 @@ class ViewOp(TypeCastingOp):
     def infer_shape(self, fgraph, node, input_shapes):
         return input_shapes
 
-    def grad(self, args, g_outs):
-        return g_outs
+    def grad(self, inputs, output_grads):
+        return output_grads
 
 
 view_op = ViewOp()

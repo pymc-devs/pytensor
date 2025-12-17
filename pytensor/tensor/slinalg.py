@@ -1166,9 +1166,9 @@ class Eigvalsh(Op):
         else:
             w[0] = scipy_linalg.eigvalsh(a=inputs[0], b=None, lower=self.lower)
 
-    def grad(self, inputs, g_outputs):
+    def grad(self, inputs, output_grads):
         a, b = inputs
-        (gw,) = g_outputs
+        (gw,) = output_grads
         return EigvalshGrad(self.lower)(a, b, gw)
 
     def infer_shape(self, fgraph, node, shapes):
@@ -1310,7 +1310,7 @@ class BaseBlockDiagonal(Op):
             raise ValueError("n_inputs must be greater than 1")
         self.n_inputs = n_inputs
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         shapes = pt.stack([i.shape for i in inputs])
         index_end = shapes.cumsum(0)
         index_begin = index_end - shapes
@@ -1321,7 +1321,7 @@ class BaseBlockDiagonal(Op):
             )
             for i in range(len(inputs))
         ]
-        return [gout[0][slc] for slc in slices]
+        return [output_grads[0][slc] for slc in slices]
 
     def infer_shape(self, fgraph, nodes, shapes):
         first, second = unzip(shapes, n=2, strict=True)

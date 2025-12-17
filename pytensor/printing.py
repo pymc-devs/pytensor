@@ -804,8 +804,8 @@ class Print(Op):
         xout[0] = xin
         self.global_fn(self, xin)
 
-    def grad(self, input, output_gradients):
-        return output_gradients
+    def grad(self, inputs, output_grads):
+        return output_grads
 
     def R_op(self, inputs, eval_points):
         return list(eval_points)

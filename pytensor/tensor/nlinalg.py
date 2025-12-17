@@ -137,7 +137,7 @@ class MatrixInverse(Op):
         (z,) = output_storage
         z[0] = np.linalg.inv(x)
 
-    def grad(self, inputs, g_outputs):
+    def grad(self, inputs, output_grads):
         r"""The gradient function should return
 
             .. math:: V\frac{\partial X^{-1}}{\partial X},
@@ -152,7 +152,7 @@ class MatrixInverse(Op):
         """
         (x,) = inputs
         xi = self(x)
-        (gz,) = g_outputs
+        (gz,) = output_grads
         # ptm.dot(gz.T,xi)
         return [-matrix_dot(xi, gz.T, xi).T]
 
@@ -244,8 +244,8 @@ class Det(Op):
         except Exception as e:
             raise ValueError("Failed to compute determinant", x) from e
 
-    def grad(self, inputs, g_outputs):
-        (gz,) = g_outputs
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         (x,) = inputs
         return [gz * self(x) * matrix_inverse(x).T]
 
