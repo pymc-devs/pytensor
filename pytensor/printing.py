@@ -1360,6 +1360,7 @@ def pydotprint(
             cond_highlight = None
 
     if cond_highlight is not None:
+        assert cond is not None
 
         def recursive_pass(x, ls):
             if x.owner is None:
@@ -1370,20 +1371,22 @@ def pydotprint(
                     ls += recursive_pass(inp, ls)
                 return ls
 
-        left = set(recursive_pass(cond.inputs[1], []))
-        right = set(recursive_pass(cond.inputs[2], []))
-        middle = left.intersection(right)
-        left = left.difference(middle)
-        right = right.difference(middle)
-        middle = list(middle)
-        left = list(left)
-        right = list(right)
+        set_left = set(recursive_pass(cond.inputs[1], []))
+        set_right = set(recursive_pass(cond.inputs[2], []))
 
-    var_str = {}
-    var_id = {}
-    all_strings = set()
+        set_middle = set_left.intersection(set_right)
+        set_left = set_left.difference(set_middle)
+        set_right = set_right.difference(set_middle)
 
-    def var_name(var):
+        middle = list(set_middle)
+        left = list(set_left)
+        right = list(set_right)
+
+    var_str: dict[Any, str] = {}
+    var_id: dict[Any, str] = {}
+    all_strings: set[str] = set()
+
+    def var_name(var) -> tuple[str, str]:
         if var in var_str:
             return var_str[var], var_id[var]
 
@@ -1391,9 +1394,9 @@ def pydotprint(
             if var_with_name_simple:
                 varstr = var.name
             else:
-                varstr = "name=" + var.name + " " + str(var.type)
+                varstr = f"name={var.name} {var.type}"
         elif isinstance(var, Constant):
-            dstr = "val=" + str(np.asarray(var.data))
+            dstr = f"val={np.asarray(var.data)}"
             if "\n" in dstr:
                 dstr = dstr[: dstr.index("\n")]
             varstr = f"{dstr} {var.type}"
@@ -1414,8 +1417,8 @@ def pydotprint(
 
         return varstr, var_id[var]
 
-    apply_name_cache = {}
-    apply_name_id = {}
+    apply_name_cache: dict[Any, str] = {}
+    apply_name_id: dict[Any, str] = {}
 
     def apply_name(node):
         if node in apply_name_cache:
@@ -1432,7 +1435,7 @@ def pydotprint(
         applystr = str(node.op).replace(":", "_")
         applystr += prof_str
         if (applystr in all_strings) or with_ids:
-            idx = " id=" + str(topo.index(node))
+            idx = f" id={topo.index(node)}"
             if len(applystr) + len(idx) > max_label_size:
                 applystr = applystr[: max_label_size - 3 - len(idx)] + idx + "..."
             else:
@@ -1442,7 +1445,7 @@ def pydotprint(
             idx = 1
             while applystr in all_strings:
                 idx += 1
-                suffix = " id=" + str(idx)
+                suffix = f" id={idx}"
                 applystr = applystr[: max_label_size - 3 - len(suffix)] + "..." + suffix
 
         all_strings.add(applystr)
@@ -1626,10 +1629,10 @@ def pydotprint(
         for idx, scan_op in scan_ops:
             # is there a chance that name is not defined?
             if hasattr(scan_op.op, "name"):
-                new_name = outfile.stem + "_" + scan_op.op.name + "_" + str(idx)
+                new_stem = f"{outfile.stem}_{scan_op.op.name}_{idx}"
             else:
-                new_name = outfile.stem + "_" + str(idx)
-            new_name = outfile.with_stem(new_name)
+                new_stem = f"{outfile.stem}_{idx}"
+            new_name = outfile.with_stem(new_stem)
             if hasattr(scan_op.op, "_fn"):
                 to_print = scan_op.op.fn
             else:
@@ -1752,7 +1755,7 @@ def min_informative_str(
     if id(obj) in _prev_obs:
         tag = _prev_obs[id(obj)]
 
-        return indent + "<" + tag + ">"
+        return f"{indent}<{tag}>"
 
     if _tag_generator is None:
         _tag_generator = _TagGenerator()
@@ -1778,11 +1781,7 @@ def min_informative_str(
     else:
         name = str(obj)
 
-    prefix = cur_tag + ". "
-
-    rval = indent + prefix + name
-
-    return rval
+    return f"{indent}{cur_tag}. {name}"
 
 
 def var_descriptor(obj, _prev_obs: dict | None = None, _tag_generator=None) -> str:
@@ -1797,7 +1796,7 @@ def var_descriptor(obj, _prev_obs: dict | None = None, _tag_generator=None) -> s
     if id(obj) in _prev_obs:
         tag = _prev_obs[id(obj)]
 
-        return "<" + tag + ">"
+        return f"<{tag}>"
 
     if _tag_generator is None:
         _tag_generator = _TagGenerator()
@@ -1833,17 +1832,12 @@ def var_descriptor(obj, _prev_obs: dict | None = None, _tag_generator=None) -> s
             if " at 0x" in name:
                 raise AssertionError(name)
 
-    prefix = cur_tag + "="
-
-    rval = prefix + name
-
-    return rval
+    return f"{cur_tag}={name}"
 
 
 def position_independent_str(obj) -> str:
     if isinstance(obj, Variable):
-        rval = "pytensor_var"
-        rval += "{type=" + str(obj.type) + "}"
+        rval = f"pytensor_var{{type={obj.type}}}"
     else:
         raise NotImplementedError()
 
