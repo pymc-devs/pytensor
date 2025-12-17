@@ -239,8 +239,8 @@ def test_optimize_0d(optimize_op):
             assert x.ndim == 0
             output_storage[0][0] = x
 
-        def L_op(self, inputs, outputs, out_grads):
-            return out_grads
+        def L_op(self, inputs, outputs, output_grads):
+            return output_grads
 
     x = scalar("x")
     x_check = AssertScalar()(x)
@@ -313,9 +313,9 @@ def test_optimize_grad_disconnected_non_numerical_inp(optimize_op):
             # Gradient connected only to first input
             return [[True], [False]]
 
-        def L_op(self, inputs, outputs, output_gradients):
+        def L_op(self, inputs, outputs, output_grads):
             [_x, str_emoji] = inputs
-            [g] = output_gradients
+            [g] = output_grads
             return [
                 self(g, str_emoji),
                 disconnected_type(),

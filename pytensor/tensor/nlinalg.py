@@ -49,7 +49,7 @@ class MatrixPinv(Op):
         (z,) = output_storage
         z[0] = np.linalg.pinv(x, hermitian=self.hermitian)
 
-    def L_op(self, inputs, outputs, g_outputs):
+    def L_op(self, inputs, outputs, output_grads):
         r"""The gradient function should return
 
             .. math:: V\frac{\partial X^+}{\partial X},
@@ -63,7 +63,7 @@ class MatrixPinv(Op):
         """
         (x,) = inputs
         (z,) = outputs
-        (gz,) = g_outputs
+        (gz,) = output_grads
 
         x_dot_z = ptm.dot(x, z)
         z_dot_x = ptm.dot(z, x)

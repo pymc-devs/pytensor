@@ -697,8 +697,8 @@ def test_gradient_mixed_discrete_output_core_op():
         def perform(self, node, inputs, output_storage):
             raise NotImplementedError()
 
-        def L_op(self, inputs, outputs, output_gradients):
-            return [ones_like(inputs[0]) * output_gradients[0]]
+        def L_op(self, inputs, outputs, output_grads):
+            return [ones_like(inputs[0]) * output_grads[0]]
 
     op = Blockwise(MixedDtypeCoreOp())
     x = vector("x")

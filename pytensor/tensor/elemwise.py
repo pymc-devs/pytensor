@@ -509,11 +509,11 @@ class Elemwise(OpenMPOp):
 
         return [[True for output in node.outputs] for ipt in node.inputs]
 
-    def L_op(self, inputs, outs, ograds):
+    def L_op(self, inputs, outputs, output_grads):
         from pytensor.tensor.math import sum as pt_sum
 
         # Compute grad with respect to broadcasted input
-        rval = self._bgrad(inputs, outs, ograds)
+        rval = self._bgrad(inputs, outputs, output_grads)
 
         # sum out the broadcasted dimensions
         for i, ipt in enumerate(inputs):
@@ -526,7 +526,7 @@ class Elemwise(OpenMPOp):
             to_sum = [
                 j
                 for j, in_s in enumerate(ipt.type.shape)
-                if in_s == 1 and outs[0].type.shape[j] != 1
+                if in_s == 1 and outputs[0].type.shape[j] != 1
             ]
 
             if to_sum:

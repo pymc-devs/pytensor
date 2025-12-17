@@ -119,7 +119,7 @@ class Cholesky(Op):
             # Transpose result if input was transposed
             out[0] = c.T if c_contiguous_input else c
 
-    def L_op(self, inputs, outputs, gradients):
+    def L_op(self, inputs, outputs, output_grads):
         """
         Cholesky decomposition reverse-mode gradient update.
 
@@ -132,7 +132,7 @@ class Cholesky(Op):
 
         """
 
-        dz = gradients[0]
+        dz = output_grads[0]
         chol_x = outputs[0]
 
         # Replace the cholesky decomposition with 1 if there are nans
@@ -309,7 +309,7 @@ class SolveBase(Op):
             cols = Bshape[1]
             return [(rows, cols)]
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         r"""Reverse-mode gradient updates for matrix solve operation :math:`c = A^{-1} b`.
 
         Symbolic expression for updates taken from [#]_.
@@ -327,7 +327,7 @@ class SolveBase(Op):
         # C is a scalar representing the entire graph
         # `output_gradients` is (dC/dc,)
         # We need to return (dC/d[inv(A)], dC/db)
-        c_bar = output_gradients[0]
+        c_bar = output_grads[0]
 
         props_dict = self._props_dict()
         props_dict["lower"] = not self.lower
@@ -742,9 +742,9 @@ class LUFactor(Op):
         output_storage[0][0] = LU
         output_storage[1][0] = p
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         [A] = inputs
-        LU_bar, _ = output_gradients
+        LU_bar, _ = output_grads
         LU, p_indices = outputs
 
         eye = ptb.identity_like(A)
@@ -950,8 +950,8 @@ class SolveTriangular(SolveBase):
 
         output_storage[0][0] = x
 
-    def L_op(self, inputs, outputs, output_gradients):
-        res = super().L_op(inputs, outputs, output_gradients)
+    def L_op(self, inputs, outputs, output_grads):
+        res = super().L_op(inputs, outputs, output_grads)
 
         if self.lower:
             res[0] = ptb.tril(res[0])

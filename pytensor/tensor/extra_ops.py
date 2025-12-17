@@ -322,9 +322,9 @@ class CumOp(COp):
         else:
             z[0] = np.cumprod(x, axis=self.axis)
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gi,) = output_gradients
+        (gi,) = output_grads
 
         reverse_slicing = [slice(None, None, None)] * gi.ndim
         reverse_slicing[self.axis] = slice(None, None, -1)

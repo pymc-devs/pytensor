@@ -1111,8 +1111,8 @@ def test_gradient_mixed_discrete_output_scalar_op():
         def perform(self, node, inputs, output_storage):
             raise NotImplementedError()
 
-        def L_op(self, inputs, outputs, output_gradients):
-            return [inputs[0].ones_like() * output_gradients[0]]
+        def L_op(self, inputs, outputs, output_grads):
+            return [inputs[0].ones_like() * output_grads[0]]
 
     op = Elemwise(MixedDtypeScalarOp())
     x = vector("x")
