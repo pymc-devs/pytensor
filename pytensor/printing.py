@@ -861,11 +861,11 @@ class OperatorPrinter(Printer):
         self.assoc = assoc
         assert self.assoc in VALID_ASSOC
 
-    def process(self, output, pstate):
-        if output in pstate.memo:
-            return pstate.memo[output]
+    def process(self, var, pstate):
+        if var in pstate.memo:
+            return pstate.memo[var]
         pprinter = pstate.pprinter
-        node = output.owner
+        node = var.owner
         if node is None:
             raise TypeError(
                 f"operator {self.operator} cannot represent a variable that is "
@@ -903,7 +903,7 @@ class OperatorPrinter(Printer):
             r = f"({s})"
         else:
             r = s
-        pstate.memo[output] = r
+        pstate.memo[var] = r
         return r
 
 
@@ -916,17 +916,17 @@ class PatternPrinter(Printer):
             else:
                 self.patterns.append((pattern[0], pattern[1:]))
 
-    def process(self, output, pstate):
-        if output in pstate.memo:
-            return pstate.memo[output]
+    def process(self, var, pstate):
+        if var in pstate.memo:
+            return pstate.memo[var]
         pprinter = pstate.pprinter
-        node = output.owner
+        node = var.owner
         if node is None:
             raise TypeError(
                 f"Patterns {self.patterns} cannot represent a variable that is "
                 "not the result of an operation"
             )
-        idx = node.outputs.index(output)
+        idx = node.outputs.index(var)
         pattern, precedences = self.patterns[idx]
         precedences += (1000,) * (len(node.inputs) - len(precedences))
 
@@ -942,7 +942,7 @@ class PatternPrinter(Printer):
             )
         }
         r = pattern % d
-        pstate.memo[output] = r
+        pstate.memo[var] = r
         return r
 
 
@@ -963,17 +963,17 @@ class FunctionPrinter(Printer):
 
         self.keywords = keywords
 
-    def process(self, output, pstate):
-        if output in pstate.memo:
-            return pstate.memo[output]
+    def process(self, var, pstate):
+        if var in pstate.memo:
+            return pstate.memo[var]
         pprinter = pstate.pprinter
-        node = output.owner
+        node = var.owner
         if node is None:
             raise TypeError(
                 f"function {self.names} cannot represent a variable that is "
                 "not the result of an operation"
             )
-        idx = node.outputs.index(output)
+        idx = node.outputs.index(var)
         name = self.names[idx]
         with set_precedence(pstate):
             inputs_str = ", ".join(
@@ -988,16 +988,16 @@ class FunctionPrinter(Printer):
 
             r = f"{name}({inputs_str}{keywords_str})"
 
-        pstate.memo[output] = r
+        pstate.memo[var] = r
         return r
 
 
 class IgnorePrinter(Printer):
-    def process(self, output, pstate):
-        if output in pstate.memo:
-            return pstate.memo[output]
+    def process(self, var, pstate):
+        if var in pstate.memo:
+            return pstate.memo[var]
         pprinter = pstate.pprinter
-        node = output.owner
+        node = var.owner
         if node is None:
             raise TypeError(
                 f"function {self.function} cannot represent a variable that is"
@@ -1005,19 +1005,19 @@ class IgnorePrinter(Printer):
             )
         input = node.inputs[0]
         r = f"{pprinter.process(input, pstate)}"
-        pstate.memo[output] = r
+        pstate.memo[var] = r
         return r
 
 
 class LeafPrinter(Printer):
-    def process(self, output, pstate):
-        if output in pstate.memo:
-            return pstate.memo[output]
-        if output.name in greek:
-            r = greek[output.name]
+    def process(self, var, pstate):
+        if var in pstate.memo:
+            return pstate.memo[var]
+        if var.name in greek:
+            r = greek[var.name]
         else:
-            r = str(output)
-        pstate.memo[output] = r
+            r = str(var)
+        pstate.memo[var] = r
         return r
 
 
@@ -1025,11 +1025,11 @@ leaf_printer = LeafPrinter()
 
 
 class ConstantPrinter(Printer):
-    def process(self, output, pstate):
-        if output in pstate.memo:
-            return pstate.memo[output]
-        r = str(output.data)
-        pstate.memo[output] = r
+    def process(self, var, pstate):
+        if var in pstate.memo:
+            return pstate.memo[var]
+        r = str(var.data)
+        pstate.memo[var] = r
         return r
 
 
@@ -1037,18 +1037,18 @@ constant_printer = ConstantPrinter()
 
 
 class DefaultPrinter(Printer):
-    def process(self, output, pstate):
-        if output in pstate.memo:
-            return pstate.memo[output]
+    def process(self, var, pstate):
+        if var in pstate.memo:
+            return pstate.memo[var]
         pprinter = pstate.pprinter
-        node = output.owner
+        node = var.owner
         if node is None:
-            return leaf_printer.process(output, pstate)
+            return leaf_printer.process(var, pstate)
         with set_precedence(pstate):
             args = ", ".join(pprinter.process(input, pstate) for input in node.inputs)
             r = f"{node.op}({args})"
 
-        pstate.memo[output] = r
+        pstate.memo[var] = r
         return r
 
 
@@ -1066,19 +1066,19 @@ class PPrinter(Printer):
         else:
             self.printers.insert(0, (condition, printer))
 
-    def process(self, r: Variable, pstate: PrinterState | None = None) -> str:
+    def process(self, var: Variable, pstate: PrinterState | None = None) -> str:
         if pstate is None:
             pstate = PrinterState(pprinter=self)
         elif isinstance(pstate, dict):
             pstate = PrinterState(pprinter=self, **pstate)
-        if getattr(r, "owner", None) is not None:
-            if r.owner.op in self.printers_dict:
-                return self.printers_dict[r.owner.op].process(r, pstate)
-            if type(r.owner.op) in self.printers_dict:
-                return self.printers_dict[type(r.owner.op)].process(r, pstate)
+        if getattr(var, "owner", None) is not None:
+            if var.owner.op in self.printers_dict:
+                return self.printers_dict[var.owner.op].process(var, pstate)
+            if type(var.owner.op) in self.printers_dict:
+                return self.printers_dict[type(var.owner.op)].process(var, pstate)
         for condition, printer in self.printers:
-            if condition(pstate, r):
-                return printer.process(r, pstate)
+            if condition(pstate, var):
+                return printer.process(var, pstate)
         return ""
 
     def clone(self):

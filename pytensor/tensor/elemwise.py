@@ -285,12 +285,12 @@ class DimShufflePrinter(Printer):
             return f"{pstate.pprinter.process(r)}.T"
         return f"DimShuffle{{{', '.join(str(o) for o in new_order)}}}({pstate.pprinter.process(r)})"
 
-    def process(self, r, pstate):
-        if r.owner is None:
+    def process(self, var, pstate):
+        if var.owner is None:
             raise TypeError("Can only print DimShuffle.")
-        elif isinstance(r.owner.op, DimShuffle):
-            ord = r.owner.op.new_order
-            return self.__p(ord, pstate, r.owner.inputs[0])
+        elif isinstance(var.owner.op, DimShuffle):
+            ord = var.owner.op.new_order
+            return self.__p(ord, pstate, var.owner.inputs[0])
         else:
             raise TypeError("Can only print DimShuffle.")
 
@@ -1094,8 +1094,8 @@ class Elemwise(OpenMPOp):
     def c_support_code(self, **kwargs):
         return self.scalar_op.c_support_code(**kwargs)
 
-    def c_support_code_apply(self, node, nodename):
-        support_code = self.scalar_op.c_support_code_apply(node, nodename + "_scalar_")
+    def c_support_code_apply(self, node, name):
+        support_code = self.scalar_op.c_support_code_apply(node, name + "_scalar_")
         return support_code
 
     def c_code_cache_version_apply(self, node):

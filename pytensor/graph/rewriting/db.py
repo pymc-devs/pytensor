@@ -396,10 +396,10 @@ class SequenceDB(RewriteDatabase):
         self.__position__ = {}
         self.failure_callback = failure_callback
 
-    def register(self, name, obj, *tags, **kwargs):
+    def register(self, name, rewriter, *tags, **kwargs):
         position = kwargs.pop("position", "last")
 
-        super().register(name, obj, *tags, **kwargs)
+        super().register(name, rewriter, *tags, **kwargs)
 
         if position == "last":
             if len(self.__position__) == 0:
@@ -497,8 +497,8 @@ class LocalGroupDB(SequenceDB):
         self.node_rewriter = node_rewriter
         self.__name__: str = ""
 
-    def register(self, name, obj, *tags, position="last", **kwargs):
-        super().register(name, obj, *tags, position=position, **kwargs)
+    def register(self, name, rewriter, *tags, position="last", **kwargs):
+        super().register(name, rewriter, *tags, position=position, **kwargs)
 
     def query(self, *tags, **kwtags):
         rewrites = list(super().query(*tags, **kwtags))

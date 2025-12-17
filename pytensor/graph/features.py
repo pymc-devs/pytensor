@@ -416,11 +416,11 @@ class History(Feature):
         del fgraph.revert
         del self.history[fgraph]
 
-    def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         if self.history[fgraph] is None:
             return
         h = self.history[fgraph]
-        h.append(LambdaExtract(fgraph, node, i, r, reason))
+        h.append(LambdaExtract(fgraph, node, i, var, reason))
 
     def revert(self, fgraph, checkpoint):
         """
@@ -544,9 +544,9 @@ class FullHistory(Feature):
             raise ValueError("Full History already attached to another fgraph")
         self.fg = fgraph
 
-    def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
-        self.bw.append(LambdaExtract(fgraph, node, i, r, reason))
-        self.fw.append(LambdaExtract(fgraph, node, i, new_r, reason))
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
+        self.bw.append(LambdaExtract(fgraph, node, i, var, reason))
+        self.fw.append(LambdaExtract(fgraph, node, i, new_var, reason))
         self.pointer += 1
         if self.callback:
             self.callback()
@@ -832,15 +832,15 @@ class PreserveVariableAttributes(Feature):
     This preserve some variables attributes and tag during optimization.
     """
 
-    def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         # Don't change the name of constants
-        if r.owner and r.name is not None and new_r.name is None:
-            new_r.name = r.name
+        if var.owner and var.name is not None and new_var.name is None:
+            new_var.name = var.name
         if (
-            getattr(r.tag, "nan_guard_mode_check", False)
-            and getattr(new_r.tag, "nan_guard_mode_check", False) is False
+            getattr(var.tag, "nan_guard_mode_check", False)
+            and getattr(new_var.tag, "nan_guard_mode_check", False) is False
         ):
-            new_r.tag.nan_guard_mode_check = r.tag.nan_guard_mode_check
+            new_var.tag.nan_guard_mode_check = var.tag.nan_guard_mode_check
 
 
 class NoOutputFromInplace(Feature):
