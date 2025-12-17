@@ -880,7 +880,7 @@ def vector(
     name: str | None = None,
     *,
     dtype: Optional["DTypeLike"] = None,
-    shape: tuple[ST] | None = (None,),
+    shape: tuple[ST, ...] | None = (None,),
 ) -> "TensorVariable":
     """Return a symbolic vector variable.
 

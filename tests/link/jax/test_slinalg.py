@@ -271,7 +271,7 @@ def test_jax_eigvalsh(lower):
 @pytest.mark.parametrize("method", ["direct", "bilinear"])
 @pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
 def test_jax_solve_discrete_lyapunov(
-    method: Literal["direct", "bilinear"], shape: tuple[int]
+    method: Literal["direct", "bilinear"], shape: tuple[int, ...]
 ):
     A = pt.tensor(name="A", shape=shape)
     B = pt.tensor(name="B", shape=shape)
@@ -297,7 +297,7 @@ def test_jax_solve_discrete_lyapunov(
 )
 @pytest.mark.parametrize("complex", [False, True], ids=["real", "complex"])
 @pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
-def test_jax_lu(permute_l, p_indices, complex, shape: tuple[int]):
+def test_jax_lu(permute_l, p_indices, complex, shape: tuple[int, ...]):
     rng = np.random.default_rng()
     A = pt.tensor(
         "A",

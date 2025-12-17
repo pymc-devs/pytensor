@@ -3112,7 +3112,7 @@ def slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
 
 
 def flip(
-    arr: TensorVariable, axis: int | tuple[int] | TensorVariable | None = None
+    arr: TensorVariable, axis: int | tuple[int, ...] | TensorVariable | None = None
 ) -> TensorVariable:
     """
     Reverse the order of elements in an tensor along the given axis.
@@ -3122,7 +3122,7 @@ def flip(
     arr: TensorVariable
         Input tensor.
 
-    axis: int | tuple[int] | TensorVariable, optional
+    axis: int | tuple[int, ...] | TensorVariable, optional
         Axis or axes along which to flip over. The default is to flip over all of the axes of the input tensor.
 
     Returns

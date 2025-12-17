@@ -251,7 +251,7 @@ def transpose(
         # No-op transpose
         return x
 
-    return Transpose(dims=typing.cast(tuple[str], dim))(x)
+    return Transpose(dims=typing.cast(tuple[str, ...], dim))(x)
 
 
 class Concat(XOp):
