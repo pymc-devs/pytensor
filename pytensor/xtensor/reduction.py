@@ -54,7 +54,7 @@ def _process_user_dims(x: XTensorVariable, dim: REDUCE_DIM) -> Sequence[str]:
     if isinstance(dim, str):
         return (dim,)
     elif dim is None or dim is Ellipsis:
-        return typing.cast(tuple[str], x.type.dims)
+        return typing.cast(tuple[str, ...], x.type.dims)
     return dim
 
 

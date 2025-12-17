@@ -52,7 +52,7 @@ class TestSolves:
     @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos", "tridiagonal"], ids=str)
     def test_solve(
         self,
-        b_shape: tuple[int],
+        b_shape: tuple[int, ...],
         assume_a: Literal["gen", "sym", "pos"],
         lower: bool,
         overwrite_a: bool,
@@ -173,7 +173,7 @@ class TestSolves:
     @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
     def test_solve_triangular(
         self,
-        b_shape: tuple[int],
+        b_shape: tuple[int, ...],
         lower: bool,
         transposed: bool,
         unit_diagonal: bool,
