@@ -875,8 +875,8 @@ class OpFromGraph(Op, HasInnerGraph):
         res.fgraph = res.fgraph.clone()
         return res
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         variables = self.fn(*inputs)
         # zip strict not specified because we are in a hot loop
-        for output, variable in zip(outputs, variables):
+        for output, variable in zip(output_storage, variables):
             output[0] = variable

@@ -37,8 +37,8 @@ class SoftmaxGrad(COp):
 
         return Apply(self, [dy, sm], [sm.type()])
 
-    def perform(self, node, input_storage, output_storage):
-        dy, sm = input_storage
+    def perform(self, node, inputs, output_storage):
+        dy, sm = inputs
 
         dy_times_sm = dy * sm
         dx = dy_times_sm - np.sum(dy_times_sm, axis=self.axis, keepdims=True) * sm
@@ -268,8 +268,8 @@ class Softmax(COp):
 
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, input_storage, output_storage):
-        (x,) = input_storage
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
         (z,) = output_storage
         z[0] = scipy.special.softmax(x, axis=self.axis)
 
@@ -523,8 +523,8 @@ class LogSoftmax(COp):
 
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, input_storage, output_storage):
-        (x,) = input_storage
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
         (z,) = output_storage
         z[0] = scipy.special.log_softmax(x, axis=self.axis)
 

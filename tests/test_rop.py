@@ -45,9 +45,9 @@ class BreakRop(Op):
     def make_node(self, x):
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inp, out_):
-        (x,) = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
+        (out,) = output_storage
         out[0] = x
 
     def grad(self, inp, grads):

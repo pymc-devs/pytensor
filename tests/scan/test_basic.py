@@ -2341,7 +2341,7 @@ def test_cvm_exception_handling(mode):
         def make_node(self, input):
             return Apply(self, [input], [vector()])
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             raise Exception("blah")
 
         # def c_code(self, node, name, inputs, outputs, sub):

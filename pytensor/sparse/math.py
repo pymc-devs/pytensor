@@ -326,9 +326,9 @@ class SpSum(Op):
         z = TensorType(dtype=x.dtype, shape=out_shape)()
         return Apply(self, [x], [z])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         if self.axis is None:
             z[0] = np.asarray(x.sum())
         else:
@@ -431,9 +431,9 @@ class AddSS(Op):
             [psb.SparseTensorType(dtype=out_dtype, format=x.type.format)()],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_sparse(x) and psb._is_sparse(y)
         assert x.shape == y.shape
         out[0] = x + y
@@ -491,9 +491,9 @@ class AddSSData(Op):
             [psb.SparseTensorType(dtype=x.type.dtype, format=x.type.format)()],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_sparse(x) and psb._is_sparse(y)
         assert x.shape == y.shape
         assert x.data.shape == y.data.shape
@@ -532,9 +532,9 @@ class AddSD(Op):
             [TensorType(dtype=out_dtype, shape=y.type.shape)()],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_dense(y)
 
         # The asarray is needed as in some case, this return a
@@ -594,9 +594,9 @@ class StructuredAddSV(Op):
             [psb.SparseTensorType(dtype=x.type.dtype, format=x.type.format)()],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_sparse(x) and not psb._is_sparse(y)
         assert x.shape[1] == y.shape[0]
         out[0] = x.__class__(x + (x.toarray() != 0) * y)
@@ -723,9 +723,9 @@ class MulSS(Op):
             [psb.SparseTensorType(dtype=out_dtype, format=x.type.format)()],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_sparse(x) and psb._is_sparse(y)
         assert len(x.shape) == 2
         assert y.shape == x.shape
@@ -766,9 +766,9 @@ class MulSD(Op):
         out = psb.SparseTensorType(dtype=dtype, format=x.type.format)()
         return Apply(self, [x, y], [out])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_sparse(x) and psb._is_dense(y)
         if len(y.shape) == 0:
             out_dtype = node.outputs[0].dtype
@@ -874,9 +874,9 @@ class MulSV(Op):
             [psb.SparseTensorType(dtype=x.type.dtype, format=x.type.format)()],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_sparse(x) and not psb._is_sparse(y)
         assert x.shape[1] == y.shape[0]
         out[0] = x.__class__(x.toarray() * y)
@@ -1002,9 +1002,9 @@ class __ComparisonOpSS(Op):
             self, [x, y], [psb.SparseTensorType(dtype="uint8", format=x.type.format)()]
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_sparse(x) and psb._is_sparse(y)
         assert x.shape == y.shape
         out[0] = self.comparison(x, y).astype("uint8")
@@ -1044,9 +1044,9 @@ class __ComparisonOpSD(Op):
         out = TensorType(dtype="uint8", shape=(None, None))()
         return Apply(self, [x, y], [out])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert psb._is_sparse(x)
         assert x.shape == y.shape
         assert psb._is_dense(y)
@@ -1255,15 +1255,15 @@ class TrueDot(Op):
         outputs = [psb.SparseTensorType(dtype=x.type.dtype, format=myformat)()]
         return Apply(self, inputs, outputs)
 
-    def perform(self, node, inp, out_):
+    def perform(self, node, inputs, output_storage):
         # TODO
         # -Verify that output is sufficiently sparse,
         #  and raise a warning if it is not.
         # -Also determine that we are storing the
         #  output in the best storage format?
 
-        x, y = inp
-        (out,) = out_
+        x, y = inputs
+        (out,) = output_storage
         rval = x.dot(y)
         if not scipy_sparse.issparse(rval):
             rval = getattr(scipy_sparse, x.format + "_matrix")(rval)
@@ -1388,9 +1388,9 @@ class StructuredDot(Op):
                 ],
             )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (a, b) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         if a.shape[1] != b.shape[0]:
             raise ValueError(
                 "shape mismatch in StructuredDot.perform", (a.shape, b.shape)
@@ -1509,9 +1509,9 @@ class StructuredDotGradCSC(COp):
             [tensor(dtype=g_ab.dtype, shape=(None,))],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (a_indices, a_indptr, b, g_ab) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         g_a_data = np.zeros(a_indices.shape, dtype=g_ab.dtype)
         for j in range(len(a_indptr) - 1):
             ind0 = a_indptr[j]
@@ -1641,9 +1641,9 @@ class StructuredDotGradCSR(COp):
             self, [a_indices, a_indptr, b, g_ab], [tensor(dtype=b.dtype, shape=(None,))]
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (a_indices, a_indptr, b, g_ab) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         g_a_data = np.zeros(a_indices.shape, dtype=g_ab.dtype)
         for i in range(len(a_indptr) - 1):  # loop over rows
             ind0 = a_indptr[i]
@@ -1825,9 +1825,9 @@ class SamplingDot(Op):
 
         return Apply(self, [x, y, p], [p.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, y, p) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         if psb._is_sparse(x):
             raise TypeError(x)
 
@@ -1924,9 +1924,9 @@ class Dot(Op):
 
         return Apply(self, [x, y], [tensor(dtype=dtype_out, shape=shape_out)])
 
-    def perform(self, node, inputs, out):
+    def perform(self, node, inputs, output_storage):
         x, y = inputs
-        out = out[0]
+        output_storage = output_storage[0]
         x_is_sparse = psb._is_sparse(x)
         y_is_sparse = psb._is_sparse(y)
 
@@ -1938,7 +1938,7 @@ class Dot(Op):
         if x_is_sparse and y_is_sparse:
             rval = rval.toarray()
 
-        out[0] = np.asarray(rval, dtype=node.outputs[0].dtype)
+        output_storage[0] = np.asarray(rval, dtype=node.outputs[0].dtype)
 
     def grad(self, inputs, gout):
         (x, y) = inputs
@@ -2060,9 +2060,9 @@ class Usmm(Op):
             [tensor(dtype=dtype_out, shape=(None, None))],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (alpha, x, y, z) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         x_is_sparse = psb._is_sparse(x)
         y_is_sparse = psb._is_sparse(y)
 

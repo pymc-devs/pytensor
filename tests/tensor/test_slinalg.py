@@ -203,9 +203,9 @@ def test_eigvalsh_grad():
 
 class TestSolveBase:
     class SolveTest(SolveBase):
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             A, b = inputs
-            outputs[0][0] = scipy.linalg.solve(A, b)
+            output_storage[0][0] = scipy.linalg.solve(A, b)
 
     @pytest.mark.parametrize(
         "A_func, b_func, error_message",

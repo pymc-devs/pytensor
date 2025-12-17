@@ -297,9 +297,9 @@ class TestVerifyGradSparse:
             x = as_sparse_variable(x)
             return Apply(self, [x], [x.type()])
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             (x,) = inputs
-            (out,) = outputs
+            (out,) = output_storage
             assert _is_sparse(x)
             out[0] = -x
 

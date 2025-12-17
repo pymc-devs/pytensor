@@ -921,8 +921,8 @@ class Subtensor(COp):
             [tensor(dtype=x.type.dtype, shape=out_shape)],
         )
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         x = inputs[0]
 
         cdata = get_idx_list(inputs, self.idx_list)
@@ -2112,8 +2112,8 @@ class AdvancedSubtensor1(COp):
         out_shape = (ilist_.type.shape[0], *x_.type.shape[1:])
         return Apply(self, [x_, ilist_], [TensorType(dtype=x.dtype, shape=out_shape)()])
 
-    def perform(self, node, inp, output_storage):
-        x, i = inp
+    def perform(self, node, inputs, output_storage):
+        x, i = inputs
 
         # Numpy take is always slower when out is provided
         # https://github.com/numpy/numpy/issues/28636
@@ -2742,8 +2742,8 @@ class AdvancedSubtensor(Op):
         assert node.outputs[0].ndim == len(res_shape)
         return [res_shape]
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         check_advanced_indexing_dimensions(inputs[0], inputs[1:])
         rval = inputs[0].__getitem__(tuple(inputs[1:]))
         # When there are no arrays, we are not actually doing advanced
@@ -2880,12 +2880,12 @@ class AdvancedIncSubtensor(Op):
             [x.type()],
         )
 
-    def perform(self, node, inputs, out_):
+    def perform(self, node, inputs, output_storage):
         x, y, *indices = inputs
 
         check_advanced_indexing_dimensions(x, indices)
 
-        (out,) = out_
+        (out,) = output_storage
         if not self.inplace:
             out[0] = x.copy()
         else:

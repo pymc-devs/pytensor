@@ -198,7 +198,7 @@ class Gemv(Op):
 
         return Apply(self, inputs, [y.type()])
 
-    def perform(self, node, inputs, out_storage):
+    def perform(self, node, inputs, output_storage):
         from scipy.linalg.blas import get_blas_funcs
 
         y, alpha, A, x, beta = inputs
@@ -232,7 +232,7 @@ class Gemv(Op):
             #  trans flag don't seam to cause slowdown.
             # out_storage[0][0] = gemv(alpha, A, x, beta, y,
             #                         overwrite_y=self.inplace)
-            out_storage[0][0] = gemv(
+            output_storage[0][0] = gemv(
                 alpha, A.T, x, beta, y, overwrite_y=self.inplace, trans=True
             )
         else:
@@ -244,7 +244,7 @@ class Gemv(Op):
                     out += beta * y
                 else:
                     out += y
-            out_storage[0][0] = np.asarray(out, dtype=y.dtype)
+            output_storage[0][0] = np.asarray(out, dtype=y.dtype)
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]]
@@ -909,9 +909,9 @@ class Gemm(GemmRelated):
         output = z.type()
         return Apply(self, inputs, [output])
 
-    def perform(self, node, inp, out):
-        z, a, x, y, b = inp
-        (zout,) = out
+    def perform(self, node, inputs, output_storage):
+        z, a, x, y, b = inputs
+        (zout,) = output_storage
         assert a.shape == ()
         assert b.shape == ()
         if not self.inplace:
@@ -1241,9 +1241,9 @@ class Dot22Scalar(GemmRelated):
         outputs = [tensor(dtype=x.type.dtype, shape=sz)]
         return Apply(self, [x, y, a], outputs)
 
-    def perform(self, node, inp, out):
-        x, y, scalar = inp
-        (z,) = out
+    def perform(self, node, inputs, output_storage):
+        x, y, scalar = inputs
+        (z,) = output_storage
         try:
             z[0] = np.asarray(scalar * np.dot(x, y))
         except ValueError as e:
@@ -1354,14 +1354,14 @@ class BatchedDot(COp):
         out = tensor(dtype=dtype, shape=out_shape)
         return Apply(self, [x, y], [out])
 
-    def perform(self, node, inp, out):
-        x, y = inp
-        (z,) = out
+    def perform(self, node, inputs, output_storage):
+        x, y = inputs
+        (z,) = output_storage
 
         if x.shape[0] != y.shape[0]:
             raise TypeError(
-                f"Inputs [{', '.join(map(str, inp))}] must have the"
-                f" same size in axis 0, but have sizes [{', '.join(str(i.shape[0]) for i in inp)}]."
+                f"Inputs [{', '.join(map(str, inputs))}] must have the"
+                f" same size in axis 0, but have sizes [{', '.join(str(i.shape[0]) for i in inputs)}]."
             )
 
         z[0] = np.matmul(x, y)

@@ -81,9 +81,9 @@ class Shape(COp):
 
         return Apply(self, [x], [out_var])
 
-    def perform(self, node, inp, out_):
-        (x,) = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
+        (out,) = output_storage
         out[0] = np.asarray(np.shape(x), dtype="int64")
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -257,9 +257,9 @@ class Shape_i(COp):
             raise TypeError(f"{x} has too few dimensions for Shape_i")
         return Apply(self, [x], [pytensor.tensor.type.lscalar()])
 
-    def perform(self, node, inp, out_):
-        (x,) = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
+        (out,) = output_storage
         if out[0] is None:
             out[0] = np.asarray(np.shape(x)[self.i], dtype="int64")
         else:
@@ -442,9 +442,9 @@ class SpecifyShape(COp):
 
         return Apply(self, [x, *shape], [out_var])
 
-    def perform(self, node, inp, out_):
-        x, *shape = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        x, *shape = inputs
+        (out,) = output_storage
         ndim = len(shape)
         if x.ndim != ndim:
             raise AssertionError(
@@ -709,9 +709,9 @@ class Reshape(COp):
 
         return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
 
-    def perform(self, node, inp, out_):
-        x, shp = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        x, shp = inputs
+        (out,) = output_storage
         if len(shp) != self.ndim:
             raise ValueError(
                 "Shape argument to Reshape has incorrect"

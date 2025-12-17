@@ -224,8 +224,8 @@ class DimShuffle(ExternalCOp):
             return f"Transpose{{axes={self.shuffle}}}"
         return f"DimShuffle{{order=[{','.join(map(str, self.new_order))}]}}"
 
-    def perform(self, node, inp, out):
-        (res,) = inp
+    def perform(self, node, inputs, output_storage):
+        (res,) = inputs
 
         # This C-like impl is very slow in Python compared to transpose+reshape
         # new_order = self._new_order
@@ -243,7 +243,7 @@ class DimShuffle(ExternalCOp):
         new_shape = list(res.shape[: len(self.shuffle)])
         for augm in self.augment:
             new_shape.insert(augm, 1)
-        out[0][0] = res.reshape(new_shape)
+        output_storage[0][0] = res.reshape(new_shape)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishp,) = shapes
@@ -1396,9 +1396,9 @@ class CAReduce(COp):
         else:
             return f"{type(self).__name__}{{{self.scalar_op}, {self._axis_str()}}}"
 
-    def perform(self, node, inp, out):
-        (input,) = inp
-        (output,) = out
+    def perform(self, node, inputs, output_storage):
+        (input,) = inputs
+        (output,) = output_storage
         axis = self.axis
 
         out_dtype = node.outputs[0].type.dtype
@@ -1412,9 +1412,9 @@ class CAReduce(COp):
 
         input = np.array(input, dtype=acc_dtype)
 
-        out = self.ufunc.reduce(input, axis=axis, dtype=acc_dtype)
+        output_storage = self.ufunc.reduce(input, axis=axis, dtype=acc_dtype)
 
-        output[0] = np.asarray(out, dtype=out_dtype)
+        output[0] = np.asarray(output_storage, dtype=out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishape,) = shapes

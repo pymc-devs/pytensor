@@ -48,9 +48,9 @@ class BROKEN_ON_PURPOSE_Add(COp):
         r = Apply(self, [a, b], [a.type()])
         return r
 
-    def perform(self, node, inp, out_):
-        a, b = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        a, b = inputs
+        (out,) = output_storage
         z = a + b
         # ERROR TO ADD THIS CRAPPY OFFSET
         if self.py_offset:
@@ -364,9 +364,9 @@ def test_baddestroymap():
             c = a.type()
             return Apply(self, [a, b], [c])
 
-        def perform(self, node, inp, out):
-            a, b = inp
-            (c,) = out
+        def perform(self, node, inputs, output_storage):
+            a, b = inputs
+            (c,) = output_storage
             c[0] = a
             c[0] += b
 
@@ -394,9 +394,9 @@ class TestViewMap:
             c = b.type()
             return Apply(self, [a, b], [c])
 
-        def perform(self, node, inp, out):
-            _a, b = inp
-            (c,) = out
+        def perform(self, node, inputs, output_storage):
+            _a, b = inputs
+            (c,) = output_storage
             c[0] = b
 
     class BadAddSlice(Op):
@@ -404,9 +404,9 @@ class TestViewMap:
             c = b.type()
             return Apply(self, [a, b], [c])
 
-        def perform(self, node, inp, out):
-            _a, b = inp
-            (c,) = out
+        def perform(self, node, inputs, output_storage):
+            _a, b = inputs
+            (c,) = output_storage
             c[0] = b[1:3]
 
     def test_badviewmap_ref(self):
@@ -452,9 +452,9 @@ class TestViewMap:
                 d = a.type()
                 return Apply(self, [a, b], [c, d])
 
-            def perform(self, node, inp, out):
-                a, _b = inp
-                c, d = out
+            def perform(self, node, inputs, output_storage):
+                a, _b = inputs
+                c, d = output_storage
                 c[0] = a
                 d[0] = a[1:]
 
@@ -476,9 +476,9 @@ class TestViewMap:
                 d = a.type()
                 return Apply(self, [a, b], [c, d])
 
-            def perform(self, node, inp, out):
-                a, _b = inp
-                c, d = out
+            def perform(self, node, inputs, output_storage):
+                a, _b = inputs
+                c, d = output_storage
                 r = a * 2
                 c[0] = r
                 d[0] = r[1:]
@@ -502,9 +502,9 @@ class TestViewMap:
                 d = a.type()
                 return Apply(self, [a, b], [c, d])
 
-            def perform(self, node, inp, out):
-                a, _b = inp
-                c, d = out
+            def perform(self, node, inputs, output_storage):
+                a, _b = inputs
+                c, d = output_storage
                 r = a * 1
                 c[0] = r
                 d[0] = r[1:]
@@ -527,9 +527,9 @@ class TestViewMap:
                 d = a.type()
                 return Apply(self, [a, b], [c, d])
 
-            def perform(self, node, inp, out):
-                a, _b = inp
-                c, d = out
+            def perform(self, node, inputs, output_storage):
+                a, _b = inputs
+                c, d = output_storage
                 r = a * 1
                 c[0] = r[:-1]
                 d[0] = r[1:]
@@ -618,10 +618,10 @@ class BrokenCImplementationAdd(COp):
         r = Apply(self, [a, b], [a.type()])
         return r
 
-    def perform(self, node, inp, out_):
+    def perform(self, node, inputs, output_storage):
         # print 'executing python perform'
-        a, b = inp
-        (out,) = out_
+        a, b = inputs
+        (out,) = output_storage
         z = a + b
         # print 'out[0] was:', out[0]
         out[0] = z
@@ -714,9 +714,9 @@ class VecAsRowAndCol(Op):
         out_c_type = type_class(dtype=v.dtype, shape=(None, 1))
         return Apply(self, [v], [out_r_type(), out_c_type()])
 
-    def perform(self, node, inp, out):
-        (v,) = inp
-        r, c = out
+    def perform(self, node, inputs, output_storage):
+        (v,) = inputs
+        r, c = output_storage
         lv = v.shape[0]
         if (r[0] is None) or (r[0].shape != (1, lv)):
             r[0] = np.empty((1, lv), dtype=node.outputs[0].type.dtype)

@@ -621,9 +621,9 @@ class TensorFromScalar(COp):
 
         return Apply(self, [s], [tensor(dtype=s.type.dtype, shape=())])
 
-    def perform(self, node, inp, out_):
-        (s,) = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (s,) = inputs
+        (out,) = output_storage
         out[0] = np.asarray(s)
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -976,12 +976,12 @@ class Nonzero(Op):
         output = [TensorType(dtype="int64", shape=(None,))() for i in range(a.ndim)]
         return Apply(self, [a], output)
 
-    def perform(self, node, inp, out_):
-        a = inp[0]
+    def perform(self, node, inputs, output_storage):
+        a = inputs[0]
 
         result_tuple = np.nonzero(a)
         for i, res in enumerate(result_tuple):
-            out_[i][0] = res.astype("int64")
+            output_storage[i][0] = res.astype("int64")
 
     def grad(self, inp, grads):
         return [grad_undefined(self, 0, inp[0])]
@@ -1108,9 +1108,9 @@ class Tri(Op):
             [TensorType(dtype=self.dtype, shape=(None, None))()],
         )
 
-    def perform(self, node, inp, out_):
-        N, M, k = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        N, M, k = inputs
+        (out,) = output_storage
         out[0] = np.tri(N, M, k, dtype=self.dtype)
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -1394,9 +1394,9 @@ class Eye(Op):
             [TensorType(dtype=self.dtype, shape=static_shape)()],
         )
 
-    def perform(self, node, inp, out_):
-        n, m, k = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        n, m, k = inputs
+        (out,) = output_storage
         out[0] = np.eye(n, m, k, dtype=self.dtype)
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -1649,8 +1649,8 @@ class Alloc(COp):
             and (x.unique_value == 0)
         )
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         v = inputs[0]
         sh = tuple(int(i) for i in inputs[1:])
         self._check_runtime_broadcast(node, v, sh)
@@ -1912,8 +1912,8 @@ class MakeVector(COp):
         otype = TensorType(dtype, shape=(len(inputs),))
         return Apply(self, inputs, [otype()])
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         # not calling pytensor._asarray as optimization
         if (out[0] is None) or (out[0].size != len(inputs)):
             out[0] = np.asarray(inputs, dtype=node.outputs[0].dtype)
@@ -2072,9 +2072,9 @@ class Default(Op):
             raise TypeError("Both arguments must have compatible types")
         return Apply(self, [x, default], [default.type()])
 
-    def perform(self, node, inp, out_):
-        x, default = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        x, default = inputs
+        (out,) = output_storage
         if x is None:
             # why copy?  PyTensor can't yet understand out[0] being a view of
             # either x or y, so we can be a view of x, but only a copy of y.
@@ -2257,7 +2257,7 @@ class Split(COp):
 
         return Apply(self, inputs, outputs)
 
-    def perform(self, node, inputs, outputs_storage):
+    def perform(self, node, inputs, output_storage):
         x, axis, splits = inputs
 
         if len(splits) != self.len_splits:
@@ -2270,7 +2270,7 @@ class Split(COp):
             raise ValueError("Split sizes cannot be negative")
 
         split_outs = np.split(x, np.cumsum(splits[:-1]), axis=axis)
-        for out_storage, out in zip(outputs_storage, split_outs, strict=False):
+        for out_storage, out in zip(output_storage, split_outs, strict=False):
             out_storage[0] = out
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -3633,9 +3633,9 @@ class PermuteRowElements(Op):
             else:
                 raise ValueError(f"Dimension mismatch: {xs0}, {ys0}")
 
-    def perform(self, node, inp, out):
-        x, y = inp
-        (outs,) = out
+    def perform(self, node, inputs, output_storage):
+        x, y = inputs
+        (outs,) = output_storage
         x_s = x.shape
         y_s = y.shape
         assert len(x_s) == len(y_s)
@@ -4305,8 +4305,8 @@ class Choose(Op):
         o = TensorType(choice.dtype, shape=static_out_shape)
         return Apply(self, [a, choice], [o()])
 
-    def perform(self, node, inputs, outputs):
-        (z,) = outputs
+    def perform(self, node, inputs, output_storage):
+        (z,) = output_storage
         a = inputs[0]
         choice = inputs[1]
         # TODO reuse out?
@@ -4352,8 +4352,8 @@ class AllocEmpty(COp):
         self.perform(node, inputs, out_)
         out_[0][0].fill(-123456789)
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         sh = tuple(int(i) for i in inputs)
         if out[0] is None or out[0].shape != sh:
             out[0] = np.empty(sh, dtype=self.dtype)

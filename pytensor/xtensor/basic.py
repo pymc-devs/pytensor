@@ -9,7 +9,7 @@ from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
 class XOp(Op):
     """A base class for XOps that shouldn't be materialized"""
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         raise NotImplementedError(
             f"xtensor operation {self} must be lowered to equivalent tensor operations"
         )

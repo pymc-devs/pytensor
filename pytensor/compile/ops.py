@@ -44,8 +44,8 @@ class TypeCastingOp(COp):
     __props__: tuple = ()
     _f16_ok: bool = True
 
-    def perform(self, node, inputs, outputs_storage):
-        outputs_storage[0][0] = inputs[0]
+    def perform(self, node, inputs, output_storage):
+        output_storage[0][0] = inputs[0]
 
     def __str__(self):
         return f"{self.__class__.__name__}"
@@ -160,15 +160,15 @@ class DeepCopyOp(COp):
     def make_node(self, x):
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, args, outs):
-        if hasattr(args[0], "copy"):
+    def perform(self, node, inputs, output_storage):
+        if hasattr(inputs[0], "copy"):
             # when args[0] is a an ndarray of 0 dimensions,
             # this return a numpy.dtype and not an ndarray
             # So when the args have a copy attribute we use it
             # as this don't have this problem
-            outs[0][0] = args[0].copy()
+            output_storage[0][0] = inputs[0].copy()
         else:
-            outs[0][0] = copy.deepcopy(args[0])
+            output_storage[0][0] = copy.deepcopy(inputs[0])
 
     def c_code_cache_version(self):
         version = []
@@ -253,13 +253,13 @@ class FromFunctionOp(Op):
     def __str__(self):
         return f"FromFunctionOp{{{self.__fn.__name__}}}"
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         outs = self.__fn(*inputs)
         if not isinstance(outs, list | tuple):
             outs = (outs,)
-        assert len(outs) == len(outputs)
+        assert len(outs) == len(output_storage)
         for i in range(len(outs)):
-            outputs[i][0] = outs[i]
+            output_storage[i][0] = outs[i]
 
     def __reduce__(self):
         mod = self.__fn.__module__

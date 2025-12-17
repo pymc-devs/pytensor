@@ -157,9 +157,9 @@ class TestShapeRewriter:
                 x = as_tensor_variable(x)
                 return Apply(self, [x], [x.type()])
 
-            def perform(self, node, inp, out_):
-                (x,) = inp
-                (out,) = out_
+            def perform(self, node, inputs, output_storage):
+                (x,) = inputs
+                (out,) = output_storage
                 out[0] = x.copy()
 
             # def infer_shape(self, fgraph, node, (xshp,)):
@@ -174,9 +174,9 @@ class TestShapeRewriter:
                 x = as_tensor_variable(x)
                 return Apply(self, [x], [x.type()])
 
-            def perform(self, node, inp, out_):
-                (x,) = inp
-                (out,) = out_
+            def perform(self, node, inputs, output_storage):
+                (x,) = inputs
+                (out,) = output_storage
                 out[0] = x.copy()
 
             def infer_shape(self, fgraph, node, xshp_):

@@ -845,9 +845,9 @@ class Bartlett(Op):
             raise TypeError(f"{self.__class__.__name__} only works on integer input")
         return Apply(self, [M], [dvector()])
 
-    def perform(self, node, inputs, out_):
+    def perform(self, node, inputs, output_storage):
         M = inputs[0]
-        (out,) = out_
+        (out,) = output_storage
         out[0] = np.bartlett(M)
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -1314,17 +1314,17 @@ class UnravelIndex(Op):
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]] * len(node.outputs)
 
-    def perform(self, node, inp, out):
-        indices, dims = inp
+    def perform(self, node, inputs, output_storage):
+        indices, dims = inputs
         res = np.unravel_index(indices, dims, order=self.order)
-        assert len(res) == len(out)
-        for i in range(len(out)):
+        assert len(res) == len(output_storage)
+        for i in range(len(output_storage)):
             ret = np.asarray(res[i], node.outputs[0].dtype)
             if ret.base is not None:
                 # NumPy will return a view when it can.
                 # But we don't want that.
                 ret = ret.copy()
-            out[i][0] = ret
+            output_storage[i][0] = ret
 
 
 def unravel_index(indices, dims, order="C"):
@@ -1391,10 +1391,10 @@ class RavelMultiIndex(Op):
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]]
 
-    def perform(self, node, inp, out):
-        *multi_index, dims = inp
+    def perform(self, node, inputs, output_storage):
+        *multi_index, dims = inputs
         res = np.ravel_multi_index(multi_index, dims, mode=self.mode, order=self.order)
-        out[0][0] = np.asarray(res, "int64")
+        output_storage[0][0] = np.asarray(res, "int64")
 
 
 def ravel_multi_index(multi_index, dims, mode="raise", order="C"):

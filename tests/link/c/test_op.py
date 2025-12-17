@@ -123,9 +123,9 @@ class TestMakeThunk:
                 output = input.type()
                 return Apply(self, [input], [output])
 
-            def perform(self, node, inputs, outputs):
+            def perform(self, node, inputs, output_storage):
                 (input,) = inputs
-                (output,) = outputs
+                (output,) = output_storage
                 output[0] = input + 1
 
         i = ps.int32("i")

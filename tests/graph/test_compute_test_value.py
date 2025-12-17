@@ -62,8 +62,8 @@ class TestComputeTestValue:
             def make_node(self, input):
                 return Apply(self, [input], [input.type()])
 
-            def perform(self, node, inputs, outputs):
-                outputs[0][0] = inputs[0]
+            def perform(self, node, inputs, output_storage):
+                output_storage[0][0] = inputs[0]
 
         test_input = SomeType()()
         orig_object = object()
@@ -282,9 +282,9 @@ class TestComputeTestValue:
                 output = input.type()
                 return Apply(self, [input], [output])
 
-            def perform(self, node, inputs, outputs):
+            def perform(self, node, inputs, output_storage):
                 (input,) = inputs
-                (output,) = outputs
+                (output,) = output_storage
                 output[0] = input + 1
 
         i = ps.int32("i")

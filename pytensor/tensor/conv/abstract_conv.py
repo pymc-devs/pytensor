@@ -2502,8 +2502,8 @@ class AbstractConv(BaseAbstractConv):
         output = img.type.clone(shape=out_shape)()
         return Apply(self, [img, kern], [output])
 
-    def perform(self, node, inp, out_):
-        img, kern = inp
+    def perform(self, node, inputs, output_storage):
+        img, kern = inputs
         img = np.asarray(img)
         kern = np.asarray(kern)
 
@@ -2515,7 +2515,7 @@ class AbstractConv(BaseAbstractConv):
             raise NotImplementedError(
                 f"Unshared convolution not implemented for {int(self.convdim)}D"
             )
-        (o,) = out_
+        (o,) = output_storage
         mode = self.border_mode
         pad = border_mode_to_pad(mode, self.convdim, dil_kernshp)
 
@@ -2839,12 +2839,12 @@ class AbstractConv_gradWeights(BaseAbstractConv):
         output = img.type.clone(shape=out_shape)()
         return Apply(self, [img, topgrad, shape], [output])
 
-    def perform(self, node, inp, out_):
-        img, topgrad, shape = inp
+    def perform(self, node, inputs, output_storage):
+        img, topgrad, shape = inputs
         img = np.asarray(img)
         topgrad = np.asarray(topgrad)
 
-        (o,) = out_
+        (o,) = output_storage
 
         if self.unshared and self.convdim != 2:
             raise NotImplementedError(
@@ -3208,11 +3208,11 @@ class AbstractConv_gradInputs(BaseAbstractConv):
         output = kern.type.clone(shape=out_shape)()
         return Apply(self, [kern, topgrad, shape], [output])
 
-    def perform(self, node, inp, out_):
-        kern, topgrad, shape = inp
+    def perform(self, node, inputs, output_storage):
+        kern, topgrad, shape = inputs
         kern = np.asarray(kern)
         topgrad = np.asarray(topgrad)
-        (o,) = out_
+        (o,) = output_storage
 
         if self.unshared and self.convdim != 2:
             raise NotImplementedError(

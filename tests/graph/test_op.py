@@ -118,9 +118,9 @@ class TestMakeThunk:
             itypes = [dmatrix]
             otypes = [dmatrix]
 
-            def perform(self, node, inputs, outputs):
+            def perform(self, node, inputs, output_storage):
                 inp = inputs[0]
-                output = outputs[0]
+                output = output_storage[0]
                 output[0] = inp * 2
 
         x_input = dmatrix("x_input")
@@ -213,7 +213,7 @@ def test_op_invalid_input_types():
         itypes = [dvector, dvector, dvector]
         otypes = [dvector]
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             pass
 
     msg = r"^Invalid input types for Op.*"
@@ -255,7 +255,7 @@ def test_call_name(multi_output):
                 outputs = [input.type()]
             return Apply(self, inputs, outputs)
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             raise NotImplementedError()
 
     if multi_output:

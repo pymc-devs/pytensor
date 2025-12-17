@@ -39,9 +39,9 @@ class MakeSlice(Op):
             inp = [slc, stop, step]
         return Apply(self, list(map(as_int_none_variable, inp)), [slicetype()])
 
-    def perform(self, node, inp, out_):
-        (out,) = out_
-        out[0] = slice(*inp)
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        out[0] = slice(*inputs)
 
     def grad(self, inputs, grads):
         return [DisconnectedType()() for i in inputs]
