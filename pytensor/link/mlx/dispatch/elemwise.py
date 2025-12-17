@@ -52,7 +52,7 @@ def mlx_funcify_DimShuffle(op, **kwargs):
             isinstance(x, np.number) and not isinstance(x, np.ndarray)
         ):
             x = mx.array(x)
-        res = mx.transpose(x, op.transposition)
+        res = mx.transpose(x, op._transposition)
         shape = list(res.shape[: len(op.shuffle)])
         for augm in op.augment:
             shape.insert(augm, 1)
