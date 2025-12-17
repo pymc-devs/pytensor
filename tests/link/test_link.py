@@ -61,7 +61,7 @@ def as_variable(x):
 
 
 class TDouble(Type):
-    def filter(self, data):
+    def filter(self, data, strict=False, allow_downcast=None):
         return float(data)
 
 

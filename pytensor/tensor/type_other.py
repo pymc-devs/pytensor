@@ -54,9 +54,9 @@ class SliceType(Type[slice]):
     def clone(self, **kwargs):
         return type(self)()
 
-    def filter(self, x, strict=False, allow_downcast=None):
-        if isinstance(x, slice):
-            return x
+    def filter(self, data, strict=False, allow_downcast=None):
+        if isinstance(data, slice):
+            return data
         else:
             raise TypeError("Expected a slice!")
 
@@ -123,9 +123,9 @@ class NoneTypeT(Generic):
 
     """
 
-    def filter(self, x, strict=False, allow_downcast=None):
-        if x is None:
-            return x
+    def filter(self, data, strict=False, allow_downcast=None):
+        if data is None:
+            return data
         else:
             raise TypeError("Expected None!")
 
