@@ -1,13 +1,11 @@
 pytensor/compile/builders.py
 pytensor/compile/function/types.py
-pytensor/compile/mode.py
 pytensor/graph/rewriting/basic.py
 pytensor/ifelse.py
 pytensor/link/numba/dispatch/elemwise.py
 pytensor/link/numba/dispatch/scan.py
 pytensor/raise_op.py
 pytensor/tensor/basic.py
-pytensor/tensor/blas_headers.py
 pytensor/tensor/elemwise.py
 pytensor/tensor/extra_ops.py
 pytensor/tensor/math.py

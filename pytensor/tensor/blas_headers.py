@@ -150,9 +150,9 @@ def detect_macos_sdot_bug():
     return detect_macos_sdot_bug.present
 
 
-detect_macos_sdot_bug.tested = False
-detect_macos_sdot_bug.present = False
-detect_macos_sdot_bug.fix_works = False
+detect_macos_sdot_bug.tested = False  # type: ignore[attr-defined]
+detect_macos_sdot_bug.present = False  # type: ignore[attr-defined]
+detect_macos_sdot_bug.fix_works = False  # type: ignore[attr-defined]
 
 
 def cblas_header_text():
