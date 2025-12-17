@@ -76,8 +76,8 @@ class CpuContiguous(COp):
         assert x.flags["C_CONTIGUOUS"]
         y[0] = x
 
-    def grad(self, inputs, dout):
-        return [ptb.as_tensor_variable(dout[0])]
+    def grad(self, inputs, output_grads):
+        return [ptb.as_tensor_variable(output_grads[0])]
 
     def c_code(self, node, name, inames, onames, sub):
         (x,) = inames
@@ -210,7 +210,7 @@ class SearchsortedOp(COp):
     def c_code_cache_version(self):
         return (2,)
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         num_ins = len(inputs)
         if num_ins == 3:
             x, v, _sorter = inputs
@@ -701,9 +701,9 @@ class Repeat(Op):
     def connection_pattern(self, node):
         return [[True], [False]]
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, repeats) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         axis = self.axis
 
         # Use IncSubtensor to sum the gradients that belong to the repeated entries of x
@@ -932,15 +932,15 @@ class FillDiagonal(Op):
 
         output_storage[0][0] = a
 
-    def grad(self, inp, cost_grad):
+    def grad(self, inputs, output_grads):
         """
         Notes
         -----
         The gradient is currently implemented for matrices only.
 
         """
-        a, _val = inp
-        grad = cost_grad[0]
+        a, _val = inputs
+        grad = output_grads[0]
         if a.dtype.startswith("complex"):
             return [None, None]
         elif a.ndim > 2:
@@ -1059,14 +1059,14 @@ class FillDiagonalOffset(Op):
 
         output_storage[0][0] = a
 
-    def grad(self, inp, cost_grad):
+    def grad(self, inputs, output_grads):
         """
         Notes
         -----
         The gradient is currently implemented for matrices only.
         """
-        a, _val, offset = inp
-        grad = cost_grad[0]
+        a, _val, offset = inputs
+        grad = output_grads[0]
         height, width = grad.shape
 
         if a.dtype.startswith("complex"):

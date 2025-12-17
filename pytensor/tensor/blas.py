@@ -1597,9 +1597,9 @@ class BatchedDot(COp):
 
         return (6, blas_header_version())
 
-    def grad(self, inp, grads):
-        x, y = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        x, y = inputs
+        (gz,) = output_grads
 
         xgrad = _batched_dot(gz, y.dimshuffle(0, 2, 1))
         ygrad = _batched_dot(x.dimshuffle(0, 2, 1), gz)

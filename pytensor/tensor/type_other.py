@@ -43,7 +43,7 @@ class MakeSlice(Op):
         (out,) = output_storage
         out[0] = slice(*inputs)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         return [DisconnectedType()() for i in inputs]
 
 

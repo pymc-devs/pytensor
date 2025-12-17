@@ -695,9 +695,9 @@ class CorrMM(BaseCorrMM):
         (top,) = out_
         return super().c_code_helper(bottom, weights, top, sub)
 
-    def grad(self, inp, grads):
-        bottom, weights = inp
-        (top,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, weights = inputs
+        (top,) = output_grads
         d_bottom = CorrMM_gradInputs(
             self.border_mode,
             self.subsample,
@@ -821,9 +821,9 @@ class CorrMM_gradWeights(BaseCorrMM):
         (weights,) = out_
         return super().c_code_helper(bottom, weights, top, sub, height, width)
 
-    def grad(self, inp, grads):
-        bottom, top = inp[:2]
-        (weights,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, top = inputs[:2]
+        (weights,) = output_grads
         d_bottom = CorrMM_gradInputs(
             self.border_mode,
             self.subsample,
@@ -839,7 +839,7 @@ class CorrMM_gradWeights(BaseCorrMM):
             self.unshared,
         )(bottom, weights)
         d_height_width = (
-            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inputs) == 4 else ()
         )
         return (d_bottom, d_top, *d_height_width)
 
@@ -953,9 +953,9 @@ class CorrMM_gradInputs(BaseCorrMM):
         (bottom,) = out_
         return super().c_code_helper(bottom, weights, top, sub, height, width)
 
-    def grad(self, inp, grads):
-        weights, top = inp[:2]
-        (bottom,) = grads
+    def grad(self, inputs, output_grads):
+        weights, top = inputs[:2]
+        (bottom,) = output_grads
         d_weights = CorrMM_gradWeights(
             self.border_mode,
             self.subsample,
@@ -971,7 +971,7 @@ class CorrMM_gradInputs(BaseCorrMM):
             self.unshared,
         )(bottom, weights)
         d_height_width = (
-            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inputs) == 4 else ()
         )
         return (d_weights, d_top, *d_height_width)
 

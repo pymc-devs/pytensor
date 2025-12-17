@@ -431,7 +431,7 @@ class RandomVariable(RNGConsumerOp):
             dtype=self.dtype,
         )
 
-    def grad(self, inputs, outputs):
+    def grad(self, inputs, output_grads):
         return [
             pytensor.gradient.grad_undefined(
                 self, k, inp, "No gradient defined for random variables"

@@ -629,9 +629,9 @@ class TensorFromScalar(COp):
     def infer_shape(self, fgraph, node, in_shapes):
         return [()]
 
-    def grad(self, inp, grads):
-        (s,) = inp
-        (dt,) = grads
+    def grad(self, inputs, output_grads):
+        (s,) = inputs
+        (dt,) = output_grads
         if s.type.dtype in float_dtypes:
             assert dt.type.dtype in float_dtypes
             return [scalar_from_tensor(dt)]
@@ -690,9 +690,9 @@ class ScalarFromTensor(COp):
     def infer_shape(self, fgraph, node, in_shapes):
         return [()]
 
-    def grad(self, inp, grads):
-        (_s,) = inp
-        (dt,) = grads
+    def grad(self, inputs, output_grads):
+        (_s,) = inputs
+        (dt,) = output_grads
         return [tensor_from_scalar(dt)]
 
     def R_op(self, inputs, eval_points):
@@ -983,8 +983,8 @@ class Nonzero(Op):
         for i, res in enumerate(result_tuple):
             output_storage[i][0] = res.astype("int64")
 
-    def grad(self, inp, grads):
-        return [grad_undefined(self, 0, inp[0])]
+    def grad(self, inputs, output_grads):
+        return [grad_undefined(self, 0, inputs[0])]
 
 
 _nonzero = Nonzero()
@@ -1117,8 +1117,8 @@ class Tri(Op):
         out_shape = [node.inputs[0], node.inputs[1]]
         return [out_shape]
 
-    def grad(self, inp, grads):
-        return [grad_undefined(self, i, inp[i]) for i in range(3)]
+    def grad(self, inputs, output_grads):
+        return [grad_undefined(self, i, inputs[i]) for i in range(3)]
 
 
 def tri(N, M=None, k=0, dtype=None):
@@ -1403,8 +1403,8 @@ class Eye(Op):
         out_shape = [node.inputs[0], node.inputs[1]]
         return [out_shape]
 
-    def grad(self, inp, grads):
-        return [grad_undefined(self, i, inp[i]) for i in range(3)]
+    def grad(self, inputs, output_grads):
+        return [grad_undefined(self, i, inputs[i]) for i in range(3)]
 
     @staticmethod
     def is_offset_zero(node) -> bool:
@@ -1736,9 +1736,9 @@ class Alloc(COp):
 
         return rval
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         x = inputs[0]
-        gz = grads[0]
+        gz = output_grads[0]
         n_axes_to_sum = gz.ndim - x.ndim
         # The number of dimensions added
         axis = list(range(n_axes_to_sum))
@@ -1749,7 +1749,7 @@ class Alloc(COp):
             zip(
                 inputs[0].type.shape,
                 # We need the dimensions corresponding to x
-                grads[0].type.shape[-inputs[0].ndim :],
+                output_grads[0].type.shape[-inputs[0].ndim :],
                 strict=False,
             )
         ):
@@ -1955,12 +1955,12 @@ class MakeVector(COp):
     def infer_shape(self, fgraph, node, ishapes):
         return [(len(ishapes),)]
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         # If the output is of an integer dtype, no gradient shall pass
         if self.dtype in discrete_dtypes:
             return [ipt.zeros_like(dtype=config.floatX) for ipt in inputs]
 
-        grads = [output_gradients[0][i] for i in range(len(inputs))]
+        grads = [output_grads[0][i] for i in range(len(inputs))]
         return grads
 
     def R_op(self, inputs, eval_points):
@@ -3668,11 +3668,11 @@ class PermuteRowElements(Op):
         out_shape = [maximum(sx, sy) for sx, sy in zip(shp_x, shp_y, strict=True)]
         return [out_shape]
 
-    def grad(self, inp, grads):
+    def grad(self, inputs, output_grads):
         from pytensor.tensor.math import Sum
 
-        x, y = inp
-        (gz,) = grads
+        x, y = inputs
+        (gz,) = output_grads
         # First, compute the gradient wrt the broadcasted x.
         # If 'inverse' is False (0), apply the inverse of y on gz.
         # Else, apply y on gz.
@@ -3886,12 +3886,12 @@ class ExtractDiag(COp):
     def c_code_cache_version(self):
         return (0,)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         # Avoid circular import
         from pytensor.tensor.subtensor import set_subtensor
 
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
 
         axis1, axis2, offset = self.axis1, self.axis2, self.offset
 
@@ -4403,7 +4403,7 @@ class AllocEmpty(COp):
     def connection_pattern(self, node):
         return [[False] for i in node.inputs]
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         return [DisconnectedType()() for i in inputs]
 
     def R_op(self, inputs, eval_points):

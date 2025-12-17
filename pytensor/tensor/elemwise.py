@@ -260,9 +260,9 @@ class DimShuffle(ExternalCOp):
             return [None]
         return self(*eval_points, return_list=True)
 
-    def grad(self, inp, grads):
-        (x,) = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
+        (gz,) = output_grads
         grad_order = ["x"] * x.type.ndim
         for i, v in enumerate(self.new_order):
             if v != "x":

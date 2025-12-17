@@ -266,8 +266,8 @@ class Argmax(COp):
     def R_op(self, inputs, eval_points):
         raise ValueError("Argmax is non-diifferentiable")
 
-    def grad(self, inp, grads):
-        (x,) = inp
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
 
         return [x.zeros_like()]
 
@@ -3025,9 +3025,9 @@ class Dot(Op):
     def perform(self, node, inputs, output_storage):
         output_storage[0][0] = np.matmul(*inputs)
 
-    def grad(self, inp, grads):
-        x, y = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        x, y = inputs
+        (gz,) = output_grads
 
         xgrad = self(gz, y.T)
         ygrad = self(x.T, gz)
@@ -3394,8 +3394,8 @@ class All(FixedOpCAReduce):
         ret = super().make_node(input)
         return ret
 
-    def grad(self, inp, grads):
-        (x,) = inp
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
         return [x.zeros_like(config.floatX)]
 
     def clone(self, **kwargs):
@@ -3424,8 +3424,8 @@ class Any(FixedOpCAReduce):
         ret = super().make_node(input)
         return ret
 
-    def grad(self, inp, grads):
-        (x,) = inp
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
         return [x.zeros_like(config.floatX)]
 
     def clone(self, **kwargs):
@@ -3761,10 +3761,10 @@ class ProdWithoutZeros(FixedOpCAReduce):
             upcast_discrete_output=True,
         )
 
-    def grad(self, inp, grads):
+    def grad(self, inputs, output_grads):
         from pytensor.gradient import grad_not_implemented
 
-        (a,) = inp
+        (a,) = inputs
         a_grad = grad_not_implemented(
             self,
             0,

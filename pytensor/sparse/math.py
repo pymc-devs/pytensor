@@ -334,9 +334,9 @@ class SpSum(Op):
         else:
             z[0] = np.asarray(x.sum(self.axis)).ravel()
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.dtype not in psb.continuous_dtypes:
             return [x.zeros_like(dtype=config.floatX)]
         if self.structured:
@@ -438,9 +438,9 @@ class AddSS(Op):
         assert x.shape == y.shape
         out[0] = x + y
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert psb._is_sparse_variable(x) and psb._is_sparse_variable(y)
         assert psb._is_sparse_variable(gz)
         return gz, gz
@@ -500,8 +500,8 @@ class AddSSData(Op):
         out[0] = x.copy()
         out[0].data += y.data
 
-    def grad(self, inputs, gout):
-        (gz,) = gout
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         is_continuous = [(i.dtype in psb.continuous_dtypes) for i in inputs]
         derivative = {True: gz, False: None}
         return [derivative[b] for b in is_continuous]
@@ -541,9 +541,9 @@ class AddSD(Op):
         # numpy.matrixlib.defmatrix.matrix object and not an ndarray.
         out[0] = np.asarray(x + y, dtype=node.outputs[0].type.dtype)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert psb._is_sparse_variable(x) and psb._is_dense_variable(y)
         assert psb._is_dense_variable(gz)
         return psb.sp_ones_like(x) * gz, gz
@@ -601,9 +601,9 @@ class StructuredAddSV(Op):
         assert x.shape[1] == y.shape[0]
         out[0] = x.__class__(x + (x.toarray() != 0) * y)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert psb._is_sparse_variable(x) and not psb._is_sparse_variable(y)
         assert psb._is_sparse_variable(gz)
         return gz, sp_sum(gz, axis=0, sparse_grad=True)
@@ -733,9 +733,9 @@ class MulSS(Op):
         # x * y calls dot...
         out[0] = x.multiply(y)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         return y * gz, x * gz
 
     def infer_shape(self, fgraph, node, shapes):
@@ -822,9 +822,9 @@ class MulSD(Op):
                 )
                 out[0] = type(x)(x.toarray() * y)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert psb._is_sparse_variable(x) and psb._is_dense_variable(y)
         assert psb._is_sparse_variable(gz)
         return y * gz, psb.dense_from_sparse(x * gz)
@@ -881,9 +881,9 @@ class MulSV(Op):
         assert x.shape[1] == y.shape[0]
         out[0] = x.__class__(x.toarray() * y)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert psb._is_sparse_variable(x) and psb._is_dense_variable(y)
         assert psb._is_sparse_variable(gz)
 
@@ -1292,9 +1292,9 @@ class TrueDot(Op):
                 )
         out[0] = rval
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert psb._is_sparse_variable(gz)
         assert psb._is_sparse_variable(x)
 
@@ -1422,12 +1422,12 @@ class StructuredDot(Op):
         # _asarray function documentation.
         out[0] = np.asarray(variable, str(variable.dtype))
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         # a is sparse, b is dense, g_out is dense
         # ga = g_out x b.T
         # gb = a.T x g_out
         (a, b) = inputs
-        (g_out,) = gout
+        (g_out,) = output_grads
         return [structured_dot_grad(a, b, g_out), structured_dot(a.T, g_out)]
 
     def infer_shape(self, fgraph, node, shapes):
@@ -1839,9 +1839,9 @@ class SamplingDot(Op):
 
         out[0] = p.__class__(p.multiply(np.dot(x, y.T)))
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y, p) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         rval = [dot(p * gz, y), dot((p * gz).T, x), grad_not_implemented(self, 2, p)]
 
         return rval
@@ -1940,9 +1940,9 @@ class Dot(Op):
 
         output_storage[0] = np.asarray(rval, dtype=node.outputs[0].dtype)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert psb._is_sparse_variable(x) or psb._is_sparse_variable(y)
         rval = []
 

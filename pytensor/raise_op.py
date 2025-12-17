@@ -88,8 +88,8 @@ class CheckAndRaise(COp):
         if not all(conds):
             raise self.exc_type(self.msg)
 
-    def grad(self, input, output_gradients):
-        return output_gradients + [DisconnectedType()()] * (len(input) - 1)
+    def grad(self, inputs, output_grads):
+        return output_grads + [DisconnectedType()()] * (len(inputs) - 1)
 
     def connection_pattern(self, node):
         return [[1]] + [[0]] * (len(node.inputs) - 1)

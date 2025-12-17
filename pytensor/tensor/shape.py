@@ -97,7 +97,7 @@ class Shape(COp):
         # part of the graph
         return [[False]]
 
-    def grad(self, inp, grads):
+    def grad(self, inputs, output_grads):
         # the grad returns the gradient with respect to the
         # elements of a tensor variable
         # the elements of the tensor variable do not participate
@@ -313,12 +313,12 @@ class Shape_i(COp):
         # part of the graph
         return [[False]]
 
-    def grad(self, inp, grads):
+    def grad(self, inputs, output_grads):
         return [
             pytensor.gradient.grad_not_implemented(
                 op=self,
                 x_pos=0,
-                x=inp[0],
+                x=inputs[0],
                 comment="No gradient for the shape of a matrix is implemented.",
             )
         ]
@@ -471,9 +471,9 @@ class SpecifyShape(COp):
     def connection_pattern(self, node):
         return [[True], *[[False]] * len(node.inputs[1:])]
 
-    def grad(self, inp, grads):
-        _x, *shape = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        _x, *shape = inputs
+        (gz,) = output_grads
         return [specify_shape(gz, shape)] + [
             pytensor.gradient.DisconnectedType()() for _ in range(len(shape))
         ]
@@ -722,9 +722,9 @@ class Reshape(COp):
     def connection_pattern(self, node):
         return [[True], [False]]
 
-    def grad(self, inp, grads):
-        x, _shp = inp
-        (g_out,) = grads
+    def grad(self, inputs, output_grads):
+        x, _shp = inputs
+        (g_out,) = output_grads
         return [reshape(g_out, shape(x), ndim=x.ndim), DisconnectedType()()]
 
     def R_op(self, inputs, eval_points):

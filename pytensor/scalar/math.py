@@ -263,9 +263,9 @@ class Owens_t(BinaryScalarOp):
     def impl(self, h, a):
         return special.owens_t(h, a)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (h, a) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             gz
             * (-1)
@@ -586,9 +586,9 @@ class GammaInc(BinaryScalarOp):
     def impl(self, k, x):
         return special.gammainc(k, x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (k, x) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             gz * gammainc_grad(k, x),
             gz * exp(-x + (k - 1) * log(x) - gammaln(k)),
@@ -633,9 +633,9 @@ class GammaIncC(BinaryScalarOp):
     def impl(self, k, x):
         return special.gammaincc(k, x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (k, x) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             gz * gammaincc_grad(k, x),
             gz * -exp(-x + (k - 1) * log(x) - gammaln(k)),
@@ -680,9 +680,9 @@ class GammaIncInv(BinaryScalarOp):
     def impl(self, k, x):
         return special.gammaincinv(k, x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (k, x) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             grad_not_implemented(self, 0, k),
             gz * exp(gammaincinv(k, x)) * gamma(k) * (gammaincinv(k, x) ** (1 - k)),
@@ -705,9 +705,9 @@ class GammaIncCInv(BinaryScalarOp):
     def impl(self, k, x):
         return special.gammainccinv(k, x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (k, x) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             grad_not_implemented(self, 0, k),
             gz * -exp(gammainccinv(k, x)) * gamma(k) * (gammainccinv(k, x) ** (1 - k)),
@@ -1004,9 +1004,9 @@ class Jv(BinaryScalarOp):
     def impl(self, v, x):
         return special.jv(v, x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         v, x = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             grad_not_implemented(self, 0, v),
             gz * (jv(v - 1, x) - jv(v + 1, x)) / 2.0,
@@ -1029,9 +1029,9 @@ class J1(UnaryScalarOp):
     def impl(self, x):
         return special.j1(x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [gz * (j0(x) - jv(2, x)) / 2.0]
 
     def c_code(self, node, name, inp, out, sub):
@@ -1056,9 +1056,9 @@ class J0(UnaryScalarOp):
     def impl(self, x):
         return special.j0(x)
 
-    def grad(self, inp, grads):
-        (x,) = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
+        (gz,) = output_grads
         return [gz * -1 * j1(x)]
 
     def c_code(self, node, name, inp, out, sub):
@@ -1083,9 +1083,9 @@ class Iv(BinaryScalarOp):
     def impl(self, v, x):
         return special.iv(v, x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         v, x = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             grad_not_implemented(self, 0, v),
             gz * (iv(v - 1, x) + iv(v + 1, x)) / 2.0,
@@ -1108,9 +1108,9 @@ class I1(UnaryScalarOp):
     def impl(self, x):
         return special.i1(x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [gz * (i0(x) + iv(2, x)) / 2.0]
 
     def c_code(self, *args, **kwargs):
@@ -1130,9 +1130,9 @@ class I0(UnaryScalarOp):
     def impl(self, x):
         return special.i0(x)
 
-    def grad(self, inp, grads):
-        (x,) = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
+        (gz,) = output_grads
         return [gz * i1(x)]
 
     def c_code(self, *args, **kwargs):
@@ -1152,9 +1152,9 @@ class Ive(BinaryScalarOp):
     def impl(self, v, x):
         return special.ive(v, x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         v, x = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             grad_not_implemented(self, 0, v),
             gz
@@ -1207,9 +1207,9 @@ class Sigmoid(UnaryScalarOp):
     def impl(self, x):
         return special.expit(x)
 
-    def grad(self, inp, grads):
-        (x,) = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
+        (gz,) = output_grads
         y = sigmoid(x)
         rval = gz * y * (1.0 - y)
 
@@ -1275,9 +1275,9 @@ class Softplus(UnaryScalarOp):
         else:
             return x
 
-    def grad(self, inp, grads):
-        (x,) = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
+        (gz,) = output_grads
         return [gz * sigmoid(x)]
 
     def c_code(self, node, name, inp, out, sub):
@@ -1343,9 +1343,9 @@ class Log1mexp(UnaryScalarOp):
         else:
             return np.log(-np.expm1(x))
 
-    def grad(self, inp, grads):
-        (x,) = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
+        (gz,) = output_grads
         res = true_div(-1.0, expm1(-x))
         # Correct gradient at 0.0 to be -inf
         res = switch(isinf(res), -np.inf, res)
@@ -1378,9 +1378,9 @@ class BetaInc(ScalarOp):
     def impl(self, a, b, x):
         return special.betainc(a, b, x)
 
-    def grad(self, inp, grads):
-        a, b, x = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        a, b, x = inputs
+        (gz,) = output_grads
 
         return [
             gz * betainc_grad(a, b, x, True),
@@ -1636,9 +1636,9 @@ class BetaIncInv(ScalarOp):
     def impl(self, a, b, x):
         return special.betaincinv(a, b, x)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         (a, b, x) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         return [
             grad_not_implemented(self, 0, a),
             grad_not_implemented(self, 0, b),
@@ -1675,9 +1675,9 @@ class Hyp2F1(ScalarOp):
     def impl(self, a, b, c, z):
         return special.hyp2f1(a, b, c, z)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         a, b, c, z = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         grad_a, grad_b, grad_c = hyp2f1_grad(a, b, c, z, wrt=[0, 1, 2])
         return [
             gz * grad_a,

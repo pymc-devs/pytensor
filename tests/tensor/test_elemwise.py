@@ -1005,9 +1005,9 @@ def test_not_implemented_elemwise_grad():
         def impl(self, n, x):
             return x * n
 
-        def grad(self, inputs, gout):
+        def grad(self, inputs, output_grads):
             (n, _x) = inputs
-            (gz,) = gout
+            (gz,) = output_grads
             dy_dx = n
             return [pytensor.gradient.grad_not_implemented(self, 0, n), gz * dy_dx]
 

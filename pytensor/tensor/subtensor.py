@@ -975,8 +975,8 @@ class Subtensor(COp):
         assert len(outshp) == node.outputs[0].ndim
         return [outshp]
 
-    def grad(self, inputs, grads):
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         x = inputs[0]
         rest = inputs[1:]
         if x.dtype in discrete_dtypes:
@@ -1998,8 +1998,8 @@ class IncSubtensor(COp):
 
         return rval
 
-    def grad(self, inputs, grads):
-        (g_output,) = grads
+    def grad(self, inputs, output_grads):
+        (g_output,) = output_grads
         x, y = inputs[:2]
         idx_list = inputs[2:]
 
@@ -2124,9 +2124,9 @@ class AdvancedSubtensor1(COp):
 
         return rval
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         x, ilist = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         assert len(inputs) == 2
         if self.sparse_grad:
             if x.type.ndim != 2:
@@ -2499,8 +2499,8 @@ class AdvancedIncSubtensor1(COp):
         rval = [[True], [True], [False]]
         return rval
 
-    def grad(self, inputs, grads):
-        (g_output,) = grads
+    def grad(self, inputs, output_grads):
+        (g_output,) = output_grads
         x, y, idx_list = inputs
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
@@ -2760,8 +2760,8 @@ class AdvancedSubtensor(Op):
 
         return rval
 
-    def grad(self, inputs, grads):
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         x = inputs[0]
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
@@ -2911,10 +2911,10 @@ class AdvancedIncSubtensor(Op):
             return [None]
         return self.make_node(eval_points[0], eval_points[1], *inputs[2:]).outputs
 
-    def grad(self, inpt, output_gradients):
-        x, y = inpt[:2]
-        idxs = inpt[2:]
-        (outgrad,) = output_gradients
+    def grad(self, inputs, output_grads):
+        x, y = inputs[:2]
+        idxs = inputs[2:]
+        (outgrad,) = output_grads
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
             gx = x.zeros_like(dtype=config.floatX)

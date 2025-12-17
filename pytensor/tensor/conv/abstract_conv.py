@@ -2680,9 +2680,9 @@ class AbstractConv2d(AbstractConv):
             unshared=unshared,
         )
 
-    def grad(self, inp, grads):
-        bottom, weights = inp
-        (top,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, weights = inputs
+        (top,) = output_grads
         # Don't add the assert again, as it was already added in the forward.
         d_bottom = AbstractConv2d_gradInputs(
             self.imshp,
@@ -2740,9 +2740,9 @@ class AbstractConv3d(AbstractConv):
             num_groups=num_groups,
         )
 
-    def grad(self, inp, grads):
-        bottom, weights = inp
-        (top,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, weights = inputs
+        (top,) = output_grads
         d_bottom = AbstractConv3d_gradInputs(
             self.imshp,
             self.kshp,
@@ -3037,9 +3037,9 @@ class AbstractConv2d_gradWeights(AbstractConv_gradWeights):
             unshared=unshared,
         )
 
-    def grad(self, inp, grads):
-        bottom, top = inp[:2]
-        (weights,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, top = inputs[:2]
+        (weights,) = output_grads
         d_bottom = AbstractConv2d_gradInputs(
             self.imshp,
             self.kshp,
@@ -3098,9 +3098,9 @@ class AbstractConv3d_gradWeights(AbstractConv_gradWeights):
             num_groups=num_groups,
         )
 
-    def grad(self, inp, grads):
-        bottom, top = inp[:2]
-        (weights,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, top = inputs[:2]
+        (weights,) = output_grads
         d_bottom = AbstractConv3d_gradInputs(
             self.imshp,
             self.kshp,
@@ -3419,9 +3419,9 @@ class AbstractConv2d_gradInputs(AbstractConv_gradInputs):
             unshared=unshared,
         )
 
-    def grad(self, inp, grads):
-        weights, top = inp[:2]
-        (bottom,) = grads
+    def grad(self, inputs, output_grads):
+        weights, top = inputs[:2]
+        (bottom,) = output_grads
         d_weights = AbstractConv2d_gradWeights(
             self.imshp,
             self.kshp,
@@ -3480,9 +3480,9 @@ class AbstractConv3d_gradInputs(AbstractConv_gradInputs):
             num_groups=num_groups,
         )
 
-    def grad(self, inp, grads):
-        weights, top = inp[:2]
-        (bottom,) = grads
+    def grad(self, inputs, output_grads):
+        weights, top = inputs[:2]
+        (bottom,) = output_grads
         d_weights = AbstractConv3d_gradWeights(
             self.imshp,
             self.kshp,

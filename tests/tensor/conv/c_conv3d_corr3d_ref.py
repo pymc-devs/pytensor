@@ -636,9 +636,9 @@ class Corr3dMM(BaseCorr3dMM):
         (top,) = out_
         return super().c_code_helper(bottom, weights, top, sub)
 
-    def grad(self, inp, grads):
-        bottom, weights = inp
-        (top,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, weights = inputs
+        (top,) = output_grads
         d_bottom = Corr3dMMGradInputs(
             self.border_mode,
             self.subsample,
@@ -750,9 +750,9 @@ class Corr3dMMGradWeights(BaseCorr3dMM):
         (weights,) = out_
         return super().c_code_helper(bottom, weights, top, sub, height, width, depth)
 
-    def grad(self, inp, grads):
-        bottom, top = inp[:2]
-        (weights,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, top = inputs[:2]
+        (weights,) = output_grads
         d_bottom = Corr3dMMGradInputs(
             self.border_mode,
             self.subsample,
@@ -766,7 +766,7 @@ class Corr3dMMGradWeights(BaseCorr3dMM):
             num_groups=self.num_groups,
         )(bottom, weights)
         d_height_width_depth = (
-            (pytensor.gradient.DisconnectedType()(),) * 3 if len(inp) == 5 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 3 if len(inputs) == 5 else ()
         )
         return (d_bottom, d_top, *d_height_width_depth)
 
@@ -890,9 +890,9 @@ class Corr3dMMGradInputs(BaseCorr3dMM):
         (bottom,) = out_
         return super().c_code_helper(bottom, weights, top, sub, height, width, depth)
 
-    def grad(self, inp, grads):
-        weights, top = inp[:2]
-        (bottom,) = grads
+    def grad(self, inputs, output_grads):
+        weights, top = inputs[:2]
+        (bottom,) = output_grads
         d_weights = Corr3dMMGradWeights(
             self.border_mode,
             self.subsample,
@@ -906,7 +906,7 @@ class Corr3dMMGradInputs(BaseCorr3dMM):
             num_groups=self.num_groups,
         )(bottom, weights)
         d_height_width_depth = (
-            (pytensor.gradient.DisconnectedType()(),) * 3 if len(inp) == 5 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 3 if len(inputs) == 5 else ()
         )
         return (d_weights, d_top, *d_height_width_depth)
 

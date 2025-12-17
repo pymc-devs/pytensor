@@ -135,14 +135,14 @@ class JAXOp(Op):
             return outputs[0]
         return outputs
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         """Compute gradients using JAX's vector-Jacobian product (VJP)."""
         import jax
 
         # Find indices of outputs that need gradients
         connected_output_indices = [
             i
-            for i, output_grad in enumerate(output_gradients)
+            for i, output_grad in enumerate(output_grads)
             if not isinstance(output_grad.type, DisconnectedType)
         ]
 
@@ -190,7 +190,7 @@ class JAXOp(Op):
         )
 
         return vjp_op(
-            *[*inputs, *[output_gradients[i] for i in connected_output_indices]],
+            *[*inputs, *[output_grads[i] for i in connected_output_indices]],
             return_list=True,
         )
 

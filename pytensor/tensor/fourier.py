@@ -127,7 +127,7 @@ class Fourier(Op):
         axis = inputs[2]
         output_storage[0][0] = np.fft.fft(a, n=int(n), axis=axis.item())
 
-    def grad(self, inputs, cost_grad):
+    def grad(self, inputs, output_grads):
         """
         In defining the gradient, the Finite Fourier Transform is viewed as
         a complex-differentiable function of a complex variable
@@ -135,7 +135,7 @@ class Fourier(Op):
         a = inputs[0]
         n = inputs[1]
         axis = inputs[2]
-        grad = cost_grad[0]
+        grad = output_grads[0]
         if not isinstance(axis, TensorConstant):
             raise NotImplementedError(
                 f"{self.__class__.__name__}: gradient is currently implemented"
