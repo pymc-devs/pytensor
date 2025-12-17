@@ -1,5 +1,4 @@
 pytensor/compile/builders.py
-pytensor/compile/function/pfunc.py
 pytensor/compile/function/types.py
 pytensor/compile/mode.py
 pytensor/graph/rewriting/basic.py
