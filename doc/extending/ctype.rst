@@ -463,10 +463,10 @@ Final version
 
    class Double(Type):
 
-       def filter(self, x, strict=False, allow_downcast=None):
-           if strict and not isinstance(x, float):
+       def filter(self, data, strict=False, allow_downcast=None):
+           if strict and not isinstance(data, float):
                raise TypeError('Expected a float!')
-           return float(x)
+           return float(data)
 
        def values_eq_approx(self, x, y, tolerance=1e-4):
            return abs(x - y) / (x + y) < tolerance

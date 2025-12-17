@@ -89,10 +89,13 @@ class XTensorType(Type, HasDataType, HasShape):
             shape = self.shape
         return type(self)(dtype=dtype, shape=shape, dims=dims, **kwargs)
 
-    def filter(self, value, strict=False, allow_downcast=None):
+    def filter(self, data, strict: bool = False, allow_downcast=None):
         # XTensorType behaves like TensorType at runtime, so we filter the same way.
         return TensorType.filter(
-            self, value, strict=strict, allow_downcast=allow_downcast
+            typing.cast(TensorType, self),
+            data,
+            strict=strict,
+            allow_downcast=allow_downcast,
         )
 
     @staticmethod

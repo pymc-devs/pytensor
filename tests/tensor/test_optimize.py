@@ -289,9 +289,9 @@ def test_optimize_grad_disconnected_numerical_inp(optimize_op):
 @pytest.mark.parametrize("optimize_op", (minimize, minimize_scalar, root, root_scalar))
 def test_optimize_grad_disconnected_non_numerical_inp(optimize_op):
     class StrType(Type):
-        def filter(self, x, **kwargs):
-            if isinstance(x, str):
-                return x
+        def filter(self, data, strict=False, allow_downcast=None):
+            if isinstance(data, str):
+                return data
             raise TypeError
 
     class SmileOrFrown(Op):

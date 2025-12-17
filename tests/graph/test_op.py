@@ -33,14 +33,14 @@ class MyType(Type):
     def __repr__(self):
         return str(self.thingy)
 
-    def filter(self, x, strict=False, allow_downcast=None):
+    def filter(self, data, strict=False, allow_downcast=None):
         # Dummy filter: we want this type to represent strings that
         # start with `self.thingy`.
-        if not isinstance(x, str):
+        if not isinstance(data, str):
             raise TypeError("Invalid type")
-        if not x.startswith(self.thingy):
+        if not data.startswith(self.thingy):
             raise ValueError("Invalid value")
-        return x
+        return data
 
     # Added to make those tests pass in DebugMode
     @staticmethod

@@ -98,31 +98,28 @@ class SparseTensorType(TensorType, HasDataType):
             shape = self.shape
         return type(self)(format, dtype, shape=shape, **kwargs)
 
-    def filter(self, value, strict=False, allow_downcast=None):
-        if isinstance(value, Variable):
+    def filter(self, data, strict: bool = False, allow_downcast=None):
+        if isinstance(data, Variable):
             raise TypeError(
                 "Expected an array-like object, but found a Variable: "
                 "maybe you are trying to call a function on a (possibly "
                 "shared) variable instead of a numeric array?"
             )
 
-        if (
-            isinstance(value, self.format_cls[self.format])
-            and value.dtype == self.dtype
-        ):
-            return value
+        if isinstance(data, self.format_cls[self.format]) and data.dtype == self.dtype:
+            return data
 
         if strict:
             raise TypeError(
-                f"{value} is not sparse, or not the right dtype (is {value.dtype}, "
+                f"{data} is not sparse, or not the right dtype (is {data.dtype}, "
                 f"expected {self.dtype})"
             )
 
         # The input format could be converted here
         if allow_downcast:
-            sp = self.format_cls[self.format](value, dtype=self.dtype)
+            sp = self.format_cls[self.format](data, dtype=self.dtype)
         else:
-            data = self.format_cls[self.format](value)
+            data = self.format_cls[self.format](data)
             up_dtype = ps.upcast(self.dtype, data.dtype)
             if up_dtype != self.dtype:
                 raise TypeError(f"Expected {self.dtype} dtype but got {data.dtype}")
@@ -209,8 +206,8 @@ class SparseTensorType(TensorType, HasDataType):
             and abs(a - b).sum() == 0.0
         )
 
-    def is_valid_value(self, a):
-        return scipy.sparse.issparse(a) and (a.format == self.format)
+    def is_valid_value(self, data, strict: bool = True):
+        return scipy.sparse.issparse(data) and (data.format == self.format)
 
     def get_shape_info(self, obj):
         obj = self.filter(obj)
