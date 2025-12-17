@@ -670,4 +670,4 @@ int main() {
     return must_initialize_y_gemv._force_init_beta
 
 
-must_initialize_y_gemv._force_init_beta = None
+must_initialize_y_gemv._force_init_beta = None  # type: ignore[attr-defined]
