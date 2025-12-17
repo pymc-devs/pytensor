@@ -62,9 +62,9 @@ class SoftmaxGrad(COp):
     def c_code_cache_version(self):
         return (6,)
 
-    def c_code(self, node, name, inp, out, sub):
-        dy, sm = inp
-        (dx,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        dy, sm = inputs
+        (dx,) = outputs
         axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
 
@@ -291,9 +291,9 @@ class Softmax(COp):
     def c_headers(self, **kwargs):
         return ["<cmath>"]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (sm,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (sm,) = outputs
         axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
         # dtype = node.inputs[0].type.dtype_specs()[1]
@@ -548,9 +548,9 @@ class LogSoftmax(COp):
     def c_headers(self, **kwargs):
         return ["<cmath>"]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (sm,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (sm,) = outputs
         axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
 

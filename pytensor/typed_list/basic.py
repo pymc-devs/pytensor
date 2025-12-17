@@ -102,9 +102,9 @@ class GetItem(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
-        x_name, index = inp[0], inp[1]
-        output_name = out[0]
+    def c_code(self, node, name, inputs, outputs, sub):
+        x_name, index = inputs[0], inputs[1]
+        output_name = outputs[0]
         fail = sub["fail"]
         return f"""
         {output_name} = (typeof {output_name}) PyList_GetItem( (PyObject*) {x_name}, *((npy_int64 *) PyArray_DATA({index})));
@@ -167,10 +167,10 @@ class Append(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
-        x_name, toAppend = inp[0], inp[1]
-        output_name = out[0]
+        x_name, toAppend = inputs[0], inputs[1]
+        output_name = outputs[0]
         fail = sub["fail"]
         if not self.inplace:
             init = f"""
@@ -247,10 +247,10 @@ class Extend(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
-        x_name, toAppend = inp[0], inp[1]
-        output_name = out[0]
+        x_name, toAppend = inputs[0], inputs[1]
+        output_name = outputs[0]
         fail = sub["fail"]
         if not self.inplace:
             init = f"""
@@ -335,10 +335,10 @@ class Insert(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
-        x_name, index, toInsert = inp[0], inp[1], inp[2]
-        output_name = out[0]
+        x_name, index, toInsert = inputs[0], inputs[1], inputs[2]
+        output_name = outputs[0]
         fail = sub["fail"]
         if not self.inplace:
             init = f"""
@@ -464,9 +464,9 @@ class Reverse(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
-        x_name = inp[0]
-        output_name = out[0]
+    def c_code(self, node, name, inputs, outputs, sub):
+        x_name = inputs[0]
+        output_name = outputs[0]
         fail = sub["fail"]
         if not self.inplace:
             init = f"""
@@ -596,9 +596,9 @@ class Length(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
-        x_name = inp[0]
-        output_name = out[0]
+    def c_code(self, node, name, inputs, outputs, sub):
+        x_name = inputs[0]
+        output_name = outputs[0]
         return f"""
         if(!{output_name})
             {output_name}=(PyArrayObject*)PyArray_EMPTY(0, NULL, NPY_INT64, 0);

@@ -24,11 +24,11 @@ Py_XDECREF((PyObject *)p);
 }
 """
 
-    def c_code(self, node, name, inps, outs, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         return f"""
-Py_XDECREF({outs[0]});
-{outs[0]} = (void *){inps[0]};
-Py_INCREF({inps[0]});
+Py_XDECREF({outputs[0]});
+{outputs[0]} = (void *){inputs[0]};
+Py_INCREF({inputs[0]});
 """
         # FIXME: should it not be outs[0]?
 
@@ -52,11 +52,11 @@ Py_XDECREF((PyObject *)p);
 }
 """
 
-    def c_code(self, node, name, inps, outs, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         return f"""
-Py_XDECREF({outs[0]});
-{outs[0]} = (PyArrayObject *){inps[0]};
-Py_INCREF({outs[0]});
+Py_XDECREF({outputs[0]});
+{outputs[0]} = (PyArrayObject *){inputs[0]};
+Py_INCREF({outputs[0]});
 """
 
     def c_code_cache_version(self):

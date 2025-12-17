@@ -204,9 +204,9 @@ class Argmax(COp):
 
         max_idx[0] = np.asarray(np.argmax(reshaped_x, axis=-1), dtype="int64")
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (argmax,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (argmax,) = outputs
         fail = sub["fail"]
         params = sub["params"]
         if self.axis is None:
@@ -3739,9 +3739,9 @@ class MulWithoutZeros(BinaryScalarOp):
             return x
         return x * y
 
-    def c_code(self, node, name, inp, out, sub):
-        x, y = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y = inputs
+        (z,) = outputs
         return f"{z} = (({x} == 0) ? ({y}) : (({y} == 0) ? ({x}) : (({y})*({x}))) );"
 
     def c_code_cache_version(self):
