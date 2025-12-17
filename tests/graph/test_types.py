@@ -22,8 +22,8 @@ class MyType(Type):
 
 
 class MyType2(MyType):
-    def is_super(self, other):
-        if self.thingy <= other.thingy:
+    def is_super(self, otype):
+        if self.thingy <= otype.thingy:
             return True
 
 

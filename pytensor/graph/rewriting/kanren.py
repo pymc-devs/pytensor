@@ -74,7 +74,7 @@ class KanrenRelationSub(NodeRewriter):
         self.node_filter = node_filter
         super().__init__()
 
-    def transform(self, fgraph, node, enforce_tracks: bool = True):
+    def transform(self, fgraph, node, enforce_tracks: bool = True, *args, **kwargs):
         if self.node_filter(node) is False:
             return False
 

@@ -1378,8 +1378,8 @@ class Subtensor(COp):
 
 
 class SubtensorPrinter(Printer):
-    def process(self, r, pstate):
-        return self._process(r.owner.op.idx_list, r.owner.inputs, pstate)
+    def process(self, var, pstate):
+        return self._process(var.owner.op.idx_list, var.owner.inputs, pstate)
 
     def _process(self, idxs, op_inputs, pstate):
         inputs = list(op_inputs)
@@ -2027,15 +2027,15 @@ class IncSubtensor(COp):
 
 
 class IncSubtensorPrinter(SubtensorPrinter):
-    def process(self, r, pstate):
-        x, _y, *idx_args = r.owner.inputs
+    def process(self, var, pstate):
+        x, _y, *idx_args = var.owner.inputs
 
-        res = self._process(r.owner.op.idx_list, [x, *idx_args], pstate)
+        res = self._process(var.owner.op.idx_list, [x, *idx_args], pstate)
 
         with set_precedence(pstate, 1000):
-            y_str = pstate.pprinter.process(r.owner.inputs[1], pstate)
+            y_str = pstate.pprinter.process(var.owner.inputs[1], pstate)
 
-        if r.owner.op.set_instead_of_inc:
+        if var.owner.op.set_instead_of_inc:
             res = f"set_subtensor({res}, {y_str})"
         else:
             res = f"inc_subtensor({res}, {y_str})"

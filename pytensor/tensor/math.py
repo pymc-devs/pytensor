@@ -404,8 +404,15 @@ class Max(NonZeroDimsCAReduce):
     def __init__(self, axis):
         super().__init__(ps.maximum, axis)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
         return type(self)(axis=axis)
 
     def L_op(self, inputs, outputs, output_grads):
@@ -462,8 +469,15 @@ class Min(NonZeroDimsCAReduce):
     def __init__(self, axis):
         super().__init__(ps.minimum, axis)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
         return type(self)(axis=axis)
 
 
@@ -3398,8 +3412,15 @@ class All(FixedOpCAReduce):
         (x,) = inputs
         return [x.zeros_like(config.floatX)]
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
         return type(self)(axis=axis)
 
 
@@ -3428,8 +3449,15 @@ class Any(FixedOpCAReduce):
         (x,) = inputs
         return [x.zeros_like(config.floatX)]
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
         return type(self)(axis=axis)
 
 
@@ -3485,10 +3513,17 @@ class Sum(FixedOpCAReduce):
             return [None]
         return self(*eval_points, return_list=True)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        dtype = kwargs.get("dtype", self.dtype)
-        acc_dtype = kwargs.get("acc_dtype", self.acc_dtype)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
+        dtype = dtype or self.dtype
+        acc_dtype = acc_dtype or self.acc_dtype
         return type(self)(axis=axis, dtype=dtype, acc_dtype=acc_dtype)
 
 
@@ -3666,10 +3701,17 @@ class Prod(FixedOpCAReduce):
     def c_code_cache_version(self):
         return (1,)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        dtype = kwargs.get("dtype", self.dtype)
-        acc_dtype = kwargs.get("acc_dtype", self.acc_dtype)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
+        dtype = dtype or self.dtype
+        acc_dtype = acc_dtype or self.acc_dtype
         no_zeros_in_input = kwargs.get("no_zeros_in_input", self.no_zeros_in_input)
         return type(self)(
             axis=axis,
@@ -3775,10 +3817,17 @@ class ProdWithoutZeros(FixedOpCAReduce):
         )
         return [a_grad]
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        dtype = kwargs.get("dtype", self.dtype)
-        acc_dtype = kwargs.get("acc_dtype", self.acc_dtype)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
+        dtype = dtype or self.dtype
+        acc_dtype = acc_dtype or self.acc_dtype
         return type(self)(axis=axis, dtype=dtype, acc_dtype=acc_dtype)
 
 

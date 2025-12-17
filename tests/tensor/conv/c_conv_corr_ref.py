@@ -223,7 +223,7 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
         # raise this whenever modifying any of the support_code_files
         return (10, self.openmp, blas_header_version())
 
-    def c_support_code_apply(self, node, nodename):
+    def c_support_code_apply(self, node, name):
         # REMEMBER TO RAISE c_code_cache_version when changing any of
         # these files
         sub = {}

@@ -1234,9 +1234,9 @@ class ScalarOp(COp):
             )
         return Apply(self, inputs, outputs)
 
-    def output_types(self, types):
+    def output_types(self, input_types):
         if self.output_types_preference is not None:
-            variables = self.output_types_preference(*types)
+            variables = self.output_types_preference(*input_types)
             if not isinstance(variables, list | tuple) or any(
                 not isinstance(x, CType) for x in variables
             ):
@@ -1661,8 +1661,8 @@ class Switch(ScalarOp):
 
         return (condition_grad, first_part, second_part)
 
-    def output_types(self, types):
-        (_cond_t, ift_t, iff_t) = types
+    def output_types(self, input_types):
+        (_cond_t, ift_t, iff_t) = input_types
         return upcast_out(ift_t, iff_t)
 
 
@@ -2018,11 +2018,11 @@ sub = Sub(upcast_out_nobool, name="sub")
 class TrueDiv(BinaryScalarOp):
     nfunc_spec = ("true_divide", 2, 1)
 
-    def output_types(self, types):
-        if all(t in discrete_types for t in types):
+    def output_types(self, input_types):
+        if all(t in discrete_types for t in input_types):
             return [get_scalar_type(config.floatX)]
         else:
-            return super().output_types(types)
+            return super().output_types(input_types)
 
     def impl(self, x, y):
         x = np.asarray(x)

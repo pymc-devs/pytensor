@@ -1973,12 +1973,12 @@ make_vector = MakeVector()
 
 
 class MakeVectorPrinter(Printer):
-    def process(self, r, pstate):
-        if r.owner is None:
+    def process(self, var, pstate):
+        if var.owner is None:
             raise TypeError("Can only print make_vector.")
-        elif isinstance(r.owner.op, MakeVector):
+        elif isinstance(var.owner.op, MakeVector):
             with set_precedence(pstate):
-                s = [pstate.pprinter.process(inp) for inp in r.owner.inputs]
+                s = [pstate.pprinter.process(inp) for inp in var.owner.inputs]
             return f"[{', '.join(s)}]"
         else:
             raise TypeError("Can only print make_vector.")
