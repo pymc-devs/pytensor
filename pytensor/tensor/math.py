@@ -408,7 +408,7 @@ class Max(NonZeroDimsCAReduce):
         axis = kwargs.get("axis", self.axis)
         return type(self)(axis=axis)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         # The strict sense mathematical gradient of the maximum function is
         # not calculated here for it is not defined at every point where some
         # coordinates are identical. However, since the latter set has null
@@ -424,7 +424,7 @@ class Max(NonZeroDimsCAReduce):
         # does it automatically
         [x] = inputs
         [out] = outputs
-        [g_out] = grads
+        [g_out] = output_grads
 
         axis = tuple(range(x.ndim)) if self.axis is None else self.axis
         out_pad = expand_dims(out, axis)
@@ -3454,13 +3454,13 @@ class Sum(FixedOpCAReduce):
             upcast_discrete_output=True,
         )
 
-    def L_op(self, inp, out, grads):
-        (x,) = inp
+    def L_op(self, inputs, outputs, output_grads):
+        (x,) = inputs
 
-        if out[0].dtype not in continuous_dtypes:
+        if outputs[0].dtype not in continuous_dtypes:
             return [x.zeros_like(dtype=config.floatX)]
 
-        (gz,) = grads
+        (gz,) = output_grads
         gz = as_tensor_variable(gz)
         axis = self.axis
         if axis is None:
@@ -3545,7 +3545,7 @@ class Prod(FixedOpCAReduce):
         )
         self.no_zeros_in_input = no_zeros_in_input
 
-    def L_op(self, inp, out, grads):
+    def L_op(self, inputs, outputs, output_grads):
         """
         The grad of this Op could be very easy, if it is was not for the case
         where zeros are present in a given "group" (ie. elements reduced
@@ -3591,10 +3591,10 @@ class Prod(FixedOpCAReduce):
         based on the result of this count.
 
         """
-        (prod_in,) = inp
-        (gz,) = grads
+        (prod_in,) = inputs
+        (gz,) = output_grads
 
-        if out[0].dtype in discrete_dtypes or self.acc_dtype in discrete_dtypes:
+        if outputs[0].dtype in discrete_dtypes or self.acc_dtype in discrete_dtypes:
             # There is an int conversion in the way
             return [prod_in.zeros_like(dtype=config.floatX)]
 

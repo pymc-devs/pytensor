@@ -2300,13 +2300,13 @@ class Split(COp):
             [False] * n_out,
         ]
 
-    def L_op(self, inputs, outputs, g_outputs):
+    def L_op(self, inputs, outputs, output_grads):
         """Join the gradients along the axis that was used to split x."""
         _x, axis, _n = inputs
 
         # We have to convert disconnected outputs to zeros before joining them
         new_g_outputs = []
-        for o, g in zip(outputs, g_outputs, strict=True):
+        for o, g in zip(outputs, output_grads, strict=True):
             if isinstance(g.type, DisconnectedType):
                 new_g_outputs.append(o.zeros_like())
             else:
@@ -2700,11 +2700,11 @@ class Join(COp):
             return [None]
         return self.make_node(inputs[0], *eval_points[1:]).outputs
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         """The gradient wrt a join op is a `Split`, used to partition
         the gradient along the `axis` which was used for joining.
         """
-        [gz] = grads
+        [gz] = output_grads
         [out] = outputs
         axis, *tensors = inputs
 
@@ -3364,9 +3364,9 @@ class ARange(COp):
     def connection_pattern(self, node):
         return [[True], [False], [True]]
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         start, _stop, step = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         # `start` and `step` affect the output values
         # but the outputs are integers so there's
         # no gradient through them.

@@ -1256,8 +1256,8 @@ class ScalarOp(COp):
     def grad(self, inputs, output_gradients):
         raise MethodNotDefined("grad", type(self), self.__class__.__name__)
 
-    def L_op(self, inputs, outputs, output_gradients):
-        return self.grad(inputs, output_gradients)
+    def L_op(self, inputs, outputs, output_grads):
+        return self.grad(inputs, output_grads)
 
     def __eq__(self, other):
         return type(self) is type(other) and getattr(
@@ -1390,7 +1390,7 @@ class LogicalComparison(BinaryScalarOp):
     def output_types(self, *input_dtypes):
         return [bool] if getattr(self, "bool", False) else [int8]
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         x, y = inputs
         assert outputs[0].type == bool
         return [
@@ -1426,7 +1426,7 @@ class FixedLogicalComparison(UnaryScalarOp):
     def output_types(self, *input_dtypes):
         return [bool] if getattr(self, "bool", False) else [int8]
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
         assert outputs[0].type == bool
         return [x.zeros_like(dtype=config.floatX)]
@@ -1625,9 +1625,9 @@ class Switch(ScalarOp):
         (z,) = outputs
         return f"{z} = {cond} ? {ift} : {iff};"
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (cond, ift, iff) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         first_part = switch(cond, gz, 0.0)
         second_part = switch(cond, 0.0, gz)
 
@@ -1787,9 +1787,9 @@ class Maximum(BinaryScalarOp):
         # Test for both y>x and x>=y to detect NaN
         return f'{z} = (({y})>({x})? ({y}): (({x})>=({y})? ({x}): nan("")));'
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             # max is currently defined for complex_types,
             # but the gradient for complex is not.
@@ -1833,9 +1833,9 @@ class Minimum(BinaryScalarOp):
             raise NotImplementedError()
         return f'{z} = (({y})<({x})? ({y}): (({x})<=({y})? ({x}): nan("")));'
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             # min is currently defined for complex_types,
             # but the gradient for complex is not.
@@ -1881,8 +1881,8 @@ class Add(ScalarOp):
         else:
             return z + " = " + op.join(inputs) + ";"
 
-    def L_op(self, inputs, outputs, gout):
-        (gz,) = gout
+    def L_op(self, inputs, outputs, output_grads):
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -1976,9 +1976,9 @@ class Sub(BinaryScalarOp):
         (z,) = outputs
         return f"{z} = {x} - {y};"
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -2263,9 +2263,9 @@ class Mod(BinaryScalarOp):
             """
         )
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if outputs[0].type in discrete_types:
             # The gradient does not flow in if the output is discrete
             return [
@@ -2291,9 +2291,9 @@ class Pow(BinaryScalarOp):
             raise NotImplementedError("type not supported", type)
         return f"{z} = pow({x}, {y});"
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x, y) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
 
@@ -2381,9 +2381,9 @@ class Clip(ScalarOp):
         (z,) = outputs
         return f"{z} = {x} < {min} ? {min} : {x} > {max} ? {max} : {x};"
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x, mn, mx) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert gz.type not in complex_types
         gx = ((x >= mn) & (x <= mx)) * gz
         gmn = (x < mn) * gz
@@ -2570,9 +2570,9 @@ class Abs(UnaryScalarOp):
     def impl(self, x):
         return np.abs(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if outputs[0].type in discrete_types:
             if x.type in discrete_types:
                 return [x.zeros_like(dtype=config.floatX)]
@@ -2855,9 +2855,9 @@ class Neg(UnaryScalarOp):
     def impl(self, x):
         return -x
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if outputs[0].type in discrete_types:
             if x.type in discrete_types:
                 return [x.zeros_like(dtype=config.floatX)]
@@ -2892,9 +2892,9 @@ class Reciprocal(UnaryScalarOp):
     def impl(self, x):
         return np.float32(1.0) / x
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -2934,9 +2934,9 @@ class Log(UnaryScalarOp):
             return np.log(x, dtype=np.float32)
         return np.log(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -2980,9 +2980,9 @@ class Log2(UnaryScalarOp):
             return np.log2(x, dtype=np.float32)
         return np.log2(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3023,9 +3023,9 @@ class Log10(UnaryScalarOp):
             return np.log10(x, dtype=np.float32)
         return np.log10(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3064,9 +3064,9 @@ class Log1p(UnaryScalarOp):
             return np.log1p(x, dtype=np.float32)
         return np.log1p(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3102,9 +3102,9 @@ class Exp(UnaryScalarOp):
             return np.exp(x, dtype=np.float32)
         return np.exp(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3138,9 +3138,9 @@ class Exp2(UnaryScalarOp):
             return np.exp2(x, dtype=np.float32)
         return np.exp2(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3174,9 +3174,9 @@ class Expm1(UnaryScalarOp):
             return np.expm1(x, dtype=np.float32)
         return np.expm1(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3208,9 +3208,9 @@ class Sqr(UnaryScalarOp):
     def impl(self, x):
         return x * x
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3241,9 +3241,9 @@ class Sqrt(UnaryScalarOp):
             return np.sqrt(x, dtype=np.float32)
         return np.sqrt(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3277,9 +3277,9 @@ class Deg2Rad(UnaryScalarOp):
             return np.deg2rad(x, dtype=np.float32)
         return np.deg2rad(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3312,9 +3312,9 @@ class Rad2Deg(UnaryScalarOp):
             return np.rad2deg(x, dtype=np.float32)
         return np.rad2deg(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3349,9 +3349,9 @@ class Cos(UnaryScalarOp):
             return np.cos(x, dtype=np.float32)
         return np.cos(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3385,9 +3385,9 @@ class ArcCos(UnaryScalarOp):
             return np.arccos(x, dtype=np.float32)
         return np.arccos(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3423,9 +3423,9 @@ class Sin(UnaryScalarOp):
             return np.sin(x, dtype=np.float32)
         return np.sin(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3459,9 +3459,9 @@ class ArcSin(UnaryScalarOp):
             return np.arcsin(x, dtype=np.float32)
         return np.arcsin(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3495,9 +3495,9 @@ class Tan(UnaryScalarOp):
             return np.tan(x, dtype=np.float32)
         return np.tan(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3531,9 +3531,9 @@ class ArcTan(UnaryScalarOp):
             return np.arctan(x, dtype=np.float32)
         return np.arctan(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3569,9 +3569,9 @@ class ArcTan2(BinaryScalarOp):
                 return np.arctan2(y, x, dtype=np.float32)
         return np.arctan2(y, x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (y, x) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if gz.type in complex_types:
             raise NotImplementedError()
         else:
@@ -3618,9 +3618,9 @@ class Cosh(UnaryScalarOp):
             return np.cosh(x, dtype=np.float32)
         return np.cosh(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3654,9 +3654,9 @@ class ArcCosh(UnaryScalarOp):
             return np.arccosh(x, dtype=np.float32)
         return np.arccosh(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3695,9 +3695,9 @@ class Sinh(UnaryScalarOp):
             return np.sinh(x, dtype=np.float32)
         return np.sinh(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3731,9 +3731,9 @@ class ArcSinh(UnaryScalarOp):
             return np.arcsinh(x, dtype=np.float32)
         return np.arcsinh(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3773,9 +3773,9 @@ class Tanh(UnaryScalarOp):
             return np.tanh(x, dtype=np.float32)
         return np.tanh(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -3809,9 +3809,9 @@ class ArcTanh(UnaryScalarOp):
             return np.arctanh(x, dtype=np.float32)
         return np.arctanh(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:

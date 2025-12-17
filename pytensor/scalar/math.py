@@ -54,9 +54,9 @@ class Erf(UnaryScalarOp):
     def impl(self, x):
         return special.erf(x)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -88,9 +88,9 @@ class Erfc(UnaryScalarOp):
     def impl(self, x):
         return special.erfc(x)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -137,9 +137,9 @@ class Erfcx(UnaryScalarOp):
     def impl(self, x):
         return special.erfcx(x)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -193,9 +193,9 @@ class Erfinv(UnaryScalarOp):
     def impl(self, x):
         return special.erfinv(x)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -228,9 +228,9 @@ class Erfcinv(UnaryScalarOp):
     def impl(self, x):
         return special.erfcinv(x)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -288,9 +288,9 @@ class Gamma(UnaryScalarOp):
     def impl(self, x):
         return special.gamma(x)
 
-    def L_op(self, inputs, outputs, gout):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -323,9 +323,9 @@ class GammaLn(UnaryScalarOp):
     def impl(self, x):
         return special.gammaln(x)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -363,9 +363,9 @@ class Psi(UnaryScalarOp):
     def impl(self, x):
         return special.psi(x)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         if x.type in complex_types:
             raise NotImplementedError()
         if outputs[0].type in discrete_types:
@@ -460,9 +460,9 @@ class TriGamma(UnaryScalarOp):
     def impl(self, x):
         return special.polygamma(1, x)
 
-    def L_op(self, inputs, outputs, outputs_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (g_out,) = outputs_gradients
+        (g_out,) = output_grads
         if x in complex_types:
             raise NotImplementedError("gradient not implemented for complex types")
         return [g_out * polygamma(2, x)]
@@ -559,9 +559,9 @@ class PolyGamma(BinaryScalarOp):
     def impl(self, n, x):
         return special.polygamma(n, x)
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         (n, x) = inputs
-        (g_out,) = output_gradients
+        (g_out,) = output_grads
         if x in complex_types:
             raise NotImplementedError("gradient not implemented for complex types")
         return [
