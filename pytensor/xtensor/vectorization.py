@@ -106,9 +106,9 @@ class XBlockwise(XOp):
         dummy_core_inputs = []
         for inp, core_inp_dims in zip(inputs, core_inputs_dims):
             try:
-                core_static_shape = [
+                core_static_shape = tuple(
                     inp.type.shape[inp.type.dims.index(d)] for d in core_inp_dims
-                ]
+                )
             except IndexError:
                 raise ValueError(
                     f"At least one core dim={core_inp_dims} missing from input {inp} with dims={inp.type.dims}"
@@ -251,9 +251,9 @@ class XRV(XOp, RNGConsumerOp):
         dummy_core_inputs = []
         for param, core_param_dims in zip(params, param_core_dims):
             try:
-                core_static_shape = [
+                core_static_shape = tuple(
                     param.type.shape[param.type.dims.index(d)] for d in core_param_dims
-                ]
+                )
             except ValueError:
                 raise ValueError(
                     f"At least one core dim={core_param_dims} missing from input {param} with dims={param.type.dims}"
