@@ -62,11 +62,11 @@ class RandomVariable(RNGConsumerOp):
 
     def __init__(
         self,
-        name=None,
+        name: str | None = None,
         ndim_supp=None,
         ndims_params=None,
-        dtype: str | None = None,
-        inplace=None,
+        dtype: str | np.dtype | None = None,
+        inplace: bool | None = None,
         signature: str | None = None,
     ):
         """Create a random variable `Op`.
@@ -115,7 +115,7 @@ class RandomVariable(RNGConsumerOp):
         if self.signature is not None:
             # Assume a single output. Several methods need to be updated to handle multiple outputs.
             self.inputs_sig, [self.output_sig] = _parse_gufunc_signature(self.signature)
-            self.ndims_params = [len(input_sig) for input_sig in self.inputs_sig]
+            self.ndims_params = tuple([len(input_sig) for input_sig in self.inputs_sig])
             self.ndim_supp = len(self.output_sig)
         else:
             if (
@@ -238,7 +238,7 @@ class RandomVariable(RNGConsumerOp):
 
         from pytensor.tensor.extra_ops import broadcast_shape_iter
 
-        supp_shape: tuple[Any]
+        supp_shape: tuple[Any, ...]
         if self.ndim_supp == 0:
             supp_shape = ()
         else:
@@ -406,19 +406,19 @@ class RandomVariable(RNGConsumerOp):
     def batch_ndim(self, node: Apply) -> int:
         return cast(int, node.default_output().type.ndim - self.ndim_supp)
 
-    def rng_param(self, node) -> Variable:
+    def rng_param(self, node: Apply) -> Variable:
         """Return the node input corresponding to the rng"""
         return node.inputs[0]
 
-    def size_param(self, node) -> Variable:
+    def size_param(self, node: Apply) -> Variable:
         """Return the node input corresponding to the size"""
         return node.inputs[1]
 
-    def dist_params(self, node) -> Sequence[Variable]:
+    def dist_params(self, node: Apply) -> Sequence[Variable]:
         """Return the node inpust corresponding to dist params"""
         return node.inputs[2:]
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node: Apply, inputs, outputs):
         rng, size, *args = inputs
 
         # Draw from `rng` if `self.inplace` is `True`, and from a copy of `rng` otherwise.
