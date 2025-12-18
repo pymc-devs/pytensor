@@ -133,6 +133,11 @@ from pytensor.tensor.extra_ops import *
 from pytensor.tensor.interpolate import interp, interpolate1d
 from pytensor.tensor.math import *
 from pytensor.tensor.pad import pad
+
+
+# isort: off
+# reshape needs to be imported before shape.reshape, otherwise the tensor.reshape imports fail
+from pytensor.tensor.reshape import *
 from pytensor.tensor.shape import (
     reshape,
     shape,
@@ -142,6 +147,8 @@ from pytensor.tensor.shape import (
     specify_broadcastable,
     specify_shape,
 )
+
+# isort: on
 
 # We import as `_shared` instead of `shared` to avoid confusion between
 # `pytensor.shared` and `tensor._shared`.
