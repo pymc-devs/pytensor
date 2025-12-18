@@ -1496,6 +1496,77 @@ class TestSubtensor(utt.OptimizationTestMixin):
             assert np.allclose(m1_val, m1_ref), (m1_val, m1_ref)
             assert np.allclose(m2_val, m2_ref), (m2_val, m2_ref)
 
+    def test_local_useless_incsubtensor_alloc_shape_check(self):
+        # Regression test for unsafe optimization hiding shape errors.
+        x = vector("x")
+        z = vector("z")  # Shape (1,)
+        # y shape is (3,)
+        y = ptb.alloc(z, 3)
+        # x[:] implies shape of x.
+        res = set_subtensor(x[:], y)
+
+        # We need to compile with optimization enabled to trigger the rewrite
+        f = pytensor.function([x, z], res, mode=self.mode)
+
+        x_val = np.zeros(5, dtype=self.dtype)
+        z_val = np.array([9.9], dtype=self.dtype)
+
+        # Should fail because 3 != 5
+        # The rewrite adds an Assert that raises AssertionError
+        with pytest.raises(AssertionError):
+            f(x_val, z_val)
+
+    def test_local_useless_incsubtensor_alloc_broadcasting_safety(self):
+        # Regression test: Ensure valid broadcasting is preserved and not flagged as error.
+        x = vector("x")  # Shape (5,)
+        z = vector("z")  # Shape (1,)
+        # y shape is (1,)
+        y = ptb.alloc(z, 1)
+        # x[:] implies shape of x.
+        res = set_subtensor(x[:], y)
+
+        f = pytensor.function([x, z], res, mode=self.mode)
+
+        x_val = np.zeros(5, dtype=self.dtype)
+        z_val = np.array([42.0], dtype=self.dtype)
+
+        # Should pass (1 broadcasts to 5)
+        res_val = f(x_val, z_val)
+        assert np.allclose(res_val, 42.0)
+
+    def test_local_useless_incsubtensor_alloc_unit_dim_safety(self):
+        # Regression test: Ensure we check shapes even if destination is known to be 1.
+        # This protects against adding `and shape_of[xi][k] != 1` to the rewrite.
+
+        # Let's try simple vector with manual Assert to enforce shape 1 info,
+        # but keep types generic.
+        x = vector("x")
+        # Assert x is size 1
+        x = pytensor.raise_op.Assert("len 1")(x, x.shape[0] == 1)
+
+        z = dscalar("z")
+        # y shape is (3,). To avoid static shape (3,), we use a symbolic shape
+        # y = ptb.alloc(z, 3) -> gives (3,) if 3 is constant.
+        # Use symbolic 3
+        n = iscalar("n")  # 3
+        y = ptb.alloc(z, n)
+
+        # x[:] implies shape of x (1).
+        res = set_subtensor(x[:], y)
+
+        # We must exclude 'local_useless_inc_subtensor' because it triggers a KeyError
+        # in ShapeFeature when handling the newly created Assert node (unrelated bug).
+        mode = self.mode.excluding("local_useless_inc_subtensor")
+        f = pytensor.function([x, z, n], res, mode=mode)
+
+        x_val = np.zeros(1, dtype=self.dtype)
+        z_val = 9.9
+        n_val = 3
+
+        # Should fail because 3 cannot be assigned to 1
+        with pytest.raises(AssertionError):
+            f(x_val, z_val, n_val)
+
 
 def test_take_basic():
     with pytest.raises(TypeError):
@@ -2402,6 +2473,88 @@ class TestAdvancedSubtensor:
         x = vector("x")
         with pytest.raises(NotImplementedError):
             x[np.array(True)]
+
+    class MyAdvancedSubtensor(AdvancedSubtensor):
+        pass
+
+    class MyAdvancedIncSubtensor(AdvancedIncSubtensor):
+        pass
+
+    def test_vectorize_advanced_subtensor_respects_subclass(self):
+        x = matrix("x")
+        idx = lvector("idx")
+        # idx_list must contain Types for variable inputs in this iteration
+        op = self.MyAdvancedSubtensor(idx_list=[idx.type])
+
+        batch_x = tensor3("batch_x")
+        batch_idx = idx
+
+        node = op.make_node(x, idx)
+        from pytensor.tensor.subtensor import vectorize_advanced_subtensor
+
+        new_node = vectorize_advanced_subtensor(op, node, batch_x, batch_idx)
+
+        assert isinstance(new_node.op, self.MyAdvancedSubtensor)
+        assert type(new_node.op) is not AdvancedSubtensor
+        assert new_node.op.idx_list == (slice(None), idx.type)
+
+    def test_advanced_inc_subtensor_grad_respects_subclass_and_rewrite(self):
+        """
+        Test that gradient of AdvancedIncSubtensor respects the subclass and is preserved by rewrites.
+        """
+        x = vector("x")
+        y = dscalar("y")
+        idx = lscalar("idx")
+
+        op_set = self.MyAdvancedIncSubtensor(
+            idx_list=[idx.type], set_instead_of_inc=True
+        )
+
+        outgrad = vector("outgrad")
+        grads = op_set.grad([x, y, idx], [outgrad])
+        gx = grads[0]
+
+        assert isinstance(gx.owner.op, self.MyAdvancedIncSubtensor)
+        assert gx.owner.op.set_instead_of_inc is True
+
+        f = pytensor.function(
+            [x, y, idx, outgrad], gx, on_unused_input="ignore", mode="FAST_RUN"
+        )
+        topo = f.maker.fgraph.toposort()
+        ops = [node.op for node in topo]
+        has_my_subclass = any(isinstance(op, self.MyAdvancedIncSubtensor) for op in ops)
+        assert has_my_subclass, (
+            "Optimizer replaced MyAdvancedIncSubtensor with generic Op!"
+        )
+
+        x_val = np.array([1.0, 2.0, 3.0], dtype=config.floatX)
+        y_val = 10.0
+        idx_val = 1
+        outgrad_val = np.ones_like(x_val)
+        gx_val = f(x_val, y_val, idx_val, outgrad_val)
+        expected_gx = np.array([1.0, 0.0, 1.0], dtype=config.floatX)
+        assert np.allclose(gx_val, expected_gx)
+
+    def test_rewrite_respects_subclass_AdvancedSubtensor(self):
+        """
+        Spec Test: The rewrite `local_replace_AdvancedSubtensor` should NOT apply to subclasses.
+        """
+        x = matrix("x")
+        idx = lvector("idx")
+        op = self.MyAdvancedSubtensor(idx_list=[idx.type])
+
+        out = op.make_node(x, idx).outputs[0]
+
+        # Compile
+        f = pytensor.function([x, idx], out, mode="FAST_RUN")
+
+        topo = f.maker.fgraph.toposort()
+        ops = [node.op for node in topo]
+
+        has_my_subclass = any(isinstance(op, self.MyAdvancedSubtensor) for op in ops)
+        assert has_my_subclass, (
+            "Optimizer replaced MyAdvancedSubtensor with generic Op!"
+        )
 
 
 class TestInferShape(utt.InferShapeTester):

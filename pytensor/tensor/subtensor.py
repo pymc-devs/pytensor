@@ -131,6 +131,22 @@ def indices_from_subtensor(
         """Reconstruct ``*Subtensor*`` index input parameter entries."""
         if indices and isinstance(entry, Type):
             rval = indices.pop(0)
+
+            # Unpack MakeSlice
+            if (
+                isinstance(rval, Variable)
+                and isinstance(rval.type, SliceType)
+                and rval.owner
+                and isinstance(rval.owner.op, MakeSlice)
+            ):
+                args = []
+                for inp in rval.owner.inputs:
+                    if isinstance(inp, Constant) and inp.data is None:
+                        args.append(None)
+                    else:
+                        args.append(inp)
+                return slice(*args)
+
             return rval
         elif isinstance(entry, slice):
             return slice(
@@ -3046,7 +3062,7 @@ def vectorize_advanced_subtensor(op: AdvancedSubtensor, node, *batch_inputs):
     x_batch_ndim = batch_x.type.ndim - x.type.ndim
     empty_slices = (slice(None),) * x_batch_ndim
     new_idx_list = empty_slices + op.idx_list
-    return AdvancedSubtensor(new_idx_list).make_node(batch_x, *batch_idxs)
+    return type(op)(new_idx_list).make_node(batch_x, *batch_idxs)
 
 
 class AdvancedIncSubtensor(Op):
@@ -3220,7 +3236,7 @@ class AdvancedIncSubtensor(Op):
         else:
             if self.set_instead_of_inc:
                 gx = (
-                    AdvancedIncSubtensor(self.idx_list, set_instead_of_inc=True)
+                    type(self)(self.idx_list, set_instead_of_inc=True)
                     .make_node(outgrad, y.zeros_like(), *idxs)
                     .outputs[0]
                 )

@@ -11,7 +11,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
-from pytensor.graph import rewrite_graph, vectorize_graph
+from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.traversal import ancestors
@@ -22,6 +22,7 @@ from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
 from pytensor.tensor.rewriting.subtensor import (
     local_replace_AdvancedSubtensor,
+    ravel_multidimensional_bool_idx,
 )
 from pytensor.tensor.shape import (
     SpecifyShape,
@@ -2113,3 +2114,112 @@ def test_local_convert_negative_indices():
     # TODO: If Subtensor decides to raise on make_node, this test can be removed
     rewritten_out = rewrite_graph(x[:, :, -2])
     assert equal_computations([rewritten_out], [x[:, :, -2]])
+
+
+def test_ravel_multidimensional_bool_idx_subtensor():
+    # Case 1: Subtensor
+    x = pt.matrix("x")
+    mask = pt.matrix("mask", dtype="bool")
+    z = x[mask]
+
+    # We want to verify the rewrite changes the graph
+    # First, get the AdvancedSubtensor node
+    fgraph = FunctionGraph([x, mask], [z])
+    node = fgraph.toposort()[-1]
+    assert isinstance(node.op, AdvancedSubtensor)
+
+    # Apply rewrite
+    # ravel_multidimensional_bool_idx is a NodeRewriter instance
+    replacements = ravel_multidimensional_bool_idx.transform(fgraph, node)
+
+    # Verify rewrite happened
+    assert replacements, "Rewrite return False or empty list"
+    rewritten_node = replacements
+
+    # The rewritten output is the first element
+    out_var = rewritten_node[0]
+
+    # Check the index input (mask)
+    # The output might be a reshaping of the new AdvancedSubtensor
+    # We need to trace back to finding the AdvancedSubtensor op
+
+    # In the refactored code: new_out = raveled_x[tuple(new_idxs)]
+    # if raveled_x[tuple(new_idxs)] returns a view, it might be Subtensor/AdvancedSubtensor
+
+    # Let's check the owner of the output variable
+    owner = out_var.owner
+    # It might be a Reshape? No, for Subtensor case we don't reshape if it was already 1D?
+    # Actually code says:
+    # new_out = AdvancedSubtensor(new_idx_list)(raveled_x, *new_tensor_inputs)
+    # vs
+    # new_out = raveled_x[tuple(new_idxs)]
+
+    # If the result of indexing is 1D (because raveled_x is 1D and new_idxs are 1D),
+    # then new_out is 1D. Original z is 1D.
+    # So maybe no reshape needed?
+
+    # Let's just check execution correctness first as that's easiest
+
+    # Verify execution correctness with the rewritten graph
+    # We need to replace the node in fgraph to compile it properly?
+    # Or just compile a function from the inputs to the NEW output variable.
+
+    f = pytensor.function(fgraph.inputs, out_var, on_unused_input="ignore")
+
+    x_val = np.arange(9).reshape(3, 3).astype(pytensor.config.floatX)
+    mask_val = np.eye(3, dtype=bool)
+
+    res = f(x_val, mask_val)
+    expected = x_val[mask_val]
+
+    np.testing.assert_allclose(res, expected)
+
+    # Check graph structure briefly
+    # The graph leading to out_var should contain raveled inputs
+    # We can inspect the inputs of the node that created out_var
+    # If it is AdvancedSubtensor, inputs[1] (index) should be 1D
+
+    # Trace back
+    node_op = out_var.owner.op
+    if isinstance(node_op, AdvancedSubtensor):
+        assert out_var.owner.inputs[1].ndim == 1, "Index should be raveled"
+
+
+def test_ravel_multidimensional_bool_idx_inc_subtensor():
+    # Case 2: IncSubtensor
+    x = pt.matrix("x")
+    mask = pt.matrix("mask", dtype="bool")
+    y = pt.vector("y")  # y should be 1D to match raveled selection
+
+    z = pt.set_subtensor(x[mask], y)
+
+    fgraph = FunctionGraph([x, mask, y], [z])
+    # Find the AdvancedIncSubtensor node
+
+    inc_node = None
+    for node in fgraph.toposort():
+        if isinstance(node.op, AdvancedIncSubtensor):
+            inc_node = node
+            break
+
+    assert inc_node is not None
+
+    # Apply rewrite
+    replacements = ravel_multidimensional_bool_idx.transform(fgraph, inc_node)
+
+    assert replacements
+    out_var = replacements[0]
+
+    # Verify correctness
+    f = pytensor.function(fgraph.inputs, out_var, on_unused_input="ignore")
+
+    x_val = np.arange(9).reshape(3, 3).astype(pytensor.config.floatX)
+    mask_val = np.eye(3, dtype=bool)
+    y_val = np.ones(3).astype(pytensor.config.floatX) * 10
+
+    res = f(x_val, mask_val, y_val)
+
+    expected = x_val.copy()
+    expected[mask_val] = y_val
+
+    np.testing.assert_allclose(res, expected)

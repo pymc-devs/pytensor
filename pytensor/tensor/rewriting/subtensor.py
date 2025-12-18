@@ -14,7 +14,6 @@ from pytensor.graph.rewriting.basic import (
     in2out,
     node_rewriter,
 )
-from pytensor.graph.type import Type
 from pytensor.raise_op import Assert
 from pytensor.scalar import Add, ScalarConstant, ScalarType
 from pytensor.scalar import constant as scalar_constant
@@ -151,12 +150,14 @@ def transform_take(a, indices, axis):
 
     shape_parts = [sp for sp in shape_parts if len(sp) > 0]
 
-    assert len(shape_parts) > 0
+    # assert len(shape_parts) > 0
 
     if len(shape_parts) > 1:
         shape = pytensor.tensor.concatenate(shape_parts)
-    else:
+    elif len(shape_parts) == 1:
         shape = shape_parts[0]
+    else:
+        shape = ()
 
     ndim = a.ndim + indices.ndim - 1
 
@@ -166,7 +167,17 @@ def transform_take(a, indices, axis):
 def is_full_slice(x):
     """Determine if `x` is a ``slice(None)`` or a symbolic equivalent."""
     if isinstance(x, slice):
-        return x == slice(None)
+        if x == slice(None):
+            return True
+
+        def _is_none(v):
+            return (
+                v is None
+                or (isinstance(v, Variable) and isinstance(v.type, NoneTypeT))
+                or (isinstance(v, Constant) and v.data is None)
+            )
+
+        return _is_none(x.start) and _is_none(x.stop) and _is_none(x.step)
 
     if isinstance(x, Variable) and isinstance(x.type, SliceType):
         if x.owner is None:
@@ -213,20 +224,6 @@ def get_advsubtensor_axis(indices):
         return axis
 
 
-def reconstruct_indices(idx_list, tensor_inputs):
-    """Reconstruct indices from idx_list and tensor inputs."""
-    indices = []
-    input_idx = 0
-    for entry in idx_list:
-        if isinstance(entry, slice):
-            indices.append(entry)
-        elif isinstance(entry, Type):
-            if input_idx < len(tensor_inputs):
-                indices.append(tensor_inputs[input_idx])
-                input_idx += 1
-    return indices
-
-
 @register_specialize
 @node_rewriter([AdvancedSubtensor])
 def local_replace_AdvancedSubtensor(fgraph, node):
@@ -239,14 +236,14 @@ def local_replace_AdvancedSubtensor(fgraph, node):
     `AdvancedSubtensor1` and `Subtensor` `Op`\s.
     """
 
-    if not isinstance(node.op, AdvancedSubtensor):
+    if type(node.op) is not AdvancedSubtensor:
         return
 
     indexed_var = node.inputs[0]
-    tensor_inputs = node.inputs[1:]
+    index_variables = node.inputs[1:]
 
     # Reconstruct indices from idx_list and tensor inputs
-    indices = reconstruct_indices(node.op.idx_list, tensor_inputs)
+    indices = indices_from_subtensor(index_variables, node.op.idx_list)
 
     axis = get_advsubtensor_axis(indices)
 
@@ -267,16 +264,19 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     This is only done when there's a single vector index.
     """
 
+    if type(node.op) is not AdvancedIncSubtensor:
+        return
+
     if node.op.ignore_duplicates:
         # `AdvancedIncSubtensor1` does not ignore duplicate index values
         return
 
     res = node.inputs[0]
     val = node.inputs[1]
-    tensor_inputs = node.inputs[2:]
+    index_variables = node.inputs[2:]
 
     # Reconstruct indices from idx_list and tensor inputs
-    indices = reconstruct_indices(node.op.idx_list, tensor_inputs)
+    indices = indices_from_subtensor(index_variables, node.op.idx_list)
 
     axis = get_advsubtensor_axis(indices)
 
@@ -1376,7 +1376,6 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
                     z_broad[k]
                     and not same_shape(xi, y, dim_x=k, dim_y=k)
                     and shape_of[y][k] != 1
-                    and shape_of[xi][k] == 1
                 )
             ]
 
@@ -1773,6 +1772,7 @@ def ravel_multidimensional_bool_idx(fgraph, node):
     x[eye(3, dtype=bool)] -> x.ravel()[eye(3).ravel()]
     x[eye(3, dtype=bool)].set(y) -> x.ravel()[eye(3).ravel()].set(y).reshape(x.shape)
     """
+
     if isinstance(node.op, AdvancedSubtensor):
         x = node.inputs[0]
         tensor_inputs = node.inputs[1:]
@@ -1781,7 +1781,7 @@ def ravel_multidimensional_bool_idx(fgraph, node):
         tensor_inputs = node.inputs[2:]
 
     # Reconstruct indices from idx_list and tensor inputs
-    idxs = reconstruct_indices(node.op.idx_list, tensor_inputs)
+    idxs = indices_from_subtensor(tensor_inputs, node.op.idx_list)
 
     if any(
         (
@@ -1802,7 +1802,6 @@ def ravel_multidimensional_bool_idx(fgraph, node):
     if len(bool_idxs) != 1:
         # Get out if there are no or multiple boolean idxs
         return None
-
     [(bool_idx_pos, bool_idx)] = bool_idxs
     bool_idx_ndim = bool_idx.type.ndim
     if bool_idx.type.ndim < 2:
@@ -1819,41 +1818,16 @@ def ravel_multidimensional_bool_idx(fgraph, node):
     new_idxs[bool_idx_pos] = raveled_bool_idx
 
     if isinstance(node.op, AdvancedSubtensor):
-        # Create new AdvancedSubtensor with updated idx_list
-        new_idx_list = list(node.op.idx_list)
-        new_tensor_inputs = list(tensor_inputs)
-
-        # Update the idx_list and tensor_inputs for the raveled boolean index
-        input_idx = 0
-        for i, entry in enumerate(node.op.idx_list):
-            if isinstance(entry, Type):
-                if input_idx == bool_idx_pos:
-                    new_tensor_inputs[input_idx] = raveled_bool_idx
-                input_idx += 1
-
-        new_out = AdvancedSubtensor(new_idx_list)(raveled_x, *new_tensor_inputs)
+        new_out = raveled_x[tuple(new_idxs)]
     else:
-        # Create new AdvancedIncSubtensor with updated idx_list
-        new_idx_list = list(node.op.idx_list)
-        new_tensor_inputs = list(tensor_inputs)
-
-        # Update the tensor_inputs for the raveled boolean index
-        input_idx = 0
-        for i, entry in enumerate(node.op.idx_list):
-            if isinstance(entry, Type):
-                if input_idx == bool_idx_pos:
-                    new_tensor_inputs[input_idx] = raveled_bool_idx
-                input_idx += 1
-
-        # The dimensions of y that correspond to the boolean indices
-        # must already be raveled in the original graph, so we don't need to do anything to it
-        new_out = AdvancedIncSubtensor(
-            new_idx_list,
-            inplace=node.op.inplace,
+        sub = raveled_x[tuple(new_idxs)]
+        new_out = inc_subtensor(
+            sub,
+            y,
             set_instead_of_inc=node.op.set_instead_of_inc,
             ignore_duplicates=node.op.ignore_duplicates,
-        )(raveled_x, y, *new_tensor_inputs)
-        # But we must reshape the output to match the original shape
+            inplace=node.op.inplace,
+        )
         new_out = new_out.reshape(x_shape)
 
     return [copy_stack_trace(node.outputs[0], new_out)]
