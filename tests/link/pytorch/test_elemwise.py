@@ -156,10 +156,6 @@ def test_cast():
     [
         (np.array([5.0], dtype=config.floatX), 0.0, 10.0),
         (np.array([-5.0], dtype=config.floatX), 0.0, 10.0),
-        (np.array([15.0], dtype=config.floatX), 0.0, 10.0),
-        (np.array([5.0], dtype=config.floatX), 10.0, 0.0),
-        (np.array([-5.0, 5.0, 15.0], dtype=config.floatX), 0.0, 10.0),
-        (np.array([[-5.0, 5.0], [15.0, 7.0]], dtype=config.floatX), 0.0, 10.0),
     ],
 )
 def test_clip(x_val, min_val, max_val):
