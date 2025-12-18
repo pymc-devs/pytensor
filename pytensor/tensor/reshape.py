@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from itertools import pairwise
 from typing import cast as type_cast
 
 import numpy as np
@@ -9,7 +10,7 @@ from pytensor.graph import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import TensorLike, as_tensor_variable
-from pytensor.tensor.basic import infer_static_shape
+from pytensor.tensor.basic import expand_dims, infer_static_shape, join, split
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType
 from pytensor.tensor.type import tensor
@@ -152,11 +153,11 @@ class SplitDims(Op):
         self.axis = axis
 
     def make_node(self, x: Variable, shape: Variable) -> Apply:  # type: ignore[override]
-        if shape.type.numpy_dtype.kind not in "iu":
-            raise TypeError("shape must be an integer tensor")
-
         x = as_tensor_variable(x)
         shape = as_tensor_variable(shape, dtype=int, ndim=1)
+
+        if shape.type.numpy_dtype.kind not in "iu":
+            raise TypeError("shape must be an integer tensor")
 
         axis = self.axis
         _, constant_shape = infer_static_shape(shape)
@@ -261,4 +262,263 @@ def split_dims(
     return type_cast(TensorVariable, split_op(x, shape))
 
 
-__all__ = ["join_dims", "split_dims"]
+def _analyze_axes_list(axes) -> tuple[int, int, int]:
+    """
+    Analyze the provided axes list to determine how many axes are before and after the interval to be raveled, as
+    well as the minimum and maximum number of axes that the inputs can have.
+
+    The rules are:
+    - Axes must be strictly increasing in both the positive and negative parts of the list.
+    - Negative axes must come after positive axes.
+    - There can be at most one "hole" in the axes list, which can be either an implicit hole on an endpoint
+      (e.g. [0, 1]) or an explicit hole in the middle (e.g. [0, 2] or [1, -1]).
+
+    Returns
+    -------
+    n_axes_before: int
+        The number of axes before the interval to be raveled.
+    n_axes_after: int
+        The number of axes after the interval to be raveled.
+    min_axes: int
+        The minimum number of axes that the inputs must have.
+    """
+    if axes is None:
+        return 0, 0, 0
+
+    if isinstance(axes, int):
+        axes = (axes,)
+    elif not isinstance(axes, Iterable):
+        raise TypeError("axes must be an int, an iterable of ints, or None")
+
+    axes = tuple(axes)
+
+    if len(axes) == 0:
+        raise ValueError("axes=[] is ambiguous; use None to ravel all")
+
+    if len(set(axes)) != len(axes):
+        raise ValueError("axes must have no duplicates")
+
+    first_negative_idx = next((i for i, a in enumerate(axes) if a < 0), len(axes))
+    positive_axes = list(axes[:first_negative_idx])
+    negative_axes = list(axes[first_negative_idx:])
+
+    if not all(a < 0 for a in negative_axes):
+        raise ValueError("Negative axes must come after positive")
+
+    def not_strictly_increasing(s):
+        if len(s) < 1:
+            return False
+        return any(b <= a for a, b in pairwise(s))
+
+    if not_strictly_increasing(positive_axes):
+        raise ValueError("Axes must be strictly increasing in the positive part")
+    if not_strictly_increasing(negative_axes):
+        raise ValueError("Axes must be strictly increasing in the negative part")
+
+    def find_gaps(s):
+        """Find if there are gaps in a strictly increasing sequence."""
+        return any(b - a > 1 for a, b in pairwise(s))
+
+    if find_gaps(positive_axes):
+        raise ValueError("Positive axes must be contiguous")
+    if find_gaps(negative_axes):
+        raise ValueError("Negative axes must be contiguous")
+
+    if positive_axes and positive_axes[0] != 0:
+        raise ValueError(
+            "If positive axes are provided, the first positive axis must be 0 to avoid ambiguity. To ravel indices "
+            "starting from the front, use negative axes only."
+        )
+
+    if negative_axes and negative_axes[-1] != -1:
+        raise ValueError(
+            "If negative axes are provided, the last negative axis must be -1 to avoid ambiguity. To ravel indices "
+            "up to the end, use positive axes only."
+        )
+
+    n_before = len(positive_axes)
+    n_after = len(negative_axes)
+    min_axes = n_before + n_after
+
+    return n_before, n_after, min_axes
+
+
+def pack(
+    *tensors: TensorLike, axes: Sequence[int] | int | None = None
+) -> tuple[TensorVariable, list[ShapeValueType]]:
+    """
+    Combine multiple tensors by preserving the specified axes and raveling the rest into a single axis.
+
+    Parameters
+    ----------
+    *tensors : TensorLike
+        Input tensors to be packed.
+    axes : int, sequence of int, or None, optional
+        Axes to preserve during packing. If None, all axes are raveled. See the Notes section for the rules.
+
+    Returns
+    -------
+    packed_tensor : TensorLike
+        The packed tensor with specified axes preserved and others raveled.
+    packed_shapes : list of ShapeValueType
+        A list containing the shapes of the raveled dimensions for each input tensor.
+
+    Notes
+    -----
+    The `axes` parameter determines which axes are preserved during packing. Axes can be specified using positive or
+    negative indices, but must follow these rules:
+        - If axes is None, all axes are raveled.
+        - If a single integer is provided, it can be positive or negative, and can take any value up to the smallest
+            number of dimensions among the input tensors.
+        - If a list is provided, it can be all positive, all negative, or a combination of positive and negative.
+        - Positive axes must be contiguous and start from 0.
+        - Negative axes must be contiguous and end at -1.
+        - If positive and negative axes are combined, positive axes must come before negative axes, and both 0 and -1
+            must be included.
+
+    Examples
+    --------
+    The easiest way to understand pack is through examples. The simplest case is using axes=None, which is equivalent
+    to ``join(0, *[t.ravel() for t in tensors])``:
+
+    .. code-block:: python
+        import pytensor.tensor as pt
+
+        x = pt.tensor("x", shape=(2, 3))
+        y = pt.tensor("y", shape=(4, 5, 6))
+
+        packed_tensor, packed_shapes = pt.pack(x, y, axes=None)
+        # packed_tensor has shape (6 + 120,) == (126,)
+        # packed_shapes is [(2, 3), (4, 5, 6)]
+
+    If we want to preserve a single axis, we can use either positive or negative indexing. Notice that all tensors
+    must have the same size along the preserved axis. For example, using axes=0:
+
+    .. code-block:: python
+        import pytensor.tensor as pt
+
+        x = pt.tensor("x", shape=(2, 3))
+        y = pt.tensor("y", shape=(2, 5, 6))
+        packed_tensor, packed_shapes = pt.pack(x, y, axes=0)
+        # packed_tensor has shape (2, 3 + 30) == (2, 33)
+        # packed_shapes is [(3,), (5, 6)]
+
+
+    Using negative indexing we can preserve the last two axes:
+
+    .. code-block:: python
+        import pytensor.tensor as pt
+
+        x = pt.tensor("x", shape=(4, 2, 3))
+        y = pt.tensor("y", shape=(5, 2, 3))
+        packed_tensor, packed_shapes = pt.pack(x, y, axes=(-2, -1))
+        # packed_tensor has shape (4 + 5, 2, 3) == (9, 2, 3)
+        # packed_shapes is [(4,), (5,
+
+    Or using a mix of positive and negative axes, we can preserve the first and last axes:
+
+    .. code-block:: python
+        import pytensor.tensor as pt
+
+        x = pt.tensor("x", shape=(2, 4, 3))
+        y = pt.tensor("y", shape=(2, 5, 3))
+        packed_tensor, packed_shapes = pt.pack(x, y, axes=(0, -1))
+        # packed_tensor has shape (2, 4 + 5, 3) == (2, 9, 3)
+        # packed_shapes is [(4,), (5,)]
+    """
+    tensor_list = [as_tensor_variable(t) for t in tensors]
+
+    n_before, n_after, min_axes = _analyze_axes_list(axes)
+
+    reshaped_tensors: list[TensorVariable] = []
+    packed_shapes: list[ShapeValueType] = []
+
+    for i, input_tensor in enumerate(tensor_list):
+        n_dim = input_tensor.ndim
+
+        if n_dim < min_axes:
+            raise ValueError(
+                f"Input {i} (zero indexed) to pack has {n_dim} dimensions, "
+                f"but axes={axes} assumes at least {min_axes} dimension{'s' if min_axes != 1 else ''}."
+            )
+        n_after_packed = n_dim - n_after
+        packed_shapes.append(input_tensor.shape[n_before:n_after_packed])
+
+        if n_dim == min_axes:
+            # If an input has the minimum number of axes, pack implicitly inserts a new axis based on the pattern
+            # implied by the axes.
+            input_tensor = expand_dims(input_tensor, axis=n_before)
+            reshaped_tensors.append(input_tensor)
+            continue
+
+        # The reshape we want is (shape[:before], -1, shape[n_after_packed:]). join_dims does (shape[:min(axes)], -1,
+        # shape[max(axes)+1:]). So this will work if we choose axes=(n_before, n_after_packed - 1). Because of the
+        # rules on the axes input, we will always have n_before <= n_after_packed - 1. A set is used here to cover the
+        # corner case when n_before == n_after_packed - 1 (i.e., when there is only one axis to ravel --> do nothing).
+        join_axes = range(n_before, n_after_packed)
+        joined = join_dims(input_tensor, tuple(join_axes))
+        reshaped_tensors.append(joined)
+
+    return join(n_before, *reshaped_tensors), packed_shapes
+
+
+def unpack(
+    packed_input: TensorLike,
+    axes: int | Sequence[int] | None,
+    packed_shapes: list[ShapeValueType],
+) -> list[TensorVariable]:
+    """
+    Unpack a packed tensor into multiple tensors by splitting along the specified axes and reshaping.
+
+    The unpacking process reverses the packing operation, restoring the original shapes of the input tensors. `axes`
+    corresponds to the axes that were preserved during packing, and `packed_shapes` contains the shapes of the raveled
+    dimensions for each output tensor (that is, the shapes that were destroyed during packing).
+
+    The signature of unpack is such that the same `axes` should be passed to both `pack` and `unpack` to create a
+    "round-trip" operation. For details on the rules for `axes`, see the documentation for `pack`.
+
+    Parameters
+    ----------
+    packed_input : TensorLike
+        The packed tensor to be unpacked.
+    axes : int, sequence of int, or None
+        Axes that were preserved during packing. If None, the input is assumed to be 1D and axis 0 is used.
+    packed_shapes : list of ShapeValueType
+        A list containing the shapes of the raveled dimensions for each output tensor.
+
+    Returns
+    -------
+    unpacked_tensors : list of TensorLike
+        A list of unpacked tensors with their original shapes restored.
+    """
+    packed_input = as_tensor_variable(packed_input)
+
+    if axes is None:
+        if packed_input.ndim != 1:
+            raise ValueError(
+                "unpack can only be called with keep_axis=None for 1d inputs"
+            )
+        split_axis = 0
+    else:
+        axes = normalize_axis_tuple(axes, ndim=packed_input.ndim)
+        try:
+            [split_axis] = (i for i in range(packed_input.ndim) if i not in axes)
+        except ValueError as err:
+            raise ValueError(
+                "Unpack must have exactly one more dimension that implied by axes"
+            ) from err
+
+    split_inputs = split(
+        packed_input,
+        splits_size=[prod(shape, dtype=int) for shape in packed_shapes],
+        n_splits=len(packed_shapes),
+        axis=split_axis,
+    )
+
+    return [
+        split_dims(inp, shape, split_axis)
+        for inp, shape in zip(split_inputs, packed_shapes, strict=True)
+    ]
+
+
+__all__ = ["join_dims", "pack", "split_dims", "unpack"]
