@@ -240,41 +240,10 @@ def {function_name}({", ".join(input_names)}):
 @register_funcify_and_cache_key(AdvancedIncSubtensor)
 def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     if isinstance(op, AdvancedSubtensor):
-        tensor_inputs = node.inputs[1:]
+        index_variables = node.inputs[1:]
     else:
-        tensor_inputs = node.inputs[2:]
+        index_variables = node.inputs[2:]
 
-    adv_idxs = [
-        {
-            "axis": i,
-            "dtype": idx.type.dtype,
-            "bcast": idx.type.broadcastable,
-            "ndim": idx.type.ndim,
-        }
-        for i, idx in enumerate(idxs)
-        if isinstance(idx.type, TensorType)
-    ]
-
-    # Reconstruct indexing information from idx_list and tensor inputs
-#   basic_idxs = []
-#   adv_idxs = []
-#   input_idx = 0
-#   
-#   for i, entry in enumerate(op.idx_list):
-#       if isinstance(entry, slice):
-#           # Basic slice index
-#           basic_idxs.append(entry)
-#       elif isinstance(entry, Type):
-#           # Advanced tensor index
-#           if input_idx < len(tensor_inputs):
-#               idx_input = tensor_inputs[input_idx]
-#               adv_idxs.append({
-#                   "axis": i,
-#                   "dtype": idx_input.type.dtype,
-#                   "bcast": idx_input.type.broadcastable,
-#                   "ndim": idx_input.type.ndim,
-#               })
-#               input_idx += 1
     basic_idxs = []
     adv_idxs = []
     input_idx = 0
@@ -285,8 +254,8 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
             basic_idxs.append(entry)
         elif isinstance(entry, Type):
             # Advanced tensor index
-            if input_idx < len(tensor_inputs):
-                idx_input = tensor_inputs[input_idx]
+            if input_idx < len(index_variables):
+                idx_input = index_variables[input_idx]
                 adv_idxs.append(
                     {
                         "axis": i,
@@ -313,7 +282,7 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
         and len(adv_idxs) >= 1
         and all(adv_idx["dtype"] != "bool" for adv_idx in adv_idxs)
         # Implementation does not support newaxis
-        and not any(isinstance(idx.type, NoneTypeT) for idx in idxs)
+        and not any(isinstance(idx.type, NoneTypeT) for idx in index_variables)
     ):
         return vector_integer_advanced_indexing(op, node, **kwargs)
 

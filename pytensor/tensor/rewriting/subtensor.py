@@ -14,7 +14,6 @@ from pytensor.graph.rewriting.basic import (
     in2out,
     node_rewriter,
 )
-from pytensor.graph.type import Type
 from pytensor.raise_op import Assert
 from pytensor.scalar import Add, ScalarConstant, ScalarType
 from pytensor.scalar import constant as scalar_constant
@@ -151,12 +150,14 @@ def transform_take(a, indices, axis):
 
     shape_parts = [sp for sp in shape_parts if len(sp) > 0]
 
-    assert len(shape_parts) > 0
+    # assert len(shape_parts) > 0
 
     if len(shape_parts) > 1:
         shape = pytensor.tensor.concatenate(shape_parts)
-    else:
+    elif len(shape_parts) == 1:
         shape = shape_parts[0]
+    else:
+        shape = ()
 
     ndim = a.ndim + indices.ndim - 1
 
@@ -166,7 +167,17 @@ def transform_take(a, indices, axis):
 def is_full_slice(x):
     """Determine if `x` is a ``slice(None)`` or a symbolic equivalent."""
     if isinstance(x, slice):
-        return x == slice(None)
+        if x == slice(None):
+            return True
+
+        def _is_none(v):
+            return (
+                v is None
+                or (isinstance(v, Variable) and isinstance(v.type, NoneTypeT))
+                or (isinstance(v, Constant) and v.data is None)
+            )
+
+        return _is_none(x.start) and _is_none(x.stop) and _is_none(x.step)
 
     if isinstance(x, Variable) and isinstance(x.type, SliceType):
         if x.owner is None:
@@ -213,20 +224,6 @@ def get_advsubtensor_axis(indices):
         return axis
 
 
-def reconstruct_indices(idx_list, tensor_inputs):
-    """Reconstruct indices from idx_list and tensor inputs."""
-    indices = []
-    input_idx = 0
-    for entry in idx_list:
-        if isinstance(entry, slice):
-            indices.append(entry)
-        elif isinstance(entry, Type):
-            if input_idx < len(tensor_inputs):
-                indices.append(tensor_inputs[input_idx])
-                input_idx += 1
-    return indices
-
-
 @register_specialize
 @node_rewriter([AdvancedSubtensor])
 def local_replace_AdvancedSubtensor(fgraph, node):
@@ -239,14 +236,14 @@ def local_replace_AdvancedSubtensor(fgraph, node):
     `AdvancedSubtensor1` and `Subtensor` `Op`\s.
     """
 
-    if not isinstance(node.op, AdvancedSubtensor):
+    if type(node.op) is not AdvancedSubtensor:
         return
 
     indexed_var = node.inputs[0]
-    tensor_inputs = node.inputs[1:]
+    index_variables = node.inputs[1:]
 
     # Reconstruct indices from idx_list and tensor inputs
-    indices = reconstruct_indices(node.op.idx_list, tensor_inputs)
+    indices = indices_from_subtensor(index_variables, node.op.idx_list)
 
     axis = get_advsubtensor_axis(indices)
 
@@ -267,16 +264,19 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     This is only done when there's a single vector index.
     """
 
+    if type(node.op) is not AdvancedIncSubtensor:
+        return
+
     if node.op.ignore_duplicates:
         # `AdvancedIncSubtensor1` does not ignore duplicate index values
         return
 
     res = node.inputs[0]
     val = node.inputs[1]
-    tensor_inputs = node.inputs[2:]
+    index_variables = node.inputs[2:]
 
     # Reconstruct indices from idx_list and tensor inputs
-    indices = reconstruct_indices(node.op.idx_list, tensor_inputs)
+    indices = indices_from_subtensor(index_variables, node.op.idx_list)
 
     axis = get_advsubtensor_axis(indices)
 
@@ -1376,7 +1376,6 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
                     z_broad[k]
                     and not same_shape(xi, y, dim_x=k, dim_y=k)
                     and shape_of[y][k] != 1
-                    and shape_of[xi][k] == 1
                 )
             ]
 
@@ -1772,6 +1771,7 @@ def bool_idx_to_nonzero(fgraph, node):
 
     x[1:, eye(3, dtype=bool), 1:] -> x[1:, *eye(3).nonzero()]
     """
+
     if isinstance(node.op, AdvancedSubtensor):
         x = node.inputs[0]
         tensor_inputs = node.inputs[1:]
@@ -1780,7 +1780,7 @@ def bool_idx_to_nonzero(fgraph, node):
         tensor_inputs = node.inputs[2:]
 
     # Reconstruct indices from idx_list and tensor inputs
-    idxs = reconstruct_indices(node.op.idx_list, tensor_inputs)
+    idxs = indices_from_subtensor(tensor_inputs, node.op.idx_list)
 
     bool_pos = {
         i
@@ -1802,7 +1802,6 @@ def bool_idx_to_nonzero(fgraph, node):
         new_out = node.op(x, *new_idxs)
     else:
         new_out = node.op(x, y, *new_idxs)
-
     return [copy_stack_trace(node.outputs[0], new_out)]
 
 
