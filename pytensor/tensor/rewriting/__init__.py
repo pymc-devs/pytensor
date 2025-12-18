@@ -10,6 +10,7 @@ import pytensor.tensor.rewriting.linalg
 import pytensor.tensor.rewriting.math
 import pytensor.tensor.rewriting.numba
 import pytensor.tensor.rewriting.ofg
+import pytensor.tensor.rewriting.reshape
 import pytensor.tensor.rewriting.shape
 import pytensor.tensor.rewriting.special
 import pytensor.tensor.rewriting.subtensor
