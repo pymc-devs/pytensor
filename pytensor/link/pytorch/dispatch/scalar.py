@@ -5,6 +5,7 @@ import torch
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 from pytensor.scalar.basic import (
     Cast,
+    Clip,
     Invert,
     ScalarOp,
 )
@@ -69,6 +70,14 @@ def pytorch_funcify_Cast(op: Cast, node, **kwargs):
 @pytorch_funcify.register(Softplus)
 def pytorch_funcify_Softplus(op, node, **kwargs):
     return torch.nn.Softplus()
+
+
+@pytorch_funcify.register(Clip)
+def pytorch_funcify_Clip(op, node, **kwargs):
+    def clip(x, min_val, max_val):
+        return torch.where(x < min_val, min_val, torch.where(x > max_val, max_val, x))
+
+    return clip
 
 
 @pytorch_funcify.register(ScalarLoop)
