@@ -195,7 +195,7 @@ def test_AdvancedSubtensor(x, indices):
         [out_pt],
         [x.data],
         # Specialize allows running boolean indexing without falling back to object mode
-        # Thanks to bool_idx_to_nonzero rewrite
+        # Thanks to ravel_multidimensional_bool_idx rewrite
         numba_mode=numba_mode.including("specialize"),
     )
 

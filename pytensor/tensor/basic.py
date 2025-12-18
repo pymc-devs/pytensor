@@ -1810,6 +1810,19 @@ def vectorize_alloc(op: Alloc, node: Apply, batch_val, *batch_shapes):
     batch_dims = [batch_val.shape[i] for i in range(batch_ndim)]
 
     new_shapes = batch_dims + list(batch_shapes)
+
+    # Alloc expects the value to be broadcastable to the shape from right to left.
+    # We need to insert singleton dimensions between the batch dimensions and the
+    # value dimensions so that the value broadcasts correctly against the shape.
+    missing_dims = len(batch_shapes) - val.type.ndim
+    if missing_dims > 0:
+        pattern = (
+            list(range(batch_ndim))
+            + ["x"] * missing_dims
+            + list(range(batch_ndim, batch_val.type.ndim))
+        )
+        batch_val = batch_val.dimshuffle(pattern)
+
     return op.make_node(batch_val, *new_shapes)
 
 
