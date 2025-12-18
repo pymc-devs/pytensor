@@ -151,6 +151,19 @@ def test_cast():
     assert res.dtype == np.int32
 
 
+@pytest.mark.parametrize(
+    "x_val, min_val, max_val",
+    [
+        (np.array([5.0], dtype=config.floatX), 0.0, 10.0),
+        (np.array([-5.0], dtype=config.floatX), 0.0, 10.0),
+    ],
+)
+def test_clip(x_val, min_val, max_val):
+    x = pt.tensor("x", shape=x_val.shape, dtype=config.floatX)
+    out = pt.clip(x, min_val, max_val)
+    compare_pytorch_and_py([x], [out], [x_val])
+
+
 def test_vmap_elemwise():
     from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
 
