@@ -197,3 +197,21 @@ test-skip = ["*musllinux*", "*i686*"]
 # Testing seems to be running into issues locating libs where expected
 # test-requires = ["pytest", "numba", "jax", "jaxlib"]
 # test-command = "pytest {package}/tests"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+pytensor = { path = ".", editable = true }
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+complete = { features = ["complete"], solve-group = "default" }
+development = { features = ["development"], solve-group = "default" }
+jax = { features = ["jax"], solve-group = "default" }
+numba = { features = ["numba"], solve-group = "default" }
+rtd = { features = ["rtd"], solve-group = "default" }
+tests = { features = ["tests"], solve-group = "default" }
+
+[tool.pixi.tasks]
