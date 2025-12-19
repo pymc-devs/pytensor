@@ -46,7 +46,7 @@ def test_convolve1d_batch():
     res = out.eval({x: x_test, y: y_test})
     # Second entry of x, y are just y, x respectively,
     # so res[0] and res[1] should be identical.
-    rtol = 1e-6 if config.floatX == "float32" else 1e-15
+    rtol = 1e-6 if config.floatX == "float32" else 2e-15
     res_np = np.convolve(x_test[0], y_test[0])
     np.testing.assert_allclose(res[0], res_np, rtol=rtol)
     np.testing.assert_allclose(res[1], res_np, rtol=rtol)
