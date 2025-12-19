@@ -41,7 +41,12 @@ from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
 from pytensor.tensor.math import add, clip
-from pytensor.tensor.shape import Reshape, Shape_i, specify_broadcastable
+from pytensor.tensor.shape import (
+    Reshape,
+    Shape_i,
+    shape_padright,
+    specify_broadcastable,
+)
 from pytensor.tensor.type import (
     TensorType,
     bscalar,
@@ -3679,13 +3684,46 @@ def vectorize_advanced_inc_subtensor(op: AdvancedIncSubtensor, node, *batch_inpu
         # alloc takes *shape.
 
         # Let's collect shape tensors.
-        out_shape = [batch_y.shape[i] for i in range(y_batch_ndim)]
+        from pytensor.tensor.extra_ops import broadcast_shape
+
+        x_batch_ndim = batch_x.type.ndim - x.type.ndim
+
+        # Ensure batch_x is broadcastable where size is 1
+        for i in range(x_batch_ndim):
+            if batch_x.type.shape[i] == 1 and not batch_x.type.broadcastable[i]:
+                batch_x = specify_broadcastable(batch_x, i)
+
+        batch_shape_x = tuple(batch_x.shape[i] for i in range(x_batch_ndim))
+        batch_shape_y = tuple(batch_y.shape[i] for i in range(y_batch_ndim))
+
+        # We use dummy arrays to determine the broadcasted batch shape
+        dummy_bx = alloc(0, *batch_shape_x)
+        dummy_by = alloc(0, *batch_shape_y)
+        common_batch_shape_var = broadcast_shape(dummy_bx, dummy_by)
+
+        # Unpack the shape vector into scalars
+        ndim_batch = max(x_batch_ndim, y_batch_ndim)
+        out_batch_dims = [common_batch_shape_var[i] for i in range(ndim_batch)]
+
+        out_shape = out_batch_dims
         out_shape.extend(batch_x.shape[x_batch_ndim + i] for i in range(x.type.ndim))
 
         batch_x = alloc(batch_x, *out_shape)
 
     # Otherwise we just need to add None slices for every new batch dim
+    x_batch_ndim = batch_x.type.ndim - x.type.ndim
+
     empty_slices = (slice(None),) * x_batch_ndim
+
+    # Check if y is missing core dimensions relative to x[indices]
+    # We use a dummy AdvancedSubtensor to determine the dimensionality of the indexed core x
+    dummy_adv_sub = AdvancedSubtensor(op.idx_list)
+    core_out_ndim = dummy_adv_sub.make_node(x, *idxs).outputs[0].type.ndim
+
+    pad_dims = core_out_ndim - y.type.ndim
+    if pad_dims > 0:
+        batch_y = shape_padright(batch_y, pad_dims)
+
     new_idx_list = empty_slices + op.idx_list
     return AdvancedIncSubtensor(
         new_idx_list,

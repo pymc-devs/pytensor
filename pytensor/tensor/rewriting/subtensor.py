@@ -150,7 +150,7 @@ def transform_take(a, indices, axis):
 
     shape_parts = [sp for sp in shape_parts if len(sp) > 0]
 
-    # assert len(shape_parts) > 0
+    assert len(shape_parts) > 0
 
     if len(shape_parts) > 1:
         shape = pytensor.tensor.concatenate(shape_parts)
@@ -1571,8 +1571,9 @@ def local_uint_constant_indices(fgraph, node):
         props = op._props_dict()
         props["idx_list"] = new_indices
         op = type(op)(**props)
-        # Basic index Ops don't expect slices, but the respective start/step/stop
-        new_indices = get_slice_elements(new_indices)
+
+    # Basic index Ops don't expect slices, but the respective start/step/stop
+    new_indices = get_slice_elements(new_indices)
 
     new_args = (x, *new_indices) if y is None else (x, y, *new_indices)
     new_out = op(*new_args)
@@ -1757,9 +1758,13 @@ def local_blockwise_inc_subtensor(fgraph, node):
             else:
                 new_out = x[new_idxs].inc(y)
     else:
-        # AdvancedIncSubtensor takes symbolic indices/slices directly, no need to create a new op
+        # AdvancedIncSubtensor takes symbolic indices/slices directly
+        # We need to update the idx_list (and expected_inputs_len)
+        new_props = core_op._props_dict()
+        new_props["idx_list"] = x_view.owner.op.idx_list
+        new_core_op = type(core_op)(**new_props)
         symbolic_idxs = x_view.owner.inputs[1:]
-        new_out = core_op(x, y, *symbolic_idxs)
+        new_out = new_core_op(x, y, *symbolic_idxs)
 
     copy_stack_trace(out, new_out)
     return [new_out]
@@ -1979,7 +1984,8 @@ def extract_diag_of_diagonal_set_subtensor(fgraph, node):
     ):
         return None
 
-    x, y, *idxs = diag_x.owner.inputs
+    x, y, *tensor_idxs = diag_x.owner.inputs
+    idxs = list(indices_from_subtensor(tensor_idxs, diag_x.owner.op.idx_list))
 
     if not (
         x.type.ndim >= 2
