@@ -901,17 +901,68 @@ def slice_static_length(slc, dim_length):
     return len(range(*slice(*entries).indices(dim_length)))
 
 
-class Subtensor(COp):
+class BaseSubtensor:
+    """Base class for Subtensor operations that handles idx_list and hash/equality."""
+
+    def __init__(self, idx_list=None):
+        """
+        Initialize BaseSubtensor with index list.
+
+        Parameters
+        ----------
+        idx_list : tuple or list, optional
+            List of indices where slices are stored as-is,
+            and numerical indices are replaced by their types.
+            If None, idx_list will not be set (for operations that don't use it).
+        """
+        if idx_list is not None:
+            self.idx_list = tuple(map(index_vars_to_types, idx_list))
+        else:
+            self.idx_list = None
+
+    def _normalize_idx_list_for_hash(self):
+        """Normalize idx_list for hash and equality comparison."""
+        if self.idx_list is None:
+            return None
+
+        msg = []
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                msg.append((entry.start, entry.stop, entry.step))
+            else:
+                msg.append(entry)
+        return tuple(msg)
+
+    def __hash__(self):
+        """Hash based on idx_list."""
+        idx_list = self._normalize_idx_list_for_hash()
+        return hash((type(self), idx_list))
+
+    def __eq__(self, other):
+        """Equality based on idx_list."""
+        if type(self) is not type(other):
+            return False
+        return (
+            self._normalize_idx_list_for_hash() == other._normalize_idx_list_for_hash()
+        )
+
+
+class Subtensor(BaseSubtensor, COp):
     """Basic NumPy indexing operator."""
 
     check_input = False
     view_map = {0: [0]}
     _f16_ok = True
-    __props__ = ("idx_list",)
+    __props__ = ()
 
     def __init__(self, idx_list):
-        # TODO: Provide the type of `self.idx_list`
-        self.idx_list = tuple(map(index_vars_to_types, idx_list))
+        super().__init__(idx_list)
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        return super().__eq__(other)
 
     def make_node(self, x, *inputs):
         """
@@ -1032,22 +1083,6 @@ class Subtensor(COp):
         rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
-
-    def __hash__(self):
-        msg = []
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                msg += [(entry.start, entry.stop, entry.step)]
-            else:
-                msg += [entry]
-
-        idx_list = tuple(msg)
-        # backport
-        # idx_list = tuple((entry.start, entry.stop, entry.step)
-        #                 if isinstance(entry, slice)
-        #                 else entry
-        #                 for entry in self.idx_list)
-        return hash(idx_list)
 
     @staticmethod
     def str_from_slice(entry):
@@ -1692,7 +1727,7 @@ def inc_subtensor(
         raise TypeError("x must be the result of a subtensor operation")
 
 
-class IncSubtensor(COp):
+class IncSubtensor(BaseSubtensor, COp):
     """
     Increment a subtensor.
 
@@ -1711,7 +1746,7 @@ class IncSubtensor(COp):
     """
 
     check_input = False
-    __props__ = ("idx_list", "inplace", "set_instead_of_inc")
+    __props__ = ("inplace", "set_instead_of_inc")
 
     def __init__(
         self,
@@ -1722,7 +1757,9 @@ class IncSubtensor(COp):
     ):
         if destroyhandler_tolerate_aliased is None:
             destroyhandler_tolerate_aliased = []
-        self.idx_list = list(map(index_vars_to_types, idx_list))
+        super().__init__(idx_list)
+        # Convert to list for compatibility (BaseSubtensor uses tuple)
+        self.idx_list = list(self.idx_list)
         self.inplace = inplace
         if inplace:
             self.destroy_map = {0: [0]}
@@ -1730,11 +1767,17 @@ class IncSubtensor(COp):
         self.set_instead_of_inc = set_instead_of_inc
 
     def __hash__(self):
-        idx_list = tuple(
-            (entry.start, entry.stop, entry.step) if isinstance(entry, slice) else entry
-            for entry in self.idx_list
-        )
+        # Use base class normalization but include additional fields
+        idx_list = self._normalize_idx_list_for_hash()
         return hash((type(self), idx_list, self.inplace, self.set_instead_of_inc))
+
+    def __eq__(self, other):
+        if not super().__eq__(other):
+            return False
+        return (
+            self.inplace == other.inplace
+            and self.set_instead_of_inc == other.set_instead_of_inc
+        )
 
     def __str__(self):
         name = "SetSubtensor" if self.set_instead_of_inc else "IncSubtensor"
@@ -2127,7 +2170,7 @@ def _sum_grad_over_bcasted_dims(x, gx):
     return gx
 
 
-class AdvancedSubtensor1(COp):
+class AdvancedSubtensor1(BaseSubtensor, COp):
     """
     Implement x[ilist] where ilist is a vector of integers.
 
@@ -2140,7 +2183,16 @@ class AdvancedSubtensor1(COp):
     check_input = False
 
     def __init__(self, sparse_grad=False):
+        super().__init__(None)  # AdvancedSubtensor1 doesn't use idx_list
         self.sparse_grad = sparse_grad
+
+    def __hash__(self):
+        return hash((type(self), self.sparse_grad))
+
+    def __eq__(self, other):
+        if not super().__eq__(other):
+            return False
+        return self.sparse_grad == other.sparse_grad
 
     def make_node(self, x, ilist):
         x_ = as_tensor_variable(x)
@@ -2615,10 +2667,10 @@ def check_advanced_indexing_dimensions(input, idx_list):
             dim_seen += 1
 
 
-class AdvancedSubtensor(Op):
+class AdvancedSubtensor(BaseSubtensor, COp):
     """Implements NumPy's advanced indexing."""
 
-    __props__ = ("idx_list",)
+    __props__ = ()
 
     def __init__(self, idx_list):
         """
@@ -2630,6 +2682,7 @@ class AdvancedSubtensor(Op):
             List of indices where slices are stored as-is,
             and numerical indices are replaced by their types.
         """
+        super().__init__(None)  # Initialize base, then set idx_list with allow_advanced
         self.idx_list = tuple(
             index_vars_to_types(idx, allow_advanced=True) for idx in idx_list
         )
@@ -2638,16 +2691,18 @@ class AdvancedSubtensor(Op):
             get_slice_elements(self.idx_list, lambda entry: isinstance(entry, Type))
         )
 
-    def __hash__(self):
-        msg = []
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                msg += [(entry.start, entry.stop, entry.step)]
-            else:
-                msg += [entry]
+    def c_code_cache_version(self):
+        hv = Subtensor.helper_c_code_cache_version()
+        if hv:
+            return (3, hv)
+        else:
+            return ()
 
-        idx_list = tuple(msg)
-        return hash((type(self), idx_list))
+    def __hash__(self):
+        return super().__hash__()
+
+    def __eq__(self, other):
+        return super().__eq__(other)
 
     def make_node(self, x, *inputs):
         """
@@ -3077,10 +3132,10 @@ def vectorize_advanced_subtensor(op: AdvancedSubtensor, node, *batch_inputs):
     return type(op)(new_idx_list).make_node(batch_x, *batch_idxs)
 
 
-class AdvancedIncSubtensor(Op):
+class AdvancedIncSubtensor(BaseSubtensor, Op):
     """Increments a subtensor using advanced indexing."""
 
-    __props__ = ("inplace", "set_instead_of_inc", "ignore_duplicates", "idx_list")
+    __props__ = ("inplace", "set_instead_of_inc", "ignore_duplicates")
 
     def __init__(
         self,
@@ -3089,6 +3144,8 @@ class AdvancedIncSubtensor(Op):
         set_instead_of_inc=False,
         ignore_duplicates=False,
     ):
+        # Initialize base with None, then set idx_list with allow_advanced=True
+        super().__init__(None)
         if idx_list is not None:
             self.idx_list = tuple(
                 index_vars_to_types(idx, allow_advanced=True) for idx in idx_list
@@ -3108,17 +3165,8 @@ class AdvancedIncSubtensor(Op):
         self.ignore_duplicates = ignore_duplicates
 
     def __hash__(self):
-        if self.idx_list is None:
-            idx_list = None
-        else:
-            msg = []
-            for entry in self.idx_list:
-                if isinstance(entry, slice):
-                    msg += [(entry.start, entry.stop, entry.step)]
-                else:
-                    msg += [entry]
-            idx_list = tuple(msg)
-
+        # Use base class normalization but include additional fields
+        idx_list = self._normalize_idx_list_for_hash()
         return hash(
             (
                 type(self),
@@ -3127,6 +3175,15 @@ class AdvancedIncSubtensor(Op):
                 self.set_instead_of_inc,
                 self.ignore_duplicates,
             )
+        )
+
+    def __eq__(self, other):
+        if not super().__eq__(other):
+            return False
+        return (
+            self.inplace == other.inplace
+            and self.set_instead_of_inc == other.set_instead_of_inc
+            and self.ignore_duplicates == other.ignore_duplicates
         )
 
     def __str__(self):
