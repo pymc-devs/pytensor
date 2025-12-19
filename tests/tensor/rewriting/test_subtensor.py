@@ -1786,7 +1786,7 @@ def test_local_uint_constant_indices():
     z_fn = pytensor.function([x], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
-    assert isinstance(subtensor_node.op, AdvancedSubtensor)
+    assert isinstance(subtensor_node.op, (AdvancedSubtensor, AdvancedSubtensor1))
     new_index = subtensor_node.inputs[1]
     assert isinstance(new_index, Constant)
     assert new_index.type.dtype == "uint8"
@@ -1836,7 +1836,10 @@ class TestBlockwiseIncSubtensor:
         y = tensor("y", shape=core_y_shape, dtype=int)
         out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
         fn, ref_fn = self.compile_fn_and_ref([x, y], out)
-        assert self.has_blockwise(ref_fn)
+        if basic_idx:
+            assert self.has_blockwise(ref_fn)
+        else:
+            assert not self.has_blockwise(ref_fn)
         assert not self.has_blockwise(fn)
         test_x = np.ones(x.type.shape, dtype=x.type.dtype)
         test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
@@ -1847,7 +1850,10 @@ class TestBlockwiseIncSubtensor:
         y = tensor("y", shape=(2, *core_y_shape), dtype=int)
         out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
         fn, ref_fn = self.compile_fn_and_ref([x, y], out)
-        assert self.has_blockwise(ref_fn)
+        if basic_idx:
+            assert self.has_blockwise(ref_fn)
+        else:
+            assert not self.has_blockwise(ref_fn)
         assert not self.has_blockwise(fn)
         test_x = np.ones(x.type.shape, dtype=x.type.dtype)
         test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
@@ -1858,7 +1864,10 @@ class TestBlockwiseIncSubtensor:
         y = tensor("y", shape=(2, *core_y_shape), dtype=int)
         out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
         fn, ref_fn = self.compile_fn_and_ref([x, y], out)
-        assert self.has_blockwise(ref_fn)
+        if basic_idx:
+            assert self.has_blockwise(ref_fn)
+        else:
+            assert not self.has_blockwise(ref_fn)
         assert not self.has_blockwise(fn)
         test_x = np.ones(x.type.shape, dtype=x.type.dtype)
         test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
@@ -1869,7 +1878,10 @@ class TestBlockwiseIncSubtensor:
         y = tensor("y", shape=(1, 2, *core_y_shape), dtype=int)
         out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
         fn, ref_fn = self.compile_fn_and_ref([x, y], out)
-        assert self.has_blockwise(ref_fn)
+        if basic_idx:
+            assert self.has_blockwise(ref_fn)
+        else:
+            assert not self.has_blockwise(ref_fn)
         assert not self.has_blockwise(fn)
         test_x = np.ones(x.type.shape, dtype=x.type.dtype)
         test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
@@ -2145,24 +2157,6 @@ def test_ravel_multidimensional_bool_idx_subtensor():
 
     # In the refactored code: new_out = raveled_x[tuple(new_idxs)]
     # if raveled_x[tuple(new_idxs)] returns a view, it might be Subtensor/AdvancedSubtensor
-
-    # Let's check the owner of the output variable
-    owner = out_var.owner
-    # It might be a Reshape? No, for Subtensor case we don't reshape if it was already 1D?
-    # Actually code says:
-    # new_out = AdvancedSubtensor(new_idx_list)(raveled_x, *new_tensor_inputs)
-    # vs
-    # new_out = raveled_x[tuple(new_idxs)]
-
-    # If the result of indexing is 1D (because raveled_x is 1D and new_idxs are 1D),
-    # then new_out is 1D. Original z is 1D.
-    # So maybe no reshape needed?
-
-    # Let's just check execution correctness first as that's easiest
-
-    # Verify execution correctness with the rewritten graph
-    # We need to replace the node in fgraph to compile it properly?
-    # Or just compile a function from the inputs to the NEW output variable.
 
     f = pytensor.function(fgraph.inputs, out_var, on_unused_input="ignore")
 

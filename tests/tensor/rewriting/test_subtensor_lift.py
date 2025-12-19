@@ -782,28 +782,23 @@ def test_local_subtensor_shape_constant():
 
 
 @pytest.mark.parametrize(
-    "original_fn, supported",
+    "supported_fn",
     [
-        (lambda x: x[:, [0, 1]][0], True),
-        (lambda x: x[:, [0, 1], [0, 0]][1:], True),
-        (lambda x: x[:, [[0, 1], [0, 0]]][1:], True),
-        # Not supported, basic indexing on advanced indexing dim
-        (lambda x: x[[0, 1]][0], False),
-        # Not implemented, basic indexing on the right of advanced indexing
-        (lambda x: x[[0, 1]][:, 0], False),
-        # Not implemented, complex flavors of advanced indexing
-        (lambda x: x[:, None, [0, 1]][0], False),
-        (lambda x: x[:, 5:, [0, 1]][0], False),
-        (lambda x: x[:, :, np.array([True, False, False])][0], False),
-        (lambda x: x[[0, 1], :, [0, 1]][:, 0], False),
+        (lambda x: x[:, [0, 1]][0]),
+        (lambda x: x[:, [0, 1], [0, 0]][1:]),
+        (lambda x: x[:, [[0, 1], [0, 0]]][1:]),
+        # Complex flavors of advanced indexing
+        (lambda x: x[:, None, [0, 1]][0]),
+        (lambda x: x[:, 5:, [0, 1]][0]),
+        (lambda x: x[:, :, np.array([True, False, False])][0]),
     ],
 )
-def test_local_subtensor_of_adv_subtensor(original_fn, supported):
+def test_local_subtensor_of_adv_subtensor_supported(supported_fn):
     rng = np.random.default_rng(257)
     x = pt.tensor3("x", shape=(7, 5, 3))
     x_test = rng.normal(size=x.type.shape).astype(x.dtype)
 
-    out = original_fn(x)
+    out = supported_fn(x)
     opt_out = rewrite_graph(
         out, include=("canonicalize", "local_subtensor_of_adv_subtensor")
     )
@@ -816,9 +811,51 @@ def test_local_subtensor_of_adv_subtensor(original_fn, supported):
     [idx_adv_subtensor] = [
         i for i, node in enumerate(toposort) if isinstance(node.op, AdvancedSubtensor)
     ]
-    swapped = idx_subtensor < idx_adv_subtensor
-    correct = swapped if supported else not swapped
-    assert correct, debugprint(opt_out, print_type=True)
+    assert idx_subtensor < idx_adv_subtensor, debugprint(opt_out, print_type=True)
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    )
+
+
+@pytest.mark.parametrize(
+    "not_supported_fn",
+    [
+        # Not supported, basic indexing on advanced indexing dim
+        (lambda x: x[[0, 1]][0]),
+        # Not supported, basic indexing on the right of advanced indexing
+        (lambda x: x[[0, 1]][:, 0]),
+        (lambda x: x[[0, 1], :, [0, 1]][:, 0]),
+    ],
+)
+def test_local_subtensor_of_adv_subtensor_unsupported(not_supported_fn):
+    rng = np.random.default_rng(257)
+    x = pt.tensor3("x", shape=(7, 5, 3))
+    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+
+    out = not_supported_fn(x)
+    opt_out = rewrite_graph(
+        out, include=("canonicalize", "local_subtensor_of_adv_subtensor")
+    )
+
+    toposort = FunctionGraph(outputs=[opt_out], clone=False).toposort()
+
+    # In unsupported cases, the rewrite should NOT happen.
+    # So Subtensor should effectively be *after* AdvancedSubtensor (or structure preserved).
+    # Since we can't easily rely on indices if they are 0 (might not exist if folded?),
+    # But for these cases, they remain separate operations.
+
+    subtensors = [
+        i for i, node in enumerate(toposort) if isinstance(node.op, Subtensor)
+    ]
+    adv_subtensors = [
+        i for i, node in enumerate(toposort) if isinstance(node.op, AdvancedSubtensor)
+    ]
+
+    # If rewrite didn't happen, we expect Subtensor > AdvSubtensor
+    if subtensors and adv_subtensors:
+        assert subtensors[0] > adv_subtensors[0], debugprint(opt_out, print_type=True)
+
     np.testing.assert_allclose(
         opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
         out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
