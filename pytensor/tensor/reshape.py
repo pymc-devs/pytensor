@@ -277,7 +277,7 @@ def split_dims(
     else:
         shape = list(shape)  # type: ignore[arg-type]
 
-    if not shape:
+    if not shape and x.broadcastable[axis]:
         # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
         # example when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes
         # (3, ) and (3, 3) to (3, 4)
@@ -535,12 +535,17 @@ def unpack(
                 "Unpack must have exactly one more dimension that implied by axes"
             ) from err
 
-    split_inputs = split(
-        packed_input,
-        splits_size=[prod(shape, dtype=int) for shape in packed_shapes],
-        n_splits=len(packed_shapes),
-        axis=split_axis,
-    )
+    n_splits = len(packed_shapes)
+    if n_splits == 1:
+        # If there is only one tensor to unpack, no need to split
+        split_inputs = [packed_input]
+    else:
+        split_inputs = split(
+            packed_input,
+            splits_size=[prod(shape, dtype=int) for shape in packed_shapes],
+            n_splits=n_splits,
+            axis=split_axis,
+        )
 
     return [
         split_dims(inp, shape, split_axis)
