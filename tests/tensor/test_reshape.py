@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
+import tests.unittest_tools as utt
 from pytensor import config, function
 from pytensor import tensor as pt
 from pytensor.graph import rewrite_graph, vectorize_graph
@@ -52,6 +53,8 @@ def test_join_dims():
     x_batched_val = rng.normal(size=(10, 3, 5)).astype(config.floatX)
     assert x_joined_batched.eval({x_batched: x_batched_val}).shape == (10, 15)
 
+    utt.verify_grad(lambda x: join_dims(x, axis=(1, 2)), [x_value])
+
 
 @pytest.mark.parametrize(
     "axis, shape, expected_shape",
@@ -76,6 +79,8 @@ def test_split_dims(axis, shape, expected_shape):
 
     x_split_value = fn(x_value)
     np.testing.assert_allclose(x_split_value, x_value.reshape(expected_shape))
+
+    utt.verify_grad(lambda x: split_dims(x, shape=shape, axis=axis), [x_value])
 
     x = pt.tensor("x", shape=(10,))
     x_split = split_dims(x, shape=(5, 2), axis=0)
@@ -115,7 +120,7 @@ def test_make_replacements_with_pack_unpack():
     new_outputs = unpack(new_input, axes=None, packed_shapes=packed_shapes)
 
     loss = pytensor.graph.graph_replace(loss, dict(zip([x, y, z], new_outputs)))
-    rewrite_graph(loss, include=("ShapeOpt", "specialize"))
+    rewrite_graph(loss, include=("ShapeOpt", "canonicalize"))
 
     fn = pytensor.function([new_input], loss, mode="FAST_COMPILE")
 
