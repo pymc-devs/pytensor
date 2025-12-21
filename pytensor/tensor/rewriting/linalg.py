@@ -65,6 +65,32 @@ logger = logging.getLogger(__name__)
 MATRIX_INVERSE_OPS = (MatrixInverse, MatrixPinv)
 
 
+@register_canonicalize
+@node_rewriter([BlockDiagonal])
+def fuse_blockdiagonal(fgraph, node):
+    """Fuse nested BlockDiagonal ops into a single BlockDiagonal."""
+
+    if not isinstance(node.op, BlockDiagonal):
+        return None
+
+    new_inputs = []
+    changed = False
+
+    for inp in node.inputs:
+        if inp.owner and isinstance(inp.owner.op, BlockDiagonal):
+            new_inputs.extend(inp.owner.inputs)
+            changed = True
+        else:
+            new_inputs.append(inp)
+
+    if changed:
+        fused_op = BlockDiagonal(len(new_inputs))
+        new_output = fused_op(*new_inputs)
+        return [new_output]
+
+    return None
+
+
 def is_matrix_transpose(x: TensorVariable) -> bool:
     """Check if a variable corresponds to a transpose of the last two axes"""
     node = x.owner

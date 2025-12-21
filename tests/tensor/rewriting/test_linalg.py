@@ -44,6 +44,71 @@ from tests import unittest_tools as utt
 from tests.test_rop import break_op
 
 
+def test_nested_blockdiag_fusion():
+    x = pt.tensor("x", shape=(3, 3))
+    y = pt.tensor("y", shape=(3, 3))
+    z = pt.tensor("z", shape=(3, 3))
+
+    inner = BlockDiagonal(2)(x, y)
+    outer = BlockDiagonal(2)(inner, z)
+
+    nodes_before = ancestors([outer])
+    initial_count = sum(
+        1
+        for node in nodes_before
+        if getattr(node, "owner", None) and isinstance(node.owner.op, BlockDiagonal)
+    )
+    assert initial_count == 2, "Setup failed: expected 2 nested BlockDiagonal ops"
+
+    f = pytensor.function([x, y, z], outer)
+    fgraph = f.maker.fgraph
+
+    nodes_after = fgraph.apply_nodes
+    fused_nodes = [node for node in nodes_after if isinstance(node.op, BlockDiagonal)]
+    assert len(fused_nodes) == 1, "Nested BlockDiagonal ops were not fused"
+
+    fused_op = fused_nodes[0].op
+
+    assert fused_op.n_inputs == 3, f"Expected n_inputs=3, got {fused_op.n_inputs}"
+
+    out_shape = fgraph.outputs[0].type.shape
+    assert out_shape == (9, 9), f"Unexpected fused output shape: {out_shape}"
+
+
+def test_deeply_nested_blockdiag_fusion():
+    x = pt.tensor("x", shape=(3, 3))
+    y = pt.tensor("y", shape=(3, 3))
+    z = pt.tensor("z", shape=(3, 3))
+    w = pt.tensor("w", shape=(3, 3))
+
+    inner1 = BlockDiagonal(2)(x, y)
+    inner2 = BlockDiagonal(2)(inner1, z)
+    outer = BlockDiagonal(2)(inner2, w)
+
+    f = pytensor.function([x, y, z, w], outer)
+    fgraph = f.maker.fgraph
+
+    fused_nodes = [
+        node for node in fgraph.apply_nodes if isinstance(node.op, BlockDiagonal)
+    ]
+
+    assert len(fused_nodes) == 1, (
+        f"Expected 1 fused BlockDiagonal, got {len(fused_nodes)}"
+    )
+
+    fused_op = fused_nodes[0].op
+
+    assert fused_op.n_inputs == 4, (
+        f"Expected n_inputs=4 after fusion, got {fused_op.n_inputs}"
+    )
+
+    out_shape = fgraph.outputs[0].type.shape
+    expected_shape = (12, 12)  # 4 blocks of (3x3)
+    assert out_shape == expected_shape, (
+        f"Unexpected fused output shape: expected {expected_shape}, got {out_shape}"
+    )
+
+
 def test_matrix_inverse_rop_lop():
     rtol = 1e-7 if config.floatX == "float64" else 1e-5
     mx = matrix("mx")
