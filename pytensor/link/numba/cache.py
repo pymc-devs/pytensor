@@ -11,7 +11,7 @@ from pytensor.configdefaults import config
 
 
 NUMBA_CACHE_PATH = config.base_compiledir / "numba"
-NUMBA_CACHE_PATH.mkdir(exist_ok=True)
+NUMBA_CACHE_PATH.mkdir(parents=True, exist_ok=True)
 CACHED_SRC_FUNCTIONS: WeakKeyDictionary[Callable, str] = WeakKeyDictionary()
 
 
