@@ -117,9 +117,9 @@ def test_make_replacements_with_pack_unpack():
 
     loss = (x + y.sum() + z.sum()) ** 2
 
-    flat_packed, packed_shapes = pack(x, y, z, axes=None)
+    flat_packed, packed_shapes = pack(x, y, z)
     new_input = flat_packed.type()
-    new_outputs = unpack(new_input, axes=None, packed_shapes=packed_shapes)
+    new_outputs = unpack(new_input, packed_shapes=packed_shapes)
 
     loss = pytensor.graph.graph_replace(loss, dict(zip([x, y, z], new_outputs)))
     rewrite_graph(loss, include=("ShapeOpt", "canonicalize"))
@@ -198,7 +198,7 @@ class TestPack:
         }
 
         # Simple case, reduce all axes, equivalent to einops '*'
-        packed_tensor, packed_shapes = pack(x, y, z, axes=None)
+        packed_tensor, packed_shapes = pack(x, y, z)
         assert packed_tensor.type.shape == (15,)
         for tensor, packed_shape in zip([x, y, z], packed_shapes):
             assert packed_shape.type.shape == (tensor.ndim,)
@@ -211,9 +211,9 @@ class TestPack:
         # x is scalar, so pack will raise:
         with pytest.raises(
             ValueError,
-            match=r"Input 0 \(zero indexed\) to pack has 0 dimensions, but axes=0 assumes at least 1 dimension\.",
+            match=r"Input 0 \(zero indexed\) to pack has 0 dimensions, but keep_axes=0 assumes at least 1 dimension\.",
         ):
-            pack(x, y, z, axes=0)
+            pack(x, y, z, keep_axes=0)
 
         # With valid x, pack should still raise, because the axis of concatenation doesn't agree across all inputs
         x = pt.tensor("x", shape=(3,))
@@ -224,13 +224,13 @@ class TestPack:
             match=r"all input array dimensions other than the specified `axis` \(1\) must match exactly, or be unknown "
             r"\(None\), but along dimension 0, the inputs shapes are incompatible: \[3 5 3\]",
         ):
-            packed_tensor, packed_shapes = pack(x, y, z, axes=0)
+            packed_tensor, packed_shapes = pack(x, y, z, keep_axes=0)
             packed_tensor.eval(input_dict)
 
         # Valid case, preserve first axis, equivalent to einops 'i *'
         y = pt.tensor("y", shape=(3, 5))
         z = pt.tensor("z", shape=(3, 3, 3))
-        packed_tensor, packed_shapes = pack(x, y, z, axes=0)
+        packed_tensor, packed_shapes = pack(x, y, z, keep_axes=0)
         input_dict = {
             variable.name: np.zeros(variable.type.shape, dtype=config.floatX)
             for variable in [x, y, z]
@@ -253,10 +253,10 @@ class TestPack:
             ValueError,
             match=r"Positive axes must be contiguous",
         ):
-            pack(x, y, z, axes=[0, 3])
+            pack(x, y, z, keep_axes=[0, 3])
 
         z = pt.tensor("z", shape=(3, 1, 7, 2))
-        packed_tensor, packed_shapes = pack(x, y, z, axes=[0, -1])
+        packed_tensor, packed_shapes = pack(x, y, z, keep_axes=[0, -1])
         input_dict = {
             variable.name: np.zeros(variable.type.shape, dtype=config.floatX)
             for variable in [x, y, z]
@@ -277,8 +277,8 @@ class TestPack:
         y = pt.tensor("y", shape=(3, 3, 5))
         z = pt.tensor("z", shape=(1, 3, 5))
 
-        flat_packed, packed_shapes = pack(x, y, z, axes=axes)
-        new_outputs = unpack(flat_packed, axes=axes, packed_shapes=packed_shapes)
+        flat_packed, packed_shapes = pack(x, y, z, keep_axes=axes)
+        new_outputs = unpack(flat_packed, packed_shapes=packed_shapes, keep_axes=axes)
 
         fn = pytensor.function([x, y, z], new_outputs, mode="FAST_COMPILE")
 
@@ -291,11 +291,17 @@ class TestPack:
         for input_val, output_val in zip(input_dict.values(), output_vals, strict=True):
             np.testing.assert_allclose(input_val, output_val)
 
+    def test_single_input(self):
+        x = pt.matrix("x", shape=(2, 5))
+        packed_x, packed_shapes = pt.pack(x)
+        assert packed_x.type.shape == (10,)
+        [x_again] = unpack(packed_x, packed_shapes)
+        assert x_again.type.shape == (2, 5)
 
-def test_unpack_connection():
-    x = pt.vector("x")
-    d0 = pt.scalar("d0", dtype=int)
-    d1 = pt.scalar("d1", dtype=int)
-    x0, x1 = pt.unpack(x, axes=None, packed_shapes=[d0, d1])
-    out = x0.sum() + x1.sum()
-    assert io_connection_pattern([x, d0, d1], [out]) == [[True], [False], [False]]
+    def test_unpack_connection(self):
+        x = pt.vector("x")
+        d0 = pt.scalar("d0", dtype=int)
+        d1 = pt.scalar("d1", dtype=int)
+        x0, x1 = pt.unpack(x, packed_shapes=[d0, d1])
+        out = x0.sum() + x1.sum()
+        assert io_connection_pattern([x, d0, d1], [out]) == [[True], [False], [False]]
