@@ -41,7 +41,7 @@ def structured_elemwise(tensor_op):
 
 
 @structured_elemwise(ptm.abs)
-def structured_abs(x):
+def abs(x):
     """
     Compute abs(x) for all non-zero elements of x.
     """
@@ -61,31 +61,10 @@ def structured_exp(x):
     """
 
 
-@structured_elemwise(ptm.exp2)
-def structured_exp2(x):
-    """
-    Compute exp2(x) for all non-zero elements of x.
-    """
-
-
 @structured_elemwise(ptm.log)
 def structured_log(x):
     """
     Compute log(x) for all non-zero elements of x.
-    """
-
-
-@structured_elemwise(ptm.log2)
-def structured_log2(x):
-    """
-    Compute log2(x) for all non-zero elements of x.
-    """
-
-
-@structured_elemwise(ptm.log10)
-def structured_log10(x):
-    """
-    Compute log10(x) for all non-zero elements of x.
     """
 
 
@@ -118,161 +97,133 @@ def structured_add(x, y):
 
 
 @structured_elemwise(ptm.sin)
-def structured_sin(x):
+def sin(x):
     """
     Compute sin(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.sinh)
-def structured_sinh(x):
+def sinh(x):
     """
     Compute sinh(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.arcsin)
-def structured_arcsin(x):
+def arcsin(x):
     """
     Compute arcsin(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.arcsinh)
-def structured_arcsinh(x):
+def arcsinh(x):
     """
     Compute arcsinh(x) for all non-zero elements of x.
     """
 
 
-@structured_elemwise(ptm.cos)
-def structured_cos(x):
-    """
-    Compute cos(x) for all non-zero elements of x.
-    """
-
-
-@structured_elemwise(ptm.cosh)
-def structured_cosh(x):
-    """
-    Compute cosh(x) for all non-zero elements of x.
-    """
-
-
-@structured_elemwise(ptm.arccos)
-def structured_arccos(x):
-    """
-    Compute arccos(x) for all non-zero elements of x.
-    """
-
-
-@structured_elemwise(ptm.arccosh)
-def structured_arccosh(x):
-    """
-    Compute arccosh(x) for all non-zero elements of x.
-    """
-
-
 @structured_elemwise(ptm.tan)
-def structured_tan(x):
+def tan(x):
     """
     Compute tan(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.tanh)
-def structured_tanh(x):
+def tanh(x):
     """
     Compute tanh(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.arctan)
-def structured_arctan(x):
+def arctan(x):
     """
     Compute arctan(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.arctanh)
-def structured_arctanh(x):
+def arctanh(x):
     """
     Compute arctanh(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.round_half_to_even)
-def structured_rint(x):
+def rint(x):
     """
     Compute round_half_to_even(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.sign)
-def structured_sign(x):
+def sign(x):
     """
     Compute sign(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.ceil)
-def structured_ceil(x):
+def ceil(x):
     """
     Compute ceil(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.floor)
-def structured_floor(x):
+def floor(x):
     """
     Compute floor(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.log1p)
-def structured_log1p(x):
+def log1p(x):
     """
     Compute log(1 + x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.expm1)
-def structured_expm1(x):
+def expm1(x):
     """
     Compute exp(x) - 1 for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.deg2rad)
-def structured_deg2rad(x):
+def deg2rad(x):
     """
     Convert degrees to radians for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.rad2deg)
-def structured_rad2deg(x):
+def rad2deg(x):
     """
     Convert radians to degrees for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.trunc)
-def structured_trunc(x):
+def trunc(x):
     """
     Truncate the decimal part of x for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.sqr)
-def structured_sqr(x):
+def sqr(x):
     """
     Compute sqr(x) for all non-zero elements of x.
     """
 
 
 @structured_elemwise(ptm.sqrt)
-def structured_sqrt(x):
+def sqrt(x):
     """
     Compute sqrt(x) for all non-zero elements of x.
     """
@@ -292,7 +243,7 @@ def conjugate(x):
     return _conj(_x)
 
 
-structured_conjugate = conjugate
+structured_conjugate = conj = conjugate
 
 
 class SpSum(Op):

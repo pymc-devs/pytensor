@@ -1382,32 +1382,32 @@ StructuredAddTester = elemwise_checker(
     name="StructuredAddTester",
 )
 
-SinTester = elemwise_checker(psm.structured_sin, np.sin)
+SinTester = elemwise_checker(psm.sin, np.sin)
 
-TanTester = elemwise_checker(psm.structured_tan, np.tan, gap=(-1, 1))
+TanTester = elemwise_checker(psm.tan, np.tan, gap=(-1, 1))
 
 ArcsinTester = elemwise_checker(
-    psm.structured_arcsin, np.arcsin, gap=(-1, 1), gap_grad=(-0.99, 0.99)
+    psm.arcsinh, np.arcsin, gap=(-1, 1), gap_grad=(-0.99, 0.99)
 )
 
-ArctanTester = elemwise_checker(psm.structured_arctan, np.arctan)
+ArctanTester = elemwise_checker(psm.arctan, np.arctan)
 
-SinhTester = elemwise_checker(psm.structured_sinh, np.sinh)
+SinhTester = elemwise_checker(psm.sinh, np.sinh)
 
-ArcsinhTester = elemwise_checker(psm.structured_arcsinh, np.arcsinh, gap=(-1, 1))
+ArcsinhTester = elemwise_checker(psm.arcsinh, np.arcsinh, gap=(-1, 1))
 
-TanhTester = elemwise_checker(psm.structured_tanh, np.tanh, gap=(-1, 1))
+TanhTester = elemwise_checker(psm.tanh, np.tanh, gap=(-1, 1))
 
 ArctanhTester = elemwise_checker(
-    psm.structured_arctanh, np.arctanh, gap=(-0.9, 1), gap_grad=(-0.9, 0.95)
+    psm.arctanh, np.arctanh, gap=(-0.9, 1), gap_grad=(-0.9, 0.95)
 )
 
 RintTester = elemwise_checker(
-    psm.structured_rint, np.rint, grad_test=False, test_dtypes=float_dtypes
+    psm.rint, np.rint, grad_test=False, test_dtypes=float_dtypes
 )
 
 SgnTester = elemwise_checker(
-    psm.structured_sign,
+    psm.sign,
     np.sign,
     grad_test=False,
     test_dtypes=[
@@ -1416,46 +1416,46 @@ SgnTester = elemwise_checker(
 )
 
 CeilTester = elemwise_checker(
-    psm.structured_ceil,
+    psm.ceil,
     np.ceil,
     grad_test=False,
     test_dtypes=[m for m in all_dtypes if m not in complex_dtypes],
 )
 
 FloorTester = elemwise_checker(
-    psm.structured_floor,
+    psm.floor,
     np.floor,
     grad_test=False,
     test_dtypes=[m for m in all_dtypes if m not in complex_dtypes],
 )
 
-Log1pTester = elemwise_checker(psm.structured_log1p, np.log1p, gap=(0.5, 10))
+Log1pTester = elemwise_checker(psm.log1p, np.log1p, gap=(0.5, 10))
 
-Expm1Tester = elemwise_checker(psm.structured_expm1, np.expm1)
+Expm1Tester = elemwise_checker(psm.expm1, np.expm1)
 
 Deg2radTester = elemwise_checker(
-    psm.structured_deg2rad,
+    psm.deg2rad,
     np.deg2rad,
     test_dtypes=[m for m in all_dtypes if m not in complex_dtypes],
 )
 
 Rad2degTester = elemwise_checker(
-    psm.structured_rad2deg,
+    psm.rad2deg,
     np.rad2deg,
     test_dtypes=[m for m in all_dtypes if m not in complex_dtypes],
 )
 
 
 TruncTester = elemwise_checker(
-    psm.structured_trunc,
+    psm.trunc,
     np.trunc,
     test_dtypes=[m for m in all_dtypes if m not in complex_dtypes],
     grad_test=False,
 )
 
 
-SqrTester = elemwise_checker(psm.structured_sqr, lambda x: x * x)
+SqrTester = elemwise_checker(psm.sqr, lambda x: x * x)
 
-SqrtTester = elemwise_checker(psm.structured_sqrt, np.sqrt, gap=(0, 10))
+SqrtTester = elemwise_checker(psm.sqrt, np.sqrt, gap=(0, 10))
 
-ConjTester = elemwise_checker(psm.structured_conjugate, np.conj, grad_test=False)
+ConjTester = elemwise_checker(psm.conjugate, np.conj, grad_test=False)
