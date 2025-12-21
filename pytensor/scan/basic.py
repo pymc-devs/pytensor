@@ -661,7 +661,7 @@ def scan(
     else:
         actual_n_steps = pt.as_tensor(n_steps, dtype="int64", ndim=0)
 
-    # Since we've added all sequences now we need to level them up based on
+    # Since we've added all sequences now we need to level them off based on
     # n_steps or their different shapes
     scan_seqs = [seq[:actual_n_steps] for seq in scan_seqs]
 
@@ -1212,8 +1212,8 @@ def scan(
     rightOrder = (
         mit_sot_rightOrder
         + sit_sot_rightOrder
-        + untraced_sit_sot_rightOrder
         + nit_sot_rightOrder
+        + untraced_sit_sot_rightOrder
     )
     scan_out_list = [None] * len(rightOrder)
     for idx, pos in enumerate(rightOrder):

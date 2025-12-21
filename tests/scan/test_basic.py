@@ -4470,3 +4470,49 @@ class ScanCompatibilityTests:
         f_infershape = function([seq, init], out_seq_tm4[1].shape)
         scan_nodes_infershape = scan_nodes_from_fct(f_infershape)
         assert len(scan_nodes_infershape) == 0
+
+
+@pytest.mark.parametrize("single_step", (True, False))
+def test_scan_mapped_and_non_traced_output_ordering(single_step):
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/1796
+
+    rng = random_generator_type("rng")
+
+    def x_then_rng(rng):
+        next_rng, x = pt.random.normal(rng=rng).owner.outputs
+        return x, next_rng
+
+    xs, final_rng = scan(
+        fn=x_then_rng,
+        outputs_info=[None, rng],
+        n_steps=1 if single_step else 5,
+        return_updates=False,
+    )
+    assert isinstance(xs.type, TensorType)
+    assert isinstance(final_rng.type, RandomGeneratorType)
+
+    def rng_then_x(rng):
+        x, next_rng = x_then_rng(rng)
+        return next_rng, x
+
+    final_rng, xs = scan(
+        fn=rng_then_x,
+        outputs_info=[rng, None],
+        n_steps=1 if single_step else 5,
+        return_updates=False,
+    )
+    assert isinstance(xs.type, TensorType)
+    assert isinstance(final_rng.type, RandomGeneratorType)
+
+    def rng_between_xs(rng):
+        x, next_rng = x_then_rng(rng)
+        return x, next_rng, x + 1, x + 2
+
+    xs1, final_rng, xs2, xs3 = scan(
+        fn=rng_between_xs,
+        outputs_info=[None, rng, None, None],
+        n_steps=1 if single_step else 5,
+        return_updates=False,
+    )
+    assert all(isinstance(xs.type, TensorType) for xs in (xs1, xs2, xs3))
+    assert isinstance(final_rng.type, RandomGeneratorType)
