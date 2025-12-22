@@ -117,11 +117,13 @@ class Convolve1d(AbstractConvolveNd, COp):  # type: ignore[misc]
     __props__ = ()
     ndim = 1
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         # We use numpy_convolve as that's what scipy would use if method="direct" was passed.
         # And mode != "same", which this Op doesn't cover anyway.
         in1, in2, full_mode = inputs
-        outputs[0][0] = numpy_convolve(in1, in2, mode="full" if full_mode else "valid")
+        output_storage[0][0] = numpy_convolve(
+            in1, in2, mode="full" if full_mode else "valid"
+        )
 
     def c_code_cache_version(self):
         return (2,)
@@ -252,7 +254,7 @@ class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
     def __init__(self, method: Literal["direct", "fft", "auto"] = "auto"):
         self.method = method
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         in1, in2, full_mode = inputs
 
         if isinstance(full_mode, np.bool):
@@ -260,7 +262,7 @@ class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
             # Conditional, because numba will produce a bool, not np.bool_
             full_mode = full_mode.item()
         mode = "full" if full_mode else "valid"
-        outputs[0][0] = scipy_convolve(in1, in2, mode=mode, method=self.method)
+        output_storage[0][0] = scipy_convolve(in1, in2, mode=mode, method=self.method)
 
 
 def convolve2d(

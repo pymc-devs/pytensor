@@ -297,15 +297,15 @@ class TestVerifyGradSparse:
             x = as_sparse_variable(x)
             return Apply(self, [x], [x.type()])
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             (x,) = inputs
-            (out,) = outputs
+            (out,) = output_storage
             assert _is_sparse(x)
             out[0] = -x
 
-        def grad(self, inputs, gout):
+        def grad(self, inputs, output_grads):
             (x,) = inputs
-            (gz,) = gout
+            (gz,) = output_grads
             assert _is_sparse_variable(x) and _is_sparse_variable(gz)
             if self.structured:
                 return (sp_ones_like(x) * dense_from_sparse(gz),)

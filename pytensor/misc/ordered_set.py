@@ -11,8 +11,8 @@ class OrderedSet(MutableSet):
         else:
             self.values = dict.fromkeys(iterable)
 
-    def __contains__(self, value) -> bool:
-        return value in self.values
+    def __contains__(self, x) -> bool:
+        return x in self.values
 
     def __iter__(self) -> Iterator:
         yield from self.values

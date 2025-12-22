@@ -409,7 +409,7 @@ class Blockwise(COp):
 
         return [[True for _ in node.outputs] for _ in node.inputs]
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         batch_ndim = self.batch_ndim(outputs[0].owner)
 
         # Obtain core_op gradients
@@ -429,7 +429,7 @@ class Blockwise(COp):
                 if isinstance(output_grad.type, NullType | DisconnectedType)
                 else core_output.type()
                 for output_grad, core_output in zip(
-                    output_gradients, core_outputs, strict=True
+                    output_grads, core_outputs, strict=True
                 )
             ]
 
@@ -444,7 +444,7 @@ class Blockwise(COp):
                 replace=dict(
                     zip(
                         core_inputs + core_outputs + core_output_gradients,
-                        inputs + outputs + output_gradients,
+                        inputs + outputs + output_grads,
                         strict=True,
                     )
                 ),

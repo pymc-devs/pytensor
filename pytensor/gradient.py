@@ -2316,8 +2316,8 @@ def _is_zero(x):
 
 
 class ZeroGrad(ViewOp):
-    def grad(self, args, g_outs):
-        return [g_out.zeros_like() for g_out in g_outs]
+    def grad(self, inputs, output_grads):
+        return [g_out.zeros_like() for g_out in output_grads]
 
     def R_op(self, inputs, eval_points):
         if eval_points[0] is None:
@@ -2354,8 +2354,8 @@ def zero_grad(x):
 
 
 class UndefinedGrad(ViewOp):
-    def grad(self, args, g_outs):
-        return [grad_undefined(self, i, arg) for i, arg in enumerate(args)]
+    def grad(self, inputs, output_grads):
+        return [grad_undefined(self, i, arg) for i, arg in enumerate(inputs)]
 
     def R_op(self, inputs, eval_points):
         return [None]
@@ -2392,8 +2392,8 @@ def undefined_grad(x):
 
 
 class DisconnectedGrad(ViewOp):
-    def grad(self, args, g_outs):
-        return [disconnected_type() for g_out in g_outs]
+    def grad(self, inputs, output_grads):
+        return [disconnected_type() for g_out in output_grads]
 
     def R_op(self, inputs, eval_points):
         return [None]
@@ -2447,10 +2447,10 @@ class GradClip(ViewOp):
         if not self.clip_upper_bound >= self.clip_lower_bound:
             raise ValueError("`clip_upper_bound` should be >= `clip_lower_bound`")
 
-    def grad(self, args, g_outs):
+    def grad(self, inputs, output_grads):
         return [
             pytensor.tensor.clip(g_out, self.clip_lower_bound, self.clip_upper_bound)
-            for g_out in g_outs
+            for g_out in output_grads
         ]
 
 
@@ -2490,8 +2490,8 @@ class GradScale(ViewOp):
     def __init__(self, multiplier):
         self.multiplier = multiplier
 
-    def grad(self, args, g_outs):
-        return [self.multiplier * g_out for g_out in g_outs]
+    def grad(self, inputs, output_grads):
+        return [self.multiplier * g_out for g_out in output_grads]
 
 
 def grad_scale(x, multiplier):

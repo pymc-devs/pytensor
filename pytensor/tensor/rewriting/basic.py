@@ -34,7 +34,6 @@ from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
-    Rewriter,
     copy_stack_trace,
     dfs_rewriter,
     in2out,
@@ -158,7 +157,7 @@ def register_useless(
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: RewriteDatabase | Rewriter):
+        def register(inner_rewriter: RewriteDatabase | NodeRewriter):
             return register_useless(inner_rewriter, node_rewriter, *tags, **kwargs)
 
         return register
@@ -176,7 +175,7 @@ def register_canonicalize(
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: RewriteDatabase | Rewriter):
+        def register(inner_rewriter: RewriteDatabase | NodeRewriter):
             return register_canonicalize(inner_rewriter, node_rewriter, *tags, **kwargs)
 
         return register
@@ -193,7 +192,7 @@ def register_stabilize(
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: RewriteDatabase | Rewriter):
+        def register(inner_rewriter: RewriteDatabase | NodeRewriter):
             return register_stabilize(inner_rewriter, node_rewriter, *tags, **kwargs)
 
         return register
@@ -210,7 +209,7 @@ def register_specialize(
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: RewriteDatabase | Rewriter):
+        def register(inner_rewriter: RewriteDatabase | NodeRewriter):
             return register_specialize(inner_rewriter, node_rewriter, *tags, **kwargs)
 
         return register
@@ -227,7 +226,7 @@ def register_uncanonicalize(
 ):
     if isinstance(node_rewriter, str):
 
-        def register(inner_rewriter: RewriteDatabase | Rewriter):
+        def register(inner_rewriter: RewriteDatabase | NodeRewriter):
             return register_uncanonicalize(
                 inner_rewriter, node_rewriter, *tags, **kwargs
             )

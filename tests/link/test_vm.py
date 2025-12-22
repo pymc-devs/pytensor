@@ -22,7 +22,7 @@ from tests import unittest_tools as utt
 
 
 class SomeOp(Op):
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         pass
 
     def make_node(self, x):
@@ -298,10 +298,10 @@ class RunOnce(Op):
     def make_node(self, x):
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         assert self.nb_run == 0
         self.nb_run += 1
-        outputs[0][0] = inputs[0].copy()
+        output_storage[0][0] = inputs[0].copy()
 
 
 def test_vm_gc():
@@ -406,7 +406,7 @@ def test_VMLinker_make_vm_no_cvm():
 
 def test_VMLinker_exception():
     class BadOp(Op):
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             pass
 
         def make_node(self, x):

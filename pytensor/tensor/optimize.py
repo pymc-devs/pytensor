@@ -393,7 +393,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
     def __str__(self):
         return f"{self.__class__.__name__}(method={self.method})"
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         global optimize
         if optimize is None:
             import scipy.optimize as optimize
@@ -412,8 +412,8 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
             **self.optimizer_kwargs,
         )
 
-        outputs[0][0] = np.array(res.x, dtype=x0.dtype)
-        outputs[1][0] = np.bool_(res.success)
+        output_storage[0][0] = np.array(res.x, dtype=x0.dtype)
+        output_storage[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs
@@ -554,7 +554,7 @@ class MinimizeOp(ScipyVectorWrapperOp):
         )
         return f"{self.__class__.__name__}({str_args})"
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         global optimize
         if optimize is None:
             import scipy.optimize as optimize
@@ -574,8 +574,8 @@ class MinimizeOp(ScipyVectorWrapperOp):
 
         f.clear_cache()
 
-        outputs[0][0] = res.x.reshape(x0.shape).astype(x0.dtype)
-        outputs[1][0] = np.bool_(res.success)
+        output_storage[0][0] = res.x.reshape(x0.shape).astype(x0.dtype)
+        output_storage[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs
@@ -732,7 +732,7 @@ class RootScalarOp(ScipyScalarWrapperOp):
         )
         return f"{self.__class__.__name__}({str_args})"
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         global optimize
         if optimize is None:
             import scipy.optimize as optimize
@@ -753,8 +753,8 @@ class RootScalarOp(ScipyScalarWrapperOp):
             **self.optimizer_kwargs,
         )
 
-        outputs[0][0] = np.array(res.root)
-        outputs[1][0] = np.bool_(res.converged)
+        output_storage[0][0] = np.array(res.root)
+        output_storage[1][0] = np.bool_(res.converged)
 
     def L_op(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs
@@ -922,7 +922,7 @@ class RootOp(ScipyVectorWrapperOp):
 
         self._fn_wrapped = LRUCache1(fn)
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         global optimize
         if optimize is None:
             import scipy.optimize as optimize
@@ -944,8 +944,8 @@ class RootOp(ScipyVectorWrapperOp):
 
         # There's a reshape here to cover the case where variables is a scalar. Scipy will still return a
         # (1, 1) matrix in in this case, which causes errors downstream (since pytensor expects a scalar).
-        outputs[0][0] = res.x.reshape(variables.shape).astype(variables.dtype)
-        outputs[1][0] = np.bool_(res.success)
+        output_storage[0][0] = res.x.reshape(variables.shape).astype(variables.dtype)
+        output_storage[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs

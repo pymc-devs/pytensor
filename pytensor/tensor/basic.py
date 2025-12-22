@@ -621,17 +621,17 @@ class TensorFromScalar(COp):
 
         return Apply(self, [s], [tensor(dtype=s.type.dtype, shape=())])
 
-    def perform(self, node, inp, out_):
-        (s,) = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (s,) = inputs
+        (out,) = output_storage
         out[0] = np.asarray(s)
 
     def infer_shape(self, fgraph, node, in_shapes):
         return [()]
 
-    def grad(self, inp, grads):
-        (s,) = inp
-        (dt,) = grads
+    def grad(self, inputs, output_grads):
+        (s,) = inputs
+        (dt,) = output_grads
         if s.type.dtype in float_dtypes:
             assert dt.type.dtype in float_dtypes
             return [scalar_from_tensor(dt)]
@@ -690,9 +690,9 @@ class ScalarFromTensor(COp):
     def infer_shape(self, fgraph, node, in_shapes):
         return [()]
 
-    def grad(self, inp, grads):
-        (_s,) = inp
-        (dt,) = grads
+    def grad(self, inputs, output_grads):
+        (_s,) = inputs
+        (dt,) = output_grads
         return [tensor_from_scalar(dt)]
 
     def R_op(self, inputs, eval_points):
@@ -976,15 +976,15 @@ class Nonzero(Op):
         output = [TensorType(dtype="int64", shape=(None,))() for i in range(a.ndim)]
         return Apply(self, [a], output)
 
-    def perform(self, node, inp, out_):
-        a = inp[0]
+    def perform(self, node, inputs, output_storage):
+        a = inputs[0]
 
         result_tuple = np.nonzero(a)
         for i, res in enumerate(result_tuple):
-            out_[i][0] = res.astype("int64")
+            output_storage[i][0] = res.astype("int64")
 
-    def grad(self, inp, grads):
-        return [grad_undefined(self, 0, inp[0])]
+    def grad(self, inputs, output_grads):
+        return [grad_undefined(self, 0, inputs[0])]
 
 
 _nonzero = Nonzero()
@@ -1108,17 +1108,17 @@ class Tri(Op):
             [TensorType(dtype=self.dtype, shape=(None, None))()],
         )
 
-    def perform(self, node, inp, out_):
-        N, M, k = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        N, M, k = inputs
+        (out,) = output_storage
         out[0] = np.tri(N, M, k, dtype=self.dtype)
 
     def infer_shape(self, fgraph, node, in_shapes):
         out_shape = [node.inputs[0], node.inputs[1]]
         return [out_shape]
 
-    def grad(self, inp, grads):
-        return [grad_undefined(self, i, inp[i]) for i in range(3)]
+    def grad(self, inputs, output_grads):
+        return [grad_undefined(self, i, inputs[i]) for i in range(3)]
 
 
 def tri(N, M=None, k=0, dtype=None):
@@ -1394,17 +1394,17 @@ class Eye(Op):
             [TensorType(dtype=self.dtype, shape=static_shape)()],
         )
 
-    def perform(self, node, inp, out_):
-        n, m, k = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        n, m, k = inputs
+        (out,) = output_storage
         out[0] = np.eye(n, m, k, dtype=self.dtype)
 
     def infer_shape(self, fgraph, node, in_shapes):
         out_shape = [node.inputs[0], node.inputs[1]]
         return [out_shape]
 
-    def grad(self, inp, grads):
-        return [grad_undefined(self, i, inp[i]) for i in range(3)]
+    def grad(self, inputs, output_grads):
+        return [grad_undefined(self, i, inputs[i]) for i in range(3)]
 
     @staticmethod
     def is_offset_zero(node) -> bool:
@@ -1649,8 +1649,8 @@ class Alloc(COp):
             and (x.unique_value == 0)
         )
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         v = inputs[0]
         sh = tuple(int(i) for i in inputs[1:])
         self._check_runtime_broadcast(node, v, sh)
@@ -1665,9 +1665,9 @@ class Alloc(COp):
             # reuse the allocated memory.
             out[0][...] = v  # broadcast v to fill us up
 
-    def c_code(self, node, name, inp, out, sub):
-        vv = inp[0]
-        (zz,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        vv = inputs[0]
+        (zz,) = outputs
         fail = sub["fail"]
 
         v_static_shape = node.inputs[0].type.shape
@@ -1675,7 +1675,7 @@ class Alloc(COp):
         v_ndim = len(v_static_shape)
         o_ndim = len(o_static_shape)
         is_zero = self.value_is_scalar_zero(node.inputs[0])
-        assert o_ndim == len(inp[1:])
+        assert o_ndim == len(inputs[1:])
 
         # Declare variables
         code = f"""
@@ -1684,7 +1684,7 @@ class Alloc(COp):
             """
 
         # Initialize shape
-        for i, shp_i in enumerate(inp[1:]):
+        for i, shp_i in enumerate(inputs[1:]):
             code += f"""
                 shape[{i}] = ((dtype_{shp_i}*) PyArray_DATA({shp_i}))[0];
             """
@@ -1736,9 +1736,9 @@ class Alloc(COp):
 
         return rval
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         x = inputs[0]
-        gz = grads[0]
+        gz = output_grads[0]
         n_axes_to_sum = gz.ndim - x.ndim
         # The number of dimensions added
         axis = list(range(n_axes_to_sum))
@@ -1749,7 +1749,7 @@ class Alloc(COp):
             zip(
                 inputs[0].type.shape,
                 # We need the dimensions corresponding to x
-                grads[0].type.shape[-inputs[0].ndim :],
+                output_grads[0].type.shape[-inputs[0].ndim :],
                 strict=False,
             )
         ):
@@ -1912,8 +1912,8 @@ class MakeVector(COp):
         otype = TensorType(dtype, shape=(len(inputs),))
         return Apply(self, inputs, [otype()])
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         # not calling pytensor._asarray as optimization
         if (out[0] is None) or (out[0].size != len(inputs)):
             out[0] = np.asarray(inputs, dtype=node.outputs[0].dtype)
@@ -1924,19 +1924,19 @@ class MakeVector(COp):
     def c_code_cache_version(self):
         return (2,)
 
-    def c_code(self, node, name, inp, out_, props):
-        (out,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        (out,) = outputs
         # Shouldn't use PyArray_TYPE(inp[0]) for the dtype
         # when len(inp) == 0 (we need to support this case.
         # So there will be (1 * nb_dtype) + ((nb len(inp) - 1 ))
         # different c code with the following algo
-        out_shape = len(inp)
+        out_shape = len(inputs)
         out_num = np.dtype(node.outputs[0].dtype).num
         # don't use dtype_%(out)s as when check_input=False, it isn't defined.
         out_dtype = node.outputs[0].type.dtype_specs()[1]
-        if len(inp) > 0:
+        if len(inputs) > 0:
             assert self.dtype == node.inputs[0].dtype
-            out_num = f"PyArray_TYPE({inp[0]})"
+            out_num = f"PyArray_TYPE({inputs[0]})"
 
         ret = f"""
         npy_intp dims[1];
@@ -1946,7 +1946,7 @@ class MakeVector(COp):
             {out} = (PyArrayObject*)PyArray_EMPTY(1, dims, {out_num}, 0);
         }}
         """
-        for idx, i in enumerate(inp):
+        for idx, i in enumerate(inputs):
             ret += f"""
             *(({out_dtype} *)PyArray_GETPTR1({out}, {idx})) = *(({out_dtype} *) PyArray_DATA({i}));
             """
@@ -1955,12 +1955,12 @@ class MakeVector(COp):
     def infer_shape(self, fgraph, node, ishapes):
         return [(len(ishapes),)]
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         # If the output is of an integer dtype, no gradient shall pass
         if self.dtype in discrete_dtypes:
             return [ipt.zeros_like(dtype=config.floatX) for ipt in inputs]
 
-        grads = [output_gradients[0][i] for i in range(len(inputs))]
+        grads = [output_grads[0][i] for i in range(len(inputs))]
         return grads
 
     def R_op(self, inputs, eval_points):
@@ -1973,12 +1973,12 @@ make_vector = MakeVector()
 
 
 class MakeVectorPrinter(Printer):
-    def process(self, r, pstate):
-        if r.owner is None:
+    def process(self, var, pstate):
+        if var.owner is None:
             raise TypeError("Can only print make_vector.")
-        elif isinstance(r.owner.op, MakeVector):
+        elif isinstance(var.owner.op, MakeVector):
             with set_precedence(pstate):
-                s = [pstate.pprinter.process(inp) for inp in r.owner.inputs]
+                s = [pstate.pprinter.process(inp) for inp in var.owner.inputs]
             return f"[{', '.join(s)}]"
         else:
             raise TypeError("Can only print make_vector.")
@@ -2072,9 +2072,9 @@ class Default(Op):
             raise TypeError("Both arguments must have compatible types")
         return Apply(self, [x, default], [default.type()])
 
-    def perform(self, node, inp, out_):
-        x, default = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        x, default = inputs
+        (out,) = output_storage
         if x is None:
             # why copy?  PyTensor can't yet understand out[0] being a view of
             # either x or y, so we can be a view of x, but only a copy of y.
@@ -2257,7 +2257,7 @@ class Split(COp):
 
         return Apply(self, inputs, outputs)
 
-    def perform(self, node, inputs, outputs_storage):
+    def perform(self, node, inputs, output_storage):
         x, axis, splits = inputs
 
         if len(splits) != self.len_splits:
@@ -2270,7 +2270,7 @@ class Split(COp):
             raise ValueError("Split sizes cannot be negative")
 
         split_outs = np.split(x, np.cumsum(splits[:-1]), axis=axis)
-        for out_storage, out in zip(outputs_storage, split_outs, strict=False):
+        for out_storage, out in zip(output_storage, split_outs, strict=False):
             out_storage[0] = out
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -2285,12 +2285,12 @@ class Split(COp):
             out_shapes.append(temp)
         return out_shapes
 
-    def L_op(self, inputs, outputs, g_outputs):
+    def L_op(self, inputs, outputs, output_grads):
         """Join the gradients along the axis that was used to split x."""
         _x, axis, n = inputs
 
         # If all the output gradients are disconnected, then so are the inputs
-        if builtins.all(isinstance(g.type, DisconnectedType) for g in g_outputs):
+        if builtins.all(isinstance(g.type, DisconnectedType) for g in output_grads):
             return [
                 DisconnectedType()(),
                 grad_undefined(self, 1, axis),
@@ -2298,7 +2298,7 @@ class Split(COp):
             ]
         # Else, we have to make them zeros before joining them
         new_g_outputs = []
-        for o, g in zip(outputs, g_outputs, strict=True):
+        for o, g in zip(outputs, output_grads, strict=True):
             if isinstance(g.type, DisconnectedType):
                 new_g_outputs.append(o.zeros_like())
             else:
@@ -2692,11 +2692,11 @@ class Join(COp):
             return [None]
         return self.make_node(inputs[0], *eval_points[1:]).outputs
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         """The gradient wrt a join op is a `Split`, used to partition
         the gradient along the `axis` which was used for joining.
         """
-        [gz] = grads
+        [gz] = output_grads
         [out] = outputs
         axis, *tensors = inputs
 
@@ -3334,9 +3334,9 @@ class ARange(COp):
             start.item(), stop.item(), step.item(), dtype=self.dtype
         )
 
-    def c_code(self, node, nodename, input_names, output_names, sub):
-        [start_name, stop_name, step_name] = input_names
-        [out_name] = output_names
+    def c_code(self, node, name, inputs, outputs, sub):
+        [start_name, stop_name, step_name] = inputs
+        [out_name] = outputs
         typenum = np.dtype(self.dtype).num
         return f"""
             double start = ((dtype_{start_name}*)PyArray_DATA({start_name}))[0];
@@ -3356,9 +3356,9 @@ class ARange(COp):
     def connection_pattern(self, node):
         return [[True], [False], [True]]
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         start, _stop, step = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         # `start` and `step` affect the output values
         # but the outputs are integers so there's
         # no gradient through them.
@@ -3633,9 +3633,9 @@ class PermuteRowElements(Op):
             else:
                 raise ValueError(f"Dimension mismatch: {xs0}, {ys0}")
 
-    def perform(self, node, inp, out):
-        x, y = inp
-        (outs,) = out
+    def perform(self, node, inputs, output_storage):
+        x, y = inputs
+        (outs,) = output_storage
         x_s = x.shape
         y_s = y.shape
         assert len(x_s) == len(y_s)
@@ -3668,11 +3668,11 @@ class PermuteRowElements(Op):
         out_shape = [maximum(sx, sy) for sx, sy in zip(shp_x, shp_y, strict=True)]
         return [out_shape]
 
-    def grad(self, inp, grads):
+    def grad(self, inputs, output_grads):
         from pytensor.tensor.math import Sum
 
-        x, y = inp
-        (gz,) = grads
+        x, y = inputs
+        (gz,) = output_grads
         # First, compute the gradient wrt the broadcasted x.
         # If 'inverse' is False (0), apply the inverse of y on gz.
         # Else, apply y on gz.
@@ -3858,9 +3858,9 @@ class ExtractDiag(COp):
             out = out.copy()
         output_storage[0][0] = out
 
-    def c_code(self, node, nodename, input_names, output_names, sub):
-        [x_name] = input_names
-        [out_name] = output_names
+    def c_code(self, node, name, inputs, outputs, sub):
+        [x_name] = inputs
+        [out_name] = outputs
         return f"""
         Py_XDECREF({out_name});
 
@@ -3886,12 +3886,12 @@ class ExtractDiag(COp):
     def c_code_cache_version(self):
         return (0,)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         # Avoid circular import
         from pytensor.tensor.subtensor import set_subtensor
 
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
 
         axis1, axis2, offset = self.axis1, self.axis2, self.offset
 
@@ -4305,8 +4305,8 @@ class Choose(Op):
         o = TensorType(choice.dtype, shape=static_out_shape)
         return Apply(self, [a, choice], [o()])
 
-    def perform(self, node, inputs, outputs):
-        (z,) = outputs
+    def perform(self, node, inputs, output_storage):
+        (z,) = output_storage
         a = inputs[0]
         choice = inputs[1]
         # TODO reuse out?
@@ -4352,14 +4352,14 @@ class AllocEmpty(COp):
         self.perform(node, inputs, out_)
         out_[0][0].fill(-123456789)
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         sh = tuple(int(i) for i in inputs)
         if out[0] is None or out[0].shape != sh:
             out[0] = np.empty(sh, dtype=self.dtype)
 
-    def c_code(self, node, name, inputs, out_, sub):
-        (out,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        (out,) = outputs
         fail = sub["fail"]
         shps = inputs
         nd = len(shps)
@@ -4403,7 +4403,7 @@ class AllocEmpty(COp):
     def connection_pattern(self, node):
         return [[False] for i in node.inputs]
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         return [DisconnectedType()() for i in inputs]
 
     def R_op(self, inputs, eval_points):

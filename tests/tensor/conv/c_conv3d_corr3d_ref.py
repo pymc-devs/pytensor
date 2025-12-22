@@ -208,7 +208,7 @@ class BaseCorr3dMM(OpenMPOp, _NoPythonOp):
         # raise this whenever modifying any of the support_code_files
         return (8, self.openmp, blas_header_version())
 
-    def c_support_code_apply(self, node, nodename):
+    def c_support_code_apply(self, node, name):
         # REMEMBER TO RAISE c_code_cache_version when changing any of
         # these files
         sub = {}
@@ -631,14 +631,14 @@ class Corr3dMM(BaseCorr3dMM):
         )
         return [res]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        bottom, weights = inp
-        (top,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        bottom, weights = inputs
+        (top,) = outputs
         return super().c_code_helper(bottom, weights, top, sub)
 
-    def grad(self, inp, grads):
-        bottom, weights = inp
-        (top,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, weights = inputs
+        (top,) = output_grads
         d_bottom = Corr3dMMGradInputs(
             self.border_mode,
             self.subsample,
@@ -744,15 +744,15 @@ class Corr3dMMGradWeights(BaseCorr3dMM):
             kD = imshp[2] + 2 * padD - (topshp[2] - 1) * dD
         return [(nkern, ssize, kH, kW, kD)]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        bottom, top = inp[:2]
-        height, width, depth = inp[2:] or (None, None, None)
-        (weights,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        bottom, top = inputs[:2]
+        height, width, depth = inputs[2:] or (None, None, None)
+        (weights,) = outputs
         return super().c_code_helper(bottom, weights, top, sub, height, width, depth)
 
-    def grad(self, inp, grads):
-        bottom, top = inp[:2]
-        (weights,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, top = inputs[:2]
+        (weights,) = output_grads
         d_bottom = Corr3dMMGradInputs(
             self.border_mode,
             self.subsample,
@@ -766,7 +766,7 @@ class Corr3dMMGradWeights(BaseCorr3dMM):
             num_groups=self.num_groups,
         )(bottom, weights)
         d_height_width_depth = (
-            (pytensor.gradient.DisconnectedType()(),) * 3 if len(inp) == 5 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 3 if len(inputs) == 5 else ()
         )
         return (d_bottom, d_top, *d_height_width_depth)
 
@@ -884,15 +884,15 @@ class Corr3dMMGradInputs(BaseCorr3dMM):
         out_shp = (out_shp0, out_shp1, out_shp2)
         return [(bsize, ssize, *out_shp)]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        weights, top = inp[:2]
-        height, width, depth = inp[2:] or (None, None, None)
-        (bottom,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        weights, top = inputs[:2]
+        height, width, depth = inputs[2:] or (None, None, None)
+        (bottom,) = outputs
         return super().c_code_helper(bottom, weights, top, sub, height, width, depth)
 
-    def grad(self, inp, grads):
-        weights, top = inp[:2]
-        (bottom,) = grads
+    def grad(self, inputs, output_grads):
+        weights, top = inputs[:2]
+        (bottom,) = output_grads
         d_weights = Corr3dMMGradWeights(
             self.border_mode,
             self.subsample,
@@ -906,7 +906,7 @@ class Corr3dMMGradInputs(BaseCorr3dMM):
             num_groups=self.num_groups,
         )(bottom, weights)
         d_height_width_depth = (
-            (pytensor.gradient.DisconnectedType()(),) * 3 if len(inp) == 5 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 3 if len(inputs) == 5 else ()
         )
         return (d_weights, d_top, *d_height_width_depth)
 

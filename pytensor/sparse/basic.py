@@ -300,17 +300,17 @@ class CSMProperties(Op):
         data = TensorType(dtype=csm.type.dtype, shape=(None,))()
         return Apply(self, [csm], [data, ivector(), ivector(), ivector()])
 
-    def perform(self, node, inputs, out):
+    def perform(self, node, inputs, output_storage):
         (csm,) = inputs
-        out[0][0] = csm.data
+        output_storage[0][0] = csm.data
         if str(csm.data.dtype) == "int32":
-            out[0][0] = np.asarray(out[0][0], dtype="int32")
+            output_storage[0][0] = np.asarray(output_storage[0][0], dtype="int32")
         # backport
-        out[1][0] = np.asarray(csm.indices, dtype="int32")
-        out[2][0] = np.asarray(csm.indptr, dtype="int32")
-        out[3][0] = np.asarray(csm.shape, dtype="int32")
+        output_storage[1][0] = np.asarray(csm.indices, dtype="int32")
+        output_storage[2][0] = np.asarray(csm.indptr, dtype="int32")
+        output_storage[3][0] = np.asarray(csm.shape, dtype="int32")
 
-    def grad(self, inputs, g):
+    def grad(self, inputs, output_grads):
         # g[1:] is all integers, so their Jacobian in this op
         # is 0. We thus don't need to worry about what their values
         # are.
@@ -320,11 +320,11 @@ class CSMProperties(Op):
         # g[1:] is connected, or this grad method wouldn't have been
         # called, so we should report zeros
         (csm,) = inputs
-        if isinstance(g[0].type, DisconnectedType):
+        if isinstance(output_grads[0].type, DisconnectedType):
             return [csm.zeros_like()]
 
         _data, indices, indptr, _shape = csm_properties(csm)
-        return [CSM(csm.format)(g[0], indices, indptr, _shape)]
+        return [CSM(csm.format)(output_grads[0], indices, indptr, _shape)]
 
 
 # don't make this a function or it breaks some optimizations below
@@ -440,10 +440,10 @@ class CSM(Op):
             [SparseTensorType(dtype=data.type.dtype, format=self.format)()],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         # for efficiency, if remap does nothing, then do not apply it
         (data, indices, indptr, _shape) = inputs
-        (out,) = outputs
+        (out,) = output_storage
 
         if len(_shape) != 2:
             raise ValueError("Shape should be an array of length 2")
@@ -470,9 +470,9 @@ class CSM(Op):
     def connection_pattern(self, node):
         return [[True], [False], [False], [False]]
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x_data, x_indices, x_indptr, x_shape) = inputs
-        (g_out,) = gout
+        (g_out,) = output_grads
         g_data, g_indices, g_indptr, g_shape = csm_properties(g_out)
         # unpack the data vector and wrap it as a 1d TensorType
         g_data = csm_grad()(
@@ -543,7 +543,7 @@ class CSMGrad(Op):
             [gout_data],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (
             x_data,
             x_indices,
@@ -554,7 +554,7 @@ class CSMGrad(Op):
             g_indptr,
             _g_shape,
         ) = inputs
-        (g_out,) = outputs
+        (g_out,) = output_storage
         if len(x_indptr) - 1 == x_shape[0]:
             sp_dim = x_shape[1]
         else:
@@ -595,14 +595,14 @@ class Cast(Op):
             self, [x], [SparseTensorType(dtype=self.out_type, format=x.format)()]
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert _is_sparse(x)
         out[0] = x.astype(self.out_type)
 
-    def grad(self, inputs, outputs_gradients):
-        gz = outputs_gradients[0]
+    def grad(self, inputs, output_grads):
+        gz = output_grads[0]
 
         if gz.dtype in complex_dtypes:
             raise NotImplementedError("grad not implemented for complex types")
@@ -701,9 +701,9 @@ class DenseFromSparse(Op):
             [TensorType(dtype=x.type.dtype, shape=(None, None))()],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         if _is_dense(x):
             warn(
                 "You just called DenseFromSparse on a dense matrix.",
@@ -713,9 +713,9 @@ class DenseFromSparse(Op):
             out[0] = x.toarray()
         assert _is_dense(out[0])
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         if self.sparse_grad:
             left = sp_ones_like(x)
             right = gz
@@ -783,14 +783,14 @@ class SparseFromDense(Op):
             self, [x], [SparseTensorType(dtype=x.type.dtype, format=self.format)()]
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         out[0] = SparseTensorType.format_cls[self.format](x)
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         gx = dense_from_sparse(gz)
         gx = specify_broadcastable(
             gx, *(ax for (ax, b) in enumerate(x.type.broadcastable) if b)
@@ -834,16 +834,16 @@ class GetItemList(Op):
 
         return Apply(self, [x, ind], [x.type()])
 
-    def perform(self, node, inp, outputs):
-        (out,) = outputs
-        x = inp[0]
-        indices = inp[1]
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        x = inputs[0]
+        indices = inputs[1]
         assert _is_sparse(x)
         out[0] = x[indices]
 
-    def grad(self, inputs, g_outputs):
+    def grad(self, inputs, output_grads):
         x, indices = inputs
-        (gout,) = g_outputs
+        (gout,) = output_grads
         return [
             get_item_list_grad(x, indices, gout),
             grad_undefined(self, 1, indices, "No gradient for this input"),
@@ -877,11 +877,11 @@ class GetItemListGrad(Op):
 
         return Apply(self, [x, ind, gz], [x.type()])
 
-    def perform(self, node, inp, outputs):
-        (out,) = outputs
-        x = inp[0]
-        indices = inp[1]
-        gz = inp[2]
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        x = inputs[0]
+        indices = inputs[1]
+        gz = inputs[2]
 
         if x.format in ["csr"]:
             y = scipy.sparse.csr_matrix((x.shape[0], x.shape[1]))
@@ -922,18 +922,18 @@ class GetItem2Lists(Op):
 
         return Apply(self, [x, ind1, ind2], [vector()])
 
-    def perform(self, node, inp, outputs):
-        (out,) = outputs
-        x = inp[0]
-        ind1 = inp[1]
-        ind2 = inp[2]
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        x = inputs[0]
+        ind1 = inputs[1]
+        ind2 = inputs[2]
         # SciPy returns the corresponding elements as a `matrix`-type instance,
         # which isn't what we want, so we convert it into an `ndarray`
         out[0] = np.asarray(x[ind1, ind2]).flatten()
 
-    def grad(self, inputs, g_outputs):
+    def grad(self, inputs, output_grads):
         x, ind1, ind2 = inputs
-        (gout,) = g_outputs
+        (gout,) = output_grads
         return [
             get_item_2lists_grad(x, ind1, ind2, gout),
             grad_undefined(self, 1, ind1, "No gradient for this input"),
@@ -964,12 +964,12 @@ class GetItem2ListsGrad(Op):
 
         return Apply(self, [x, ind1, ind2, gz], [x.type()])
 
-    def perform(self, node, inp, outputs):
-        (out,) = outputs
-        x = inp[0]
-        ind1 = inp[1]
-        ind2 = inp[2]
-        gz = inp[3]
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        x = inputs[0]
+        ind1 = inputs[1]
+        ind2 = inputs[2]
+        gz = inputs[3]
 
         if x.format in ["csr"]:
             y = scipy.sparse.csr_matrix((x.shape[0], x.shape[1]))
@@ -1104,9 +1104,9 @@ class GetItem2d(Op):
 
         return Apply(self, input_op, [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, start1, stop1, step1, start2, stop2, step2) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert _is_sparse(x)
         out[0] = x[start1:stop1:step1, start2:stop2:step2]
 
@@ -1165,9 +1165,9 @@ class GetItemScalar(Op):
 
         return Apply(self, input_op, [scalar(dtype=x.dtype)])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, ind1, ind2) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert _is_sparse(x)
         out[0] = np.asarray(x[ind1, ind2], x.dtype)
 
@@ -1216,15 +1216,15 @@ class Transpose(Op):
             ],
         )
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert _is_sparse(x)
         out[0] = x.transpose()
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert _is_sparse_variable(x) and _is_sparse_variable(gz)
         return (transpose(gz),)
 
@@ -1262,15 +1262,15 @@ class Neg(Op):
         assert x.format in ("csr", "csc")
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         assert _is_sparse(x)
         out[0] = -x
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         assert _is_sparse_variable(x) and _is_sparse_variable(gz)
         return (-gz,)
 
@@ -1302,9 +1302,9 @@ class ColScaleCSC(Op):
             raise ValueError("x was not a csc matrix")
         return Apply(self, [x, s], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, s) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         _M, N = x.shape
         assert x.format == "csc"
         assert s.shape == (N,)
@@ -1316,11 +1316,11 @@ class ColScaleCSC(Op):
 
         z[0] = y
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         from pytensor.sparse.math import sp_sum
 
         (x, s) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         return [col_scale(gz, s), sp_sum(x * gz, axis=0)]
 
     def infer_shape(self, fgraph, node, ins_shapes):
@@ -1349,9 +1349,9 @@ class RowScaleCSC(Op):
         assert x.format in ("csr", "csc")
         return Apply(self, [x, s], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, s) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         M, N = x.shape
         assert x.format == "csc"
         assert s.shape == (M,)
@@ -1367,11 +1367,11 @@ class RowScaleCSC(Op):
 
         z[0] = scipy.sparse.csc_matrix((y_data, indices, indptr), (M, N))
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         from pytensor.sparse.math import sp_sum
 
         (x, s) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         return [row_scale(gz, s), sp_sum(x * gz, axis=1)]
 
     def infer_shape(self, fgraph, node, ins_shapes):
@@ -1460,17 +1460,17 @@ class Diag(Op):
         assert x.format in ("csr", "csc")
         return Apply(self, [x], [tensor(dtype=x.dtype, shape=(None,))])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         N, M = x.shape
         if N != M:
             raise ValueError("Diag only apply on square matrix")
         z[0] = x.diagonal()
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (_x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         return [square_diagonal(gz)]
 
     def infer_shape(self, fgraph, nodes, shapes):
@@ -1506,8 +1506,8 @@ class SquareDiagonal(Op):
 
         return Apply(self, [diag], [SparseTensorType(dtype=diag.dtype, format="csc")()])
 
-    def perform(self, node, inputs, outputs):
-        (z,) = outputs
+    def perform(self, node, inputs, output_storage):
+        (z,) = output_storage
         diag = inputs[0]
 
         N = len(diag)
@@ -1518,8 +1518,8 @@ class SquareDiagonal(Op):
 
         z[0] = scipy.sparse.csc_matrix(tup, copy=True)
 
-    def grad(self, inputs, gout):
-        (gz,) = gout
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         return [diag(gz)]
 
     def infer_shape(self, fgraph, nodes, shapes):
@@ -1562,16 +1562,16 @@ class EnsureSortedIndices(Op):
         assert x.format in ("csr", "csc")
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         if self.inplace:
             z[0] = x.sort_indices()
         else:
             z[0] = x.sorted_indices()
 
-    def grad(self, inputs, output_grad):
-        return [output_grad[0]]
+    def grad(self, inputs, output_grads):
+        return [output_grads[0]]
 
     def infer_shape(self, fgraph, node, i0_shapes):
         return i0_shapes
@@ -1644,18 +1644,18 @@ class Stack(Op):
 
 
 class HStack(Stack):
-    def perform(self, node, block, outputs):
-        (out,) = outputs
-        for b in block:
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        for b in inputs:
             assert _is_sparse(b)
-        out[0] = scipy.sparse.hstack(block, format=self.format, dtype=self.dtype)
+        out[0] = scipy.sparse.hstack(inputs, format=self.format, dtype=self.dtype)
         # Some version of scipy (at least 0.14.0.dev-c4314b0)
         # Do not cast to the wanted dtype.
         if out[0].dtype != self.dtype:
             out[0] = out[0].astype(self.dtype)
 
-    def grad(self, inputs, gout):
-        (gz,) = gout
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         is_continuous = [
             (inputs[i].dtype in tensor_continuous_dtypes) for i in range(len(inputs))
         ]
@@ -1717,18 +1717,18 @@ def hstack(blocks, format=None, dtype=None):
 
 
 class VStack(Stack):
-    def perform(self, node, block, outputs):
-        (out,) = outputs
-        for b in block:
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        for b in inputs:
             assert _is_sparse(b)
-        out[0] = scipy.sparse.vstack(block, format=self.format, dtype=self.dtype)
+        out[0] = scipy.sparse.vstack(inputs, format=self.format, dtype=self.dtype)
         # Some version of scipy (at least 0.14.0.dev-c4314b0)
         # Do not cast to the wanted dtype.
         if out[0].dtype != self.dtype:
             out[0] = out[0].astype(self.dtype)
 
-    def grad(self, inputs, gout):
-        (gz,) = gout
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         is_continuous = [
             (inputs[i].dtype in tensor_continuous_dtypes) for i in range(len(inputs))
         ]
@@ -1824,9 +1824,9 @@ class Remove0(Op):
         assert x.format in ("csr", "csc")
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
-        (z,) = outputs
+        (z,) = output_storage
         if self.inplace:
             c = x
         else:
@@ -1834,9 +1834,9 @@ class Remove0(Op):
         c.eliminate_zeros()
         z[0] = c
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (_x,) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         return [gz]
 
     def infer_shape(self, fgraph, node, i0_shapes):
@@ -1905,9 +1905,9 @@ class ConstructSparseFromList(Op):
         # take `x_.shape` as input and not `x`.
         return Apply(self, [x_.shape, values_, ilist_], [csc_matrix(dtype=x.dtype)])
 
-    def perform(self, node, inp, out_):
-        out_shape, values, ilist = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        out_shape, values, ilist = inputs
+        (out,) = output_storage
         rows, cols = values.shape
         assert rows == len(ilist)
         indptr = np.arange(cols + 1) * rows
@@ -1932,8 +1932,8 @@ class ConstructSparseFromList(Op):
         rval = [[True], [True], [False]]
         return rval
 
-    def grad(self, inputs, grads):
-        (g_output,) = grads
+    def grad(self, inputs, output_grads):
+        (g_output,) = output_grads
         _x, _y = inputs[:2]
         idx_list = inputs[2:]
 

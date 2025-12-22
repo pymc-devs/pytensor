@@ -2502,8 +2502,8 @@ class AbstractConv(BaseAbstractConv):
         output = img.type.clone(shape=out_shape)()
         return Apply(self, [img, kern], [output])
 
-    def perform(self, node, inp, out_):
-        img, kern = inp
+    def perform(self, node, inputs, output_storage):
+        img, kern = inputs
         img = np.asarray(img)
         kern = np.asarray(kern)
 
@@ -2515,7 +2515,7 @@ class AbstractConv(BaseAbstractConv):
             raise NotImplementedError(
                 f"Unshared convolution not implemented for {int(self.convdim)}D"
             )
-        (o,) = out_
+        (o,) = output_storage
         mode = self.border_mode
         pad = border_mode_to_pad(mode, self.convdim, dil_kernshp)
 
@@ -2680,9 +2680,9 @@ class AbstractConv2d(AbstractConv):
             unshared=unshared,
         )
 
-    def grad(self, inp, grads):
-        bottom, weights = inp
-        (top,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, weights = inputs
+        (top,) = output_grads
         # Don't add the assert again, as it was already added in the forward.
         d_bottom = AbstractConv2d_gradInputs(
             self.imshp,
@@ -2740,9 +2740,9 @@ class AbstractConv3d(AbstractConv):
             num_groups=num_groups,
         )
 
-    def grad(self, inp, grads):
-        bottom, weights = inp
-        (top,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, weights = inputs
+        (top,) = output_grads
         d_bottom = AbstractConv3d_gradInputs(
             self.imshp,
             self.kshp,
@@ -2839,12 +2839,12 @@ class AbstractConv_gradWeights(BaseAbstractConv):
         output = img.type.clone(shape=out_shape)()
         return Apply(self, [img, topgrad, shape], [output])
 
-    def perform(self, node, inp, out_):
-        img, topgrad, shape = inp
+    def perform(self, node, inputs, output_storage):
+        img, topgrad, shape = inputs
         img = np.asarray(img)
         topgrad = np.asarray(topgrad)
 
-        (o,) = out_
+        (o,) = output_storage
 
         if self.unshared and self.convdim != 2:
             raise NotImplementedError(
@@ -3037,9 +3037,9 @@ class AbstractConv2d_gradWeights(AbstractConv_gradWeights):
             unshared=unshared,
         )
 
-    def grad(self, inp, grads):
-        bottom, top = inp[:2]
-        (weights,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, top = inputs[:2]
+        (weights,) = output_grads
         d_bottom = AbstractConv2d_gradInputs(
             self.imshp,
             self.kshp,
@@ -3098,9 +3098,9 @@ class AbstractConv3d_gradWeights(AbstractConv_gradWeights):
             num_groups=num_groups,
         )
 
-    def grad(self, inp, grads):
-        bottom, top = inp[:2]
-        (weights,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, top = inputs[:2]
+        (weights,) = output_grads
         d_bottom = AbstractConv3d_gradInputs(
             self.imshp,
             self.kshp,
@@ -3208,11 +3208,11 @@ class AbstractConv_gradInputs(BaseAbstractConv):
         output = kern.type.clone(shape=out_shape)()
         return Apply(self, [kern, topgrad, shape], [output])
 
-    def perform(self, node, inp, out_):
-        kern, topgrad, shape = inp
+    def perform(self, node, inputs, output_storage):
+        kern, topgrad, shape = inputs
         kern = np.asarray(kern)
         topgrad = np.asarray(topgrad)
-        (o,) = out_
+        (o,) = output_storage
 
         if self.unshared and self.convdim != 2:
             raise NotImplementedError(
@@ -3419,9 +3419,9 @@ class AbstractConv2d_gradInputs(AbstractConv_gradInputs):
             unshared=unshared,
         )
 
-    def grad(self, inp, grads):
-        weights, top = inp[:2]
-        (bottom,) = grads
+    def grad(self, inputs, output_grads):
+        weights, top = inputs[:2]
+        (bottom,) = output_grads
         d_weights = AbstractConv2d_gradWeights(
             self.imshp,
             self.kshp,
@@ -3480,9 +3480,9 @@ class AbstractConv3d_gradInputs(AbstractConv_gradInputs):
             num_groups=num_groups,
         )
 
-    def grad(self, inp, grads):
-        weights, top = inp[:2]
-        (bottom,) = grads
+    def grad(self, inputs, output_grads):
+        weights, top = inputs[:2]
+        (bottom,) = output_grads
         d_weights = AbstractConv3d_gradWeights(
             self.imshp,
             self.kshp,

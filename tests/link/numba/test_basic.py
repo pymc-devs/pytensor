@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 
 class MyType(Type):
-    def filter(self, data):
+    def filter(self, data, strict=False, allow_downcast=None):
         return data
 
     def __eq__(self, other):
@@ -60,9 +60,9 @@ class MySingleOut(Op):
     def make_node(self, a, b):
         return Apply(self, [a, b], [a.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         res = (inputs[0] + inputs[1]).astype(inputs[0][0].dtype)
-        outputs[0][0] = res
+        output_storage[0][0] = res
 
 
 class ScalarMyMultiOut(ScalarOp):
@@ -80,10 +80,10 @@ class ScalarMyMultiOut(ScalarOp):
         b = as_scalar(b)
         return Apply(self, [a, b], [a.type(), b.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         res1, res2 = self.impl(inputs[0], inputs[1])
-        outputs[0][0] = res1
-        outputs[1][0] = res2
+        output_storage[0][0] = res1
+        output_storage[1][0] = res2
 
 
 scalar_my_multi_out = Elemwise(ScalarMyMultiOut())
@@ -105,10 +105,10 @@ class MyMultiOut(Op):
     def make_node(self, a, b):
         return Apply(self, [a, b], [a.type(), b.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         res1, res2 = self.impl(inputs[0], inputs[1])
-        outputs[0][0] = res1
-        outputs[1][0] = res2
+        output_storage[0][0] = res1
+        output_storage[1][0] = res2
 
 
 my_multi_out = Elemwise(MyMultiOut())
@@ -599,18 +599,18 @@ def test_funcify_dispatch_interop():
         otypes = [pt.dscalar]
 
     class FuncifiedOp(BaseOp):
-        def perform(self, node, inputs, outputs):
-            outputs[0][0] = inputs[0] + 1
+        def perform(self, node, inputs, output_storage):
+            output_storage[0][0] = inputs[0] + 1
 
     class FuncifiedAndCachedOp(BaseOp):
-        def perform(self, node, inputs, outputs):
-            outputs[0][0] = inputs[0] * 2
+        def perform(self, node, inputs, output_storage):
+            output_storage[0][0] = inputs[0] * 2
 
     class FuncifiedAndDefaultCachedOp(BaseOp):
         __props__ = ()
 
-        def perform(self, node, inputs, outputs):
-            outputs[0][0] = inputs[0] - 3
+        def perform(self, node, inputs, output_storage):
+            output_storage[0][0] = inputs[0] - 3
 
     @numba_basic.numba_funcify.register(FuncifiedOp)
     def _(op, node, **kwargs):

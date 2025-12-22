@@ -550,15 +550,15 @@ class MergeFeature(Feature):
     def clone(self):
         return type(self)()
 
-    def on_change_input(self, fgraph, node, i, r, new_r, reason):
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         if node in self.nodes_seen:
             # If inputs to a node change, it's not guaranteed that the node is
             # distinct from the other nodes in `self.nodes_seen`.
             self.nodes_seen.discard(node)
             self.process_node(fgraph, node)
 
-        if isinstance(new_r, AtomicVariable):
-            self.process_atomic(fgraph, new_r)
+        if isinstance(new_var, AtomicVariable):
+            self.process_atomic(fgraph, new_var)
 
     def on_import(self, fgraph, node, reason):
         for c in node.inputs:
@@ -973,7 +973,7 @@ class FromFunctionNodeRewriter(NodeRewriter):
                     )
         self.requirements = requirements
 
-    def transform(self, fgraph, node, enforce_tracks: bool = True):
+    def transform(self, fgraph, node, enforce_tracks: bool = True, *args, **kwargs):
         if enforce_tracks and self._tracks:
             node_op = node.op
             if not (
@@ -1230,7 +1230,7 @@ class SequentialNodeRewriter(NodeRewriter):
                 t.extend(at)
         return t
 
-    def transform(self, fgraph, node, enforce_tracks=False):
+    def transform(self, fgraph, node, enforce_tracks=False, *args, **kwargs):
         if len(self.rewrites) == 0:
             return
 
@@ -1385,7 +1385,7 @@ class SubstitutionNodeRewriter(NodeRewriter):
     def tracks(self):
         return [self.op1]
 
-    def transform(self, fgraph, node, enforce_tracks=True):
+    def transform(self, fgraph, node, enforce_tracks=True, *args, **kwargs):
         if enforce_tracks and (node.op != self.op1):
             return False
         repl = self.op2.make_node(*node.inputs)
@@ -1713,9 +1713,9 @@ class DispatchingFeature(Feature):
         if self.pruner:
             self.pruner(node)
 
-    def on_change_input(self, fgraph, node, i, r, new_r, reason):
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         if self.chin:
-            self.chin(node, i, r, new_r, reason)
+            self.chin(node, i, var, new_var, reason)
 
     def on_detach(self, fgraph):
         # To allow pickling this object
@@ -2160,7 +2160,7 @@ class ChangeTracker(Feature):
         self.nb_imported += 1
         self.changed = True
 
-    def on_change_input(self, fgraph, node, i, r, new_r, reason):
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         self.changed = True
 
     def reset(self):

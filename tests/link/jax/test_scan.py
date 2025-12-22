@@ -357,8 +357,8 @@ def test_dynamic_sequence_length():
             x = pt.as_tensor_variable(x)
             return Apply(self, [x], [pt.tensor(shape=(None,) * x.type.ndim)])
 
-        def perform(self, node, inputs, outputs):
-            outputs[0][0] = inputs[0] + 1
+        def perform(self, node, inputs, output_storage):
+            output_storage[0][0] = inputs[0] + 1
 
     @jax_funcify.register(IncWithoutStaticShape)
     def _(op, **kwargs):

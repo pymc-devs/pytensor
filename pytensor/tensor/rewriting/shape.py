@@ -588,17 +588,17 @@ class ShapeFeature(Feature):
         for r, s in zip(node.outputs, o_shapes, strict=True):
             self.set_shape(r, s)
 
-    def on_change_input(self, fgraph, node, i, r, new_r, reason):
-        if new_r not in self.shape_of:
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
+        if new_var not in self.shape_of:
             # It happen that the fgraph didn't called on_import for some
             # new_r.  This happen when new_r don't have an
             # owner(i.e. it is a constant or an input of the graph)
             # update_shape suppose that r and new_r are in shape_of.
-            self.init_r(new_r)
+            self.init_r(new_var)
 
         # This tells us that r and new_r must have the same shape if
         # we didn't know that the shapes are related, now we do.
-        self.update_shape(new_r, r)
+        self.update_shape(new_var, var)
 
         # change_input happens in two cases:
         # 1) we are trying to get rid of r, or
@@ -608,10 +608,10 @@ class ShapeFeature(Feature):
         # replace the shape_i of r with the shape of new_r.  Say that
         # r is *scheduled*.
         # At that point, node is no longer a client of r, but of new_r
-        for shpnode, idx in fgraph.clients[r] + [(node, i)]:
+        for shpnode, idx in fgraph.clients[var] + [(node, i)]:
             if isinstance(shpnode.op, Shape_i):
                 idx = shpnode.op.i
-                repl = self.shape_of[new_r][idx]
+                repl = self.shape_of[new_var][idx]
                 if repl.owner is shpnode:
                     # This mean the replacement shape object is
                     # exactly the same as the current shape object. So
@@ -631,20 +631,20 @@ class ShapeFeature(Feature):
                 if shpnode.outputs[0] in ancestors([repl]):
                     raise InconsistencyError(
                         "This substitution would insert a cycle in the graph:"
-                        f"node: {node}, i: {i}, r: {r}, new_r: {new_r}"
+                        f"node: {node}, i: {i}, r: {var}, new_r: {new_var}"
                     )
 
-                self.scheduled[shpnode] = new_r
+                self.scheduled[shpnode] = new_var
         # In case 2, if r is a variable that we've scheduled for shape update,
         # then we should cancel it.
-        unscheduled = [k for k, v in self.scheduled.items() if v == r]
+        unscheduled = [k for k, v in self.scheduled.items() if v == var]
         for k in unscheduled:
             del self.scheduled[k]
 
         # In either case, r could be in shape_of.values(), that is, r itself
         # is the shape of  something. In that case, we want to update
         # the value in shape_of, to keep it up-to-date.
-        for v in self.shape_of_reverse_index.get(r, []):
+        for v in self.shape_of_reverse_index.get(var, []):
             # The reverse index is only approximate. It is not updated on
             # deletion of variables, or on change_input so it might be the
             # case that there are a few extra `v`'s in it that no longer have
@@ -652,9 +652,9 @@ class ShapeFeature(Feature):
             # entirely. The important thing is that it permits to recall
             # all variables with r in their shape.
             for ii, svi in enumerate(self.shape_of.get(v, [])):
-                if svi == r:
-                    self.set_shape_i(v, ii, new_r)
-        self.shape_of_reverse_index[r] = set()
+                if svi == var:
+                    self.set_shape_i(v, ii, new_var)
+        self.shape_of_reverse_index[var] = set()
 
     def same_shape(
         self,

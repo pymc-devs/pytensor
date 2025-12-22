@@ -76,12 +76,12 @@ class CpuContiguous(COp):
         assert x.flags["C_CONTIGUOUS"]
         y[0] = x
 
-    def grad(self, inputs, dout):
-        return [ptb.as_tensor_variable(dout[0])]
+    def grad(self, inputs, output_grads):
+        return [ptb.as_tensor_variable(output_grads[0])]
 
-    def c_code(self, node, name, inames, onames, sub):
-        (x,) = inames
-        (y,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (y,) = outputs
         code = f"""
             if (!PyArray_CHKFLAGS({x}, NPY_ARRAY_C_CONTIGUOUS)){{
                 // check to see if output is contiguous first
@@ -183,15 +183,15 @@ class SearchsortedOp(COp):
             Py_DECREF(tmp_{name});
         """
 
-    def c_code(self, node, name, inames, onames, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         sorter = None
         if len(node.inputs) == 3:
-            x, v, sorter = inames
+            x, v, sorter = inputs
         else:
-            x, v = inames
+            x, v = inputs
         if not sorter:
             sorter = "NULL"
-        (z,) = onames
+        (z,) = outputs
         fail = sub["fail"]
 
         return f"""
@@ -210,7 +210,7 @@ class SearchsortedOp(COp):
     def c_code_cache_version(self):
         return (2,)
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         num_ins = len(inputs)
         if num_ins == 3:
             x, v, _sorter = inputs
@@ -322,9 +322,9 @@ class CumOp(COp):
         else:
             z[0] = np.cumprod(x, axis=self.axis)
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         (x,) = inputs
-        (gi,) = output_gradients
+        (gi,) = output_grads
 
         reverse_slicing = [slice(None, None, None)] * gi.ndim
         reverse_slicing[self.axis] = slice(None, None, -1)
@@ -344,9 +344,9 @@ class CumOp(COp):
     def infer_shape(self, fgraph, node, shapes):
         return shapes
 
-    def c_code(self, node, name, inames, onames, sub):
-        (x,) = inames
-        (z,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
         fail = sub["fail"]
         params = sub["params"]
 
@@ -701,9 +701,9 @@ class Repeat(Op):
     def connection_pattern(self, node):
         return [[True], [False]]
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         (x, repeats) = inputs
-        (gz,) = gout
+        (gz,) = output_grads
         axis = self.axis
 
         # Use IncSubtensor to sum the gradients that belong to the repeated entries of x
@@ -845,9 +845,9 @@ class Bartlett(Op):
             raise TypeError(f"{self.__class__.__name__} only works on integer input")
         return Apply(self, [M], [dvector()])
 
-    def perform(self, node, inputs, out_):
+    def perform(self, node, inputs, output_storage):
         M = inputs[0]
-        (out,) = out_
+        (out,) = output_storage
         out[0] = np.bartlett(M)
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -932,15 +932,15 @@ class FillDiagonal(Op):
 
         output_storage[0][0] = a
 
-    def grad(self, inp, cost_grad):
+    def grad(self, inputs, output_grads):
         """
         Notes
         -----
         The gradient is currently implemented for matrices only.
 
         """
-        a, _val = inp
-        grad = cost_grad[0]
+        a, _val = inputs
+        grad = output_grads[0]
         if a.dtype.startswith("complex"):
             return [None, None]
         elif a.ndim > 2:
@@ -1059,14 +1059,14 @@ class FillDiagonalOffset(Op):
 
         output_storage[0][0] = a
 
-    def grad(self, inp, cost_grad):
+    def grad(self, inputs, output_grads):
         """
         Notes
         -----
         The gradient is currently implemented for matrices only.
         """
-        a, _val, offset = inp
-        grad = cost_grad[0]
+        a, _val, offset = inputs
+        grad = output_grads[0]
         height, width = grad.shape
 
         if a.dtype.startswith("complex"):
@@ -1314,17 +1314,17 @@ class UnravelIndex(Op):
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]] * len(node.outputs)
 
-    def perform(self, node, inp, out):
-        indices, dims = inp
+    def perform(self, node, inputs, output_storage):
+        indices, dims = inputs
         res = np.unravel_index(indices, dims, order=self.order)
-        assert len(res) == len(out)
-        for i in range(len(out)):
+        assert len(res) == len(output_storage)
+        for i in range(len(output_storage)):
             ret = np.asarray(res[i], node.outputs[0].dtype)
             if ret.base is not None:
                 # NumPy will return a view when it can.
                 # But we don't want that.
                 ret = ret.copy()
-            out[i][0] = ret
+            output_storage[i][0] = ret
 
 
 def unravel_index(indices, dims, order="C"):
@@ -1391,10 +1391,10 @@ class RavelMultiIndex(Op):
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]]
 
-    def perform(self, node, inp, out):
-        *multi_index, dims = inp
+    def perform(self, node, inputs, output_storage):
+        *multi_index, dims = inputs
         res = np.ravel_multi_index(multi_index, dims, mode=self.mode, order=self.order)
-        out[0][0] = np.asarray(res, "int64")
+        output_storage[0][0] = np.asarray(res, "int64")
 
 
 def ravel_multi_index(multi_index, dims, mode="raise", order="C"):

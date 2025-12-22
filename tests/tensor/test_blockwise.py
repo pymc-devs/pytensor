@@ -59,13 +59,13 @@ def test_perform_method_per_node():
         def make_node(self, x):
             return Apply(self, [x], [x.type()])
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             [x] = inputs
             if node.inputs[0].type.dtype.startswith("float"):
                 y = x + 1
             else:
                 y = x - 1
-            outputs[0][0] = y
+            output_storage[0][0] = y
 
     blockwise_op = Blockwise(core_op=NodeDependentPerformOp(), signature="()->()")
     x = tensor("x", shape=(3,), dtype="float32")
@@ -306,9 +306,9 @@ def test_blockwise_infer_core_shape():
             d = tensor(shape=(None,))
             return Apply(self, [a_identity, b_identity], [c, d])
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             a, b = inputs
-            c, d = outputs
+            c, d = output_storage
             c[0] = np.arange(a.size + b.size, dtype=config.floatX)
             d[0] = np.arange(a.sum() + b.sum(), dtype=config.floatX)
 
@@ -694,11 +694,11 @@ def test_gradient_mixed_discrete_output_core_op():
         itypes = [scalar().type]
         otypes = [scalar().type, scalar(dtype=int).type]
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             raise NotImplementedError()
 
-        def L_op(self, inputs, outputs, output_gradients):
-            return [ones_like(inputs[0]) * output_gradients[0]]
+        def L_op(self, inputs, outputs, output_grads):
+            return [ones_like(inputs[0]) * output_grads[0]]
 
     op = Blockwise(MixedDtypeCoreOp())
     x = vector("x")
@@ -774,7 +774,7 @@ def test_partial_inplace():
         def make_node(self, x, y, z):
             return Apply(self, [x, y, z], [x.type(), y.type(), z.type()])
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             [x, y, z] = inputs
             if 0 not in self.inplace:
                 x = x.copy()
@@ -782,9 +782,9 @@ def test_partial_inplace():
                 y = y.copy()
             if 2 not in self.inplace:
                 z = z.copy()
-            outputs[0][0] = x
-            outputs[1][0] = y
-            outputs[2][0] = z
+            output_storage[0][0] = x
+            output_storage[1][0] = y
+            output_storage[2][0] = z
 
     core_op = CoreOp(inplace=())
     blockwise_op = Blockwise(core_op, signature="(),(),()->(),(),()")

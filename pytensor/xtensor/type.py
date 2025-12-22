@@ -14,7 +14,7 @@ from pytensor.tensor import (
     as_tensor_variable,
     specify_shape,
 )
-from pytensor.tensor.math import variadic_mul
+from pytensor.tensor.math import divmod, variadic_mul
 
 
 try:
@@ -89,10 +89,13 @@ class XTensorType(Type, HasDataType, HasShape):
             shape = self.shape
         return type(self)(dtype=dtype, shape=shape, dims=dims, **kwargs)
 
-    def filter(self, value, strict=False, allow_downcast=None):
+    def filter(self, data, strict: bool = False, allow_downcast=None):
         # XTensorType behaves like TensorType at runtime, so we filter the same way.
         return TensorType.filter(
-            self, value, strict=strict, allow_downcast=allow_downcast
+            typing.cast(TensorType, self),
+            data,
+            strict=strict,
+            allow_downcast=allow_downcast,
         )
 
     @staticmethod
@@ -315,7 +318,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         return px.math.mod(self, other)
 
     def __divmod__(self, other):
-        return px.math.divmod(self, other)
+        return divmod(self, other)
 
     def __truediv__(self, other):
         return px.math.true_div(self, other)
@@ -342,7 +345,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         return px.math.mod(other, self)
 
     def __rdivmod__(self, other):
-        return px.math.divmod(other, self)
+        return divmod(other, self)
 
     def __rpow__(self, other):
         return px.math.pow(other, self)
