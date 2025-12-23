@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pytensor import Mode, OpFromGraph, config, function, ifelse
+from pytensor import In, Mode, OpFromGraph, Out, config, function, ifelse
 from pytensor import tensor as pt
 from pytensor.compile import ViewOp
 from pytensor.ifelse import IfElse
@@ -163,7 +163,12 @@ def test_ifelse_single_output(as_view):
     op = IfElse(as_view=as_view, n_outs=1)
     out = op(x.sum() > 0, [x], [x])[0]  # returns tuple/list
 
-    fn = function([x], out, mode=Mode("numba", optimizer=None), accept_inplace=True)
+    fn = function(
+        [In(x, borrow=True)],
+        Out(out, borrow=True),
+        mode=Mode("numba", optimizer=None),
+        accept_inplace=True,
+    )
 
     # FALSE branch
     a = np.zeros(3)
@@ -195,7 +200,10 @@ def test_ifelse_multiple_outputs(as_view):
     out1, out2 = op(x.sum() > 0, x, y, y, x)
 
     fn = function(
-        [x, y], [out1, out2], mode=Mode("numba", optimizer=None), accept_inplace=True
+        [In(x, borrow=True), In(y, borrow=True)],
+        [Out(out1, borrow=True), Out(out2, borrow=True)],
+        mode=Mode("numba", optimizer=None),
+        accept_inplace=True,
     )
 
     # TRUE branch
