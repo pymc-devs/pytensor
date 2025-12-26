@@ -216,14 +216,16 @@ def core_MvNormalRV(op, node):
 
 @numba_core_rv_funcify.register(ptr.DirichletRV)
 def core_DirichletRV(op, node):
+    dtype = op.dtype
+
     @numba_basic.numba_njit
     def random_fn(rng, alpha):
-        y = np.empty_like(alpha)
+        y = np.empty_like(alpha, dtype=dtype)
         for i in range(len(alpha)):
             y[i] = rng.gamma(alpha[i], 1.0)
         return y / y.sum()
 
-    return random_fn
+    return random_fn, 1
 
 
 @numba_core_rv_funcify.register(ptr.GumbelRV)
@@ -410,7 +412,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
     rv_op: RandomVariable = rv_node.op
 
     try:
-        core_rv_fn = numba_core_rv_funcify(rv_op, rv_node)
+        core_rv_fn_and_cache_key = numba_core_rv_funcify(rv_op, rv_node)
     except NotImplementedError:
         py_impl = generate_fallback_impl(rv_op, node=rv_node, **kwargs)
 
@@ -419,6 +421,16 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
             return py_impl(*args)
 
         return fallback_rv, None
+
+    match core_rv_fn_and_cache_key:
+        case (core_rv_fn, (int() | None) as core_cache_key):
+            pass
+        case (_core_rv_fn, invalid_core_cache_key):
+            raise ValueError(
+                f"Invalid core_cache_key returned from numba_core_rv_funcify: {invalid_core_cache_key}. Must be int or None."
+            )
+        case core_rv_fn:
+            core_cache_key = "__None__"
 
     size = rv_op.size_param(rv_node)
     dist_params = rv_op.dist_params(rv_node)
@@ -469,16 +481,21 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
         return impl
 
-    rv_op_props_dict = rv_op.props_dict() if hasattr(rv_op, "props_dict") else {}
-    random_rv_key_contents = (
-        type(op),
-        type(rv_op),
-        rv_op,
-        tuple(rv_op_props_dict.items()),
-        size_len,
-        core_shape_len,
-        inplace,
-        input_bc_patterns,
-    )
-    random_rv_key = sha256(str(random_rv_key_contents).encode()).hexdigest()
+    if core_cache_key is None:
+        # If the core RV can't be cached, then the whole RV can't be cached
+        random_rv_key = None  # type: ignore[unreachable]
+    else:
+        rv_op_props_dict = rv_op.props_dict() if hasattr(rv_op, "props_dict") else {}
+        random_rv_key_contents = (
+            type(op),
+            type(rv_op),
+            rv_op,
+            tuple(rv_op_props_dict.items()),
+            size_len,
+            core_shape_len,
+            inplace,
+            input_bc_patterns,
+            core_cache_key,
+        )
+        random_rv_key = sha256(str(random_rv_key_contents).encode()).hexdigest()
     return random, random_rv_key

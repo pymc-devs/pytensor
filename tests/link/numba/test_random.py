@@ -679,6 +679,16 @@ def test_DirichletRV(a, size, cm):
         assert np.allclose(res, exp_res, atol=1e-4)
 
 
+def test_dirichlet_discrete_alpha():
+    alpha = pt.lvector()
+    g = ptr.dirichlet(alpha, size=100)
+    fn = function([alpha], g, mode=numba_mode)
+    res = fn(np.array([1, 1, 1], dtype=np.int64))
+    assert res.dtype == np.float64
+    np.testing.assert_allclose(res.sum(-1), 1.0)
+    assert np.unique(res).size > 2  # Make sure we have more than just 0s and 1s
+
+
 def test_rv_inside_ofg():
     rng_np = np.random.default_rng(562)
     rng = shared(rng_np)
