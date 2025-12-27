@@ -689,6 +689,15 @@ def test_dirichlet_discrete_alpha():
     assert np.unique(res).size > 2  # Make sure we have more than just 0s and 1s
 
 
+def test_cache_size_bcast_change():
+    # Regression bug for caching with the same key in case where size is meaningful vs not
+    alpha = pt.dvector()
+    for s in (1, 2, 3):
+        x = ptr.dirichlet(alpha, size=(s,))
+        fn = function([alpha], x, mode=numba_mode)
+        assert fn([0.2, 0.3, 0.5]).shape == (s, 3)
+
+
 def test_rv_inside_ofg():
     rng_np = np.random.default_rng(562)
     rng = shared(rng_np)
