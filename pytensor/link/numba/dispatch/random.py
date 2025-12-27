@@ -485,16 +485,14 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
         # If the core RV can't be cached, then the whole RV can't be cached
         random_rv_key = None  # type: ignore[unreachable]
     else:
-        rv_op_props_dict = rv_op.props_dict() if hasattr(rv_op, "props_dict") else {}
         random_rv_key_contents = (
             type(op),
             type(rv_op),
-            rv_op,
-            tuple(rv_op_props_dict.items()),
+            tuple(rv_op._props_dict().items()),  # type: ignore[attr-defined]
             size_len,
             core_shape_len,
-            inplace,
             input_bc_patterns,
+            output_bc_patterns,
             core_cache_key,
         )
         random_rv_key = sha256(str(random_rv_key_contents).encode()).hexdigest()
