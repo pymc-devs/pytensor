@@ -73,7 +73,6 @@ from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
     advanced_inc_subtensor1,
-    advanced_subtensor,
     advanced_subtensor1,
     as_index_constant,
     get_canonical_form_slice,
@@ -83,7 +82,7 @@ from pytensor.tensor.subtensor import (
     inc_subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import TensorType, integer_dtypes
 from pytensor.tensor.type_other import NoneTypeT, SliceType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
@@ -265,6 +264,7 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     """
 
     if type(node.op) is not AdvancedIncSubtensor:
+        # Don't apply to subclasses
         return
 
     if node.op.ignore_duplicates:
@@ -1321,7 +1321,9 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
             if isinstance(node.op, IncSubtensor):
                 xi = Subtensor(node.op.idx_list)(x, *i)
             elif isinstance(node.op, AdvancedIncSubtensor):
-                xi = advanced_subtensor(x, *i)
+                # Use the same idx_list as the original operation to ensure correct shape
+                op = AdvancedSubtensor(node.op.idx_list)
+                xi = op.make_node(x, *i).outputs[0]
             elif isinstance(node.op, AdvancedIncSubtensor1):
                 xi = advanced_subtensor1(x, *i)
             else:
@@ -1771,10 +1773,11 @@ def local_blockwise_inc_subtensor(fgraph, node):
 
 
 @node_rewriter(tracks=[AdvancedSubtensor, AdvancedIncSubtensor])
-def bool_idx_to_nonzero(fgraph, node):
-    """Convert boolean indexing into equivalent vector boolean index, supported by our dispatch
+def ravel_multidimensional_bool_idx(fgraph, node):
+    """Convert multidimensional boolean indexing into equivalent vector boolean index, supported by Numba
 
-    x[1:, eye(3, dtype=bool), 1:] -> x[1:, *eye(3).nonzero()]
+    x[eye(3, dtype=bool)] -> x.ravel()[eye(3).ravel()]
+    x[eye(3, dtype=bool)].set(y) -> x.ravel()[eye(3).ravel()].set(y).reshape(x.shape)
     """
 
     if isinstance(node.op, AdvancedSubtensor):
@@ -1787,26 +1790,53 @@ def bool_idx_to_nonzero(fgraph, node):
     # Reconstruct indices from idx_list and tensor inputs
     idxs = indices_from_subtensor(tensor_inputs, node.op.idx_list)
 
-    bool_pos = {
-        i
-        for i, idx in enumerate(idxs)
-        if (isinstance(idx.type, TensorType) and idx.dtype == "bool")
-    }
-
-    if not bool_pos:
+    if any(
+        (
+            (isinstance(idx.type, TensorType) and idx.type.dtype in integer_dtypes)
+            or isinstance(idx.type, NoneTypeT)
+        )
+        for idx in idxs
+    ):
+        # Get out if there are any other advanced indexes or np.newaxis
         return None
 
-    new_idxs = []
-    for i, idx in enumerate(idxs):
-        if i in bool_pos:
-            new_idxs.extend(idx.nonzero())
-        else:
-            new_idxs.append(idx)
+    bool_idxs = [
+        (i, idx)
+        for i, idx in enumerate(idxs)
+        if (isinstance(idx.type, TensorType) and idx.dtype == "bool")
+    ]
+
+    if len(bool_idxs) != 1:
+        # Get out if there are no or multiple boolean idxs
+        return None
+    [(bool_idx_pos, bool_idx)] = bool_idxs
+    bool_idx_ndim = bool_idx.type.ndim
+    if bool_idx.type.ndim < 2:
+        # No need to do anything if it's a vector or scalar, as it's already supported by Numba
+        return None
+
+    x_shape = x.shape
+    raveled_x = x.reshape(
+        (*x_shape[:bool_idx_pos], -1, *x_shape[bool_idx_pos + bool_idx_ndim :])
+    )
+
+    raveled_bool_idx = bool_idx.ravel()
+    new_idxs = list(idxs)
+    new_idxs[bool_idx_pos] = raveled_bool_idx
 
     if isinstance(node.op, AdvancedSubtensor):
-        new_out = node.op(x, *new_idxs)
+        new_out = raveled_x[tuple(new_idxs)]
     else:
-        new_out = node.op(x, y, *new_idxs)
+        sub = raveled_x[tuple(new_idxs)]
+        new_out = inc_subtensor(
+            sub,
+            y,
+            set_instead_of_inc=node.op.set_instead_of_inc,
+            ignore_duplicates=node.op.ignore_duplicates,
+            inplace=node.op.inplace,
+        )
+        new_out = new_out.reshape(x_shape)
+
     return [copy_stack_trace(node.outputs[0], new_out)]
 
 
@@ -1941,10 +1971,16 @@ def ravel_multidimensional_int_idx(fgraph, node):
 
 
 optdb["specialize"].register(
-    bool_idx_to_nonzero.__name__,
-    bool_idx_to_nonzero,
+    ravel_multidimensional_bool_idx.__name__,
+    ravel_multidimensional_bool_idx,
     "numba",
-    "shape_unsafe",  # It can mask invalid mask sizes
+    use_db_name_as_tag=False,  # Not included if only "specialize" is requested
+)
+
+optdb["specialize"].register(
+    ravel_multidimensional_int_idx.__name__,
+    ravel_multidimensional_int_idx,
+    "numba",
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
 
