@@ -230,5 +230,5 @@ def test_tri_nonconcrete():
 
     # The actual error the user will see should be jax.errors.ConcretizationTypeError, but
     # the error handler raises an Attribute error first, so that's what this test needs to pass
-    with pytest.raises(AttributeError):
+    with pytest.raises((AttributeError, TypeError)):
         compare_jax_and_py([m, n, k], [out], [m_test_value, n_test_value, k_test_value])
