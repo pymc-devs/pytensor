@@ -705,7 +705,7 @@ class TestAsTensorVariable:
 
 
 def check_alloc_runtime_broadcast(mode):
-    """Check we emmit a clear error when runtime broadcasting would occur according to Numpy rules."""
+    """Check we emit a clear error when runtime broadcasting would occur according to Numpy rules."""
     floatX = config.floatX
     x_v = vector("x", shape=(None,))
 
