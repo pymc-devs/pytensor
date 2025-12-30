@@ -922,11 +922,12 @@ class BaseSubtensor:
 
     def _normalize_idx_list_for_hash(self):
         """Normalize idx_list for hash and equality comparison."""
-        if self.idx_list is None:
+        idx_list = getattr(self, "idx_list", None)
+        if idx_list is None:
             return None
 
         msg = []
-        for entry in self.idx_list:
+        for entry in idx_list:
             if isinstance(entry, slice):
                 msg.append((entry.start, entry.stop, entry.step))
             else:
@@ -2812,13 +2813,6 @@ class AdvancedSubtensor(BaseSubtensor, COp):
         advanced_indices = []
         adv_group_axis = None
         last_adv_group_axis = None
-        if new_axes: #not defined?
-            expanded_x_shape_list = list(x.type.shape)
-            for new_axis in new_axes:
-                expanded_x_shape_list.insert(new_axis, 1)
-            expanded_x_shape = tuple(expanded_x_shape_list)
-        else:
-            expanded_x_shape = x.type.shape
         for i, (idx, dim_length) in enumerate(
             zip_longest(explicit_indices, x.type.shape, fillvalue=slice(None))
         ):

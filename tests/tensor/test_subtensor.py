@@ -3303,6 +3303,33 @@ def test_slice_at_axis():
     assert x_sliced.type.shape == (3, 1, 5)
 
 
+def test_advanced_inc_subtensor1_failure():
+    # Shapes from the failure log
+    N = 500
+    TotalCols = 7
+    OrderedCols = 5
+    UnorderedCols = 2
+
+    oinds_val = [1, 2, 3, 5, 6]
+    uoinds_val = [0, 4]
+
+    y_ordered = matrix("y_ordered")
+    y_unordered = matrix("y_unordered")
+
+    fodds_init = ptb.empty((N, TotalCols))
+
+    fodds_step1 = set_subtensor(fodds_init[:, uoinds_val], y_unordered)
+    fodds_step2 = set_subtensor(fodds_step1[:, oinds_val], y_ordered)
+
+    f = pytensor.function([y_unordered, y_ordered], fodds_step2)
+    # assert any("AdvancedIncSubtensor1" in str(node) for node in f.maker.fgraph.toposort())
+
+    y_u_data = np.random.randn(N, UnorderedCols).astype(np.float64)
+    y_o_data = np.random.randn(N, OrderedCols).astype(np.float64)
+    res = f(y_u_data, y_o_data)
+    assert res.shape == (N, TotalCols)
+
+
 @pytest.mark.parametrize(
     "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
 )
