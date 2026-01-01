@@ -523,3 +523,31 @@ def test_optimize_grad_disconnected_non_numerical_inp(optimize_op):
         _grad_wrt_num_theta = pt.grad(x_star, num_theta, disconnected_inputs="raise")
     # np.testing.assert_allclose(grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":)"}), -1)
     # np.testing.assert_allclose(grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":("}), 1)
+
+
+def test_vectorize_root_gradients():
+    """Regression test for https://github.com/pymc-devs/pytensor/issues/1586"""
+    a, x, y = pt.dscalars("a", "x", "y")
+
+    eq_1 = a * x**2 - y - 1
+    eq_2 = x - a * y**2 + 1
+
+    [x_star, y_star], _ = pt.optimize.root(
+        equations=pt.stack([eq_1, eq_2]),
+        variables=[x, y],
+        method="hybr",
+        optimizer_kwargs={"tol": 1e-8},
+    )
+    solution = pt.stack([x_star, y_star])
+    a_grad = pt.grad(solution.sum(), a)
+    a_grid = pt.dmatrix("a_grid")
+
+    solution_grid, a_grad_grid = pytensor.graph.vectorize_graph(
+        [solution, a_grad], {a: a_grid}
+    )
+
+    _ = pytensor.function(
+        [a_grid, x, y],
+        [solution_grid, a_grad_grid],
+        on_unused_input="ignore",
+    )
