@@ -204,6 +204,65 @@ def test_optimize_multiple_minimands():
     utt.verify_grad(f, inputs, eps=1e-6)
 
 
+def test_minimize_mvn_logp_mu_and_cov():
+    """Regression test for https://github.com/pymc-devs/pytensor/issues/1550"""
+    d = 3
+
+    def objective(mu, cov, data):
+        L = pt.linalg.cholesky(cov)
+        _, logdet = pt.linalg.slogdet(cov)
+
+        v = mu - data
+        y = pt.linalg.solve_triangular(L, v, lower=True)
+        quad_term = (y**2).sum()
+
+        return 0.5 * (d * pt.log(2 * np.pi) + logdet + quad_term)
+
+    data = pt.vector("data", shape=(d,))
+    mu = pt.vector("mu", shape=(d,))
+    cov = pt.dmatrix("cov", shape=(d, d))
+
+    neg_logp = objective(mu, cov, data)
+    mu_star, success = minimize(
+        objective=neg_logp,
+        x=mu,
+        method="BFGS",
+        jac=True,
+        hess=False,
+        use_vectorized_jac=True,
+    )
+
+    # This replace + gradient was the original source of the error in #1550, check that no longer raises
+    y_star = pytensor.graph_replace(neg_logp, {mu: mu_star})
+    _ = pt.grad(y_star, [mu, cov, data])
+
+    rng = np.random.default_rng()
+    data_val = rng.normal(size=(d,)).astype(floatX)
+
+    L = rng.normal(size=(d, d)).astype(floatX)
+    cov_val = L @ L.T
+    mu0_val = rng.normal(size=(d,)).astype(floatX)
+
+    fn = pytensor.function([mu, cov, data], [mu_star, success])
+    _, success_flag = fn(mu0_val, cov_val, data_val)
+    assert success_flag
+
+    def min_fn(mu, cov, data):
+        mu_star, _ = minimize(
+            objective=objective(mu, cov, data),
+            x=mu,
+            method="BFGS",
+            jac=True,
+            hess=False,
+            use_vectorized_jac=True,
+        )
+        return mu_star.sum()
+
+    utt.verify_grad(
+        min_fn, [mu0_val, cov_val, data_val], eps=1e-3 if floatX == "float32" else 1e-6
+    )
+
+
 @pytest.mark.parametrize(
     "method, jac, hess",
     [("secant", False, False), ("newton", True, False), ("halley", True, True)],
