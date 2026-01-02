@@ -1,3 +1,5 @@
+import re
+
 import numpy as np
 import pytest
 
@@ -210,10 +212,6 @@ def test_tri():
     compare_jax_and_py([], [out], [])
 
 
-@pytest.mark.skipif(
-    jax.__version__ == "0.4.31",
-    reason="https://github.com/google/jax/issues/22751",
-)
 def test_tri_nonconcrete():
     """JAX cannot JIT-compile `jax.numpy.tri` when arguments are not concrete values."""
 
@@ -228,7 +226,10 @@ def test_tri_nonconcrete():
 
     out = ptb.tri(m, n, k)
 
-    # The actual error the user will see should be jax.errors.ConcretizationTypeError, but
-    # the error handler raises an Attribute error first, so that's what this test needs to pass
-    with pytest.raises((AttributeError, TypeError)):
+    with pytest.raises(
+        NotImplementedError,
+        match=re.escape(
+            "JAX requires the arguments of `jax.numpy.arange` to be constants"
+        ),
+    ):
         compare_jax_and_py([m, n, k], [out], [m_test_value, n_test_value, k_test_value])

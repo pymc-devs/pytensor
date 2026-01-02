@@ -1088,39 +1088,6 @@ def nonzero_values(a):
     return _a.flatten()[flatnonzero(_a)]
 
 
-class Tri(Op):
-    __props__ = ("dtype",)
-
-    def __init__(self, dtype=None):
-        if dtype is None:
-            dtype = config.floatX
-        else:
-            dtype = np.dtype(dtype).name
-        self.dtype = dtype
-
-    def make_node(self, N, M, k):
-        N = as_tensor_variable(N)
-        M = as_tensor_variable(M)
-        k = as_tensor_variable(k)
-        return Apply(
-            self,
-            [N, M, k],
-            [TensorType(dtype=self.dtype, shape=(None, None))()],
-        )
-
-    def perform(self, node, inp, out_):
-        N, M, k = inp
-        (out,) = out_
-        out[0] = np.tri(N, M, k, dtype=self.dtype)
-
-    def infer_shape(self, fgraph, node, in_shapes):
-        out_shape = [node.inputs[0], node.inputs[1]]
-        return [out_shape]
-
-    def grad(self, inp, grads):
-        return [grad_undefined(self, i, inp[i]) for i in range(3)]
-
-
 def tri(N, M=None, k=0, dtype=None):
     """
     An array with ones at and below the given diagonal and zeros elsewhere.
@@ -1148,10 +1115,12 @@ def tri(N, M=None, k=0, dtype=None):
     """
     if dtype is None:
         dtype = config.floatX
+
     if M is None:
         M = N
-    op = Tri(dtype)
-    return op(N, M, k)
+    # Implementation adapted from https://github.com/numpy/numpy/blob/2f7fe64b8b6d7591dd208942f1cc74473d5db4cb/numpy/lib/_twodim_base_impl.py#L421-L433
+    m = arange(N)[:, None] >= arange(-k, M - k)[None, :]
+    return m.astype(dtype)
 
 
 def tril(m, k=0):
