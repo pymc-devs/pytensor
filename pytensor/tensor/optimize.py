@@ -6,8 +6,7 @@ import numpy as np
 
 import pytensor.scalar as ps
 from pytensor.compile.function import function
-from pytensor.gradient import grad, grad_not_implemented, jacobian
-from pytensor.graph import rewrite_graph
+from pytensor.gradient import DisconnectedType, grad, grad_not_implemented, jacobian
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
@@ -255,16 +254,31 @@ def scalar_implict_optimization_grads(
     output_grad: TensorVariable,
     fgraph: FunctionGraph,
 ) -> list[TensorVariable | ScalarVariable]:
+    inner_args_to_diff = []
+    outer_args_to_diff = []
+    for inner_arg, outer_arg in zip(inner_args, args):
+        if inner_arg.type.dtype.startswith("float"):
+            inner_args_to_diff.append(inner_arg)
+            outer_args_to_diff.append(outer_arg)
+
+    if len(args) > 0 and not inner_args_to_diff:
+        # No differentiable arguments, return disconnected gradients
+        return [DisconnectedType()() for _ in args]
+
     df_dx, *df_dthetas = grad(
-        inner_fx, [inner_x, *inner_args], disconnected_inputs="ignore"
+        inner_fx, [inner_x, *inner_args_to_diff], disconnected_inputs="ignore"
     )
 
     replace = dict(zip(fgraph.inputs, (x_star, *args), strict=True))
     df_dx_star, *df_dthetas_stars = graph_replace([df_dx, *df_dthetas], replace=replace)
 
+    arg_to_grad = dict(zip(outer_args_to_diff, df_dthetas_stars))
+
     grad_wrt_args = [
-        (-df_dtheta_star / df_dx_star) * output_grad
-        for df_dtheta_star in df_dthetas_stars
+        (-arg_to_grad[arg] / df_dx_star) * output_grad
+        if arg in arg_to_grad
+        else DisconnectedType()()
+        for arg in args
     ]
 
     return grad_wrt_args
@@ -317,10 +331,26 @@ def implict_optimization_grads(
     fgraph : FunctionGraph
         The function graph that contains the inputs and outputs of the optimization problem.
     """
+
+    # There might be non-differentiable arguments along the compute path from the objective to the inputs. Notably,
+    # integers often arise due to Shape ops called by pack/unpack. These will be given DisconnectedType gradients.
+    # First, they are filtered out before calling jacobian.
+    inner_args_to_diff = []
+    outer_args_to_diff = []
+    for inner_arg, outer_arg in zip(inner_args, args):
+        if inner_arg.type.dtype.startswith("float"):
+            inner_args_to_diff.append(inner_arg)
+            outer_args_to_diff.append(outer_arg)
+
+    if len(args) > 0 and not inner_args_to_diff:
+        # No differentiable arguments, return disconnected gradients
+        return [DisconnectedType()() for _ in args]
+
+    # Gradients are computed using the inner graph of the optimization op, not the actual inputs/outputs of the op.
     packed_inner_args, packed_arg_shapes, implicit_f = (
         _maybe_pack_input_variables_and_rewrite_objective(
             implicit_f,
-            inner_args,
+            inner_args_to_diff,
         )
     )
 
@@ -331,9 +361,11 @@ def implict_optimization_grads(
         vectorize=use_vectorized_jac,
     )
 
+    # Replace inner inputs (abstract dummies) with outer inputs (the actual user-provided symbols)
+    # at the solution point. From here on, the inner values should not be referenced.
     inner_to_outer_map = dict(zip(fgraph.inputs, (x_star, *args)))
-
     df_dx_star, df_dtheta_star = graph_replace([df_dx, df_dtheta], inner_to_outer_map)
+
     grad_wrt_args_packed = solve(-atleast_2d(df_dx_star), atleast_1d(df_dtheta_star))
 
     if packed_arg_shapes is not None:
@@ -351,16 +383,23 @@ def implict_optimization_grads(
             grad_wrt_args_packed = grad_wrt_args_packed.squeeze(axis=0)
         grad_wrt_args = [grad_wrt_args_packed]
 
-    final_grads = [
-        tensordot(output_grad, arg_grad, [[0], [0]])
-        if arg_grad.ndim > 0 and output_grad.ndim > 0
-        else arg_grad * output_grad
-        for arg_grad in grad_wrt_args
-    ]
-    final_grads = [
-        scalar_from_tensor(g) if isinstance(arg.type, ScalarType) else g
-        for arg, g in zip(args, final_grads)
-    ]
+    arg_to_grad = dict(zip(outer_args_to_diff, grad_wrt_args))
+
+    final_grads = []
+    for arg in args:
+        arg_grad = arg_to_grad.get(arg, None)
+
+        if arg_grad is None:
+            final_grads.append(DisconnectedType()())
+            continue
+
+        if arg_grad.ndim > 0 and output_grad.ndim > 0:
+            g = tensordot(output_grad, arg_grad, [[0], [0]])
+        else:
+            g = arg_grad * output_grad
+        if isinstance(arg.type, ScalarType):
+            g = scalar_from_tensor(g)
+        final_grads.append(g)
 
     return final_grads
 
@@ -640,7 +679,7 @@ def _maybe_pack_input_variables_and_rewrite_objective(
                 for xi, ui in zip(x, unpacked_output)
             },
         )
-        objective = rewrite_graph(objective, include=("ShapeOpt", "canonicalize"))
+
     return packed_input, packed_shapes, objective
 
 

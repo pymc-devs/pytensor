@@ -4,7 +4,11 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import Variable, config, function
-from pytensor.gradient import NullTypeGradError, disconnected_type
+from pytensor.gradient import (
+    DisconnectedInputError,
+    NullTypeGradError,
+    disconnected_type,
+)
 from pytensor.graph import Apply, Op, Type
 from pytensor.tensor import alloc, scalar, scalar_from_tensor, tensor_from_scalar
 from pytensor.tensor.optimize import minimize, minimize_scalar, root, root_scalar
@@ -438,7 +442,11 @@ def test_optimize_grad_scalar_arg(optimize_op):
     np.testing.assert_allclose(grad_wrt_theta.eval({x: np.pi, theta: np.e}), -1)
 
 
-@pytest.mark.parametrize("optimize_op", (minimize, minimize_scalar, root, root_scalar))
+@pytest.mark.parametrize(
+    "optimize_op",
+    (minimize, minimize_scalar, root, root_scalar),
+    ids=["minimize", "minimize_scalar", "root", "root_scalar"],
+)
 def test_optimize_grad_disconnected_numerical_inp(optimize_op):
     x = scalar("x", dtype="float64")
     theta = scalar("theta", dtype="int64")
@@ -449,12 +457,14 @@ def test_optimize_grad_disconnected_numerical_inp(optimize_op):
     assert x0.owner.inputs[1] is theta
 
     # This should technically raise, but does not right now
-    grad_wrt_theta = pt.grad(x0, theta, disconnected_inputs="raise")
-    np.testing.assert_allclose(grad_wrt_theta.eval({x: np.pi, theta: 5}), 0)
+    with pytest.raises(DisconnectedInputError):
+        pt.grad(x0, theta, disconnected_inputs="raise")
 
     # This should work even if the previous one raised
     grad_wrt_theta = pt.grad(x0, theta, disconnected_inputs="ignore")
-    np.testing.assert_allclose(grad_wrt_theta.eval({x: np.pi, theta: 5}), 0)
+    np.testing.assert_allclose(
+        grad_wrt_theta.eval({x: np.pi, theta: 5}, on_unused_input="ignore"), 0
+    )
 
 
 @pytest.mark.parametrize("optimize_op", (minimize, minimize_scalar, root, root_scalar))
