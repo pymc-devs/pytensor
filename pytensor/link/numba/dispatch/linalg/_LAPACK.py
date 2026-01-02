@@ -7,6 +7,21 @@ from numba.core.types import Complex
 from numba.np.linalg import ensure_lapack, get_blas_kind
 
 
+nb_i32 = types.int32
+nb_i32p = types.CPointer(nb_i32)
+
+nb_f32 = types.float32
+nb_f32p = types.CPointer(nb_f32)
+
+nb_f64 = types.float64
+nb_f64p = types.CPointer(nb_f64)
+
+nb_c64 = types.complex64
+nb_c64p = types.CPointer(nb_c64)
+
+nb_c128 = types.complex128
+nb_c128p = types.CPointer(nb_c128)
+
 _PTR = ctypes.POINTER
 
 _dbl = ctypes.c_double
@@ -29,6 +44,13 @@ def _get_lapack_ptr_and_ptr_type(dtype, name):
     return lapack_ptr, float_pointer
 
 
+def get_lapack_ptr(dtype, name):
+    d = get_blas_kind(dtype)
+    func_name = f"{d}{name}"
+    lapack_ptr = get_cython_function_address("scipy.linalg.cython_lapack", func_name)
+    return lapack_ptr
+
+
 def _get_underlying_float(dtype):
     s_dtype = str(dtype)
     out_type = s_dtype
@@ -45,6 +67,20 @@ def _get_float_pointer_for_dtype(blas_dtype):
         return _ptr_float
     elif blas_dtype in ["d", "z"]:
         return _ptr_dbl
+
+
+def _get_nb_float_from_dtype(blas_dtype, return_pointer=True):
+    match blas_dtype:
+        case "s":
+            return nb_f32p if return_pointer else nb_f32
+        case "d":
+            return nb_f64p if return_pointer else nb_f64
+        case "c":
+            return nb_c64p if return_pointer else nb_c64
+        case "z":
+            return nb_c128p if return_pointer else nb_c128
+        case _:
+            raise ValueError(f"Unsupported BLAS dtype: {blas_dtype}")
 
 
 def _get_output_ctype(dtype):
