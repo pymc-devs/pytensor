@@ -309,7 +309,7 @@ def numba_funcify_Solve(op, node, **kwargs):
     return solve
 
 
-@numba_funcify.register(SolveTriangular)
+@register_funcify_default_op_cache_key(SolveTriangular)
 def numba_funcify_SolveTriangular(op, node, **kwargs):
     lower = op.lower
     unit_diagonal = op.unit_diagonal
@@ -359,7 +359,8 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
         return res
 
-    return solve_triangular
+    cache_key = 1
+    return solve_triangular, cache_key
 
 
 @numba_funcify.register(CholeskySolve)
