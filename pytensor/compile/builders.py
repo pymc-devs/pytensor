@@ -872,7 +872,7 @@ class OpFromGraph(Op, HasInnerGraph):
 
     def clone(self):
         res = copy(self)
-        res.fgraph = res.fgraph.clone()
+        res.fgraph = res.fgraph.clone(clone_inner_graphs=True)
         return res
 
     def perform(self, node, inputs, outputs):

@@ -838,9 +838,13 @@ class FunctionGraph(MetaObject):
     def __repr__(self):
         return f"FunctionGraph({', '.join(graph_as_string(self.inputs, self.outputs))})"
 
-    def clone(self, check_integrity=True) -> "FunctionGraph":
+    def clone(
+        self, check_integrity=True, clone_inner_graphs: bool = False
+    ) -> "FunctionGraph":
         """Clone the graph."""
-        return self.clone_get_equiv(check_integrity)[0]
+        return self.clone_get_equiv(
+            check_integrity, clone_inner_graphs=clone_inner_graphs
+        )[0]
 
     def clone_get_equiv(
         self, check_integrity: bool = True, attach_feature: bool = True, **kwargs
