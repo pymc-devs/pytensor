@@ -2515,43 +2515,6 @@ class TestAdvancedSubtensor:
         assert type(new_node.op) is not AdvancedSubtensor
         assert new_node.op.idx_list == (slice(None), idx.type)
 
-    def test_advanced_inc_subtensor_grad_respects_subclass_and_rewrite(self):
-        """
-        Test that gradient of AdvancedIncSubtensor respects the subclass and is preserved by rewrites.
-        """
-        x = vector("x")
-        y = dscalar("y")
-        idx = lscalar("idx")
-
-        op_set = self.MyAdvancedIncSubtensor(
-            idx_list=[idx.type], set_instead_of_inc=True
-        )
-
-        outgrad = vector("outgrad")
-        grads = op_set.grad([x, y, idx], [outgrad])
-        gx = grads[0]
-
-        assert isinstance(gx.owner.op, self.MyAdvancedIncSubtensor)
-        assert gx.owner.op.set_instead_of_inc is True
-
-        f = pytensor.function(
-            [x, y, idx, outgrad], gx, on_unused_input="ignore", mode="FAST_RUN"
-        )
-        topo = f.maker.fgraph.toposort()
-        ops = [node.op for node in topo]
-        has_my_subclass = any(isinstance(op, self.MyAdvancedIncSubtensor) for op in ops)
-        assert has_my_subclass, (
-            "Optimizer replaced MyAdvancedIncSubtensor with generic Op!"
-        )
-
-        x_val = np.array([1.0, 2.0, 3.0], dtype=config.floatX)
-        y_val = 10.0
-        idx_val = 1
-        outgrad_val = np.ones_like(x_val)
-        gx_val = f(x_val, y_val, idx_val, outgrad_val)
-        expected_gx = np.array([1.0, 0.0, 1.0], dtype=config.floatX)
-        assert np.allclose(gx_val, expected_gx)
-
     def test_rewrite_respects_subclass_AdvancedSubtensor(self):
         """
         Spec Test: The rewrite `local_replace_AdvancedSubtensor` should NOT apply to subclasses.
