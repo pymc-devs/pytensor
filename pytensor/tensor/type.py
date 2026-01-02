@@ -118,7 +118,9 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
                 f"TensorType broadcastable/shape must be a boolean, integer or None, got {type(s)} {s}"
             )
 
-        self.shape = tuple(parse_bcast_and_shape(s) for s in shape)
+        self.shape = _shape = tuple(parse_bcast_and_shape(s) for s in shape)
+        self.broadcastable = tuple(s == 1 for s in _shape)
+        self.ndim = len(_shape)
         self.dtype_specs()  # error checking is done there
         self.name = name
         self.numpy_dtype = np.dtype(self.dtype)
@@ -391,16 +393,6 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
 
     def __hash__(self):
         return hash((type(self), self.dtype, self.shape))
-
-    @property
-    def broadcastable(self):
-        """A boolean tuple indicating which dimensions have a shape equal to one."""
-        return tuple(s == 1 for s in self.shape)
-
-    @property
-    def ndim(self):
-        """The number of dimensions."""
-        return len(self.shape)
 
     def __str__(self):
         if self.name:
