@@ -181,12 +181,12 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
             )
 
     def test_too_big_rank(self):
-        numpy_maxdims = 64
         x = self.type(self.dtype, shape=())()
-        y = x.dimshuffle(("x",) * (numpy_maxdims + 1))
-
-        with pytest.raises((ValueError, SystemError)):
-            y.eval({x: 0})
+        with pytest.raises(
+            ValueError,
+            match="maximum supported dimension for a TensorType is currently 64, found 65",
+        ):
+            x.dimshuffle(("x",) * 65)
 
     def test_c_views(self):
         x_pt = vector()
