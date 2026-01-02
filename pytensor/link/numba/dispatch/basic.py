@@ -478,7 +478,7 @@ def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | Non
             src=f"def {op_name}(*args): return jitable_func(*args)",
             function_name=op_name,
             global_env=globals() | {"jitable_func": jitable_func},
-            cache_key=cache_key,
+            cache_key=f"{cache_key}_fastmath{int(config.numba__fastmath)}",
         )
         return numba_njit(cached_func, cache=True), cache_key
 
