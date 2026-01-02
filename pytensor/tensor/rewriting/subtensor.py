@@ -1778,13 +1778,13 @@ def ravel_multidimensional_bool_idx(fgraph, node):
 
     if isinstance(node.op, AdvancedSubtensor):
         x = node.inputs[0]
-        tensor_inputs = node.inputs[1:]
+        index_variables = node.inputs[1:]
     else:
         x, y = node.inputs[0], node.inputs[1]
-        tensor_inputs = node.inputs[2:]
+        index_variables = node.inputs[2:]
 
     # Reconstruct indices from idx_list and tensor inputs
-    idxs = indices_from_subtensor(tensor_inputs, node.op.idx_list)
+    idxs = indices_from_subtensor(index_variables, node.op.idx_list)
 
     if any(
         (
