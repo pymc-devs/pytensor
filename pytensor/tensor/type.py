@@ -120,7 +120,12 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
 
         self.shape = _shape = tuple(parse_bcast_and_shape(s) for s in shape)
         self.broadcastable = tuple(s == 1 for s in _shape)
-        self.ndim = len(_shape)
+        self.ndim = _ndim = len(_shape)
+        if _ndim > 64:
+            # Message mimicks that of numpy
+            raise ValueError(
+                f"maximum supported dimension for a TensorType is currently 64, found {_ndim}"
+            )
         self.dtype_specs()  # error checking is done there
         self.name = name
         self.numpy_dtype = np.dtype(self.dtype)
