@@ -679,67 +679,127 @@ class _LAPACK:
         """
         Compute the LU factorization of a tridiagonal matrix A using row interchanges.
 
-        Called by scipy.linalg.lu_factor
+        Called by scipy.linalg.solve when assume_a == "tri"
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "gttrf")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # N
-            float_pointer,  # DL
-            float_pointer,  # D
-            float_pointer,  # DU
-            float_pointer,  # DU2
-            _ptr_int,  # IPIV
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}gttrf"
+
+        @numba_basic.numba_njit
+        def get_gttrf_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "gttrf")
+            return ptr
+
+        gttrf_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # N
+                float_pointer,  # DL
+                float_pointer,  # D
+                float_pointer,  # DU
+                float_pointer,  # DU2
+                nb_i32p,  # IPIV
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _gttrf_py(N, DL, D, DU, DU2, IPIV, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_gttrf_pointer,
+                func_type_ref=gttrf_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(N, DL, D, DU, DU2, IPIV, INFO)
+
+        gttrf: CPUDispatcher = numba_basic.numba_njit(cache=True)(_gttrf_py)
+        return gttrf
 
     @classmethod
     def numba_xgttrs(cls, dtype):
         """
         Solve a system of linear equations A @ X = B with a tridiagonal matrix A using the LU factorization computed by numba_gttrf.
 
-        Called by scipy.linalg.lu_solve
+        Called by scipy.linalg.solve, when assume_a == "tri"
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "gttrs")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # TRANS
-            _ptr_int,  # N
-            _ptr_int,  # NRHS
-            float_pointer,  # DL
-            float_pointer,  # D
-            float_pointer,  # DU
-            float_pointer,  # DU2
-            _ptr_int,  # IPIV
-            float_pointer,  # B
-            _ptr_int,  # LDB
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}gttrs"
+
+        @numba_basic.numba_njit
+        def get_gttrs_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "gttrs")
+            return ptr
+
+        gttrs_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # TRANS
+                nb_i32p,  # N
+                nb_i32p,  # NRHS
+                float_pointer,  # DL
+                float_pointer,  # D
+                float_pointer,  # DU
+                float_pointer,  # DU2
+                nb_i32p,  # IPIV
+                float_pointer,  # B
+                nb_i32p,  # LDB
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _gttrs_py(TRANS, N, NRHS, DL, D, DU, DU2, IPIV, B, LDB, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_gttrs_pointer,
+                func_type_ref=gttrs_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(TRANS, N, NRHS, DL, D, DU, DU2, IPIV, B, LDB, INFO)
+
+        gttrs: CPUDispatcher = numba_basic.numba_njit(cache=True)(_gttrs_py)
+        return gttrs
 
     @classmethod
     def numba_xgtcon(cls, dtype):
         """
         Estimate the reciprocal of the condition number of a tridiagonal matrix A using the LU factorization computed by numba_gttrf.
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "gtcon")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # NORM
-            _ptr_int,  # N
-            float_pointer,  # DL
-            float_pointer,  # D
-            float_pointer,  # DU
-            float_pointer,  # DU2
-            _ptr_int,  # IPIV
-            float_pointer,  # ANORM
-            float_pointer,  # RCOND
-            float_pointer,  # WORK
-            _ptr_int,  # IWORK
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}gtcon"
+
+        @numba_basic.numba_njit
+        def get_gtcon_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "gtcon")
+            return ptr
+
+        gtcon_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # NORM
+                nb_i32p,  # N
+                float_pointer,  # DL
+                float_pointer,  # D
+                float_pointer,  # DU
+                float_pointer,  # DU2
+                nb_i32p,  # IPIV
+                float_pointer,  # ANORM
+                float_pointer,  # RCOND
+                float_pointer,  # WORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _gtcon_py(NORM, N, DL, D, DU, DU2, IPIV, ANORM, RCOND, WORK, IWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_gtcon_pointer,
+                func_type_ref=gtcon_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(NORM, N, DL, D, DU, DU2, IPIV, ANORM, RCOND, WORK, IWORK, INFO)
+
+        gtcon: CPUDispatcher = numba_basic.numba_njit(cache=True)(_gtcon_py)
+        return gtcon
 
     @classmethod
     def numba_xgeqrf(cls, dtype):

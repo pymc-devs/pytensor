@@ -116,7 +116,7 @@ def pivot_to_permutation(op, node, **kwargs):
     return numba_pivot_to_permutation, cache_key
 
 
-@numba_funcify.register(LU)
+@register_funcify_default_op_cache_key(LU)
 def numba_funcify_LU(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.numpy_dtype
     if inp_dtype.kind == "c":
@@ -180,7 +180,8 @@ def numba_funcify_LU(op, node, **kwargs):
 
         return res
 
-    return lu
+    cache_key = 1
+    return lu, cache_key
 
 
 @register_funcify_default_op_cache_key(LUFactor)
