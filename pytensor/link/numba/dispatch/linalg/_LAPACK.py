@@ -310,34 +310,74 @@ class _LAPACK:
         Compute the value of the 1-norm, Frobenius norm, infinity-norm, or the largest absolute value of any element of
         a general M-by-N matrix A.
 
-        Called by scipy.linalg.solve
+        Called by scipy.linalg.solve, but doesn't correspond to any Op in pytensor.
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "lange")
-        output_ctype = _get_output_ctype(dtype)
-        functype = ctypes.CFUNCTYPE(
-            output_ctype,  # Output
-            _ptr_int,  # NORM
-            _ptr_int,  # M
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # WORK
+        kind = get_blas_kind(dtype)
+        float_type = _get_nb_float_from_dtype(kind, return_pointer=False)
+        float_pointer = _get_nb_float_from_dtype(kind, return_pointer=True)
+        cache_key = f"{kind}lange"
+
+        @numba_basic.numba_njit
+        def get_lange_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "lange")
+            return ptr
+
+        lange_function_type = types.FunctionType(
+            float_type(
+                nb_i32p,  # NORM
+                nb_i32p,  # M
+                nb_i32p,  # N
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # WORK
+            )
         )
-        return functype(lapack_ptr)
+
+        def _lange_py(NORM, M, N, A, LDA, WORK):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_lange_pointer,
+                func_type_ref=lange_function_type,
+                cache_key_lit=cache_key,
+            )
+            return fn(NORM, M, N, A, LDA, WORK)
+
+        lange: CPUDispatcher = numba_basic.numba_njit(cache=True)(_lange_py)
+        return lange
 
     @classmethod
     def numba_xlamch(cls, dtype):
         """
         Determine machine precision for floating point arithmetic.
         """
+        kind = get_blas_kind(dtype)
+        float_type = _get_nb_float_from_dtype(kind, return_pointer=False)
+        cache_key = f"{kind}lamch"
 
-        lapack_ptr, _float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "lamch")
-        output_dtype = _get_output_ctype(dtype)
-        functype = ctypes.CFUNCTYPE(
-            output_dtype,  # Output
-            _ptr_int,  # CMACH
+        @numba_basic.numba_njit
+        def get_lamch_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "lamch")
+            return ptr
+
+        lamch_function_type = types.FunctionType(
+            float_type(  # Return type
+                nb_i32p,  # CMACH
+            )
         )
-        return functype(lapack_ptr)
+
+        def _lamch_py(CMACH):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_lamch_pointer,
+                func_type_ref=lamch_function_type,
+                cache_key_lit=cache_key,
+            )
+            res = fn(CMACH)
+            return res
+
+        lamch: CPUDispatcher = numba_basic.numba_njit(cache=True)(_lamch_py)
+
+        return lamch
 
     @classmethod
     def numba_xgecon(cls, dtype):
