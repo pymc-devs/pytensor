@@ -176,7 +176,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_trtrs_pointer,
                 func_type_ref=trtrs_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(UPLO, TRANS, DIAG, N, NRHS, A, LDA, B, LDB, INFO)
 
@@ -215,7 +215,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_potrf_pointer,
                 func_type_ref=potrf_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(UPLO, N, A, LDA, INFO)
 
@@ -257,7 +257,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_potrs_pointer,
                 func_type_ref=potrs_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(UPLO, N, NRHS, A, LDA, B, LDB, INFO)
 
@@ -298,7 +298,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_lange_pointer,
                 func_type_ref=lange_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             return fn(NORM, M, N, A, LDA, WORK)
 
@@ -330,7 +330,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_lamch_pointer,
                 func_type_ref=lamch_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             res = fn(CMACH)
             return res
@@ -373,7 +373,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_gecon_pointer,
                 func_type_ref=gecon_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(NORM, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO)
 
@@ -412,7 +412,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_getrf_pointer,
                 func_type_ref=getrf_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(M, N, A, LDA, IPIV, INFO)
 
@@ -455,7 +455,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_getrs_pointer,
                 func_type_ref=getrs_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(TRANS, N, NRHS, A, LDA, IPIV, B, LDB, INFO)
 
@@ -500,7 +500,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_sysv_pointer,
                 func_type_ref=sysv_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO)
 
@@ -542,7 +542,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_sycon_pointer,
                 func_type_ref=sycon_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(UPLO, N, A, LDA, IPIV, ANORM, RCOND, WORK, IWORK, INFO)
 
@@ -585,7 +585,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_pocon_pointer,
                 func_type_ref=pocon_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(UPLO, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO)
 
@@ -625,7 +625,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_posv_pointer,
                 func_type_ref=posv_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(UPLO, N, NRHS, A, LDA, B, LDB, INFO)
 
@@ -665,7 +665,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_gttrf_pointer,
                 func_type_ref=gttrf_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(N, DL, D, DU, DU2, IPIV, INFO)
 
@@ -709,7 +709,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_gttrs_pointer,
                 func_type_ref=gttrs_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(TRANS, N, NRHS, DL, D, DU, DU2, IPIV, B, LDB, INFO)
 
@@ -752,7 +752,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_gtcon_pointer,
                 func_type_ref=gtcon_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(NORM, N, DL, D, DU, DU2, IPIV, ANORM, RCOND, WORK, IWORK, INFO)
 
@@ -793,7 +793,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_geqrf_pointer,
                 func_type_ref=geqrf_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(M, N, A, LDA, TAU, WORK, LWORK, INFO)
 
@@ -838,7 +838,7 @@ class _LAPACK:
                 fn = _call_cached_ptr(
                     get_ptr_func=get_geqp3_pointer,
                     func_type_ref=geqp3_function_type,
-                    cache_key_lit=unique_func_name,
+                    unique_func_name_lit=unique_func_name,
                 )
                 fn(M, N, A, LDA, JPVT, TAU, WORK, LWORK, RWORK, INFO)
 
@@ -862,7 +862,7 @@ class _LAPACK:
                 fn = _call_cached_ptr(
                     get_ptr_func=get_geqp3_pointer,
                     func_type_ref=geqp3_function_type,
-                    cache_key_lit=unique_func_name,
+                    unique_func_name_lit=unique_func_name,
                 )
                 fn(M, N, A, LDA, JPVT, TAU, WORK, LWORK, INFO)
 
@@ -904,7 +904,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_orgqr_pointer,
                 func_type_ref=orgqr_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
 
@@ -946,7 +946,7 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_ungqr_pointer,
                 func_type_ref=ungqr_function_type,
-                cache_key_lit=unique_func_name,
+                unique_func_name_lit=unique_func_name,
             )
             fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
 

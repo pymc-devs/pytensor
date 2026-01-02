@@ -133,7 +133,7 @@ def compile_numba_function_src(
 
 
 @numba.extending.intrinsic(prefer_literal=True)
-def _call_cached_ptr(typingctx, get_ptr_func, func_type_ref, cache_key_lit):
+def _call_cached_ptr(typingctx, get_ptr_func, func_type_ref, unique_func_name_lit):
     """
     Enable caching of function pointers returned by `get_ptr_func`.
 
@@ -141,11 +141,11 @@ def _call_cached_ptr(typingctx, get_ptr_func, func_type_ref, cache_key_lit):
     cython_lapack routines), numba will refuse to cache the function, because the pointer may change between runs.
 
     This intrinsic allows us to cache the pointer ourselves, by storing it in a global variable keyed by a literal
-    `cache_key_lit`. The first time the intrinsic is called, it will call `get_ptr_func` to get the pointer, store it
+    `unique_func_name_lit`. The first time the intrinsic is called, it will call `get_ptr_func` to get the pointer, store it
     in the global variable, and return it. Subsequent calls will load the pointer from the global variable.
     """
     func_type = func_type_ref.instance_type
-    cache_key = cache_key_lit.literal_value
+    cache_key = unique_func_name_lit.literal_value
 
     def codegen(context, builder, signature, args):
         ptr_ty = ir.PointerType(ir.IntType(8))
@@ -174,5 +174,5 @@ def _call_cached_ptr(typingctx, get_ptr_func, func_type_ref, cache_key_lit):
 
         return sfunc._getvalue()
 
-    sig = func_type(get_ptr_func, func_type_ref, cache_key_lit)
+    sig = func_type(get_ptr_func, func_type_ref, unique_func_name_lit)
     return sig, codegen
