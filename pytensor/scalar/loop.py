@@ -123,7 +123,7 @@ class ScalarLoop(ScalarInnerGraphOp):
             update, until = self.outputs, None
         init = self.inputs[: len(update)]
         constant = self.inputs[len(update) :]
-        return ScalarLoop(
+        return self.__class__(
             init=init,
             update=update,
             constant=constant,

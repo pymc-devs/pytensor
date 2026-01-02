@@ -4301,7 +4301,7 @@ class Composite(ScalarInnerGraphOp):
         return self._fgraph
 
     def clone(self):
-        return Composite(self.fgraph.inputs, self.fgraph.outputs)
+        return self.__class__(self.fgraph.inputs, self.fgraph.outputs)
 
     def output_types(self, input_types):
         if tuple(input_types) != self.inputs_type:
