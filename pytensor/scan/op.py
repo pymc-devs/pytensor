@@ -1521,7 +1521,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
     def clone(self) -> "Scan":
         res = copy(self)
-        res.fgraph = res.fgraph.clone()
+        res.fgraph = res.fgraph.clone(clone_inner_graphs=True)
         return res
 
     def make_thunk(self, node, storage_map, compute_map, no_recycling, impl=None):

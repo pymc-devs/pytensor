@@ -211,7 +211,7 @@ class ScipyWrapperOp(Op, HasInnerGraph):
 
     def clone(self):
         copy_op = copy(self)
-        copy_op.fgraph = self.fgraph.clone()
+        copy_op.fgraph = self.fgraph.clone(clone_inner_graphs=True)
         return copy_op
 
     def prepare_node(
