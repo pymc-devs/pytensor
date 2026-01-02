@@ -242,7 +242,7 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
     return block_diag
 
 
-@numba_funcify.register(Solve)
+@register_funcify_default_op_cache_key(Solve)
 def numba_funcify_Solve(op, node, **kwargs):
     A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -307,7 +307,8 @@ def numba_funcify_Solve(op, node, **kwargs):
         res = solve_fn(a, b, lower, overwrite_a, overwrite_b, check_finite, transposed)
         return res
 
-    return solve
+    cache_key = 1
+    return solve, cache_key
 
 
 @register_funcify_default_op_cache_key(SolveTriangular)

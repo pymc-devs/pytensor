@@ -468,20 +468,40 @@ class _LAPACK:
 
         Called by scipy.linalg.lu_solve
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "getrs")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # TRANS
-            _ptr_int,  # N
-            _ptr_int,  # NRHS
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            _ptr_int,  # IPIV
-            float_pointer,  # B
-            _ptr_int,  # LDB
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}getrs"
+
+        @numba_basic.numba_njit
+        def get_getrs_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "getrs")
+            return ptr
+
+        getrs_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # TRANS
+                nb_i32p,  # N
+                nb_i32p,  # NRHS
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                nb_i32p,  # IPIV
+                float_pointer,  # B
+                nb_i32p,  # LDB
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _getrs_py(TRANS, N, NRHS, A, LDA, IPIV, B, LDB, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_getrs_pointer,
+                func_type_ref=getrs_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(TRANS, N, NRHS, A, LDA, IPIV, B, LDB, INFO)
+
+        getrs: CPUDispatcher = numba_basic.numba_njit(cache=True)(_getrs_py)
+        return getrs
 
     @classmethod
     def numba_xsysv(cls, dtype):
