@@ -148,7 +148,7 @@ class _LAPACK:
 
         kind = get_blas_kind(dtype)
         float_ptr = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}trtrs"
+        unique_func_name = f"{kind}trtrs"
 
         @numba_basic.numba_njit
         def get_trtrs_pointer():
@@ -175,11 +175,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_trtrs_pointer,
                 func_type_ref=trtrs_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(UPLO, TRANS, DIAG, N, NRHS, A, LDA, B, LDB, INFO)
 
-        trtrs: CPUDispatcher = numba_basic.numba_njit(cache=True)(_trtrs_py)
+        trtrs: CPUDispatcher = numba_basic.numba_njit()(_trtrs_py)
 
         return trtrs
 
@@ -193,7 +193,7 @@ class _LAPACK:
 
         kind = get_blas_kind(dtype)
         float_ptr = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}potrf"
+        unique_func_name = f"{kind}potrf"
 
         @numba_basic.numba_njit
         def get_potrf_pointer():
@@ -215,11 +215,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_potrf_pointer,
                 func_type_ref=potrf_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(UPLO, N, A, LDA, INFO)
 
-        potrf: CPUDispatcher = numba_basic.numba_njit(cache=True)(_potrf_py)
+        potrf: CPUDispatcher = numba_basic.numba_njit()(_potrf_py)
 
         return potrf
 
@@ -233,7 +233,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}potrs"
+        unique_func_name = f"{kind}potrs"
 
         @numba_basic.numba_njit
         def get_potrs_pointer():
@@ -258,11 +258,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_potrs_pointer,
                 func_type_ref=potrs_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(UPLO, N, NRHS, A, LDA, B, LDB, INFO)
 
-        potrs: CPUDispatcher = numba_basic.numba_njit(cache=True)(_potrs_py)
+        potrs: CPUDispatcher = numba_basic.numba_njit()(_potrs_py)
 
         return potrs
 
@@ -277,7 +277,7 @@ class _LAPACK:
         kind = get_blas_kind(dtype)
         float_type = _get_nb_float_from_dtype(kind, return_pointer=False)
         float_pointer = _get_nb_float_from_dtype(kind, return_pointer=True)
-        cache_key = f"{kind}lange"
+        unique_func_name = f"{kind}lange"
 
         @numba_basic.numba_njit
         def get_lange_pointer():
@@ -300,11 +300,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_lange_pointer,
                 func_type_ref=lange_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             return fn(NORM, M, N, A, LDA, WORK)
 
-        lange: CPUDispatcher = numba_basic.numba_njit(cache=True)(_lange_py)
+        lange: CPUDispatcher = numba_basic.numba_njit()(_lange_py)
         return lange
 
     @classmethod
@@ -314,7 +314,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_type = _get_nb_float_from_dtype(kind, return_pointer=False)
-        cache_key = f"{kind}lamch"
+        unique_func_name = f"{kind}lamch"
 
         @numba_basic.numba_njit
         def get_lamch_pointer():
@@ -332,12 +332,12 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_lamch_pointer,
                 func_type_ref=lamch_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             res = fn(CMACH)
             return res
 
-        lamch: CPUDispatcher = numba_basic.numba_njit(cache=True)(_lamch_py)
+        lamch: CPUDispatcher = numba_basic.numba_njit()(_lamch_py)
 
         return lamch
 
@@ -350,7 +350,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}gecon"
+        unique_func_name = f"{kind}gecon"
 
         @numba_basic.numba_njit
         def get_gecon_pointer():
@@ -376,11 +376,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_gecon_pointer,
                 func_type_ref=gecon_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(NORM, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO)
 
-        gecon: CPUDispatcher = numba_basic.numba_njit(cache=True)(_gecon_py)
+        gecon: CPUDispatcher = numba_basic.numba_njit()(_gecon_py)
         return gecon
 
     @classmethod
@@ -392,7 +392,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}getrf"
+        unique_func_name = f"{kind}getrf"
 
         @numba_basic.numba_njit
         def get_getrf_pointer():
@@ -415,11 +415,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_getrf_pointer,
                 func_type_ref=getrf_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(M, N, A, LDA, IPIV, INFO)
 
-        getrf: CPUDispatcher = numba_basic.numba_njit(cache=True)(_getrf_py)
+        getrf: CPUDispatcher = numba_basic.numba_njit()(_getrf_py)
         return getrf
 
     @classmethod
@@ -432,7 +432,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}getrs"
+        unique_func_name = f"{kind}getrs"
 
         @numba_basic.numba_njit
         def get_getrs_pointer():
@@ -458,11 +458,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_getrs_pointer,
                 func_type_ref=getrs_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(TRANS, N, NRHS, A, LDA, IPIV, B, LDB, INFO)
 
-        getrs: CPUDispatcher = numba_basic.numba_njit(cache=True)(_getrs_py)
+        getrs: CPUDispatcher = numba_basic.numba_njit()(_getrs_py)
         return getrs
 
     @classmethod
@@ -475,7 +475,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}sysv"
+        unique_func_name = f"{kind}sysv"
 
         @numba_basic.numba_njit
         def get_sysv_pointer():
@@ -503,11 +503,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_sysv_pointer,
                 func_type_ref=sysv_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO)
 
-        sysv: CPUDispatcher = numba_basic.numba_njit(cache=True)(_sysv_py)
+        sysv: CPUDispatcher = numba_basic.numba_njit()(_sysv_py)
         return sysv
 
     @classmethod
@@ -518,7 +518,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}sycon"
+        unique_func_name = f"{kind}sycon"
 
         @numba_basic.numba_njit
         def get_sycon_pointer():
@@ -545,11 +545,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_sycon_pointer,
                 func_type_ref=sycon_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(UPLO, N, A, LDA, IPIV, ANORM, RCOND, WORK, IWORK, INFO)
 
-        sycon: CPUDispatcher = numba_basic.numba_njit(cache=True)(_sycon_py)
+        sycon: CPUDispatcher = numba_basic.numba_njit()(_sycon_py)
 
         return sycon
 
@@ -563,7 +563,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}pocon"
+        unique_func_name = f"{kind}pocon"
 
         @numba_basic.numba_njit
         def get_pocon_pointer():
@@ -589,11 +589,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_pocon_pointer,
                 func_type_ref=pocon_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(UPLO, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO)
 
-        pocon: CPUDispatcher = numba_basic.numba_njit(cache=True)(_pocon_py)
+        pocon: CPUDispatcher = numba_basic.numba_njit()(_pocon_py)
         return pocon
 
     @classmethod
@@ -604,7 +604,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}posv"
+        unique_func_name = f"{kind}posv"
 
         @numba_basic.numba_njit
         def get_posv_pointer():
@@ -629,11 +629,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_posv_pointer,
                 func_type_ref=posv_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(UPLO, N, NRHS, A, LDA, B, LDB, INFO)
 
-        posv: CPUDispatcher = numba_basic.numba_njit(cache=True)(_posv_py)
+        posv: CPUDispatcher = numba_basic.numba_njit()(_posv_py)
         return posv
 
     @classmethod
@@ -645,7 +645,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}gttrf"
+        unique_func_name = f"{kind}gttrf"
 
         @numba_basic.numba_njit
         def get_gttrf_pointer():
@@ -669,11 +669,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_gttrf_pointer,
                 func_type_ref=gttrf_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(N, DL, D, DU, DU2, IPIV, INFO)
 
-        gttrf: CPUDispatcher = numba_basic.numba_njit(cache=True)(_gttrf_py)
+        gttrf: CPUDispatcher = numba_basic.numba_njit()(_gttrf_py)
         return gttrf
 
     @classmethod
@@ -685,7 +685,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}gttrs"
+        unique_func_name = f"{kind}gttrs"
 
         @numba_basic.numba_njit
         def get_gttrs_pointer():
@@ -713,11 +713,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_gttrs_pointer,
                 func_type_ref=gttrs_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(TRANS, N, NRHS, DL, D, DU, DU2, IPIV, B, LDB, INFO)
 
-        gttrs: CPUDispatcher = numba_basic.numba_njit(cache=True)(_gttrs_py)
+        gttrs: CPUDispatcher = numba_basic.numba_njit()(_gttrs_py)
         return gttrs
 
     @classmethod
@@ -727,7 +727,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}gtcon"
+        unique_func_name = f"{kind}gtcon"
 
         @numba_basic.numba_njit
         def get_gtcon_pointer():
@@ -756,11 +756,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_gtcon_pointer,
                 func_type_ref=gtcon_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(NORM, N, DL, D, DU, DU2, IPIV, ANORM, RCOND, WORK, IWORK, INFO)
 
-        gtcon: CPUDispatcher = numba_basic.numba_njit(cache=True)(_gtcon_py)
+        gtcon: CPUDispatcher = numba_basic.numba_njit()(_gtcon_py)
         return gtcon
 
     @classmethod
@@ -772,7 +772,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}geqrf"
+        unique_func_name = f"{kind}geqrf"
 
         @numba_basic.numba_njit
         def get_geqrf_pointer():
@@ -797,11 +797,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_geqrf_pointer,
                 func_type_ref=geqrf_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(M, N, A, LDA, TAU, WORK, LWORK, INFO)
 
-        geqrf: CPUDispatcher = numba_basic.numba_njit(cache=True)(_geqrf_py)
+        geqrf: CPUDispatcher = numba_basic.numba_njit()(_geqrf_py)
         return geqrf
 
     @classmethod
@@ -813,7 +813,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}geqp3"
+        unique_func_name = f"{kind}geqp3"
 
         @numba_basic.numba_njit
         def get_geqp3_pointer():
@@ -842,7 +842,7 @@ class _LAPACK:
                 fn = _call_cached_ptr(
                     get_ptr_func=get_geqp3_pointer,
                     func_type_ref=geqp3_function_type,
-                    cache_key_lit=cache_key,
+                    cache_key_lit=unique_func_name,
                 )
                 fn(M, N, A, LDA, JPVT, TAU, WORK, LWORK, RWORK, INFO)
 
@@ -865,11 +865,11 @@ class _LAPACK:
                 fn = _call_cached_ptr(
                     get_ptr_func=get_geqp3_pointer,
                     func_type_ref=geqp3_function_type,
-                    cache_key_lit=cache_key,
+                    cache_key_lit=unique_func_name,
                 )
                 fn(M, N, A, LDA, JPVT, TAU, WORK, LWORK, INFO)
 
-        geqp3: CPUDispatcher = numba_basic.numba_njit(cache=True)(_geqp3_py)
+        geqp3: CPUDispatcher = numba_basic.numba_njit()(_geqp3_py)
 
         return geqp3
 
@@ -882,7 +882,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}orgqr"
+        unique_func_name = f"{kind}orgqr"
 
         @numba_basic.numba_njit
         def get_orgqr_pointer():
@@ -908,11 +908,11 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_orgqr_pointer,
                 func_type_ref=orgqr_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
 
-        orgqr: CPUDispatcher = numba_basic.numba_njit(cache=True)(_orgqr_py)
+        orgqr: CPUDispatcher = numba_basic.numba_njit()(_orgqr_py)
         return orgqr
 
     @classmethod
@@ -924,7 +924,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        cache_key = f"{kind}ungqr"
+        unique_func_name = f"{kind}ungqr"
 
         @numba_basic.numba_njit
         def get_ungqr_pointer():
@@ -950,10 +950,10 @@ class _LAPACK:
             fn = _call_cached_ptr(
                 get_ptr_func=get_ungqr_pointer,
                 func_type_ref=ungqr_function_type,
-                cache_key_lit=cache_key,
+                cache_key_lit=unique_func_name,
             )
             fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
 
-        ungqr: CPUDispatcher = numba_basic.numba_njit(cache=True)(_ungqr_py)
+        ungqr: CPUDispatcher = numba_basic.numba_njit()(_ungqr_py)
 
         return ungqr
