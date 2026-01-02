@@ -6,7 +6,6 @@ from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
-    numba_funcify,
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
@@ -416,7 +415,7 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     return cho_solve, cache_key
 
 
-@numba_funcify.register(QR)
+@register_funcify_default_op_cache_key(QR)
 def numba_funcify_QR(op, node, **kwargs):
     mode = op.mode
     check_finite = op.check_finite
@@ -506,4 +505,5 @@ def numba_funcify_QR(op, node, **kwargs):
                 f"QR mode={mode}, pivoting={pivoting} not supported in numba mode."
             )
 
-    return qr
+    cache_key = 1
+    return qr, cache_key

@@ -31,7 +31,6 @@ def _xgeqrf(A: np.ndarray, overwrite_a: bool, lwork: int):
 def xgeqrf_impl(A, overwrite_a, lwork):
     ensure_lapack()
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     geqrf = _LAPACK().numba_xgeqrf(dtype)
 
     def impl(A, overwrite_a, lwork):
@@ -57,10 +56,10 @@ def xgeqrf_impl(A, overwrite_a, lwork):
         geqrf(
             val_to_int_ptr(M),
             val_to_int_ptr(N),
-            A_copy.T.view(w_type).T.ctypes,
+            A_copy.ctypes,
             LDA,
-            TAU.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            TAU.ctypes,
+            WORK.ctypes,
             LWORK,
             INFO,
         )
@@ -82,7 +81,6 @@ def _xgeqp3(A: np.ndarray, overwrite_a: bool, lwork: int):
 def xgeqp3_impl(A, overwrite_a, lwork):
     ensure_lapack()
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     geqp3 = _LAPACK().numba_xgeqp3(dtype)
 
     def impl(A, overwrite_a, lwork):
@@ -109,11 +107,11 @@ def xgeqp3_impl(A, overwrite_a, lwork):
         geqp3(
             val_to_int_ptr(M),
             val_to_int_ptr(N),
-            A_copy.T.view(w_type).T.ctypes,
+            A_copy.ctypes,
             LDA,
             JPVT.ctypes,
-            TAU.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            TAU.ctypes,
+            WORK.ctypes,
             LWORK,
             INFO,
         )
@@ -135,7 +133,6 @@ def _xorgqr(A: np.ndarray, tau: np.ndarray, overwrite_a: bool, lwork: int):
 def xorgqr_impl(A, tau, overwrite_a, lwork):
     ensure_lapack()
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     orgqr = _LAPACK().numba_xorgqr(dtype)
 
     def impl(A, tau, overwrite_a, lwork):
@@ -162,10 +159,10 @@ def xorgqr_impl(A, tau, overwrite_a, lwork):
             val_to_int_ptr(M),
             val_to_int_ptr(N),
             val_to_int_ptr(K),
-            A_copy.T.view(w_type).T.ctypes,
+            A_copy.ctypes,
             LDA,
-            tau.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            tau.ctypes,
+            WORK.ctypes,
             LWORK,
             INFO,
         )
@@ -188,7 +185,6 @@ def xungqr_impl(A, tau, overwrite_a, lwork):
     ensure_lapack()
     _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = A.dtype
-    w_type = _get_underlying_float(dtype)
     ungqr = _LAPACK().numba_xungqr(dtype)
 
     def impl(A, tau, overwrite_a, lwork):
@@ -214,10 +210,10 @@ def xungqr_impl(A, tau, overwrite_a, lwork):
             val_to_int_ptr(M),
             val_to_int_ptr(N),
             val_to_int_ptr(K),
-            A_copy.T.view(w_type).T.ctypes,
+            A_copy.ctypes,
             LDA,
-            tau.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            tau.ctypes,
+            WORK.ctypes,
             LWORK,
             INFO,
         )
@@ -426,11 +422,11 @@ def qr_full_pivot_impl(
                 geqp3(
                     val_to_int_ptr(M),
                     val_to_int_ptr(N),
-                    x_copy.T.view(w_type).T.ctypes,
+                    x_copy.ctypes,
                     LDA,
                     JPVT.ctypes,
-                    TAU.view(w_type).ctypes,
-                    WORK.view(w_type).ctypes,
+                    TAU.ctypes,
+                    WORK.ctypes,
                     val_to_int_ptr(-1),  # LWORK
                     RWORK.ctypes,
                     val_to_int_ptr(1),  # INFO
@@ -439,11 +435,11 @@ def qr_full_pivot_impl(
                 geqp3(
                     val_to_int_ptr(M),
                     val_to_int_ptr(N),
-                    x_copy.T.view(w_type).T.ctypes,
+                    x_copy.ctypes,
                     LDA,
                     JPVT.ctypes,
-                    TAU.view(w_type).ctypes,
-                    WORK.view(w_type).ctypes,
+                    TAU.ctypes,
+                    WORK.ctypes,
                     val_to_int_ptr(-1),
                     val_to_int_ptr(1),
                 )
@@ -458,11 +454,11 @@ def qr_full_pivot_impl(
             geqp3(
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
-                x_copy.T.view(w_type).T.ctypes,
+                x_copy.ctypes,
                 LDA,
                 JPVT.ctypes,
-                TAU.view(w_type).ctypes,
-                WORK.view(w_type).ctypes,
+                TAU.ctypes,
+                WORK.ctypes,
                 val_to_int_ptr(lwork_val),
                 RWORK.ctypes,
                 INFO,
@@ -471,11 +467,11 @@ def qr_full_pivot_impl(
             geqp3(
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
-                x_copy.T.view(w_type).T.ctypes,
+                x_copy.ctypes,
                 LDA,
                 JPVT.ctypes,
-                TAU.view(w_type).ctypes,
-                WORK.view(w_type).ctypes,
+                TAU.ctypes,
+                WORK.ctypes,
                 val_to_int_ptr(lwork_val),
                 INFO,
             )
@@ -501,10 +497,10 @@ def qr_full_pivot_impl(
                 val_to_int_ptr(M),
                 val_to_int_ptr(Q_in.shape[1]),
                 val_to_int_ptr(K),
-                Q_in.T.view(w_type).T.ctypes,
+                Q_in.ctypes,
                 val_to_int_ptr(M),
-                TAU.view(w_type).ctypes,
-                WORKQ.view(w_type).ctypes,
+                TAU.ctypes,
+                WORKQ.ctypes,
                 val_to_int_ptr(-1),
                 val_to_int_ptr(1),
             )
@@ -519,10 +515,10 @@ def qr_full_pivot_impl(
             val_to_int_ptr(M),
             val_to_int_ptr(Q_in.shape[1]),
             val_to_int_ptr(K),
-            Q_in.T.view(w_type).T.ctypes,
+            Q_in.ctypes,
             val_to_int_ptr(M),
-            TAU.view(w_type).ctypes,
-            WORKQ.view(w_type).ctypes,
+            TAU.ctypes,
+            WORKQ.ctypes,
             val_to_int_ptr(lwork_q),
             INFOQ,
         )
@@ -538,7 +534,6 @@ def qr_full_no_pivot_impl(
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = x.dtype
-    w_type = _get_underlying_float(dtype)
     geqrf = _LAPACK().numba_xgeqrf(dtype)
     orgqr = (
         _LAPACK().numba_xorgqr(dtype)
@@ -574,10 +569,10 @@ def qr_full_no_pivot_impl(
             geqrf(
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
-                x_copy.T.view(w_type).T.ctypes,
+                x_copy.ctypes,
                 LDA,
-                TAU.view(w_type).ctypes,
-                WORK.view(w_type).ctypes,
+                TAU.ctypes,
+                WORK.ctypes,
                 val_to_int_ptr(-1),
                 val_to_int_ptr(1),
             )
@@ -591,10 +586,10 @@ def qr_full_no_pivot_impl(
         geqrf(
             val_to_int_ptr(M),
             val_to_int_ptr(N),
-            x_copy.T.view(w_type).T.ctypes,
+            x_copy.ctypes,
             LDA,
-            TAU.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            TAU.ctypes,
+            WORK.ctypes,
             val_to_int_ptr(lwork_val),
             INFO,
         )
@@ -619,10 +614,10 @@ def qr_full_no_pivot_impl(
                 val_to_int_ptr(M),
                 val_to_int_ptr(Q_in.shape[1]),
                 val_to_int_ptr(K),
-                Q_in.T.view(w_type).T.ctypes,
+                Q_in.ctypes,
                 val_to_int_ptr(M),
-                TAU.view(w_type).ctypes,
-                WORKQ.view(w_type).ctypes,
+                TAU.ctypes,
+                WORKQ.ctypes,
                 val_to_int_ptr(-1),
                 val_to_int_ptr(1),
             )
@@ -637,10 +632,10 @@ def qr_full_no_pivot_impl(
             val_to_int_ptr(M),  # M
             val_to_int_ptr(Q_in.shape[1]),  # N
             val_to_int_ptr(K),  # K
-            Q_in.T.view(w_type).T.ctypes,  # A
+            Q_in.ctypes,  # A
             val_to_int_ptr(M),  # LDA
-            TAU.view(w_type).ctypes,  # TAU
-            WORKQ.view(w_type).ctypes,  # WORK
+            TAU.ctypes,  # TAU
+            WORKQ.ctypes,  # WORK
             val_to_int_ptr(lwork_q),  # LWORK
             INFOQ,  # INFO
         )
@@ -656,7 +651,6 @@ def qr_r_pivot_impl(
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = x.dtype
-    w_type = _get_underlying_float(dtype)
     geqp3 = _LAPACK().numba_xgeqp3(dtype)
 
     def impl(
@@ -687,11 +681,11 @@ def qr_r_pivot_impl(
             geqp3(
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
-                x_copy.T.view(w_type).T.ctypes,
+                x_copy.ctypes,
                 LDA,
                 JPVT.ctypes,
-                TAU.view(w_type).ctypes,
-                WORK.view(w_type).ctypes,
+                TAU.ctypes,
+                WORK.ctypes,
                 val_to_int_ptr(-1),
                 val_to_int_ptr(1),
             )
@@ -705,11 +699,11 @@ def qr_r_pivot_impl(
         geqp3(
             val_to_int_ptr(M),
             val_to_int_ptr(N),
-            x_copy.T.view(w_type).T.ctypes,
+            x_copy.ctypes,
             LDA,
             JPVT.ctypes,
-            TAU.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            TAU.ctypes,
+            WORK.ctypes,
             val_to_int_ptr(lwork_val),
             INFO,
         )
@@ -732,7 +726,6 @@ def qr_r_no_pivot_impl(
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = x.dtype
-    w_type = _get_underlying_float(dtype)
     geqrf = _LAPACK().numba_xgeqrf(dtype)
 
     def impl(
@@ -762,10 +755,10 @@ def qr_r_no_pivot_impl(
             geqrf(
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
-                x_copy.T.view(w_type).T.ctypes,
+                x_copy.ctypes,
                 LDA,
-                TAU.view(w_type).ctypes,
-                WORK.view(w_type).ctypes,
+                TAU.ctypes,
+                WORK.ctypes,
                 val_to_int_ptr(-1),
                 val_to_int_ptr(1),
             )
@@ -779,10 +772,10 @@ def qr_r_no_pivot_impl(
         geqrf(
             val_to_int_ptr(M),
             val_to_int_ptr(N),
-            x_copy.T.view(w_type).T.ctypes,
+            x_copy.ctypes,
             LDA,
-            TAU.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            TAU.ctypes,
+            WORK.ctypes,
             val_to_int_ptr(lwork_val),
             INFO,
         )
@@ -805,7 +798,6 @@ def qr_raw_no_pivot_impl(
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = x.dtype
-    w_type = _get_underlying_float(dtype)
     geqrf = _LAPACK().numba_xgeqrf(dtype)
 
     def impl(
@@ -835,10 +827,10 @@ def qr_raw_no_pivot_impl(
             geqrf(
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
-                x_copy.T.view(w_type).T.ctypes,
+                x_copy.ctypes,
                 LDA,
-                TAU.view(w_type).ctypes,
-                WORK.view(w_type).ctypes,
+                TAU.ctypes,
+                WORK.ctypes,
                 val_to_int_ptr(-1),
                 val_to_int_ptr(1),
             )
@@ -852,10 +844,10 @@ def qr_raw_no_pivot_impl(
         geqrf(
             val_to_int_ptr(M),
             val_to_int_ptr(N),
-            x_copy.T.view(w_type).T.ctypes,
+            x_copy.ctypes,
             LDA,
-            TAU.view(w_type).ctypes,
-            WORK.view(w_type).ctypes,
+            TAU.ctypes,
+            WORK.ctypes,
             val_to_int_ptr(lwork_val),
             INFO,
         )
@@ -914,11 +906,11 @@ def qr_raw_pivot_impl(
                 geqp3(
                     val_to_int_ptr(M),
                     val_to_int_ptr(N),
-                    x_copy.T.view(w_type).T.ctypes,
+                    x_copy.ctypes,
                     LDA,
                     JPVT.ctypes,
-                    TAU.view(w_type).ctypes,
-                    WORK.view(w_type).ctypes,
+                    TAU.ctypes,
+                    WORK.ctypes,
                     val_to_int_ptr(-1),  # LWORK
                     RWORK.ctypes,
                     val_to_int_ptr(1),  # INFO
@@ -927,11 +919,11 @@ def qr_raw_pivot_impl(
                 geqp3(
                     val_to_int_ptr(M),
                     val_to_int_ptr(N),
-                    x_copy.T.view(w_type).T.ctypes,
+                    x_copy.ctypes,
                     LDA,
                     JPVT.ctypes,
-                    TAU.view(w_type).ctypes,
-                    WORK.view(w_type).ctypes,
+                    TAU.ctypes,
+                    WORK.ctypes,
                     val_to_int_ptr(-1),
                     val_to_int_ptr(1),
                 )
@@ -946,11 +938,11 @@ def qr_raw_pivot_impl(
             geqp3(
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
-                x_copy.T.view(w_type).T.ctypes,
+                x_copy.ctypes,
                 LDA,
                 JPVT.ctypes,
-                TAU.view(w_type).ctypes,
-                WORK.view(w_type).ctypes,
+                TAU.ctypes,
+                WORK.ctypes,
                 val_to_int_ptr(lwork_val),
                 RWORK.ctypes,
                 INFO,
@@ -959,11 +951,11 @@ def qr_raw_pivot_impl(
             geqp3(
                 val_to_int_ptr(M),
                 val_to_int_ptr(N),
-                x_copy.T.view(w_type).T.ctypes,
+                x_copy.ctypes,
                 LDA,
                 JPVT.ctypes,
-                TAU.view(w_type).ctypes,
-                WORK.view(w_type).ctypes,
+                TAU.ctypes,
+                WORK.ctypes,
                 val_to_int_ptr(lwork_val),
                 INFO,
             )

@@ -808,19 +808,39 @@ class _LAPACK:
 
         Used in QR decomposition (no pivoting).
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "geqrf")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # M
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # TAU
-            float_pointer,  # WORK
-            _ptr_int,  # LWORK
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}geqrf"
+
+        @numba_basic.numba_njit
+        def get_geqrf_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "geqrf")
+            return ptr
+
+        geqrf_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # M
+                nb_i32p,  # N
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # TAU
+                float_pointer,  # WORK
+                nb_i32p,  # LWORK
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _geqrf_py(M, N, A, LDA, TAU, WORK, LWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_geqrf_pointer,
+                func_type_ref=geqrf_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(M, N, A, LDA, TAU, WORK, LWORK, INFO)
+
+        geqrf: CPUDispatcher = numba_basic.numba_njit(cache=True)(_geqrf_py)
+        return geqrf
 
     @classmethod
     def numba_xgeqp3(cls, dtype):
@@ -829,31 +849,67 @@ class _LAPACK:
 
         Used in QR decomposition with pivoting.
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "geqp3")
-        ctype_args = (
-            _ptr_int,  # M
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            _ptr_int,  # JPVT
-            float_pointer,  # TAU
-            float_pointer,  # WORK
-            _ptr_int,  # LWORK
-        )
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}geqp3"
+
+        @numba_basic.numba_njit
+        def get_geqp3_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "geqp3")
+            return ptr
 
         if isinstance(dtype, Complex):
-            ctype_args = (
-                *ctype_args,
-                float_pointer,  # RWORK)
+            real_pointer = nb_f64p if dtype is nb_c128 else nb_f32p
+            geqp3_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # M
+                    nb_i32p,  # N
+                    float_pointer,  # A
+                    nb_i32p,  # LDA
+                    nb_i32p,  # JPVT
+                    float_pointer,  # TAU
+                    float_pointer,  # WORK
+                    nb_i32p,  # LWORK
+                    real_pointer,  # RWORK
+                    nb_i32p,  # INFO
+                )
             )
 
-        functype = ctypes.CFUNCTYPE(
-            None,
-            *ctype_args,
-            _ptr_int,  # INFO
-        )
+            def _geqp3_py(M, N, A, LDA, JPVT, TAU, WORK, LWORK, RWORK, INFO):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_geqp3_pointer,
+                    func_type_ref=geqp3_function_type,
+                    cache_key_lit=cache_key,
+                )
+                fn(M, N, A, LDA, JPVT, TAU, WORK, LWORK, RWORK, INFO)
 
-        return functype(lapack_ptr)
+        else:
+            geqp3_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # M
+                    nb_i32p,  # N
+                    float_pointer,  # A
+                    nb_i32p,  # LDA
+                    nb_i32p,  # JPVT
+                    float_pointer,  # TAU
+                    float_pointer,  # WORK
+                    nb_i32p,  # LWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            def _geqp3_py(M, N, A, LDA, JPVT, TAU, WORK, LWORK, INFO):  # type: ignore[misc]
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_geqp3_pointer,
+                    func_type_ref=geqp3_function_type,
+                    cache_key_lit=cache_key,
+                )
+                fn(M, N, A, LDA, JPVT, TAU, WORK, LWORK, INFO)
+
+        geqp3: CPUDispatcher = numba_basic.numba_njit(cache=True)(_geqp3_py)
+
+        return geqp3
 
     @classmethod
     def numba_xorgqr(cls, dtype):
@@ -862,20 +918,40 @@ class _LAPACK:
 
         Used in QR decomposition to form Q.
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "orgqr")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # M
-            _ptr_int,  # N
-            _ptr_int,  # K
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # TAU
-            float_pointer,  # WORK
-            _ptr_int,  # LWORK
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}orgqr"
+
+        @numba_basic.numba_njit
+        def get_orgqr_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "orgqr")
+            return ptr
+
+        orgqr_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # M
+                nb_i32p,  # N
+                nb_i32p,  # K
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # TAU
+                float_pointer,  # WORK
+                nb_i32p,  # LWORK
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _orgqr_py(M, N, K, A, LDA, TAU, WORK, LWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_orgqr_pointer,
+                func_type_ref=orgqr_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
+
+        orgqr: CPUDispatcher = numba_basic.numba_njit(cache=True)(_orgqr_py)
+        return orgqr
 
     @classmethod
     def numba_xungqr(cls, dtype):
@@ -884,17 +960,38 @@ class _LAPACK:
 
         Used in QR decomposition to form Q for complex types.
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "ungqr")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # M
-            _ptr_int,  # N
-            _ptr_int,  # K
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # TAU
-            float_pointer,  # WORK
-            _ptr_int,  # LWORK
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}ungqr"
+
+        @numba_basic.numba_njit
+        def get_ungqr_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "ungqr")
+            return ptr
+
+        ungqr_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # M
+                nb_i32p,  # N
+                nb_i32p,  # K
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # TAU
+                float_pointer,  # WORK
+                nb_i32p,  # LWORK
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _ungqr_py(M, N, K, A, LDA, TAU, WORK, LWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_ungqr_pointer,
+                func_type_ref=ungqr_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
+
+        ungqr: CPUDispatcher = numba_basic.numba_njit(cache=True)(_ungqr_py)
+
+        return ungqr
