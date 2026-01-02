@@ -2958,7 +2958,7 @@ class AdvancedSubtensor(BaseSubtensor, COp):
 
         # Reconstruct the full tuple of indices from idx_list and inputs (newaxis handled by __getitem__)
         x = inputs[0]
-        tensor_inputs = inputs[1:]
+        index_variables = inputs[1:]
 
         full_indices = []
         input_idx = 0
@@ -2967,19 +2967,19 @@ class AdvancedSubtensor(BaseSubtensor, COp):
             if isinstance(entry, slice):
                 # Reconstruct slice from idx_list and inputs
                 if entry.start is not None and isinstance(entry.start, Type):
-                    start_val = tensor_inputs[input_idx]
+                    start_val = index_variables[input_idx]
                     input_idx += 1
                 else:
                     start_val = entry.start
 
                 if entry.stop is not None and isinstance(entry.stop, Type):
-                    stop_val = tensor_inputs[input_idx]
+                    stop_val = index_variables[input_idx]
                     input_idx += 1
                 else:
                     stop_val = entry.stop
 
                 if entry.step is not None and isinstance(entry.step, Type):
-                    step_val = tensor_inputs[input_idx]
+                    step_val = index_variables[input_idx]
                     input_idx += 1
                 else:
                     step_val = entry.step
@@ -2987,8 +2987,8 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                 full_indices.append(slice(start_val, stop_val, step_val))
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
-                if input_idx < len(tensor_inputs):
-                    full_indices.append(tensor_inputs[input_idx])
+                if input_idx < len(index_variables):
+                    full_indices.append(index_variables[input_idx])
                     input_idx += 1
                 else:
                     raise ValueError("Mismatch between idx_list and inputs")
@@ -3078,7 +3078,7 @@ class AdvancedSubtensor(BaseSubtensor, COp):
         """
         # Reconstruct the full indices from idx_list and inputs to check consecutivity (newaxis handled by __getitem__)
         op = node.op
-        tensor_inputs = node.inputs[1:]
+        index_variables = node.inputs[1:]
 
         full_indices = []
         input_idx = 0
@@ -3088,8 +3088,8 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                 full_indices.append(slice(None))  # Represent as basic slice
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
-                if input_idx < len(tensor_inputs):
-                    full_indices.append(tensor_inputs[input_idx])
+                if input_idx < len(index_variables):
+                    full_indices.append(index_variables[input_idx])
                     input_idx += 1
 
         return _non_consecutive_adv_indexing(full_indices)
@@ -3219,7 +3219,7 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         )
 
     def perform(self, node, inputs, out_):
-        x, y, *tensor_inputs = inputs
+        x, y, *index_variables = inputs
 
         # Reconstruct the full tuple of indices from idx_list and inputs (newaxis handled by __getitem__)
         full_indices = []
@@ -3229,19 +3229,19 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
             if isinstance(entry, slice):
                 # Reconstruct slice from idx_list and inputs
                 if entry.start is not None and isinstance(entry.start, Type):
-                    start_val = tensor_inputs[input_idx]
+                    start_val = index_variables[input_idx]
                     input_idx += 1
                 else:
                     start_val = entry.start
 
                 if entry.stop is not None and isinstance(entry.stop, Type):
-                    stop_val = tensor_inputs[input_idx]
+                    stop_val = index_variables[input_idx]
                     input_idx += 1
                 else:
                     stop_val = entry.stop
 
                 if entry.step is not None and isinstance(entry.step, Type):
-                    step_val = tensor_inputs[input_idx]
+                    step_val = index_variables[input_idx]
                     input_idx += 1
                 else:
                     step_val = entry.step
@@ -3249,8 +3249,8 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
                 full_indices.append(slice(start_val, stop_val, step_val))
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
-                if input_idx < len(tensor_inputs):
-                    full_indices.append(tensor_inputs[input_idx])
+                if input_idx < len(index_variables):
+                    full_indices.append(index_variables[input_idx])
                     input_idx += 1
                 else:
                     raise ValueError("Mismatch between idx_list and inputs")
@@ -3342,7 +3342,7 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         """
         # Reconstruct the full indices from idx_list and inputs to check consecutivity (newaxis handled by __getitem__)
         op = node.op
-        tensor_inputs = node.inputs[2:]  # Skip x and y
+        index_variables = node.inputs[2:]
 
         full_indices = []
         input_idx = 0
@@ -3352,8 +3352,8 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
                 full_indices.append(slice(None))  # Represent as basic slice
             elif isinstance(entry, Type):
                 # This is a numerical index - get from inputs
-                if input_idx < len(tensor_inputs):
-                    full_indices.append(tensor_inputs[input_idx])
+                if input_idx < len(index_variables):
+                    full_indices.append(index_variables[input_idx])
                     input_idx += 1
 
         return _non_consecutive_adv_indexing(full_indices)
