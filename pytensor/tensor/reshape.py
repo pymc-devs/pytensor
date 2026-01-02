@@ -90,7 +90,8 @@ class JoinDims(Op):
         (x,) = inputs
         (g_out,) = output_grads
 
-        packed_shape = shape(x)[list(self.axis_range)]
+        x_shape = shape(x)
+        packed_shape = [x_shape[i] for i in self.axis_range]
         return [split_dims(g_out, shape=packed_shape, axis=self.start_axis)]
 
 
@@ -105,19 +106,19 @@ def _vectorize_joindims(op, node, x):
     return JoinDims(start_axis + batched_ndims, n_axes).make_node(x)
 
 
-def join_dims(x: TensorLike, axis: Sequence[int] | int | None = None) -> Variable:
+def join_dims(x: TensorLike, axis: Sequence[int] | int | None = None) -> TensorVariable:
     """Join consecutive dimensions of a tensor into a single dimension.
 
     Parameters
     ----------
-    x : Variable
+    x : TensorLike
         The input tensor.
     axis : int or sequence of int, optional
         The dimensions to join. If None, all dimensions are joined.
 
     Returns
     -------
-    joined_x : Variable
+    joined_x : TensorVariable
         The reshaped tensor with joined dimensions.
 
     Examples
@@ -237,7 +238,7 @@ def split_dims(
     x: TensorLike,
     shape: ShapeValueType | Sequence[ShapeValueType],
     axis: int | None = None,
-) -> Variable:
+) -> TensorVariable:
     """Split a dimension of a tensor into multiple dimensions.
 
     Parameters
@@ -251,7 +252,7 @@ def split_dims(
 
     Returns
     -------
-    split_x : Variable
+    split_x : TensorVariable
         The reshaped tensor with split dimensions.
 
     Examples
@@ -384,7 +385,7 @@ def pack(
 
     Returns
     -------
-    packed_tensor : TensorLike
+    packed_tensor : TensorVariable
         The packed tensor with specified axes preserved and others raveled.
     packed_shapes : list of ShapeValueType
         A list containing the shapes of the raveled dimensions for each input tensor.
@@ -492,7 +493,7 @@ def unpack(
     packed_input: TensorLike,
     axes: int | Sequence[int] | None,
     packed_shapes: list[ShapeValueType],
-) -> list[Variable]:
+) -> list[TensorVariable]:
     """
     Unpack a packed tensor into multiple tensors by splitting along the specified axes and reshaping.
 
@@ -514,7 +515,7 @@ def unpack(
 
     Returns
     -------
-    unpacked_tensors : list of TensorLike
+    unpacked_tensors : list of TensorVariable
         A list of unpacked tensors with their original shapes restored.
     """
     packed_input = as_tensor_variable(packed_input)
