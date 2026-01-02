@@ -44,7 +44,7 @@ from pytensor.tensor.slinalg import (
 )
 
 
-@numba_funcify.register(Cholesky)
+@register_funcify_default_op_cache_key(Cholesky)
 def numba_funcify_Cholesky(op, node, **kwargs):
     """
     Overload scipy.linalg.cholesky with a numba function.
@@ -95,7 +95,8 @@ def numba_funcify_Cholesky(op, node, **kwargs):
 
         return res
 
-    return cholesky
+    cache_key = 1
+    return cholesky, cache_key
 
 
 @register_funcify_default_op_cache_key(PivotToPermutations)

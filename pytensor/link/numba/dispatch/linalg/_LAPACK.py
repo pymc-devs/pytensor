@@ -1,10 +1,15 @@
 import ctypes
 
+import numba
 import numpy as np
 from numba.core import cgutils, types
 from numba.core.extending import get_cython_function_address, intrinsic
+from numba.core.registry import CPUDispatcher
 from numba.core.types import Complex
 from numba.np.linalg import ensure_lapack, get_blas_kind
+
+from pytensor.link.numba.cache import _call_cached_ptr
+from pytensor.link.numba.dispatch import basic as numba_basic
 
 
 nb_i32 = types.int32
@@ -203,16 +208,38 @@ class _LAPACK:
 
         Called by scipy.linalg.cholesky
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "potrf")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # UPLO,
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            _ptr_int,  # INFO
+
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}potrf"
+
+        @numba_basic.numba_njit
+        def get_potrf_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "potrf")
+            return ptr
+
+        potrf_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_ptr,  # A
+                nb_i32p,  # LDA
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _potrf_py(UPLO, N, A, LDA, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_potrf_pointer,
+                func_type_ref=potrf_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(UPLO, N, A, LDA, INFO)
+
+        potrf: CPUDispatcher = numba_basic.numba_njit(cache=True)(_potrf_py)
+
+        return potrf
 
     @classmethod
     def numba_xpotrs(cls, dtype):
