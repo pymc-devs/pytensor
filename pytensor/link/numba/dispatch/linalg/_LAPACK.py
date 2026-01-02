@@ -599,20 +599,40 @@ class _LAPACK:
 
         Called by scipy.linalg.solve when assume_a == "pos"
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "pocon")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # UPLO
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # ANORM
-            float_pointer,  # RCOND
-            float_pointer,  # WORK
-            _ptr_int,  # IWORK
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}pocon"
+
+        @numba_basic.numba_njit
+        def get_pocon_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "pocon")
+            return ptr
+
+        pocon_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # ANORM
+                float_pointer,  # RCOND
+                float_pointer,  # WORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _pocon_py(UPLO, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_pocon_pointer,
+                func_type_ref=pocon_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(UPLO, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO)
+
+        pocon: CPUDispatcher = numba_basic.numba_njit(cache=True)(_pocon_py)
+        return pocon
 
     @classmethod
     def numba_xposv(cls, dtype):
@@ -620,20 +640,39 @@ class _LAPACK:
         Solve a system of linear equations A @ X = B with a symmetric positive definite matrix A using the Cholesky
         factorization computed by potrf.
         """
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}posv"
 
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "posv")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # UPLO
-            _ptr_int,  # N
-            _ptr_int,  # NRHS
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # B
-            _ptr_int,  # LDB
-            _ptr_int,  # INFO
+        @numba_basic.numba_njit
+        def get_posv_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "posv")
+            return ptr
+
+        posv_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                nb_i32p,  # NRHS
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # B
+                nb_i32p,  # LDB
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _posv_py(UPLO, N, NRHS, A, LDA, B, LDB, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_posv_pointer,
+                func_type_ref=posv_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(UPLO, N, NRHS, A, LDA, B, LDB, INFO)
+
+        posv: CPUDispatcher = numba_basic.numba_njit(cache=True)(_posv_py)
+        return posv
 
     @classmethod
     def numba_xgttrf(cls, dtype):
