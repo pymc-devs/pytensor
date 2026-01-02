@@ -38,10 +38,13 @@ from pytensor.link.jax.dispatch import jax_funcify
 
 
 try:
-    pass
+    import tensorflow_probability  # noqa: F401
+    from jax.interpreters.xla import (
+        pytype_aval_mappings,  # This is what's missing in new JAX  # noqa: F401
+    )
 
     TFP_INSTALLED = True
-except ModuleNotFoundError:
+except (ModuleNotFoundError, AttributeError, ImportError):
     TFP_INSTALLED = False
 
 

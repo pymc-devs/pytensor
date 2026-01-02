@@ -237,20 +237,22 @@ def local_subtensor_rv_lift(fgraph, node):
         return False
 
     # Parse indices
-    if isinstance(subtensor_op, Subtensor):
+    if isinstance(subtensor_op, Subtensor | AdvancedSubtensor):
         indices = indices_from_subtensor(node.inputs[1:], subtensor_op.idx_list)
     else:
         indices = node.inputs[1:]
-        # The rewrite doesn't apply if advanced indexing could broadcast the samples (leading to duplicates)
-        # Note: For simplicity this also excludes subtensor-related expand_dims (np.newaxis).
-        #  If we wanted to support that we could rewrite it as subtensor + dimshuffle
-        #  and make use of the dimshuffle lift rewrite
-        # TODO: This rewrite is aborting with dummy indexing dimensions which aren't a problem
-        if any(
-            is_nd_advanced_idx(idx, integer_dtypes) or isinstance(idx.type, NoneTypeT)
-            for idx in indices
-        ):
-            return False
+
+    # The rewrite doesn't apply if advanced indexing could broadcast the samples (leading to duplicates)
+    # Note: For simplicity this also excludes subtensor-related expand_dims (np.newaxis).
+    #  If we wanted to support that we could rewrite it as subtensor + dimshuffle
+    #  and make use of the dimshuffle lift rewrite
+    # TODO: This rewrite is aborting with dummy indexing dimensions which aren't a problem
+    if any(
+        is_nd_advanced_idx(idx, integer_dtypes)
+        or isinstance(getattr(idx, "type", None), NoneTypeT)
+        for idx in indices
+    ):
+        return False
 
     # Check that indexing does not act on support dims
     batch_ndims = rv_op.batch_ndim(rv_node)
@@ -269,8 +271,11 @@ def local_subtensor_rv_lift(fgraph, node):
         )
         for idx in supp_indices:
             if not (
-                isinstance(idx.type, SliceType)
-                and all(isinstance(i.type, NoneTypeT) for i in idx.owner.inputs)
+                (isinstance(idx, slice) and idx == slice(None))
+                or (
+                    isinstance(getattr(idx, "type", None), SliceType)
+                    and all(isinstance(i.type, NoneTypeT) for i in idx.owner.inputs)
+                )
             ):
                 return False
         n_discarded_idxs = len(supp_indices)

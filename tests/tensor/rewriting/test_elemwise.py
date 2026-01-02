@@ -1642,9 +1642,9 @@ def test_InplaceElemwiseOptimizer_bug():
     # with config.change_flags(tensor__insert_inplace_optimizer_validate_nb=10):
     rewrite_graph(fgraph, include=("inplace",))
 
-    pytensor.config.tensor__insert_inplace_optimizer_validate_nb = 1
-    with pytest.warns(
-        FutureWarning,
-        match="tensor__insert_inplace_optimizer_validate_nb config is deprecated",
-    ):
-        rewrite_graph(fgraph, include=("inplace",))
+    with config.change_flags(tensor__insert_inplace_optimizer_validate_nb=1):
+        with pytest.warns(
+            FutureWarning,
+            match="tensor__insert_inplace_optimizer_validate_nb config is deprecated",
+        ):
+            rewrite_graph(fgraph, include=("inplace",))
