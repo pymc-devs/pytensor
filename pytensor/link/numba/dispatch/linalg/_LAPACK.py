@@ -511,22 +511,42 @@ class _LAPACK:
 
         Called by scipy.linalg.solve when assume_a == "sym"
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "sysv")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # UPLO
-            _ptr_int,  # N
-            _ptr_int,  # NRHS
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            _ptr_int,  # IPIV
-            float_pointer,  # B
-            _ptr_int,  # LDB
-            float_pointer,  # WORK
-            _ptr_int,  # LWORK
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}sysv"
+
+        @numba_basic.numba_njit
+        def get_sysv_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "sysv")
+            return ptr
+
+        sysv_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                nb_i32p,  # NRHS
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                nb_i32p,  # IPIV
+                float_pointer,  # B
+                nb_i32p,  # LDB
+                float_pointer,  # WORK
+                nb_i32p,  # LWORK
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _sysv_py(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_sysv_pointer,
+                func_type_ref=sysv_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO)
+
+        sysv: CPUDispatcher = numba_basic.numba_njit(cache=True)(_sysv_py)
+        return sysv
 
     @classmethod
     def numba_xsycon(cls, dtype):
@@ -534,22 +554,42 @@ class _LAPACK:
         Estimate the reciprocal of the condition number of a symmetric matrix A using the UDU or LDL factorization
         computed by xSYTRF.
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "sycon")
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}sycon"
 
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # UPLO
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            _ptr_int,  # IPIV
-            float_pointer,  # ANORM
-            float_pointer,  # RCOND
-            float_pointer,  # WORK
-            _ptr_int,  # IWORK
-            _ptr_int,  # INFO
+        @numba_basic.numba_njit
+        def get_sycon_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "sycon")
+            return ptr
+
+        sycon_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                nb_i32p,  # IPIV
+                float_pointer,  # ANORM
+                float_pointer,  # RCOND
+                float_pointer,  # WORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _sycon_py(UPLO, N, A, LDA, IPIV, ANORM, RCOND, WORK, IWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_sycon_pointer,
+                func_type_ref=sycon_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(UPLO, N, A, LDA, IPIV, ANORM, RCOND, WORK, IWORK, INFO)
+
+        sycon: CPUDispatcher = numba_basic.numba_njit(cache=True)(_sycon_py)
+
+        return sycon
 
     @classmethod
     def numba_xpocon(cls, dtype):
