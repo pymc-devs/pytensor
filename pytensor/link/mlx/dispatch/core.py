@@ -13,7 +13,6 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
-    Tri,
     get_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -217,23 +216,6 @@ def mlx_funcify_ScalarFromTensor(op, **kwargs):
         return x
 
     return scalar_from_tensor
-
-
-@mlx_funcify.register(Tri)
-def mlx_funcify_Tri(op, node, **kwargs):
-    # node.inputs  ->  N, M, k
-    const_args = [getattr(inp, "data", None) for inp in node.inputs]
-    dtype = convert_dtype_to_mlx(op.dtype)
-
-    def tri(*args):
-        # Replace args with compile-time constants when available
-        args = [
-            arg if const_a is None else const_a
-            for arg, const_a in zip(args, const_args, strict=True)
-        ]
-        return mx.tri(*args, dtype=dtype)
-
-    return tri
 
 
 @mlx_funcify.register(AllocEmpty)

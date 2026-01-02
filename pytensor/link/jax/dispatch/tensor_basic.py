@@ -17,16 +17,15 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
-    Tri,
     get_scalar_constant_value,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.shape import Shape_i
 
 
-ARANGE_CONCRETE_VALUE_ERROR = """JAX requires the arguments of `jax.numpy.arange`
-to be constants. The graph that you defined thus cannot be JIT-compiled
-by JAX. An example of a graph that can be compiled to JAX:
+ARANGE_CONCRETE_VALUE_ERROR = """JAX requires the arguments of `jax.numpy.arange` to be constants.
+The graph that you defined thus cannot be JIT-compiled by JAX.
+An example of a graph that can be compiled to JAX:
 >>> import pytensor.tensor as pt
 >>> pt.arange(1, 10, 2)
 """
@@ -185,19 +184,3 @@ def jax_funcify_ScalarFromTensor(op, **kwargs):
         return jnp.array(x).flatten()[0]
 
     return scalar_from_tensor
-
-
-@jax_funcify.register(Tri)
-def jax_funcify_Tri(op, node, **kwargs):
-    # node.inputs is N, M, k
-    const_args = [getattr(x, "data", None) for x in node.inputs]
-
-    def tri(*args):
-        # args is N, M, k
-        args = [
-            x if const_x is None else const_x
-            for x, const_x in zip(args, const_args, strict=True)
-        ]
-        return jnp.tri(*args, dtype=op.dtype)
-
-    return tri

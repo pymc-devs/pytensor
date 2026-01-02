@@ -35,7 +35,6 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
-    Tri,
     alloc,
     alloc_diag,
     arange,
@@ -972,22 +971,17 @@ class TestEye:
 
 class TestTriangle:
     def test_tri(self):
-        def check(dtype, N, M_=None, k=0):
-            # PyTensor does not accept None as a tensor.
-            # So we must use a real value.
-            M = M_
-            # Currently DebugMode does not support None as inputs even if this is
-            # allowed.
-            if M is None and config.mode in ["DebugMode", "DEBUG_MODE"]:
+        def check(dtype, N, M=None, k=0):
+            if M is None:
                 M = N
-            N_symb = iscalar()
-            M_symb = iscalar()
-            k_symb = iscalar()
+            N_symb = iscalar("N")
+            M_symb = iscalar("M")
+            k_symb = iscalar("k")
             f = function(
                 [N_symb, M_symb, k_symb], tri(N_symb, M_symb, k_symb, dtype=dtype)
             )
             result = f(N, M, k)
-            assert np.allclose(result, np.tri(N, M_, k, dtype=dtype))
+            assert np.allclose(result, np.tri(N, M, k, dtype=dtype))
             assert result.dtype == np.dtype(dtype)
 
         for dtype in ["int32", "int64", "float32", "float64", "uint16", "complex64"]:
@@ -3887,22 +3881,6 @@ class TestInferShape(utt.InferShapeTester):
 
         self._compile_and_check(
             [aiscal, biscal, ciscal], [Eye()(aiscal, biscal, ciscal)], [3, 5, 0], Eye
-        )
-
-    def test_Tri(self):
-        aiscal = iscalar()
-        biscal = iscalar()
-        ciscal = iscalar()
-        self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [4, 4, 0], Tri
-        )
-
-        self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [4, 5, 0], Tri
-        )
-
-        self._compile_and_check(
-            [aiscal, biscal, ciscal], [Tri()(aiscal, biscal, ciscal)], [3, 5, 0], Tri
         )
 
     def test_ExtractDiag(self):
