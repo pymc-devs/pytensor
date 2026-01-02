@@ -23,7 +23,6 @@ from pytensor.scalar.basic import (
     arctan,
     arctan2,
     arctanh,
-    cast,
     complex64,
     constant,
     cos,
@@ -33,7 +32,6 @@ from pytensor.scalar.basic import (
     exp,
     exp2,
     expm1,
-    float16,
     float32,
     floats,
     int8,
@@ -53,11 +51,9 @@ from pytensor.scalar.basic import (
     sin,
     sinh,
     sqrt,
-    switch,
     tan,
     tanh,
     true_div,
-    uint8,
 )
 from pytensor.tensor.type import fscalar, imatrix, matrix
 from tests.link.test_link import make_function
@@ -72,43 +68,6 @@ def test_mul_add_true():
 
 
 class TestComposite:
-    def test_composite_clone_float32(self):
-        def has_f16(comp):
-            if any(v.type == float16 for v in comp.fgraph.variables):
-                return True
-            return False
-
-        w = int8()
-        x = float16()
-        y = float32()
-        cz = Composite([x, y], [tanh(x + cast(y, "float16"))])
-        c = Composite(
-            [w, x, y],
-            [
-                cz(x, y)
-                - cz(x, y) ** 2
-                + cast(x, "int16")
-                + cast(x, "float32")
-                + cast(w, "float16")
-                - constant(np.float16(1.0))
-            ],
-        )
-        assert has_f16(c)
-        nc = c.clone_float32()
-        assert not has_f16(nc)
-
-        v = uint8()
-        w = float16()
-        x = float16()
-        y = float16()
-        z = float16()
-
-        c = Composite([v, w, x, y, z], [switch(v, mul(w, x, y), z)])
-
-        assert has_f16(c)
-        nc = c.clone_float32()
-        assert not has_f16(nc)
-
     def test_straightforward(self):
         x, y, _z = floats("xyz")
         e = mul(add(x, y), true_div(x, y))
