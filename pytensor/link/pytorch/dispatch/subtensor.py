@@ -63,10 +63,8 @@ def pytorch_funcify_makeslice(op, **kwargs):
 @pytorch_funcify.register(AdvancedSubtensor1)
 @pytorch_funcify.register(AdvancedSubtensor)
 def pytorch_funcify_AdvSubtensor(op, node, **kwargs):
-    idx_list = op.idx_list
-
-    def advsubtensor(x, *flattened_indices):
-        indices = indices_from_subtensor(flattened_indices, idx_list)
+    def advsubtensor(x, *indices):
+        indices = indices_from_subtensor(indices, op.idx_list)
         check_negative_steps(indices)
         return x[indices]
 

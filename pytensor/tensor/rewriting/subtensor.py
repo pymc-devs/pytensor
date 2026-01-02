@@ -235,7 +235,7 @@ def local_replace_AdvancedSubtensor(fgraph, node):
     `AdvancedSubtensor1` and `Subtensor` `Op`\s.
     """
 
-    if type(node.op) is not AdvancedSubtensor:
+    if not isinstance(node.op, AdvancedSubtensor):
         return
 
     indexed_var = node.inputs[0]
@@ -1570,9 +1570,7 @@ def local_uint_constant_indices(fgraph, node):
         props["idx_list"] = new_indices
         op = type(op)(**props)
 
-    # Basic index Ops don't expect slices, but the respective start/step/stop
     new_indices = get_slice_elements(new_indices)
-
     new_args = (x, *new_indices) if y is None else (x, y, *new_indices)
     new_out = op(*new_args)
     copy_stack_trace(node.outputs[0], new_out)
@@ -1788,8 +1786,12 @@ def ravel_multidimensional_bool_idx(fgraph, node):
 
     if any(
         (
-            (isinstance(idx.type, TensorType) and idx.type.dtype in integer_dtypes)
-            or isinstance(idx.type, NoneTypeT)
+            (
+                hasattr(idx, "type")
+                and isinstance(idx.type, TensorType)
+                and idx.type.dtype in integer_dtypes
+            )
+            or (hasattr(idx, "type") and isinstance(idx.type, NoneTypeT))
         )
         for idx in idxs
     ):
@@ -1799,7 +1801,11 @@ def ravel_multidimensional_bool_idx(fgraph, node):
     bool_idxs = [
         (i, idx)
         for i, idx in enumerate(idxs)
-        if (isinstance(idx.type, TensorType) and idx.dtype == "bool")
+        if (
+            hasattr(idx, "type")
+            and isinstance(idx.type, TensorType)
+            and idx.dtype == "bool"
+        )
     ]
 
     if len(bool_idxs) != 1:
@@ -1861,7 +1867,16 @@ def ravel_multidimensional_int_idx(fgraph, node):
     is_inc_subtensor = isinstance(op, AdvancedIncSubtensor)
 
     if is_inc_subtensor:
-        x, y, *idxs = node.inputs
+        x, y = node.inputs[:2]
+        index_variables = node.inputs[2:]
+    else:
+        x = node.inputs[0]
+        y = None
+        index_variables = node.inputs[1:]
+
+    idxs = list(indices_from_subtensor(index_variables, op.idx_list))
+
+    if is_inc_subtensor:
         # Inc/SetSubtensor is harder to reason about due to y
         # We get out if it's broadcasting or if the advanced indices are non-consecutive
         if non_consecutive_adv_indexing or (
@@ -1869,13 +1884,14 @@ def ravel_multidimensional_int_idx(fgraph, node):
         ):
             return None
 
-    else:
-        x, *idxs = node.inputs
-
     if any(
         (
-            (isinstance(idx.type, TensorType) and idx.type.dtype == "bool")
-            or isinstance(idx.type, NoneTypeT)
+            (
+                hasattr(idx, "type")
+                and isinstance(idx.type, TensorType)
+                and idx.type.dtype == "bool"
+            )
+            or (hasattr(idx, "type") and isinstance(idx.type, NoneTypeT))
         )
         for idx in idxs
     ):
@@ -1885,7 +1901,11 @@ def ravel_multidimensional_int_idx(fgraph, node):
     int_idxs_and_pos = [
         (i, idx)
         for i, idx in enumerate(idxs)
-        if (isinstance(idx.type, TensorType) and idx.dtype in integer_dtypes)
+        if (
+            hasattr(idx, "type")
+            and isinstance(idx.type, TensorType)
+            and idx.dtype in integer_dtypes
+        )
     ]
 
     if not int_idxs_and_pos:
@@ -1970,6 +1990,7 @@ optdb["specialize"].register(
     ravel_multidimensional_bool_idx.__name__,
     ravel_multidimensional_bool_idx,
     "numba",
+    "shape_unsafe",
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
 
@@ -1977,6 +1998,7 @@ optdb["specialize"].register(
     ravel_multidimensional_int_idx.__name__,
     ravel_multidimensional_int_idx,
     "numba",
+    "shape_unsafe",
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
 

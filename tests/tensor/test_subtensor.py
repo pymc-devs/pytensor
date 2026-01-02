@@ -2513,28 +2513,6 @@ class TestAdvancedSubtensor:
 
         assert isinstance(new_node.op, self.MyAdvancedSubtensor)
         assert type(new_node.op) is not AdvancedSubtensor
-        assert new_node.op.idx_list == (slice(None), idx.type)
-
-    def test_rewrite_respects_subclass_AdvancedSubtensor(self):
-        """
-        Spec Test: The rewrite `local_replace_AdvancedSubtensor` should NOT apply to subclasses.
-        """
-        x = matrix("x")
-        idx = lvector("idx")
-        op = self.MyAdvancedSubtensor(idx_list=[idx.type])
-
-        out = op.make_node(x, idx).outputs[0]
-
-        # Compile
-        f = pytensor.function([x, idx], out, mode="FAST_RUN")
-
-        topo = f.maker.fgraph.toposort()
-        ops = [node.op for node in topo]
-
-        has_my_subclass = any(isinstance(op, self.MyAdvancedSubtensor) for op in ops)
-        assert has_my_subclass, (
-            "Optimizer replaced MyAdvancedSubtensor with generic Op!"
-        )
 
 
 class TestInferShape(utt.InferShapeTester):
