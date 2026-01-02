@@ -263,10 +263,6 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
     This is only done when there's a single vector index.
     """
 
-    if type(node.op) is not AdvancedIncSubtensor:
-        # Don't apply to subclasses
-        return
-
     if node.op.ignore_duplicates:
         # `AdvancedIncSubtensor1` does not ignore duplicate index values
         return
