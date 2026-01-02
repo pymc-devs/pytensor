@@ -269,19 +269,40 @@ class _LAPACK:
 
         Called by scipy.linalg.cho_solve
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "potrs")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # UPLO
-            _ptr_int,  # N
-            _ptr_int,  # NRHS
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # B
-            _ptr_int,  # LDB
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}potrs"
+
+        @numba_basic.numba_njit
+        def get_potrs_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "potrs")
+            return ptr
+
+        potrs_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                nb_i32p,  # NRHS
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # B
+                nb_i32p,  # LDB
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _potrs_py(UPLO, N, NRHS, A, LDA, B, LDB, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_potrs_pointer,
+                func_type_ref=potrs_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(UPLO, N, NRHS, A, LDA, B, LDB, INFO)
+
+        potrs: CPUDispatcher = numba_basic.numba_njit(cache=True)(_potrs_py)
+
+        return potrs
 
     @classmethod
     def numba_xlange(cls, dtype):

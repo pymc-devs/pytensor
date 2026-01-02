@@ -363,7 +363,7 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     return solve_triangular, cache_key
 
 
-@numba_funcify.register(CholeskySolve)
+@register_funcify_default_op_cache_key(CholeskySolve)
 def numba_funcify_CholeskySolve(op, node, **kwargs):
     lower = op.lower
     overwrite_b = op.overwrite_b
@@ -409,7 +409,8 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
             check_finite=check_finite,
         )
 
-    return cho_solve
+    cache_key = 1
+    return cho_solve, cache_key
 
 
 @numba_funcify.register(QR)
