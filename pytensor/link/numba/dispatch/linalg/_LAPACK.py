@@ -428,17 +428,37 @@ class _LAPACK:
 
         Called by scipy.linalg.lu_factor
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "getrf")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # M
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            _ptr_int,  # IPIV
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}getrf"
+
+        @numba_basic.numba_njit
+        def get_getrf_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "getrf")
+            return ptr
+
+        getrf_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # M
+                nb_i32p,  # N
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                nb_i32p,  # IPIV
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _getrf_py(M, N, A, LDA, IPIV, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_getrf_pointer,
+                func_type_ref=getrf_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(M, N, A, LDA, IPIV, INFO)
+
+        getrf: CPUDispatcher = numba_basic.numba_njit(cache=True)(_getrf_py)
+        return getrf
 
     @classmethod
     def numba_xgetrs(cls, dtype):

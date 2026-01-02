@@ -183,7 +183,7 @@ def numba_funcify_LU(op, node, **kwargs):
     return lu
 
 
-@numba_funcify.register(LUFactor)
+@register_funcify_default_op_cache_key(LUFactor)
 def numba_funcify_LUFactor(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.numpy_dtype
     if inp_dtype.kind == "c":
@@ -216,7 +216,8 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
         return LU, piv
 
-    return lu_factor
+    cache_key = 1
+    return lu_factor, cache_key
 
 
 @register_funcify_default_op_cache_key(BlockDiagonal)
