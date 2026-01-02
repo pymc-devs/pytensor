@@ -13,12 +13,13 @@ import pytensor.tensor as pt
 import tests.unittest_tools as utt
 from pytensor import In, Out, config, grad
 from pytensor.compile.function import function
-from pytensor.compile.mode import Mode
+from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import vectorize_node
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
+from pytensor.link.numba import NumbaLinker
 from pytensor.scalar import ScalarOp, float32, float64, int32, int64
 from pytensor.scalar import add as scalar_add
 from pytensor.scalar import exp as scalar_exp
@@ -658,6 +659,10 @@ class TestCAReduce(unittest_tools.InferShapeTester):
         not pytensor.config.cxx,
         reason="G++ not available, so we need to skip this test.",
     )
+    @pytest.mark.skipif(
+        isinstance(get_default_mode().linker, NumbaLinker),
+        reason="Running with numba linker, c backend (should be) covered in another CI",
+    )
     def test_c_noopt(self):
         # We need to make sure that we cover the corner cases that
         # optimizations normally cover
@@ -667,6 +672,10 @@ class TestCAReduce(unittest_tools.InferShapeTester):
     @pytest.mark.skipif(
         not pytensor.config.cxx,
         reason="G++ not available, so we need to skip this test.",
+    )
+    @pytest.mark.skipif(
+        isinstance(get_default_mode().linker, NumbaLinker),
+        reason="Running with numba linker, c backend (should be) covered in another CI",
     )
     def test_c(self):
         for dtype in ["bool", "floatX", "complex64", "complex128", "int8", "uint8"]:
@@ -686,6 +695,10 @@ class TestCAReduce(unittest_tools.InferShapeTester):
     @pytest.mark.skipif(
         not pytensor.config.cxx,
         reason="G++ not available, so we need to skip this test.",
+    )
+    @pytest.mark.skipif(
+        isinstance(get_default_mode().linker, NumbaLinker),
+        reason="Running with numba linker, c backend (should be) covered in another CI",
     )
     def test_c_nan(self):
         for dtype in ["floatX", "complex64", "complex128"]:
