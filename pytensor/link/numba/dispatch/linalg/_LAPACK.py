@@ -386,20 +386,40 @@ class _LAPACK:
 
         Called by scipy.linalg.solve when assume_a == "gen"
         """
-        lapack_ptr, float_pointer = _get_lapack_ptr_and_ptr_type(dtype, "gecon")
-        functype = ctypes.CFUNCTYPE(
-            None,
-            _ptr_int,  # NORM
-            _ptr_int,  # N
-            float_pointer,  # A
-            _ptr_int,  # LDA
-            float_pointer,  # ANORM
-            float_pointer,  # RCOND
-            float_pointer,  # WORK
-            _ptr_int,  # IWORK
-            _ptr_int,  # INFO
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        cache_key = f"{kind}gecon"
+
+        @numba_basic.numba_njit
+        def get_gecon_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "gecon")
+            return ptr
+
+        gecon_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # NORM
+                nb_i32p,  # N
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # ANORM
+                float_pointer,  # RCOND
+                float_pointer,  # WORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # INFO
+            )
         )
-        return functype(lapack_ptr)
+
+        def _gecon_py(NORM, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_gecon_pointer,
+                func_type_ref=gecon_function_type,
+                cache_key_lit=cache_key,
+            )
+            fn(NORM, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO)
+
+        gecon: CPUDispatcher = numba_basic.numba_njit(cache=True)(_gecon_py)
+        return gecon
 
     @classmethod
     def numba_xgetrf(cls, dtype):
