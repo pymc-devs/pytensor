@@ -139,7 +139,7 @@ class _LAPACK:
         ensure_lapack()
 
     @classmethod
-    def numba_xtrtrs(cls, dtype):
+    def numba_xtrtrs(cls, dtype) -> CPUDispatcher:
         """
         Solve a triangular system of equations of the form A @ X = B or A.T @ X = B.
 
@@ -148,7 +148,7 @@ class _LAPACK:
 
         kind = get_blas_kind(dtype)
         float_ptr = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}trtrs"
+        unique_func_name = f"scipy.lapack.{kind}trtrs"
 
         @numba_basic.numba_njit
         def get_trtrs_pointer():
@@ -171,7 +171,8 @@ class _LAPACK:
             )
         )
 
-        def _trtrs_py(UPLO, TRANS, DIAG, N, NRHS, A, LDA, B, LDB, INFO):
+        @numba_basic.numba_njit
+        def trtrs(UPLO, TRANS, DIAG, N, NRHS, A, LDA, B, LDB, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_trtrs_pointer,
                 func_type_ref=trtrs_function_type,
@@ -179,12 +180,10 @@ class _LAPACK:
             )
             fn(UPLO, TRANS, DIAG, N, NRHS, A, LDA, B, LDB, INFO)
 
-        trtrs: CPUDispatcher = numba_basic.numba_njit()(_trtrs_py)
-
         return trtrs
 
     @classmethod
-    def numba_xpotrf(cls, dtype):
+    def numba_xpotrf(cls, dtype) -> CPUDispatcher:
         """
         Compute the Cholesky factorization of a real symmetric positive definite matrix.
 
@@ -193,7 +192,7 @@ class _LAPACK:
 
         kind = get_blas_kind(dtype)
         float_ptr = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}potrf"
+        unique_func_name = f"scipy.lapack.{kind}potrf"
 
         @numba_basic.numba_njit
         def get_potrf_pointer():
@@ -211,7 +210,8 @@ class _LAPACK:
             )
         )
 
-        def _potrf_py(UPLO, N, A, LDA, INFO):
+        @numba_basic.numba_njit
+        def potrf(UPLO, N, A, LDA, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_potrf_pointer,
                 func_type_ref=potrf_function_type,
@@ -219,12 +219,10 @@ class _LAPACK:
             )
             fn(UPLO, N, A, LDA, INFO)
 
-        potrf: CPUDispatcher = numba_basic.numba_njit()(_potrf_py)
-
         return potrf
 
     @classmethod
-    def numba_xpotrs(cls, dtype):
+    def numba_xpotrs(cls, dtype) -> CPUDispatcher:
         """
         Solve a system of linear equations A @ X = B with a symmetric positive definite matrix A using the Cholesky
         factorization computed by numba_potrf.
@@ -233,7 +231,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}potrs"
+        unique_func_name = f"scipy.lapack.{kind}potrs"
 
         @numba_basic.numba_njit
         def get_potrs_pointer():
@@ -254,7 +252,8 @@ class _LAPACK:
             )
         )
 
-        def _potrs_py(UPLO, N, NRHS, A, LDA, B, LDB, INFO):
+        @numba_basic.numba_njit
+        def potrs(UPLO, N, NRHS, A, LDA, B, LDB, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_potrs_pointer,
                 func_type_ref=potrs_function_type,
@@ -262,12 +261,10 @@ class _LAPACK:
             )
             fn(UPLO, N, NRHS, A, LDA, B, LDB, INFO)
 
-        potrs: CPUDispatcher = numba_basic.numba_njit()(_potrs_py)
-
         return potrs
 
     @classmethod
-    def numba_xlange(cls, dtype):
+    def numba_xlange(cls, dtype) -> CPUDispatcher:
         """
         Compute the value of the 1-norm, Frobenius norm, infinity-norm, or the largest absolute value of any element of
         a general M-by-N matrix A.
@@ -277,7 +274,7 @@ class _LAPACK:
         kind = get_blas_kind(dtype)
         float_type = _get_nb_float_from_dtype(kind, return_pointer=False)
         float_pointer = _get_nb_float_from_dtype(kind, return_pointer=True)
-        unique_func_name = f"{kind}lange"
+        unique_func_name = f"scipy.lapack.{kind}lange"
 
         @numba_basic.numba_njit
         def get_lange_pointer():
@@ -296,7 +293,8 @@ class _LAPACK:
             )
         )
 
-        def _lange_py(NORM, M, N, A, LDA, WORK):
+        @numba_basic.numba_njit
+        def lange(NORM, M, N, A, LDA, WORK):
             fn = _call_cached_ptr(
                 get_ptr_func=get_lange_pointer,
                 func_type_ref=lange_function_type,
@@ -304,17 +302,16 @@ class _LAPACK:
             )
             return fn(NORM, M, N, A, LDA, WORK)
 
-        lange: CPUDispatcher = numba_basic.numba_njit()(_lange_py)
         return lange
 
     @classmethod
-    def numba_xlamch(cls, dtype):
+    def numba_xlamch(cls, dtype) -> CPUDispatcher:
         """
         Determine machine precision for floating point arithmetic.
         """
         kind = get_blas_kind(dtype)
         float_type = _get_nb_float_from_dtype(kind, return_pointer=False)
-        unique_func_name = f"{kind}lamch"
+        unique_func_name = f"scipy.lapack.{kind}lamch"
 
         @numba_basic.numba_njit
         def get_lamch_pointer():
@@ -328,7 +325,8 @@ class _LAPACK:
             )
         )
 
-        def _lamch_py(CMACH):
+        @numba_basic.numba_njit
+        def lamch(CMACH):
             fn = _call_cached_ptr(
                 get_ptr_func=get_lamch_pointer,
                 func_type_ref=lamch_function_type,
@@ -337,12 +335,10 @@ class _LAPACK:
             res = fn(CMACH)
             return res
 
-        lamch: CPUDispatcher = numba_basic.numba_njit()(_lamch_py)
-
         return lamch
 
     @classmethod
-    def numba_xgecon(cls, dtype):
+    def numba_xgecon(cls, dtype) -> CPUDispatcher:
         """
         Estimates the condition number of a matrix A, using the LU factorization computed by numba_getrf.
 
@@ -350,7 +346,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}gecon"
+        unique_func_name = f"scipy.lapack.{kind}gecon"
 
         @numba_basic.numba_njit
         def get_gecon_pointer():
@@ -372,7 +368,8 @@ class _LAPACK:
             )
         )
 
-        def _gecon_py(NORM, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO):
+        @numba_basic.numba_njit
+        def gecon(NORM, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_gecon_pointer,
                 func_type_ref=gecon_function_type,
@@ -380,11 +377,10 @@ class _LAPACK:
             )
             fn(NORM, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO)
 
-        gecon: CPUDispatcher = numba_basic.numba_njit()(_gecon_py)
         return gecon
 
     @classmethod
-    def numba_xgetrf(cls, dtype):
+    def numba_xgetrf(cls, dtype) -> CPUDispatcher:
         """
         Compute partial pivoting LU factorization of a general M-by-N matrix A using row interchanges.
 
@@ -392,7 +388,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}getrf"
+        unique_func_name = f"scipy.lapack.{kind}getrf"
 
         @numba_basic.numba_njit
         def get_getrf_pointer():
@@ -411,7 +407,8 @@ class _LAPACK:
             )
         )
 
-        def _getrf_py(M, N, A, LDA, IPIV, INFO):
+        @numba_basic.numba_njit
+        def getrf(M, N, A, LDA, IPIV, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_getrf_pointer,
                 func_type_ref=getrf_function_type,
@@ -419,11 +416,10 @@ class _LAPACK:
             )
             fn(M, N, A, LDA, IPIV, INFO)
 
-        getrf: CPUDispatcher = numba_basic.numba_njit()(_getrf_py)
         return getrf
 
     @classmethod
-    def numba_xgetrs(cls, dtype):
+    def numba_xgetrs(cls, dtype) -> CPUDispatcher:
         """
         Solve a system of linear equations A @ X = B or A.T @ X = B with a general N-by-N matrix A using the LU
         factorization computed by GETRF.
@@ -432,7 +428,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}getrs"
+        unique_func_name = f"scipy.lapack.{kind}getrs"
 
         @numba_basic.numba_njit
         def get_getrs_pointer():
@@ -454,7 +450,8 @@ class _LAPACK:
             )
         )
 
-        def _getrs_py(TRANS, N, NRHS, A, LDA, IPIV, B, LDB, INFO):
+        @numba_basic.numba_njit
+        def getrs(TRANS, N, NRHS, A, LDA, IPIV, B, LDB, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_getrs_pointer,
                 func_type_ref=getrs_function_type,
@@ -462,11 +459,10 @@ class _LAPACK:
             )
             fn(TRANS, N, NRHS, A, LDA, IPIV, B, LDB, INFO)
 
-        getrs: CPUDispatcher = numba_basic.numba_njit()(_getrs_py)
         return getrs
 
     @classmethod
-    def numba_xsysv(cls, dtype):
+    def numba_xsysv(cls, dtype) -> CPUDispatcher:
         """
         Solve a system of linear equations A @ X = B with a symmetric matrix A using the diagonal pivoting method,
         factorizing A into LDL^T or UDU^T form, depending on the value of UPLO
@@ -475,7 +471,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}sysv"
+        unique_func_name = f"scipy.lapack.{kind}sysv"
 
         @numba_basic.numba_njit
         def get_sysv_pointer():
@@ -499,7 +495,8 @@ class _LAPACK:
             )
         )
 
-        def _sysv_py(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO):
+        @numba_basic.numba_njit
+        def sysv(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_sysv_pointer,
                 func_type_ref=sysv_function_type,
@@ -507,18 +504,17 @@ class _LAPACK:
             )
             fn(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO)
 
-        sysv: CPUDispatcher = numba_basic.numba_njit()(_sysv_py)
         return sysv
 
     @classmethod
-    def numba_xsycon(cls, dtype):
+    def numba_xsycon(cls, dtype) -> CPUDispatcher:
         """
         Estimate the reciprocal of the condition number of a symmetric matrix A using the UDU or LDL factorization
         computed by xSYTRF.
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}sycon"
+        unique_func_name = f"scipy.lapack.{kind}sycon"
 
         @numba_basic.numba_njit
         def get_sycon_pointer():
@@ -541,7 +537,8 @@ class _LAPACK:
             )
         )
 
-        def _sycon_py(UPLO, N, A, LDA, IPIV, ANORM, RCOND, WORK, IWORK, INFO):
+        @numba_basic.numba_njit
+        def sycon(UPLO, N, A, LDA, IPIV, ANORM, RCOND, WORK, IWORK, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_sycon_pointer,
                 func_type_ref=sycon_function_type,
@@ -549,12 +546,10 @@ class _LAPACK:
             )
             fn(UPLO, N, A, LDA, IPIV, ANORM, RCOND, WORK, IWORK, INFO)
 
-        sycon: CPUDispatcher = numba_basic.numba_njit()(_sycon_py)
-
         return sycon
 
     @classmethod
-    def numba_xpocon(cls, dtype):
+    def numba_xpocon(cls, dtype) -> CPUDispatcher:
         """
         Estimates the reciprocal of the condition number of a positive definite matrix A using the Cholesky factorization
         computed by potrf.
@@ -563,7 +558,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}pocon"
+        unique_func_name = f"scipy.lapack.{kind}pocon"
 
         @numba_basic.numba_njit
         def get_pocon_pointer():
@@ -585,7 +580,8 @@ class _LAPACK:
             )
         )
 
-        def _pocon_py(UPLO, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO):
+        @numba_basic.numba_njit
+        def pocon(UPLO, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_pocon_pointer,
                 func_type_ref=pocon_function_type,
@@ -593,18 +589,17 @@ class _LAPACK:
             )
             fn(UPLO, N, A, LDA, ANORM, RCOND, WORK, IWORK, INFO)
 
-        pocon: CPUDispatcher = numba_basic.numba_njit()(_pocon_py)
         return pocon
 
     @classmethod
-    def numba_xposv(cls, dtype):
+    def numba_xposv(cls, dtype) -> CPUDispatcher:
         """
         Solve a system of linear equations A @ X = B with a symmetric positive definite matrix A using the Cholesky
         factorization computed by potrf.
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}posv"
+        unique_func_name = f"scipy.lapack.{kind}posv"
 
         @numba_basic.numba_njit
         def get_posv_pointer():
@@ -625,7 +620,8 @@ class _LAPACK:
             )
         )
 
-        def _posv_py(UPLO, N, NRHS, A, LDA, B, LDB, INFO):
+        @numba_basic.numba_njit
+        def posv(UPLO, N, NRHS, A, LDA, B, LDB, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_posv_pointer,
                 func_type_ref=posv_function_type,
@@ -633,11 +629,10 @@ class _LAPACK:
             )
             fn(UPLO, N, NRHS, A, LDA, B, LDB, INFO)
 
-        posv: CPUDispatcher = numba_basic.numba_njit()(_posv_py)
         return posv
 
     @classmethod
-    def numba_xgttrf(cls, dtype):
+    def numba_xgttrf(cls, dtype) -> CPUDispatcher:
         """
         Compute the LU factorization of a tridiagonal matrix A using row interchanges.
 
@@ -645,7 +640,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}gttrf"
+        unique_func_name = f"scipy.lapack.{kind}gttrf"
 
         @numba_basic.numba_njit
         def get_gttrf_pointer():
@@ -665,7 +660,8 @@ class _LAPACK:
             )
         )
 
-        def _gttrf_py(N, DL, D, DU, DU2, IPIV, INFO):
+        @numba_basic.numba_njit
+        def gttrf(N, DL, D, DU, DU2, IPIV, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_gttrf_pointer,
                 func_type_ref=gttrf_function_type,
@@ -673,11 +669,10 @@ class _LAPACK:
             )
             fn(N, DL, D, DU, DU2, IPIV, INFO)
 
-        gttrf: CPUDispatcher = numba_basic.numba_njit()(_gttrf_py)
         return gttrf
 
     @classmethod
-    def numba_xgttrs(cls, dtype):
+    def numba_xgttrs(cls, dtype) -> CPUDispatcher:
         """
         Solve a system of linear equations A @ X = B with a tridiagonal matrix A using the LU factorization computed by numba_gttrf.
 
@@ -685,7 +680,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}gttrs"
+        unique_func_name = f"scipy.lapack.{kind}gttrs"
 
         @numba_basic.numba_njit
         def get_gttrs_pointer():
@@ -709,7 +704,8 @@ class _LAPACK:
             )
         )
 
-        def _gttrs_py(TRANS, N, NRHS, DL, D, DU, DU2, IPIV, B, LDB, INFO):
+        @numba_basic.numba_njit
+        def gttrs(TRANS, N, NRHS, DL, D, DU, DU2, IPIV, B, LDB, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_gttrs_pointer,
                 func_type_ref=gttrs_function_type,
@@ -717,17 +713,16 @@ class _LAPACK:
             )
             fn(TRANS, N, NRHS, DL, D, DU, DU2, IPIV, B, LDB, INFO)
 
-        gttrs: CPUDispatcher = numba_basic.numba_njit()(_gttrs_py)
         return gttrs
 
     @classmethod
-    def numba_xgtcon(cls, dtype):
+    def numba_xgtcon(cls, dtype) -> CPUDispatcher:
         """
         Estimate the reciprocal of the condition number of a tridiagonal matrix A using the LU factorization computed by numba_gttrf.
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}gtcon"
+        unique_func_name = f"scipy.lapack.{kind}gtcon"
 
         @numba_basic.numba_njit
         def get_gtcon_pointer():
@@ -752,7 +747,8 @@ class _LAPACK:
             )
         )
 
-        def _gtcon_py(NORM, N, DL, D, DU, DU2, IPIV, ANORM, RCOND, WORK, IWORK, INFO):
+        @numba_basic.numba_njit
+        def gtcon(NORM, N, DL, D, DU, DU2, IPIV, ANORM, RCOND, WORK, IWORK, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_gtcon_pointer,
                 func_type_ref=gtcon_function_type,
@@ -760,11 +756,10 @@ class _LAPACK:
             )
             fn(NORM, N, DL, D, DU, DU2, IPIV, ANORM, RCOND, WORK, IWORK, INFO)
 
-        gtcon: CPUDispatcher = numba_basic.numba_njit()(_gtcon_py)
         return gtcon
 
     @classmethod
-    def numba_xgeqrf(cls, dtype):
+    def numba_xgeqrf(cls, dtype) -> CPUDispatcher:
         """
         Compute the QR factorization of a general M-by-N matrix A.
 
@@ -772,7 +767,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}geqrf"
+        unique_func_name = f"scipy.lapack.{kind}geqrf"
 
         @numba_basic.numba_njit
         def get_geqrf_pointer():
@@ -793,7 +788,8 @@ class _LAPACK:
             )
         )
 
-        def _geqrf_py(M, N, A, LDA, TAU, WORK, LWORK, INFO):
+        @numba_basic.numba_njit
+        def geqrf(M, N, A, LDA, TAU, WORK, LWORK, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_geqrf_pointer,
                 func_type_ref=geqrf_function_type,
@@ -801,11 +797,10 @@ class _LAPACK:
             )
             fn(M, N, A, LDA, TAU, WORK, LWORK, INFO)
 
-        geqrf: CPUDispatcher = numba_basic.numba_njit()(_geqrf_py)
         return geqrf
 
     @classmethod
-    def numba_xgeqp3(cls, dtype):
+    def numba_xgeqp3(cls, dtype) -> CPUDispatcher:
         """
         Compute the QR factorization with column pivoting of a general M-by-N matrix A.
 
@@ -813,7 +808,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}geqp3"
+        unique_func_name = f"scipy.lapack.{kind}geqp3"
 
         @numba_basic.numba_njit
         def get_geqp3_pointer():
@@ -838,7 +833,8 @@ class _LAPACK:
                 )
             )
 
-            def _geqp3_py(M, N, A, LDA, JPVT, TAU, WORK, LWORK, RWORK, INFO):
+            @numba_basic.numba_njit
+            def geqp3(M, N, A, LDA, JPVT, TAU, WORK, LWORK, RWORK, INFO):
                 fn = _call_cached_ptr(
                     get_ptr_func=get_geqp3_pointer,
                     func_type_ref=geqp3_function_type,
@@ -861,7 +857,8 @@ class _LAPACK:
                 )
             )
 
-            def _geqp3_py(M, N, A, LDA, JPVT, TAU, WORK, LWORK, INFO):  # type: ignore[misc]
+            @numba_basic.numba_njit
+            def geqp3(M, N, A, LDA, JPVT, TAU, WORK, LWORK, INFO):
                 fn = _call_cached_ptr(
                     get_ptr_func=get_geqp3_pointer,
                     func_type_ref=geqp3_function_type,
@@ -869,12 +866,10 @@ class _LAPACK:
                 )
                 fn(M, N, A, LDA, JPVT, TAU, WORK, LWORK, INFO)
 
-        geqp3: CPUDispatcher = numba_basic.numba_njit()(_geqp3_py)
-
         return geqp3
 
     @classmethod
-    def numba_xorgqr(cls, dtype):
+    def numba_xorgqr(cls, dtype) -> CPUDispatcher:
         """
         Generate the orthogonal matrix Q from a QR factorization (real types).
 
@@ -882,7 +877,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}orgqr"
+        unique_func_name = f"scipy.lapack.{kind}orgqr"
 
         @numba_basic.numba_njit
         def get_orgqr_pointer():
@@ -904,7 +899,8 @@ class _LAPACK:
             )
         )
 
-        def _orgqr_py(M, N, K, A, LDA, TAU, WORK, LWORK, INFO):
+        @numba_basic.numba_njit
+        def orgqr(M, N, K, A, LDA, TAU, WORK, LWORK, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_orgqr_pointer,
                 func_type_ref=orgqr_function_type,
@@ -912,11 +908,10 @@ class _LAPACK:
             )
             fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
 
-        orgqr: CPUDispatcher = numba_basic.numba_njit()(_orgqr_py)
         return orgqr
 
     @classmethod
-    def numba_xungqr(cls, dtype):
+    def numba_xungqr(cls, dtype) -> CPUDispatcher:
         """
         Generate the unitary matrix Q from a QR factorization (complex types).
 
@@ -924,7 +919,7 @@ class _LAPACK:
         """
         kind = get_blas_kind(dtype)
         float_pointer = _get_nb_float_from_dtype(kind)
-        unique_func_name = f"{kind}ungqr"
+        unique_func_name = f"scipy.lapack.{kind}ungqr"
 
         @numba_basic.numba_njit
         def get_ungqr_pointer():
@@ -946,14 +941,13 @@ class _LAPACK:
             )
         )
 
-        def _ungqr_py(M, N, K, A, LDA, TAU, WORK, LWORK, INFO):
+        @numba_basic.numba_njit
+        def ungqr(M, N, K, A, LDA, TAU, WORK, LWORK, INFO):
             fn = _call_cached_ptr(
                 get_ptr_func=get_ungqr_pointer,
                 func_type_ref=ungqr_function_type,
                 cache_key_lit=unique_func_name,
             )
             fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
-
-        ungqr: CPUDispatcher = numba_basic.numba_njit()(_ungqr_py)
 
         return ungqr
