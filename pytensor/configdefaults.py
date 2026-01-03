@@ -271,15 +271,6 @@ def add_basic_configvars():
     )
 
     config.add(
-        "conv__assert_shape",
-        "If True, AbstractConv* ops will verify that user-provided"
-        " shapes match the runtime shapes (debugging option,"
-        " may slow down compilation)",
-        BoolParam(False),
-        in_c_key=False,
-    )
-
-    config.add(
         "print_global_stats",
         "Print some global statistics (time spent) at the end",
         BoolParam(False),
