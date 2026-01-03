@@ -84,10 +84,10 @@ jobs:
         part:
           - [ "*rest", "tests --ignore=tests/scan --ignore=tests/tensor --ignore=tests/xtensor --ignore=tests/link/numba" ]
           - [ "scan", "tests/scan" ]
-          - [ "tensor *rest", "tests/tensor --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/signal --ignore=tests/tensor/conv --ignore=tests/tensor/rewriting --ignore=tests/tensor/linalg --ignore=tests/tensor/test_nlinalg.py --ignore=tests/tensor/test_slinalg.py --ignore=tests/tensor/test_pad.py" ]
+          - [ "tensor *rest", "tests/tensor --ignore=tests/tensor/test_basic.py --ignore=tests/tensor/test_elemwise.py --ignore=tests/tensor/test_math.py --ignore=tests/tensor/test_math_scipy.py --ignore=tests/tensor/test_blas.py --ignore=tests/tensor/signal --ignore=tests/tensor/rewriting --ignore=tests/tensor/linalg --ignore=tests/tensor/test_nlinalg.py --ignore=tests/tensor/test_slinalg.py --ignore=tests/tensor/test_pad.py" ]
           - [ "tensor basic+elemwise", "tests/tensor/test_basic.py tests/tensor/test_elemwise.py" ]
           - [ "tensor math", "tests/tensor/test_math.py" ]
-          - [ "tensor scipy+blas+conv+pad", "tests/tensor/test_math_scipy.py tests/tensor/test_blas.py tests/tensor/signal tests/tensor/conv tests/tensor/test_pad.py" ]
+          - [ "tensor scipy+blas+pad", "tests/tensor/test_math_scipy.py tests/tensor/test_blas.py tests/tensor/signal tests/tensor/test_pad.py" ]
           - [ "tensor rewriting", "tests/tensor/rewriting" ]
           - [ "tensor linalg", "tests/tensor/linalg tests/tensor/test_nlinalg.py tests/tensor/test_slinalg.py" ]
         exclude:

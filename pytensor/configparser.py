@@ -71,7 +71,6 @@ class PyTensorConfigParser:
     pickle_test_value: bool
     cast_policy: str
     device: str
-    conv__assert_shape: bool
     print_global_stats: bool
     unpickle_function: bool
     # add_compile_configvars
