@@ -11,7 +11,6 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import expand_dims, infer_static_shape, join, split
-from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType, shape
 from pytensor.tensor.type import tensor
@@ -66,7 +65,7 @@ class JoinDims(Op):
         [input_shape] = shapes
         axis_range = self.axis_range
 
-        joined_shape = prod([input_shape[i] for i in axis_range])
+        joined_shape = prod([input_shape[i] for i in axis_range], dtype=int)
         return [self.output_shapes(input_shape, joined_shape)]
 
     def perform(self, node, inputs, outputs):
@@ -92,7 +91,7 @@ class JoinDims(Op):
 
         x_shape = shape(x)
         packed_shape = [x_shape[i] for i in self.axis_range]
-        return [split_dims(g_out, shape=packed_shape, axis=self.start_axis)]
+        return [SplitDims(axis=self.start_axis)(g_out, shape=packed_shape)]  # type: ignore[list-item]
 
 
 @_vectorize_node.register(JoinDims)
@@ -215,9 +214,10 @@ class SplitDims(Op):
         (g_out,) = output_grads
 
         n_axes = g_out.ndim - x.ndim + 1  # type: ignore[attr-defined]
-        axis_range = list(range(self.axis, self.axis + n_axes))
-
-        return [join_dims(g_out, axis=axis_range), DisconnectedType()()]
+        return [
+            JoinDims(start_axis=self.axis, n_axes=n_axes)(g_out),  # type: ignore[list-item]
+            DisconnectedType()(),
+        ]
 
 
 @_vectorize_node.register(SplitDims)
@@ -276,12 +276,6 @@ def split_dims(
         shape = [shape]
     else:
         shape = list(shape)  # type: ignore[arg-type]
-
-    if not shape:
-        # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
-        # example when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes
-        # (3, ) and (3, 3) to (3, 4)
-        return squeeze(x, axis=axis)  # type: ignore[no-any-return]
 
     [axis] = normalize_axis_tuple(axis, x.ndim)  # type: ignore[misc]
     shape = as_tensor_variable(shape, dtype="int64", ndim=1)  # type: ignore[arg-type]
@@ -535,12 +529,17 @@ def unpack(
                 "Unpack must have exactly one more dimension that implied by axes"
             ) from err
 
-    split_inputs = split(
-        packed_input,
-        splits_size=[prod(shape, dtype=int) for shape in packed_shapes],
-        n_splits=len(packed_shapes),
-        axis=split_axis,
-    )
+    n_splits = len(packed_shapes)
+    if n_splits == 1:
+        # If there is only one tensor to unpack, no need to split
+        split_inputs = [packed_input]
+    else:
+        split_inputs = split(
+            packed_input,
+            splits_size=[prod(shape, dtype=int) for shape in packed_shapes],
+            n_splits=n_splits,
+            axis=split_axis,
+        )
 
     return [
         split_dims(inp, shape, split_axis)
