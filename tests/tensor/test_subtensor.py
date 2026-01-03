@@ -3145,7 +3145,7 @@ def test_slice_at_axis():
 @pytest.mark.parametrize(
     "size", [(3,), (3, 3), (3, 5, 5)], ids=["1d", "2d square", "3d square"]
 )
-def test_flip(size: tuple[int]):
+def test_flip(size: tuple[int, ...]):
     from itertools import combinations
 
     ATOL = RTOL = 1e-8 if config.floatX == "float64" else 1e-4

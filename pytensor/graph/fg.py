@@ -40,7 +40,7 @@ class Output(Op):
     def make_node(self, inp):
         return Apply(self, [inp], [])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         raise RuntimeError("Output Ops should never be evaluated")
 
     def __str__(self):

@@ -39,11 +39,11 @@ class MakeSlice(Op):
             inp = [slc, stop, step]
         return Apply(self, list(map(as_int_none_variable, inp)), [slicetype()])
 
-    def perform(self, node, inp, out_):
-        (out,) = out_
-        out[0] = slice(*inp)
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        out[0] = slice(*inputs)
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         return [DisconnectedType()() for i in inputs]
 
 
@@ -54,9 +54,9 @@ class SliceType(Type[slice]):
     def clone(self, **kwargs):
         return type(self)()
 
-    def filter(self, x, strict=False, allow_downcast=None):
-        if isinstance(x, slice):
-            return x
+    def filter(self, data, strict=False, allow_downcast=None):
+        if isinstance(data, slice):
+            return data
         else:
             raise TypeError("Expected a slice!")
 
@@ -123,9 +123,9 @@ class NoneTypeT(Generic):
 
     """
 
-    def filter(self, x, strict=False, allow_downcast=None):
-        if x is None:
-            return x
+    def filter(self, data, strict=False, allow_downcast=None):
+        if data is None:
+            return data
         else:
             raise TypeError("Expected None!")
 

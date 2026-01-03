@@ -191,8 +191,8 @@ class TestComposite:
             def make_node(self, x):
                 return Apply(self, [x], [x.type(), x.type()])
 
-            def perform(self, node, inputs, outputs):
-                outputs[1][0] = outputs[0][0] = inputs[0]
+            def perform(self, node, inputs, output_storage):
+                output_storage[1][0] = output_storage[0][0] = inputs[0]
 
             def c_code(self, *args):
                 return "dummy"

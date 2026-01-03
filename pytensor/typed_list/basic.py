@@ -92,9 +92,9 @@ class GetItem(COp):
         else:
             raise TypeError("Expected scalar or slice as index.")
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, index) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         if not isinstance(index, slice):
             index = int(index)
         out[0] = x[index]
@@ -102,9 +102,9 @@ class GetItem(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
-        x_name, index = inp[0], inp[1]
-        output_name = out[0]
+    def c_code(self, node, name, inputs, outputs, sub):
+        x_name, index = inputs[0], inputs[1]
+        output_name = outputs[0]
         fail = sub["fail"]
         return f"""
         {output_name} = (typeof {output_name}) PyList_GetItem( (PyObject*) {x_name}, *((npy_int64 *) PyArray_DATA({index})));
@@ -153,9 +153,9 @@ class Append(COp):
         assert x.ttype == toAppend.type, (x.ttype, toAppend.type)
         return Apply(self, [x, toAppend], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, toAppend) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         if not self.inplace:
             out[0] = list(x)
         else:
@@ -167,10 +167,10 @@ class Append(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
-        x_name, toAppend = inp[0], inp[1]
-        output_name = out[0]
+        x_name, toAppend = inputs[0], inputs[1]
+        output_name = outputs[0]
         fail = sub["fail"]
         if not self.inplace:
             init = f"""
@@ -232,9 +232,9 @@ class Extend(COp):
         assert toAppend.type.is_super(x.type)
         return Apply(self, [x, toAppend], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, toAppend) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         if not self.inplace:
             out[0] = list(x)
         else:
@@ -247,10 +247,10 @@ class Extend(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
-        x_name, toAppend = inp[0], inp[1]
-        output_name = out[0]
+        x_name, toAppend = inputs[0], inputs[1]
+        output_name = outputs[0]
         fail = sub["fail"]
         if not self.inplace:
             init = f"""
@@ -321,9 +321,9 @@ class Insert(COp):
             assert isinstance(index, TensorVariable) and index.ndim == 0
         return Apply(self, [x, index, toInsert], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, index, toInsert) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         if not self.inplace:
             out[0] = list(x)
         else:
@@ -335,10 +335,10 @@ class Insert(COp):
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         raise NotImplementedError("DISABLED AS WE NEED TO UPDATE IT TO COPY toAppend()")
-        x_name, index, toInsert = inp[0], inp[1], inp[2]
-        output_name = out[0]
+        x_name, index, toInsert = inputs[0], inputs[1], inputs[2]
+        output_name = outputs[0]
         fail = sub["fail"]
         if not self.inplace:
             init = f"""
@@ -397,9 +397,9 @@ class Remove(Op):
         assert x.ttype == toRemove.type
         return Apply(self, [x, toRemove], [x.type()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x, toRemove) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         if not self.inplace:
             out[0] = list(x)
         else:
@@ -453,20 +453,20 @@ class Reverse(COp):
         assert isinstance(x.type, TypedListType)
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inp, outputs):
-        (out,) = outputs
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         if not self.inplace:
-            out[0] = list(inp[0])
+            out[0] = list(inputs[0])
         else:
-            out[0] = inp[0]
+            out[0] = inputs[0]
         out[0].reverse()
 
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
-        x_name = inp[0]
-        output_name = out[0]
+    def c_code(self, node, name, inputs, outputs, sub):
+        x_name = inputs[0]
+        output_name = outputs[0]
         fail = sub["fail"]
         if not self.inplace:
             init = f"""
@@ -514,14 +514,14 @@ class Index(Op):
         assert x.ttype == elem.type
         return Apply(self, [x, elem], [lscalar()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         """
         Inelegant workaround for ValueError: The truth value of an
         array with more than one element is ambiguous. Use a.any() or a.all()
         being thrown when trying to remove a matrix from a matrices list
         """
         (x, elem) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         for y in range(len(x)):
             if node.inputs[0].ttype.values_eq(x[y], elem):
                 out[0] = np.asarray(y, dtype="int64")
@@ -543,14 +543,14 @@ class Count(Op):
         assert x.ttype == elem.type
         return Apply(self, [x, elem], [lscalar()])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         """
         Inelegant workaround for ValueError: The truth value of an
         array with more than one element is ambiguous. Use a.any() or a.all()
         being thrown when trying to remove a matrix from a matrices list
         """
         (x, elem) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         out[0] = 0
         for y in range(len(x)):
             if node.inputs[0].ttype.values_eq(x[y], elem):
@@ -589,16 +589,16 @@ class Length(COp):
         assert isinstance(x.type, TypedListType)
         return Apply(self, [x], [lscalar()])
 
-    def perform(self, node, x, outputs):
-        (out,) = outputs
-        out[0] = np.asarray(len(x[0]), "int64")
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
+        out[0] = np.asarray(len(inputs[0]), "int64")
 
     def __str__(self):
         return self.__class__.__name__
 
-    def c_code(self, node, name, inp, out, sub):
-        x_name = inp[0]
-        output_name = out[0]
+    def c_code(self, node, name, inputs, outputs, sub):
+        x_name = inputs[0]
+        output_name = outputs[0]
         return f"""
         if(!{output_name})
             {output_name}=(PyArrayObject*)PyArray_EMPTY(0, NULL, NPY_INT64, 0);
@@ -638,8 +638,8 @@ class MakeList(Op):
 
         return Apply(self, a2, [tl])
 
-    def perform(self, node, inputs, outputs):
-        (out,) = outputs
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         # We need to make sure that we don't get a view on our inputs
         out[0] = [_lessbroken_deepcopy(inp) for inp in inputs]
 

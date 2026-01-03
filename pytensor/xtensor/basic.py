@@ -9,7 +9,7 @@ from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
 class XOp(Op):
     """A base class for XOps that shouldn't be materialized"""
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         raise NotImplementedError(
             f"xtensor operation {self} must be lowered to equivalent tensor operations"
         )
@@ -31,9 +31,9 @@ class TensorFromXTensor(XTypeCastOp):
         output = TensorType(x.type.dtype, shape=x.type.shape)()
         return Apply(self, [x], [output])
 
-    def L_op(self, inputs, outs, g_outs):
+    def L_op(self, inputs, outputs, output_grads):
         [x] = inputs
-        [g_out] = g_outs
+        [g_out] = output_grads
         return [xtensor_from_tensor(g_out, dims=x.type.dims)]
 
 
@@ -53,8 +53,8 @@ class XTensorFromTensor(XTypeCastOp):
         output = xtensor(dtype=x.type.dtype, dims=self.dims, shape=x.type.shape)
         return Apply(self, [x], [output])
 
-    def L_op(self, inputs, outs, g_outs):
-        [g_out] = g_outs
+    def L_op(self, inputs, outputs, output_grads):
+        [g_out] = output_grads
         return [tensor_from_xtensor(g_out)]
 
 
@@ -74,9 +74,9 @@ class Rename(XTypeCastOp):
         output = x.type.clone(dims=self.new_dims)()
         return Apply(self, [x], [output])
 
-    def L_op(self, inputs, outs, g_outs):
+    def L_op(self, inputs, outputs, output_grads):
         [x] = inputs
-        [g_out] = g_outs
+        [g_out] = output_grads
         return [rename(g_out, dims=x.type.dims)]
 
 

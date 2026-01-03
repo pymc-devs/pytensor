@@ -1,7 +1,7 @@
 import logging
 import warnings
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -627,8 +627,8 @@ class TensorType(CType[np.ndarray], HasDataType, HasShape):
 
 
 class DenseTypeMeta(MetaType):
-    def __instancecheck__(self, o):
-        if type(o) is TensorType or isinstance(o, DenseTypeMeta):
+    def __instancecheck__(self, instance: Any) -> bool:
+        if type(instance) is TensorType or isinstance(instance, DenseTypeMeta):
             return True
         return False
 
@@ -877,7 +877,7 @@ def vector(
     name: str | None = None,
     *,
     dtype: Optional["DTypeLike"] = None,
-    shape: tuple[ST] | None = (None,),
+    shape: tuple[ST, ...] | None = (None,),
 ) -> "TensorVariable":
     """Return a symbolic vector variable.
 

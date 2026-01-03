@@ -2429,9 +2429,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         node.tag.connection_pattern = connection_pattern
         return connection_pattern
 
-    def L_op(self, inputs, outs, dC_douts):
-        if not isinstance(outs, list | tuple):
-            outs = [outs]
+    def L_op(self, inputs, outputs, output_grads):
+        if not isinstance(outputs, list | tuple):
+            outputs = [outputs]
         # `grad_step` equals the number of steps the original scan node has
         # done (if the original scan is a while loop than this number is the
         # length of the output sequence)
@@ -2440,17 +2440,18 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # then a mit_sot
         info = self.info
         if info.n_nit_sot > 0:
-            grad_steps = self.outer_nitsot_outs(outs)[0].shape[0]
+            grad_steps = self.outer_nitsot_outs(outputs)[0].shape[0]
         elif info.n_sit_sot > 0:
-            grad_steps = self.outer_sitsot_outs(outs)[0].shape[0] - 1
+            grad_steps = self.outer_sitsot_outs(outputs)[0].shape[0] - 1
         elif info.n_mit_sot > 0:
             grad_steps = (
-                self.outer_mitsot_outs(outs)[0].shape[0] + self.mintaps[info.n_mit_mot]
+                self.outer_mitsot_outs(outputs)[0].shape[0]
+                + self.mintaps[info.n_mit_mot]
             )
         else:
             grad_steps = inputs[0]
         if info.as_while:
-            n_steps = outs[0].shape[0]
+            n_steps = outputs[0].shape[0]
 
         # Restrict the number of grad steps according to
         # self.truncate_gradient
@@ -2473,7 +2474,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             + self.inner_sitsot_outs(self_outputs)
             + self.inner_nitsot_outs(self_outputs)
         )
-        scan_node = outs[0].owner
+        scan_node = outputs[0].owner
         connection_pattern = self.connection_pattern(scan_node)
 
         def get_inp_idx(iidx):
@@ -2603,8 +2604,10 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                             info.n_seqs + pos
                         ]
 
-                        if not isinstance(dC_douts[outer_oidx].type, DisconnectedType):
-                            dtypes.append(dC_douts[outer_oidx].dtype)
+                        if not isinstance(
+                            output_grads[outer_oidx].type, DisconnectedType
+                        ):
+                            dtypes.append(output_grads[outer_oidx].dtype)
                 if dtypes:
                     new_dtype = pytensor.scalar.upcast(*dtypes)
                 else:
@@ -2614,10 +2617,10 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 # nit-sot outputs
                 # If not disconnected assume the output gradient type is a valid type for the input gradient
                 if isinstance(
-                    dC_douts[idx - n_extra_mit_mot_outs].type, DisconnectedType
+                    output_grads[idx - n_extra_mit_mot_outs].type, DisconnectedType
                 ):
                     continue
-                dC_dXt = safe_new(dC_douts[idx - n_extra_mit_mot_outs][0])
+                dC_dXt = safe_new(output_grads[idx - n_extra_mit_mot_outs][0])
             dC_dXts.append(dC_dXt)
 
         # Handle cases where the very same variable may be used as different outputs
@@ -2626,7 +2629,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         dc_dxts_idx = 0
         for i in range(len(diff_outputs)):
             if not (i < idx_nitsot_out_start or i >= idx_nitsot_out_end) and isinstance(
-                dC_douts[i - n_extra_mit_mot_outs].type, DisconnectedType
+                output_grads[i - n_extra_mit_mot_outs].type, DisconnectedType
             ):
                 # Special case where we don't have a dC_dXt for disconnected nitsot outputs
                 continue
@@ -2706,15 +2709,15 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 outmaxtap = np.max(info.mit_mot_out_slices[: info.n_mit_mot][idx])
             else:
                 outmaxtap = 0
-            seq = outs[idx]
+            seq = outputs[idx]
             for k in taps:
                 if outmaxtap - k != 0:
                     nw_seq = seq[k - mintap : -(outmaxtap - k)][::-1]
                 else:
                     nw_seq = seq[k - mintap :][::-1]
                 outer_inp_seqs.append(nw_seq)
-        outer_inp_seqs += [x[:-1][::-1] for x in self.outer_sitsot_outs(outs)]
-        for x in self.outer_nitsot_outs(dC_douts):
+        outer_inp_seqs += [x[:-1][::-1] for x in self.outer_sitsot_outs(outputs)]
+        for x in self.outer_nitsot_outs(output_grads):
             if not isinstance(x.type, DisconnectedType):
                 if info.as_while:
                     # equivalent to x[:n_steps][::-1]
@@ -2733,15 +2736,15 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             else:
                 n = inputs[0].tag.test_value
             for taps, x in zip(
-                info.mit_sot_in_slices, self.outer_mitsot_outs(outs), strict=True
+                info.mit_sot_in_slices, self.outer_mitsot_outs(outputs), strict=True
             ):
                 mintap = np.min(taps)
                 if hasattr(x[::-1][:mintap], "test_value"):
                     assert x[::-1][:mintap].tag.test_value.shape[0] == n
-            for x in self.outer_sitsot_outs(outs):
+            for x in self.outer_sitsot_outs(outputs):
                 if hasattr(x[::-1][:-1].tag, "test_value"):
                     assert x[::-1][:-1].tag.test_value.shape[0] == n
-            for x in self.outer_nitsot_outs(outs):
+            for x in self.outer_nitsot_outs(outputs):
                 if hasattr(x[::-1].tag, "test_value"):
                     if info.as_while:
                         assert x[n_steps - 1 :: -1].tag.test_value.shape[0] == n
@@ -2750,11 +2753,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         outer_inp_seqs += [
             x[::-1][: np.min(taps)]
             for taps, x in zip(
-                info.mit_sot_in_slices, self.outer_mitsot_outs(outs), strict=True
+                info.mit_sot_in_slices, self.outer_mitsot_outs(outputs), strict=True
             )
         ]
-        outer_inp_seqs += [x[::-1][:-1] for x in self.outer_sitsot_outs(outs)]
-        outer_inp_seqs += [x[::-1] for x in self.outer_nitsot_outs(outs)]
+        outer_inp_seqs += [x[::-1][:-1] for x in self.outer_sitsot_outs(outputs)]
+        outer_inp_seqs += [x[::-1] for x in self.outer_nitsot_outs(outputs)]
 
         # Restrict the length of the outer sequences to the number of grad
         # steps
@@ -2779,11 +2782,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         n_mitmot_inps = 0
 
         for idx, taps in enumerate(info.mit_mot_in_slices):
-            if isinstance(dC_douts[idx].type, DisconnectedType):
-                out = outs[idx]
+            if isinstance(output_grads[idx].type, DisconnectedType):
+                out = outputs[idx]
                 outer_inp_mitmot.append(pt.zeros_like(out))
             else:
-                outer_inp_mitmot.append(dC_douts[idx][::-1])
+                outer_inp_mitmot.append(output_grads[idx][::-1])
             mitmot_inp_taps.append([])
             mitmot_out_taps.append([])
             undefined_msg = None
@@ -2856,10 +2859,10 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         offset = info.n_mit_mot
         for idx, taps in enumerate(info.mit_sot_in_slices):
-            if isinstance(dC_douts[idx + offset].type, DisconnectedType):
-                outer_inp_mitmot.append(outs[idx + offset].zeros_like())
+            if isinstance(output_grads[idx + offset].type, DisconnectedType):
+                outer_inp_mitmot.append(outputs[idx + offset].zeros_like())
             else:
-                outer_inp_mitmot.append(dC_douts[idx + offset][::-1])
+                outer_inp_mitmot.append(output_grads[idx + offset][::-1])
             mitmot_inp_taps.append([])
             mitmot_out_taps.append([])
             inner_inp_mitmot.append(dC_dXts[out_pos])
@@ -2910,20 +2913,20 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         for idx in range(info.n_sit_sot):
             mitmot_inp_taps.append([0, 1])
             mitmot_out_taps.append([1])
-            if not isinstance(dC_douts[idx + offset].type, DisconnectedType):
-                outer_inp_mitmot.append(dC_douts[idx + offset][::-1])
+            if not isinstance(output_grads[idx + offset].type, DisconnectedType):
+                outer_inp_mitmot.append(output_grads[idx + offset][::-1])
             else:
                 if isinstance(dC_dinps_t[ins_pos].type, NullType):
                     # Cannot use dC_dinps_t[ins_pos].dtype, so we use
                     # floatX instead, as it is a dummy value that will not
                     # be used anyway.
                     outer_inp_mitmot.append(
-                        pt.zeros(outs[idx + offset].shape, dtype=config.floatX)
+                        pt.zeros(outputs[idx + offset].shape, dtype=config.floatX)
                     )
                 else:
                     outer_inp_mitmot.append(
                         pt.zeros(
-                            outs[idx + offset].shape, dtype=dC_dinps_t[ins_pos].dtype
+                            outputs[idx + offset].shape, dtype=dC_dinps_t[ins_pos].dtype
                         )
                     )
 
@@ -3071,14 +3074,14 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             name=f"grad_of_{self.name}" if self.name else None,
             allow_gc=self.allow_gc,
         )
-        outputs = local_op(*outer_inputs, return_list=True)
+        outs = local_op(*outer_inputs, return_list=True)
         # Re-order the gradients correctly
         gradients = [DisconnectedType()()]
 
         offset = info.n_mit_mot + info.n_mit_sot + info.n_sit_sot + n_sitsot_outs
         for p, (x, t) in enumerate(
             zip(
-                outputs[offset : offset + info.n_seqs],
+                outs[offset : offset + info.n_seqs],
                 type_outs[offset : offset + info.n_seqs],
                 strict=True,
             )
@@ -3110,7 +3113,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 gradients.append(NullType(t)())
 
         end = info.n_mit_mot + info.n_mit_sot + info.n_sit_sot
-        for p, (x, t) in enumerate(zip(outputs[:end], type_outs[:end], strict=True)):
+        for p, (x, t) in enumerate(zip(outs[:end], type_outs[:end], strict=True)):
             if t == "connected":
                 # If the forward scan is in as_while mode, we need to pad
                 # the gradients, so that they match the size of the input
@@ -3141,11 +3144,10 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 gradients.append(NullType(t)())
 
         start = len(gradients)
-        node = outs[0].owner
         for idx in range(info.n_untraced_sit_sot_outs):
             disconnected = True
-            connected_flags = self.connection_pattern(node)[idx + start]
-            for dC_dout, connected in zip(dC_douts, connected_flags, strict=True):
+            connected_flags = self.connection_pattern(scan_node)[idx + start]
+            for dC_dout, connected in zip(output_grads, connected_flags, strict=True):
                 if not isinstance(dC_dout.type, DisconnectedType) and connected:
                     disconnected = False
             if disconnected:
@@ -3162,7 +3164,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         end = begin + n_sitsot_outs
         for p, (x, t) in enumerate(
-            zip(outputs[begin:end], type_outs[begin:end], strict=True)
+            zip(outs[begin:end], type_outs[begin:end], strict=True)
         ):
             if t == "connected":
                 gradients.append(x[-1])
@@ -3189,9 +3191,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # because through the recurrence they can become nonzero
         for idx in range(len(gradients)):
             disconnected = True
-            for kdx in range(len(node.outputs)):
+            for kdx in range(len(scan_node.outputs)):
                 if connection_pattern[idx][kdx] and not isinstance(
-                    dC_douts[kdx].type, DisconnectedType
+                    output_grads[kdx].type, DisconnectedType
                 ):
                     disconnected = False
             if disconnected:

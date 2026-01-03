@@ -1018,9 +1018,9 @@ def test_not_implemented_elemwise_grad():
         def impl(self, n, x):
             return x * n
 
-        def grad(self, inputs, gout):
+        def grad(self, inputs, output_grads):
             (n, _x) = inputs
-            (gz,) = gout
+            (gz,) = output_grads
             dy_dx = n
             return [pytensor.gradient.grad_not_implemented(self, 0, n), gz * dy_dx]
 
@@ -1121,11 +1121,11 @@ def test_gradient_mixed_discrete_output_scalar_op():
             outputs = [float_op(), int_op()]
             return Apply(self, inputs, outputs)
 
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             raise NotImplementedError()
 
-        def L_op(self, inputs, outputs, output_gradients):
-            return [inputs[0].ones_like() * output_gradients[0]]
+        def L_op(self, inputs, outputs, output_grads):
+            return [inputs[0].ones_like() * output_grads[0]]
 
     op = Elemwise(MixedDtypeScalarOp())
     x = vector("x")

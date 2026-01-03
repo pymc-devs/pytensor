@@ -921,8 +921,8 @@ class Subtensor(COp):
             [tensor(dtype=x.type.dtype, shape=out_shape)],
         )
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         x = inputs[0]
 
         cdata = get_idx_list(inputs, self.idx_list)
@@ -975,8 +975,8 @@ class Subtensor(COp):
         assert len(outshp) == node.outputs[0].ndim
         return [outshp]
 
-    def grad(self, inputs, grads):
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         x = inputs[0]
         rest = inputs[1:]
         if x.dtype in discrete_dtypes:
@@ -1378,8 +1378,8 @@ class Subtensor(COp):
 
 
 class SubtensorPrinter(Printer):
-    def process(self, r, pstate):
-        return self._process(r.owner.op.idx_list, r.owner.inputs, pstate)
+    def process(self, var, pstate):
+        return self._process(var.owner.op.idx_list, var.owner.inputs, pstate)
 
     def _process(self, idxs, op_inputs, pstate):
         inputs = list(op_inputs)
@@ -1998,8 +1998,8 @@ class IncSubtensor(COp):
 
         return rval
 
-    def grad(self, inputs, grads):
-        (g_output,) = grads
+    def grad(self, inputs, output_grads):
+        (g_output,) = output_grads
         x, y = inputs[:2]
         idx_list = inputs[2:]
 
@@ -2027,15 +2027,15 @@ class IncSubtensor(COp):
 
 
 class IncSubtensorPrinter(SubtensorPrinter):
-    def process(self, r, pstate):
-        x, _y, *idx_args = r.owner.inputs
+    def process(self, var, pstate):
+        x, _y, *idx_args = var.owner.inputs
 
-        res = self._process(r.owner.op.idx_list, [x, *idx_args], pstate)
+        res = self._process(var.owner.op.idx_list, [x, *idx_args], pstate)
 
         with set_precedence(pstate, 1000):
-            y_str = pstate.pprinter.process(r.owner.inputs[1], pstate)
+            y_str = pstate.pprinter.process(var.owner.inputs[1], pstate)
 
-        if r.owner.op.set_instead_of_inc:
+        if var.owner.op.set_instead_of_inc:
             res = f"set_subtensor({res}, {y_str})"
         else:
             res = f"inc_subtensor({res}, {y_str})"
@@ -2112,8 +2112,8 @@ class AdvancedSubtensor1(COp):
         out_shape = (ilist_.type.shape[0], *x_.type.shape[1:])
         return Apply(self, [x_, ilist_], [TensorType(dtype=x.dtype, shape=out_shape)()])
 
-    def perform(self, node, inp, output_storage):
-        x, i = inp
+    def perform(self, node, inputs, output_storage):
+        x, i = inputs
 
         # Numpy take is always slower when out is provided
         # https://github.com/numpy/numpy/issues/28636
@@ -2124,9 +2124,9 @@ class AdvancedSubtensor1(COp):
 
         return rval
 
-    def grad(self, inputs, grads):
+    def grad(self, inputs, output_grads):
         x, ilist = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         assert len(inputs) == 2
         if self.sparse_grad:
             if x.type.ndim != 2:
@@ -2156,7 +2156,7 @@ class AdvancedSubtensor1(COp):
         x, ilist = ishapes
         return [ilist + x[1:]]
 
-    def c_code(self, node, name, input_names, output_names, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         if self.__class__ is not AdvancedSubtensor1:
             raise MethodNotDefined(
                 "c_code defined for AdvancedSubtensor1, not for child class",
@@ -2169,8 +2169,8 @@ class AdvancedSubtensor1(COp):
             # We can know ahead of time that all indices are valid, so we can use a faster mode
             mode = "NPY_WRAP"  # This seems to be faster than NPY_CLIP
 
-        a_name, i_name = input_names[0], input_names[1]
-        output_name = output_names[0]
+        a_name, i_name = inputs[0], inputs[1]
+        output_name = outputs[0]
         fail = sub["fail"]
         if mode == "NPY_RAISE":
             # numpy_take always makes an intermediate copy if NPY_RAISE which is slower than just allocating a new buffer
@@ -2330,9 +2330,9 @@ class AdvancedIncSubtensor1(COp):
         return f"""(PyArrayObject*)PyArray_FromAny(py_{x}, NULL, 0, 0,
                 NPY_ARRAY_ENSURECOPY, NULL)"""
 
-    def c_code(self, node, name, input_names, output_names, sub):
-        x, y, idx = input_names
-        [out] = output_names
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y, idx = inputs
+        [out] = outputs
         copy_of_x = self.copy_of_x(x)
         params = sub["params"]
         fail = sub["fail"]
@@ -2499,8 +2499,8 @@ class AdvancedIncSubtensor1(COp):
         rval = [[True], [True], [False]]
         return rval
 
-    def grad(self, inputs, grads):
-        (g_output,) = grads
+    def grad(self, inputs, output_grads):
+        (g_output,) = output_grads
         x, y, idx_list = inputs
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
@@ -2742,8 +2742,8 @@ class AdvancedSubtensor(Op):
         assert node.outputs[0].ndim == len(res_shape)
         return [res_shape]
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         check_advanced_indexing_dimensions(inputs[0], inputs[1:])
         rval = inputs[0].__getitem__(tuple(inputs[1:]))
         # When there are no arrays, we are not actually doing advanced
@@ -2760,8 +2760,8 @@ class AdvancedSubtensor(Op):
 
         return rval
 
-    def grad(self, inputs, grads):
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (gz,) = output_grads
         x = inputs[0]
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
@@ -2880,12 +2880,12 @@ class AdvancedIncSubtensor(Op):
             [x.type()],
         )
 
-    def perform(self, node, inputs, out_):
+    def perform(self, node, inputs, output_storage):
         x, y, *indices = inputs
 
         check_advanced_indexing_dimensions(x, indices)
 
-        (out,) = out_
+        (out,) = output_storage
         if not self.inplace:
             out[0] = x.copy()
         else:
@@ -2911,10 +2911,10 @@ class AdvancedIncSubtensor(Op):
             return [None]
         return self.make_node(eval_points[0], eval_points[1], *inputs[2:]).outputs
 
-    def grad(self, inpt, output_gradients):
-        x, y = inpt[:2]
-        idxs = inpt[2:]
-        (outgrad,) = output_gradients
+    def grad(self, inputs, output_grads):
+        x, y = inputs[:2]
+        idxs = inputs[2:]
+        (outgrad,) = output_grads
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
             gx = x.zeros_like(dtype=config.floatX)
@@ -3112,7 +3112,7 @@ def slice_at_axis(sl: slice, axis: int) -> tuple[slice, ...]:
 
 
 def flip(
-    arr: TensorVariable, axis: int | tuple[int] | TensorVariable | None = None
+    arr: TensorVariable, axis: int | tuple[int, ...] | TensorVariable | None = None
 ) -> TensorVariable:
     """
     Reverse the order of elements in an tensor along the given axis.
@@ -3122,7 +3122,7 @@ def flip(
     arr: TensorVariable
         Input tensor.
 
-    axis: int | tuple[int] | TensorVariable, optional
+    axis: int | tuple[int, ...] | TensorVariable, optional
         Axis or axes along which to flip over. The default is to flip over all of the axes of the input tensor.
 
     Returns

@@ -203,9 +203,9 @@ def test_eigvalsh_grad():
 
 class TestSolveBase:
     class SolveTest(SolveBase):
-        def perform(self, node, inputs, outputs):
+        def perform(self, node, inputs, output_storage):
             A, b = inputs
-            outputs[0][0] = scipy.linalg.solve(A, b)
+            output_storage[0][0] = scipy.linalg.solve(A, b)
 
     @pytest.mark.parametrize(
         "A_func, b_func, error_message",
@@ -316,7 +316,7 @@ class TestSolve(utt.InferShapeTester):
         "assume_a, lower, transposed", solve_test_cases, ids=solve_test_ids
     )
     def test_solve_correctness(
-        self, b_size: tuple[int], assume_a: str, lower: bool, transposed: bool
+        self, b_size: tuple[int, ...], assume_a: str, lower: bool, transposed: bool
     ):
         rng = np.random.default_rng(utt.fetch_seed())
         A = pt.tensor("A", shape=(5, 5))
@@ -370,7 +370,7 @@ class TestSolve(utt.InferShapeTester):
         config.floatX == "float32", reason="Gradients not numerically stable in float32"
     )
     def test_solve_gradient(
-        self, b_size: tuple[int], assume_a: str, lower: bool, transposed: bool
+        self, b_size: tuple[int, ...], assume_a: str, lower: bool, transposed: bool
     ):
         rng = np.random.default_rng(utt.fetch_seed())
 
@@ -447,7 +447,7 @@ class TestSolveTriangular(utt.InferShapeTester):
     @pytest.mark.parametrize("lower", [True, False])
     @pytest.mark.parametrize("trans", [0, 1, 2])
     @pytest.mark.parametrize("unit_diagonal", [True, False])
-    def test_correctness(self, b_shape: tuple[int], lower, trans, unit_diagonal):
+    def test_correctness(self, b_shape: tuple[int, ...], lower, trans, unit_diagonal):
         rng = np.random.default_rng(utt.fetch_seed())
         A = pt.tensor("A", shape=(5, 5))
         b = pt.tensor("b", shape=b_shape)
@@ -650,7 +650,7 @@ class TestCholeskySolve(utt.InferShapeTester):
 @pytest.mark.parametrize("complex", [False, True], ids=["real", "complex"])
 @pytest.mark.parametrize("shape", [(3, 5, 5), (5, 5)], ids=["batched", "not_batched"])
 def test_lu_decomposition(
-    permute_l: bool, p_indices: bool, complex: bool, shape: tuple[int]
+    permute_l: bool, p_indices: bool, complex: bool, shape: tuple[int, ...]
 ):
     dtype = config.floatX if not complex else f"complex{int(config.floatX[-2:]) * 2}"
 
@@ -749,7 +749,7 @@ class TestLUSolve(utt.InferShapeTester):
 
     @pytest.mark.parametrize("b_shape", [(5,), (5, 5)], ids=["b_vec", "b_matrix"])
     @pytest.mark.parametrize("trans", [True, False], ids=["x_T", "x"])
-    def test_lu_solve(self, b_shape: tuple[int], trans):
+    def test_lu_solve(self, b_shape: tuple[int, ...], trans):
         rng = np.random.default_rng(utt.fetch_seed())
         A = pt.tensor("A", shape=(5, 5))
         b = pt.tensor("b", shape=b_shape)
@@ -785,7 +785,7 @@ class TestLUSolve(utt.InferShapeTester):
 
     @pytest.mark.parametrize("b_shape", [(5,), (5, 5)], ids=["b_vec", "b_matrix"])
     @pytest.mark.parametrize("trans", [True, False], ids=["x_T", "x"])
-    def test_lu_solve_gradient(self, b_shape: tuple[int], trans: bool):
+    def test_lu_solve_gradient(self, b_shape: tuple[int, ...], trans: bool):
         rng = np.random.default_rng(utt.fetch_seed())
 
         A_val = rng.normal(size=(5, 5)).astype(config.floatX)
@@ -925,7 +925,7 @@ vec_recover_Q = np.vectorize(recover_Q, signature="(m,m),(m,m),()->(m,m)")
 @pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
 @pytest.mark.parametrize("method", ["direct", "bilinear"])
 def test_solve_discrete_lyapunov(
-    use_complex, shape: tuple[int], method: Literal["direct", "bilinear"]
+    use_complex, shape: tuple[int, ...], method: Literal["direct", "bilinear"]
 ):
     rng = np.random.default_rng(utt.fetch_seed())
     dtype = config.floatX
@@ -962,7 +962,7 @@ def test_solve_discrete_lyapunov(
 @pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batch"])
 @pytest.mark.parametrize("method", ["direct", "bilinear"])
 def test_solve_discrete_lyapunov_gradient(
-    use_complex, shape: tuple[int], method: Literal["direct", "bilinear"]
+    use_complex, shape: tuple[int, ...], method: Literal["direct", "bilinear"]
 ):
     if config.floatX == "float32":
         pytest.skip(reason="Not enough precision in float32 to get a good gradient")
@@ -982,7 +982,7 @@ def test_solve_discrete_lyapunov_gradient(
 
 @pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batched"])
 @pytest.mark.parametrize("use_complex", [False, True], ids=["float", "complex"])
-def test_solve_continuous_lyapunov(shape: tuple[int], use_complex: bool):
+def test_solve_continuous_lyapunov(shape: tuple[int, ...], use_complex: bool):
     dtype = config.floatX
     if use_complex and dtype == "float32":
         pytest.skip(
@@ -1023,7 +1023,7 @@ def test_solve_continuous_lyapunov(shape: tuple[int], use_complex: bool):
 
 @pytest.mark.parametrize("shape", [(5, 5), (5, 5, 5)], ids=["matrix", "batched"])
 @pytest.mark.parametrize("use_complex", [False, True], ids=["float", "complex"])
-def test_solve_continuous_lyapunov_grad(shape: tuple[int], use_complex):
+def test_solve_continuous_lyapunov_grad(shape: tuple[int, ...], use_complex):
     if config.floatX == "float32":
         pytest.skip(reason="Not enough precision in float32 to get a good gradient")
     if use_complex:

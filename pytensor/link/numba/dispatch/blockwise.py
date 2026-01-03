@@ -30,7 +30,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
     core_shapes_len = tuple(get_vector_length(sh) for sh in node.inputs[nin:])
 
     core_node = blockwise_op._create_dummy_core_node(
-        cast(tuple[TensorVariable], node.inputs[:nin]),
+        cast(tuple[TensorVariable, ...], node.inputs[:nin]),
         propagate_unbatched_core_inputs=True,
     )
     core_op_fn, core_op_key = numba_funcify_and_cache_key(

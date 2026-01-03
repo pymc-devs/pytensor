@@ -4,6 +4,7 @@ from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.type import TensorType
 
 
 class PdbBreakpoint(Op):
@@ -50,23 +51,26 @@ class PdbBreakpoint(Op):
         # as the individual error values
         breakpointOp = PdbBreakpoint("MSE too high")
         condition = pt.gt(mse.sum(), 100)
-        mse, monitored_input, monitored_target = breakpointOp(condition, mse,
-                                                              input, target)
+        mse, monitored_input, monitored_target = breakpointOp(
+            condition, mse, input, target
+        )
 
         # Compile the pytensor function
         fct = pytensor.function([input, target], mse)
 
         # Use the function
-        print fct([10, 0], [10, 5]) # Will NOT activate the breakpoint
-        print fct([0, 0], [10, 5]) # Will activate the breakpoint
+        print(fct([10, 0], [10, 5]))  # Will NOT activate the breakpoint
+        print(fct([0, 0], [10, 5]))  # Will activate the breakpoint
 
 
     """
 
     __props__ = ("name",)
 
-    def __init__(self, name):
+    def __init__(self, name: str):
         self.name = name
+        self.view_map = {}
+        self.inp_types: list[TensorType] = []
 
     def make_node(self, condition, *monitored_vars):
         # Ensure that condition is an PyTensor tensor
@@ -83,13 +87,11 @@ class PdbBreakpoint(Op):
         # (view_map and var_types) in that instance and then apply it on the
         # inputs.
         new_op = PdbBreakpoint(name=self.name)
-        new_op.view_map = {}
-        new_op.inp_types = []
-        for i in range(len(monitored_vars)):
+        for i, var in enumerate(monitored_vars):
             # Every output i is a view of the input i+1 because of the input
             # condition.
             new_op.view_map[i] = [i + 1]
-            new_op.inp_types.append(monitored_vars[i].type)
+            new_op.inp_types.append(var.type)
 
         # Build the Apply node
         inputs = [condition, *monitored_vars]
@@ -141,8 +143,8 @@ class PdbBreakpoint(Op):
             for i in range(len(output_storage)):
                 output_storage[i][0] = inputs[i + 1]
 
-    def grad(self, inputs, output_gradients):
-        return [DisconnectedType()(), *output_gradients]
+    def grad(self, inputs, output_grads):
+        return [DisconnectedType()(), *output_grads]
 
     def infer_shape(self, fgraph, inputs, input_shapes):
         # Return the shape of every input but the condition (first input)

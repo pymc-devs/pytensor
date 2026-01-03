@@ -1,11 +1,11 @@
 """Define new Ops from existing Ops"""
 
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from copy import copy
 from functools import partial
 from itertools import chain
-from typing import Union, cast
+from typing import Union
 
 from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
@@ -88,12 +88,12 @@ def infer_shape(outs, inputs, input_shapes):
 
 
 def construct_nominal_fgraph(
-    inputs: Sequence[Variable], outputs: Sequence[Variable]
+    inputs: list[Variable], outputs: list[Variable]
 ) -> tuple[
     FunctionGraph,
-    Sequence[Variable],
-    dict[Variable, Variable],
-    dict[Variable, Variable],
+    list[SharedVariable],
+    dict[SharedVariable, Variable],
+    list[Variable],
 ]:
     """Construct an inner-`FunctionGraph` with ordered nominal inputs."""
     implicit_shared_inputs = []
@@ -119,7 +119,7 @@ def construct_nominal_fgraph(
     )
 
     new = rebuild_collect_shared(
-        cast(Sequence[Variable], outputs),
+        outputs,
         inputs=inputs + implicit_shared_inputs,
         replace=replacements,
         copy_inputs_over=False,
@@ -401,7 +401,7 @@ class OpFromGraph(Op, HasInnerGraph):
         self.output_types = [out.type for out in outputs]
 
         for override in (lop_overrides, grad_overrides, rop_overrides):
-            if override == "default":
+            if override == "default":  # type: ignore[comparison-overlap]
                 raise ValueError(
                     "'default' is no longer a valid value for overrides. Use None instead."
                 )
@@ -702,7 +702,7 @@ class OpFromGraph(Op, HasInnerGraph):
         # Return a wrapper that combines connected and disconnected output gradients
         def wrapper(*inputs: Variable, **kwargs) -> list[Variable | None]:
             connected_output_grads = iter(rop_op(*inputs, **kwargs))
-            all_output_grads = []
+            all_output_grads: list[Variable | None] = []
             for out_grad in output_grads:
                 if isinstance(out_grad.type, DisconnectedType):
                     # R_Op does not have DisconnectedType yet, None should be used instead
@@ -875,8 +875,8 @@ class OpFromGraph(Op, HasInnerGraph):
         res.fgraph = res.fgraph.clone(clone_inner_graphs=True)
         return res
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         variables = self.fn(*inputs)
         # zip strict not specified because we are in a hot loop
-        for output, variable in zip(outputs, variables):
+        for output, variable in zip(output_storage, variables):
             output[0] = variable

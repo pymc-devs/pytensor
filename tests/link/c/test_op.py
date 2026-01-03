@@ -78,9 +78,9 @@ class StructOp(COp):
     def c_init_code_struct(self, node, name, sub):
         return f"counter{name} = 0;"
 
-    def c_code(self, node, name, input_names, outputs_names, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         return f"""
-{outputs_names[0]} = counter{name};
+{outputs[0]} = counter{name};
 counter{name}++;
 """
 
@@ -123,9 +123,9 @@ class TestMakeThunk:
                 output = input.type()
                 return Apply(self, [input], [output])
 
-            def perform(self, node, inputs, outputs):
+            def perform(self, node, inputs, output_storage):
                 (input,) = inputs
-                (output,) = outputs
+                (output,) = output_storage
                 output[0] = input + 1
 
         i = ps.int32("i")

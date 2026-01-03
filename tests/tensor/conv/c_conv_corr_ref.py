@@ -223,7 +223,7 @@ class BaseCorrMM(OpenMPOp, _NoPythonOp):
         # raise this whenever modifying any of the support_code_files
         return (10, self.openmp, blas_header_version())
 
-    def c_support_code_apply(self, node, nodename):
+    def c_support_code_apply(self, node, name):
         # REMEMBER TO RAISE c_code_cache_version when changing any of
         # these files
         sub = {}
@@ -690,14 +690,14 @@ class CorrMM(BaseCorrMM):
         )
         return [res]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        bottom, weights = inp
-        (top,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        bottom, weights = inputs
+        (top,) = outputs
         return super().c_code_helper(bottom, weights, top, sub)
 
-    def grad(self, inp, grads):
-        bottom, weights = inp
-        (top,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, weights = inputs
+        (top,) = output_grads
         d_bottom = CorrMM_gradInputs(
             self.border_mode,
             self.subsample,
@@ -815,15 +815,15 @@ class CorrMM_gradWeights(BaseCorrMM):
         else:
             return [(nkern, ssize, kH, kW)]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        bottom, top = inp[:2]
-        height, width = inp[2:] or (None, None)
-        (weights,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        bottom, top = inputs[:2]
+        height, width = inputs[2:] or (None, None)
+        (weights,) = outputs
         return super().c_code_helper(bottom, weights, top, sub, height, width)
 
-    def grad(self, inp, grads):
-        bottom, top = inp[:2]
-        (weights,) = grads
+    def grad(self, inputs, output_grads):
+        bottom, top = inputs[:2]
+        (weights,) = output_grads
         d_bottom = CorrMM_gradInputs(
             self.border_mode,
             self.subsample,
@@ -839,7 +839,7 @@ class CorrMM_gradWeights(BaseCorrMM):
             self.unshared,
         )(bottom, weights)
         d_height_width = (
-            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inputs) == 4 else ()
         )
         return (d_bottom, d_top, *d_height_width)
 
@@ -947,15 +947,15 @@ class CorrMM_gradInputs(BaseCorrMM):
         out_shp = (out_shp0, out_shp1)
         return [(bsize, ssize, *out_shp)]
 
-    def c_code(self, node, nodename, inp, out_, sub):
-        weights, top = inp[:2]
-        height, width = inp[2:] or (None, None)
-        (bottom,) = out_
+    def c_code(self, node, name, inputs, outputs, sub):
+        weights, top = inputs[:2]
+        height, width = inputs[2:] or (None, None)
+        (bottom,) = outputs
         return super().c_code_helper(bottom, weights, top, sub, height, width)
 
-    def grad(self, inp, grads):
-        weights, top = inp[:2]
-        (bottom,) = grads
+    def grad(self, inputs, output_grads):
+        weights, top = inputs[:2]
+        (bottom,) = output_grads
         d_weights = CorrMM_gradWeights(
             self.border_mode,
             self.subsample,
@@ -971,7 +971,7 @@ class CorrMM_gradInputs(BaseCorrMM):
             self.unshared,
         )(bottom, weights)
         d_height_width = (
-            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inp) == 4 else ()
+            (pytensor.gradient.DisconnectedType()(),) * 2 if len(inputs) == 4 else ()
         )
         return (d_weights, d_top, *d_height_width)
 

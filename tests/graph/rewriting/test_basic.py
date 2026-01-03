@@ -50,7 +50,7 @@ from tests.unittest_tools import assert_equal_computations
 class AssertNoChanges(Feature):
     """A `Feature` that raises an error when nodes are changed in a graph."""
 
-    def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         raise AssertionError()
 
 

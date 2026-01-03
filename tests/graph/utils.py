@@ -14,7 +14,7 @@ def is_variable(x):
 
 
 class MyType(Type):
-    def filter(self, data):
+    def filter(self, data, strict=False, allow_downcast=None):
         return data
 
     def __eq__(self, other):
@@ -28,7 +28,7 @@ class MyType(Type):
 
 
 class MyType2(Type):
-    def filter(self, data):
+    def filter(self, data, strict=False, allow_downcast=None):
         return data
 
     def __eq__(self, other):
@@ -70,8 +70,8 @@ class MyOp(Op):
         outputs = [MyType()() for i in range(self.n_outs)]
         return Apply(self, inputs, outputs)
 
-    def perform(self, node, inputs, outputs):
-        outputs[0] = np.array(inputs, dtype=object)
+    def perform(self, node, inputs, output_storage):
+        output_storage[0] = np.array(inputs, dtype=object)
 
     def __str__(self):
         return self.name

@@ -101,7 +101,7 @@ def _good_seem_param(seed):
         return True
     try:
         int(seed)
-    except Exception:
+    except ValueError:
         return False
     return True
 

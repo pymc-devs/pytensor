@@ -81,9 +81,9 @@ class Shape(COp):
 
         return Apply(self, [x], [out_var])
 
-    def perform(self, node, inp, out_):
-        (x,) = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
+        (out,) = output_storage
         out[0] = np.asarray(np.shape(x), dtype="int64")
 
     def infer_shape(self, fgraph, node, in_shapes):
@@ -97,7 +97,7 @@ class Shape(COp):
         # part of the graph
         return [[False]]
 
-    def grad(self, inp, grads):
+    def grad(self, inputs, output_grads):
         # the grad returns the gradient with respect to the
         # elements of a tensor variable
         # the elements of the tensor variable do not participate
@@ -108,9 +108,9 @@ class Shape(COp):
     def R_op(self, inputs, eval_points):
         return [None]
 
-    def c_code(self, node, name, inames, onames, sub):
-        (iname,) = inames
-        (oname,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (iname,) = inputs
+        (oname,) = outputs
         fail = sub["fail"]
 
         itype = node.inputs[0].type.__class__
@@ -257,9 +257,9 @@ class Shape_i(COp):
             raise TypeError(f"{x} has too few dimensions for Shape_i")
         return Apply(self, [x], [pytensor.tensor.type.lscalar()])
 
-    def perform(self, node, inp, out_):
-        (x,) = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
+        (out,) = output_storage
         if out[0] is None:
             out[0] = np.asarray(np.shape(x)[self.i], dtype="int64")
         else:
@@ -287,9 +287,9 @@ class Shape_i(COp):
 
         return tuple(version)
 
-    def c_code(self, node, name, inames, onames, sub):
-        (iname,) = inames
-        (oname,) = onames
+    def c_code(self, node, name, inputs, outputs, sub):
+        (iname,) = inputs
+        (oname,) = outputs
         fail = sub["fail"]
         # i is then 'params->i', not just 'params'.
         i = sub["params"] + "->i"
@@ -313,12 +313,12 @@ class Shape_i(COp):
         # part of the graph
         return [[False]]
 
-    def grad(self, inp, grads):
+    def grad(self, inputs, output_grads):
         return [
             pytensor.gradient.grad_not_implemented(
                 op=self,
                 x_pos=0,
-                x=inp[0],
+                x=inputs[0],
                 comment="No gradient for the shape of a matrix is implemented.",
             )
         ]
@@ -442,9 +442,9 @@ class SpecifyShape(COp):
 
         return Apply(self, [x, *shape], [out_var])
 
-    def perform(self, node, inp, out_):
-        x, *shape = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        x, *shape = inputs
+        (out,) = output_storage
         ndim = len(shape)
         if x.ndim != ndim:
             raise AssertionError(
@@ -471,9 +471,9 @@ class SpecifyShape(COp):
     def connection_pattern(self, node):
         return [[True], *[[False]] * len(node.inputs[1:])]
 
-    def grad(self, inp, grads):
-        _x, *shape = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        _x, *shape = inputs
+        (gz,) = output_grads
         return [specify_shape(gz, shape)] + [
             pytensor.gradient.DisconnectedType()() for _ in range(len(shape))
         ]
@@ -484,14 +484,14 @@ class SpecifyShape(COp):
             return [None]
         return self.make_node(eval_points[0], *inputs[1:]).outputs
 
-    def c_code(self, node, name, i_names, o_names, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         if not isinstance(node.inputs[0].type, DenseTensorType):
             raise NotImplementedError(
                 f"Specify_shape c_code not implemented for input type {node.inputs[0].type}"
             )
 
-        x_name, *shape_names = i_names
-        (o_name,) = o_names
+        x_name, *shape_names = inputs
+        (o_name,) = outputs
         fail = sub["fail"]
 
         code = dedent(
@@ -709,9 +709,9 @@ class Reshape(COp):
 
         return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
 
-    def perform(self, node, inp, out_):
-        x, shp = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        x, shp = inputs
+        (out,) = output_storage
         if len(shp) != self.ndim:
             raise ValueError(
                 "Shape argument to Reshape has incorrect"
@@ -722,9 +722,9 @@ class Reshape(COp):
     def connection_pattern(self, node):
         return [[True], [False]]
 
-    def grad(self, inp, grads):
-        x, _shp = inp
-        (g_out,) = grads
+    def grad(self, inputs, output_grads):
+        x, _shp = inputs
+        (g_out,) = output_grads
         return [reshape(g_out, shape(x), ndim=x.ndim), DisconnectedType()()]
 
     def R_op(self, inputs, eval_points):

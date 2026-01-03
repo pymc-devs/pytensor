@@ -317,9 +317,9 @@ class CGer(BaseBLAS, Ger):
         destructive=bool_t,
     )
 
-    def c_code(self, node, name, inp, out, sub):
-        A, a, x, y = inp
-        (Z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        A, a, x, y = inputs
+        (Z,) = outputs
         code = ger_c_code(A, a, x, y, Z, fail=sub["fail"], params=sub["params"])
         return code
 
@@ -590,9 +590,9 @@ class CGemv(BaseBLAS, Gemv):
     def __init__(self, inplace):
         super().__init__(inplace)
 
-    def c_code(self, node, name, inp, out, sub):
-        y, alpha, A, x, beta = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        y, alpha, A, x, beta = inputs
+        (z,) = outputs
         code = gemv_c_code(
             y,
             A,
@@ -670,4 +670,4 @@ int main() {
     return must_initialize_y_gemv._force_init_beta
 
 
-must_initialize_y_gemv._force_init_beta = None
+must_initialize_y_gemv._force_init_beta = None  # type: ignore[attr-defined]

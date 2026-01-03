@@ -45,13 +45,13 @@ class BreakRop(Op):
     def make_node(self, x):
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, inp, out_):
-        (x,) = inp
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
+        (out,) = output_storage
         out[0] = x
 
-    def grad(self, inp, grads):
-        return [grad_undefined(self, 0, inp[0])]
+    def grad(self, inputs, output_grads):
+        return [grad_undefined(self, 0, inputs[0])]
 
     def R_op(self, inputs, eval_points):
         return [None]

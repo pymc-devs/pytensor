@@ -66,9 +66,9 @@ class Cholesky(Op):
         dtype = scipy_linalg.cholesky(np.eye(1, dtype=x.type.dtype)).dtype
         return Apply(self, [x], [tensor(shape=x.type.shape, dtype=dtype)])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         [x] = inputs
-        [out] = outputs
+        [out] = output_storage
 
         (potrf,) = scipy_linalg.get_lapack_funcs(("potrf",), (x,))
 
@@ -119,7 +119,7 @@ class Cholesky(Op):
             # Transpose result if input was transposed
             out[0] = c.T if c_contiguous_input else c
 
-    def L_op(self, inputs, outputs, gradients):
+    def L_op(self, inputs, outputs, output_grads):
         """
         Cholesky decomposition reverse-mode gradient update.
 
@@ -132,7 +132,7 @@ class Cholesky(Op):
 
         """
 
-        dz = gradients[0]
+        dz = output_grads[0]
         chol_x = outputs[0]
 
         # Replace the cholesky decomposition with 1 if there are nans
@@ -278,7 +278,7 @@ class SolveBase(Op):
             destroy_map[0] = [1]
         self.destroy_map = destroy_map
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         raise NotImplementedError(
             "SolveBase should be subclassed with an perform method"
         )
@@ -309,7 +309,7 @@ class SolveBase(Op):
             cols = Bshape[1]
             return [(rows, cols)]
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         r"""Reverse-mode gradient updates for matrix solve operation :math:`c = A^{-1} b`.
 
         Symbolic expression for updates taken from [#]_.
@@ -327,7 +327,7 @@ class SolveBase(Op):
         # C is a scalar representing the entire graph
         # `output_gradients` is (dC/dc,)
         # We need to return (dC/d[inv(A)], dC/db)
-        c_bar = output_gradients[0]
+        c_bar = output_grads[0]
 
         props_dict = self._props_dict()
         props_dict["lower"] = not self.lower
@@ -516,7 +516,7 @@ class LU(Op):
         P = tensor(shape=x.type.shape, dtype=P_dtype)
         return Apply(self, inputs=[x], outputs=[P, L, U])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         [A] = inputs
 
         out = scipy_linalg.lu(
@@ -527,12 +527,12 @@ class LU(Op):
             p_indices=self.p_indices,
         )
 
-        outputs[0][0] = out[0]
-        outputs[1][0] = out[1]
+        output_storage[0][0] = out[0]
+        output_storage[1][0] = out[1]
 
         if not self.permute_l:
             # In all cases except permute_l, there are three returns
-            outputs[2][0] = out[2]
+            output_storage[2][0] = out[2]
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if 0 in allowed_inplace_inputs:
@@ -661,7 +661,7 @@ class PivotToPermutations(Op):
         permutations = pivots.type.clone(dtype="int64")()
         return Apply(self, [pivots], [permutations])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         [pivots] = inputs
         p_inv = np.arange(len(pivots), dtype="int64")
 
@@ -669,9 +669,9 @@ class PivotToPermutations(Op):
             p_inv[i], p_inv[pivots[i]] = p_inv[pivots[i]], p_inv[i]
 
         if self.inverse:
-            outputs[0][0] = p_inv
+            output_storage[0][0] = p_inv
         else:
-            outputs[0][0] = np.argsort(p_inv)
+            output_storage[0][0] = np.argsort(p_inv)
 
 
 def pivot_to_permutation(p: TensorLike, inverse=False):
@@ -714,13 +714,13 @@ class LUFactor(Op):
         else:
             return self
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         A = inputs[0]
 
         # Quick return for empty arrays
         if A.size == 0:
-            outputs[0][0] = np.empty_like(A)
-            outputs[1][0] = np.array([], dtype=np.int32)
+            output_storage[0][0] = np.empty_like(A)
+            output_storage[1][0] = np.array([], dtype=np.int32)
             return
 
         if self.check_finite and not np.isfinite(A).all():
@@ -739,12 +739,12 @@ class LUFactor(Op):
                 stacklevel=2,
             )
 
-        outputs[0][0] = LU
-        outputs[1][0] = p
+        output_storage[0][0] = LU
+        output_storage[1][0] = p
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def L_op(self, inputs, outputs, output_grads):
         [A] = inputs
-        LU_bar, _ = output_gradients
+        LU_bar, _ = output_grads
         LU, p_indices = outputs
 
         eye = ptb.identity_like(A)
@@ -902,7 +902,7 @@ class SolveTriangular(SolveBase):
         super().__init__(**kwargs)
         self.unit_diagonal = unit_diagonal
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         A, b = inputs
 
         if self.check_finite and not (np.isfinite(A).all() and np.isfinite(b).all()):
@@ -918,7 +918,7 @@ class SolveTriangular(SolveBase):
 
         # Quick return for empty arrays
         if b.size == 0:
-            outputs[0][0] = np.empty_like(b, dtype=trtrs.dtype)
+            output_storage[0][0] = np.empty_like(b, dtype=trtrs.dtype)
             return
 
         if A.flags["F_CONTIGUOUS"]:
@@ -948,10 +948,10 @@ class SolveTriangular(SolveBase):
         elif info < 0:
             raise ValueError(f"illegal value in {-info}-th argument of internal trtrs")
 
-        outputs[0][0] = x
+        output_storage[0][0] = x
 
-    def L_op(self, inputs, outputs, output_gradients):
-        res = super().L_op(inputs, outputs, output_gradients)
+    def L_op(self, inputs, outputs, output_grads):
+        res = super().L_op(inputs, outputs, output_grads)
 
         if self.lower:
             res[0] = ptb.tril(res[0])
@@ -1071,9 +1071,9 @@ class Solve(SolveBase):
         super().__init__(**kwargs)
         self.assume_a = assume_a
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         a, b = inputs
-        outputs[0][0] = scipy_linalg.solve(
+        output_storage[0][0] = scipy_linalg.solve(
             a=a,
             b=b,
             lower=self.lower,
@@ -1232,16 +1232,16 @@ class Eigvalsh(Op):
             w = vector(dtype=out_dtype)
             return Apply(self, [a, b], [w])
 
-    def perform(self, node, inputs, outputs):
-        (w,) = outputs
+    def perform(self, node, inputs, output_storage):
+        (w,) = output_storage
         if len(inputs) == 2:
             w[0] = scipy_linalg.eigvalsh(a=inputs[0], b=inputs[1], lower=self.lower)
         else:
             w[0] = scipy_linalg.eigvalsh(a=inputs[0], b=None, lower=self.lower)
 
-    def grad(self, inputs, g_outputs):
+    def grad(self, inputs, output_grads):
         a, b = inputs
-        (gw,) = g_outputs
+        (gw,) = output_grads
         return EigvalshGrad(self.lower)(a, b, gw)
 
     def infer_shape(self, fgraph, node, shapes):
@@ -1289,7 +1289,7 @@ class EigvalshGrad(Op):
         out2 = matrix(dtype=out_dtype)
         return Apply(self, [a, b, gw], [out1, out2])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (a, b, gw) = inputs
         w, v = scipy_linalg.eigh(a, b, lower=self.lower)
         gA = v.dot(np.diag(gw).dot(v.T))
@@ -1298,8 +1298,8 @@ class EigvalshGrad(Op):
         # See EighGrad comments for an explanation of these lines
         out1 = self.tri0(gA) + self.tri1(gA).T
         out2 = self.tri0(gB) + self.tri1(gB).T
-        outputs[0][0] = np.asarray(out1, dtype=node.outputs[0].dtype)
-        outputs[1][0] = np.asarray(out2, dtype=node.outputs[1].dtype)
+        output_storage[0][0] = np.asarray(out1, dtype=node.outputs[0].dtype)
+        output_storage[1][0] = np.asarray(out2, dtype=node.outputs[1].dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0], shapes[1]]
@@ -1325,9 +1325,9 @@ class Expm(Op):
 
         return Apply(self, [A], [expm])
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (A,) = inputs
-        (expm,) = outputs
+        (expm,) = output_storage
         expm[0] = scipy_linalg.expm(A)
 
     def L_op(self, inputs, outputs, output_grads):
@@ -1673,7 +1673,7 @@ class BaseBlockDiagonal(Op):
             raise ValueError("n_inputs must be greater than 0")
         self.n_inputs = n_inputs
 
-    def grad(self, inputs, gout):
+    def grad(self, inputs, output_grads):
         shapes = pt.stack([i.shape for i in inputs])
         index_end = shapes.cumsum(0)
         index_begin = index_end - shapes
@@ -1684,7 +1684,7 @@ class BaseBlockDiagonal(Op):
             )
             for i in range(len(inputs))
         ]
-        return [gout[0][slc] for slc in slices]
+        return [output_grads[0][slc] for slc in slices]
 
     def infer_shape(self, fgraph, nodes, shapes):
         first, second = zip(*shapes, strict=True)
@@ -1911,7 +1911,7 @@ class QR(Op):
 
         return fn(*args, lwork=lwork, **kwargs)
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (x,) = inputs
         M, N = x.shape
 
@@ -1933,25 +1933,25 @@ class QR(Op):
             R = np.triu(qr[:N, :])
 
         if self.mode == "r" and self.pivoting:
-            outputs[0][0] = R
-            outputs[1][0] = jpvt
+            output_storage[0][0] = R
+            output_storage[1][0] = jpvt
             return
 
         elif self.mode == "r":
-            outputs[0][0] = R
+            output_storage[0][0] = R
             return
 
         elif self.mode == "raw" and self.pivoting:
-            outputs[0][0] = qr
-            outputs[1][0] = tau
-            outputs[2][0] = R
-            outputs[3][0] = jpvt
+            output_storage[0][0] = qr
+            output_storage[1][0] = tau
+            output_storage[2][0] = R
+            output_storage[3][0] = jpvt
             return
 
         elif self.mode == "raw":
-            outputs[0][0] = qr
-            outputs[1][0] = tau
-            outputs[2][0] = R
+            output_storage[0][0] = qr
+            output_storage[1][0] = tau
+            output_storage[2][0] = R
             return
 
         (gor_un_gqr,) = get_lapack_funcs(("orgqr",), (qr,))
@@ -1974,11 +1974,11 @@ class QR(Op):
                 gor_un_gqr, qqr, tau, lwork=-1, overwrite_a=1
             )
 
-        outputs[0][0] = Q
-        outputs[1][0] = R
+        output_storage[0][0] = Q
+        output_storage[1][0] = R
 
         if self.pivoting:
-            outputs[2][0] = jpvt
+            output_storage[2][0] = jpvt
 
     def L_op(self, inputs, outputs, output_grads):
         """
