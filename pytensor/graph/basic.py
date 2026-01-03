@@ -293,11 +293,11 @@ class Apply(Node, Generic[OpType]):
 
         # Some Ops like Alloc require the node to always be rebuilt in non-strict mode
         # as the output type depends on the input values and not just their types
-        output_type_depends_on_input_value = self.op._output_type_depends_on_input_value
+        data_dependent_output_shape = self.op.data_dependent_output_shape
 
         for i, (curr, new) in enumerate(zip(self.inputs, new_inputs, strict=True)):
             # Check if the input type changed or if the Op has output types that depend on input values
-            if (curr.type != new.type) or output_type_depends_on_input_value:
+            if (curr.type != new.type) or data_dependent_output_shape:
                 # In strict mode, the cloned graph is assumed to be mathematically equivalent to the original one.
                 # We only need to rebuild a node when the new input has a different, but compatible, type.
                 # This can happen e.g., when we provide a new input with a more specialized static shape.
