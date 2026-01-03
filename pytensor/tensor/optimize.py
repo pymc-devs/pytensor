@@ -18,7 +18,6 @@ from pytensor.graph.traversal import (
 from pytensor.scalar import ScalarType, ScalarVariable
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import (
-    atleast_1d,
     atleast_2d,
     scalar_from_tensor,
     tensor,
@@ -366,7 +365,10 @@ def implict_optimization_grads(
     inner_to_outer_map = dict(zip(fgraph.inputs, (x_star, *args)))
     df_dx_star, df_dtheta_star = graph_replace([df_dx, df_dtheta], inner_to_outer_map)
 
-    grad_wrt_args_packed = solve(-atleast_2d(df_dx_star), atleast_1d(df_dtheta_star))
+    if df_dtheta_star.ndim == 0 or df_dx_star.ndim == 0:
+        grad_wrt_args_packed = -(df_dtheta_star / df_dx_star)
+    else:
+        grad_wrt_args_packed = solve(-atleast_2d(df_dx_star), df_dtheta_star)
 
     if packed_arg_shapes is not None:
         packed_shapes_from_outer = graph_replace(
@@ -378,9 +380,6 @@ def implict_optimization_grads(
             axes=0 if not all(inp.ndim == 0 for inp in (x_star, *args)) else None,
         )
     else:
-        # There might have been a dimension added when performing the solve. In that case, squeeze it out.
-        if grad_wrt_args_packed.ndim > df_dtheta_star.ndim:
-            grad_wrt_args_packed = grad_wrt_args_packed.squeeze(axis=0)
         grad_wrt_args = [grad_wrt_args_packed]
 
     arg_to_grad = dict(zip(outer_args_to_diff, grad_wrt_args))
@@ -397,7 +396,7 @@ def implict_optimization_grads(
             g = tensordot(output_grad, arg_grad, [[0], [0]])
         else:
             g = arg_grad * output_grad
-        if isinstance(arg.type, ScalarType):
+        if isinstance(arg.type, ScalarType) and isinstance(g, TensorVariable):
             g = scalar_from_tensor(g)
         final_grads.append(g)
 
