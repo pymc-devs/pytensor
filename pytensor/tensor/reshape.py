@@ -11,7 +11,6 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import expand_dims, infer_static_shape, join, split
-from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType, shape
 from pytensor.tensor.type import tensor
@@ -277,12 +276,6 @@ def split_dims(
         shape = [shape]
     else:
         shape = list(shape)  # type: ignore[arg-type]
-
-    if not shape and x.broadcastable[axis]:
-        # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
-        # example when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes
-        # (3, ) and (3, 3) to (3, 4)
-        return squeeze(x, axis=axis)  # type: ignore[no-any-return]
 
     [axis] = normalize_axis_tuple(axis, x.ndim)  # type: ignore[misc]
     shape = as_tensor_variable(shape, dtype="int64", ndim=1)  # type: ignore[arg-type]
