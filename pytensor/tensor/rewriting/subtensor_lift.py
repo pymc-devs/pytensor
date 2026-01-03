@@ -488,7 +488,11 @@ def local_subtensor_of_squeeze(fgraph, node):
 
     # Apply indices directly on x
     # Add empty slices on the axis that squeeze would have removed
-    new_idxs = np.insert(np.array(idxs, dtype=object), dropped_dims, slice(None))
+    new_idxs = list(idxs)
+    for d in sorted(dropped_dims):
+        new_idxs.insert(d, slice(None))
+    new_idxs = np.array(new_idxs, dtype=object)
+
     x_indexed = x_before_squeeze[tuple(new_idxs)]
 
     # Reapply squeeze

@@ -824,3 +824,59 @@ def test_local_subtensor_of_adv_subtensor(original_fn, supported):
         opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
         out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
     )
+
+
+def test_local_subtensor_of_squeeze():
+    def find_squeeze_and_index_ops(fg):
+        squeeze_op = next(
+            node
+            for node in fg.toposort()
+            if isinstance(node.op, DimShuffle) and node.op.is_squeeze
+        )
+        index_op = next(
+            node for node in fg.toposort() if isinstance(node.op, Subtensor)
+        )
+        return squeeze_op, index_op
+
+    x = pt.tensor("x", shape=(1, 5, 2, 1))
+    z = x.squeeze(0)[0]
+    fg = FunctionGraph(outputs=[z], clone=False)
+    squeeze_op, index_op = find_squeeze_and_index_ops(fg)
+
+    sorted_ops = list(fg.toposort())
+    assert sorted_ops.index(squeeze_op) < sorted_ops.index(index_op)
+
+    x_indexed = rewrite_graph(
+        z,
+        include=(
+            "canonicalize",
+            "local_subtensor_of_squeeze",
+        ),
+    )
+
+    fg = FunctionGraph(outputs=[x_indexed], clone=False)
+    squeeze_op, index_op = find_squeeze_and_index_ops(fg)
+    sorted_ops = list(fg.toposort())
+    assert sorted_ops.index(squeeze_op) > sorted_ops.index(index_op)
+
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/1818
+    x = pt.tensor("x", shape=(1, 1, 2, 1, 3))
+    z = x.squeeze((0, 1, -2))[:, 0]
+    fg = FunctionGraph(outputs=[z], clone=False)
+
+    squeeze_op, index_op = find_squeeze_and_index_ops(fg)
+    sorted_ops = list(fg.toposort())
+    assert sorted_ops.index(squeeze_op) < sorted_ops.index(index_op)
+
+    x_indexed = rewrite_graph(
+        z,
+        include=(
+            "canonicalize",
+            "local_subtensor_of_squeeze",
+        ),
+    )
+
+    fg = FunctionGraph(outputs=[x_indexed], clone=False)
+    squeeze_op, index_op = find_squeeze_and_index_ops(fg)
+    sorted_ops = list(fg.toposort())
+    assert sorted_ops.index(squeeze_op) > sorted_ops.index(index_op)
