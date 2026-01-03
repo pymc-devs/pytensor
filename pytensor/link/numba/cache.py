@@ -5,6 +5,9 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 from weakref import WeakKeyDictionary
 
+import numba
+from llvmlite import ir
+from numba.core import cgutils
 from numba.core.caching import CacheImpl, _CacheLocator
 
 from pytensor.configdefaults import config
@@ -127,3 +130,49 @@ def compile_numba_function_src(
         CACHED_SRC_FUNCTIONS[res] = cache_key
 
     return res  # type: ignore
+
+
+@numba.extending.intrinsic(prefer_literal=True)
+def _call_cached_ptr(typingctx, get_ptr_func, func_type_ref, unique_func_name_lit):
+    """
+    Enable caching of function pointers returned by `get_ptr_func`.
+
+    When one of our Numba-dispatched functions depends on a pointer to a compiled function function (e.g. when we call
+    cython_lapack routines), numba will refuse to cache the function, because the pointer may change between runs.
+
+    This intrinsic allows us to cache the pointer ourselves, by storing it in a global variable keyed by a literal
+    `unique_func_name_lit`. The first time the intrinsic is called, it will call `get_ptr_func` to get the pointer, store it
+    in the global variable, and return it. Subsequent calls will load the pointer from the global variable.
+    """
+    func_type = func_type_ref.instance_type
+    cache_key = unique_func_name_lit.literal_value
+
+    def codegen(context, builder, signature, args):
+        ptr_ty = ir.PointerType(ir.IntType(8))
+        null = ptr_ty(None)
+        align = 64
+
+        mod = builder.module
+        var = cgutils.add_global_variable(mod, ptr_ty, f"_ptr_cache_{cache_key}")
+        var.align = align
+        var.linkage = "private"
+        var.initializer = null
+
+        var_val = builder.load_atomic(var, "acquire", align)
+        result_ptr = cgutils.alloca_once_value(builder, var_val)
+
+        with builder.if_then(builder.icmp_signed("==", var_val, null), likely=False):
+            sig = typingctx.resolve_function_type(get_ptr_func, [], {})
+            f = context.get_function(get_ptr_func, sig)
+            new_ptr = f(builder, [])
+            new_ptr = builder.inttoptr(new_ptr, ptr_ty)
+            builder.store_atomic(new_ptr, var, "release", align)
+            builder.store(new_ptr, result_ptr)
+
+        sfunc = cgutils.create_struct_proxy(func_type)(context, builder)
+        sfunc.c_addr = builder.load(result_ptr)
+
+        return sfunc._getvalue()
+
+    sig = func_type(get_ptr_func, func_type_ref, unique_func_name_lit)
+    return sig, codegen

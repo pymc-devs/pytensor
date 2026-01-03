@@ -6,7 +6,6 @@ from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
-    numba_funcify,
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
@@ -44,7 +43,7 @@ from pytensor.tensor.slinalg import (
 )
 
 
-@numba_funcify.register(Cholesky)
+@register_funcify_default_op_cache_key(Cholesky)
 def numba_funcify_Cholesky(op, node, **kwargs):
     """
     Overload scipy.linalg.cholesky with a numba function.
@@ -95,7 +94,8 @@ def numba_funcify_Cholesky(op, node, **kwargs):
 
         return res
 
-    return cholesky
+    cache_key = 1
+    return cholesky, cache_key
 
 
 @register_funcify_default_op_cache_key(PivotToPermutations)
@@ -115,7 +115,7 @@ def pivot_to_permutation(op, node, **kwargs):
     return numba_pivot_to_permutation, cache_key
 
 
-@numba_funcify.register(LU)
+@register_funcify_default_op_cache_key(LU)
 def numba_funcify_LU(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.numpy_dtype
     if inp_dtype.kind == "c":
@@ -179,10 +179,11 @@ def numba_funcify_LU(op, node, **kwargs):
 
         return res
 
-    return lu
+    cache_key = 1
+    return lu, cache_key
 
 
-@numba_funcify.register(LUFactor)
+@register_funcify_default_op_cache_key(LUFactor)
 def numba_funcify_LUFactor(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.numpy_dtype
     if inp_dtype.kind == "c":
@@ -215,7 +216,8 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
         return LU, piv
 
-    return lu_factor
+    cache_key = 1
+    return lu_factor, cache_key
 
 
 @register_funcify_default_op_cache_key(BlockDiagonal)
@@ -240,7 +242,7 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
     return block_diag
 
 
-@numba_funcify.register(Solve)
+@register_funcify_default_op_cache_key(Solve)
 def numba_funcify_Solve(op, node, **kwargs):
     A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -305,10 +307,11 @@ def numba_funcify_Solve(op, node, **kwargs):
         res = solve_fn(a, b, lower, overwrite_a, overwrite_b, check_finite, transposed)
         return res
 
-    return solve
+    cache_key = 1
+    return solve, cache_key
 
 
-@numba_funcify.register(SolveTriangular)
+@register_funcify_default_op_cache_key(SolveTriangular)
 def numba_funcify_SolveTriangular(op, node, **kwargs):
     lower = op.lower
     unit_diagonal = op.unit_diagonal
@@ -358,10 +361,11 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
 
         return res
 
-    return solve_triangular
+    cache_key = 1
+    return solve_triangular, cache_key
 
 
-@numba_funcify.register(CholeskySolve)
+@register_funcify_default_op_cache_key(CholeskySolve)
 def numba_funcify_CholeskySolve(op, node, **kwargs):
     lower = op.lower
     overwrite_b = op.overwrite_b
@@ -407,10 +411,11 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
             check_finite=check_finite,
         )
 
-    return cho_solve
+    cache_key = 1
+    return cho_solve, cache_key
 
 
-@numba_funcify.register(QR)
+@register_funcify_default_op_cache_key(QR)
 def numba_funcify_QR(op, node, **kwargs):
     mode = op.mode
     check_finite = op.check_finite
@@ -500,4 +505,5 @@ def numba_funcify_QR(op, node, **kwargs):
                 f"QR mode={mode}, pivoting={pivoting} not supported in numba mode."
             )
 
-    return qr
+    cache_key = 1
+    return qr, cache_key
