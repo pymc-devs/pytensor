@@ -838,6 +838,8 @@ def test_local_subtensor_of_squeeze():
         )
         return squeeze_op, index_op
 
+    rng = np.random.default_rng()
+
     x = pt.tensor("x", shape=(1, 5, 2, 1))
     z = x.squeeze(0)[0]
     fg = FunctionGraph(outputs=[z], clone=False)
@@ -858,6 +860,10 @@ def test_local_subtensor_of_squeeze():
     squeeze_op, index_op = find_squeeze_and_index_ops(fg)
     sorted_ops = list(fg.toposort())
     assert sorted_ops.index(squeeze_op) > sorted_ops.index(index_op)
+
+    fn = function([x], x_indexed)
+    x_val = rng.normal(size=x.type.shape).astype(x.type.dtype)
+    np.testing.assert_allclose(fn(x_val), x_val[0, 0])
 
     # Regression test for https://github.com/pymc-devs/pytensor/issues/1818
     x = pt.tensor("x", shape=(1, 1, 2, 1, 3))
@@ -880,3 +886,7 @@ def test_local_subtensor_of_squeeze():
     squeeze_op, index_op = find_squeeze_and_index_ops(fg)
     sorted_ops = list(fg.toposort())
     assert sorted_ops.index(squeeze_op) > sorted_ops.index(index_op)
+
+    fn = function([x], x_indexed)
+    x_val = rng.normal(size=x.type.shape).astype(x.type.dtype)
+    np.testing.assert_allclose(fn(x_val), x_val[0, 0, :, 0, 0])
