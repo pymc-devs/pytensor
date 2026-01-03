@@ -521,43 +521,10 @@ class ScalarType(CType, HasDataType, HasShape):
                 # In that case we add the 'int' type to the real types.
                 real_types.append("int")
 
-            # Macros for backwards compatibility with numpy < 2.0
-            #
-            # In numpy 2.0+, these are defined in npy_math.h, but
-            # for early versions, they must be vendored by users (e.g. PyTensor)
-            backwards_compat_macros = """
-            #ifndef NUMPY_CORE_INCLUDE_NUMPY_NPY_2_COMPLEXCOMPAT_H_
-            #define NUMPY_CORE_INCLUDE_NUMPY_NPY_2_COMPLEXCOMPAT_H_
-
-            #include <numpy/npy_math.h>
-
-            #ifndef NPY_CSETREALF
-            #define NPY_CSETREALF(c, r) (c)->real = (r)
-            #endif
-            #ifndef NPY_CSETIMAGF
-            #define NPY_CSETIMAGF(c, i) (c)->imag = (i)
-            #endif
-            #ifndef NPY_CSETREAL
-            #define NPY_CSETREAL(c, r)  (c)->real = (r)
-            #endif
-            #ifndef NPY_CSETIMAG
-            #define NPY_CSETIMAG(c, i)  (c)->imag = (i)
-            #endif
-            #ifndef NPY_CSETREALL
-            #define NPY_CSETREALL(c, r) (c)->real = (r)
-            #endif
-            #ifndef NPY_CSETIMAGL
-            #define NPY_CSETIMAGL(c, i) (c)->imag = (i)
-            #endif
-
-            #endif
-            """
-
             def _make_get_set_real_imag(scalar_type: str) -> str:
                 """Make overloaded getter/setter functions for real/imag parts of numpy complex types.
 
-                The functions called by these getter/setter functions are defining in npy_math.h, or
-                in the `backward_compat_macros` defined above.
+                The functions called by these getter/setter functions are defining in npy_math.h
 
                 Args:
                     scalar_type: float, double, or longdouble
@@ -601,8 +568,6 @@ class ScalarType(CType, HasDataType, HasShape):
                 _make_get_set_real_imag(stype)
                 for stype in ["float", "double", "longdouble"]
             )
-
-            get_set_aliases = backwards_compat_macros + "\n" + get_set_aliases
 
             # Template for defining pytensor_complex64 and pytensor_complex128 structs/classes
             #
