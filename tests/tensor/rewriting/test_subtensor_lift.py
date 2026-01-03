@@ -53,6 +53,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
 from pytensor.tensor.shape import SpecifyShape, _shape
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
+from tests.unittest_tools import assert_equal_computations
 
 
 mode_opt = config.mode
@@ -826,67 +827,33 @@ def test_local_subtensor_of_adv_subtensor(original_fn, supported):
     )
 
 
-def test_local_subtensor_of_squeeze():
-    def find_squeeze_and_index_ops(fg):
-        squeeze_op = next(
-            node
-            for node in fg.toposort()
-            if isinstance(node.op, DimShuffle) and node.op.is_squeeze
-        )
-        index_op = next(
-            node for node in fg.toposort() if isinstance(node.op, Subtensor)
-        )
-        return squeeze_op, index_op
-
+@pytest.mark.parametrize(
+    "original_fn, expected_fn, x_shape",
+    [
+        (
+            lambda x: x.squeeze(0)[0],
+            lambda x: x[:, 0].squeeze(0),
+            (1, 5, 2, 1),
+        ),
+        # Regression test for https://github.com/pymc-devs/pytensor/issues/1818
+        # Squeeze multiple axes then index
+        (
+            lambda x: x.squeeze((0, 1, -2))[:, 0],
+            lambda x: x[:, :, :, :, 0].squeeze((0, 1, 3)),
+            (1, 1, 2, 1, 3),
+        ),
+    ],
+)
+def test_local_subtensor_of_squeeze(original_fn, expected_fn, x_shape):
     rng = np.random.default_rng()
+    x = pt.tensor("x", shape=x_shape)
+    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
 
-    x = pt.tensor("x", shape=(1, 5, 2, 1))
-    z = x.squeeze(0)[0]
-    fg = FunctionGraph(outputs=[z], clone=False)
-    squeeze_op, index_op = find_squeeze_and_index_ops(fg)
-
-    sorted_ops = list(fg.toposort())
-    assert sorted_ops.index(squeeze_op) < sorted_ops.index(index_op)
-
-    x_indexed = rewrite_graph(
-        z,
-        include=(
-            "canonicalize",
-            "local_subtensor_of_squeeze",
-        ),
+    out = original_fn(x)
+    expected_opt_out = expected_fn(x)
+    opt_out = rewrite_graph(out)
+    assert_equal_computations([opt_out], [expected_opt_out])
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
     )
-
-    fg = FunctionGraph(outputs=[x_indexed], clone=False)
-    squeeze_op, index_op = find_squeeze_and_index_ops(fg)
-    sorted_ops = list(fg.toposort())
-    assert sorted_ops.index(squeeze_op) > sorted_ops.index(index_op)
-
-    fn = function([x], x_indexed)
-    x_val = rng.normal(size=x.type.shape).astype(x.type.dtype)
-    np.testing.assert_allclose(fn(x_val), x_val[0, 0])
-
-    # Regression test for https://github.com/pymc-devs/pytensor/issues/1818
-    x = pt.tensor("x", shape=(1, 1, 2, 1, 3))
-    z = x.squeeze((0, 1, -2))[:, 0]
-    fg = FunctionGraph(outputs=[z], clone=False)
-
-    squeeze_op, index_op = find_squeeze_and_index_ops(fg)
-    sorted_ops = list(fg.toposort())
-    assert sorted_ops.index(squeeze_op) < sorted_ops.index(index_op)
-
-    x_indexed = rewrite_graph(
-        z,
-        include=(
-            "canonicalize",
-            "local_subtensor_of_squeeze",
-        ),
-    )
-
-    fg = FunctionGraph(outputs=[x_indexed], clone=False)
-    squeeze_op, index_op = find_squeeze_and_index_ops(fg)
-    sorted_ops = list(fg.toposort())
-    assert sorted_ops.index(squeeze_op) > sorted_ops.index(index_op)
-
-    fn = function([x], x_indexed)
-    x_val = rng.normal(size=x.type.shape).astype(x.type.dtype)
-    np.testing.assert_allclose(fn(x_val), x_val[0, 0, :, 0, 0])
