@@ -511,6 +511,10 @@ class ScalarType(CType, HasDataType, HasShape):
                 "npy_int16",
                 "npy_int32",
                 "npy_int64",
+                "npy_uint8",  # also covers npy_bool
+                "npy_uint16",
+                "npy_uint32",
+                "npy_uint64",
                 "npy_float32",
                 "npy_float64",
             ]
