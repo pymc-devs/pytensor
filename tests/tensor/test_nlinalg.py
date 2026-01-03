@@ -7,7 +7,7 @@ from numpy.testing import assert_array_almost_equal
 import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
-from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.basic import arange, as_tensor_variable
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.nlinalg import (
     SVD,
@@ -41,6 +41,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
+from tests.test_rop import break_op
 
 
 def test_pseudoinverse_correctness():
@@ -100,6 +101,53 @@ class TestMatrixInverse(utt.InferShapeTester):
         xi = self.op(x)
 
         self._compile_and_check([x], [xi], [r], self.op_class, warn=False)
+
+    def test_rop_lop(self):
+        rtol = 1e-7 if config.floatX == "float64" else 1e-5
+        mx = matrix("mx")
+        mv = matrix("mv")
+        v = vector("v")
+        y = MatrixInverse()(mx).sum(axis=0)
+
+        yv = pytensor.gradient.Rop(y, mx, mv, use_op_rop_implementation=True)
+        rop_f = function([mx, mv], yv)
+
+        yv_via_lop = pytensor.gradient.Rop(y, mx, mv, use_op_rop_implementation=False)
+        rop_via_lop_f = function([mx, mv], yv_via_lop)
+
+        sy, _ = pytensor.scan(
+            lambda i, y, x, v: (pytensor.gradient.grad(y[i], x) * v).sum(),
+            sequences=arange(y.shape[0]),
+            non_sequences=[y, mx, mv],
+        )
+        scan_f = function([mx, mv], sy)
+
+        rng = np.random.default_rng(utt.fetch_seed())
+        vx = np.asarray(rng.standard_normal((4, 4)), pytensor.config.floatX)
+        vv = np.asarray(rng.standard_normal((4, 4)), pytensor.config.floatX)
+
+        v_ref = scan_f(vx, vv)
+        np.testing.assert_allclose(rop_f(vx, vv), v_ref, rtol=rtol)
+        np.testing.assert_allclose(rop_via_lop_f(vx, vv), v_ref, rtol=rtol)
+
+        with pytest.raises(ValueError):
+            pytensor.gradient.Rop(
+                pytensor.clone_replace(y, replace={mx: break_op(mx)}),
+                mx,
+                mv,
+                use_op_rop_implementation=True,
+            )
+
+        vv = np.asarray(rng.uniform(size=(4,)), pytensor.config.floatX)
+        yv = pytensor.gradient.Lop(y, mx, v)
+        lop_f = function([mx, v], yv)
+
+        sy = pytensor.gradient.grad((v * y).sum(), mx)
+        scan_f = function([mx, v], sy)
+
+        v_ref = scan_f(vx, vv)
+        v = lop_f(vx, vv)
+        np.testing.assert_allclose(v, v_ref, rtol=rtol)
 
 
 def test_matrix_dot():
