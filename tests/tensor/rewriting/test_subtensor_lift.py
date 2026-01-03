@@ -53,6 +53,7 @@ from pytensor.tensor.rewriting.subtensor_lift import (
 from pytensor.tensor.shape import SpecifyShape, _shape
 from pytensor.tensor.special import softmax
 from pytensor.tensor.subtensor import AdvancedSubtensor, Subtensor
+from tests.unittest_tools import assert_equal_computations
 
 
 mode_opt = config.mode
@@ -820,6 +821,38 @@ def test_local_subtensor_of_adv_subtensor(original_fn, supported):
     swapped = idx_subtensor < idx_adv_subtensor
     correct = swapped if supported else not swapped
     assert correct, debugprint(opt_out, print_type=True)
+    np.testing.assert_allclose(
+        opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+        out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
+    )
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn, x_shape",
+    [
+        (
+            lambda x: x.squeeze(0)[0],
+            lambda x: x[:, 0].squeeze(0),
+            (1, 5, 2, 1),
+        ),
+        # Regression test for https://github.com/pymc-devs/pytensor/issues/1818
+        # Squeeze multiple axes then index
+        (
+            lambda x: x.squeeze((0, 1, -2))[:, 0],
+            lambda x: x[:, :, :, :, 0].squeeze((0, 1, 3)),
+            (1, 1, 2, 1, 3),
+        ),
+    ],
+)
+def test_local_subtensor_of_squeeze(original_fn, expected_fn, x_shape):
+    rng = np.random.default_rng()
+    x = pt.tensor("x", shape=x_shape)
+    x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+
+    out = original_fn(x)
+    expected_opt_out = expected_fn(x)
+    opt_out = rewrite_graph(out)
+    assert_equal_computations([opt_out], [expected_opt_out])
     np.testing.assert_allclose(
         opt_out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
         out.eval({x: x_test}, mode=NO_OPTIMIZATION_MODE),
