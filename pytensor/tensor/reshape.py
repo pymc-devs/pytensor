@@ -66,7 +66,7 @@ class JoinDims(Op):
         [input_shape] = shapes
         axis_range = self.axis_range
 
-        joined_shape = prod([input_shape[i] for i in axis_range])
+        joined_shape = prod([input_shape[i] for i in axis_range], dtype=int)
         return [self.output_shapes(input_shape, joined_shape)]
 
     def perform(self, node, inputs, outputs):
@@ -92,7 +92,7 @@ class JoinDims(Op):
 
         x_shape = shape(x)
         packed_shape = [x_shape[i] for i in self.axis_range]
-        return [split_dims(g_out, shape=packed_shape, axis=self.start_axis)]
+        return [SplitDims(axis=self.start_axis)(g_out, shape=packed_shape)]  # type: ignore[list-item]
 
 
 @_vectorize_node.register(JoinDims)
@@ -215,9 +215,10 @@ class SplitDims(Op):
         (g_out,) = output_grads
 
         n_axes = g_out.ndim - x.ndim + 1  # type: ignore[attr-defined]
-        axis_range = list(range(self.axis, self.axis + n_axes))
-
-        return [join_dims(g_out, axis=axis_range), DisconnectedType()()]
+        return [
+            JoinDims(start_axis=self.axis, n_axes=n_axes)(g_out),  # type: ignore[list-item]
+            DisconnectedType()(),
+        ]
 
 
 @_vectorize_node.register(SplitDims)
