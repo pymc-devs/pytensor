@@ -1317,9 +1317,7 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
             if isinstance(node.op, IncSubtensor):
                 xi = Subtensor(node.op.idx_list)(x, *i)
             elif isinstance(node.op, AdvancedIncSubtensor):
-                # Use the same idx_list as the original operation to ensure correct shape
-                op = AdvancedSubtensor(node.op.idx_list)
-                xi = op.make_node(x, *i).outputs[0]
+                xi = AdvancedSubtensor(node.op.idx_list)(x, *i)
             elif isinstance(node.op, AdvancedIncSubtensor1):
                 xi = advanced_subtensor1(x, *i)
             else:

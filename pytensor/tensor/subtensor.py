@@ -124,6 +124,16 @@ def indices_from_subtensor(
         obtained from ``op.idx_list``, when ``op`` is a ``*Subtensor*``
         ``Op``.
 
+    Returns
+    =======
+    tuple[slice | Variable, ...]
+        A tuple containing a mix of ``slice`` objects and ``Variable`` objects.
+        Each element corresponds to one indexing dimension:
+        - ``slice`` objects for slice-based indexing (e.g., ``x[1:3]``)
+        - ``Variable`` objects for scalar or array-based indexing
+
+        Callers should handle both types when iterating over the result.
+
     Example
     =======
         array, *op_indices = subtensor_node.inputs
@@ -2183,12 +2193,37 @@ class AdvancedSubtensor1(BaseSubtensor, COp):
     _f16_ok = True
     check_input = False
 
-    def __init__(self, sparse_grad=False):
-        super().__init__(None)  # AdvancedSubtensor1 doesn't use idx_list
+    def __init__(self, idx_list=None, sparse_grad=False):
+        """
+        Initialize AdvancedSubtensor1.
+
+        Parameters
+        ----------
+        idx_list : tuple, optional
+            Index list containing the type of the 1D integer index.
+            If not provided, idx_list will be set to None for backward compatibility.
+        sparse_grad : bool, optional
+            Whether to use sparse gradient. Default False.
+        """
+        if idx_list is not None:
+            # idx_list should contain a single TensorType for the 1D integer index
+            self.idx_list = tuple(
+                index_vars_to_types(idx, allow_advanced=True) for idx in idx_list
+            )
+        else:
+            self.idx_list = None
+        # Call BaseSubtensor.__init__ with None since we set idx_list directly
+        BaseSubtensor.__init__(self, None)
+        # Restore our idx_list after base init
+        if idx_list is not None:
+            self.idx_list = tuple(
+                index_vars_to_types(idx, allow_advanced=True) for idx in idx_list
+            )
         self.sparse_grad = sparse_grad
 
     def __hash__(self):
-        return hash((type(self), self.sparse_grad))
+        idx_list = self._normalize_idx_list_for_hash()
+        return hash((type(self), idx_list, self.sparse_grad))
 
     def __eq__(self, other):
         if not super().__eq__(other):
@@ -2339,7 +2374,7 @@ class AdvancedSubtensor1(BaseSubtensor, COp):
 advanced_subtensor1 = AdvancedSubtensor1()
 
 
-class AdvancedIncSubtensor1(COp):
+class AdvancedIncSubtensor1(BaseSubtensor, COp):
     """
     Increments a subtensor using advanced slicing (list of index).
 
@@ -2355,14 +2390,54 @@ class AdvancedIncSubtensor1(COp):
         "If broadcasting was intended, use `specify_broadcastable` on the relevant dimension(s)."
     )
 
-    def __init__(self, inplace=False, set_instead_of_inc=False):
+    def __init__(self, inplace=False, set_instead_of_inc=False, idx_list=None):
+        """
+        Initialize AdvancedIncSubtensor1.
+
+        Parameters
+        ----------
+        inplace : bool, optional
+            Whether to perform the operation in-place. Default False.
+        set_instead_of_inc : bool, optional
+            Whether to set values instead of incrementing. Default False.
+        idx_list : tuple, optional
+            Index list containing the type of the 1D integer index.
+            If not provided, idx_list will be set to None for backward compatibility.
+        """
+        if idx_list is not None:
+            self.idx_list = tuple(
+                index_vars_to_types(idx, allow_advanced=True) for idx in idx_list
+            )
+        else:
+            self.idx_list = None
+        BaseSubtensor.__init__(self, None)
+        if idx_list is not None:
+            self.idx_list = tuple(
+                index_vars_to_types(idx, allow_advanced=True) for idx in idx_list
+            )
         self.inplace = bool(inplace)
         self.set_instead_of_inc = bool(set_instead_of_inc)
         if inplace:
             self.destroy_map = {0: [0]}
 
+    def __hash__(self):
+        idx_list = self._normalize_idx_list_for_hash()
+        return hash((type(self), idx_list, self.inplace, self.set_instead_of_inc))
+
+    def __eq__(self, other):
+        if not super().__eq__(other):
+            return False
+        return (
+            self.inplace == other.inplace
+            and self.set_instead_of_inc == other.set_instead_of_inc
+        )
+
     def clone_inplace(self):
-        return self.__class__(inplace=True, set_instead_of_inc=self.set_instead_of_inc)
+        return self.__class__(
+            inplace=True,
+            set_instead_of_inc=self.set_instead_of_inc,
+            idx_list=self.idx_list,
+        )
 
     def __str__(self):
         if self.inplace:
