@@ -344,16 +344,26 @@ def test_det_of_matrix_factorized_elsewhere(decomp_fn, decomp_output_idx):
     d = det(x)
 
     outputs = [decomp_var, d]
-    fn = function(
+    fn_no_opt = function(
+        [x],
+        outputs,
+        mode=get_default_mode().excluding("det_of_matrix_factorized_elsewhere"),
+    )
+    det_nodes_no_opt = [
+        node for node in fn_no_opt.maker.fgraph.apply_nodes if isinstance(node.op, Det)
+    ]
+    assert len(det_nodes_no_opt) == 1
+
+    fn_opt = function(
         [x],
         outputs,
         mode=get_default_mode().including("det_of_matrix_factorized_elsewhere"),
     )
 
-    det_nodes = [
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Det)
+    det_nodes_opt = [
+        node for node in fn_opt.maker.fgraph.apply_nodes if isinstance(node.op, Det)
     ]
-    assert len(det_nodes) == 0
+    assert len(det_nodes_opt) == 0
 
 
 @pytest.mark.parametrize(
@@ -378,16 +388,26 @@ def test_det_of_matrix_factorized_elsewhere_abs(decomp_fn, abs_needed):
     d = pt.abs(det(x))
 
     outputs = [decomp_var, d]
-    fn = function(
+    fn_no_opt = function(
+        [x],
+        outputs,
+        mode=get_default_mode().excluding("det_of_matrix_factorized_elsewhere"),
+    )
+    det_nodes_no_opt = [
+        node for node in fn_no_opt.maker.fgraph.apply_nodes if isinstance(node.op, Det)
+    ]
+    assert len(det_nodes_no_opt) == 1
+
+    fn_opt = function(
         [x],
         outputs,
         mode=get_default_mode().including("det_of_matrix_factorized_elsewhere"),
     )
 
-    det_nodes = [
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Det)
+    det_nodes_opt = [
+        node for node in fn_opt.maker.fgraph.apply_nodes if isinstance(node.op, Det)
     ]
-    assert len(det_nodes) == 0
+    assert len(det_nodes_opt) == 0
 
 
 @pytest.mark.parametrize(
