@@ -2,8 +2,10 @@ import numpy as np
 import pytest
 
 from pytensor import config, function, scan
+from pytensor import tensor as pt
 from pytensor.compile.mode import get_default_mode
 from pytensor.gradient import grad
+from pytensor.graph import rewrite_graph
 from pytensor.scan.op import Scan
 from pytensor.tensor._linalg.solve.rewriting import (
     reuse_decomposition_multiple_solves,
@@ -14,7 +16,9 @@ from pytensor.tensor._linalg.solve.tridiagonal import (
     SolveLUFactorTridiagonal,
 )
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg import solve
+from pytensor.tensor.nlinalg import Det, det
 from pytensor.tensor.slinalg import (
     Cholesky,
     CholeskySolve,
@@ -23,6 +27,7 @@ from pytensor.tensor.slinalg import (
     SolveTriangular,
 )
 from pytensor.tensor.type import tensor
+from tests.unittest_tools import assert_equal_computations
 
 
 class DecompSolveOpCounter:
@@ -257,3 +262,201 @@ def test_decomposition_reused_preserves_check_finite(assume_a, counter):
         assert fn_opt(A_valid, b1_valid * np.nan, b2_valid)
     with pytest.raises((ValueError, np.linalg.LinAlgError), match=err_msg):
         assert fn_opt(A_valid * np.nan, b1_valid, b2_valid)
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        pytest.param(
+            lambda x: pt.log(pt.prod(pt.abs(x))),
+            lambda x: pt.sum(pt.log(pt.abs(x))),
+            id="log_prod_abs",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(pt.exp(x))), lambda x: pt.sum(x), id="log_prod_exp"
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(x**2)),
+            lambda x: pt.sum(pt.log(pt.sqr(x))),
+            id="log_prod_sqr",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.abs(pt.prod(x))),
+            lambda x: pt.sum(pt.log(pt.abs(x))),
+            id="log_abs_prod",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(pt.abs(x), axis=0)),
+            lambda x: pt.sum(pt.log(pt.abs(x)), axis=0),
+            id="log_prod_abs_axis0",
+        ),
+        pytest.param(
+            lambda x: pt.log(pt.prod(pt.exp(x), axis=-1)),
+            lambda x: pt.sum(x, axis=-1),
+            id="log_prod_exp_axis-1",
+        ),
+    ],
+)
+def test_local_log_prod_to_sum_log(original_fn, expected_fn):
+    x = pt.tensor("x", shape=(3, 4))
+    out = original_fn(x)
+    expected = expected_fn(x)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_local_log_prod_to_sum_log_positive_tag():
+    x = pt.tensor("x", shape=(3, 4))
+    x.tag.positive = True
+    out = pt.log(pt.prod(x))
+    expected = pt.sum(pt.log(x))
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_local_log_prod_to_sum_log_no_rewrite():
+    x = pt.tensor("x", shape=(3, 4))
+    out = pt.log(pt.prod(x))
+    rewritten = rewrite_graph(out)
+    from pytensor.scalar.basic import Log
+
+    assert rewritten.owner is not None
+    assert isinstance(rewritten.owner.op.scalar_op, Log)
+
+
+@pytest.mark.parametrize(
+    "decomp_fn, decomp_output_idx",
+    [
+        pytest.param(lambda x: pt.linalg.cholesky(x), 0, id="cholesky"),
+        pytest.param(lambda x: pt.linalg.lu(x), -1, id="lu"),
+        pytest.param(lambda x: pt.linalg.lu_factor(x), 0, id="lu_factor"),
+    ],
+)
+def test_det_of_matrix_factorized_elsewhere(decomp_fn, decomp_output_idx):
+    x = pt.tensor("x", shape=(3, 3))
+
+    decomp_out = decomp_fn(x)
+    if isinstance(decomp_out, list):
+        decomp_var = decomp_out[decomp_output_idx]
+    else:
+        decomp_var = decomp_out
+
+    d = det(x)
+
+    outputs = [decomp_var, d]
+    fn = function([x], outputs, mode=get_default_mode())
+
+    det_nodes = [
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Det)
+    ]
+    assert len(det_nodes) == 0
+
+
+@pytest.mark.parametrize(
+    "decomp_fn, abs_needed",
+    [
+        pytest.param(lambda x: pt.linalg.svd(x, compute_uv=True), True, id="svd"),
+        pytest.param(
+            lambda x: pt.linalg.svd(x, compute_uv=False), True, id="svd_no_uv"
+        ),
+        pytest.param(lambda x: pt.linalg.qr(x), True, id="qr"),
+    ],
+)
+def test_det_of_matrix_factorized_elsewhere_abs(decomp_fn, abs_needed):
+    x = pt.tensor("x", shape=(3, 3))
+
+    decomp_out = decomp_fn(x)
+    if isinstance(decomp_out, list):
+        decomp_var = decomp_out[0]
+    else:
+        decomp_var = decomp_out
+
+    d = pt.abs(det(x))
+
+    outputs = [decomp_var, d]
+    fn = function([x], outputs, mode=get_default_mode())
+
+    det_nodes = [
+        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Det)
+    ]
+    assert len(det_nodes) == 0
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        pytest.param(
+            lambda x: det(pt.linalg.cholesky(x)),
+            lambda x: pt.prod(
+                pt.diagonal(pt.linalg.cholesky(x), axis1=-2, axis2=-1), axis=-1
+            ),
+            id="det_cholesky",
+        ),
+        pytest.param(
+            lambda x: det(pt.linalg.lu(x)[-1]),
+            lambda x: pt.prod(
+                pt.diagonal(pt.linalg.lu(x)[-1], axis1=-2, axis2=-1), axis=-1
+            ),
+            id="det_lu_U",
+        ),
+        pytest.param(
+            lambda x: det(pt.linalg.lu(x)[-2]),
+            lambda x: pt.as_tensor(1.0, dtype=x.dtype),
+            id="det_lu_L",
+        ),
+    ],
+)
+def test_det_of_factorized_matrix(original_fn, expected_fn):
+    x = pt.tensor("x", shape=(3, 3))
+    out = original_fn(x)
+    expected = expected_fn(x)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "original_fn, expected_fn",
+    [
+        pytest.param(
+            lambda x: pt.abs(det(pt.linalg.svd(x, compute_uv=True)[0])),
+            lambda x: pt.as_tensor(1.0, dtype=x.dtype),
+            id="abs_det_svd_U",
+        ),
+        pytest.param(
+            lambda x: pt.abs(det(pt.linalg.svd(x, compute_uv=True)[2])),
+            lambda x: pt.as_tensor(1.0, dtype=x.dtype),
+            id="abs_det_svd_Vt",
+        ),
+        pytest.param(
+            lambda x: pt.abs(det(pt.linalg.qr(x)[0])),
+            lambda x: pt.as_tensor(1.0, dtype=x.dtype),
+            id="abs_det_qr_Q",
+        ),
+        pytest.param(
+            lambda x: det(pt.linalg.qr(x)[1]),
+            lambda x: pt.prod(
+                pt.diagonal(pt.linalg.qr(x)[1], axis1=-2, axis2=-1), axis=-1
+            ),
+            id="det_qr_R",
+        ),
+    ],
+)
+def test_det_of_factorized_matrix_special_cases(original_fn, expected_fn):
+    x = pt.tensor("x", shape=(3, 3))
+    out = original_fn(x)
+    expected = expected_fn(x)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_det_of_factorized_matrix_no_rewrite_without_abs():
+    x = pt.tensor("x", shape=(3, 3))
+    Q = pt.linalg.qr(x)[0]
+    out = det(Q)
+    rewritten = rewrite_graph(out, include=["stabilize", "specialize"])
+
+    assert not (
+        rewritten.owner is not None
+        and isinstance(rewritten.owner.op, Elemwise)
+        and len(rewritten.owner.inputs) == 0
+    ), "det(Q) should not be rewritten to a constant without abs()"
