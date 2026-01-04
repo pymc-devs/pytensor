@@ -241,3 +241,23 @@ class TestSparseVariable:
         f = pytensor.function([x], z)
         exp_res = f([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
         assert isinstance(exp_res, np.ndarray)
+
+    @pytest.mark.parametrize(
+        "transpose_op",
+        [lambda x: x.T, lambda x: x.transpose(), lambda x: x.mT],
+        ids=[".T", ".transpose()", ".mT"],
+    )
+    def test_transpose_and_aliases(self, transpose_op):
+        x = pt.dmatrix("x")
+        x = sparse.csc_from_dense(x)
+
+        z = transpose_op(x)
+        assert isinstance(z.type, SparseTensorType)
+
+        f = pytensor.function([x], z)
+        x_value = np.array([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
+        res_value = f([[1.1, 0.0, 2.0], [-1.0, 0.0, 0.0]])
+
+        # CSC transpose returns CSR
+        assert isinstance(res_value, csr_matrix)
+        np.testing.assert_array_equal(res_value.todense(), x_value.T)

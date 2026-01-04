@@ -3,6 +3,7 @@ from warnings import warn
 import numpy as np
 import scipy.sparse as scipy_sparse
 
+from pytensor.compile import ViewOp
 from pytensor.sparse.basic import (
     cast,
     csm_data,
@@ -83,6 +84,11 @@ def override_dense(method):
 class _sparse_py_operators:
     T = property(
         lambda self: transpose(self), doc="Return aliased transpose of self (read-only)"
+    )
+
+    mT = property(
+        lambda self: transpose(self),
+        doc="Return aliased matrix transpose of self (read-only)",
     )
 
     def astype(self, dtype):
@@ -316,7 +322,7 @@ class _sparse_py_operators:
 
     @override_dense
     def copy(self, name=None):
-        raise NotImplementedError
+        raise ViewOp()(self)
 
     @override_dense
     def prod(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
