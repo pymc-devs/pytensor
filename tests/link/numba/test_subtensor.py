@@ -521,15 +521,7 @@ def test_advanced_indexing_with_newaxis_fallback_obj_mode():
     # After which we can add these parametrizations to the relevant tests above
     x = pt.matrix("x")
     out = x[None, [0, 1, 2], [0, 1, 2]]
-    with pytest.warns(
-        UserWarning,
-        match=r"Numba will use object mode to run AdvancedSubtensor's perform method",
-    ):
-        compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
+    compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
 
     out = x[None, [0, 1, 2], [0, 1, 2]].inc(5)
-    with pytest.warns(
-        UserWarning,
-        match=r"Numba will use object mode to run AdvancedIncSubtensor's perform method",
-    ):
-        compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
+    compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])

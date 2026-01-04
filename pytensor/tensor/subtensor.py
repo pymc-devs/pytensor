@@ -3042,9 +3042,50 @@ class AdvancedSubtensor(BaseSubtensor, COp):
             raise NotImplementedError("No support for complex grad yet")
         else:
             gx = x.zeros_like()
-        rest = inputs[1:]
-        return [advanced_inc_subtensor(gx, gz, *rest)] + [DisconnectedType()()] * len(
-            rest
+
+        # Reconstruct the full indices from idx_list and inputs
+        # This is necessary because advanced_inc_subtensor expects the full
+        # description of indices, including slices that might not be in inputs.
+
+        index_variables = inputs[1:]
+        args = []
+        input_idx = 0
+
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                # Reconstruct slice from idx_list and inputs
+                if entry.start is not None and isinstance(entry.start, Type):
+                    start_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+
+                if entry.stop is not None and isinstance(entry.stop, Type):
+                    stop_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+
+                if entry.step is not None and isinstance(entry.step, Type):
+                    step_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+
+                args.append(slice(start_val, stop_val, step_val))
+            elif isinstance(entry, Type):
+                # This is a numerical index
+                if input_idx < len(index_variables):
+                    args.append(index_variables[input_idx])
+                    input_idx += 1
+                else:
+                    raise ValueError("Mismatch between idx_list and inputs in grad")
+            else:
+                # Should be valid constant/None
+                args.append(entry)
+
+        return [advanced_inc_subtensor(gx, gz, *args)] + [DisconnectedType()()] * len(
+            index_variables
         )
 
     @staticmethod
