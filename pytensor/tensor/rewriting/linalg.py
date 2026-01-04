@@ -448,8 +448,8 @@ def _find_diag_from_eye_mul(potential_mul_input):
     return eye_input, non_eye_inputs
 
 
-@register_stabilize
-@register_specialize
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
 @node_rewriter([det])
 def det_of_matrix_factorized_elsewhere(fgraph, node):
     """
