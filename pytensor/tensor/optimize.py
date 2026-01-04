@@ -6,10 +6,16 @@ import numpy as np
 
 import pytensor.scalar as ps
 from pytensor.compile.function import function
-from pytensor.gradient import DisconnectedType, grad, grad_not_implemented, jacobian
+from pytensor.gradient import DisconnectedType, grad, jacobian
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import ComputeMapType, HasInnerGraph, Op, StorageMapType
+from pytensor.graph.op import (
+    ComputeMapType,
+    HasInnerGraph,
+    Op,
+    StorageMapType,
+    io_connection_pattern,
+)
 from pytensor.graph.replace import graph_replace
 from pytensor.graph.traversal import (
     ancestors,
@@ -27,7 +33,6 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.math import tensordot
 from pytensor.tensor.reshape import pack, unpack
 from pytensor.tensor.slinalg import solve
-from pytensor.tensor.type import DenseTensorType
 from pytensor.tensor.variable import TensorVariable, Variable
 
 
@@ -207,6 +212,27 @@ class ScipyWrapperOp(Op, HasInnerGraph):
 
         return Apply(self, inputs, [self.inner_inputs[0].type(), ps.bool("success")])
 
+    def connection_pattern(self, node=None):
+        """
+        All Ops that inherit from ScipyWrapperOp share the same connection pattern logic, because they all share the
+        same output structure. There are two outputs: the optimized variable, and a success flag. The success flag is
+        not differentiable, so it is never connected. The optimized variable is connected only to inputs that are
+        both connected to the objective function and of float dtype.
+        """
+        if self._connection_pattern is not None:
+            return self._connection_pattern
+
+        fx = self.fgraph.outputs[0]
+        inputs = self.fgraph.inputs
+
+        connections = [
+            [connection and input.type.dtype in ("float32", "float64"), False]
+            for input, connection in zip(inputs, io_connection_pattern(inputs, [fx]))
+        ]
+        self._connection_pattern = connections
+
+        return connections
+
 
 class ScipyScalarWrapperOp(ScipyWrapperOp):
     def build_fn(self):
@@ -252,11 +278,14 @@ def scalar_implict_optimization_grads(
     x_star: TensorVariable,
     output_grad: TensorVariable,
     fgraph: FunctionGraph,
+    arg_connection_pattern: list[bool],
 ) -> list[TensorVariable | ScalarVariable]:
     inner_args_to_diff = []
     outer_args_to_diff = []
-    for inner_arg, outer_arg in zip(inner_args, args):
-        if inner_arg.type.dtype.startswith("float"):
+    for inner_arg, outer_arg, is_connected in zip(
+        inner_args, args, arg_connection_pattern
+    ):
+        if is_connected:
             inner_args_to_diff.append(inner_arg)
             outer_args_to_diff.append(outer_arg)
 
@@ -292,11 +321,23 @@ def implict_optimization_grads(
     output_grad: TensorVariable,
     fgraph: FunctionGraph,
     use_vectorized_jac: bool,
+    arg_connection_pattern: list[bool],
 ) -> list[TensorVariable | ScalarVariable]:
     r"""
     Compute gradients of an optimization problem with respect to its parameters.
 
-    The gradents are computed using the implicit function theorem. Given a fuction `f(x, theta) =`, and a function
+    Parameters
+    ----------
+    implicit_f : TensorVariable
+        The implicit function whose root defines the solution of the optimization problem. For a root-finding problem,
+        this is simply the function whose root is being found. For a minimization problem, this is the gradient of the
+        objective function with respect to the optimization variable.
+    inner_x : TensorVariable
+        The optimization variable inside the inner graph of the optimization Op.
+
+    Notes
+    -----
+        The gradents are computed using the implicit function theorem. Given a fuction `f(x, theta) =`, and a function
     `x_star(theta)` that, given input parameters theta returns `x` such that `f(x_star(theta), theta) = 0`, we can
     compute the gradients of `x_star` with respect to `theta` as follows:
 
@@ -318,26 +359,18 @@ def implict_optimization_grads(
     Note that this method assumes `f(x_star(theta), theta) = 0`; so it is not immediately applicable to a minimization
     problem, where `f` is the objective function. In this case, we instead take `f` to be the gradient of the objective
     function, which *is* indeed zero at the minimum.
-
-    Parameters
-    ----------
-    args : Sequence[Variable]
-        The optimization parameters `theta`.
-    x_star : Variable
-        Symbolic graph representing the value of the variable `x` such that `f(x_star, theta) = 0 `.
-    output_grad : Variable
-        The gradient of the output with respect to the objective function.
-    fgraph : FunctionGraph
-        The function graph that contains the inputs and outputs of the optimization problem.
     """
 
     # There might be non-differentiable arguments along the compute path from the objective to the inputs. Notably,
-    # integers often arise due to Shape ops called by pack/unpack. These will be given DisconnectedType gradients.
-    # First, they are filtered out before calling jacobian.
+    # integers often arise due to Shape ops called by pack/unpack. These will be given DisconnectedType gradients
+    # by this function, but first need to be filtered out to avoid errors during jacobian computation.
     inner_args_to_diff = []
     outer_args_to_diff = []
-    for inner_arg, outer_arg in zip(inner_args, args):
-        if inner_arg.type.dtype.startswith("float"):
+
+    for inner_arg, outer_arg, is_connected in zip(
+        inner_args, args, arg_connection_pattern
+    ):
+        if is_connected:
             inner_args_to_diff.append(inner_arg)
             outer_args_to_diff.append(outer_arg)
 
@@ -430,6 +463,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
+        self._connection_pattern = None
 
     def __str__(self):
         return f"{self.__class__.__name__}(method={self.method})"
@@ -459,17 +493,6 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
     def L_op(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs
         x, *args = inputs
-        if non_supported_types := tuple(
-            inp.type
-            for inp in inputs
-            if not isinstance(inp.type, DenseTensorType | ScalarType)
-        ):
-            # TODO: Support SparseTensorTypes
-            # TODO: Remaining types are likely just disconnected anyway
-            msg = f"Minimize gradient not implemented due to inputs of type {non_supported_types}"
-            return [
-                grad_not_implemented(self, i, inp, msg) for i, inp in enumerate(inputs)
-            ]
         x_star, _ = outputs
         output_grad, _ = output_grads
 
@@ -486,6 +509,9 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
             x_star=x_star,
             output_grad=output_grad,
             fgraph=self.fgraph,
+            arg_connection_pattern=[
+                pattern[0] for pattern in self.connection_pattern()[1:]
+            ],
         )
 
         return [zeros_like(x), *grad_wrt_args]
@@ -585,6 +611,7 @@ class MinimizeOp(ScipyVectorWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
+        self._connection_pattern = None
 
     def __str__(self):
         str_args = ", ".join(
@@ -621,19 +648,6 @@ class MinimizeOp(ScipyVectorWrapperOp):
     def L_op(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs
         x, *args = inputs
-
-        if non_supported_types := tuple(
-            inp.type
-            for inp in inputs
-            if not isinstance(inp.type, DenseTensorType | ScalarType)
-        ):
-            # TODO: Support SparseTensorTypes
-            # TODO: Remaining types are likely just disconnected anyway
-            msg = f"MinimizeOp gradient not implemented due to inputs of type {non_supported_types}"
-            return [
-                grad_not_implemented(self, i, inp, msg) for i, inp in enumerate(inputs)
-            ]
-
         x_star, _success = outputs
         output_grad, _ = output_grads
 
@@ -650,6 +664,9 @@ class MinimizeOp(ScipyVectorWrapperOp):
             output_grad=output_grad,
             fgraph=self.fgraph,
             use_vectorized_jac=self.use_vectorized_jac,
+            arg_connection_pattern=[
+                pattern[0] for pattern in self.connection_pattern()[1:]
+            ],
         )
 
         return [zeros_like(x), *final_grads]
@@ -798,6 +815,7 @@ class RootScalarOp(ScipyScalarWrapperOp):
 
         self._fn = None
         self._fn_wrapped = None
+        self._connection_pattern = None
 
     def __str__(self):
         str_args = ", ".join(
@@ -832,17 +850,6 @@ class RootScalarOp(ScipyScalarWrapperOp):
     def L_op(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs
         x, *args = inputs
-        if non_supported_types := tuple(
-            inp.type
-            for inp in inputs
-            if not isinstance(inp.type, DenseTensorType | ScalarType)
-        ):
-            # TODO: Support SparseTensorTypes
-            # TODO: Remaining types are likely just disconnected anyway
-            msg = f"RootScalarOp gradient not implemented due to inputs of type {non_supported_types}"
-            return [
-                grad_not_implemented(self, i, inp, msg) for i, inp in enumerate(inputs)
-            ]
         x_star, _ = outputs
         output_grad, _ = output_grads
 
@@ -857,6 +864,9 @@ class RootScalarOp(ScipyScalarWrapperOp):
             x_star=x_star,
             output_grad=output_grad,
             fgraph=self.fgraph,
+            arg_connection_pattern=[
+                pattern[0] for pattern in self.connection_pattern()[1:]
+            ],
         )
 
         return [zeros_like(x), *grad_wrt_args]
@@ -962,6 +972,7 @@ class RootOp(ScipyVectorWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
+        self._connection_pattern = None
 
     def __str__(self):
         str_args = ", ".join(
@@ -1021,20 +1032,7 @@ class RootOp(ScipyVectorWrapperOp):
         outputs[1][0] = np.bool_(res.success)
 
     def L_op(self, inputs, outputs, output_grads):
-        # TODO: Handle disconnected inputs
         x, *args = inputs
-        if non_supported_types := tuple(
-            inp.type
-            for inp in inputs
-            if not isinstance(inp.type, DenseTensorType | ScalarType)
-        ):
-            # TODO: Support SparseTensorTypes
-            # TODO: Remaining types are likely just disconnected anyway
-            msg = f"RootOp gradient not implemented due to inputs of type {non_supported_types}"
-            return [
-                grad_not_implemented(self, i, inp, msg) for i, inp in enumerate(inputs)
-            ]
-
         x_star, _ = outputs
         output_grad, _ = output_grads
 
@@ -1050,6 +1048,9 @@ class RootOp(ScipyVectorWrapperOp):
             output_grad=output_grad,
             fgraph=self.fgraph,
             use_vectorized_jac=self.use_vectorized_jac,
+            arg_connection_pattern=[
+                pattern[0] for pattern in self.connection_pattern()[1:]
+            ],
         )
 
         return [zeros_like(x), *final_grads]

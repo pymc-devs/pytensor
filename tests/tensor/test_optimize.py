@@ -6,7 +6,6 @@ import pytensor.tensor as pt
 from pytensor import Variable, config, function
 from pytensor.gradient import (
     DisconnectedInputError,
-    NullTypeGradError,
     disconnected_type,
 )
 from pytensor.graph import Apply, Op, Type
@@ -475,6 +474,9 @@ def test_optimize_grad_disconnected_non_numerical_inp(optimize_op):
                 return x
             raise TypeError
 
+        def dtype(self):
+            return "<U64"
+
     class SmileOrFrown(Op):
         def make_node(self, x, str_emoji):
             return Apply(self, [x, str_emoji], [x.type()])
@@ -525,14 +527,17 @@ def test_optimize_grad_disconnected_non_numerical_inp(optimize_op):
         np.e,
     )
 
-    with pytest.raises(NullTypeGradError):
+    with pytest.raises(DisconnectedInputError):
         pt.grad(x_star, str_theta, disconnected_inputs="raise")
 
     # This could be supported, but it is not right now.
-    with pytest.raises(NullTypeGradError):
-        _grad_wrt_num_theta = pt.grad(x_star, num_theta, disconnected_inputs="raise")
-    # np.testing.assert_allclose(grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":)"}), -1)
-    # np.testing.assert_allclose(grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":("}), 1)
+    grad_wrt_num_theta = pt.grad(x_star, num_theta, disconnected_inputs="raise")
+    np.testing.assert_allclose(
+        grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":)"}), -1
+    )
+    np.testing.assert_allclose(
+        grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":("}), 1
+    )
 
 
 def test_vectorize_root_gradients():
