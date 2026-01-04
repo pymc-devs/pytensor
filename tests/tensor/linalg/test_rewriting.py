@@ -367,16 +367,21 @@ def test_det_of_matrix_factorized_elsewhere(decomp_fn, decomp_output_idx):
 
 
 @pytest.mark.parametrize(
-    "decomp_fn, abs_needed",
+    "decomp_fn, sign_op",
     [
-        pytest.param(lambda x: pt.linalg.svd(x, compute_uv=True), True, id="svd"),
+        pytest.param(lambda x: pt.linalg.svd(x, compute_uv=True), pt.abs, id="svd_abs"),
         pytest.param(
-            lambda x: pt.linalg.svd(x, compute_uv=False), True, id="svd_no_uv"
+            lambda x: pt.linalg.svd(x, compute_uv=False), pt.abs, id="svd_no_uv_abs"
         ),
-        pytest.param(lambda x: pt.linalg.qr(x), True, id="qr"),
+        pytest.param(lambda x: pt.linalg.qr(x), pt.abs, id="qr_abs"),
+        pytest.param(lambda x: pt.linalg.svd(x, compute_uv=True), pt.sqr, id="svd_sqr"),
+        pytest.param(
+            lambda x: pt.linalg.svd(x, compute_uv=False), pt.sqr, id="svd_no_uv_sqr"
+        ),
+        pytest.param(lambda x: pt.linalg.qr(x), pt.sqr, id="qr_sqr"),
     ],
 )
-def test_det_of_matrix_factorized_elsewhere_abs(decomp_fn, abs_needed):
+def test_det_of_matrix_factorized_elsewhere_abs(decomp_fn, sign_op):
     x = pt.tensor("x", shape=(3, 3))
 
     decomp_out = decomp_fn(x)
@@ -385,7 +390,7 @@ def test_det_of_matrix_factorized_elsewhere_abs(decomp_fn, abs_needed):
     else:
         decomp_var = decomp_out
 
-    d = pt.abs(det(x))
+    d = sign_op(det(x))
 
     outputs = [decomp_var, d]
     fn_no_opt = function(
@@ -459,6 +464,21 @@ def test_det_of_factorized_matrix(original_fn, expected_fn):
             lambda x: pt.abs(det(pt.linalg.qr(x)[0])),
             lambda x: pt.as_tensor(1.0, dtype=x.dtype),
             id="abs_det_qr_Q",
+        ),
+        pytest.param(
+            lambda x: pt.sqr(det(pt.linalg.svd(x, compute_uv=True)[0])),
+            lambda x: pt.as_tensor(1.0, dtype=x.dtype),
+            id="sqr_det_svd_U",
+        ),
+        pytest.param(
+            lambda x: pt.sqr(det(pt.linalg.svd(x, compute_uv=True)[2])),
+            lambda x: pt.as_tensor(1.0, dtype=x.dtype),
+            id="sqr_det_svd_Vt",
+        ),
+        pytest.param(
+            lambda x: pt.sqr(det(pt.linalg.qr(x)[0])),
+            lambda x: pt.as_tensor(1.0, dtype=x.dtype),
+            id="sqr_det_qr_Q",
         ),
         pytest.param(
             lambda x: det(pt.linalg.qr(x)[1]),

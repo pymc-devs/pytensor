@@ -460,8 +460,8 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
     [det] = node.outputs
     [x] = node.inputs
 
-    only_used_by_abs = all(
-        isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Abs)
+    sign_not_needed = all(
+        isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, (Abs, Sqr))
         for client, _ in fgraph.clients[det]
     )
 
@@ -479,7 +479,7 @@ def det_of_matrix_factorized_elsewhere(fgraph, node):
                 LU_packed = client.outputs[0]
                 new_det = matrix_diagonal_product(LU_packed)
             case _:
-                if not only_used_by_abs:
+                if not sign_not_needed:
                     continue
                 match core_op:
                     case SVD():
@@ -513,13 +513,13 @@ def det_of_factorized_matrix(fgraph, node):
     """Introduce special forms for det(decomposition(X)).
 
     Some cases are only known up to a sign change such as det(QR(X)),
-    and are only introduced if the determinant is only ever used inside an abs
+    and are only introduced if the determinant sign is discarded downstream (e.g., abs, sqr)
     """
     [det] = node.outputs
     [x] = node.inputs
 
-    only_used_by_abs = all(
-        isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Abs)
+    sign_not_needed = all(
+        isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, (Abs, Sqr))
         for client, _ in fgraph.clients[det]
     )
 
@@ -545,8 +545,8 @@ def det_of_factorized_matrix(fgraph, node):
             if not core_op.compute_uv or x is x_node.outputs[1]:
                 # x is lambda
                 new_det = prod(x, axis=-1)
-            elif only_used_by_abs:
-                # x is either U or Vt and only ever used inside an abs
+            elif sign_not_needed:
+                # x is either U or Vt and sign is discarded downstream
                 new_det = ones(x.shape[:-2], dtype=det.dtype)
         case QR():
             # if mode == "economic", Q/R may not be square and this rewrite could hide a shape error
@@ -555,11 +555,11 @@ def det_of_factorized_matrix(fgraph, node):
                 # x is R
                 new_det = matrix_diagonal_product(x)
             elif (
-                only_used_by_abs
+                sign_not_needed
                 and core_op.mode in ("economic", "full")
                 and x is x_node.outputs[0]
             ):
-                # x is Q and it's only ever used inside an abs
+                # x is Q and sign is discarded downstream
                 new_det = ones(x.shape[:-2], dtype=det.dtype)
 
     if new_det is None:
