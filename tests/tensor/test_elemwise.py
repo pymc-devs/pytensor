@@ -210,6 +210,10 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
             # Confirm the broadcasted value in the output
             assert np.array_equiv(outputs[0].storage[0], 2039)
 
+    @pytest.mark.skipif(
+        isinstance(get_default_mode().linker, NumbaLinker),
+        reason="Running with numba linker, c backend (should be) covered in another CI",
+    )
     @pytest.mark.parametrize("inplace", [True, False])
     def test_memory_leak(self, inplace):
         import gc
