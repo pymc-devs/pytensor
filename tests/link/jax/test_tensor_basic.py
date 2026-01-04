@@ -226,6 +226,8 @@ def test_tri_nonconcrete():
 
     out = ptb.tri(m, n, k)
 
+    # The actual error the user will see should be jax.errors.ConcretizationTypeError, but
+    # the error handler raises an Attribute error first, so that's what this test needs to pass
     with pytest.raises(
         NotImplementedError,
         match=re.escape(

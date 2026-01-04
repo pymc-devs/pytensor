@@ -225,12 +225,16 @@ def jax_funcify_Scan(op: Scan, node, **kwargs):
                         # Trace is shorter than buffer, this happens when we keep the initial_state
                         if init_state.ndim < buffer.ndim:
                             init_state = init_state[None]
-                        if (
-                            n_init_needed := buffer_size - trace.shape[0]
-                        ) < init_state.shape[0]:
-                            # We may not need to keep all the initial states
-                            init_state = init_state[-n_init_needed:]
-                        partial_trace = jnp.concatenate([init_state, trace], axis=0)
+
+                        n_init_needed = buffer_size - trace.shape[0]
+
+                        if n_init_needed > 0:
+                            if n_init_needed < init_state.shape[0]:
+                                # We may not need to keep all the initial states
+                                init_state = init_state[-n_init_needed:]
+                            partial_trace = jnp.concatenate([init_state, trace], axis=0)
+                        else:
+                            partial_trace = trace
                 else:
                     # NIT-SOT: Buffer is just the number of entries that should be returned
                     buffer_size = buffer
