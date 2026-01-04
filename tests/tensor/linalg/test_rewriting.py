@@ -344,7 +344,11 @@ def test_det_of_matrix_factorized_elsewhere(decomp_fn, decomp_output_idx):
     d = det(x)
 
     outputs = [decomp_var, d]
-    fn = function([x], outputs, mode=get_default_mode())
+    fn = function(
+        [x],
+        outputs,
+        mode=get_default_mode().including("det_of_matrix_factorized_elsewhere"),
+    )
 
     det_nodes = [
         node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Det)
@@ -374,7 +378,11 @@ def test_det_of_matrix_factorized_elsewhere_abs(decomp_fn, abs_needed):
     d = pt.abs(det(x))
 
     outputs = [decomp_var, d]
-    fn = function([x], outputs, mode=get_default_mode())
+    fn = function(
+        [x],
+        outputs,
+        mode=get_default_mode().including("det_of_matrix_factorized_elsewhere"),
+    )
 
     det_nodes = [
         node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Det)
