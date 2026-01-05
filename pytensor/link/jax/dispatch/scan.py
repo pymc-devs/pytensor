@@ -29,7 +29,10 @@ def jax_funcify_Scan(op: Scan, **kwargs):
 
     # Optimize inner graph (exclude any defalut rewrites that are incompatible with JAX mode)
     rewriter = (
-        get_mode(op.mode).including("jax").excluding(*JAX._optimizer.exclude).optimizer
+        get_mode(op.mode)
+        .including("jax")
+        .excluding("numba", *JAX._optimizer.exclude)
+        .optimizer
     )
     rewriter(op.fgraph)
     scan_inner_func = jax_funcify(op.fgraph, **kwargs)
