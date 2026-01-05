@@ -10,7 +10,7 @@ from pytensor.scan.op import Scan
 
 
 @jax_funcify.register(Scan)
-def jax_funcify_Scan(op: Scan, **kwargs):
+def jax_funcify_Scan(op: Scan, node, **kwargs):
     # Note: This implementation is different from the internal PyTensor Scan op.
     # In particular, we don't make use of the provided buffers for recurring outputs (MIT-SOT, SIT-SOT)
     # These buffers include the initial state and enough space to store as many intermediate results as needed.
@@ -219,6 +219,8 @@ def jax_funcify_Scan(op: Scan, **kwargs):
                     if trace.shape[0] > buffer_size:
                         # Trace is longer than buffer, keep just the last `buffer.shape[0]` entries
                         partial_trace = trace[-buffer_size:]
+                    elif trace.shape[0] == buffer_size:
+                        partial_trace = trace
                     else:
                         # Trace is shorter than buffer, this happens when we keep the initial_state
                         if init_state.ndim < buffer.ndim:
