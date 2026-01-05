@@ -74,7 +74,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        default-mode: ["C", "NUMBA", "FAST_COMPILE"]
+        # default-mode: "CVM" is actually a no-op, to make sure we're testing default config settings
+        default-mode: ["CVM", "NUMBA", "FAST_COMPILE"]
         python-version: ["3.11", "3.14"]
         os: ["ubuntu-latest"]
         install-jax: [0]
@@ -95,39 +96,39 @@ jobs:
             default-mode: "FAST_COMPILE"
         include:
           - part: ["doctests", "--doctest-modules pytensor --ignore=pytensor/misc/check_duplicate_key.py --ignore=pytensor/link --ignore=pytensor/ipython.py"]
-            default-mode: "C"
+            default-mode: "CVM"
             python-version: "3.12"
             os: "ubuntu-latest"
           - part: ["numba link", "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"]
-            default-mode: "C"
+            default-mode: "CVM"
             python-version: "3.12"
             os: "ubuntu-latest"
           - part: ["numba link slinalg", "tests/link/numba/test_slinalg.py"]
-            default-mode: "C"
+            default-mode: "CVM"
             python-version: "3.13"
             os: "ubuntu-latest"
           - part: ["jax link", "tests/link/jax"]
             install-jax: 1
-            default-mode: "C"
+            default-mode: "CVM"
             python-version: "3.14"
             os: "ubuntu-latest"
           - part: ["pytorch link", "tests/link/pytorch"]
             install-torch: 1
-            default-mode: "C"
+            default-mode: "CVM"
             python-version: "3.11"
             os: "ubuntu-latest"
           - part: ["xtensor", "tests/xtensor"]
             install-xarray: 1
-            default-mode: "C"
+            default-mode: "CVM"
             python-version: "3.14"
             os: "ubuntu-latest"
           - part: ["mlx link", "tests/link/mlx"]
             install-mlx: 1
-            default-mode: "C"
+            default-mode: "CVM"
             python-version: "3.11"
             os: "macos-15"
           - part: ["macos smoke test", "tests/tensor/test_elemwise.py tests/tensor/test_math_scipy.py tests/tensor/test_blas.py"]
-            default-mode: "C"
+            default-mode: "CVM"
             python-version: "3.14"
             os: "macos-15"
 
