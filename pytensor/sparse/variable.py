@@ -30,8 +30,8 @@ from pytensor.sparse.math import (
 )
 from pytensor.sparse.type import SparseTensorType
 from pytensor.sparse.utils import hash_from_sparse
-from pytensor.tensor import iscalar
 from pytensor.tensor.shape import shape
+from pytensor.tensor.type import iscalar
 from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
