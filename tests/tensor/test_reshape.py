@@ -61,9 +61,10 @@ def test_join_dims():
     [
         (0, pt.as_tensor([2, 3]), (2, 3, 4, 6)),
         (2, [2, 3], (6, 4, 2, 3)),
+        (-1, pt.as_tensor(6), (6, 4, 6)),
         (-1, 6, (6, 4, 6)),
     ],
-    ids=["tensor", "list", "integer"],
+    ids=["tensor list", "integer list", "tensor", "integer"],
 )
 def test_split_dims(axis, shape, expected_shape):
     rng = np.random.default_rng()
@@ -95,7 +96,7 @@ def test_split_dims(axis, shape, expected_shape):
 
 def test_split_size_zero_shape():
     x = pt.tensor("x", shape=(1, 4, 6))
-    x_split = split_dims(x, axis=0, shape=pt.as_tensor(np.zeros((0,))))
+    x_split = split_dims(x, axis=0, shape=pt.as_tensor(np.zeros((0,), dtype="int32")))
     assert x_split.type.shape == (4, 6)
 
     x_value = np.empty((1, 4, 6), dtype=config.floatX)

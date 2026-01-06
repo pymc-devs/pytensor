@@ -3,7 +3,7 @@ from itertools import pairwise
 from typing import TypeAlias
 
 import numpy as np
-from numpy.lib._array_utils_impl import normalize_axis_tuple
+from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
 
 from pytensor import Variable
 from pytensor.gradient import DisconnectedType
@@ -13,7 +13,6 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import expand_dims, infer_static_shape, join, split
-from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
 from pytensor.tensor.type import tensor
 from pytensor.tensor.variable import TensorVariable
@@ -166,10 +165,15 @@ class SplitDims(Op):
 
     def make_node(self, x, shape):
         x = as_tensor_variable(x)
-        shape = as_tensor_variable(shape, dtype=int, ndim=1)
+        shape = as_tensor_variable(shape, dtype=int)
 
         if shape.type.numpy_dtype.kind not in "iu":
             raise TypeError("shape must be an integer tensor")
+
+        if shape.type.ndim != 1:
+            raise TypeError(
+                f"shape must be a 1-D tensor, got {shape} with {shape.type.ndim} dimensions"
+            )
 
         axis = self.axis
         _, constant_shape = infer_static_shape(shape)
@@ -262,25 +266,21 @@ def split_dims(
     x = as_tensor_variable(x)
 
     if axis is None:
-        if x.ndim != 1:
+        if x.type.ndim != 1:
             raise ValueError(
                 "split_dims can only be called with axis=None for 1d inputs"
             )
         axis = 0
-
-    if isinstance(shape, int):
-        shape = [shape]
     else:
-        shape = list(shape)  # type: ignore[arg-type]
+        axis = normalize_axis_index(axis, x.ndim)
 
-    if not shape:
-        # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
-        # example when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes
-        # (3, ) and (3, 3) to (3, 4)
-        return squeeze(x, axis=axis)  # type: ignore[no-any-return]
-
-    [axis] = normalize_axis_tuple(axis, x.ndim)  # type: ignore[misc]
-    shape = as_tensor_variable(shape, dtype="int64", ndim=1)  # type: ignore[arg-type]
+    # Convert scalar shape to 1d tuple (shape,)
+    if not isinstance(shape, Sequence):
+        if isinstance(shape, TensorVariable | np.ndarray):
+            if shape.ndim == 0:
+                shape = (shape,)
+        elif isinstance(shape, int | np.integer | ScalarVariable):
+            shape = (shape,)
 
     return SplitDims(axis=axis)(x, shape)  # type: ignore[return-value]
 
