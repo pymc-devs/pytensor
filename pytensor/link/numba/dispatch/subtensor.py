@@ -10,7 +10,7 @@ from numba import types
 from numba.core.pythonapi import box
 
 import pytensor.link.numba.dispatch.basic as numba_basic
-from pytensor.graph import Type, Variable
+from pytensor.graph import Variable
 from pytensor.link.numba.cache import (
     compile_numba_function_src,
 )
@@ -29,6 +29,7 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
+    _is_position,
     indices_from_subtensor,
 )
 from pytensor.tensor.type_other import MakeSlice, NoneTypeT
@@ -158,7 +159,7 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
     def convert_indices(indices_iterator, entry):
-        if hasattr(indices_iterator, "__next__") and isinstance(entry, Type):
+        if hasattr(indices_iterator, "__next__") and _is_position(entry):
             name, var = next(indices_iterator)
             if var.ndim == 0 and isinstance(var.type, TensorType):
                 return f"{name}.item()"
@@ -171,8 +172,6 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
             )
         elif isinstance(entry, type(None)):
             return "None"
-        elif isinstance(entry, (int, np.integer)):
-            return str(entry)
         else:
             raise ValueError(f"Unknown index type: {entry}")
 
@@ -181,14 +180,12 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
     )
     index_start_idx = 1 + int(set_or_inc)
     op_indices = list(node.inputs[index_start_idx:])
-    # AdvancedSubtensor1 doesn't have idx_list, so use getattr for compatibility
     idx_list = getattr(op, "idx_list", None)
     idx_names = [f"idx_{i}" for i in range(len(op_indices))]
 
     input_names = ["x", "y", *idx_names] if set_or_inc else ["x", *idx_names]
 
     indices_iterator = iter(zip(idx_names, op_indices))
-    # AdvancedSubtensor1 doesn't use idx_list, so handle None case
     if idx_list is not None:
         indices_creation_src = tuple(
             convert_indices(indices_iterator, idx) for idx in idx_list

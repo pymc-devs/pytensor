@@ -548,10 +548,9 @@ class _tensor_py_operators:
             for inp in args
         )
 
-        # Determine if advanced indexing is needed or not.  The logic is
-        # already in `index_vars_to_types`: if it succeeds, standard indexing is
-        # used; if it fails with `AdvancedIndexingError`, advanced indexing is
-        # used
+        # Determine if advanced indexing is needed. If index_vars_to_positions
+        # succeeds, standard indexing is used; if it fails with
+        # AdvancedIndexingError, advanced indexing is used
         advanced = False
         for i, arg in enumerate(args):
             if includes_bool(arg):
@@ -560,7 +559,8 @@ class _tensor_py_operators:
 
             if arg is not None:
                 try:
-                    pt.subtensor.index_vars_to_types(arg)
+                    # Use dummy counter since we only care about the exception
+                    pt.subtensor.index_vars_to_positions(arg, [0])
                 except AdvancedIndexingError:
                     if advanced:
                         break
@@ -570,11 +570,20 @@ class _tensor_py_operators:
         if advanced:
             return pt.subtensor.advanced_subtensor(self, *args)
         else:
+            # Extract all inputs: Variables at top level, and all non-None slice components
+            def is_subtensor_input(entry):
+                # Top-level Variables are inputs
+                if isinstance(entry, Variable):
+                    return True
+                # Non-None, non-slice values in slices are inputs (literals become inputs too)
+                # But this is called recursively by get_slice_elements, so we check for non-None
+                if entry is not None and not isinstance(entry, slice):
+                    return True
+                return False
+
             return pt.subtensor.Subtensor(args)(
                 self,
-                *pt.subtensor.get_slice_elements(
-                    args, lambda entry: isinstance(entry, Variable)
-                ),
+                *pt.subtensor.get_slice_elements(args, is_subtensor_input),
             )
 
     def __setitem__(self, key, value):

@@ -6,7 +6,7 @@ import numpy as np
 import pytensor
 from pytensor import compile
 from pytensor.compile import optdb
-from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
     copy_stack_trace,
@@ -15,7 +15,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.raise_op import Assert
-from pytensor.scalar import Add, ScalarConstant, ScalarType
+from pytensor.scalar import Add, ScalarConstant
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
@@ -72,6 +72,7 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
+    _is_position,
     advanced_inc_subtensor1,
     advanced_subtensor1,
     as_index_constant,
@@ -480,9 +481,8 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
     remove_dim = []
     node_inputs_idx = 1
     for dim, elem in enumerate(idx):
-        if isinstance(elem, ScalarType):
-            # The idx is a ScalarType, ie a Type. This means the actual index
-            # is contained in node.inputs[1]
+        if _is_position(elem):
+            # The idx is a integer position.
             dim_index = node.inputs[node_inputs_idx]
             if isinstance(dim_index, ScalarConstant):
                 dim_index = dim_index.value
@@ -494,9 +494,6 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         elif isinstance(elem, slice):
             if elem != slice(None):
                 return
-        elif isinstance(elem, int | np.integer):
-            if elem in (0, -1) and node.inputs[0].broadcastable[dim]:
-                remove_dim.append(dim)
         else:
             raise TypeError("case not expected")
 
@@ -506,6 +503,39 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         all_dim = range(node.inputs[0].ndim)
         remain_dim = [x for x in all_dim if x not in remove_dim]
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
+
+
+def _idx_list_struct_equal(idx_list1, idx_list2):
+    """Check if two idx_lists have the same structure.
+
+    Positions (integers) are treated as equivalent regardless of value,
+    since positions are relative to each Op's inputs.
+    """
+    if len(idx_list1) != len(idx_list2):
+        return False
+
+    def normalize_entry(entry):
+        if isinstance(entry, int) and not isinstance(entry, bool):
+            return "POS"  # All positions are equivalent
+        elif isinstance(entry, slice):
+            return (
+                "POS"
+                if isinstance(entry.start, int) and not isinstance(entry.start, bool)
+                else entry.start,
+                "POS"
+                if isinstance(entry.stop, int) and not isinstance(entry.stop, bool)
+                else entry.stop,
+                "POS"
+                if isinstance(entry.step, int) and not isinstance(entry.step, bool)
+                else entry.step,
+            )
+        else:
+            return entry
+
+    for e1, e2 in zip(idx_list1, idx_list2):
+        if normalize_entry(e1) != normalize_entry(e2):
+            return False
+    return True
 
 
 @register_specialize
@@ -523,9 +553,17 @@ def local_subtensor_inc_subtensor(fgraph, node):
         if not x.owner.op.set_instead_of_inc:
             return
 
-        if x.owner.inputs[2:] == node.inputs[1:] and tuple(
-            x.owner.op.idx_list
-        ) == tuple(node.op.idx_list):
+        # Check structural equality of idx_lists and semantic equality of inputs
+        inc_inputs = x.owner.inputs[2:]
+        sub_inputs = node.inputs[1:]
+
+        if (
+            len(inc_inputs) == len(sub_inputs)
+            and _idx_list_struct_equal(x.owner.op.idx_list, node.op.idx_list)
+            and all(
+                equal_computations([a], [b]) for a, b in zip(inc_inputs, sub_inputs)
+            )
+        ):
             out = node.outputs[0]
             y = x.owner.inputs[1]
             # If the dtypes differ, cast y into x.dtype

@@ -8,7 +8,6 @@ from pytensor import Variable
 from pytensor.compile import optdb
 from pytensor.graph import Constant, FunctionGraph, node_rewriter, vectorize_graph
 from pytensor.graph.rewriting.basic import NodeRewriter, copy_stack_trace
-from pytensor.scalar import basic as ps
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -42,6 +41,7 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     AdvancedSubtensor1,
     Subtensor,
+    _is_position,
     _non_consecutive_adv_indexing,
     as_index_literal,
     get_canonical_form_slice,
@@ -702,13 +702,13 @@ def local_subtensor_make_vector(fgraph, node):
 
         (idx,) = idxs
 
-        if isinstance(idx, ps.ScalarType | TensorType):
-            old_idx, idx = idx, node.inputs[1]
-            assert idx.type.is_super(old_idx)
+        if _is_position(idx):
+            # idx is an integer position - get the actual index value from inputs
+            idx = node.inputs[1]
     elif isinstance(node.op, AdvancedSubtensor1):
         idx = node.inputs[1]
 
-    if isinstance(idx, int | np.integer):
+    if False:  # isinstance(idx, int | np.integer) - disabled, positions handled above
         return [x.owner.inputs[idx]]
     elif isinstance(idx, Variable):
         if idx.ndim == 0:

@@ -24,7 +24,7 @@ from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
-from pytensor.tensor import as_tensor, constant, get_vector_length, vectorize
+from pytensor.tensor import as_tensor, constant, get_vector_length, ivector, vectorize
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import exp, isinf, lt, switch
@@ -49,7 +49,7 @@ from pytensor.tensor.subtensor import (
     flip,
     get_canonical_form_slice,
     inc_subtensor,
-    index_vars_to_types,
+    index_vars_to_positions,
     indexed_result_shape,
     set_subtensor,
     slice_at_axis,
@@ -2491,29 +2491,6 @@ class TestAdvancedSubtensor:
         with pytest.raises(NotImplementedError):
             x[np.array(True)]
 
-    class MyAdvancedSubtensor(AdvancedSubtensor):
-        pass
-
-    class MyAdvancedIncSubtensor(AdvancedIncSubtensor):
-        pass
-
-    def test_vectorize_advanced_subtensor_respects_subclass(self):
-        x = matrix("x")
-        idx = lvector("idx")
-        # idx_list must contain Types for variable inputs in this iteration
-        op = self.MyAdvancedSubtensor(idx_list=[idx.type])
-
-        batch_x = tensor3("batch_x")
-        batch_idx = idx
-
-        node = op.make_node(x, idx)
-        from pytensor.tensor.subtensor import vectorize_advanced_subtensor
-
-        new_node = vectorize_advanced_subtensor(op, node, batch_x, batch_idx)
-
-        assert isinstance(new_node.op, self.MyAdvancedSubtensor)
-        assert type(new_node.op) is not AdvancedSubtensor
-
 
 class TestInferShape(utt.InferShapeTester):
     mode = get_default_mode().excluding(
@@ -3039,12 +3016,11 @@ def test_get_vector_length():
     "indices, exp_res",
     [
         ((0,), "x[0]"),
-        # TODO: The numbers should be printed
-        ((slice(None, 2),), "x[:int64]"),
-        ((slice(0, None),), "x[int64:]"),
-        ((slice(0, 2),), "x[int64:int64]"),
-        ((slice(0, 2, 2),), "x[int64:int64:int64]"),
-        ((slice(0, 2), 0, slice(0, 2)), "x[int64:int64, 2, int64:int64]"),
+        ((slice(None, 2),), "x[:2]"),
+        ((slice(0, None),), "x[0:]"),
+        ((slice(0, 2),), "x[0:2]"),
+        ((slice(0, 2, 2),), "x[0:2:2]"),
+        ((slice(0, 2), 0, slice(0, 2)), "x[0:2, 0, 0:2]"),
     ],
 )
 def test_pprint_Subtensor(indices, exp_res):
@@ -3058,7 +3034,7 @@ def test_pprint_Subtensor(indices, exp_res):
     [
         ((0,), False, "inc_subtensor(x[0], z)"),
         ((0,), True, "set_subtensor(x[0], z)"),
-        ((slice(0, 2),), True, "set_subtensor(x[int64:int64], z)"),
+        ((slice(0, 2),), True, "set_subtensor(x[0:2], z)"),
     ],
 )
 def test_pprint_IncSubtensor(indices, set_instead_of_inc, exp_res):
@@ -3068,21 +3044,60 @@ def test_pprint_IncSubtensor(indices, set_instead_of_inc, exp_res):
     assert pprint(y) == exp_res
 
 
-def test_index_vars_to_types():
+@pytest.mark.parametrize(
+    "indices, exp_res",
+    [
+        # Vector index
+        ((ivector("idx"),), "x[idx]"),
+        # Two vector indices
+        ((ivector("idx"), ivector("idx2")), "x[idx, idx2]"),
+        # Vector index with scalar (triggers advanced indexing)
+        ((ivector("idx"), 0), "x[idx, 0]"),
+        # Vector index with constant slice
+        ((ivector("idx"), slice(0, 5)), "x[idx, 0:5]"),
+    ],
+)
+def test_pprint_AdvancedSubtensor(indices, exp_res):
+    x = tensor4("x")
+    y = advanced_subtensor(x, *indices)
+    assert pprint(y) == exp_res
+
+
+@pytest.mark.parametrize(
+    "indices, set_instead_of_inc, exp_res",
+    [
+        ((ivector("idx"),), False, "inc_subtensor(x[idx], z)"),
+        ((ivector("idx"),), True, "set_subtensor(x[idx], z)"),
+        ((ivector("idx"), slice(None, 5)), True, "set_subtensor(x[idx, :5], z)"),
+    ],
+)
+def test_pprint_AdvancedIncSubtensor(indices, set_instead_of_inc, exp_res):
+    x = tensor4("x")
+    z = tensor3("z")
+    y = advanced_inc_subtensor(x, z, *indices, set_instead_of_inc=set_instead_of_inc)
+    assert pprint(y) == exp_res
+
+
+def test_index_vars_to_positions():
     x = ptb.as_tensor_variable(np.array([True, False]))
 
+    # Boolean array raises AdvancedIndexingError
     with pytest.raises(AdvancedIndexingError):
-        index_vars_to_types(x)
+        index_vars_to_positions(x, [0])
 
-    assert index_vars_to_types(1) == 1
+    # Literal int returns itself
+    assert index_vars_to_positions(1, [0]) == 1
 
-    res = index_vars_to_types(iscalar)
-    assert isinstance(res, scal.ScalarType)
+    # Scalar variable returns position and increments counter
+    counter = [0]
+    res = index_vars_to_positions(iscalar(), counter)
+    assert res == 0
+    assert counter[0] == 1
 
-    x = scal.constant(1, dtype=np.uint8)
-    assert isinstance(x.type, scal.ScalarType)
-    res = index_vars_to_types(x)
-    assert res == x.type
+    # Another scalar variable gets next position
+    res = index_vars_to_positions(iscalar(), counter)
+    assert res == 1
+    assert counter[0] == 2
 
 
 @pytest.mark.parametrize(
@@ -3367,3 +3382,37 @@ class TestBenchmarks:
         )
         fn.vm.allow_gc = gc
         benchmark(fn, x_values)
+
+
+def test_subtensor_hash_and_eq():
+    s1 = Subtensor(idx_list=[slice(None, None, None), 5])
+    s2 = Subtensor(idx_list=[slice(None, None, None), 5])
+    assert s1 == s2
+    assert hash(s1) == hash(s2)
+
+    s3 = AdvancedSubtensor(idx_list=[slice(None, None, None), 5])
+    s4 = AdvancedIncSubtensor(idx_list=[slice(0, 10, None), 5])
+    assert s3 != s4
+    assert hash(s3) != hash(s4)
+    assert s1 != s3
+
+    inc1 = IncSubtensor(
+        idx_list=[slice(None)], inplace=True, destroyhandler_tolerate_aliased=[(0, 1)]
+    )
+    inc2 = IncSubtensor(
+        idx_list=[slice(None)], inplace=True, destroyhandler_tolerate_aliased=[(0, 1)]
+    )
+    inc3 = IncSubtensor(
+        idx_list=[slice(None)], inplace=True, destroyhandler_tolerate_aliased=[(0, 2)]
+    )
+
+    assert inc1 == inc2
+    assert hash(inc1) == hash(inc2)
+    assert inc1 != inc3
+    if hash(inc1) == hash(inc3):
+        assert inc1 == inc3
+
+    s_mix1 = Subtensor(idx_list=[1, slice(None), None])
+    s_mix2 = Subtensor(idx_list=[1, slice(None), None])
+    assert s_mix1 == s_mix2
+    assert hash(s_mix1) == hash(s_mix2)
