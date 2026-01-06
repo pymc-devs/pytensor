@@ -272,10 +272,8 @@ def split_dims(
             )
         axis = 0
 
-    if isinstance(shape, int):
-        shape = [shape]
-    else:
-        shape = list(shape)  # type: ignore[arg-type]
+    if not isinstance(shape, list | tuple):
+        shape = (shape,)
 
     if not shape:
         # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
