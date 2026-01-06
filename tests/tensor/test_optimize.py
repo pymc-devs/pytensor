@@ -474,9 +474,6 @@ def test_optimize_grad_disconnected_non_numerical_inp(optimize_op):
                 return x
             raise TypeError
 
-        def dtype(self):
-            return "<U64"
-
     class SmileOrFrown(Op):
         def make_node(self, x, str_emoji):
             return Apply(self, [x, str_emoji], [x.type()])

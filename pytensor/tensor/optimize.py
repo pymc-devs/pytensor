@@ -22,6 +22,7 @@ from pytensor.graph.traversal import (
     truncated_graph_inputs,
 )
 from pytensor.scalar import ScalarType, ScalarVariable
+from pytensor.sparse.variable import SparseVariable
 from pytensor.tensor import as_tensor_variable
 from pytensor.tensor.basic import (
     atleast_2d,
@@ -224,7 +225,13 @@ class ScipyWrapperOp(Op, HasInnerGraph):
 
         return [
             [
-                (connection and input.type.dtype in ("float32", "float64"),),
+                (
+                    connection
+                    and isinstance(
+                        input, TensorVariable | ScalarVariable | SparseVariable
+                    )
+                    and input.type.dtype.startswith("float")
+                ),
                 False,
             ]
             for input, connection in zip(inputs, io_connection_pattern(inputs, [fx]))
@@ -422,7 +429,9 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
         )
 
         # Replace inner inputs (abstract dummies) with outer inputs (the actual user-provided symbols)
-        # at the solution point. From here on, the inner values should not be referenced.
+        # at the solution point. Innner arguments aren't needed anymore, delete them to avoid accidental references.
+        del inner_x
+        del inner_args
         inner_to_outer_map = dict(zip(fgraph.inputs, (x_star, *args)))
         df_dx_star, df_dtheta_star = graph_replace(
             [df_dx, df_dtheta], inner_to_outer_map
