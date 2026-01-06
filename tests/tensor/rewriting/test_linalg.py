@@ -11,6 +11,7 @@ from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph import ancestors
+from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
@@ -23,6 +24,7 @@ from pytensor.tensor.nlinalg import (
     MatrixInverse,
     MatrixPinv,
     SLogDet,
+    inv,
     matrix_inverse,
     svd,
 )
@@ -34,8 +36,11 @@ from pytensor.tensor.slinalg import (
     Solve,
     SolveBase,
     SolveTriangular,
+    TriangularInv,
     cho_solve,
     cholesky,
+    lu,
+    qr,
     solve,
     solve_triangular,
 )
@@ -1064,3 +1069,98 @@ def test_scalar_solve_to_division_rewrite(
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
+
+
+def _check_op_in_graph(fgraph, op_type, present=True):
+    """Helper to check if an Op is in a graph."""
+
+    # We use type() instead of isinstance() to avoid matching subclasses
+    # (e.g., finding TriangularInv when we're looking for MatrixInverse).
+    found = any(
+        type(node.op) is op_type
+        or (hasattr(node.op, "core_op") and type(node.op.core_op) is op_type)
+        for node in fgraph.apply_nodes
+    )
+    if present:
+        assert found, f"{op_type.__name__} not found in graph"
+    else:
+        assert not found, f"{op_type.__name__} unexpectedly found in graph"
+
+
+rewrite_cases = {
+    "lower_tag": (
+        lambda x: (setattr(x.tag, "lower_triangular", True), x)[-1],
+        lambda a: np.tril(a),
+    ),
+    "upper_tag": (
+        lambda x: (setattr(x.tag, "upper_triangular", True), x)[-1],
+        lambda a: np.triu(a),
+    ),
+    "tri": (
+        lambda x: pt.tri(x.shape[0], x.shape[1], k=0, dtype=x.dtype),
+        lambda a: np.tri(N=a.shape[0], M=a.shape[1], k=0, dtype=a.dtype),
+    ),
+    "tril": (
+        lambda x: pt.tril(x),
+        lambda a: np.tril(a),
+    ),
+    "triu": (
+        lambda x: pt.triu(x),
+        lambda a: np.triu(a),
+    ),
+    "cholesky": (
+        lambda x: cholesky(x),
+        lambda a: np.linalg.cholesky(a),
+    ),
+    "lu_L": (
+        lambda x: lu(x)[1],
+        lambda a: scipy.linalg.lu(a)[1],
+    ),
+    "lu_U": (
+        lambda x: lu(x)[2],
+        lambda a: scipy.linalg.lu(a)[2],
+    ),
+    "qr_R": (
+        lambda x: qr(x)[1],
+        lambda a: np.linalg.qr(a)[1],
+    ),
+}
+
+
+@pytest.mark.parametrize("case", rewrite_cases.keys())
+def test_inv_to_triangular_inv_rewrite(case):
+    """
+    Tests the rewrite of inv(triangular) -> TriangularInv.
+    """
+    x = matrix("x", dtype=config.floatX)
+    build_tri, _ = rewrite_cases[case]
+    x_tri = build_tri(x)
+    y_inv = inv(x_tri)
+
+    # Check graph BEFORE compilation
+    pre_compile_fgraph = FunctionGraph([x], [y_inv], clone=False)
+    _check_op_in_graph(pre_compile_fgraph, MatrixInverse, present=True)
+    _check_op_in_graph(pre_compile_fgraph, TriangularInv, present=False)
+
+    # Trigger the rewrite
+    f = function([x], y_inv)
+
+    # Check graph AFTER compilation
+    post_compile_fgraph = f.maker.fgraph
+    _check_op_in_graph(post_compile_fgraph, TriangularInv, present=True)
+    _check_op_in_graph(post_compile_fgraph, MatrixInverse, present=False)
+
+    # Check numerical correctness
+    a = np.random.rand(5, 5)
+    a = (np.dot(a, a.T) + np.eye(5)).astype(
+        config.floatX
+    )  # Make positive definite for Cholesky
+    if case == "lower_tag":
+        a = np.tril(a)
+    elif case == "upper_tag":
+        a = np.triu(a)
+    pytensor_result = f(a)
+    _, numpy_tri_func = rewrite_cases[case]
+    numpy_result = np.linalg.inv(numpy_tri_func(a))
+    atol = rtol = 1e-8 if config.floatX.endswith("64") else 1e-4
+    np.testing.assert_allclose(pytensor_result, numpy_result, rtol=rtol, atol=atol)

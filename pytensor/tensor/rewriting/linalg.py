@@ -8,6 +8,7 @@ from pytensor import Variable
 from pytensor import tensor as pt
 from pytensor.compile import optdb
 from pytensor.graph import Apply, FunctionGraph
+from pytensor.graph.basic import Constant
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     dfs_rewriter,
@@ -15,11 +16,14 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Abs, Log, Mul, Sign
+from pytensor.scalar.basic import Mul as ScalarMul
+from pytensor.scalar.basic import Sub as ScalarSub
 from pytensor.tensor.basic import (
     AllocDiag,
     ExtractDiag,
     Eye,
     TensorVariable,
+    Tri,
     concatenate,
     diag,
     diagonal,
@@ -46,12 +50,16 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.slinalg import (
+    LU,
+    QR,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
+    LUFactor,
     Solve,
     SolveBase,
     SolveTriangular,
+    TriangularInv,
     _bilinear_solve_discrete_lyapunov,
     block_diag,
     cholesky,
@@ -1017,3 +1025,94 @@ def scalar_solve_to_division(fgraph, node):
     copy_stack_trace(old_out, new_out)
 
     return [new_out]
+
+
+def _find_triangular_op(var):
+    """
+    Inspects a variable to see if it's triangular.
+
+    Returns `True` if lower-triangular, `False` if upper-triangular, otherwise `None`.
+    """
+    # Case 1: Check for an explicit tag
+    is_lower = getattr(var.tag, "lower_triangular", False)
+    is_upper = getattr(var.tag, "upper_triangular", False)
+    if is_lower or is_upper:
+        return is_lower
+
+    if not var.owner:
+        return None
+
+    op = var.owner.op
+    core_op = op.core_op if isinstance(op, Blockwise) else op
+
+    # Case 2: Check for direct creator Ops
+    if isinstance(core_op, Cholesky):
+        return core_op.lower
+
+    if isinstance(core_op, LU | LUFactor):
+        if var.owner.outputs[1] == var:
+            return True
+        if var.owner.outputs[2] == var:
+            return False
+
+    if isinstance(core_op, QR):
+        if var.owner.outputs[1] == var:
+            return False
+
+    if isinstance(core_op, Tri):
+        k_node = var.owner.inputs[2]
+        if isinstance(k_node, Constant) and k_node.data == 0:
+            return True
+
+    # Case 3: tril/triu patterns which are implemented as Mul
+    if isinstance(core_op, Elemwise) and isinstance(core_op.scalar_op, ScalarMul):
+        other_inp = next(
+            (i for i in var.owner.inputs if i != var.owner.inputs[0]), None
+        )
+
+        if other_inp is not None and other_inp.owner:
+            # Check for tril pattern: Mul(x, Tri(...))
+            if isinstance(other_inp.owner.op, Tri):
+                k_node = other_inp.owner.inputs[2]
+                if isinstance(k_node, Constant) and k_node.data == 0:
+                    return True  # It's tril
+
+            # Check for triu pattern: Mul(x, Sub(1, Tri(k=-1)))
+            sub_op = other_inp.owner.op
+            if isinstance(sub_op, Elemwise) and isinstance(sub_op.scalar_op, ScalarSub):
+                sub_inputs = other_inp.owner.inputs
+                const_one = next(
+                    (i for i in sub_inputs if isinstance(i, Constant) and i.data == 1),
+                    None,
+                )
+                tri_inp = next(
+                    (i for i in sub_inputs if i.owner and isinstance(i.owner.op, Tri)),
+                    None,
+                )
+
+                if const_one is not None and tri_inp is not None:
+                    k_node = tri_inp.owner.inputs[2]
+                    if isinstance(k_node, Constant) and k_node.data == -1:
+                        return False  # It's triu
+
+    return None
+
+
+@register_stabilize
+@node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
+def rewrite_inv_to_triangular_solve(fgraph, node):
+    """
+    This rewrite takes advantage of the fact that the inverse of a triangular
+    matrix can be computed more efficiently than the inverse of a general
+    matrix by using a triangular inv instead of a general matrix inverse.
+    """
+
+    A = node.inputs[0]
+    is_lower = _find_triangular_op(A)
+    if is_lower is None:
+        return None
+
+    new_op = TriangularInv(lower=is_lower)
+    new_inv = new_op(A)
+    copy_stack_trace(node.outputs[0], new_inv)
+    return [new_inv]

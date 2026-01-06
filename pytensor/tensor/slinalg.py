@@ -20,7 +20,7 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.nlinalg import kron, matrix_dot
+from pytensor.tensor.nlinalg import MatrixInverse, kron, matrix_dot
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix, tensor, vector
 from pytensor.tensor.variable import TensorVariable
@@ -1023,6 +1023,71 @@ def solve_triangular(
         )
     )(a, b)
     return cast(TensorVariable, ret)
+
+
+class TriangularInv(MatrixInverse):
+    """
+    Computes the inverse of a triangular matrix.
+    """
+
+    __props__ = ("lower", "on_error", "overwrite_a")
+
+    def __init__(self, lower=True, on_error="raise", overwrite_a=False):
+        self.lower = lower
+        if on_error not in ("raise", "nan"):
+            raise ValueError('on_error must be one of "raise" or "nan"')
+        self.on_error = on_error
+        self.overwrite_a = overwrite_a
+
+        if self.overwrite_a:
+            self.destroy_map = {0: [0]}
+
+    def perform(self, node, inputs, outputs):
+        (x,) = inputs
+        (z,) = outputs
+        (trtri,) = get_lapack_funcs(("trtri",), (x,))
+
+        # Check if we want to overwrite and if the input is C-contiguous
+        c_contiguous_input = self.overwrite_a and x.flags["C_CONTIGUOUS"]
+        if c_contiguous_input:
+            # Transpose C-contiguous to F-contiguous
+            x_in = x.T
+            lower_flag = not self.lower
+            overwrite_flag = True
+        else:
+            # Use original matrix and flags
+            x_in = x
+            lower_flag = self.lower
+            overwrite_flag = self.overwrite_a
+
+        # Call trtri with the potentially transposed input and correct flags
+        # Use overwrite_c (LAPACK flag for trtri) based on our logic
+        inv_maybe_transposed, info = trtri(
+            x_in, lower=lower_flag, overwrite_c=overwrite_flag
+        )
+
+        if info != 0:
+            if self.on_error == "nan":
+                z[0] = np.full_like(x, np.nan)
+                return
+            elif info > 0:
+                raise np.linalg.LinAlgError("Singular matrix")
+            elif info < 0:
+                raise ValueError(
+                    f"illegal value in {-info}-th argument of internal trtri"
+                )
+        z[0] = inv_maybe_transposed.T if c_contiguous_input else inv_maybe_transposed
+
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        """
+        Allows this Op to overwrite its input buffer with its output.
+        """
+        if not allowed_inplace_inputs:
+            return self
+
+        new_props = self._props_dict()  # type: ignore
+        new_props["overwrite_a"] = True
+        return type(self)(**new_props)
 
 
 class Solve(SolveBase):

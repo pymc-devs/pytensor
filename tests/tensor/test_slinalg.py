@@ -8,6 +8,7 @@ import pytest
 import scipy
 from scipy import linalg as scipy_linalg
 
+import pytensor
 from pytensor import function, grad
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
@@ -21,6 +22,7 @@ from pytensor.tensor.slinalg import (
     Solve,
     SolveBase,
     SolveTriangular,
+    TriangularInv,
     block_diag,
     cho_solve,
     cholesky,
@@ -1244,3 +1246,75 @@ def test_qr_grad(shape, gradient_test_case, mode, is_complex):
         utt.verify_grad(
             partial(_test_fn, case=gradient_test_case, mode=mode), [a], rng=np.random
         )
+
+
+class TestTriangularInv:
+    """
+    Tests for the `TriangularInv` `Op`.
+    """
+
+    @pytest.mark.parametrize("lower", [True, False])
+    def test_triangular_inv_op(self, lower):
+        """Tests the TriangularInv Op directly."""
+        x = matrix("x", dtype=config.floatX)
+        f = function([x], TriangularInv(lower=lower)(x))
+
+        if lower:
+            a = np.tril(np.random.rand(5, 5) + 0.1).astype(config.floatX)
+        else:
+            a = np.triu(np.random.rand(5, 5) + 0.1).astype(config.floatX)
+
+        a_inv = f(a)
+        expected_inv = np.linalg.inv(a)
+
+        # The inverse of a triangular matrix is also triangular.
+        # We should check the full matrix, not just a part of it.
+        atol = rtol = 1e-8 if config.floatX.endswith("64") else 1e-4
+        np.testing.assert_allclose(a_inv, expected_inv, rtol=rtol, atol=atol)
+
+    def test_triangular_inv_op_bad_on_error(self):
+        """Tests that a bad `on_error` value raises a ValueError."""
+        with pytest.raises(ValueError, match="on_error must be one of"):
+            TriangularInv(on_error="foo")
+
+    def test_triangular_inv_op_raise_on_error(self):
+        """Tests the default `on_error='raise'` functionality."""
+        x = matrix("x", dtype=config.floatX)
+        f_raise = function([x], TriangularInv()(x))
+
+        # Create a singular triangular matrix (zero on the diagonal)
+        a_singular = np.tril(np.random.rand(5, 5))
+        a_singular[2, 2] = 0
+        a_singular = a_singular.astype(config.floatX)
+
+        with pytest.raises(np.linalg.LinAlgError, match="Singular matrix"):
+            f_raise(a_singular)
+
+    def test_triangular_inv_op_nan_on_error(self):
+        """Tests the `on_error='nan'` functionality of the TriangularInv Op."""
+        x = matrix("x", dtype=config.floatX)
+        f_nan = function([x], TriangularInv(on_error="nan")(x))
+
+        # Create a singular triangular matrix (zero on the diagonal)
+        a_singular = np.tril(np.random.rand(5, 5))
+        a_singular[2, 2] = 0
+        a_singular = a_singular.astype(config.floatX)
+
+        res = f_nan(a_singular)
+        assert np.all(np.isnan(res))
+
+    @pytest.mark.parametrize("overwrite_a", [True, False])
+    def test_triangular_inv_op_inplace(self, overwrite_a):
+        """Tests the TriangularInv Op directly."""
+        x = matrix("x", dtype=config.floatX)
+        f = function(
+            [pytensor.In(x, mutable=overwrite_a)],
+            TriangularInv(overwrite_a=overwrite_a)(x),
+            accept_inplace=True,
+        )
+
+        a = np.tril(np.random.rand(5, 5) + 0.1).astype(config.floatX)
+        a_copy = a.copy()
+        f(a)
+
+        assert overwrite_a == (not np.allclose(a, a_copy))
