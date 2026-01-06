@@ -6,6 +6,7 @@ import tests.unittest_tools as utt
 from pytensor import config, function
 from pytensor import tensor as pt
 from pytensor.graph import rewrite_graph, vectorize_graph
+from pytensor.graph.op import io_connection_pattern
 from pytensor.tensor.reshape import (
     _analyze_axes_list,
     join_dims,
@@ -289,3 +290,12 @@ class TestPack:
 
         for input_val, output_val in zip(input_dict.values(), output_vals, strict=True):
             np.testing.assert_allclose(input_val, output_val)
+
+
+def test_unpack_connection():
+    x = pt.vector("x")
+    d0 = pt.scalar("d0", dtype=int)
+    d1 = pt.scalar("d1", dtype=int)
+    x0, x1 = pt.unpack(x, axes=None, packed_shapes=[d0, d1])
+    out = x0.sum() + x1.sum()
+    assert io_connection_pattern([x, d0, d1], [out]) == [[True], [False], [False]]
