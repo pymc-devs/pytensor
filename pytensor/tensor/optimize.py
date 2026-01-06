@@ -219,19 +219,16 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         not differentiable, so it is never connected. The optimized variable is connected only to inputs that are
         both connected to the objective function and of float dtype.
         """
-        if self._connection_pattern is not None:
-            return self._connection_pattern
-
         fx = self.fgraph.outputs[0]
         inputs = self.fgraph.inputs
 
-        connections = [
-            [connection and input.type.dtype in ("float32", "float64"), False]
+        return [
+            [
+                (connection and input.type.dtype in ("float32", "float64"),),
+                False,
+            ]
             for input, connection in zip(inputs, io_connection_pattern(inputs, [fx]))
         ]
-        self._connection_pattern = connections
-
-        return connections
 
 
 class ScipyScalarWrapperOp(ScipyWrapperOp):
@@ -496,7 +493,6 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
-        self._connection_pattern = None
 
     def __str__(self):
         return f"{self.__class__.__name__}(method={self.method})"
@@ -633,7 +629,6 @@ class MinimizeOp(ScipyVectorWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
-        self._connection_pattern = None
 
     def __str__(self):
         str_args = ", ".join(
@@ -831,7 +826,6 @@ class RootScalarOp(ScipyScalarWrapperOp):
 
         self._fn = None
         self._fn_wrapped = None
-        self._connection_pattern = None
 
     def __str__(self):
         str_args = ", ".join(
@@ -978,7 +972,6 @@ class RootOp(ScipyVectorWrapperOp):
         self.optimizer_kwargs = optimizer_kwargs if optimizer_kwargs is not None else {}
         self._fn = None
         self._fn_wrapped = None
-        self._connection_pattern = None
 
     def __str__(self):
         str_args = ", ".join(
