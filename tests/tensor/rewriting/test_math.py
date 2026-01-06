@@ -2016,6 +2016,29 @@ class TestExpLog:
         np.testing.assert_almost_equal(f(data_valid), expected)
         assert np.all(np.isnan(f(data_invalid)))
 
+    def test_log1mexp_log1mexp(self):
+        # log1mexp(log1mexp(x)) -> x
+        data_valid = -np.random.random((4, 3)).astype("float32")
+        data_valid[0, 0] = 0  # edge case
+        data_invalid = data_valid + 1.1
+
+        x = fmatrix()
+        f = function([x], log1mexp(log1mexp(x)), mode=self.mode.excluding("inplace"))
+        assert equal_computations(
+            f.maker.fgraph.outputs,
+            [
+                pt.switch(
+                    x <= np.array([[0]], dtype=np.int8),
+                    x,
+                    np.array([[np.nan]], dtype=np.float32),
+                )
+            ],
+        )
+
+        expected = data_valid
+        np.testing.assert_almost_equal(f(data_valid), expected)
+        assert np.all(np.isnan(f(data_invalid)))
+
     @pytest.mark.parametrize(
         ["nested_expression", "expected_switches"],
         [
