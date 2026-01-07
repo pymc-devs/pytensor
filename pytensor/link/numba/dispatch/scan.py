@@ -11,10 +11,10 @@ from pytensor.compile.mode import NUMBA, get_mode
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    create_tuple_string,
     numba_funcify_and_cache_key,
     register_funcify_and_cache_key,
 )
+from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
 from pytensor.scan.op import Scan
 from pytensor.tensor.type import TensorType
 
