@@ -38,13 +38,10 @@ from pytensor.link.jax.dispatch import jax_funcify
 
 
 try:
-    import tensorflow_probability  # noqa: F401
-    from jax.interpreters.xla import (
-        pytype_aval_mappings,  # This is what's missing in new JAX  # noqa: F401
-    )
+    pass
 
     TFP_INSTALLED = True
-except (ModuleNotFoundError, AttributeError, ImportError):
+except ModuleNotFoundError:
     TFP_INSTALLED = False
 
 
@@ -163,7 +160,6 @@ def test_tfp_ops(op, test_values):
     compare_jax_and_py(inputs, [output], test_values)
 
 
-@pytest.mark.skipif(not TFP_INSTALLED, reason="Test requires tensorflow-probability")
 def test_betaincinv():
     a = vector("a", dtype="float64")
     b = vector("b", dtype="float64")
@@ -181,7 +177,6 @@ def test_betaincinv():
     )
 
 
-@pytest.mark.skipif(not TFP_INSTALLED, reason="Test requires tensorflow-probability")
 def test_gammaincinv():
     k = vector("k", dtype="float64")
     x = vector("x", dtype="float64")
@@ -190,7 +185,6 @@ def test_gammaincinv():
     compare_jax_and_py([k, x], [out], [np.array([5.5, 7.0]), np.array([0.25, 0.7])])
 
 
-@pytest.mark.skipif(not TFP_INSTALLED, reason="Test requires tensorflow-probability")
 def test_gammainccinv():
     k = vector("k", dtype="float64")
     x = vector("x", dtype="float64")
