@@ -5,6 +5,7 @@ from pytensor import function
 from pytensor.tensor import lvector, tensor, tensor3
 from pytensor.tensor.basic import Alloc, ARange, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
+from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.nlinalg import SVD, Det
 from pytensor.tensor.slinalg import Cholesky, cholesky
 from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
@@ -80,3 +81,12 @@ def test_blockwise_alloc():
     assert out.type.ndim == 3
 
     compare_numba_and_py([val], [out], [np.arange(5)], eval_obj_mode=False)
+
+
+def test_blockwise_scalar_dimshuffle():
+    x = lvector("x")
+    blockwise_scalar_ds = Blockwise(
+        DimShuffle(input_ndim=0, new_order=["x", "x"]), signature="()->(1,1)"
+    )
+    out = blockwise_scalar_ds(x)
+    compare_numba_and_py([x], [out], [np.arange(9)], eval_obj_mode=False)

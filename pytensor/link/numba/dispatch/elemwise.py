@@ -466,6 +466,16 @@ def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
 
         return squeeze_to_0d
 
+    elif op.input_ndim == 0:
+        # DimShuffle can only be an expand_dims or a no_op
+        # This branch uses asarray in case we get a scalar due to https://github.com/numba/numba/issues/10358
+        new_shape = shape_template
+        new_strides = strides_template
+
+        @numba_basic.numba_njit
+        def dimshuffle(x):
+            return as_strided(np.asarray(x), shape=new_shape, strides=new_strides)
+
     else:
 
         @numba_basic.numba_njit
@@ -490,7 +500,7 @@ def numba_funcify_DimShuffle(op: DimShuffle, node, **kwargs):
 
             return as_strided(x, shape=new_shape, strides=new_strides)
 
-    cache_version = 1
+    cache_version = 2
     return dimshuffle, cache_version
 
 
