@@ -171,40 +171,6 @@ def create_numba_signature(
         return numba.types.void(*input_types)
 
 
-def create_tuple_creator(f, n):
-    """Construct a compile-time ``tuple``-comprehension-like loop.
-
-    See https://github.com/numba/numba/issues/2771#issuecomment-414358902
-    """
-    warnings.warn(
-        "create_tuple_creator is deprecated and will be removed in a future release",
-        FutureWarning,
-    )
-
-    assert n > 0
-
-    f = numba_njit(f)
-
-    @numba_njit
-    def creator(args):
-        return (f(0, *args),)
-
-    for i in range(1, n):
-
-        @numba_njit
-        def creator(args, creator=creator, i=i):
-            return (*creator(args), f(i, *args))
-
-    return numba_njit(lambda *args: creator(args))
-
-
-def create_tuple_string(x):
-    if len(x) == 1:
-        return f"({x[0]},)"
-    else:
-        return f"({', '.join(x)})"
-
-
 @numba.extending.intrinsic
 def direct_cast(typingctx, val, typ):
     if isinstance(typ, numba.types.TypeRef):

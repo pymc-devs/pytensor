@@ -6,10 +6,10 @@ import numpy as np
 from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    create_tuple_string,
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
+from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,

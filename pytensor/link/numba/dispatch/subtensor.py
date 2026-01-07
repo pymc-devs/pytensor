@@ -15,12 +15,12 @@ from pytensor.link.numba.cache import (
     compile_numba_function_src,
 )
 from pytensor.link.numba.dispatch.basic import (
-    create_tuple_string,
     generate_fallback_impl,
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
+from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
 from pytensor.tensor import TensorType
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
