@@ -19,6 +19,7 @@ from pytensor.tensor import (
     dmatrix,
     log,
     matrices,
+    matrix,
     ones_like,
     scalar,
     tensor,
@@ -350,6 +351,32 @@ def test_blockwise_infer_core_shape():
     b_test = np.zeros(b.type.shape, dtype=b.type.dtype)
     assert tuple(c_shape_fn(a_test, b_test)) == (5, 7)
     assert tuple(d_shape_fn(a_test, b_test)) == (5, 0)
+
+
+def test_infer_shape_literals():
+    # Define a CoreOp whose infer_shape is (symbolic operation on itself, literal)
+    # Then tell Blockwise that the first dimension is constant.
+    # The Op has no perform method, so it will fail to evaluate if the infer_shape of that dimension isn't ignored
+    class TestCoreOp(Op):
+        def make_node(self, x):
+            assert x.type.ndim == 0
+            return Apply(self, [x], [matrix()])
+
+        def perform(self, node, inputs, outputs):
+            raise NotImplementedError()
+
+        def infer_shape(self, fgraph, node, input_shapes):
+            y = node.outputs[0]
+            # Apparently it's valid to return integers in infer_shape.
+            # DimShuffle does this. Modify test if that is no longer allowed.
+            return [(y[0][0].astype(int), 3)]
+
+    op = Blockwise(TestCoreOp(), signature="()->(2,a)")
+    x = scalar("x")
+    y = op(x)
+
+    fn = function([x], y.shape)
+    assert tuple(fn(0)) == (2, 3)
 
 
 class BlockwiseOpTester:
