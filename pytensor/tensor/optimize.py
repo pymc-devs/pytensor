@@ -9,6 +9,7 @@ from pytensor.compile.function import function
 from pytensor.gradient import DisconnectedType, grad, jacobian
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.null_type import NullType
 from pytensor.graph.op import (
     ComputeMapType,
     HasInnerGraph,
@@ -222,19 +223,28 @@ class ScipyWrapperOp(Op, HasInnerGraph):
         """
         fx = self.fgraph.outputs[0]
         inputs = self.fgraph.inputs
+        grads = grad(
+            fx.sum(),
+            inputs,
+            disconnected_inputs="ignore",
+            null_gradients="return",
+            return_disconnected="disconnected",
+        )
 
         return [
             [
                 (
                     connection
+                    and not isinstance(g.type, DisconnectedType)
                     and isinstance(
                         input, TensorVariable | ScalarVariable | SparseVariable
                     )
-                    and input.type.dtype.startswith("float")
                 ),
                 False,
             ]
-            for input, connection in zip(inputs, io_connection_pattern(inputs, [fx]))
+            for input, g, connection in zip(
+                inputs, grads, io_connection_pattern(inputs, [fx])
+            )
         ]
 
 
@@ -282,28 +292,30 @@ class ScipyScalarWrapperOp(ScipyWrapperOp):
         fgraph = self.fgraph
         inner_x, *inner_args = self.inner_inputs
         inner_fx = self.inner_outputs[0]
-        connection_pattern = [pattern[0] for pattern in self.connection_pattern()]
-        arg_connection_pattern = connection_pattern[1:]
 
         if is_minimization:
             inner_fx = grad(inner_fx, inner_x)
 
-        inner_args_to_diff = []
-        outer_args_to_diff = []
-        for inner_arg, outer_arg, is_connected in zip(
-            inner_args, args, arg_connection_pattern
-        ):
-            if is_connected:
-                inner_args_to_diff.append(inner_arg)
-                outer_args_to_diff.append(outer_arg)
-
-        if len(args) > 0 and not inner_args_to_diff:
-            # No differentiable arguments, return disconnected gradients
-            return [DisconnectedType()() for _ in args]
-
-        df_dx, *df_dthetas = grad(
-            inner_fx, [inner_x, *inner_args_to_diff], disconnected_inputs="ignore"
+        df_dx, *arg_grads = grad(
+            inner_fx,
+            [inner_x, *inner_args],
+            disconnected_inputs="ignore",
+            null_gradients="return",
+            return_disconnected="disconnected",
         )
+
+        outer_arg_grad_map = dict(zip(args, arg_grads))
+        valid_args_and_grads = [
+            (arg, g)
+            for arg, g in outer_arg_grad_map.items()
+            if not isinstance(g.type, DisconnectedType | NullType)
+        ]
+
+        if len(valid_args_and_grads) == 0:
+            # No differentiable arguments, return disconnected gradients
+            return arg_grads
+
+        outer_args_to_diff, df_dthetas = zip(*valid_args_and_grads)
 
         replace = dict(zip(fgraph.inputs, (x_star, *args), strict=True))
         df_dx_star, *df_dthetas_stars = graph_replace(
@@ -315,7 +327,7 @@ class ScipyScalarWrapperOp(ScipyWrapperOp):
         grad_wrt_args = [
             (-arg_to_grad[arg] / df_dx_star) * output_grad
             if arg in arg_to_grad
-            else DisconnectedType()()
+            else outer_arg_grad_map[arg]
             for arg in args
         ]
 
@@ -390,28 +402,32 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
         inner_x, *inner_args = self.inner_inputs
         implicit_f = self.inner_outputs[0]
 
+        df_dx, *arg_grads = grad(
+            implicit_f.sum(),
+            [inner_x, *inner_args],
+            disconnected_inputs="ignore",
+            null_gradients="return",
+            return_disconnected="disconnected",
+        )
+
+        inner_args_to_diff = [
+            arg
+            for arg, g in zip(inner_args, arg_grads)
+            if not isinstance(g.type, DisconnectedType | NullType)
+        ]
+
+        if len(inner_args_to_diff) == 0:
+            # No differentiable arguments, return disconnected/null gradients
+            return arg_grads
+
+        outer_args_to_diff = [
+            arg
+            for inner_arg, arg in zip(inner_args, args)
+            if inner_arg in inner_args_to_diff
+        ]
+
         if is_minimization:
             implicit_f = grad(implicit_f, inner_x)
-
-        connection_pattern = [pattern[0] for pattern in self.connection_pattern()]
-        arg_connection_pattern = connection_pattern[1:]
-
-        # There might be non-differentiable arguments along the compute path from the objective to the inputs. Notably,
-        # integers often arise due to Shape ops called by pack/unpack. These will be given DisconnectedType gradients
-        # by this function, but first need to be filtered out to avoid errors during jacobian computation.
-        inner_args_to_diff = []
-        outer_args_to_diff = []
-
-        for inner_arg, outer_arg, is_connected in zip(
-            inner_args, args, arg_connection_pattern
-        ):
-            if is_connected:
-                inner_args_to_diff.append(inner_arg)
-                outer_args_to_diff.append(outer_arg)
-
-        if len(args) > 0 and not inner_args_to_diff:
-            # No differentiable arguments, return disconnected gradients
-            return [DisconnectedType()() for _ in args]
 
         # Gradients are computed using the inner graph of the optimization op, not the actual inputs/outputs of the op.
         packed_inner_args, packed_arg_shapes, implicit_f = (
