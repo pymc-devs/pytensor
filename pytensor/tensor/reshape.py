@@ -272,7 +272,7 @@ def split_dims(
             )
         axis = 0
 
-    if not isinstance(shape, list | tuple):
+    if not isinstance(shape, Sequence):
         shape = (shape,)
 
     if not shape:
