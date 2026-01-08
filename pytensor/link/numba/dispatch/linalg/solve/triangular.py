@@ -15,13 +15,12 @@ from pytensor.link.numba.dispatch.linalg.utils import (
     _check_dtypes_match,
     _check_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
-    _solve_check,
     _trans_char_to_int,
 )
 
 
 def _solve_triangular(
-    A, B, trans=0, lower=False, unit_diagonal=False, b_ndim=1, overwrite_b=False
+    A, B, trans=0, lower=False, unit_diagonal=False, overwrite_b=False
 ):
     """
     Thin wrapper around scipy.linalg.solve_triangular.
@@ -39,11 +38,12 @@ def _solve_triangular(
         lower=lower,
         unit_diagonal=unit_diagonal,
         overwrite_b=overwrite_b,
+        check_finite=False,
     )
 
 
 @overload(_solve_triangular)
-def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b):
+def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
     ensure_lapack()
 
     _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve_triangular")
@@ -57,12 +57,10 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
             "This function is not expected to work with complex numbers yet"
         )
 
-    def impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b):
+    def impl(A, B, trans, lower, unit_diagonal, overwrite_b):
         _N = np.int32(A.shape[-1])
         _solve_check_input_shapes(A, B)
 
-        # Seems weird to not use the b_ndim input directly, but when I did that Numba complained that the output type
-        # could potentially be 3d (it didn't understand b_ndim was always equal to B.ndim)
         B_is_1d = B.ndim == 1
 
         if A.flags.f_contiguous or (A.flags.c_contiguous and trans in (0, 1)):
@@ -106,8 +104,8 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, b_ndim, overwrite_b
             LDB,
             INFO,
         )
-
-        _solve_check(int_ptr_to_val(LDA), int_ptr_to_val(INFO))
+        if int_ptr_to_val(INFO) != 0:
+            B_copy = np.full_like(B_copy, np.nan)
 
         if B_is_1d:
             return B_copy[..., 0]

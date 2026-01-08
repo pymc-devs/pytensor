@@ -79,11 +79,12 @@ def lu_factor_impl(
     _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="lu_factor")
 
     def impl(A: np.ndarray, overwrite_a: bool = False) -> tuple[np.ndarray, np.ndarray]:
-        A_copy, IPIV, INFO = _getrf(A, overwrite_a=overwrite_a)
+        A_copy, IPIV, info = _getrf(A, overwrite_a=overwrite_a)
         IPIV -= 1  # LAPACK uses 1-based indexing, convert to 0-based
 
-        if INFO != 0:
-            raise np.linalg.LinAlgError("LU decomposition failed")
+        if info != 0:
+            A_copy = np.full_like(A_copy, np.nan)
+
         return A_copy, IPIV
 
     return impl

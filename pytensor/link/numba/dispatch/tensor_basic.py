@@ -181,8 +181,8 @@ def numba_funcify_ExtractDiag(op, node, **kwargs):
                 out[..., i] = new_entry
             return out
 
-    cache_key = 1
-    return extract_diag, cache_key
+    cache_version = 1
+    return extract_diag, cache_version
 
 
 @register_funcify_default_op_cache_key(Eye)

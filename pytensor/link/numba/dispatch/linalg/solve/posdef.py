@@ -11,13 +11,11 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
     int_ptr_to_val,
     val_to_int_ptr,
 )
-from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
 from pytensor.link.numba.dispatch.linalg.solve.utils import _solve_check_input_shapes
 from pytensor.link.numba.dispatch.linalg.utils import (
     _check_dtypes_match,
     _check_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
-    _solve_check,
 )
 
 
@@ -27,8 +25,6 @@ def _posv(
     lower: bool,
     overwrite_a: bool,
     overwrite_b: bool,
-    check_finite: bool,
-    transposed: bool,
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """
     Placeholder for solving a linear system with a positive-definite matrix; used by linalg.solve.
@@ -43,10 +39,8 @@ def posv_impl(
     lower: bool,
     overwrite_a: bool,
     overwrite_b: bool,
-    check_finite: bool,
-    transposed: bool,
 ) -> Callable[
-    [np.ndarray, np.ndarray, bool, bool, bool, bool, bool],
+    [np.ndarray, np.ndarray, bool, bool, bool],
     tuple[np.ndarray, np.ndarray, int],
 ]:
     ensure_lapack()
@@ -62,8 +56,6 @@ def posv_impl(
         lower: bool,
         overwrite_a: bool,
         overwrite_b: bool,
-        check_finite: bool,
-        transposed: bool,
     ) -> tuple[np.ndarray, np.ndarray, int]:
         _solve_check_input_shapes(A, B)
 
@@ -115,60 +107,12 @@ def posv_impl(
     return impl
 
 
-def _pocon(A: np.ndarray, anorm: float) -> tuple[np.ndarray, int]:
-    """
-    Placeholder for computing the condition number of a cholesky-factorized positive-definite matrix. Used by
-    linalg.solve when assume_a = "pos".
-    """
-    return  # type: ignore
-
-
-@overload(_pocon)
-def pocon_impl(
-    A: np.ndarray, anorm: float
-) -> Callable[[np.ndarray, float], tuple[np.ndarray, int]]:
-    ensure_lapack()
-    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="pocon")
-    dtype = A.dtype
-    numba_pocon = _LAPACK().numba_xpocon(dtype)
-
-    def impl(A: np.ndarray, anorm: float):
-        _N = np.int32(A.shape[-1])
-        A_copy = _copy_to_fortran_order(A)
-
-        UPLO = val_to_int_ptr(ord("L"))
-        N = val_to_int_ptr(_N)
-        LDA = val_to_int_ptr(_N)
-        ANORM = np.array(anorm, dtype=dtype)
-        RCOND = np.empty(1, dtype=dtype)
-        WORK = np.empty(3 * _N, dtype=dtype)
-        IWORK = np.empty(_N, dtype=np.int32)
-        INFO = val_to_int_ptr(0)
-
-        numba_pocon(
-            UPLO,
-            N,
-            A_copy.ctypes,
-            LDA,
-            ANORM.ctypes,
-            RCOND.ctypes,
-            WORK.ctypes,
-            IWORK.ctypes,
-            INFO,
-        )
-
-        return RCOND, int_ptr_to_val(INFO)
-
-    return impl
-
-
 def _solve_psd(
     A: np.ndarray,
     B: np.ndarray,
     lower: bool,
     overwrite_a: bool,
     overwrite_b: bool,
-    check_finite: bool,
     transposed: bool,
 ):
     """Thin wrapper around scipy.linalg.solve for positive-definite matrices. Used as an overload target for numba to
@@ -179,7 +123,7 @@ def _solve_psd(
         lower=lower,
         overwrite_a=overwrite_a,
         overwrite_b=overwrite_b,
-        check_finite=check_finite,
+        check_finite=False,
         transposed=transposed,
         assume_a="pos",
     )
@@ -192,9 +136,8 @@ def solve_psd_impl(
     lower: bool,
     overwrite_a: bool,
     overwrite_b: bool,
-    check_finite: bool,
     transposed: bool,
-) -> Callable[[np.ndarray, np.ndarray, bool, bool, bool, bool, bool], np.ndarray]:
+) -> Callable[[np.ndarray, np.ndarray, bool, bool, bool, bool], np.ndarray]:
     ensure_lapack()
     _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
     _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
@@ -206,18 +149,14 @@ def solve_psd_impl(
         lower: bool,
         overwrite_a: bool,
         overwrite_b: bool,
-        check_finite: bool,
         transposed: bool,
     ) -> np.ndarray:
         _solve_check_input_shapes(A, B)
 
-        C, x, info = _posv(
-            A, B, lower, overwrite_a, overwrite_b, check_finite, transposed
-        )
-        _solve_check(A.shape[-1], info)
+        _C, x, info = _posv(A, B, lower, overwrite_a, overwrite_b)
 
-        rcond, info = _pocon(C, _xlange(A))
-        _solve_check(A.shape[-1], info=info, lamch=True, rcond=rcond)
+        if info != 0:
+            x = np.full_like(x, np.nan)
 
         return x
 

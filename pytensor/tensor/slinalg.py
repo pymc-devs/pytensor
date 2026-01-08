@@ -6,7 +6,7 @@ from typing import Literal, cast
 
 import numpy as np
 import scipy.linalg as scipy_linalg
-from scipy.linalg import LinAlgError, LinAlgWarning, get_lapack_funcs
+from scipy.linalg import get_lapack_funcs
 
 import pytensor
 from pytensor import ifelse
@@ -14,7 +14,7 @@ from pytensor import tensor as pt
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
-from pytensor.raise_op import Assert
+from pytensor.raise_op import Assert, CheckAndRaise
 from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
@@ -32,22 +32,16 @@ logger = logging.getLogger(__name__)
 class Cholesky(Op):
     # TODO: LAPACK wrapper with in-place behavior, for solve also
 
-    __props__ = ("lower", "check_finite", "on_error", "overwrite_a")
+    __props__ = ("lower", "overwrite_a")
     gufunc_signature = "(m,m)->(m,m)"
 
     def __init__(
         self,
         *,
         lower: bool = True,
-        check_finite: bool = False,
-        on_error: Literal["raise", "nan"] = "raise",
         overwrite_a: bool = False,
     ):
         self.lower = lower
-        self.check_finite = check_finite
-        if on_error not in ("raise", "nan"):
-            raise ValueError('on_error must be one of "raise" or ""nan"')
-        self.on_error = on_error
         self.overwrite_a = overwrite_a
 
         if self.overwrite_a:
@@ -77,13 +71,6 @@ class Cholesky(Op):
             out[0] = np.empty_like(x, dtype=potrf.dtype)
             return
 
-        if self.check_finite and not np.isfinite(x).all():
-            if self.on_error == "nan":
-                out[0] = np.full(x.shape, np.nan, dtype=potrf.dtype)
-                return
-            else:
-                raise ValueError("array must not contain infs or NaNs")
-
         # Squareness check
         if x.shape[0] != x.shape[1]:
             raise ValueError(
@@ -104,17 +91,8 @@ class Cholesky(Op):
         c, info = potrf(x, lower=lower, overwrite_a=overwrite_a, clean=True)
 
         if info != 0:
-            if self.on_error == "nan":
-                out[0] = np.full(x.shape, np.nan, dtype=node.outputs[0].type.dtype)
-            elif info > 0:
-                raise scipy_linalg.LinAlgError(
-                    f"{info}-th leading minor of the array is not positive definite"
-                )
-            elif info < 0:
-                raise ValueError(
-                    f"LAPACK reported an illegal value in {-info}-th argument "
-                    f'on entry to "POTRF".'
-                )
+            c[...] = np.nan
+            out[0] = c
         else:
             # Transpose result if input was transposed
             out[0] = c.T if c_contiguous_input else c
@@ -134,13 +112,6 @@ class Cholesky(Op):
 
         dz = gradients[0]
         chol_x = outputs[0]
-
-        # Replace the cholesky decomposition with 1 if there are nans
-        # or solve_upper_triangular will throw a ValueError.
-        if self.on_error == "nan":
-            ok = ~ptm.any(ptm.isnan(chol_x))
-            chol_x = ptb.switch(ok, chol_x, 1)
-            dz = ptb.switch(ok, dz, 1)
 
         # deal with upper triangular by converting to lower triangular
         if not self.lower:
@@ -165,10 +136,7 @@ class Cholesky(Op):
         else:
             grad = ptb.triu(s + s.T) - ptb.diag(ptb.diagonal(s))
 
-        if self.on_error == "nan":
-            return [ptb.switch(ok, grad, np.nan)]
-        else:
-            return [grad]
+        return [grad]
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if not allowed_inplace_inputs:
@@ -182,9 +150,9 @@ def cholesky(
     x: "TensorLike",
     lower: bool = True,
     *,
-    check_finite: bool = False,
+    check_finite: bool = True,
     overwrite_a: bool = False,
-    on_error: Literal["raise", "nan"] = "raise",
+    on_error: Literal["raise", "nan"] = "nan",
 ):
     """
     Return a triangular matrix square root of positive semi-definite `x`.
@@ -196,8 +164,8 @@ def cholesky(
     x: tensor_like
     lower : bool, default=True
         Whether to return the lower or upper cholesky factor
-    check_finite : bool, default=False
-        Whether to check that the input matrix contains only finite numbers.
+    check_finite : bool
+        Unused by PyTensor. PyTensor will return nan if the operation fails.
     overwrite_a: bool, ignored
         Whether to use the same memory for the output as `a`. This argument is ignored, and is present here only
         for consistency with scipy.linalg.cholesky.
@@ -228,10 +196,19 @@ def cholesky(
         assert np.allclose(L_value @ L_value.T, x_value)
 
     """
+    res = Blockwise(Cholesky(lower=lower))(x)
 
-    return Blockwise(
-        Cholesky(lower=lower, on_error=on_error, check_finite=check_finite)
-    )(x)
+    if on_error == "raise":
+        # For back-compatibility
+        warnings.warn(
+            'Cholesky on_raise == "raise" is deprecated. The operation will return nan when in fails. Setting this argument will fail in the future',
+            FutureWarning,
+        )
+        res = CheckAndRaise(np.linalg.LinAlgError, "Matrix is not positive definite")(
+            res, ~ptm.isnan(res).any()
+        )
+
+    return res
 
 
 class SolveBase(Op):
@@ -239,7 +216,6 @@ class SolveBase(Op):
 
     __props__: tuple[str, ...] = (
         "lower",
-        "check_finite",
         "b_ndim",
         "overwrite_a",
         "overwrite_b",
@@ -249,13 +225,11 @@ class SolveBase(Op):
         self,
         *,
         lower=False,
-        check_finite=True,
         b_ndim,
         overwrite_a=False,
         overwrite_b=False,
     ):
         self.lower = lower
-        self.check_finite = check_finite
 
         assert b_ndim in (1, 2)
         self.b_ndim = b_ndim
@@ -358,7 +332,6 @@ def _default_b_ndim(b, b_ndim):
 class CholeskySolve(SolveBase):
     __props__ = (
         "lower",
-        "check_finite",
         "b_ndim",
         "overwrite_b",
     )
@@ -366,7 +339,6 @@ class CholeskySolve(SolveBase):
     def __init__(self, **kwargs):
         if kwargs.get("overwrite_a", False):
             raise ValueError("overwrite_a is not supported for CholeskySolve")
-        kwargs.setdefault("lower", True)
         super().__init__(**kwargs)
 
     def make_node(self, *inputs):
@@ -387,9 +359,6 @@ class CholeskySolve(SolveBase):
 
         (potrs,) = get_lapack_funcs(("potrs",), (c, b))
 
-        if self.check_finite and not (np.isfinite(c).all() and np.isfinite(b).all()):
-            raise ValueError("array must not contain infs or NaNs")
-
         if c.shape[0] != c.shape[1]:
             raise ValueError("The factored matrix c is not square.")
         if c.shape[1] != b.shape[0]:
@@ -402,7 +371,7 @@ class CholeskySolve(SolveBase):
 
         x, info = potrs(c, b, lower=self.lower, overwrite_b=self.overwrite_b)
         if info != 0:
-            raise ValueError(f"illegal value in {-info}th argument of internal potrs")
+            x[...] = np.nan
 
         output_storage[0][0] = x
 
@@ -423,7 +392,6 @@ def cho_solve(
     c_and_lower: tuple[TensorLike, bool],
     b: TensorLike,
     *,
-    check_finite: bool = True,
     b_ndim: int | None = None,
 ):
     """Solve the linear equations A x = b, given the Cholesky factorization of A.
@@ -434,33 +402,26 @@ def cho_solve(
         Cholesky factorization of a, as given by cho_factor
     b : TensorLike
         Right-hand side
-    check_finite : bool, optional
-        Whether to check that the input matrices contain only finite numbers.
-        Disabling may give a performance gain, but may result in problems
-        (crashes, non-termination) if the inputs do contain infinities or NaNs.
+    check_finite : bool
+        Unused by PyTensor. PyTensor will return nan if the operation fails.
     b_ndim : int
         Whether the core case of b is a vector (1) or matrix (2).
         This will influence how batched dimensions are interpreted.
     """
     A, lower = c_and_lower
     b_ndim = _default_b_ndim(b, b_ndim)
-    return Blockwise(
-        CholeskySolve(lower=lower, check_finite=check_finite, b_ndim=b_ndim)
-    )(A, b)
+    return Blockwise(CholeskySolve(lower=lower, b_ndim=b_ndim))(A, b)
 
 
 class LU(Op):
     """Decompose a matrix into lower and upper triangular matrices."""
 
-    __props__ = ("permute_l", "overwrite_a", "check_finite", "p_indices")
+    __props__ = ("permute_l", "overwrite_a", "p_indices")
 
-    def __init__(
-        self, *, permute_l=False, overwrite_a=False, check_finite=True, p_indices=False
-    ):
+    def __init__(self, *, permute_l=False, overwrite_a=False, p_indices=False):
         if permute_l and p_indices:
             raise ValueError("Only one of permute_l and p_indices can be True")
         self.permute_l = permute_l
-        self.check_finite = check_finite
         self.p_indices = p_indices
         self.overwrite_a = overwrite_a
 
@@ -523,7 +484,6 @@ class LU(Op):
             A,
             permute_l=self.permute_l,
             overwrite_a=self.overwrite_a,
-            check_finite=self.check_finite,
             p_indices=self.p_indices,
         )
 
@@ -563,7 +523,7 @@ class LU(Op):
             # TODO: Rewrite into permute_l = False for graphs where we need to compute the gradient
             # We need L, not PL. It's not possible to recover it from PL, though. So we need to do a new forward pass
             P_or_indices, L, U = lu(  # type: ignore
-                A, permute_l=False, check_finite=self.check_finite, p_indices=False
+                A, permute_l=False, p_indices=False
             )
 
         else:
@@ -621,8 +581,8 @@ def lu(
     permute_l: bool
         If True, L is a product of permutation and unit lower triangular matrices. Only two values, PL and U, will
         be returned in this case, and PL will not be lower triangular.
-    check_finite: bool
-        Whether to check that the input matrix contains only finite numbers.
+    check_finite : bool
+        Unused by PyTensor. PyTensor will return nan if the operation fails.
     p_indices: bool
         If True, return integer matrix indices for the permutation matrix. Otherwise, return the permutation matrix
         itself.
@@ -640,9 +600,7 @@ def lu(
     return cast(
         tuple[TensorVariable, TensorVariable, TensorVariable]
         | tuple[TensorVariable, TensorVariable],
-        Blockwise(
-            LU(permute_l=permute_l, p_indices=p_indices, check_finite=check_finite)
-        )(a),
+        Blockwise(LU(permute_l=permute_l, p_indices=p_indices))(a),
     )
 
 
@@ -680,12 +638,11 @@ def pivot_to_permutation(p: TensorLike, inverse=False):
 
 
 class LUFactor(Op):
-    __props__ = ("overwrite_a", "check_finite")
+    __props__ = ("overwrite_a",)
     gufunc_signature = "(m,m)->(m,m),(m)"
 
-    def __init__(self, *, overwrite_a=False, check_finite=True):
+    def __init__(self, *, overwrite_a=False):
         self.overwrite_a = overwrite_a
-        self.check_finite = check_finite
 
         if self.overwrite_a:
             self.destroy_map = {1: [0]}
@@ -723,21 +680,10 @@ class LUFactor(Op):
             outputs[1][0] = np.array([], dtype=np.int32)
             return
 
-        if self.check_finite and not np.isfinite(A).all():
-            raise ValueError("array must not contain infs or NaNs")
-
         (getrf,) = get_lapack_funcs(("getrf",), (A,))
         LU, p, info = getrf(A, overwrite_a=self.overwrite_a)
-        if info < 0:
-            raise ValueError(
-                f"illegal value in {-info}th argument of internal getrf (lu_factor)"
-            )
-        if info > 0:
-            warnings.warn(
-                f"Diagonal number {info} is exactly zero. Singular matrix.",
-                LinAlgWarning,
-                stacklevel=2,
-            )
+        if info != 0:
+            LU[...] = np.nan
 
         outputs[0][0] = LU
         outputs[1][0] = p
@@ -782,7 +728,7 @@ def lu_factor(
     a: TensorLike
         Matrix to be factorized
     check_finite: bool
-        Whether to check that the input matrix contains only finite numbers.
+        Unused by PyTensor. PyTensor will return nan if the operation fails.
     overwrite_a: bool
         Unused by PyTensor. PyTensor will always perform the operation in-place if possible.
 
@@ -796,7 +742,7 @@ def lu_factor(
 
     return cast(
         tuple[TensorVariable, TensorVariable],
-        Blockwise(LUFactor(check_finite=check_finite))(a),
+        Blockwise(LUFactor())(a),
     )
 
 
@@ -806,7 +752,6 @@ def _lu_solve(
     b: TensorLike,
     trans: bool = False,
     b_ndim: int | None = None,
-    check_finite: bool = True,
 ):
     b_ndim = _default_b_ndim(b, b_ndim)
 
@@ -824,7 +769,6 @@ def _lu_solve(
         unit_diagonal=not trans,
         trans=trans,
         b_ndim=b_ndim,
-        check_finite=check_finite,
     )
 
     x = solve_triangular(
@@ -834,7 +778,6 @@ def _lu_solve(
         unit_diagonal=trans,
         trans=trans,
         b_ndim=b_ndim,
-        check_finite=check_finite,
     )
 
     # TODO: Use PermuteRows(inverse=True) on x
@@ -867,7 +810,7 @@ def lu_solve(
         The number of core dimensions in b. Used to distinguish between a batch of vectors (b_ndim=1) and a matrix
         of vectors (b_ndim=2). Default is None, which will infer the number of core dimensions from the input.
     check_finite: bool
-        If True, check that the input matrices contain only finite numbers. Default is True.
+        Unused by PyTensor. PyTensor will return nan if the operation fails.
     overwrite_b: bool
         Ignored by Pytensor. Pytensor will always compute inplace when possible.
     """
@@ -876,9 +819,7 @@ def lu_solve(
         signature = "(m,m),(m),(m)->(m)"
     else:
         signature = "(m,m),(m),(m,n)->(m,n)"
-    partialled_func = partial(
-        _lu_solve, trans=trans, b_ndim=b_ndim, check_finite=check_finite
-    )
+    partialled_func = partial(_lu_solve, trans=trans, b_ndim=b_ndim)
     return pt.vectorize(partialled_func, signature=signature)(*LU_and_pivots, b)
 
 
@@ -888,7 +829,6 @@ class SolveTriangular(SolveBase):
     __props__ = (
         "unit_diagonal",
         "lower",
-        "check_finite",
         "b_ndim",
         "overwrite_b",
     )
@@ -905,10 +845,7 @@ class SolveTriangular(SolveBase):
     def perform(self, node, inputs, outputs):
         A, b = inputs
 
-        if self.check_finite and not (np.isfinite(A).all() and np.isfinite(b).all()):
-            raise ValueError("array must not contain infs or NaNs")
-
-        if len(A.shape) != 2 or A.shape[0] != A.shape[1]:
+        if A.ndim != 2 or A.shape[0] != A.shape[1]:
             raise ValueError("expected square matrix")
 
         if A.shape[0] != b.shape[0]:
@@ -941,12 +878,8 @@ class SolveTriangular(SolveBase):
                 unitdiag=self.unit_diagonal,
             )
 
-        if info > 0:
-            raise LinAlgError(
-                f"singular matrix: resolution failed at diagonal {info - 1}"
-            )
-        elif info < 0:
-            raise ValueError(f"illegal value in {-info}-th argument of internal trtrs")
+        if info != 0:
+            x[...] = np.nan
 
         outputs[0][0] = x
 
@@ -998,9 +931,7 @@ def solve_triangular(
     unit_diagonal: bool, optional
         If True, diagonal elements of `a` are assumed to be 1 and will not be referenced.
     check_finite : bool, optional
-        Whether to check that the input matrices contain only finite numbers.
-        Disabling may give a performance gain, but may result in problems
-        (crashes, non-termination) if the inputs do contain infinities or NaNs.
+        Unused by PyTensor. PyTensor will return nan if the operation fails.
     b_ndim : int
         Whether the core case of b is a vector (1) or matrix (2).
         This will influence how batched dimensions are interpreted.
@@ -1018,7 +949,6 @@ def solve_triangular(
         SolveTriangular(
             lower=lower,
             unit_diagonal=unit_diagonal,
-            check_finite=check_finite,
             b_ndim=b_ndim,
         )
     )(a, b)
@@ -1033,7 +963,6 @@ class Solve(SolveBase):
     __props__ = (
         "assume_a",
         "lower",
-        "check_finite",
         "b_ndim",
         "overwrite_a",
         "overwrite_b",
@@ -1073,15 +1002,18 @@ class Solve(SolveBase):
 
     def perform(self, node, inputs, outputs):
         a, b = inputs
-        outputs[0][0] = scipy_linalg.solve(
-            a=a,
-            b=b,
-            lower=self.lower,
-            check_finite=self.check_finite,
-            assume_a=self.assume_a,
-            overwrite_a=self.overwrite_a,
-            overwrite_b=self.overwrite_b,
-        )
+        try:
+            outputs[0][0] = scipy_linalg.solve(
+                a=a,
+                b=b,
+                lower=self.lower,
+                check_finite=False,
+                assume_a=self.assume_a,
+                overwrite_a=self.overwrite_a,
+                overwrite_b=self.overwrite_b,
+            )
+        except np.linalg.LinAlgError:
+            outputs[0][0] = np.full(a.shape, np.nan, dtype=a.dtype)
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if not allowed_inplace_inputs:
@@ -1152,10 +1084,8 @@ def solve(
         Unused by PyTensor. PyTensor will always perform the operation in-place if possible.
     overwrite_b : bool
         Unused by PyTensor. PyTensor will always perform the operation in-place if possible.
-    check_finite : bool, optional
-        Whether to check that the input matrices contain only finite numbers.
-        Disabling may give a performance gain, but may result in problems
-        (crashes, non-termination) if the inputs do contain infinities or NaNs.
+    check_finite : bool
+        Unused by PyTensor. PyTensor returns nan if the operation fails.
     assume_a : str, optional
         Valid entries are explained above.
     transposed: bool, default False
@@ -1174,7 +1104,6 @@ def solve(
             b,
             lower=lower,
             trans=transposed,
-            check_finite=check_finite,
             b_ndim=b_ndim,
         )
 
@@ -1195,7 +1124,6 @@ def solve(
     return Blockwise(
         Solve(
             lower=lower,
-            check_finite=check_finite,
             assume_a=assume_a,
             b_ndim=b_ndim,
         )
@@ -1779,7 +1707,6 @@ class QR(Op):
         "overwrite_a",
         "mode",
         "pivoting",
-        "check_finite",
     )
 
     def __init__(
@@ -1787,12 +1714,10 @@ class QR(Op):
         mode: Literal["full", "r", "economic", "raw"] = "full",
         overwrite_a: bool = False,
         pivoting: bool = False,
-        check_finite: bool = False,
     ):
         self.mode = mode
         self.overwrite_a = overwrite_a
         self.pivoting = pivoting
-        self.check_finite = check_finite
 
         self.destroy_map = {}
 

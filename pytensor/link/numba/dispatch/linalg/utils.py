@@ -1,17 +1,10 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 import numba
 from numba.core import types
-from numba.core.extending import overload
-from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
-from numpy.linalg import LinAlgError
+from numba.np.linalg import _copy_to_fortran_order
 
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.linalg._LAPACK import (
-    _LAPACK,
-    _get_underlying_float,
-    val_to_int_ptr,
-)
 
 
 @numba_basic.numba_njit(inline="always")
@@ -61,58 +54,3 @@ def _check_dtypes_match(arrays: Sequence, func_name="cho_solve"):
         if first_dtype != other_dtype:
             msg = f"{func_name} only supported for matching dtypes, got {dtypes}"
             raise numba.TypingError(msg, highlighting=False)
-
-
-@numba_basic.numba_njit(inline="always")
-def _solve_check(n, info, lamch=False, rcond=None):
-    """
-    Check arguments during the different steps of the solution phase
-    Adapted from https://github.com/scipy/scipy/blob/7f7f04caa4a55306a9c6613c89eef91fedbd72d4/scipy/linalg/_basic.py#L38
-    """
-    if info < 0:
-        # TODO: figure out how to do an fstring here
-        msg = "LAPACK reported an illegal value in input"
-        raise ValueError(msg)
-    elif 0 < info:
-        raise LinAlgError("Matrix is singular.")
-
-    if lamch:
-        E = _xlamch("E")
-        if rcond < E:
-            # TODO: This should be a warning, but we can't raise warnings in numba mode
-            print(  # noqa: T201
-                "Ill-conditioned matrix, rcond=", rcond, ", result may not be accurate."
-            )
-
-
-def _xlamch(kind: str = "E"):
-    """
-    Placeholder for getting machine precision; used by linalg.solve. Not used by pytensor to numbify graphs.
-    """
-    pass
-
-
-@overload(_xlamch)
-def xlamch_impl(kind: str = "E") -> Callable[[str], float]:
-    """
-    Compute the machine precision for a given floating point type.
-    """
-    from pytensor import config
-
-    ensure_lapack()
-    w_type = _get_underlying_float(config.floatX)
-
-    if w_type == "float32":
-        dtype = types.float32
-    elif w_type == "float64":
-        dtype = types.float64
-    else:
-        raise NotImplementedError("Unsupported dtype")
-
-    numba_lamch = _LAPACK().numba_xlamch(dtype)
-
-    def impl(kind: str = "E") -> float:
-        KIND = val_to_int_ptr(ord(kind))
-        return numba_lamch(KIND)  # type: ignore
-
-    return impl

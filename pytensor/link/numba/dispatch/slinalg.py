@@ -58,8 +58,6 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     """
     lower = op.lower
     overwrite_a = op.overwrite_a
-    check_finite = op.check_finite
-    on_error = op.on_error
 
     inp_dtype = node.inputs[0].type.numpy_dtype
     if inp_dtype.kind == "c":
@@ -77,30 +75,11 @@ def numba_funcify_Cholesky(op, node, **kwargs):
 
         if discrete_inp:
             a = a.astype(out_dtype)
-        elif check_finite:
-            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) found in input to cholesky"
-                )
-        res, info = _cholesky(a, lower, overwrite_a, check_finite)
 
-        if on_error == "raise":
-            if info > 0:
-                raise np.linalg.LinAlgError(
-                    "Input to cholesky is not positive definite"
-                )
-            if info < 0:
-                raise ValueError(
-                    'LAPACK reported an illegal value in input on entry to "POTRF."'
-                )
-        else:
-            if info != 0:
-                res = np.full_like(res, np.nan)
+        return _cholesky(a, lower, overwrite_a)
 
-        return res
-
-    cache_key = 1
-    return cholesky, cache_key
+    cache_version = 2
+    return cholesky, cache_version
 
 
 @register_funcify_default_op_cache_key(PivotToPermutations)
@@ -116,8 +95,8 @@ def pivot_to_permutation(op, node, **kwargs):
 
         return np.argsort(p_inv)
 
-    cache_key = 1
-    return numba_pivot_to_permutation, cache_key
+    cache_version = 2
+    return numba_pivot_to_permutation, cache_version
 
 
 @register_funcify_default_op_cache_key(LU)
@@ -131,7 +110,6 @@ def numba_funcify_LU(op, node, **kwargs):
 
     out_dtype = node.outputs[0].type.numpy_dtype
     permute_l = op.permute_l
-    check_finite = op.check_finite
     p_indices = op.p_indices
     overwrite_a = op.overwrite_a
 
@@ -151,17 +129,11 @@ def numba_funcify_LU(op, node, **kwargs):
 
         if discrete_inp:
             a = a.astype(out_dtype)
-        elif check_finite:
-            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) found in input to lu"
-                )
 
         if p_indices:
             res = _lu_1(
                 a,
                 permute_l=permute_l,
-                check_finite=check_finite,
                 p_indices=p_indices,
                 overwrite_a=overwrite_a,
             )
@@ -169,7 +141,6 @@ def numba_funcify_LU(op, node, **kwargs):
             res = _lu_2(
                 a,
                 permute_l=permute_l,
-                check_finite=check_finite,
                 p_indices=p_indices,
                 overwrite_a=overwrite_a,
             )
@@ -177,15 +148,14 @@ def numba_funcify_LU(op, node, **kwargs):
             res = _lu_3(
                 a,
                 permute_l=permute_l,
-                check_finite=check_finite,
                 p_indices=p_indices,
                 overwrite_a=overwrite_a,
             )
 
         return res
 
-    cache_key = 1
-    return lu, cache_key
+    cache_version = 2
+    return lu, cache_version
 
 
 @register_funcify_default_op_cache_key(LUFactor)
@@ -198,7 +168,6 @@ def numba_funcify_LUFactor(op, node, **kwargs):
         print("LUFactor requires casting discrete input to float")  # noqa: T201
 
     out_dtype = node.outputs[0].type.numpy_dtype
-    check_finite = op.check_finite
     overwrite_a = op.overwrite_a
 
     @numba_basic.numba_njit
@@ -211,18 +180,13 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
         if discrete_inp:
             a = a.astype(out_dtype)
-        elif check_finite:
-            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) found in input to cholesky"
-                )
 
         LU, piv = _lu_factor(a, overwrite_a)
 
         return LU, piv
 
-    cache_key = 1
-    return lu_factor, cache_key
+    cache_version = 2
+    return lu_factor, cache_version
 
 
 @register_funcify_default_op_cache_key(BlockDiagonal)
@@ -288,8 +252,8 @@ def numba_funcify_BlockDiagonal(op, node, **kwargs):
         globals() | {"np": np},
     )
 
-    cache_key = 1
-    return numba_basic.numba_njit(block_diag), cache_key
+    cache_version = 1
+    return numba_basic.numba_njit(block_diag), cache_version
 
 
 @register_funcify_default_op_cache_key(Solve)
@@ -306,12 +270,9 @@ def numba_funcify_Solve(op, node, **kwargs):
     if must_cast_B and config.compiler_verbose:
         print("Solve requires casting second input `b`")  # noqa: T201
 
-    check_finite = op.check_finite
     overwrite_a = op.overwrite_a
-
     assume_a = op.assume_a
     lower = op.lower
-    check_finite = op.check_finite
     overwrite_a = op.overwrite_a
     overwrite_b = op.overwrite_b
     transposed = False  # TODO: Solve doesnt currently allow the transposed argument
@@ -344,30 +305,18 @@ def numba_funcify_Solve(op, node, **kwargs):
             a = a.astype(out_dtype)
         if must_cast_B:
             b = b.astype(out_dtype)
-        if check_finite:
-            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) in input A to solve"
-                )
-            if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) in input b to solve"
-                )
 
-        res = solve_fn(a, b, lower, overwrite_a, overwrite_b, check_finite, transposed)
-        return res
+        return solve_fn(a, b, lower, overwrite_a, overwrite_b, transposed)
 
-    cache_key = 1
-    return solve, cache_key
+    cache_version = 2
+    return solve, cache_version
 
 
 @register_funcify_default_op_cache_key(SolveTriangular)
 def numba_funcify_SolveTriangular(op, node, **kwargs):
     lower = op.lower
     unit_diagonal = op.unit_diagonal
-    check_finite = op.check_finite
     overwrite_b = op.overwrite_b
-    b_ndim = op.b_ndim
 
     A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -389,37 +338,24 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
             a = a.astype(out_dtype)
         if must_cast_B:
             b = b.astype(out_dtype)
-        if check_finite:
-            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) in input A to solve_triangular"
-                )
-            if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) in input b to solve_triangular"
-                )
 
-        res = _solve_triangular(
+        return _solve_triangular(
             a,
             b,
             trans=0,  # transposing is handled explicitly on the graph, so we never use this argument
             lower=lower,
             unit_diagonal=unit_diagonal,
             overwrite_b=overwrite_b,
-            b_ndim=b_ndim,
         )
 
-        return res
-
-    cache_key = 1
-    return solve_triangular, cache_key
+    cache_version = 2
+    return solve_triangular, cache_version
 
 
 @register_funcify_default_op_cache_key(CholeskySolve)
 def numba_funcify_CholeskySolve(op, node, **kwargs):
     lower = op.lower
     overwrite_b = op.overwrite_b
-    check_finite = op.check_finite
 
     c_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
@@ -439,36 +375,24 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
             return np.zeros(b.shape, dtype=out_dtype)
         if must_cast_c:
             c = c.astype(out_dtype)
-        if check_finite:
-            if np.any(np.bitwise_or(np.isinf(c), np.isnan(c))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) in input A to cho_solve"
-                )
 
         if must_cast_b:
             b = b.astype(out_dtype)
-        if check_finite:
-            if np.any(np.bitwise_or(np.isinf(b), np.isnan(b))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) in input b to cho_solve"
-                )
 
         return _cho_solve(
             c,
             b,
             lower=lower,
             overwrite_b=overwrite_b,
-            check_finite=check_finite,
         )
 
-    cache_key = 1
-    return cho_solve, cache_key
+    cache_version = 2
+    return cho_solve, cache_version
 
 
 @register_funcify_default_op_cache_key(QR)
 def numba_funcify_QR(op, node, **kwargs):
     mode = op.mode
-    check_finite = op.check_finite
     pivoting = op.pivoting
     overwrite_a = op.overwrite_a
 
@@ -481,12 +405,6 @@ def numba_funcify_QR(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def qr(a):
-        if check_finite:
-            if np.any(np.bitwise_or(np.isinf(a), np.isnan(a))):
-                raise np.linalg.LinAlgError(
-                    "Non-numeric values (nan or inf) found in input to qr"
-                )
-
         if integer_input:
             a = a.astype(out_dtype)
 
@@ -496,7 +414,6 @@ def numba_funcify_QR(op, node, **kwargs):
                 mode=mode,
                 pivoting=pivoting,
                 overwrite_a=overwrite_a,
-                check_finite=check_finite,
             )
             return Q, R, P
 
@@ -506,7 +423,6 @@ def numba_funcify_QR(op, node, **kwargs):
                 mode=mode,
                 pivoting=pivoting,
                 overwrite_a=overwrite_a,
-                check_finite=check_finite,
             )
             return Q, R
 
@@ -516,7 +432,6 @@ def numba_funcify_QR(op, node, **kwargs):
                 mode=mode,
                 pivoting=pivoting,
                 overwrite_a=overwrite_a,
-                check_finite=check_finite,
             )
             return R, P
 
@@ -526,7 +441,6 @@ def numba_funcify_QR(op, node, **kwargs):
                 mode=mode,
                 pivoting=pivoting,
                 overwrite_a=overwrite_a,
-                check_finite=check_finite,
             )
             return R
 
@@ -536,7 +450,6 @@ def numba_funcify_QR(op, node, **kwargs):
                 mode=mode,
                 pivoting=pivoting,
                 overwrite_a=overwrite_a,
-                check_finite=check_finite,
             )
             return H, tau, R, P
 
@@ -546,7 +459,6 @@ def numba_funcify_QR(op, node, **kwargs):
                 mode=mode,
                 pivoting=pivoting,
                 overwrite_a=overwrite_a,
-                check_finite=check_finite,
             )
             return H, tau, R
 
@@ -555,5 +467,5 @@ def numba_funcify_QR(op, node, **kwargs):
                 f"QR mode={mode}, pivoting={pivoting} not supported in numba mode."
             )
 
-    cache_key = 1
-    return qr, cache_key
+    cache_version = 2
+    return qr, cache_version

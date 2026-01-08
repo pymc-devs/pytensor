@@ -39,7 +39,6 @@ def _lu_factor_to_lu(a, dtype, overwrite_a):
 def _lu_1(
     a: np.ndarray,
     permute_l: Literal[True],
-    check_finite: bool,
     p_indices: Literal[False],
     overwrite_a: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -52,7 +51,7 @@ def _lu_1(
     return linalg.lu(  # type: ignore[no-any-return]
         a,
         permute_l=permute_l,
-        check_finite=check_finite,
+        check_finite=False,
         p_indices=p_indices,
         overwrite_a=overwrite_a,
     )
@@ -61,7 +60,6 @@ def _lu_1(
 def _lu_2(
     a: np.ndarray,
     permute_l: Literal[False],
-    check_finite: bool,
     p_indices: Literal[True],
     overwrite_a: bool,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -74,7 +72,7 @@ def _lu_2(
     return linalg.lu(  # type: ignore[no-any-return]
         a,
         permute_l=permute_l,
-        check_finite=check_finite,
+        check_finite=False,
         p_indices=p_indices,
         overwrite_a=overwrite_a,
     )
@@ -83,7 +81,6 @@ def _lu_2(
 def _lu_3(
     a: np.ndarray,
     permute_l: Literal[False],
-    check_finite: bool,
     p_indices: Literal[False],
     overwrite_a: bool,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -96,7 +93,7 @@ def _lu_3(
     return linalg.lu(  # type: ignore[no-any-return]
         a,
         permute_l=permute_l,
-        check_finite=check_finite,
+        check_finite=False,
         p_indices=p_indices,
         overwrite_a=overwrite_a,
     )
@@ -106,11 +103,10 @@ def _lu_3(
 def lu_impl_1(
     a: np.ndarray,
     permute_l: bool,
-    check_finite: bool,
     p_indices: bool,
     overwrite_a: bool,
 ) -> Callable[
-    [np.ndarray, bool, bool, bool, bool], tuple[np.ndarray, np.ndarray, np.ndarray]
+    [np.ndarray, bool, bool, bool], tuple[np.ndarray, np.ndarray, np.ndarray]
 ]:
     """
     Overload scipy.linalg.lu with a numba function. This function is called when permute_l is True and p_indices is
@@ -123,7 +119,6 @@ def lu_impl_1(
     def impl(
         a: np.ndarray,
         permute_l: bool,
-        check_finite: bool,
         p_indices: bool,
         overwrite_a: bool,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -137,10 +132,9 @@ def lu_impl_1(
 def lu_impl_2(
     a: np.ndarray,
     permute_l: bool,
-    check_finite: bool,
     p_indices: bool,
     overwrite_a: bool,
-) -> Callable[[np.ndarray, bool, bool, bool, bool], tuple[np.ndarray, np.ndarray]]:
+) -> Callable[[np.ndarray, bool, bool, bool], tuple[np.ndarray, np.ndarray]]:
     """
     Overload scipy.linalg.lu with a numba function. This function is called when permute_l is False and p_indices is
     True. Returns a tuple of (PL, U), where PL is the permuted L matrix, PL = P @ L.
@@ -153,7 +147,6 @@ def lu_impl_2(
     def impl(
         a: np.ndarray,
         permute_l: bool,
-        check_finite: bool,
         p_indices: bool,
         overwrite_a: bool,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -169,11 +162,10 @@ def lu_impl_2(
 def lu_impl_3(
     a: np.ndarray,
     permute_l: bool,
-    check_finite: bool,
     p_indices: bool,
     overwrite_a: bool,
 ) -> Callable[
-    [np.ndarray, bool, bool, bool, bool], tuple[np.ndarray, np.ndarray, np.ndarray]
+    [np.ndarray, bool, bool, bool], tuple[np.ndarray, np.ndarray, np.ndarray]
 ]:
     """
     Overload scipy.linalg.lu with a numba function. This function is called when permute_l is True and p_indices is
@@ -186,7 +178,6 @@ def lu_impl_3(
     def impl(
         a: np.ndarray,
         permute_l: bool,
-        check_finite: bool,
         p_indices: bool,
         overwrite_a: bool,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
