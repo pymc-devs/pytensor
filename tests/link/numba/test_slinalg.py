@@ -1,4 +1,3 @@
-import re
 from typing import Literal
 
 import numpy as np
@@ -34,70 +33,6 @@ numba = pytest.importorskip("numba")
 floatX = config.floatX
 
 rng = np.random.default_rng(42849)
-
-
-def test_lamch():
-    from scipy.linalg import get_lapack_funcs
-
-    from pytensor.link.numba.dispatch.linalg.utils import _xlamch
-
-    @numba.njit()
-    def xlamch(kind):
-        return _xlamch(kind)
-
-    lamch = get_lapack_funcs("lamch", (np.array([0.0], dtype=floatX),))
-
-    np.testing.assert_allclose(xlamch("E"), lamch("E"))
-    np.testing.assert_allclose(xlamch("S"), lamch("S"))
-    np.testing.assert_allclose(xlamch("P"), lamch("P"))
-    np.testing.assert_allclose(xlamch("B"), lamch("B"))
-    np.testing.assert_allclose(xlamch("R"), lamch("R"))
-    np.testing.assert_allclose(xlamch("M"), lamch("M"))
-
-
-@pytest.mark.parametrize(
-    "ord_numba, ord_scipy", [("F", "fro"), ("1", 1), ("I", np.inf)]
-)
-def test_xlange(ord_numba, ord_scipy):
-    # xlange is called internally only, we don't dispatch pt.linalg.norm to it
-    from scipy import linalg
-
-    from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
-
-    @numba.njit()
-    def xlange(x, ord):
-        return _xlange(x, ord)
-
-    x = np.random.normal(size=(5, 5)).astype(floatX)
-    np.testing.assert_allclose(xlange(x, ord_numba), linalg.norm(x, ord_scipy))
-
-
-@pytest.mark.parametrize("ord_numba, ord_scipy", [("1", 1), ("I", np.inf)])
-def test_xgecon(ord_numba, ord_scipy):
-    # gecon is called internally only, we don't dispatch pt.linalg.norm to it
-    from scipy.linalg import get_lapack_funcs
-
-    from pytensor.link.numba.dispatch.linalg.solve.general import _xgecon
-    from pytensor.link.numba.dispatch.linalg.solve.norm import _xlange
-
-    @numba.njit()
-    def gecon(x, norm):
-        anorm = _xlange(x, norm)
-        cond, info = _xgecon(x, anorm, norm)
-        return cond, info
-
-    x = np.random.normal(size=(5, 5)).astype(floatX)
-
-    rcond, info = gecon(x, norm=ord_numba)
-
-    # Test against direct call to the underlying LAPACK functions
-    # Solution does **not** agree with 1 / np.linalg.cond(x) !
-    lange, gecon = get_lapack_funcs(("lange", "gecon"), (x,))
-    norm = lange(ord_numba, x)
-    rcond2, _ = gecon(x, norm, norm=ord_numba)
-
-    assert info == 0
-    np.testing.assert_allclose(rcond, rcond2)
 
 
 class TestSolves:
@@ -323,7 +258,7 @@ class TestSolves:
         np.testing.assert_allclose(b_val_not_contig, b_val)
 
     @pytest.mark.parametrize("value", [np.nan, np.inf])
-    def test_solve_triangular_raises_on_nan_inf(self, value):
+    def test_solve_triangular_does_not_raise_on_nan_inf(self, value):
         A = pt.matrix("A")
         b = pt.matrix("b")
 
@@ -335,11 +270,8 @@ class TestSolves:
         A_tri = np.linalg.cholesky(A_sym).astype(floatX)
         b = np.full((5, 1), value).astype(floatX)
 
-        with pytest.raises(
-            np.linalg.LinAlgError,
-            match=re.escape("Non-numeric values"),
-        ):
-            f(A_tri, b)
+        # Not checking everything is nan, because, with inf, LAPACK returns a mix of inf/nan, but does not set info != 0
+        assert not np.isfinite(f(A_tri, b)).any()
 
     @pytest.mark.parametrize("lower", [True, False], ids=lambda x: f"lower = {x}")
     @pytest.mark.parametrize(
@@ -567,10 +499,13 @@ class TestDecompositions:
 
         x = pt.tensor(dtype=floatX, shape=(3, 3))
         x = x.T.dot(x)
-        g = pt.linalg.cholesky(x, check_finite=True)
+        with pytest.warns(FutureWarning):
+            g = pt.linalg.cholesky(x, check_finite=True, on_error="raise")
         f = pytensor.function([x], g, mode="NUMBA")
 
-        with pytest.raises(np.linalg.LinAlgError, match=r"Non-numeric values"):
+        with pytest.raises(
+            np.linalg.LinAlgError, match=r"Matrix is not positive definite"
+        ):
             f(test_value)
 
     @pytest.mark.parametrize("on_error", ["nan", "raise"])
@@ -578,13 +513,17 @@ class TestDecompositions:
         test_value = rng.random(size=(3, 3)).astype(floatX)
 
         x = pt.tensor(dtype=floatX, shape=(3, 3))
-        g = pt.linalg.cholesky(x, on_error=on_error)
+        if on_error == "raise":
+            with pytest.warns(FutureWarning):
+                g = pt.linalg.cholesky(x, on_error=on_error)
+        else:
+            g = pt.linalg.cholesky(x, on_error=on_error)
         f = pytensor.function([x], g, mode="NUMBA")
 
         if on_error == "raise":
             with pytest.raises(
                 np.linalg.LinAlgError,
-                match=r"Input to cholesky is not positive definite",
+                match=r"Matrix is not positive definite",
             ):
                 f(test_value)
         else:
