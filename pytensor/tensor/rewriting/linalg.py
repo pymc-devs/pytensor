@@ -70,9 +70,6 @@ MATRIX_INVERSE_OPS = (MatrixInverse, MatrixPinv)
 def fuse_blockdiagonal(fgraph, node):
     """Fuse nested BlockDiagonal ops into a single BlockDiagonal."""
 
-    if not isinstance(node.op, BlockDiagonal):
-        return None
-
     new_inputs = []
     changed = False
 
@@ -86,6 +83,7 @@ def fuse_blockdiagonal(fgraph, node):
     if changed:
         fused_op = BlockDiagonal(len(new_inputs))
         new_output = fused_op(*new_inputs)
+        copy_stack_trace(node.outputs[0], new_output)
         return [new_output]
 
     return None
