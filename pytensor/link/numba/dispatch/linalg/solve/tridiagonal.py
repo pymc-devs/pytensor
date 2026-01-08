@@ -23,7 +23,6 @@ from pytensor.link.numba.dispatch.linalg.utils import (
     _check_dtypes_match,
     _check_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
-    _solve_check,
     _trans_char_to_int,
 )
 from pytensor.tensor._linalg.solve.tridiagonal import (
@@ -202,83 +201,12 @@ def gttrs_impl(
     return impl
 
 
-def _gtcon(
-    dl: ndarray,
-    d: ndarray,
-    du: ndarray,
-    du2: ndarray,
-    ipiv: ndarray,
-    anorm: float,
-    norm: str,
-) -> tuple[ndarray, int]:
-    """Placeholder for computing the condition number of a tridiagonal system."""
-    return  # type: ignore
-
-
-@overload(_gtcon)
-def gtcon_impl(
-    dl: ndarray,
-    d: ndarray,
-    du: ndarray,
-    du2: ndarray,
-    ipiv: ndarray,
-    anorm: float,
-    norm: str,
-) -> Callable[
-    [ndarray, ndarray, ndarray, ndarray, ndarray, float, str], tuple[ndarray, int]
-]:
-    ensure_lapack()
-    _check_linalg_matrix(dl, ndim=1, dtype=Float, func_name="gtcon")
-    _check_linalg_matrix(d, ndim=1, dtype=Float, func_name="gtcon")
-    _check_linalg_matrix(du, ndim=1, dtype=Float, func_name="gtcon")
-    _check_linalg_matrix(du2, ndim=1, dtype=Float, func_name="gtcon")
-    _check_dtypes_match((dl, d, du, du2), func_name="gtcon")
-    _check_linalg_matrix(ipiv, ndim=1, dtype=int32, func_name="gtcon")
-    dtype = d.dtype
-    numba_gtcon = _LAPACK().numba_xgtcon(dtype)
-
-    def impl(
-        dl: ndarray,
-        d: ndarray,
-        du: ndarray,
-        du2: ndarray,
-        ipiv: ndarray,
-        anorm: float,
-        norm: str,
-    ) -> tuple[ndarray, int]:
-        n = np.int32(d.shape[-1])
-        rcond = np.empty(1, dtype=dtype)
-        work = np.empty(2 * n, dtype=dtype)
-        iwork = np.empty(n, dtype=np.int32)
-        info = val_to_int_ptr(0)
-
-        numba_gtcon(
-            val_to_int_ptr(ord(norm)),
-            val_to_int_ptr(n),
-            dl.ctypes,
-            d.ctypes,
-            du.ctypes,
-            du2.ctypes,
-            ipiv.ctypes,
-            np.array(anorm, dtype=dtype).ctypes,
-            rcond.ctypes,
-            work.ctypes,
-            iwork.ctypes,
-            info,
-        )
-
-        return rcond, int_ptr_to_val(info)
-
-    return impl
-
-
 def _solve_tridiagonal(
     a: ndarray,
     b: ndarray,
     lower: bool,
     overwrite_a: bool,
     overwrite_b: bool,
-    check_finite: bool,
     transposed: bool,
 ):
     """
@@ -290,7 +218,7 @@ def _solve_tridiagonal(
         lower=lower,
         overwrite_a=overwrite_a,
         overwrite_b=overwrite_b,
-        check_finite=check_finite,
+        check_finite=False,
         transposed=transposed,
         assume_a="tridiagonal",
     )
@@ -303,9 +231,8 @@ def _tridiagonal_solve_impl(
     lower: bool,
     overwrite_a: bool,
     overwrite_b: bool,
-    check_finite: bool,
     transposed: bool,
-) -> Callable[[ndarray, ndarray, bool, bool, bool, bool, bool], ndarray]:
+) -> Callable[[ndarray, ndarray, bool, bool, bool, bool], ndarray]:
     ensure_lapack()
     _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
     _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
@@ -317,31 +244,24 @@ def _tridiagonal_solve_impl(
         lower: bool,
         overwrite_a: bool,
         overwrite_b: bool,
-        check_finite: bool,
         transposed: bool,
     ) -> ndarray:
-        n = np.int32(A.shape[-1])
         _solve_check_input_shapes(A, B)
-        norm = "1"
 
         if transposed:
             A = A.T
         dl, d, du = np.diag(A, -1), np.diag(A, 0), np.diag(A, 1)
 
-        anorm = tridiagonal_norm(du, d, dl)
-
-        dl, d, du, du2, IPIV, INFO = _gttrf(
+        dl, d, du, du2, ipiv, info1 = _gttrf(
             dl, d, du, overwrite_dl=True, overwrite_d=True, overwrite_du=True
         )
-        _solve_check(n, INFO)
 
-        X, INFO = _gttrs(
-            dl, d, du, du2, IPIV, B, trans=transposed, overwrite_b=overwrite_b
+        X, info2 = _gttrs(
+            dl, d, du, du2, ipiv, B, trans=transposed, overwrite_b=overwrite_b
         )
-        _solve_check(n, INFO)
 
-        RCOND, INFO = _gtcon(dl, d, du, du2, IPIV, anorm, norm)
-        _solve_check(n, INFO, True, RCOND)
+        if info1 != 0 or info2 != 0:
+            X = np.full_like(X, np.nan)
 
         return X
 
@@ -391,8 +311,8 @@ def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
         )
         return dl, d, du, du2, ipiv
 
-    cache_key = 1
-    return lu_factor_tridiagonal, cache_key
+    cache_version = 2
+    return lu_factor_tridiagonal, cache_version
 
 
 @register_funcify_default_op_cache_key(SolveLUFactorTridiagonal)
@@ -434,7 +354,7 @@ def numba_funcify_SolveLUFactorTridiagonal(
             ipiv = ipiv.astype(np.int32)
         if cast_b:
             b = b.astype(out_dtype)
-        x, _ = _gttrs(
+        x, info = _gttrs(
             dl,
             d,
             du,
@@ -444,7 +364,11 @@ def numba_funcify_SolveLUFactorTridiagonal(
             overwrite_b=overwrite_b,
             trans=transposed,
         )
+
+        if info != 0:
+            x = np.full_like(x, np.nan)
+
         return x
 
-    cache_key = 1
-    return solve_lu_factor_tridiagonal, cache_key
+    cache_version = 2
+    return solve_lu_factor_tridiagonal, cache_version

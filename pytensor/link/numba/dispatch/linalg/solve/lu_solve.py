@@ -17,7 +17,6 @@ from pytensor.link.numba.dispatch.linalg.utils import (
     _check_dtypes_match,
     _check_linalg_matrix,
     _copy_to_fortran_order_even_if_1d,
-    _solve_check,
     _trans_char_to_int,
 )
 
@@ -107,14 +106,11 @@ def _lu_solve(
     b: np.ndarray,
     trans: _Trans,
     overwrite_b: bool,
-    check_finite: bool,
 ):
     """
     Thin wrapper around scipy.lu_solve, used to avoid side effects from numba overloads on users who import Pytensor.
     """
-    return linalg.lu_solve(
-        lu_and_piv, b, trans=trans, overwrite_b=overwrite_b, check_finite=check_finite
-    )
+    return linalg.lu_solve(lu_and_piv, b, trans=trans, overwrite_b=overwrite_b)
 
 
 @overload(_lu_solve)
@@ -123,8 +119,7 @@ def lu_solve_impl(
     b: np.ndarray,
     trans: _Trans,
     overwrite_b: bool,
-    check_finite: bool,
-) -> Callable[[np.ndarray, np.ndarray, np.ndarray, _Trans, bool, bool], np.ndarray]:
+) -> Callable[[np.ndarray, np.ndarray, np.ndarray, _Trans, bool], np.ndarray]:
     ensure_lapack()
     lu, _piv = lu_and_piv
     _check_linalg_matrix(lu, ndim=2, dtype=Float, func_name="lu_solve")
@@ -137,13 +132,11 @@ def lu_solve_impl(
         b: np.ndarray,
         trans: _Trans,
         overwrite_b: bool,
-        check_finite: bool,
     ) -> np.ndarray:
-        n = np.int32(lu.shape[0])
+        X, info = _getrs(LU=lu, B=b, IPIV=piv, trans=trans, overwrite_b=overwrite_b)
 
-        X, INFO = _getrs(LU=lu, B=b, IPIV=piv, trans=trans, overwrite_b=overwrite_b)
-
-        _solve_check(n, INFO)
+        if info != 0:
+            X = np.full_like(X, np.nan)
 
         return X
 

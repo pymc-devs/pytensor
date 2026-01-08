@@ -228,7 +228,6 @@ def _qr_full_pivot(
     mode: Literal["full", "economic"] = "full",
     pivoting: Literal[True] = True,
     overwrite_a: bool = False,
-    check_finite: bool = False,
     lwork: int | None = None,
 ):
     """
@@ -243,7 +242,7 @@ def _qr_full_pivot(
         mode=mode,
         pivoting=pivoting,
         overwrite_a=overwrite_a,
-        check_finite=check_finite,
+        check_finite=False,
         lwork=lwork,
     )
 
@@ -253,7 +252,6 @@ def _qr_full_no_pivot(
     mode: Literal["full", "economic"] = "full",
     pivoting: Literal[False] = False,
     overwrite_a: bool = False,
-    check_finite: bool = False,
     lwork: int | None = None,
 ):
     """
@@ -267,7 +265,7 @@ def _qr_full_no_pivot(
         mode=mode,
         pivoting=pivoting,
         overwrite_a=overwrite_a,
-        check_finite=check_finite,
+        check_finite=False,
         lwork=lwork,
     )
 
@@ -277,7 +275,6 @@ def _qr_r_pivot(
     mode: Literal["r", "raw"] = "r",
     pivoting: Literal[True] = True,
     overwrite_a: bool = False,
-    check_finite: bool = False,
     lwork: int | None = None,
 ):
     """
@@ -291,7 +288,7 @@ def _qr_r_pivot(
         mode=mode,
         pivoting=pivoting,
         overwrite_a=overwrite_a,
-        check_finite=check_finite,
+        check_finite=False,
         lwork=lwork,
     )
 
@@ -301,7 +298,6 @@ def _qr_r_no_pivot(
     mode: Literal["r", "raw"] = "r",
     pivoting: Literal[False] = False,
     overwrite_a: bool = False,
-    check_finite: bool = False,
     lwork: int | None = None,
 ):
     """
@@ -315,7 +311,7 @@ def _qr_r_no_pivot(
         mode=mode,
         pivoting=pivoting,
         overwrite_a=overwrite_a,
-        check_finite=check_finite,
+        check_finite=False,
         lwork=lwork,
     )
 
@@ -325,7 +321,6 @@ def _qr_raw_no_pivot(
     mode: Literal["raw"] = "raw",
     pivoting: Literal[False] = False,
     overwrite_a: bool = False,
-    check_finite: bool = False,
     lwork: int | None = None,
 ):
     """
@@ -339,7 +334,7 @@ def _qr_raw_no_pivot(
         mode=mode,
         pivoting=pivoting,
         overwrite_a=overwrite_a,
-        check_finite=check_finite,
+        check_finite=False,
         lwork=lwork,
     )
 
@@ -351,7 +346,6 @@ def _qr_raw_pivot(
     mode: Literal["raw"] = "raw",
     pivoting: Literal[True] = True,
     overwrite_a: bool = False,
-    check_finite: bool = False,
     lwork: int | None = None,
 ):
     """
@@ -365,7 +359,7 @@ def _qr_raw_pivot(
         mode=mode,
         pivoting=pivoting,
         overwrite_a=overwrite_a,
-        check_finite=check_finite,
+        check_finite=False,
         lwork=lwork,
     )
 
@@ -373,9 +367,7 @@ def _qr_raw_pivot(
 
 
 @overload(_qr_full_pivot)
-def qr_full_pivot_impl(
-    x, mode="full", pivoting=True, overwrite_a=False, check_finite=False, lwork=None
-):
+def qr_full_pivot_impl(x, mode="full", pivoting=True, overwrite_a=False, lwork=None):
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = x.dtype
@@ -395,7 +387,6 @@ def qr_full_pivot_impl(
         mode="full",
         pivoting=True,
         overwrite_a=False,
-        check_finite=False,
         lwork=None,
     ):
         M = np.int32(x.shape[0])
@@ -529,7 +520,7 @@ def qr_full_pivot_impl(
 
 @overload(_qr_full_no_pivot)
 def qr_full_no_pivot_impl(
-    x, mode="full", pivoting=False, overwrite_a=False, check_finite=False, lwork=None
+    x, mode="full", pivoting=False, overwrite_a=False, lwork=None
 ):
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
@@ -546,7 +537,6 @@ def qr_full_no_pivot_impl(
         mode="full",
         pivoting=False,
         overwrite_a=False,
-        check_finite=False,
         lwork=None,
     ):
         M = np.int32(x.shape[0])
@@ -645,9 +635,7 @@ def qr_full_no_pivot_impl(
 
 
 @overload(_qr_r_pivot)
-def qr_r_pivot_impl(
-    x, mode="r", pivoting=True, overwrite_a=False, check_finite=False, lwork=None
-):
+def qr_r_pivot_impl(x, mode="r", pivoting=True, overwrite_a=False, lwork=None):
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = x.dtype
@@ -658,7 +646,6 @@ def qr_r_pivot_impl(
         mode="r",
         pivoting=True,
         overwrite_a=False,
-        check_finite=False,
         lwork=None,
     ):
         M = np.int32(x.shape[0])
@@ -720,9 +707,7 @@ def qr_r_pivot_impl(
 
 
 @overload(_qr_r_no_pivot)
-def qr_r_no_pivot_impl(
-    x, mode="r", pivoting=False, overwrite_a=False, check_finite=False, lwork=None
-):
+def qr_r_no_pivot_impl(x, mode="r", pivoting=False, overwrite_a=False, lwork=None):
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = x.dtype
@@ -733,7 +718,6 @@ def qr_r_no_pivot_impl(
         mode="r",
         pivoting=False,
         overwrite_a=False,
-        check_finite=False,
         lwork=None,
     ):
         M = np.int32(x.shape[0])
@@ -792,9 +776,7 @@ def qr_r_no_pivot_impl(
 
 
 @overload(_qr_raw_no_pivot)
-def qr_raw_no_pivot_impl(
-    x, mode="raw", pivoting=False, overwrite_a=False, check_finite=False, lwork=None
-):
+def qr_raw_no_pivot_impl(x, mode="raw", pivoting=False, overwrite_a=False, lwork=None):
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
     dtype = x.dtype
@@ -805,7 +787,6 @@ def qr_raw_no_pivot_impl(
         mode="raw",
         pivoting=False,
         overwrite_a=False,
-        check_finite=False,
         lwork=None,
     ):
         M = np.int32(x.shape[0])
@@ -863,9 +844,7 @@ def qr_raw_no_pivot_impl(
 
 
 @overload(_qr_raw_pivot)
-def qr_raw_pivot_impl(
-    x, mode="raw", pivoting=True, overwrite_a=False, check_finite=False, lwork=None
-):
+def qr_raw_pivot_impl(x, mode="raw", pivoting=True, overwrite_a=False, lwork=None):
     ensure_lapack()
     _check_linalg_matrix(x, ndim=2, dtype=(Float, Complex), func_name="qr")
 
@@ -880,7 +859,6 @@ def qr_raw_pivot_impl(
         mode="raw",
         pivoting=True,
         overwrite_a=False,
-        check_finite=False,
         lwork=None,
     ):
         M = np.int32(x.shape[0])

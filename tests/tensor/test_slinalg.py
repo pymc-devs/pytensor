@@ -74,9 +74,6 @@ def test_cholesky():
     chol = Cholesky(lower=False)(x)
     ch_f = function([x], chol)
     check_upper_triangular(pd, ch_f)
-    chol = Cholesky(lower=False, on_error="nan")(x)
-    ch_f = function([x], chol)
-    check_upper_triangular(pd, ch_f)
 
 
 def test_cholesky_performance(benchmark):
@@ -102,12 +99,15 @@ def test_cholesky_empty():
 def test_cholesky_indef():
     x = matrix()
     mat = np.array([[1, 0.2], [0.2, -2]]).astype(config.floatX)
-    cholesky = Cholesky(lower=True, on_error="raise")
-    chol_f = function([x], cholesky(x))
+
+    with pytest.warns(FutureWarning):
+        out = cholesky(x, lower=True, on_error="raise")
+    chol_f = function([x], out)
     with pytest.raises(scipy.linalg.LinAlgError):
         chol_f(mat)
-    cholesky = Cholesky(lower=True, on_error="nan")
-    chol_f = function([x], cholesky(x))
+
+    out = cholesky(x, lower=True, on_error="nan")
+    chol_f = function([x], out)
     assert np.all(np.isnan(chol_f(mat)))
 
 
@@ -143,12 +143,16 @@ def test_cholesky_grad():
 def test_cholesky_grad_indef():
     x = matrix()
     mat = np.array([[1, 0.2], [0.2, -2]]).astype(config.floatX)
-    cholesky = Cholesky(lower=True, on_error="raise")
-    chol_f = function([x], grad(cholesky(x).sum(), [x]))
-    with pytest.raises(scipy.linalg.LinAlgError):
-        chol_f(mat)
-    cholesky = Cholesky(lower=True, on_error="nan")
-    chol_f = function([x], grad(cholesky(x).sum(), [x]))
+
+    with pytest.warns(FutureWarning):
+        out = cholesky(x, lower=True, on_error="raise")
+    chol_f = function([x], grad(out.sum(), [x]), mode="FAST_RUN")
+
+    # original cholesky doesn't show up in the grad (if mode="FAST_RUN"), so it does not raise
+    assert np.all(np.isnan(chol_f(mat)))
+
+    out = cholesky(x, lower=True, on_error="nan")
+    chol_f = function([x], grad(out.sum(), [x]))
     assert np.all(np.isnan(chol_f(mat)))
 
 
@@ -237,7 +241,7 @@ class TestSolveBase:
         y = self.SolveTest(b_ndim=2)(A, b)
         assert (
             y.__repr__()
-            == "SolveTest{lower=False, check_finite=True, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
+            == "SolveTest{lower=False, b_ndim=2, overwrite_a=False, overwrite_b=False}.0"
         )
 
 
@@ -549,7 +553,7 @@ class TestCholeskySolve(utt.InferShapeTester):
     def test_repr(self):
         assert (
             repr(CholeskySolve(lower=True, b_ndim=1))
-            == "CholeskySolve(lower=True,check_finite=True,b_ndim=1,overwrite_b=False)"
+            == "CholeskySolve(lower=True,b_ndim=1,overwrite_b=False)"
         )
 
     def test_infer_shape(self):
