@@ -496,13 +496,13 @@ def Lop(
     """
     from pytensor.tensor import as_tensor_variable
 
-    if not isinstance(eval_points, list | tuple):
+    if not isinstance(eval_points, Sequence):
         eval_points = [eval_points]
     _eval_points = [
         x if isinstance(x, Variable) else as_tensor_variable(x) for x in eval_points
     ]
 
-    if not isinstance(f, list | tuple):
+    if not isinstance(f, Sequence):
         f = [f]
     _f = [x if isinstance(x, Variable) else as_tensor_variable(x) for x in f]
 
@@ -510,7 +510,7 @@ def Lop(
 
     using_list = isinstance(wrt, list)
     using_tuple = isinstance(wrt, tuple)
-    if not isinstance(wrt, list | tuple):
+    if not isinstance(wrt, Sequence):
         wrt = [wrt]
     _wrt = [x if isinstance(x, Variable) else as_tensor_variable(x) for x in wrt]
 
