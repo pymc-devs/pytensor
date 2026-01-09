@@ -12,24 +12,19 @@ from pytensor.link.numba.dispatch.linalg._LAPACK import (
 from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
 
 
-def _cholesky(a, lower=False, overwrite_a=False, check_finite=True):
-    return (
-        linalg.cholesky(
-            a, lower=lower, overwrite_a=overwrite_a, check_finite=check_finite
-        ),
-        0,
-    )
+def _cholesky(a, lower=False, overwrite_a=False):
+    return linalg.cholesky(a, lower=lower, overwrite_a=overwrite_a, check_finite=False)
 
 
 @overload(_cholesky)
-def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
+def cholesky_impl(A, lower=0, overwrite_a=False):
     ensure_lapack()
     _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="cholesky")
     dtype = A.dtype
 
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
 
-    def impl(A, lower=False, overwrite_a=False, check_finite=True):
+    def impl(A, lower=False, overwrite_a=False):
         _N = np.int32(A.shape[-1])
         if A.shape[-2] != _N:
             raise linalg.LinAlgError("Last 2 dimensions of A must be square")
@@ -58,6 +53,10 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
             INFO,
         )
 
+        if int_ptr_to_val(INFO) != 0:
+            A_copy = np.full_like(A_copy, np.nan)
+            return A_copy
+
         if lower:
             for j in range(1, _N):
                 for i in range(j):
@@ -67,10 +66,9 @@ def cholesky_impl(A, lower=0, overwrite_a=False, check_finite=True):
                 for i in range(j + 1, _N):
                     A_copy[i, j] = 0.0
 
-        info_int = int_ptr_to_val(INFO)
-
         if transposed:
-            return A_copy.T, info_int
-        return A_copy, info_int
+            return A_copy.T
+        else:
+            return A_copy
 
     return impl

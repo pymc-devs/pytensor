@@ -92,7 +92,6 @@ def jax_funcify_Solve(op, **kwargs):
 def jax_funcify_SolveTriangular(op, **kwargs):
     lower = op.lower
     unit_diagonal = op.unit_diagonal
-    check_finite = op.check_finite
 
     def solve_triangular(A, b):
         return jax.scipy.linalg.solve_triangular(
@@ -101,7 +100,7 @@ def jax_funcify_SolveTriangular(op, **kwargs):
             lower=lower,
             trans=0,  # this is handled by explicitly transposing A, so it will always be 0 when we get to here.
             unit_diagonal=unit_diagonal,
-            check_finite=check_finite,
+            check_finite=False,
         )
 
     return solve_triangular
@@ -132,27 +131,23 @@ def jax_funcify_PivotToPermutation(op, **kwargs):
 def jax_funcify_LU(op, **kwargs):
     permute_l = op.permute_l
     p_indices = op.p_indices
-    check_finite = op.check_finite
 
     if p_indices:
         raise ValueError("JAX does not support the p_indices argument")
 
     def lu(*inputs):
-        return jax.scipy.linalg.lu(
-            *inputs, permute_l=permute_l, check_finite=check_finite
-        )
+        return jax.scipy.linalg.lu(*inputs, permute_l=permute_l, check_finite=False)
 
     return lu
 
 
 @jax_funcify.register(LUFactor)
 def jax_funcify_LUFactor(op, **kwargs):
-    check_finite = op.check_finite
     overwrite_a = op.overwrite_a
 
     def lu_factor(a):
         return jax.scipy.linalg.lu_factor(
-            a, check_finite=check_finite, overwrite_a=overwrite_a
+            a, check_finite=False, overwrite_a=overwrite_a
         )
 
     return lu_factor
@@ -161,12 +156,11 @@ def jax_funcify_LUFactor(op, **kwargs):
 @jax_funcify.register(CholeskySolve)
 def jax_funcify_ChoSolve(op, **kwargs):
     lower = op.lower
-    check_finite = op.check_finite
     overwrite_b = op.overwrite_b
 
     def cho_solve(c, b):
         return jax.scipy.linalg.cho_solve(
-            (c, lower), b, check_finite=check_finite, overwrite_b=overwrite_b
+            (c, lower), b, check_finite=False, overwrite_b=overwrite_b
         )
 
     return cho_solve

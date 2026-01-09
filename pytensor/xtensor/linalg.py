@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from typing import Literal
 
 from pytensor.tensor.slinalg import Cholesky, Solve
 from pytensor.xtensor.type import as_xtensor
@@ -10,8 +9,7 @@ def cholesky(
     x,
     lower: bool = True,
     *,
-    check_finite: bool = False,
-    on_error: Literal["raise", "nan"] = "raise",
+    check_finite: bool = True,
     dims: Sequence[str],
 ):
     """Compute the Cholesky decomposition of an XTensorVariable.
@@ -22,22 +20,15 @@ def cholesky(
         The input variable to decompose.
     lower : bool, optional
         Whether to return the lower triangular matrix. Default is True.
-    check_finite : bool, optional
-        Whether to check that the input is finite. Default is False.
-    on_error : {'raise', 'nan'}, optional
-        What to do if the input is not positive definite. If 'raise', an error is raised.
-        If 'nan', the output will contain NaNs. Default is 'raise'.
+    check_finite : bool
+        Unused by PyTensor. PyTensor will return nan if the operation fails.
     dims : Sequence[str]
         The two core dimensions of the input variable, over which the Cholesky decomposition is computed.
     """
     if len(dims) != 2:
         raise ValueError(f"Cholesky needs two dims, got {len(dims)}")
 
-    core_op = Cholesky(
-        lower=lower,
-        check_finite=check_finite,
-        on_error=on_error,
-    )
+    core_op = Cholesky(lower=lower)
     core_dims = (
         ((dims[0], dims[1]),),
         ((dims[0], dims[1]),),
@@ -52,7 +43,7 @@ def solve(
     dims: Sequence[str],
     assume_a="gen",
     lower: bool = False,
-    check_finite: bool = False,
+    check_finite: bool = True,
 ):
     """Solve a system of linear equations using XTensorVariables.
 
@@ -75,8 +66,8 @@ def solve(
         Long form options can also be used ["general", "symmetric", "hermitian", "positive_definite"].
     lower : bool, optional
         Whether `a` is lower triangular. Default is False. Only relevant if `assume_a` is "sym", "her", or "pos".
-    check_finite : bool, optional
-        Whether to check that the input is finite. Default is False.
+    check_finite : bool
+        Unused by PyTensor. PyTensor will return nan if the operation fails.
     """
     a, b = as_xtensor(a), as_xtensor(b)
     input_core_dims: tuple[tuple[str, str], tuple[str] | tuple[str, str]]
@@ -98,9 +89,7 @@ def solve(
     else:
         raise ValueError("Solve dims must have length 2 or 3")
 
-    core_op = Solve(
-        b_ndim=b_ndim, assume_a=assume_a, lower=lower, check_finite=check_finite
-    )
+    core_op = Solve(b_ndim=b_ndim, assume_a=assume_a, lower=lower)
     x_op = XBlockwise(
         core_op,
         core_dims=(input_core_dims, output_core_dims),
