@@ -47,8 +47,9 @@ def test_function_dump():
 def test_function_name():
     x = vector("x")
     func = function([x], x + 1.0)
-
-    assert __file__ in func.name
+    assert func.name is None
+    func = function([x], x + 1.0, name="my_func")
+    assert func.name == "my_func"
 
 
 def test_trust_input():
