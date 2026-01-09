@@ -81,7 +81,7 @@ jobs:
         with:
           subject-path: dist/*.tar.gz
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -136,7 +136,7 @@ jobs:
         with:
           subject-path: ./wheelhouse/*.whl
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: wheels-${{ matrix.platform }}
           path: ./wheelhouse/*.whl
@@ -177,7 +177,7 @@ jobs:
         with:
           subject-path: dist/*.whl
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: universal_wheel
           path: dist/*.whl
