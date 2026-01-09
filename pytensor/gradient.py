@@ -494,22 +494,25 @@ def Lop(
         coordinates of the tensor elements.
         If `f` is a list/tuple, then return a list/tuple with the results.
     """
-    if not isinstance(eval_points, list | tuple):
-        _eval_points: list[Variable] = [pytensor.tensor.as_tensor_variable(eval_points)]
-    else:
-        _eval_points = [pytensor.tensor.as_tensor_variable(x) for x in eval_points]
+    from pytensor.tensor import as_tensor_variable
 
-    if not isinstance(f, list | tuple):
-        _f: list[Variable] = [pytensor.tensor.as_tensor_variable(f)]
-    else:
-        _f = [pytensor.tensor.as_tensor_variable(x) for x in f]
+    if not isinstance(eval_points, Sequence):
+        eval_points = [eval_points]
+    _eval_points = [
+        x if isinstance(x, Variable) else as_tensor_variable(x) for x in eval_points
+    ]
+
+    if not isinstance(f, Sequence):
+        f = [f]
+    _f = [x if isinstance(x, Variable) else as_tensor_variable(x) for x in f]
 
     grads = list(_eval_points)
 
-    if not isinstance(wrt, list | tuple):
-        _wrt: list[Variable] = [pytensor.tensor.as_tensor_variable(wrt)]
-    else:
-        _wrt = [pytensor.tensor.as_tensor_variable(x) for x in wrt]
+    using_list = isinstance(wrt, list)
+    using_tuple = isinstance(wrt, tuple)
+    if not isinstance(wrt, Sequence):
+        wrt = [wrt]
+    _wrt = [x if isinstance(x, Variable) else as_tensor_variable(x) for x in wrt]
 
     assert len(_f) == len(grads)
     known = dict(zip(_f, grads, strict=True))
@@ -523,8 +526,6 @@ def Lop(
         return_disconnected=return_disconnected,
     )
 
-    using_list = isinstance(wrt, list)
-    using_tuple = isinstance(wrt, tuple)
     return as_list_or_tuple(using_list, using_tuple, ret)
 
 
