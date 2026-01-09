@@ -455,7 +455,6 @@ def test_optimize_grad_disconnected_numerical_inp(optimize_op):
     # Confirm theta is a direct input to the node
     assert x0.owner.inputs[1] is theta
 
-    # This should technically raise, but does not right now
     with pytest.raises(DisconnectedInputError):
         pt.grad(x0, theta, disconnected_inputs="raise")
 
@@ -527,7 +526,6 @@ def test_optimize_grad_disconnected_non_numerical_inp(optimize_op):
     with pytest.raises(DisconnectedInputError):
         pt.grad(x_star, str_theta, disconnected_inputs="raise")
 
-    # This could be supported, but it is not right now.
     grad_wrt_num_theta = pt.grad(x_star, num_theta, disconnected_inputs="raise")
     np.testing.assert_allclose(
         grad_wrt_num_theta.eval({x: np.pi, num_theta: np.e, str_theta: ":)"}), -1
@@ -558,9 +556,40 @@ def test_vectorize_root_gradients():
         [solution, a_grad], {a: a_grid}
     )
 
-    # Compilation previously failed; we just check it works now
-    _ = pytensor.function(
+    def analytical_roots_and_grad(
+        a_vals: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        a = a_vals
+        # There are 4 roots to this equation, but we're always starting the optimizer at (1, 1) to control which one
+        # we get. For a > 0, this is the root with both x and y positive.
+        solution_grid = np.array(
+            (
+                -1 + (np.sqrt(4 * a + 1) + 1) ** 2 / (4 * a),
+                (np.sqrt(4 * a + 1) + 1) / (2 * a),
+            )
+        )
+
+        # Derivative of the sum of the two solutions w.r.t. a
+        dx_da = (np.sqrt(4 * a + 1) + 1) / (a * np.sqrt(4 * a + 1)) + 1 / (
+            a * np.sqrt(4 * a + 1)
+        )
+        dy_da = -((np.sqrt(4 * a + 1) + 1) ** 2) / (4 * a**2) - (
+            np.sqrt(4 * a + 1) + 1
+        ) / (2 * a**2)
+        solution_a_grad = dx_da + dy_da
+
+        return solution_grid.transpose((1, 2, 0)), solution_a_grad
+
+    fn = pytensor.function(
         [a_grid, x, y],
         [solution_grid, a_grad_grid],
         on_unused_input="ignore",
     )
+
+    a_grid = np.linspace(1, 10, 9).reshape((3, 3))
+    solution_grid_val, a_grad_grid_val = fn(a_grid=a_grid, x=1.0, y=1.0)
+
+    analytical_solution_grid, analytical_a_grad_grid = analytical_roots_and_grad(a_grid)
+
+    np.testing.assert_allclose(solution_grid_val, analytical_solution_grid)
+    np.testing.assert_allclose(a_grad_grid_val, analytical_a_grad_grid)

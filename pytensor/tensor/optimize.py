@@ -425,16 +425,17 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
             for inner_arg, arg in zip(inner_args, args)
             if inner_arg in inner_args_to_diff
         ]
+        invalid_grad_map = {
+            arg: g for arg, g in zip(args, arg_grads) if arg not in outer_args_to_diff
+        }
 
         if is_minimization:
             implicit_f = grad(implicit_f, inner_x)
 
         # Gradients are computed using the inner graph of the optimization op, not the actual inputs/outputs of the op.
-        packed_inner_args, packed_arg_shapes, implicit_f = (
-            pack_inputs_unpack_outputs_with_rewrite(
-                implicit_f,
-                inner_args_to_diff,
-            )
+        packed_inner_args, packed_arg_shapes, implicit_f = pack_inputs_of_objective(
+            implicit_f,
+            inner_args_to_diff,
         )
 
         df_dx, df_dtheta = jacobian(
@@ -477,7 +478,7 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
             arg_grad = arg_to_grad.get(arg, None)
 
             if arg_grad is None:
-                final_grads.append(DisconnectedType()())
+                final_grads.append(invalid_grad_map[arg])
                 continue
 
             if arg_grad.ndim > 0 and output_grad.ndim > 0:
@@ -702,7 +703,7 @@ class MinimizeOp(ScipyVectorWrapperOp):
         return [zeros_like(x), *d_xstar_d_theta]
 
 
-def pack_inputs_unpack_outputs_with_rewrite(
+def pack_inputs_of_objective(
     objective: TensorVariable,
     x: TensorVariable | Sequence[TensorVariable],
 ) -> tuple[TensorVariable, list[TensorVariable] | None, TensorVariable]:
@@ -781,9 +782,7 @@ def minimize(
     """
     objective = as_tensor_variable(objective)
 
-    packed_input, packed_shapes, objective = pack_inputs_unpack_outputs_with_rewrite(
-        objective, x
-    )
+    packed_input, packed_shapes, objective = pack_inputs_of_objective(objective, x)
     args = _find_optimization_parameters(objective, packed_input)
 
     minimize_op = MinimizeOp(
@@ -1111,8 +1110,8 @@ def root(
     success: TensorVariable
         Boolean indicating whether the root-finding was successful. If True, the solution is a root of the equation
     """
-    packed_variables, packed_shapes, equations = (
-        pack_inputs_unpack_outputs_with_rewrite(equations, variables)
+    packed_variables, packed_shapes, equations = pack_inputs_of_objective(
+        equations, variables
     )
     args = _find_optimization_parameters(equations, packed_variables)
 
