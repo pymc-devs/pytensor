@@ -2254,18 +2254,19 @@ class Split(COp):
             out_shapes.append(temp)
         return out_shapes
 
+    def connection_pattern(self, node):
+        n_out = len(node.outputs)
+        return [
+            [True] * n_out,
+            [True] * n_out,
+            [False] * n_out,
+        ]
+
     def L_op(self, inputs, outputs, g_outputs):
         """Join the gradients along the axis that was used to split x."""
-        _x, axis, n = inputs
+        _x, axis, _n = inputs
 
-        # If all the output gradients are disconnected, then so are the inputs
-        if builtins.all(isinstance(g.type, DisconnectedType) for g in g_outputs):
-            return [
-                DisconnectedType()(),
-                grad_undefined(self, 1, axis),
-                grad_undefined(self, 2, n),
-            ]
-        # Else, we have to make them zeros before joining them
+        # We have to convert disconnected outputs to zeros before joining them
         new_g_outputs = []
         for o, g in zip(outputs, g_outputs, strict=True):
             if isinstance(g.type, DisconnectedType):
@@ -2276,7 +2277,7 @@ class Split(COp):
         return [
             join(axis, *new_g_outputs),
             grad_undefined(self, 1, axis),
-            grad_undefined(self, 2, n),
+            DisconnectedType()(),
         ]
 
     def R_op(self, inputs, eval_points):

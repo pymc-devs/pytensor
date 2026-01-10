@@ -6,6 +6,7 @@ import tests.unittest_tools as utt
 from pytensor import config, function
 from pytensor import tensor as pt
 from pytensor.graph import rewrite_graph, vectorize_graph
+from pytensor.graph.op import io_connection_pattern
 from pytensor.tensor.reshape import (
     _analyze_axes_list,
     join_dims,
@@ -61,9 +62,10 @@ def test_join_dims():
     [
         (0, pt.as_tensor([2, 3]), (2, 3, 4, 6)),
         (2, [2, 3], (6, 4, 2, 3)),
+        (-1, pt.as_tensor(6), (6, 4, 6)),
         (-1, 6, (6, 4, 6)),
     ],
-    ids=["tensor", "list", "integer"],
+    ids=["tensor list", "integer list", "tensor", "integer"],
 )
 def test_split_dims(axis, shape, expected_shape):
     rng = np.random.default_rng()
@@ -95,7 +97,7 @@ def test_split_dims(axis, shape, expected_shape):
 
 def test_split_size_zero_shape():
     x = pt.tensor("x", shape=(1, 4, 6))
-    x_split = split_dims(x, axis=0, shape=pt.as_tensor(np.zeros((0,))))
+    x_split = split_dims(x, axis=0, shape=pt.as_tensor(np.zeros((0,), dtype="int32")))
     assert x_split.type.shape == (4, 6)
 
     x_value = np.empty((1, 4, 6), dtype=config.floatX)
@@ -288,3 +290,12 @@ class TestPack:
 
         for input_val, output_val in zip(input_dict.values(), output_vals, strict=True):
             np.testing.assert_allclose(input_val, output_val)
+
+
+def test_unpack_connection():
+    x = pt.vector("x")
+    d0 = pt.scalar("d0", dtype=int)
+    d1 = pt.scalar("d1", dtype=int)
+    x0, x1 = pt.unpack(x, axes=None, packed_shapes=[d0, d1])
+    out = x0.sum() + x1.sum()
+    assert io_connection_pattern([x, d0, d1], [out]) == [[True], [False], [False]]

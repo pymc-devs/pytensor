@@ -11,7 +11,6 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import expand_dims, infer_static_shape, join, split
-from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType, shape
 from pytensor.tensor.type import tensor
@@ -165,7 +164,7 @@ class SplitDims(Op):
 
     def make_node(self, x: Variable, shape: Variable) -> Apply:  # type: ignore[override]
         x = as_tensor_variable(x)
-        shape = as_tensor_variable(shape, dtype=int, ndim=1)
+        shape = as_tensor_variable(shape, dtype="int64")
 
         if shape.type.numpy_dtype.kind not in "iu":
             raise TypeError("shape must be an integer tensor")
@@ -272,19 +271,20 @@ def split_dims(
             )
         axis = 0
 
-    if isinstance(shape, int):
-        shape = [shape]
-    else:
-        shape = list(shape)  # type: ignore[arg-type]
-
-    if not shape:
-        # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
-        # example when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes
-        # (3, ) and (3, 3) to (3, 4)
-        return squeeze(x, axis=axis)  # type: ignore[no-any-return]
+    if not isinstance(shape, Sequence):
+        if isinstance(shape, TensorVariable):
+            if shape.ndim > 1:
+                raise ValueError(
+                    "If shape is not a sequence, it must be a scalar, 0D, or 1D tensor"
+                )
+            elif shape.ndim == 0:
+                shape = (shape,)
+            # else: shape.ndim == 1, use as-is
+        elif np.isscalar(shape):
+            shape = (shape,)  # type: ignore[assignment]
 
     [axis] = normalize_axis_tuple(axis, x.ndim)  # type: ignore[misc]
-    shape = as_tensor_variable(shape, dtype="int64", ndim=1)  # type: ignore[arg-type]
+    shape = as_tensor_variable(shape, dtype="int64")  # type: ignore[arg-type]
 
     return SplitDims(axis=axis)(x, shape)  # type: ignore[return-value]
 
