@@ -97,7 +97,7 @@ def test_split_dims(axis, shape, expected_shape):
 
 def test_split_size_zero_shape():
     x = pt.tensor("x", shape=(1, 4, 6))
-    x_split = split_dims(x, axis=0, shape=pt.as_tensor(np.zeros((0,))))
+    x_split = split_dims(x, axis=0, shape=pt.as_tensor(np.zeros((0,), dtype="int32")))
     assert x_split.type.shape == (4, 6)
 
     x_value = np.empty((1, 4, 6), dtype=config.floatX)

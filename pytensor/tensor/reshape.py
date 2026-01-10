@@ -11,7 +11,6 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.tensor import TensorLike, as_tensor_variable
 from pytensor.tensor.basic import expand_dims, infer_static_shape, join, split
-from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import prod
 from pytensor.tensor.shape import ShapeValueType, shape
 from pytensor.tensor.type import tensor
@@ -166,6 +165,7 @@ class SplitDims(Op):
     def make_node(self, x: Variable, shape: Variable) -> Apply:  # type: ignore[override]
         x = as_tensor_variable(x)
         shape = as_tensor_variable(shape, dtype="int64")
+
         if shape.type.numpy_dtype.kind not in "iu":
             raise TypeError("shape must be an integer tensor")
 
@@ -282,21 +282,6 @@ def split_dims(
             # else: shape.ndim == 1, use as-is
         elif np.isscalar(shape):
             shape = (shape,)  # type: ignore[assignment]
-
-    try:
-        empty_shape = not shape
-    except TypeError:
-        # TensorVariables, including tensor constants, will raise TypeError when evaluated in boolean context.
-        # If all shapes of the tensor are known to be zero, however, it is still an empty shape.
-        empty_shape = isinstance(shape, TensorVariable) and any(
-            s is not None and s == 0 for s in shape.type.shape
-        )
-
-    if empty_shape:
-        # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
-        # example when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes
-        # (3, ) and (3, 3) to (3, 4)
-        return squeeze(x, axis=axis)  # type: ignore[no-any-return]
 
     [axis] = normalize_axis_tuple(axis, x.ndim)  # type: ignore[misc]
     shape = as_tensor_variable(shape, dtype="int64")  # type: ignore[arg-type]
