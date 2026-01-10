@@ -165,7 +165,10 @@ class SplitDims(Op):
 
     def make_node(self, x: Variable, shape: Variable) -> Apply:  # type: ignore[override]
         x = as_tensor_variable(x)
-        shape = as_tensor_variable(shape).astype(int)
+        shape = as_tensor_variable(shape, dtype="int64")
+        if shape.type.numpy_dtype.kind not in "iu":
+            raise TypeError("shape must be an integer tensor")
+
         axis = self.axis
         _, constant_shape = infer_static_shape(shape)
 
@@ -280,7 +283,16 @@ def split_dims(
         elif np.isscalar(shape):
             shape = (shape,)  # type: ignore[assignment]
 
-    if shape is None or (isinstance(shape, Sequence) and len(shape) == 0):
+    try:
+        empty_shape = not shape
+    except TypeError:
+        # TensorVariables, including tensor constants, will raise TypeError when evaluated in boolean context.
+        # If all shapes of the tensor are known to be zero, however, it is still an empty shape.
+        empty_shape = isinstance(shape, TensorVariable) and any(
+            s is not None and s == 0 for s in shape.type.shape
+        )
+
+    if empty_shape:
         # If we get an empty shape, there is potentially a dummy dimension at the requested axis. This happens for
         # example when splitting a packed tensor that had its dims expanded before packing (e.g. when packing shapes
         # (3, ) and (3, 3) to (3, 4)
