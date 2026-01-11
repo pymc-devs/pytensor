@@ -148,6 +148,7 @@ from pytensor.tensor.type import (
 )
 from pytensor.tensor.variable import TensorConstant
 from tests import unittest_tools as utt
+from tests.unittest_tools import assert_equal_computations
 
 
 rewrite_mode = config.mode
@@ -4943,6 +4944,29 @@ class TestBlockDiagDotToDotBlockDiag:
             atol=1e-6 if config.floatX == "float32" else 1e-12,
             rtol=1e-6 if config.floatX == "float32" else 1e-12,
         )
+
+    def test_rewrite_does_not_apply(self):
+        # Regression test for https://github.com/pymc-devs/pytensor/issues/1836
+
+        # Shapes match if either R is tranposed or y is, but not by default
+        y = pt.tensor("y", shape=(7, 9))
+        R1 = pt.tensor("R1", shape=(2, 3))
+        R2 = pt.tensor("R2", shape=(5, 6))
+        R = pt.linalg.block_diag(R1, R2)
+
+        # This could be rewritten in the future, if that's the case remove this condition
+        original = dot(R.mT, y)
+        rewritten = rewrite_graph(
+            original, include=("canonicalize", "stabilize", "specialize")
+        )
+        assert_equal_computations([rewritten], [original])
+
+        # This is unlikely to ever be rewritten
+        original = dot(R.exp(), y.mT)
+        rewritten = rewrite_graph(
+            original, include=("canonicalize", "stabilize", "specialize")
+        )
+        assert_equal_computations([rewritten], [original])
 
     @pytest.mark.parametrize("rewrite", [True, False], ids=["rewrite", "no_rewrite"])
     @pytest.mark.parametrize("size", [10, 100, 1000], ids=["small", "medium", "large"])

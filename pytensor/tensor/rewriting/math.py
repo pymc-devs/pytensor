@@ -183,13 +183,23 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
         try:
             client_idx = client.inputs.index(blockdiag_result)
         except ValueError:
-            # If the blockdiag result is not an input to the dot, there is at least one Op between them (usually a
-            # DimShuffle). In this case, we need to figure out which of the inputs of the dot eventually leads to the
-            # blockdiag result.
+            # If the blockdiag result is not an input to the dot, there is at least one Op between them.
+            # We allow left expand_dims (DimShuffle), which is introduced automatically by Blockwise to equalize number of batch dims,
+            # But does not change the semantics of the graph
             for ancestor in client.inputs:
-                if ancestor.owner and blockdiag_result in ancestor.owner.inputs:
+                if (
+                    ancestor.owner is not None
+                    and (
+                        isinstance(ancestor.owner.op, DimShuffle)
+                        and ancestor.owner.op.is_left_expand_dims
+                    )
+                    and blockdiag_result in ancestor.owner.inputs
+                ):
                     client_idx = client.inputs.index(ancestor)
                     break
+            else:  # no-break
+                # Not a simple left expand_dims between dot and block_diag
+                return None
 
         other_input = client.inputs[1 - client_idx]
 
