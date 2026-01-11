@@ -22,7 +22,7 @@ import pytensor.scalar.sharedvar
 from pytensor import config, printing
 from pytensor import scalar as ps
 from pytensor.compile.builders import OpFromGraph
-from pytensor.gradient import DisconnectedType, grad_undefined
+from pytensor.gradient import DisconnectedType, disconnected_type, grad_undefined
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Apply, Constant, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph, Output
@@ -1738,7 +1738,7 @@ class Alloc(COp):
         # the inputs that specify the shape. If you grow the
         # shape by epsilon, the existing elements do not
         # change.
-        return [gx] + [DisconnectedType()() for i in inputs[1:]]
+        return [gx, *(disconnected_type() for _ in range(len(inputs) - 1))]
 
     def R_op(self, inputs, eval_points):
         if eval_points[0] is None:
@@ -2277,7 +2277,7 @@ class Split(COp):
         return [
             join(axis, *new_g_outputs),
             grad_undefined(self, 1, axis),
-            DisconnectedType()(),
+            disconnected_type(),
         ]
 
     def R_op(self, inputs, eval_points):
@@ -3340,14 +3340,14 @@ class ARange(COp):
         if self.dtype in discrete_dtypes:
             return [
                 start.zeros_like(dtype=config.floatX),
-                DisconnectedType()(),
+                disconnected_type(),
                 step.zeros_like(dtype=config.floatX),
             ]
         else:
             num_steps_taken = outputs[0].shape[0]
             return [
                 gz.sum(),
-                DisconnectedType()(),
+                disconnected_type(),
                 (gz * arange(num_steps_taken, dtype=self.dtype)).sum(),
             ]
 
@@ -4374,7 +4374,7 @@ class AllocEmpty(COp):
         return [[False] for i in node.inputs]
 
     def grad(self, inputs, grads):
-        return [DisconnectedType()() for i in inputs]
+        return [disconnected_type() for _ in range(len(inputs))]
 
     def R_op(self, inputs, eval_points):
         return [zeros(inputs, self.dtype)]

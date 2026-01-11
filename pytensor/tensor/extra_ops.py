@@ -8,7 +8,6 @@ from numpy.lib.array_utils import normalize_axis_index
 import pytensor
 import pytensor.scalar.basic as ps
 from pytensor.gradient import (
-    DisconnectedType,
     _float_zeros_like,
     disconnected_type,
     grad_undefined,
@@ -716,7 +715,7 @@ class Repeat(Op):
         gx_transpose = ptb.zeros_like(x_transpose)[repeated_arange].inc(gz_transpose)
         gx = ptb.moveaxis(gx_transpose, 0, axis)
 
-        return [gx, DisconnectedType()()]
+        return [gx, disconnected_type()]
 
     def infer_shape(self, fgraph, node, ins_shapes):
         i0_shapes = ins_shapes[0]

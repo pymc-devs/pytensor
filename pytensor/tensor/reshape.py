@@ -6,7 +6,7 @@ import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
 
 from pytensor import Variable
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import disconnected_type
 from pytensor.graph import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
@@ -217,7 +217,7 @@ class SplitDims(Op):
         n_axes = g_out.ndim - x.ndim + 1
         axis_range = list(range(self.axis, self.axis + n_axes))
 
-        return [join_dims(g_out, axis=axis_range), DisconnectedType()()]
+        return [join_dims(g_out, axis=axis_range), disconnected_type()]
 
 
 @_vectorize_node.register(SplitDims)

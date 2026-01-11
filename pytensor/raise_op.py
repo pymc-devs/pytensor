@@ -2,7 +2,7 @@
 
 from textwrap import indent
 
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import disconnected_type
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
@@ -89,7 +89,10 @@ class CheckAndRaise(COp):
             raise self.exc_type(self.msg)
 
     def grad(self, input, output_gradients):
-        return output_gradients + [DisconnectedType()()] * (len(input) - 1)
+        return [
+            *output_gradients,
+            *(disconnected_type() for _ in range(len(input) - 1)),
+        ]
 
     def connection_pattern(self, node):
         return [[1]] + [[0]] * (len(node.inputs) - 1)

@@ -8,7 +8,7 @@ from numpy.lib.array_utils import normalize_axis_tuple
 
 from pytensor import scalar as ps
 from pytensor.compile.builders import OpFromGraph
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike
@@ -652,8 +652,8 @@ class SVD(Op):
             ]
             if all(is_disconnected):
                 # This should never actually be reached by Pytensor -- the SVD Op should be pruned from the gradient
-                # graph if its fully disconnected. It is included for completeness.
-                return [DisconnectedType()()]  # pragma: no cover
+                # graph if it's fully disconnected. It is included for completeness.
+                return [disconnected_type()]  # pragma: no cover
 
             elif is_disconnected == [True, False, True]:
                 # This is the same as the compute_uv = False, so we can drop back to that simpler computation, without

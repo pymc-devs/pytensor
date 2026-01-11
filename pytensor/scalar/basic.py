@@ -22,7 +22,7 @@ import numpy as np
 import pytensor
 from pytensor import printing
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType, grad_undefined
+from pytensor.gradient import disconnected_type, grad_undefined
 from pytensor.graph.basic import Apply, Constant, Variable, clone
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph
@@ -2426,13 +2426,13 @@ class Second(BinaryScalarOp):
         (gz,) = gout
         if y.type in continuous_types:
             # x is disconnected because the elements of x are not used
-            return DisconnectedType()(), gz
+            return disconnected_type(), gz
         else:
             # when y is discrete, we assume the function can be extended
             # to deal with real-valued inputs by rounding them to the
             # nearest integer. f(x+eps) thus equals f(x) so the gradient
             # is zero, not disconnected or undefined
-            return DisconnectedType()(), y.zeros_like(dtype=config.floatX)
+            return disconnected_type(), y.zeros_like(dtype=config.floatX)
 
 
 second = Second(name="second")

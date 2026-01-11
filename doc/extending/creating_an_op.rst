@@ -495,7 +495,7 @@ If both outputs are disconnected PyTensor will not bother calling the :meth:`L_o
 
     from pytensor.graph.op import Op
     from pytensor.graph.basic import Apply
-    from pytensor.gradient import DisconnectedType
+    from pytensor.gradient import DisconnectedType, disconnected_type
 
     class TransposeAndSumOp(Op):
         __props__ = ()
@@ -539,13 +539,13 @@ If both outputs are disconnected PyTensor will not bother calling the :meth:`L_o
             out1_grad, out2_grad = output_grads
 
             if isinstance(out1_grad.type, DisconnectedType):
-                x_grad = DisconnectedType()()
+                x_grad = disconnected_type()
             else:
                 # Transpose the last two dimensions of the output gradient
                 x_grad = pt.swapaxes(out1_grad, -1, -2)
 
             if isinstance(out2_grad.type, DisconnectedType):
-                y_grad = DisconnectedType()()
+                y_grad = disconnected_type()
             else:
                 # Broadcast the output gradient to the same shape as y
                 y_grad = pt.broadcast_to(pt.expand_dims(out2_grad, -1), y.shape)
