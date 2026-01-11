@@ -63,7 +63,14 @@ from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.compile.profiling import register_profiler_printer
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType, NullType, Rop, grad, grad_undefined
+from pytensor.gradient import (
+    DisconnectedType,
+    NullType,
+    Rop,
+    disconnected_type,
+    grad,
+    grad_undefined,
+)
 from pytensor.graph.basic import (
     Apply,
     Variable,
@@ -3073,7 +3080,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         )
         outputs = local_op(*outer_inputs, return_list=True)
         # Re-order the gradients correctly
-        gradients = [DisconnectedType()()]
+        gradients = [disconnected_type()]  # n_steps is disconnected
 
         offset = info.n_mit_mot + info.n_mit_sot + info.n_sit_sot + n_sitsot_outs
         for p, (x, t) in enumerate(
@@ -3098,7 +3105,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 else:
                     gradients.append(x[::-1])
             elif t == "disconnected":
-                gradients.append(DisconnectedType()())
+                gradients.append(disconnected_type())
             elif t == "through_untraced":
                 gradients.append(
                     grad_undefined(
@@ -3126,7 +3133,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 else:
                     gradients.append(x[::-1])
             elif t == "disconnected":
-                gradients.append(DisconnectedType()())
+                gradients.append(disconnected_type())
             elif t == "through_untraced":
                 gradients.append(
                     grad_undefined(
@@ -3149,7 +3156,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 if not isinstance(dC_dout.type, DisconnectedType) and connected:
                     disconnected = False
             if disconnected:
-                gradients.append(DisconnectedType()())
+                gradients.append(disconnected_type())
             else:
                 gradients.append(
                     grad_undefined(
@@ -3157,7 +3164,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     )
                 )
 
-        gradients += [DisconnectedType()() for _ in range(info.n_nit_sot)]
+        gradients.extend(disconnected_type() for _ in range(info.n_nit_sot))
         begin = end
 
         end = begin + n_sitsot_outs
@@ -3167,7 +3174,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             if t == "connected":
                 gradients.append(x[-1])
             elif t == "disconnected":
-                gradients.append(DisconnectedType()())
+                gradients.append(disconnected_type())
             elif t == "through_untraced":
                 gradients.append(
                     grad_undefined(
@@ -3195,7 +3202,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 ):
                     disconnected = False
             if disconnected:
-                gradients[idx] = DisconnectedType()()
+                gradients[idx] = disconnected_type()
         return gradients
 
     def R_op(self, inputs, eval_points):

@@ -11,7 +11,7 @@ from numpy.lib.array_utils import normalize_axis_tuple
 import pytensor
 from pytensor import scalar as ps
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import disconnected_type
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
@@ -988,7 +988,7 @@ class Subtensor(COp):
             # set subtensor here at:
             # pytensor/tensor/opt.py:local_incsubtensor_of_zeros_to_setsubtensor()
             first = IncSubtensor(self.idx_list)(x.zeros_like(), gz, *rest)
-        return [first] + [DisconnectedType()()] * len(rest)
+        return [first, *(disconnected_type() for _ in range(len(rest)))]
 
     def connection_pattern(self, node):
         rval = [[True], *([False] for _ in node.inputs[1:])]
@@ -2023,7 +2023,7 @@ class IncSubtensor(COp):
             gy = Subtensor(idx_list=self.idx_list)(g_output, *idx_list)
             gy = _sum_grad_over_bcasted_dims(y, gy)
 
-        return [gx, gy] + [DisconnectedType()()] * len(idx_list)
+        return [gx, gy, *(disconnected_type() for _ in range(len(idx_list)))]
 
 
 class IncSubtensorPrinter(SubtensorPrinter):
@@ -2135,7 +2135,7 @@ class AdvancedSubtensor1(COp):
                     " from a tensor with ndim != 2. ndim is " + str(x.type.ndim)
                 )
 
-            rval1 = [pytensor.sparse.construct_sparse_from_list(x, gz, ilist)]
+            rval1 = pytensor.sparse.construct_sparse_from_list(x, gz, ilist)
         else:
             if x.dtype in discrete_dtypes:
                 # The output dtype is the same as x
@@ -2144,8 +2144,8 @@ class AdvancedSubtensor1(COp):
                 raise NotImplementedError("No support for complex grad yet")
             else:
                 gx = x.zeros_like()
-            rval1 = [advanced_inc_subtensor1(gx, gz, ilist)]
-        return rval1 + [DisconnectedType()()] * (len(inputs) - 1)
+            rval1 = advanced_inc_subtensor1(gx, gz, ilist)
+        return [rval1, *(disconnected_type() for _ in range(len(inputs) - 1))]
 
     def R_op(self, inputs, eval_points):
         if eval_points[0] is None:
@@ -2519,7 +2519,7 @@ class AdvancedIncSubtensor1(COp):
             gy = advanced_subtensor1(g_output, idx_list)
             gy = _sum_grad_over_bcasted_dims(y, gy)
 
-        return [gx, gy, DisconnectedType()()]
+        return [gx, gy, disconnected_type()]
 
 
 advanced_inc_subtensor1 = AdvancedIncSubtensor1()
@@ -2771,9 +2771,10 @@ class AdvancedSubtensor(Op):
         else:
             gx = x.zeros_like()
         rest = inputs[1:]
-        return [advanced_inc_subtensor(gx, gz, *rest)] + [DisconnectedType()()] * len(
-            rest
-        )
+        return [
+            advanced_inc_subtensor(gx, gz, *rest),
+            *(disconnected_type() for _ in range(len(rest))),
+        ]
 
     @staticmethod
     def non_contiguous_adv_indexing(node: Apply) -> bool:
@@ -2933,7 +2934,7 @@ class AdvancedIncSubtensor(Op):
             # Make sure to sum gy over the dimensions of y that have been
             # added or broadcasted
             gy = _sum_grad_over_bcasted_dims(y, gy)
-        return [gx, gy] + [DisconnectedType()() for _ in idxs]
+        return [gx, gy, *(disconnected_type() for _ in range(len(idxs)))]
 
     @staticmethod
     def non_contiguous_adv_indexing(node: Apply) -> bool:

@@ -1,6 +1,6 @@
 import numpy as np
 
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import as_tensor_variable
@@ -59,7 +59,7 @@ class RFFTOp(Op):
             + [slice(None)]
         )
         gout = set_subtensor(gout[idx], gout[idx] * 0.5)
-        return [irfft_op(gout, s), DisconnectedType()()]
+        return [irfft_op(gout, s), disconnected_type()]
 
     def connection_pattern(self, node):
         # Specify that shape input parameter has no connection to graph and gradients.
@@ -121,7 +121,7 @@ class IRFFTOp(Op):
             + [slice(None)]
         )
         gf = set_subtensor(gf[idx], gf[idx] * 2)
-        return [gf, DisconnectedType()()]
+        return [gf, disconnected_type()]
 
     def connection_pattern(self, node):
         # Specify that shape input parameter has no connection to graph and gradients.

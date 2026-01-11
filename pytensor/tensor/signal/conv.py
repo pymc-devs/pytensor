@@ -5,7 +5,7 @@ import numpy as np
 from numpy import convolve as numpy_convolve
 from scipy.signal import convolve as scipy_convolve
 
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import disconnected_type
 from pytensor.graph import Apply, Constant
 from pytensor.graph.op import Op
 from pytensor.link.c.op import COp
@@ -109,7 +109,7 @@ class AbstractConvolveNd:
         return [
             self(grad, flip(in2), full_mode_in1_bar),
             self(grad, flip(in1), full_mode_in2_bar),
-            DisconnectedType()(),
+            disconnected_type(),
         ]
 
 

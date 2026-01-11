@@ -18,7 +18,7 @@ import pytensor
 from pytensor import _as_symbolic, as_symbolic
 from pytensor import scalar as ps
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType, grad_undefined
+from pytensor.gradient import DisconnectedType, disconnected_type, grad_undefined
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
 from pytensor.link.c.type import generic
@@ -480,9 +480,9 @@ class CSM(Op):
         )
         return [
             g_data,
-            DisconnectedType()(),
-            DisconnectedType()(),
-            DisconnectedType()(),
+            disconnected_type(),
+            disconnected_type(),
+            disconnected_type(),
         ]
 
     def infer_shape(self, fgraph, node, shapes):
@@ -1940,7 +1940,7 @@ class ConstructSparseFromList(Op):
         gx = g_output
         gy = pytensor.tensor.subtensor.advanced_subtensor1(g_output, *idx_list)
 
-        return [gx, gy] + [DisconnectedType()()] * len(idx_list)
+        return [gx, gy, *(disconnected_type() for _ in range(len(idx_list)))]
 
 
 construct_sparse_from_list = ConstructSparseFromList()

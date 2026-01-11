@@ -11,7 +11,7 @@ from scipy.linalg import get_lapack_funcs
 import pytensor
 from pytensor import ifelse
 from pytensor import tensor as pt
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.raise_op import Assert, CheckAndRaise
@@ -1966,7 +1966,7 @@ class QR(Op):
             ]
             if all(is_disconnected):
                 # This should never be reached by Pytensor
-                return [DisconnectedType()()]  # pragma: no cover
+                return [disconnected_type()]  # pragma: no cover
 
             for disconnected, output_grad, output in zip(
                 is_disconnected, output_grads, [Q, R], strict=True

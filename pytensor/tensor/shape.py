@@ -10,7 +10,7 @@ import numpy as np
 from numpy.lib.array_utils import normalize_axis_tuple
 
 import pytensor
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import disconnected_type
 from pytensor.graph import Op
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.replace import _vectorize_node
@@ -103,7 +103,7 @@ class Shape(COp):
         # the elements of the tensor variable do not participate
         # in the computation of the shape, so they are not really
         # part of the graph
-        return [pytensor.gradient.DisconnectedType()()]
+        return [disconnected_type()]
 
     def R_op(self, inputs, eval_points):
         return [None]
@@ -474,8 +474,9 @@ class SpecifyShape(COp):
     def grad(self, inp, grads):
         _x, *shape = inp
         (gz,) = grads
-        return [specify_shape(gz, shape)] + [
-            pytensor.gradient.DisconnectedType()() for _ in range(len(shape))
+        return [
+            specify_shape(gz, shape),
+            *(disconnected_type() for _ in range(len(shape))),
         ]
 
     def R_op(self, inputs, eval_points):
@@ -725,7 +726,7 @@ class Reshape(COp):
     def grad(self, inp, grads):
         x, _shp = inp
         (g_out,) = grads
-        return [reshape(g_out, shape(x), ndim=x.ndim), DisconnectedType()()]
+        return [reshape(g_out, shape(x), ndim=x.ndim), disconnected_type()]
 
     def R_op(self, inputs, eval_points):
         if eval_points[0] is None:

@@ -1,6 +1,6 @@
 import numpy as np
 
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import disconnected_type
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import as_tensor_variable
@@ -142,7 +142,7 @@ class PdbBreakpoint(Op):
                 output_storage[i][0] = inputs[i + 1]
 
     def grad(self, inputs, output_gradients):
-        return [DisconnectedType()(), *output_gradients]
+        return [disconnected_type(), *output_gradients]
 
     def infer_shape(self, fgraph, inputs, input_shapes):
         # Return the shape of every input but the condition (first input)
