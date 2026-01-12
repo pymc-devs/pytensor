@@ -8,7 +8,7 @@ import pytest
 import scipy
 from scipy import linalg as scipy_linalg
 
-from pytensor import function, grad
+from pytensor import In, function, grad
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
@@ -31,6 +31,7 @@ from pytensor.tensor.slinalg import (
     lu_solve,
     pivot_to_permutation,
     qr,
+    schur,
     solve,
     solve_continuous_lyapunov,
     solve_discrete_are,
@@ -1248,3 +1249,92 @@ def test_qr_grad(shape, gradient_test_case, mode, is_complex):
         utt.verify_grad(
             partial(_test_fn, case=gradient_test_case, mode=mode), [a], rng=np.random
         )
+
+
+class TestSchur:
+    @pytest.mark.parametrize(
+        "shape, output",
+        [((5, 5), "real"), ((5, 5), "complex"), ((2, 4, 4), "real")],
+        ids=["not_batched_real", "not_batched_complex", "batched_real"],
+    )
+    @pytest.mark.parametrize("complex", [False, True], ids=["real", "complex"])
+    def test_schur_decomposition(self, shape, output, complex):
+        dtype = (
+            config.floatX if not complex else f"complex{int(config.floatX[-2:]) * 2}"
+        )
+
+        A = tensor("A", shape=shape, dtype=dtype)
+        T, Z = schur(A, output=output)
+
+        f = function([A], [T, Z])
+
+        rng = np.random.default_rng(utt.fetch_seed())
+        x = rng.normal(size=shape).astype(config.floatX)
+        if complex:
+            x = x + 1j * rng.normal(size=shape).astype(config.floatX)
+
+        T_out, Z_out = f(x)
+
+        # Verify reconstruction
+        x_rebuilt = np.einsum("...ij,...jk,...lk->...il", Z_out, T_out, Z_out.conj())
+
+        np.testing.assert_allclose(
+            x,
+            x_rebuilt,
+            atol=1e-6 if config.floatX == "float64" else 1e-3,
+            rtol=1e-6 if config.floatX == "float64" else 1e-3,
+        )
+
+        vec_schur = np.vectorize(
+            lambda a: scipy_linalg.schur(a, output=output),
+            signature="(m,m)->(m,m),(m,m)",
+        )
+
+        scipy_T, scipy_Z = vec_schur(x)
+        np.testing.assert_allclose(T_out, scipy_T, atol=1e-6, rtol=1e-6)
+        np.testing.assert_allclose(Z_out, scipy_Z, atol=1e-6, rtol=1e-6)
+
+        if len(shape) == 2 and (output == "complex") == complex:
+            x_f = np.asfortranarray(x.copy())
+            f_mut = function(
+                [In(A, mutable=True)],
+                [T, Z],
+                mode=get_default_mode().including("inplace"),
+            )
+            f_mut(x_f)
+            np.testing.assert_allclose(x_f, scipy_T, atol=1e-6, rtol=1e-6)
+
+    @pytest.mark.parametrize("sort", ["lhp", "rhp", "iuc", "ouc"])
+    def test_schur_sort(self, sort):
+        rng = np.random.default_rng(utt.fetch_seed())
+        x = rng.normal(size=(3, 3)).astype(config.floatX)
+
+        A = matrix("A", dtype=config.floatX)
+        T, Z = schur(A, sort=sort)
+
+        f = function([A], [T, Z])
+        T_out, Z_out = f(x)
+
+        x_rebuilt = Z_out @ T_out @ Z_out.T
+
+        np.testing.assert_allclose(
+            x,
+            x_rebuilt,
+            atol=1e-6 if config.floatX == "float64" else 1e-3,
+            rtol=1e-6 if config.floatX == "float64" else 1e-3,
+        )
+
+        scipy_T, scipy_Z, _ = scipy_linalg.schur(x, output="real", sort=sort)
+        np.testing.assert_allclose(T_out, scipy_T, atol=1e-6, rtol=1e-6)
+        np.testing.assert_allclose(Z_out, scipy_Z, atol=1e-6, rtol=1e-6)
+
+    def test_schur_empty(self):
+        empty = np.empty([0, 0], dtype=config.floatX)
+        A = matrix()
+        T, Z = schur(A)
+        f = function([A], [T, Z])
+        T_out, Z_out = f(empty)
+        assert T_out.size == 0
+        assert Z_out.size == 0
+        assert T_out.dtype == config.floatX
+        assert Z_out.dtype == config.floatX
