@@ -382,3 +382,13 @@ def test_jax_qr(mode):
     out = pt_slinalg.qr(A, mode=mode)
 
     compare_jax_and_py([A], out, [A_val])
+
+
+@pytest.mark.parametrize("output", ["real", "complex"])
+def test_jax_schur(output):
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = pt.tensor(name="A", shape=(5, 5))
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+    T, Z = pt_slinalg.schur(A, output=output)
+
+    compare_jax_and_py([A], [T, Z], [A_val])

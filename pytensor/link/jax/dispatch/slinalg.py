@@ -13,6 +13,7 @@ from pytensor.tensor.slinalg import (
     Expm,
     LUFactor,
     PivotToPermutations,
+    Schur,
     Solve,
     SolveTriangular,
 )
@@ -183,3 +184,19 @@ def jax_funcify_Expm(op, **kwargs):
         return jax.scipy.linalg.expm(x)
 
     return expm
+
+
+@jax_funcify.register(Schur)
+def jax_funcify_Schur(op, **kwargs):
+    output = op.output
+
+    if op.sort is not None:
+        warnings.warn(
+            "jax.scipy.linalg.schur only supports sort=None. The sort argument is ignored."
+        )
+
+    def schur(a):
+        T, Z = jax.scipy.linalg.schur(a, output=output)
+        return T, Z
+
+    return schur
