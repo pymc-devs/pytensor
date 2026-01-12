@@ -51,8 +51,8 @@ from pytensor.tensor.slinalg import (
     CholeskySolve,
     Solve,
     SolveBase,
+    SolveBilinearDiscreteLyapunov,
     SolveTriangular,
-    _bilinear_solve_discrete_lyapunov,
     block_diag,
     cholesky,
     solve,
@@ -918,10 +918,10 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
     return [eye_input * (non_eye_input**0.5)]
 
 
-@node_rewriter([_bilinear_solve_discrete_lyapunov])
+@node_rewriter([SolveBilinearDiscreteLyapunov])
 def jax_bilinaer_lyapunov_to_direct(fgraph: FunctionGraph, node: Apply):
     """
-    Replace BilinearSolveDiscreteLyapunov with a direct computation that is supported by JAX
+    Replace SolveBilinearDiscreteLyapunov with a direct computation that is supported by JAX
     """
     A, B = (cast(TensorVariable, x) for x in node.inputs)
     result = solve_discrete_lyapunov(A, B, method="direct")
