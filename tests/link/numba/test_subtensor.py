@@ -195,7 +195,7 @@ def test_AdvancedSubtensor(x, indices):
         [out_pt],
         [x.data],
         # Specialize allows running boolean indexing without falling back to object mode
-        # Thanks to bool_idx_to_nonzero rewrite
+        # Thanks to ravel_multidimensional_bool_idx rewrite
         numba_mode=numba_mode.including("specialize"),
     )
 
@@ -521,15 +521,7 @@ def test_advanced_indexing_with_newaxis_fallback_obj_mode():
     # After which we can add these parametrizations to the relevant tests above
     x = pt.matrix("x")
     out = x[None, [0, 1, 2], [0, 1, 2]]
-    with pytest.warns(
-        UserWarning,
-        match=r"Numba will use object mode to run AdvancedSubtensor's perform method",
-    ):
-        compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
+    compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
 
     out = x[None, [0, 1, 2], [0, 1, 2]].inc(5)
-    with pytest.warns(
-        UserWarning,
-        match=r"Numba will use object mode to run AdvancedIncSubtensor's perform method",
-    ):
-        compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
+    compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])

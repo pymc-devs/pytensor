@@ -8,7 +8,6 @@ from pytensor import Variable
 from pytensor.compile import optdb
 from pytensor.graph import Constant, FunctionGraph, node_rewriter, vectorize_graph
 from pytensor.graph.rewriting.basic import NodeRewriter, copy_stack_trace
-from pytensor.scalar import basic as ps
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -42,6 +41,7 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     AdvancedSubtensor1,
     Subtensor,
+    _is_position,
     _non_consecutive_adv_indexing,
     as_index_literal,
     get_canonical_form_slice,
@@ -702,13 +702,13 @@ def local_subtensor_make_vector(fgraph, node):
 
         (idx,) = idxs
 
-        if isinstance(idx, ps.ScalarType | TensorType):
-            old_idx, idx = idx, node.inputs[1]
-            assert idx.type.is_super(old_idx)
+        if _is_position(idx):
+            # idx is an integer position - get the actual index value from inputs
+            idx = node.inputs[1]
     elif isinstance(node.op, AdvancedSubtensor1):
         idx = node.inputs[1]
 
-    if isinstance(idx, int | np.integer):
+    if False:  # isinstance(idx, int | np.integer) - disabled, positions handled above
         return [x.owner.inputs[idx]]
     elif isinstance(idx, Variable):
         if idx.ndim == 0:
@@ -833,7 +833,7 @@ def local_subtensor_shape_constant(fgraph, node):
     except NotScalarConstantError:
         return False
 
-    assert idx_val != np.newaxis
+    assert idx_val is not None
 
     if not isinstance(shape_arg.type, TensorType):
         return False
@@ -871,22 +871,20 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
         # AdvancedSubtensor involves a full_copy, so we don't want to do it twice
         return None
 
-    x, *adv_idxs = adv_subtensor.owner.inputs
+    x = adv_subtensor.owner.inputs[0]
+    adv_index_vars = adv_subtensor.owner.inputs[1:]
+    adv_idxs = indices_from_subtensor(adv_index_vars, adv_subtensor.owner.op.idx_list)
 
     # Advanced indexing is a minefield, avoid all cases except for consecutive integer indices
     if any(
-        (
-            isinstance(adv_idx.type, NoneTypeT)
-            or (isinstance(adv_idx.type, TensorType) and adv_idx.type.dtype == "bool")
-            or (isinstance(adv_idx.type, SliceType) and not is_full_slice(adv_idx))
-        )
+        ((adv_idx is None) or isinstance(getattr(adv_idx, "type", None), NoneTypeT))
         for adv_idx in adv_idxs
     ) or _non_consecutive_adv_indexing(adv_idxs):
         return None
 
     for first_adv_idx_dim, adv_idx in enumerate(adv_idxs):
         # We already made sure there were only None slices besides integer indexes
-        if isinstance(adv_idx.type, TensorType):
+        if isinstance(getattr(adv_idx, "type", None), TensorType):
             break
     else:  # no-break
         # Not sure if this should ever happen, but better safe than sorry
@@ -909,7 +907,7 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
     copy_stack_trace([basic_subtensor, adv_subtensor], x_indexed)
 
     x_after_index_lift = expand_dims(x_indexed, dropped_dims)
-    x_after_adv_idx = adv_subtensor.owner.op(x_after_index_lift, *adv_idxs)
+    x_after_adv_idx = adv_subtensor.owner.op(x_after_index_lift, *adv_index_vars)
     copy_stack_trace([basic_subtensor, adv_subtensor], x_after_adv_idx)
 
     new_out = squeeze(x_after_adv_idx[basic_idxs_kept], dropped_dims)
