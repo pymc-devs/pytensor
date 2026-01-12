@@ -25,6 +25,10 @@ from pytensor.link.numba.dispatch.linalg.decomposition.qr import (
     _qr_raw_no_pivot,
     _qr_raw_pivot,
 )
+from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
+    schur_complex,
+    schur_real,
+)
 from pytensor.link.numba.dispatch.linalg.solve.cholesky import _cho_solve
 from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
 from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
@@ -43,6 +47,7 @@ from pytensor.tensor.slinalg import (
     CholeskySolve,
     LUFactor,
     PivotToPermutations,
+    Schur,
     Solve,
     SolveTriangular,
 )
@@ -469,3 +474,58 @@ def numba_funcify_QR(op, node, **kwargs):
 
     cache_version = 2
     return qr, cache_version
+
+
+@register_funcify_default_op_cache_key(Schur)
+def numba_funcify_Schur(op, node, **kwargs):
+    output = op.output
+    overwrite_a = op.overwrite_a
+    sort = op.sort
+
+    if sort is not None:
+        if config.compiler_verbose:
+            print(  # noqa: T201
+                "Schur is not implemented in numba mode when `sort` is not None, "
+                "falling back to object mode"
+            )
+        return generate_fallback_impl(op, node=node, **kwargs)
+
+    in_dtype = node.inputs[0].type.numpy_dtype
+    out_dtype = node.outputs[0].type.numpy_dtype
+    integer_input = in_dtype.kind in "ibu"
+    complex_input = in_dtype.kind in "cz"
+    needs_complex_cast = in_dtype.kind in "fd" and output == "complex"
+
+    # Disable overwrite_a for dtype conversion (real->complex upcast)
+    if needs_complex_cast:
+        overwrite_a = False
+        if config.compiler_verbose:
+            print(  # noqa: T201
+                "Schur: disabling overwrite_a due to dtype conversion (casting prevents in-place operation)"
+            )
+
+    if integer_input and config.compiler_verbose:
+        print("Schur requires casting discrete input to float")  # noqa: T201
+
+    # Complex input always produces complex output, and output == "complex" forces complex output
+    if complex_input or output == "complex":
+
+        @numba_basic.numba_njit
+        def schur(a):
+            if integer_input:
+                a = a.astype(out_dtype)
+            elif needs_complex_cast:
+                a = a.astype(out_dtype)
+            T, Z = schur_complex(a, lwork=None, overwrite_a=overwrite_a)
+            return T, Z
+    else:
+        # Real input with real output
+        @numba_basic.numba_njit
+        def schur(a):
+            if integer_input:
+                a = a.astype(out_dtype)
+            T, Z = schur_real(a, lwork=None, overwrite_a=overwrite_a)
+            return T, Z
+
+    cache_version = 1
+    return schur, cache_version
