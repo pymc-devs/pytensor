@@ -34,8 +34,9 @@ def local_join_dims_to_reshape(fgraph, node):
     """
 
     (x,) = node.inputs
-    start_axis = node.op.start_axis
-    n_axes = node.op.n_axes
+    op = node.op
+    start_axis = op.start_axis
+    n_axes = op.n_axes
 
     output_shape = [
         *x.shape[:start_axis],
