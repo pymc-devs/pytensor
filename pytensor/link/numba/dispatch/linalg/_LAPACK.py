@@ -894,3 +894,55 @@ class _LAPACK:
                 )
 
         return gees
+
+    @classmethod
+    def numba_xtrsyl(cls, dtype):
+        """
+        Solve the Sylvester equation A*X + ISGN*X*B = C or A**T*X + ISGN*X*B**T = C.
+
+        Called by scipy.linalg.solve_sylvester and scipy.linalg.solve_continuous_lyapunov.
+        """
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+
+        if kind in "ld":
+            real_pointer = float_pointer
+        else:
+            real_pointer = nb_f64p if dtype is nb_c128 else nb_f32p
+
+        unique_func_name = f"scipy.lapack.{kind}trsyl"
+
+        @numba_basic.numba_njit
+        def get_trsyl_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "trsyl")
+            return ptr
+
+        trsyl_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # TRANA
+                nb_i32p,  # TRANB
+                nb_i32p,  # ISGN
+                nb_i32p,  # M
+                nb_i32p,  # N
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                float_pointer,  # B
+                nb_i32p,  # LDB
+                float_pointer,  # C
+                nb_i32p,  # LDC
+                real_pointer,  # SCALE
+                nb_i32p,  # INFO
+            )
+        )
+
+        @numba_basic.numba_njit
+        def trsyl(TRANA, TRANB, ISGN, M, N, A, LDA, B, LDB, C, LDC, SCALE, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_trsyl_pointer,
+                func_type_ref=trsyl_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(TRANA, TRANB, ISGN, M, N, A, LDA, B, LDB, C, LDC, SCALE, INFO)
+
+        return trsyl
