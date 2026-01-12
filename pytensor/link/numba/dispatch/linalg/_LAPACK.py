@@ -750,3 +750,147 @@ class _LAPACK:
             fn(M, N, K, A, LDA, TAU, WORK, LWORK, INFO)
 
         return ungqr
+
+    @classmethod
+    def numba_xgees(cls, dtype):
+        """
+        Compute the eigenvalues and, optionally, the right Schur vectors of a real nonsymmetric matrix A.
+
+        Called by scipy.linalg.schur
+        """
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        unique_func_name = f"scipy.lapack.{kind}gees"
+
+        @numba_basic.numba_njit
+        def get_gees_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "gees")
+            return ptr
+
+        if isinstance(dtype, Complex):
+            real_pointer = nb_f64p if dtype is nb_c128 else nb_f32p
+            gees_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # JOBVS
+                    nb_i32p,  # SORT
+                    nb_i32p,  # SELECT
+                    nb_i32p,  # N
+                    float_pointer,  # A
+                    nb_i32p,  # LDA
+                    nb_i32p,  # SDIM
+                    float_pointer,  # W
+                    float_pointer,  # VS
+                    nb_i32p,  # LDVS
+                    float_pointer,  # WORK
+                    nb_i32p,  # LWORK
+                    real_pointer,  # RWORK
+                    nb_i32p,  # BWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def gees(
+                JOBVS,
+                SORT,
+                SELECT,
+                N,
+                A,
+                LDA,
+                SDIM,
+                W,
+                VS,
+                LDVS,
+                WORK,
+                LWORK,
+                RWORK,
+                BWORK,
+                INFO,
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_gees_pointer,
+                    func_type_ref=gees_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(
+                    JOBVS,
+                    SORT,
+                    SELECT,
+                    N,
+                    A,
+                    LDA,
+                    SDIM,
+                    W,
+                    VS,
+                    LDVS,
+                    WORK,
+                    LWORK,
+                    RWORK,
+                    BWORK,
+                    INFO,
+                )
+
+        else:  # Real case
+            gees_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # JOBVS
+                    nb_i32p,  # SORT
+                    nb_i32p,  # SELECT
+                    nb_i32p,  # N
+                    float_pointer,  # A
+                    nb_i32p,  # LDA
+                    nb_i32p,  # SDIM
+                    float_pointer,  # WR
+                    float_pointer,  # WI
+                    float_pointer,  # VS
+                    nb_i32p,  # LDVS
+                    float_pointer,  # WORK
+                    nb_i32p,  # LWORK
+                    nb_i32p,  # BWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def gees(
+                JOBVS,
+                SORT,
+                SELECT,
+                N,
+                A,
+                LDA,
+                SDIM,
+                WR,
+                WI,
+                VS,
+                LDVS,
+                WORK,
+                LWORK,
+                BWORK,
+                INFO,
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_gees_pointer,
+                    func_type_ref=gees_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(
+                    JOBVS,
+                    SORT,
+                    SELECT,
+                    N,
+                    A,
+                    LDA,
+                    SDIM,
+                    WR,
+                    WI,
+                    VS,
+                    LDVS,
+                    WORK,
+                    LWORK,
+                    BWORK,
+                    INFO,
+                )
+
+        return gees

@@ -20,6 +20,7 @@ from pytensor.tensor.slinalg import (
     lu,
     lu_factor,
     lu_solve,
+    schur,
     solve,
     solve_triangular,
 )
@@ -734,6 +735,63 @@ class TestDecompositions:
             outs,
             [np.zeros((0, 0))],
         )
+
+    @pytest.mark.parametrize("output", ["real", "complex"], ids=lambda x: f"output_{x}")
+    @pytest.mark.parametrize(
+        "input_type", ["real", "complex"], ids=lambda x: f"input_{x}"
+    )
+    @pytest.mark.parametrize(
+        "overwrite_a", [False, True], ids=["no_overwrite", "overwrite_a"]
+    )
+    def test_schur(self, output, input_type, overwrite_a):
+        shape = (5, 5)
+        # Scipy only respects output parameter for real inputs
+        # Complex inputs always produce complex output
+        requires_casting = input_type == "real" and output == "complex"
+
+        dtype = (
+            config.floatX
+            if input_type == "real"
+            else ("complex64" if config.floatX.endswith("32") else "complex128")
+        )
+        A = pt.tensor("A", shape=shape, dtype=dtype)
+        T, Z = schur(A, output=output)
+
+        rng = np.random.default_rng()
+        A_val = rng.normal(size=shape).astype(dtype)
+
+        fn, (T_res, Z_res) = compare_numba_and_py(
+            [In(A, mutable=overwrite_a)],
+            [T, Z],
+            [A_val],
+            numba_mode=numba_inplace_mode,
+            inplace=True,
+        )
+
+        expected_complex_output = input_type == "complex" or output == "complex"
+        assert (
+            np.iscomplexobj(T_res) and np.iscomplexobj(Z_res)
+        ) == expected_complex_output
+
+        # Verify reconstruction
+        A_rebuilt = Z_res @ T_res @ Z_res.conj().T
+        np.testing.assert_allclose(A_val, A_rebuilt, atol=1e-6, rtol=1e-6)
+
+        # Test F-contiguous input
+        val_f_contig = np.copy(A_val, order="F")
+        T_f, Z_f = fn(val_f_contig)
+        np.testing.assert_allclose(T_f, T_res, atol=1e-6)
+        np.testing.assert_allclose(Z_f, Z_res, atol=1e-6)
+
+        expect_destroy = overwrite_a and not requires_casting
+        assert (A_val == val_f_contig).all() == (not expect_destroy)
+
+        # Test C-contiguous input (cannot destroy)
+        val_c_contig = np.copy(A_val, order="C")
+        T_c, Z_c = fn(val_c_contig)
+        np.testing.assert_allclose(T_c, T_res, atol=1e-6)
+        np.testing.assert_allclose(Z_c, Z_res, atol=1e-6)
+        np.testing.assert_allclose(val_c_contig, A_val)
 
 
 def test_block_diag():
