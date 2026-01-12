@@ -20,32 +20,37 @@ def test_join_dims():
     rng = np.random.default_rng()
 
     x = pt.tensor("x", shape=(2, 3, 4, 5))
-    assert join_dims(x, axis=(0, 1)).type.shape == (6, 4, 5)
-    assert join_dims(x, axis=(1, 2)).type.shape == (2, 12, 5)
-    assert join_dims(x, axis=(-1, -2)).type.shape == (2, 3, 20)
+    assert join_dims(x).type.shape == (120,)
+    assert join_dims(x, n_axes=1).type.shape == (2, 3, 4, 5)
+    assert join_dims(x, n_axes=0).type.shape == (1, 2, 3, 4, 5)
 
-    assert join_dims(x, axis=()).type.shape == (2, 3, 4, 5)
-    assert join_dims(x, axis=(2,)).type.shape == (2, 3, 4, 5)
+    assert join_dims(x, n_axes=2).type.shape == (6, 4, 5)
+    assert join_dims(x, start_axis=1, n_axes=2).type.shape == (2, 12, 5)
+    assert join_dims(x, start_axis=-3, n_axes=2).type.shape == (2, 12, 5)
+    assert join_dims(x, start_axis=2).type.shape == (2, 3, 20)
+
+    with pytest.raises(
+        IndexError,
+        match=r"Axis 5 is out of bounds for array of dimension 4",
+    ):
+        join_dims(x, start_axis=5)
 
     with pytest.raises(
         ValueError,
-        match=r"join_dims axis must be consecutive, got normalized axis: \(0, 2\)",
+        match=r"JoinDims was asked to join dimensions 0 to 5, but input x has only 4 dimensions.",
     ):
-        _ = join_dims(x, axis=(0, 2)).type.shape == (8, 3, 5)
+        join_dims(x, n_axes=5)
 
-    x_joined = join_dims(x, axis=(1, 2))
     x_value = rng.normal(size=(2, 3, 4, 5)).astype(config.floatX)
-
-    fn = function([x], x_joined, mode="FAST_COMPILE")
-
-    x_joined_value = fn(x_value)
-    np.testing.assert_allclose(x_joined_value, x_value.reshape(2, 12, 5))
-
-    assert join_dims(x, axis=(1,)).eval({x: x_value}).shape == (2, 3, 4, 5)
-    assert join_dims(x, axis=()).eval({x: x_value}).shape == (2, 3, 4, 5)
+    np.testing.assert_allclose(
+        join_dims(x, start_axis=1, n_axes=2).eval({x: x_value}),
+        x_value.reshape(2, 12, 5),
+    )
+    assert join_dims(x, 1, n_axes=1).eval({x: x_value}).shape == (2, 3, 4, 5)
+    assert join_dims(x, 1, n_axes=0).eval({x: x_value}).shape == (2, 1, 3, 4, 5)
 
     x = pt.tensor("x", shape=(3, 5))
-    x_joined = join_dims(x, axis=(0, 1))
+    x_joined = join_dims(x)
     x_batched = pt.tensor("x_batched", shape=(10, 3, 5))
     x_joined_batched = vectorize_graph(x_joined, {x: x_batched})
 
@@ -54,7 +59,7 @@ def test_join_dims():
     x_batched_val = rng.normal(size=(10, 3, 5)).astype(config.floatX)
     assert x_joined_batched.eval({x_batched: x_batched_val}).shape == (10, 15)
 
-    utt.verify_grad(lambda x: join_dims(x, axis=(1, 2)), [x_value])
+    utt.verify_grad(lambda x: join_dims(x, start_axis=1, n_axes=2), [x_value])
 
 
 @pytest.mark.parametrize(
@@ -289,7 +294,7 @@ class TestPack:
         output_vals = fn(**input_dict)
 
         for input_val, output_val in zip(input_dict.values(), output_vals, strict=True):
-            np.testing.assert_allclose(input_val, output_val)
+            np.testing.assert_allclose(input_val, output_val, strict=True)
 
     def test_single_input(self):
         x = pt.matrix("x", shape=(2, 5))

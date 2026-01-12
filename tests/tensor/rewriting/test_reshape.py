@@ -21,7 +21,7 @@ def test_local_split_dims_to_reshape():
 
 def test_local_join_dims_to_reshape():
     x = tensor("x", shape=(2, 2, 5, 1, 3))
-    x_join = join_dims(x, axis=(1, 2, 3))
+    x_join = join_dims(x, start_axis=1, n_axes=3)
 
     fg = FunctionGraph(inputs=[x], outputs=[x_join])
 
