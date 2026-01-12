@@ -31,6 +31,9 @@ from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
 )
 from pytensor.link.numba.dispatch.linalg.solve.cholesky import _cho_solve
 from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
+from pytensor.link.numba.dispatch.linalg.solve.linear_control import (
+    _trsyl,
+)
 from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
 from pytensor.link.numba.dispatch.linalg.solve.symmetric import _solve_symmetric
 from pytensor.link.numba.dispatch.linalg.solve.triangular import _solve_triangular
@@ -42,6 +45,7 @@ from pytensor.link.numba.dispatch.string_codegen import (
 from pytensor.tensor.slinalg import (
     LU,
     QR,
+    TRSYL,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
@@ -529,3 +533,38 @@ def numba_funcify_Schur(op, node, **kwargs):
 
     cache_version = 1
     return schur, cache_version
+
+
+@register_funcify_default_op_cache_key(TRSYL)
+def numba_funcify_TRSYL(op, node, **kwargs):
+    in_dtype_a = node.inputs[0].type.numpy_dtype
+    in_dtype_b = node.inputs[1].type.numpy_dtype
+    in_dtype_c = node.inputs[2].type.numpy_dtype
+    out_dtype = node.outputs[0].type.numpy_dtype
+
+    overwrite_c = op.overwrite_c
+
+    must_cast_a = in_dtype_a != out_dtype
+    if must_cast_a and config.compiler_verbose:
+        print("TRSYL requires casting first input `A`")  # noqa: T201
+    must_cast_b = in_dtype_b != out_dtype
+    if must_cast_b and config.compiler_verbose:
+        print("TRSYL requires casting second input `B`")  # noqa: T201
+    must_cast_c = in_dtype_c != out_dtype
+    if must_cast_c and config.compiler_verbose:
+        print("TRSYL requires casting third input `C`")  # noqa: T201
+
+    @numba_basic.numba_njit
+    def trsyl(a, b, c):
+        if must_cast_a:
+            a = a.astype(out_dtype)
+        if must_cast_b:
+            b = b.astype(out_dtype)
+        if must_cast_c:
+            c = c.astype(out_dtype)
+
+        x = _trsyl(a, b, c, overwrite_c=overwrite_c)
+        return x
+
+    cache_version = 1
+    return trsyl, cache_version
