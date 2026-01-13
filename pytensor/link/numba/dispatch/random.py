@@ -470,6 +470,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
                 output_bc_patterns,
                 output_dtypes,
                 inplace_pattern,
+                True,  # allow_core_scalar
                 (rng,),
                 dist_params,
                 (numba_ndarray.to_fixed_tuple(core_shape, core_shape_len),),

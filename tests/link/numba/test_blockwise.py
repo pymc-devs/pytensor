@@ -2,10 +2,12 @@ import numpy as np
 import pytest
 
 from pytensor import function
-from pytensor.tensor import lvector, tensor, tensor3
+from pytensor.graph import Apply
+from pytensor.scalar import ScalarOp
+from pytensor.tensor import TensorVariable, lvector, tensor, tensor3, vector
 from pytensor.tensor.basic import Alloc, ARange, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.nlinalg import SVD, Det
 from pytensor.tensor.slinalg import Cholesky, cholesky
 from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
@@ -90,3 +92,39 @@ def test_blockwise_scalar_dimshuffle():
     )
     out = blockwise_scalar_ds(x)
     compare_numba_and_py([x], [out], [np.arange(9)], eval_obj_mode=False)
+
+
+def test_blockwise_vs_elemwise_scalar_op():
+    # Regression test for https://github.com/pymc-devs/pytensor/issues/1760
+
+    class TestScalarOp(ScalarOp):
+        def make_node(self, x):
+            return Apply(self, [x], [x.type()])
+
+        def perform(self, node, inputs, outputs):
+            [x] = inputs
+            if isinstance(node.inputs[0], TensorVariable):
+                assert isinstance(x, np.ndarray)
+            else:
+                assert isinstance(x, np.number | float)
+            out = x + 1
+            if isinstance(node.outputs[0], TensorVariable):
+                out = np.asarray(out)
+            outputs[0][0] = out
+
+    x = vector("x")
+    y = Elemwise(TestScalarOp())(x)
+    with pytest.warns(
+        UserWarning,
+        match="Numba will use object mode to run TestScalarOp's perform method",
+    ):
+        fn = function([x], y, mode="NUMBA")
+    np.testing.assert_allclose(fn(np.zeros((3,))), [1, 1, 1])
+
+    z = Blockwise(TestScalarOp(), signature="()->()")(x)
+    with pytest.warns(
+        UserWarning,
+        match="Numba will use object mode to run TestScalarOp's perform method",
+    ):
+        fn = function([x], z, mode="NUMBA")
+    np.testing.assert_allclose(fn(np.zeros((3,))), [1, 1, 1])

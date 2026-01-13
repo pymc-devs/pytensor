@@ -86,6 +86,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
                 output_bc_patterns,
                 output_dtypes,
                 inplace_pattern,
+                False,  # allow_core_scalar
                 (),  # constant_inputs
                 inputs,
                 tuple_core_shapes,
@@ -98,6 +99,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
         # If the core op cannot be cached, the Blockwise wrapper cannot be cached either
         blockwise_key = None
     else:
+        blockwise_cache_version = 1
         blockwise_key = "_".join(
             map(
                 str,
@@ -108,6 +110,7 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
                     blockwise_op.signature,
                     input_bc_patterns,
                     core_op_key,
+                    blockwise_cache_version,
                 ),
             )
         )
