@@ -392,3 +392,18 @@ def test_jax_schur(output):
     T, Z = pt_slinalg.schur(A, output=output)
 
     compare_jax_and_py([A], [T, Z], [A_val])
+
+
+def test_jax_solve_sylvester():
+    rng = np.random.default_rng(utt.fetch_seed())
+    A = pt.tensor(name="A", shape=(3, 3))
+    B = pt.tensor(name="B", shape=(3, 3))
+    C = pt.tensor(name="C", shape=(3, 3))
+
+    A_val = rng.normal(size=(3, 3)).astype(config.floatX)
+    B_val = rng.normal(size=(3, 3)).astype(config.floatX)
+    C_val = rng.normal(size=(3, 3)).astype(config.floatX)
+
+    out = pt_slinalg.solve_sylvester(A, B, C)
+
+    compare_jax_and_py([A, B, C], [out], [A_val, B_val, C_val])
