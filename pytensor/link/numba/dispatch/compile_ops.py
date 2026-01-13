@@ -68,7 +68,7 @@ def numba_funcify_OpFromGraph(op, node=None, **kwargs):
     output_specs = [Out(o, borrow=False) for o in fgraph.outputs]
     insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
     fgraph_fn, fgraph_cache_key = numba_funcify_and_cache_key(
-        fgraph, squeeze_output=True, **kwargs
+        fgraph, squeeze_output=True, fgraph_name="numba_ofg", **kwargs
     )
 
     if fgraph_cache_key is None:

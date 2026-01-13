@@ -236,7 +236,7 @@ def numba_funcify_Composite(op, node, **kwargs):
     _ = kwargs.pop("storage_map", None)
 
     composite_fn, fgraph_key = numba_funcify_and_cache_key(
-        op.fgraph, squeeze_output=True, **kwargs
+        op.fgraph, squeeze_output=True, fgraph_name="numba_composite", **kwargs
     )
     if fgraph_key is None:
         composite_key = None
