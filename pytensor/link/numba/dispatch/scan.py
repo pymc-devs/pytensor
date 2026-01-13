@@ -98,7 +98,9 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
     output_specs = [Out(x, borrow=False) for x in fgraph.outputs]
     insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
 
-    scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(op.fgraph)
+    scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
+        op.fgraph, fgraph_name="numba_scan"
+    )
 
     outer_in_names_to_vars = {
         (f"outer_in_{i}" if i > 0 else "n_steps"): v for i, v in enumerate(node.inputs)
