@@ -10,6 +10,7 @@ from pytensor.configdefaults import config
 from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor import slinalg as pt_slinalg
 from pytensor.tensor import subtensor as pt_subtensor
+from pytensor.tensor._linalg.solve import linear_control
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
 from tests.link.jax.test_basic import compare_jax_and_py
@@ -275,7 +276,7 @@ def test_jax_solve_discrete_lyapunov(
 ):
     A = pt.tensor(name="A", shape=shape)
     B = pt.tensor(name="B", shape=shape)
-    out = pt_slinalg.solve_discrete_lyapunov(A, B, method=method)
+    out = linear_control.solve_discrete_lyapunov(A, B, method=method)
 
     atol = rtol = 1e-8 if config.floatX == "float64" else 1e-3
     compare_jax_and_py(
@@ -404,6 +405,6 @@ def test_jax_solve_sylvester():
     B_val = rng.normal(size=(3, 3)).astype(config.floatX)
     C_val = rng.normal(size=(3, 3)).astype(config.floatX)
 
-    out = pt_slinalg.solve_sylvester(A, B, C)
+    out = linear_control.solve_sylvester(A, B, C)
 
     compare_jax_and_py([A, B, C], [out], [A_val, B_val, C_val])
