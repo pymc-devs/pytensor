@@ -1,19 +1,38 @@
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
+from pytensor.tensor.basic import expand_dims
+from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.rewriting.basic import register_canonicalize
+from pytensor.tensor.shape import specify_shape
 
 
 @register_canonicalize
 @node_rewriter([SplitDims])
-def local_split_dims_to_reshape(fgraph, node):
+def local_split_dims(fgraph, node):
     """
     Canonicalize SplitDims Ops to Reshape Ops for further graph reasoning (and dispatch to other backends).
+    Special case: if shape is (0,), converts to squeeze instead.
     """
 
     x, shape = node.inputs
     axis = node.op.axis
 
+    # Special case: empty shape -> squeeze
+    if shape.type.shape == (0,):
+        squeezed_x = squeeze(x, axis=axis)
+        copy_stack_trace(x, squeezed_x)
+        return [squeezed_x]
+
+    # Special case: size 1 shape -> SpecifyShape
+    if shape.type.shape == (1,):
+        specified_shape = [None] * x.type.ndim
+        specified_shape[axis] = shape
+        specified_x = specify_shape(x, specified_shape)
+        copy_stack_trace(x, specified_x)
+        return [specified_x]
+
+    # General case: rewrite to reshape
     output_shape = [
         *x.shape[:axis],
         *shape,
@@ -28,7 +47,7 @@ def local_split_dims_to_reshape(fgraph, node):
 
 @register_canonicalize
 @node_rewriter([JoinDims])
-def local_join_dims_to_reshape(fgraph, node):
+def local_join_dims(fgraph, node):
     """
     Canonicalize JoinDims Ops to Reshape Ops for further graph reasoning (and dispatch to other backends).
     """
@@ -37,6 +56,15 @@ def local_join_dims_to_reshape(fgraph, node):
     op = node.op
     start_axis = op.start_axis
     n_axes = op.n_axes
+
+    if n_axes == 0:
+        expanded_x = expand_dims(x, axis=node.op.start_axis)
+        copy_stack_trace(x, expanded_x)
+        return [expanded_x]
+
+    if n_axes == 1:
+        copy_stack_trace(x, x)
+        return [x]
 
     output_shape = [
         *x.shape[:start_axis],
