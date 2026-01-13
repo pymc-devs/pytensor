@@ -3,6 +3,7 @@ from warnings import warn
 import numpy as np
 import scipy.sparse as scipy_sparse
 
+from pytensor.compile import ViewOp
 from pytensor.sparse.basic import (
     cast,
     csm_data,
@@ -24,8 +25,18 @@ from pytensor.sparse.math import (
     lt,
     mul,
     sp_sum,
+    structured_abs,
+    structured_arcsin,
+    structured_arcsinh,
+    structured_arctan,
     structured_conjugate,
+    structured_deg2rad,
     structured_dot,
+    structured_expm1,
+    structured_log1p,
+    structured_rad2deg,
+    structured_sinh,
+    structured_tanh,
     sub,
 )
 from pytensor.sparse.type import SparseTensorType
@@ -73,6 +84,11 @@ def override_dense(method):
 class _sparse_py_operators:
     T = property(
         lambda self: transpose(self), doc="Return aliased transpose of self (read-only)"
+    )
+
+    mT = property(
+        lambda self: transpose(self),
+        doc="Return aliased matrix transpose of self (read-only)",
     )
 
     def astype(self, dtype):
@@ -175,9 +191,8 @@ class _sparse_py_operators:
     def conj(self):
         return structured_conjugate(self)
 
-    @override_dense
     def __abs__(self):
-        raise NotImplementedError
+        return structured_abs(self)
 
     @override_dense
     def __ceil__(self):
@@ -191,9 +206,8 @@ class _sparse_py_operators:
     def __trunc__(self):
         raise NotImplementedError
 
-    @override_dense
     def transpose(self):
-        raise NotImplementedError
+        return self.T
 
     @override_dense
     def any(self, axis=None, keepdims=False):
@@ -223,21 +237,18 @@ class _sparse_py_operators:
     def arccos(self):
         raise NotImplementedError
 
-    @override_dense
     def arcsin(self):
-        raise NotImplementedError
+        return structured_arcsin(self)
 
-    @override_dense
     def arctan(self):
-        raise NotImplementedError
+        return structured_arctan(self)
 
     @override_dense
     def arccosh(self):
         raise NotImplementedError
 
-    @override_dense
     def arcsinh(self):
-        raise NotImplementedError
+        return structured_arcsinh(self)
 
     @override_dense
     def arctanh(self):
@@ -255,9 +266,8 @@ class _sparse_py_operators:
     def cosh(self):
         raise NotImplementedError
 
-    @override_dense
     def deg2rad(self):
-        raise NotImplementedError
+        return structured_deg2rad(self)
 
     @override_dense
     def exp(self):
@@ -267,9 +277,8 @@ class _sparse_py_operators:
     def exp2(self):
         raise NotImplementedError
 
-    @override_dense
     def expm1(self):
-        raise NotImplementedError
+        return structured_expm1(self)
 
     @override_dense
     def floor(self):
@@ -283,25 +292,22 @@ class _sparse_py_operators:
     def log10(self):
         raise NotImplementedError
 
-    @override_dense
     def log1p(self):
-        raise NotImplementedError
+        return structured_log1p(self)
 
     @override_dense
     def log2(self):
         raise NotImplementedError
 
-    @override_dense
     def rad2deg(self):
-        raise NotImplementedError
+        return structured_rad2deg(self)
 
     @override_dense
     def sin(self):
         raise NotImplementedError
 
-    @override_dense
     def sinh(self):
-        raise NotImplementedError
+        return structured_sinh(self)
 
     @override_dense
     def sqrt(self):
@@ -311,13 +317,12 @@ class _sparse_py_operators:
     def tan(self):
         raise NotImplementedError
 
-    @override_dense
     def tanh(self):
-        raise NotImplementedError
+        return structured_tanh(self)
 
     @override_dense
     def copy(self, name=None):
-        raise NotImplementedError
+        raise ViewOp()(self)
 
     @override_dense
     def prod(self, axis=None, dtype=None, keepdims=False, acc_dtype=None):
