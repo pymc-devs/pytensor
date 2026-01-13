@@ -12,8 +12,8 @@ from pytensor import config
 from pytensor.gradient import grad_not_implemented
 from pytensor.graph import Apply, Op
 from pytensor.link.c.op import COp
-from pytensor.tensor import TensorType, Variable, specify_broadcastable, tensor
-from pytensor.tensor.type import complex_dtypes
+from pytensor.tensor.shape import specify_broadcastable
+from pytensor.tensor.type import TensorType, Variable, complex_dtypes, tensor
 
 
 def structured_elemwise(tensor_op):
