@@ -1,7 +1,49 @@
-from pytensor.graph import node_rewriter
+from pytensor.graph import Constant, node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
+from pytensor.tensor.basic import expand_dims
+from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.rewriting.basic import register_canonicalize
+
+
+@register_canonicalize
+@node_rewriter([SplitDims])
+def local_split_dims_squeeze(fgraph, node):
+    """
+    Canonicalize SplitDims Ops to Squeeze Ops if shape is ().
+    split_dims(x, axis=axis, shape=()) -> squeeze(x, axis)
+    """
+    x, shape = node.inputs
+    axis = node.op.axis
+
+    if isinstance(shape, Constant) and shape.data.size == 0:
+        squeezed_x = squeeze(x, axis=axis)
+        copy_stack_trace(x, squeezed_x)
+        return [squeezed_x]
+    return None
+
+
+# @register_canonicalize
+# @node_rewriter([SplitDims])
+# def local_split_dims_specify_shape(fgraph, node):
+#     """
+#     Canonicalize SplitDims Ops to SpecifyShape Ops if shape is (dim,).
+#     split_dims(x, axis=axis, shape=(dim,)) -> specify_shape(x, (*[None] * axis, dim, ...))
+#     """
+#     x, shape = node.inputs
+#     axis = node.op.axis
+
+#     if isinstance(shape, Constant) and shape.data.size == 1:
+#         # Extract the dimension value (shape.data is numpy array)
+#         dim_value = int(shape.data[0])
+
+#         # split_dims with shape=(dim,) keeps same number of dimensions
+#         output_ndim = x.type.ndim
+
+#         specify_shape_x = specify_shape(x, (*[None] * axis, dim_value, ...))
+#         copy_stack_trace(x, specify_shape_x)
+#         return [specify_shape_x]
+#     return None
 
 
 @register_canonicalize
@@ -24,6 +66,39 @@ def local_split_dims_to_reshape(fgraph, node):
     copy_stack_trace(x, new_x)
 
     return [new_x]
+
+
+@register_canonicalize
+@node_rewriter([JoinDims])
+def local_join_dims_noop(fgraph, node):
+    """
+    Canonicalize JoinDims Ops to identity if n_axes=1.
+    join_dims(x, axis=axis, n_axes=1) -> x
+    """
+    (x,) = node.inputs
+    op = node.op
+
+    if op.n_axes == 1:
+        copy_stack_trace(x, x)
+        return [x]
+    return None
+
+
+@register_canonicalize
+@node_rewriter([JoinDims])
+def local_join_dims_expand(fgraph, node):
+    """
+    Canonicalize JoinDims Ops to expand dims if n_axes=0.
+    join_dims(x, axis=axis, n_axes=0) -> expand_dims(x, axis)
+    """
+    (x,) = node.inputs
+    op = node.op
+
+    if op.n_axes == 0:
+        expanded_x = expand_dims(x, axis=node.op.start_axis)
+        copy_stack_trace(x, expanded_x)
+        return [expanded_x]
+    return None
 
 
 @register_canonicalize
