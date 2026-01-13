@@ -42,10 +42,10 @@ from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
     build_source_code,
 )
+from pytensor.tensor._linalg.solve.linear_control import TRSYL
 from pytensor.tensor.slinalg import (
     LU,
     QR,
-    TRSYL,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,

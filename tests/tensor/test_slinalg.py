@@ -15,6 +15,12 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
 from pytensor.link.numba import NumbaLinker
 from pytensor.tensor import TensorVariable
+from pytensor.tensor._linalg.solve.linear_control import (
+    solve_continuous_lyapunov,
+    solve_discrete_are,
+    solve_discrete_lyapunov,
+    solve_sylvester,
+)
 from pytensor.tensor.slinalg import (
     Cholesky,
     CholeskySolve,
@@ -33,10 +39,6 @@ from pytensor.tensor.slinalg import (
     qr,
     schur,
     solve,
-    solve_continuous_lyapunov,
-    solve_discrete_are,
-    solve_discrete_lyapunov,
-    solve_sylvester,
     solve_triangular,
 )
 from pytensor.tensor.type import dmatrix, matrix, tensor, vector

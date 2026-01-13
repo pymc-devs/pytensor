@@ -3,6 +3,7 @@ import warnings
 import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor._linalg.solve.linear_control import SolveSylvester
 from pytensor.tensor.slinalg import (
     LU,
     QR,
@@ -15,7 +16,6 @@ from pytensor.tensor.slinalg import (
     PivotToPermutations,
     Schur,
     Solve,
-    SolveSylvester,
     SolveTriangular,
 )
 

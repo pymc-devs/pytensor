@@ -3,6 +3,7 @@ import pytest
 
 from pytensor import config
 from pytensor import tensor as pt
+from pytensor.tensor._linalg.solve import linear_control
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -17,7 +18,7 @@ def test_solve_sylvester():
     A = pt.matrix("A")
     B = pt.matrix("B")
     C = pt.matrix("C")
-    X = pt.linalg.solve_sylvester(A, B, C)
+    X = linear_control.solve_sylvester(A, B, C)
 
     rng = np.random.default_rng()
     A_val = rng.normal(size=(5, 5)).astype(floatX)
@@ -30,7 +31,7 @@ def test_solve_sylvester():
 def test_solve_continuous_lyapunov():
     A = pt.matrix("A")
     Q = pt.matrix("Q")
-    X = pt.linalg.solve_continuous_lyapunov(A, Q)
+    X = linear_control.solve_continuous_lyapunov(A, Q)
 
     rng = np.random.default_rng()
     A_val = rng.normal(size=(5, 5)).astype(floatX)
@@ -44,7 +45,7 @@ def test_solve_continuous_lyapunov():
 def test_solve_discrete_lyapunov(method):
     A = pt.matrix("A")
     Q = pt.matrix("Q")
-    X = pt.linalg.solve_discrete_lyapunov(A, Q, method=method)
+    X = linear_control.solve_discrete_lyapunov(A, Q, method=method)
 
     rng = np.random.default_rng()
     A_val = rng.normal(size=(5, 5)).astype(floatX)
