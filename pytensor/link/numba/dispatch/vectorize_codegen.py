@@ -82,6 +82,7 @@ def _vectorized(
     output_bc_patterns,
     output_dtypes,
     inplace_pattern,
+    allow_core_scalar,
     constant_inputs_types,
     input_types,
     output_core_shape_types,
@@ -93,6 +94,7 @@ def _vectorized(
         output_bc_patterns,
         output_dtypes,
         inplace_pattern,
+        allow_core_scalar,
         constant_inputs_types,
         input_types,
         output_core_shape_types,
@@ -119,6 +121,10 @@ def _vectorized(
     inplace_pattern = inplace_pattern.literal_value
     inplace_pattern = pickle.loads(base64.decodebytes(inplace_pattern.encode()))
 
+    if not isinstance(allow_core_scalar, types.Literal):
+        raise TypeError("allow_core_scalar must be literal.")
+    allow_core_scalar = allow_core_scalar.literal_value
+
     batch_ndim = len(input_bc_patterns[0])
     nin = len(constant_inputs_types) + len(input_types)
     nout = len(output_bc_patterns)
@@ -142,8 +148,7 @@ def _vectorized(
     core_input_types = []
     for input_type, bc_pattern in zip(input_types, input_bc_patterns, strict=True):
         core_ndim = input_type.ndim - len(bc_pattern)
-        # TODO: Reconsider this
-        if core_ndim == 0:
+        if allow_core_scalar and core_ndim == 0:
             core_input_type = input_type.dtype
         else:
             core_input_type = types.Array(
@@ -196,7 +201,7 @@ def _vectorized(
         sig,
         args,
     ):
-        [_, _, _, _, _, constant_inputs, inputs, output_core_shapes, size] = args
+        [_, _, _, _, _, _, constant_inputs, inputs, output_core_shapes, size] = args
 
         constant_inputs = cgutils.unpack_tuple(builder, constant_inputs)
         inputs = cgutils.unpack_tuple(builder, inputs)
@@ -256,6 +261,7 @@ def _vectorized(
             output_bc_patterns_val,
             input_types,
             output_types,
+            core_scalar=allow_core_scalar,
         )
 
         if len(outputs) == 1:
@@ -429,6 +435,7 @@ def make_loop_call(
     output_bc: tuple[tuple[bool, ...], ...],
     input_types: tuple[Any, ...],
     output_types: tuple[Any, ...],
+    core_scalar: bool = True,
 ):
     safe = (False, False)
 
@@ -486,7 +493,7 @@ def make_loop_call(
             idxs_bc,
             *safe,
         )
-        if core_ndim == 0:
+        if core_scalar and core_ndim == 0:
             # Retrive scalar item at index
             val = builder.load(ptr)
             # val.set_metadata("alias.scope", input_scope_set)
@@ -499,15 +506,19 @@ def make_loop_call(
                 dtype=input_type.dtype, ndim=core_ndim, layout=input_type.layout
             )
             core_array = context.make_array(core_arry_type)(context, builder)
-            core_shape = cgutils.unpack_tuple(builder, input.shape)[-core_ndim:]
-            core_strides = cgutils.unpack_tuple(builder, input.strides)[-core_ndim:]
+            core_shape = cgutils.unpack_tuple(builder, input.shape)[
+                input_type.ndim - core_ndim :
+            ]
+            core_strides = cgutils.unpack_tuple(builder, input.strides)[
+                input_type.ndim - core_ndim :
+            ]
             itemsize = context.get_abi_sizeof(context.get_data_type(input_type.dtype))
             context.populate_array(
                 core_array,
                 # TODO whey do we need to bitcast?
                 data=builder.bitcast(ptr, core_array.data.type),
-                shape=cgutils.pack_array(builder, core_shape),
-                strides=cgutils.pack_array(builder, core_strides),
+                shape=core_shape,
+                strides=core_strides,
                 itemsize=context.get_constant(types.intp, itemsize),
                 # TODO what is meminfo about?
                 meminfo=None,

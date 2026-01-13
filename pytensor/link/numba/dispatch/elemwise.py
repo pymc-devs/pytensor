@@ -365,6 +365,7 @@ def numba_funcify_Elemwise(op, node, **kwargs):
                 output_bc_patterns_enc,
                 output_dtypes_enc,
                 inplace_pattern_enc,
+                True,  # allow_core_scalar
                 (),  # constant_inputs
                 inputs,
                 core_output_shapes,  # core_shapes
