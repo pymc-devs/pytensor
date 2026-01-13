@@ -15,6 +15,7 @@ from pytensor.tensor.slinalg import (
     PivotToPermutations,
     Schur,
     Solve,
+    SolveSylvester,
     SolveTriangular,
 )
 
@@ -200,3 +201,11 @@ def jax_funcify_Schur(op, **kwargs):
         return T, Z
 
     return schur
+
+
+@jax_funcify.register(SolveSylvester)
+def jax_funcify_SolveSylsterer(op, **kwargs):
+    def solve_sylvester(a, b, c):
+        return jax.scipy.linalg.solve_sylvester(a, b, c)
+
+    return solve_sylvester
