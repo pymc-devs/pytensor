@@ -109,26 +109,3 @@ def test_local_split_dims_to_reshape_squeeze_case():
     assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 0
     # Output shape should be (2, 3, 4) - dimension 1 removed
     assert fg.outputs[0].type.shape == (2, 3, 4)
-
-
-# def test_local_split_dims_specify_shape():
-#     """Test that split_dims with shape=(dim,) becomes specify_shape (when input shape is None)."""
-#     # Create input with unknown shape at axis 1
-#     x = tensor("x", shape=(2, None, 4))
-#     # Create a constant shape with single dimension - split_dims will convert it to a tensor
-#     dim_shape = np.array([5], dtype="int32")
-#     x_split = split_dims(x, axis=1, shape=dim_shape)
-#
-#     fg = FunctionGraph(inputs=[x], outputs=[x_split])
-#
-#     # Before rewrite: should have 1 SplitDims node
-#     assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 1
-#
-#     rewrite_graph(fg, include=("canonicalize",))
-#
-#     # After rewrite: should have 0 SplitDims nodes
-#     assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 0
-#     # Should have 1 SpecifyShape node
-#     assert sum([1 for node in fg.toposort() if isinstance(node.op, SpecifyShape)]) == 1
-#     # Output shape should be (2, 5, 4) - dimension 1 specified as 5
-#     assert fg.outputs[0].type.shape == (2, 5, 4)
