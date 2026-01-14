@@ -1,26 +1,9 @@
-from pytensor.graph import Constant, node_rewriter
+from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import copy_stack_trace
 from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.rewriting.basic import register_canonicalize
-
-
-@register_canonicalize
-@node_rewriter([SplitDims])
-def local_split_dims_squeeze(fgraph, node):
-    """
-    Canonicalize SplitDims Ops to Squeeze Ops if shape is ().
-    split_dims(x, axis=axis, shape=()) -> squeeze(x, axis)
-    """
-    x, shape = node.inputs
-    axis = node.op.axis
-
-    if isinstance(shape, Constant) and shape.data.size == 0:
-        squeezed_x = squeeze(x, axis=axis)
-        copy_stack_trace(x, squeezed_x)
-        return [squeezed_x]
-    return None
 
 
 # @register_canonicalize
@@ -51,10 +34,17 @@ def local_split_dims_squeeze(fgraph, node):
 def local_split_dims_to_reshape(fgraph, node):
     """
     Canonicalize SplitDims Ops to Reshape Ops for further graph reasoning (and dispatch to other backends).
+    Special case: if shape is (0,), converts to squeeze instead.
     """
 
     x, shape = node.inputs
     axis = node.op.axis
+
+    # Special case: empty shape -> squeeze
+    if shape.type.shape == (0,):
+        squeezed_x = squeeze(x, axis=axis)
+        copy_stack_trace(x, squeezed_x)
+        return [squeezed_x]
 
     output_shape = [
         *x.shape[:axis],

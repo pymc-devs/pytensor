@@ -1,5 +1,3 @@
-import numpy as np
-
 from pytensor.graph import FunctionGraph, rewrite_graph
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
@@ -8,6 +6,7 @@ from pytensor.tensor.type import tensor
 
 
 def test_local_split_dims_to_reshape():
+    """Test that split_dims converts to reshape for general shapes."""
     x = tensor("x", shape=(2, 10, 3))
     x_split = split_dims(x, axis=1, shape=(2, 5, 1))
 
@@ -83,14 +82,14 @@ def test_local_join_dims_expand():
     assert fg.outputs[0].type.shape == (2, 1, 3, 4)
 
 
-def test_local_split_dims_squeeze():
-    """Test that split_dims with shape=() becomes squeeze."""
+def test_local_split_dims_to_reshape_squeeze_case():
+    """Test that split_dims with shape tensor of static shape (0,) becomes squeeze via merged rewrite."""
     x = tensor("x", shape=(2, 1, 3, 4))
-    # Create a constant empty shape array - split_dims will convert it to a tensor
-    empty_shape = np.array([], dtype="int32")
-    x_split = split_dims(x, axis=1, shape=empty_shape)
+    # Create a tensor variable with static shape (0,)
+    empty_shape_var = tensor("empty_shape", shape=(0,), dtype="int32")
+    x_split = split_dims(x, axis=1, shape=empty_shape_var)
 
-    fg = FunctionGraph(inputs=[x], outputs=[x_split])
+    fg = FunctionGraph(inputs=[x, empty_shape_var], outputs=[x_split])
 
     # Before rewrite: should have 1 SplitDims node
     assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 1
@@ -99,13 +98,15 @@ def test_local_split_dims_squeeze():
 
     # After rewrite: should have 0 SplitDims nodes
     assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 0
-    # Should have 1 DimShuffle node with is_squeeze=True
+    # Should have 1 DimShuffle node with is_squeeze=True (not Reshape)
     squeeze_nodes = [
         node
         for node in fg.toposort()
         if isinstance(node.op, DimShuffle) and node.op.is_squeeze
     ]
     assert len(squeeze_nodes) == 1
+    # Should NOT have a Reshape node
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 0
     # Output shape should be (2, 3, 4) - dimension 1 removed
     assert fg.outputs[0].type.shape == (2, 3, 4)
 
