@@ -17,7 +17,6 @@ from pytensor.compile.io import In
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
-from pytensor.graph import Constant
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
@@ -84,7 +83,6 @@ from pytensor.tensor.type_other import (
     NoneConst,
     SliceConstant,
     as_symbolic_slice,
-    make_slice,
     slicetype,
 )
 from tests import unittest_tools as utt
@@ -108,8 +106,6 @@ def test_as_index_literal():
     assert res == slice(None, None, 2)
     res = as_index_literal(SliceConstant(slicetype, slice(None)))
     assert res == slice(None)
-    res = as_index_literal(make_slice(None, ptb.as_tensor(1)))
-    assert res == slice(None, 1)
 
     res = as_index_literal(ptb.as_tensor(2))
     assert res == 2
@@ -369,7 +365,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             "local_replace_AdvancedSubtensor",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_useless_subtensor",
-        ).excluding("ravel_multidimensional_bool_idx", "ravel_multidimensional_int_idx")
+        ).excluding("ravel_multidimensional_bool_idx")
         self.fast_compile = config.mode == "FAST_COMPILE"
 
     def function(
@@ -2038,7 +2034,7 @@ class TestAdvancedSubtensor:
             x = self.shared(x_val, name="x")
             y = tensor(dtype="float32", shape=(None,) * len(y_val.shape), name="y")
             sym_idx = [ptb.as_tensor_variable(ix) for ix in idx]
-            expr = AdvancedIncSubtensor(inplace=inplace)(x, y, *sym_idx)
+            expr = advanced_inc_subtensor(x, y, *sym_idx, inplace=inplace)
             f = pytensor.function(
                 [y], expr, mode=self.mode.excluding("inplace"), accept_inplace=inplace
             )
@@ -2374,20 +2370,29 @@ class TestAdvancedSubtensor:
     def test_adv_sub_slice(self):
         # Reported in https://github.com/Theano/Theano/issues/5898
         var = self.shared(np.zeros([3, 3], dtype=config.floatX))
-        slc = slicetype()
-        f = pytensor.function([slc], var[slc], mode=self.mode)
-        s = slice(1, 3)
-        assert f(s).shape == (2, 3)
 
-        f_shape0 = pytensor.function([slc], var[slc].shape[0], mode=self.mode)
-        assert f_shape0(s) == 2
+        # Test with scalar variables for slice boundaries
+        start = lscalar("start")
+        stop = lscalar("stop")
 
-        f_shape1 = pytensor.function([slc], var[slc].shape[1], mode=self.mode)
+        # Create sliced output
+        f = pytensor.function([start, stop], var[start:stop], mode=self.mode)
+        result = f(1, 3)
+        assert result.shape == (2, 3)
+
+        f_shape0 = pytensor.function(
+            [start, stop], var[start:stop].shape[0], mode=self.mode
+        )
+        assert f_shape0(1, 3) == 2
+
+        f_shape1 = pytensor.function(
+            [start, stop], var[start:stop].shape[1], mode=self.mode
+        )
         assert not any(
             isinstance(node.op, AdvancedSubtensor)
             for node in f_shape1.maker.fgraph.toposort()
         )
-        assert f_shape1(s) == 3
+        assert f_shape1(1, 3) == 3
 
     def test_adv_sub_boolean(self):
         # Boolean indexing with consumed_dims > 1 and newaxis
@@ -2493,9 +2498,7 @@ class TestAdvancedSubtensor:
 
 
 class TestInferShape(utt.InferShapeTester):
-    mode = get_default_mode().excluding(
-        "ravel_multidimensional_bool_idx", "ravel_multidimensional_int_idx"
-    )
+    mode = get_default_mode().excluding("ravel_multidimensional_bool_idx")
 
     @staticmethod
     def random_bool_mask(shape, rng=None):
@@ -2885,8 +2888,8 @@ class TestInferShape(utt.InferShapeTester):
 
     def test_advanced_subtensor_constant_slice(self):
         x = dmatrix("x")
-        constant_slice = pytensor.as_symbolic(slice(1, None, None))
-        assert isinstance(constant_slice, Constant)
+        # Use Python slice directly instead of as_symbolic(slice())
+        constant_slice = slice(1, None, None)
         adv_indices = ptb.constant(np.zeros((2, 3)), dtype="int")
         y = advanced_subtensor(x, constant_slice, adv_indices)
         assert tuple(y.shape.eval({x: np.zeros((10, 10))})) == (9, 2, 3)
@@ -2895,7 +2898,7 @@ class TestInferShape(utt.InferShapeTester):
 @config.change_flags(compute_test_value="raise")
 def test_basic_shape():
     test_shape = (5, 4)
-    test_indices = (make_slice(1, 3, None),)
+    test_indices = (slice(1, 3, None),)  # Python slice instead of make_slice()
     res = basic_shape(test_shape, test_indices)
     assert get_test_value(res) == (2,)
 

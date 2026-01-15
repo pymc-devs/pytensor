@@ -8,7 +8,6 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice
 
 
 BOOLEAN_MASK_ERROR = """JAX does not support resizing arrays with boolean
@@ -74,11 +73,3 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
         return jax_fn(x, indices, y)
 
     return incsubtensor
-
-
-@jax_funcify.register(MakeSlice)
-def jax_funcify_MakeSlice(op, **kwargs):
-    def makeslice(*x):
-        return slice(*x)
-
-    return makeslice

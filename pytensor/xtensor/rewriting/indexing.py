@@ -1,10 +1,8 @@
 from itertools import zip_longest
 
-from pytensor import as_symbolic
-from pytensor.graph import Constant, node_rewriter
+from pytensor.graph import Variable, node_rewriter
 from pytensor.tensor import TensorType, arange, specify_shape
 from pytensor.tensor.subtensor import _non_consecutive_adv_indexing, inc_subtensor
-from pytensor.tensor.type_other import NoneTypeT, SliceType
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.indexing import Index, IndexUpdate, index
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
@@ -12,20 +10,20 @@ from pytensor.xtensor.type import XTensorType
 
 
 def to_basic_idx(idx):
-    if isinstance(idx.type, SliceType):
-        if isinstance(idx, Constant):
-            return idx.data
-        elif idx.owner:
-            # MakeSlice Op
-            # We transform NoneConsts to regular None so that basic Subtensor can be used if possible
-            return slice(
-                *[
-                    None if isinstance(i.type, NoneTypeT) else i
-                    for i in idx.owner.inputs
-                ]
-            )
-        else:
-            return idx
+    """Convert an index to basic indexing form.
+
+    Parameters
+    ----------
+    idx : slice | Variable
+        The index to convert
+
+    Returns
+    -------
+    slice | Variable
+        The index in basic form (Python slice or Variable)
+    """
+    if isinstance(idx, slice):
+        return idx
     if (
         isinstance(idx.type, XTensorType)
         and idx.type.ndim == 0
@@ -66,14 +64,20 @@ def _lower_index(node):
 
     assert isinstance(node.op, Index)
 
-    x, *idxs = node.inputs
+    x = node.inputs[0]
     [out] = node.outputs
     x_tensor_indexed_dims = out.type.dims
     x_tensor = tensor_from_xtensor(x)
 
+    # Reconstruct full indices from idx_list and flattened inputs
+    from pytensor.tensor.subtensor import indices_from_subtensor
+
+    index_variables = node.inputs[1:]
+    idxs = indices_from_subtensor(index_variables, node.op.idx_list)
+
     if all(
         (
-            isinstance(idx.type, SliceType)
+            isinstance(idx, slice)
             or (isinstance(idx.type, XTensorType) and idx.type.ndim == 0)
         )
         for idx in idxs
@@ -92,12 +96,13 @@ def _lower_index(node):
         basic_idx_axis = []
         # zip_longest adds the implicit slice(None)
         for i, (idx, x_dim) in enumerate(
-            zip_longest(idxs, x_dims, fillvalue=as_symbolic(slice(None)))
+            zip_longest(idxs, x_dims, fillvalue=slice(None))
         ):
-            if isinstance(idx.type, SliceType):
+            if isinstance(idx, slice):
                 if not any(
                     (
-                        isinstance(other_idx.type, XTensorType)
+                        isinstance(other_idx, Variable)
+                        and isinstance(other_idx.type, XTensorType)
                         and x_dim in other_idx.dims
                     )
                     for j, other_idx in enumerate(idxs)
@@ -131,7 +136,11 @@ def _lower_index(node):
         if basic_idx_axis:
             aligned_idxs = [
                 idx.squeeze(axis=basic_idx_axis)
-                if (isinstance(idx.type, TensorType) and idx.type.ndim > 0)
+                if (
+                    isinstance(idx, Variable)
+                    and isinstance(idx.type, TensorType)
+                    and idx.type.ndim > 0
+                )
                 else idx
                 for idx in aligned_idxs
             ]
@@ -185,10 +194,19 @@ def lower_index_update(fgraph, node):
     dimensions of the index view, with special care for non-consecutive dimensions being
     pulled to the front axis according to numpy rules.
     """
-    x, y, *idxs = node.inputs
+    x, y, *index_variables = node.inputs
 
-    # Lower the indexing part first
-    indexed_node = index.make_node(x, *idxs)
+    # Create a synthetic Index node to use _lower_index
+    index_op = Index(node.op.idx_list)
+
+    from pytensor.tensor.subtensor import indices_from_subtensor
+
+    idxs = indices_from_subtensor(index_variables, index_op.idx_list)
+
+    # Call index() to create the proper node
+    x_view = index(x, *idxs)
+    indexed_node = x_view.owner
+
     x_tensor_indexed, x_tensor_indexed_dims = _lower_index(indexed_node)
     y_tensor = tensor_from_xtensor(y)
 

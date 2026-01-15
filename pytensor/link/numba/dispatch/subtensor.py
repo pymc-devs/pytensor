@@ -17,11 +17,10 @@ from pytensor.link.numba.cache import (
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
     register_funcify_and_cache_key,
-    register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
-from pytensor.tensor import TensorType
+from pytensor.tensor import TensorType, TensorVariable
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -29,10 +28,8 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
-    _is_position,
     indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice, NoneTypeT
 
 
 def slice_new(self, start, stop, step):
@@ -120,18 +117,9 @@ def numba_deepcopy_slice(x):
         return deepcopy_slice
 
 
-@register_funcify_default_op_cache_key(MakeSlice)
-def numba_funcify_MakeSlice(op, **kwargs):
-    @numba_basic.numba_njit
-    def makeslice(*x):
-        return slice(*x)
-
-    return makeslice
-
-
 def subtensor_op_cache_key(op, **extra_fields):
     key_parts = [type(op), tuple(extra_fields.items())]
-    if hasattr(op, "idx_list") and op.idx_list is not None:
+    if hasattr(op, "idx_list"):
         idx_parts = []
         for idx in op.idx_list:
             if isinstance(idx, slice):
@@ -159,7 +147,7 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
     def convert_indices(indices_iterator, entry):
-        if hasattr(indices_iterator, "__next__") and _is_position(entry):
+        if hasattr(indices_iterator, "__next__") and isinstance(entry, int):
             name, var = next(indices_iterator)
             if var.ndim == 0 and isinstance(var.type, TensorType):
                 return f"{name}.item()"
@@ -180,18 +168,15 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
     )
     index_start_idx = 1 + int(set_or_inc)
     op_indices = list(node.inputs[index_start_idx:])
-    idx_list = getattr(op, "idx_list", None)
+    idx_list = op.idx_list
     idx_names = [f"idx_{i}" for i in range(len(op_indices))]
 
     input_names = ["x", "y", *idx_names] if set_or_inc else ["x", *idx_names]
 
     indices_iterator = iter(zip(idx_names, op_indices))
-    if idx_list is not None:
-        indices_creation_src = tuple(
-            convert_indices(indices_iterator, idx) for idx in idx_list
-        )
-    else:
-        indices_creation_src = tuple(input_names[index_start_idx:])
+    indices_creation_src = tuple(
+        convert_indices(indices_iterator, idx) for idx in idx_list
+    )
 
     if len(indices_creation_src) == 1:
         indices_creation_src = f"indices = ({indices_creation_src[0]},)"
@@ -257,7 +242,7 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     # Extract advanced index metadata from reconstructed indices
     adv_idxs = []
     for i, idx in enumerate(reconstructed_indices):
-        if isinstance(idx, Variable) and isinstance(idx.type, TensorType):
+        if isinstance(idx, TensorVariable):
             # This is an advanced tensor index
             adv_idxs.append(
                 {
@@ -278,18 +263,10 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
         )
     )
 
-    # Check if input has ExpandDims (from newaxis) - this is not supported
-    # ExpandDims is implemented as DimShuffle, so check for that
-
-    # Check for newaxis in reconstructed indices (newaxis is handled by __getitem__ before creating ops)
-    # But we still check reconstructed_indices to be safe
-
     if (
         not must_ignore_duplicates
         and len(adv_idxs) >= 1
         and all(adv_idx["dtype"] != "bool" for adv_idx in adv_idxs)
-        # Implementation does not support newaxis
-        and not any(isinstance(idx.type, NoneTypeT) for idx in index_variables)
     ):
         return vector_integer_advanced_indexing(op, node, **kwargs)
 
@@ -417,7 +394,6 @@ def vector_integer_advanced_indexing(
             y_bcast = np.broadcast_to(y_adv_dims_front, (*adv_idx_shape, *basic_idx_shape))
 
             # Ravel the advanced dims (if needed)
-            # Note that numba reshape only supports C-arrays, so we ravel before reshape
             y_bcast = y_bcast
 
             # Index over tuples of raveled advanced indices and update buffer
@@ -479,47 +455,23 @@ def vector_integer_advanced_indexing(
 
     """
 
-    # =========================================================================
-    # STEP 1: Extract inputs based on op type
-    # For get operations (AdvancedSubtensor*): inputs = [x, *indices]
-    # For set/inc operations (AdvancedIncSubtensor*): inputs = [x, y, *indices]
-    # =========================================================================
     if isinstance(op, AdvancedSubtensor1 | AdvancedSubtensor):
-        x = node.inputs[0]
-        if isinstance(op, AdvancedSubtensor):
-            index_variables = node.inputs[1:]
-        else:
-            index_variables = node.inputs[1:]
+        x, *index_variables = node.inputs
     else:
-        x, y = node.inputs[:2]
-        index_variables = node.inputs[2:]
+        x, y, *index_variables = node.inputs
 
     [out] = node.outputs
 
-    # =========================================================================
-    # STEP 2: Reconstruct the full index tuple
-    # op.idx_list contains type info for each index dimension, including static
-    # slices that aren't in index_variables. indices_from_subtensor merges them
-    # back together to get the complete indexing tuple.
-    # =========================================================================
     idx_list = getattr(op, "idx_list", None)
     reconstructed_indices = indices_from_subtensor(index_variables, idx_list)
 
-    # =========================================================================
-    # STEP 3: Build codegen mapping from Variables to argument names
-    # This maps each input Variable to a string like "idx0", "idx1", etc.
-    # used in the generated function signature and body.
-    # =========================================================================
     idx_args = [f"idx{i}" for i in range(len(index_variables))]
     var_to_arg = dict(zip(index_variables, idx_args))
 
-    # =========================================================================
-    # STEP 4: Convert reconstructed indices to string representations
+    # Convert reconstructed indices to string representations
     # Each index becomes either:
     # - A slice string like "slice(1, None, None)"
     # - An argument name like "idx0" (for Variables)
-    # - A literal value like "3" (for constants)
-    # =========================================================================
     idxs = []
 
     def get_idx_str(val, is_slice_component=False):
@@ -527,7 +479,7 @@ def vector_integer_advanced_indexing(
 
         Parameters
         ----------
-        val : None | Variable | int
+        val : None | Variable
             The index component to convert.
         is_slice_component : bool
             If True and val is a 0-d Variable, use .item() to extract scalar.
@@ -545,7 +497,7 @@ def vector_integer_advanced_indexing(
             if val.ndim == 0 and is_slice_component:
                 return f"{arg}.item()"
             return arg
-        return str(val)
+        raise ValueError(f"Unexpected index value: {val}")
 
     for idx in reconstructed_indices:
         if isinstance(idx, slice):
@@ -557,12 +509,9 @@ def vector_integer_advanced_indexing(
             # It's a variable or constant
             idxs.append(get_idx_str(idx, is_slice_component=False))
 
-    # =========================================================================
-    # STEP 5: Classify indices as "advanced" or "basic"
     # - Advanced indices: integer/boolean arrays with ndim > 0 (vector indexing)
     # - Basic indices: scalars, slices, or None (newaxis)
     # This distinction matters because NumPy handles them differently.
-    # =========================================================================
     adv_indices_pos = tuple(
         i
         for i, idx in enumerate(reconstructed_indices)
@@ -576,11 +525,6 @@ def vector_integer_advanced_indexing(
             hasattr(idx, "type") and isinstance(idx.type, TensorType) and idx.ndim > 0
         )
     )
-    # Include trailing dimensions not covered by explicit indices
-    explicit_basic_indices_pos = (
-        *basic_indices_pos,
-        *range(len(reconstructed_indices), x.type.ndim),
-    )
 
     # Create index signature for generated function: "idx0, idx1, idx2, ..."
     idx_signature = ", ".join(idx_args)
@@ -589,60 +533,47 @@ def vector_integer_advanced_indexing(
     adv_indices = [idxs[i] for i in adv_indices_pos]
     basic_indices = [idxs[i] for i in basic_indices_pos]
 
-    # =========================================================================
-    # STEP 6: Compute transpose order to move advanced indices to front
-    # NumPy's advanced indexing rules are complex when advanced indices are
-    # non-contiguous. By transposing advanced dimensions to the front, we can
-    # handle all cases uniformly with a simple loop over broadcasted indices.
-    # =========================================================================
-    adv_axis_front_order = (*adv_indices_pos, *explicit_basic_indices_pos)
-    adv_axis_front_transpose_needed = adv_axis_front_order != tuple(range(x.type.ndim))
-    # Maximum ndim among advanced indices (they'll be broadcast to this shape)
-    adv_idx_ndim = max(reconstructed_indices[i].ndim for i in adv_indices_pos)
-
-    # After transposing, we apply basic indexing. The ':' slices preserve the
-    # advanced dimensions at front, followed by any basic index operations.
-    basic_indices_with_none_slices = ", ".join(
-        (*((":",) * len(adv_indices)), *basic_indices)
-    )
-
-    # =========================================================================
-    # STEP 7: Determine output position of advanced index dimensions
-    # Per NumPy rules:
-    # - If advanced indices are non-contiguous, result dims go to front
-    # - If contiguous, result dims stay in place of the first advanced index
-    # This affects the final transpose needed to match NumPy's output layout.
-    # =========================================================================
-    if (np.diff(adv_indices_pos) > 1).any():
-        # Non-contiguous advanced indices: result always goes to front
-        out_adv_axis_pos = 0
-    else:
-        # Contiguous: count how many dims are kept before the first adv index
-        out_adv_axis_pos = 0
-        first_adv_idx = adv_indices_pos[0]
-        for i in range(first_adv_idx):
-            idx = reconstructed_indices[i]
-            if isinstance(idx, slice):
-                # Slices preserve dimensions
-                out_adv_axis_pos += 1
-            elif idx is None or (
-                isinstance(idx, Variable) and isinstance(idx.type, NoneTypeT)
-            ):
-                # newaxis adds a dimension
-                out_adv_axis_pos += 1
-            # Scalar indices remove a dimension, so don't increment
-
     to_tuple = create_tuple_string  # alias to make code more readable below
 
-    # =========================================================================
-    # STEP 8: Generate the actual indexing function
-    # The generated code follows this strategy:
-    # 1. Transpose x to move advanced-indexed dims to front
-    # 2. Apply basic indexing (slices) once
-    # 3. Broadcast all advanced indices to common shape
-    # 4. Loop over flattened advanced indices, performing scalar indexing
-    # 5. Reshape and transpose output to match NumPy's layout
-    # =========================================================================
+    # Compute number of dimensions in advanced indices (after broadcasting)
+    if len(adv_indices_pos) == 1:
+        adv_idx = reconstructed_indices[adv_indices_pos[0]]
+        adv_idx_ndim = adv_idx.ndim
+    else:
+        # Multiple advanced indices - they will be broadcast together
+        adv_idx_shapes = [reconstructed_indices[i].type.shape for i in adv_indices_pos]
+        adv_idx_ndim = len(
+            adv_idx_shapes[0]
+        )  # Assume all have same ndim after broadcast
+
+    # Determine output position of advanced indexed dimensions
+    # If advanced indices are consecutive, they go in the first advanced index position
+    # Otherwise they go at the beginning
+    if adv_indices_pos == tuple(range(adv_indices_pos[0], adv_indices_pos[-1] + 1)):
+        # Consecutive - advanced dims will be at position of first advanced index
+        out_adv_axis_pos = adv_indices_pos[0]
+        # Account for scalar indices before it that remove dimensions
+        for i in range(out_adv_axis_pos):
+            if not isinstance(reconstructed_indices[i], slice):
+                out_adv_axis_pos -= 1
+    else:
+        # Non-consecutive - advanced dims go at the front
+        out_adv_axis_pos = 0
+
+    # Include trailing dimensions not covered by explicit indices
+    explicit_basic_indices_pos = (
+        *basic_indices_pos,
+        *range(len(reconstructed_indices), x.type.ndim),
+    )
+
+    # Compute transpose to move advanced indexed dims to the front
+    adv_axis_front_order = (*adv_indices_pos, *explicit_basic_indices_pos)
+    adv_axis_front_transpose_needed = adv_axis_front_order != tuple(range(x.type.ndim))
+
+    # Compute basic indices with "None" slices for dimensions that will be indexed by advanced indices
+    basic_indices_with_none_slices = ", ".join(
+        ":" for _ in range(len(adv_indices_pos))
+    ) + (", " + ", ".join(basic_indices) if basic_indices else "")
 
     if isinstance(op, AdvancedSubtensor1 | AdvancedSubtensor):
         # Define transpose axis on the output to restore original meaning
@@ -681,8 +612,6 @@ def vector_integer_advanced_indexing(
                 f"""
                 # Create output buffer
                 adv_idx_size = {adv_indices[0]}.size
-                # basic_indexed_x has len(adv_indices) dimensions at the front from the ':' slices
-                # These correspond to the dimensions that will be indexed by advanced indices
                 basic_idx_shape = basic_indexed_x.shape[{len(adv_indices)}:]
                 out_buffer = np.empty((adv_idx_size, *basic_idx_shape), dtype=x.dtype)
 

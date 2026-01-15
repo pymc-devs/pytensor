@@ -41,7 +41,6 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
     AdvancedSubtensor1,
     Subtensor,
-    _is_position,
     _non_consecutive_adv_indexing,
     as_index_literal,
     get_canonical_form_slice,
@@ -50,7 +49,6 @@ from pytensor.tensor.subtensor import (
     indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.type_other import NoneTypeT, SliceType
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -648,10 +646,7 @@ def local_subtensor_SpecifyShape_lift(fgraph, node):
 
     indices = get_idx_list(node.inputs, node.op.idx_list)
 
-    if any(
-        isinstance(index, slice) or isinstance(getattr(index, "type", None), SliceType)
-        for index in indices
-    ):
+    if any(isinstance(index, slice) for index in indices):
         return False
 
     new_obj_arg = obj_arg[indices]
@@ -702,7 +697,7 @@ def local_subtensor_make_vector(fgraph, node):
 
         (idx,) = idxs
 
-        if _is_position(idx):
+        if isinstance(idx, int):
             # idx is an integer position - get the actual index value from inputs
             idx = node.inputs[1]
     elif isinstance(node.op, AdvancedSubtensor1):
@@ -833,8 +828,6 @@ def local_subtensor_shape_constant(fgraph, node):
     except NotScalarConstantError:
         return False
 
-    assert idx_val is not None
-
     if not isinstance(shape_arg.type, TensorType):
         return False
 
@@ -871,15 +864,11 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
         # AdvancedSubtensor involves a full_copy, so we don't want to do it twice
         return None
 
-    x = adv_subtensor.owner.inputs[0]
-    adv_index_vars = adv_subtensor.owner.inputs[1:]
+    x, *adv_index_vars = adv_subtensor.owner.inputs
     adv_idxs = indices_from_subtensor(adv_index_vars, adv_subtensor.owner.op.idx_list)
 
     # Advanced indexing is a minefield, avoid all cases except for consecutive integer indices
-    if any(
-        ((adv_idx is None) or isinstance(getattr(adv_idx, "type", None), NoneTypeT))
-        for adv_idx in adv_idxs
-    ) or _non_consecutive_adv_indexing(adv_idxs):
+    if _non_consecutive_adv_indexing(adv_idxs):
         return None
 
     for first_adv_idx_dim, adv_idx in enumerate(adv_idxs):

@@ -23,7 +23,7 @@ from pytensor.tensor.subtensor import (
     indices_from_subtensor,
 )
 from pytensor.tensor.type import integer_dtypes
-from pytensor.tensor.type_other import NoneTypeT, SliceType
+from pytensor.tensor.type_other import NoneTypeT
 
 
 def is_rv_used_in_graph(base_rv, node, fgraph):
@@ -243,15 +243,8 @@ def local_subtensor_rv_lift(fgraph, node):
         indices = node.inputs[1:]
 
     # The rewrite doesn't apply if advanced indexing could broadcast the samples (leading to duplicates)
-    # Note: For simplicity this also excludes subtensor-related expand_dims (np.newaxis).
-    #  If we wanted to support that we could rewrite it as subtensor + dimshuffle
-    #  and make use of the dimshuffle lift rewrite
     # TODO: This rewrite is aborting with dummy indexing dimensions which aren't a problem
-    if any(
-        is_nd_advanced_idx(idx, integer_dtypes)
-        or isinstance(getattr(idx, "type", None), NoneTypeT)
-        for idx in indices
-    ):
+    if any(is_nd_advanced_idx(idx, integer_dtypes) for idx in indices):
         return False
 
     # Check that indexing does not act on support dims
@@ -270,13 +263,7 @@ def local_subtensor_rv_lift(fgraph, node):
             non_bool_indices[batch_ndims:],
         )
         for idx in supp_indices:
-            if not (
-                (isinstance(idx, slice) and idx == slice(None))
-                or (
-                    isinstance(getattr(idx, "type", None), SliceType)
-                    and all(isinstance(i.type, NoneTypeT) for i in idx.owner.inputs)
-                )
-            ):
+            if not (isinstance(idx, slice) and idx == slice(None)):
                 return False
         n_discarded_idxs = len(supp_indices)
         indices = indices[:-n_discarded_idxs]
@@ -336,7 +323,7 @@ def local_subtensor_rv_lift(fgraph, node):
                 # Broadcasted dim
                 if curr_dim in bcast_param_dims:
                     # Slice indexing, keep degenerate dim by none-slicing
-                    if isinstance(idx, slice) or isinstance(idx.type, SliceType):
+                    if isinstance(idx, slice):
                         batch_indices.append(slice(None))
                     # Integer indexing, drop degenerate dim by 0-indexing
                     else:

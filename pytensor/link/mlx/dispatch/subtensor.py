@@ -10,7 +10,6 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice
 
 
 @mlx_funcify.register(Subtensor)
@@ -95,11 +94,3 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         return mlx_fn(x, ilist, y)
 
     return advancedincsubtensor
-
-
-@mlx_funcify.register(MakeSlice)
-def mlx_funcify_MakeSlice(op, **kwargs):
-    def makeslice(*x):
-        return slice(*x)
-
-    return makeslice

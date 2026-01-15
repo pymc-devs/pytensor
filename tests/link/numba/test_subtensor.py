@@ -5,7 +5,7 @@ import pytest
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor import Mode, as_symbolic
+from pytensor import Mode
 from pytensor.tensor import as_tensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -30,39 +30,33 @@ rng = np.random.default_rng(sum(map(ord, "Numba subtensors")))
 @pytest.mark.parametrize("stop", [None, 10, "x"], ids=lambda x: f"stop={x}")
 @pytest.mark.parametrize("start", [None, 0, 3, "x"], ids=lambda x: f"start={x}")
 def test_slice(start, stop, step):
-    x = ps.int64("x")
+    """Test slicing with scalar variables in Numba."""
+    x_scalar = ps.int64("x")
+    data = pt.arange(20)
 
-    sym_slice = as_symbolic(
-        slice(
-            x if start == "x" else start,
-            x if stop == "x" else stop,
-            x if step == "x" else step,
-        )
+    tslice = slice(
+        x_scalar if start == "x" else start,
+        x_scalar if stop == "x" else stop,
+        x_scalar if step == "x" else step,
     )
 
+    # Apply slice to tensor
+    out_pt = data[tslice]
+    assert isinstance(out_pt.owner.op, Subtensor)
+
+    # Compare numba and Python execution
     no_opt_mode = Mode(linker="numba", optimizer=None)
-    evaled_slice = sym_slice.eval({x: -5}, on_unused_input="ignore", mode=no_opt_mode)
-    assert isinstance(evaled_slice, slice)
-    if start == "x":
-        assert evaled_slice.start == -5
-    elif start is None and (evaled_slice.step is None or evaled_slice.step > 0):
-        # Numba can convert to 0 (and sometimes does) in this case
-        assert evaled_slice.start in (None, 0)
-    else:
-        assert evaled_slice.start == start
+    result = out_pt.eval({x_scalar: -5}, on_unused_input="ignore", mode=no_opt_mode)
 
-    if stop == "x":
-        assert evaled_slice.stop == -5
-    else:
-        assert evaled_slice.stop == stop
+    # Compute expected result
+    expected_slice = slice(
+        -5 if start == "x" else start,
+        -5 if stop == "x" else stop,
+        -5 if step == "x" else step,
+    )
+    expected = np.arange(20)[expected_slice]
 
-    if step == "x":
-        assert evaled_slice.step == -5
-    elif step is None:
-        # Numba can convert to 1 (and sometimes does) in this case
-        assert evaled_slice.step in (None, 1)
-    else:
-        assert evaled_slice.step == step
+    assert np.array_equal(result, expected)
 
 
 @pytest.mark.parametrize(
@@ -516,12 +510,40 @@ def test_AdvancedIncSubtensor(
             assert not np.all(x == x_orig)
 
 
-def test_advanced_indexing_with_newaxis_fallback_obj_mode():
-    # This should be automatically solved with https://github.com/pymc-devs/pytensor/issues/1564
-    # After which we can add these parametrizations to the relevant tests above
+def test_advanced_indexing_with_newaxis():
     x = pt.matrix("x")
     out = x[None, [0, 1, 2], [0, 1, 2]]
     compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
 
     out = x[None, [0, 1, 2], [0, 1, 2]].inc(5)
     compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
+
+
+def test_advanced_boolean_indexing_multi_dim():
+    """Test boolean indexing where the mask consumes multiple dimensions.
+
+    A 2D boolean mask indexing a 3D tensor will consume the first 2 dimensions,
+    resulting in a flattened selection along those dims.
+    """
+    # 2D mask that consumes 2 dimensions of a 3D tensor
+    mask = np.array(
+        [[True, False, True], [False, False, True]]
+    )  # shape (2, 3) -> 3 True values
+    val_data = np.arange(24).reshape((2, 3, 4)).astype("float64")
+
+    val = pt.tensor("val", shape=(2, 3, 4), dtype="float64")
+
+    # Basic boolean indexing with 2D mask - mask consumes dims 0,1
+    out = val[mask]
+    compare_numba_and_py([val], [out], [val_data])
+
+    # Boolean indexing with 2D mask combined with newaxis and ellipsis
+    # val[mask, None, ..., None] should produce shape (3, 1, 4, 1)
+    out_with_newaxis = val[mask, None, ..., None]
+    compare_numba_and_py([val], [out_with_newaxis], [val_data])
+
+    # Boolean indexing with set_subtensor
+    y = pt.tensor("y", shape=(3, 4), dtype="float64")
+    y_data = np.ones((3, 4)) * 99
+    out_set = pt.set_subtensor(val[mask], y)
+    compare_numba_and_py([val, y], [out_set], [val_data.copy(), y_data])

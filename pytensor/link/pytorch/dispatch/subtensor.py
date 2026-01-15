@@ -9,7 +9,6 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice
 
 
 def check_negative_steps(indices):
@@ -45,19 +44,6 @@ def pytorch_funcify_Subtensor(op, node, **kwargs):
         return x[indices]
 
     return subtensor
-
-
-@pytorch_funcify.register(MakeSlice)
-def pytorch_funcify_makeslice(op, **kwargs):
-    def makeslice(start, stop, step):
-        # Torch does not like numpy integers in indexing slices
-        return slice(
-            None if start is None else int(start),
-            None if stop is None else int(stop),
-            None if step is None else int(step),
-        )
-
-    return makeslice
 
 
 @pytorch_funcify.register(AdvancedSubtensor1)
@@ -136,7 +122,6 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         return adv_inc_subtensor_no_duplicates
 
     else:
-        # Check if we have slice indexing in idx_list
         has_slice_indexing = (
             any(isinstance(entry, slice) for entry in idx_list) if idx_list else False
         )

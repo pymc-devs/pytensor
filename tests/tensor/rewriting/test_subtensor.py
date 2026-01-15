@@ -53,7 +53,6 @@ from pytensor.tensor.type import (
     tensor4,
     vector,
 )
-from pytensor.tensor.type_other import make_slice
 from tests import unittest_tools as utt
 from tests.unittest_tools import create_pytensor_param
 
@@ -1656,7 +1655,7 @@ def test_local_uint_constant_indices():
     mode = (
         get_default_mode()
         .including("specialize", "local_uint_constant_indices")
-        .excluding("ravel_multidimensional_bool_idx", "ravel_multidimensional_int_idx")
+        .excluding("ravel_multidimensional_bool_idx")
     )
     rng = np.random.default_rng(20900)
 
@@ -1705,8 +1704,8 @@ def test_local_uint_constant_indices():
     # `AdvancedSubtensor`, two indices, one symbolic slice, convert
     x = pt.matrix("x")
     indices = (
-        pt.as_tensor_variable(np.array(1, np.int64)),
-        make_slice(slice(None, 10)),
+        pt.as_tensor_variable(np.array([1], dtype=np.int64)),
+        slice(None, 10),
     )
     z = x[indices]
 

@@ -32,7 +32,6 @@ from pytensor.tensor import (
     lscalars,
     matrix,
     shape,
-    slicetype,
     specify_shape,
     tensor,
     tensor3,
@@ -557,7 +556,7 @@ class TestLocalSubtensorSpecifyShapeLift:
             (
                 matrix(),
                 (iscalar(), iscalar()),
-                (slicetype(),),
+                (slice(iscalar(), iscalar(), iscalar()),),
             ),
             (
                 matrix(),

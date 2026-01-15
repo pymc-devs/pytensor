@@ -44,7 +44,7 @@ from pytensor.tensor.shape import (
     SpecifyShape,
     specify_shape,
 )
-from pytensor.tensor.subtensor import Subtensor, _is_position, get_idx_list
+from pytensor.tensor.subtensor import Subtensor, get_idx_list
 from pytensor.tensor.type import TensorType, discrete_dtypes, integer_dtypes
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorVariable
@@ -853,7 +853,7 @@ def _is_shape_i_of_x(
             # Check we have integer indexing operation
             # (and not slice or multiple indexing)
             len(var.owner.op.idx_list) == 1
-            and _is_position(idx_entry)
+            and isinstance(idx_entry, int)
             # Check we are indexing on the shape of x
             and var.owner.inputs[0].owner is not None
             and isinstance(var.owner.inputs[0].owner.op, Shape)

@@ -9,20 +9,49 @@ from typing import Literal
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.scalar.basic import discrete_dtypes
 from pytensor.tensor.basic import as_tensor
-from pytensor.tensor.type_other import NoneTypeT, SliceType, make_slice
+from pytensor.tensor.subtensor import get_slice_elements, index_vars_to_positions
+from pytensor.tensor.type_other import NoneTypeT
 from pytensor.xtensor.basic import XOp, xtensor_from_tensor
 from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
 
 
 def as_idx_variable(idx, indexed_dim: str):
+    """Convert an index to either a Python slice or a Variable.
+
+    Parameters
+    ----------
+    idx : slice | Variable | array-like
+        The index to convert
+    indexed_dim : str
+        The dimension being indexed
+
+    Returns
+    -------
+    slice | Variable
+        Either a Python slice object (for slice indexing) or a Variable (for scalar/array indexing)
+    """
     if idx is None or (isinstance(idx, Variable) and isinstance(idx.type, NoneTypeT)):
         raise TypeError(
             "XTensors do not support indexing with None (np.newaxis), use expand_dims instead"
         )
+    # Python slices pass through directly (will be converted to positions in idx_list)
     if isinstance(idx, slice):
-        idx = make_slice(idx)
-    elif isinstance(idx, Variable) and isinstance(idx.type, SliceType):
-        pass
+        # Convert slice components to Variables if needed
+        start, stop, step = idx.start, idx.stop, idx.step
+
+        def convert_slice_component(comp):
+            if comp is None:
+                return None
+            if isinstance(comp, Variable):
+                return comp
+            # Convert literals to tensors
+            return as_tensor(comp)
+
+        return slice(
+            convert_slice_component(start),
+            convert_slice_component(stop),
+            convert_slice_component(step),
+        )
     elif (
         isinstance(idx, tuple)
         and len(idx) == 2
@@ -81,125 +110,250 @@ def as_idx_variable(idx, indexed_dim: str):
     return idx
 
 
-def get_static_slice_length(slc: Variable, dim_length: None | int) -> int | None:
+def xtensor_index_vars_to_positions(entry, counter):
+    """Convert Variables to positions for xtensor indexing.
+
+    This is a wrapper around tensor.subtensor.index_vars_to_positions that
+    handles XTensorVariable by extracting the underlying TensorVariable.
+
+    Parameters
+    ----------
+    entry : slice | Variable
+        An index entry - either a Python slice or a Variable
+    counter : list[int]
+        Mutable counter for position tracking
+
+    Returns
+    -------
+    slice | int
+        Slice with position integers for Variables, or position integer
+    """
+    # Convert XTensorVariable to TensorVariable for processing
+    if isinstance(entry, Variable) and isinstance(entry.type, XTensorType):
+        # Extract the underlying tensor
+        entry = entry.values
+    elif isinstance(entry, slice):
+        # Process slice components
+        start, stop, step = entry.start, entry.stop, entry.step
+
+        def convert_component(comp):
+            if comp is None:
+                return None
+            if isinstance(comp, Variable) and isinstance(comp.type, XTensorType):
+                return comp.values
+            return comp
+
+        entry = slice(
+            convert_component(start), convert_component(stop), convert_component(step)
+        )
+
+    # Now use the standard function (which handles TensorVariable)
+    return index_vars_to_positions(entry, counter, allow_advanced=True)
+
+
+def get_static_slice_length(slc: slice, dim_length: None | int) -> int | None:
+    """Get the static length of a slice if possible.
+
+    Parameters
+    ----------
+    slc : slice
+        Python slice object with Variable or None components
+    dim_length : None | int
+        The length of the dimension being sliced
+
+    Returns
+    -------
+    int | None
+        The static length of the slice if it can be determined, otherwise None
+    """
     if dim_length is None:
         return None
-    if isinstance(slc, Constant):
-        d = slc.data
-        start, stop, step = d.start, d.stop, d.step
-    elif slc.owner is None:
-        # It's a root variable no way of knowing what we're getting
+
+    # Extract slice components
+    start, stop, step = slc.start, slc.stop, slc.step
+
+    # Try to extract constants from Variables
+    def get_const_value(x):
+        if x is None:
+            return None
+        if isinstance(x, Constant):
+            return x.data
+        # If it's not a constant, we can't determine static length
+        return ...  # Sentinel for non-constant
+
+    start_val = get_const_value(start)
+    stop_val = get_const_value(stop)
+    step_val = get_const_value(step)
+
+    # If any component is non-constant (represented by ...), can't determine length
+    if start_val is ... or stop_val is ... or step_val is ...:
         return None
-    else:
-        # It's a MakeSliceOp
-        start, stop, step = slc.owner.inputs
-        if isinstance(start, Constant):
-            start = start.data
-        else:
-            return None
-        if isinstance(stop, Constant):
-            stop = stop.data
-        else:
-            return None
-        if isinstance(step, Constant):
-            step = step.data
-        else:
-            return None
-    return len(range(*slice(start, stop, step).indices(dim_length)))
+
+    return len(range(*slice(start_val, stop_val, step_val).indices(dim_length)))
 
 
 class Index(XOp):
-    __props__ = ()
+    __props__ = ("idx_list",)
 
-    def make_node(self, x, *idxs):
-        x = as_xtensor(x)
+    def __init__(self, idx_list):
+        """Initialize Index with index list.
 
-        if any(idx is Ellipsis for idx in idxs):
-            if idxs.count(Ellipsis) > 1:
-                raise IndexError("an index can only have a single ellipsis ('...')")
-            # Convert intermediate Ellipsis to slice(None)
-            ellipsis_loc = idxs.index(Ellipsis)
-            n_implied_none_slices = x.type.ndim - (len(idxs) - 1)
-            idxs = (
-                *idxs[:ellipsis_loc],
-                *((slice(None),) * n_implied_none_slices),
-                *idxs[ellipsis_loc + 1 :],
-            )
+        Parameters
+        ----------
+        idx_list : tuple
+            Tuple of indices where slices are stored with Variable/None components,
+            and scalar/array indices are Variables. This will be converted to positions.
+        """
+        counter = [0]
+        self.idx_list = tuple(
+            xtensor_index_vars_to_positions(entry, counter) for entry in idx_list
+        )
 
-        x_ndim = x.type.ndim
-        x_dims = x.type.dims
-        x_shape = x.type.shape
-        out_dims = []
-        out_shape = []
+    def __hash__(self):
+        """Hash using idx_list. Slices are not hashable in Python < 3.12."""
+        return hash((type(self), self._hashable_idx_list()))
 
-        def combine_dim_info(idx_dim, idx_dim_shape):
-            if idx_dim not in out_dims:
-                # First information about the dimension length
-                out_dims.append(idx_dim)
-                out_shape.append(idx_dim_shape)
-            else:
-                # Dim already introduced in output by a previous index
-                # Update static shape or raise if incompatible
-                out_dim_pos = out_dims.index(idx_dim)
-                out_dim_shape = out_shape[out_dim_pos]
-                if out_dim_shape is None:
-                    # We don't know the size of the dimension yet
-                    out_shape[out_dim_pos] = idx_dim_shape
-                elif idx_dim_shape is not None and idx_dim_shape != out_dim_shape:
-                    raise IndexError(
-                        f"Dimension of indexers mismatch for dim {idx_dim}"
-                    )
+    def _hashable_idx_list(self):
+        """Return a hashable version of idx_list (slices converted to tuples)."""
+        return tuple(
+            (slice, entry.start, entry.stop, entry.step)
+            if isinstance(entry, slice)
+            else entry
+            for entry in self.idx_list
+        )
 
-        if len(idxs) > x_ndim:
-            raise IndexError("Too many indices")
+    def make_node(self, x, *inputs):
+        """This should not be called directly. Use the index() factory function instead."""
+        raise NotImplementedError(
+            "Index.make_node should not be called directly. Use index(x, *idxs) instead."
+        )
 
-        idxs = [
-            as_idx_variable(idx, dim) for idx, dim in zip(idxs, x_dims, strict=False)
-        ]
 
-        for i, idx in enumerate(idxs):
-            if isinstance(idx.type, SliceType):
-                idx_dim = x_dims[i]
-                idx_dim_shape = get_static_slice_length(idx, x_shape[i])
+def index(x, *idxs):
+    """Create an indexed view of an xtensor.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        The xtensor to index
+    *idxs : slice | Variable | array-like
+        The indices to apply
+
+    Returns
+    -------
+    XTensorVariable
+        The indexed xtensor
+    """
+    x = as_xtensor(x)
+
+    # Handle Ellipsis
+    if any(idx is Ellipsis for idx in idxs):
+        if idxs.count(Ellipsis) > 1:
+            raise IndexError("an index can only have a single ellipsis ('...')")
+        # Convert intermediate Ellipsis to slice(None)
+        ellipsis_loc = idxs.index(Ellipsis)
+        n_implied_none_slices = x.type.ndim - (len(idxs) - 1)
+        idxs = (
+            *idxs[:ellipsis_loc],
+            *((slice(None),) * n_implied_none_slices),
+            *idxs[ellipsis_loc + 1 :],
+        )
+
+    x_ndim = x.type.ndim
+    x_dims = x.type.dims
+    x_shape = x.type.shape
+    out_dims = []
+    out_shape = []
+
+    def combine_dim_info(idx_dim, idx_dim_shape):
+        if idx_dim not in out_dims:
+            # First information about the dimension length
+            out_dims.append(idx_dim)
+            out_shape.append(idx_dim_shape)
+        else:
+            # Dim already introduced in output by a previous index
+            # Update static shape or raise if incompatible
+            out_dim_pos = out_dims.index(idx_dim)
+            out_dim_shape = out_shape[out_dim_pos]
+            if out_dim_shape is None:
+                # We don't know the size of the dimension yet
+                out_shape[out_dim_pos] = idx_dim_shape
+            elif idx_dim_shape is not None and idx_dim_shape != out_dim_shape:
+                raise IndexError(f"Dimension of indexers mismatch for dim {idx_dim}")
+
+    if len(idxs) > x_ndim:
+        raise IndexError("Too many indices")
+
+    # Convert all indices to either Python slices or Variables
+    processed_idxs = [
+        as_idx_variable(idx, dim) for idx, dim in zip(idxs, x_dims, strict=False)
+    ]
+
+    # Infer output shape and dims from the processed indices
+    for i, idx in enumerate(processed_idxs):
+        if isinstance(idx, slice):
+            idx_dim = x_dims[i]
+            idx_dim_shape = get_static_slice_length(idx, x_shape[i])
+            combine_dim_info(idx_dim, idx_dim_shape)
+        else:
+            if idx.type.ndim == 0:
+                # Scalar index, dimension is dropped
+                continue
+
+            assert isinstance(idx.type, XTensorType)
+
+            idx_dims = idx.type.dims
+            for idx_dim in idx_dims:
+                idx_dim_shape = idx.type.shape[idx_dims.index(idx_dim)]
                 combine_dim_info(idx_dim, idx_dim_shape)
-            else:
-                if idx.type.ndim == 0:
-                    # Scalar index, dimension is dropped
-                    continue
 
-                assert isinstance(idx.type, XTensorType)
+    for dim_i, shape_i in zip(x_dims[i + 1 :], x_shape[i + 1 :]):
+        # Add back any unindexed dimensions
+        if dim_i not in out_dims:
+            # If the dimension was not indexed, we keep it as is
+            combine_dim_info(dim_i, shape_i)
 
-                idx_dims = idx.type.dims
-                for idx_dim in idx_dims:
-                    idx_dim_shape = idx.type.shape[idx_dims.index(idx_dim)]
-                    combine_dim_info(idx_dim, idx_dim_shape)
+    # Create the Op with the processed idx_list and extract flattened inputs
+    op = Index(processed_idxs)
 
-        for dim_i, shape_i in zip(x_dims[i + 1 :], x_shape[i + 1 :]):
-            # Add back any unindexed dimensions
-            if dim_i not in out_dims:
-                # If the dimension was not indexed, we keep it as is
-                combine_dim_info(dim_i, shape_i)
+    # Get flattened inputs from the idx_list
+    inputs = get_slice_elements(
+        processed_idxs, lambda entry: isinstance(entry, Variable)
+    )
 
-        output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
-        return Apply(self, [x, *idxs], [output])
-
-
-index = Index()
+    output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
+    return Apply(op, [x, *inputs], [output]).outputs[0]
 
 
 class IndexUpdate(XOp):
-    __props__ = ("mode",)
+    __props__ = ("mode", "idx_list")
 
-    def __init__(self, mode: Literal["set", "inc"]):
+    def __init__(self, mode: Literal["set", "inc"], idx_list=None):
         if mode not in ("set", "inc"):
             raise ValueError("mode must be 'set' or 'inc'")
         self.mode = mode
+        # idx_list will be set when make_node is called
+        # We need it in __props__ but it's set later
+        if idx_list is not None:
+            self.idx_list = idx_list
 
     def make_node(self, x, y, *idxs):
-        # Call Index on (x, *idxs) to process inputs and infer output type
-        x_view_node = index.make_node(x, *idxs)
-        x, *idxs = x_view_node.inputs
-        [x_view] = x_view_node.outputs
+        # Use the index factory function to get the view and extract the idx_list
+        x_view = index(x, *idxs)
+
+        # Extract the Index Op from the view's owner
+        index_op = x_view.owner.op
+        assert isinstance(index_op, Index)
+
+        # Store the idx_list from the Index op (needed for rewrites)
+        # Create a new instance with the idx_list set
+        if not hasattr(self, "idx_list"):
+            new_op = IndexUpdate(self.mode, index_op.idx_list)
+            return new_op.make_node(x, y, *idxs)
+
+        # Get the processed x and inputs from the index operation
+        x = x_view.owner.inputs[0]
+        index_inputs = x_view.owner.inputs[1:]
 
         try:
             y = as_xtensor(y)
@@ -212,8 +366,18 @@ class IndexUpdate(XOp):
             )
 
         out = x.type()
-        return Apply(self, [x, y, *idxs], [out])
+        return Apply(self, [x, y, *index_inputs], [out])
 
 
-index_assignment = IndexUpdate("set")
-index_increment = IndexUpdate("inc")
+def _make_index_update(mode):
+    """Factory to create IndexUpdate operations."""
+
+    def update_fn(x, y, *idxs):
+        op = IndexUpdate(mode)
+        return op.make_node(x, y, *idxs).outputs[0]
+
+    return update_fn
+
+
+index_assignment = _make_index_update("set")
+index_increment = _make_index_update("inc")
