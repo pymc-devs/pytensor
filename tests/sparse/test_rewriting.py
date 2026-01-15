@@ -7,6 +7,7 @@ import pytensor.sparse.math as smath
 from pytensor import sparse
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
+from pytensor.link.numba import NumbaLinker
 from pytensor.sparse.rewriting import SamplingDotCSR, sd_csc
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import sum as pt_sum
@@ -68,6 +69,10 @@ def test_local_csm_grad_c():
 @pytest.mark.skipif(
     not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
+@pytest.mark.skipif(
+    isinstance(get_default_mode().linker, NumbaLinker),
+    reason="This is a C-specific test",
+)
 def test_local_mul_s_d():
     for sp_format in sparse.sparse_formats:
         inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), matrix()]
@@ -82,6 +87,10 @@ def test_local_mul_s_d():
 
 @pytest.mark.skipif(
     not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
+)
+@pytest.mark.skipif(
+    isinstance(get_default_mode().linker, NumbaLinker),
+    reason="This is a C-specific test",
 )
 def test_local_mul_s_v():
     mode = get_default_mode()
@@ -101,6 +110,10 @@ def test_local_mul_s_v():
 @pytest.mark.skipif(
     not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
+@pytest.mark.skipif(
+    isinstance(get_default_mode().linker, NumbaLinker),
+    reason="This is a C-specific test",
+)
 def test_local_structured_add_s_v():
     for sp_format in ["csr"]:  # Not implemented for other format
         inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), vector()]
@@ -115,6 +128,10 @@ def test_local_structured_add_s_v():
 
 @pytest.mark.skipif(
     not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
+)
+@pytest.mark.skipif(
+    isinstance(get_default_mode().linker, NumbaLinker),
+    reason="This is a C-specific test",
 )
 def test_local_sampling_dot_csr():
     for sp_format in ["csr"]:  # Not implemented for other format

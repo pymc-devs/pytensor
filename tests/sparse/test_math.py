@@ -8,7 +8,9 @@ import scipy.sparse as scipy_sparse
 import pytensor
 import pytensor.sparse.math as psm
 import pytensor.tensor as pt
+from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.link.numba import NumbaLinker
 from pytensor.scalar import upcast
 from pytensor.sparse.basic import (
     CSR,
@@ -427,33 +429,54 @@ class TestStructuredDot:
         )
         f(kernvals, imvals)
 
-    def test_dot_sparse_sparse(self):
+    @pytest.mark.parametrize(
+        "sparse_format_a",
+        (
+            "csc",
+            "csr",
+            pytest.param(
+                "bsr",
+                marks=pytest.mark.xfail(
+                    isinstance(get_default_mode().linker, NumbaLinker),
+                    reason="Numba does not support bsr",
+                ),
+            ),
+        ),
+    )
+    @pytest.mark.parametrize(
+        "sparse_format_b",
+        (
+            "csc",
+            "csr",
+            pytest.param(
+                "bsr",
+                marks=pytest.mark.xfail(
+                    isinstance(get_default_mode().linker, NumbaLinker),
+                    reason="Numba does not support bsr",
+                ),
+            ),
+        ),
+    )
+    def test_dot_sparse_sparse(self, sparse_format_a, sparse_format_b):
         sparse_dtype = "float64"
         sp_mat = {
             "csc": scipy_sparse.csc_matrix,
             "csr": scipy_sparse.csr_matrix,
             "bsr": scipy_sparse.csr_matrix,
         }
-
-        for sparse_format_a in ["csc", "csr", "bsr"]:
-            for sparse_format_b in ["csc", "csr", "bsr"]:
-                a = SparseTensorType(sparse_format_a, dtype=sparse_dtype)()
-                b = SparseTensorType(sparse_format_b, dtype=sparse_dtype)()
-                d = pt.dot(a, b)
-                f = pytensor.function([a, b], d)
-                for M, N, K, nnz in [
-                    (4, 3, 2, 3),
-                    (40, 30, 20, 3),
-                    (40, 30, 20, 30),
-                    (400, 3000, 200, 6000),
-                ]:
-                    a_val = sp_mat[sparse_format_a](
-                        random_lil((M, N), sparse_dtype, nnz)
-                    )
-                    b_val = sp_mat[sparse_format_b](
-                        random_lil((N, K), sparse_dtype, nnz)
-                    )
-                    f(a_val, b_val)
+        a = SparseTensorType(sparse_format_a, dtype=sparse_dtype)()
+        b = SparseTensorType(sparse_format_b, dtype=sparse_dtype)()
+        d = pt.dot(a, b)
+        f = pytensor.function([a, b], d)
+        for M, N, K, nnz in [
+            (4, 3, 2, 3),
+            (40, 30, 20, 3),
+            (40, 30, 20, 30),
+            (400, 3000, 200, 6000),
+        ]:
+            a_val = sp_mat[sparse_format_a](random_lil((M, N), sparse_dtype, nnz))
+            b_val = sp_mat[sparse_format_b](random_lil((N, K), sparse_dtype, nnz))
+            f(a_val, b_val)  # TODO: Test something
 
     def test_tensor_dot_types(self):
         x = csc_matrix("x")
@@ -775,7 +798,7 @@ class TestUsmm:
         f_b_out = f_b(z_data, a_data, x_data, y_data)
 
         # To make it easier to check the toposort
-        mode = pytensor.compile.mode.get_default_mode().excluding("fusion")
+        mode = get_default_mode().excluding("fusion")
 
         if inplace:
             updates = [(z, z - a * psm.dot(x, y))]
@@ -815,8 +838,7 @@ class TestUsmm:
             y.type.dtype == up
             and format1 == "csc"
             and format2 == "dense"
-            and not fast_compile
-            and pytensor.config.cxx
+            and "cxx_only" not in f_a.maker.linker.incompatible_rewrites
             and up in ("float32", "float64")
         ):
             # The op UsmmCscDense should be inserted
