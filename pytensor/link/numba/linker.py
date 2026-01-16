@@ -7,7 +7,7 @@ class NumbaLinker(JITLinker):
         "numba",
     )  # TODO: Distinguish between optional "numba" and "minimum_compile_numba"
     incompatible_rewrites = (
-        "cxx",
+        "cxx_only",
         "BlasOpt",
         "local_careduce_fusion",
         "scan_save_mem_prealloc",

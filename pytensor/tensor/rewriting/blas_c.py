@@ -68,5 +68,6 @@ optdb.register(
     "fast_run",
     "inplace",
     "c_blas",
+    "cxx_only",
     position=70.0,
 )
