@@ -2278,6 +2278,27 @@ class TestLocalSwitchSink:
             [new_left, new_right], [expected_left, expected_right]
         )
 
+    def test_safe_constant_fold(self):
+        inner_mul = [1.5, 0, 1]
+        outer_mul = [1.5, -np.inf, -np.inf]
+        valid = [True, False, True]
+
+        for inner_zero in (
+            pt.expand_dims(np.array(0), 0),
+            pt.zeros((3,)),
+        ):
+            out = (
+                switch(
+                    valid,
+                    inner_mul,
+                    inner_zero,
+                )
+                * outer_mul
+            )
+
+            # If the rewrite doesn't happen before constant_folding, the middle term will be nan
+            np.testing.assert_allclose(out.eval(), [1.5**2, 0, -np.inf])
+
 
 @pytest.mark.skipif(
     config.cxx == "",

@@ -840,6 +840,7 @@ def local_expm1(fgraph, node):
 
 
 @register_specialize
+@register_stabilize
 @register_canonicalize
 @node_rewriter([mul])
 def local_mul_switch_sink(fgraph, node):
@@ -878,14 +879,17 @@ def local_mul_switch_sink(fgraph, node):
             switch_node = mul_inp.owner
             # Look for a zero as the first or second branch of the switch
             for branch in range(2):
-                zero_switch_input = switch_node.inputs[1 + branch]
-                if (
-                    not get_underlying_scalar_constant_value(
-                        zero_switch_input,
-                        only_process_constants=True,
-                        raise_not_constant=False,
-                    )
-                    == 0.0
+                zero_inp = underlying_zero = switch_node.inputs[1 + branch]
+
+                # Allow zero inside a DimShuffle or Alloc
+                if zero_inp.owner is not None and isinstance(
+                    zero_inp.owner.op, DimShuffle | Alloc
+                ):
+                    underlying_zero = zero_inp.owner.inputs[0]
+
+                if not (
+                    isinstance(underlying_zero, TensorConstant)
+                    and underlying_zero.unique_value == 0
                 ):
                     continue
 
@@ -904,9 +908,9 @@ def local_mul_switch_sink(fgraph, node):
                 copy_stack_trace(node.outputs, fmul)
 
                 if branch == 0:
-                    fct = switch(switch_cond, zero_switch_input, fmul)
+                    fct = switch(switch_cond, zero_inp, fmul)
                 else:
-                    fct = switch(switch_cond, fmul, zero_switch_input)
+                    fct = switch(switch_cond, fmul, zero_inp)
 
                 # Tell debug_mode than the output is correct, even if nan disappear
                 fct.tag.values_eq_approx = values_eq_approx_remove_nan
@@ -942,14 +946,17 @@ def local_div_switch_sink(fgraph, node):
         switch_node = num.owner
         # Look for a zero as the first or second branch of the switch
         for branch in range(2):
-            zero_switch_input = switch_node.inputs[1 + branch]
-            if (
-                not get_underlying_scalar_constant_value(
-                    zero_switch_input,
-                    only_process_constants=True,
-                    raise_not_constant=False,
-                )
-                == 0.0
+            zero_inp = underlying_zero = switch_node.inputs[1 + branch]
+
+            # Allow zero inside a DimShuffle or Alloc
+            if zero_inp.owner is not None and isinstance(
+                zero_inp.owner.op, DimShuffle | Alloc
+            ):
+                underlying_zero = zero_inp.owner.inputs[0]
+
+            if not (
+                isinstance(underlying_zero, TensorConstant)
+                and underlying_zero.unique_value == 0
             ):
                 continue
 
@@ -966,9 +973,9 @@ def local_div_switch_sink(fgraph, node):
             copy_stack_trace(node.outputs, fdiv)
 
             if branch == 0:
-                fct = switch(switch_cond, zero_switch_input, fdiv)
+                fct = switch(switch_cond, zero_inp, fdiv)
             else:
-                fct = switch(switch_cond, fdiv, zero_switch_input)
+                fct = switch(switch_cond, fdiv, zero_inp)
 
             # Tell debug_mode than the output is correct, even if nan disappear
             fct.tag.values_eq_approx = values_eq_approx_remove_nan
