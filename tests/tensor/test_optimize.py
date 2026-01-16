@@ -239,7 +239,7 @@ def test_minimize_mvn_logp_mu_and_cov():
     y_star = pytensor.graph_replace(neg_logp, {mu: mu_star})
     _ = pt.grad(y_star, [mu, cov, data])
 
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(242)
     data_val = rng.normal(size=(d,)).astype(floatX)
 
     L = rng.normal(size=(d, d)).astype(floatX)
@@ -262,7 +262,10 @@ def test_minimize_mvn_logp_mu_and_cov():
         return mu_star.sum()
 
     utt.verify_grad(
-        min_fn, [mu0_val, cov_val, data_val], eps=1e-3 if floatX == "float32" else 1e-6
+        min_fn,
+        [mu0_val, cov_val, data_val],
+        eps=1e-3 if floatX == "float32" else 1e-6,
+        rng=rng,
     )
 
 
