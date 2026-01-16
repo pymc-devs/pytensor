@@ -1430,25 +1430,16 @@ class TestCasting(utt.InferShapeTester):
                         format, shape=(4, 7), out_dtype=i_dtype
                     )
 
-                    func = pytensor.function([variable], cast(variable, o_dtype))
-                    cls = pytensor.function([variable], Cast(o_dtype)(variable))
-                    prop = pytensor.function([variable], variable.astype(o_dtype))
+                    func_cast = cast(variable, o_dtype)
+                    cls_cast = Cast(o_dtype)(variable)
+                    prop_cast = variable.astype(o_dtype)
+                    utt.assert_equal_computations([func_cast], [cls_cast])
+                    utt.assert_equal_computations([cls_cast], [prop_cast])
 
-                    t_func, t_cls, t_prop = func(data), cls(data), prop(data)
-
+                    func_cast_res = func_cast.eval({variable: data})
+                    assert func_cast_res.format == format
                     expected = data.toarray().astype(o_dtype)
-
-                    assert t_func.format == format
-                    assert t_cls.format == format
-                    assert t_prop.format == format
-
-                    t_func = t_func.toarray()
-                    t_cls = t_cls.toarray()
-                    t_prop = t_prop.toarray()
-
-                    utt.assert_allclose(expected, t_func)
-                    utt.assert_allclose(expected, t_cls)
-                    utt.assert_allclose(expected, t_prop)
+                    utt.assert_allclose(expected, func_cast_res.toarray())
 
     @pytest.mark.slow
     def test_infer_shape(self):
