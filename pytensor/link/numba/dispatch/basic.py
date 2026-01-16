@@ -14,14 +14,13 @@ from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
 from pytensor.link.numba.cache import compile_numba_function_src, hash_from_pickle_dump
-from pytensor.link.numba.dispatch.sparse import CSCMatrixType, CSRMatrixType
 from pytensor.link.utils import (
     fgraph_to_python,
 )
 from pytensor.scalar.basic import ScalarType
 from pytensor.sparse import SparseTensorType
 from pytensor.tensor.random.type import RandomGeneratorType
-from pytensor.tensor.type import TensorType
+from pytensor.tensor.type import DenseTensorType
 from pytensor.tensor.utils import hash_from_ndarray
 from pytensor.typed_list import TypedListType
 
@@ -112,7 +111,7 @@ def get_numba_type(
         Return Numba scalars for zero dimensional :class:`TensorType`\s.
     """
 
-    if isinstance(pytensor_type, TensorType):
+    if isinstance(pytensor_type, DenseTensorType):
         dtype = pytensor_type.numpy_dtype
         numba_dtype = numba.from_dtype(dtype)
         if force_scalar or (
@@ -125,18 +124,26 @@ def get_numba_type(
         numba_dtype = numba.from_dtype(dtype)
         return numba_dtype
     elif isinstance(pytensor_type, SparseTensorType):
-        dtype = pytensor_type.numpy_dtype
-        numba_dtype = numba.from_dtype(dtype)
+        from pytensor.link.numba.dispatch.sparse.variable import (
+            CSCMatrixType,
+            CSRMatrixType,
+        )
+
+        data_array = numba.types.Array(
+            numba.from_dtype(pytensor_type.numpy_dtype), 1, layout
+        )
+        indices_array = numba.types.Array(numba.from_dtype(np.int32), 1, layout)
+        indptr_array = numba.types.Array(numba.from_dtype(np.int32), 1, layout)
         if pytensor_type.format == "csr":
-            return CSRMatrixType(numba_dtype)
+            return CSRMatrixType(data_array, indices_array, indptr_array)
         if pytensor_type.format == "csc":
-            return CSCMatrixType(numba_dtype)
+            return CSCMatrixType(data_array, indices_array, indptr_array)
     elif isinstance(pytensor_type, RandomGeneratorType):
         return numba.types.NumPyRandomGeneratorType("NumPyRandomGeneratorType")
     elif isinstance(pytensor_type, TypedListType):
         return numba.types.List(get_numba_type(pytensor_type.ttype))
-    else:
-        raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
+
+    raise NotImplementedError(f"Numba type not implemented for {pytensor_type}")
 
 
 def create_numba_signature(
