@@ -973,7 +973,12 @@ class __ComparisonOpSS(Op):
         (out,) = outputs
         assert psb._is_sparse(x) and psb._is_sparse(y)
         assert x.shape == y.shape
-        out[0] = self.comparison(x, y).astype("uint8")
+        # FIXME: Scipy csc > csc outputs csr format, but make_node assumes it will be the same as inputs
+        # Casting to respect make_node, but this is very inefficient
+        # TODO: Why not go with default bool?
+        out[0] = (
+            self.comparison(x, y).astype("uint8").asformat(node.outputs[0].type.format)
+        )
 
     def infer_shape(self, fgraph, node, ins_shapes):
         return [ins_shapes[0]]
