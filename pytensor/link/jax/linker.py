@@ -14,7 +14,7 @@ class JAXLinker(JITLinker):
         "jax",
     )  # TODO: Distinguish between optional "jax" and "minimum_compile_jax"
     incompatible_rewrites = (
-        "cxx",
+        "cxx_only",
         "BlasOpt",
         "local_careduce_fusion",
         "scan_save_mem_prealloc",

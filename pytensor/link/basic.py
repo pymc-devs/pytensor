@@ -284,7 +284,7 @@ class PerformLinker(LocalLinker):
     """
 
     required_rewrites: tuple[str, ...] = ("minimum_compile", "py_only")
-    incompatible_rewrites: tuple[str, ...] = ("cxx",)
+    incompatible_rewrites: tuple[str, ...] = ("cxx_only",)
 
     def __init__(
         self, allow_gc: bool | None = None, schedule: Callable | None = None

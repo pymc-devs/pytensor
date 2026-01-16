@@ -69,13 +69,10 @@ def test_local_csm_grad_c():
     not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_local_mul_s_d():
-    mode = get_default_mode()
-    mode = mode.including("specialize", "local_mul_s_d")
-
     for sp_format in sparse.sparse_formats:
         inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), matrix()]
 
-        f = pytensor.function(inputs, smath.mul_s_d(*inputs), mode=mode)
+        f = pytensor.function(inputs, smath.mul_s_d(*inputs), mode="CVM")
 
         assert not any(
             isinstance(node.op, smath.MulSD) for node in f.maker.fgraph.toposort()
@@ -92,7 +89,7 @@ def test_local_mul_s_v():
     for sp_format in ["csr"]:  # Not implemented for other format
         inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), vector()]
 
-        f = pytensor.function(inputs, smath.mul_s_v(*inputs), mode=mode)
+        f = pytensor.function(inputs, smath.mul_s_v(*inputs), mode="CVM")
 
         assert not any(
             isinstance(node.op, smath.MulSV) for node in f.maker.fgraph.toposort()
@@ -103,13 +100,10 @@ def test_local_mul_s_v():
     not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_local_structured_add_s_v():
-    mode = get_default_mode()
-    mode = mode.including("specialize", "local_structured_add_s_v")
-
     for sp_format in ["csr"]:  # Not implemented for other format
         inputs = [getattr(pytensor.sparse, sp_format + "_matrix")(), vector()]
 
-        f = pytensor.function(inputs, smath.structured_add_s_v(*inputs), mode=mode)
+        f = pytensor.function(inputs, smath.structured_add_s_v(*inputs), mode="CVM")
 
         assert not any(
             isinstance(node.op, smath.StructuredAddSV)
@@ -121,9 +115,6 @@ def test_local_structured_add_s_v():
     not pytensor.config.cxx, reason="G++ not available, so we need to skip this test."
 )
 def test_local_sampling_dot_csr():
-    mode = get_default_mode()
-    mode = mode.including("specialize", "local_sampling_dot_csr")
-
     for sp_format in ["csr"]:  # Not implemented for other format
         inputs = [
             matrix(),
@@ -131,7 +122,7 @@ def test_local_sampling_dot_csr():
             getattr(pytensor.sparse, sp_format + "_matrix")(),
         ]
 
-        f = pytensor.function(inputs, smath.sampling_dot(*inputs), mode=mode)
+        f = pytensor.function(inputs, smath.sampling_dot(*inputs), mode="CVM")
 
         if pytensor.config.blas__ldflags:
             assert not any(

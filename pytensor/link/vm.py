@@ -840,7 +840,7 @@ class VMLinker(LocalLinker):
             c_thunks = bool(config.cxx)
         if not c_thunks:
             self.required_rewrites: tuple[str, ...] = ("minimum_compile", "py_only")
-            self.incompatible_rewrites: tuple[str, ...] = ("cxx",)
+            self.incompatible_rewrites: tuple[str, ...] = ("cxx_only",)
         self.c_thunks = c_thunks
         self.allow_partial_eval = allow_partial_eval
         self.updated_vars = {}
