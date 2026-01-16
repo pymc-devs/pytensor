@@ -9,6 +9,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
+from pytensor.link.numba.dispatch.sparse.variable import CSCMatrixType, CSRMatrixType
 from pytensor.tensor.type_other import SliceType
 from pytensor.typed_list import (
     Append,
@@ -63,6 +64,18 @@ def list_all_equal(x, y):
 
         def all_equal(x, y):
             return x == y
+
+    if (isinstance(x, CSRMatrixType) and isinstance(y, CSRMatrixType)) or (
+        isinstance(x, CSCMatrixType) and isinstance(y, CSCMatrixType)
+    ):
+
+        def all_equal(x, y):
+            return (
+                x.shape == y.shape
+                and (x.data == y.data).all()
+                and (x.indptr == y.indptr).all()
+                and (x.indices == y.indices).all()
+            )
 
     return all_equal
 
