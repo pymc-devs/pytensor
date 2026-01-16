@@ -1,12 +1,14 @@
 from pytensor.graph import FunctionGraph, rewrite_graph
+from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.type import tensor
 from tests.unittest_tools import assert_equal_computations
 
 
-def test_local_split_dims_to_reshape():
+def test_local_split_dims():
     """Test that split_dims converts to reshape for general shapes."""
     x = tensor("x", shape=(2, 10, 3))
     x_split = split_dims(x, axis=1, shape=(2, 5, 1))
@@ -22,7 +24,7 @@ def test_local_split_dims_to_reshape():
     assert fg.outputs[0].type.shape == (2, 2, 5, 1, 3)
 
 
-def test_local_join_dims_to_reshape():
+def test_local_join_dims():
     x = tensor("x", shape=(2, 2, 5, 1, 3))
     x_join = join_dims(x, start_axis=1, n_axes=3)
 
@@ -31,10 +33,12 @@ def test_local_join_dims_to_reshape():
     assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 1
 
     rewrite_graph(fg, include=("canonicalize",))
-
     assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 0
     assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 1
     assert fg.outputs[0].type.shape == (2, 10, 3)
+
+    # expected = x.reshape((2, 10, 3))
+    # assert_equal_computations([fg.outputs[0]], [expected], in_xs=[fg.outputs[0]], in_ys=[expected])
 
 
 def test_local_join_dims_noop():
@@ -77,7 +81,10 @@ def test_local_join_dims_expand():
     ]
     assert len(expand_nodes) == 1
     # Output shape should be (2, 1, 3, 4) - new dimension of size 1 inserted at axis 1
-    assert fg.outputs[0].type.shape == (2, 1, 3, 4)
+    expected = expand_dims(x, axis=1)
+    assert_equal_computations(
+        [fg.outputs[0]], [expected], in_xs=[fg.outputs[0]], in_ys=[expected]
+    )
 
 
 def test_local_split_dims_to_reshape_squeeze_case():
@@ -106,4 +113,7 @@ def test_local_split_dims_to_reshape_squeeze_case():
     # Should NOT have a Reshape node
     assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 0
     # Output shape should be (2, 3, 4) - dimension 1 removed
-    assert fg.outputs[0].type.shape == (2, 3, 4)
+    expected = squeeze(x, axis=1)
+    assert_equal_computations(
+        [fg.outputs[0]], [expected], in_xs=[fg.outputs[0]], in_ys=[expected]
+    )
