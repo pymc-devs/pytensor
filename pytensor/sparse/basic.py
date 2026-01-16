@@ -297,15 +297,12 @@ class CSMProperties(Op):
 
         csm = as_sparse_variable(csm)
         assert csm.format in ("csr", "csc")
-        data = TensorType(dtype=csm.type.dtype, shape=(None,))()
+        data = vector(dtype=csm.type.dtype)
         return Apply(self, [csm], [data, ivector(), ivector(), ivector()])
 
     def perform(self, node, inputs, out):
         (csm,) = inputs
-        out[0][0] = csm.data
-        if str(csm.data.dtype) == "int32":
-            out[0][0] = np.asarray(out[0][0], dtype="int32")
-        # backport
+        out[0][0] = np.asarray(csm.data)
         out[1][0] = np.asarray(csm.indices, dtype="int32")
         out[2][0] = np.asarray(csm.indptr, dtype="int32")
         out[3][0] = np.asarray(csm.shape, dtype="int32")
