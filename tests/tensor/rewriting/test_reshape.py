@@ -3,6 +3,7 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.shape import Reshape
 from pytensor.tensor.type import tensor
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_local_split_dims_to_reshape():
@@ -51,10 +52,7 @@ def test_local_join_dims_noop():
     # After rewrite: should have 0 JoinDims nodes
     assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 0
     # Output should be equivalent to input (identity rewrite)
-    # The rewrite returns the input variable, so output should match input shape/type
-    assert fg.outputs[0].type.shape == x.type.shape
-    assert fg.outputs[0].type.dtype == x.type.dtype
-    assert fg.outputs[0].type.ndim == x.type.ndim
+    assert_equal_computations([fg.outputs[0]], [x], in_xs=[fg.outputs[0]], in_ys=[x])
 
 
 def test_local_join_dims_expand():
