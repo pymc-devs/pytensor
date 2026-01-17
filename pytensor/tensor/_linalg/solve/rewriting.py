@@ -15,7 +15,6 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.linalg import is_matrix_transpose
 from pytensor.tensor.slinalg import Solve, cho_solve, cholesky, lu_factor, lu_solve
 from pytensor.tensor.variable import TensorVariable
 
@@ -74,28 +73,26 @@ def _split_decomp_and_solve_steps(
         # the root variable is the pre-DimShuffled input.
         # Otherwise, `a` is considered the root variable.
         # We also return whether the root `a` is transposed.
+        root_a = a
         transposed = False
-        if a.owner is not None and isinstance(a.owner.op, DimShuffle):
-            if a.owner.op.is_left_expand_dims:
-                [a] = a.owner.inputs
-            elif is_matrix_transpose(a):
-                [a] = a.owner.inputs
-                transposed = True
-        return a, transposed
+        match a.owner_op_and_inputs:
+            case (DimShuffle(is_left_expand_dims=True), root_a):  # type: ignore[misc]
+                transposed = False
+            case (DimShuffle(is_left_expanded_matrix_transpose=True), root_a):  # type: ignore[misc]
+                transposed = True  # type: ignore[unreachable]
+
+        return root_a, transposed
 
     def find_solve_clients(var, assume_a):
         clients = []
         for cl, idx in fgraph.clients[var]:
-            if (
-                idx == 0
-                and isinstance(cl.op, Blockwise)
-                and isinstance(cl.op.core_op, Solve)
-                and (cl.op.core_op.assume_a == assume_a)
-            ):
-                clients.append(cl)
-            elif isinstance(cl.op, DimShuffle) and cl.op.is_left_expand_dims:
-                # If it's a left expand_dims, recurse on the output
-                clients.extend(find_solve_clients(cl.outputs[0], assume_a))
+            match (idx, cl.op, *cl.outputs):
+                case (0, Blockwise(Solve(assume_a=assume_a_var)), *_) if (
+                    assume_a_var == assume_a
+                ):
+                    clients.append(cl)
+                case (0, DimShuffle(is_left_expand_dims=True), cl_out):
+                    clients.extend(find_solve_clients(cl_out, assume_a))
         return clients
 
     assume_a = node.op.core_op.assume_a
@@ -114,11 +111,11 @@ def _split_decomp_and_solve_steps(
 
     # Find Solves using A.T
     for cl, _ in fgraph.clients[A]:
-        if isinstance(cl.op, DimShuffle) and is_matrix_transpose(cl.out):
-            A_T = cl.out
-            A_solve_clients_and_transpose.extend(
-                (client, True) for client in find_solve_clients(A_T, assume_a)
-            )
+        match (cl.op, *cl.outputs):
+            case (DimShuffle(is_left_expanded_matrix_transpose=True), A_T):
+                A_solve_clients_and_transpose.extend(
+                    (client, True) for client in find_solve_clients(A_T, assume_a)
+                )
 
     if not eager and len(A_solve_clients_and_transpose) == 1:
         # If theres' a single use don't do it... unless it's being broadcast in a Blockwise (or we're eager)
@@ -171,34 +168,34 @@ def _scan_split_non_sequence_decomposition_and_solve(
     changed = False
     while True:
         for inner_node in new_scan_fgraph.toposort():
-            if (
-                isinstance(inner_node.op, Blockwise)
-                and isinstance(inner_node.op.core_op, Solve)
-                and inner_node.op.core_op.assume_a in allowed_assume_a
-            ):
-                A, _b = inner_node.inputs
-                if all(
-                    (isinstance(root_inp, Constant) or (root_inp in non_sequences))
-                    for root_inp in graph_inputs([A])
+            match (inner_node.op, *inner_node.inputs):
+                case (Blockwise(Solve(assume_a=assume_a_var)), A, _b) if (
+                    assume_a_var in allowed_assume_a
                 ):
-                    if new_scan_fgraph is scan_op.fgraph:
-                        # Clone the first time to avoid mutating the original fgraph
-                        new_scan_fgraph, equiv = new_scan_fgraph.clone_get_equiv()
-                        non_sequences = {equiv[non_seq] for non_seq in non_sequences}
-                        inner_node = equiv[inner_node]  # type: ignore
+                    if all(
+                        (isinstance(root_inp, Constant) or (root_inp in non_sequences))
+                        for root_inp in graph_inputs([A])
+                    ):
+                        if new_scan_fgraph is scan_op.fgraph:
+                            # Clone the first time to avoid mutating the original fgraph
+                            new_scan_fgraph, equiv = new_scan_fgraph.clone_get_equiv()
+                            non_sequences = {
+                                equiv[non_seq] for non_seq in non_sequences
+                            }
+                            inner_node = equiv[inner_node]  # type: ignore
 
-                    replace_dict = _split_decomp_and_solve_steps(
-                        new_scan_fgraph,
-                        inner_node,
-                        eager=True,
-                        allowed_assume_a=allowed_assume_a,
-                    )
-                    assert isinstance(replace_dict, dict) and len(replace_dict) > 0, (
-                        "Rewrite failed"
-                    )
-                    new_scan_fgraph.replace_all(replace_dict.items())
-                    changed = True
-                    break  # Break to start over with a fresh toposort
+                        replace_dict = _split_decomp_and_solve_steps(
+                            new_scan_fgraph,
+                            inner_node,
+                            eager=True,
+                            allowed_assume_a=allowed_assume_a,
+                        )
+                        assert (
+                            isinstance(replace_dict, dict) and len(replace_dict) > 0
+                        ), "Rewrite failed"
+                        new_scan_fgraph.replace_all(replace_dict.items())
+                        changed = True
+                        break  # Break to start over with a fresh toposort
         else:  # no_break
             break  # Nothing else changed
 

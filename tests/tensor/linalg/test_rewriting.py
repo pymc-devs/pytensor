@@ -91,13 +91,21 @@ def test_lu_decomposition_reused_forward_and_gradient(assume_a, counter, transpo
 
     x = solve(A, b, assume_a=assume_a, transposed=transposed)
     grad_x_wrt_A = grad(x.sum(), A)
-    fn_no_opt = function([A, b], [x, grad_x_wrt_A], mode=mode.excluding(rewrite_name))
+    fn_no_opt = function(
+        [A, b],
+        [x, grad_x_wrt_A],
+        mode=mode.excluding(rewrite_name, "psd_solve_to_chol_solve"),
+    )
     no_opt_nodes = fn_no_opt.maker.fgraph.apply_nodes
     assert counter.count_vanilla_solve_nodes(no_opt_nodes) == 2
     assert counter.count_decomp_nodes(no_opt_nodes) == 0
     assert counter.count_solve_nodes(no_opt_nodes) == 0
 
-    fn_opt = function([A, b], [x, grad_x_wrt_A], mode=mode.including(rewrite_name))
+    fn_opt = function(
+        [A, b],
+        [x, grad_x_wrt_A],
+        mode=mode.including(rewrite_name).excluding("psd_solve_to_chol_solve"),
+    )
     opt_nodes = fn_opt.maker.fgraph.apply_nodes
     assert counter.count_vanilla_solve_nodes(opt_nodes) == 0
     assert counter.count_decomp_nodes(opt_nodes) == 1
@@ -134,13 +142,19 @@ def test_lu_decomposition_reused_blockwise(assume_a, counter, transposed):
     b = tensor("b", shape=(2, 3, 4))
 
     x = solve(A, b, assume_a=assume_a, transposed=transposed)
-    fn_no_opt = function([A, b], [x], mode=mode.excluding(rewrite_name))
+    fn_no_opt = function(
+        [A, b], [x], mode=mode.excluding(rewrite_name, "psd_solve_to_chol_solve")
+    )
     no_opt_nodes = fn_no_opt.maker.fgraph.apply_nodes
     assert counter.count_vanilla_solve_nodes(no_opt_nodes) == 1
     assert counter.count_decomp_nodes(no_opt_nodes) == 0
     assert counter.count_solve_nodes(no_opt_nodes) == 0
 
-    fn_opt = function([A, b], [x], mode=mode.including(rewrite_name))
+    fn_opt = function(
+        [A, b],
+        [x],
+        mode=mode.including(rewrite_name).excluding("psd_solve_to_chol_solve"),
+    )
     opt_nodes = fn_opt.maker.fgraph.apply_nodes
     assert counter.count_vanilla_solve_nodes(opt_nodes) == 0
     assert counter.count_decomp_nodes(opt_nodes) == 1
@@ -181,6 +195,7 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
         non_sequences=[A],
         n_steps=10,
         return_updates=False,
+        mode=get_default_mode().excluding("psd_solve_to_chol_solve"),
     )
 
     fn_no_opt = function(

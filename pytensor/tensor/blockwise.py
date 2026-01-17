@@ -160,6 +160,8 @@ class Blockwise(COp):
     """
 
     __props__ = ("core_op", "signature")
+    # Allow pattern matching on core_op positionally
+    __match_args__ = ("core_op",)
 
     def __init__(
         self,

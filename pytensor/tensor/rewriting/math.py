@@ -25,6 +25,7 @@ from pytensor.tensor.basic import (
     MakeVector,
     alloc,
     as_tensor_variable,
+    atleast_Nd,
     cast,
     constant,
     expand_dims,
@@ -105,7 +106,6 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
-from pytensor.tensor.rewriting.linalg import is_matrix_transpose
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
 from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.subtensor import Subtensor
@@ -245,17 +245,24 @@ def local_lift_transpose_through_dot(fgraph, node):
 
     [(client, _)] = clients
 
-    if not (isinstance(client.op, DimShuffle) and is_matrix_transpose(client.out)):
+    if not (
+        isinstance(client.op, DimShuffle)
+        and client.op.is_left_expanded_matrix_transpose
+    ):
         return None
 
     x, y = node.inputs
     # Output is dot product of transposed inputs in reverse order
     ret = node.op(y.mT, x.mT)
 
+    client.out.dprint(depth=2, print_shape=True)
     # Copy over stack trace to output from result of dot-product
     copy_stack_trace(node.out, ret)
 
-    return {client.out: ret}
+    replaced_client = client.out
+    ret = atleast_Nd(ret, n=replaced_client.type.ndim)
+
+    return {replaced_client: ret}
 
 
 def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):

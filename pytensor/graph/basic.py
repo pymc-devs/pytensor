@@ -553,30 +553,26 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         cp.tag = copy(self.tag)
         return cp
 
-    def __lt__(self, other):
-        raise NotImplementedError(
-            "Subclasses of Variable must provide __lt__", self.__class__.__name__
-        )
-
-    def __le__(self, other):
-        raise NotImplementedError(
-            "Subclasses of Variable must provide __le__", self.__class__.__name__
-        )
-
-    def __gt__(self, other):
-        raise NotImplementedError(
-            "Subclasses of Variable must provide __gt__", self.__class__.__name__
-        )
-
-    def __ge__(self, other):
-        raise NotImplementedError(
-            "Subclasses of Variable must provide __ge__", self.__class__.__name__
-        )
-
     def get_parents(self):
         if self.owner is not None:
             return [self.owner]
         return []
+
+    @property
+    def owner_op(self) -> Optional["Op"]:
+        if (apply := self.owner) is not None:
+            return apply.op  # type: ignore[no-any-return]
+        else:
+            return None
+
+    @property
+    def owner_op_and_inputs(
+        self,
+    ) -> tuple[Optional["Op"], *tuple["Variable", ...]]:
+        if (apply := self.owner) is not None:
+            return apply.op, *apply.inputs  # type: ignore[has-type]
+        else:
+            return (None,)
 
     def eval(
         self,
@@ -793,6 +789,8 @@ class Constant(AtomicVariable[_TypeType]):
     """
 
     # __slots__ = ['data']
+    # Allow pattern matching on data field positionally
+    __match_args__ = ("data",)
 
     def __init__(self, type: _TypeType, data: Any, name: str | None = None):
         super().__init__(type, name=name)
