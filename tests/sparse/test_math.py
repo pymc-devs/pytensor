@@ -682,6 +682,12 @@ class TestDots(utt.InferShapeTester):
                 ("csr", "csc"),
                 ("csr", "csr"),
             ]:
+                if d2 == "complex64" and isinstance(
+                    get_default_mode().linker, NumbaLinker
+                ):
+                    # NOTE: Numba does not support sparse dot with complex numbers
+                    continue
+
                 x = SparseTensorType(format=x_f, dtype=d1)("x")
                 y = SparseTensorType(format=x_f, dtype=d2)("x")
 
