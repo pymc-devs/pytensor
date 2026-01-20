@@ -1,3 +1,4 @@
+import numba as nb
 import numpy as np
 import scipy as sp
 from numba.core import cgutils, types
@@ -292,14 +293,15 @@ def overload_sparse_astype(matrix, dtype):
 @overload_method(CSCMatrixType, "tocsr")
 def overload_tocsr(matrix):
     def to_csr(matrix):
-        n_row, n_col = matrix.shape
-        csc_ptr = matrix.indptr
-        csc_ind = matrix.indices
+        n_row = nb.uint32(matrix.shape[0])
+        n_col = nb.uint32(matrix.shape[1])
+        csc_ptr = matrix.indptr.view(np.uint32)
+        csc_ind = matrix.indices.view(np.uint32)
         csc_data = matrix.data
-        nnz = csc_ptr[n_col]
+        nnz = nb.uint32(csc_ptr[n_col])
 
-        csr_ptr = np.empty(n_row + 1, dtype=np.int32)
-        csr_ind = np.empty(nnz, dtype=np.int32)
+        csr_ptr = np.empty(n_row + 1, dtype=np.uint32)
+        csr_ind = np.empty(nnz, dtype=np.uint32)
         csr_data = np.empty(nnz, dtype=matrix.data.dtype)
 
         csr_ptr[:n_row] = 0
@@ -307,27 +309,27 @@ def overload_tocsr(matrix):
         for n in range(nnz):
             csr_ptr[csc_ind[n]] += 1
 
-        cumsum = 0
+        cumsum = nb.uint32(0)
         for row in range(n_row):
             temp = csr_ptr[row]
             csr_ptr[row] = cumsum
             cumsum += temp
         csr_ptr[n_row] = nnz
 
-        for col in range(n_col):
-            for jj in range(csc_ptr[col], csc_ptr[col + 1]):
-                row = csc_ind[jj]
-                dest = csr_ptr[row]
+        for col_idx in range(n_col):
+            for jj in range(csc_ptr[col_idx], csc_ptr[col_idx + 1]):
+                row_idx = csc_ind[jj]
+                dest = csr_ptr[row_idx]
 
-                csr_ind[dest] = col
+                csr_ind[dest] = col_idx
                 csr_data[dest] = csc_data[jj]
 
-                csr_ptr[row] += 1
+                csr_ptr[row_idx] += 1
 
-        last = 0
-        for row in range(n_row + 1):
-            temp = csr_ptr[row]
-            csr_ptr[row] = last
+        last = nb.uint32(0)
+        for row_idx in range(n_row + 1):
+            temp = csr_ptr[row_idx]
+            csr_ptr[row_idx] = last
             last = temp
 
         return csr_matrix_from_components(csr_data, csr_ind, csr_ptr, matrix.shape)
@@ -339,30 +341,32 @@ def overload_tocsr(matrix):
 def overload_toarray(matrix):
     match matrix:
         case CSRMatrixType():
-            kind = "csr"
+
+            def to_array(matrix):
+                indptr = matrix.indptr.view(np.uint32)
+                indices = matrix.indices.view(np.uint32)
+                n_row = nb.uint32(matrix.shape[0])
+                dense = np.zeros(matrix.shape, dtype=matrix.data.dtype)
+                for row_idx in range(n_row):
+                    for k in range(indptr[row_idx], indptr[row_idx + 1]):
+                        col_idx = indices[k]
+                        dense[row_idx, col_idx] = matrix.data[k]
+                return dense
+
+            return to_array
         case CSCMatrixType():
-            kind = "csc"
+
+            def to_array(matrix):
+                indptr = matrix.indptr.view(np.uint32)
+                indices = matrix.indices.view(np.uint32)
+                n_col = nb.uint32(matrix.shape[1])
+                dense = np.zeros(matrix.shape, dtype=matrix.data.dtype)
+                for col_idx in range(n_col):
+                    for k in range(indptr[col_idx], indptr[col_idx + 1]):
+                        row_idx = indices[k]
+                        dense[row_idx, col_idx] = matrix.data[k]
+                return dense
+
+            return to_array
         case _:
             return
-
-    def to_array(matrix):
-        n_rows, n_cols = matrix.shape
-        dense = np.zeros((n_rows, n_cols), dtype=matrix.data.dtype)
-
-        if kind == "csr":
-            for row in range(n_rows):
-                start = matrix.indptr[row]
-                end = matrix.indptr[row + 1]
-                for k in range(start, end):
-                    col = matrix.indices[k]
-                    dense[row][col] = matrix.data[k]
-        else:
-            for col in range(n_cols):
-                start = matrix.indptr[col]
-                end = matrix.indptr[col + 1]
-                for k in range(start, end):
-                    row = matrix.indices[k]
-                    dense[row][col] = matrix.data[k]
-        return dense
-
-    return to_array
