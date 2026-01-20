@@ -291,7 +291,33 @@ def overload_sparse_astype(matrix, dtype):
 
 @overload_method(CSMatrixType, "toarray")
 def overload_toarray(matrix):
+    match matrix:
+        case CSRMatrixType():
+            kind = "csr"
+        case CSCMatrixType():
+            kind = "csc"
+        case _:
+            return
+
     def to_array(matrix):
-        return matrix
+        n_rows, n_cols = matrix.shape
+        dense = np.zeros((n_rows, n_cols), dtype=matrix.data.dtype)
+
+        if kind == "csr":
+            # fill non-zero entries
+            for row in range(n_rows):
+                start = matrix.indptr[row]
+                end = matrix.indptr[row + 1]
+                for k in range(start, end):
+                    col = matrix.indices[k]
+                    dense[row][col] = matrix.data[k]
+        else:
+            for col in range(n_cols):
+                start = matrix.indptr[col]
+                end = matrix.indptr[col + 1]
+                for k in range(start, end):
+                    row = matrix.indices[k]
+                    dense[row][col] = matrix.data[k]
+        return dense
 
     return to_array

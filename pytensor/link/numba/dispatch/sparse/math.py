@@ -202,7 +202,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
             # Dot returns a dense result even in spMspM
             if not z_is_sparse:
-                output.toarray()
+                return output.toarray()
 
             return output
 
