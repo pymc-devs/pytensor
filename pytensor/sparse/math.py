@@ -1365,6 +1365,8 @@ class StructuredDot(Op):
                 "shape mismatch in StructuredDot.perform", (a.shape, b.shape)
             )
 
+        # Multiplication of objects of `*_matrix` type means dot product
+        # The result can be sparse or dense, depending on the inputs.
         variable = a * b
         if isinstance(node.outputs[0].type, SparseTensorType):
             assert psb._is_sparse(variable)
@@ -1902,6 +1904,7 @@ class Dot(Op):
         if not x_is_sparse and not y_is_sparse:
             raise TypeError(x)
 
+        # Multiplication of objects of `*_matrix` type means dot product
         rval = x * y
 
         if x_is_sparse and y_is_sparse:
