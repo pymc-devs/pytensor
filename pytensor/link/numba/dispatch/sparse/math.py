@@ -205,11 +205,18 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             if not z_is_sparse:
                 return output.toarray()
 
+            # StructuredDot returns in the format of 'x'
+            if x_format == "csc":
+                return output.tocsc()
+
             return output
 
         return spmspm
 
-    if x_is_sparse and y.type.shape[1] == 1:  # NOTE: y.ndim is always 2 within dot
+    if x_is_sparse and (
+        y.type.ndim == 1 or (y.type.ndim == 2 and y.type.shape[1] == 1)
+    ):
+        # Use more performant spmv
         if x_format == "csr":
 
             @numba_basic.numba_njit
@@ -239,11 +246,20 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
                 return output
 
-        @numba_basic.numba_njit
-        def spmdv(x, y):
-            # Output _has to be_ 2d.
-            assert x.shape[1] == y.shape[0]
-            return _spmdv(x.indptr, x.indices, x.data, np.squeeze(y))[:, np.newaxis]
+        if y.type.ndim == 1:
+
+            @numba_basic.numba_njit
+            def spmdv(x, y):
+                # np.squeeze is not supported when ndim is 1
+                assert x.shape[1] == y.shape[0]
+                return _spmdv(x.indptr, x.indices, x.data, y)
+        else:
+
+            @numba_basic.numba_njit
+            def spmdv(x, y):
+                # Output _has to be_ 2d.
+                assert x.shape[1] == y.shape[0]
+                return _spmdv(x.indptr, x.indices, x.data, np.squeeze(y))[:, np.newaxis]
 
         return spmdv
 

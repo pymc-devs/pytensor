@@ -30,6 +30,12 @@ def sparse_assert_fn(a, b):
     a_is_sparse = sp.sparse.issparse(a)
     assert a_is_sparse == sp.sparse.issparse(b)
     if a_is_sparse:
+        # Attributes can be compared only if both matrices have sorted indices
+        if not a.has_sorted_indices:
+            a = a.sorted_indices()
+        if not b.has_sorted_indices:
+            b = b.sorted_indices()
+
         assert a.format == b.format
         assert a.dtype == b.dtype
         assert a.shape == b.shape

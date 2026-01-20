@@ -30,12 +30,13 @@ def test_sparse_dense_multiply(y_ndim, format):
     )
 
 
+@pytest.mark.parametrize("op", [ps.dot, ps.structured_dot])
 @pytest.mark.parametrize("sp_format", ["csr", "csc"])
 @pytest.mark.parametrize("x_shape, y_shape", DOT_SHAPES)
-def test_dot_sparse_dense(sp_format, x_shape, y_shape):
+def test_dot_sparse_dense(op, sp_format, x_shape, y_shape):
     x = ps.matrix(format=sp_format, name="x", shape=x_shape)
     y = pt.matrix("y", shape=y_shape)
-    z = ps.dot(x, y)
+    z = op(x, y)
 
     rng = np.random.default_rng(sum(map(ord, sp_format)) + sum(x_shape) + sum(y_shape))
     x_test = scipy.sparse.random(
@@ -46,12 +47,13 @@ def test_dot_sparse_dense(sp_format, x_shape, y_shape):
     compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
 
 
+@pytest.mark.parametrize("op", [ps.dot, ps.structured_dot])
 @pytest.mark.parametrize("sp_format", ["csr", "csc"])
 @pytest.mark.parametrize("x_shape, y_shape", DOT_SHAPES)
-def test_dot_dense_sparse(sp_format, x_shape, y_shape):
+def test_dot_dense_sparse(op, sp_format, x_shape, y_shape):
     x = pt.matrix(name="x", shape=x_shape)
     y = ps.matrix(format=sp_format, name="y", shape=y_shape)
-    z = ps.dot(x, y)
+    z = op(x, y)
 
     rng = np.random.default_rng(sum(map(ord, sp_format)) + sum(x_shape) + sum(y_shape))
     x_test = rng.normal(size=x_shape)
@@ -62,13 +64,14 @@ def test_dot_dense_sparse(sp_format, x_shape, y_shape):
     compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
 
 
+@pytest.mark.parametrize("op", [ps.dot, ps.structured_dot])
 @pytest.mark.parametrize("x_format", ["csr", "csc"])
 @pytest.mark.parametrize("y_format", ["csr", "csc"])
 @pytest.mark.parametrize("x_shape, y_shape", DOT_SHAPES)
-def test_sparse_dot_sparse_sparse(x_format, y_format, x_shape, y_shape):
+def test_sparse_dot_sparse_sparse(op, x_format, y_format, x_shape, y_shape):
     x = ps.matrix(x_format, name="x", shape=x_shape)
     y = ps.matrix(y_format, name="y", shape=y_shape)
-    z = ps.dot(x, y)
+    z = op(x, y)
 
     rng = np.random.default_rng(sum(map(ord, x_format)) + sum(map(ord, y_format)))
     x_test = scipy.sparse.random(
@@ -77,5 +80,18 @@ def test_sparse_dot_sparse_sparse(x_format, y_format, x_shape, y_shape):
     y_test = scipy.sparse.random(
         *y_shape, density=0.5, format=y_format, random_state=rng
     )
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("sp_format", ["csr", "csc"])
+def test_sparse_spmv(sp_format):
+    x = ps.matrix(format=sp_format, name="x", shape=(20, 6))
+    y = pt.vector("y", shape=(6,))
+    z = ps.dot(x, y)
+
+    rng = np.random.default_rng(sp_format == "csr")
+    x_test = scipy.sparse.random(20, 6, density=0.5, format=sp_format, random_state=rng)
+    y_test = rng.normal(size=(6,))
 
     compare_numba_and_py_sparse([x, y], z, [x_test, y_test])

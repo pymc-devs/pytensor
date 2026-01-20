@@ -10,7 +10,7 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.sparse.variable import CSMatrixType
-from pytensor.sparse import CSM, Cast, CSMProperties
+from pytensor.sparse import CSM, Cast, CSMProperties, Transpose
 
 
 @overload(numba_deepcopy)
@@ -66,3 +66,12 @@ def numba_funcify_Cast(op, node, **kwargs):
         return x.astype(out_dtype)
 
     return cast
+
+
+@register_funcify_default_op_cache_key(Transpose)
+def numba_funcify_Transpose(op, node, **kwargs):
+    @numba_basic.numba_njit
+    def transpose(x):
+        return x.T
+
+    return transpose

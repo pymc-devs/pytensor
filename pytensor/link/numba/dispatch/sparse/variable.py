@@ -1,4 +1,3 @@
-import numba as nb
 import numpy as np
 import scipy as sp
 from numba.core import cgutils, types
@@ -293,12 +292,11 @@ def overload_sparse_astype(matrix, dtype):
 @overload_method(CSCMatrixType, "tocsr")
 def overload_tocsr(matrix):
     def to_csr(matrix):
-        n_row = nb.uint32(matrix.shape[0])
-        n_col = nb.uint32(matrix.shape[1])
+        n_row, n_col = matrix.shape
         csc_ptr = matrix.indptr.view(np.uint32)
         csc_ind = matrix.indices.view(np.uint32)
         csc_data = matrix.data
-        nnz = nb.uint32(csc_ptr[n_col])
+        nnz = csc_ptr[n_col]
 
         csr_ptr = np.empty(n_row + 1, dtype=np.uint32)
         csr_ind = np.empty(nnz, dtype=np.uint32)
@@ -309,7 +307,7 @@ def overload_tocsr(matrix):
         for n in range(nnz):
             csr_ptr[csc_ind[n]] += 1
 
-        cumsum = nb.uint32(0)
+        cumsum = 0
         for row in range(n_row):
             temp = csr_ptr[row]
             csr_ptr[row] = cumsum
@@ -326,7 +324,7 @@ def overload_tocsr(matrix):
 
                 csr_ptr[row_idx] += 1
 
-        last = nb.uint32(0)
+        last = 0
         for row_idx in range(n_row + 1):
             temp = csr_ptr[row_idx]
             csr_ptr[row_idx] = last
@@ -337,6 +335,52 @@ def overload_tocsr(matrix):
     return to_csr
 
 
+@overload_method(CSRMatrixType, "tocsc")
+def overload_tocsc(matrix):
+    def to_csc(matrix):
+        n_row, n_col = matrix.shape
+        csr_ptr = matrix.indptr.view(np.uint32)
+        csr_ind = matrix.indices.view(np.uint32)
+        csr_data = matrix.data
+        nnz = csr_ptr[n_row]
+
+        csc_ptr = np.empty(n_col + 1, dtype=np.uint32)
+        csc_ind = np.empty(nnz, dtype=np.uint32)
+        csc_data = np.empty(nnz, dtype=matrix.data.dtype)
+
+        csc_ptr[:n_col] = 0
+
+        for n in range(nnz):
+            csc_ptr[csr_ind[n]] += 1
+
+        cumsum = 0
+        for col in range(n_col):
+            temp = csc_ptr[col]
+            csc_ptr[col] = cumsum
+            cumsum += temp
+        csc_ptr[n_col] = nnz
+
+        for row in range(n_row):
+            for jj in range(csr_ptr[row], csr_ptr[row + 1]):
+                col = csr_ind[jj]
+                dest = csc_ptr[col]
+
+                csc_ind[dest] = row
+                csc_data[dest] = csr_data[jj]
+
+                csc_ptr[col] += 1
+
+        last = 0
+        for col in range(n_col + 1):
+            temp = csc_ptr[col]
+            csc_ptr[col] = last
+            last = temp
+
+        return csc_matrix_from_components(csc_data, csc_ind, csc_ptr, matrix.shape)
+
+    return to_csc
+
+
 @overload_method(CSMatrixType, "toarray")
 def overload_toarray(matrix):
     match matrix:
@@ -345,7 +389,7 @@ def overload_toarray(matrix):
             def to_array(matrix):
                 indptr = matrix.indptr.view(np.uint32)
                 indices = matrix.indices.view(np.uint32)
-                n_row = nb.uint32(matrix.shape[0])
+                n_row = matrix.shape[0]
                 dense = np.zeros(matrix.shape, dtype=matrix.data.dtype)
                 for row_idx in range(n_row):
                     for k in range(indptr[row_idx], indptr[row_idx + 1]):
@@ -359,7 +403,7 @@ def overload_toarray(matrix):
             def to_array(matrix):
                 indptr = matrix.indptr.view(np.uint32)
                 indices = matrix.indices.view(np.uint32)
-                n_col = nb.uint32(matrix.shape[1])
+                n_col = matrix.shape[1]
                 dense = np.zeros(matrix.shape, dtype=matrix.data.dtype)
                 for col_idx in range(n_col):
                     for k in range(indptr[col_idx], indptr[col_idx + 1]):
