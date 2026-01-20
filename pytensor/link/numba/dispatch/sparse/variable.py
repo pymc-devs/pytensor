@@ -236,12 +236,12 @@ def overload_sparse_T(matrix):
             return
 
     def transpose(matrix):
-        n_rows, n_cols = matrix.shape
+        n_row, n_col = matrix.shape
         return builder(
             matrix.data.copy(),
             matrix.indices.copy(),
             matrix.indptr.copy(),
-            (n_cols, n_rows),
+            (n_col, n_row),
         )
 
     return transpose
@@ -287,6 +287,52 @@ def overload_sparse_astype(matrix, dtype):
         )
 
     return astype
+
+
+@overload_method(CSCMatrixType, "tocsr")
+def overload_tocsr(matrix):
+    def to_csr(matrix):
+        n_row, n_col = matrix.shape
+        csc_ptr = matrix.indptr
+        csc_ind = matrix.indices
+        csc_data = matrix.data
+        nnz = csc_ptr[n_col]
+
+        csr_ptr = np.empty(n_row + 1, dtype=np.int32)
+        csr_ind = np.empty(nnz, dtype=np.int32)
+        csr_data = np.empty(nnz, dtype=matrix.data.dtype)
+
+        csr_ptr[:n_row] = 0
+
+        for n in range(nnz):
+            csr_ptr[csc_ind[n]] += 1
+
+        cumsum = 0
+        for row in range(n_row):
+            temp = csr_ptr[row]
+            csr_ptr[row] = cumsum
+            cumsum += temp
+        csr_ptr[n_row] = nnz
+
+        for col in range(n_col):
+            for jj in range(csc_ptr[col], csc_ptr[col + 1]):
+                row = csc_ind[jj]
+                dest = csr_ptr[row]
+
+                csr_ind[dest] = col
+                csr_data[dest] = csc_data[jj]
+
+                csr_ptr[row] += 1
+
+        last = 0
+        for row in range(n_row + 1):
+            temp = csr_ptr[row]
+            csr_ptr[row] = last
+            last = temp
+
+        return csr_matrix_from_components(csr_data, csr_ind, csr_ptr, matrix.shape)
+
+    return to_csr
 
 
 @overload_method(CSMatrixType, "toarray")
