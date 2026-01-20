@@ -304,7 +304,6 @@ def overload_toarray(matrix):
         dense = np.zeros((n_rows, n_cols), dtype=matrix.data.dtype)
 
         if kind == "csr":
-            # fill non-zero entries
             for row in range(n_rows):
                 start = matrix.indptr[row]
                 end = matrix.indptr[row + 1]
