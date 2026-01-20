@@ -182,6 +182,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
             return z_ptr, z_ind, z_data
 
+        @numba_basic.numba_njit
         def spmspm(x, y):
             if x_format != "csr":
                 x = x.tocsr()
@@ -196,7 +197,6 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             z_ptr, z_ind, z_data = _spmspm(
                 n_row, n_col, x_ptr, x_ind, x_data, y_ptr, y_ind, y_data
             )
-
             return sp.csr_matrix((z_data, z_ind, z_ptr), shape=(n_row, n_col))
 
         return spmspm
@@ -233,54 +233,79 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                 return output
 
         def spmdv(x, y):
-            # NOTE: Ensure output is still 2d
+            # Output _has to be_ 2d.
             return _spmdv(x.indptr, x.indices, x.data, np.squeeze(y))[:, np.newaxis]
 
         return spmdv
 
     @numba_basic.numba_njit
-    def spmdm(x, y):
+    def spmdm_csr(x, y):
         assert x.shape[1] == y.shape[0]
         n = x.shape[0]
         k = y.shape[1]
         z = np.zeros((n, k), dtype=out_dtype)
 
-        indices = x.indices
-        indptr = x.indptr
-        data = x.data
+        x_ind = x.indices
+        x_ptr = x.indptr
+        x_data = x.data
 
-        if x_format == "csc":
-            p = x.shape[1]
-            for col_idx in range(p):
-                col_start = indptr[col_idx]
-                col_end = indptr[col_idx + 1]
+        for row_idx in range(n):
+            row_start = x_ptr[row_idx]
+            row_end = x_ptr[row_idx + 1]
+            for idx in range(row_start, row_end):
+                col_idx = x_ind[idx]
+                value = x_data[idx]
+                z[row_idx, :] += value * y[col_idx, :]
 
-                for idx in range(col_start, col_end):
-                    row_idx = indices[idx]
-                    value = data[idx]
-                    z[row_idx, :] += value * y[col_idx, :]
-        else:
-            for row_idx in range(n):
-                row_start = indptr[row_idx]
-                row_end = indptr[row_idx + 1]
-                for idx in range(row_start, row_end):
-                    col_idx = indices[idx]
-                    value = data[idx]
-                    z[row_idx, :] += value * y[col_idx, :]
+        return z
+
+    @numba_basic.numba_njit
+    def spmdm_csc(x, y):
+        assert x.shape[1] == y.shape[0]
+        n = x.shape[0]
+        k = y.shape[1]
+        z = np.zeros((n, k), dtype=out_dtype)
+
+        x_ind = x.indices
+        x_ptr = x.indptr
+        x_data = x.data
+
+        p = x.shape[1]
+        for col_idx in range(p):
+            col_start = x_ptr[col_idx]
+            col_end = x_ptr[col_idx + 1]
+
+            for idx in range(col_start, col_end):
+                row_idx = x_ind[idx]
+                value = x_data[idx]
+                z[row_idx, :] += value * y[col_idx, :]
+
         return z
 
     if x_is_sparse:
-        return spmdm
+        if x_format == "csr":
+            return spmdm_csr
+        else:
+            return spmdm_csc
 
     if y_is_sparse:
+        # We don't implement a dense-sparse dot product.
+        # Instead, we use properties of transpose:
+        #     z = dot(x, y) -> z^T = dot(x, y)^T -> z^T = dot(y^T, x^T)
+        # which allows us to reuse sparse-dense dot.
+        if y_format == "csr":
+            # y.T will be CSC
+            @numba_basic.numba_njit
+            def dmspm_1(x, y):
+                return spmdm_csc(y.T, x.T).T
 
-        def dmspm(x, y):
-            # We don't implement a dense-sparse dot product.
-            # Instead, we use properties of transpose:
-            #     z = dot(x, y) -> z^T = dot(x, y)^T -> z^T = dot(y^T, x^T)
-            # which allows us to reuse sparse-dense dot.
-            return spmdm(y.T, x.T).T
+            return dmspm_1
+        else:
+            # y.T will be CSR
+            @numba_basic.numba_njit
+            def dmspm_2(x, y):
+                return spmdm_csr(y.T, x.T).T
 
-        return dmspm
+            return dmspm_2
 
     raise ValueError("What!")
