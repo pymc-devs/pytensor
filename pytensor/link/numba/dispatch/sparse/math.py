@@ -142,7 +142,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             # Pass 2
             z_ptr = np.empty(n_row + 1, dtype=np.int32)  # NOTE: consider int64?
             z_ind = np.empty(nnz, dtype=np.int32)
-            z_data = np.empty(nnz, dtype=np.float64)
+            z_data = np.empty(nnz, dtype=out_dtype)
 
             mask2 = np.full(n_col, -1, dtype=np.int32)
             sums = np.zeros(n_col, dtype=x_data.dtype)
@@ -307,5 +307,3 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                 return spmdm_csr(y.T, x.T).T
 
             return dmspm_2
-
-    raise ValueError("What!")
