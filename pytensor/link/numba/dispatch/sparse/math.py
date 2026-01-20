@@ -102,16 +102,16 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
 @register_funcify_default_op_cache_key(Dot)
 @register_funcify_default_op_cache_key(StructuredDot)
 def numba_funcify_SparseDot(op, node, **kwargs):
-    # (n, p) @ (p, k) -> (n, k)
-    # Inputs can be of types: (sparse, dense), (dense, sparse), (sparse, sparse)
-    # Output is sparse when all entries are sparse, otherwise dense.
-
+    # Inputs can be of types: (sparse, dense), (dense, sparse), (sparse, sparse).
+    # Dot always returns a dense result.
+    # StructuredDot returns a sparse object when all entries are sparse, otherwise dense.
     x, y = node.inputs
     [z] = node.outputs
     out_dtype = z.type.dtype
 
     x_is_sparse = psb._is_sparse_variable(x)
     y_is_sparse = psb._is_sparse_variable(y)
+    z_is_sparse = psb._is_sparse_variable(z)
 
     x_format = x.type.format if x_is_sparse else None
     y_format = y.type.format if y_is_sparse else None
@@ -197,7 +197,14 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             z_ptr, z_ind, z_data = _spmspm(
                 n_row, n_col, x_ptr, x_ind, x_data, y_ptr, y_ind, y_data
             )
-            return sp.csr_matrix((z_data, z_ind, z_ptr), shape=(n_row, n_col))
+
+            output = sp.csr_matrix((z_data, z_ind, z_ptr), shape=(n_row, n_col))
+
+            # Dot returns a dense result even in spMspM
+            if not z_is_sparse:
+                output.toarray()
+
+            return output
 
         return spmspm
 

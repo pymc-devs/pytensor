@@ -238,10 +238,10 @@ def overload_sparse_T(matrix):
     def transpose(matrix):
         n_rows, n_cols = matrix.shape
         return builder(
-            data=matrix.data.copy(),
-            indices=matrix.indices.copy(),
-            indptr=matrix.indptr.copy(),
-            shape=(n_cols, n_rows),
+            matrix.data.copy(),
+            matrix.indices.copy(),
+            matrix.indptr.copy(),
+            (n_cols, n_rows),
         )
 
     return transpose
@@ -287,3 +287,11 @@ def overload_sparse_astype(matrix, dtype):
         )
 
     return astype
+
+
+@overload_method(CSMatrixType, "toarray")
+def overload_toarray(matrix):
+    def to_array(matrix):
+        return matrix
+
+    return to_array
