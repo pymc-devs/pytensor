@@ -1,4 +1,3 @@
-import numba as nb
 import numpy as np
 import scipy.sparse as sp
 
@@ -127,7 +126,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             x_ptr = x_ptr.view(np.uint32)
             y_ptr = y_ptr.view(np.uint32)
 
-            output_nnz = nb.uint32(0)
+            output_nnz = 0
             mask = np.full(n_col, -1, dtype=np.int32)
             for i in range(n_row):
                 row_nnz = 0
@@ -145,10 +144,11 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             z_ind = np.empty(output_nnz, dtype=np.uint32)
             z_data = np.empty(output_nnz, dtype=out_dtype)
 
-            mask2 = np.full(n_col, -1, dtype=np.int32)
+            # Refill original mask for reuse
+            mask.fill(-1)
             sums = np.zeros(n_col, dtype=x_data.dtype)
 
-            nnz = nb.uint32(0)
+            nnz = 0
             z_ptr[0] = 0
 
             for i in range(n_row):
@@ -163,8 +163,8 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                         k = y_ind[kk]
                         sums[k] += v * y_data[kk]
 
-                        if mask2[k] == -1:
-                            mask2[k] = head
+                        if mask[k] == -1:
+                            mask[k] = head
                             head = k
                             length += 1
 
@@ -175,8 +175,8 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                         nnz += 1
 
                     temp = head
-                    head = mask2[head]
-                    mask2[temp] = -1
+                    head = mask[head]
+                    mask[temp] = -1
                     sums[temp] = 0
 
                 z_ptr[i + 1] = nnz
@@ -193,8 +193,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
             x_ptr, x_ind, x_data = x.indptr, x.indices, x.data
             y_ptr, y_ind, y_data = y.indptr, y.indices, y.data
-            n_row = nb.uint32(x.shape[0])
-            n_col = nb.uint32(y.shape[1])
+            n_row, n_col = x.shape[0], y.shape[1]
 
             z_ptr, z_ind, z_data = _spmspm(
                 n_row, n_col, x_ptr, x_ind, x_data, y_ptr, y_ind, y_data
@@ -215,7 +214,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
             @numba_basic.numba_njit
             def _spmdv(x_ptr, x_ind, x_data, y):
-                n_row = nb.uint32(x_ptr.shape[0] - 1)
+                n_row = x_ptr.shape[0] - 1
                 output = np.zeros(n_row, dtype=out_dtype)
 
                 for row_idx in range(n_row):
@@ -229,8 +228,8 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
             @numba_basic.numba_njit
             def _spmdv(x_ptr, x_ind, x_data, y):
-                n_row = nb.uint32(np.max(x_ind) + 1)
-                n_col = nb.uint32(x_ptr.shape[0] - 1)
+                n_row = np.max(x_ind) + 1
+                n_col = x_ptr.shape[0] - 1
                 output = np.zeros(n_row, dtype=out_dtype)
 
                 for col_idx in range(n_col):
@@ -251,8 +250,8 @@ def numba_funcify_SparseDot(op, node, **kwargs):
     @numba_basic.numba_njit
     def spmdm_csr(x, y):
         assert x.shape[1] == y.shape[0]
-        n = nb.uint32(x.shape[0])
-        k = nb.uint32(y.shape[1])
+        n = x.shape[0]
+        k = y.shape[1]
         z = np.zeros((n, k), dtype=out_dtype)
 
         x_ind = x.indices.view(np.uint32)
@@ -269,9 +268,9 @@ def numba_funcify_SparseDot(op, node, **kwargs):
     @numba_basic.numba_njit
     def spmdm_csc(x, y):
         assert x.shape[1] == y.shape[0]
-        n = nb.uint32(x.shape[0])
-        p = nb.uint32(x.shape[1])
-        k = nb.uint32(y.shape[1])
+        n = x.shape[0]
+        p = x.shape[1]
+        k = y.shape[1]
         z = np.zeros((n, k), dtype=out_dtype)
 
         x_ind = x.indices.view(np.uint32)
