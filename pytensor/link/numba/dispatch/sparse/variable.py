@@ -225,6 +225,28 @@ def overload_sparse_ndim(matrix):
     return lambda matrix: 2
 
 
+@overload_attribute(CSMatrixType, "T")
+def overload_sparse_T(matrix):
+    match matrix:
+        case CSRMatrixType():
+            builder = csc_matrix_from_components
+        case CSCMatrixType():
+            builder = csr_matrix_from_components
+        case _:
+            return
+
+    def transpose(matrix):
+        n_rows, n_cols = matrix.shape
+        return builder(
+            data=matrix.data.copy(),
+            indices=matrix.indices.copy(),
+            indptr=matrix.indptr.copy(),
+            shape=(n_cols, n_rows),
+        )
+
+    return transpose
+
+
 @overload_method(CSMatrixType, "copy")
 def overload_sparse_copy(matrix):
     match matrix:
