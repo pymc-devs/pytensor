@@ -79,7 +79,7 @@ def numba_funcify_Transpose(op, node, **kwargs):
 
 @register_funcify_default_op_cache_key(DenseFromSparse)
 def numba_funcify_DenseFromSparse(op, node, **kwargs):
-    @numba_basic.numba.njit
+    @numba_basic.numba_njit
     def to_array(x):
         return x.toarray()
 
