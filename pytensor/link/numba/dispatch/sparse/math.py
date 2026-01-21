@@ -6,7 +6,6 @@ import scipy.sparse as sp
 import pytensor.sparse.basic as psb
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    generate_fallback_impl,
     register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
@@ -115,9 +114,6 @@ def numba_funcify_SparseDot(op, node, **kwargs):
     [z] = node.outputs
     out_dtype = z.type.dtype
 
-    if x.type.numpy_dtype.kind == "c" or y.type.numpy_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs), None
-
     x_is_sparse = psb._is_sparse_variable(x)
     y_is_sparse = psb._is_sparse_variable(y)
     z_is_sparse = psb._is_sparse_variable(z)
@@ -162,13 +158,13 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                 output_nnz += row_nnz
 
             # Pass 2
-            z_ptr = np.empty(n_row + 1, dtype=np.uint32)  # NOTE: consider int64?
+            z_ptr = np.empty(n_row + 1, dtype=np.uint32)
             z_ind = np.empty(output_nnz, dtype=np.uint32)
             z_data = np.empty(output_nnz, dtype=out_dtype)
 
             # Refill original mask for reuse
             mask.fill(-1)
-            sums = np.zeros(n_col, dtype=x_data.dtype)
+            sums = np.zeros(n_col, dtype=out_dtype)
 
             nnz = 0
             z_ptr[0] = 0
