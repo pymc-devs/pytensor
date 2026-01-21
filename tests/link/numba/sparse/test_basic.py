@@ -268,3 +268,11 @@ def test_sparse_deepcopy(format):
     x = ps.matrix(shape=(3, 3), format=format)
     x_test = sp.sparse.random(3, 3, density=0.5, format=format)
     compare_numba_and_py_sparse([x], [x], [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_dense_from_sparse(format):
+    x = ps.matrix(shape=(5, 3), format=format)
+    x_test = sp.sparse.random(5, 3, density=0.5, format=format)
+    y = ps.dense_from_sparse(x)
+    compare_numba_and_py_sparse([x], y, [x_test])

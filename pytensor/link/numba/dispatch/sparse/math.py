@@ -3,7 +3,10 @@ import scipy.sparse as sp
 
 import pytensor.sparse.basic as psb
 from pytensor.link.numba.dispatch import basic as numba_basic
-from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
+from pytensor.link.numba.dispatch.basic import (
+    generate_fallback_impl,
+    register_funcify_default_op_cache_key,
+)
 from pytensor.sparse import (
     Dot,
     SparseDenseMultiply,
@@ -109,6 +112,9 @@ def numba_funcify_SparseDot(op, node, **kwargs):
     [z] = node.outputs
     out_dtype = z.type.dtype
 
+    if x.type.numpy_dtype.kind == "c" or y.type.numpy_dtype.kind == "c":
+        return generate_fallback_impl(op, node=node, **kwargs)
+
     x_is_sparse = psb._is_sparse_variable(x)
     y_is_sparse = psb._is_sparse_variable(y)
     z_is_sparse = psb._is_sparse_variable(z)
@@ -181,7 +187,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
                 z_ptr[i + 1] = nnz
 
-            return z_ptr, z_ind, z_data
+            return z_ptr.view(np.int32), z_ind.view(np.int32), z_data
 
         @numba_basic.numba_njit
         def spmspm(x, y):
@@ -213,6 +219,9 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
         return spmspm
 
+    # Only one of 'x' or 'y' is sparse, not both.
+    # Before using a general dot(sparse-matrix, dense-matrix) algorithm,
+    # we check if we can rely on the less intensive (sparse-matrix, dense-vector) algorithm (spmv).
     if x_is_sparse and (
         y.type.ndim == 1 or (y.type.ndim == 2 and y.type.shape[1] == 1)
     ):
@@ -220,8 +229,10 @@ def numba_funcify_SparseDot(op, node, **kwargs):
         if x_format == "csr":
 
             @numba_basic.numba_njit
-            def _spmdv(x_ptr, x_ind, x_data, y):
-                n_row = x_ptr.shape[0] - 1
+            def _spmdv(x_ptr, x_ind, x_data, x_shape, y):
+                n_row = x_shape[0]
+                x_ptr = x_ptr.view(np.uint32)
+                x_ind = x_ind.view(np.uint32)
                 output = np.zeros(n_row, dtype=out_dtype)
 
                 for row_idx in range(n_row):
@@ -234,9 +245,10 @@ def numba_funcify_SparseDot(op, node, **kwargs):
         else:  # "csc"
 
             @numba_basic.numba_njit
-            def _spmdv(x_ptr, x_ind, x_data, y):
-                n_row = np.max(x_ind) + 1
-                n_col = x_ptr.shape[0] - 1
+            def _spmdv(x_ptr, x_ind, x_data, x_shape, y):
+                n_row, n_col = x_shape
+                x_ptr = x_ptr.view(np.uint32)
+                x_ind = x_ind.view(np.uint32)
                 output = np.zeros(n_row, dtype=out_dtype)
 
                 for col_idx in range(n_col):
@@ -252,17 +264,21 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             def spmdv(x, y):
                 # np.squeeze is not supported when ndim is 1
                 assert x.shape[1] == y.shape[0]
-                return _spmdv(x.indptr, x.indices, x.data, y)
+                return _spmdv(x.indptr, x.indices, x.data, x.shape, y)
         else:
 
             @numba_basic.numba_njit
             def spmdv(x, y):
-                # Output _has to be_ 2d.
+                # Output must be 2d.
                 assert x.shape[1] == y.shape[0]
-                return _spmdv(x.indptr, x.indices, x.data, np.squeeze(y))[:, np.newaxis]
+                return _spmdv(x.indptr, x.indices, x.data, x.shape, np.squeeze(y))[
+                    :, np.newaxis
+                ]
 
         return spmdv
 
+    # Only one of 'x' or 'y' is sparse, and we couldn't rely on spmv.
+    # We know we have to rely on the general (sparse-matrix, dense-matrix) dot product (spmdm).
     @numba_basic.numba_njit
     def spmdm_csr(x, y):
         assert x.shape[1] == y.shape[0]

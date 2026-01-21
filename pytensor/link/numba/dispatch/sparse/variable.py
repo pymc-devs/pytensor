@@ -330,7 +330,9 @@ def overload_tocsr(matrix):
             csr_ptr[row_idx] = last
             last = temp
 
-        return csr_matrix_from_components(csr_data, csr_ind, csr_ptr, matrix.shape)
+        return csr_matrix_from_components(
+            csr_data, csr_ind.view(np.int32), csr_ptr.view(np.int32), matrix.shape
+        )
 
     return to_csr
 
@@ -376,7 +378,9 @@ def overload_tocsc(matrix):
             csc_ptr[col] = last
             last = temp
 
-        return csc_matrix_from_components(csc_data, csc_ind, csc_ptr, matrix.shape)
+        return csc_matrix_from_components(
+            csc_data, csc_ind.view(np.int32), csc_ptr.view(np.int32), matrix.shape
+        )
 
     return to_csc
 
