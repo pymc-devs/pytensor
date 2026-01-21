@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 import numpy as np
 import scipy.sparse as sp
 
@@ -5,6 +7,7 @@ import pytensor.sparse.basic as psb
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
+    register_funcify_and_cache_key,
     register_funcify_default_op_cache_key,
 )
 from pytensor.sparse import (
@@ -102,8 +105,8 @@ def numba_funcify_SparseDenseMultiply(op, node, **kwargs):
         return sparse_dense_multiply
 
 
-@register_funcify_default_op_cache_key(Dot)
-@register_funcify_default_op_cache_key(StructuredDot)
+@register_funcify_and_cache_key(Dot)
+@register_funcify_and_cache_key(StructuredDot)
 def numba_funcify_SparseDot(op, node, **kwargs):
     # Inputs can be of types: (sparse, dense), (dense, sparse), (sparse, sparse).
     # Dot always returns a dense result.
@@ -113,7 +116,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
     out_dtype = z.type.dtype
 
     if x.type.numpy_dtype.kind == "c" or y.type.numpy_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
+        return generate_fallback_impl(op, node=node, **kwargs), None
 
     x_is_sparse = psb._is_sparse_variable(x)
     y_is_sparse = psb._is_sparse_variable(y)
@@ -121,6 +124,19 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
     x_format = x.type.format if x_is_sparse else None
     y_format = y.type.format if y_is_sparse else None
+
+    cache_key = sha256(
+        str(
+            (
+                type(op),
+                x_format,
+                y_format,
+                z_is_sparse,
+                y.type.ndim,
+                y.type.broadcastable,
+            )
+        ).encode()
+    ).hexdigest()
 
     if x_is_sparse and y_is_sparse:
         # General spmspm algorithm in CSR format
@@ -217,7 +233,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
             return output
 
-        return spmspm
+        return spmspm, cache_key
 
     # Only one of 'x' or 'y' is sparse, not both.
     # Before using a general dot(sparse-matrix, dense-matrix) algorithm,
@@ -262,7 +278,6 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
             @numba_basic.numba_njit
             def spmdv(x, y):
-                # np.squeeze is not supported when ndim is 1
                 assert x.shape[1] == y.shape[0]
                 return _spmdv(x.indptr, x.indices, x.data, x.shape, y)
         else:
@@ -271,11 +286,11 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             def spmdv(x, y):
                 # Output must be 2d.
                 assert x.shape[1] == y.shape[0]
-                return _spmdv(x.indptr, x.indices, x.data, x.shape, np.squeeze(y))[
+                return _spmdv(x.indptr, x.indices, x.data, x.shape, y[:, 0])[
                     :, np.newaxis
                 ]
 
-        return spmdv
+        return spmdv, cache_key
 
     # Only one of 'x' or 'y' is sparse, and we couldn't rely on spmv.
     # We know we have to rely on the general (sparse-matrix, dense-matrix) dot product (spmdm).
@@ -318,9 +333,9 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
     if x_is_sparse:
         if x_format == "csr":
-            return spmdm_csr
+            return spmdm_csr, cache_key
         else:
-            return spmdm_csc
+            return spmdm_csc, cache_key
 
     if y_is_sparse:
         # We don't implement a dense-sparse dot product.
@@ -338,4 +353,4 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             def dmspm(x, y):
                 return spmdm_csr(y.T, x.T).T
 
-        return dmspm
+        return dmspm, cache_key
