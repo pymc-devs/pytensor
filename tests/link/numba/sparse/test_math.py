@@ -9,7 +9,7 @@ from tests.link.numba.sparse.test_basic import compare_numba_and_py_sparse
 
 pytestmark = pytest.mark.filterwarnings("error")
 
-DOT_SHAPES = [((20, 11), (11, 4)), ((10, 3), (3, 1))]
+DOT_SHAPES = [((20, 11), (11, 4)), ((10, 3), (3, 1)), ((1, 10), (10, 5))]
 
 
 @pytest.mark.parametrize("format", ["csr", "csc"])

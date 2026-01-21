@@ -238,61 +238,81 @@ def numba_funcify_SparseDot(op, node, **kwargs):
     # Only one of 'x' or 'y' is sparse, not both.
     # Before using a general dot(sparse-matrix, dense-matrix) algorithm,
     # we check if we can rely on the less intensive (sparse-matrix, dense-vector) algorithm (spmv).
-    if x_is_sparse and (
-        y.type.ndim == 1 or (y.type.ndim == 2 and y.type.shape[1] == 1)
-    ):
-        # Use more performant spmv
-        if x_format == "csr":
+    y_is_1d_like = y.type.ndim == 1 or (y.type.ndim == 2 and y.type.shape[1] == 1)
+    x_is_1d = x.type.ndim == 1
 
-            @numba_basic.numba_njit
-            def _spmdv(x_ptr, x_ind, x_data, x_shape, y):
-                n_row = x_shape[0]
-                x_ptr = x_ptr.view(np.uint32)
-                x_ind = x_ind.view(np.uint32)
-                output = np.zeros(n_row, dtype=out_dtype)
+    if (x_is_sparse and y_is_1d_like) or (y_is_sparse and x_is_1d):
+        # We can use spmv
+        @numba_basic.numba_njit
+        def _spmdv_csr(x_ptr, x_ind, x_data, x_shape, y):
+            n_row = x_shape[0]
+            x_ptr = x_ptr.view(np.uint32)
+            x_ind = x_ind.view(np.uint32)
+            output = np.zeros(n_row, dtype=out_dtype)
 
-                for row_idx in range(n_row):
-                    acc = 0.0
-                    for k in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
-                        acc += x_data[k] * y[x_ind[k]]
-                    output[row_idx] = acc
+            for row_idx in range(n_row):
+                acc = 0.0
+                for k in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
+                    acc += x_data[k] * y[x_ind[k]]
+                output[row_idx] = acc
 
-                return output
-        else:  # "csc"
+            return output
 
-            @numba_basic.numba_njit
-            def _spmdv(x_ptr, x_ind, x_data, x_shape, y):
-                n_row, n_col = x_shape
-                x_ptr = x_ptr.view(np.uint32)
-                x_ind = x_ind.view(np.uint32)
-                output = np.zeros(n_row, dtype=out_dtype)
+        @numba_basic.numba_njit
+        def _spmdv_csc(x_ptr, x_ind, x_data, x_shape, y):
+            n_row, n_col = x_shape
+            x_ptr = x_ptr.view(np.uint32)
+            x_ind = x_ind.view(np.uint32)
+            output = np.zeros(n_row, dtype=out_dtype)
 
-                for col_idx in range(n_col):
-                    yj = y[col_idx]
-                    for k in range(x_ptr[col_idx], x_ptr[col_idx + 1]):
-                        output[x_ind[k]] += x_data[k] * yj
+            for col_idx in range(n_col):
+                yj = y[col_idx]
+                for k in range(x_ptr[col_idx], x_ptr[col_idx + 1]):
+                    output[x_ind[k]] += x_data[k] * yj
 
-                return output
+            return output
 
-        if y.type.ndim == 1:
+        if x_is_sparse:
+            if x_format == "csr":
+                _spmdv = _spmdv_csr
+            else:
+                _spmdv = _spmdv_csc
+
+            if y.type.ndim == 1:
+
+                @numba_basic.numba_njit
+                def spmdv(x, y):
+                    assert x.shape[1] == y.shape[0]
+                    return _spmdv(x.indptr, x.indices, x.data, x.shape, y)
+            else:
+
+                @numba_basic.numba_njit
+                def spmdv(x, y):
+                    # Output must be 2d.
+                    assert x.shape[1] == y.shape[0]
+                    return _spmdv(x.indptr, x.indices, x.data, x.shape, y[:, 0])[
+                        :, None
+                    ]
+
+            return spmdv, cache_key
+        else:  # y_is_sparse
+            # Rely on: z = dot(x, y) -> z^T = dot(x, y)^T -> z^T = dot(y^T, x^T)
+            if y_format == "csr":
+                _spmdv = _spmdv_csc
+            else:  # csc
+                _spmdv = _spmdv_csr
 
             @numba_basic.numba_njit
             def spmdv(x, y):
-                assert x.shape[1] == y.shape[0]
-                return _spmdv(x.indptr, x.indices, x.data, x.shape, y)
-        else:
+                # SciPy treats (p, ) * (p, k) as (1, p) @ (p, k),
+                # but returns the result as of shape (k, ).
+                assert x.shape[0] == y.shape[0]
+                yT = y.T  # (k, p)
+                return _spmdv(yT.indptr, yT.indices, yT.data, yT.shape, x)
 
-            @numba_basic.numba_njit
-            def spmdv(x, y):
-                # Output must be 2d.
-                assert x.shape[1] == y.shape[0]
-                return _spmdv(x.indptr, x.indices, x.data, x.shape, y[:, 0])[
-                    :, np.newaxis
-                ]
+            return spmdv, cache_key
 
-        return spmdv, cache_key
-
-    # Only one of 'x' or 'y' is sparse, and we couldn't rely on spmv.
+    # Only one of 'x' or 'y' is sparse, and we can't use spmdv.
     # We know we have to rely on the general (sparse-matrix, dense-matrix) dot product (spmdm).
     @numba_basic.numba_njit
     def spmdm_csr(x, y):
@@ -309,15 +329,15 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             for idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
                 col_idx = x_ind[idx]
                 value = x_data[idx]
-                z[row_idx, :] += value * y[col_idx, :]
+                z[row_idx] += value * y[col_idx]
         return z
 
     @numba_basic.numba_njit
     def spmdm_csc(x, y):
         assert x.shape[1] == y.shape[0]
+        k = y.shape[1]
         n = x.shape[0]
         p = x.shape[1]
-        k = y.shape[1]
         z = np.zeros((n, k), dtype=out_dtype)
 
         x_ind = x.indices.view(np.uint32)
@@ -328,7 +348,7 @@ def numba_funcify_SparseDot(op, node, **kwargs):
             for idx in range(x_ptr[col_idx], x_ptr[col_idx + 1]):
                 row_idx = x_ind[idx]
                 value = x_data[idx]
-                z[row_idx, :] += value * y[col_idx, :]
+                z[row_idx] += value * y[col_idx]
         return z
 
     if x_is_sparse:
