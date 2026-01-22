@@ -291,6 +291,37 @@ def test_jax_solve_discrete_lyapunov(
     )
 
 
+def test_bilinear_to_direct_rewrite(monkeypatch):
+    mock_called = []
+
+    def mock_load_solve_sylvester():
+        mock_called.append(True)
+        raise ImportError("Simulated ImportError for testing.")
+
+    monkeypatch.setattr(
+        "pytensor.tensor._linalg.solve.rewriting._load_solve_sylvester",
+        mock_load_solve_sylvester,
+    )
+
+    A = pt.tensor(name="A", shape=(3, 3))
+    B = pt.tensor(name="B", shape=(3, 3))
+
+    out = linear_control.solve_discrete_lyapunov(A, B, method="bilinear")
+
+    atol = rtol = 1e-8 if config.floatX == "float64" else 1e-3
+    compare_jax_and_py(
+        [A, B],
+        [out],
+        [
+            np.random.normal(size=(3, 3)).astype(config.floatX),
+            np.random.normal(size=(3, 3)).astype(config.floatX),
+        ],
+        jax_mode="JAX",
+        assert_fn=partial(np.testing.assert_allclose, atol=atol, rtol=rtol),
+    )
+    assert mock_called
+
+
 @pytest.mark.parametrize(
     "permute_l, p_indices",
     [(True, False), (False, True), (False, False)],
