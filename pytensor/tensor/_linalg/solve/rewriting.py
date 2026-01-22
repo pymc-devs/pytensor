@@ -6,6 +6,10 @@ from pytensor.graph import Constant, graph_inputs
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter, node_rewriter
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
+from pytensor.tensor._linalg.solve.linear_control import (
+    SolveBilinearDiscreteLyapunov,
+    solve_discrete_lyapunov,
+)
 from pytensor.tensor._linalg.solve.tridiagonal import (
     tridiagonal_lu_factor,
     tridiagonal_lu_solve,
@@ -268,4 +272,37 @@ scan_seqopt1.register(
     "jax",
     use_db_name_as_tag=False,
     position=2,
+)
+
+
+def _load_solve_sylvester():
+    # Thin import wrapper to help with testing
+    from jax.scipy.linalg import solve_sylvester
+
+    return solve_sylvester
+
+
+@node_rewriter([SolveBilinearDiscreteLyapunov])
+def jax_bilinear_lyapunov_to_direct(fgraph, node):
+    """
+    Replace SolveBilinearDiscreteLyapunov with a direct computation that is supported by JAX < 0.8
+    """
+    try:
+        _load_solve_sylvester()
+        return None
+
+    except ImportError:
+        # solve_sylvester is only available in jax > 0.8, which is not available on conda-forge.
+        # If it's not available, we can drop back to method="direct"
+        A, B = node.inputs
+        result = solve_discrete_lyapunov(A, B, method="direct")
+
+        return [result]
+
+
+optdb.register(
+    "jax_bilinear_lyapunov_to_direct",
+    dfs_rewriter(jax_bilinear_lyapunov_to_direct),
+    "jax",
+    position=0.9,  # Run before canonicalization
 )
