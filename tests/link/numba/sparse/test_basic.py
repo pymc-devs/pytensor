@@ -30,6 +30,12 @@ def sparse_assert_fn(a, b):
     a_is_sparse = sp.sparse.issparse(a)
     assert a_is_sparse == sp.sparse.issparse(b)
     if a_is_sparse:
+        # Attributes can be compared only if both matrices have sorted indices
+        if not a.has_sorted_indices:
+            a = a.sorted_indices()
+        if not b.has_sorted_indices:
+            b = b.sorted_indices()
+
         assert a.format == b.format
         assert a.dtype == b.dtype
         assert a.shape == b.shape
@@ -262,3 +268,11 @@ def test_sparse_deepcopy(format):
     x = ps.matrix(shape=(3, 3), format=format)
     x_test = sp.sparse.random(3, 3, density=0.5, format=format)
     compare_numba_and_py_sparse([x], [x], [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_dense_from_sparse(format):
+    x = ps.matrix(shape=(5, 3), format=format)
+    x_test = sp.sparse.random(5, 3, density=0.5, format=format)
+    y = ps.dense_from_sparse(x)
+    compare_numba_and_py_sparse([x], y, [x_test])
