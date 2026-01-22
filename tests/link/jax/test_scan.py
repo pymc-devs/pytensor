@@ -651,7 +651,7 @@ def test_trace_truncation_regression_bug():
             mit_sot_in_slices=(),
             sit_sot_in_slices=((-1,),),
             n_nit_sot=0,
-            n_untraced_sit_sot_outs=0,
+            n_untraced_sit_sot=0,
             n_non_seqs=0,
             as_while=False,
         ),

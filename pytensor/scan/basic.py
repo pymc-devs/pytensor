@@ -695,7 +695,7 @@ def scan(
     sit_sot_inner_outputs = []
     sit_sot_rightOrder = []
 
-    n_untraced_sit_sot_outs = 0
+    n_untraced_sit_sot = 0
     untraced_sit_sot_scan_inputs = []
     untraced_sit_sot_inner_inputs = []
     untraced_sit_sot_inner_outputs = []
@@ -763,7 +763,7 @@ def scan(
                     )
                 untraced_sit_sot_scan_inputs.append(actual_arg)
                 untraced_sit_sot_inner_inputs.append(arg)
-                n_untraced_sit_sot_outs += 1
+                n_untraced_sit_sot += 1
                 untraced_sit_sot_rightOrder.append(i)
 
         elif init_out.get("taps", None):
@@ -839,7 +839,7 @@ def scan(
         else:
             _ordered_args[sit_sot_rightOrder[idx]] = [sit_sot_inner_inputs[idx]]
 
-    for idx in range(n_untraced_sit_sot_outs):
+    for idx in range(n_untraced_sit_sot):
         _ordered_args[untraced_sit_sot_rightOrder[idx]] = [
             untraced_sit_sot_inner_inputs[idx]
         ]
@@ -1026,7 +1026,7 @@ def scan(
                 untraced_sit_sot_inner_inputs.append(new_var)
                 untraced_sit_sot_scan_inputs.append(input.variable)
                 untraced_sit_sot_inner_outputs.append(input.update)
-                n_untraced_sit_sot_outs += 1
+                n_untraced_sit_sot += 1
         else:
             no_update_shared_inputs.append(input)
 
@@ -1121,7 +1121,7 @@ def scan(
         mit_mot_out_slices=tuple(tuple(v) for v in mit_mot_out_slices),
         mit_sot_in_slices=tuple(tuple(v) for v in mit_sot_tap_array),
         sit_sot_in_slices=tuple((-1,) for x in range(n_sit_sot)),
-        n_untraced_sit_sot_outs=n_untraced_sit_sot_outs,
+        n_untraced_sit_sot=n_untraced_sit_sot,
         n_nit_sot=n_nit_sot,
         n_non_seqs=len(other_shared_inner_args) + len(other_inner_args),
         as_while=as_while,
@@ -1195,14 +1195,12 @@ def scan(
     offset += n_nit_sot
 
     # Legacy support for explicit untraced sit_sot and those built with update dictionary
-    # Switch to n_untraced_sit_sot_outs after deprecation period
-    n_explicit_untraced_sit_sot_outs = len(untraced_sit_sot_rightOrder)
-    untraced_sit_sot_outs = scan_outs[
-        offset : offset + n_explicit_untraced_sit_sot_outs
-    ]
+    # Switch to n_untraced_sit_sot after deprecation period
+    n_explicit_untraced_sit_sot = len(untraced_sit_sot_rightOrder)
+    untraced_sit_sot_outs = scan_outs[offset : offset + n_explicit_untraced_sit_sot]
 
     # Legacy support: map shared outputs to their updates
-    offset += n_explicit_untraced_sit_sot_outs
+    offset += n_explicit_untraced_sit_sot
     for idx, update_rule in enumerate(scan_outs[offset:]):
         update_map[untraced_sit_sot_scan_inputs[idx]] = update_rule
 
