@@ -110,7 +110,7 @@ def remove_constants_and_unused_inputs_scan(fgraph, node):
         sum(len(x) for x in chain(op_info.mit_mot_in_slices, op_info.mit_sot_in_slices))
     )
     st += op_info.n_sit_sot
-    st += op_info.n_untraced_sit_sot_outs
+    st += op_info.n_untraced_sit_sot
 
     op_ins = op.inner_inputs
     op_outs = op.inner_outputs
@@ -126,7 +126,7 @@ def remove_constants_and_unused_inputs_scan(fgraph, node):
         + op_info.n_mit_sot
         + op_info.n_sit_sot
         + op_info.n_nit_sot
-        + op_info.n_untraced_sit_sot_outs
+        + op_info.n_untraced_sit_sot
         + 1
     )
     outer_non_seqs = node.inputs[st:]
@@ -1628,7 +1628,7 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                         + idx
                         + op_info.n_seqs
                         + 1
-                        + op_info.n_untraced_sit_sot_outs
+                        + op_info.n_untraced_sit_sot
                     )
                     if nw_inputs[pos] == node.inputs[0]:
                         nw_inputs[pos] = 1 if required_orphan else val
@@ -1662,7 +1662,7 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                     elif (
                         idx < op_info.n_mit_sot + op_info.n_sit_sot + op_info.n_nit_sot
                     ):
-                        in_idx = offset + idx + op_info.n_untraced_sit_sot_outs
+                        in_idx = offset + idx + op_info.n_untraced_sit_sot
                         if nw_inputs[in_idx] == node.inputs[0]:
                             nw_inputs[in_idx] = nw_steps
 
@@ -1980,9 +1980,7 @@ class ScanMerge(GraphRewriter):
             mit_sot_in_slices=mit_sot_in_slices,
             sit_sot_in_slices=sit_sot_in_slices,
             n_nit_sot=sum(nd.op.info.n_nit_sot for nd in nodes),
-            n_untraced_sit_sot_outs=sum(
-                nd.op.info.n_untraced_sit_sot_outs for nd in nodes
-            ),
+            n_untraced_sit_sot=sum(nd.op.info.n_untraced_sit_sot for nd in nodes),
             n_non_seqs=n_non_seqs,
             as_while=as_while,
         )

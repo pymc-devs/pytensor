@@ -86,7 +86,7 @@ from tests.scan.test_basic import ScanCompatibilityTests
             3,
             [],
             [np.array([0.50100236, 2.16822932, 1.36326596])],
-            lambda op: op.info.n_untraced_sit_sot_outs > 0,
+            lambda op: op.info.n_untraced_sit_sot > 0,
         ),
         # mit-sot (that's also a type of sit-sot)
         (

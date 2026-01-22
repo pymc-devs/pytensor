@@ -4095,7 +4095,7 @@ class TestExamples:
             [{}],
             [],
             3,
-            lambda op: op.info.n_untraced_sit_sot_outs > 0,
+            lambda op: op.info.n_untraced_sit_sot > 0,
         ),
         # mit-sot (that's also a type of sit-sot)
         (
@@ -4292,7 +4292,7 @@ def test_scan_mode_compatibility(scan_mode):
         mit_sot_in_slices=(),
         sit_sot_in_slices=(),
         n_nit_sot=0,
-        n_untraced_sit_sot_outs=0,
+        n_untraced_sit_sot=0,
         n_non_seqs=0,
         as_while=False,
     )

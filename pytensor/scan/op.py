@@ -217,18 +217,18 @@ class ScanInfo:
     mit_sot_in_slices: tuple
     sit_sot_in_slices: tuple
     n_nit_sot: int
-    n_untraced_sit_sot_outs: int
+    n_untraced_sit_sot: int
     n_non_seqs: int
     as_while: bool
 
     @property
     def n_shared_outs(self):
         warnings.warn(
-            "The 'n_shared_outs' property is deprecated. Use 'n_untraced_sit_sot_outs' instead.",
+            "The 'n_shared_outs' property is deprecated. Use 'n_untraced_sit_sot' instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return self.n_untraced_sit_sot_outs
+        return self.n_untraced_sit_sot
 
     @property
     def n_mit_mot(self):
@@ -257,7 +257,7 @@ class ScanInfo:
             + sum(len(x) for x in self.mit_mot_in_slices)
             + sum(len(x) for x in self.mit_sot_in_slices)
             + self.n_sit_sot
-            + self.n_untraced_sit_sot_outs
+            + self.n_untraced_sit_sot
             + self.n_non_seqs
         )
 
@@ -268,7 +268,7 @@ class ScanInfo:
             + self.n_mit_sot
             + self.n_sit_sot
             + self.n_nit_sot
-            + self.n_untraced_sit_sot_outs
+            + self.n_untraced_sit_sot
             + int(self.as_while)
         )
 
@@ -281,7 +281,7 @@ class ScanInfo:
             + self.n_mit_sot
             + self.n_sit_sot
             + self.n_nit_sot
-            + self.n_untraced_sit_sot_outs
+            + self.n_untraced_sit_sot
             + self.n_non_seqs
         )
 
@@ -292,7 +292,7 @@ class ScanInfo:
             + self.n_mit_sot
             + self.n_sit_sot
             + self.n_nit_sot
-            + self.n_untraced_sit_sot_outs
+            + self.n_untraced_sit_sot
         )
 
     @property
@@ -419,7 +419,7 @@ class ScanMethodsMixin:
             + self.info.n_mit_mot
             + self.info.n_mit_sot
             + self.info.n_sit_sot
-            + self.info.n_untraced_sit_sot_outs
+            + self.info.n_untraced_sit_sot
         )
         return list_inputs[offset : offset + self.info.n_nit_sot]
 
@@ -438,7 +438,7 @@ class ScanMethodsMixin:
             for x in chain(self.info.mit_mot_in_slices, self.info.mit_sot_in_slices)
         )
         offset = self.info.n_seqs + n_taps_upto_sit_sot + self.info.n_sit_sot
-        return list_inputs[offset : offset + self.info.n_untraced_sit_sot_outs]
+        return list_inputs[offset : offset + self.info.n_untraced_sit_sot]
 
     def inner_shared(self, list_inputs):
         warnings.warn(
@@ -456,7 +456,7 @@ class ScanMethodsMixin:
             + self.info.n_mit_sot
             + self.info.n_sit_sot
         )
-        return list_inputs[offset : offset + self.info.n_untraced_sit_sot_outs]
+        return list_inputs[offset : offset + self.info.n_untraced_sit_sot]
 
     def outer_shared(self, list_inputs):
         warnings.warn(
@@ -471,7 +471,7 @@ class ScanMethodsMixin:
         offset = (
             self.info.n_mit_sot + n_taps + self.info.n_sit_sot + self.info.n_nit_sot
         )
-        return list_outputs[offset : offset + self.info.n_untraced_sit_sot_outs]
+        return list_outputs[offset : offset + self.info.n_untraced_sit_sot]
 
     def inner_shared_outs(self, list_outputs):
         warnings.warn(
@@ -488,7 +488,7 @@ class ScanMethodsMixin:
             + self.info.n_sit_sot
             + self.info.n_nit_sot
         )
-        return list_outputs[offset : offset + self.info.n_untraced_sit_sot_outs]
+        return list_outputs[offset : offset + self.info.n_untraced_sit_sot]
 
     def outer_shared_outs(self, list_outputs):
         warnings.warn(
@@ -507,7 +507,7 @@ class ScanMethodsMixin:
             self.info.n_seqs
             + n_taps_upto_sit_sot
             + self.info.n_sit_sot
-            + self.info.n_untraced_sit_sot_outs
+            + self.info.n_untraced_sit_sot
         )
         return list_inputs[offset:]
 
@@ -519,7 +519,7 @@ class ScanMethodsMixin:
             + self.info.n_mit_sot
             + self.info.n_sit_sot
             + self.info.n_nit_sot
-            + self.info.n_untraced_sit_sot_outs
+            + self.info.n_untraced_sit_sot
         )
         return list_inputs[offset:]
 
@@ -596,7 +596,7 @@ class ScanMethodsMixin:
 
         # This is needed because, for outer inputs (and for outer inputs only)
         # nitsots come *after* untraced_sitsot variables.
-        outer_iidx += self.info.n_untraced_sit_sot_outs
+        outer_iidx += self.info.n_untraced_sit_sot
 
         # Handle nitsots variables
         for i in range(self.info.n_nit_sot):
@@ -612,10 +612,10 @@ class ScanMethodsMixin:
 
         # This is needed because, for outer inputs (and for outer inputs only)
         # nitsots come *after* untraced_sit_sot variables.
-        outer_iidx -= self.info.n_untraced_sit_sot_outs + self.info.n_nit_sot
+        outer_iidx -= self.info.n_untraced_sit_sot + self.info.n_nit_sot
 
         # Handle untraced_sitsot states
-        for i in range(self.info.n_untraced_sit_sot_outs):
+        for i in range(self.info.n_untraced_sit_sot):
             outer_input_indices.append(outer_iidx)
             inner_input_indices.append([inner_iidx])
             inner_output_indices.append([inner_oidx])
@@ -910,7 +910,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             self.seqs_arg_offset + info.n_mit_mot + info.n_mit_sot + info.n_sit_sot
         )
         self.nit_sot_arg_offset = (
-            self.untraced_sit_sot_arg_offset + info.n_untraced_sit_sot_outs
+            self.untraced_sit_sot_arg_offset + info.n_untraced_sit_sot
         )
         # Note: This doesn't include `info.n_nit_sot`s, so it's really a count
         # of the number of outputs generated by taps with inputs
@@ -1647,7 +1647,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
                 try:
                     t_fn, n_steps = scan_perform_ext.perform(
-                        self.info.n_untraced_sit_sot_outs,
+                        self.info.n_untraced_sit_sot,
                         self.info.n_mit_mot_outs,
                         self.info.n_seqs,
                         self.info.n_mit_mot,
@@ -1846,7 +1846,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     info.sit_sot_in_slices,
                 )
             )
-            + info.n_untraced_sit_sot_outs
+            + info.n_untraced_sit_sot
         )
         for idx in range(len(other_args)):
             inner_input_storage[idx + offset].storage[0] = other_args[idx]
@@ -1892,11 +1892,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             a_offset = self.untraced_sit_sot_arg_offset
             o_offset = self.n_outs + info.n_nit_sot
             if i == 0:
-                for j in range(info.n_untraced_sit_sot_outs):
+                for j in range(info.n_untraced_sit_sot):
                     inner_input_storage[offset].storage[0] = inputs[a_offset + j]
                     offset += 1
             else:
-                for j in range(info.n_untraced_sit_sot_outs):
+                for j in range(info.n_untraced_sit_sot):
                     inner_input_storage[offset].storage[0] = output_storage[
                         o_offset + j
                     ][0]
@@ -1930,12 +1930,12 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
             # 4.3. Collect slices for untraced sitsot outputs
             offset += self.n_outs + info.n_nit_sot - info.n_mit_mot
-            for idx in range(info.n_untraced_sit_sot_outs):
+            for idx in range(info.n_untraced_sit_sot):
                 inner_output_storage[idx + offset].storage[0] = None
 
             # 4.4. If there is a condition add it to the mix
             if info.as_while:
-                pdx = offset + info.n_untraced_sit_sot_outs
+                pdx = offset + info.n_untraced_sit_sot
                 inner_output_storage[pdx].storage[0] = None
 
             # 4.5. Keep a reference to the variables (ndarrays,
@@ -2004,7 +2004,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
             dt_fn = time.perf_counter() - t0_fn
             if info.as_while:
-                pdx = offset + info.n_untraced_sit_sot_outs
+                pdx = offset + info.n_untraced_sit_sot
                 cond = inner_output_storage[pdx].storage[0] == 0
 
             t_fn += dt_fn
@@ -2151,7 +2151,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             # 5.6 Copy over the values for outputs corresponding to untraced sitsot
             # variables
             begin = end
-            end += info.n_untraced_sit_sot_outs
+            end += info.n_untraced_sit_sot
             for j in range(begin, end):
                 jout = j + offset_out
                 output_storage[j][0] = inner_output_storage[jout].storage[0]
@@ -2301,11 +2301,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         # untraced sit_sot outputs
         offset = 1 + info.n_seqs + n_outs
-        for idx in range(info.n_untraced_sit_sot_outs):
+        for idx in range(info.n_untraced_sit_sot):
             outs_shape += [input_shapes[idx + offset]]
 
         # non_sequences
-        offset += info.n_nit_sot + info.n_untraced_sit_sot_outs
+        offset += info.n_nit_sot + info.n_untraced_sit_sot
         inner_ins_shapes = seqs_shape + outs_shape + input_shapes[offset:]
         assert len(inner_ins_shapes) == len(self.inner_inputs)
 
@@ -2347,7 +2347,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 # in the inner function.
                 r = node.outputs[n_outs + x]
                 assert r.ndim == 1 + len(out_shape_x)
-                shp = [node.inputs[offset + info.n_untraced_sit_sot_outs + x]]
+                shp = [node.inputs[offset + info.n_untraced_sit_sot + x]]
                 for i, shp_i in zip(range(1, r.ndim), out_shape_x, strict=True):
                     # Validate shp_i. v_shape_i is either None (if invalid),
                     # or a (variable, Boolean) tuple. The Boolean indicates
@@ -2364,7 +2364,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         shp.append(v_shp_i[0])
                 scan_outs.append(tuple(shp))
 
-        scan_outs += list(input_shapes[offset : offset + info.n_untraced_sit_sot_outs])
+        scan_outs += list(input_shapes[offset : offset + info.n_untraced_sit_sot])
         # if we are dealing with a repeat-until, then we do not know the
         # leading dimension so we replace it for every entry with Shape_i
         if info.as_while:
@@ -2437,8 +2437,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         return connection_pattern
 
     def L_op(self, inputs, outs, dC_douts):
-        if not isinstance(outs, list | tuple):
-            outs = [outs]
         # `grad_step` equals the number of steps the original scan node has
         # done (if the original scan is a while loop than this number is the
         # length of the output sequence)
@@ -2695,7 +2693,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 pass
             elif isinstance(dC_dXtm1.type, NullType):
                 # The new gradient is undefined, this makes the accumulated
-                # gradient undefined as weell
+                # gradient undefined as well
                 dC_dinps_t[dx + info.n_seqs] = dC_dXtm1
             else:
                 dC_dinps_t[dx + info.n_seqs] += dC_dXtm1
@@ -3062,7 +3060,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             mit_sot_in_slices=(),
             sit_sot_in_slices=tuple((-1,) for k in range(n_sitsot_outs)),
             n_nit_sot=n_nit_sot,
-            n_untraced_sit_sot_outs=0,
+            n_untraced_sit_sot=0,
             n_non_seqs=len(self.outer_untraced_sit_sot(inputs))
             + len(self.outer_non_seqs(inputs)),
             as_while=False,
@@ -3149,7 +3147,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         start = len(gradients)
         node = outs[0].owner
-        for idx in range(info.n_untraced_sit_sot_outs):
+        for idx in range(info.n_untraced_sit_sot):
             disconnected = True
             connected_flags = self.connection_pattern(node)[idx + start]
             for dC_dout, connected in zip(dC_douts, connected_flags, strict=True):
@@ -3211,7 +3209,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         self_inputs = self.inner_inputs
         rop_of_inputs = (
             self_inputs[: info.n_seqs + self.n_outs]
-            + self_inputs[info.n_seqs + self.n_outs + info.n_untraced_sit_sot_outs :]
+            + self_inputs[info.n_seqs + self.n_outs + info.n_untraced_sit_sot :]
         )
         self_outputs = self.inner_outputs
 
@@ -3221,8 +3219,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             rop_self_outputs = self_outputs[:-1]
         else:
             rop_self_outputs = self_outputs
-        if info.n_untraced_sit_sot_outs > 0:
-            rop_self_outputs = rop_self_outputs[: -info.n_untraced_sit_sot_outs]
+        if info.n_untraced_sit_sot > 0:
+            rop_self_outputs = rop_self_outputs[: -info.n_untraced_sit_sot]
         rop_outs = Rop(
             rop_self_outputs,
             rop_of_inputs,
@@ -3308,9 +3306,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         # Untraced outs ...
         b = e
-        e = e + info.n_untraced_sit_sot_outs
+        e = e + info.n_untraced_sit_sot
         ib = ie
-        ie = ie + info.n_untraced_sit_sot_outs
+        ie = ie + info.n_untraced_sit_sot
         scan_untraced = inputs[b:e]
         inner_untraced = self_inputs[ib:ie]
 
@@ -3346,7 +3344,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         e = e + info.n_nit_sot
         inner_out_nit_sot = self_outputs[b:e] + rop_outs[b:e]
         b = e
-        e = e + info.n_untraced_sit_sot_outs
+        e = e + info.n_untraced_sit_sot
         inner_out_untraced = self_outputs[b:e]
 
         inner_ins = (
@@ -3385,7 +3383,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             mit_sot_in_slices=new_mit_sot_in_slices,
             sit_sot_in_slices=new_sit_sot_in_slices,
             n_nit_sot=info.n_nit_sot * 2,
-            n_untraced_sit_sot_outs=info.n_untraced_sit_sot_outs,
+            n_untraced_sit_sot=info.n_untraced_sit_sot,
             n_non_seqs=len(inner_other),
             as_while=info.as_while,
         )
@@ -3417,7 +3415,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         b = e + info.n_nit_sot
         e = e + info.n_nit_sot * 2
         final_outs += outputs[b:e]
-        final_outs += [None] * info.n_untraced_sit_sot_outs
+        final_outs += [None] * info.n_untraced_sit_sot
 
         return final_outs
 
