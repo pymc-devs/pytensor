@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 import pytensor.tensor as pt
 from pytensor.compile.ops import DeepCopyOp, ViewOp
@@ -53,9 +52,6 @@ def test_jax_Reshape_concrete_shape():
     compare_jax_and_py([a], [x], [np.r_[1.0, 2.0, 3.0, 4.0].astype(config.floatX)])
 
 
-@pytest.mark.xfail(
-    reason="`shape_pt` should be specified as a static argument", strict=True
-)
 def test_jax_Reshape_shape_graph_input():
     a = vector("a")
     shape_pt = iscalar("b")
