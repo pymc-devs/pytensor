@@ -420,8 +420,12 @@ def test_VMLinker_exception():
 
     z = BadOp()(a)
 
-    with pytest.raises(Exception, match=r".*Apply node that caused the error.*"):
+    with pytest.raises(Exception, match=r"bad Op"):
         function([a], z, mode=Mode(optimizer=None, linker=linker))
+
+    with config.change_flags(exception_verbosity="high"):
+        with pytest.raises(Exception, match=r".*Apply node that caused the error.*"):
+            function([a], z, mode=Mode(optimizer=None, linker=linker))
 
 
 def test_VM_exception():
