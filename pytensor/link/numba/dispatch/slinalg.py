@@ -25,6 +25,16 @@ from pytensor.link.numba.dispatch.linalg.decomposition.qr import (
     _qr_raw_no_pivot,
     _qr_raw_pivot,
 )
+from pytensor.link.numba.dispatch.linalg.decomposition.qz import (
+    _qz_complex_nosort_eig,
+    _qz_complex_nosort_noeig,
+    _qz_complex_sort_eig,
+    _qz_complex_sort_noeig,
+    _qz_real_nosort_eig,
+    _qz_real_nosort_noeig,
+    _qz_real_sort_eig,
+    _qz_real_sort_noeig,
+)
 from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
     schur_complex,
     schur_real,
@@ -46,6 +56,7 @@ from pytensor.tensor._linalg.solve.linear_control import TRSYL
 from pytensor.tensor.slinalg import (
     LU,
     QR,
+    QZ,
     BlockDiagonal,
     Cholesky,
     CholeskySolve,
@@ -533,6 +544,94 @@ def numba_funcify_Schur(op, node, **kwargs):
 
     cache_version = 1
     return schur, cache_version
+
+
+@register_funcify_default_op_cache_key(QZ)
+def numba_funcify_QZ(op, node, **kwargs):
+    complex_output = op.complex_output
+    sort = op.sort
+    return_eigenvalues = op.return_eigenvalues
+    overwrite_a = op.overwrite_a
+    overwrite_b = op.overwrite_b
+
+    in_dtype_a = node.inputs[0].type.numpy_dtype
+    in_dtype_b = node.inputs[1].type.numpy_dtype
+    out_dtype = node.outputs[0].type.numpy_dtype
+
+    integer_input_a = in_dtype_a.kind in "ibu"
+    integer_input_b = in_dtype_b.kind in "ibu"
+    complex_input = in_dtype_a.kind == "c" or in_dtype_b.kind == "c"
+    needs_complex_cast = (
+        in_dtype_a.kind in "fd" or in_dtype_b.kind in "fd"
+    ) and complex_output
+
+    # Disable overwrite for dtype conversion (real->complex upcast)
+    if needs_complex_cast:
+        overwrite_a = False
+        overwrite_b = False
+        if config.compiler_verbose:
+            print(  # noqa: T201
+                "QZ: disabling overwrite_a/b due to dtype conversion (casting prevents in-place operation)"
+            )
+
+    if (integer_input_a or integer_input_b) and config.compiler_verbose:
+        print("QZ requires casting discrete input to float")  # noqa: T201
+
+    use_complex = complex_input or complex_output
+    use_sort = sort is not None
+
+    if use_complex:
+        if use_sort:
+            if return_eigenvalues:
+                qz_fn = _qz_complex_sort_eig
+            else:
+                qz_fn = _qz_complex_sort_noeig
+        else:
+            if return_eigenvalues:
+                qz_fn = _qz_complex_nosort_eig
+            else:
+                qz_fn = _qz_complex_nosort_noeig
+    else:
+        if use_sort:
+            if return_eigenvalues:
+                qz_fn = _qz_real_sort_eig
+            else:
+                qz_fn = _qz_real_sort_noeig
+        else:
+            if return_eigenvalues:
+                qz_fn = _qz_real_nosort_eig
+            else:
+                qz_fn = _qz_real_nosort_noeig
+
+    if use_sort:
+
+        @numba_basic.numba_njit
+        def qz(a, b):
+            if integer_input_a:
+                a = a.astype(out_dtype)
+            elif needs_complex_cast:
+                a = a.astype(out_dtype)
+            if integer_input_b:
+                b = b.astype(out_dtype)
+            elif needs_complex_cast:
+                b = b.astype(out_dtype)
+            return qz_fn(a, b, sort, overwrite_a, overwrite_b)
+    else:
+
+        @numba_basic.numba_njit
+        def qz(a, b):
+            if integer_input_a:
+                a = a.astype(out_dtype)
+            elif needs_complex_cast:
+                a = a.astype(out_dtype)
+            if integer_input_b:
+                b = b.astype(out_dtype)
+            elif needs_complex_cast:
+                b = b.astype(out_dtype)
+            return qz_fn(a, b, overwrite_a, overwrite_b)
+
+    cache_version = 1
+    return qz, cache_version
 
 
 @register_funcify_default_op_cache_key(TRSYL)

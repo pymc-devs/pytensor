@@ -20,6 +20,7 @@ from pytensor.tensor.slinalg import (
     lu,
     lu_factor,
     lu_solve,
+    qz,
     schur,
     solve,
     solve_triangular,
@@ -792,6 +793,103 @@ class TestDecompositions:
         np.testing.assert_allclose(T_c, T_res, atol=1e-6)
         np.testing.assert_allclose(Z_c, Z_res, atol=1e-6)
         np.testing.assert_allclose(val_c_contig, A_val)
+
+    @pytest.mark.parametrize(
+        "output, input_type, sort, return_eigenvalues",
+        [
+            ("real", "real", None, False),
+            ("complex", "real", "lhp", True),
+            ("real", "complex", "ouc", False),
+            ("complex", "complex", None, True),
+            ("real", "real", "iuc", True),
+        ],
+        ids=[
+            "real_nosort",
+            "real_to_complex_sort",
+            "complex_sort",
+            "complex_nosort_eig",
+            "real_sort_eig",
+        ],
+    )
+    def test_qz(self, output, input_type, sort, return_eigenvalues):
+        shape = (5, 5)
+
+        dtype = (
+            config.floatX
+            if input_type == "real"
+            else ("complex64" if config.floatX.endswith("32") else "complex128")
+        )
+        A = pt.tensor("A", shape=shape, dtype=dtype)
+        B = pt.tensor("B", shape=shape, dtype=dtype)
+        outputs = qz(
+            A, B, output=output, sort=sort, return_eigenvalues=return_eigenvalues
+        )
+
+        if return_eigenvalues:
+            AA, BB, alpha, beta, Q, Z = outputs
+            output_list = [AA, BB, alpha, beta, Q, Z]
+        else:
+            AA, BB, Q, Z = outputs
+            output_list = [AA, BB, Q, Z]
+
+        rng = np.random.default_rng()
+        A_val = rng.normal(size=shape).astype(dtype)
+        B_val = rng.normal(size=shape).astype(dtype)
+
+        fn, res = compare_numba_and_py(
+            [A, B],
+            output_list,
+            [A_val, B_val],
+            numba_mode=numba_inplace_mode,
+            inplace=True,
+        )
+
+        if return_eigenvalues:
+            AA_res, BB_res, alpha_res, beta_res, Q_res, Z_res = res
+        else:
+            AA_res, BB_res, Q_res, Z_res = res
+
+        expected_complex_output = input_type == "complex" or output == "complex"
+        assert np.iscomplexobj(AA_res) == expected_complex_output
+        assert np.iscomplexobj(BB_res) == expected_complex_output
+        assert np.iscomplexobj(Q_res) == expected_complex_output
+        assert np.iscomplexobj(Z_res) == expected_complex_output
+
+        # Verify reconstruction: Q @ AA @ Z.conj().T = A, Q @ BB @ Z.conj().T = B
+        A_rebuilt = Q_res @ AA_res @ Z_res.conj().T
+        B_rebuilt = Q_res @ BB_res @ Z_res.conj().T
+        np.testing.assert_allclose(A_val, A_rebuilt, atol=1e-5, rtol=1e-5)
+        np.testing.assert_allclose(B_val, B_rebuilt, atol=1e-5, rtol=1e-5)
+
+        # Test F-contiguous input
+        A_val_f_contig = np.copy(A_val, order="F")
+        B_val_f_contig = np.copy(B_val, order="F")
+        res_f = fn(A_val_f_contig, B_val_f_contig)
+        if return_eigenvalues:
+            AA_f, BB_f, alpha_f, beta_f, Q_f, Z_f = res_f
+            np.testing.assert_allclose(alpha_f, alpha_res, atol=1e-6)
+            np.testing.assert_allclose(beta_f, beta_res, atol=1e-6)
+        else:
+            AA_f, BB_f, Q_f, Z_f = res_f
+        np.testing.assert_allclose(AA_f, AA_res, atol=1e-6)
+        np.testing.assert_allclose(BB_f, BB_res, atol=1e-6)
+        np.testing.assert_allclose(Q_f, Q_res, atol=1e-6)
+        np.testing.assert_allclose(Z_f, Z_res, atol=1e-6)
+
+        # Test C-contiguous input
+        A_val_c_contig = np.copy(A_val, order="C")
+        B_val_c_contig = np.copy(B_val, order="C")
+        res_c = fn(A_val_c_contig, B_val_c_contig)
+        if return_eigenvalues:
+            AA_c, BB_c, alpha_c, beta_c, Q_c, Z_c = res_c
+            np.testing.assert_allclose(alpha_c, alpha_res, atol=1e-6)
+            np.testing.assert_allclose(beta_c, beta_res, atol=1e-6)
+        else:
+            AA_c, BB_c, Q_c, Z_c = res_c
+        np.testing.assert_allclose(AA_c, AA_res, atol=1e-6)
+        np.testing.assert_allclose(BB_c, BB_res, atol=1e-6)
+        np.testing.assert_allclose(Q_c, Q_res, atol=1e-6)
+        np.testing.assert_allclose(Z_c, Z_res, atol=1e-6)
 
 
 def test_block_diag():
