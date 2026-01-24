@@ -60,3 +60,23 @@ def test_solve_discrete_lyapunov(method):
         # when mode is "bilinear"
         eval_obj_mode=method == "direct",
     )
+
+
+def test_solve_discrete_are():
+    A = pt.matrix("A")
+    B = pt.matrix("B")
+    Q = pt.matrix("Q")
+    R = pt.matrix("R")
+    X = linear_control.solve_discrete_are(A, B, Q, R)
+
+    rng = np.random.default_rng()
+    A_val = rng.normal(size=(5, 5)).astype(floatX)
+    B_val = rng.normal(size=(5, 3)).astype(floatX)
+    Q_val = rng.normal(size=(5, 5)).astype(floatX)
+    R_val = rng.normal(size=(3, 3)).astype(floatX)
+
+    # Q and R should be symmetric positive definite
+    Q_val = Q_val @ Q_val.T
+    R_val = R_val @ R_val.T
+
+    compare_numba_and_py([A, B, Q, R], [X], [A_val, B_val, Q_val, R_val])
