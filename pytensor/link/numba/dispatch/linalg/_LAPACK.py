@@ -946,3 +946,388 @@ class _LAPACK:
             fn(TRANA, TRANB, ISGN, M, N, A, LDA, B, LDB, C, LDC, SCALE, INFO)
 
         return trsyl
+
+    @classmethod
+    def numba_xgges(cls, dtype):
+        """
+        Compute generalized eigenvalues and, optionally, the left and/or right generalized Schur vectors of a pair
+        of real nonsymmetric matrices (A,B).
+
+        Called by scipy.linalg.qz and scipy.linalg.ordqz.
+        """
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        unique_func_name = f"scipy.lapack.{kind}gges"
+
+        @numba_basic.numba_njit
+        def get_gges_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "gges")
+            return ptr
+
+        if isinstance(dtype, Complex):
+            real_pointer = nb_f64p if dtype is nb_c128 else nb_f32p
+            gges_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # JOBVSL
+                    nb_i32p,  # JOBVSR
+                    nb_i32p,  # SORT
+                    nb_i32p,  # SELECT
+                    nb_i32p,  # N
+                    float_pointer,  # A
+                    nb_i32p,  # LDA
+                    float_pointer,  # B
+                    nb_i32p,  # LDB
+                    nb_i32p,  # SDIM
+                    float_pointer,  # ALPHA
+                    float_pointer,  # BETA
+                    float_pointer,  # VSL
+                    nb_i32p,  # LDVSL
+                    float_pointer,  # VSR
+                    nb_i32p,  # LDVSR
+                    float_pointer,  # WORK
+                    nb_i32p,  # LWORK
+                    real_pointer,  # RWORK
+                    nb_i32p,  # BWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def gges(
+                JOBVSL,
+                JOBVSR,
+                SORT,
+                SELECT,
+                N,
+                A,
+                LDA,
+                B,
+                LDB,
+                SDIM,
+                ALPHA,
+                BETA,
+                VSL,
+                LDVSL,
+                VSR,
+                LDVSR,
+                WORK,
+                LWORK,
+                RWORK,
+                BWORK,
+                INFO,
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_gges_pointer,
+                    func_type_ref=gges_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(
+                    JOBVSL,
+                    JOBVSR,
+                    SORT,
+                    SELECT,
+                    N,
+                    A,
+                    LDA,
+                    B,
+                    LDB,
+                    SDIM,
+                    ALPHA,
+                    BETA,
+                    VSL,
+                    LDVSL,
+                    VSR,
+                    LDVSR,
+                    WORK,
+                    LWORK,
+                    RWORK,
+                    BWORK,
+                    INFO,
+                )
+        else:  # Real case
+            gges_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # JOBVSL
+                    nb_i32p,  # JOBVSR
+                    nb_i32p,  # SORT
+                    nb_i32p,  # SELECT
+                    nb_i32p,  # N
+                    float_pointer,  # A
+                    nb_i32p,  # LDA
+                    float_pointer,  # B
+                    nb_i32p,  # LDB
+                    nb_i32p,  # SDIM
+                    float_pointer,  # ALPHAR
+                    float_pointer,  # ALPHAI
+                    float_pointer,  # BETA
+                    float_pointer,  # VSL
+                    nb_i32p,  # LDVSL
+                    float_pointer,  # VSR
+                    nb_i32p,  # LDVSR
+                    float_pointer,  # WORK
+                    nb_i32p,  # LWORK
+                    nb_i32p,  # BWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def gges(
+                JOBVSL,
+                JOBVSR,
+                SORT,
+                SELECT,
+                N,
+                A,
+                LDA,
+                B,
+                LDB,
+                SDIM,
+                ALPHAR,
+                ALPHAI,
+                BETA,
+                VSL,
+                LDVSL,
+                VSR,
+                LDVSR,
+                WORK,
+                LWORK,
+                BWORK,
+                INFO,
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_gges_pointer,
+                    func_type_ref=gges_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(
+                    JOBVSL,
+                    JOBVSR,
+                    SORT,
+                    SELECT,
+                    N,
+                    A,
+                    LDA,
+                    B,
+                    LDB,
+                    SDIM,
+                    ALPHAR,
+                    ALPHAI,
+                    BETA,
+                    VSL,
+                    LDVSL,
+                    VSR,
+                    LDVSR,
+                    WORK,
+                    LWORK,
+                    BWORK,
+                    INFO,
+                )
+
+        return gges
+
+    @classmethod
+    def numba_tgsen(cls, dtype):
+        """
+        Reorders the generalized Schur decomposition of a matrix pair (A, B) by their eigenvalues.
+
+        Output is sorted so that a selected cluster of eigenvalues appears in the leading diagonal blocks of the pair
+        (A,B). The leading columns of Q and Z form unitary bases of the corresponding left and right eigenspaces
+        (deflating subspaces). (A, B) must be in generalized Schur canonical form, that is, A and B are both upper
+        triangular.
+
+        Used by scipy.linalg.ordqz.
+        """
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        unique_func_name = f"scipy.lapack.{kind}tgsen"
+
+        @numba_basic.numba_njit
+        def get_tgsen_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "tgsen")
+            return ptr
+
+        if isinstance(dtype, Complex):
+            real_pointer = nb_f64p if dtype is nb_c128 else nb_f32p
+            tgsen_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # IJOB
+                    nb_i32p,  # WANTQ
+                    nb_i32p,  # WANTZ
+                    nb_i32p,  # SELECT
+                    nb_i32p,  # N
+                    float_pointer,  # A
+                    nb_i32p,  # LDA
+                    float_pointer,  # B
+                    nb_i32p,  # LDB
+                    float_pointer,  # alpha
+                    float_pointer,  # beta
+                    float_pointer,  # Q
+                    nb_i32p,  # LDQ
+                    float_pointer,  # Z
+                    nb_i32p,  # LDZ
+                    nb_i32p,  # M
+                    real_pointer,  # PL
+                    real_pointer,  # PR
+                    real_pointer,  # DIF
+                    float_pointer,  # WORK
+                    nb_i32p,  # LWORK
+                    nb_i32p,  # IWORK
+                    nb_i32p,  # LIWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def tgsen(
+                IJOB,
+                WANTQ,
+                WANTZ,
+                SELECT,
+                N,
+                A,
+                LDA,
+                B,
+                LDB,
+                alpha,
+                beta,
+                Q,
+                LDQ,
+                Z,
+                LDZ,
+                M,
+                PL,
+                PR,
+                DIF,
+                WORK,
+                LWORK,
+                IWORK,
+                LIWORK,
+                INFO,
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_tgsen_pointer,
+                    func_type_ref=tgsen_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(
+                    IJOB,
+                    WANTQ,
+                    WANTZ,
+                    SELECT,
+                    N,
+                    A,
+                    LDA,
+                    B,
+                    LDB,
+                    alpha,
+                    beta,
+                    Q,
+                    LDQ,
+                    Z,
+                    LDZ,
+                    M,
+                    PL,
+                    PR,
+                    DIF,
+                    WORK,
+                    LWORK,
+                    IWORK,
+                    LIWORK,
+                    INFO,
+                )
+        else:  # Real case
+            tgsen_function_type = types.FunctionType(
+                types.void(
+                    nb_i32p,  # IJOB
+                    nb_i32p,  # WANTQ
+                    nb_i32p,  # WANTZ
+                    nb_i32p,  # SELECT
+                    nb_i32p,  # N
+                    float_pointer,  # A
+                    nb_i32p,  # LDA
+                    float_pointer,  # B
+                    nb_i32p,  # LDB
+                    float_pointer,  # ALPHAR
+                    float_pointer,  # ALPHAI
+                    float_pointer,  # BETA
+                    float_pointer,  # Q
+                    nb_i32p,  # LDQ
+                    float_pointer,  # Z
+                    nb_i32p,  # LDZ
+                    nb_i32p,  # M
+                    float_pointer,  # PL
+                    float_pointer,  # PR
+                    float_pointer,  # DIF
+                    float_pointer,  # WORK
+                    nb_i32p,  # LWORK
+                    nb_i32p,  # IWORK
+                    nb_i32p,  # LIWORK
+                    nb_i32p,  # INFO
+                )
+            )
+
+            @numba_basic.numba_njit
+            def tgsen(
+                IJOB,
+                WANTQ,
+                WANTZ,
+                SELECT,
+                N,
+                A,
+                LDA,
+                B,
+                LDB,
+                ALPHAR,
+                ALPHAI,
+                BETA,
+                Q,
+                LDQ,
+                Z,
+                LDZ,
+                M,
+                PL,
+                PR,
+                DIF,
+                WORK,
+                LWORK,
+                IWORK,
+                LIWORK,
+                INFO,
+            ):
+                fn = _call_cached_ptr(
+                    get_ptr_func=get_tgsen_pointer,
+                    func_type_ref=tgsen_function_type,
+                    unique_func_name_lit=unique_func_name,
+                )
+                fn(
+                    IJOB,
+                    WANTQ,
+                    WANTZ,
+                    SELECT,
+                    N,
+                    A,
+                    LDA,
+                    B,
+                    LDB,
+                    ALPHAR,
+                    ALPHAI,
+                    BETA,
+                    Q,
+                    LDQ,
+                    Z,
+                    LDZ,
+                    M,
+                    PL,
+                    PR,
+                    DIF,
+                    WORK,
+                    LWORK,
+                    IWORK,
+                    LIWORK,
+                    INFO,
+                )
+
+        return tgsen
