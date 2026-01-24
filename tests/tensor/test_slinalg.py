@@ -1118,7 +1118,7 @@ def test_solve_discrete_are_grad(add_batch_dim):
     atol = 1e-4 if config.floatX == "float32" else 1e-12
 
     utt.verify_grad(
-        functools.partial(solve_discrete_are, enforce_Q_symmetric=True),
+        solve_discrete_are,
         pt=[a, b, q, r],
         rng=rng,
         abs_tol=atol,
