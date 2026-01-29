@@ -388,8 +388,6 @@ def numba_funcify_StructuredDotGradCSR(op, node, **kwargs):
     out_dtype = g_xy.type.dtype
     g_xy_is_sparse = psb._is_sparse_variable(g_xy)
 
-    # breakpoint()
-
     cache_key = sha256(str((out_dtype, g_xy_is_sparse)).encode()).hexdigest()
 
     # O = g_xy @ Y^T
@@ -406,34 +404,37 @@ def numba_funcify_StructuredDotGradCSR(op, node, **kwargs):
         def perform(x_indices, x_ptr, y, g_xy):
             n_row = len(x_ptr) - 1
             output = np.zeros(len(x_indices), dtype=out_dtype)
-            Y = y.T  # CSR -> CSC
+
+            g_xy_data = g_xy.data
+            g_xy_indices = g_xy.indices.view(np.uint32)
+            g_xy_indptr = g_xy.indptr.view(np.uint32)
+
+            y_data = y.data
+            y_indices = y.indices.view(np.uint32)
+            y_indptr = y.indptr.view(np.uint32)
 
             for g_row in range(n_row):
                 # G row segment
-                gx_start = g_xy.indptr[g_row]
-                gx_end = g_xy.indptr[g_row + 1]
-                gx_idx = g_xy.indices
-                gx_data = g_xy.data
+                gx_start = g_xy_indptr[g_row]
+                gx_end = g_xy_indptr[g_row + 1]
 
                 for idx in range(x_ptr[g_row], x_ptr[g_row + 1]):
                     g_column = x_indices[idx]
 
-                    # Y column segment
-                    y_start = Y.indptr[g_column]
-                    y_end = Y.indptr[g_column + 1]
-                    y_idx = Y.indices
-                    y_data = Y.data
+                    # Y row segment
+                    y_start = y_indptr[g_column]
+                    y_end = y_indptr[g_column + 1]
 
-                    # Inline dot(vector_csr, vector_csc)
+                    # Inline dot(sparse_vector, sparse_vector)
                     i = gx_start
                     j = y_start
-                    s = 0.0
+                    acc = 0.0
 
                     while i < gx_end and j < y_end:
-                        ix = gx_idx[i]
-                        iy = y_idx[j]
+                        ix = g_xy_indices[i]
+                        iy = y_indices[j]
                         if ix == iy:
-                            s += gx_data[i] * y_data[j]
+                            acc += g_xy_data[i] * y_data[j]
                             i += 1
                             j += 1
                         elif ix < iy:
@@ -441,7 +442,7 @@ def numba_funcify_StructuredDotGradCSR(op, node, **kwargs):
                         else:
                             j += 1
 
-                    output[idx] = s
+                    output[idx] = acc
 
             return output
 
