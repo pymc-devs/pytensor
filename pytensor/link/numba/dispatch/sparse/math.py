@@ -15,6 +15,7 @@ from pytensor.sparse import (
     SparseDenseVectorMultiply,
     SpSum,
     StructuredDot,
+    StructuredDotGradCSC,
     StructuredDotGradCSR,
 )
 
@@ -395,7 +396,8 @@ def numba_funcify_SparseDot(op, node, **kwargs):
 
 
 @register_funcify_default_op_cache_key(StructuredDotGradCSR)
-def numba_funcify_StructuredDotGradCSR(op, node, **kwargs):
+@register_funcify_default_op_cache_key(StructuredDotGradCSC)
+def numba_funcify_StructuredDotGrad(op, node, **kwargs):
     # Let:
     #   Z = structured_dot(X, Y)
     #   L = L(Z), a scalar loss depending on Z.
@@ -425,79 +427,145 @@ def numba_funcify_StructuredDotGradCSR(op, node, **kwargs):
 
     _, _, y, g_xy = node.inputs
     out_dtype = g_xy.type.dtype
+
+    y_is_sparse = psb._is_sparse_variable(y)
     g_xy_is_sparse = psb._is_sparse_variable(g_xy)
 
-    if g_xy_is_sparse:
-        # 'g_xy' is sparse only if both 'x' and 'y' are sparse.
-        assert g_xy.type.format == "csr"
-        y_format = y.type.format
+    y_format = y.type.format if y_is_sparse else None
+    g_xy_format = g_xy.type.format if g_xy_is_sparse else None
+
+    x_format = "csc" if isinstance(op, StructuredDotGradCSC) else "csr"
+
+    if not g_xy_is_sparse:
+        # X is sparse, Y and G_xy are dense.
+        if x_format == "csr":
+
+            @numba_basic.numba_njit
+            def perform(x_indices, x_ptr, y, g_xy):
+                # len(x_indices) gives the number of non-zero elements in X.
+                output = np.zeros(len(x_indices), dtype=out_dtype)
+                size = len(x_ptr) - 1
+                x_indices = x_indices.view(np.uint32)
+                x_ptr = x_ptr.view(np.uint32)
+
+                for row_idx in range(size):
+                    for value_idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
+                        output[value_idx] = np.dot(
+                            g_xy[row_idx], y[x_indices[value_idx]]
+                        )
+                return output
+        else:
+
+            @numba_basic.numba_njit
+            def perform(x_indices, x_ptr, y, g_xy):
+                # len(x_indices) gives the number of non-zero elements in X.
+                output = np.zeros(len(x_indices), dtype=out_dtype)
+                size = len(x_ptr) - 1
+                x_indices = x_indices.view(np.uint32)
+                x_ptr = x_ptr.view(np.uint32)
+
+                for col_idx in range(size):
+                    for value_idx in range(x_ptr[col_idx], x_ptr[col_idx + 1]):
+                        output[value_idx] = np.dot(
+                            g_xy[x_indices[value_idx]], y[col_idx]
+                        )
+                return output
+
+        return perform
+
+    # X is sparse. In either case we need 'dot_csr_rows'
+    @numba_basic.numba_njit
+    def dot_csr_rows(x_ptr, x_indices, x_data, x_row, y_ptr, y_indices, y_data, y_row):
+        x_p = x_ptr[x_row]
+        x_end = x_ptr[x_row + 1]
+        y_p = y_ptr[y_row]
+        y_end = y_ptr[y_row + 1]
+
+        acc = 0.0
+        while x_p < x_end and y_p < y_end:
+            x_col = x_indices[x_p]
+            y_col = y_indices[y_p]
+            if x_col == y_col:
+                acc += x_data[x_p] * y_data[y_p]
+                x_p += 1
+                y_p += 1
+            elif x_col < y_col:
+                x_p += 1
+            else:
+                y_p += 1
+
+        return acc
+
+    if x_format == "csr":
+        assert g_xy_format == "csr"
+        assert psb._is_sparse_variable(y)
 
         @numba_basic.numba_njit
         def perform(x_indices, x_ptr, y, g_xy):
             if y_format == "csc":
                 y = y.tocsr()
 
-            n_row = len(x_ptr) - 1
-            output = np.zeros(len(x_indices), dtype=out_dtype)
-
             g_xy_data = g_xy.data
             g_xy_indices = g_xy.indices.view(np.uint32)
-            g_xy_indptr = g_xy.indptr.view(np.uint32)
+            g_xy_ptr = g_xy.indptr.view(np.uint32)
 
             y_data = y.data
             y_indices = y.indices.view(np.uint32)
-            y_indptr = y.indptr.view(np.uint32)
+            y_ptr = y.indptr.view(np.uint32)
 
-            for g_row in range(n_row):
-                # G row segment
-                gx_start = g_xy_indptr[g_row]
-                gx_end = g_xy_indptr[g_row + 1]
+            n_row = len(x_ptr) - 1
+            output = np.zeros(len(x_indices), dtype=out_dtype)
 
-                for output_idx in range(x_ptr[g_row], x_ptr[g_row + 1]):
-                    g_column = x_indices[output_idx]
-
-                    # Y^T column segment (i.e., Y row segment)
-                    y_start = y_indptr[g_column]
-                    y_end = y_indptr[g_column + 1]
-
-                    # Inline dot(sparse_vector, sparse_vector) -> scalar
-                    i = gx_start
-                    j = y_start
-                    acc = 0.0
-
-                    while i < gx_end and j < y_end:
-                        ix = g_xy_indices[i]
-                        iy = y_indices[j]
-                        if ix == iy:
-                            acc += g_xy_data[i] * y_data[j]
-                            i += 1
-                            j += 1
-                        elif ix < iy:
-                            i += 1
-                        else:
-                            j += 1
-
-                    output[output_idx] = acc
-
+            for x_row in range(n_row):
+                for data_idx in range(x_ptr[x_row], x_ptr[x_row + 1]):
+                    x_col = x_indices[data_idx]
+                    output[data_idx] = dot_csr_rows(
+                        g_xy_ptr,
+                        g_xy_indices,
+                        g_xy_data,
+                        x_row,
+                        y_ptr,
+                        y_indices,
+                        y_data,
+                        x_col,
+                    )
             return output
+    else:
+        assert g_xy_format == "csc"
+        assert psb._is_sparse_variable(y)
 
-        return perform
+        @numba_basic.numba_njit
+        def perform(x_indices, x_ptr, y, g_xy):
+            if y_format == "csc":
+                y = y.tocsr()
 
-    # X is sparse, Y and g_xy are dense.
-    @numba_basic.numba_njit
-    def perform(x_indices, x_ptr, y, g_xy):
-        # The number of column indices give the number of non zero elements in X.
-        output = np.zeros(len(x_indices), dtype=out_dtype)
+            # Looping a CSC matrix rowwise is too painful, slow, and cryptic.
+            g_xy = g_xy.tocsr()
 
-        x_indices = x_indices.view(np.uint32)
-        x_ptr = x_ptr.view(np.uint32)
-        n_row = len(x_ptr) - 1
+            g_xy_data = g_xy.data
+            g_xy_indices = g_xy.indices.view(np.uint32)
+            g_xy_ptr = g_xy.indptr.view(np.uint32)
 
-        for row_idx in range(n_row):
-            for val_idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
-                # dot(dense_vector, dense_vector) -> scalar
-                output[val_idx] = np.dot(g_xy[row_idx], y[x_indices[val_idx]])
+            y_data = y.data
+            y_indices = y.indices.view(np.uint32)
+            y_ptr = y.indptr.view(np.uint32)
 
-        return perform
+            n_cols = len(x_ptr) - 1
+            output = np.empty(len(x_indices), dtype=out_dtype)
+
+            for x_col in range(n_cols):
+                for data_idx in range(x_ptr[x_col], x_ptr[x_col + 1]):
+                    x_row = x_indices[data_idx]
+                    output[data_idx] = dot_csr_rows(
+                        g_xy_ptr,
+                        g_xy_indices,
+                        g_xy_data,
+                        x_row,
+                        y_ptr,
+                        y_indices,
+                        y_data,
+                        x_col,
+                    )
+            return output
 
     return perform
