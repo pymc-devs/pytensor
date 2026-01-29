@@ -1,5 +1,6 @@
 import numpy as np
 import scipy as sp
+from numba.core import types
 from numba.extending import overload
 
 from pytensor import config
@@ -9,8 +10,19 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
-from pytensor.link.numba.dispatch.sparse.variable import CSMatrixType
-from pytensor.sparse import CSM, Cast, CSMProperties, DenseFromSparse, Transpose
+from pytensor.link.numba.dispatch.sparse.variable import (
+    CSMatrixType,
+    csc_matrix_from_components,
+    csr_matrix_from_components,
+)
+from pytensor.sparse import (
+    CSM,
+    Cast,
+    CSMProperties,
+    DenseFromSparse,
+    SparseFromDense,
+    Transpose,
+)
 
 
 @overload(numba_deepcopy)
@@ -84,3 +96,75 @@ def numba_funcify_DenseFromSparse(op, node, **kwargs):
         return x.toarray()
 
     return to_array
+
+
+@register_funcify_default_op_cache_key(SparseFromDense)
+def numba_funcify_SparseFromDense(op, node, **kwargs):
+    sparse_format = op.format
+
+    if sparse_format == "csr":
+
+        @numba_basic.numba_njit
+        def dense_to_csr(matrix):
+            n_rows = types.int32(matrix.shape[0])
+            n_cols = types.int32(matrix.shape[1])
+
+            # Pass 1: Count non-zeros to pre-allocate
+            nnz = 0
+            for i in range(n_rows):
+                for j in range(n_cols):
+                    if matrix[i, j] != 0:
+                        nnz += 1
+
+            # Pre-allocate internal containers
+            data = np.empty(nnz, dtype=matrix.dtype)
+            indices = np.empty(nnz, dtype=np.uint32)
+            indptr = np.zeros(n_rows + 1, dtype=np.uint32)
+
+            # Pass 2: Fill the arrays
+            pos = 0
+            for i in range(n_rows):
+                for j in range(n_cols):
+                    value = matrix[i, j]
+                    if value != 0:
+                        data[pos] = value
+                        indices[pos] = j
+                        pos += 1
+                indptr[i + 1] = pos
+
+            return csr_matrix_from_components(data, indices, indptr, (n_rows, n_cols))
+
+        return dense_to_csr
+
+    # sparse_format is "csc"
+    @numba_basic.numba_njit
+    def dense_to_csc(matrix):
+        n_rows = types.int32(matrix.shape[0])
+        n_cols = types.int32(matrix.shape[1])
+
+        # Pass 1: Count non-zeros to pre-allocate
+        nnz = 0
+        for j in range(n_cols):
+            for i in range(n_rows):
+                if matrix[i, j] != 0:
+                    nnz += 1
+
+        # Pre-allocate internal containers
+        data = np.empty(nnz, dtype=matrix.dtype)
+        indices = np.empty(nnz, dtype=np.uint32)
+        indptr = np.zeros(n_cols + 1, dtype=np.uint32)
+
+        # Pass 2: Fill the arrays
+        pos = 0
+        for j in range(n_cols):
+            for i in range(n_rows):
+                value = matrix[i, j]
+                if value != 0:
+                    data[pos] = value
+                    indices[pos] = i
+                    pos += 1
+            indptr[j + 1] = pos
+
+        return csc_matrix_from_components(data, indices, indptr, (n_rows, n_cols))
+
+    return dense_to_csc
