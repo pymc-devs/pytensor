@@ -15,8 +15,8 @@ import scipy.sparse
 from numpy.lib.stride_tricks import as_strided
 
 import pytensor
-from pytensor import _as_symbolic, as_symbolic
 from pytensor import scalar as ps
+from pytensor.basic import _as_symbolic, as_symbolic
 from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, disconnected_type, grad_undefined
 from pytensor.graph.basic import Apply, Constant, Variable

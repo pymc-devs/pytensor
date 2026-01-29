@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-import pytensor.tensor as pt
-from pytensor import as_symbolic
+from pytensor.basic import as_symbolic
 from pytensor.compile import optdb
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
@@ -27,7 +26,13 @@ from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
 from pytensor.graph.traversal import apply_depends_on
 from pytensor.graph.type import HasDataType, HasShape
+from pytensor.tensor import as_tensor_variable
+from pytensor.tensor.basic import Alloc, zeros_like
+from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.math import Argmax, Dot, Max
 from pytensor.tensor.shape import Reshape, Shape, SpecifyShape
+from pytensor.tensor.subtensor import IncSubtensor, Subtensor
 
 
 if TYPE_CHECKING:
@@ -160,7 +165,7 @@ class IfElse(_NoPythonOp):
                 f"{int(2 * self.n_outs)}, got {len(true_false_branches)}"
             )
 
-        condition = pt.basic.as_tensor_variable(condition)
+        condition = as_tensor_variable(condition)
 
         if condition.type.ndim > 0:
             raise TypeError("The condition argument must be a truthy scalar value")
@@ -262,14 +267,14 @@ class IfElse(_NoPythonOp):
             [condition]
             + grads
             + [
-                pt.basic.zeros_like(t, dtype=grads[i].dtype)
+                zeros_like(t, dtype=grads[i].dtype)
                 for i, t in enumerate(inputs_true_branch)
             ]
         )
         inputs_false_grad = (
             [condition]
             + [
-                pt.basic.zeros_like(f, dtype=grads[i].dtype)
+                zeros_like(f, dtype=grads[i].dtype)
                 for i, f in enumerate(inputs_false_branch)
             ]
             + grads
@@ -482,15 +487,15 @@ acceptable_ops = (
     Shape,
     SpecifyShape,
     Reshape,
-    pt.math.Dot,
-    pt.math.Max,
-    pt.math.Argmax,
-    pt.subtensor.Subtensor,
-    pt.subtensor.IncSubtensor,
-    pt.basic.Alloc,
-    pt.elemwise.Elemwise,
-    pt.elemwise.DimShuffle,
-    pt.blockwise.Blockwise,
+    Dot,
+    Max,
+    Argmax,
+    Subtensor,
+    IncSubtensor,
+    Alloc,
+    Elemwise,
+    DimShuffle,
+    Blockwise,
 )
 
 
