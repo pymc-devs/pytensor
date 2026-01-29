@@ -37,7 +37,7 @@ from pytensor.graph.utils import MissingInputError
 from pytensor.link.vm import VMLinker
 from pytensor.raise_op import assert_op
 from pytensor.scan.basic import scan
-from pytensor.scan.op import Scan, ScanInfo
+from pytensor.scan.op import Scan, ScanInfo, check_broadcast
 from pytensor.scan.utils import until
 from pytensor.tensor import as_tensor
 from pytensor.tensor.math import all as pt_all
@@ -2544,9 +2544,22 @@ def test_inconsistent_broadcast_error():
         outputs_info=[dict(initial=initial_x)],
         return_updates=False,
     )
-    # Error, because the broadcast patterns are inconsistent.
+    # This should now work with relaxed broadcast checks
+    g = grad(y.sum(), x)
+    assert g is not None
+
+
+def test_check_broadcast_allows_more_specific_inner():
+    outer = TensorType(config.floatX, shape=(None,))("outer")
+    inner = TensorType(config.floatX, shape=(None, 1))("inner")
+    check_broadcast(outer, inner)
+
+
+def test_check_broadcast_rejects_more_specific_outer():
+    outer = TensorType(config.floatX, shape=(None, 1))("outer")
+    inner = TensorType(config.floatX, shape=(None,))("inner")
     with pytest.raises(TypeError):
-        grad(y.sum(), x)
+        check_broadcast(outer, inner)
 
 
 def test_missing_input_error():

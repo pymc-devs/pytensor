@@ -180,7 +180,7 @@ def check_broadcast(v1, v2):
     for n, (b1, b2) in enumerate(
         zip(v1.type.broadcastable[-size:], v2.type.broadcastable[-size:], strict=False)
     ):
-        if b1 != b2:
+        if b1 and not b2:
             a1 = n + size - v1.type.ndim + 1
             a2 = n + size - v2.type.ndim + 1
             raise TypeError(msg % (v1.type, v2.type, a1, b1, b2, a2))
@@ -712,11 +712,26 @@ class ScanMethodsMixin:
             for inner_iidx, inner_oidx in product(inner_iidxs, inner_oidxs):
                 type_input = self.inner_inputs[inner_iidx].type
                 type_output = self.inner_outputs[inner_oidx].type
-                if (
-                    # TODO: Use the `Type` interface for this
-                    type_input.dtype != type_output.dtype
-                    or type_input.broadcastable != type_output.broadcastable
+                if type_input.dtype != type_output.dtype:
+                    raise TypeError(
+                        "Inconsistency in the inner graph of "
+                        f"scan '{self.name}' : an input and an output are "
+                        "associated with the same recurrent state "
+                        "and should have compatible types but have "
+                        f"type '{type_input}' and '{type_output}' respectively."
+                    )
+                if isinstance(type_input, TensorType) and isinstance(
+                    type_output, TensorType
                 ):
+                    if not type_input.is_super(type_output):
+                        raise TypeError(
+                            "Inconsistency in the inner graph of "
+                            f"scan '{self.name}' : an input and an output are "
+                            "associated with the same recurrent state "
+                            "and should have compatible types but have "
+                            f"type '{type_input}' and '{type_output}' respectively."
+                        )
+                elif type_input != type_output:
                     raise TypeError(
                         "Inconsistency in the inner graph of "
                         f"scan '{self.name}' : an input and an output are "
