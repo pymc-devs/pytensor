@@ -14,6 +14,7 @@ from pytensor.sparse import (
     SparseDenseMultiply,
     SparseDenseVectorMultiply,
     StructuredDot,
+    StructuredDotGradCSR,
 )
 
 
@@ -370,3 +371,99 @@ def numba_funcify_SparseDot(op, node, **kwargs):
                 return spmdm_csr(y.T, x.T).T
 
         return dmspm, cache_key
+
+
+@register_funcify_and_cache_key(StructuredDotGradCSR)
+def numba_funcify_StructuredDotGradCSR(op, node, **kwargs):
+    # x.shape        is (n, p)
+    # y.shape        is (p, k)
+    # g_xy.shape     is (n, k)
+    # output.shape   is (p, )
+
+    # g_xy[i]        is (k, )
+    # y[j]           is (k, )
+
+    # dot(g_xy[i], y[j]) is ()
+    _, _, _, g_xy = node.inputs
+    out_dtype = g_xy.type.dtype
+    g_xy_is_sparse = psb._is_sparse_variable(g_xy)
+
+    cache_key = sha256(str((out_dtype, g_xy_is_sparse)).encode()).hexdigest()
+
+    # O = g_xy @ Y^T
+    # Each O[i, j] is equal to sum(g_xy[i, :] * Y^T[:, j]), which is the same as
+    # sum(g_xy[i, :] * Y[j, ])
+    # for each non-zero entry of the resulting matrix, we have to do sum(g_xy[i, :] * Y[j, :])
+
+    if g_xy_is_sparse:
+        # both 'g_xy' and 'y'are sparse and CSR
+        # I'll be multiplying their rows and adding them up
+        assert g_xy.type.format == "csr"
+
+        @numba_basic.numba_njit
+        def perform(x_indices, x_ptr, y, g_xy):
+            n_row = len(x_ptr) - 1
+            output = np.zeros(len(x_indices), dtype=out_dtype)
+
+            g_xy_data = g_xy.data
+            g_xy_indices = g_xy.indices.view(np.uint32)
+            g_xy_indptr = g_xy.indptr.view(np.uint32)
+
+            y_data = y.data
+            y_indices = y.indices.view(np.uint32)
+            y_indptr = y.indptr.view(np.uint32)
+
+            for g_row in range(n_row):
+                # G row segment
+                gx_start = g_xy_indptr[g_row]
+                gx_end = g_xy_indptr[g_row + 1]
+
+                for idx in range(x_ptr[g_row], x_ptr[g_row + 1]):
+                    g_column = x_indices[idx]
+
+                    # Y row segment
+                    y_start = y_indptr[g_column]
+                    y_end = y_indptr[g_column + 1]
+
+                    # Inline dot(sparse_vector, sparse_vector)
+                    i = gx_start
+                    j = y_start
+                    acc = 0.0
+
+                    while i < gx_end and j < y_end:
+                        ix = g_xy_indices[i]
+                        iy = y_indices[j]
+                        if ix == iy:
+                            acc += g_xy_data[i] * y_data[j]
+                            i += 1
+                            j += 1
+                        elif ix < iy:
+                            i += 1
+                        else:
+                            j += 1
+
+                    output[idx] = acc
+
+            return output
+
+        return perform, cache_key
+
+    @numba_basic.numba_njit
+    def fun(x_col, x_rowptr, y, g_xy):
+        # The number of column indices give the number of non zero elements
+        output = np.zeros(len(x_col), dtype=out_dtype)
+
+        x_col = x_col.view(np.uint32)
+        x_rowptr = x_rowptr.view(np.uint32)
+        n_row = len(x_rowptr) - 1
+
+        # np.dot(dense, dense)?
+        for row_idx in range(n_row):
+            for val_idx in range(x_rowptr[row_idx], x_rowptr[row_idx + 1]):
+                col_idx = x_col[val_idx]
+                # y[col_idx] gets the column from Y^T
+                output[val_idx] = np.dot(g_xy[row_idx], y[col_idx])
+
+        return output
+
+    return fun, cache_key
