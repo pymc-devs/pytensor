@@ -14,10 +14,22 @@ from pytensor.sparse import (
     Dot,
     SparseDenseMultiply,
     SparseDenseVectorMultiply,
+    SpSum,
     StructuredDot,
     StructuredDotGradCSC,
     StructuredDotGradCSR,
 )
+
+
+@register_funcify_default_op_cache_key(SpSum)
+def numba_funcify_SpSum(op, node, **kwargs):
+    axis = op.axis
+
+    @numba_basic.numba_njit
+    def perform(x):
+        return x.sum(axis)
+
+    return perform
 
 
 @register_funcify_default_op_cache_key(SparseDenseMultiply)
