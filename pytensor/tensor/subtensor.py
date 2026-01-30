@@ -133,8 +133,7 @@ def indices_from_subtensor(
     Example
     =======
         array, *op_indices = subtensor_node.inputs
-        idx_list = getattr(subtensor_node.op, "idx_list", None)
-        indices = indices_from_subtensor(op_indices, idx_list)
+        indices = indices_from_subtensor(op_indices, subtensor_node.op.idx_list)
 
     """
 
@@ -746,6 +745,9 @@ def index_vars_to_positions(entry, counter, slice_ok=True, allow_advanced=False)
         def convert_slice_component(comp):
             if comp is None or comp == sys.maxsize:
                 return None
+            # Existing integer positions pass through unchanged
+            elif isinstance(comp, int) and not isinstance(comp, bool):
+                return comp
             # Validate Variable types
             elif isinstance(comp, Variable):
                 if comp.type in invalid_scal_types or comp.type in invalid_tensor_types:
@@ -898,6 +900,22 @@ class BaseSubtensor:
             else entry
             for entry in self.idx_list
         )
+
+    def _count_expected_inputs(self):
+        count = 0
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                # All non-None slice components are positions that need inputs
+                if entry.start is not None:
+                    count += 1
+                if entry.stop is not None:
+                    count += 1
+                if entry.step is not None:
+                    count += 1
+            else:
+                assert isinstance(entry, int)
+                count += 1
+        return count
 
 
 class Subtensor(BaseSubtensor, COp):
@@ -2659,30 +2677,6 @@ class AdvancedSubtensor(BaseSubtensor, COp):
         # plus Types inside slices (for backwards compat with slice components)
         self.expected_inputs_len = self._count_expected_inputs()
 
-    def _count_expected_inputs(self):
-        """Count the expected number of inputs based on idx_list.
-
-        idx_list contains:
-        - Integer positions (references to inputs)
-        - Slices with integer position components (need inputs)
-        - Slices with None components (don't need inputs)
-
-        All non-None slice components are positions, so we count them all.
-        """
-        count = 0
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                # All non-None slice components are positions that need inputs
-                if entry.start is not None:
-                    count += 1
-                if entry.stop is not None:
-                    count += 1
-                if entry.step is not None:
-                    count += 1
-            elif isinstance(entry, int):
-                count += 1
-        return count
-
     def c_code_cache_version(self):
         hv = Subtensor.helper_c_code_cache_version()
         if hv:
@@ -2854,7 +2848,6 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                 or getattr(idx, "dtype", None) == "bool"
             )
 
-        # Reconstruct the full indices from idx_list and inputs (newaxis handled by __getitem__)
         inputs = node.inputs[1:]
 
         full_indices = []
@@ -2862,15 +2855,12 @@ class AdvancedSubtensor(BaseSubtensor, COp):
 
         for entry in self.idx_list:
             if isinstance(entry, slice):
-                # Reconstruct slice from idx_list and inputs
-                # All non-None slice components are positions referencing inputs
 
                 def get_slice_val(comp):
                     nonlocal input_idx
                     if comp is None:
                         return None
                     elif isinstance(comp, int):
-                        # Position - get value from inputs
                         val = inputs[input_idx]
                         input_idx += 1
                         return val
@@ -2882,8 +2872,8 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                 step_val = get_slice_val(entry.step)
 
                 full_indices.append(slice(start_val, stop_val, step_val))
-            elif isinstance(entry, int):
-                # This is a numerical index - get from inputs
+            else:
+                assert isinstance(entry, int)
                 if input_idx < len(inputs):
                     full_indices.append(inputs[input_idx])
                     input_idx += 1
@@ -2895,12 +2885,10 @@ class AdvancedSubtensor(BaseSubtensor, COp):
             if isinstance(idx, slice):
                 index_shapes.append(idx)
             elif hasattr(idx, "type"):
-                # Mixed bool indexes are converted to nonzero entries
                 shape0_op = Shape_i(0)
                 if is_bool_index(idx):
                     index_shapes.extend((shape0_op(nz_dim),) for nz_dim in nonzero(idx))
                 else:
-                    # Get ishape for this input
                     input_shape_idx = (
                         inputs.index(idx) + 1
                     )  # +1 because ishapes[0] is x
@@ -2967,8 +2955,8 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                     step_val = entry.step
 
                 full_indices.append(slice(start_val, stop_val, step_val))
-            elif isinstance(entry, int):
-                # This is a numerical index - get from inputs
+            else:
+                assert isinstance(entry, int)
                 if input_idx < len(index_variables):
                     full_indices.append(index_variables[input_idx])
                     input_idx += 1
@@ -3221,31 +3209,6 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         if inplace:
             self.destroy_map = {0: [0]}
         self.ignore_duplicates = ignore_duplicates
-
-    def _count_expected_inputs(self):
-        """Count the expected number of inputs based on idx_list.
-
-        idx_list contains:
-        - Integer positions (references to inputs)
-        - Slices with integer position components (references to inputs)
-        - Slices with None components (don't need inputs)
-
-        All non-None slice components are positions, so we count them all.
-        """
-        count = 0
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                # All non-None slice components are positions that need inputs
-                if entry.start is not None:
-                    count += 1
-                if entry.stop is not None:
-                    count += 1
-                if entry.step is not None:
-                    count += 1
-            elif isinstance(entry, int):
-                # Top-level Types or positions need inputs
-                count += 1
-        return count
 
     def __str__(self):
         return (

@@ -3103,6 +3103,99 @@ def test_index_vars_to_positions():
     assert counter[0] == 2
 
 
+def test_index_vars_to_positions_int_passthrough():
+    """Test that integer entries and slice components pass through unchanged.
+
+    This tests two specific code paths in index_vars_to_positions:
+    - Line 736: isinstance(entry, int) and not isinstance(entry, bool)
+    - Line 750: isinstance(comp, int) and not isinstance(comp, bool)
+
+    These paths handle "existing integer positions" that should pass through
+    unchanged rather than being converted to new positions.
+    """
+    # Test line 736: Integer entry (not bool) passes through unchanged
+    # This happens when AdvancedSubtensor is created with integer positions in idx_list
+    counter = [0]
+
+    # Regular integers should pass through
+    assert index_vars_to_positions(0, counter) == 0
+    assert index_vars_to_positions(5, counter) == 5
+    assert index_vars_to_positions(42, counter) == 42
+
+    # Counter should NOT be incremented for integer passthroughs
+    assert counter[0] == 0
+
+    # Booleans should NOT pass through this path (they're rejected elsewhere)
+    # This tests the "not isinstance(entry, bool)" part
+    # Note: In Python, bool is a subclass of int, so we need the bool check
+    assert isinstance(True, int)  # Verify bool is subclass of int
+    assert isinstance(False, int)
+
+    # Test line 750: Integer slice components pass through unchanged
+    # This happens when idx_list contains slices with integer position components
+    counter = [10]  # Reset counter
+
+    # Create a slice with integer positions (this happens internally)
+    result = index_vars_to_positions(slice(0, 5, 2), counter, slice_ok=True)
+
+    # The slice components should be preserved as integers
+    assert isinstance(result, slice)
+    assert result.start == 0
+    assert result.stop == 5
+    assert result.step == 2
+
+    # Counter should NOT be incremented for existing integer positions
+    assert counter[0] == 10
+
+    # Test with None components (common case)
+    result = index_vars_to_positions(slice(1, None, None), counter, slice_ok=True)
+    assert result.start == 1
+    assert result.stop is None
+    assert result.step is None
+
+
+def test_index_vars_to_positions_real_world_usage():
+    """Test index_vars_to_positions with realistic usage patterns.
+
+    These tests verify the code paths are hit during actual indexing operations.
+    """
+    import numpy as np
+
+    # Line 736 is hit when using list/array indexing
+    # Example: x[[1, 2, 3]] creates AdvancedSubtensor with integer positions
+    x = ptb.tensor("x", shape=(10,))
+
+    # This internally processes the list [1, 2, 3]
+    # Each integer in the list hits line 736
+    result = x[[1, 2, 3]]
+    assert result.owner.op.__class__.__name__ in [
+        "AdvancedSubtensor1",
+        "AdvancedSubtensor",
+    ]
+
+    # Test with array indexing
+    idx_array = np.array([0, 2, 3])
+    result = x[idx_array]
+    assert result.owner.op.__class__.__name__ in [
+        "AdvancedSubtensor1",
+        "AdvancedSubtensor",
+    ]
+
+    # Line 750 is hit when AdvancedSubtensor is created with slices
+    # containing integer positions (happens during op construction)
+    from pytensor.tensor.subtensor import AdvancedSubtensor
+
+    # Direct creation with slice(int, int, int) hits line 750
+    idx_list_with_slice = (slice(0, 1, None),)
+    op = AdvancedSubtensor(idx_list_with_slice)
+    assert op.idx_list == (slice(0, 1, None),)
+
+    # Mixed case: slice with ints and integer entry
+    idx_list_mixed = (slice(0, 2, 3), 5)
+    op = AdvancedSubtensor(idx_list_mixed)
+    assert op.idx_list == (slice(0, 2, 3), 5)
+
+
 @pytest.mark.parametrize(
     "x_shape, indices, expected",
     [

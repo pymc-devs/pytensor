@@ -147,7 +147,7 @@ def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
     def convert_indices(indices_iterator, entry):
-        if hasattr(indices_iterator, "__next__") and isinstance(entry, int):
+        if isinstance(entry, int):
             name, var = next(indices_iterator)
             if var.ndim == 0 and isinstance(var.type, TensorType):
                 return f"{name}.item()"
@@ -235,11 +235,9 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     else:
         index_variables = node.inputs[2:]
 
-    # Use indices_from_subtensor to reconstruct full indices (like JAX/PyTorch)
     idx_list = op.idx_list
     reconstructed_indices = indices_from_subtensor(index_variables, idx_list)
 
-    # Extract advanced index metadata from reconstructed indices
     adv_idxs = []
     for i, idx in enumerate(reconstructed_indices):
         if isinstance(idx, TensorVariable):
@@ -462,16 +460,11 @@ def vector_integer_advanced_indexing(
 
     [out] = node.outputs
 
-    idx_list = getattr(op, "idx_list", None)
-    reconstructed_indices = indices_from_subtensor(index_variables, idx_list)
+    reconstructed_indices = indices_from_subtensor(index_variables, op.idx_list)
 
     idx_args = [f"idx{i}" for i in range(len(index_variables))]
     var_to_arg = dict(zip(index_variables, idx_args))
 
-    # Convert reconstructed indices to string representations
-    # Each index becomes either:
-    # - A slice string like "slice(1, None, None)"
-    # - An argument name like "idx0" (for Variables)
     idxs = []
 
     def get_idx_str(val, is_slice_component=False):
@@ -506,7 +499,7 @@ def vector_integer_advanced_indexing(
             step = get_idx_str(idx.step, is_slice_component=True)
             idxs.append(f"slice({start}, {stop}, {step})")
         else:
-            # It's a variable or constant
+            # It's a direct index variable
             idxs.append(get_idx_str(idx, is_slice_component=False))
 
     # - Advanced indices: integer/boolean arrays with ndim > 0 (vector indexing)
@@ -515,15 +508,13 @@ def vector_integer_advanced_indexing(
     adv_indices_pos = tuple(
         i
         for i, idx in enumerate(reconstructed_indices)
-        if hasattr(idx, "type") and isinstance(idx.type, TensorType) and idx.ndim > 0
+        if not isinstance(idx, slice) and idx.ndim > 0
     )
     assert adv_indices_pos  # Otherwise it's just basic indexing
     basic_indices_pos = tuple(
         i
         for i, idx in enumerate(reconstructed_indices)
-        if not (
-            hasattr(idx, "type") and isinstance(idx.type, TensorType) and idx.ndim > 0
-        )
+        if isinstance(idx, slice) or idx.ndim == 0
     )
 
     # Create index signature for generated function: "idx0, idx1, idx2, ..."

@@ -162,16 +162,6 @@ def transform_take(a, indices, axis):
     return transform_take(a, indices.flatten(), axis).reshape(shape, ndim=ndim)
 
 
-def is_full_slice(x):
-    """Determine if `x` is a ``slice(None)`` or a symbolic equivalent."""
-    if isinstance(x, slice):
-        if x == slice(None):
-            return True
-        return x.start is None and x.stop is None and x.step is None
-
-    return False
-
-
 def get_advsubtensor_axis(indices):
     """Determine the axis at which an array index is applied.
 
@@ -184,13 +174,13 @@ def get_advsubtensor_axis(indices):
     found_idx = False
     axis = 0
     for idx in indices:
-        if not found_idx and is_full_slice(idx):
+        if not found_idx and idx == slice(None):
             # Preceding full slices
             axis += 1
-        elif found_idx and not is_full_slice(idx):
+        elif found_idx and not idx == slice(None):
             # We don't handle multiple indices
             return
-        elif found_idx and is_full_slice(idx):
+        elif found_idx and idx == slice(None):
             # Trailing full slices
             continue
         else:
@@ -483,39 +473,6 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
 
 
-def _idx_list_struct_equal(idx_list1, idx_list2):
-    """Check if two idx_lists have the same structure.
-
-    Positions (integers) are treated as equivalent regardless of value,
-    since positions are relative to each Op's inputs.
-    """
-    if len(idx_list1) != len(idx_list2):
-        return False
-
-    def normalize_entry(entry):
-        if isinstance(entry, int) and not isinstance(entry, bool):
-            return "POS"  # All positions are equivalent
-        elif isinstance(entry, slice):
-            return (
-                "POS"
-                if isinstance(entry.start, int) and not isinstance(entry.start, bool)
-                else entry.start,
-                "POS"
-                if isinstance(entry.stop, int) and not isinstance(entry.stop, bool)
-                else entry.stop,
-                "POS"
-                if isinstance(entry.step, int) and not isinstance(entry.step, bool)
-                else entry.step,
-            )
-        else:
-            return entry
-
-    for e1, e2 in zip(idx_list1, idx_list2):
-        if normalize_entry(e1) != normalize_entry(e2):
-            return False
-    return True
-
-
 @register_specialize
 @register_canonicalize
 @node_rewriter([Subtensor])
@@ -531,13 +488,12 @@ def local_subtensor_inc_subtensor(fgraph, node):
         if not x.owner.op.set_instead_of_inc:
             return
 
-        # Check structural equality of idx_lists and semantic equality of inputs
         inc_inputs = x.owner.inputs[2:]
         sub_inputs = node.inputs[1:]
 
         if (
             len(inc_inputs) == len(sub_inputs)
-            and _idx_list_struct_equal(x.owner.op.idx_list, node.op.idx_list)
+            and x.owner.op.idx_list == node.op.idx_list
             and all(
                 equal_computations([a], [b]) for a, b in zip(inc_inputs, sub_inputs)
             )
@@ -862,9 +818,9 @@ def merge_two_slices(fgraph, slice1, len1, slice2, len2):
         raise ValueError("slice1 should be of type `slice`")
 
     # Simple case where one of the slices is useless
-    if is_full_slice(slice1):
+    if slice1 == slice(None):
         return slice2
-    elif is_full_slice(slice2):
+    elif slice2 == slice(None):
         return slice1
 
     sl1, reverse1 = get_canonical_form_slice(slice1, len1)
@@ -1527,8 +1483,7 @@ def local_uint_constant_indices(fgraph, node):
         x, *indices = node.inputs
         y = None
 
-    idx_list = getattr(node.op, "idx_list", None)
-    new_indices = list(indices_from_subtensor(indices, idx_list))
+    new_indices = list(indices_from_subtensor(indices, node.op.idx_list))
     has_new_index = False
 
     for i, index in enumerate(new_indices):
@@ -1645,12 +1600,8 @@ def local_blockwise_inc_subtensor(fgraph, node):
     x, y, *idxs = node.inputs
     [out] = node.outputs
     if isinstance(core_op, AdvancedIncSubtensor):
-        if any(
-            # Get out if we have boolean indices as they cross dimension boundaries
-            # / can't be safely broadcasted depending on their runtime content
-            idx.type.dtype == "bool"
-            for idx in idxs
-        ):
+        # bool indices can consume different number of dims
+        if any(idx.type.dtype == "bool" for idx in idxs):
             return None
 
     batch_ndim = node.op.batch_ndim(node)
@@ -1896,7 +1847,7 @@ def extract_diag_of_diagonal_set_subtensor(fgraph, node):
 
     # Check all non-axis indices are full slices
     axis = {op.axis1, op.axis2}
-    if not all(is_full_slice(idx) for i, idx in enumerate(idxs) if i not in axis):
+    if not all(idx == slice(None) for i, idx in enumerate(idxs) if i not in axis):
         return None
 
     # Check axis indices are arange we would expect from setting on the diagonal
