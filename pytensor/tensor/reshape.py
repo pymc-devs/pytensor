@@ -5,10 +5,8 @@ from typing import TypeAlias
 import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
 
-from pytensor import Variable
 from pytensor.gradient import disconnected_type
-from pytensor.graph import Apply
-from pytensor.graph.op import Op
+from pytensor.graph import Apply, Op, Variable
 from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor import TensorLike, as_tensor_variable

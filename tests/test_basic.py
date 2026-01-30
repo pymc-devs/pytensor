@@ -1,0 +1,41 @@
+import pytensor
+
+
+def test_root_module_not_polluted():
+    module_items = sorted(i for i in dir(pytensor) if not i.startswith("__"))
+    assert module_items == [
+        "In",
+        "Lop",
+        "Mode",
+        "OpFromGraph",
+        "Out",
+        "Rop",
+        "basic",
+        "compile",
+        "config",
+        "configdefaults",
+        "configparser",
+        "dprint",
+        "foldl",
+        "foldr",
+        "function",
+        "grad",
+        "gradient",
+        "graph",
+        "ifelse",
+        "link",
+        "map",
+        "misc",
+        "npy_2_compat",
+        "printing",
+        "raise_op",
+        "reduce",
+        "scalar",
+        "scan",
+        "shared",
+        "sparse",
+        "tensor",
+        "utils",
+        "wrap_jax",
+        "wrap_py",
+    ]

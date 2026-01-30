@@ -7,7 +7,7 @@ from pytensor.graph.basic import (
     Constant,
     clone,
 )
-from pytensor.graph.traversal import ancestors, graph_inputs
+from pytensor.graph.traversal import ancestors, graph_inputs, explicit_graph_inputs
 from pytensor.graph.replace import clone_replace, graph_replace, vectorize_graph
 from pytensor.graph.op import Op
 from pytensor.graph.type import Type

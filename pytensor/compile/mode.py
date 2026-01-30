@@ -5,7 +5,7 @@ WRITEME
 
 import logging
 import warnings
-from typing import Any, Literal
+from typing import Any
 
 from pytensor.compile.function.types import Supervisor
 from pytensor.configdefaults import config
@@ -512,7 +512,7 @@ def get_mode(orig_string):
     if upper_string == "FAST_RUN":
         linker = config.linker
         if linker == "auto":
-            return CVM if config.cxx else VM
+            return NUMBA
         return fast_run_linkers_to_mode[linker]
 
     global _CACHED_RUNTIME_MODES
@@ -565,26 +565,3 @@ def register_mode(name, mode):
     if name in predefined_modes:
         raise ValueError(f"Mode name already taken: {name}")
     predefined_modes[name] = mode
-
-
-def get_target_language(mode=None) -> tuple[Literal["py", "c", "numba", "jax"], ...]:
-    """Get the compilation target language."""
-
-    if mode is None:
-        mode = get_default_mode()
-
-    linker = mode.linker
-
-    if isinstance(linker, NumbaLinker):
-        return ("numba",)
-    if isinstance(linker, JAXLinker):
-        return ("jax",)
-    if isinstance(linker, PerformLinker):
-        return ("py",)
-    if isinstance(linker, CLinker):
-        return ("c",)
-
-    if isinstance(linker, VMLinker | OpWiseCLinker):
-        return ("c", "py") if config.cxx else ("py",)
-
-    raise Exception(f"Unsupported Linker: {linker}")

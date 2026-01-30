@@ -1,7 +1,7 @@
 """This file don't test everything. It only test one past crash error."""
 
 import pytensor
-from pytensor import as_symbolic
+from pytensor.basic import as_symbolic
 from pytensor.graph.basic import Constant
 from pytensor.tensor.math import argmax
 from pytensor.tensor.type import iscalar, vector
