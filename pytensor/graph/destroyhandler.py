@@ -771,9 +771,9 @@ class DestroyHandler(Bookkeeper):
                     }
                     tolerated.add(destroyed_idx)
                     tolerate_aliased = getattr(
-                        app.op, "destroyhandler_tolerate_aliased", []
+                        app.op, "destroyhandler_tolerate_aliased", ()
                     )
-                    assert isinstance(tolerate_aliased, list)
+                    assert isinstance(tolerate_aliased, tuple | list)
                     ignored = {
                         idx1 for idx0, idx1 in tolerate_aliased if idx0 == destroyed_idx
                     }

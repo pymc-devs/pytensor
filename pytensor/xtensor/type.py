@@ -15,6 +15,7 @@ from pytensor.tensor import (
     specify_shape,
 )
 from pytensor.tensor.math import variadic_mul
+from pytensor.tensor.subtensor import indices_from_subtensor
 
 
 try:
@@ -469,7 +470,9 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         if not isinstance(idx, tuple):
             idx = (idx,)
 
-        return px.indexing.index(self, *idx)
+        import pytensor.xtensor.indexing as px_indexing
+
+        return px_indexing.index(self, *idx)
 
     def isel(
         self,
@@ -516,7 +519,9 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                         UserWarning,
                     )
 
-        return px.indexing.index(self, *indices)
+        import pytensor.xtensor.indexing as px_indexing
+
+        return px_indexing.index(self, *indices)
 
     def set(self, value):
         """Return a copy of the variable indexed by self with the indexed values set to y.
@@ -568,8 +573,14 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                 f"set can only be called on the output of an index (or isel) operation. Self is the result of {self.owner}"
             )
 
-        x, *idxs = self.owner.inputs
-        return px.indexing.index_assignment(x, value, *idxs)
+        x = self.owner.inputs[0]
+        # Reconstruct the full indices from idx_list and inputs
+        idx_inputs = self.owner.inputs[1:]
+        idxs = indices_from_subtensor(idx_inputs, self.owner.op.idx_list)
+
+        import pytensor.xtensor.indexing as px_indexing
+
+        return px_indexing.advanced_set_index(x, value, *idxs)
 
     def inc(self, value):
         """Return a copy of the variable indexed by self with the indexed values incremented by value.
@@ -621,8 +632,14 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                 f"inc can only be called on the output of an index (or isel) operation. Self is the result of {self.owner}"
             )
 
-        x, *idxs = self.owner.inputs
-        return px.indexing.index_increment(x, value, *idxs)
+        x = self.owner.inputs[0]
+        # Reconstruct the full indices from idx_list and inputs
+        idx_inputs = self.owner.inputs[1:]
+        idxs = indices_from_subtensor(idx_inputs, self.owner.op.idx_list)
+
+        import pytensor.xtensor.indexing as px_indexing
+
+        return px_indexing.advanced_inc_index(x, value, *idxs)
 
     def _head_tail_or_thin(
         self,
