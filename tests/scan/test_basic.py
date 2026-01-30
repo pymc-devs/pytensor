@@ -37,7 +37,7 @@ from pytensor.graph.utils import MissingInputError
 from pytensor.link.vm import VMLinker
 from pytensor.raise_op import assert_op
 from pytensor.scan.basic import scan
-from pytensor.scan.op import Scan, ScanInfo, check_broadcast
+from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.utils import until
 from pytensor.tensor import as_tensor
 from pytensor.tensor.math import all as pt_all
@@ -2549,17 +2549,19 @@ def test_inconsistent_broadcast_error():
     assert g is not None
 
 
-def test_check_broadcast_allows_more_specific_inner():
-    outer = TensorType(config.floatX, shape=(None,))("outer")
-    inner = TensorType(config.floatX, shape=(None, 1))("inner")
-    check_broadcast(outer, inner)
+def test_filter_variable_allows_inner_more_specific():
+    outer_t = TensorType(config.floatX, shape=(None,))
+    inner_t = TensorType(config.floatX, shape=(None, 1))
+    inner_var = inner_t()
+    outer_t.filter_variable(inner_var, allow_convert=True)
 
 
-def test_check_broadcast_rejects_more_specific_outer():
-    outer = TensorType(config.floatX, shape=(None, 1))("outer")
-    inner = TensorType(config.floatX, shape=(None,))("inner")
+def test_filter_variable_rejects_incompatible_static_shapes():
+    outer_t = TensorType(config.floatX, shape=(5,))
+    inner_t = TensorType(config.floatX, shape=(2,))
+    inner_var = inner_t()
     with pytest.raises(TypeError):
-        check_broadcast(outer, inner)
+        outer_t.filter_variable(inner_var, allow_convert=True)
 
 
 def test_missing_input_error():

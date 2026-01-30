@@ -153,39 +153,6 @@ err_msg3 = (
 )
 
 
-def check_broadcast(v1, v2):
-    """Checks that the broadcast pattern of v1 and v2.
-
-    Controls that the broadcast pattern of the variable provided as
-    input to `scan` matches the broadcast pattern provided in
-    `output_info`. It raises an error when they don't match. The
-    typical case is when the user provides either the input or the
-    `output_info` (but not both) with a dimension fixed to 1,
-    which may wrongly be interpreted as broadcastable.
-
-    """
-    if not isinstance(v1.type, TensorType) and not isinstance(v2.type, TensorType):
-        return
-
-    msg = (
-        "The broadcast pattern of the output of scan (%s) is "
-        "inconsistent with the one provided in `output_info` "
-        "(%s). The output on axis %d is `%r`, but it is `%r` on "
-        "axis %d in `output_info`. This can happen if one of the "
-        "dimension is fixed to 1 in the input, while it is still "
-        "variable in the output, or vice-verca. You have to make "
-        "them consistent, e.g. using pytensor.tensor.specify_broadcastable."
-    )
-    size = min(v1.type.ndim, v2.type.ndim)
-    for n, (b1, b2) in enumerate(
-        zip(v1.type.broadcastable[-size:], v2.type.broadcastable[-size:], strict=False)
-    ):
-        if b1 and not b2:
-            a1 = n + size - v1.type.ndim + 1
-            a2 = n + size - v2.type.ndim + 1
-            raise TypeError(msg % (v1.type, v2.type, a1, b1, b2, a2))
-
-
 def copy_var_format(var, as_var):
     """
     This functions ensures that ``var`` has the same dtype as ``as_var`` as
@@ -720,25 +687,19 @@ class ScanMethodsMixin:
                         "and should have compatible types but have "
                         f"type '{type_input}' and '{type_output}' respectively."
                     )
-                if isinstance(type_input, TensorType) and isinstance(
-                    type_output, TensorType
-                ):
-                    if not type_input.is_super(type_output):
-                        raise TypeError(
-                            "Inconsistency in the inner graph of "
-                            f"scan '{self.name}' : an input and an output are "
-                            "associated with the same recurrent state "
-                            "and should have compatible types but have "
-                            f"type '{type_input}' and '{type_output}' respectively."
-                        )
-                elif type_input != type_output:
+
+                try:
+                    type_input.filter_variable(
+                        self.inner_outputs[inner_oidx], allow_convert=True
+                    )
+                except Exception as e:
                     raise TypeError(
                         "Inconsistency in the inner graph of "
                         f"scan '{self.name}' : an input and an output are "
                         "associated with the same recurrent state "
                         "and should have compatible types but have "
                         f"type '{type_input}' and '{type_output}' respectively."
-                    )
+                    ) from e
 
 
 class Scan(Op, ScanMethodsMixin, HasInnerGraph):
@@ -1030,7 +991,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         for inner_seq, outer_seq in zip(
             self.inner_seqs(self.inner_inputs), self.outer_seqs(inputs), strict=True
         ):
-            check_broadcast(outer_seq, inner_seq)
             new_inputs.append(copy_var_format(outer_seq, as_var=inner_seq))
 
         argoffset += len(self.outer_seqs(inputs))
