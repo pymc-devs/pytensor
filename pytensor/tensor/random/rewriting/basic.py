@@ -242,8 +242,6 @@ def local_subtensor_rv_lift(fgraph, node):
     else:
         indices = node.inputs[1:]
 
-    # The rewrite doesn't apply if advanced indexing could broadcast the samples (leading to duplicates)
-    # TODO: This rewrite is aborting with dummy indexing dimensions which aren't a problem
     if any(is_nd_advanced_idx(idx, integer_dtypes) for idx in indices):
         return False
 
@@ -263,7 +261,7 @@ def local_subtensor_rv_lift(fgraph, node):
             non_bool_indices[batch_ndims:],
         )
         for idx in supp_indices:
-            if not (isinstance(idx, slice) and idx == slice(None)):
+            if idx != slice(None):
                 return False
         n_discarded_idxs = len(supp_indices)
         indices = indices[:-n_discarded_idxs]

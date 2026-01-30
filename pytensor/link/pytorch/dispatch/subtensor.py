@@ -122,10 +122,7 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         return adv_inc_subtensor_no_duplicates
 
     else:
-        has_slice_indexing = (
-            any(isinstance(entry, slice) for entry in idx_list) if idx_list else False
-        )
-        if has_slice_indexing:
+        if any(isinstance(entry, slice) for entry in idx_list):
             raise NotImplementedError(
                 "IncSubtensor with potential duplicates indexes and slice indexing not implemented in PyTorch"
             )

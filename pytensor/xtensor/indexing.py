@@ -230,7 +230,7 @@ class Index(XOp):
 
 
 def index(x, *idxs):
-    """Create an indexed view of an xtensor.
+    """Create an indexed xtensor (subtensor).
 
     Parameters
     ----------
@@ -271,12 +271,9 @@ def index(x, *idxs):
             out_dims.append(idx_dim)
             out_shape.append(idx_dim_shape)
         else:
-            # Dim already introduced in output by a previous index
-            # Update static shape or raise if incompatible
             out_dim_pos = out_dims.index(idx_dim)
             out_dim_shape = out_shape[out_dim_pos]
             if out_dim_shape is None:
-                # We don't know the size of the dimension yet
                 out_shape[out_dim_pos] = idx_dim_shape
             elif idx_dim_shape is not None and idx_dim_shape != out_dim_shape:
                 raise IndexError(f"Dimension of indexers mismatch for dim {idx_dim}")
@@ -284,12 +281,10 @@ def index(x, *idxs):
     if len(idxs) > x_ndim:
         raise IndexError("Too many indices")
 
-    # Convert all indices to either Python slices or Variables
     processed_idxs = [
         as_idx_variable(idx, dim) for idx, dim in zip(idxs, x_dims, strict=False)
     ]
 
-    # Infer output shape and dims from the processed indices
     for i, idx in enumerate(processed_idxs):
         if isinstance(idx, slice):
             idx_dim = x_dims[i]
@@ -313,48 +308,25 @@ def index(x, *idxs):
             # If the dimension was not indexed, we keep it as is
             combine_dim_info(dim_i, shape_i)
 
-    # Create the Op with the processed idx_list and extract flattened inputs
     op = Index(processed_idxs)
-
-    # Get flattened inputs from the idx_list
     inputs = get_slice_elements(
         processed_idxs, lambda entry: isinstance(entry, Variable)
     )
-
     output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
+
     return Apply(op, [x, *inputs], [output]).outputs[0]
 
 
 class IndexUpdate(XOp):
     __props__ = ("mode", "idx_list")
 
-    def __init__(self, mode: Literal["set", "inc"], idx_list=None):
+    def __init__(self, mode: Literal["set", "inc"], idx_list):
         if mode not in ("set", "inc"):
             raise ValueError("mode must be 'set' or 'inc'")
         self.mode = mode
-        # idx_list will be set when make_node is called
-        # We need it in __props__ but it's set later
-        if idx_list is not None:
-            self.idx_list = idx_list
+        self.idx_list = idx_list
 
-    def make_node(self, x, y, *idxs):
-        # Use the index factory function to get the view and extract the idx_list
-        x_view = index(x, *idxs)
-
-        # Extract the Index Op from the view's owner
-        index_op = x_view.owner.op
-        assert isinstance(index_op, Index)
-
-        # Store the idx_list from the Index op (needed for rewrites)
-        # Create a new instance with the idx_list set
-        if not hasattr(self, "idx_list"):
-            new_op = IndexUpdate(self.mode, index_op.idx_list)
-            return new_op.make_node(x, y, *idxs)
-
-        # Get the processed x and inputs from the index operation
-        x = x_view.owner.inputs[0]
-        index_inputs = x_view.owner.inputs[1:]
-
+    def make_node(self, x, y, x_view, *index_inputs):
         try:
             y = as_xtensor(y)
         except TypeError:
@@ -369,15 +341,19 @@ class IndexUpdate(XOp):
         return Apply(self, [x, y, *index_inputs], [out])
 
 
-def _make_index_update(mode):
-    """Factory to create IndexUpdate operations."""
+def _advanced_update_index(x, y, *idxs, mode):
+    x_indexed = index(x, *idxs)
+    index_op = x_indexed.owner.op
+    assert isinstance(index_op, Index)
 
-    def update_fn(x, y, *idxs):
-        op = IndexUpdate(mode)
-        return op.make_node(x, y, *idxs).outputs[0]
-
-    return update_fn
+    x_orig, *index_variables = x_indexed.owner.inputs
+    op = IndexUpdate(mode, index_op.idx_list)
+    return op.make_node(x_orig, y, x_indexed, *index_variables).outputs[0]
 
 
-index_assignment = _make_index_update("set")
-index_increment = _make_index_update("inc")
+def advanced_inc_index(x, y, *idxs):
+    return _advanced_update_index(x, y, *idxs, mode="inc")
+
+
+def advanced_set_index(x, y, *idxs):
+    return _advanced_update_index(x, y, *idxs, mode="set")

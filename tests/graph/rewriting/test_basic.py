@@ -26,9 +26,7 @@ from pytensor.graph.rewriting.unify import LiteralString, OpPattern
 from pytensor.raise_op import assert_op
 from pytensor.tensor.math import Dot, add, dot, exp
 from pytensor.tensor.rewriting.basic import constant_folding
-from pytensor.tensor.subtensor import AdvancedSubtensor
 from pytensor.tensor.type import matrix, values_eq_approx_always_true, vector
-from pytensor.tensor.type_other import MakeSlice, SliceConstant, slicetype
 from tests.graph.utils import (
     MyOp,
     MyType,
@@ -629,21 +627,6 @@ def test_pre_constant_merge():
     assert res == [o2]
     assert o2.owner.inputs[2] is c2
 
-    # What is this supposed to test?
-    ms = MakeSlice()(1)
-    res = pre_constant_merge(empty_fgraph, [ms])
-
-    assert res == [ms]
-
-    const_slice = SliceConstant(type=slicetype, data=slice(1, None, 2))
-
-    assert isinstance(const_slice, Constant)
-
-    adv = AdvancedSubtensor()(matrix(), [2, 3], const_slice)
-
-    res = pre_constant_merge(empty_fgraph, adv)
-    assert res == [adv]
-
 
 def test_pre_greedy_node_rewriter():
     empty_fgraph = FunctionGraph([], [])
@@ -678,15 +661,6 @@ def test_pre_greedy_node_rewriter():
 
     assert cst.owner.inputs[0] is o1
     assert cst.owner.inputs[4] is cst.owner.inputs[0]
-
-    # What exactly is this supposed to test?
-    ms = MakeSlice()(1)
-    cst = pre_greedy_node_rewriter(empty_fgraph, [constant_folding], ms)
-
-    assert isinstance(cst, SliceConstant)
-
-    # Make sure constant of slice signature is hashable.
-    assert isinstance(hash(cst.signature()), int)
 
 
 @pytest.mark.parametrize("tracks", [True, False])

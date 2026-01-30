@@ -30,7 +30,7 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
-from pytensor.tensor.rewriting.subtensor import is_full_slice, register_useless
+from pytensor.tensor.rewriting.subtensor import register_useless
 from pytensor.tensor.shape import (
     Shape,
     SpecifyShape,
@@ -69,7 +69,7 @@ def _axis_is_indexed_by_basic_index(
 ) -> bool:
     if isinstance(axis, int):
         axis = (axis,)
-    return any(ax < len(idxs) and not is_full_slice(idxs[ax]) for ax in axis)
+    return any(ax < len(idxs) and not idxs[ax] == slice(None) for ax in axis)
 
 
 def _lift_subtensor_non_axis(
@@ -81,7 +81,7 @@ def _lift_subtensor_non_axis(
     old_subtensor_variable: TensorVariable,
 ) -> None | list[TensorVariable]:
     # Apply generic subtensor lift rewrite along "non-axis" dimensions
-    real_indices = [idx for idx in idx_tuple if not is_full_slice(idx)]
+    real_indices = [idx for idx in idx_tuple if not idx == slice(None)]
     if len(real_indices) > 1 and variable.type.ndim > 1:
         # Split the subtensor
         idx_to_keep = idx_tuple[axis]
@@ -204,7 +204,7 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if len(idx_tuple) > batch_ndim:
         # Indexing on core dimensions of Blockwise. We split the indices and lift the batch ones only
         batch_indices, core_indices = idx_tuple[:batch_ndim], idx_tuple[batch_ndim:]
-        if all(is_full_slice(idx) for idx in batch_indices):
+        if all(idx == slice(None) for idx in batch_indices):
             # No batch indices, nothing to do
             return None
         elem_with_batch_indices = elem[batch_indices]
@@ -238,7 +238,7 @@ def local_subtensor_of_batch_dims(fgraph, node):
                 strict=False,
             )
         ):
-            if is_full_slice(dim_idx):
+            if dim_idx == slice(None):
                 # Full slice can be safely applied to all inputs
                 continue
 
@@ -427,7 +427,7 @@ def local_subtensor_of_expand_dims(fgraph, node):
         if i in expanded_axes:
             if isinstance(idx_item, slice):
                 # Slice could be keeping or dropping this dimension
-                if is_full_slice(idx_item):
+                if idx_item == slice(None):
                     # A None slice, always keeps the dimension.
                     # We skip the index, and later introduce the needed expand_dim
                     continue

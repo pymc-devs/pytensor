@@ -580,7 +580,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
         import pytensor.xtensor.indexing as px_indexing
 
-        return px_indexing.index_assignment(x, value, *idxs)
+        return px_indexing.advanced_set_index(x, value, *idxs)
 
     def inc(self, value):
         """Return a copy of the variable indexed by self with the indexed values incremented by value.
@@ -639,7 +639,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
         import pytensor.xtensor.indexing as px_indexing
 
-        return px_indexing.index_increment(x, value, *idxs)
+        return px_indexing.advanced_inc_index(x, value, *idxs)
 
     def _head_tail_or_thin(
         self,

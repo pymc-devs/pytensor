@@ -1943,8 +1943,7 @@ class ConstructSparseFromList(Op):
 
     def grad(self, inputs, grads):
         (g_output,) = grads
-        _x, _y = inputs[:2]
-        idx_list = inputs[2:]
+        _x, _y, *idx_list = inputs
 
         gx = g_output
         gy = pytensor.tensor.subtensor.advanced_subtensor1(g_output, *idx_list)

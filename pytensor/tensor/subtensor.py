@@ -3,7 +3,7 @@ import sys
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from itertools import chain, groupby, zip_longest
-from typing import TypeGuard, cast, overload
+from typing import cast, overload
 
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_tuple
@@ -63,11 +63,6 @@ from pytensor.tensor.type import (
     uwscalar,
     wscalar,
     zscalar,
-)
-from pytensor.tensor.type_other import (
-    NoneConst,
-    NoneTypeT,
-    SliceConstant,
 )
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
@@ -133,8 +128,7 @@ def indices_from_subtensor(
     Example
     =======
         array, *op_indices = subtensor_node.inputs
-        idx_list = getattr(subtensor_node.op, "idx_list", None)
-        indices = indices_from_subtensor(op_indices, idx_list)
+        indices = indices_from_subtensor(op_indices, subtensor_node.op.idx_list)
 
     """
 
@@ -192,7 +186,7 @@ def as_index_literal(idx: None) -> None: ...
 
 
 @overload
-def as_index_literal(idx: slice | SliceConstant) -> slice: ...
+def as_index_literal(idx: slice) -> slice: ...
 
 
 @overload
@@ -204,14 +198,7 @@ def as_index_literal(idx: Variable): ...
 
 
 def as_index_literal(
-    idx: None
-    | int
-    | np.integer
-    | slice
-    | SliceConstant
-    | ScalarConstant
-    | TensorConstant
-    | Variable,
+    idx: None | int | np.integer | slice | ScalarConstant | TensorConstant | Variable,
 ) -> int | np.integer | slice | None:
     """Convert a symbolic index element to its Python equivalent.
 
@@ -234,9 +221,6 @@ def as_index_literal(
     if not isinstance(idx, Variable):
         raise TypeError(f"Not an index element: {idx}")
 
-    if isinstance(idx.type, NoneTypeT):
-        return None
-
     if isinstance(idx, ScalarConstant):
         return cast(int, idx.data)
 
@@ -249,9 +233,6 @@ def as_index_literal(
 
     if isinstance(idx, TensorConstant):
         return cast(int, idx.data.item())
-
-    if isinstance(idx, SliceConstant):
-        return cast(slice, idx.data)
 
     # Other kinds of variables are not supported
     raise NotScalarConstantError()
@@ -281,7 +262,7 @@ def get_canonical_form_slice(
 ) -> tuple[slice | TensorVariable, int | TensorVariable]:
     """Convert indices or slices to canonical form.
 
-    This function handles Python slice objects with Scalar or literal integer components.
+    Handles slice objects with ScalarVariable (including ScalarConstant) or None components.
     Vector indices and advanced indexing operations are handled separately by AdvancedSubtensor.
 
     Given a slice [start:stop:step] transform it into a canonical form
@@ -530,7 +511,7 @@ def slice_len(slc, n):
     return range_len(canon_slc)
 
 
-def is_basic_idx(idx) -> TypeGuard[None | slice]:
+def is_basic_idx(idx):
     """Check if an index is a basic index (slice or None)."""
     return idx is None or isinstance(idx, slice)
 
@@ -719,7 +700,6 @@ def index_vars_to_positions(entry, counter, slice_ok=True, allow_advanced=False)
     ):
         raise TypeError("Expected an integer")
 
-    # Variables and Types become integer positions
     if isinstance(entry, Variable):
         if (
             entry.type in scal_types
@@ -736,34 +716,45 @@ def index_vars_to_positions(entry, counter, slice_ok=True, allow_advanced=False)
     elif isinstance(entry, int) and not isinstance(entry, bool):
         return entry
 
-    # Slices: convert all non-None components to positions
-    # This includes Variables, Types, and literals - all become positions
+    # Slices: handle both fresh creation (Variables) and idx_list pass through
     elif slice_ok and isinstance(entry, slice):
-        a = entry.start
-        b = entry.stop
-        c = entry.step
 
-        def convert_slice_component(comp):
-            if comp is None or comp == sys.maxsize:
+        def is_already_position(component):
+            return component is None or (
+                isinstance(component, int) and not isinstance(component, bool)
+            )
+
+        if (
+            is_already_position(entry.start)
+            and is_already_position(entry.stop)
+            and is_already_position(entry.step)
+        ):
+            return entry
+
+        def convert_slice_component(component):
+            if component is None or component == sys.maxsize:
                 return None
-            # Validate Variable types
-            elif isinstance(comp, Variable):
-                if comp.type in invalid_scal_types or comp.type in invalid_tensor_types:
+            if isinstance(component, Variable):
+                if (
+                    component.type in invalid_scal_types
+                    or component.type in invalid_tensor_types
+                ):
                     raise TypeError("Expected an integer")
-                if comp.type not in scal_types and not (
-                    comp.type in tensor_types and all(comp.type.broadcastable)
+                if component.type not in scal_types and not (
+                    component.type in tensor_types and all(component.type.broadcastable)
                 ):
                     raise AdvancedIndexingError(
                         "Invalid index type or slice for Subtensor"
                     )
-            # All valid non-None components become positions
-            pos = counter[0]
-            counter[0] += 1
-            return pos
+                position = counter[0]
+                counter[0] += 1
+                return position
+            else:
+                raise AdvancedIndexingError("Invalid slice component type")
 
-        slice_a = convert_slice_component(a)
-        slice_b = convert_slice_component(b)
-        slice_c = convert_slice_component(c)
+        slice_a = convert_slice_component(entry.start)
+        slice_b = convert_slice_component(entry.stop)
+        slice_c = convert_slice_component(entry.step)
 
         return slice(slice_a, slice_b, slice_c)
 
@@ -898,6 +889,22 @@ class BaseSubtensor:
             else entry
             for entry in self.idx_list
         )
+
+    def _count_expected_inputs(self):
+        count = 0
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                # All non-None slice components are positions that need inputs
+                if entry.start is not None:
+                    count += 1
+                if entry.stop is not None:
+                    count += 1
+                if entry.step is not None:
+                    count += 1
+            else:
+                assert isinstance(entry, int)
+                count += 1
+        return count
 
 
 class Subtensor(BaseSubtensor, COp):
@@ -1405,7 +1412,6 @@ class SubtensorPrinter(Printer):
             if comp is None:
                 return ""
             elif isinstance(comp, int):
-                # Position - get string from corresponding input
                 with set_precedence(pstate):
                     return pstate.pprinter.process(inputs.pop(0))
             else:
@@ -2030,8 +2036,7 @@ class IncSubtensor(BaseSubtensor, COp):
 
     def grad(self, inputs, grads):
         (g_output,) = grads
-        x, y = inputs[:2]
-        idx_list = inputs[2:]
+        x, y, *idx_list = inputs
 
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
@@ -2595,11 +2600,8 @@ advanced_set_subtensor1 = AdvancedIncSubtensor1(set_instead_of_inc=True)
 
 
 def as_index_variable(idx):
-    if idx is None:
-        return NoneConst.clone()
+    """Convert index to Variable form for advanced indexing."""
     if isinstance(idx, slice):
-        return idx  # Return Python slice directly
-    if isinstance(idx, Variable) and isinstance(idx.type, NoneTypeT):
         return idx
     idx = as_tensor_variable(idx)
     if idx.type.dtype not in discrete_dtypes:
@@ -2655,33 +2657,7 @@ class AdvancedSubtensor(BaseSubtensor, COp):
             and numerical indices are replaced by integer positions.
         """
         super().__init__(idx_list, allow_advanced=True)
-        # Count expected inputs: all positions (int) at top level,
-        # plus Types inside slices (for backwards compat with slice components)
         self.expected_inputs_len = self._count_expected_inputs()
-
-    def _count_expected_inputs(self):
-        """Count the expected number of inputs based on idx_list.
-
-        idx_list contains:
-        - Integer positions (references to inputs)
-        - Slices with integer position components (need inputs)
-        - Slices with None components (don't need inputs)
-
-        All non-None slice components are positions, so we count them all.
-        """
-        count = 0
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                # All non-None slice components are positions that need inputs
-                if entry.start is not None:
-                    count += 1
-                if entry.stop is not None:
-                    count += 1
-                if entry.step is not None:
-                    count += 1
-            elif isinstance(entry, int):
-                count += 1
-        return count
 
     def c_code_cache_version(self):
         hv = Subtensor.helper_c_code_cache_version()
@@ -2854,7 +2830,6 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                 or getattr(idx, "dtype", None) == "bool"
             )
 
-        # Reconstruct the full indices from idx_list and inputs (newaxis handled by __getitem__)
         inputs = node.inputs[1:]
 
         full_indices = []
@@ -2862,15 +2837,12 @@ class AdvancedSubtensor(BaseSubtensor, COp):
 
         for entry in self.idx_list:
             if isinstance(entry, slice):
-                # Reconstruct slice from idx_list and inputs
-                # All non-None slice components are positions referencing inputs
 
                 def get_slice_val(comp):
                     nonlocal input_idx
                     if comp is None:
                         return None
                     elif isinstance(comp, int):
-                        # Position - get value from inputs
                         val = inputs[input_idx]
                         input_idx += 1
                         return val
@@ -2882,8 +2854,8 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                 step_val = get_slice_val(entry.step)
 
                 full_indices.append(slice(start_val, stop_val, step_val))
-            elif isinstance(entry, int):
-                # This is a numerical index - get from inputs
+            else:
+                assert isinstance(entry, int)
                 if input_idx < len(inputs):
                     full_indices.append(inputs[input_idx])
                     input_idx += 1
@@ -2895,12 +2867,10 @@ class AdvancedSubtensor(BaseSubtensor, COp):
             if isinstance(idx, slice):
                 index_shapes.append(idx)
             elif hasattr(idx, "type"):
-                # Mixed bool indexes are converted to nonzero entries
                 shape0_op = Shape_i(0)
                 if is_bool_index(idx):
                     index_shapes.extend((shape0_op(nz_dim),) for nz_dim in nonzero(idx))
                 else:
-                    # Get ishape for this input
                     input_shape_idx = (
                         inputs.index(idx) + 1
                     )  # +1 because ishapes[0] is x
@@ -2913,7 +2883,6 @@ class AdvancedSubtensor(BaseSubtensor, COp):
         )
         for i, res_dim_length in enumerate(res_shape):
             if res_dim_length is None:
-                # This can happen when we have a Slice provided by the user (not a constant nor the result of MakeSlice)
                 # We must compute the Op to find its shape
                 res_shape[i] = Shape_i(i)(node.out)
 
@@ -2967,8 +2936,8 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                     step_val = entry.step
 
                 full_indices.append(slice(start_val, stop_val, step_val))
-            elif isinstance(entry, int):
-                # This is a numerical index - get from inputs
+            else:
+                assert isinstance(entry, int)
                 if input_idx < len(index_variables):
                     full_indices.append(index_variables[input_idx])
                     input_idx += 1
@@ -3221,31 +3190,6 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         if inplace:
             self.destroy_map = {0: [0]}
         self.ignore_duplicates = ignore_duplicates
-
-    def _count_expected_inputs(self):
-        """Count the expected number of inputs based on idx_list.
-
-        idx_list contains:
-        - Integer positions (references to inputs)
-        - Slices with integer position components (references to inputs)
-        - Slices with None components (don't need inputs)
-
-        All non-None slice components are positions, so we count them all.
-        """
-        count = 0
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                # All non-None slice components are positions that need inputs
-                if entry.start is not None:
-                    count += 1
-                if entry.stop is not None:
-                    count += 1
-                if entry.step is not None:
-                    count += 1
-            elif isinstance(entry, int):
-                # Top-level Types or positions need inputs
-                count += 1
-        return count
 
     def __str__(self):
         return (
