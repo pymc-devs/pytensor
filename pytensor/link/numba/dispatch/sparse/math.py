@@ -395,8 +395,8 @@ def numba_funcify_SparseDot(op, node, **kwargs):
         return dmspm, cache_key
 
 
-@register_funcify_default_op_cache_key(StructuredDotGradCSR)
-@register_funcify_default_op_cache_key(StructuredDotGradCSC)
+@register_funcify_and_cache_key(StructuredDotGradCSR)
+@register_funcify_and_cache_key(StructuredDotGradCSC)
 def numba_funcify_StructuredDotGrad(op, node, **kwargs):
     # Let:
     #   Z = structured_dot(X, Y)
@@ -436,24 +436,54 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
 
     x_format = "csc" if isinstance(op, StructuredDotGradCSC) else "csr"
 
+    cache_key = sha256(
+        str(
+            (
+                type(op),
+                x_format,
+                y_format,
+                g_xy_format,
+                y.type.shape,
+            )
+        ).encode()
+    ).hexdigest()
+
     if not g_xy_is_sparse:
         # X is sparse, Y and G_xy are dense.
         if x_format == "csr":
+            if y.type.shape[1] == 1:
+                # If Y is actually 1D, use more performant specialized algorithm
+                # Shapes other than of length 2 will not be admitted in StructuredDot Op
+                @numba_basic.numba_njit
+                def _perform(x_indices, x_ptr, y, g_xy):
+                    output = np.empty(len(x_indices), dtype=out_dtype)
+                    size = len(x_ptr) - 1
+                    x_indices = x_indices.view(np.uint32)
+                    x_ptr = x_ptr.view(np.uint32)
+                    for row_idx in range(size):
+                        for value_idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
+                            output[value_idx] = g_xy[row_idx] * y[x_indices[value_idx]]
+                    return output
 
-            @numba_basic.numba_njit
-            def perform(x_indices, x_ptr, y, g_xy):
-                # len(x_indices) gives the number of non-zero elements in X.
-                output = np.zeros(len(x_indices), dtype=out_dtype)
-                size = len(x_ptr) - 1
-                x_indices = x_indices.view(np.uint32)
-                x_ptr = x_ptr.view(np.uint32)
+                @numba_basic.numba_njit
+                def perform(x_indices, x_ptr, y, g_xy):
+                    return _perform(x_indices, x_ptr, y[:, 0], g_xy[:, 0])
+            else:
 
-                for row_idx in range(size):
-                    for value_idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
-                        output[value_idx] = np.dot(
-                            g_xy[row_idx], y[x_indices[value_idx]]
-                        )
-                return output
+                @numba_basic.numba_njit
+                def perform(x_indices, x_ptr, y, g_xy):
+                    # len(x_indices) gives the number of non-zero elements in X.
+                    output = np.zeros(len(x_indices), dtype=out_dtype)
+                    size = len(x_ptr) - 1
+                    x_indices = x_indices.view(np.uint32)
+                    x_ptr = x_ptr.view(np.uint32)
+
+                    for row_idx in range(size):
+                        for value_idx in range(x_ptr[row_idx], x_ptr[row_idx + 1]):
+                            output[value_idx] = np.dot(
+                                g_xy[row_idx], y[x_indices[value_idx]]
+                            )
+                    return output
         else:
 
             @numba_basic.numba_njit
@@ -471,7 +501,7 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
                         )
                 return output
 
-        return perform
+        return perform, cache_key
 
     # X is sparse. In either case we need 'dot_csr_rows'
     @numba_basic.numba_njit
@@ -568,4 +598,4 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
                     )
             return output
 
-    return perform
+    return perform, cache_key
