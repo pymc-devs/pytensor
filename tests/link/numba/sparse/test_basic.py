@@ -276,3 +276,26 @@ def test_sparse_dense_from_sparse(format):
     x_test = sp.sparse.random(5, 3, density=0.5, format=format)
     y = ps.dense_from_sparse(x)
     compare_numba_and_py_sparse([x], y, [x_test])
+
+
+def test_sparse_conversion():
+    @numba.njit
+    def to_csr(matrix):
+        return matrix.tocsr()
+
+    @numba.njit
+    def to_csc(matrix):
+        return matrix.tocsc()
+
+    x_csr = scipy.sparse.random(5, 5, density=0.5, format="csr")
+    x_csc = x_csr.tocsc()
+    x_dense = x_csr.todense()
+
+    for x_inp in (x_csr, x_csc):
+        for output_format in ("csr", "csc"):
+            if output_format == "csr":
+                res = to_csr(x_inp)
+            else:
+                res = to_csc(x_inp)
+            assert res.format == output_format
+            np.testing.assert_array_equal(res.todense(), x_dense)
