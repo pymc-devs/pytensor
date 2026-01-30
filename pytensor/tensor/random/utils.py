@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from functools import wraps
@@ -246,6 +247,11 @@ class RandomStream:
             [np.random.SeedSequence], np.random.Generator
         ] = np.random.default_rng,
     ):
+        warnings.warn(
+            "pytensor.tensor.random.utils.RandomStream is deprecated and will be removed in a future release.",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
         if namespace is None:
             from pytensor.tensor.random import basic  # pylint: disable=import-self
 
