@@ -178,6 +178,9 @@ def local_block_diag_dot_to_dot_block_diag(fgraph, node):
         [blockdiag_result] = node.outputs
         blockdiag_inputs = node.inputs
 
+        if len(blockdiag_inputs) < 2:
+            return None
+
         dot_op = client.op
 
         try:
