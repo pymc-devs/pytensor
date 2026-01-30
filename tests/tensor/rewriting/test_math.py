@@ -4989,6 +4989,20 @@ class TestBlockDiagDotToDotBlockDiag:
         )
         assert_equal_computations([rewritten], [original])
 
+    def test_single_input_block_diag(self):
+        A = pt.matrix("A", shape=(2, 2))
+        bd = pt.linalg.block_diag(A)
+        B = pt.matrix("B", shape=(2, 3))
+        result = pt.dot(bd, B)
+
+        with config.change_flags(on_opt_error="raise"):
+            fn = pytensor.function([A, B], result)
+
+        rng = np.random.default_rng()
+        A_val = rng.normal(size=(2, 2)).astype(config.floatX)
+        B_val = rng.normal(size=(2, 3)).astype(config.floatX)
+        np.testing.assert_allclose(fn(A_val, B_val), A_val @ B_val)
+
     @pytest.mark.parametrize("rewrite", [True, False], ids=["rewrite", "no_rewrite"])
     @pytest.mark.parametrize("size", [10, 100, 1000], ids=["small", "medium", "large"])
     def test_benchmark(self, benchmark, size, rewrite):
