@@ -2,6 +2,7 @@ import pytest
 
 
 pytest.importorskip("xarray")
+pytestmark = pytest.mark.filterwarnings("error")
 
 import re
 from itertools import chain, combinations
@@ -31,9 +32,6 @@ from tests.xtensor.util import (
     xr_function,
     xr_random_like,
 )
-
-
-pytest.importorskip("xarray")
 
 
 def powerset(iterable, min_group_size=0):
@@ -322,7 +320,7 @@ def test_squeeze():
     xr_assert_allclose(fn5(x5_test), x5_test.squeeze(axis=1))
 
     # Test axis parameter with negative index
-    y5 = x5.squeeze(axis=-1)  # squeeze dimension at index -2 (b)
+    y5 = x5.squeeze(axis=-2)  # squeeze dimension at index -2 (b)
     fn5 = xr_function([x5], y5)
     x5_test = xr_arange_like(x5)
     xr_assert_allclose(fn5(x5_test), x5_test.squeeze(axis=-2))
@@ -333,12 +331,9 @@ def test_squeeze():
     x2_test = xr_arange_like(x2)
     xr_assert_allclose(fn6(x2_test), x2_test.squeeze(axis=[1, 2]))
 
-    # Test drop parameter warning
+    # Test drop parameter ignored, but accepted
     x7 = xtensor("x7", dims=("a", "b"), shape=(2, 1))
-    with pytest.warns(
-        UserWarning, match="drop parameter has no effect in pytensor.xtensor"
-    ):
-        y7 = x7.squeeze("b", drop=True)  # squeeze and drop coordinate
+    y7 = x7.squeeze("b", drop=True)
     fn7 = xr_function([x7], y7)
     x7_test = xr_arange_like(x7)
     xr_assert_allclose(fn7(x7_test), x7_test.squeeze("b", drop=True))
@@ -391,7 +386,8 @@ def test_expand_dims():
     xr_assert_allclose(fn(x_test), x_test.expand_dims(country=2, state=3))
 
     # Test with a dict of name-coord array pairs
-    y = x.expand_dims({"country": np.array([1, 2]), "state": np.array([3, 4, 5])})
+    with pytest.warns(UserWarning, match="only its length is used"):
+        y = x.expand_dims({"country": np.array([1, 2]), "state": np.array([3, 4, 5])})
     fn = xr_function([x], y)
     xr_assert_allclose(
         fn(x_test),
@@ -471,7 +467,7 @@ def test_expand_dims_errors():
     # TypeError: unhashable type: 'numpy.ndarray'
 
     # Test with a numpy array as dim (not supported)
-    with pytest.raises(TypeError, match="unhashable type"):
+    with pytest.raises(TypeError, match="Invalid type for `dim`"):
         y.expand_dims(np.array([1, 2]))
 
 

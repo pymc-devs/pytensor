@@ -1,9 +1,14 @@
+import pytest
+
+
+pytest.importorskip("xarray")
+pytestmark = pytest.mark.filterwarnings("error")
+
 import inspect
 import re
 from copy import deepcopy
 
 import numpy as np
-import pytest
 
 import pytensor.tensor.random as ptr
 import pytensor.xtensor.random as pxr

@@ -2,6 +2,8 @@ import pytest
 
 
 pytest.importorskip("xarray")
+pytestmark = pytest.mark.filterwarnings("error")
+
 
 import re
 

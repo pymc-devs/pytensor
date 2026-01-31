@@ -3,6 +3,7 @@ import pytest
 
 pytest.importorskip("xarray")
 pytest.importorskip("xarray_einstats")
+pytestmark = pytest.mark.filterwarnings("error")
 
 import numpy as np
 from xarray import DataArray
