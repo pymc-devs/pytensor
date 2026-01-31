@@ -10,7 +10,7 @@ from xarray import DataArray
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor import as_tensor, specify_shape, tensor
 from pytensor.xtensor import xtensor
-from pytensor.xtensor.type import XTensorType, as_xtensor
+from pytensor.xtensor.type import XTensorConstant, XTensorType, as_xtensor
 
 
 def test_xtensortype():
@@ -75,6 +75,37 @@ def test_xtensortype_filter_variable():
     with pytest.raises(TypeError):
         z4 = tensor("z4", shape=(2, 3), dtype="int32")
         x.type.filter_variable(z4)
+
+
+def test_xtensortype_filter_variable_constant():
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3), dtype="float32")
+
+    valid_x = np.zeros((2, 3), dtype="float32")
+    res = x.type.filter_variable(valid_x)
+    assert isinstance(res, XTensorConstant) and res.type == x.type
+
+    # Upcasting allowed
+    valid_x = np.zeros((2, 3), dtype="float16")
+    res = x.type.filter_variable(valid_x)
+    assert isinstance(res, XTensorConstant) and res.type == x.type
+
+    valid_x = np.zeros((2, 3), dtype="int16")
+    res = x.type.filter_variable(valid_x)
+    assert isinstance(res, XTensorConstant) and res.type == x.type
+
+    # Downcasting not allowed
+    invalid_x = np.zeros((2, 3), dtype="float64")
+    with pytest.raises(TypeError):
+        x.type.filter_variable(invalid_x)
+
+    invalid_x = np.zeros((2, 3), dtype="int32")
+    with pytest.raises(TypeError):
+        x.type.filter_variable(invalid_x)
+
+    # non_array types are fine
+    valid_x = [[0, 0, 0], [0, 0, 0]]
+    res = x.type.filter_variable(valid_x)
+    assert isinstance(res, XTensorConstant) and res.type == x.type
 
 
 def test_xtensor_constant():
