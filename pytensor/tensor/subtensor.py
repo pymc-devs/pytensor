@@ -70,6 +70,7 @@ from pytensor.tensor.type_other import (
     make_slice,
 )
 from pytensor.tensor.variable import TensorConstant, TensorVariable
+from pytensor.utils import unzip
 
 
 _logger = logging.getLogger("pytensor.tensor.subtensor")
@@ -650,7 +651,7 @@ def indexed_result_shape(array_shape, indices, indices_are_shapes=False):
         )
 
     for basic, grp_dim_indices in idx_groups:
-        dim_nums, grp_indices = zip(*grp_dim_indices, strict=True)
+        dim_nums, grp_indices = unzip(grp_dim_indices, n=2, strict=True)
         remaining_dims = tuple(dim for dim in remaining_dims if dim not in dim_nums)
 
         if basic:

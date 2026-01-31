@@ -35,6 +35,7 @@ from pytensor.tensor.math import tensordot
 from pytensor.tensor.reshape import pack, unpack
 from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable, Variable
+from pytensor.utils import unzip
 
 
 # scipy.optimize can be slow to import, and will not be used by most users
@@ -297,7 +298,7 @@ class ScipyScalarWrapperOp(ScipyWrapperOp):
             # No differentiable arguments, return disconnected gradients
             return arg_grads
 
-        outer_args_to_diff, df_dthetas = zip(*valid_args_and_grads)
+        outer_args_to_diff, df_dthetas = unzip(valid_args_and_grads, n=2)
 
         replace = dict(zip(fgraph.inputs, (x_star, *args), strict=True))
         df_dx_star, *df_dthetas_stars = graph_replace(

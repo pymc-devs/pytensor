@@ -12,6 +12,7 @@ from pytensor.tensor import as_tensor, get_scalar_constant_value
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.type import integer_dtypes
 from pytensor.tensor.utils import get_static_shape_from_size_variables
+from pytensor.utils import unzip
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.math import cast, second
 from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
@@ -296,7 +297,7 @@ class Concat(XOp):
                 if concat_dim not in inp.type.dims:
                     dims_and_shape[concat_dim] += 1
 
-        dims, shape = zip(*dims_and_shape.items())
+        dims, shape = unzip(dims_and_shape.items(), n=2)
         dtype = upcast(*[x.type.dtype for x in inputs])
         output = xtensor(dtype=dtype, dims=dims, shape=shape)
         return Apply(self, inputs, [output])

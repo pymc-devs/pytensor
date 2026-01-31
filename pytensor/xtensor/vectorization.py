@@ -13,6 +13,7 @@ from pytensor.tensor.random.type import RandomType
 from pytensor.tensor.utils import (
     get_static_shape_from_size_variables,
 )
+from pytensor.utils import unzip
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
 
@@ -57,12 +58,7 @@ class XElemwise(XOp):
                 f"Wrong number of inputs, expected {self.scalar_op.nin}, got {len(inputs)}"
             )
 
-        dims_and_shape = combine_dims_and_shape(inputs)
-        if dims_and_shape:
-            output_dims, output_shape = zip(*dims_and_shape.items())
-        else:
-            output_dims, output_shape = (), ()
-
+        output_dims, output_shape = unzip(combine_dims_and_shape(inputs).items(), n=2)
         dummy_scalars = [ps.get_scalar_type(inp.type.dtype)() for inp in inputs]
         output_dtypes = [
             out.type.dtype for out in self.scalar_op.make_node(*dummy_scalars).outputs
@@ -99,8 +95,9 @@ class XBlockwise(XOp):
 
         core_inputs_dims, core_outputs_dims = self.core_dims
         core_input_dims_set = set(chain.from_iterable(core_inputs_dims))
-        batch_dims, batch_shape = zip(
-            *((k, v) for k, v in dims_and_shape.items() if k not in core_input_dims_set)
+        batch_dims, batch_shape = unzip(
+            ((k, v) for k, v in dims_and_shape.items() if k not in core_input_dims_set),
+            n=2,
         )
 
         dummy_core_inputs = []
@@ -236,17 +233,16 @@ class XRV(XOp, RNGConsumerOp):
                 f"Size dimensions {sorted(conflict_dims)} conflict with parameter dimensions. They should be unique."
             )
 
-        batch_dims_and_shape = [
-            (dim, dim_length)
-            for dim, dim_length in (
-                extra_dims_and_shape | params_dims_and_shape
-            ).items()
-            if dim not in input_core_dims_set
-        ]
-        if batch_dims_and_shape:
-            batch_output_dims, batch_output_shape = zip(*batch_dims_and_shape)
-        else:
-            batch_output_dims, batch_output_shape = (), ()
+        batch_output_dims, batch_output_shape = unzip(
+            (
+                (dim, dim_length)
+                for dim, dim_length in (
+                    extra_dims_and_shape | params_dims_and_shape
+                ).items()
+                if dim not in input_core_dims_set
+            ),
+            n=2,
+        )
 
         dummy_core_inputs = []
         for param, core_param_dims in zip(params, param_core_dims):
