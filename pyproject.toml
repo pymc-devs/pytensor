@@ -163,6 +163,7 @@ lines-after-imports = 2
 "tests/link/numba/**/test_*.py" = ["E402"]
 "tests/link/pytorch/**/test_*.py" = ["E402"]
 "tests/link/mlx/**/test_*.py" = ["E402"]
+"tests/xtensor/**/test_*.py" = ["E402"]
 
 
 

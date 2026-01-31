@@ -37,7 +37,7 @@ from pytensor.tensor.utils import (
     normalize_reduce_axis,
 )
 from pytensor.tensor.variable import TensorVariable
-from pytensor.utils import uniq
+from pytensor.utils import uniq, unzip
 
 
 class DimShuffle(ExternalCOp):
@@ -765,8 +765,8 @@ class Elemwise(OpenMPOp):
         # assert that inames and inputs order stay consistent.
         # This is to protect again futur change of uniq.
         assert len(inames) == len(inputs)
-        ii, iii = list(
-            zip(*uniq(list(zip(_inames, node.inputs, strict=True))), strict=True)
+        ii, iii = unzip(
+            uniq(list(zip(_inames, node.inputs, strict=True))), n=2, strict=True
         )
         assert all(x == y for x, y in zip(ii, inames, strict=True))
         assert all(x == y for x, y in zip(iii, inputs, strict=True))

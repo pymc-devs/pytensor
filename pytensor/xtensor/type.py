@@ -8,6 +8,7 @@ from pytensor.compile import (
     register_deep_copy_op_c_code,
     register_view_op_c_code,
 )
+from pytensor.scalar import ScalarType
 from pytensor.tensor import (
     TensorType,
     _as_tensor_variable,
@@ -35,6 +36,7 @@ from pytensor.graph import Apply, Constant
 from pytensor.graph.basic import OptionalApplyType, Variable
 from pytensor.graph.type import HasDataType, HasShape, Type
 from pytensor.tensor.basic import constant as tensor_constant
+from pytensor.tensor.basic import tensor_from_scalar
 from pytensor.tensor.variable import TensorConstantSignature, TensorVariable
 
 
@@ -103,7 +105,7 @@ class XTensorType(Type, HasDataType, HasShape):
         if not isinstance(other, Variable):
             # The value is not a Variable: we cast it into
             # a Constant of the appropriate Type.
-            other = xtensor_constant(other)
+            other = XTensorConstant(type=self, data=other)
 
         if self.is_super(other.type):
             return other
@@ -695,12 +697,27 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         XTensorVariable
             A new tensor with the specified dimension(s) removed.
         """
-        return px.shape.squeeze(self, dim, drop, axis)
+        if drop is not None:
+            if drop is not None:
+                warnings.warn(
+                    "drop parameter has no effect in pytensor.xtensor", UserWarning
+                )
+
+        if axis is not None:
+            if dim is not None:
+                raise ValueError("Cannot specify both `dim` and `axis`")
+
+            if not isinstance(axis, Sequence):
+                axis = (axis,)
+
+            dim = tuple(self.type.dims[i] for i in axis)
+
+        return px.shape.squeeze(self, dim)
 
     def expand_dims(
         self,
         dim: str | Sequence[str] | dict[str, int | Sequence] | None = None,
-        create_index_for_new_dim: bool = True,
+        create_index_for_new_dim: bool | None = None,
         axis: int | Sequence[int] | None = None,
         **dim_kwargs,
     ):
@@ -730,7 +747,6 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         return px.shape.expand_dims(
             self,
             dim,
-            create_index_for_new_dim=create_index_for_new_dim,
             axis=axis,
             **dim_kwargs,
         )
@@ -1006,9 +1022,15 @@ def as_xtensor(x, dims: Sequence[str] | None = None, *, name: str | None = None)
                         "non-scalar TensorVariable cannot be converted to XTensorVariable without dims."
                     )
             return px.basic.xtensor_from_tensor(x, dims=dims, name=name)
+        elif isinstance(x.type, ScalarType):
+            if dims is None:
+                dims = ()
+            return px.basic.xtensor_from_tensor(
+                tensor_from_scalar(x), dims=dims, name=name
+            )
         else:
             raise TypeError(
-                "Variable with type {x.type} cannot be converted to XTensorVariable."
+                f"Variable with type {x.type} cannot be converted to XTensorVariable."
             )
     try:
         return xtensor_constant(x, dims=dims, name=name)
