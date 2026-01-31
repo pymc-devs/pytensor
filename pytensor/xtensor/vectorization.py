@@ -78,11 +78,13 @@ class XBlockwise(XOp):
         core_op: Op,
         core_dims: tuple[tuple[tuple[str, ...], ...], tuple[tuple[str, ...], ...]],
         signature: str | None = None,
+        unaligned_core_dims: tuple[str, ...] = (),
     ):
         super().__init__()
         self.core_op = core_op
         self.core_dims = core_dims
         self.signature = signature  # Only used for lowering, not for validation
+        self.unaligned_core_dims = unaligned_core_dims
 
     def make_node(self, *inputs):
         inputs = [as_xtensor(i) for i in inputs]
@@ -91,7 +93,9 @@ class XBlockwise(XOp):
                 f"Wrong number of inputs, expected {len(self.core_dims[0])}, got {len(inputs)}"
             )
 
-        dims_and_shape = combine_dims_and_shape(inputs)
+        dims_and_shape = combine_dims_and_shape(
+            inputs, exclude=self.unaligned_core_dims
+        )
 
         core_inputs_dims, core_outputs_dims = self.core_dims
         core_input_dims_set = set(chain.from_iterable(core_inputs_dims))

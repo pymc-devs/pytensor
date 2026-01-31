@@ -195,7 +195,8 @@ class Convolve1d(AbstractConvolveNd, COp):  # type: ignore[misc]
         return code
 
 
-blockwise_convolve_1d = Blockwise(Convolve1d())
+_convolve_1d = Convolve1d()
+_blockwise_convolve_1d = Blockwise(_convolve_1d)
 
 
 def convolve1d(
@@ -235,14 +236,14 @@ def convolve1d(
         zeros_right = (in2.shape[-1] - 1) // 2
         in1 = join(
             -1,
-            zeros((*in1_batch_shape, zeros_left), dtype=in2.dtype),
+            zeros((*in1_batch_shape, zeros_left), dtype=in1.dtype),
             in1,
-            zeros((*in1_batch_shape, zeros_right), dtype=in2.dtype),
+            zeros((*in1_batch_shape, zeros_right), dtype=in1.dtype),
         )
         mode = "valid"
 
     full_mode = as_scalar(np.bool_(mode == "full"))
-    return type_cast(TensorVariable, blockwise_convolve_1d(in1, in2, full_mode))
+    return type_cast(TensorVariable, _blockwise_convolve_1d(in1, in2, full_mode))
 
 
 class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
