@@ -299,3 +299,20 @@ def test_sparse_conversion():
                 res = to_csc(x_inp)
             assert res.format == output_format
             np.testing.assert_array_equal(res.todense(), x_dense)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_from_dense(format):
+    rng = np.random.default_rng((156, format == "csr"))
+    x = pt.matrix(name="x", shape=(11, 7), dtype=config.floatX)
+    x_sparse = sp.sparse.random(
+        11, 7, density=0.4, format=format, random_state=rng, dtype=config.floatX
+    )
+    x_test = x_sparse.toarray()
+
+    if format == "csr":
+        y = ps.csr_from_dense(x)
+    else:
+        y = ps.csc_from_dense(x)
+
+    compare_numba_and_py_sparse([x], y, [x_test])
