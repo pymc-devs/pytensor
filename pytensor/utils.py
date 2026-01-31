@@ -338,3 +338,14 @@ class Singleton:
 
     def __hash__(self):
         return hash(type(self))
+
+
+def unzip(iterable, n: int, strict: bool = False):
+    """Unzip a nested iterable, returns n empty tuples if empty.
+
+    It can be safely unpacked into n variables.
+    """
+    res = tuple(zip(*iterable, strict=strict))
+    if not res:
+        return ((),) * n
+    return res

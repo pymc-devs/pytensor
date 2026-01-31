@@ -22,6 +22,7 @@ from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import matrix, tensor, vector
 from pytensor.tensor.variable import TensorVariable
+from pytensor.utils import unzip
 
 
 logger = logging.getLogger(__name__)
@@ -1323,7 +1324,7 @@ class BaseBlockDiagonal(Op):
         return [gout[0][slc] for slc in slices]
 
     def infer_shape(self, fgraph, nodes, shapes):
-        first, second = zip(*shapes, strict=True)
+        first, second = unzip(shapes, n=2, strict=True)
         return [(pt.add(*first), pt.add(*second))]
 
     def _validate_and_prepare_inputs(self, matrices, as_tensor_func):
