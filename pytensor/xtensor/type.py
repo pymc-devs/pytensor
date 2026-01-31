@@ -687,7 +687,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             The name(s) of the dimension(s) to remove. If None, all dimensions of size 1
             (known statically) will be removed. Dimensions with unknown static shape will be retained, even if they have size 1 at runtime.
         drop : bool, optional
-            If drop=True, drop squeezed coordinates instead of making them scalar.
+            Ignored by PyTensor.
         axis : int or iterable of int, optional
             The axis(es) to remove. If None, all dimensions of size 1 will be removed.
         Returns
@@ -695,12 +695,21 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         XTensorVariable
             A new tensor with the specified dimension(s) removed.
         """
-        return px.shape.squeeze(self, dim, drop, axis)
+        if axis is not None:
+            if dim is not None:
+                raise ValueError("Cannot specify both `dim` and `axis`")
+
+            if not isinstance(axis, Sequence):
+                axis = (axis,)
+
+            dim = tuple(self.type.dims[i] for i in axis)
+
+        return px.shape.squeeze(self, dim)
 
     def expand_dims(
         self,
         dim: str | Sequence[str] | dict[str, int | Sequence] | None = None,
-        create_index_for_new_dim: bool = True,
+        create_index_for_new_dim: bool | None = None,
         axis: int | Sequence[int] | None = None,
         **dim_kwargs,
     ):
@@ -714,7 +723,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
 
             - int: the new size
             - sequence: coordinates (length determines size)
-        create_index_for_new_dim : bool, default: True
+        create_index_for_new_dim : bool, optional
             Ignored by PyTensor
         axis : int | Sequence[int] | None, default: None
             Not implemented yet. In xarray, specifies where to insert the new dimension(s).
@@ -730,7 +739,6 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         return px.shape.expand_dims(
             self,
             dim,
-            create_index_for_new_dim=create_index_for_new_dim,
             axis=axis,
             **dim_kwargs,
         )
