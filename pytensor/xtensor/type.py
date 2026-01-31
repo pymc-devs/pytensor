@@ -103,7 +103,7 @@ class XTensorType(Type, HasDataType, HasShape):
         if not isinstance(other, Variable):
             # The value is not a Variable: we cast it into
             # a Constant of the appropriate Type.
-            other = xtensor_constant(other)
+            other = XTensorConstant(type=self, data=other)
 
         if self.is_super(other.type):
             return other
