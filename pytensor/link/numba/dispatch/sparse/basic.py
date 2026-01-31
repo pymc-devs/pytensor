@@ -10,11 +10,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
-from pytensor.link.numba.dispatch.sparse.variable import (
-    CSMatrixType,
-    csc_matrix_from_components,
-    csr_matrix_from_components,
-)
+from pytensor.link.numba.dispatch.sparse.variable import CSMatrixType
 from pytensor.sparse import (
     CSM,
     Cast,
@@ -132,7 +128,7 @@ def numba_funcify_SparseFromDense(op, node, **kwargs):
                         pos += 1
                 indptr[i + 1] = pos
 
-            return csr_matrix_from_components(data, indices, indptr, (n_rows, n_cols))
+            return sp.sparse.csr_matrix((data, indices, indptr), (n_rows, n_cols))
 
         return dense_to_csr
 
@@ -165,6 +161,6 @@ def numba_funcify_SparseFromDense(op, node, **kwargs):
                     pos += 1
             indptr[j + 1] = pos
 
-        return csc_matrix_from_components(data, indices, indptr, (n_rows, n_cols))
+        return sp.sparse.csc_matrix((data, indices, indptr), (n_rows, n_cols))
 
     return dense_to_csc
