@@ -8,6 +8,7 @@ from pytensor.compile import (
     register_deep_copy_op_c_code,
     register_view_op_c_code,
 )
+from pytensor.scalar import ScalarType
 from pytensor.tensor import (
     TensorType,
     _as_tensor_variable,
@@ -35,6 +36,7 @@ from pytensor.graph import Apply, Constant
 from pytensor.graph.basic import OptionalApplyType, Variable
 from pytensor.graph.type import HasDataType, HasShape, Type
 from pytensor.tensor.basic import constant as tensor_constant
+from pytensor.tensor.basic import tensor_from_scalar
 from pytensor.tensor.variable import TensorConstantSignature, TensorVariable
 
 
@@ -1014,9 +1016,15 @@ def as_xtensor(x, dims: Sequence[str] | None = None, *, name: str | None = None)
                         "non-scalar TensorVariable cannot be converted to XTensorVariable without dims."
                     )
             return px.basic.xtensor_from_tensor(x, dims=dims, name=name)
+        elif isinstance(x.type, ScalarType):
+            if dims is None:
+                dims = ()
+            return px.basic.xtensor_from_tensor(
+                tensor_from_scalar(x), dims=dims, name=name
+            )
         else:
             raise TypeError(
-                "Variable with type {x.type} cannot be converted to XTensorVariable."
+                f"Variable with type {x.type} cannot be converted to XTensorVariable."
             )
     try:
         return xtensor_constant(x, dims=dims, name=name)

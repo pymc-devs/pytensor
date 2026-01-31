@@ -91,10 +91,21 @@ class XBlockwise(XOp):
                 f"Wrong number of inputs, expected {len(self.core_dims[0])}, got {len(inputs)}"
             )
 
-        dims_and_shape = combine_dims_and_shape(inputs)
-
         core_inputs_dims, core_outputs_dims = self.core_dims
         core_input_dims_set = set(chain.from_iterable(core_inputs_dims))
+
+        # Check no input has a core_dim it shouldn't have
+        for i, (inp, core_inp_dims) in enumerate(
+            zip(inputs, core_inputs_dims, strict=True)
+        ):
+            if invalid_dims := (
+                set(inp.dims) & (core_input_dims_set - set(core_inp_dims))
+            ):
+                raise ValueError(
+                    f"Input {i} has invalid core dims {sorted(invalid_dims)}. Allowed: {core_inp_dims}"
+                )
+
+        dims_and_shape = combine_dims_and_shape(inputs)
         batch_dims, batch_shape = unzip(
             ((k, v) for k, v in dims_and_shape.items() if k not in core_input_dims_set),
             n=2,
