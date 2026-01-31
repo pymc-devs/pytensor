@@ -695,12 +695,27 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         XTensorVariable
             A new tensor with the specified dimension(s) removed.
         """
-        return px.shape.squeeze(self, dim, drop, axis)
+        if drop is not None:
+            if drop is not None:
+                warnings.warn(
+                    "drop parameter has no effect in pytensor.xtensor", UserWarning
+                )
+
+        if axis is not None:
+            if dim is not None:
+                raise ValueError("Cannot specify both `dim` and `axis`")
+
+            if not isinstance(axis, Sequence):
+                axis = (axis,)
+
+            dim = tuple(self.type.dims[i] for i in axis)
+
+        return px.shape.squeeze(self, dim)
 
     def expand_dims(
         self,
         dim: str | Sequence[str] | dict[str, int | Sequence] | None = None,
-        create_index_for_new_dim: bool = True,
+        create_index_for_new_dim: bool | None = None,
         axis: int | Sequence[int] | None = None,
         **dim_kwargs,
     ):
@@ -730,7 +745,6 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
         return px.shape.expand_dims(
             self,
             dim,
-            create_index_for_new_dim=create_index_for_new_dim,
             axis=axis,
             **dim_kwargs,
         )
