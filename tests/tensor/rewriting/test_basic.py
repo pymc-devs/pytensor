@@ -784,10 +784,11 @@ class TestConstantFolding:
 
         fg = FunctionGraph(outputs=[out], clone=False)
         # Default constant_folding will raise
-        with pytest.raises(NotImplementedError):
-            topo_constant_folding.apply(fg)
+        topo_constant_folding.apply(fg)
+        assert not isinstance(fg.outputs[0], Constant)
+        assert isinstance(fg.outputs[0].owner.op, OpNoPerform)
 
-        # Unconditional constant folding will be silent
+        # Default and Unconditional constant folding will be silent
         topo_unconditional_constant_folding.apply(fg)
         assert not isinstance(fg.outputs[0], Constant)
         assert isinstance(fg.outputs[0].owner.op, OpNoPerform)
