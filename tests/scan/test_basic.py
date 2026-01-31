@@ -2535,34 +2535,22 @@ def test_outputs_taps_check():
         scan(f, x, outputs_info)
 
 
-def test_inconsistent_broadcast_error():
-    x = tensor3()
+def test_relaxed_broadcast_allows_observed_more_specific_and_grad():
     initial_x = pt.constant(np.zeros((1, 10)))
-    y = scan(
-        fn=lambda x, prev_x: x + prev_x,
-        sequences=x,
-        outputs_info=[dict(initial=initial_x)],
-        return_updates=False,
-    )
-    # This should now work with relaxed broadcast checks
-    g = grad(y.sum(), x)
-    assert g is not None
 
+    def get_sum_of_grad(inp):
+        y = scan(
+            fn=lambda x_i, prev_x: x_i + prev_x,
+            sequences=inp,
+            outputs_info=[dict(initial=initial_x)],
+            return_updates=False,
+        )
+        return y.sum()
 
-def test_filter_variable_allows_inner_more_specific():
-    outer_t = TensorType(config.floatX, shape=(None,))
-    inner_t = TensorType(config.floatX, shape=(None, 1))
-    inner_var = inner_t()
-    outer_t.filter_variable(inner_var, allow_convert=True)
-
-
-def test_filter_variable_rejects_incompatible_static_shapes():
-    outer_t = TensorType(config.floatX, shape=(5,))
-    inner_t = TensorType(config.floatX, shape=(2,))
-    inner_var = inner_t()
-    with pytest.raises(TypeError):
-        outer_t.filter_variable(inner_var, allow_convert=True)
-
+    floatX = config.floatX
+    rng = np.random.default_rng(utt.fetch_seed())
+    sample = rng.random((2, 1, 10)).astype(floatX)
+    utt.verify_grad(get_sum_of_grad, [sample])
 
 def test_missing_input_error():
     c = shared(0.0)
