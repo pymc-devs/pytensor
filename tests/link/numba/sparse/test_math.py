@@ -95,3 +95,38 @@ def test_sparse_spmv(sp_format):
     y_test = rng.normal(size=(6,))
 
     compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("x_format", ["csr", "csc"])
+@pytest.mark.parametrize("y_format", ["csr", "csc", "dense"])
+@pytest.mark.parametrize("x_shape, y_shape", DOT_SHAPES)
+def test_structured_dot_grad(x_format, y_format, x_shape, y_shape):
+    rng = np.random.default_rng()
+    g_xy_shape = (x_shape[0], y_shape[1])
+
+    x = ps.matrix(format=x_format, name="x", shape=x_shape)
+    x_test = scipy.sparse.random(*x_shape, density=0.4, format=x_format)
+
+    if y_format == "dense":
+        y = pt.matrix("y", shape=y_shape)
+        g_xy = pt.matrix(name="g_xy", shape=g_xy_shape)
+        y_test = rng.normal(size=y_shape)
+        g_xy_test = rng.normal(size=g_xy_shape)
+    else:
+        y = ps.matrix(format=y_format, name="y", shape=y_shape)
+        g_xy = ps.matrix(format=x_format, name="g_xy", shape=g_xy_shape)
+        y_test = scipy.sparse.random(*y_shape, density=0.5, format=y_format)
+        g_xy_test = scipy.sparse.random(*g_xy_shape, density=0.3, format=x_format)
+
+    z = ps.structured_dot_grad(x, y, g_xy)
+    compare_numba_and_py_sparse([x, y, g_xy], z, [x_test, y_test, g_xy_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+@pytest.mark.parametrize("axis", [None, 0, 1])
+def test_sparse_sum(format, axis):
+    x = ps.matrix(format=format, name="x", shape=(7, 5))
+    z = ps.sp_sum(x, axis=axis)
+    x_test = scipy.sparse.random(7, 5, density=0.4, format=format)
+
+    compare_numba_and_py_sparse([x], z, [x_test])

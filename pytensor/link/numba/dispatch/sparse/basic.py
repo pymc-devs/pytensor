@@ -10,11 +10,7 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
-from pytensor.link.numba.dispatch.sparse.variable import (
-    CSMatrixType,
-    csc_matrix_from_components,
-    csr_matrix_from_components,
-)
+from pytensor.link.numba.dispatch.sparse.variable import CSMatrixType
 from pytensor.sparse import (
     CSM,
     Cast,
