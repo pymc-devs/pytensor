@@ -14,6 +14,9 @@ class XOp(Op):
             f"xtensor operation {self} must be lowered to equivalent tensor operations"
         )
 
+    def do_constant_folding(self, fgraph, node):
+        return False
+
 
 class XTypeCastOp(TypeCastingOp):
     """Base class for Ops that type cast between TensorType and XTensorType.
