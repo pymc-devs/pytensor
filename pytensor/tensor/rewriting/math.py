@@ -41,12 +41,14 @@ from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
 from pytensor.tensor.math import (
+    Argmax,
     Dot,
     Prod,
     Sum,
     _conj,
     _dot,
     _matmul,
+    argmin,
     add,
     arccosh,
     arcsinh,
@@ -120,6 +122,14 @@ from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
 )
+
+MONOTONIC_INCREASING = (
+    ps.Exp, ps.Exp2, ps.Expm1, ps.Log, ps.Log2, ps.Log10, ps.Log1p,
+    ps.Sqrt, ps.Deg2Rad, ps.Rad2Deg, ps.ArcSin, ps.Tan, ps.ArcTan,
+    ps.ArcCosh, ps.Sinh, ps.ArcSinh, ps.Tanh, ps.ArcTanh
+)
+
+MONOTONIC_DECREASING = (ps.Neg, ps.Reciprocal, ps.ArcCos)
 
 
 def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
@@ -3885,3 +3895,81 @@ local_log_kv = PatternNodeRewriter(
 )
 
 register_stabilize(local_log_kv)
+
+def _is_argmin(node):
+    """Check if node represents argmin by detecting Argmax(Neg(...))"""
+    if not isinstance(node.op, Argmax):
+        return False
+    
+    input_node = node.inputs[0]
+    if not input_node.owner:
+        return False
+    
+    # argmin(x) becomes Argmax(Neg(x)) or Argmax(imax - x) or Argmax(~x)
+    inner_op = input_node.owner.op
+    if isinstance(inner_op, Elemwise) and isinstance(inner_op.scalar_op, ps.Neg):
+        return True
+    
+    return False
+
+@register_canonicalize
+@node_rewriter([Argmax])
+def local_argmax_argmin_monotonic(fgraph, node):
+    """
+    Optimize argmax/argmin with monotonic functions:
+    - argmax(f_inc(x)) -> argmax(x) for monotonically increasing f
+    - argmin(f_inc(x)) -> argmin(x) for monotonically increasing f
+    - argmax(f_dec(x)) -> argmin(x) for monotonically decreasing f
+    - argmin(f_dec(x)) -> argmax(x) for monotonically decreasing f
+    
+    Note: argmin is represented as Argmax(Neg(...)) internally
+    """
+
+    if not isinstance(node.op, Argmax):
+        return False
+
+    is_argmin = _is_argmin(node)
+    argmax_input = node.inputs[0]
+    
+    # If argmin, skip the Neg wrapper to get to the monotonic function
+    if is_argmin:
+        if not argmax_input.owner:
+            return False
+        argmax_input = argmax_input.owner.inputs[0]  # Skip Neg
+    
+    if not argmax_input.owner:
+        return False
+        
+    inner_op = argmax_input.owner.op
+    
+    if not isinstance(inner_op, Elemwise):
+        return False
+        
+    scalar_op = inner_op.scalar_op
+    
+    is_increasing = isinstance(scalar_op, MONOTONIC_INCREASING)
+    is_decreasing = isinstance(scalar_op, MONOTONIC_DECREASING)
+    
+    if not (is_increasing or is_decreasing):
+        return False
+    
+    x = argmax_input.owner.inputs[0]
+    
+    # Determine new operation based on current op and monotonicity
+    if is_argmin:
+        if is_increasing:
+            # argmin(f_inc(x)) -> argmin(x) = Argmax(Neg(x))
+            new_output = argmin(x, axis=node.op.axis)
+        else:  # is_decreasing
+            # argmin(f_dec(x)) -> argmax(x)
+            new_output = node.op(x)
+    else:  # is argmax
+        if is_increasing:
+            # argmax(f_inc(x)) -> argmax(x)
+            new_output = node.op(x)
+        else:  # is_decreasing
+            # argmax(f_dec(x)) -> argmin(x) = Argmax(Neg(x))
+            new_output = argmin(x, axis=node.op.axis)
+    
+    copy_stack_trace(node.outputs[0], new_output)
+    return [new_output]

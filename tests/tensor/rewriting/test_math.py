@@ -5022,3 +5022,122 @@ class TestBlockDiagDotToDotBlockDiag:
             c_val,
             d_val,
         )
+
+class TestArgmaxArgminMonotonic:
+    """Test argmax/argmin rewrites for monotonic functions."""
+    
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_argmax_increasing_functions(self, axis):
+        """Test argmax(f_inc(x)) -> argmax(x) for monotonic increasing f."""
+        x = pt.vector("x")
+        test_val = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        
+        mode = get_default_mode()
+        
+        for f in [pt.exp, pt.log1p, pt.sqrt]:
+            # Compile the unrewritten and expected graphs
+            unrewritten = pt.argmax(f(x), axis=axis)
+            expected = pt.argmax(x, axis=axis)
+            
+            # Create functions to apply rewrites
+            fn_unrewritten = function([x], unrewritten, mode=mode)
+            fn_expected = function([x], expected, mode=mode)
+            
+            # Test numerical equality
+            result_unrewritten = fn_unrewritten(test_val)
+            result_expected = fn_expected(test_val)
+            
+            assert result_unrewritten == result_expected, (
+                f"argmax({f.__name__}(x), axis={axis}) failed: "
+                f"got {result_unrewritten}, expected {result_expected}"
+            )
+            
+            # Verify the rewrite was applied (no Exp/Log1p/Sqrt in final graph)
+            topo = fn_unrewritten.maker.fgraph.toposort()
+            has_eliminated_op = any(
+                isinstance(node.op, Elemwise) and 
+                isinstance(node.op.scalar_op, (ps.Exp, ps.Log1p, ps.Sqrt))
+                for node in topo
+            )
+            assert not has_eliminated_op, (
+                f"Rewrite failed to eliminate {f.__name__} from argmax graph"
+            )
+    
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_argmin_increasing_functions(self, axis):
+        """Test argmin(f_inc(x)) -> argmin(x) for monotonic increasing f."""
+        x = pt.vector("x")
+        test_val = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        
+        mode = get_default_mode()
+        
+        for f in [pt.exp, pt.log1p, pt.sqrt]:
+            unrewritten = pt.argmin(f(x), axis=axis)
+            expected = pt.argmin(x, axis=axis)
+            
+            fn_unrewritten = function([x], unrewritten, mode=mode)
+            fn_expected = function([x], expected, mode=mode)
+            
+            result_unrewritten = fn_unrewritten(test_val)
+            result_expected = fn_expected(test_val)
+            
+            assert result_unrewritten == result_expected, (
+                f"argmin({f.__name__}(x), axis={axis}) failed: "
+                f"got {result_unrewritten}, expected {result_expected}"
+            )
+            
+            topo = fn_unrewritten.maker.fgraph.toposort()
+            has_eliminated_op = any(
+                isinstance(node.op, Elemwise) and 
+                isinstance(node.op.scalar_op, (ps.Exp, ps.Log1p, ps.Sqrt))
+                for node in topo
+            )
+            assert not has_eliminated_op, (
+                f"Rewrite failed to eliminate {f.__name__} from argmin graph"
+            )
+    
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_argmax_decreasing_functions(self, axis):
+        """Test argmax(f_dec(x)) -> argmin(x) for monotonic decreasing f."""
+        x = pt.vector("x")
+        test_val = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        
+        mode = get_default_mode()
+        
+        for f in [pt.neg, lambda z: -z]:
+            unrewritten = pt.argmax(f(x), axis=axis)
+            expected = pt.argmin(x, axis=axis)
+            
+            fn_unrewritten = function([x], unrewritten, mode=mode)
+            fn_expected = function([x], expected, mode=mode)
+            
+            result_unrewritten = fn_unrewritten(test_val)
+            result_expected = fn_expected(test_val)
+            
+            assert result_unrewritten == result_expected, (
+                f"argmax(neg(x), axis={axis}) failed: "
+                f"got {result_unrewritten}, expected {result_expected}"
+            )
+    
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_argmin_decreasing_functions(self, axis):
+        """Test argmin(f_dec(x)) -> argmax(x) for monotonic decreasing f."""
+        x = pt.vector("x")
+        test_val = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        
+        mode = get_default_mode()
+        
+        for f in [pt.neg, lambda z: -z]:
+            unrewritten = pt.argmin(f(x), axis=axis)
+            expected = pt.argmax(x, axis=axis)
+            
+            fn_unrewritten = function([x], unrewritten, mode=mode)
+            fn_expected = function([x], expected, mode=mode)
+            
+            result_unrewritten = fn_unrewritten(test_val)
+            result_expected = fn_expected(test_val)
+            
+            assert result_unrewritten == result_expected, (
+                f"argmin(neg(x), axis={axis}) failed: "
+                f"got {result_unrewritten}, expected {result_expected}"
+            )
