@@ -326,6 +326,19 @@ class IndexUpdate(XOp):
         self.mode = mode
         self.idx_list = idx_list
 
+    def __hash__(self):
+        """Hash using mode and idx_list. Slices are not hashable in Python < 3.12."""
+        return hash((type(self), self.mode, self._hashable_idx_list()))
+
+    def _hashable_idx_list(self):
+        """Return a hashable version of idx_list (slices converted to tuples)."""
+        return tuple(
+            (slice, entry.start, entry.stop, entry.step)
+            if isinstance(entry, slice)
+            else entry
+            for entry in self.idx_list
+        )
+
     def make_node(self, x, y, x_view, *index_inputs):
         try:
             y = as_xtensor(y)

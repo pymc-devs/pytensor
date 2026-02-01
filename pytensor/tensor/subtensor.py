@@ -2852,7 +2852,6 @@ class AdvancedSubtensor(BaseSubtensor, COp):
                 start_val = get_slice_val(entry.start)
                 stop_val = get_slice_val(entry.stop)
                 step_val = get_slice_val(entry.step)
-
                 full_indices.append(slice(start_val, stop_val, step_val))
             else:
                 assert isinstance(entry, int)

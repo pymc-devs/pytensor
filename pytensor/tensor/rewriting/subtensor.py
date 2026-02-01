@@ -162,6 +162,11 @@ def transform_take(a, indices, axis):
     return transform_take(a, indices.flatten(), axis).reshape(shape, ndim=ndim)
 
 
+def is_full_slice(x):
+    # Replace this function in pymc-extras and pymc with x==slice(None)
+    return x == slice(None)
+
+
 def get_advsubtensor_axis(indices):
     """Determine the axis at which an array index is applied.
 
