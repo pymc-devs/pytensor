@@ -1,6 +1,5 @@
 import numpy as np
 import scipy as sp
-from numba.core import types
 from numba.extending import overload
 
 from pytensor import config
@@ -96,9 +95,7 @@ def numba_funcify_DenseFromSparse(op, node, **kwargs):
 
 @register_funcify_default_op_cache_key(SparseFromDense)
 def numba_funcify_SparseFromDense(op, node, **kwargs):
-    sparse_format = op.format
-
-    if sparse_format == "csr":
+    if op.format == "csr":
 
         @numba_basic.numba_njit
         def dense_to_csr(matrix):
