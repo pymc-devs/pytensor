@@ -125,11 +125,11 @@ from pytensor.tensor.variable import (
 
 MONOTONIC_INCREASING = (
     ps.Exp, ps.Exp2, ps.Expm1, ps.Log, ps.Log2, ps.Log10, ps.Log1p,
-    ps.Sqrt, ps.Deg2Rad, ps.Rad2Deg, ps.ArcSin, ps.Tan, ps.ArcTan,
+    ps.Sqrt, ps.Deg2Rad, ps.Rad2Deg, ps.ArcSin, ps.ArcTan,
     ps.ArcCosh, ps.Sinh, ps.ArcSinh, ps.Tanh, ps.ArcTanh
 )
 
-MONOTONIC_DECREASING = (ps.Neg, ps.Reciprocal, ps.ArcCos)
+MONOTONIC_DECREASING = (ps.Neg, ps.ArcCos)
 
 
 def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):

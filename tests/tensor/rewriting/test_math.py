@@ -5100,11 +5100,11 @@ class TestArgmaxArgminMonotonic:
     def test_argmax_decreasing_functions(self, axis):
         """Test argmax(f_dec(x)) -> argmin(x) for monotonic decreasing f."""
         x = pt.vector("x")
-        test_val = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        test_val = np.array([0.1, 0.3, 0.2, 0.5, 0.4])  # Values in (0, 1) for arccos
         
         mode = get_default_mode()
         
-        for f in [pt.neg, lambda z: -z]:
+        for f in [pt.arccos]:
             unrewritten = pt.argmax(f(x), axis=axis)
             expected = pt.argmin(x, axis=axis)
             
@@ -5115,19 +5115,30 @@ class TestArgmaxArgminMonotonic:
             result_expected = fn_expected(test_val)
             
             assert result_unrewritten == result_expected, (
-                f"argmax(neg(x), axis={axis}) failed: "
+                f"argmax({f.__name__}(x), axis={axis}) failed: "
                 f"got {result_unrewritten}, expected {result_expected}"
             )
-    
+            
+            # Verify the rewrite was applied (no ArcCos in final graph)
+            topo = fn_unrewritten.maker.fgraph.toposort()
+            has_eliminated_op = any(
+                isinstance(node.op, Elemwise) and 
+                isinstance(node.op.scalar_op, ps.ArcCos)  # not testing for negative since argmin contains a neg itself
+                for node in topo
+            )
+            assert not has_eliminated_op, (
+                f"Rewrite failed to eliminate arccos from argmax graph"
+            )
+
     @pytest.mark.parametrize("axis", [None, 0, -1])
     def test_argmin_decreasing_functions(self, axis):
         """Test argmin(f_dec(x)) -> argmax(x) for monotonic decreasing f."""
         x = pt.vector("x")
-        test_val = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        test_val = np.array([0.1, 0.3, 0.2, 0.5, 0.4])  # Values in (0, 1) for arccos
         
         mode = get_default_mode()
         
-        for f in [pt.neg, lambda z: -z]:
+        for f in [pt.arccos]:
             unrewritten = pt.argmin(f(x), axis=axis)
             expected = pt.argmax(x, axis=axis)
             
@@ -5138,6 +5149,17 @@ class TestArgmaxArgminMonotonic:
             result_expected = fn_expected(test_val)
             
             assert result_unrewritten == result_expected, (
-                f"argmin(neg(x), axis={axis}) failed: "
+                f"argmin({f.__name__}(x), axis={axis}) failed: "
                 f"got {result_unrewritten}, expected {result_expected}"
+            )
+            
+            # Verify the rewrite was applied (no ArcCos in final graph)
+            topo = fn_unrewritten.maker.fgraph.toposort()
+            has_eliminated_op = any(
+                isinstance(node.op, Elemwise) and 
+                isinstance(node.op.scalar_op, ps.ArcCos)
+                for node in topo
+            )
+            assert not has_eliminated_op, (
+                f"Rewrite failed to eliminate arccos from argmin graph"
             )
