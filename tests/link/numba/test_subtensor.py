@@ -5,7 +5,8 @@ import pytest
 
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor import Mode, as_symbolic
+from pytensor import Mode
+from pytensor.basic import as_symbolic
 from pytensor.tensor import as_tensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,

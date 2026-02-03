@@ -21,7 +21,6 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import minimum
 from pytensor.tensor.shape import shape_padleft
 from pytensor.tensor.type import TensorType, integer_dtypes
-from pytensor.updates import OrderedUpdates
 
 
 if typing.TYPE_CHECKING:
@@ -1170,7 +1169,7 @@ def scan(
     # and so on ...
     ##
 
-    update_map = OrderedUpdates()
+    update_map = {}
 
     def remove_dimensions(outs, offsets=None):
         out_ls = []

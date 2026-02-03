@@ -143,19 +143,6 @@ class TestConfigTypes:
         with pytest.raises(ValueError, match="Non-str value"):
             configparser.EnumStr(default="red", options=["red", 12, "yellow"])
 
-    def test_deviceparam(self):
-        cp = configparser.DeviceParam("cpu", mutable=False)
-        assert cp.default == "cpu"
-        with pytest.raises(ValueError, match="It was removed from PyTensor"):
-            cp._apply("cuda123")
-        with pytest.raises(ValueError, match="It was removed from PyTensor"):
-            cp._apply("gpu123")
-        with pytest.raises(
-            ValueError, match='Valid options start with one of "cpu"\\.'
-        ):
-            cp._apply("notadevice")
-        assert str(cp) == "unnamed (cpu)"
-
 
 def test_config_context():
     root = _create_test_config()

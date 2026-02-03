@@ -70,7 +70,6 @@ class PyTensorConfigParser:
     warn_float64: str
     pickle_test_value: bool
     cast_policy: str
-    device: str
     print_global_stats: bool
     unpickle_function: bool
     # add_compile_configvars
@@ -510,30 +509,6 @@ class BoolParam(TypedParam):
         raise ValueError(
             f"Invalid value ({value}) for configuration variable '{self.name}'."
         )
-
-
-class DeviceParam(ConfigParam):
-    def __init__(self, default, *options, **kwargs):
-        super().__init__(
-            default, apply=self._apply, mutable=kwargs.get("mutable", True)
-        )
-
-    def _apply(self, val):
-        if val.startswith("opencl") or val.startswith("cuda") or val.startswith("gpu"):
-            raise ValueError(
-                "You are trying to use the old GPU back-end. "
-                "It was removed from PyTensor."
-            )
-        elif val == self.default:
-            return val
-        raise ValueError(
-            f'Invalid value ("{val}") for configuration '
-            f'variable "{self.name}". Valid options start with '
-            'one of "cpu".'
-        )
-
-    def __str__(self):
-        return f"{self.name} ({self.default})"
 
 
 def parse_config_string(

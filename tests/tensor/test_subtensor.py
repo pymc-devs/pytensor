@@ -11,7 +11,7 @@ from numpy.testing import assert_array_equal
 import pytensor
 import pytensor.scalar as scal
 import pytensor.tensor.basic as ptb
-from pytensor import function
+from pytensor import basic, function
 from pytensor.compile import DeepCopyOp, shared
 from pytensor.compile.io import In
 from pytensor.compile.mode import Mode, get_default_mode
@@ -2798,7 +2798,7 @@ class TestInferShape(utt.InferShapeTester):
 
     def test_advanced_subtensor_constant_slice(self):
         x = dmatrix("x")
-        constant_slice = pytensor.as_symbolic(slice(1, None, None))
+        constant_slice = basic.as_symbolic(slice(1, None, None))
         assert isinstance(constant_slice, Constant)
         adv_indices = ptb.constant(np.zeros((2, 3)), dtype="int")
         y = advanced_subtensor(x, constant_slice, adv_indices)

@@ -186,7 +186,7 @@ class AddSD_ccode(_NoPythonCOp):
 @node_rewriter([spm.AddSD])
 def local_inplace_addsd_ccode(fgraph, node):
     """Rewrite to insert inplace versions of `AddSD`."""
-    if isinstance(node.op, spm.AddSD) and config.cxx:
+    if isinstance(node.op, spm.AddSD):
         out_dtype = ps.upcast(*[inp.type.dtype for inp in node.inputs])
         if out_dtype != node.inputs[1].dtype:
             return
@@ -225,7 +225,7 @@ def local_addsd_ccode(fgraph, node):
     Convert AddSD to faster AddSD_ccode.
 
     """
-    if isinstance(node.op, spm.AddSD) and config.cxx:
+    if isinstance(node.op, spm.AddSD):
         new_node = AddSD_ccode(format=node.inputs[0].type.format)(*node.inputs)
         return [new_node]
     return False

@@ -1,6 +1,6 @@
 from itertools import zip_longest
 
-from pytensor import as_symbolic
+from pytensor.basic import as_symbolic
 from pytensor.graph import Constant, node_rewriter
 from pytensor.tensor import TensorType, arange, specify_shape
 from pytensor.tensor.subtensor import _non_consecutive_adv_indexing, inc_subtensor
