@@ -1305,8 +1305,8 @@ class BaseBlockDiagonal(Op):
         input_sig = ",".join(f"(m{i},n{i})" for i in range(n_inputs))
         self.gufunc_signature = f"{input_sig}->(m,n)"
 
-        if n_inputs == 0:
-            raise ValueError("n_inputs must be greater than 0")
+        if n_inputs <= 1:
+            raise ValueError("n_inputs must be greater than 1")
         self.n_inputs = n_inputs
 
     def grad(self, inputs, gout):
@@ -1402,6 +1402,9 @@ def block_diag(*matrices: TensorVariable):
                      [0, 0, 5, 6],
                      [0, 0, 7, 8]])
     """
+    if len(matrices) == 1:
+        return matrices[0]
+
     _block_diagonal_matrix = Blockwise(BlockDiagonal(n_inputs=len(matrices)))
     return _block_diagonal_matrix(*matrices)
 
