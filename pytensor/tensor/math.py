@@ -881,6 +881,56 @@ def isinf(a):
     return isinf_(a)
 
 
+@scalar_elemwise
+def isfinite(a):
+    """isfinite(a)
+
+    Computes element-wise detection of finite values.
+
+    A value is finite if it is neither NaN nor infinite.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Input tensor
+
+    Returns
+    -------
+    TensorVariable
+        Output tensor of type bool, with 1 (True) where elements are finite
+        (not NaN or infinite), and 0 (False) elsewhere.
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> import numpy as np
+    >>> x = pt.vector("x")
+    >>> f = pytensor.function([x], pt.isfinite(x))
+    >>> f([1.0, np.nan, np.inf, -np.inf, 3.0])
+    array([ True, False, False, False,  True])
+
+    Notes
+    -----
+    For discrete dtypes (int, uint, bool), all values are finite by definition.
+    """
+
+
+# Rename isfinite to isfinite_ to allow bypassing when not needed
+isfinite_ = isfinite
+
+
+def isfinite(a):
+    """isfinite(a)"""
+    a = as_tensor_variable(a)
+    if a.dtype in discrete_dtypes:
+        # All discrete values are finite
+        return alloc(
+            np.asarray(True, dtype="bool"), *[a.shape[i] for i in range(a.ndim)]
+        )
+    return isfinite_(a)
+
+
 def allclose(a, b, rtol=1.0e-5, atol=1.0e-8, equal_nan=False):
     """
     Implement Numpy's ``allclose`` on tensors.

@@ -771,6 +771,69 @@ def test_isnan():
         f([[0, 1, 2]])
 
 
+def test_isfinite():
+    """Test isfinite for various dtypes and edge cases."""
+    # Test floating point types
+    for dtype in ["float32", "float64"]:
+        x = matrix(dtype=dtype)
+        y = isfinite(x)
+        assert isinstance(y.owner.op, Elemwise)
+        assert y.dtype == "bool"
+        
+        f = function([x], y)
+        # Test with NaN, inf, and normal values
+        test_data = np.array([[1.0, np.nan, np.inf], 
+                               [-np.inf, 0.0, -5.2]], dtype=dtype)
+        result = f(test_data)
+        expected = np.isfinite(test_data)
+        assert np.array_equal(result, expected)
+    
+    # Test integer types - should always be True
+    x = imatrix()
+    y = isfinite(x)
+    # For integer types, the discrete dtype handling bypasses Elemwise
+    assert y.dtype == "bool"
+    
+    f = function([x], y)
+    result = f([[1, 2, 3], [4, 5, 6]])
+    assert np.all(result == True)
+    
+    # Test boolean type - should always be True
+    x = matrix(dtype="bool")
+    y = isfinite(x)
+    assert y.dtype == "bool"
+    
+    f = function([x], y, allow_input_downcast=True)
+    result = f([[True, False], [False, True]])
+    assert np.all(result == True)
+    
+    # Test edge cases with vector
+    x = vector()
+    f = function([x], isfinite(x))
+    
+    # Empty array
+    assert f([]).shape == (0,)
+    
+    # All edge cases
+    test_cases = [
+        ([np.nan], [False]),
+        ([np.inf], [False]),
+        ([-np.inf], [False]),
+        ([0.0], [True]),
+        ([1.5, np.nan, 3.0], [True, False, True]),
+        ([np.inf, -np.inf, np.nan], [False, False, False]),
+        ([1.0, 2.0, 3.0], [True, True, True]),
+    ]
+    for input_val, expected_val in test_cases:
+        result = f(input_val)
+        assert np.array_equal(result, expected_val), f"Failed for input {input_val}"
+    
+    # Test c code generator
+    y = isfinite_(vector())
+    assert isinstance(y.owner.op, Elemwise)
+    assert y.dtype == "bool"
+
+
 class TestMaxAndArgmax:
     def setup_method(self):
         Max.debug = 0

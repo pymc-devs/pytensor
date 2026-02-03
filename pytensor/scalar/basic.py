@@ -1610,7 +1610,34 @@ class IsInf(FixedLogicalComparison):
         return (*scalarop_version, 3)
 
 
+
 isinf = IsInf()
+
+
+class IsFinite(FixedLogicalComparison):
+    nfunc_spec = ("isfinite", 1, 1)
+
+    def impl(self, x):
+        return np.isfinite(x)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (z,) = outputs
+        if node.inputs[0].type in complex_types:
+            # For complex: finite if both real and imaginary parts are finite
+            return f"{z} = isfinite(real({x})) && isfinite(imag({x}));"
+        # Discrete types are always finite
+        if node.inputs[0].type in discrete_types:
+            return f"{z} = true;"
+
+        return f"{z} = abs(isfinite({x}));"
+
+    def c_code_cache_version(self):
+        scalarop_version = super().c_code_cache_version()
+        return (*scalarop_version, 1)
+
+
+isfinite = IsFinite()
 
 
 class Switch(ScalarOp):
