@@ -36,7 +36,6 @@ def as_idx_variable(idx, indexed_dim: str):
         )
     # Python slices pass through directly (will be converted to positions in idx_list)
     if isinstance(idx, slice):
-        # Convert slice components to Variables if needed
         start, stop, step = idx.start, idx.stop, idx.step
 
         def convert_slice_component(comp):

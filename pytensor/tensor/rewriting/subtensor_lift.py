@@ -698,14 +698,11 @@ def local_subtensor_make_vector(fgraph, node):
         (idx,) = idxs
 
         if isinstance(idx, int):
-            # idx is an integer position - get the actual index value from inputs
             idx = node.inputs[1]
     elif isinstance(node.op, AdvancedSubtensor1):
         idx = node.inputs[1]
 
-    if False:  # isinstance(idx, int | np.integer) - disabled, positions handled above
-        return [x.owner.inputs[idx]]
-    elif isinstance(idx, Variable):
+    if isinstance(idx, Variable):
         if idx.ndim == 0:
             try:
                 v = get_underlying_scalar_constant_value(

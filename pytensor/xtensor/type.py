@@ -574,7 +574,6 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             )
 
         x = self.owner.inputs[0]
-        # Reconstruct the full indices from idx_list and inputs
         idx_inputs = self.owner.inputs[1:]
         idxs = indices_from_subtensor(idx_inputs, self.owner.op.idx_list)
 
@@ -633,7 +632,6 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
             )
 
         x = self.owner.inputs[0]
-        # Reconstruct the full indices from idx_list and inputs
         idx_inputs = self.owner.inputs[1:]
         idxs = indices_from_subtensor(idx_inputs, self.owner.op.idx_list)
 

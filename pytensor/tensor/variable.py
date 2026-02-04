@@ -508,8 +508,8 @@ class _tensor_py_operators:
             expansion_axes = []
             new_args = []
             # Track dims consumed by args and inserted `None`s after ellipsis
-            counter = 0  # Logical position in `self` dims
-            nones = 0  # Number of inserted dims so far
+            counter = 0
+            nones = 0
             for arg in args:
                 if arg is None or (isinstance(arg, Constant) and arg.data is None):
                     expansion_axes.append(counter + nones)  # Expand here

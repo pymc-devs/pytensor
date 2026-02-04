@@ -10,18 +10,6 @@ from pytensor.xtensor.type import XTensorType
 
 
 def to_basic_idx(idx):
-    """Convert an index to basic indexing form.
-
-    Parameters
-    ----------
-    idx : slice | Variable
-        The index to convert
-
-    Returns
-    -------
-    slice | Variable
-        The index in basic form (Python slice or Variable)
-    """
     if isinstance(idx, slice):
         return idx
     if (
@@ -69,7 +57,6 @@ def _lower_index(node):
     x_tensor_indexed_dims = out.type.dims
     x_tensor = tensor_from_xtensor(x)
 
-    # Reconstruct full indices from idx_list and flattened inputs
     from pytensor.tensor.subtensor import indices_from_subtensor
 
     index_variables = node.inputs[1:]
@@ -196,14 +183,12 @@ def lower_index_update(fgraph, node):
     """
     x, y, *index_variables = node.inputs
 
-    # Create a synthetic Index node to use _lower_index
     index_op = Index(node.op.idx_list)
 
     from pytensor.tensor.subtensor import indices_from_subtensor
 
     idxs = indices_from_subtensor(index_variables, index_op.idx_list)
 
-    # Call index() to create the proper node
     x_view = index(x, *idxs)
     indexed_node = x_view.owner
 
