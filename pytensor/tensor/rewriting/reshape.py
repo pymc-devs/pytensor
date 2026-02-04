@@ -57,9 +57,9 @@ def local_join_dims(fgraph, node):
         return [x]
 
     output_shape = [
-        *x.shape[:start_axis],
+        *[x.shape[i] for i in range(start_axis)],
         -1,
-        *x.shape[start_axis + n_axes :],
+        *[x.shape[i] for i in range(start_axis + n_axes, x.type.ndim)],
     ]
 
     new_x = x.reshape(output_shape)

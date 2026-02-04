@@ -62,7 +62,14 @@ def test_local_join_dims():
 
     assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 1
 
-    rewrite_graph(fg, include=("canonicalize",))
+    rewrite_graph(
+        fg,
+        include=("canonicalize",),
+        exclude=(
+            "local_subtensor_merge",
+            "local_subtensor_remove_broadcastable_index",
+        ),
+    )
 
     assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 0
     assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 1
