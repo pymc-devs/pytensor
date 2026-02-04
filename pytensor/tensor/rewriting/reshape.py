@@ -24,9 +24,9 @@ def local_split_dims(fgraph, node):
         return [squeezed_x]
 
     output_shape = [
-        *x.shape[:axis],
+        *[x.shape[i] for i in range(axis)],
         *shape,
-        *x.shape[axis + 1 :],
+        *[x.shape[i] for i in range(axis + 1, x.type.ndim)],
     ]
 
     new_x = x.reshape(output_shape)
