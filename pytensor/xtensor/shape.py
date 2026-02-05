@@ -519,7 +519,6 @@ class Broadcast(XOp):
 
         broadcast_dims = tuple(dims_and_shape.keys())
         broadcast_shape = tuple(dims_and_shape.values())
-        dtype = upcast(*[x.type.dtype for x in inputs])
 
         outputs = []
         for x in inputs:
@@ -530,7 +529,7 @@ class Broadcast(XOp):
             excluded_shape = tuple(x_shape[x_dims.index(d)] for d in excluded_dims)
 
             output = xtensor(
-                dtype=dtype,
+                dtype=x.type.dtype,
                 shape=broadcast_shape + excluded_shape,
                 dims=broadcast_dims + excluded_dims,
             )
