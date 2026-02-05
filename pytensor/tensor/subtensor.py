@@ -15,7 +15,6 @@ from pytensor.gradient import disconnected_type
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
-from pytensor.graph.type import Type
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
@@ -40,7 +39,12 @@ from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import AdvancedIndexingError, NotScalarConstantError
 from pytensor.tensor.math import add, clip
-from pytensor.tensor.shape import Reshape, Shape_i, specify_broadcastable
+from pytensor.tensor.shape import (
+    Reshape,
+    Shape_i,
+    shape_padright,
+    specify_broadcastable,
+)
 from pytensor.tensor.type import (
     TensorType,
     bscalar,
@@ -59,15 +63,6 @@ from pytensor.tensor.type import (
     uwscalar,
     wscalar,
     zscalar,
-)
-from pytensor.tensor.type_other import (
-    MakeSlice,
-    NoneConst,
-    NoneSliceConst,
-    NoneTypeT,
-    SliceConstant,
-    SliceType,
-    make_slice,
 )
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.utils import unzip
@@ -106,7 +101,7 @@ invalid_tensor_types = (
 
 def indices_from_subtensor(
     op_indices: Iterable[ScalarConstant],
-    idx_list: list[Type | slice | Variable] | None,
+    idx_list: tuple[slice | int, ...],
 ) -> tuple[slice | Variable, ...]:
     """Recreate the index tuple from which a ``*Subtensor**`` ``Op`` was created.
 
@@ -116,21 +111,31 @@ def indices_from_subtensor(
         The flattened indices obtained from ``x.inputs``, when ``x`` is a
         ``*Subtensor*`` node.
     idx_list
-        The values describing the types of each dimension's index.  This is
-        obtained from ``op.idx_list``, when ``op`` is a ``*Subtensor*``
-        ``Op``.
+        The values describing each dimension's index. This is obtained from
+        ``op.idx_list``. Entries can be:
+        - Integer positions (indices into op_indices)
+        - slice objects with int/None components
+
+    Returns
+    =======
+    tuple[slice | Variable, ...]
+        A tuple containing a mix of ``slice`` objects and ``Variable`` objects.
+        Each element corresponds to one indexing dimension:
+        - ``slice`` objects for slice-based indexing (e.g., ``x[1:3]``)
+        - ``Variable`` objects for scalar or array-based indexing
+
+        Callers should handle both types when iterating over the result.
 
     Example
     =======
         array, *op_indices = subtensor_node.inputs
-        idx_list = getattr(subtensor_node.op, "idx_list", None)
-        indices = indices_from_subtensor(op_indices, idx_list)
+        indices = indices_from_subtensor(op_indices, subtensor_node.op.idx_list)
 
     """
 
     def convert_indices(indices, entry):
         """Reconstruct ``*Subtensor*`` index input parameter entries."""
-        if indices and isinstance(entry, Type):
+        if indices and isinstance(entry, int):
             rval = indices.pop(0)
             return rval
         elif isinstance(entry, slice):
@@ -182,7 +187,7 @@ def as_index_literal(idx: None) -> None: ...
 
 
 @overload
-def as_index_literal(idx: slice | SliceConstant) -> slice: ...
+def as_index_literal(idx: slice) -> slice: ...
 
 
 @overload
@@ -194,14 +199,7 @@ def as_index_literal(idx: Variable): ...
 
 
 def as_index_literal(
-    idx: None
-    | int
-    | np.integer
-    | slice
-    | SliceConstant
-    | ScalarConstant
-    | TensorConstant
-    | Variable,
+    idx: None | int | np.integer | slice | ScalarConstant | TensorConstant | Variable,
 ) -> int | np.integer | slice | None:
     """Convert a symbolic index element to its Python equivalent.
 
@@ -224,9 +222,6 @@ def as_index_literal(
     if not isinstance(idx, Variable):
         raise TypeError(f"Not an index element: {idx}")
 
-    if isinstance(idx.type, NoneTypeT):
-        return None
-
     if isinstance(idx, ScalarConstant):
         return cast(int, idx.data)
 
@@ -239,13 +234,6 @@ def as_index_literal(
 
     if isinstance(idx, TensorConstant):
         return cast(int, idx.data.item())
-
-    if isinstance(idx, SliceConstant):
-        return cast(slice, idx.data)
-
-    if isinstance(idx.type, SliceType):
-        assert idx.owner is not None
-        return slice(*map(as_index_literal, idx.owner.inputs))
 
     # Other kinds of variables are not supported
     raise NotScalarConstantError()
@@ -275,10 +263,8 @@ def get_canonical_form_slice(
 ) -> tuple[slice | TensorVariable, int | TensorVariable]:
     """Convert indices or slices to canonical form.
 
-    Scalar integer indices or python Slices with Scalar/None attributes
-    used in basic Subtensor Ops are supported.
-    Symbolic slices (of SliceType) or vector indices
-    used in advanced Subtensor Ops are not supported.
+    Handles slice objects with ScalarVariable (including ScalarConstant) or None components.
+    Vector indices and advanced indexing operations are handled separately by AdvancedSubtensor.
 
     Given a slice [start:stop:step] transform it into a canonical form
     that respects the conventions imposed by python and numpy.
@@ -527,16 +513,8 @@ def slice_len(slc, n):
 
 
 def is_basic_idx(idx):
-    """Determine if an index is of the NumPy basic type.
-
-    XXX: This only checks a single index, so an integer is *not* considered a
-    basic index, because--depending on the other indices its used with--an
-    integer can indicate advanced indexing.
-
-    """
-    return isinstance(idx, slice | type(None)) or isinstance(
-        getattr(idx, "type", None), SliceType | NoneTypeT
-    )
+    """Check if an index is a basic index (slice or None)."""
+    return idx is None or isinstance(idx, slice)
 
 
 def basic_shape(shape, indices):
@@ -557,24 +535,7 @@ def basic_shape(shape, indices):
     for n, idx in zip(shape[: len(indices)], indices, strict=True):
         if isinstance(idx, slice):
             res_shape += (slice_len(idx, n),)
-        elif isinstance(getattr(idx, "type", None), SliceType):
-            if idx.owner is None:
-                if not isinstance(idx, Constant):
-                    # This is an input slice, we can't reason symbolically on it.
-                    # We don't even know if we will get None entries or integers
-                    res_shape += (None,)
-                    continue
-                else:
-                    sl: slice = idx.data
-                    slice_inputs = (sl.start, sl.stop, sl.step)
-            elif isinstance(idx.owner.op, MakeSlice):
-                slice_inputs = idx.owner.inputs
-            else:
-                raise ValueError(f"Unexpected Slice producing Op {idx.owner.op}")
-            res_shape += (slice_len(slice(*slice_inputs), n),)
         elif idx is None:
-            res_shape += (ps.ScalarConstant(ps.int64, 1),)
-        elif isinstance(getattr(idx, "type", None), NoneTypeT):
             res_shape += (ps.ScalarConstant(ps.int64, 1),)
         else:
             raise ValueError(f"Invalid index type: {idx}")
@@ -598,9 +559,7 @@ def group_indices(indices):
         for idx in grp_indices:
             # We "zip" the dimension number to each index, which means we can't
             # count indices that add new axes
-            if (idx is not None) and not isinstance(
-                getattr(idx, "type", None), NoneTypeT
-            ):
+            if idx is not None:
                 dim_num += 1
 
             enum_grp_indices.append((dim_num, idx))
@@ -707,68 +666,100 @@ def get_slice_elements(
     return ret
 
 
-def index_vars_to_types(entry, slice_ok=True):
-    r"""Change references to `Variable`s into references to `Type`s.
+def index_vars_to_positions(entry, counter, slice_ok=True, allow_advanced=False):
+    r"""Change references to `Variable`s into integer positions.
 
-    The `Subtensor.idx_list` field is unique to each `Subtensor` instance.  It
-    is not unique to each `Apply` node, so it should not refer to specific
-    `Variable`s.
+    Stores integer positions. The positions index into the flattened inputs list.
 
-    TODO WRITEME: This function also accepts an `entry` already being a `Type`;
-    when would that happen?
+    Parameters
+    ==========
+    entry
+        An index entry: Variable, slice, or integer position.
+    counter
+        A single-element list [n] used as a mutable counter.
+    slice_ok
+        Whether slice entries are allowed.
+    allow_advanced
+        Whether advanced indexing (TensorType arrays) is allowed.
 
+    Returns
+    =======
+    int | slice | None
+        Integer position for Variables, slice with int/None components,
+        or None for omitted slice parts.
     """
-    if (
-        isinstance(entry, np.ndarray | Variable)
-        and hasattr(entry, "dtype")
-        and entry.dtype == "bool"
-    ):
-        raise AdvancedIndexingError("Invalid index type or slice for Subtensor")
+    if not allow_advanced:
+        if (
+            isinstance(entry, np.ndarray | Variable)
+            and hasattr(entry, "dtype")
+            and entry.dtype == "bool"
+        ):
+            raise AdvancedIndexingError("Invalid index type or slice for Subtensor")
 
     if isinstance(entry, Variable) and (
         entry.type in invalid_scal_types or entry.type in invalid_tensor_types
     ):
         raise TypeError("Expected an integer")
 
-    if isinstance(entry, Variable) and entry.type in scal_types:
-        return entry.type
-    elif isinstance(entry, Type) and entry in scal_types:
+    if isinstance(entry, Variable):
+        if (
+            entry.type in scal_types
+            or (entry.type in tensor_types and all(entry.type.broadcastable))
+            or (allow_advanced and isinstance(entry.type, TensorType))
+        ):
+            pos = counter[0]
+            counter[0] += 1
+            return pos
+        else:
+            raise AdvancedIndexingError("Invalid index type or slice for Subtensor")
+
+    # Existing integer positions pass through
+    elif isinstance(entry, int):
         return entry
 
-    if (
-        isinstance(entry, Variable)
-        and entry.type in tensor_types
-        and all(entry.type.broadcastable)
-    ):
-        return ps.get_scalar_type(entry.type.dtype)
-    elif isinstance(entry, Type) and entry in tensor_types and all(entry.broadcastable):
-        return ps.get_scalar_type(entry.dtype)
+    # Slices: handle both fresh creation (Variables) and idx_list pass through
     elif slice_ok and isinstance(entry, slice):
-        a = entry.start
-        b = entry.stop
-        c = entry.step
 
-        if a is not None:
-            slice_a = index_vars_to_types(a, False)
-        else:
-            slice_a = None
+        def is_already_position(component):
+            return component is None or isinstance(component, int)
 
-        if b is not None and b != sys.maxsize:
-            # The special "maxsize" case is probably not needed here,
-            # as slices containing maxsize are not generated by
-            # __getslice__ anymore.
-            slice_b = index_vars_to_types(b, False)
-        else:
-            slice_b = None
+        if (
+            is_already_position(entry.start)
+            and is_already_position(entry.stop)
+            and is_already_position(entry.step)
+        ):
+            return entry
 
-        if c is not None:
-            slice_c = index_vars_to_types(c, False)
-        else:
-            slice_c = None
+        def convert_slice_component(component):
+            if component is None or component == sys.maxsize:
+                return None
+            if isinstance(component, Variable):
+                if (
+                    component.type in invalid_scal_types
+                    or component.type in invalid_tensor_types
+                ):
+                    raise TypeError("Expected an integer")
+                if component.type not in scal_types and not (
+                    component.type in tensor_types and all(component.type.broadcastable)
+                ):
+                    raise AdvancedIndexingError(
+                        "Invalid index type or slice for Subtensor"
+                    )
+                position = counter[0]
+                counter[0] += 1
+                return position
+            else:
+                raise AdvancedIndexingError("Invalid slice component type")
+
+        slice_a = convert_slice_component(entry.start)
+        slice_b = convert_slice_component(entry.stop)
+        slice_c = convert_slice_component(entry.step)
 
         return slice(slice_a, slice_b, slice_c)
-    elif isinstance(entry, int | np.integer):
-        raise TypeError()
+
+    elif entry is None:
+        return None
+
     else:
         raise AdvancedIndexingError("Invalid index type or slice for Subtensor")
 
@@ -864,7 +855,58 @@ def slice_static_length(slc, dim_length):
     return len(range(*slice(*entries).indices(dim_length)))
 
 
-class Subtensor(COp):
+class BaseSubtensor:
+    """Base class for Subtensor operations that handles idx_list and hash/equality."""
+
+    def __init__(self, idx_list, allow_advanced=False):
+        """
+        Initialize BaseSubtensor with index list.
+
+        Parameters
+        ----------
+        idx_list : tuple
+            Tuple of indices where slices are stored as-is,
+            and numerical indices are replaced by integer positions.
+        allow_advanced : bool, optional
+            Whether to allow advanced indexing (TensorType arrays) in idx_list.
+            Default False. Set to True for AdvancedSubtensor* operations.
+        """
+        counter = [0]
+        self.idx_list = tuple(
+            index_vars_to_positions(entry, counter, allow_advanced=allow_advanced)
+            for entry in idx_list
+        )
+
+    def _hashable_idx_list(self):
+        """Return a hashable version of idx_list (slices converted to tuples).
+
+        Slices are not hashable in Python < 3.12, so we convert them to tuples.
+        """
+        return tuple(
+            (slice, entry.start, entry.stop, entry.step)
+            if isinstance(entry, slice)
+            else entry
+            for entry in self.idx_list
+        )
+
+    def _count_expected_inputs(self):
+        count = 0
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                # All non-None slice components are positions that need inputs
+                if entry.start is not None:
+                    count += 1
+                if entry.stop is not None:
+                    count += 1
+                if entry.step is not None:
+                    count += 1
+            else:
+                assert isinstance(entry, int)
+                count += 1
+        return count
+
+
+class Subtensor(BaseSubtensor, COp):
     """Basic NumPy indexing operator."""
 
     check_input = False
@@ -873,8 +915,11 @@ class Subtensor(COp):
     __props__ = ("idx_list",)
 
     def __init__(self, idx_list):
-        # TODO: Provide the type of `self.idx_list`
-        self.idx_list = tuple(map(index_vars_to_types, idx_list))
+        super().__init__(idx_list)
+
+    def __hash__(self):
+        # Slices are not hashable in Python < 3.12
+        return hash((type(self), self._hashable_idx_list()))
 
     def make_node(self, x, *inputs):
         """
@@ -893,17 +938,11 @@ class Subtensor(COp):
         if len(idx_list) > x.type.ndim:
             raise IndexError("too many indices for array")
 
-        input_types = get_slice_elements(
-            idx_list, lambda entry: isinstance(entry, Type)
+        input_positions = get_slice_elements(
+            idx_list, lambda entry: isinstance(entry, int)
         )
 
-        assert len(inputs) == len(input_types)
-
-        for input, expected_type in zip(inputs, input_types, strict=True):
-            if not expected_type.is_super(input.type):
-                raise TypeError(
-                    f"Incompatible types for Subtensor template. Expected {input.type}, got {expected_type}."
-                )
+        assert len(inputs) == len(input_positions)
 
         padded = [
             *indices_from_subtensor(inputs, self.idx_list),
@@ -995,22 +1034,6 @@ class Subtensor(COp):
         rval = [[True], *([False] for _ in node.inputs[1:])]
 
         return rval
-
-    def __hash__(self):
-        msg = []
-        for entry in self.idx_list:
-            if isinstance(entry, slice):
-                msg += [(entry.start, entry.stop, entry.step)]
-            else:
-                msg += [entry]
-
-        idx_list = tuple(msg)
-        # backport
-        # idx_list = tuple((entry.start, entry.stop, entry.step)
-        #                 if isinstance(entry, slice)
-        #                 else entry
-        #                 for entry in self.idx_list)
-        return hash(idx_list)
 
     @staticmethod
     def str_from_slice(entry):
@@ -1107,12 +1130,7 @@ class Subtensor(COp):
             return pos[1]
 
         def init_entry(entry, depth=0):
-            if isinstance(entry, np.integer | int):
-                init_cmds.append(f"subtensor_spec[{spec_pos()}] = {entry};")
-                inc_spec_pos(1)
-                if depth == 0:
-                    is_slice.append(0)
-            elif isinstance(entry, Type):
+            if isinstance(entry, int):
                 init_cmds.append(
                     f"subtensor_spec[{spec_pos()}] = {inputs[input_pos()]};"
                 )
@@ -1387,25 +1405,28 @@ class SubtensorPrinter(Printer):
         input = inputs.pop(0)
         sidxs = []
         getattr(pstate, "precedence", None)
-        for entry in idxs:
-            if isinstance(entry, ps.ScalarType):
+
+        def process_slice_component(comp):
+            """Process a slice component, returning string representation."""
+            if comp is None:
+                return ""
+            elif isinstance(comp, int):
                 with set_precedence(pstate):
-                    sidxs.append(pstate.pprinter.process(inputs.pop()))
+                    return pstate.pprinter.process(inputs.pop(0))
+            else:
+                return str(comp)
+
+        for entry in idxs:
+            if isinstance(entry, int):
+                with set_precedence(pstate):
+                    sidxs.append(pstate.pprinter.process(inputs.pop(0)))
             elif isinstance(entry, slice):
-                if entry.start is None or entry.start == 0:
-                    msg1 = ""
-                else:
-                    msg1 = entry.start
-
-                if entry.stop is None or entry.stop == sys.maxsize:
-                    msg2 = ""
-                else:
-                    msg2 = entry.stop
-
+                msg1 = process_slice_component(entry.start)
+                msg2 = process_slice_component(entry.stop)
                 if entry.step is None:
                     msg3 = ""
                 else:
-                    msg3 = f":{entry.step}"
+                    msg3 = f":{process_slice_component(entry.step)}"
 
                 sidxs.append(f"{msg1}:{msg2}{msg3}")
 
@@ -1565,7 +1586,10 @@ def inc_subtensor(
         ilist = x.owner.inputs[1]
         if ignore_duplicates:
             the_op = AdvancedIncSubtensor(
-                inplace, set_instead_of_inc=set_instead_of_inc, ignore_duplicates=True
+                [ilist],
+                inplace,
+                set_instead_of_inc=set_instead_of_inc,
+                ignore_duplicates=True,
             )
         else:
             the_op = AdvancedIncSubtensor1(
@@ -1576,6 +1600,7 @@ def inc_subtensor(
         real_x = x.owner.inputs[0]
         ilist = x.owner.inputs[1:]
         the_op = AdvancedIncSubtensor(
+            x.owner.op.idx_list,
             inplace,
             set_instead_of_inc=set_instead_of_inc,
             ignore_duplicates=ignore_duplicates,
@@ -1651,7 +1676,7 @@ def inc_subtensor(
         raise TypeError("x must be the result of a subtensor operation")
 
 
-class IncSubtensor(COp):
+class IncSubtensor(BaseSubtensor, COp):
     """
     Increment a subtensor.
 
@@ -1670,7 +1695,6 @@ class IncSubtensor(COp):
     """
 
     check_input = False
-    __props__ = ("idx_list", "inplace", "set_instead_of_inc")
 
     def __init__(
         self,
@@ -1680,20 +1704,32 @@ class IncSubtensor(COp):
         destroyhandler_tolerate_aliased=None,
     ):
         if destroyhandler_tolerate_aliased is None:
-            destroyhandler_tolerate_aliased = []
-        self.idx_list = list(map(index_vars_to_types, idx_list))
+            destroyhandler_tolerate_aliased = ()
+        super().__init__(idx_list)
         self.inplace = inplace
         if inplace:
             self.destroy_map = {0: [0]}
-        self.destroyhandler_tolerate_aliased = list(destroyhandler_tolerate_aliased)
+        self.destroyhandler_tolerate_aliased = tuple(destroyhandler_tolerate_aliased)
         self.set_instead_of_inc = set_instead_of_inc
 
+    __props__ = (
+        "idx_list",
+        "inplace",
+        "set_instead_of_inc",
+        "destroyhandler_tolerate_aliased",
+    )
+
     def __hash__(self):
-        idx_list = tuple(
-            (entry.start, entry.stop, entry.step) if isinstance(entry, slice) else entry
-            for entry in self.idx_list
+        # Slices are not hashable in Python < 3.12
+        return hash(
+            (
+                type(self),
+                self._hashable_idx_list(),
+                self.inplace,
+                self.set_instead_of_inc,
+                self.destroyhandler_tolerate_aliased,
+            )
         )
-        return hash((type(self), idx_list, self.inplace, self.set_instead_of_inc))
 
     def __str__(self):
         name = "SetSubtensor" if self.set_instead_of_inc else "IncSubtensor"
@@ -1707,8 +1743,11 @@ class IncSubtensor(COp):
             The tensor to increment.
         y
             The value to increment by.
-        inputs: TODO WRITEME
+        inputs
+            The indeces/slices list to increment in combination with idx_list.
 
+        E.g. self._idx_list = (0, slice(1, None, None), 2, slice(3, None, 4))
+        tell to use inputs[0] as the first dim.
         """
         x, y = map(as_tensor_variable, [x, y])
         if y.ndim > x.ndim:
@@ -1722,18 +1761,13 @@ class IncSubtensor(COp):
         if len(idx_list) > x.type.ndim:
             raise IndexError("too many indices for array")
 
-        input_types = get_slice_elements(
-            idx_list, lambda entry: isinstance(entry, Type)
+        input_positions = get_slice_elements(
+            idx_list, lambda entry: isinstance(entry, int)
         )
-        if len(inputs) != len(input_types):
+        if len(inputs) != len(input_positions):
             raise IndexError(
                 "Not enough inputs to fill in the Subtensor template.", inputs, idx_list
             )
-        for input, expected_type in zip(inputs, input_types, strict=True):
-            if not expected_type.is_super(input.type):
-                raise TypeError(
-                    f"Wrong type for Subtensor template. Expected {input.type}, got {expected_type}."
-                )
 
         return Apply(self, (x, y, *inputs), [x.type()])
 
@@ -1747,7 +1781,7 @@ class IncSubtensor(COp):
         indices = tuple(
             (
                 next(flat_indices_iterator)
-                if isinstance(entry, Type)
+                if isinstance(entry, int)
                 else slice(
                     None if entry.start is None else next(flat_indices_iterator),
                     None if entry.stop is None else next(flat_indices_iterator),
@@ -2001,8 +2035,7 @@ class IncSubtensor(COp):
 
     def grad(self, inputs, grads):
         (g_output,) = grads
-        x, y = inputs[:2]
-        idx_list = inputs[2:]
+        x, y, *idx_list = inputs
 
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
@@ -2086,7 +2119,7 @@ def _sum_grad_over_bcasted_dims(x, gx):
     return gx
 
 
-class AdvancedSubtensor1(COp):
+class AdvancedSubtensor1(BaseSubtensor, COp):
     """
     Implement x[ilist] where ilist is a vector of integers.
 
@@ -2095,8 +2128,12 @@ class AdvancedSubtensor1(COp):
     # sparse_grad doesn't go in here since it only affects the output
     # of the grad() method.
     __props__ = ()
+    idx_list = (0,)
     _f16_ok = True
     check_input = False
+
+    def __hash__(self):
+        return hash(type(self))
 
     def __init__(self, sparse_grad=False):
         self.sparse_grad = sparse_grad
@@ -2245,13 +2282,17 @@ class AdvancedSubtensor1(COp):
 advanced_subtensor1 = AdvancedSubtensor1()
 
 
-class AdvancedIncSubtensor1(COp):
+class AdvancedIncSubtensor1(BaseSubtensor, COp):
     """
     Increments a subtensor using advanced slicing (list of index).
 
     """
 
-    __props__ = ("inplace", "set_instead_of_inc")
+    __props__ = (
+        "inplace",
+        "set_instead_of_inc",
+    )
+    idx_list = (0,)
     check_input = False
     params_type = ParamsType(inplace=ps.bool, set_instead_of_inc=ps.bool)
 
@@ -2267,8 +2308,20 @@ class AdvancedIncSubtensor1(COp):
         if inplace:
             self.destroy_map = {0: [0]}
 
+    def __hash__(self):
+        return hash(
+            (
+                type(self),
+                self.inplace,
+                self.set_instead_of_inc,
+            )
+        )
+
     def clone_inplace(self):
-        return self.__class__(inplace=True, set_instead_of_inc=self.set_instead_of_inc)
+        return self.__class__(
+            inplace=True,
+            set_instead_of_inc=self.set_instead_of_inc,
+        )
 
     def __str__(self):
         if self.inplace:
@@ -2528,13 +2581,8 @@ advanced_set_subtensor1 = AdvancedIncSubtensor1(set_instead_of_inc=True)
 
 
 def as_index_variable(idx):
-    if idx is None:
-        return NoneConst.clone()
+    """Convert index to Variable form for advanced indexing."""
     if isinstance(idx, slice):
-        return make_slice(idx)
-    if isinstance(idx, Variable) and isinstance(idx.type, SliceType):
-        return idx
-    if isinstance(idx, Variable) and isinstance(idx.type, NoneTypeT):
         return idx
     idx = as_tensor_variable(idx)
     if idx.type.dtype not in discrete_dtypes:
@@ -2557,7 +2605,7 @@ def check_advanced_indexing_dimensions(input, idx_list):
     """
     dim_seen = 0
     for index in idx_list:
-        if index is np.newaxis:
+        if index is None:
             # skip, does not count as an input dimension
             pass
         elif isinstance(index, np.ndarray) and index.dtype == "bool":
@@ -2574,85 +2622,119 @@ def check_advanced_indexing_dimensions(input, idx_list):
             dim_seen += 1
 
 
-class AdvancedSubtensor(Op):
+class AdvancedSubtensor(BaseSubtensor, COp):
     """Implements NumPy's advanced indexing."""
 
-    __props__ = ()
+    __props__ = ("idx_list",)
 
-    def make_node(self, x, *indices):
+    def __init__(self, idx_list):
+        super().__init__(idx_list, allow_advanced=True)
+        self.expected_inputs_len = self._count_expected_inputs()
+
+    def c_code_cache_version(self):
+        hv = Subtensor.helper_c_code_cache_version()
+        if hv:
+            return (3, hv)
+        else:
+            return ()
+
+    def __hash__(self):
+        # Slices are not hashable in Python < 3.12
+        return hash((type(self), self._hashable_idx_list()))
+
+    def make_node(self, x, *inputs):
         x = as_tensor_variable(x)
-        indices = tuple(map(as_index_variable, indices))
+        inputs = tuple(as_tensor_variable(a) for a in inputs)
 
-        explicit_indices = []
-        new_axes = []
-        for idx in indices:
-            if isinstance(idx.type, TensorType) and idx.dtype == "bool":
-                if idx.type.ndim == 0:
-                    raise NotImplementedError(
-                        "Indexing with scalar booleans not supported"
-                    )
+        idx_list = list(self.idx_list)
+        if len(idx_list) > x.type.ndim:
+            raise IndexError("too many indices for array")
 
-                # Check static shape aligned
-                axis = len(explicit_indices) - len(new_axes)
-                indexed_shape = x.type.shape[axis : axis + idx.type.ndim]
-                for j, (indexed_length, indexer_length) in enumerate(
-                    zip(indexed_shape, idx.type.shape)
-                ):
-                    if (
-                        indexed_length is not None
-                        and indexer_length is not None
-                        and indexed_length != indexer_length
-                    ):
-                        raise IndexError(
-                            f"boolean index did not match indexed tensor along axis {axis + j};"
-                            f"size of axis is {indexed_length} but size of corresponding boolean axis is {indexer_length}"
-                        )
-                # Convert boolean indices to integer with nonzero, to reason about static shape next
-                if isinstance(idx, Constant):
-                    nonzero_indices = [tensor_constant(i) for i in idx.data.nonzero()]
-                else:
-                    # Note: Sometimes we could infer a shape error by reasoning about the largest possible size of nonzero
-                    #  and seeing that other integer indices cannot possible match it
-                    nonzero_indices = idx.nonzero()
-                explicit_indices.extend(nonzero_indices)
-            else:
-                if isinstance(idx.type, NoneTypeT):
-                    new_axes.append(len(explicit_indices))
-                explicit_indices.append(idx)
-
-        if (len(explicit_indices) - len(new_axes)) > x.type.ndim:
-            raise IndexError(
-                f"too many indices for array: tensor is {x.type.ndim}-dimensional, but {len(explicit_indices) - len(new_axes)} were indexed"
+        if len(inputs) != self.expected_inputs_len:
+            raise ValueError(
+                f"Expected {self.expected_inputs_len} inputs but got {len(inputs)}"
             )
 
-        # Perform basic and advanced indexing shape inference separately
+        # Build explicit_indices for shape inference
+        explicit_indices = []
+        input_idx = 0
+
+        for i, entry in enumerate(idx_list):
+            if isinstance(entry, slice):
+                if entry.start is not None and (isinstance(entry.start, int)):
+                    start_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+
+                if entry.stop is not None and (isinstance(entry.stop, int)):
+                    stop_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+
+                if entry.step is not None and (isinstance(entry.step, int)):
+                    step_val = inputs[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+
+                explicit_indices.append(slice(start_val, stop_val, step_val))
+            elif isinstance(entry, int):
+                inp = inputs[input_idx]
+                input_idx += 1
+
+                # Handle boolean indices
+                if hasattr(inp, "dtype") and inp.dtype == "bool":
+                    if inp.type.ndim == 0:
+                        raise NotImplementedError(
+                            "Indexing with scalar booleans not supported"
+                        )
+
+                    axis = len(explicit_indices)
+                    indexed_shape = x.type.shape[axis : axis + inp.type.ndim]
+                    for j, (indexed_length, indexer_length) in enumerate(
+                        zip(indexed_shape, inp.type.shape)
+                    ):
+                        if (
+                            indexed_length is not None
+                            and indexer_length is not None
+                            and indexed_length != indexer_length
+                        ):
+                            raise IndexError(
+                                f"boolean index did not match indexed tensor along axis {axis + j};"
+                                f"size of axis is {indexed_length} but size of corresponding boolean axis is {indexer_length}"
+                            )
+                    if isinstance(inp, Constant):
+                        nonzero_indices = [
+                            tensor_constant(i) for i in inp.data.nonzero()
+                        ]
+                    else:
+                        nonzero_indices = inp.nonzero()
+                    explicit_indices.extend(nonzero_indices)
+                else:
+                    explicit_indices.append(inp)
+            elif entry is None:
+                explicit_indices.append(None)
+            else:
+                raise ValueError(f"Invalid entry in idx_list: {entry}")
+
+        if len(explicit_indices) > x.type.ndim:
+            raise IndexError(
+                f"too many indices for array: tensor is {x.type.ndim}-dimensional, but {len(explicit_indices)} were indexed"
+            )
+
+        # Perform basic and advanced indexing shape inference separately (no newaxis)
         basic_group_shape = []
         advanced_indices = []
         adv_group_axis = None
         last_adv_group_axis = None
-        if new_axes:
-            expanded_x_shape_list = list(x.type.shape)
-            for new_axis in new_axes:
-                expanded_x_shape_list.insert(new_axis, 1)
-            expanded_x_shape = tuple(expanded_x_shape_list)
-        else:
-            expanded_x_shape = x.type.shape
         for i, (idx, dim_length) in enumerate(
-            zip_longest(explicit_indices, expanded_x_shape, fillvalue=NoneSliceConst)
+            zip_longest(explicit_indices, x.type.shape, fillvalue=slice(None))
         ):
-            if isinstance(idx.type, NoneTypeT):
-                basic_group_shape.append(1)  # New-axis
-            elif isinstance(idx.type, SliceType):
-                if isinstance(idx, Constant):
-                    basic_group_shape.append(slice_static_length(idx.data, dim_length))
-                elif idx.owner is not None and isinstance(idx.owner.op, MakeSlice):
-                    basic_group_shape.append(
-                        slice_static_length(slice(*idx.owner.inputs), dim_length)
-                    )
-                else:
-                    # Symbolic root slice (owner is None), or slice operation we don't understand
-                    basic_group_shape.append(None)
-            else:  # TensorType
+            if isinstance(idx, slice):
+                basic_group_shape.append(slice_static_length(idx, dim_length))
+            else:  # TensorType (advanced index)
                 # Keep track of advanced group axis
                 if adv_group_axis is None:
                     # First time we see an advanced index
@@ -2687,7 +2769,7 @@ class AdvancedSubtensor(Op):
 
         return Apply(
             self,
-            [x, *indices],
+            [x, *inputs],
             [tensor(dtype=x.type.dtype, shape=tuple(indexed_shape))],
         )
 
@@ -2703,30 +2785,62 @@ class AdvancedSubtensor(Op):
                 or getattr(idx, "dtype", None) == "bool"
             )
 
-        indices = node.inputs[1:]
-        index_shapes = []
-        for idx, ishape in zip(indices, ishapes[1:], strict=True):
-            # Mixed bool indexes are converted to nonzero entries
-            shape0_op = Shape_i(0)
-            if is_bool_index(idx):
-                index_shapes.extend((shape0_op(nz_dim),) for nz_dim in nonzero(idx))
-            # The `ishapes` entries for `SliceType`s will be None, and
-            # we need to give `indexed_result_shape` the actual slices.
-            elif isinstance(getattr(idx, "type", None), SliceType):
-                index_shapes.append(idx)
+        inputs = node.inputs[1:]
+
+        full_indices = []
+        input_idx = 0
+
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+
+                def get_slice_val(comp):
+                    nonlocal input_idx
+                    if comp is None:
+                        return None
+                    elif isinstance(comp, int):
+                        val = inputs[input_idx]
+                        input_idx += 1
+                        return val
+                    else:
+                        return comp
+
+                start_val = get_slice_val(entry.start)
+                stop_val = get_slice_val(entry.stop)
+                step_val = get_slice_val(entry.step)
+                full_indices.append(slice(start_val, stop_val, step_val))
             else:
-                index_shapes.append(ishape)
+                assert isinstance(entry, int)
+                if input_idx < len(inputs):
+                    full_indices.append(inputs[input_idx])
+                    input_idx += 1
+                else:
+                    raise ValueError("Mismatch between idx_list and inputs")
+
+        index_shapes = []
+        for idx in full_indices:
+            if isinstance(idx, slice):
+                index_shapes.append(idx)
+            elif hasattr(idx, "type"):
+                shape0_op = Shape_i(0)
+                if is_bool_index(idx):
+                    index_shapes.extend((shape0_op(nz_dim),) for nz_dim in nonzero(idx))
+                else:
+                    input_shape_idx = (
+                        inputs.index(idx) + 1
+                    )  # +1 because ishapes[0] is x
+                    index_shapes.append(ishapes[input_shape_idx])
+            else:
+                index_shapes.append(idx)
 
         res_shape = list(
             indexed_result_shape(ishapes[0], index_shapes, indices_are_shapes=True)
         )
         for i, res_dim_length in enumerate(res_shape):
             if res_dim_length is None:
-                # This can happen when we have a Slice provided by the user (not a constant nor the result of MakeSlice)
                 # We must compute the Op to find its shape
                 res_shape[i] = Shape_i(i)(node.out)
 
-        adv_indices = [idx for idx in indices if not is_basic_idx(idx)]
+        adv_indices = [idx for idx in full_indices if not is_basic_idx(idx)]
         bool_indices = [idx for idx in adv_indices if is_bool_index(idx)]
 
         # Special logic when the only advanced index group is of bool type.
@@ -2737,7 +2851,7 @@ class AdvancedSubtensor(Op):
             # Because there are no more advanced index groups, there is exactly
             # one output dim per index variable up to the bool group.
             # Note: Scalar integer indexing counts as advanced indexing.
-            start_dim = indices.index(bool_index)
+            start_dim = full_indices.index(bool_index)
             res_shape[start_dim] = bool_index.sum()
 
         assert node.outputs[0].ndim == len(res_shape)
@@ -2745,14 +2859,96 @@ class AdvancedSubtensor(Op):
 
     def perform(self, node, inputs, out_):
         (out,) = out_
-        check_advanced_indexing_dimensions(inputs[0], inputs[1:])
-        rval = inputs[0].__getitem__(tuple(inputs[1:]))
+
+        x = inputs[0]
+        index_variables = inputs[1:]
+
+        full_indices = []
+        input_idx = 0
+
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                if entry.start is not None and (isinstance(entry.start, int)):
+                    start_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+
+                if entry.stop is not None and (isinstance(entry.stop, int)):
+                    stop_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+
+                if entry.step is not None and (isinstance(entry.step, int)):
+                    step_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+
+                full_indices.append(slice(start_val, stop_val, step_val))
+            else:
+                assert isinstance(entry, int)
+                if input_idx < len(index_variables):
+                    full_indices.append(index_variables[input_idx])
+                    input_idx += 1
+                else:
+                    raise ValueError("Mismatch between idx_list and inputs")
+
+        check_advanced_indexing_dimensions(x, full_indices)
+
+        broadcastable = node.inputs[0].type.broadcastable
+        new_full_indices = []
+        for i, idx in enumerate(full_indices):
+            if i < len(broadcastable) and broadcastable[i] and x.shape[i] == 1:
+                if isinstance(idx, np.ndarray | list | tuple):
+                    # Replace with zeros of same shape to preserve output shape
+                    if isinstance(idx, np.ndarray):
+                        new_full_indices.append(np.zeros_like(idx))
+                    else:
+                        arr = np.array(idx)
+                        new_full_indices.append(np.zeros_like(arr))
+                elif isinstance(idx, int | np.integer):
+                    new_full_indices.append(0)
+                else:
+                    new_full_indices.append(idx)
+            else:
+                new_full_indices.append(idx)
+
+        rval = x.__getitem__(tuple(new_full_indices))
+
         # When there are no arrays, we are not actually doing advanced
         # indexing, so __getitem__ will not return a copy.
         # Since no view_map is set, we need to copy the returned value
-        if not any(
-            isinstance(v.type, TensorType) and v.ndim > 0 for v in node.inputs[1:]
-        ):
+        # Check if any index is a non-scalar tensor by checking actual input type
+        def _is_tensor_index_entry(entry, input_idx):
+            """Check if entry is a tensor index. Returns (is_tensor, new_input_idx)."""
+            if isinstance(entry, int):
+                inp = node.inputs[1 + input_idx]
+                is_tensor = hasattr(inp.type, "ndim") and inp.type.ndim > 0
+                return is_tensor, input_idx + 1
+            return False, input_idx
+
+        has_tensor_indices = False
+        input_idx = 0
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                if entry.start is not None and (isinstance(entry.start, int)):
+                    is_tensor, input_idx = _is_tensor_index_entry(
+                        entry.start, input_idx
+                    )
+                    has_tensor_indices = has_tensor_indices or is_tensor
+                if entry.stop is not None and (isinstance(entry.stop, int)):
+                    is_tensor, input_idx = _is_tensor_index_entry(entry.stop, input_idx)
+                    has_tensor_indices = has_tensor_indices or is_tensor
+                if entry.step is not None and (isinstance(entry.step, int)):
+                    is_tensor, input_idx = _is_tensor_index_entry(entry.step, input_idx)
+                    has_tensor_indices = has_tensor_indices or is_tensor
+            elif isinstance(entry, int):
+                is_tensor, input_idx = _is_tensor_index_entry(entry, input_idx)
+                has_tensor_indices = has_tensor_indices or is_tensor
+
+        if not has_tensor_indices:
             rval = rval.copy()
         out[0] = rval
 
@@ -2771,10 +2967,47 @@ class AdvancedSubtensor(Op):
             raise NotImplementedError("No support for complex grad yet")
         else:
             gx = x.zeros_like()
-        rest = inputs[1:]
+
+        # Reconstruct the full indices from idx_list and inputs
+        # This is necessary because advanced_inc_subtensor expects the full
+        # description of indices, including slices that might not be in inputs.
+        index_variables = inputs[1:]
+        args = []
+        input_idx = 0
+
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                if entry.start is not None and (isinstance(entry.start, int)):
+                    start_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+
+                if entry.stop is not None and (isinstance(entry.stop, int)):
+                    stop_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+
+                if entry.step is not None and (isinstance(entry.step, int)):
+                    step_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+
+                args.append(slice(start_val, stop_val, step_val))
+            elif isinstance(entry, int):
+                if input_idx < len(index_variables):
+                    args.append(index_variables[input_idx])
+                    input_idx += 1
+                else:
+                    raise ValueError("Mismatch between idx_list and inputs in grad")
+            else:
+                args.append(entry)
+
         return [
-            advanced_inc_subtensor(gx, gz, *rest),
-            *(disconnected_type() for _ in range(len(rest))),
+            advanced_inc_subtensor(gx, gz, *args),
+            *(disconnected_type() for _ in range(len(index_variables))),
         ]
 
     @staticmethod
@@ -2791,7 +3024,7 @@ class AdvancedSubtensor(Op):
 
         This function checks if the advanced indexing is non-consecutive,
         in which case the advanced index dimensions are placed on the left of the
-        output array, regardless of their opriginal position.
+        output array, regardless of their original position.
 
         See: https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
 
@@ -2806,11 +3039,29 @@ class AdvancedSubtensor(Op):
         bool
             True if the advanced indexing is non-consecutive, False otherwise.
         """
-        _, *idxs = node.inputs
-        return _non_consecutive_adv_indexing(idxs)
+        op = node.op
+        index_variables = node.inputs[1:]
+
+        full_indices = []
+        input_idx = 0
+
+        for entry in op.idx_list:
+            if isinstance(entry, slice):
+                full_indices.append(slice(None))
+            elif isinstance(entry, int):
+                if input_idx < len(index_variables):
+                    full_indices.append(index_variables[input_idx])
+                    input_idx += 1
+
+        return _non_consecutive_adv_indexing(full_indices)
 
 
-advanced_subtensor = AdvancedSubtensor()
+class AdvancedSubtensorPrinter(SubtensorPrinter):
+    def process(self, r, pstate):
+        return self._process(r.owner.op.idx_list, r.owner.inputs, pstate)
+
+
+pprint.assign(AdvancedSubtensor, AdvancedSubtensorPrinter())
 
 
 @_vectorize_node.register(AdvancedSubtensor)
@@ -2830,30 +3081,46 @@ def vectorize_advanced_subtensor(op: AdvancedSubtensor, node, *batch_inputs):
         # which would put the indexed results to the left of the batch dimensions!
         # TODO: Not all cases must be handled by Blockwise, but the logic is complex
 
-        # Blockwise doesn't accept None or Slices types so we raise informative error here
-        # TODO: Implement these internally, so Blockwise is always a safe fallback
-        if any(not isinstance(idx, TensorVariable) for idx in idxs):
-            raise NotImplementedError(
-                "Vectorized AdvancedSubtensor with batched indexes or non-consecutive advanced indexing "
-                "and slices or newaxis is currently not supported."
-            )
-        else:
-            return vectorize_node_fallback(op, node, batch_x, *batch_idxs)
+        return vectorize_node_fallback(op, node, batch_x, *batch_idxs)
 
     # Otherwise we just need to add None slices for every new batch dim
     x_batch_ndim = batch_x.type.ndim - x.type.ndim
-    empty_slices = (slice(None),) * x_batch_ndim
-    return op.make_node(batch_x, *empty_slices, *batch_idxs)
+    new_idx_list = (slice(None),) * x_batch_ndim + op.idx_list
+    return type(op)(new_idx_list).make_node(batch_x, *batch_idxs)
 
 
-class AdvancedIncSubtensor(Op):
+class AdvancedIncSubtensor(BaseSubtensor, Op):
     """Increments a subtensor using advanced indexing."""
 
-    __props__ = ("inplace", "set_instead_of_inc", "ignore_duplicates")
+    __props__ = (
+        "idx_list",
+        "inplace",
+        "set_instead_of_inc",
+        "ignore_duplicates",
+    )
+
+    def __hash__(self):
+        # Slices are not hashable in Python < 3.12
+        return hash(
+            (
+                type(self),
+                self._hashable_idx_list(),
+                self.inplace,
+                self.set_instead_of_inc,
+                self.ignore_duplicates,
+            )
+        )
 
     def __init__(
-        self, inplace=False, set_instead_of_inc=False, ignore_duplicates=False
+        self,
+        idx_list,
+        inplace=False,
+        set_instead_of_inc=False,
+        ignore_duplicates=False,
     ):
+        super().__init__(idx_list, allow_advanced=True)
+        self.expected_inputs_len = self._count_expected_inputs()
+
         self.set_instead_of_inc = set_instead_of_inc
         self.inplace = inplace
         if inplace:
@@ -2871,6 +3138,11 @@ class AdvancedIncSubtensor(Op):
         x = as_tensor_variable(x)
         y = as_tensor_variable(y)
 
+        if len(inputs) != self.expected_inputs_len:
+            raise ValueError(
+                f"Expected {self.expected_inputs_len} tensor inputs but got {len(inputs)}"
+            )
+
         new_inputs = []
         for inp in inputs:
             if isinstance(inp, list | tuple):
@@ -2883,9 +3155,40 @@ class AdvancedIncSubtensor(Op):
         )
 
     def perform(self, node, inputs, out_):
-        x, y, *indices = inputs
+        x, y, *index_variables = inputs
 
-        check_advanced_indexing_dimensions(x, indices)
+        full_indices = []
+        input_idx = 0
+
+        for entry in self.idx_list:
+            if isinstance(entry, slice):
+                if entry.start is not None and (isinstance(entry.start, int)):
+                    start_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    start_val = entry.start
+
+                if entry.stop is not None and (isinstance(entry.stop, int)):
+                    stop_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    stop_val = entry.stop
+
+                if entry.step is not None and (isinstance(entry.step, int)):
+                    step_val = index_variables[input_idx]
+                    input_idx += 1
+                else:
+                    step_val = entry.step
+
+                full_indices.append(slice(start_val, stop_val, step_val))
+            elif isinstance(entry, int):
+                if input_idx < len(index_variables):
+                    full_indices.append(index_variables[input_idx])
+                    input_idx += 1
+                else:
+                    raise ValueError("Mismatch between idx_list and inputs")
+
+        check_advanced_indexing_dimensions(x, full_indices)
 
         (out,) = out_
         if not self.inplace:
@@ -2894,11 +3197,11 @@ class AdvancedIncSubtensor(Op):
             out[0] = x
 
         if self.set_instead_of_inc:
-            out[0][tuple(indices)] = y
+            out[0][tuple(full_indices)] = y
         elif self.ignore_duplicates:
-            out[0][tuple(indices)] += y
+            out[0][tuple(full_indices)] += y
         else:
-            np.add.at(out[0], tuple(indices), y)
+            np.add.at(out[0], tuple(full_indices), y)
 
     def infer_shape(self, fgraph, node, ishapes):
         return [ishapes[0]]
@@ -2928,10 +3231,14 @@ class AdvancedIncSubtensor(Op):
             raise NotImplementedError("No support for complex grad yet")
         else:
             if self.set_instead_of_inc:
-                gx = advanced_set_subtensor(outgrad, y.zeros_like(), *idxs)
+                gx = (
+                    type(self)(self.idx_list, set_instead_of_inc=True)
+                    .make_node(outgrad, y.zeros_like(), *idxs)
+                    .outputs[0]
+                )
             else:
                 gx = outgrad
-            gy = advanced_subtensor(outgrad, *idxs)
+            gy = AdvancedSubtensor(self.idx_list).make_node(outgrad, *idxs).outputs[0]
             # Make sure to sum gy over the dimensions of y that have been
             # added or broadcasted
             gy = _sum_grad_over_bcasted_dims(y, gy)
@@ -2951,7 +3258,7 @@ class AdvancedIncSubtensor(Op):
 
         This function checks if the advanced indexing is non-consecutive,
         in which case the advanced index dimensions are placed on the left of the
-        output array, regardless of their opriginal position.
+        output array, regardless of their original position.
 
         See: https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
 
@@ -2966,16 +3273,127 @@ class AdvancedIncSubtensor(Op):
         bool
             True if the advanced indexing is non-consecutive, False otherwise.
         """
-        _, _, *idxs = node.inputs
-        return _non_consecutive_adv_indexing(idxs)
+        # Reconstruct the full indices from idx_list and inputs to check consecutivity (newaxis handled by __getitem__)
+        op = node.op
+        index_variables = node.inputs[2:]
+
+        full_indices = []
+        input_idx = 0
+
+        for entry in op.idx_list:
+            if isinstance(entry, slice):
+                full_indices.append(slice(None))
+            elif isinstance(entry, int):
+                if input_idx < len(index_variables):
+                    full_indices.append(index_variables[input_idx])
+                    input_idx += 1
+
+        return _non_consecutive_adv_indexing(full_indices)
 
 
-advanced_inc_subtensor = AdvancedIncSubtensor()
-advanced_set_subtensor = AdvancedIncSubtensor(set_instead_of_inc=True)
-advanced_inc_subtensor_nodup = AdvancedIncSubtensor(ignore_duplicates=True)
-advanced_set_subtensor_nodup = AdvancedIncSubtensor(
-    set_instead_of_inc=True, ignore_duplicates=True
-)
+class AdvancedIncSubtensorPrinter(SubtensorPrinter):
+    def process(self, r, pstate):
+        x, y, *idx_args = r.owner.inputs
+
+        res = self._process(r.owner.op.idx_list, [x, *idx_args], pstate)
+
+        with set_precedence(pstate, 1000):
+            y_str = pstate.pprinter.process(y, pstate)
+
+        if r.owner.op.set_instead_of_inc:
+            res = f"set_subtensor({res}, {y_str})"
+        else:
+            res = f"inc_subtensor({res}, {y_str})"
+        return res
+
+
+pprint.assign(AdvancedIncSubtensor, AdvancedIncSubtensorPrinter())
+
+
+def _build_slice_positions(components, position, input_vars):
+    """Build a slice with position entries from slice components.
+
+    Parameters
+    ----------
+    components : tuple
+        Tuple of 3 elements (start, stop, step). Each can be None or a scalar Variable.
+    position : int
+        Current position counter for input_vars.
+    input_vars : list
+        List to append input variables to (modified in-place).
+
+    Returns
+    -------
+    tuple
+        (new_position, slice_object)
+    """
+    entries = []
+    for comp in components:
+        if comp is None:
+            entries.append(None)
+        else:
+            entries.append(position)
+            # Convert ScalarConstants to TensorConstants to avoid TensorFromScalar
+            if isinstance(comp, Constant) and isinstance(comp.type, ps.ScalarType):
+                input_vars.append(as_tensor_variable(comp.data))
+            else:
+                input_vars.append(comp)
+            position += 1
+    return position, slice(*entries)
+
+
+def _normalize_const_slice(const_slice):
+    """Convert a Python slice to a tuple with None or scalar Variables."""
+    return tuple(
+        None if v is None else as_tensor_variable(v)
+        for v in (const_slice.start, const_slice.stop, const_slice.step)
+    )
+
+
+def advanced_subtensor(x, *args):
+    processed_args = tuple(map(as_index_variable, args))
+
+    idx_list = []
+    input_vars = []
+    position = 0
+
+    for arg in processed_args:
+        if isinstance(arg, slice):
+            # Python slice - create positions for each component
+            components = _normalize_const_slice(arg)
+            position, s = _build_slice_positions(components, position, input_vars)
+            idx_list.append(s)
+        else:
+            idx_list.append(position)
+            input_vars.append(arg)
+            position += 1
+
+    return AdvancedSubtensor(idx_list)(x, *input_vars)
+
+
+def advanced_inc_subtensor(x, y, *args, **kwargs):
+    processed_args = tuple(map(as_index_variable, args))
+
+    idx_list = []
+    input_vars = []
+    position = 0
+
+    for arg in processed_args:
+        if isinstance(arg, slice):
+            # Python slice - create positions for each component
+            components = _normalize_const_slice(arg)
+            position, s = _build_slice_positions(components, position, input_vars)
+            idx_list.append(s)
+        else:
+            idx_list.append(position)
+            input_vars.append(arg)
+            position += 1
+
+    return AdvancedIncSubtensor(idx_list, **kwargs)(x, y, *input_vars)
+
+
+def advanced_set_subtensor(x, y, *args, **kwargs):
+    return advanced_inc_subtensor(x, y, *args, set_instead_of_inc=True, **kwargs)
 
 
 def take(a, indices, axis=None, mode="raise"):
@@ -3175,3 +3593,124 @@ __all__ = [
     "slice_at_axis",
     "take",
 ]
+
+
+@_vectorize_node.register(AdvancedIncSubtensor)
+def vectorize_advanced_inc_subtensor(op: AdvancedIncSubtensor, node, *batch_inputs):
+    x, y, *idxs = node.inputs
+    batch_x, batch_y, *batch_idxs = batch_inputs
+
+    x_is_batched = x.type.ndim < batch_x.type.ndim
+    idxs_are_batched = any(
+        batch_idx.type.ndim > idx.type.ndim
+        for batch_idx, idx in zip(batch_idxs, idxs, strict=True)
+        if isinstance(batch_idx, TensorVariable)
+    )
+
+    if idxs_are_batched or (x_is_batched and op.non_consecutive_adv_indexing(node)):
+        # Fallback to Blockwise if idxs are batched or if we have non contiguous advanced indexing
+        # which would put the indexed results to the left of the batch dimensions!
+        return vectorize_node_fallback(op, node, batch_x, batch_y, *batch_idxs)
+    # If y is batched more than x, we need to broadcast x to match y's batch dims
+    x_batch_ndim = batch_x.type.ndim - x.type.ndim
+    y_batch_ndim = batch_y.type.ndim - y.type.ndim
+
+    # Ensure x has at least as many batch dims as y
+    if y_batch_ndim > x_batch_ndim:
+        diff = y_batch_ndim - x_batch_ndim
+        new_dims = (["x"] * diff) + list(range(batch_x.type.ndim))
+        batch_x = batch_x.dimshuffle(new_dims)
+        x_batch_ndim = y_batch_ndim
+
+    # Ensure x is broadcasted to match y's batch shape
+    # We use Alloc to broadcast batch_x to the required shape
+    if y_batch_ndim > 0:
+        from pytensor.tensor.extra_ops import broadcast_shape
+
+        x_batch_ndim = batch_x.type.ndim - x.type.ndim
+
+        # Ensure batch_x is broadcastable where size is 1
+        for i in range(x_batch_ndim):
+            if batch_x.type.shape[i] == 1 and not batch_x.type.broadcastable[i]:
+                batch_x = specify_broadcastable(batch_x, i)
+
+        batch_shape_x = tuple(batch_x.shape[i] for i in range(x_batch_ndim))
+        batch_shape_y = tuple(batch_y.shape[i] for i in range(y_batch_ndim))
+
+        # We use dummy arrays to determine the broadcasted batch shape
+        dummy_bx = alloc(0, *batch_shape_x)
+        dummy_by = alloc(0, *batch_shape_y)
+        common_batch_shape_var = broadcast_shape(dummy_bx, dummy_by)
+
+        # Unpack the shape vector into scalars
+        ndim_batch = max(x_batch_ndim, y_batch_ndim)
+        out_batch_dims = [common_batch_shape_var[i] for i in range(ndim_batch)]
+
+        out_shape = out_batch_dims
+        out_shape.extend(batch_x.shape[x_batch_ndim + i] for i in range(x.type.ndim))
+
+        batch_x = alloc(batch_x, *out_shape)
+
+    # Otherwise we just need to add None slices for every new batch dim
+    x_batch_ndim = batch_x.type.ndim - x.type.ndim
+
+    empty_slices = (slice(None),) * x_batch_ndim
+
+    # Check if y is missing core dimensions relative to x[indices]
+    # We use a dummy AdvancedSubtensor to determine the dimensionality of the indexed core x
+    dummy_adv_sub = AdvancedSubtensor(op.idx_list)
+    core_out_ndim = dummy_adv_sub.make_node(x, *idxs).outputs[0].type.ndim
+
+    pad_dims = core_out_ndim - y.type.ndim
+    if pad_dims > 0:
+        batch_y = shape_padright(batch_y, pad_dims)
+
+    new_idx_list = empty_slices + op.idx_list
+    return AdvancedIncSubtensor(
+        new_idx_list,
+        inplace=op.inplace,
+        set_instead_of_inc=op.set_instead_of_inc,
+        ignore_duplicates=op.ignore_duplicates,
+    ).make_node(batch_x, batch_y, *batch_idxs)
+
+
+@_vectorize_node.register(AdvancedIncSubtensor1)
+def vectorize_advanced_inc_subtensor1(op: AdvancedIncSubtensor1, node, *batch_inputs):
+    x, y, idx = node.inputs
+    batch_x, batch_y, batch_idx = batch_inputs
+
+    # x_is_batched = x.type.ndim < batch_x.type.ndim
+    idx_is_batched = idx.type.ndim < batch_idx.type.ndim
+
+    if idx_is_batched:
+        return vectorize_node_fallback(op, node, batch_x, batch_y, batch_idx)
+
+    # AdvancedIncSubtensor1 only supports indexing the first dimension.
+    # If x is batched, we can use AdvancedIncSubtensor which supports indexing any dimension.
+    x_batch_ndim = batch_x.type.ndim - x.type.ndim
+    y_batch_ndim = batch_y.type.ndim - y.type.ndim
+
+    # Ensure x has at least as many batch dims as y
+    if y_batch_ndim > x_batch_ndim:
+        diff = y_batch_ndim - x_batch_ndim
+        new_dims = (["x"] * diff) + list(range(batch_x.type.ndim))
+        batch_x = batch_x.dimshuffle(new_dims)
+        x_batch_ndim = y_batch_ndim
+
+    # Ensure x is broadcasted to match y's batch shape
+    if y_batch_ndim > 0:
+        out_shape = [batch_y.shape[i] for i in range(y_batch_ndim)]
+        out_shape.extend(batch_x.shape[x_batch_ndim + i] for i in range(x.type.ndim))
+
+        batch_x = alloc(batch_x, *out_shape)
+
+    empty_slices = (slice(None),) * x_batch_ndim
+
+    # AdvancedIncSubtensor1 takes a single index tensor
+    new_idx_list = (*empty_slices, batch_idx.type)
+
+    return AdvancedIncSubtensor(
+        new_idx_list,
+        inplace=op.inplace,
+        set_instead_of_inc=op.set_instead_of_inc,
+    ).make_node(batch_x, batch_y, batch_idx)

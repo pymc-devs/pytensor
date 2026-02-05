@@ -6,9 +6,7 @@ import numpy as np
 
 import pytensor
 from pytensor import _as_symbolic
-from pytensor.gradient import disconnected_type
-from pytensor.graph.basic import Apply, Constant, Variable
-from pytensor.graph.op import Op
+from pytensor.graph.basic import Constant
 from pytensor.link.c.type import Generic, Type
 from pytensor.tensor.type import integer_dtypes
 
@@ -22,32 +20,6 @@ def as_int_none_variable(x):
     if x.type.dtype not in integer_dtypes:
         raise TypeError("index must be integers")
     return x
-
-
-class MakeSlice(Op):
-    __props__ = ()
-
-    def make_node(self, slc, stop=None, step=None):
-        # We need to accept and handle in make_node inputs the node
-        # inputs to allow redoing a new op elsewhere in the graph by
-        # optimization.
-        if isinstance(slc, slice):
-            assert stop is None
-            assert step is None
-            inp = [slc.start, slc.stop, slc.step]
-        else:
-            inp = [slc, stop, step]
-        return Apply(self, list(map(as_int_none_variable, inp)), [slicetype()])
-
-    def perform(self, node, inp, out_):
-        (out,) = out_
-        out[0] = slice(*inp)
-
-    def grad(self, inputs, grads):
-        return [disconnected_type() for _ in range(len(inputs))]
-
-
-make_slice = MakeSlice()
 
 
 class SliceType(Type[slice]):
@@ -106,14 +78,6 @@ class SliceConstant(Constant):
 SliceType.constant_type = SliceConstant
 
 
-@_as_symbolic.register(slice)
-def as_symbolic_slice(x, **kwargs):
-    if any(isinstance(i, Variable) for i in (x.start, x.stop, x.step)):
-        return make_slice(x)
-
-    return SliceConstant(slicetype, x)
-
-
 NoneSliceConst = Constant(slicetype, slice(None), name="slice(None)")
 
 
@@ -140,4 +104,4 @@ def as_symbolic_None(x, **kwargs):
     return NoneConst
 
 
-__all__ = ["NoneConst", "NoneSliceConst", "make_slice", "none_type_t", "slicetype"]
+__all__ = ["NoneConst", "NoneSliceConst", "none_type_t", "slicetype"]

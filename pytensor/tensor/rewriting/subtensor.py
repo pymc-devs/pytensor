@@ -6,7 +6,7 @@ import numpy as np
 import pytensor
 from pytensor import compile
 from pytensor.compile import optdb
-from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import (
     WalkingGraphRewriter,
     copy_stack_trace,
@@ -15,7 +15,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.raise_op import Assert
-from pytensor.scalar import Add, ScalarConstant, ScalarType
+from pytensor.scalar import Add, ScalarConstant
 from pytensor.scalar import constant as scalar_constant
 from pytensor.tensor.basic import (
     Alloc,
@@ -73,7 +73,6 @@ from pytensor.tensor.subtensor import (
     IncSubtensor,
     Subtensor,
     advanced_inc_subtensor1,
-    advanced_subtensor,
     advanced_subtensor1,
     as_index_constant,
     get_canonical_form_slice,
@@ -83,8 +82,7 @@ from pytensor.tensor.subtensor import (
     inc_subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type import TensorType
-from pytensor.tensor.type_other import NoneTypeT, SliceType
+from pytensor.tensor.type import TensorType, integer_dtypes
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
@@ -154,8 +152,10 @@ def transform_take(a, indices, axis):
 
     if len(shape_parts) > 1:
         shape = pytensor.tensor.concatenate(shape_parts)
-    else:
+    elif len(shape_parts) == 1:
         shape = shape_parts[0]
+    else:
+        shape = ()
 
     ndim = a.ndim + indices.ndim - 1
 
@@ -163,23 +163,8 @@ def transform_take(a, indices, axis):
 
 
 def is_full_slice(x):
-    """Determine if `x` is a ``slice(None)`` or a symbolic equivalent."""
-    if isinstance(x, slice):
-        return x == slice(None)
-
-    if isinstance(x, Variable) and isinstance(x.type, SliceType):
-        if x.owner is None:
-            if isinstance(x, Constant):
-                return x.data == slice(None)
-            else:
-                # Root slice variable
-                return False
-
-        # Symbolic MakeSlice
-        # Ignores start = 0, step = 1 cases
-        return all(isinstance(i.type, NoneTypeT) for i in x.owner.inputs)
-
-    return False
+    # Replace this function in pymc-extras and pymc with x==slice(None)
+    return x == slice(None)
 
 
 def get_advsubtensor_axis(indices):
@@ -194,13 +179,13 @@ def get_advsubtensor_axis(indices):
     found_idx = False
     axis = 0
     for idx in indices:
-        if not found_idx and is_full_slice(idx):
+        if not found_idx and idx == slice(None):
             # Preceding full slices
             axis += 1
-        elif found_idx and not is_full_slice(idx):
+        elif found_idx and not idx == slice(None):
             # We don't handle multiple indices
             return
-        elif found_idx and is_full_slice(idx):
+        elif found_idx and idx == slice(None):
             # Trailing full slices
             continue
         else:
@@ -228,8 +213,8 @@ def local_replace_AdvancedSubtensor(fgraph, node):
         return
 
     indexed_var = node.inputs[0]
-    indices = node.inputs[1:]
-
+    index_variables = node.inputs[1:]
+    indices = indices_from_subtensor(index_variables, node.op.idx_list)
     axis = get_advsubtensor_axis(indices)
 
     if axis is None or indices[axis].dtype == "bool":
@@ -253,9 +238,8 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
         # `AdvancedIncSubtensor1` does not ignore duplicate index values
         return
 
-    res = node.inputs[0]
-    val = node.inputs[1]
-    indices = node.inputs[2:]
+    res, val, *index_variables = node.inputs
+    indices = indices_from_subtensor(index_variables, node.op.idx_list)
 
     axis = get_advsubtensor_axis(indices)
 
@@ -463,9 +447,8 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
     remove_dim = []
     node_inputs_idx = 1
     for dim, elem in enumerate(idx):
-        if isinstance(elem, ScalarType):
-            # The idx is a ScalarType, ie a Type. This means the actual index
-            # is contained in node.inputs[1]
+        if isinstance(elem, int):
+            # The idx is a integer position.
             dim_index = node.inputs[node_inputs_idx]
             if isinstance(dim_index, ScalarConstant):
                 dim_index = dim_index.value
@@ -477,9 +460,6 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         elif isinstance(elem, slice):
             if elem != slice(None):
                 return
-        elif isinstance(elem, int | np.integer):
-            if elem in (0, -1) and node.inputs[0].broadcastable[dim]:
-                remove_dim.append(dim)
         else:
             raise TypeError("case not expected")
 
@@ -506,9 +486,16 @@ def local_subtensor_inc_subtensor(fgraph, node):
         if not x.owner.op.set_instead_of_inc:
             return
 
-        if x.owner.inputs[2:] == node.inputs[1:] and tuple(
-            x.owner.op.idx_list
-        ) == tuple(node.op.idx_list):
+        inc_inputs = x.owner.inputs[2:]
+        sub_inputs = node.inputs[1:]
+
+        if (
+            len(inc_inputs) == len(sub_inputs)
+            and x.owner.op.idx_list == node.op.idx_list
+            and all(
+                equal_computations([a], [b]) for a, b in zip(inc_inputs, sub_inputs)
+            )
+        ):
             out = node.outputs[0]
             y = x.owner.inputs[1]
             # If the dtypes differ, cast y into x.dtype
@@ -829,9 +816,9 @@ def merge_two_slices(fgraph, slice1, len1, slice2, len2):
         raise ValueError("slice1 should be of type `slice`")
 
     # Simple case where one of the slices is useless
-    if is_full_slice(slice1):
+    if slice1 == slice(None):
         return slice2
-    elif is_full_slice(slice2):
+    elif slice2 == slice(None):
         return slice1
 
     sl1, reverse1 = get_canonical_form_slice(slice1, len1)
@@ -1090,6 +1077,7 @@ compile.optdb.register(
 def local_inplace_AdvancedIncSubtensor(fgraph, node):
     if isinstance(node.op, AdvancedIncSubtensor) and not node.op.inplace:
         new_op = type(node.op)(
+            node.op.idx_list,
             inplace=True,
             set_instead_of_inc=node.op.set_instead_of_inc,
             ignore_duplicates=node.op.ignore_duplicates,
@@ -1299,7 +1287,7 @@ def local_useless_inc_subtensor_alloc(fgraph, node):
             if isinstance(node.op, IncSubtensor):
                 xi = Subtensor(node.op.idx_list)(x, *i)
             elif isinstance(node.op, AdvancedIncSubtensor):
-                xi = advanced_subtensor(x, *i)
+                xi = AdvancedSubtensor(node.op.idx_list)(x, *i)
             elif isinstance(node.op, AdvancedIncSubtensor1):
                 xi = advanced_subtensor1(x, *i)
             else:
@@ -1493,8 +1481,7 @@ def local_uint_constant_indices(fgraph, node):
         x, *indices = node.inputs
         y = None
 
-    idx_list = getattr(node.op, "idx_list", None)
-    new_indices = list(indices_from_subtensor(indices, idx_list))
+    new_indices = list(indices_from_subtensor(indices, node.op.idx_list))
     has_new_index = False
 
     for i, index in enumerate(new_indices):
@@ -1549,9 +1536,8 @@ def local_uint_constant_indices(fgraph, node):
         props = op._props_dict()
         props["idx_list"] = new_indices
         op = type(op)(**props)
-        # Basic index Ops don't expect slices, but the respective start/step/stop
-        new_indices = get_slice_elements(new_indices)
 
+    new_indices = get_slice_elements(new_indices)
     new_args = (x, *new_indices) if y is None else (x, y, *new_indices)
     new_out = op(*new_args)
     copy_stack_trace(node.outputs[0], new_out)
@@ -1612,19 +1598,8 @@ def local_blockwise_inc_subtensor(fgraph, node):
     x, y, *idxs = node.inputs
     [out] = node.outputs
     if isinstance(core_op, AdvancedIncSubtensor):
-        if any(
-            (
-                # Blockwise requires all inputs to be tensors so it is not possible
-                # to wrap an AdvancedIncSubtensor with slice / newaxis inputs, but we check again just in case
-                # If this is ever supported we need to pay attention to special behavior of numpy when advanced indices
-                # are separated by basic indices
-                isinstance(idx, SliceType | NoneTypeT)
-                # Also get out if we have boolean indices as they cross dimension boundaries
-                # / can't be safely broadcasted depending on their runtime content
-                or (idx.type.dtype == "bool")
-            )
-            for idx in idxs
-        ):
+        # bool indices can consume different number of dims
+        if any(idx.type.dtype == "bool" for idx in idxs):
             return None
 
     batch_ndim = node.op.batch_ndim(node)
@@ -1720,69 +1695,95 @@ def local_blockwise_inc_subtensor(fgraph, node):
     implicit_axes = tuple(range(batch_ndim, batch_ndim + missing_y_core_ndim))
     y = _squeeze_left(expand_dims(y, implicit_axes), stop_at_dim=batch_ndim)
 
-    if isinstance(core_op, IncSubtensor):
-        # Check if we can still use a basic IncSubtensor
-        if isinstance(x_view.owner.op, Subtensor):
-            new_props = core_op._props_dict()
-            new_props["idx_list"] = x_view.owner.op.idx_list
-            new_core_op = type(core_op)(**new_props)
-            symbolic_idxs = x_view.owner.inputs[1:]
-            new_out = new_core_op(x, y, *symbolic_idxs)
-        else:
-            # We need to use AdvancedSet/IncSubtensor
-            if core_op.set_instead_of_inc:
-                new_out = x[new_idxs].set(y)
-            else:
-                new_out = x[new_idxs].inc(y)
-    else:
-        # AdvancedIncSubtensor takes symbolic indices/slices directly, no need to create a new op
+    if isinstance(x_view.owner.op, Subtensor):
+        new_props = core_op._props_dict()
+        new_props["idx_list"] = x_view.owner.op.idx_list
+        new_core_op = type(core_op)(**new_props)
         symbolic_idxs = x_view.owner.inputs[1:]
-        new_out = core_op(x, y, *symbolic_idxs)
+        new_out = new_core_op(x, y, *symbolic_idxs)
+    else:
+        if core_op.set_instead_of_inc:
+            new_out = x[new_idxs].set(y)
+        else:
+            new_out = x[new_idxs].inc(y)
 
     copy_stack_trace(out, new_out)
     return [new_out]
 
 
 @node_rewriter(tracks=[AdvancedSubtensor, AdvancedIncSubtensor])
-def bool_idx_to_nonzero(fgraph, node):
-    """Convert boolean indexing into equivalent vector boolean index, supported by our dispatch
+def ravel_multidimensional_bool_idx(fgraph, node):
+    """Convert multidimensional boolean indexing into equivalent vector boolean index, supported by Numba
 
-    x[1:, eye(3, dtype=bool), 1:] -> x[1:, *eye(3).nonzero()]
+    x[eye(3, dtype=bool)] -> x.ravel()[eye(3).ravel()]
+    x[eye(3, dtype=bool)].set(y) -> x.ravel()[eye(3).ravel()].set(y).reshape(x.shape)
     """
+
     if isinstance(node.op, AdvancedSubtensor):
-        x, *idxs = node.inputs
+        x, *index_variables = node.inputs
     else:
-        x, y, *idxs = node.inputs
+        x, y, *index_variables = node.inputs
 
-    bool_pos = {
-        i
-        for i, idx in enumerate(idxs)
-        if (isinstance(idx.type, TensorType) and idx.dtype == "bool")
-    }
+    idxs = indices_from_subtensor(index_variables, node.op.idx_list)
 
-    if not bool_pos:
+    if any(
+        hasattr(idx, "type")
+        and isinstance(idx.type, TensorType)
+        and idx.type.dtype in integer_dtypes
+        for idx in idxs
+    ):
+        # Get out if there are any other advanced indexes
         return None
 
-    new_idxs = []
-    for i, idx in enumerate(idxs):
-        if i in bool_pos:
-            new_idxs.extend(idx.nonzero())
-        else:
-            new_idxs.append(idx)
+    bool_idxs = [
+        (i, idx)
+        for i, idx in enumerate(idxs)
+        if (
+            hasattr(idx, "type")
+            and isinstance(idx.type, TensorType)
+            and idx.dtype == "bool"
+        )
+    ]
+
+    if len(bool_idxs) != 1:
+        # Get out if there are no or multiple boolean idxs
+        return None
+    [(bool_idx_pos, bool_idx)] = bool_idxs
+    bool_idx_ndim = bool_idx.type.ndim
+    if bool_idx.type.ndim < 2:
+        # No need to do anything if it's a vector or scalar, as it's already supported by Numba
+        return None
+
+    x_shape = x.shape
+    raveled_x = x.reshape(
+        (*x_shape[:bool_idx_pos], -1, *x_shape[bool_idx_pos + bool_idx_ndim :])
+    )
+
+    raveled_bool_idx = bool_idx.ravel()
+    new_idxs = list(idxs)
+    new_idxs[bool_idx_pos] = raveled_bool_idx
 
     if isinstance(node.op, AdvancedSubtensor):
-        new_out = node.op(x, *new_idxs)
+        new_out = raveled_x[tuple(new_idxs)]
     else:
-        new_out = node.op(x, y, *new_idxs)
+        sub = raveled_x[tuple(new_idxs)]
+        new_out = inc_subtensor(
+            sub,
+            y,
+            set_instead_of_inc=node.op.set_instead_of_inc,
+            ignore_duplicates=node.op.ignore_duplicates,
+            inplace=node.op.inplace,
+        )
+        new_out = new_out.reshape(x_shape)
 
     return [copy_stack_trace(node.outputs[0], new_out)]
 
 
 optdb["specialize"].register(
-    bool_idx_to_nonzero.__name__,
-    bool_idx_to_nonzero,
+    ravel_multidimensional_bool_idx.__name__,
+    ravel_multidimensional_bool_idx,
     "numba",
-    "shape_unsafe",  # It can mask invalid mask sizes
+    "shape_unsafe",
     use_db_name_as_tag=False,  # Not included if only "specialize" is requested
 )
 
@@ -1822,7 +1823,8 @@ def extract_diag_of_diagonal_set_subtensor(fgraph, node):
     ):
         return None
 
-    x, y, *idxs = diag_x.owner.inputs
+    x, y, *tensor_idxs = diag_x.owner.inputs
+    idxs = list(indices_from_subtensor(tensor_idxs, diag_x.owner.op.idx_list))
 
     if not (
         x.type.ndim >= 2
@@ -1838,7 +1840,7 @@ def extract_diag_of_diagonal_set_subtensor(fgraph, node):
 
     # Check all non-axis indices are full slices
     axis = {op.axis1, op.axis2}
-    if not all(is_full_slice(idx) for i, idx in enumerate(idxs) if i not in axis):
+    if not all(idx == slice(None) for i, idx in enumerate(idxs) if i not in axis):
         return None
 
     # Check axis indices are arange we would expect from setting on the diagonal

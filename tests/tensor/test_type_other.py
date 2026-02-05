@@ -1,33 +1,13 @@
 """This file don't test everything. It only test one past crash error."""
 
+import pytest
+
 import pytensor
 from pytensor import as_symbolic
 from pytensor.graph.basic import Constant
 from pytensor.tensor.math import argmax
-from pytensor.tensor.type import iscalar, vector
-from pytensor.tensor.type_other import (
-    MakeSlice,
-    NoneConst,
-    NoneTypeT,
-    SliceConstant,
-    SliceType,
-    make_slice,
-)
-
-
-def test_SliceType():
-    st = SliceType()
-    assert st == st.clone()
-
-
-def test_make_slice_merge():
-    # In the past, this was crahsing during compilation.
-    i = iscalar()
-    s1 = make_slice(0, i)
-    s2 = make_slice(0, i)
-    f = pytensor.function([i], [s1, s2])
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([n for n in nodes if isinstance(n.op, MakeSlice)]) == 1
+from pytensor.tensor.type import vector
+from pytensor.tensor.type_other import NoneConst, NoneTypeT
 
 
 def test_none_Constant():
@@ -59,12 +39,29 @@ def test_none_Constant():
     pickle.loads(pickle.dumps(f))
 
 
+def test_slice_handling():
+    from pytensor.tensor.type import iscalar
+
+    i = iscalar()
+    x = vector("x")
+
+    result = x[0:i]
+    f = pytensor.function([x, i], result)
+
+    import numpy as np
+
+    test_val = np.arange(10)
+    assert np.array_equal(f(test_val, 5), test_val[0:5])
+
+
 def test_as_symbolic():
     res = as_symbolic(None)
     assert res is NoneConst
 
-    res = as_symbolic(slice(iscalar()))
-    assert res.owner.op == make_slice
+    with pytest.raises(NotImplementedError):
+        as_symbolic(slice(1, 2))
 
-    res = as_symbolic(slice(1, 2))
-    assert isinstance(res, SliceConstant)
+    from pytensor.tensor.type import iscalar
+
+    with pytest.raises(NotImplementedError):
+        as_symbolic(slice(iscalar()))

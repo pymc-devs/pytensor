@@ -10,15 +10,14 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice
 
 
 @mlx_funcify.register(Subtensor)
 def mlx_funcify_Subtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
-
     def subtensor(x, *ilists):
-        indices = indices_from_subtensor([int(element) for element in ilists], idx_list)
+        indices = indices_from_subtensor(
+            [int(element) for element in ilists], op.idx_list
+        )
         if len(indices) == 1:
             indices = indices[0]
 
@@ -30,10 +29,8 @@ def mlx_funcify_Subtensor(op, node, **kwargs):
 @mlx_funcify.register(AdvancedSubtensor)
 @mlx_funcify.register(AdvancedSubtensor1)
 def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
-
     def advanced_subtensor(x, *ilists):
-        indices = indices_from_subtensor(ilists, idx_list)
+        indices = indices_from_subtensor(ilists, op.idx_list)
         if len(indices) == 1:
             indices = indices[0]
 
@@ -45,8 +42,6 @@ def mlx_funcify_AdvancedSubtensor(op, node, **kwargs):
 @mlx_funcify.register(IncSubtensor)
 @mlx_funcify.register(AdvancedIncSubtensor1)
 def mlx_funcify_IncSubtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
-
     if getattr(op, "set_instead_of_inc", False):
 
         def mlx_fn(x, indices, y):
@@ -63,7 +58,7 @@ def mlx_funcify_IncSubtensor(op, node, **kwargs):
             x[indices] += y
             return x
 
-    def incsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=idx_list):
+    def incsubtensor(x, y, *ilist, mlx_fn=mlx_fn, idx_list=op.idx_list):
         indices = indices_from_subtensor(ilist, idx_list)
         if len(indices) == 1:
             indices = indices[0]
@@ -95,11 +90,3 @@ def mlx_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         return mlx_fn(x, ilist, y)
 
     return advancedincsubtensor
-
-
-@mlx_funcify.register(MakeSlice)
-def mlx_funcify_MakeSlice(op, **kwargs):
-    def makeslice(*x):
-        return slice(*x)
-
-    return makeslice

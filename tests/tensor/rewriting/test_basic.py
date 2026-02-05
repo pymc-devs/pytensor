@@ -468,6 +468,63 @@ class TestLocalUselessIncSubtensorAlloc:
         assert check_stack_trace(f1, ops_to_check="last")
         assert check_stack_trace(f2, ops_to_check="last")
 
+    def test_advanced_inc_subtensor_shape_inference_bug(self):
+        """
+        Test for bug in local_useless_inc_subtensor_alloc where advanced_subtensor
+        was called instead of using the original op's idx_list, causing incorrect
+        shape inference and AssertionError.
+
+        The bug occurred when advanced_subtensor(x, *i) tried to reconstruct
+        idx_list from inputs, leading to wrong shape for xi. This caused the
+        Assert condition checking shape compatibility to fail at runtime with:
+        AssertionError: `x[i]` and `y` do not have the same shape.
+
+        This test reproduces the bug by using a scenario where the shape
+        comparison would fail if xi has the wrong shape due to incorrect
+        idx_list reconstruction.
+        """
+        # Use vector with matrix indices - this creates AdvancedIncSubtensor
+        # The key is that when advanced_subtensor tries to reconstruct idx_list,
+        # it may get it wrong, causing xi to have incorrect shape
+        x = vector("x")
+        y = scalar("y")
+        i = matrix(
+            "i", dtype="int64"
+        )  # 2D indices for 1D array -> AdvancedIncSubtensor
+
+        # Create AdvancedIncSubtensor with Alloc
+        # When i is (n, m), i.shape is (n, m), so alloc creates shape (n, m)
+        # But x[i] where i is (n, m) creates shape (n, m) as well
+        # The bug would cause xi to have wrong shape, making the Assert fail
+        z = advanced_inc_subtensor(x, pt.alloc(y, *i.shape), i)
+
+        # Compile - this should not raise AssertionError during execution
+        # With the buggy code (using advanced_subtensor), this raises:
+        # AssertionError: `x[i]` and `y` do not have the same shape.
+        f = function([x, i, y], z, mode=self.mode)
+
+        # Test with actual values
+        x_value = np.random.standard_normal(10).astype(config.floatX)
+        y_value = np.random.standard_normal()
+        i_value = self.rng.integers(0, 10, size=(3, 2))
+
+        # This should execute without AssertionError
+        # With the buggy code (using advanced_subtensor), this would raise:
+        # AssertionError: `x[i]` and `y` do not have the same shape.
+        result = f(x_value, i_value, y_value)
+
+        # Verify basic properties
+        # The main point of this test is that it doesn't raise AssertionError
+        # advanced_inc_subtensor modifies x in place and returns it
+        assert result.shape == x_value.shape, "Result should have same shape as input"
+        assert not np.array_equal(result, x_value), "Result should be modified"
+
+        # Verify the rewrite was applied (Alloc should be removed)
+        topo = f.maker.fgraph.toposort()
+        assert len([n for n in topo if isinstance(n.op, Alloc)]) == 0, (
+            "Alloc should have been removed by the rewrite"
+        )
+
 
 class TestUselessCheckAndRaise:
     def test_basic(self):
