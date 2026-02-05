@@ -635,6 +635,27 @@ class TestBroadcast:
         for res, expected_res in zip(results, expected_results, strict=True):
             xr_assert_allclose(res, expected_res)
 
+    def test_mixed_dtypes(self):
+        x = xtensor("x", dims=("a", "b"), shape=(3, 4), dtype="float64")
+        y = xtensor("y", dims=("c", "d"), shape=(5, 6), dtype="int64")
+        z = xtensor("z", dims=("b", "d"), shape=(4, 6), dtype="int32")
+
+        x_bcast, y_bcast, z_bcast = broadcast(x, y, z)
+        assert x_bcast.dtype == x.dtype
+        assert y_bcast.dtype == y.dtype
+        assert z_bcast.dtype == z.dtype
+
+        fn = xr_function([x, y, z], [x_bcast, y_bcast, z_bcast])
+
+        x_test = xr_arange_like(x)
+        y_test = xr_arange_like(y)
+        z_test = xr_arange_like(z)
+        results = fn(x_test, y_test, z_test)
+        expected_results = xr_broadcast(x_test, y_test, z_test)
+        for res, exp_res in zip(results, expected_results, strict=True):
+            assert res.dtype == exp_res.dtype
+            xr_assert_allclose(res, exp_res)
+
 
 def test_full_like():
     """Test full_like function, comparing with xarray's full_like."""
