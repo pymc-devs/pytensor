@@ -17,7 +17,12 @@ from pytensor.scalar import ScalarOp
 from pytensor.xtensor.basic import rename
 from pytensor.xtensor.math import add, exp, logsumexp
 from pytensor.xtensor.type import xtensor
-from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
+from tests.xtensor.util import (
+    check_vectorization,
+    xr_arange_like,
+    xr_assert_allclose,
+    xr_function,
+)
 
 
 def test_all_scalar_ops_are_wrapped():
@@ -340,3 +345,11 @@ def test_dot_errors():
         match=r"(Input operand 1 has a mismatch in its core dimension 0|incompatible array sizes for np.dot)",
     ):
         fn(x_test, y_test)
+
+
+def test_xelemwise_vectorize():
+    ab = xtensor("ab", dims=("a", "b"), shape=(2, 3))
+    bc = xtensor("bc", dims=("b", "c"), shape=(3, 5))
+
+    check_vectorization([ab], [exp(ab)])
+    check_vectorization([ab, bc], [ab + bc])

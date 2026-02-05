@@ -13,6 +13,7 @@ from xarray import DataArray
 from pytensor.tensor import tensor
 from pytensor.xtensor import xtensor
 from tests.xtensor.util import (
+    check_vectorization,
     xr_arange_like,
     xr_assert_allclose,
     xr_function,
@@ -511,3 +512,35 @@ def test_diff(dim, n):
     else:
         expected_res = x_test.diff(dim, n=n)
     xr_assert_allclose(res, expected_res)
+
+
+def test_indexing_vectorize():
+    abc = xtensor(dims=("a", "b", "c"), shape=(3, 5, 7))
+    a_idx = xtensor(dims=("a",), shape=(5,), dtype="int64")
+    c_idx = xtensor(dims=("c",), shape=(3,), dtype="int64")
+
+    abc_val = xr_random_like(abc)
+    a_idx_val = DataArray([0, 1, 0, 2, 0], dims=("a",))
+    c_idx_val = DataArray([0, 5, 6], dims=("c",))
+
+    check_vectorization([abc, a_idx], [abc.isel(a=a_idx)], [abc_val, a_idx_val])
+    check_vectorization(
+        [abc, a_idx], [abc.isel(a=a_idx.rename(a="b"))], [abc_val, a_idx_val]
+    )
+    check_vectorization(
+        [abc, a_idx], [abc.isel(a=a_idx.rename(a="d"))], [abc_val, a_idx_val]
+    )
+    check_vectorization([abc, a_idx], [abc.isel(c=a_idx[:3])], [abc_val, a_idx_val])
+    check_vectorization(
+        [abc, a_idx], [abc.isel(a=a_idx, c=a_idx)], [abc_val, a_idx_val]
+    )
+    check_vectorization(
+        [abc, a_idx, c_idx],
+        [abc.isel(a=a_idx, c=c_idx)],
+        [abc_val, a_idx_val, c_idx_val],
+    )
+
+
+def test_index_update_vectorize():
+    # TODO
+    pass

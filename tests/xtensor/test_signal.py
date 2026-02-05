@@ -12,7 +12,12 @@ from xarray import apply_ufunc
 
 from pytensor.xtensor.signal import convolve1d
 from pytensor.xtensor.type import xtensor
-from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
+from tests.xtensor.util import (
+    check_vectorization,
+    xr_arange_like,
+    xr_assert_allclose,
+    xr_function,
+)
 
 
 @pytest.mark.parametrize("mode", ("full", "valid", "same"))
@@ -68,3 +73,14 @@ def test_convolve_1d_invalid():
         match=re.escape("Input 1 has invalid core dims ['time']. Allowed: ('kernel',)"),
     ):
         convolve1d(in1, in2.rename({"batch": "time"}), dims=("time", "kernel"))
+
+
+def test_signal_vectorize():
+    # Note: We only need to test a couple Ops, since the vectorization logic is not Op specific
+    ab = xtensor("a", dims=("a", "b"), shape=(3, 3))
+    c = xtensor(name="c", dims=("c",), shape=(7,))
+
+    check_vectorization(
+        [ab, c],
+        [convolve1d(ab, c, dims=("a", "c"))],
+    )
