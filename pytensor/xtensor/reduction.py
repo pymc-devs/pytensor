@@ -46,6 +46,9 @@ class XReduce(XOp):
         output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
         return Apply(self, [x], [output])
 
+    def vectorize_node(self, node, new_x):
+        return [self(new_x)]
+
 
 def _process_user_dims(x: XTensorVariable, dim: REDUCE_DIM) -> Sequence[str]:
     if isinstance(dim, str):
@@ -116,6 +119,9 @@ class XCumReduce(XOp):
         x = as_xtensor(x)
         out = x.type()
         return Apply(self, [x], [out])
+
+    def vectorize_node(self, node, new_x):
+        return [self(new_x)]
 
 
 def cumreduce(x, dim: REDUCE_DIM, *, binary_op):

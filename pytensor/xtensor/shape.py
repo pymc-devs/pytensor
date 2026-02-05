@@ -68,6 +68,9 @@ class Stack(XOp):
         )
         return Apply(self, [x], [output])
 
+    def vectorize_node(self, node, new_x):
+        return [self(new_x)]
+
 
 def stack(x, dim: dict[str, Sequence[str]] | None = None, **dims: Sequence[str]):
     if dim is not None:
@@ -146,6 +149,14 @@ class UnStack(XOp):
         )
         return Apply(self, [x, *unstacked_lengths], [output])
 
+    def vectorize_node(self, node, new_x, *new_unstacked_length):
+        new_unstacked_length = [ul.squeeze() for ul in new_unstacked_length]
+        if not all(ul.type.ndim == 0 for ul in new_unstacked_length):
+            raise NotImplementedError(
+                f"Vectorization of {self} with batched unstacked_length not implemented, "
+            )
+        return [self(new_x, *new_unstacked_length)]
+
 
 def unstack(x, dim: dict[str, dict[str, int]] | None = None, **dims: dict[str, int]):
     if dim is not None:
@@ -188,6 +199,11 @@ class Transpose(XOp):
             dims=transpose_dims,
         )
         return Apply(self, [x], [output])
+
+    def vectorize_node(self, node, new_x):
+        old_dims = self.dims
+        new_dims = tuple(dim for dim in new_x.dims if dim not in old_dims)
+        return [type(self)(dims=(*new_dims, *old_dims))(new_x)]
 
 
 def transpose(
@@ -302,6 +318,9 @@ class Concat(XOp):
         output = xtensor(dtype=dtype, dims=dims, shape=shape)
         return Apply(self, inputs, [output])
 
+    def vectorize_node(self, node, *new_inputs):
+        return [self(*new_inputs)]
+
 
 def concat(xtensors, dim: str):
     """Concatenate a sequence of XTensorVariables along a specified dimension.
@@ -383,6 +402,9 @@ class Squeeze(XOp):
         )
         return Apply(self, [x], [out])
 
+    def vectorize_node(self, node, new_x):
+        return [self(new_x)]
+
 
 def squeeze(x, dim: str | Sequence[str] | None = None):
     """Remove dimensions of size 1 from an XTensorVariable."""
@@ -441,6 +463,14 @@ class ExpandDims(XOp):
             dims=new_dims,
         )
         return Apply(self, [x, size], [out])
+
+    def vectorize_node(self, node, new_x, new_size):
+        new_size = new_size.squeeze()
+        if new_size.type.ndim != 0:
+            raise NotImplementedError(
+                f"Vectorization of {self} with batched new_size not implemented, "
+            )
+        return [self(new_x, new_size)]
 
 
 def expand_dims(x, dim=None, axis=None, **dim_kwargs):
@@ -536,6 +566,19 @@ class Broadcast(XOp):
             outputs.append(output)
 
         return Apply(self, inputs, outputs)
+
+    def vectorize_node(self, node, *new_inputs):
+        if exclude_set := set(self.exclude):
+            for new_x, old_x in zip(node.inputs, new_inputs, strict=True):
+                if invalid_excluded := (
+                    (set(new_x.dims) - set(old_x.dims)) & exclude_set
+                ):
+                    raise NotImplementedError(
+                        f"Vectorize of {self} is undefined because one of the inputs {new_x} "
+                        f"has an excluded dimension {sorted(invalid_excluded)} that it did not have before."
+                    )
+
+        return self(*new_inputs, return_list=True)
 
 
 def broadcast(

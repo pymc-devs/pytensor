@@ -1,14 +1,17 @@
 import pytest
 
 
-pytest.importorskip("xarray")
+xr = pytest.importorskip("xarray")
+
+from itertools import chain
 
 import numpy as np
 from xarray import DataArray
 from xarray.testing import assert_allclose
 
 from pytensor import function
-from pytensor.xtensor.type import XTensorType
+from pytensor.graph import vectorize_graph
+from pytensor.xtensor.type import XTensorType, as_xtensor
 
 
 def xr_function(*args, **kwargs):
@@ -76,3 +79,57 @@ def xr_random_like(x, rng=None):
     return DataArray(
         rng.standard_normal(size=x.type.shape, dtype=x.type.dtype), dims=x.type.dims
     )
+
+
+def check_vectorization(inputs, outputs, input_vals=None, rng=None):
+    # Create core graph and function
+    if not isinstance(inputs, list | tuple):
+        inputs = (inputs,)
+
+    if not isinstance(outputs, list | tuple):
+        outputs = (outputs,)
+
+    # apply_ufunc isn't happy with list output or single entry
+    _core_fn = function(inputs, outputs)
+
+    def core_fn(*args, _core_fn=_core_fn):
+        res = _core_fn(*args)
+        if len(res) == 1:
+            return res[0]
+        else:
+            return tuple(res)
+
+    if input_vals is None:
+        rng = np.random.default_rng(rng)
+        input_vals = [xr_random_like(inp, rng) for inp in inputs]
+
+    # Create vectorized inputs
+    batch_inputs = []
+    batch_input_vals = []
+    for i, (inp, val) in enumerate(zip(inputs, input_vals)):
+        new_val = val.expand_dims({f"batch_{i}": 2 ** (i + 1)})
+        new_inp = as_xtensor(new_val).type(f"batch_{inp.name or f'input{i}'}")
+        batch_inputs.append(new_inp)
+        batch_input_vals.append(new_val)
+
+    # Create vectorized function
+    new_outputs = vectorize_graph(outputs, dict(zip(inputs, batch_inputs)))
+    vec_fn = xr_function(batch_inputs, new_outputs)
+    vec_res = vec_fn(*batch_input_vals)
+
+    # xarray.apply_ufunc with vectorize=True loops over non-core dims
+    input_core_dims = [i.dims for i in inputs]
+    output_core_dims = [o.dims for o in outputs]
+    expected_res = xr.apply_ufunc(
+        core_fn,
+        *batch_input_vals,
+        input_core_dims=input_core_dims,
+        output_core_dims=output_core_dims,
+        exclude_dims=set(chain.from_iterable((*input_core_dims, *output_core_dims))),
+        vectorize=True,
+    )
+    if not isinstance(expected_res, list | tuple):
+        expected_res = (expected_res,)
+
+    for v_r, e_r in zip(vec_res, expected_res):
+        xr_assert_allclose(v_r, e_r.transpose(*v_r.dims))

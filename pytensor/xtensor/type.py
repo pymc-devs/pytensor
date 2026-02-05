@@ -1044,7 +1044,7 @@ def as_xtensor(x, dims: Sequence[str] | None = None, *, name: str | None = None)
 
     if isinstance(x, Variable):
         if isinstance(x.type, XTensorType):
-            if (dims is None) or (x.type.dims == dims):
+            if (dims is None) or (x.type.dims == tuple(dims)):
                 return x
             else:
                 raise ValueError(
