@@ -9,6 +9,7 @@ import re
 from copy import deepcopy
 
 import numpy as np
+from xarray import DataArray
 
 import pytensor.tensor.random as ptr
 import pytensor.xtensor.random as pxr
@@ -26,6 +27,7 @@ from pytensor.xtensor.random import (
     normal,
 )
 from pytensor.xtensor.vectorization import XRV
+from tests.xtensor.util import check_vectorization
 
 
 def lower_rewrite(vars):
@@ -438,3 +440,27 @@ def test_multivariate_normal():
     ):
         # cov must have both core_dims
         multivariate_normal(mu_xr, cov_xr, core_dims=("rows", "missing_cols"))
+
+
+def test_xrv_vectorize():
+    # Note: We only need to test a couple Ops, since the vectorization logic is not Op specific
+
+    n = xtensor("n", dims=("n",), shape=(3,), dtype=int)
+    pna = xtensor("p", dims=("p", "n", "a"), shape=(5, 3, 2))
+    out = multinomial(n, pna, core_dims=("p",), extra_dims={"extra": 5})
+    check_vectorization(
+        [n, pna],
+        [out],
+        input_vals=[
+            DataArray([3, 5, 10], dims=("n",)),
+            DataArray(
+                np.random.multinomial(n=1, pvals=np.ones(5) / 5, size=(2, 3)).T,
+                dims=("p", "n", "a"),
+            ),
+        ],
+    )
+
+
+def test_xrv_batch_extra_dim_vectorize():
+    # TODO: Check it raises NotImplementedError when we try to batch the extra_dim of an xrv
+    pass

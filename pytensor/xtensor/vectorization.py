@@ -6,6 +6,8 @@ import numpy as np
 from pytensor import scalar as ps
 from pytensor import shared
 from pytensor.graph import Apply, Op
+from pytensor.graph.basic import Variable
+from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import discrete_dtypes
 from pytensor.tensor import tensor
 from pytensor.tensor.random.op import RNGConsumerOp
@@ -14,8 +16,11 @@ from pytensor.tensor.utils import (
     get_static_shape_from_size_variables,
 )
 from pytensor.utils import unzip
-from pytensor.xtensor.basic import XOp
-from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
+from pytensor.xtensor.basic import (
+    XOp,
+    XTypeCastOp,
+)
+from pytensor.xtensor.type import XTensorType, XTensorVariable, as_xtensor, xtensor
 
 
 def combine_dims_and_shape(
@@ -73,6 +78,9 @@ class XElemwise(XOp):
             for output_dtype in output_dtypes
         ]
         return Apply(self, inputs, outputs)
+
+    def vectorize_node(self, node, *new_inputs):
+        return self(*new_inputs, return_list=True)
 
 
 class XBlockwise(XOp):
@@ -140,6 +148,9 @@ class XBlockwise(XOp):
             for core_out, core_out_dims in zip(core_node.outputs, core_outputs_dims)
         ]
         return Apply(self, inputs, outputs)
+
+    def vectorize_node(self, node, *new_inputs):
+        return self(*new_inputs, return_list=True)
 
 
 class XRV(XOp, RNGConsumerOp):
@@ -288,3 +299,54 @@ class XRV(XOp, RNGConsumerOp):
         )
 
         return Apply(self, [rng, *extra_dim_lengths, *params], [rng.type(), out])
+
+    def vectorize_node(self, node, *new_inputs):
+        new_rng, *new_extra_dim_lengths_and_params = new_inputs
+        k = len(self.extra_dims)
+        new_extra_dim_lengths, new_params = (
+            new_extra_dim_lengths_and_params[:k],
+            new_extra_dim_lengths_and_params[k:],
+        )
+
+        new_extra_dim_lengths = [dl.squeeze() for dl in new_extra_dim_lengths]
+        if not all(dl.type.ndim == 0 for dl in new_extra_dim_lengths):
+            raise NotImplementedError(
+                f"Vectorization of {self} with batched extra_dim_lengths not implemented, "
+            )
+
+        return self.make_node(new_rng, *new_extra_dim_lengths, *new_params).outputs
+
+
+@_vectorize_node.register(XOp)
+@_vectorize_node.register(XTypeCastOp)
+def vectorize_xop(op: XOp, node, *new_inputs) -> Sequence[Variable]:
+    old_inp_dims = [
+        inp.dims for inp in node.inputs if isinstance(inp.type, XTensorType)
+    ]
+    old_out_dims = [
+        out.dims for out in node.outputs if isinstance(out.type, XTensorType)
+    ]
+    all_old_dims_set = set(chain.from_iterable((*old_inp_dims, old_out_dims)))
+
+    for new_inp, old_inp in zip(new_inputs, node.inputs, strict=True):
+        if not (
+            isinstance(new_inp.type, XTensorType)
+            and isinstance(old_inp.type, XTensorType)
+        ):
+            continue
+
+        old_dims_set = set(old_inp.dims)
+        new_dims_set = set(new_inp.dims)
+
+        # Validate that new inputs didn't drop pre-existing dims
+        if missing_dims := old_dims_set - new_dims_set:
+            raise ValueError(
+                f"Vectorized input {new_inp} is missing pre-existing dims: {sorted(missing_dims)}"
+            )
+        # Or have new dimensions that were already in the graph
+        if new_core_dims := ((new_dims_set - old_dims_set) & all_old_dims_set):
+            raise ValueError(
+                f"Vectorized input {new_inp} has new dimensions that were present in the original graph: {new_core_dims}"
+            )
+
+    return op.vectorize_node(node, *new_inputs)

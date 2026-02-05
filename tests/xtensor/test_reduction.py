@@ -8,7 +8,12 @@ import numpy as np
 import xarray as xr
 
 from pytensor.xtensor.type import xtensor
-from tests.xtensor.util import xr_arange_like, xr_assert_allclose, xr_function
+from tests.xtensor.util import (
+    check_vectorization,
+    xr_arange_like,
+    xr_assert_allclose,
+    xr_function,
+)
 
 
 @pytest.mark.parametrize(
@@ -99,3 +104,16 @@ def test_discrete_reduction_upcasting(signed):
     res = fn(x_val)
     np.testing.assert_allclose(res, [test_val, test_val**2])
     xr_assert_allclose(res, x_val.cumprod())
+
+
+def test_reduction_vectorize():
+    # Note: We only need to test a couple Ops, since the vectorization logic is not Op specific
+    abc = xtensor("x", dims=("a", "b", "c"), shape=(3, 5, 7))
+
+    check_vectorization([abc], [abc.sum(dim="a")])
+    check_vectorization([abc], [abc.max(dim=("a", "c"))])
+    check_vectorization([abc], [abc.all()])
+
+    check_vectorization([abc], [abc.cumsum(dim="b")])
+    check_vectorization([abc], [abc.cumsum(dim=("c", "b"))])
+    check_vectorization([abc], [abc.cumprod()])

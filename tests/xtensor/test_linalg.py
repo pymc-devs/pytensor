@@ -16,7 +16,7 @@ from xarray_einstats.linalg import (
 
 from pytensor.xtensor.linalg import cholesky, solve
 from pytensor.xtensor.type import xtensor
-from tests.xtensor.util import xr_assert_allclose, xr_function
+from tests.xtensor.util import check_vectorization, xr_assert_allclose, xr_function
 
 
 def test_cholesky():
@@ -73,4 +73,23 @@ def test_solve_matrix_b():
     xr_assert_allclose(
         fn(a_test, b_test),
         xr_solve(a_test, b_test, dims=["country", "city", "district"]),
+    )
+
+
+def test_linalg_vectorize():
+    # Note: We only need to test a couple Ops, since the vectorization logic is not Op specific
+    a = xtensor("b", dims=("a",), shape=(3,))
+    ab = xtensor("a", dims=("a", "b"), shape=(3, 3))
+    test_spd = np.random.randn(3, 3)
+    test_spd = test_spd @ test_spd.T
+
+    check_vectorization(
+        [ab],
+        [cholesky(ab, dims=("b", "a"))],
+        input_vals=[DataArray(test_spd, dims=("a", "b"))],
+    )
+
+    check_vectorization(
+        [ab, a],
+        [solve(ab, a, dims=("a", "b"))],
     )

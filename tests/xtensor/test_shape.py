@@ -15,7 +15,8 @@ from xarray import full_like as xr_full_like
 from xarray import ones_like as xr_ones_like
 from xarray import zeros_like as xr_zeros_like
 
-from pytensor.tensor import scalar
+from pytensor.graph import vectorize_graph
+from pytensor.tensor import scalar, vector
 from pytensor.xtensor.shape import (
     broadcast,
     concat,
@@ -25,8 +26,9 @@ from pytensor.xtensor.shape import (
     unstack,
     zeros_like,
 )
-from pytensor.xtensor.type import xtensor
+from pytensor.xtensor.type import as_xtensor, xtensor
 from tests.xtensor.util import (
+    check_vectorization,
     xr_arange_like,
     xr_assert_allclose,
     xr_function,
@@ -800,3 +802,90 @@ def test_zeros_like():
     expected1 = xr_zeros_like(x_test)
     xr_assert_allclose(result1, expected1)
     assert result1.dtype == expected1.dtype
+
+
+def test_shape_ops_vectorize():
+    a1 = xtensor("a1", dims=("a", "1"), shape=(2, 1), dtype="float64")
+    ab = xtensor("ab", dims=("a", "b"), shape=(2, 3), dtype="float64")
+    abc = xtensor("abc", dims=("a", "b", "c"), shape=(2, 3, 5), dtype="float64")
+    a_bc_d = xtensor("a_bc_d", dims=("a", "bc", "d"), shape=(4, 15, 7))
+
+    check_vectorization(abc, abc.transpose("b", "c", "a"))
+    check_vectorization(abc, abc.transpose("b", ...))
+
+    check_vectorization(abc, stack(abc, new_dim=("a", "c")))
+    check_vectorization(a_bc_d, unstack(a_bc_d, bc=dict(b=3, c=5)))
+
+    check_vectorization([abc, ab], concat([abc, ab], dim="a"))
+
+    check_vectorization(a1, a1.squeeze("1"))
+
+    check_vectorization(abc, abc.expand_dims(d=5))
+
+    check_vectorization([ab, abc], broadcast(ab, abc))
+    check_vectorization([ab, abc, a1], broadcast(ab, abc, a1, exclude="1"))
+    # a is longer in a_bc_d than in ab and abc, helper can't handle that
+    # check_vectorization([ab, abc, a_bc_d], broadcast(ab, abc, a_bc_d, exclude="a"))
+
+
+def test_broadcast_exclude_vectorize():
+    x = xtensor("x", dims=("a", "b"), shape=(3, 4))
+    y = xtensor("y", dims=("b", "c"), shape=(7, 5))
+
+    out_x, out_y = broadcast(x, y, exclude=("b",))
+
+    x_val = xr_random_like(x)
+    y_val = xr_random_like(y)
+
+    x_batch_val = x_val.expand_dims({"batch": 2})
+    y_batch_val = y_val.expand_dims({"batch": 2})
+    x_batch = as_xtensor(x_batch_val).type("x_batch")
+    y_batch = as_xtensor(y_batch_val).type("y_batch")
+
+    [out_x_vec, out_y_vec] = vectorize_graph([out_x, out_y], {x: x_batch, y: y_batch})
+
+    fn = xr_function([x_batch, y_batch], [out_x_vec, out_y_vec])
+    res_x, res_y = fn(x_batch_val, y_batch_val)
+
+    expected_x = []
+    expected_y = []
+    for i in range(2):
+        ex_x, ex_y = xr_broadcast(
+            x_batch_val.isel(batch=i), y_batch_val.isel(batch=i), exclude=("b",)
+        )
+        expected_x.append(ex_x)
+        expected_y.append(ex_y)
+
+    expected_x = xr_concat(expected_x, dim="batch")
+    expected_y = xr_concat(expected_y, dim="batch")
+
+    xr_assert_allclose(res_x, expected_x)
+    xr_assert_allclose(res_y, expected_y)
+
+
+def test_expand_dims_batch_length_vectorize():
+    x = xtensor("x", dims=("a",), shape=(3,))
+    l = scalar("l", dtype="int64")
+    y = x.expand_dims(b=l)
+
+    x_batch = as_xtensor(xr_random_like(x).expand_dims(batch=2)).type("x_batch")
+    l_batch = vector("l_batch", dtype="int64")
+
+    with pytest.raises(
+        NotImplementedError, match=r"Vectorization of .* not implemented"
+    ):
+        vectorize_graph([y], {x: x_batch, l: l_batch})
+
+
+def test_unstack_batch_length_vectorize():
+    x = xtensor("x", dims=("ab",), shape=(12,))
+    l = scalar("l", dtype="int64")
+    y = unstack(x, ab={"a": l, "b": x.sizes["ab"] // l})
+
+    x_batch = as_xtensor(xr_random_like(x).expand_dims(batch=2)).type("x_batch")
+    l_batch = vector("l_batch", dtype="int64")
+
+    with pytest.raises(
+        NotImplementedError, match=r"Vectorization of .* not implemented"
+    ):
+        vectorize_graph([y], {x: x_batch, l: l_batch})
