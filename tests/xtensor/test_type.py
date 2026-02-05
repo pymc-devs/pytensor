@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 
@@ -148,3 +150,21 @@ def test_minimum_compile():
     minimum_mode = Mode(linker="py", optimizer="minimum_compile")
     result = y.eval({"x": np.ones((2, 3))}, mode=minimum_mode)
     np.testing.assert_array_equal(result, np.ones((3, 2)))
+
+
+def test_isel_missing_dims():
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+
+    # Check valid case works
+    assert x.isel(b=0).dims == ("a",)
+
+    with pytest.raises(ValueError):
+        x.isel(c=0)
+
+    with pytest.warns(
+        UserWarning,
+        match=re.escape("Dimension c does not exist. Expected one of ('a', 'b')"),
+    ):
+        x.isel(c=0, missing_dims="warn")
+
+    x.isel(c=0, missing_dims="ignore").dims == ("a", "b")

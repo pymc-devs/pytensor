@@ -505,7 +505,7 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                 raise TypeError("Ellipsis (...) is an invalid labeled index")
             try:
                 indices[dims.index(key)] = idx
-            except IndexError:
+            except ValueError:
                 if missing_dims == "raise":
                     raise ValueError(
                         f"Dimension {key} does not exist. Expected one of {dims}"
