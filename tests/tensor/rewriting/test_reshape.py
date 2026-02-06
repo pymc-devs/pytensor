@@ -4,7 +4,6 @@ import pytensor as pt
 from pytensor.graph import FunctionGraph, rewrite_graph
 from pytensor.tensor import shape
 from pytensor.tensor.basic import expand_dims
-from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
 from pytensor.tensor.shape import Reshape, specify_shape
@@ -19,20 +18,14 @@ def test_local_split_dims():
 
     fg = FunctionGraph(inputs=[x], outputs=[x_split])
 
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 1
-
-    with pt.config.change_flags(optimizer_verbose=True):
-        rewrite_graph(
-            fg,
-            include=("canonicalize",),
-            exclude=(
-                "local_subtensor_merge",
-                "local_subtensor_remove_broadcastable_index",
-            ),
-        )
-
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 0
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 1
+    rewrite_graph(
+        fg,
+        include=("canonicalize",),
+        exclude=(
+            "local_subtensor_merge",
+            "local_subtensor_remove_broadcastable_index",
+        ),
+    )
 
     # Build the expected computation manually
     x_shape = shape(x)
@@ -60,8 +53,6 @@ def test_local_join_dims():
 
     fg = FunctionGraph(inputs=[x], outputs=[x_join])
 
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 1
-
     rewrite_graph(
         fg,
         include=("canonicalize",),
@@ -70,10 +61,6 @@ def test_local_join_dims():
             "local_subtensor_remove_broadcastable_index",
         ),
     )
-
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 0
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 1
-    assert fg.outputs[0].type.shape == (2, 10, 3)
 
     expected = x.reshape((2, 10, 3))
     assert_equal_computations(
@@ -113,15 +100,6 @@ def test_local_join_dims_expand():
 
     rewrite_graph(fg, include=("canonicalize",))
 
-    # After rewrite: should have 0 JoinDims nodes
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 0
-    # Should have 1 DimShuffle node with is_expand_dims=True
-    expand_nodes = [
-        node
-        for node in fg.toposort()
-        if isinstance(node.op, DimShuffle) and node.op.is_expand_dims
-    ]
-    assert len(expand_nodes) == 1
     # Output shape should be (2, 1, 3, 4) - new dimension of size 1 inserted at axis 1
     expected = expand_dims(x, axis=1)
     assert_equal_computations(
@@ -143,17 +121,6 @@ def test_local_split_dims_to_reshape_squeeze_case():
 
     rewrite_graph(fg, include=("canonicalize",))
 
-    # After rewrite: should have 0 SplitDims nodes
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 0
-    # Should have 1 DimShuffle node with is_squeeze=True (not Reshape)
-    squeeze_nodes = [
-        node
-        for node in fg.toposort()
-        if isinstance(node.op, DimShuffle) and node.op.is_squeeze
-    ]
-    assert len(squeeze_nodes) == 1
-    # Should NOT have a Reshape node
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 0
     # Output shape should be (2, 3, 4) - dimension 1 removed
     expected = squeeze(x, axis=1)
     assert_equal_computations(
