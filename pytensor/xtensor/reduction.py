@@ -9,7 +9,7 @@ from pytensor.tensor.math import variadic_mul
 from pytensor.xtensor.basic import XOp
 from pytensor.xtensor.math import neq, sqrt
 from pytensor.xtensor.math import sqr as square
-from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.type import XTensorVariable, as_xtensor, xtensor
 
 
 REDUCE_DIM = str | Sequence[str] | EllipsisType | None
@@ -47,22 +47,24 @@ class XReduce(XOp):
         return Apply(self, [x], [output])
 
 
-def _process_user_dims(x, dim: REDUCE_DIM) -> Sequence[str]:
+def _process_user_dims(x: XTensorVariable, dim: REDUCE_DIM) -> Sequence[str]:
     if isinstance(dim, str):
         return (dim,)
     elif dim is None or dim is Ellipsis:
-        x = as_xtensor(x)
         return typing.cast(tuple[str], x.type.dims)
     return dim
 
 
-def reduce(x, dim: REDUCE_DIM = None, *, binary_op):
+def reduce(x, dim: REDUCE_DIM = None, *, binary_op, upcast_discrete_inp: bool = False):
+    x = as_xtensor(x)
     dims = _process_user_dims(x, dim)
+    if upcast_discrete_inp and ((x_kind := x.type.numpy_dtype.kind) in "ibu"):
+        x = x.astype("uint64" if x_kind == "u" else "int64")
     return XReduce(binary_op=binary_op, dims=dims)(x)
 
 
-sum = partial(reduce, binary_op=ps.add)
-prod = partial(reduce, binary_op=ps.mul)
+sum = partial(reduce, binary_op=ps.add, upcast_discrete_inp=True)
+prod = partial(reduce, binary_op=ps.mul, upcast_discrete_inp=True)
 max = partial(reduce, binary_op=ps.maximum)
 min = partial(reduce, binary_op=ps.minimum)
 
@@ -117,7 +119,10 @@ class XCumReduce(XOp):
 
 
 def cumreduce(x, dim: REDUCE_DIM, *, binary_op):
+    x = as_xtensor(x)
     dims = _process_user_dims(x, dim)
+    if (x_kind := x.type.numpy_dtype.kind) in "ibu":
+        x = x.astype("uint64" if x_kind == "u" else "int64")
     return XCumReduce(dims=dims, binary_op=binary_op)(x)
 
 
