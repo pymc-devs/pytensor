@@ -30,9 +30,18 @@ def test_local_split_dims():
     # Build the expected computation manually
     x_shape = shape(x)
 
-    # 1. Build shape vector for reshape: (x.shape[0], 2, 5, x.shape[2]) = (2, 2, 5, 3)
-    # The split shape (2, 5, 1) has the 1 removed for reshape, then expand_dims adds it back
-    shape_vector = pt.tensor.stack([x_shape[0], np.int64(2), np.int64(5), x_shape[2]])
+    # Use slice notation like the code does: x.shape[:axis] and x.shape[axis+1:]
+    shape_before = x_shape[:1]  # Creates Subtensor{:stop}
+    shape_after = x_shape[2:]  # Creates Subtensor{start:}
+
+    # Concatenate: [x.shape[:1], 2, 5, x.shape[2:]]
+    shape_vector = pt.tensor.concatenate(
+        [
+            shape_before,
+            pt.tensor.as_tensor([np.int64(2), np.int64(5)]),
+            shape_after,
+        ]
+    )
 
     # 2. Replicate the Reshape and ExpandDims
     reshaped = Reshape(4)(x, shape_vector)
@@ -62,7 +71,25 @@ def test_local_join_dims():
         ),
     )
 
-    expected = x.reshape((2, 10, 3))
+    x_shape = shape(x)
+    shape_before = x_shape[:1]  # x.shape[:start_axis]
+    shape_after = x_shape[4:]  # x.shape[start_axis + n_axes:]
+
+    shape_vector = pt.tensor.concatenate(
+        [
+            shape_before,
+            pt.tensor.as_tensor([np.int64(-1)]),
+            shape_after,
+        ]
+    )
+
+    # Squeeze then reshape
+    squeezed = squeeze(x, axis=3)
+    reshaped = Reshape(3)(squeezed, shape_vector)
+
+    # SpecifyShape to lock in output
+    expected = specify_shape(reshaped, (2, 10, 3))
+
     assert_equal_computations(
         [fg.outputs[0]], [expected], in_xs=[fg.outputs[0]], in_ys=[expected]
     )
