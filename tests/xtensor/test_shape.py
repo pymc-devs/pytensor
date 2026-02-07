@@ -15,7 +15,6 @@ from xarray import full_like as xr_full_like
 from xarray import ones_like as xr_ones_like
 from xarray import zeros_like as xr_zeros_like
 
-from pytensor.graph import vectorize_graph
 from pytensor.tensor import scalar, vector
 from pytensor.xtensor.shape import (
     broadcast,
@@ -27,6 +26,7 @@ from pytensor.xtensor.shape import (
     zeros_like,
 )
 from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.vectorization import vectorize_graph
 from tests.xtensor.util import (
     check_vectorization,
     xr_arange_like,
@@ -874,7 +874,7 @@ def test_expand_dims_batch_length_vectorize():
     with pytest.raises(
         NotImplementedError, match=r"Vectorization of .* not implemented"
     ):
-        vectorize_graph([y], {x: x_batch, l: l_batch})
+        vectorize_graph([y], {x: x_batch, l: l_batch}, new_tensor_dims=["batch"])
 
 
 def test_unstack_batch_length_vectorize():
@@ -888,4 +888,4 @@ def test_unstack_batch_length_vectorize():
     with pytest.raises(
         NotImplementedError, match=r"Vectorization of .* not implemented"
     ):
-        vectorize_graph([y], {x: x_batch, l: l_batch})
+        vectorize_graph([y], {x: x_batch, l: l_batch}, new_tensor_dims=["batch"])

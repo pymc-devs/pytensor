@@ -1,5 +1,5 @@
 import warnings
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Sequence
 from textwrap import dedent
 
 import numpy as np
@@ -1926,7 +1926,7 @@ def logspace(
 
 
 def broadcast_to(
-    x: TensorVariable, shape: TensorVariable | tuple[Variable, ...]
+    x: TensorLike, shape: TensorLike | Sequence[TensorLike]
 ) -> TensorVariable:
     """Broadcast an array to a new shape.
 

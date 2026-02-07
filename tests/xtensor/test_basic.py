@@ -3,10 +3,12 @@ import pytest
 
 pytest.importorskip("xarray")
 
+import re
+
 import numpy as np
 
 from pytensor import function
-from pytensor.graph import vectorize_graph
+from pytensor.graph import vectorize_graph as tensor_vectorize_graph
 from pytensor.tensor import matrix, vector
 from pytensor.xtensor.basic import (
     Rename,
@@ -14,10 +16,9 @@ from pytensor.xtensor.basic import (
     tensor_from_xtensor,
     xtensor_from_tensor,
 )
-from pytensor.xtensor.type import xtensor
+from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.vectorization import vectorize_graph
 from tests.unittest_tools import assert_equal_computations
-
-# from pytensor.xtensor.vectorization import vectorize_graph
 from tests.xtensor.util import check_vectorization
 
 
@@ -53,9 +54,15 @@ def test_xtensor_from_tensor_vectorize():
 
     t_batched = matrix("t_batched")
     with pytest.raises(
-        NotImplementedError, match=r"Vectorization of .* not implemented"
+        NotImplementedError,
+        match=re.escape(
+            "cannot infer the new dimension labels. Use pytensor.xtensor.vectorization.vectorize_graph instead."
+        ),
     ):
-        vectorize_graph([x], {t: t_batched})
+        tensor_vectorize_graph(x, {t: t_batched})
+
+    vec_x = vectorize_graph(x, {t: t_batched}, new_tensor_dims=("b",))
+    assert_equal_computations([vec_x], [as_xtensor(t_batched, dims=("b", "a"))])
 
 
 def test_tensor_from_xtensor_vectorize():
@@ -64,7 +71,7 @@ def test_tensor_from_xtensor_vectorize():
 
     x_batched = xtensor("x", dims=("a", "b"), shape=(3, 5))
 
-    y_batched = vectorize_graph(y, {x: x_batched})
+    y_batched = tensor_vectorize_graph(y, {x: x_batched})
     # vectorize_graph should place output batch dimension on the left
     assert y_batched.type.shape == (5, 3)
     assert_equal_computations([y_batched], [x_batched.transpose("b", ...).values])
@@ -72,4 +79,9 @@ def test_tensor_from_xtensor_vectorize():
     x_batched = xtensor("x", dims=("c", "a", "b"), shape=(7, 3, 5))
     # vectorize_graph can't handle multiple batch dimensions safely
     with pytest.raises(NotImplementedError):
-        vectorize_graph(y, {x: x_batched})
+        tensor_vectorize_graph(y, {x: x_batched})
+
+    # xtensor vectorize_graph can handle this graph safely
+    y_batched = vectorize_graph(y, {x: x_batched})
+    assert y_batched.type.shape == (7, 5, 3)
+    assert_equal_computations([y_batched], [x_batched.transpose("c", "b", "a").values])
