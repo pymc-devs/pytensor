@@ -21,7 +21,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, grad, numeric_grad
 from pytensor.graph.basic import Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.replace import vectorize_node
+from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.traversal import ancestors, applys_between
 from pytensor.link.c.basic import DualLinker
 from pytensor.link.numba import NumbaLinker
@@ -1070,11 +1070,10 @@ class TestMaxAndArgmax:
 
         argmax_x = argmax(x, axis=core_axis)
 
-        arg_max_node = argmax_x.owner
-        new_node = vectorize_node(arg_max_node, batch_x)
+        vect_out = vectorize_graph(argmax_x, {x: batch_x})
 
-        assert isinstance(new_node.op, Argmax)
-        assert new_node.op.axis == batch_axis
+        assert isinstance(vect_out.owner.op, Argmax)
+        assert vect_out.owner.op.axis == batch_axis
 
 
 class TestArgminArgmax:

@@ -1602,7 +1602,7 @@ def local_blockwise_of_subtensor(fgraph, node):
 def local_blockwise_inc_subtensor(fgraph, node):
     """Rewrite blockwised inc_subtensors.
 
-    Note: The reason we don't apply this rewrite eagerly in the `vectorize_node` dispatch
+    Note: The reason we don't apply this rewrite eagerly in the `_vectorize_node` dispatch
     Is that we often have batch dimensions from alloc of shapes/reshape that can be removed by rewrites
 
     such as x[:vectorized(w.shape[0])].set(y), that will later be rewritten as x[:w.shape[1]].set(y),

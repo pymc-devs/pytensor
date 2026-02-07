@@ -9,7 +9,7 @@ from scipy.special import softmax as scipy_softmax
 
 from pytensor.compile.function import function
 from pytensor.configdefaults import config
-from pytensor.graph.replace import vectorize_node
+from pytensor.graph.replace import vectorize_graph
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.special import (
     LogSoftmax,
@@ -168,18 +168,18 @@ def test_vectorize_softmax(op, constructor, core_axis, batch_axis):
     x = tensor(shape=(5, 5, 5, 5))
     batch_x = tensor(shape=(3, 5, 5, 5, 5))
 
-    node = constructor(x, axis=core_axis).owner
-    assert isinstance(node.op, op)
+    out = constructor(x, axis=core_axis)
+    assert isinstance(out.owner.op, op)
 
-    new_node = vectorize_node(node, batch_x)
+    new_out = vectorize_graph(out, {x: batch_x})
     if len(batch_axis) == 1:
-        assert isinstance(new_node.op, op)
-        assert (new_node.op.axis,) == batch_axis
+        assert isinstance(new_out.owner.op, op)
+        assert (new_out.owner.op.axis,) == batch_axis
     else:
-        assert isinstance(new_node.op, Blockwise) and isinstance(
-            new_node.op.core_op, op
+        assert isinstance(new_out.owner.op, Blockwise) and isinstance(
+            new_out.owner.op.core_op, op
         )
-        assert new_node.op.core_op.axis == core_axis
+        assert new_out.owner.op.core_op.axis == core_axis
 
 
 def test_poch():

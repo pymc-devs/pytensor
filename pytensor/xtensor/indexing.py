@@ -4,6 +4,7 @@
 # https://numpy.org/neps/nep-0021-advanced-indexing.html
 # https://docs.xarray.dev/en/latest/user-guide/indexing.html
 # https://tutorial.xarray.dev/intermediate/indexing/advanced-indexing.html
+from itertools import chain
 from typing import Literal
 
 from pytensor.graph.basic import Apply, Constant, Variable
@@ -11,6 +12,7 @@ from pytensor.scalar.basic import discrete_dtypes
 from pytensor.tensor.basic import as_tensor
 from pytensor.tensor.type_other import NoneTypeT, SliceType, make_slice
 from pytensor.xtensor.basic import XOp, xtensor_from_tensor
+from pytensor.xtensor.shape import broadcast
 from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
 
 
@@ -183,6 +185,15 @@ class Index(XOp):
         output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
         return Apply(self, [x, *idxs], [output])
 
+    def vectorize_node(self, node, new_x, *new_idxs):
+        # new_x may have dims in different order
+        # we pair each pre-existing dim to the respective index
+        # with new dims having simply a slice(None)
+        old_x, *_ = node.inputs
+        dims_to_idxs = dict(zip(old_x.dims, new_idxs, strict=True))
+        new_idxs = tuple(dims_to_idxs.get(dim, slice(None)) for dim in new_x.dims)
+        return self.make_node(new_x, *new_idxs)
+
 
 index = Index()
 
@@ -213,6 +224,22 @@ class IndexUpdate(XOp):
 
         out = x.type()
         return Apply(self, [x, y, *idxs], [out])
+
+    def vectorize_node(self, node, *new_inputs):
+        # If y or the indices have new dimensions we need to broadcast_x
+        exclude: set[str] = set(
+            chain.from_iterable(old_inp.dims for old_inp in node.inputs)
+        )
+        for new_inp, old_inp in zip(new_inputs, node.inputs, strict=True):
+            # Note: This check may be too conservative
+            if invalid_new_dims := ((set(new_inp.dims) - set(old_inp.dims)) & exclude):
+                raise NotImplementedError(
+                    f"Vectorize of {self} is undefined because one of the inputs {new_inp} new dimensions "
+                    f"was present in the old inputs: {sorted(invalid_new_dims)}"
+                )
+        new_x, *_ = broadcast(*new_inputs, exclude=tuple(exclude))
+        _, new_y, *new_idxs = new_inputs
+        return self.make_node(new_x, new_y, *new_idxs)
 
 
 index_assignment = IndexUpdate("set")
