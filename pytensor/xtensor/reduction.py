@@ -46,7 +46,7 @@ class XReduce(XOp):
         output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
         return Apply(self, [x], [output])
 
-    def vectorize_node(self, node, new_x):
+    def vectorize_node(self, node, new_x, new_dim):
         return [self(new_x)]
 
 
@@ -120,7 +120,7 @@ class XCumReduce(XOp):
         out = x.type()
         return Apply(self, [x], [out])
 
-    def vectorize_node(self, node, new_x):
+    def vectorize_node(self, node, new_x, new_dim):
         return [self(new_x)]
 
 

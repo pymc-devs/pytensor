@@ -10,8 +10,8 @@ from xarray import DataArray
 from xarray.testing import assert_allclose
 
 from pytensor import function
-from pytensor.graph import vectorize_graph
 from pytensor.xtensor.type import XTensorType, as_xtensor
+from pytensor.xtensor.vectorization import vectorize_graph
 
 
 def xr_function(*args, **kwargs):

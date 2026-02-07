@@ -283,6 +283,13 @@ def vectorize_graph(
         # [array([-10., -11.]), array([10., 11.])]
 
     """
+    # TODO: Move this to tensor.vectorize, and make this helper type agnostic.
+    #
+    # This helper may dispatch to tensor.vectorize_graph or xtensor.vectorize_graph depending on the replacement types
+    # The behavior is distinct, because tensor vectorization depends on axis-position while xtensor depends on dimension labels
+    #
+    # xtensor.vectorize_graph will be able to handle batched inner tensor operations, while tensor.vectorize_graph won't,
+    # as it is by design unaware of xtensors and their semantics.
     if isinstance(outputs, Sequence):
         seq_outputs = outputs
     else:

@@ -197,7 +197,7 @@ class Index(XOp):
         output = xtensor(dtype=x.type.dtype, shape=out_shape, dims=out_dims)
         return Apply(self, [x, *idxs], [output])
 
-    def vectorize_node(self, node, new_x, *new_idxs):
+    def vectorize_node(self, node, new_x, *new_idxs, new_dim):
         # new_x may have dims in different order
         # we pair each pre-existing dim to the respective index
         # with new dims having simply a slice(None)
@@ -237,7 +237,7 @@ class IndexUpdate(XOp):
         out = x.type()
         return Apply(self, [x, y, *idxs], [out])
 
-    def vectorize_node(self, node, *new_inputs):
+    def vectorize_node(self, node, *new_inputs, new_dim):
         # If y or the indices have new dimensions we need to broadcast_x
         exclude: set[str] = set(
             chain.from_iterable(
