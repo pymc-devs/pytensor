@@ -7,6 +7,7 @@ from pytensor.compile import get_default_mode
 from pytensor.graph.replace import vectorize_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import Assert
+from pytensor.tensor import as_tensor
 from pytensor.tensor.math import eq
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.basic import NormalRV
@@ -247,7 +248,7 @@ def test_vectorize():
     # Test with size, new size provided
     size = pt.as_tensor(np.array((3,), dtype="int64"))
     out = normal(vec, size=size)
-    vect_node = vectorize_graph(out, {vec: mat, size: (2, 3)}).owner
+    vect_node = vectorize_graph(out, {vec: mat, size: as_tensor((2, 3))}).owner
     assert isinstance(vect_node.op, NormalRV)
     assert tuple(vect_node.op.size_param(vect_node).eval()) == (2, 3)
     assert vect_node.op.dist_params(vect_node)[0] is mat

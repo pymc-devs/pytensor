@@ -16,7 +16,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.replace import vectorize_node
+from pytensor.graph.replace import vectorize_graph
 from pytensor.link.basic import PerformLinker
 from pytensor.link.c.basic import CLinker, OpWiseCLinker
 from pytensor.link.numba import NumbaLinker
@@ -1042,46 +1042,39 @@ class TestVectorize:
         vec = tensor(shape=(None,))
         mat = tensor(shape=(None, None))
 
-        node = exp(vec).owner
-        vect_node = vectorize_node(node, mat)
-        assert vect_node.op == exp
-        assert vect_node.inputs[0] is mat
+        out = exp(vec)
+        vect_out = vectorize_graph(out, {vec: mat})
+        assert vect_out.owner.op == exp
+        assert vect_out.owner.inputs[0] is mat
 
     def test_dimshuffle(self):
-        vec = tensor(shape=(None,))
-        mat = tensor(shape=(None, None))
-
-        node = exp(vec).owner
-        vect_node = vectorize_node(node, mat)
-        assert vect_node.op == exp
-        assert vect_node.inputs[0] is mat
-
         col_mat = tensor(shape=(None, 1))
         tcol_mat = tensor(shape=(None, None, 1))
-        node = col_mat.dimshuffle(0).owner  # drop column
-        vect_node = vectorize_node(node, tcol_mat)
-        assert isinstance(vect_node.op, DimShuffle)
-        assert vect_node.op.new_order == (0, 1)
-        assert vect_node.inputs[0] is tcol_mat
-        assert vect_node.outputs[0].type.shape == (None, None)
+
+        out = col_mat.dimshuffle(0)  # drop column
+        vect_out = vectorize_graph(out, {col_mat: tcol_mat})
+        assert isinstance(vect_out.owner.op, DimShuffle)
+        assert vect_out.owner.op.new_order == (0, 1)
+        assert vect_out.owner.inputs[0] is tcol_mat
+        assert vect_out.owner.outputs[0].type.shape == (None, None)
 
     def test_CAReduce(self):
         mat = tensor(shape=(None, None))
         tns = tensor(shape=(None, None, None))
 
-        node = pt_sum(mat).owner
-        vect_node = vectorize_node(node, tns)
-        assert isinstance(vect_node.op, Sum)
-        assert vect_node.op.axis == (1, 2)
-        assert vect_node.inputs[0] is tns
+        out = pt_sum(mat)
+        vect_out = vectorize_graph(out, {mat: tns})
+        assert isinstance(vect_out.owner.op, Sum)
+        assert vect_out.owner.op.axis == (1, 2)
+        assert vect_out.owner.inputs[0] is tns
 
         bool_mat = tensor(dtype="bool", shape=(None, None))
         bool_tns = tensor(dtype="bool", shape=(None, None, None))
-        node = pt_any(bool_mat, axis=-2).owner
-        vect_node = vectorize_node(node, bool_tns)
-        assert isinstance(vect_node.op, Any)
-        assert vect_node.op.axis == (1,)
-        assert vect_node.inputs[0] is bool_tns
+        out = pt_any(bool_mat, axis=-2)
+        vect_out = vectorize_graph(out, {bool_mat: bool_tns})
+        assert isinstance(vect_out.owner.op, Any)
+        assert vect_out.owner.op.axis == (1,)
+        assert vect_out.owner.inputs[0] is bool_tns
 
 
 def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):

@@ -1,9 +1,10 @@
 from pytensor.compile.mode import optdb
 from pytensor.graph import Constant, Op, node_rewriter
 from pytensor.graph.destroyhandler import inplace_candidates
-from pytensor.graph.replace import vectorize_node
+from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.graph.rewriting.unify import OpPattern, OpPatternOpTypeType
+from pytensor.graph.traversal import apply_ancestors
 from pytensor.tensor.basic import Alloc, ARange, alloc, shape_padleft
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.math import Dot
@@ -37,10 +38,15 @@ def local_useless_blockwise(fgraph, node):
     """
     op = node.op
     inputs = node.inputs
-    dummy_core_node = op._create_dummy_core_node(node.inputs)
-    vect_node = vectorize_node(dummy_core_node, *inputs)
-    if not isinstance(vect_node.op, Blockwise):
-        return copy_stack_trace(node.outputs, vect_node.outputs)
+    dummy_core_node, dummy_inputs = op._create_dummy_core_node(
+        inputs, return_dummy_inputs=True
+    )
+    outputs = vectorize_graph(dummy_core_node.outputs, dict(zip(dummy_inputs, inputs)))
+    if not any(
+        isinstance(vect_node.op, Blockwise)
+        for vect_node in apply_ancestors(outputs, blockers=inputs)
+    ):
+        return copy_stack_trace(node.outputs, outputs)
 
 
 @node_rewriter([Blockwise])

@@ -8,7 +8,7 @@ from pytensor import In, Mode, Out, function, grad
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, equal_computations
-from pytensor.graph.replace import clone_replace, vectorize_node
+from pytensor.graph.replace import clone_replace, vectorize_graph
 from pytensor.graph.type import Type
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
@@ -742,9 +742,9 @@ class TestVectorize:
     def test_shape(self):
         vec = tensor(shape=(None,), dtype="float64")
         mat = tensor(shape=(None, None), dtype="float64")
-        node = shape(vec).owner
+        out = shape(vec)
 
-        [vect_out] = vectorize_node(node, mat).outputs
+        vect_out = vectorize_graph(out, {vec: mat})
         assert equal_computations(
             [vect_out], [broadcast_to(mat.shape[1:], (*mat.shape[:1], 1))]
         )
@@ -758,8 +758,8 @@ class TestVectorize:
 
         mat = tensor(shape=(None, None), dtype="float64")
         tns = tensor(shape=(None, None, None, None), dtype="float64")
-        node = shape(mat).owner
-        [vect_out] = vectorize_node(node, tns).outputs
+        out = shape(mat)
+        vect_out = vectorize_graph(out, {mat: tns})
         assert equal_computations(
             [vect_out], [broadcast_to(tns.shape[2:], (*tns.shape[:2], 2))]
         )
@@ -779,11 +779,13 @@ class TestVectorize:
         vec = tensor(shape=(None,), dtype="float64")
         mat = tensor(shape=(None, None), dtype="float64")
 
-        shape = (-1, x)
-        node = reshape(vec, shape).owner
+        shape = as_tensor_variable([-1, x])
+        out = reshape(vec, shape)
 
-        [vect_out] = vectorize_node(node, mat, shape).outputs
-        assert equal_computations([vect_out], [reshape(mat, (*mat.shape[:1], -1, x))])
+        vect_out = vectorize_graph(out, {vec: mat})
+        utt.assert_equal_computations(
+            [vect_out], [reshape(mat, (*mat.shape[:1], *stack((-1, x))))]
+        )
 
         x_test_value = 2
         mat_test_value = np.ones((5, 6))
@@ -795,12 +797,12 @@ class TestVectorize:
             ref_fn(x_test_value, mat_test_value),
         )
 
-        new_shape = (5, -1, x)
-        [vect_out] = vectorize_node(node, mat, new_shape).outputs
-        assert equal_computations([vect_out], [reshape(mat, new_shape)])
+        new_shape = as_tensor_variable((5, -1, x))
+        vect_out = vectorize_graph(out, {vec: mat, shape: new_shape})
+        utt.assert_equal_computations([vect_out], [reshape(mat, new_shape)])
 
         new_shape = stack([[-1, x], [x - 1, -1]], axis=0)
-        [vect_out] = vectorize_node(node, vec, new_shape).outputs
+        vect_out = vectorize_graph(out, {shape: new_shape})
         vec_test_value = np.arange(6)
         np.testing.assert_allclose(
             vect_out.eval({x: 3, vec: vec_test_value}),
@@ -811,13 +813,13 @@ class TestVectorize:
             ValueError,
             match="Invalid shape length passed into vectorize node of Reshape",
         ):
-            vectorize_node(node, vec, (5, 2, x))
+            vectorize_graph(out, {shape: as_tensor_variable((5, 2, x))})
 
         with pytest.raises(
             ValueError,
             match="Invalid shape length passed into vectorize node of Reshape",
         ):
-            vectorize_node(node, mat, (5, 3, 2, x))
+            vectorize_graph(out, {vec: mat, shape: as_tensor_variable((5, 3, 2, x))})
 
     def test_specify_shape(self):
         x = scalar("x", dtype=int)
@@ -825,27 +827,9 @@ class TestVectorize:
         tns = tensor(shape=(None, None, None))
 
         shape = (x, None)
-        node = specify_shape(mat, shape).owner
-        vect_node = vectorize_node(node, tns, *shape)
-        assert equal_computations(
-            vect_node.outputs, [specify_shape(tns, (None, x, None))]
-        )
-
-        new_shape = (5, 2, x)
-        vect_node = vectorize_node(node, tns, *new_shape)
-        assert equal_computations(vect_node.outputs, [specify_shape(tns, (5, 2, x))])
+        out = specify_shape(mat, shape)
+        vect_out = vectorize_graph(out, {mat: tns})
+        assert equal_computations([vect_out], [specify_shape(tns, (None, x, None))])
 
         with pytest.raises(NotImplementedError):
-            vectorize_node(node, mat, *([x, x], None))
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid number of shape arguments passed into vectorize node of SpecifyShape",
-        ):
-            vectorize_node(node, mat, *(5, 2, x))
-
-        with pytest.raises(
-            ValueError,
-            match="Invalid number of shape arguments passed into vectorize node of SpecifyShape",
-        ):
-            vectorize_node(node, tns, *(5, 3, 2, x))
+            vectorize_graph(out, {x: as_tensor_variable([x, x])})
