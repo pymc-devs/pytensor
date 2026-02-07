@@ -6,10 +6,10 @@ import pytensor.tensor as pt
 from pytensor import config, function, shared
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.replace import (
+    _vectorize_node,
     clone_replace,
     graph_replace,
     vectorize_graph,
-    vectorize_node,
 )
 from pytensor.graph.traversal import graph_inputs
 from pytensor.tensor import dvector, fvector, vector
@@ -277,7 +277,7 @@ class TestVectorizeGraph:
 
         # Cases where either x or both of y1 and y2 are given replacements
         new_out = vectorize_graph(out, {x: new_x})
-        expected_new_out = pt.add(*vectorize_node(node, new_x).outputs)
+        expected_new_out = pt.add(*_vectorize_node(node.op, node, new_x).outputs)
         assert equal_computations([new_out], [expected_new_out])
 
         new_out = vectorize_graph(out, {y1: new_y1, y2: new_y2})
@@ -291,7 +291,9 @@ class TestVectorizeGraph:
         # Special case where x is given a replacement as well as only one of y1 and y2
         # The graph combines the replaced variable with the other vectorized output
         new_out = vectorize_graph(out, {x: new_x, y1: new_y1})
-        expected_new_out = pt.add(new_y1, vectorize_node(node, new_x).outputs[1])
+        expected_new_out = pt.add(
+            new_y1, _vectorize_node(node.op, node, new_x).outputs[1]
+        )
         assert equal_computations([new_out], [expected_new_out])
 
     def test_multi_output_node_random_variable(self):

@@ -11,7 +11,7 @@ from pytensor.compile import get_default_mode, get_mode
 from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.gradient import grad
 from pytensor.graph import Apply, FunctionGraph, Op, rewrite_graph
-from pytensor.graph.replace import vectorize_graph, vectorize_node
+from pytensor.graph.replace import _vectorize_node, vectorize_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.tensor import (
@@ -95,8 +95,8 @@ def test_vectorize_blockwise():
     tns = tensor(shape=(None, None, None))
 
     # Something that falls back to Blockwise
-    node = MatrixInverse()(mat).owner
-    vect_node = vectorize_node(node, tns)
+    out = MatrixInverse()(mat)
+    vect_node = vectorize_graph(out, {mat: tns}).owner
     assert isinstance(vect_node.op, Blockwise) and isinstance(
         vect_node.op.core_op, MatrixInverse
     )
@@ -105,7 +105,7 @@ def test_vectorize_blockwise():
 
     # Useless blockwise
     tns4 = tensor(shape=(5, None, None, None))
-    new_vect_node = vectorize_node(vect_node, tns4)
+    new_vect_node = vectorize_graph(vect_node.out, {tns: tns4}).owner
     assert new_vect_node.op is vect_node.op
     assert isinstance(new_vect_node.op, Blockwise) and isinstance(
         new_vect_node.op.core_op, MatrixInverse
@@ -204,7 +204,7 @@ def test_vectorize_node_default_signature():
     mat = tensor(shape=(5, None))
     node = my_test_op.make_node(vec, mat)
 
-    vect_node = vectorize_node(node, mat, mat)
+    vect_node = _vectorize_node(node.op, node, mat, mat)
     assert isinstance(vect_node.op, Blockwise) and isinstance(
         vect_node.op.core_op, MyTestOp
     )

@@ -856,7 +856,7 @@ def _vectorize_reshape(op, node, x, shape):
     else:
         raise ValueError("Invalid shape length passed into vectorize node of Reshape")
 
-    return reshape(x, new_shape, ndim=len(new_shape)).owner
+    return reshape(x, new_shape, ndim=len(tuple(new_shape))).owner
 
 
 def reshape(

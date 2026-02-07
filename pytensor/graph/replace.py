@@ -208,19 +208,13 @@ def graph_replace(
 
 
 @singledispatch
-def _vectorize_node(op: Op, node: Apply, *batched_inputs) -> Apply:
+def _vectorize_node(op: Op, node: Apply, *batched_inputs) -> Apply | Sequence[Variable]:
     # Default implementation is provided in pytensor.tensor.blockwise
     raise NotImplementedError
 
 
-def vectorize_node(node: Apply, *batched_inputs) -> Apply:
-    """Returns vectorized version of node with new batched inputs."""
-    op = node.op
-    return _vectorize_node(op, node, *batched_inputs)
-
-
 def _vectorize_not_needed(op, node, *batched_inputs):
-    return op.make_node(*batched_inputs)
+    return op.make_node(*batched_inputs).outputs
 
 
 @overload
@@ -306,8 +300,16 @@ def vectorize_graph(
     vect_vars = dict(zip(inputs, new_inputs, strict=True))
     for node in toposort(seq_outputs, blockers=inputs):
         vect_inputs = [vect_vars.get(inp, inp) for inp in node.inputs]
-        vect_node = vectorize_node(node, *vect_inputs)
-        for output, vect_output in zip(node.outputs, vect_node.outputs, strict=True):
+
+        vect_node_or_outputs = _vectorize_node(node.op, node, *vect_inputs)
+        # Compatibility with the old API
+        vect_outputs = (
+            vect_node_or_outputs.outputs
+            if isinstance(vect_node_or_outputs, Apply)
+            else vect_node_or_outputs
+        )
+
+        for output, vect_output in zip(node.outputs, vect_outputs, strict=True):
             if output in vect_vars:
                 # This can happen when some outputs of a multi-output node are given a replacement,
                 # while some of the remaining outputs are still needed in the graph.
