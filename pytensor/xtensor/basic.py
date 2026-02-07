@@ -17,7 +17,7 @@ class XOp(Op):
     def do_constant_folding(self, fgraph, node):
         return False
 
-    def vectorize_node(self, node, *new_inputs):
+    def vectorize_node(self, node, *new_inputs, new_dim: str | None):
         raise NotImplementedError(f"Vectorized node not implemented for {self}")
 
 
@@ -27,7 +27,7 @@ class XTypeCastOp(TypeCastingOp):
     This is like a `ViewOp` but without the expectation the input and output have identical types.
     """
 
-    def vectorize_node(self, node, *new_inputs):
+    def vectorize_node(self, node, *new_inputs, new_dim: str | None):
         raise NotImplementedError(f"Vectorized node not implemented for {self}")
 
 
@@ -45,11 +45,11 @@ class TensorFromXTensor(XTypeCastOp):
         [g_out] = g_outs
         return [xtensor_from_tensor(g_out, dims=x.type.dims)]
 
-    def vectorize_node(self, node, new_x):
+    def vectorize_node(self, node, new_x, new_dim):
         [old_x] = node.inputs
         # We transpose batch dims to the left, for consistency with tensor vectorization
         new_x = new_x.transpose(..., *old_x.dims)
-        return self.make_node(new_x)
+        return [self(new_x)]
 
 
 tensor_from_xtensor = TensorFromXTensor()
@@ -72,15 +72,17 @@ class XTensorFromTensor(XTypeCastOp):
         [g_out] = g_outs
         return [tensor_from_xtensor(g_out)]
 
-    def vectorize_node(self, node, new_x):
+    def vectorize_node(self, node, new_x, new_dim):
         [old_x] = node.inputs
         if new_x.ndim != old_x.ndim:
-            # TODO: Figure out API for this?
-            raise NotImplementedError(
-                f"Vectorization of {self} with batched inputs not implemented, "
-                "as it can't infer new dimension labels"
-            )
-        return self().make_node(new_x)
+            if new_dim is None:
+                raise NotImplementedError(
+                    f"Vectorization of {self} is not well defined because it can't infer the new dimension labels. "
+                    f"Use pytensor.xtensor.vectorization.vectorize_graph instead."
+                )
+            return [type(self)(dims=(new_dim, *self.dims))(new_x)]
+        else:
+            return [self(new_x)]
 
 
 def xtensor_from_tensor(x, dims, name=None):
@@ -104,7 +106,7 @@ class Rename(XTypeCastOp):
         [g_out] = g_outs
         return [rename(g_out, dims=x.type.dims)]
 
-    def vectorize_node(self, node, new_x):
+    def vectorize_node(self, node, new_x, new_dim):
         [old_x] = node.inputs
         old_dim_mapping = dict(zip(old_x.dims, self.new_dims, strict=True))
 
@@ -112,7 +114,7 @@ class Rename(XTypeCastOp):
         new_dims = tuple(
             old_dim_mapping.get(new_dim, new_dim) for new_dim in new_x.dims
         )
-        return type(self)(new_dims).make_node(new_x)
+        return [type(self)(new_dims)(new_x)]
 
 
 def rename(x, name_dict: dict[str, str] | None = None, **names: str):

@@ -1,12 +1,15 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from functools import singledispatch
 from itertools import chain
 
 import numpy as np
 
+from pytensor import Variable, shared
 from pytensor import scalar as ps
-from pytensor import shared
 from pytensor.graph import Apply, Op
-from pytensor.graph.replace import _vectorize_node
+from pytensor.graph.replace import _vectorize_node, graph_replace
+from pytensor.graph.traversal import toposort, truncated_graph_inputs
+from pytensor.graph.type import HasShape
 from pytensor.scalar import discrete_dtypes
 from pytensor.tensor import tensor
 from pytensor.tensor.random.op import RNGConsumerOp
@@ -15,10 +18,7 @@ from pytensor.tensor.utils import (
     get_static_shape_from_size_variables,
 )
 from pytensor.utils import unzip
-from pytensor.xtensor.basic import (
-    XOp,
-    XTypeCastOp,
-)
+from pytensor.xtensor.basic import XOp, XTypeCastOp
 from pytensor.xtensor.type import XTensorType, XTensorVariable, as_xtensor, xtensor
 
 
@@ -73,8 +73,8 @@ class XElemwise(XOp):
         ]
         return Apply(self, inputs, outputs)
 
-    def vectorize_node(self, node, *new_inputs):
-        return self.make_node(*new_inputs)
+    def vectorize_node(self, node, *new_inputs, new_dim):
+        return self(*new_inputs, return_list=True)
 
 
 class XBlockwise(XOp):
@@ -143,8 +143,8 @@ class XBlockwise(XOp):
         ]
         return Apply(self, inputs, outputs)
 
-    def vectorize_node(self, node, *new_inputs):
-        return self.make_node(*new_inputs)
+    def vectorize_node(self, node, *new_inputs, new_dim):
+        return self(*new_inputs, return_list=True)
 
 
 class XRV(XOp, RNGConsumerOp):
@@ -294,9 +294,8 @@ class XRV(XOp, RNGConsumerOp):
 
         return Apply(self, [rng, *extra_dim_lengths, *params], [rng.type(), out])
 
-    def vectorize_node(self, node, *new_inputs):
+    def vectorize_node(self, node, *new_inputs, new_dim):
         if len(new_inputs) != len(node.inputs):
-            # TODO: Figure out API to allow this
             raise NotImplementedError(
                 f"Vectorization of {self} with additional extra_dim_lengths not implemented, "
                 "as it can't infer new dimension labels"
@@ -313,21 +312,33 @@ class XRV(XOp, RNGConsumerOp):
                 f"Vectorization of {self} with batched extra_dim_lengths not implemented, "
             )
 
-        return self.make_node(new_rng, *new_extra_dim_lengths, *new_params)
+        return self.make_node(new_rng, *new_extra_dim_lengths, *new_params).outputs
 
 
 @_vectorize_node.register(XOp)
 @_vectorize_node.register(XTypeCastOp)
-def vectorize_xop(op: XOp, node, *new_inputs) -> Apply:
-    old_inp_dims = [
-        inp.dims for inp in node.inputs if isinstance(inp.type, XTensorType)
-    ]
-    old_out_dims = [
-        out.dims for out in node.outputs if isinstance(out.type, XTensorType)
-    ]
-    all_old_dims_set = set(chain.from_iterable((*old_inp_dims, old_out_dims)))
+def vectorize_xop(op, node, *new_inputs) -> Apply:
+    # This gets called by regular graph_replace, which isn't aware of xtensor and doesn't have a concept of `new_dim`
+    return vectorize_xnode(node.op, node, *new_inputs, new_dim=None)
 
-    for new_inp, old_inp in zip(new_inputs, node.inputs, strict=True):
+
+@singledispatch
+def vectorize_xnode(
+    op: XOp | XTypeCastOp,
+    node: Apply,
+    *batched_inputs: Variable,
+    new_dim: str | None = None,
+) -> tuple[Variable]:
+    """Returns vectorized version of node with new batched inputs."""
+
+    all_old_dims_set = set(
+        chain.from_iterable(
+            x.dims
+            for x in (*node.inputs, *node.outputs)
+            if isinstance(x.type, XTensorType)
+        )
+    )
+    for new_inp, old_inp in zip(batched_inputs, node.inputs, strict=True):
         if not (
             isinstance(new_inp.type, XTensorType)
             and isinstance(old_inp.type, XTensorType)
@@ -348,5 +359,124 @@ def vectorize_xop(op: XOp, node, *new_inputs) -> Apply:
                 f"Vectorized input {new_inp} has new dimensions that were present in the original graph: {new_core_dims}"
             )
 
-    # TODO: Once we stop having to return an Apply, automatically align batch_dimensions in the order they were first seen
-    return op.vectorize_node(node, *new_inputs)
+    def align_dims(new_x, old_x):
+        if isinstance(new_x.type, XTensorType):
+            if new_dim is not None and new_dim in new_x.dims:
+                return new_x.transpose(new_dim, *old_x.dims)
+            else:
+                return new_x.transpose(..., *old_x.dims)
+        else:
+            return new_x
+
+    vectorized_outs = op.vectorize_node(
+        node,
+        *(
+            align_dims(new_x, old_x)
+            for new_x, old_x in zip(batched_inputs, node.inputs)
+        ),
+        new_dim=new_dim,
+    )
+
+    return tuple(
+        align_dims(new_out, old_out)
+        for new_out, old_out in zip(vectorized_outs, node.outputs, strict=True)
+    )
+
+
+def _vectorize_single_dim(outputs, replace, new_dim: str):
+    inputs = truncated_graph_inputs(outputs, ancestors_to_include=replace.keys())
+    new_inputs = [replace.get(inp, inp) for inp in inputs]
+
+    vect_vars = dict(zip(inputs, new_inputs, strict=True))
+    for node in toposort(outputs, blockers=inputs):
+        vect_inputs = [vect_vars.get(inp, inp) for inp in node.inputs]
+
+        if isinstance(node.op, XOp | XTypeCastOp):
+            node_vect_outs = vectorize_xnode(
+                node.op, node, *vect_inputs, new_dim=new_dim
+            )
+        else:
+            node_vect_outs = _vectorize_node(node.op, node, *vect_inputs)
+            if isinstance(node_vect_outs, Apply):
+                # Old API
+                node_vect_outs = node_vect_outs.outputs
+
+        for output, vect_output in zip(node.outputs, node_vect_outs, strict=True):
+            if output in vect_vars:
+                # This can happen when some outputs of a multi-output node are given a replacement,
+                # while some of the remaining outputs are still needed in the graph.
+                # We make sure we don't overwrite the provided replacement with the newly vectorized output
+                continue
+            vect_vars[output] = vect_output
+
+    return [vect_vars[out] for out in outputs]
+
+
+def vectorize_graph(
+    outputs: Variable | Sequence[Variable],
+    replace: Mapping[XTensorVariable, XTensorVariable],
+):
+    new_dims = []
+    for old, new in replace.items():
+        if not old.type.in_same_class(new.type):
+            raise ValueError(
+                f"Vectorized input {new} is not of the same type as the variable {old} "
+                f"it is trying to replace {new.type} vs {old.type}"
+            )
+        if not isinstance(new.type, XTensorType):
+            if isinstance(new.type, HasShape) and new.type.ndim != old.type.ndim:
+                # We have no way of knowing what `new_dims` the new axis correspond to
+                raise ValueError(
+                    "A non-XTensorType input with batch dimensions was provided. "
+                    "The semantics of xtensor.vectorize_graph are not well defined in this case."
+                )
+            continue
+
+        old_dims_set = set(old.dims)
+        new_dims_set = set(new.dims)
+        if missing_dims := old_dims_set - new_dims_set:
+            raise ValueError(
+                f"Vectorized input {new} is missing pre-existing dims: {sorted(missing_dims)}"
+            )
+        new_dims.extend(dim for dim in new.dims if dim not in old_dims_set)
+
+    if isinstance(outputs, Sequence):
+        seq_outputs = outputs
+    else:
+        seq_outputs = [outputs]
+
+    # Align batch dims on the left
+    replace = {
+        k: v.transpose(*new_dims, ..., missing_dims="ignore")
+        for k, v in replace.items()
+    }
+
+    if not new_dims:
+        return graph_replace(seq_outputs, replace, strict=False)
+
+    seq_vect_outputs = seq_outputs
+    remaining_new_dims = list(new_dims)
+    while new_dims:
+        new_dim = remaining_new_dims.pop()
+
+        if remaining_new_dims:
+            # We need to use a dummy inputs to batch graph once at a time
+            # We drop all the dims that are still in `remaining_new_dims`
+            single_dim_replace = {
+                k: v.type.clone(
+                    dims=tuple(dim for dim in v.dims if dim not in remaining_new_dims)
+                )
+                for k, v in replace.items()
+            }
+            replace = dict(zip(single_dim_replace.values(), replace.keys()))
+        else:
+            single_dim_replace = replace
+        seq_vect_outputs = _vectorize_single_dim(
+            seq_vect_outputs, single_dim_replace, new_dim
+        )
+
+    if isinstance(outputs, Sequence):
+        return seq_vect_outputs
+    else:
+        [vect_output] = seq_vect_outputs
+        return vect_output
