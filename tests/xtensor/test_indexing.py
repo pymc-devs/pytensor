@@ -12,6 +12,7 @@ from xarray import DataArray
 
 from pytensor.tensor import tensor
 from pytensor.xtensor import xtensor
+from tests.unittest_tools import assert_equal_computations
 from tests.xtensor.util import (
     xr_arange_like,
     xr_assert_allclose,
@@ -511,3 +512,33 @@ def test_diff(dim, n):
     else:
         expected_res = x_test.diff(dim, n=n)
     xr_assert_allclose(res, expected_res)
+
+
+def test_empty_index():
+    x = xtensor("x", shape=(5, 5), dims=("a", "b"))
+    out1 = x[()]
+    out2 = x[...]
+    out3 = x.isel({})
+    out4 = x.isel({"c": 0}, missing_dims="ignore")
+    assert_equal_computations([out1], [out2])
+    assert_equal_computations([out1], [out3])
+    assert_equal_computations([out1], [out4])
+
+    fn = xr_function([x], out1)
+    x_test = xr_random_like(x)
+    xr_assert_allclose(fn(x_test), x_test)
+
+
+def test_empty_update_index():
+    x = xtensor("x", shape=(5, 5), dims=("a", "b"))
+    out1 = x[()].inc(1)
+    out2 = x[...].inc(1)
+    out3 = x.isel({}).inc(1)
+    out4 = x.isel({"c": 0}, missing_dims="ignore").inc(1)
+    assert_equal_computations([out1], [out2])
+    assert_equal_computations([out1], [out3])
+    assert_equal_computations([out1], [out4])
+
+    fn = xr_function([x], out1)
+    x_test = xr_random_like(x)
+    xr_assert_allclose(fn(x_test), x_test + 1)
