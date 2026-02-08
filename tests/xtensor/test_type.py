@@ -2,6 +2,9 @@ import re
 
 import pytest
 
+from pytensor import as_symbolic, shared
+from pytensor.compile import SharedVariable
+
 
 pytest.importorskip("xarray")
 pytestmark = pytest.mark.filterwarnings("error")
@@ -9,10 +12,17 @@ pytestmark = pytest.mark.filterwarnings("error")
 import numpy as np
 from xarray import DataArray
 
-from pytensor.graph.basic import equal_computations
+from pytensor.graph.basic import Constant, equal_computations
 from pytensor.tensor import as_tensor, specify_shape, tensor
 from pytensor.xtensor import xtensor
-from pytensor.xtensor.type import XTensorConstant, XTensorType, as_xtensor
+from pytensor.xtensor.type import (
+    XTensorConstant,
+    XTensorSharedVariable,
+    XTensorType,
+    as_xtensor,
+    xtensor_constant,
+    xtensor_shared,
+)
 
 
 def test_xtensortype():
@@ -110,23 +120,76 @@ def test_xtensortype_filter_variable_constant():
     assert isinstance(res, XTensorConstant) and res.type == x.type
 
 
-def test_xtensor_constant():
-    x = as_xtensor(DataArray(np.ones((2, 3)), dims=("a", "b")))
+@pytest.mark.parametrize(
+    "constant_constructor", (as_symbolic, as_xtensor, xtensor_constant)
+)
+def test_xtensor_constant(constant_constructor):
+    x = constant_constructor(DataArray(np.ones((2, 3)), dims=("a", "b")))
+    assert isinstance(x, Constant)
+    assert isinstance(x, XTensorConstant)
     assert x.type == XTensorType(dtype="float64", dims=("a", "b"), shape=(2, 3))
 
-    y = as_xtensor(np.ones((2, 3)), dims=("a", "b"))
-    assert y.type == x.type
-    assert x.signature() == y.signature()
-    assert x.equals(y)
-    x_eval = x.eval()
-    assert isinstance(x.eval(), np.ndarray)
-    np.testing.assert_array_equal(x_eval, y.eval(), strict=True)
+    if constant_constructor is not as_symbolic:
+        # We should be able to pass numpy arrays if we pass dims
+        y = as_xtensor(np.ones((2, 3)), dims=("a", "b"))
+        assert y.type == x.type
+        assert x.signature() == y.signature()
+        assert x.equals(y)
+        x_eval = x.eval()
+        assert isinstance(x.eval(), np.ndarray)
+        np.testing.assert_array_equal(x_eval, y.eval(), strict=True)
 
-    z = as_xtensor(np.ones((3, 2)), dims=("b", "a"))
-    assert z.type != x.type
-    assert z.signature() != x.signature()
-    assert not x.equals(z)
-    np.testing.assert_array_equal(x_eval, z.eval().T, strict=True)
+        z = as_xtensor(np.ones((3, 2)), dims=("b", "a"))
+        assert z.type != x.type
+        assert z.signature() != x.signature()
+        assert not x.equals(z)
+        np.testing.assert_array_equal(x_eval, z.eval().T, strict=True)
+
+
+@pytest.mark.parametrize("shared_constructor", (shared, xtensor_shared))
+def test_xtensor_shared(shared_constructor):
+    arr = np.array([[1, 2, 3], [4, 5, 6]], dtype="int64")
+    xarr = DataArray(arr, dims=("a", "b"), name="xarr")
+    shared_xarr = shared_constructor(xarr)
+    assert isinstance(shared_xarr, SharedVariable)
+    assert isinstance(shared_xarr, XTensorSharedVariable)
+    assert shared_xarr.type == XTensorType(
+        dtype="int64", dims=("a", "b"), shape=(None, None)
+    )
+    assert xarr.name == "xarr"
+
+    shared_rrax = shared_constructor(xarr, shape=(2, None), name="rrax")
+    assert isinstance(shared_rrax, XTensorSharedVariable)
+    assert shared_rrax.type == XTensorType(
+        dtype="int64", dims=("a", "b"), shape=(2, None)
+    )
+    assert shared_rrax.name == "rrax"
+
+    if shared_constructor == xtensor_shared:
+        # We should be able to pass numpy arrays, if we pass dims
+        with pytest.raises(TypeError):
+            shared_constructor(arr)
+        shared_arr = shared_constructor(arr, dims=("a", "b"))
+        assert isinstance(shared_arr, XTensorSharedVariable)
+        assert shared_arr.type == shared_xarr.type
+
+    # Test get and set_value
+    retrieved_value = shared_xarr.get_value()
+    assert isinstance(retrieved_value, np.ndarray)
+    np.testing.assert_allclose(retrieved_value, xarr.to_numpy())
+
+    shared_xarr.set_value(xarr[::-1])
+    np.testing.assert_allclose(shared_xarr.get_value(), xarr[::-1].to_numpy())
+
+    # Test dims in different order
+    shared_xarr.set_value(xarr[::-1].T)
+    np.testing.assert_allclose(shared_xarr.get_value(), xarr[::-1].to_numpy())
+
+    with pytest.raises(ValueError):
+        shared_xarr.set_value(xarr.rename(b="c"))
+
+    shared_xarr.set_value(arr[::-1])
+    np.testing.assert_allclose(shared_xarr.get_value(), arr[::-1])
 
 
 def test_as_tensor():
