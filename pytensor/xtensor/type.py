@@ -488,9 +488,8 @@ class XTensorVariable(Variable[_XTensorTypeType, OptionalApplyType]):
                 )
             indexers = indexers_kwargs
 
-        if not indexers:
-            # No-op
-            return self
+        elif indexers is None:
+            indexers = {}
 
         if missing_dims not in {"raise", "warn", "ignore"}:
             raise ValueError(

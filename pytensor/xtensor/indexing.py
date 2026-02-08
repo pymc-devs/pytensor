@@ -153,8 +153,18 @@ class Index(XOp):
         if len(idxs) > x_ndim:
             raise IndexError("Too many indices")
 
+        # Remove useless trailing slice(None) indices
+        # starting at -1 ensures we handle the case of no useful indices correctly with idxs[:0]
+        last_useful_index = -1
+        for i, idx in enumerate(idxs):
+            if isinstance(idx, slice) and idx == slice(None):
+                continue
+            last_useful_index = i
+
+        # Convert (useful) indices to symbolic variables
         idxs = [
-            as_idx_variable(idx, dim) for idx, dim in zip(idxs, x_dims, strict=False)
+            as_idx_variable(idx, dim)
+            for idx, dim in zip(idxs[: last_useful_index + 1], x_dims, strict=False)
         ]
 
         for i, idx in enumerate(idxs):
@@ -174,7 +184,9 @@ class Index(XOp):
                     idx_dim_shape = idx.type.shape[idx_dims.index(idx_dim)]
                     combine_dim_info(idx_dim, idx_dim_shape)
 
-        for dim_i, shape_i in zip(x_dims[i + 1 :], x_shape[i + 1 :]):
+        for dim_i, shape_i in zip(
+            x_dims[last_useful_index + 1 :], x_shape[last_useful_index + 1 :]
+        ):
             # Add back any unindexed dimensions
             if dim_i not in out_dims:
                 # If the dimension was not indexed, we keep it as is
