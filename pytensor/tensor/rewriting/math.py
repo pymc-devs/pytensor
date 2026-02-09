@@ -42,6 +42,8 @@ from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
 from pytensor.tensor.math import (
     Argmax,
+    Max,
+    Min,
     Dot,
     Prod,
     Sum,
@@ -3970,6 +3972,62 @@ def local_argmax_argmin_monotonic(fgraph, node):
         else:  # is_decreasing
             # argmax(f_dec(x)) -> argmin(x) = Argmax(Neg(x))
             new_output = argmin(x, axis=node.op.axis)
+    
+    copy_stack_trace(node.outputs[0], new_output)
+    return [new_output]
+
+@register_canonicalize
+@node_rewriter([Max, Min])
+def local_max_min_monotonic(fgraph, node):
+    """
+    Optimize max/min with monotonic functions by moving the function outside:
+    - max(f_inc(x)) -> f_inc(max(x)) for monotonically increasing f
+    - min(f_inc(x)) -> f_inc(min(x)) for monotonically increasing f
+    - max(f_dec(x)) -> f_dec(min(x)) for monotonically decreasing f
+    - min(f_dec(x)) -> f_dec(max(x)) for monotonically decreasing f
+    """
+    if not isinstance(node.op, (Max, Min)):
+        return False
+
+    is_max = isinstance(node.op, Max)
+    input_arg = node.inputs[0]
+    
+    if not input_arg.owner:
+        return False
+        
+    inner_op = input_arg.owner.op
+    
+    if not isinstance(inner_op, Elemwise):
+        return False
+        
+    scalar_op = inner_op.scalar_op
+    
+    is_increasing = isinstance(scalar_op, MONOTONIC_INCREASING)
+    is_decreasing = isinstance(scalar_op, MONOTONIC_DECREASING)
+    
+    if not (is_increasing or is_decreasing):
+        return False
+    
+    x = input_arg.owner.inputs[0]
+    
+    # Determine new operation based on current op and monotonicity
+    if is_max:
+        if is_increasing:
+            # max(f_inc(x)) -> f_inc(max(x))
+            inner_result = node.op.make_node(x).outputs[0]
+        else:  # is_decreasing
+            # max(f_dec(x)) -> f_dec(min(x))
+            inner_result = Min(axis=node.op.axis)(x)
+    else:  # is_min
+        if is_increasing:
+            # min(f_inc(x)) -> f_inc(min(x))
+            inner_result = node.op.make_node(x).outputs[0]
+        else:  # is_decreasing
+            # min(f_dec(x)) -> f_dec(max(x))
+            inner_result = Max(axis=node.op.axis)(x)
+    
+    # Apply the monotonic function to the result
+    new_output = inner_op.make_node(inner_result).outputs[0]
     
     copy_stack_trace(node.outputs[0], new_output)
     return [new_output]

@@ -5023,7 +5023,7 @@ class TestBlockDiagDotToDotBlockDiag:
             d_val,
         )
 
-class TestArgmaxArgminMonotonic:
+class TestArgmaxArgminMaxMinMonotonic:
     """Test argmax/argmin rewrites for monotonic functions."""
     
     @pytest.mark.parametrize("axis", [None, 0, -1])
@@ -5163,3 +5163,101 @@ class TestArgmaxArgminMonotonic:
             assert not has_eliminated_op, (
                 f"Rewrite failed to eliminate arccos from argmin graph"
             )
+
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_max_increasing_functions(self, axis):
+        """Test max(f_inc(x)) -> f_inc(max(x)) for monotonic increasing f."""
+        x = pt.vector("x")
+        test_val = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        
+        mode = get_default_mode()
+        
+        for f in [pt.exp, pt.log1p, pt.sqrt]:
+            unrewritten = pt.max(f(x), axis=axis)
+            expected = f(pt.max(x, axis=axis))
+            
+            fn_unrewritten = function([x], unrewritten, mode=mode)
+            fn_expected = function([x], expected, mode=mode)
+            
+            result_unrewritten = fn_unrewritten(test_val)
+            result_expected = fn_expected(test_val)
+            
+            np.testing.assert_allclose(result_unrewritten, result_expected)
+            
+            # Verify rewrite structure: should have f wrapping max, not max wrapping f
+            topo = fn_unrewritten.maker.fgraph.toposort()
+            # The outer operation should be the monotonic function
+            assert isinstance(topo[-1].op, Elemwise)
+            assert isinstance(topo[-1].op.scalar_op, type(f(pt.scalar()).owner.op.scalar_op))
+    
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_min_increasing_functions(self, axis):
+        """Test min(f_inc(x)) -> f_inc(min(x)) for monotonic increasing f."""
+        x = pt.vector("x")
+        test_val = np.array([1.0, 3.0, 2.0, 5.0, 4.0])
+        
+        mode = get_default_mode()
+        
+        for f in [pt.exp, pt.log1p, pt.sqrt]:
+            unrewritten = pt.min(f(x), axis=axis)
+            expected = f(pt.min(x, axis=axis))
+            
+            fn_unrewritten = function([x], unrewritten, mode=mode)
+            fn_expected = function([x], expected, mode=mode)
+            
+            result_unrewritten = fn_unrewritten(test_val)
+            result_expected = fn_expected(test_val)
+            
+            np.testing.assert_allclose(result_unrewritten, result_expected)
+
+            topo = fn_unrewritten.maker.fgraph.toposort()
+            assert isinstance(topo[-1].op, Elemwise)
+            assert isinstance(topo[-1].op.scalar_op, type(f(pt.scalar()).owner.op.scalar_op))
+    
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_max_decreasing_functions(self, axis):
+        """Test max(f_dec(x)) -> f_dec(min(x)) for monotonic decreasing f."""
+        x = pt.vector("x")
+        test_val = np.array([0.1, 0.3, 0.2, 0.5, 0.4])
+        
+        mode = get_default_mode()
+        
+        for f in [pt.arccos]:
+            unrewritten = pt.max(f(x), axis=axis)
+            expected = f(pt.min(x, axis=axis))
+            
+            fn_unrewritten = function([x], unrewritten, mode=mode)
+            fn_expected = function([x], expected, mode=mode)
+            
+            result_unrewritten = fn_unrewritten(test_val)
+            result_expected = fn_expected(test_val)
+            
+            np.testing.assert_allclose(result_unrewritten, result_expected)
+
+            topo = fn_unrewritten.maker.fgraph.toposort()
+            assert isinstance(topo[-1].op, Elemwise)
+            assert isinstance(topo[-1].op.scalar_op, type(f(pt.scalar()).owner.op.scalar_op))
+    
+    @pytest.mark.parametrize("axis", [None, 0, -1])
+    def test_min_decreasing_functions(self, axis):
+        """Test min(f_dec(x)) -> f_dec(max(x)) for monotonic decreasing f."""
+        x = pt.vector("x")
+        test_val = np.array([0.1, 0.3, 0.2, 0.5, 0.4])
+        
+        mode = get_default_mode()
+        
+        for f in [pt.arccos]:
+            unrewritten = pt.min(f(x), axis=axis)
+            expected = f(pt.max(x, axis=axis))
+            
+            fn_unrewritten = function([x], unrewritten, mode=mode)
+            fn_expected = function([x], expected, mode=mode)
+            
+            result_unrewritten = fn_unrewritten(test_val)
+            result_expected = fn_expected(test_val)
+            
+            np.testing.assert_allclose(result_unrewritten, result_expected)
+
+            topo = fn_unrewritten.maker.fgraph.toposort()
+            assert isinstance(topo[-1].op, Elemwise)
+            assert isinstance(topo[-1].op.scalar_op, type(f(pt.scalar()).owner.op.scalar_op))
