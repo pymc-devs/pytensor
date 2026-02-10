@@ -17,7 +17,7 @@ optdb.register(
     "fast_run",
     "fast_compile",
     "minimum_compile",
-    position=0.1,
+    position=0.09,  # before ShapeOpt, so we don't accidentally reintroduce xtensor Ops
 )
 
 # Register OFG inline again after lowering xtensor
@@ -26,7 +26,7 @@ optdb.register(
     dfs_rewriter(inline_ofg_expansion),
     "fast_run",
     "fast_compile",
-    position=0.11,
+    position=0.091,
 )
 
 

@@ -24,6 +24,9 @@ class XTypeCastOp(TypeCastingOp):
     This is like a `ViewOp` but without the expectation the input and output have identical types.
     """
 
+    def infer_shape(self, fgraph, node, input_shapes):
+        return input_shapes
+
 
 class TensorFromXTensor(XTypeCastOp):
     __props__ = ()
