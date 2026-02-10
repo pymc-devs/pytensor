@@ -729,11 +729,8 @@ class ShapeFeature(Feature):
 class ShapeOptimizer(GraphRewriter):
     """Rewriter that adds `ShapeFeature` as a feature."""
 
-    def add_requirements(self, fgraph):
-        fgraph.attach_feature(ShapeFeature())
-
     def apply(self, fgraph):
-        pass
+        fgraph.attach_feature(ShapeFeature())
 
 
 class UnShapeOptimizer(GraphRewriter):
