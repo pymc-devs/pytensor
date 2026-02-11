@@ -70,6 +70,21 @@ def test_pseudoinverse_grad():
     utt.verify_grad(pinv, [r])
 
 
+def test_pseudoinverse_static_shape():
+    x = matrix(shape=(3, 5))
+    z = pinv(x)
+    assert z.type.shape == (5, 3)
+
+    g = pytensor.grad(z.sum(), x)
+    f = function([x], g)
+
+    rng = np.random.default_rng(utt.fetch_seed())
+    r = rng.standard_normal((3, 5)).astype(config.floatX)
+    assert f(r).shape == (3, 5)
+
+    utt.verify_grad(pinv, [r])
+
+
 class TestMatrixInverse(utt.InferShapeTester):
     def setup_method(self):
         super().setup_method()
