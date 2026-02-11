@@ -55,6 +55,7 @@ from pytensor.tensor.math import (
     deg2rad,
     digamma,
     dot,
+    eq,
     erf,
     erfc,
     exp,
@@ -3812,12 +3813,14 @@ def logmexpm1_to_log1mexp(fgraph, node):
 
 
 # log(exp(a) - exp(b)) -> a + log1mexp(b - a)
+# special care is taken for a == b == -inf, by wrapping -> switch(b == -inf, a, ...)
 logdiffexp_to_log1mexpdiff = PatternNodeRewriter(
     (log, (sub, (exp, "x"), (exp, "y"))),
-    (add, "x", (log1mexp, (sub, "y", "x"))),
+    (switch, (eq, "y", -np.inf), "x", (add, "x", (log1mexp, (sub, "y", "x")))),
     allow_multiple_clients=True,
+    name="logdiffexp_to_log1mexpdiff",
 )
-register_stabilize(logdiffexp_to_log1mexpdiff, name="logdiffexp_to_log1mexpdiff")
+register_stabilize(logdiffexp_to_log1mexpdiff)
 
 # log(sigmoid(x) / (1 - sigmoid(x))) -> x
 # i.e logit(sigmoid(x)) -> x

@@ -4581,7 +4581,7 @@ def test_log1mexp_stabilization(op_name):
     )
 
 
-def test_logdiffexp():
+def test_logdiffexp_stabilization():
     rng = np.random.default_rng(3559)
     mode = Mode("py").including("stabilize").excluding("fusion")
 
@@ -4617,6 +4617,11 @@ def test_logdiffexp():
     x_test = rng.normal(size=(3, 2)).astype("float32") + y_test.max()
     np.testing.assert_almost_equal(
         f(x_test, y_test), np.log(np.exp(x_test) - np.exp(y_test))
+    )
+    # Test edge cases
+    np.testing.assert_array_equal(
+        f([[-np.inf, -np.inf, -1]], [[-1, -np.inf, -np.inf]]),
+        [[np.nan, -np.inf, -1]],
     )
 
 
