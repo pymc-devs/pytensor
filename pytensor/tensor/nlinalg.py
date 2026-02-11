@@ -42,7 +42,11 @@ class MatrixPinv(Op):
             out_dtype = "float64"
         else:
             out_dtype = x.dtype
-        return Apply(self, [x], [matrix(shape=x.type.shape, dtype=out_dtype)])
+        return Apply(
+            self,
+            [x],
+            [matrix(shape=(x.type.shape[1], x.type.shape[0]), dtype=out_dtype)],
+        )
 
     def perform(self, node, inputs, outputs):
         (x,) = inputs
