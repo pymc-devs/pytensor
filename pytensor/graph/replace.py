@@ -294,6 +294,12 @@ def vectorize_graph(
     else:
         seq_outputs = [outputs]
 
+    if not all(
+        isinstance(key, Variable) and isinstance(value, Variable)
+        for key, value in replace.items()
+    ):
+        raise ValueError(f"Some of the replaced items are not Variables: {replace}")
+
     inputs = truncated_graph_inputs(seq_outputs, ancestors_to_include=replace.keys())
     new_inputs = [replace.get(inp, inp) for inp in inputs]
 
