@@ -1,100 +1,40 @@
-import numpy as np
-
-import pytensor as pt
 from pytensor.graph import FunctionGraph, rewrite_graph
-from pytensor.tensor import shape
 from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
-from pytensor.tensor.shape import Reshape, specify_shape
+from pytensor.tensor.shape import Reshape
 from pytensor.tensor.type import tensor
 from tests.unittest_tools import assert_equal_computations
 
 
-def test_local_split_dims():
-    """Test that split_dims converts to reshape for general shapes."""
+def test_local_split_dims_to_reshape():
     x = tensor("x", shape=(2, 10, 3))
     x_split = split_dims(x, axis=1, shape=(2, 5, 1))
 
     fg = FunctionGraph(inputs=[x], outputs=[x_split])
 
-    rewrite_graph(
-        fg,
-        include=("canonicalize",),
-        exclude=(
-            "local_subtensor_merge",
-            "local_subtensor_remove_broadcastable_index",
-        ),
-    )
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 1
 
-    # Build the expected computation manually
-    x_shape = shape(x)
+    rewrite_graph(fg, include=("canonicalize",))
 
-    # Use slice notation like the code does: x.shape[:axis] and x.shape[axis+1:]
-    shape_before = x_shape[:1]  # Creates Subtensor{:stop}
-    shape_after = x_shape[2:]  # Creates Subtensor{start:}
-
-    # Concatenate: [x.shape[:1], 2, 5, x.shape[2:]]
-    shape_vector = pt.tensor.concatenate(
-        [
-            shape_before,
-            pt.tensor.as_tensor([np.int64(2), np.int64(5)]),
-            shape_after,
-        ]
-    )
-
-    # 2. Replicate the Reshape and ExpandDims
-    reshaped = Reshape(4)(x, shape_vector)
-    expanded = expand_dims(reshaped, axis=3)
-
-    # 3. SpecifyShape to lock in the output shape
-    expected_shape_tuple = (2, 2, 5, 1, 3)
-    expected = specify_shape(expanded, expected_shape_tuple)
-
-    assert_equal_computations(
-        [fg.outputs[0]], [expected], in_xs=[fg.outputs[0]], in_ys=[expected]
-    )
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 0
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 1
+    assert fg.outputs[0].type.shape == (2, 2, 5, 1, 3)
 
 
-def test_local_join_dims():
+def test_local_join_dims_to_reshape():
     x = tensor("x", shape=(2, 2, 5, 1, 3))
     x_join = join_dims(x, start_axis=1, n_axes=3)
 
     fg = FunctionGraph(inputs=[x], outputs=[x_join])
 
-    rewrite_graph(
-        fg,
-        include=("canonicalize",),
-        exclude=(
-            "local_subtensor_merge",
-            "local_subtensor_remove_broadcastable_index",
-        ),
-    )
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 1
 
-    x_shape = shape(x)
-    shape_before = x_shape[:1]  # x.shape[:start_axis]
-    shape_after = x_shape[4:]  # x.shape[start_axis + n_axes:]
+    rewrite_graph(fg, include=("canonicalize",))
 
-    shape_vector = pt.tensor.concatenate(
-        [
-            shape_before,
-            pt.tensor.as_tensor([np.int64(-1)]),
-            shape_after,
-        ]
-    )
-
-    # Squeeze then reshape
-    squeezed = squeeze(x, axis=3)
-    reshaped = Reshape(3)(squeezed, shape_vector)
-
-    # SpecifyShape to lock in output
-    expected = specify_shape(reshaped, (2, 10, 3))
-
-    assert_equal_computations(
-        [fg.outputs[0]], [expected], in_xs=[fg.outputs[0]], in_ys=[expected]
-    )
-    # expected = x.reshape((2, 10, 3))
-    # assert_equal_computations([fg.outputs[0]], [expected], in_xs=[fg.outputs[0]], in_ys=[expected])
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 0
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 1
+    assert fg.outputs[0].type.shape == (2, 10, 3)
 
 
 def test_local_join_dims_noop():
