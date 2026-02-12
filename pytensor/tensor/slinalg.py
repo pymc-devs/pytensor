@@ -1014,6 +1014,22 @@ class Solve(SolveBase):
         except np.linalg.LinAlgError:
             outputs[0][0] = np.full(a.shape, np.nan, dtype=a.dtype)
 
+    def L_op(self, inputs, outputs, output_gradients):
+        res = super().L_op(inputs, outputs, output_gradients)
+
+        if self.assume_a in ("sym", "her", "pos"):
+            A_bar = res[0]
+            # When assume_a is sym/her/pos, the solver only reads one triangle
+            # of A and symmetrizes internally. Off-diagonal elements in the read
+            # triangle contribute to both (i,j) and (j,i) of the effective matrix,
+            # so we must accumulate the symmetric contribution and zero the unread triangle.
+            if self.lower:
+                res[0] = ptb.tril(A_bar) + ptb.tril(A_bar.mT, -1)
+            else:
+                res[0] = ptb.triu(A_bar) + ptb.triu(A_bar.mT, 1)
+
+        return res
+
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if not allowed_inplace_inputs:
             return self

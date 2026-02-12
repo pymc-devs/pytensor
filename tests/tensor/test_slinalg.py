@@ -399,6 +399,69 @@ class TestSolve(utt.InferShapeTester):
             lambda A, b: solve_op(A_func(A), b), [A_val, b_val], 3, rng, eps=eps
         )
 
+    @pytest.mark.parametrize("b_shape", [(5, 1), (5,)], ids=["b_col_vec", "b_vec"])
+    @pytest.mark.parametrize(
+        "assume_a, lower",
+        [
+            ("sym", False),
+            ("sym", True),
+            ("pos", False),
+            ("pos", True),
+        ],
+        ids=["sym_upper", "sym_lower", "pos_upper", "pos_lower"],
+    )
+    @pytest.mark.skipif(
+        config.floatX == "float32",
+        reason="Gradients not numerically stable in float32",
+    )
+    def test_solve_symmetric_gradient_direct(
+        self, b_shape: tuple[int], assume_a: str, lower: bool
+    ):
+        """Test that the gradient of Solve is correct when a pre-structured
+        matrix is passed directly, without composing with a symmetrization
+        wrapper.  This catches bugs where L_op doesn't account for the solver
+        only reading one triangle of A."""
+        rng = np.random.default_rng(utt.fetch_seed())
+
+        A_raw = rng.normal(size=(5, 5)).astype(config.floatX)
+        if assume_a == "pos":
+            A_val = (A_raw @ A_raw.T + 5 * np.eye(5)).astype(config.floatX)
+        else:
+            A_val = ((A_raw + A_raw.T) / 2).astype(config.floatX)
+        b_val = rng.normal(size=b_shape).astype(config.floatX)
+
+        A = pt.tensor("A", shape=(5, 5))
+        b = pt.tensor("b", shape=b_shape)
+        x = solve(A, b, assume_a=assume_a, lower=lower, b_ndim=len(b_shape))
+        loss = x.sum()
+        g_A = grad(loss, A)
+        f = function([A, b], g_A)
+
+        analytic = f(A_val, b_val)
+
+        # Numerical gradient: perturb only the read triangle
+        eps = 1e-7
+        numerical = np.zeros_like(A_val)
+        for i in range(5):
+            for j in range(5):
+                if lower and j > i:
+                    continue
+                if not lower and j < i:
+                    continue
+                A_plus = A_val.copy()
+                A_plus[i, j] += eps
+                A_minus = A_val.copy()
+                A_minus[i, j] -= eps
+                x_plus = scipy_linalg.solve(
+                    A_plus, b_val, assume_a=assume_a, lower=lower
+                )
+                x_minus = scipy_linalg.solve(
+                    A_minus, b_val, assume_a=assume_a, lower=lower
+                )
+                numerical[i, j] = (x_plus.sum() - x_minus.sum()) / (2 * eps)
+
+        np.testing.assert_allclose(analytic, numerical, atol=1e-5, rtol=1e-5)
+
     def test_solve_tringular_indirection(self):
         a = pt.matrix("a")
         b = pt.vector("b")
