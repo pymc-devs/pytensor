@@ -17,6 +17,8 @@ def test_local_split_dims_to_reshape():
 
     rewrite_graph(fg, include=("canonicalize",))
 
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, SplitDims)]) == 0
+    assert sum([1 for node in fg.toposort() if isinstance(node.op, Reshape)]) == 1
     assert fg.outputs[0].type.shape == (2, 2, 5, 1, 3)
 
 
