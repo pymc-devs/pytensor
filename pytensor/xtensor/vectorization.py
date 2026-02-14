@@ -23,7 +23,12 @@ def combine_dims_and_shape(
 ) -> dict[str, int | None]:
     """Combine information of static dimensions and shapes from multiple xtensor inputs.
 
-    Exclude
+    Parameters
+    ----------
+    inputs: Sequence of XTensorVariable
+        Sequence of input XTensorVariables.
+    exclude: Sequence of str, optional
+        Dimensions to exclude from the result.
     """
     exclude_set: set[str] = set() if exclude is None else set(exclude)
     dims_and_shape: dict[str, int | None] = {}
