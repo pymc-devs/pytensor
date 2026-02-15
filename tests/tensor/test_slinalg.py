@@ -456,11 +456,17 @@ class TestSolve(utt.InferShapeTester):
             # For pos-def, parameterize from A_raw's triangle before the outer product
             tri_val_raw = A_raw[tri_idx].astype(config.floatX)
             utt.verify_grad(
-                solve_from_tri, [tri_val_raw, b_val], 3, rng,
+                solve_from_tri,
+                [tri_val_raw, b_val],
+                3,
+                rng,
             )
         else:
             utt.verify_grad(
-                solve_from_tri, [tri_val, b_val], 3, rng,
+                solve_from_tri,
+                [tri_val, b_val],
+                3,
+                rng,
             )
 
         # --- Part 2: gradient w.r.t. full A has zeros in the unread triangle ---
