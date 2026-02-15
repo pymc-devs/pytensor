@@ -1019,14 +1019,20 @@ class Solve(SolveBase):
 
         if self.assume_a in ("sym", "her", "pos"):
             A_bar = res[0]
-            # When assume_a is sym/her/pos, the solver only reads one triangle
-            # of A and symmetrizes internally. Off-diagonal elements in the read
-            # triangle contribute to both (i,j) and (j,i) of the effective matrix,
-            # so we must accumulate the symmetric contribution and zero the unread triangle.
-            if self.lower:
-                res[0] = ptb.tril(A_bar) + ptb.tril(A_bar.mT, -1)
+            # The solver reads only one triangle and symmetrizes internally.
+            # Each off-diagonal entry A_ij in the read triangle controls both
+            # (i,j) and (j,i) of the effective matrix, so we must fold the
+            # contribution from the unread triangle back into the read one.
+            # For Hermitian matrices, the relationship is A_ji = conj(A_ij).
+            if self.assume_a == "her":
+                A_bar_folded = A_bar.conj().mT
             else:
-                res[0] = ptb.triu(A_bar) + ptb.triu(A_bar.mT, 1)
+                A_bar_folded = A_bar.mT
+
+            if self.lower:
+                res[0] = ptb.tril(A_bar) + ptb.tril(A_bar_folded, -1)
+            else:
+                res[0] = ptb.triu(A_bar) + ptb.triu(A_bar_folded, 1)
 
         return res
 
