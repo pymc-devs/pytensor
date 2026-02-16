@@ -3,7 +3,6 @@ from sys import getrefcount
 
 import numpy as np
 import pytest
-import scipy
 import scipy as sp
 
 import pytensor.sparse as ps
@@ -18,7 +17,7 @@ numba = pytest.importorskip("numba")
 
 # Make sure the Numba customizations are loaded
 import pytensor.link.numba.dispatch.sparse  # noqa: F401
-from pytensor import config
+from pytensor import config, function
 from pytensor.sparse import SparseTensorType
 from tests.link.numba.test_basic import compare_numba_and_py
 
@@ -75,9 +74,9 @@ def test_sparse_boxing():
 def test_sparse_creation_refcount():
     @numba.njit
     def create_csr_matrix(data, indices, ind_ptr):
-        return scipy.sparse.csr_matrix((data, indices, ind_ptr), shape=(5, 5))
+        return sp.sparse.csr_matrix((data, indices, ind_ptr), shape=(5, 5))
 
-    x = scipy.sparse.random(5, 5, density=0.5, format="csr")
+    x = sp.sparse.random(5, 5, density=0.5, format="csr")
 
     x_data = x.data
     x_indptr = x.indptr
@@ -102,7 +101,7 @@ def test_sparse_passthrough_refcount():
     def identity(a):
         return a
 
-    x = scipy.sparse.random(5, 5, density=0.5, format="csr")
+    x = sp.sparse.random(5, 5, density=0.5, format="csr")
 
     x_data = x.data
     assert getrefcount(x_data) == 3
@@ -287,7 +286,7 @@ def test_sparse_conversion():
     def to_csc(matrix):
         return matrix.tocsc()
 
-    x_csr = scipy.sparse.random(5, 5, density=0.5, format="csr")
+    x_csr = sp.sparse.random(5, 5, density=0.5, format="csr")
     x_csc = x_csr.tocsc()
     x_dense = x_csr.todense()
 
@@ -313,3 +312,123 @@ def test_sparse_from_dense(format):
         y = ps.csc_from_dense(x)
 
     compare_numba_and_py_sparse([x], y, [x_test])
+
+
+@pytest.mark.parametrize("output_format", ("csr", "csc"))
+@pytest.mark.parametrize(
+    "input_formats",
+    (
+        ("csr", "csr", "csr"),
+        ("csc", "csc", "csc"),
+        ("csr", "csc", "csr"),
+        ("csc", "csr", "csc"),
+        ("csc", "csc", "csr"),
+    ),
+)
+def test_sparse_hstack(output_format, input_formats):
+    x1 = ps.matrix(
+        name="x1", shape=(7, 2), format=input_formats[0], dtype=config.floatX
+    )
+    x2 = ps.matrix(
+        name="x2", shape=(7, 1), format=input_formats[1], dtype=config.floatX
+    )
+    x3 = ps.matrix(
+        name="x3", shape=(7, 5), format=input_formats[2], dtype=config.floatX
+    )
+    z = ps.hstack([x1, x2, x3], format=output_format, dtype=config.floatX)
+    x1_test = sp.sparse.random(
+        7,
+        2,
+        density=0.5,
+        format=input_formats[0],
+        dtype=config.floatX,
+    )
+    x2_test = sp.sparse.random(
+        7,
+        1,
+        density=0.3,
+        format=input_formats[1],
+        dtype=config.floatX,
+    )
+    x3_test = sp.sparse.random(
+        7,
+        5,
+        density=0.4,
+        format=input_formats[2],
+        dtype=config.floatX,
+    )
+
+    compare_numba_and_py_sparse([x1, x2, x3], z, [x1_test, x2_test, x3_test])
+
+
+@pytest.mark.parametrize("output_format", ("csr", "csc"))
+@pytest.mark.parametrize(
+    "input_formats",
+    (
+        ("csr", "csr", "csr"),
+        ("csc", "csc", "csc"),
+        ("csr", "csc", "csr"),
+        ("csc", "csr", "csc"),
+        ("csc", "csc", "csr"),
+    ),
+)
+def test_sparse_vstack(output_format, input_formats):
+    x1 = ps.matrix(
+        name="x1", shape=(2, 11), format=input_formats[0], dtype=config.floatX
+    )
+    x2 = ps.matrix(
+        name="x2", shape=(1, 11), format=input_formats[1], dtype=config.floatX
+    )
+    x3 = ps.matrix(
+        name="x3", shape=(5, 11), format=input_formats[2], dtype=config.floatX
+    )
+    z = ps.vstack([x1, x2, x3], format=output_format, dtype=config.floatX)
+    x1_test = sp.sparse.random(
+        2,
+        11,
+        density=0.4,
+        format=input_formats[0],
+        dtype=config.floatX,
+    )
+    x2_test = sp.sparse.random(
+        1,
+        11,
+        density=0.5,
+        format=input_formats[1],
+        dtype=config.floatX,
+    )
+    x3_test = sp.sparse.random(
+        5,
+        11,
+        density=0.2,
+        format=input_formats[2],
+        dtype=config.floatX,
+    )
+
+    compare_numba_and_py_sparse([x1, x2, x3], z, [x1_test, x2_test, x3_test])
+
+
+def test_sparse_hstack_mismatched_rows_raises():
+    x = ps.matrix(name="x", shape=(3, 5), format="csr", dtype=config.floatX)
+    y = ps.matrix(name="y", shape=(4, 7), format="csr", dtype=config.floatX)
+    z = ps.hstack([x, y], format="csr", dtype=config.floatX)
+    fn = function([x, y], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(3, 5, density=0.4, format="csr", dtype=config.floatX)
+    y_test = sp.sparse.random(4, 7, density=0.4, format="csr", dtype=config.floatX)
+
+    with pytest.raises(ValueError, match="Mismatching dimensions along axis 0"):
+        fn(x_test, y_test)
+
+
+def test_sparse_vstack_mismatched_cols_raises():
+    x = ps.matrix(name="x", shape=(10, 3), format="csr", dtype=config.floatX)
+    y = ps.matrix(name="y", shape=(13, 4), format="csr", dtype=config.floatX)
+    z = ps.vstack([x, y], format="csr", dtype=config.floatX)
+    fn = function([x, y], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(10, 3, density=0.4, format="csr", dtype=config.floatX)
+    y_test = sp.sparse.random(13, 4, density=0.4, format="csr", dtype=config.floatX)
+
+    with pytest.raises(ValueError, match="Mismatching dimensions along axis 1"):
+        fn(x_test, y_test)
