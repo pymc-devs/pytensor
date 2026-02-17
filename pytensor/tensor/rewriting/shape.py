@@ -605,9 +605,9 @@ class ShapeFeature(Feature):
         # 2) we are putting things back after a failed transaction.
 
         # In case 1, if r has a shape_i client, we will want to
-        # replace the shape_i of r with the shape of new_r.  Say that
-        # r is *scheduled*.
+        # replace the shape_i of r with the shape of new_r.  Say that r is *scheduled*.
         # At that point, node is no longer a client of r, but of new_r
+        # This schedule is processed by `local_track_shape_i`.
         for shpnode, idx in fgraph.clients[r] + [(node, i)]:
             if isinstance(shpnode.op, Shape_i):
                 idx = shpnode.op.i
@@ -1271,13 +1271,39 @@ def local_shape_to_shape_i(fgraph, node):
         return [ret]
 
 
+@register_infer_shape
 @register_specialize
 @register_canonicalize
 @node_rewriter([Shape_i])
 def local_track_shape_i(fgraph, node):
-    if not isinstance(node.op, Shape_i):
-        return False
+    """
+    Update `Shape_i` nodes to match `ShapeFeature`'s internal state.
 
+    This rewrite is essential for propagating shape information during graph
+    transformations (like lowering). When a node is replaced or updated,
+    `ShapeFeature` calculates the shape of the new node and "schedules"
+    dependent `Shape_i` nodes for update, so they use the latest inferred graph.
+
+    If we start with an fgraph containing the two nodes below:
+    >> out = OpWithoutInferShape(a, b)
+    >> out_shape_i = Shape_i(out)
+
+    And then rewrite
+    >> new_out = OpWithInferShape(a, b)
+    >> fgraph.replace(out, new_out)
+
+    We end up with
+    >> out_shape_i == Shape_i(new_out)
+
+    If installed, ShapeFeature will do this work in the background
+    >> new_out_shape = infer_shape(new_out)  # Usually some f(a, b)
+    >> fgraph.shape_feature.scheduled[out_shape_i.owner] = new_out_shape
+
+    And this rewrite will ultimately propagate the inference back to the fgraph
+    >> new_out_shape_i = fgraph.shape_feature.scheduled[out_shape_i.owner][i]
+    >> fgraph.replace(out_shape_i, new_out_shape_i)
+
+    """
     try:
         shape_feature = fgraph.shape_feature
     except AttributeError:
