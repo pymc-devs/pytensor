@@ -409,8 +409,8 @@ def test_sparse_vstack(output_format, input_formats):
 
 
 def test_sparse_hstack_mismatched_rows_raises():
-    x = ps.matrix(name="x", shape=(3, 5), format="csr", dtype=config.floatX)
-    y = ps.matrix(name="y", shape=(4, 7), format="csr", dtype=config.floatX)
+    x = ps.matrix(name="x", shape=(None, 5), format="csr", dtype=config.floatX)
+    y = ps.matrix(name="y", shape=(None, 7), format="csr", dtype=config.floatX)
     z = ps.hstack([x, y], format="csr", dtype=config.floatX)
     fn = function([x, y], z, mode="NUMBA")
 
@@ -422,8 +422,8 @@ def test_sparse_hstack_mismatched_rows_raises():
 
 
 def test_sparse_vstack_mismatched_cols_raises():
-    x = ps.matrix(name="x", shape=(10, 3), format="csr", dtype=config.floatX)
-    y = ps.matrix(name="y", shape=(13, 4), format="csr", dtype=config.floatX)
+    x = ps.matrix(name="x", shape=(10, None), format="csr", dtype=config.floatX)
+    y = ps.matrix(name="y", shape=(13, None), format="csr", dtype=config.floatX)
     z = ps.vstack([x, y], format="csr", dtype=config.floatX)
     fn = function([x, y], z, mode="NUMBA")
 

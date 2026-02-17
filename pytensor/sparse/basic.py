@@ -1636,23 +1636,35 @@ class Stack(Op):
             raise ValueError("The output dtype must be specified.")
         self.dtype = dtype
 
-    def make_node(self, *mat):
-        if not mat:
-            raise ValueError("Cannot join an empty list of sparses.")
-        var = [as_sparse_variable(x) for x in mat]
-
-        for x in var:
-            assert x.format in ("csr", "csc")
-
-        return Apply(
-            self, var, [SparseTensorType(dtype=self.dtype, format=self.format)()]
-        )
-
     def __str__(self):
         return f"{self.__class__.__name__}({self.format},{self.dtype})"
 
 
 class HStack(Stack):
+    def make_node(self, *blocks):
+        if not blocks:
+            raise ValueError("Cannot join an empty list of sparses.")
+        input_blocks = [as_sparse_variable(block) for block in blocks]
+
+        for x in input_blocks:
+            assert x.format in ("csr", "csc")
+
+        # Known rows numbers must be the same for all matrices.
+        static_n_rows = {
+            x.type.shape[0] for x in input_blocks if x.type.shape[0] is not None
+        }
+        if len(static_n_rows) > 1:
+            raise ValueError(
+                "All matrices must have the same number of rows; "
+                f"got row counts: {static_n_rows}."
+            )
+
+        return Apply(
+            self,
+            input_blocks,
+            [SparseTensorType(dtype=self.dtype, format=self.format)()],
+        )
+
     def perform(self, node, block, outputs):
         (out,) = outputs
         for b in block:
@@ -1726,6 +1738,30 @@ def hstack(blocks, format=None, dtype=None):
 
 
 class VStack(Stack):
+    def make_node(self, *blocks):
+        if not blocks:
+            raise ValueError("Cannot join an empty list of sparses.")
+        input_blocks = [as_sparse_variable(block) for block in blocks]
+
+        for x in input_blocks:
+            assert x.format in ("csr", "csc")
+
+        # Known column numbers must be the same for all matrices.
+        static_n_cols = {
+            x.type.shape[1] for x in input_blocks if x.type.shape[1] is not None
+        }
+        if len(static_n_cols) > 1:
+            raise ValueError(
+                "All matrices must have the same number of columns; "
+                f"got column counts: {static_n_cols}."
+            )
+
+        return Apply(
+            self,
+            input_blocks,
+            [SparseTensorType(dtype=self.dtype, format=self.format)()],
+        )
+
     def perform(self, node, block, outputs):
         (out,) = outputs
         for b in block:

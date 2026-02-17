@@ -1583,3 +1583,23 @@ def test_hstack_vstack():
             stacked_blocks = stack_function(blocks, dtype=to_dtype)
             expected_dtype = get_expected_dtype(blocks, to_dtype)
             assert stacked_blocks.dtype == expected_dtype
+
+
+def test_sparse_hstack_mismatched_static_rows_raises():
+    x = sparse.matrix(name="x", shape=(3, 5), format="csr", dtype=config.floatX)
+    y = sparse.matrix(name="y", shape=(4, 7), format="csr", dtype=config.floatX)
+
+    with pytest.raises(
+        ValueError, match="All matrices must have the same number of rows"
+    ):
+        sparse.hstack([x, y], format="csr", dtype=config.floatX)
+
+
+def test_sparse_vstack_mismatched_static_cols_raises():
+    x = sparse.matrix(name="x", shape=(10, 3), format="csr", dtype=config.floatX)
+    y = sparse.matrix(name="y", shape=(13, 4), format="csr", dtype=config.floatX)
+
+    with pytest.raises(
+        ValueError, match="All matrices must have the same number of columns"
+    ):
+        sparse.vstack([x, y], format="csr", dtype=config.floatX)
