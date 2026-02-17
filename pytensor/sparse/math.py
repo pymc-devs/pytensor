@@ -1394,11 +1394,10 @@ class StructuredDot(Op):
         out[0] = np.asarray(variable, str(variable.dtype))
 
     def grad(self, inputs, gout):
-        # NOTE: a is sparse; b and g_out may be dense or sparse.
-        # Sparse b and g_out are supported in Python and Numba,
-        # but the C backend does not yet support them.
-        #
-        # ga = structured_dot_grad(a, b, g_out)
+        # NOTE: a is sparse; b and g_out are both dense or sparse.
+        # Python and Numba backends support sparse b and g_out.
+        # C backend only supports dense b and g_out.
+        # ga = g_out x b.T
         # gb = a.T x g_out
         (a, b) = inputs
         (g_out,) = gout
