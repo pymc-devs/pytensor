@@ -14,9 +14,11 @@ from pytensor.link.numba.dispatch.sparse.variable import CSMatrixType
 from pytensor.sparse import (
     CSM,
     Cast,
+    ColScaleCSC,
     CSMProperties,
     DenseFromSparse,
     HStack,
+    RowScaleCSC,
     SparseFromDense,
     Transpose,
     VStack,
@@ -238,3 +240,46 @@ def numba_funcify_VStack(op, node, **kwargs):
         return vstack_csr(*blocks).tocsc()
 
     return vstack_csc
+
+
+@register_funcify_default_op_cache_key(ColScaleCSC)
+def numba_funcify_ColScaleCSC(op, node, **kwargs):
+    @numba_basic.numba_njit
+    def col_scale_csc(x, v):
+        n_cols = x.shape[1]
+        assert v.shape == (n_cols,)
+
+        z = x.copy()
+        z_data = z.data
+        z_indptr = z.indptr.view(np.uint32)
+
+        for col_idx in range(n_cols):
+            scale = v[col_idx]
+            # Could use slicing, but numba is usually faster with explicit loops.
+            for idx in range(z_indptr[col_idx], z_indptr[col_idx + 1]):
+                z_data[idx] *= scale
+        return z
+
+    return col_scale_csc
+
+
+@register_funcify_default_op_cache_key(RowScaleCSC)
+def numba_funcify_RowScaleCSC(op, node, **kwargs):
+    @numba_basic.numba_njit
+    def row_scale_csc(x, v):
+        n_rows, n_cols = x.shape
+        assert v.shape == (n_rows,)
+
+        indices = x.indices.view(np.uint32)
+        indptr = x.indptr.view(np.uint32)
+        z_data = x.data.copy()
+
+        for col_idx in range(n_cols):
+            for idx in range(indptr[col_idx], indptr[col_idx + 1]):
+                z_data[idx] *= v[indices[idx]]
+
+        return sp.sparse.csc_matrix(
+            (z_data, x.indices.copy(), x.indptr.copy()), shape=x.shape
+        )
+
+    return row_scale_csc

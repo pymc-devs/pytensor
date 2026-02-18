@@ -432,3 +432,25 @@ def test_sparse_vstack_mismatched_cols_raises():
 
     with pytest.raises(ValueError, match="Mismatching dimensions along axis 1"):
         fn(x_test, y_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_col_scale(format):
+    x = ps.matrix(format, name="x", shape=(8, 10), dtype=config.floatX)
+    v = pt.vector(name="v", shape=(10,), dtype=config.floatX)
+    z = ps.col_scale(x, v)
+    x_test = sp.sparse.random(8, 10, density=0.4, format=format, dtype=config.floatX)
+    s_test = np.random.random(10).astype(config.floatX)
+
+    compare_numba_and_py_sparse([x, v], z, [x_test, s_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_row_scale(format):
+    x = ps.matrix(format, name="x", shape=(7, 10), dtype=config.floatX)
+    v = pt.vector(name="v", shape=(7,), dtype=config.floatX)
+    z = ps.row_scale(x, v)
+    x_test = sp.sparse.random(7, 10, density=0.4, format=format, dtype=config.floatX)
+    v_test = np.random.random(7).astype(config.floatX)
+
+    compare_numba_and_py_sparse([x, v], z, [x_test, v_test])
