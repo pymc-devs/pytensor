@@ -13,10 +13,10 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 import builtins
 import math
 from collections.abc import Callable
+from enum import IntEnum
 from itertools import chain
 from textwrap import dedent
 from typing import Any, TypeAlias
-from enum import IntEnum
 
 import numpy as np
 
@@ -1186,7 +1186,6 @@ def _cast_to_promised_scalar_dtype(x, dtype):
 class Monotonicity(IntEnum):
     """
     Indicates monotonicity of a scalar operation over its domain.
-    
     Attributes
     ----------
     DECREASING : int
@@ -1196,6 +1195,7 @@ class Monotonicity(IntEnum):
     INCREASING : int
         Operation is monotonically increasing (f(x) < f(y) when x < y)
     """
+
     DECREASING = -1
     NONMONOTONIC = 0
     INCREASING = 1
