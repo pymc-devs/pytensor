@@ -17,6 +17,8 @@ from pytensor.sparse import (
     ColScaleCSC,
     CSMProperties,
     DenseFromSparse,
+    GetItem2Lists,
+    GetItem2ListsGrad,
     GetItemList,
     GetItemListGrad,
     HStack,
@@ -357,7 +359,7 @@ def numba_funcify_GetItemList(op, node, **kwargs):
 @register_funcify_default_op_cache_key(GetItemListGrad)
 def numba_funcify_GetItemListGrad(op, node, **kwargs):
     output_format = node.outputs[0].type.format
-    out_dtype = np.dtype(node.outputs[0].type.dtype)
+    out_dtype = node.outputs[0].type.dtype
 
     @numba_basic.numba_njit
     def get_item_list_grad_csr(x, idxs, gz):
@@ -461,47 +463,50 @@ def numba_funcify_GetItemListGrad(op, node, **kwargs):
         return get_item_list_grad_csr(x, idx, gz).tocsc()
 
     return get_item_list_grad_csc
-<<<<<<< HEAD
-=======
 
 
 @register_funcify_default_op_cache_key(GetItem2Lists)
 def numba_funcify_GetItem2Lists(op, node, **kwargs):
-    out_dtype = np.dtype(node.outputs[0].type.dtype)
+    out_dtype = node.outputs[0].type.dtype
 
     @numba_basic.numba_njit
     def get_item_2lists(x, ind1, ind2):
-        x_csr = x.tocsr()
-        n_rows, n_cols = x_csr.shape
+        # Reproduces SciPy and NumPy when running:
+        # np.asarray(x[ind1, ind2]).flatten()
 
         if ind1.shape != ind2.shape:
             raise ValueError("shape mismatch in row/column indices")
 
+        # Output vector contains as many elements as the length of the index lists.
         out_size = ind1.shape[0]
         out = np.zeros(out_size, dtype=out_dtype)
 
-        x_data = x_csr.data
+        x_csr = x.tocsr()
         x_indices = x_csr.indices.view(np.uint32)
         x_indptr = x_csr.indptr.view(np.uint32)
+        n_rows, n_cols = x_csr.shape
 
         for i in range(out_size):
+            # Normalize row index
             row_idx = ind1[i]
             if row_idx < 0:
                 row_idx += n_rows
             if row_idx < 0 or row_idx >= n_rows:
                 raise IndexError("row index out of bounds")
 
+            # Normalize column index
             col_idx = ind2[i]
             if col_idx < 0:
                 col_idx += n_cols
             if col_idx < 0 or col_idx >= n_cols:
                 raise IndexError("column index out of bounds")
 
-            col_idx_u32 = np.uint32(col_idx)
+            row_idx = np.uint32(row_idx)
+            col_idx = np.uint32(col_idx)
             for data_idx in range(x_indptr[row_idx], x_indptr[row_idx + 1]):
-                if x_indices[data_idx] == col_idx_u32:
+                if x_indices[data_idx] == col_idx:
                     # Duplicate sparse entries must accumulate like scipy indexing.
-                    out[i] += x_data[data_idx]
+                    out[i] += x_csr.data[data_idx]
 
         return out
 
@@ -511,31 +516,42 @@ def numba_funcify_GetItem2Lists(op, node, **kwargs):
 @register_funcify_default_op_cache_key(GetItem2ListsGrad)
 def numba_funcify_GetItem2ListsGrad(op, node, **kwargs):
     output_format = node.outputs[0].type.format
-    out_dtype = np.dtype(node.outputs[0].type.dtype)
+    out_dtype = node.outputs[0].type.dtype
 
     @numba_basic.numba_njit
     def get_item_2lists_grad_csr(x, ind1, ind2, gz):
-        n_rows, n_cols = x.shape
-        n_assignments = ind1.shape[0]
+        # Reproduces SciPy when running:
+        # y = [csc|csr]_matrix(x.shape)
+        # for i in range(len(ind1)):
+        #     y[(ind1[i], ind2[i])] = gz[i]
+        #
+        # Note that gz is a dense vector.
 
-        if ind2.shape[0] != n_assignments:
+        if ind1.shape != ind2.shape:
             raise ValueError("shape mismatch in row/column indices")
+
+        n_assignments = ind1.shape[0]
         if gz.shape[0] < n_assignments:
             raise IndexError("gradient index out of bounds")
 
-        norm_row = np.empty(n_assignments, dtype=np.int32)
-        norm_col = np.empty(n_assignments, dtype=np.int32)
+        # Vectors with normalized (non-negative) row and column indices
+        norm_row = np.empty(n_assignments, dtype=np.uint32)
+        norm_col = np.empty(n_assignments, dtype=np.uint32)
 
+        n_rows, n_cols = x.shape
+        # Maps original rows to values in [0, ..., touched_n_rows - 1]
         row_to_pos = np.full(n_rows, -1, dtype=np.int32)
         touched_n_rows = 0
 
         for i in range(n_assignments):
+            # Normalize row idx
             row_idx = ind1[i]
             if row_idx < 0:
                 row_idx += n_rows
             if row_idx < 0 or row_idx >= n_rows:
                 raise IndexError("row index out of bounds")
 
+            # Normalize column idx
             col_idx = ind2[i]
             if col_idx < 0:
                 col_idx += n_cols
@@ -552,13 +568,19 @@ def numba_funcify_GetItem2ListsGrad(op, node, **kwargs):
         # Build row-wise buffers for touched rows. Repeated writes overwrite values.
         row_data = np.zeros((touched_n_rows, n_cols), dtype=out_dtype)
         row_mask = np.zeros((touched_n_rows, n_cols), dtype=np.bool_)
+        row_nnz = np.zeros(touched_n_rows, dtype=np.int32)
 
         for i in range(n_assignments):
             row_pos = row_to_pos[norm_row[i]]
             col_idx = norm_col[i]
+            if not row_mask[row_pos, col_idx]:
+                row_nnz[row_pos] += 1
+                row_mask[row_pos, col_idx] = True
             row_data[row_pos, col_idx] = gz[i]
-            row_mask[row_pos, col_idx] = True
 
+        # Build output indptr.
+        # For touched rows add row_nnz[row_pos] to total_nnz.
+        # For untouched rows, carry forward the previous total_nnz count.
         out_indptr = np.empty(n_rows + 1, dtype=np.int32)
         out_indptr[0] = 0
 
@@ -566,26 +588,26 @@ def numba_funcify_GetItem2ListsGrad(op, node, **kwargs):
         for row_idx in range(n_rows):
             row_pos = row_to_pos[row_idx]
             if row_pos >= 0:
-                row_nnz = 0
-                for col_idx in range(n_cols):
-                    if row_mask[row_pos, col_idx]:
-                        row_nnz += 1
-                total_nnz += row_nnz
+                total_nnz += row_nnz[row_pos]
             out_indptr[row_idx + 1] = total_nnz
 
+        # Build output data and indices, which need the total number of non-zero elements.
         out_data = np.empty(total_nnz, dtype=out_dtype)
         out_indices = np.empty(total_nnz, dtype=np.int32)
-        out_pos = 0
 
+        # Populate indices and data by storing col_idx and value (row_data[row_pos, col_idx])
+        # for touched rows/columns.
         for row_idx in range(n_rows):
             row_pos = row_to_pos[row_idx]
             if row_pos < 0:
                 continue
+
+            dst = out_indptr[row_idx]
             for col_idx in range(n_cols):
                 if row_mask[row_pos, col_idx]:
-                    out_indices[out_pos] = col_idx
-                    out_data[out_pos] = row_data[row_pos, col_idx]
-                    out_pos += 1
+                    out_indices[dst] = col_idx
+                    out_data[dst] = row_data[row_pos, col_idx]
+                    dst += 1
 
         return sp.sparse.csr_matrix(
             (out_data, out_indices, out_indptr), shape=(n_rows, n_cols)
@@ -599,4 +621,3 @@ def numba_funcify_GetItem2ListsGrad(op, node, **kwargs):
         return get_item_2lists_grad_csr(x, ind1, ind2, gz).tocsc()
 
     return get_item_2lists_grad_csc
->>>>>>> fb1d09134 (Better comments for GetItemList and GetItemListGrad)
