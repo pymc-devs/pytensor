@@ -926,6 +926,8 @@ class GetItem2Lists(Op):
         assert x.format in ("csr", "csc")
         ind1 = ptb.as_tensor_variable(ind1)
         ind2 = ptb.as_tensor_variable(ind2)
+        assert ind1.ndim == 1
+        assert ind2.ndim == 1
         assert ind1.dtype in integer_dtypes
         assert ind2.dtype in integer_dtypes
 
