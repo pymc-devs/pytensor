@@ -8,6 +8,7 @@ from functools import partial, reduce
 import numpy as np
 
 import pytensor.scalar.basic as ps
+from pytensor.scalar.basic import Monotonicity
 import pytensor.scalar.math as ps_math
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.rewriting.basic import (
@@ -124,14 +125,6 @@ from pytensor.tensor.variable import (
     TensorConstant,
     TensorVariable,
 )
-
-MONOTONIC_INCREASING = (
-    ps.Exp, ps.Exp2, ps.Expm1, ps.Log, ps.Log2, ps.Log10, ps.Log1p,
-    ps.Sqrt, ps.Deg2Rad, ps.Rad2Deg, ps.ArcSin, ps.ArcTan,
-    ps.ArcCosh, ps.Sinh, ps.ArcSinh, ps.Tanh, ps.ArcTanh
-)
-
-MONOTONIC_DECREASING = (ps.Neg, ps.ArcCos)
 
 
 def scalarconsts_rest(inputs, elemwise=True, only_process_constants=False):
@@ -3949,8 +3942,9 @@ def local_argmax_argmin_monotonic(fgraph, node):
         
     scalar_op = inner_op.scalar_op
     
-    is_increasing = isinstance(scalar_op, MONOTONIC_INCREASING)
-    is_decreasing = isinstance(scalar_op, MONOTONIC_DECREASING)
+    monotonicity = getattr(scalar_op, 'monotonicity', Monotonicity.NONMONOTONIC)
+    is_increasing = monotonicity == Monotonicity.INCREASING
+    is_decreasing = monotonicity == Monotonicity.DECREASING
     
     if not (is_increasing or is_decreasing):
         return False
@@ -4002,8 +3996,9 @@ def local_max_min_monotonic(fgraph, node):
         
     scalar_op = inner_op.scalar_op
     
-    is_increasing = isinstance(scalar_op, MONOTONIC_INCREASING)
-    is_decreasing = isinstance(scalar_op, MONOTONIC_DECREASING)
+    monotonicity = getattr(scalar_op, 'monotonicity', Monotonicity.NONMONOTONIC)
+    is_increasing = monotonicity == Monotonicity.INCREASING
+    is_decreasing = monotonicity == Monotonicity.DECREASING
     
     if not (is_increasing or is_decreasing):
         return False
