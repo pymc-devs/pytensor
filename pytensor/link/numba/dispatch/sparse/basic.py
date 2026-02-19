@@ -28,6 +28,7 @@ from pytensor.sparse import (
     Neg,
     RowScaleCSC,
     SparseFromDense,
+    SquareDiagonal,
     Transpose,
     VStack,
 )
@@ -874,3 +875,16 @@ def numba_funcify_Diag(op, node, **kwargs):
         return out
 
     return diag_csc
+
+
+@register_funcify_default_op_cache_key(SquareDiagonal)
+def numba_funcify_SquareDiagonal(op, node, **kwargs):
+    @numba_basic.numba_njit
+    def square_diagonal(diag):
+        n = len(diag)
+        data = diag.copy()
+        indices = np.arange(n, dtype=np.int32)
+        indptr = np.arange(n + 1, dtype=np.int32)
+        return sp.sparse.csc_matrix((data, indices, indptr), shape=(n, n))
+
+    return square_diagonal

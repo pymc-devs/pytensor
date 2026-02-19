@@ -686,3 +686,12 @@ def test_sparse_diag_not_square_raises(format):
 
     with pytest.raises(ValueError, match="Diag only apply on square matrix"):
         fn(x_test)
+
+
+def test_sparse_square_diagonal():
+    x = pt.vector(name="x", shape=(8,), dtype=config.floatX)
+    z = ps.square_diagonal(x)
+
+    x_test = np.random.random(8).astype(config.floatX)
+
+    compare_numba_and_py_sparse([x], z, [x_test])
