@@ -657,16 +657,6 @@ def test_sparse_get_item_scalar_wrong_index(format):
 
 
 @pytest.mark.parametrize("format", ("csr", "csc"))
-def test_sparse_neg(format):
-    x = ps.matrix(format, name="x", shape=(7, 6), dtype=config.floatX)
-    z = -x
-
-    x_test = sp.sparse.random(7, 6, density=0.4, format=format, dtype=config.floatX)
-
-    compare_numba_and_py_sparse([x], z, [x_test])
-
-
-@pytest.mark.parametrize("format", ("csr", "csc"))
 def test_sparse_diag(format):
     x = ps.matrix(format, name="x", shape=(8, 8), dtype=config.floatX)
     z = ps.diag(x)

@@ -237,6 +237,13 @@ def _conj(x):
     """
 
 
+@structured_elemwise(ptm.neg)
+def neg(x):
+    """
+    Compute -x for all non-zero elements of x.
+    """
+
+
 def conjugate(x):
     _x = psb.as_sparse_variable(x)
     if _x.type.dtype not in complex_dtypes:
