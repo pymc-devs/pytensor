@@ -1131,6 +1131,25 @@ def test_scalar_solve_to_division_rewrite(
 
 
 def test_simplify_transpose_solve_transpose():
+    """
+    Test that inverse matmul expressions are rewritten into solve-based formulations
+    and simplified to avoid redundant transpose operations.
+
+    Specifically, verifies that:
+
+        A @ inv(B)
+
+    is rewritten into an equivalent solve expression:
+
+        solve(B.T, A.T).T
+
+    and that the resulting graph contains a Solve operation and produces
+    numerically correct results.
+
+    This test ensures that the transpose solve transpose simplification rewrite
+    is correctly applied and preserves mathematical correctness.
+    """
+
     import numpy as np
 
     import pytensor
@@ -1139,15 +1158,20 @@ def test_simplify_transpose_solve_transpose():
     from pytensor.tensor.blockwise import Blockwise
     from pytensor.tensor.slinalg import Solve
 
+    # Define symbolic matrices
     A = pt.matrix("A")
     B = pt.matrix("B")
 
+    # Expression expected to trigger inverse→solve rewrite
     expr = pt.matmul(A, pt.linalg.inv(B))
 
+    # Compile function with default optimization mode
     f = pytensor.function([A, B], expr, mode=get_default_mode())
 
+    # Inspect optimized computation graph
     topo = f.maker.fgraph.toposort()
 
+    # Verify that Solve appears in the optimized graph
     found_solve = False
     for node in topo:
         if isinstance(node.op, Solve):
@@ -1159,12 +1183,13 @@ def test_simplify_transpose_solve_transpose():
 
     assert found_solve, "Expected Solve rewrite was not applied"
 
-    # Correct expected computation
+    # Test numeric correctness
     A_val = np.array([[1.0, 2.0], [3.0, 4.0]])
     B_val = np.array([[5.0, 6.0], [7.0, 8.0]])
 
     result = f(A_val, B_val)
 
+    # Expected result based on equivalent solve formulation
     expected = np.linalg.solve(B_val.T, A_val.T).T
 
     np.testing.assert_allclose(result, expected)
