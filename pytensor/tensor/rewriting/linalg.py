@@ -11,7 +11,6 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Abs, Exp, Log, Mul, Sign, Sqr
 from pytensor.tensor.basic import (
     AllocDiag,
@@ -163,13 +162,15 @@ def inv_as_solve(fgraph, node):
 
 @register_stabilize
 @register_canonicalize
-@node_rewriter([blockwise_of(OpPattern(Solve, assume_a="gen"))])
+@node_rewriter([blockwise_of(Solve)])
 def generic_solve_to_solve_triangular(fgraph, node):
     """
     If any solve() is applied to the output of a cholesky op, then
     replace it with a triangular solve.
 
     """
+    if node.op.core_op.assume_a != "gen":
+        return None
     A, b = node.inputs  # result is the solution to Ax=b
     if (
         A.owner
@@ -198,12 +199,14 @@ def generic_solve_to_solve_triangular(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([blockwise_of(OpPattern(SolveBase, b_ndim=1))])
+@node_rewriter([blockwise_of(SolveBase)])
 def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
     """Replace a batched Solve(a, b, b_ndim=1) by Solve(a, b.T, b_ndim=2).T
 
     `a` must have no batched dimensions, while `b` can have arbitrary batched dimensions.
     """
+    if node.op.core_op.b_ndim != 1:
+        return None
     core_op = node.op.core_op
     [a, b] = node.inputs
 
@@ -255,11 +258,13 @@ def no_transpose_symmetric(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([blockwise_of(OpPattern(Solve, b_ndim=2))])
+@node_rewriter([blockwise_of(Solve)])
 def psd_solve_with_chol(fgraph, node):
     """
     This utilizes a boolean `psd` tag on matrices.
     """
+    if node.op.core_op.b_ndim != 2:
+        return None
     A, b = node.inputs  # result is the solution to Ax=b
     if getattr(A.tag, "psd", None) is True:
         L = cholesky(A)
