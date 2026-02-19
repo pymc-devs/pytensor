@@ -22,6 +22,7 @@ from pytensor.sparse import (
     GetItem2ListsGrad,
     GetItemList,
     GetItemListGrad,
+    GetItemScalar,
     HStack,
     RowScaleCSC,
     SparseFromDense,
@@ -741,3 +742,73 @@ def numba_funcify_GetItem2d(op, node, **kwargs):
         )
 
     return get_item_2d_csc
+
+
+@register_funcify_default_op_cache_key(GetItemScalar)
+def numba_funcify_GetItemScalar(op, node, **kwargs):
+    input_format = node.inputs[0].type.format
+    out_dtype = np.dtype(node.outputs[0].type.dtype)
+
+    if input_format == "csr":
+
+        @numba_basic.numba_njit
+        def get_item_scalar_csr(x, ind1, ind2):
+            n_rows, n_cols = x.shape
+
+            row_idx = np.asarray(ind1).item()
+            if row_idx < 0:
+                row_idx += n_rows
+            if row_idx < 0 or row_idx >= n_rows:
+                raise IndexError("row index out of bounds")
+
+            col_idx = np.asarray(ind2).item()
+            if col_idx < 0:
+                col_idx += n_cols
+            if col_idx < 0 or col_idx >= n_cols:
+                raise IndexError("column index out of bounds")
+
+            row_idx = np.uint32(row_idx)
+            col_idx = np.uint32(col_idx)
+
+            indptr = x.indptr.view(np.uint32)
+            indices = x.indices.view(np.uint32)
+
+            out = 0
+            for data_idx in range(indptr[row_idx], indptr[row_idx + 1]):
+                # Duplicate sparse entries must accumulate like scipy indexing.
+                if indices[data_idx] == col_idx:
+                    out += x.data[data_idx]
+            return np.asarray(out, dtype=out_dtype)
+
+        return get_item_scalar_csr
+
+    @numba_basic.numba_njit
+    def get_item_scalar_csc(x, ind1, ind2):
+        n_rows, n_cols = x.shape
+
+        row_idx = np.asarray(ind1).item()
+        if row_idx < 0:
+            row_idx += n_rows
+        if row_idx < 0 or row_idx >= n_rows:
+            raise IndexError("row index out of bounds")
+
+        col_idx = np.asarray(ind2).item()
+        if col_idx < 0:
+            col_idx += n_cols
+        if col_idx < 0 or col_idx >= n_cols:
+            raise IndexError("column index out of bounds")
+
+        row_idx = np.uint32(row_idx)
+        col_idx = np.uint32(col_idx)
+
+        indptr = x.indptr.view(np.uint32)
+        indices = x.indices.view(np.uint32)
+
+        out = 0
+        for data_idx in range(indptr[col_idx], indptr[col_idx + 1]):
+            # Duplicate sparse entries must accumulate like scipy indexing.
+            if indices[data_idx] == row_idx:
+                out += x.data[data_idx]
+        return np.asarray(out, dtype=out_dtype)
+
+    return get_item_scalar_csc

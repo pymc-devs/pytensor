@@ -620,3 +620,37 @@ def test_sparse_get_item_2lists_grad_wrong_index(format, ind1_test, ind2_test):
 
     with pytest.raises(IndexError):
         fn(x_test, ind1_test, ind2_test, gz_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+@pytest.mark.parametrize(("row_idx", "col_idx"), [(3, 2), (-1, -2)])
+def test_sparse_get_item_scalar(format, row_idx, col_idx):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    row = pt.iscalar("row")
+    col = pt.iscalar("col")
+    z_var = x[row, col]
+    z_lit = x[3, 2]
+    z_lit_neg = x[-1, -2]
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+
+    compare_numba_and_py_sparse([x, row, col], z_var, [x_test, row_idx, col_idx])
+    compare_numba_and_py_sparse([x], z_lit, [x_test])
+    compare_numba_and_py_sparse([x], z_lit_neg, [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_scalar_wrong_index(format):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    row = pt.iscalar("row")
+    col = pt.iscalar("col")
+    z = x[row, col]
+    fn = function([x, row, col], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+
+    with pytest.raises(IndexError, match="row index out of bounds"):
+        fn(x_test, 6, 0)
+
+    with pytest.raises(IndexError, match="column index out of bounds"):
+        fn(x_test, 0, 5)
