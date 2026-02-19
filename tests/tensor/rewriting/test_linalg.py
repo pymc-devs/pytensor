@@ -1129,13 +1129,15 @@ def test_scalar_solve_to_division_rewrite(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
 
+
 def test_simplify_transpose_solve_transpose():
     import numpy as np
+
     import pytensor
     import pytensor.tensor as pt
-    from pytensor.tensor.slinalg import Solve
-    from pytensor.tensor.blockwise import Blockwise
     from pytensor.compile import get_default_mode
+    from pytensor.tensor.blockwise import Blockwise
+    from pytensor.tensor.slinalg import Solve
 
     A = pt.matrix("A")
     B = pt.matrix("B")

@@ -134,7 +134,6 @@ def transinv_to_invtrans(fgraph, node):
 @register_stabilize
 @node_rewriter([Dot, _matmul])
 def inv_as_solve(fgraph, node):
-
     l, r = node.inputs
 
     # inv(A) @ B → solve(A, B)
@@ -160,7 +159,6 @@ def inv_as_solve(fgraph, node):
         return [solve(B.T, A.T).T]
 
     return None
-
 
 
 @register_stabilize
