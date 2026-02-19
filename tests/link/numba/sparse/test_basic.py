@@ -664,3 +664,25 @@ def test_sparse_neg(format):
     x_test = sp.sparse.random(7, 6, density=0.4, format=format, dtype=config.floatX)
 
     compare_numba_and_py_sparse([x], z, [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_diag(format):
+    x = ps.matrix(format, name="x", shape=(8, 8), dtype=config.floatX)
+    z = ps.diag(x)
+
+    x_test = sp.sparse.random(8, 8, density=0.4, format=format, dtype=config.floatX)
+
+    compare_numba_and_py_sparse([x], z, [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_diag_not_square_raises(format):
+    x = ps.matrix(format, name="x", shape=(8, 6), dtype=config.floatX)
+    z = ps.diag(x)
+    fn = function([x], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(8, 6, density=0.4, format=format, dtype=config.floatX)
+
+    with pytest.raises(ValueError, match="Diag only apply on square matrix"):
+        fn(x_test)
