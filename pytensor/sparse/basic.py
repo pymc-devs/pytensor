@@ -1246,52 +1246,6 @@ class Transpose(Op):
 transpose = Transpose()
 
 
-class Neg(Op):
-    """Negative of the sparse matrix (i.e. multiply by ``-1``).
-
-    Notes
-    -----
-    The grad is regular, i.e. not structured.
-
-    """
-
-    __props__ = ()
-
-    def __str__(self):
-        return "Sparse" + self.__class__.__name__
-
-    def make_node(self, x):
-        """
-
-        Parameters
-        ----------
-        x
-            Sparse matrix.
-
-        """
-        x = as_sparse_variable(x)
-        assert x.format in ("csr", "csc")
-        return Apply(self, [x], [x.type()])
-
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        (out,) = outputs
-        assert _is_sparse(x)
-        out[0] = -x
-
-    def grad(self, inputs, gout):
-        (x,) = inputs
-        (gz,) = gout
-        assert _is_sparse_variable(x) and _is_sparse_variable(gz)
-        return (-gz,)
-
-    def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
-
-
-neg = Neg()
-
-
 class ColScaleCSC(Op):
     # Scale each columns of a sparse matrix by the corresponding
     # element of a dense vector

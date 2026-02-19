@@ -1470,3 +1470,5 @@ SqrTester = elemwise_checker(psm.sqr, lambda x: x * x)
 SqrtTester = elemwise_checker(psm.sqrt, np.sqrt, gap=(0, 10))
 
 ConjTester = elemwise_checker(psm.conjugate, np.conj, grad_test=False)
+
+NegTester = elemwise_checker(psm.neg, np.negative, name="TestNeg")
