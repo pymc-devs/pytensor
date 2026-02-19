@@ -26,7 +26,6 @@ from pytensor.sparse.basic import (
     EnsureSortedIndices,
     GetItemScalar,
     HStack,
-    Neg,
     Remove0,
     SparseFromDense,
     SparseTensorType,
@@ -407,15 +406,6 @@ class TestSparseInferShape(utt.InferShapeTester):
             [x.T],
             [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
             Transpose,
-        )
-
-    def test_neg(self):
-        x = SparseTensorType("csr", dtype=config.floatX)()
-        self._compile_and_check(
-            [x],
-            [-x],
-            [scipy_sparse.csr_matrix(random_lil((10, 40), config.floatX, 3))],
-            Neg,
         )
 
     def test_remove0(self):
