@@ -1140,11 +1140,10 @@ def test_simplify_transpose_solve_transpose():
     """
 
     import numpy as np
+
     import pytensor
     import pytensor.tensor as pt
-    from pytensor.compile import get_default_mode
     from pytensor.tensor.blockwise import Blockwise
-    from pytensor.tensor.slinalg import SolveBase
 
     A = pt.matrix("A")
     B = pt.matrix("B")
