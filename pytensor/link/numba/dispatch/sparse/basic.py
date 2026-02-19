@@ -24,6 +24,7 @@ from pytensor.sparse import (
     GetItemListGrad,
     GetItemScalar,
     HStack,
+    Neg,
     RowScaleCSC,
     SparseFromDense,
     Transpose,
@@ -812,3 +813,15 @@ def numba_funcify_GetItemScalar(op, node, **kwargs):
         return np.asarray(out, dtype=out_dtype)
 
     return get_item_scalar_csc
+
+
+@register_funcify_default_op_cache_key(Neg)
+def numba_funcify_Neg(op, node, **kwargs):
+    @numba_basic.numba_njit
+    def neg(x):
+        z = x.copy()
+        z_data = z.data
+        z_data *= -1
+        return z
+
+    return neg
