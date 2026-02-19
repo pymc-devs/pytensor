@@ -432,3 +432,256 @@ def test_sparse_vstack_mismatched_cols_raises():
 
     with pytest.raises(ValueError, match="Mismatching dimensions along axis 1"):
         fn(x_test, y_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_col_scale(format):
+    x = ps.matrix(format, name="x", shape=(8, 10), dtype=config.floatX)
+    v = pt.vector(name="v", shape=(10,), dtype=config.floatX)
+    z = ps.col_scale(x, v)
+    x_test = sp.sparse.random(8, 10, density=0.4, format=format, dtype=config.floatX)
+    s_test = np.random.random(10).astype(config.floatX)
+
+    compare_numba_and_py_sparse([x, v], z, [x_test, s_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_row_scale(format):
+    x = ps.matrix(format, name="x", shape=(7, 10), dtype=config.floatX)
+    v = pt.vector(name="v", shape=(7,), dtype=config.floatX)
+    z = ps.row_scale(x, v)
+    x_test = sp.sparse.random(7, 10, density=0.4, format=format, dtype=config.floatX)
+    v_test = np.random.random(7).astype(config.floatX)
+
+    compare_numba_and_py_sparse([x, v], z, [x_test, v_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_list(format):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    idx = pt.ivector("idx")
+    z = ps.get_item_list(x, idx)
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+    idx_test = np.asarray([0, 2, 5, 2], dtype=np.int32)
+
+    compare_numba_and_py_sparse([x, idx], z, [x_test, idx_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_list_wrong_index(format):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    idx = pt.ivector("idx")
+    z = ps.get_item_list(x, idx)
+    fn = function([x, idx], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+    idx_test = np.asarray([0, 6], dtype=np.int32)
+
+    with pytest.raises(IndexError):
+        fn(x_test, idx_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_list_grad(format):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    idx = pt.ivector("idx")
+    gz = ps.matrix(format, name="gz", shape=(4, 5), dtype=config.floatX)
+    z = ps.get_item_list_grad(x, idx, gz)
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+    gz_test = sp.sparse.random(4, 5, density=0.4, format=format, dtype=config.floatX)
+    idx_test = np.asarray([0, 2, 5, 2], dtype=np.int32)
+
+    with pytest.warns(sp.sparse.SparseEfficiencyWarning):
+        # GetItemListGrad.perform does sparse row assignment into an initially empty sparse
+        # matrix, which changes sparsity structure incrementally and triggers the warning.
+        compare_numba_and_py_sparse([x, idx, gz], z, [x_test, idx_test, gz_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_list_grad_wrong_index(format):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    idx = pt.ivector("idx")
+    gz = ps.matrix(format, name="gz", shape=(2, 5), dtype=config.floatX)
+    z = ps.get_item_list_grad(x, idx, gz)
+    fn = function([x, idx, gz], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+    gz_test = sp.sparse.random(2, 5, density=0.4, format=format, dtype=config.floatX)
+    idx_test = np.asarray([0, 6], dtype=np.int32)
+
+    with pytest.raises(IndexError):
+        fn(x_test, idx_test, gz_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_2lists(format):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    ind1 = pt.ivector("ind1")
+    ind2 = pt.ivector("ind2")
+    z = ps.get_item_2lists(x, ind1, ind2)
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+    ind1_test = np.asarray([0, 0, 3, 5], dtype=np.int32)
+    ind2_test = np.asarray([0, 4, 2, 1], dtype=np.int32)
+
+    compare_numba_and_py_sparse([x, ind1, ind2], z, [x_test, ind1_test, ind2_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_2d(format):
+    x = ps.matrix(format, name="x", shape=(100, 97), dtype=config.floatX)
+    a = pt.iscalar("a")
+    b = pt.iscalar("b")
+    c = pt.iscalar("c")
+    d = pt.iscalar("d")
+    e = pt.iscalar("e")
+    f = pt.iscalar("f")
+
+    z1 = x[a:b:e, c:d:f]
+    z2 = x[a:b:e]
+    z3 = x[:a, :b]
+    z4 = x[:, a:]
+    z5 = x[1:10:2, 10:20:3]
+    z6 = x[10:1:-2, 15:2:-3]
+
+    x_test = sp.sparse.random(100, 97, density=0.4, format=format, dtype=config.floatX)
+
+    compare_numba_and_py_sparse(
+        [x, a, b, c, d, e, f],
+        [z1, z2, z3, z4],
+        [x_test, 1, 5, 10, 15, 2, 3],
+    )
+    compare_numba_and_py_sparse([x], z5, [x_test])
+    compare_numba_and_py_sparse([x], z6, [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+@pytest.mark.parametrize(
+    ("ind1_test", "ind2_test"),
+    [
+        (np.asarray([0, 6], dtype=np.int32), np.asarray([0, 3], dtype=np.int32)),
+        (np.asarray([0, 3], dtype=np.int32), np.asarray([0, 5], dtype=np.int32)),
+    ],
+)
+def test_sparse_get_item_2lists_wrong_index(format, ind1_test, ind2_test):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    ind1 = pt.ivector("ind1")
+    ind2 = pt.ivector("ind2")
+    z = ps.get_item_2lists(x, ind1, ind2)
+    fn = function([x, ind1, ind2], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+
+    with pytest.raises(IndexError):
+        fn(x_test, ind1_test, ind2_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_2lists_grad(format):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    ind1 = pt.ivector("ind1")
+    ind2 = pt.ivector("ind2")
+    gz = pt.vector(name="gz", shape=(4,), dtype=config.floatX)
+    z = ps.get_item_2lists_grad(x, ind1, ind2, gz)
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+    ind1_test = np.asarray([0, 2, 5, 2], dtype=np.int32)
+    ind2_test = np.asarray([1, 0, 4, 0], dtype=np.int32)
+    gz_test = np.asarray([0.5, -1.25, 2.0, 4.5], dtype=config.floatX)
+
+    with pytest.warns(sp.sparse.SparseEfficiencyWarning):
+        # GetItem2ListsGrad.perform does sparse item assignment into an initially empty
+        # sparse matrix, which changes sparsity structure incrementally.
+        compare_numba_and_py_sparse(
+            [x, ind1, ind2, gz], z, [x_test, ind1_test, ind2_test, gz_test]
+        )
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+@pytest.mark.parametrize(
+    ("ind1_test", "ind2_test"),
+    [
+        (np.asarray([0, 6], dtype=np.int32), np.asarray([0, 3], dtype=np.int32)),
+        (np.asarray([0, 3], dtype=np.int32), np.asarray([0, 5], dtype=np.int32)),
+    ],
+)
+def test_sparse_get_item_2lists_grad_wrong_index(format, ind1_test, ind2_test):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    ind1 = pt.ivector("ind1")
+    ind2 = pt.ivector("ind2")
+    gz = pt.vector(name="gz", shape=(2,), dtype=config.floatX)
+    z = ps.get_item_2lists_grad(x, ind1, ind2, gz)
+    fn = function([x, ind1, ind2, gz], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+    gz_test = np.asarray([1.0, -2.0], dtype=config.floatX)
+
+    with pytest.raises(IndexError):
+        fn(x_test, ind1_test, ind2_test, gz_test)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+@pytest.mark.parametrize(("row_idx", "col_idx"), [(3, 2), (-1, -2)])
+def test_sparse_get_item_scalar(format, row_idx, col_idx):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    row = pt.iscalar("row")
+    col = pt.iscalar("col")
+    z_var = x[row, col]
+    z_lit = x[3, 2]
+    z_lit_neg = x[-1, -2]
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+
+    compare_numba_and_py_sparse([x, row, col], z_var, [x_test, row_idx, col_idx])
+    compare_numba_and_py_sparse([x], z_lit, [x_test])
+    compare_numba_and_py_sparse([x], z_lit_neg, [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_scalar_wrong_index(format):
+    x = ps.matrix(format, name="x", shape=(6, 5), dtype=config.floatX)
+    row = pt.iscalar("row")
+    col = pt.iscalar("col")
+    z = x[row, col]
+    fn = function([x, row, col], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(6, 5, density=0.4, format=format, dtype=config.floatX)
+
+    with pytest.raises(IndexError, match="row index out of bounds"):
+        fn(x_test, 6, 0)
+
+    with pytest.raises(IndexError, match="column index out of bounds"):
+        fn(x_test, 0, 5)
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_diag(format):
+    x = ps.matrix(format, name="x", shape=(8, 8), dtype=config.floatX)
+    z = ps.diag(x)
+
+    x_test = sp.sparse.random(8, 8, density=0.4, format=format, dtype=config.floatX)
+
+    compare_numba_and_py_sparse([x], z, [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_diag_not_square_raises(format):
+    x = ps.matrix(format, name="x", shape=(8, 6), dtype=config.floatX)
+    z = ps.diag(x)
+    fn = function([x], z, mode="NUMBA")
+
+    x_test = sp.sparse.random(8, 6, density=0.4, format=format, dtype=config.floatX)
+
+    with pytest.raises(ValueError, match="Diag only apply on square matrix"):
+        fn(x_test)
+
+
+def test_sparse_square_diagonal():
+    x = pt.vector(name="x", shape=(8,), dtype=config.floatX)
+    z = ps.square_diagonal(x)
+
+    x_test = np.random.random(8).astype(config.floatX)
+
+    compare_numba_and_py_sparse([x], z, [x_test])
