@@ -1128,3 +1128,41 @@ def test_scalar_solve_to_division_rewrite(
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
+
+def test_simplify_transpose_solve_transpose():
+    import numpy as np
+    import pytensor
+    import pytensor.tensor as pt
+    from pytensor.tensor.slinalg import Solve
+    from pytensor.tensor.blockwise import Blockwise
+    from pytensor.compile import get_default_mode
+
+    A = pt.matrix("A")
+    B = pt.matrix("B")
+
+    expr = pt.matmul(A, pt.linalg.inv(B))
+
+    f = pytensor.function([A, B], expr, mode=get_default_mode())
+
+    topo = f.maker.fgraph.toposort()
+
+    found_solve = False
+    for node in topo:
+        if isinstance(node.op, Solve):
+            found_solve = True
+            break
+        if isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve):
+            found_solve = True
+            break
+
+    assert found_solve, "Expected Solve rewrite was not applied"
+
+    # Correct expected computation
+    A_val = np.array([[1.0, 2.0], [3.0, 4.0]])
+    B_val = np.array([[5.0, 6.0], [7.0, 8.0]])
+
+    result = f(A_val, B_val)
+
+    expected = np.linalg.solve(B_val.T, A_val.T).T
+
+    np.testing.assert_allclose(result, expected)
