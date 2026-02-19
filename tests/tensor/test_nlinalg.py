@@ -744,15 +744,23 @@ class TestKron(utt.InferShapeTester):
     def test_perform(self, shp0, shp1):
         if len(shp0) + len(shp1) == 2:
             pytest.skip("Sum of shp0 and shp1 must be more than 2")
-        x = tensor(dtype="floatX", shape=(None,) * len(shp0))
+
+        x = tensor(dtype="floatX", shape=shp0)
         a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
-        y = tensor(dtype="floatX", shape=(None,) * len(shp1))
-        f = function([x, y], kron(x, y))
+
+        y = tensor(dtype="floatX", shape=shp1)
         b = self.rng.random(shp1).astype(config.floatX)
+
+        kron_xy = kron(x, y)
+        f = function([x, y], kron_xy)
         out = f(a, b)
-        # Using the np.kron to compare outputs
+
+        # Using np.kron to compare outputs
         np_val = np.kron(a, b)
         np.testing.assert_allclose(out, np_val)
+
+        # Regression test for issue #1867
+        assert kron_xy.type.shape == np_val.shape
 
     @pytest.mark.parametrize(
         "i, shp0, shp1",
