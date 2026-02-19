@@ -530,6 +530,34 @@ def test_sparse_get_item_2lists(format):
 
 
 @pytest.mark.parametrize("format", ("csr", "csc"))
+def test_sparse_get_item_2d(format):
+    x = ps.matrix(format, name="x", shape=(100, 97), dtype=config.floatX)
+    a = pt.iscalar("a")
+    b = pt.iscalar("b")
+    c = pt.iscalar("c")
+    d = pt.iscalar("d")
+    e = pt.iscalar("e")
+    f = pt.iscalar("f")
+
+    z1 = x[a:b:e, c:d:f]
+    z2 = x[a:b:e]
+    z3 = x[:a, :b]
+    z4 = x[:, a:]
+    z5 = x[1:10:2, 10:20:3]
+    z6 = x[10:1:-2, 15:2:-3]
+
+    x_test = sp.sparse.random(100, 97, density=0.4, format=format, dtype=config.floatX)
+
+    compare_numba_and_py_sparse(
+        [x, a, b, c, d, e, f],
+        [z1, z2, z3, z4],
+        [x_test, 1, 5, 10, 15, 2, 3],
+    )
+    compare_numba_and_py_sparse([x], z5, [x_test])
+    compare_numba_and_py_sparse([x], z6, [x_test])
+
+
+@pytest.mark.parametrize("format", ("csr", "csc"))
 @pytest.mark.parametrize(
     ("ind1_test", "ind2_test"),
     [
