@@ -2865,9 +2865,21 @@ def roll(x, shift, axis=None):
     # List of slices describing the back half [:, :, :shift, :]
     end_slice = slice(0, -shift)
     end_list = [allslice] * axis + [end_slice] + [allslice] * (_x.ndim - axis - 1)
-    return join(
-        axis, _x.__getitem__(tuple(front_list)), _x.__getitem__(tuple(end_list))
-    )
+    out = join(axis, _x.__getitem__(tuple(front_list)), _x.__getitem__(tuple(end_list)))
+    return Roll(inputs=[_x, shift], outputs=[out], axis=axis)(_x, shift)
+
+
+class Roll(OpFromGraph):
+    """
+    Wrapper Op for roll graphs, enabling custom dispatch in JAX/Numba backends.
+    """
+
+    def __init__(self, *args, axis, **kwargs):
+        self.axis = axis
+        super().__init__(*args, **kwargs, strict=True)
+
+    def __str__(self):
+        return f"Roll{{axis={self.axis}}}"
 
 
 def stack(tensors: Sequence["TensorLike"], axis: int = 0):
