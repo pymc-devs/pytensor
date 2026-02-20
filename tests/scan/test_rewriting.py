@@ -1790,6 +1790,26 @@ class TestSaveMem:
         )
         assert buffer_size_fn(val_test) == 52 if keep_beginning else 50
 
+    def test_zero_steps_uninitialized_memory(self):
+        # Regression test for PyMC #7380
+        n = pt.tensor("n", shape=(), dtype=int)
+        init_state = pt.tensor("init_state", shape=(3,))
+
+        final_state = scan(
+            fn=lambda xtm1: xtm1 * 2,
+            outputs_info=[init_state],
+            n_steps=n,
+            return_updates=False,
+        )
+        res = final_state.owner.inputs[0][-1]
+
+        fn = function([init_state, n], res, mode=self.mode, on_unused_input="ignore")
+
+        np.testing.assert_allclose(fn(init_state=np.ones(3), n=0), np.ones(3))
+        np.testing.assert_allclose(fn(init_state=np.ones(3), n=1), np.full(3, 2.0))
+        np.testing.assert_allclose(fn(init_state=np.ones(3), n=2), np.full(3, 4.0))
+        np.testing.assert_allclose(fn(init_state=np.ones(3), n=3), np.full(3, 8.0))
+
 
 def test_inner_replace_dot():
     """
