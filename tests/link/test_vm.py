@@ -573,4 +573,3 @@ def test_partial_function_output_subset_oob(linker):
 
     # Verify the function still works after the error cases
     utt.assert_allclose(f(5), np.array([32.0, 16.0, 1.7857142857142858]))
-
