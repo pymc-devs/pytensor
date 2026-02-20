@@ -31,6 +31,8 @@ from pytensor.tensor.blockwise import (
     vectorize_node_fallback,
 )
 from pytensor.tensor.nlinalg import MatrixInverse, eig
+from pytensor.tensor.random import normal
+from pytensor.tensor.random.op import default_rng
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
 from pytensor.tensor.signal import convolve1d
 from pytensor.tensor.slinalg import (
@@ -114,16 +116,18 @@ def test_vectorize_blockwise():
 
 
 def test_vectorize_node_fallback_unsupported_type():
-    x = tensor("x", shape=(2, 6))
-    node = x[:, [0, 2, 4]].owner
+    rng = default_rng()
+    node = normal(rng=rng).owner
 
     with pytest.raises(
         NotImplementedError,
         match=re.escape(
-            "Cannot vectorize node AdvancedSubtensor(x, MakeSlice.0, [0 2 4]) with input MakeSlice.0 of type slice"
+            'Cannot vectorize node normal_rv{"(),()->()"}('
+            "DefaultGeneratorMakerOp.0, NoneConst{None}, 0.0, 1.0)"
+            " with input DefaultGeneratorMakerOp.0 of type RandomGeneratorType"
         ),
     ):
-        vectorize_node_fallback(node.op, node, node.inputs)
+        vectorize_node_fallback(node.op, node, *node.inputs)
 
 
 def check_blockwise_runtime_broadcasting(mode):

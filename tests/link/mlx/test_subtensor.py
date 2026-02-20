@@ -187,27 +187,6 @@ def test_mlx_inplace_variants():
     compare_mlx_and_py([], [out_pt], [])
 
 
-@pytest.mark.xfail(
-    reason="MLX slice indices must be integers or None, dynamic slices not supported"
-)
-def test_mlx_MakeSlice():
-    """Test MakeSlice operation."""
-    # Test slice creation
-    start = pt.iscalar("start")
-    stop = pt.iscalar("stop")
-    step = pt.iscalar("step")
-
-    # Create a slice using MakeSlice
-    slice_op = pt_subtensor.MakeSlice()
-    slice_pt = slice_op(start, stop, step)
-
-    # Use simple constant array instead of arange
-    x_pt = pt.constant(np.arange(10, dtype=np.float32))
-    out_pt = x_pt[slice_pt]
-
-    compare_mlx_and_py([start, stop, step], [out_pt], [1, 8, 2])
-
-
 def test_mlx_subtensor_edge_cases():
     """Test edge cases and boundary conditions."""
     # Empty slices - use constant array

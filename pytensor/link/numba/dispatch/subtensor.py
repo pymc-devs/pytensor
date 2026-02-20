@@ -10,18 +10,17 @@ from numba import types
 from numba.core.pythonapi import box
 
 import pytensor.link.numba.dispatch.basic as numba_basic
-from pytensor.graph import Type
+from pytensor.graph import Variable
 from pytensor.link.numba.cache import (
     compile_numba_function_src,
 )
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
     register_funcify_and_cache_key,
-    register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
-from pytensor.tensor import TensorType
+from pytensor.tensor import TensorType, TensorVariable
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -29,8 +28,8 @@ from pytensor.tensor.subtensor import (
     AdvancedSubtensor1,
     IncSubtensor,
     Subtensor,
+    indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice, NoneTypeT
 
 
 def slice_new(self, start, stop, step):
@@ -118,15 +117,6 @@ def numba_deepcopy_slice(x):
         return deepcopy_slice
 
 
-@register_funcify_default_op_cache_key(MakeSlice)
-def numba_funcify_MakeSlice(op, **kwargs):
-    @numba_basic.numba_njit
-    def makeslice(*x):
-        return slice(*x)
-
-    return makeslice
-
-
 def subtensor_op_cache_key(op, **extra_fields):
     key_parts = [type(op), tuple(extra_fields.items())]
     if hasattr(op, "idx_list"):
@@ -156,35 +146,36 @@ def subtensor_op_cache_key(op, **extra_fields):
 def numba_funcify_default_subtensor(op, node, **kwargs):
     """Create a Python function that assembles and uses an index on an array."""
 
-    def convert_indices(indice_names, entry):
-        if indice_names and isinstance(entry, Type):
-            return next(indice_names)
+    def convert_indices(indices_iterator, entry):
+        if isinstance(entry, int):
+            name, var = next(indices_iterator)
+            if var.ndim == 0 and isinstance(var.type, TensorType):
+                return f"{name}.item()"
+            return name
         elif isinstance(entry, slice):
             return (
-                f"slice({convert_indices(indice_names, entry.start)}, "
-                f"{convert_indices(indice_names, entry.stop)}, "
-                f"{convert_indices(indice_names, entry.step)})"
+                f"slice({convert_indices(indices_iterator, entry.start)}, "
+                f"{convert_indices(indices_iterator, entry.stop)}, "
+                f"{convert_indices(indices_iterator, entry.step)})"
             )
         elif isinstance(entry, type(None)):
             return "None"
         else:
-            raise ValueError()
+            raise ValueError(f"Unknown index type: {entry}")
 
     set_or_inc = isinstance(
         op, IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor
     )
     index_start_idx = 1 + int(set_or_inc)
     op_indices = list(node.inputs[index_start_idx:])
-    idx_list = getattr(op, "idx_list", None)
+    idx_list = op.idx_list
     idx_names = [f"idx_{i}" for i in range(len(op_indices))]
 
     input_names = ["x", "y", *idx_names] if set_or_inc else ["x", *idx_names]
 
-    idx_names_iterator = iter(idx_names)
-    indices_creation_src = (
-        tuple(convert_indices(idx_names_iterator, idx) for idx in idx_list)
-        if idx_list
-        else tuple(input_names[index_start_idx:])
+    indices_iterator = iter(zip(idx_names, op_indices))
+    indices_creation_src = tuple(
+        convert_indices(indices_iterator, idx) for idx in idx_list
     )
 
     if len(indices_creation_src) == 1:
@@ -240,20 +231,24 @@ def {function_name}({", ".join(input_names)}):
 @register_funcify_and_cache_key(AdvancedIncSubtensor)
 def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
     if isinstance(op, AdvancedSubtensor):
-        _x, _y, idxs = node.inputs[0], None, node.inputs[1:]
+        _x, *index_variables = node.inputs
     else:
-        _x, _y, *idxs = node.inputs
+        _x, _y, *index_variables = node.inputs
 
-    adv_idxs = [
-        {
-            "axis": i,
-            "dtype": idx.type.dtype,
-            "bcast": idx.type.broadcastable,
-            "ndim": idx.type.ndim,
-        }
-        for i, idx in enumerate(idxs)
-        if isinstance(idx.type, TensorType)
-    ]
+    reconstructed_indices = indices_from_subtensor(index_variables, op.idx_list)
+
+    adv_idxs = []
+    for i, idx in enumerate(reconstructed_indices):
+        if isinstance(idx, TensorVariable):
+            # This is an advanced tensor index
+            adv_idxs.append(
+                {
+                    "axis": i,
+                    "dtype": idx.type.dtype,
+                    "bcast": idx.type.broadcastable,
+                    "ndim": idx.type.ndim,
+                }
+            )
 
     must_ignore_duplicates = (
         isinstance(op, AdvancedIncSubtensor)
@@ -265,13 +260,10 @@ def numba_funcify_AdvancedSubtensor(op, node, **kwargs):
         )
     )
 
-    # Special implementation for integer indices that respects duplicates
     if (
         not must_ignore_duplicates
         and len(adv_idxs) >= 1
         and all(adv_idx["dtype"] != "bool" for adv_idx in adv_idxs)
-        # Implementation does not support newaxis
-        and not any(isinstance(idx.type, NoneTypeT) for idx in idxs)
     ):
         return vector_integer_advanced_indexing(op, node, **kwargs)
 
@@ -399,7 +391,6 @@ def vector_integer_advanced_indexing(
             y_bcast = np.broadcast_to(y_adv_dims_front, (*adv_idx_shape, *basic_idx_shape))
 
             # Ravel the advanced dims (if needed)
-            # Note that numba reshape only supports C-arrays, so we ravel before reshape
             y_bcast = y_bcast
 
             # Index over tuples of raveled advanced indices and update buffer
@@ -460,45 +451,90 @@ def vector_integer_advanced_indexing(
             return x
 
     """
+
     if isinstance(op, AdvancedSubtensor1 | AdvancedSubtensor):
-        x, *idxs = node.inputs
+        x, *index_variables = node.inputs
     else:
-        x, y, *idxs = node.inputs
+        x, y, *index_variables = node.inputs
+
     [out] = node.outputs
 
+    reconstructed_indices = indices_from_subtensor(index_variables, op.idx_list)
+
+    idx_args = [f"idx{i}" for i in range(len(index_variables))]
+    var_to_arg = dict(zip(index_variables, idx_args))
+
+    idxs = []
+
+    def get_idx_str(val, is_slice_component=False):
+        if val is None:
+            return "None"
+        if isinstance(val, Variable) and val in var_to_arg:
+            arg = var_to_arg[val]
+            if val.ndim == 0 and is_slice_component:
+                return f"{arg}.item()"
+            return arg
+        raise ValueError(f"Unexpected index value: {val}")
+
+    for idx in reconstructed_indices:
+        if isinstance(idx, slice):
+            start = get_idx_str(idx.start, is_slice_component=True)
+            stop = get_idx_str(idx.stop, is_slice_component=True)
+            step = get_idx_str(idx.step, is_slice_component=True)
+            idxs.append(f"slice({start}, {stop}, {step})")
+        else:
+            # It's a direct index variable
+            idxs.append(get_idx_str(idx, is_slice_component=False))
+
     adv_indices_pos = tuple(
-        i for i, idx in enumerate(idxs) if isinstance(idx.type, TensorType)
+        i for i, idx in enumerate(reconstructed_indices) if not isinstance(idx, slice)
     )
     assert adv_indices_pos  # Otherwise it's just basic indexing
     basic_indices_pos = tuple(
-        i for i, idx in enumerate(idxs) if not isinstance(idx.type, TensorType)
-    )
-    explicit_basic_indices_pos = (*basic_indices_pos, *range(len(idxs), x.type.ndim))
-
-    # Create index signature and split them among basic and advanced
-    idx_signature = ", ".join(f"idx{i}" for i in range(len(idxs)))
-    adv_indices = [f"idx{i}" for i in adv_indices_pos]
-    basic_indices = [f"idx{i}" for i in basic_indices_pos]
-
-    # Define transpose axis so that advanced indexing dims are on the front
-    adv_axis_front_order = (*adv_indices_pos, *explicit_basic_indices_pos)
-    adv_axis_front_transpose_needed = adv_axis_front_order != tuple(range(x.ndim))
-    adv_idx_ndim = max(idxs[i].ndim for i in adv_indices_pos)
-
-    # Helper needed for basic indexing after moving advanced indices to the front
-    basic_indices_with_none_slices = ", ".join(
-        (*((":",) * len(adv_indices)), *basic_indices)
+        i for i, idx in enumerate(reconstructed_indices) if isinstance(idx, slice)
     )
 
-    # Position of the first advanced index dimension after indexing the array
-    if (np.diff(adv_indices_pos) > 1).any():
-        # If not consecutive, it's always at the front
-        out_adv_axis_pos = 0
-    else:
-        # Otherwise wherever the first advanced index is located
-        out_adv_axis_pos = adv_indices_pos[0]
+    # Create index signature for generated function: "idx0, idx1, idx2, ..."
+    idx_signature = ", ".join(idx_args)
+
+    # String representations of advanced and basic indices for codegen
+    adv_indices = [idxs[i] for i in adv_indices_pos]
+    basic_indices = [idxs[i] for i in basic_indices_pos]
 
     to_tuple = create_tuple_string  # alias to make code more readable below
+
+    # Compute number of dimensions in advanced indices (after broadcasting)
+    if len(adv_indices_pos) == 1:
+        adv_idx = reconstructed_indices[adv_indices_pos[0]]
+        adv_idx_ndim = adv_idx.ndim  # type: ignore[union-attr]
+    else:
+        # Multiple advanced indices - use max ndim (broadcast result ndim)
+        adv_idx_ndim = max(reconstructed_indices[i].ndim for i in adv_indices_pos)  # type: ignore[union-attr]
+
+    # Determine output position of advanced indexed dimensions
+    # If advanced indices are consecutive, they go in the first advanced index position
+    # Otherwise they go at the beginning
+    if adv_indices_pos == tuple(range(adv_indices_pos[0], adv_indices_pos[-1] + 1)):
+        # Consecutive - advanced dims will be at position of first advanced index
+        out_adv_axis_pos = adv_indices_pos[0]
+    else:
+        # Non-consecutive - advanced dims go at the front
+        out_adv_axis_pos = 0
+
+    # Include trailing dimensions not covered by explicit indices
+    explicit_basic_indices_pos = (
+        *basic_indices_pos,
+        *range(len(reconstructed_indices), x.type.ndim),
+    )
+
+    # Compute transpose to move advanced indexed dims to the front
+    adv_axis_front_order = (*adv_indices_pos, *explicit_basic_indices_pos)
+    adv_axis_front_transpose_needed = adv_axis_front_order != tuple(range(x.type.ndim))
+
+    # Compute basic indices with "None" slices for dimensions that will be indexed by advanced indices
+    basic_indices_with_none_slices = ", ".join(
+        ":" for _ in range(len(adv_indices_pos))
+    ) + (", " + ", ".join(basic_indices) if basic_indices else "")
 
     if isinstance(op, AdvancedSubtensor1 | AdvancedSubtensor):
         # Define transpose axis on the output to restore original meaning
@@ -557,7 +593,8 @@ def vector_integer_advanced_indexing(
     else:
         # Make implicit dims of y explicit to simplify code
         # Numba doesn't support `np.expand_dims` with multiple axis, so we use indexing with newaxis
-        indexed_ndim = x[tuple(idxs)].type.ndim
+        indexed_ndim = x[tuple(reconstructed_indices)].type.ndim
+
         y_expand_dims = [":"] * y.type.ndim
         y_implicit_dims = range(indexed_ndim - y.type.ndim)
         for axis in y_implicit_dims:

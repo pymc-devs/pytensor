@@ -38,7 +38,7 @@ from pytensor.tensor.elemwise import CAReduce, DimShuffle
 from pytensor.tensor.math import Min, neg
 from pytensor.tensor.rewriting.basic import register_uncanonicalize
 from pytensor.tensor.shape import Reshape, reshape
-from pytensor.tensor.subtensor import Subtensor
+from pytensor.tensor.subtensor import Subtensor, indices_from_subtensor
 
 
 @register_uncanonicalize
@@ -193,60 +193,42 @@ def local_dimshuffle_subtensor(fgraph, node):
             if not all(broadcastable[i] for i in missing_dims):
                 return False
 
-            # create a new idx_list for a new Subtensor object
-            # have to loop on idx_list and inputs
-            # inputs has the length of sum of non None elements of idx_list
-            # (check in slice!).
-            # len(missing_dims) can be < len(idx_list), this happens if
-            # tensor was indexed such as x[scalar, :, :], check that as well
-            new_idx_list = list(input_.owner.op.idx_list)
-            new_inputs = [input_.owner.inputs[0]]
+            # create a new index tuple for a new Subtensor
+            # Reconstruct the full indices from the subtensor node, then replace
+            # dimensions that are being dropped by dimshuffle with scalar index 0
+            x = input_.owner.inputs[0]
+            indices = list(
+                indices_from_subtensor(
+                    input_.owner.inputs[1:], input_.owner.op.idx_list
+                )
+            )
             zero = constant(0)
-            j = 0
-            slice_i = -1
-            subtensor_removed_dims = 0
-            for i, idx in enumerate(input_.owner.op.idx_list):
+
+            # Track which output dimension each index corresponds to
+            # Scalar indices remove dimensions, slices keep them
+            output_dim = 0
+            for i, idx in enumerate(indices):
                 if isinstance(idx, slice):
-                    slice_i += 1
-                    if slice_i in missing_dims:
-                        # Missing dim is a slice(None), remove by indexing by 0
+                    # This slice produces an output dimension
+                    if output_dim in missing_dims:
+                        # This output dimension is being dropped, so replace slice with scalar
                         if idx == slice(None):
-                            new_idx_list[i] = zero
-                            new_inputs += [zero]
-                        # Missing dim is an ordinary slice with known output dim length of 1
-                        # Remove by indexing by start
+                            indices[i] = zero
                         else:
-                            if idx.start is None:
-                                start = zero
-                            else:
-                                start = input_.owner.inputs[1 + j]
-                                j += 1
-                            new_idx_list[i] = start
-                            new_inputs += [start]
+                            # Use the start of the slice (or 0 if None)
+                            indices[i] = idx.start if idx.start is not None else zero
+                    output_dim += 1
+                # Scalar indices don't contribute to output dimensions
 
-                            # Ignore useless stop and step input if there is one
-                            for slice_attr in ("stop", "step"):
-                                if getattr(idx, slice_attr) is not None:
-                                    j += 1
-
-                    # Keep non-dropped slice inputs
-                    else:
-                        for slice_attr in ("start", "stop", "step"):
-                            if getattr(idx, slice_attr) is not None:
-                                new_inputs += [input_.owner.inputs[1 + j]]
-                                j += 1
-                # Keep non-dropped non-slice inputs
+            # Handle trailing dimensions that weren't explicitly indexed
+            for input_dim in range(len(indices), x.ndim):
+                if output_dim in missing_dims:
+                    # This unindexed dimension is being dropped, index with 0
+                    indices.append(zero)
                 else:
-                    new_inputs += [input_.owner.inputs[1 + j]]
-                    j += 1
-                    subtensor_removed_dims += 1
-            # Verify the trailing dimensions the subtensor didn't look at.
-            for idx in range(len(input_.owner.op.idx_list), new_inputs[0].ndim):
-                if (idx - subtensor_removed_dims) in missing_dims:
-                    while len(new_idx_list) < idx:
-                        new_idx_list.append(slice(None))
+                    # This unindexed dimension is kept, index with slice(None)
+                    indices.append(slice(None))
+                output_dim += 1
 
-                    new_idx_list.append(zero)
-                    new_inputs.append(zero)
-            return [Subtensor(new_idx_list)(*new_inputs)]
+            return [x[tuple(indices)]]
     return False
