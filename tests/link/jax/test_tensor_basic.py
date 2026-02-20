@@ -10,6 +10,7 @@ jax = pytest.importorskip("jax")
 from jax import errors
 
 import pytensor
+import pytensor.tensor as pt
 import pytensor.tensor.basic as ptb
 from pytensor.configdefaults import config
 from pytensor.tensor.type import iscalar, matrix, scalar, vector
@@ -233,3 +234,30 @@ def test_tri_nonconcrete():
         ),
     ):
         compare_jax_and_py([m, n, k], [out], [m_test_value, n_test_value, k_test_value])
+
+
+def test_jax_roll():
+    # Test roll with dynamic shift (the main bug fix)
+    x = pt.dmatrix("x")
+    shift = pt.iscalar("shift")
+    data = np.arange(16, dtype=float).reshape(4, 4)
+
+    # axis=0, dynamic shift
+    out = pt.roll(x, shift=shift, axis=0)
+    compare_jax_and_py([x, shift], [out], [data, 2])
+
+    # axis=1, dynamic shift
+    out = pt.roll(x, shift=shift, axis=1)
+    compare_jax_and_py([x, shift], [out], [data, 3])
+
+    # negative shift
+    out = pt.roll(x, shift=shift, axis=0)
+    compare_jax_and_py([x, shift], [out], [data, -1])
+
+    # axis=None (flatten then roll)
+    out = pt.roll(x, shift=shift, axis=None)
+    compare_jax_and_py([x, shift], [out], [data, 2])
+
+    # shift larger than axis size
+    out = pt.roll(x, shift=shift, axis=0)
+    compare_jax_and_py([x, shift], [out], [data, 10])
