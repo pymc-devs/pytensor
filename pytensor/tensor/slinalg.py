@@ -1014,6 +1014,28 @@ class Solve(SolveBase):
         except np.linalg.LinAlgError:
             outputs[0][0] = np.full(a.shape, np.nan, dtype=a.dtype)
 
+    def L_op(self, inputs, outputs, output_gradients):
+        res = super().L_op(inputs, outputs, output_gradients)
+
+        if self.assume_a in ("sym", "her", "pos"):
+            A_bar = res[0]
+            # The solver reads only one triangle and symmetrizes internally.
+            # Each off-diagonal entry A_ij in the read triangle controls both
+            # (i,j) and (j,i) of the effective matrix, so we must fold the
+            # contribution from the unread triangle back into the read one.
+            # For Hermitian matrices, the relationship is A_ji = conj(A_ij).
+            if self.assume_a == "her":
+                A_bar_folded = A_bar.conj().mT
+            else:
+                A_bar_folded = A_bar.mT
+
+            if self.lower:
+                res[0] = ptb.tril(A_bar) + ptb.tril(A_bar_folded, -1)
+            else:
+                res[0] = ptb.triu(A_bar) + ptb.triu(A_bar_folded, 1)
+
+        return res
+
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if not allowed_inplace_inputs:
             return self
