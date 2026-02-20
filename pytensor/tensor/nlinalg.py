@@ -1178,7 +1178,7 @@ def kron(a, b):
     b_reshaped = ptb.expand_dims(b, tuple(range(0, 2 * b.ndim, 2)))
     out_shape = tuple(a.shape[i] * b.shape[i] for i in range(a.ndim))
     output_out_of_shape = a_reshaped * b_reshaped
-    output_reshaped = output_out_of_shape.reshape(tuple(out_shape))
+    output_reshaped = output_out_of_shape.reshape(out_shape)
 
     return KroneckerProduct(inputs=[a, b], outputs=[output_reshaped])(a, b)
 
