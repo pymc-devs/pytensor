@@ -8,7 +8,6 @@ from pytensor import Variable
 from pytensor.compile import optdb
 from pytensor.graph import Constant, FunctionGraph, node_rewriter, vectorize_graph
 from pytensor.graph.rewriting.basic import NodeRewriter, copy_stack_trace
-from pytensor.scalar import basic as ps
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -31,7 +30,7 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
-from pytensor.tensor.rewriting.subtensor import is_full_slice, register_useless
+from pytensor.tensor.rewriting.subtensor import register_useless
 from pytensor.tensor.shape import (
     Shape,
     SpecifyShape,
@@ -50,7 +49,6 @@ from pytensor.tensor.subtensor import (
     indices_from_subtensor,
 )
 from pytensor.tensor.type import TensorType
-from pytensor.tensor.type_other import NoneTypeT, SliceType
 from pytensor.tensor.variable import TensorVariable
 
 
@@ -71,7 +69,7 @@ def _axis_is_indexed_by_basic_index(
 ) -> bool:
     if isinstance(axis, int):
         axis = (axis,)
-    return any(ax < len(idxs) and not is_full_slice(idxs[ax]) for ax in axis)
+    return any(ax < len(idxs) and not idxs[ax] == slice(None) for ax in axis)
 
 
 def _lift_subtensor_non_axis(
@@ -83,7 +81,7 @@ def _lift_subtensor_non_axis(
     old_subtensor_variable: TensorVariable,
 ) -> None | list[TensorVariable]:
     # Apply generic subtensor lift rewrite along "non-axis" dimensions
-    real_indices = [idx for idx in idx_tuple if not is_full_slice(idx)]
+    real_indices = [idx for idx in idx_tuple if not idx == slice(None)]
     if len(real_indices) > 1 and variable.type.ndim > 1:
         # Split the subtensor
         idx_to_keep = idx_tuple[axis]
@@ -206,7 +204,7 @@ def local_subtensor_of_batch_dims(fgraph, node):
     if len(idx_tuple) > batch_ndim:
         # Indexing on core dimensions of Blockwise. We split the indices and lift the batch ones only
         batch_indices, core_indices = idx_tuple[:batch_ndim], idx_tuple[batch_ndim:]
-        if all(is_full_slice(idx) for idx in batch_indices):
+        if all(idx == slice(None) for idx in batch_indices):
             # No batch indices, nothing to do
             return None
         elem_with_batch_indices = elem[batch_indices]
@@ -240,7 +238,7 @@ def local_subtensor_of_batch_dims(fgraph, node):
                 strict=False,
             )
         ):
-            if is_full_slice(dim_idx):
+            if dim_idx == slice(None):
                 # Full slice can be safely applied to all inputs
                 continue
 
@@ -429,7 +427,7 @@ def local_subtensor_of_expand_dims(fgraph, node):
         if i in expanded_axes:
             if isinstance(idx_item, slice):
                 # Slice could be keeping or dropping this dimension
-                if is_full_slice(idx_item):
+                if idx_item == slice(None):
                     # A None slice, always keeps the dimension.
                     # We skip the index, and later introduce the needed expand_dim
                     continue
@@ -648,10 +646,7 @@ def local_subtensor_SpecifyShape_lift(fgraph, node):
 
     indices = get_idx_list(node.inputs, node.op.idx_list)
 
-    if any(
-        isinstance(index, slice) or isinstance(getattr(index, "type", None), SliceType)
-        for index in indices
-    ):
+    if any(isinstance(index, slice) for index in indices):
         return False
 
     new_obj_arg = obj_arg[indices]
@@ -702,15 +697,12 @@ def local_subtensor_make_vector(fgraph, node):
 
         (idx,) = idxs
 
-        if isinstance(idx, ps.ScalarType | TensorType):
-            old_idx, idx = idx, node.inputs[1]
-            assert idx.type.is_super(old_idx)
+        if isinstance(idx, int):
+            idx = node.inputs[1]
     elif isinstance(node.op, AdvancedSubtensor1):
         idx = node.inputs[1]
 
-    if isinstance(idx, int | np.integer):
-        return [x.owner.inputs[idx]]
-    elif isinstance(idx, Variable):
+    if isinstance(idx, Variable):
         if idx.ndim == 0:
             try:
                 v = get_underlying_scalar_constant_value(
@@ -833,8 +825,6 @@ def local_subtensor_shape_constant(fgraph, node):
     except NotScalarConstantError:
         return False
 
-    assert idx_val != np.newaxis
-
     if not isinstance(shape_arg.type, TensorType):
         return False
 
@@ -871,22 +861,24 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
         # AdvancedSubtensor involves a full_copy, so we don't want to do it twice
         return None
 
-    x, *adv_idxs = adv_subtensor.owner.inputs
+    x, *adv_index_vars = adv_subtensor.owner.inputs
+    adv_idxs = indices_from_subtensor(adv_index_vars, adv_subtensor.owner.op.idx_list)
 
     # Advanced indexing is a minefield, avoid all cases except for consecutive integer indices
-    if any(
-        (
-            isinstance(adv_idx.type, NoneTypeT)
-            or (isinstance(adv_idx.type, TensorType) and adv_idx.type.dtype == "bool")
-            or (isinstance(adv_idx.type, SliceType) and not is_full_slice(adv_idx))
+    if (
+        not all(
+            (
+                (isinstance(adv_idx, TensorVariable) and adv_idx.type.dtype != "bool")
+                or (isinstance(adv_idx, slice) and adv_idx == slice(None))
+            )
+            for adv_idx in adv_idxs
         )
-        for adv_idx in adv_idxs
     ) or _non_consecutive_adv_indexing(adv_idxs):
         return None
 
     for first_adv_idx_dim, adv_idx in enumerate(adv_idxs):
         # We already made sure there were only None slices besides integer indexes
-        if isinstance(adv_idx.type, TensorType):
+        if isinstance(adv_idx, TensorVariable):
             break
     else:  # no-break
         # Not sure if this should ever happen, but better safe than sorry
@@ -909,7 +901,7 @@ def local_subtensor_of_adv_subtensor(fgraph, node):
     copy_stack_trace([basic_subtensor, adv_subtensor], x_indexed)
 
     x_after_index_lift = expand_dims(x_indexed, dropped_dims)
-    x_after_adv_idx = adv_subtensor.owner.op(x_after_index_lift, *adv_idxs)
+    x_after_adv_idx = adv_subtensor.owner.op(x_after_index_lift, *adv_index_vars)
     copy_stack_trace([basic_subtensor, adv_subtensor], x_after_adv_idx)
 
     new_out = squeeze(x_after_adv_idx[basic_idxs_kept], dropped_dims)

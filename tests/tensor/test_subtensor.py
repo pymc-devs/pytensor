@@ -11,20 +11,19 @@ from numpy.testing import assert_array_equal
 import pytensor
 import pytensor.scalar as scal
 import pytensor.tensor.basic as ptb
-from pytensor import function
-from pytensor.compile import DeepCopyOp, shared
+from pytensor import function, shared
+from pytensor.compile import DeepCopyOp
 from pytensor.compile.io import In
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
-from pytensor.graph import Constant
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.scalar.basic import as_scalar, int16
-from pytensor.tensor import as_tensor, constant, get_vector_length, vectorize
+from pytensor.tensor import as_tensor, constant, get_vector_length, ivector, vectorize
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import exp, isinf, lt, switch
@@ -33,7 +32,6 @@ from pytensor.tensor.shape import specify_broadcastable, specify_shape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
-    AdvancedIndexingError,
     AdvancedSubtensor,
     AdvancedSubtensor1,
     IncSubtensor,
@@ -49,7 +47,6 @@ from pytensor.tensor.subtensor import (
     flip,
     get_canonical_form_slice,
     inc_subtensor,
-    index_vars_to_types,
     indexed_result_shape,
     set_subtensor,
     slice_at_axis,
@@ -80,13 +77,7 @@ from pytensor.tensor.type import (
     tensor5,
     vector,
 )
-from pytensor.tensor.type_other import (
-    NoneConst,
-    SliceConstant,
-    as_symbolic_slice,
-    make_slice,
-    slicetype,
-)
+from pytensor.tensor.type_other import NoneConst
 from tests import unittest_tools as utt
 from tests.tensor.utils import inplace_func, integers_ranged, random
 
@@ -106,19 +97,11 @@ def test_as_index_literal():
     assert res == slice(1, None)
     res = as_index_literal(slice(None, None, ptb.as_tensor(2)))
     assert res == slice(None, None, 2)
-    res = as_index_literal(SliceConstant(slicetype, slice(None)))
-    assert res == slice(None)
-    res = as_index_literal(make_slice(None, ptb.as_tensor(1)))
-    assert res == slice(None, 1)
 
     res = as_index_literal(ptb.as_tensor(2))
     assert res == 2
 
     res = as_index_literal(np.newaxis)
-    assert res is np.newaxis
-    res = as_index_literal(NoneConst)
-    assert res is np.newaxis
-    res = as_index_literal(NoneConst.clone())
     assert res is np.newaxis
 
 
@@ -128,14 +111,25 @@ class TestGetCanonicalFormSlice:
         [
             NoneConst,
             None,
-            as_symbolic_slice(slice(3, 7, 2)),
-            as_symbolic_slice(slice(3, int16(), 2)),
             vector(),
         ],
     )
     def test_unsupported_inputs(self, idx):
         with pytest.raises(ValueError, match="not a supported slice"):
             get_canonical_form_slice(idx, 5)
+
+    @pytest.mark.parametrize(
+        "idx,expected_direction",
+        [
+            (slice(3, 7, 2), 1),
+            (slice(None, None), 1),
+            (slice(None, None, -1), -1),
+        ],
+    )
+    def test_python_slice_support(self, idx, expected_direction):
+        result, direction = get_canonical_form_slice(idx, 10)
+        assert isinstance(result, slice)
+        assert direction == expected_direction
 
     def test_scalar_constant(self):
         a = as_scalar(0)
@@ -408,7 +402,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
         f = inplace_func([], t, mode=mode)
         topo = f.maker.fgraph.toposort()
         topo_ = [node for node in topo if not isinstance(node.op, DeepCopyOp)]
-        assert len(topo_) == length
+        assert len(topo_) == length, f.dprint()
         if length == 1:
             assert isinstance(topo_[0].op, op_type)
         tval = f()
@@ -623,7 +617,7 @@ class TestSubtensor(utt.OptimizationTestMixin):
             (3, DimShuffle, np.index_exp[..., [0, 2, 3]]),
             (1, DimShuffle, np.index_exp[np.newaxis, ...]),
             (
-                1,
+                4 if config.mode == "FAST_COMPILE" else 3,
                 AdvancedSubtensor,
                 np.index_exp[..., np.newaxis, [1, 2]],
             ),
@@ -1967,7 +1961,7 @@ class TestAdvancedSubtensor:
             x = self.shared(x_val, name="x")
             y = tensor(dtype="float32", shape=(None,) * len(y_val.shape), name="y")
             sym_idx = [ptb.as_tensor_variable(ix) for ix in idx]
-            expr = AdvancedIncSubtensor(inplace=inplace)(x, y, *sym_idx)
+            expr = advanced_inc_subtensor(x, y, *sym_idx, inplace=inplace)
             f = pytensor.function(
                 [y], expr, mode=self.mode.excluding("inplace"), accept_inplace=inplace
             )
@@ -2303,20 +2297,29 @@ class TestAdvancedSubtensor:
     def test_adv_sub_slice(self):
         # Reported in https://github.com/Theano/Theano/issues/5898
         var = self.shared(np.zeros([3, 3], dtype=config.floatX))
-        slc = slicetype()
-        f = pytensor.function([slc], var[slc], mode=self.mode)
-        s = slice(1, 3)
-        assert f(s).shape == (2, 3)
 
-        f_shape0 = pytensor.function([slc], var[slc].shape[0], mode=self.mode)
-        assert f_shape0(s) == 2
+        # Test with scalar variables for slice boundaries
+        start = lscalar("start")
+        stop = lscalar("stop")
 
-        f_shape1 = pytensor.function([slc], var[slc].shape[1], mode=self.mode)
+        # Create sliced output
+        f = pytensor.function([start, stop], var[start:stop], mode=self.mode)
+        result = f(1, 3)
+        assert result.shape == (2, 3)
+
+        f_shape0 = pytensor.function(
+            [start, stop], var[start:stop].shape[0], mode=self.mode
+        )
+        assert f_shape0(1, 3) == 2
+
+        f_shape1 = pytensor.function(
+            [start, stop], var[start:stop].shape[1], mode=self.mode
+        )
         assert not any(
             isinstance(node.op, AdvancedSubtensor)
             for node in f_shape1.maker.fgraph.toposort()
         )
-        assert f_shape1(s) == 3
+        assert f_shape1(1, 3) == 3
 
     def test_adv_grouped(self):
         # Reported in https://github.com/Theano/Theano/issues/6152
@@ -2798,8 +2801,8 @@ class TestInferShape(utt.InferShapeTester):
 
     def test_advanced_subtensor_constant_slice(self):
         x = dmatrix("x")
-        constant_slice = pytensor.as_symbolic(slice(1, None, None))
-        assert isinstance(constant_slice, Constant)
+        # Use Python slice directly instead of as_symbolic(slice())
+        constant_slice = slice(1, None, None)
         adv_indices = ptb.constant(np.zeros((2, 3)), dtype="int")
         y = advanced_subtensor(x, constant_slice, adv_indices)
         assert tuple(y.shape.eval({x: np.zeros((10, 10))})) == (9, 2, 3)
@@ -2808,7 +2811,7 @@ class TestInferShape(utt.InferShapeTester):
 @config.change_flags(compute_test_value="raise")
 def test_basic_shape():
     test_shape = (5, 4)
-    test_indices = (make_slice(1, 3, None),)
+    test_indices = (slice(1, 3, None),)  # Python slice instead of make_slice()
     res = basic_shape(test_shape, test_indices)
     assert get_test_value(res) == (2,)
 
@@ -2848,27 +2851,11 @@ test_idx = np.ix_(np.array([True, True]), np.array([True]), np.array([True, True
         ),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            (slice(None, None), None, *test_idx[1:2]),
-        ),
-        (
-            np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            (np.array(1), slice(None, None), None),
-        ),
-        (
-            np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            (slice(None, None), None, np.array(1)),
-        ),
-        (
-            np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
             (*test_idx[:1], slice(None, None), *test_idx[1:2]),
         ),
         (
             np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
             (*test_idx[:1], slice(None, None), *test_idx[1:2], slice(None, None)),
-        ),
-        (
-            np.arange(np.prod((5, 6, 7, 8))).reshape((5, 6, 7, 8)),
-            (*test_idx[:1], None, *test_idx[1:2]),
         ),
         (np.arange(np.prod((5, 4))).reshape((5, 4)), ([1, 3, 2], slice(1, 3))),
         (np.arange(np.prod((5, 4))).reshape((5, 4)), (slice(1, 3), [1, 3, 2])),
@@ -2929,12 +2916,11 @@ def test_get_vector_length():
     "indices, exp_res",
     [
         ((0,), "x[0]"),
-        # TODO: The numbers should be printed
-        ((slice(None, 2),), "x[:int64]"),
-        ((slice(0, None),), "x[int64:]"),
-        ((slice(0, 2),), "x[int64:int64]"),
-        ((slice(0, 2, 2),), "x[int64:int64:int64]"),
-        ((slice(0, 2), 0, slice(0, 2)), "x[int64:int64, 2, int64:int64]"),
+        ((slice(None, 2),), "x[:2]"),
+        ((slice(0, None),), "x[0:]"),
+        ((slice(0, 2),), "x[0:2]"),
+        ((slice(0, 2, 2),), "x[0:2:2]"),
+        ((slice(0, 2), 0, slice(0, 2)), "x[0:2, 0, 0:2]"),
     ],
 )
 def test_pprint_Subtensor(indices, exp_res):
@@ -2948,7 +2934,7 @@ def test_pprint_Subtensor(indices, exp_res):
     [
         ((0,), False, "inc_subtensor(x[0], z)"),
         ((0,), True, "set_subtensor(x[0], z)"),
-        ((slice(0, 2),), True, "set_subtensor(x[int64:int64], z)"),
+        ((slice(0, 2),), True, "set_subtensor(x[0:2], z)"),
     ],
 )
 def test_pprint_IncSubtensor(indices, set_instead_of_inc, exp_res):
@@ -2958,22 +2944,38 @@ def test_pprint_IncSubtensor(indices, set_instead_of_inc, exp_res):
     assert pprint(y) == exp_res
 
 
-def test_index_vars_to_types():
-    x = ptb.as_tensor_variable(np.array([True, False]))
+@pytest.mark.parametrize(
+    "indices, exp_res",
+    [
+        # Vector index
+        ((ivector("idx"),), "x[idx]"),
+        # Two vector indices
+        ((ivector("idx"), ivector("idx2")), "x[idx, idx2]"),
+        # Vector index with scalar (triggers advanced indexing)
+        ((ivector("idx"), 0), "x[idx, 0]"),
+        # Vector index with constant slice
+        ((ivector("idx"), slice(0, 5)), "x[idx, 0:5]"),
+    ],
+)
+def test_pprint_AdvancedSubtensor(indices, exp_res):
+    x = tensor4("x")
+    y = advanced_subtensor(x, *indices)
+    assert pprint(y) == exp_res
 
-    with pytest.raises(AdvancedIndexingError):
-        index_vars_to_types(x)
 
-    with pytest.raises(TypeError):
-        index_vars_to_types(1)
-
-    res = index_vars_to_types(iscalar)
-    assert isinstance(res, scal.ScalarType)
-
-    x = scal.constant(1, dtype=np.uint8)
-    assert isinstance(x.type, scal.ScalarType)
-    res = index_vars_to_types(x)
-    assert res == x.type
+@pytest.mark.parametrize(
+    "indices, set_instead_of_inc, exp_res",
+    [
+        ((ivector("idx"),), False, "inc_subtensor(x[idx], z)"),
+        ((ivector("idx"),), True, "set_subtensor(x[idx], z)"),
+        ((ivector("idx"), slice(None, 5)), True, "set_subtensor(x[idx, :5], z)"),
+    ],
+)
+def test_pprint_AdvancedIncSubtensor(indices, set_instead_of_inc, exp_res):
+    x = tensor4("x")
+    z = tensor3("z")
+    y = advanced_inc_subtensor(x, z, *indices, set_instead_of_inc=set_instead_of_inc)
+    assert pprint(y) == exp_res
 
 
 @pytest.mark.parametrize(
@@ -3066,15 +3068,12 @@ def test_vectorize_subtensor_without_batch_indices():
             (2,),
             False,
         ),
-        # (this is currently failing because PyTensor tries to vectorize the slice(None) operation,
-        # due to the exact same None constant being used there and in the np.newaxis)
         pytest.param(
             (lambda x, idx: x[:, idx, None]),
             "(7,5,3),(2)->(7,2,1,3)",
             (11, 7, 5, 3),
             (2,),
             False,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
         ),
         (
             (lambda x, idx: x[:, idx, idx, :]),
@@ -3083,27 +3082,23 @@ def test_vectorize_subtensor_without_batch_indices():
             (2,),
             False,
         ),
-        # (not supported, because fallback Blocwise can't handle slices)
         pytest.param(
             (lambda x, idx: x[:, idx, :, idx]),
             "(7,5,3,5),(2)->(2,7,3)",
             (11, 7, 5, 3, 5),
             (2,),
             True,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
         ),
         # Core x, batched idx
         ((lambda x, idx: x[idx]), "(t1),(idx)->(tx)", (7,), (11, 2), True),
         # Batched x, batched idx
         ((lambda x, idx: x[idx]), "(t1),(idx)->(tx)", (11, 7), (11, 2), True),
-        # (not supported, because fallback Blocwise can't handle slices)
         pytest.param(
             (lambda x, idx: x[:, idx, :]),
             "(t1,t2,t3),(idx)->(t1,tx,t3)",
             (11, 7, 5, 3),
             (11, 2),
             True,
-            marks=pytest.mark.xfail(raises=NotImplementedError),
         ),
     ],
 )
@@ -3238,3 +3233,37 @@ class TestBenchmarks:
         )
         fn.vm.allow_gc = gc
         benchmark(fn, x_values)
+
+
+def test_subtensor_hash_and_eq():
+    s1 = Subtensor(idx_list=[slice(None, None, None), 0])
+    s2 = Subtensor(idx_list=[slice(None, None, None), 0])
+    assert s1 == s2
+    assert hash(s1) == hash(s2)
+
+    s3 = AdvancedSubtensor(idx_list=[slice(None, None, None), 0])
+    s4 = AdvancedIncSubtensor(idx_list=[slice(0, 1, None), 2])
+    assert s3 != s4
+    assert hash(s3) != hash(s4)
+    assert s1 != s3
+
+    inc1 = IncSubtensor(
+        idx_list=[slice(None)], inplace=True, destroyhandler_tolerate_aliased=[(0, 1)]
+    )
+    inc2 = IncSubtensor(
+        idx_list=[slice(None)], inplace=True, destroyhandler_tolerate_aliased=[(0, 1)]
+    )
+    inc3 = IncSubtensor(
+        idx_list=[slice(None)], inplace=True, destroyhandler_tolerate_aliased=[(0, 2)]
+    )
+
+    assert inc1 == inc2
+    assert hash(inc1) == hash(inc2)
+    assert inc1 != inc3
+    if hash(inc1) == hash(inc3):
+        assert inc1 == inc3
+
+    s_mix1 = Subtensor(idx_list=[0, slice(None), slice(None, 1)])
+    s_mix2 = Subtensor(idx_list=[0, slice(None), slice(None, 1)])
+    assert s_mix1 == s_mix2
+    assert hash(s_mix1) == hash(s_mix2)

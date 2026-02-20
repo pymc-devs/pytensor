@@ -225,6 +225,37 @@ def test_jax_IncSubtensor():
     compare_jax_and_py([], [out_pt], [])
 
 
+@pytest.mark.parametrize(
+    "func", (pt_subtensor.advanced_inc_subtensor1, pt_subtensor.advanced_set_subtensor1)
+)
+def test_jax_AdvancedIncSubtensor1_runtime_broadcast(func):
+    """Test that JAX backend checks for runtime broadcasting in AdvancedIncSubtensor1.
+
+    JAX silently broadcasts when using .at[].set() or .at[].add(), but PyTensor
+    requires explicit broadcastable dimensions. This test ensures we raise the same
+    error as the Python/C backend when runtime broadcasting would occur.
+    """
+    from pytensor import function
+
+    y = pt.matrix("y", dtype="float64", shape=(None, None))
+    x = pt.zeros((10, 5))
+    idxs = np.repeat(np.arange(10), 2)  # 20 indices
+    out = func(x, y, idxs)
+
+    f = function([y], out, mode="JAX")
+
+    # Should work with correctly sized y
+    f(np.ones((20, 5)))
+
+    # Should raise for runtime broadcasting on first dimension
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        f(np.ones((1, 5)))
+
+    # Should raise for runtime broadcasting on second dimension
+    with pytest.raises(ValueError, match="Runtime broadcasting not allowed"):
+        f(np.ones((20, 1)))
+
+
 def test_jax_IncSubtensor_boolean_indexing_reexpressible():
     """Setting or incrementing values with boolean indexing.
 

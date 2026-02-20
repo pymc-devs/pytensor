@@ -4,30 +4,8 @@ import pytensor
 from pytensor import as_symbolic
 from pytensor.graph.basic import Constant
 from pytensor.tensor.math import argmax
-from pytensor.tensor.type import iscalar, vector
-from pytensor.tensor.type_other import (
-    MakeSlice,
-    NoneConst,
-    NoneTypeT,
-    SliceConstant,
-    SliceType,
-    make_slice,
-)
-
-
-def test_SliceType():
-    st = SliceType()
-    assert st == st.clone()
-
-
-def test_make_slice_merge():
-    # In the past, this was crahsing during compilation.
-    i = iscalar()
-    s1 = make_slice(0, i)
-    s2 = make_slice(0, i)
-    f = pytensor.function([i], [s1, s2])
-    nodes = f.maker.fgraph.apply_nodes
-    assert len([n for n in nodes if isinstance(n.op, MakeSlice)]) == 1
+from pytensor.tensor.type import vector
+from pytensor.tensor.type_other import NoneConst, NoneTypeT
 
 
 def test_none_Constant():
@@ -47,8 +25,6 @@ def test_none_Constant():
     # This trigger equals that returned the wrong answer in the past.
     import pickle
 
-    import pytensor
-
     x = vector("x")
     y = argmax(x)
     kwargs = {}
@@ -60,11 +36,18 @@ def test_none_Constant():
 
 
 def test_as_symbolic():
+    # Remove this when xtensor is not using symbolic slices
+    from pytensor.tensor.type import iscalar
+    from pytensor.tensor.type_other import SliceConstant, slicetype
+
     res = as_symbolic(None)
     assert res is NoneConst
 
-    res = as_symbolic(slice(iscalar()))
-    assert res.owner.op == make_slice
-
     res = as_symbolic(slice(1, 2))
     assert isinstance(res, SliceConstant)
+    assert res.type == slicetype
+    assert res.data == slice(1, 2)
+
+    i = iscalar()
+    res = as_symbolic(slice(i))
+    assert res.owner is not None

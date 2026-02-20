@@ -17,7 +17,6 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.traversal import ancestors
 from pytensor.graph.utils import InconsistencyError, get_variable_trace_string
-from pytensor.scalar import ScalarType
 from pytensor.tensor.basic import (
     MakeVector,
     as_tensor_variable,
@@ -842,13 +841,16 @@ def _is_shape_i_of_x(
     if isinstance(var.owner.op, Shape_i):
         return (var.owner.op.i == i) and (var.owner.inputs[0] == x)  # type: ignore
 
-    # Match Subtensor((ScalarType,))(Shape(input), i)
+    # Match Subtensor((int,))(Shape(input), i) - single integer index into shape
     if isinstance(var.owner.op, Subtensor):
+        idx_entry = (
+            var.owner.op.idx_list[0] if len(var.owner.op.idx_list) == 1 else None
+        )
         return (
             # Check we have integer indexing operation
             # (and not slice or multiple indexing)
             len(var.owner.op.idx_list) == 1
-            and isinstance(var.owner.op.idx_list[0], ScalarType)
+            and isinstance(idx_entry, int)
             # Check we are indexing on the shape of x
             and var.owner.inputs[0].owner is not None
             and isinstance(var.owner.inputs[0].owner.op, Shape)

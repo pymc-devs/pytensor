@@ -2,9 +2,10 @@ from itertools import zip_longest
 
 from pytensor import as_symbolic
 from pytensor.graph import Constant, node_rewriter
-from pytensor.tensor import TensorType, arange, specify_shape
+from pytensor.tensor import arange, specify_shape
 from pytensor.tensor.subtensor import _non_consecutive_adv_indexing, inc_subtensor
 from pytensor.tensor.type_other import NoneTypeT, SliceType
+from pytensor.tensor.variable import TensorVariable
 from pytensor.xtensor.basic import tensor_from_xtensor, xtensor_from_tensor
 from pytensor.xtensor.indexing import Index, IndexUpdate, index
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
@@ -106,7 +107,7 @@ def _lower_index(node):
                     # We can use basic indexing directly if no other index acts on this dimension
                     # This is an optimization that avoids creating an unnecessary arange tensor
                     # and facilitates the use of the specialized AdvancedSubtensor1 when possible
-                    aligned_idxs.append(idx)
+                    aligned_idxs.append(to_basic_idx(idx))
                     basic_idx_axis.append(out_dims.index(x_dim))
                 else:
                     # Otherwise we need to convert the basic index into an equivalent advanced indexing
@@ -131,7 +132,7 @@ def _lower_index(node):
         if basic_idx_axis:
             aligned_idxs = [
                 idx.squeeze(axis=basic_idx_axis)
-                if (isinstance(idx.type, TensorType) and idx.type.ndim > 0)
+                if (isinstance(idx, TensorVariable) and idx.type.ndim > 0)
                 else idx
                 for idx in aligned_idxs
             ]

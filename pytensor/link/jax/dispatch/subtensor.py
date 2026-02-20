@@ -8,7 +8,6 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice
 
 
 BOOLEAN_MASK_ERROR = """JAX does not support resizing arrays with boolean
@@ -35,10 +34,8 @@ slice length.
 @jax_funcify.register(AdvancedSubtensor)
 @jax_funcify.register(AdvancedSubtensor1)
 def jax_funcify_Subtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
-
     def subtensor(x, *ilists):
-        indices = indices_from_subtensor(ilists, idx_list)
+        indices = indices_from_subtensor(ilists, op.idx_list)
         if len(indices) == 1:
             indices = indices[0]
 
@@ -48,10 +45,9 @@ def jax_funcify_Subtensor(op, node, **kwargs):
 
 
 @jax_funcify.register(IncSubtensor)
+@jax_funcify.register(AdvancedIncSubtensor)
 @jax_funcify.register(AdvancedIncSubtensor1)
 def jax_funcify_IncSubtensor(op, node, **kwargs):
-    idx_list = getattr(op, "idx_list", None)
-
     if getattr(op, "set_instead_of_inc", False):
 
         def jax_fn(x, indices, y):
@@ -62,7 +58,7 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
         def jax_fn(x, indices, y):
             return x.at[indices].add(y)
 
-    def incsubtensor(x, y, *ilist, jax_fn=jax_fn, idx_list=idx_list):
+    def incsubtensor(x, y, *ilist, jax_fn=jax_fn, idx_list=op.idx_list):
         indices = indices_from_subtensor(ilist, idx_list)
         if len(indices) == 1:
             indices = indices[0]
@@ -73,29 +69,3 @@ def jax_funcify_IncSubtensor(op, node, **kwargs):
         return jax_fn(x, indices, y)
 
     return incsubtensor
-
-
-@jax_funcify.register(AdvancedIncSubtensor)
-def jax_funcify_AdvancedIncSubtensor(op, node, **kwargs):
-    if getattr(op, "set_instead_of_inc", False):
-
-        def jax_fn(x, indices, y):
-            return x.at[indices].set(y)
-
-    else:
-
-        def jax_fn(x, indices, y):
-            return x.at[indices].add(y)
-
-    def advancedincsubtensor(x, y, *ilist, jax_fn=jax_fn):
-        return jax_fn(x, ilist, y)
-
-    return advancedincsubtensor
-
-
-@jax_funcify.register(MakeSlice)
-def jax_funcify_MakeSlice(op, **kwargs):
-    def makeslice(*x):
-        return slice(*x)
-
-    return makeslice

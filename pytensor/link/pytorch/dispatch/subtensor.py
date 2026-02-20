@@ -9,7 +9,6 @@ from pytensor.tensor.subtensor import (
     Subtensor,
     indices_from_subtensor,
 )
-from pytensor.tensor.type_other import MakeSlice, SliceType
 
 
 def check_negative_steps(indices):
@@ -47,23 +46,11 @@ def pytorch_funcify_Subtensor(op, node, **kwargs):
     return subtensor
 
 
-@pytorch_funcify.register(MakeSlice)
-def pytorch_funcify_makeslice(op, **kwargs):
-    def makeslice(start, stop, step):
-        # Torch does not like numpy integers in indexing slices
-        return slice(
-            None if start is None else int(start),
-            None if stop is None else int(stop),
-            None if step is None else int(step),
-        )
-
-    return makeslice
-
-
 @pytorch_funcify.register(AdvancedSubtensor1)
 @pytorch_funcify.register(AdvancedSubtensor)
 def pytorch_funcify_AdvSubtensor(op, node, **kwargs):
     def advsubtensor(x, *indices):
+        indices = indices_from_subtensor(indices, op.idx_list)
         check_negative_steps(indices)
         return x[indices]
 
@@ -102,12 +89,14 @@ def pytorch_funcify_IncSubtensor(op, node, **kwargs):
 @pytorch_funcify.register(AdvancedIncSubtensor)
 @pytorch_funcify.register(AdvancedIncSubtensor1)
 def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
+    idx_list = op.idx_list
     inplace = op.inplace
     ignore_duplicates = getattr(op, "ignore_duplicates", False)
 
     if op.set_instead_of_inc:
 
-        def adv_set_subtensor(x, y, *indices):
+        def adv_set_subtensor(x, y, *flattened_indices):
+            indices = indices_from_subtensor(flattened_indices, idx_list)
             check_negative_steps(indices)
             if isinstance(op, AdvancedIncSubtensor1):
                 op._check_runtime_broadcasting(node, x, y, indices)
@@ -120,7 +109,8 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
 
     elif ignore_duplicates:
 
-        def adv_inc_subtensor_no_duplicates(x, y, *indices):
+        def adv_inc_subtensor_no_duplicates(x, y, *flattened_indices):
+            indices = indices_from_subtensor(flattened_indices, idx_list)
             check_negative_steps(indices)
             if isinstance(op, AdvancedIncSubtensor1):
                 op._check_runtime_broadcasting(node, x, y, indices)
@@ -132,13 +122,14 @@ def pytorch_funcify_AdvancedIncSubtensor(op, node, **kwargs):
         return adv_inc_subtensor_no_duplicates
 
     else:
-        if any(isinstance(idx.type, SliceType) for idx in node.inputs[2:]):
+        if any(isinstance(entry, slice) for entry in idx_list):
             raise NotImplementedError(
                 "IncSubtensor with potential duplicates indexes and slice indexing not implemented in PyTorch"
             )
 
-        def adv_inc_subtensor(x, y, *indices):
-            # Not needed because slices aren't supported
+        def adv_inc_subtensor(x, y, *flattened_indices):
+            indices = indices_from_subtensor(flattened_indices, idx_list)
+            # Not needed because slices aren't supported in this path
             # check_negative_steps(indices)
             if not inplace:
                 x = x.clone()

@@ -3,9 +3,7 @@ import contextlib
 import numpy as np
 import pytest
 
-import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor import Mode, as_symbolic
 from pytensor.tensor import as_tensor
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
@@ -20,49 +18,14 @@ from pytensor.tensor.subtensor import (
     inc_subtensor,
     set_subtensor,
 )
-from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
+from tests.link.numba.test_basic import (
+    compare_numba_and_py,
+    numba_inplace_mode,
+    numba_mode,
+)
 
 
 rng = np.random.default_rng(sum(map(ord, "Numba subtensors")))
-
-
-@pytest.mark.parametrize("step", [None, 1, 2, -2, "x"], ids=lambda x: f"step={x}")
-@pytest.mark.parametrize("stop", [None, 10, "x"], ids=lambda x: f"stop={x}")
-@pytest.mark.parametrize("start", [None, 0, 3, "x"], ids=lambda x: f"start={x}")
-def test_slice(start, stop, step):
-    x = ps.int64("x")
-
-    sym_slice = as_symbolic(
-        slice(
-            x if start == "x" else start,
-            x if stop == "x" else stop,
-            x if step == "x" else step,
-        )
-    )
-
-    no_opt_mode = Mode(linker="numba", optimizer=None)
-    evaled_slice = sym_slice.eval({x: -5}, on_unused_input="ignore", mode=no_opt_mode)
-    assert isinstance(evaled_slice, slice)
-    if start == "x":
-        assert evaled_slice.start == -5
-    elif start is None and (evaled_slice.step is None or evaled_slice.step > 0):
-        # Numba can convert to 0 (and sometimes does) in this case
-        assert evaled_slice.start in (None, 0)
-    else:
-        assert evaled_slice.start == start
-
-    if stop == "x":
-        assert evaled_slice.stop == -5
-    else:
-        assert evaled_slice.stop == stop
-
-    if step == "x":
-        assert evaled_slice.step == -5
-    elif step is None:
-        # Numba can convert to 1 (and sometimes does) in this case
-        assert evaled_slice.step in (None, 1)
-    else:
-        assert evaled_slice.step == step
 
 
 @pytest.mark.parametrize(
@@ -181,6 +144,11 @@ def test_AdvancedSubtensor1_out_of_bounds():
         (
             as_tensor(np.arange(3 * 4 * 5).reshape((3, 4, 5))),
             ([[1, 2], [2, 1]], slice(1, None), [[0, 0], [0, 0]]),
+        ),
+        # Newaxis with vector indexing
+        (
+            as_tensor(np.arange(4 * 4).reshape((4, 4))),
+            (None, [0, 1, 2], [0, 1, 2]),
         ),
     ],
 )
@@ -447,6 +415,13 @@ def test_AdvancedIncSubtensor1(x, y, indices):
             False,
             False,
         ),
+        (
+            np.arange(4 * 4).reshape((4, 4)),
+            np.array(5),  # Broadcasted scalar value
+            (None, [0, 1, 2], [0, 1, 2]),  # Newaxis with vector indexing
+            False,
+            False,
+        ),
     ],
 )
 @pytest.mark.parametrize("inplace", (False, True))
@@ -460,7 +435,9 @@ def test_AdvancedIncSubtensor(
     inplace,
 ):
     # Need rewrite to support certain forms of advanced indexing without object mode
-    mode = numba_mode.including("specialize")
+    # Use inplace_mode when testing inplace operations to preserve inplace flag
+    base_mode = numba_inplace_mode if inplace else numba_mode
+    mode = base_mode.including("specialize")
 
     x_pt = pt.as_tensor(x).type("x")
     y_pt = pt.as_tensor(y).type("y")
@@ -514,22 +491,3 @@ def test_AdvancedIncSubtensor(
             x_orig = x.copy()
             fn(x, y)
             assert not np.all(x == x_orig)
-
-
-def test_advanced_indexing_with_newaxis_fallback_obj_mode():
-    # This should be automatically solved with https://github.com/pymc-devs/pytensor/issues/1564
-    # After which we can add these parametrizations to the relevant tests above
-    x = pt.matrix("x")
-    out = x[None, [0, 1, 2], [0, 1, 2]]
-    with pytest.warns(
-        UserWarning,
-        match=r"Numba will use object mode to run AdvancedSubtensor's perform method",
-    ):
-        compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])
-
-    out = x[None, [0, 1, 2], [0, 1, 2]].inc(5)
-    with pytest.warns(
-        UserWarning,
-        match=r"Numba will use object mode to run AdvancedIncSubtensor's perform method",
-    ):
-        compare_numba_and_py([x], [out], [np.random.normal(size=(4, 4))])

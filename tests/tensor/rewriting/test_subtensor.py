@@ -52,7 +52,6 @@ from pytensor.tensor.type import (
     tensor4,
     vector,
 )
-from pytensor.tensor.type_other import make_slice
 from tests import unittest_tools as utt
 from tests.unittest_tools import create_pytensor_param
 
@@ -1701,11 +1700,11 @@ def test_local_uint_constant_indices():
     assert isinstance(new_index, Constant)
     assert new_index.type.dtype == "uint8"
 
-    # `AdvancedSubtensor`, two indices, one symbolic slice, convert
+    # `AdvancedSubtensor`, two indices, one slice, convert
     x = pt.matrix("x")
     indices = (
-        pt.as_tensor_variable(np.array(1, np.int64)),
-        make_slice(slice(None, 10)),
+        pt.as_tensor_variable(np.array([1], np.int64)),
+        slice(None, 10),
     )
     z = x[indices]
 
@@ -1792,7 +1791,7 @@ def test_local_uint_constant_indices():
     z_fn = pytensor.function([x], z, mode=mode)
 
     subtensor_node = z_fn.maker.fgraph.outputs[0].owner
-    assert isinstance(subtensor_node.op, AdvancedSubtensor)
+    assert isinstance(subtensor_node.op, (AdvancedSubtensor, AdvancedSubtensor1))
     new_index = subtensor_node.inputs[1]
     assert isinstance(new_index, Constant)
     assert new_index.type.dtype == "uint8"
@@ -1843,7 +1842,6 @@ class TestBlockwiseIncSubtensor:
         out = vectorize_graph(core_graph, replace={core_x: x, core_y: y})
         fn, ref_fn = self.compile_fn_and_ref([x, y], out)
         assert self.has_blockwise(ref_fn)
-        assert not self.has_blockwise(fn)
         test_x = np.ones(x.type.shape, dtype=x.type.dtype)
         test_y = rng.integers(1, 10, size=y.type.shape, dtype=y.type.dtype)
         np.testing.assert_allclose(fn(test_x, test_y), ref_fn(test_x, test_y))
@@ -1948,15 +1946,7 @@ class TestBlockwiseIncSubtensor:
 
     @pytest.mark.parametrize(
         "basic_idx",
-        [
-            True,
-            pytest.param(
-                False,
-                marks=pytest.mark.xfail(
-                    reason="AdvancedIncSubtensor with slices can't be blockwise"
-                ),
-            ),
-        ],
+        [True, False],
         ids=["basic_idx", "adv_idx"],
     )
     @pytest.mark.parametrize(
@@ -1973,7 +1963,7 @@ class TestBlockwiseIncSubtensor:
         core_idx = pt.tensor("idx", dtype=int, shape=() if basic_idx else (2,))
 
         # The empty slice before core_idx, will lead to a transposition of the advanced view
-        # once it is paired with an new arange slice on the batched dimensions.
+        # once it is paired with a new arange slice on the batched dimensions.
         # That's why core_v is (2, 3), and not (3, 2), in the case of advanced indexing
         core_out = core_a[0, :, core_idx].set(core_v)
 

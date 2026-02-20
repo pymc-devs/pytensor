@@ -35,7 +35,7 @@ from pytensor.tensor.type import (
     scalar,
     tensor3,
 )
-from pytensor.tensor.type_other import MakeSlice, NoneConst
+from pytensor.tensor.type_other import NoneConst
 from pytensor.tensor.variable import (
     DenseTensorConstant,
     DenseTensorVariable,
@@ -232,11 +232,11 @@ def test__getitem__AdvancedSubtensor():
 
     z = x[:, i]
     op_types = [type(node.op) for node in io_toposort([x, i], [z])]
-    assert op_types == [MakeSlice, AdvancedSubtensor]
+    assert op_types == [AdvancedSubtensor]
 
     z = x[..., i, None]
     op_types = [type(node.op) for node in io_toposort([x, i], [z])]
-    assert op_types == [MakeSlice, AdvancedSubtensor]
+    assert op_types == [DimShuffle, AdvancedSubtensor]
 
     z = x[i, None]
     op_types = [type(node.op) for node in io_toposort([x, i], [z])]
