@@ -2,13 +2,22 @@ import numpy as np
 import pytest
 
 import pytensor.scalar as ps
+import pytensor.tensor as pt
 from pytensor.compile.function import function
 from pytensor.compile.mode import OPT_NONE, Mode, get_default_mode
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.basic import Alloc, alloc, as_tensor_variable, second
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.extra_ops import Repeat, Unique, repeat, unique
+from pytensor.tensor.extra_ops import (
+    CumOp,
+    Repeat,
+    Unique,
+    cumprod,
+    cumsum,
+    repeat,
+    unique,
+)
 from pytensor.tensor.type import dscalar
 
 
@@ -229,3 +238,76 @@ def test_local_Unique_second(
 
     y_exp_val, y_val = y_fn(x_val)
     assert np.array_equal(y_exp_val, y_val)
+
+
+@pytest.mark.parametrize(
+    "shape, axis, mode, should_rewrite",
+    [
+        # Axis has length 1 → rewrite should apply
+        ((1, 5), 0, "add", True),
+        ((5, 1), 1, "add", True),
+        ((1, 5), 0, "mul", True),
+        ((1,), 0, "add", True),
+        ((1,), 0, "mul", True),
+        ((3, 1, 4), 1, "add", True),
+        # Axis does NOT have length 1 → rewrite should NOT apply
+        ((5, 1), 0, "add", False),
+        ((1, 5), 1, "add", False),
+        ((3, 4), 0, "mul", False),
+    ],
+)
+def test_local_CumOp_length1(shape, axis, mode, should_rewrite):
+    """Test that cumsum/cumprod on a length-1 axis is removed."""
+    x = pt.tensor(dtype="float64", shape=shape, name="x")
+
+    if mode == "add":
+        y = cumsum(x, axis=axis)
+    else:
+        y = cumprod(x, axis=axis)
+
+    y_fg = FunctionGraph(outputs=[y], copy_inputs=False)
+    y_rewritten_fg = rewrite_graph(
+        y_fg,
+        clone=False,
+        include=["canonicalize", "local_CumOp_length1"],
+    )
+    y_rewritten = y_rewritten_fg.outputs[0]
+
+    has_cumop = any(isinstance(node.op, CumOp) for node in y_rewritten_fg.apply_nodes)
+
+    if should_rewrite:
+        # CumOp should have been removed
+        assert not has_cumop, "CumOp was not removed but should have been"
+        assert y_rewritten == x
+    else:
+        # CumOp should still be present
+        assert has_cumop, "CumOp was removed but should not have been"
+
+    # Numerical correctness check
+    default_mode = get_default_mode()
+    rewrite_mode = default_mode.excluding("local_CumOp_length1")
+    y_fn = function([x], [y, y_rewritten], mode=rewrite_mode)
+
+    rng = np.random.default_rng(42)
+    x_val = rng.standard_normal(shape)
+    y_exp_val, y_val = y_fn(x_val)
+    np.testing.assert_array_equal(y_exp_val, y_val)
+
+
+def test_local_CumOp_length1_dynamic_shape():
+    """Test that the rewrite does NOT apply when the shape is not statically known."""
+    # None in shape means the dimension is unknown at graph construction time
+    x = pt.tensor(dtype="float64", shape=(None, 5), name="x")
+    y = cumsum(x, axis=0)
+
+    y_fg = FunctionGraph(outputs=[y], copy_inputs=False)
+    y_rewritten_fg = rewrite_graph(
+        y_fg,
+        clone=False,
+        include=["canonicalize", "local_CumOp_length1"],
+    )
+
+    # CumOp must still be present since we don't know if axis 0 has length 1
+    assert any(isinstance(node.op, CumOp) for node in y_rewritten_fg.apply_nodes), (
+        "CumOp was removed despite dynamic shape"
+    )

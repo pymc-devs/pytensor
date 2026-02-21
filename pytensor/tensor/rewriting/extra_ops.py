@@ -2,7 +2,7 @@ import pytensor.scalar.basic as ps
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.tensor.basic import Alloc, as_tensor_variable
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.extra_ops import Repeat, Unique
+from pytensor.tensor.extra_ops import CumOp, Repeat, Unique
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_useless
 
 
@@ -128,3 +128,25 @@ def local_Unique_second(fgraph, node):
     old_out = node.outputs[0]
     new_x = as_tensor_variable(new_unique, ndim=old_out.ndim, dtype=old_out.dtype)
     return [new_x]
+
+
+@register_useless
+@register_canonicalize
+@node_rewriter([CumOp])
+def local_CumOp_length1(fgraph, node):
+    """Remove cumsum/cumprod when the axis has static length 1.
+
+    When ``cumsum`` or ``cumprod`` is applied along an axis of length 1,
+    the result is identical to the input, so the operation can be removed.
+    """
+    if not isinstance(node.op, CumOp):
+        return False
+
+    x = node.inputs[0]
+    axis = node.op.axis
+
+    # Only rewrite when we statically know the axis has length 1
+    if x.type.shape[axis] != 1:
+        return False
+
+    return [x]
