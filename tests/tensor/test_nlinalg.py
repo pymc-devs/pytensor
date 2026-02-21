@@ -744,14 +744,26 @@ class TestKron(utt.InferShapeTester):
     def test_perform(self, shp0, shp1):
         if len(shp0) + len(shp1) == 2:
             pytest.skip("Sum of shp0 and shp1 must be more than 2")
+
         x = tensor(dtype="floatX", shape=(None,) * len(shp0))
         a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
+
         y = tensor(dtype="floatX", shape=(None,) * len(shp1))
-        f = function([x, y], kron(x, y))
         b = self.rng.random(shp1).astype(config.floatX)
+
+        f = function([x, y], kron(x, y))
         out = f(a, b)
-        # Using the np.kron to compare outputs
+
+        # Using np.kron to compare outputs
         np_val = np.kron(a, b)
+        np.testing.assert_allclose(out, np_val)
+
+        # Regression test for issue #1867
+        # Instantiate static tensors to verify static shape is preserved at the symbolic level
+        x_static = tensor(dtype="floatX", shape=shp0)
+        y_static = tensor(dtype="floatX", shape=shp1)
+        assert kron(x_static, y_static).type.shape == np_val.shape
+
         np.testing.assert_allclose(out, np_val)
 
     @pytest.mark.parametrize(

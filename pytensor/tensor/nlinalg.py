@@ -1176,7 +1176,7 @@ def kron(a, b):
         b = ptb.expand_dims(b, tuple(range(a.ndim - b.ndim)))
     a_reshaped = ptb.expand_dims(a, tuple(range(1, 2 * a.ndim, 2)))
     b_reshaped = ptb.expand_dims(b, tuple(range(0, 2 * b.ndim, 2)))
-    out_shape = tuple(a.shape * b.shape)
+    out_shape = tuple(a.shape[i] * b.shape[i] for i in range(a.ndim))
     output_out_of_shape = a_reshaped * b_reshaped
     output_reshaped = output_out_of_shape.reshape(out_shape)
 
