@@ -139,9 +139,6 @@ def local_CumOp_length1(fgraph, node):
     When ``cumsum`` or ``cumprod`` is applied along an axis of length 1,
     the result is identical to the input, so the operation can be removed.
     """
-    if not isinstance(node.op, CumOp):
-        return False
-
     x = node.inputs[0]
     axis = node.op.axis
 
