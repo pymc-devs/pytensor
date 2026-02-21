@@ -1566,10 +1566,6 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                     if store_steps[i] != -1:
                         pval = select_max(pval, store_steps[i])
 
-                    # Force buffer size to strictly match the initial states (taps) when n=0.
-                    # This prevents symbolic simplifications from allocating extra uninitialized memory.
-                    pval = pt.switch(pt.eq(node.inputs[0], 0), init_l[i], pval)
-
                     store_steps[i] = pval
                     flag_store = True
 
@@ -1765,10 +1761,19 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                             isinstance(old_slices[0], ScalarConstant)
                             and old_slices[0].value == -1
                         ):
-                            position = old_slices[0]
+                            # Bypass the padded uninitialized slot when n_steps=0 by fetching the last initialized tap
+                            position = pt.switch(
+                                pt.eq(node.inputs[0], 0), init_l[pos] - 1, old_slices[0]
+                            )
                         else:
-                            position = (
-                                cnf_slice[0] - nw_steps - init_l[pos] + store_steps[pos]
+                            # Bypass the buffer shift when n_steps=0, mapping directly to the canonical tap index
+                            position = pt.switch(
+                                pt.eq(node.inputs[0], 0),
+                                cnf_slice[0],
+                                cnf_slice[0]
+                                - nw_steps
+                                - init_l[pos]
+                                + store_steps[pos],
                             )
 
                         nw_slice = (sanitize(position), *old_slices[1:])
