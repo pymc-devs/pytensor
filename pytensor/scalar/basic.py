@@ -23,10 +23,9 @@ import pytensor
 from pytensor import printing
 from pytensor.configdefaults import config
 from pytensor.gradient import disconnected_type, grad_undefined
-from pytensor.graph.basic import Apply, Constant, Variable, clone
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph
-from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.traversal import applys_between
 from pytensor.graph.type import HasDataType, HasShape
 from pytensor.graph.utils import MetaObject, MethodNotDefined
@@ -4004,41 +4003,14 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         self.prepare_node_called = set()
         super().__init__(*args, **kwargs)
 
-    def _cleanup_graph(self, inputs, outputs, clone: builtins.bool = True):
-        # TODO: We could convert to TensorVariable, optimize graph,
-        # and then convert back to ScalarVariable.
-        # This would introduce rewrites like `log(1 + x) -> log1p`.
-
-        fgraph = FunctionGraph(inputs, outputs, clone=clone)
-
-        # Validate node types
+    def _validate_inner_graph(self, fgraph):
+        """Validate that all ops in the inner graph are ScalarOps."""
         for node in fgraph.apply_nodes:
             if not isinstance(node.op, ScalarOp):
                 raise TypeError(
                     f"The fgraph of {self.__class__.__name__} must be exclusively "
                     "composed of scalar operations."
                 )
-
-        # Run MergeOptimization to avoid duplicated nodes
-        MergeOptimizer().rewrite(fgraph)
-
-        inputs, outputs = fgraph.inputs, fgraph.outputs
-
-        # Clone identical outputs that may have been merged
-        # If fgraph.outputs = [out_A, out_B, out_A], then final outputs = [out_A, out_B, clone(out_A)]
-        if len(set(fgraph.outputs)) != len(outputs):
-            old_outputs = outputs
-            outputs = []
-            for old_output in old_outputs:
-                if old_output not in outputs:
-                    outputs.append(old_output)
-                else:
-                    node = old_output.owner
-                    output_idx = node.outputs.index(old_output)
-                    output = node.clone().outputs[output_idx]
-                    outputs.append(output)
-
-        return inputs, outputs
 
     @property
     def fn(self):
@@ -4116,6 +4088,8 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
         return "\n".join(sorted(rval))
 
     def c_support_code_apply(self, node, name):
+        # Ensure nodenames is populated (side effect of c_code_template)
+        _ = self.c_code_template
         rval = []
         for subnode, subnodename in zip(
             self.fgraph.toposort(), self.nodenames, strict=True
@@ -4140,38 +4114,17 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
     def __eq__(self, other):
         if self is other:
             return True
-        if (
-            type(self) is not type(other)
-            or self.nin != other.nin
-            or self.nout != other.nout
-        ):
+        if type(self) is not type(other):
             return False
-
-        # TODO FIXME: Why this?  Shouldn't we expect equivalent inputs to this
-        # object to generate the same `_c_code`?
-        return self.c_code_template == other.c_code_template
+        return self.fgraph == other.fgraph
 
     def __hash__(self):
-        # Note that in general, the configparser settings at the time
-        # of code generation (__init__) affect the semantics of this Op.
-        # This function assumes that all relevant info about the configparser
-        # is embodied in _c_code.  So the _c_code, rather than self.fgraph,
-        # is the signature of the semantics of this Op.
-        # _c_code is preserved through unpickling, so the Op will not change
-        # semantics when it is reloaded with different configparser
-        # settings.
-        #
-        # TODO FIXME: Doesn't the above just mean that we should be including
-        # the relevant "configparser settings" here?  Also, why should we even
-        # care about the exact form of the generated C code when comparing
-        # `Op`s?  All this smells of leaky concerns and interfaces.
-        return hash((type(self), self.nin, self.nout, self.c_code_template))
+        return hash((type(self), self.fgraph))
 
     def __getstate__(self):
         rval = dict(self.__dict__)
         rval.pop("_c_code", None)
         rval.pop("_py_perform_fn", None)
-        rval.pop("_fgraph", None)
         rval.pop("prepare_node_called", None)
         return rval
 
@@ -4197,36 +4150,20 @@ class Composite(ScalarInnerGraphOp):
     ):
         self.name = name
         self._name = None
-        # We need to clone the graph as sometimes its nodes already
-        # contain a reference to an fgraph. As we want the Composite
-        # to be pickable, we can't have reference to fgraph.
 
-        # Also, if there is Composite in the inner graph, we want to
-        # remove them. In that case, we do a more complicated clone
-        # that will flatten Composite. We don't need to do this
-        # recursively, as the way the fusion optimizer work, we have
-        # only 1 new Composite each time at the output.
         for i in inputs:
             assert i not in outputs  # This isn't supported, use identity
 
-        if len(outputs) > 1 or not any(
+        # Flatten nested Composites in single-output case
+        if len(outputs) == 1 and any(
             isinstance(var.owner.op, Composite) for var in outputs
         ):
-            if clone_graph:
-                inputs, outputs = clone(inputs, outputs)
-
-        else:
             # Inner Composite that we need to flatten
-            # FIXME: There could be a composite in the middle of the graph, why is this here?
-            #  If anything it should be an optimization, but I suspect lower-level compilation can handle this anyway.
-            assert len(outputs) == 1
-            # 1. Create a new graph from inputs up to the
-            # Composite
+            # 1. Create a new graph from inputs up to the Composite
             res = pytensor.compile.rebuild_collect_shared(
                 inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
-            )  # Clone also the inputs
-            # 2. We continue this partial clone with the graph in
-            # the inner Composite
+            )
+            # 2. Continue this partial clone with the graph in the inner Composite
             res2 = pytensor.compile.rebuild_collect_shared(
                 inputs=outputs[0].owner.op.inputs,
                 outputs=outputs[0].owner.op.outputs,
@@ -4234,34 +4171,31 @@ class Composite(ScalarInnerGraphOp):
             )
             assert len(res2[1]) == len(outputs)
             assert len(res[0]) == len(inputs)
-            assert res[0] != inputs
             inputs, outputs = res[0], res2[1]
 
-        # We already cloned the graph, or the user told us there was no need for it
-        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs, clone=False)
-        self.inputs_type = tuple(input.type for input in self.inputs)
-        self.outputs_type = tuple(output.type for output in self.outputs)
-        self.nin = len(inputs)
-        self.nout = len(outputs)
+        # Create FunctionGraph and validate ops, then freeze for immutability
+        # and hash-consing deduplication
+        fgraph = FunctionGraph(inputs, outputs, clone=clone_graph)
+        self._validate_inner_graph(fgraph)
+        self._fgraph = fgraph.freeze()
+
+        self.inputs_type = tuple(input.type for input in self._fgraph.inputs)
+        self.outputs_type = tuple(output.type for output in self._fgraph.outputs)
+        self.nin = len(self._fgraph.inputs)
+        self.nout = len(self._fgraph.outputs)
         super().__init__()
+
+    @property
+    def inputs(self):
+        return self._fgraph.inputs
+
+    @property
+    def outputs(self):
+        return self._fgraph.outputs
 
     def __str__(self):
         if self._name is not None:
             return self._name
-
-        # Rename internal variables
-        for i, r in enumerate(self.fgraph.inputs):
-            r.name = f"i{i}"
-        for i, r in enumerate(self.fgraph.outputs):
-            r.name = f"o{i}"
-        io = set(self.fgraph.inputs + self.fgraph.outputs)
-        for i, r in enumerate(self.fgraph.variables):
-            if (
-                not isinstance(r, Constant)
-                and r not in io
-                and len(self.fgraph.clients[r]) > 1
-            ):
-                r.name = f"t{i}"
 
         if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
             self._name = "Composite{...}"
@@ -4273,12 +4207,6 @@ class Composite(ScalarInnerGraphOp):
 
     @property
     def fgraph(self):
-        if hasattr(self, "_fgraph"):
-            return self._fgraph
-        # fgraph cannot be a property of the base class because it messes up with C caching.
-        # We also need a `FunctionGraph(clone=True)` (default) according to an old comment
-        fgraph = FunctionGraph(self.inputs, self.outputs)
-        self._fgraph = fgraph
         return self._fgraph
 
     def clone(self):
