@@ -2501,6 +2501,49 @@ def test_batched_dot():
     assert result.shape[0] == first_mat_val.shape[0]
 
 
+def test_batched_dot_complex():
+    """
+    Validates that BatchedDot correctly compiles and executes complex64
+    and complex128 inputs across the C and JAX backends. Resolves #1849.
+    """
+    import numpy as np
+
+    import pytensor.tensor as pt
+    from pytensor import function
+
+    # Test complex128 (ztensor3)
+    x = pt.ztensor3("x")
+    y = pt.ztensor3("y")
+    z = x @ y  # Using modern @ operator avoids the FutureWarning
+
+    f = function([x, y], z)
+
+    # Generate random complex data
+    rng = np.random.default_rng(42)
+    x_val = rng.normal(size=(2, 6, 6)) + 1j * rng.normal(size=(2, 6, 6))
+    y_val = rng.normal(size=(2, 6, 6)) + 1j * rng.normal(size=(2, 6, 6))
+
+    expected = np.matmul(x_val, y_val)
+    actual = f(x_val, y_val)
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-8)
+
+    # Test complex64 (ctensor3)
+    x_c = pt.ctensor3("x_c")
+    y_c = pt.ctensor3("y_c")
+    z_c = x_c @ y_c  # Using modern @ operator
+
+    f_c = function([x_c, y_c], z_c)
+
+    x_val_c = x_val.astype(np.complex64)
+    y_val_c = y_val.astype(np.complex64)
+
+    expected_c = np.matmul(x_val_c, y_val_c)
+    actual_c = f_c(x_val_c, y_val_c)
+
+    np.testing.assert_allclose(actual_c, expected_c, rtol=1e-4, atol=1e-6)
+
+
 def test_batched_dot_not_contiguous():
     def np_genarray(*_shape):
         size = 1
