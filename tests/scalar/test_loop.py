@@ -297,7 +297,34 @@ def test_elemwise_inplace(mutate_arg_idx):
     cv_test = np.array([0, 0, 0], dtype="int64")
 
     xv_res, yv_res = fn(n_test, x0v_test, y0v_test, cv_test)
-    # Check the outputs are the destroyed inputs
     assert xv_res is (n_test, x0v_test, y0v_test, cv_test)[mutate_arg_idx]
     np.testing.assert_allclose(xv_res, [-1, -8, -128])
     np.testing.assert_allclose(yv_res, [1, 8, 128])
+
+
+def test_identical_loops_share_inner_graph():
+    x0 = float64("x0")
+    c = float64("c")
+
+    op1 = ScalarLoop(init=[x0], constant=[c], update=[x0 + c])
+    op2 = ScalarLoop(init=[x0], constant=[c], update=[x0 + c])
+
+    assert op1 == op2
+    assert hash(op1) == hash(op2)
+    assert op1.fgraph == op2.fgraph
+
+    # Two loops with the same structure but different outer inputs.
+    # MergeOptimizer can't collapse the Apply nodes (different inputs),
+    # but both should reference the same inner Op after merging.
+    n = int64("n")
+    a, b, c_val, d = float64("a"), float64("b"), float64("c_val"), float64("d")
+    y1 = op1(n, a, b)
+    y2 = op2(n, c_val, d)
+
+    fn = function(
+        [n, a, b, c_val, d], [y1, y2], mode=Mode(optimizer="merge", linker="py")
+    )
+    nodes = fn.maker.fgraph.toposort()
+    loop_nodes = [nd for nd in nodes if isinstance(nd.op, ScalarLoop)]
+    assert len(loop_nodes) == 2
+    assert loop_nodes[0].op is loop_nodes[1].op

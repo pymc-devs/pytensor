@@ -983,6 +983,8 @@ def as_scalar(x: Any, name: str | None = None) -> ScalarVariable:
 
         if isinstance(x.type, TensorType) and x.type.ndim == 0:
             return scalar_from_tensor(x)
+        elif isinstance(x, Constant) and isinstance(x.type, ScalarType):
+            return ScalarConstant(x.type, x.data, name=x.name)
         else:
             raise TypeError(f"Cannot convert {x} to a scalar type")
 
@@ -4146,7 +4148,11 @@ class Composite(ScalarInnerGraphOp):
     init_param: tuple[str, ...] = ("inputs", "outputs")
 
     def __init__(
-        self, inputs, outputs, name="Composite", clone_graph: builtins.bool = True
+        self,
+        inputs,
+        outputs,
+        name="Composite",
+        clone_graph: builtins.bool = True,
     ):
         self.name = name
         self._name = None
@@ -4156,14 +4162,12 @@ class Composite(ScalarInnerGraphOp):
 
         # Flatten nested Composites in single-output case
         if len(outputs) == 1 and any(
-            isinstance(var.owner.op, Composite) for var in outputs
+            var.owner is not None and isinstance(var.owner.op, Composite)
+            for var in outputs
         ):
-            # Inner Composite that we need to flatten
-            # 1. Create a new graph from inputs up to the Composite
             res = pytensor.compile.rebuild_collect_shared(
                 inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
             )
-            # 2. Continue this partial clone with the graph in the inner Composite
             res2 = pytensor.compile.rebuild_collect_shared(
                 inputs=outputs[0].owner.op.inputs,
                 outputs=outputs[0].owner.op.outputs,
@@ -4173,14 +4177,12 @@ class Composite(ScalarInnerGraphOp):
             assert len(res[0]) == len(inputs)
             inputs, outputs = res[0], res2[1]
 
-        # Create FunctionGraph and validate ops, then freeze for immutability
-        # and hash-consing deduplication
         fgraph = FunctionGraph(inputs, outputs, clone=clone_graph)
         self._validate_inner_graph(fgraph)
         self._fgraph = fgraph.freeze()
 
-        self.inputs_type = tuple(input.type for input in self._fgraph.inputs)
-        self.outputs_type = tuple(output.type for output in self._fgraph.outputs)
+        self.inputs_type = tuple(inp.type for inp in self._fgraph.inputs)
+        self.outputs_type = tuple(out.type for out in self._fgraph.outputs)
         self.nin = len(self._fgraph.inputs)
         self.nout = len(self._fgraph.outputs)
         super().__init__()
