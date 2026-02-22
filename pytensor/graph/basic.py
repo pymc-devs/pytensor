@@ -825,6 +825,16 @@ class Constant(AtomicVariable[_TypeType]):
     def clone(self, **kwargs):
         return self
 
+    def equals(self, other):
+        if not isinstance(other, type(self)):
+            return False
+        if self.type != other.type:
+            return False
+        try:
+            return np.array_equal(self.data, other.data, equal_nan=True)
+        except (TypeError, ValueError):
+            return self.data == other.data
+
     @property
     def owner(self) -> None:
         return None
@@ -1268,14 +1278,14 @@ def equal_computations(
 
     for x, y in zip(xs, ys, strict=True):
         if not isinstance(x, Variable) and not isinstance(y, Variable):
-            return np.array_equal(x, y)
+            return np.array_equal(x, y, equal_nan=True)
         if not isinstance(x, Variable):
             if isinstance(y, Constant):
-                return np.array_equal(y.data, x)
+                return np.array_equal(y.data, x, equal_nan=True)
             return False
         if not isinstance(y, Variable):
             if isinstance(x, Constant):
-                return np.array_equal(x.data, y)
+                return np.array_equal(x.data, y, equal_nan=True)
             return False
         x_is_owned, y_is_owned = (x.owner is not None, y.owner is not None)
         if x_is_owned != y_is_owned:
