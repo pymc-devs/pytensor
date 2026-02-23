@@ -1407,7 +1407,7 @@ class IncSubtensor(BaseSubtensor, COp):
 
     def __str__(self):
         name = "SetSubtensor" if self.set_instead_of_inc else "IncSubtensor"
-        return f"{name}{{{BaseSubtensor.str_from_indices(self.idx_list)}}}"
+        return f"{name}{{{super().str_from_indices(self.idx_list)}}}"
 
     def make_node(self, x, y, *inputs):
         """
