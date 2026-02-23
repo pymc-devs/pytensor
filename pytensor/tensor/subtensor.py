@@ -2277,7 +2277,7 @@ class AdvancedSubtensor(BaseSubtensor, COp):
 
     def __str__(self):
         return (
-            f"{self.__class__.__name__}{{{Subtensor.str_from_indices(self.idx_list)}}}"
+            f"{self.__class__.__name__}{{{BaseSubtensor.str_from_indices(self.idx_list)}}}"
         )
 
     def c_code_cache_version(self):
@@ -2586,7 +2586,7 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
             if self.set_instead_of_inc
             else "AdvancedIncSubtensor"
         )
-        return f"{name}{{{Subtensor.str_from_indices(self.idx_list)}}}"
+        return f"{name}{{{BaseSubtensor.str_from_indices(self.idx_list)}}}"
 
     def make_node(self, x, y, *index_variables):
         if len(index_variables) != self.n_index_vars:
