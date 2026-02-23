@@ -2275,6 +2275,9 @@ class AdvancedSubtensor(BaseSubtensor, COp):
     __props__ = ("idx_list",)
     __hash__ = BaseSubtensor.__hash__
 
+    def __str__(self):
+        return f"{self.__class__.__name__}{{{Subtensor.str_from_indices(self.idx_list)}}}"
+
     def c_code_cache_version(self):
         hv = Subtensor.helper_c_code_cache_version()
         if hv:
@@ -2576,11 +2579,8 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         self.ignore_duplicates = ignore_duplicates
 
     def __str__(self):
-        return (
-            "AdvancedSetSubtensor"
-            if self.set_instead_of_inc
-            else "AdvancedIncSubtensor"
-        )
+        name = "AdvancedSetSubtensor" if self.set_instead_of_inc else "AdvancedIncSubtensor"
+        return f"{name}{{{Subtensor.str_from_indices(self.idx_list)}}}"
 
     def make_node(self, x, y, *index_variables):
         if len(index_variables) != self.n_index_vars:
