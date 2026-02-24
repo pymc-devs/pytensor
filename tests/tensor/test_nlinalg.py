@@ -739,16 +739,21 @@ class TestKron(utt.InferShapeTester):
         ):
             kron(x, y)
 
+    @pytest.mark.parametrize("static_shape", [True, False])
     @pytest.mark.parametrize("shp0", [(2,), (2, 3), (2, 3, 4), (2, 3, 4, 5)])
     @pytest.mark.parametrize("shp1", [(6,), (6, 7), (6, 7, 8), (6, 7, 8, 9)])
-    def test_perform(self, shp0, shp1):
+    def test_perform(self, static_shape, shp0, shp1):
         if len(shp0) + len(shp1) == 2:
             pytest.skip("Sum of shp0 and shp1 must be more than 2")
 
-        x = tensor(dtype="floatX", shape=shp0)
+        # Determine tensor shapes based on the parametrization flag
+        shape_x = shp0 if static_shape else (None,) * len(shp0)
+        shape_y = shp1 if static_shape else (None,) * len(shp1)
+
+        x = tensor(dtype="floatX", shape=shape_x)
         a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
 
-        y = tensor(dtype="floatX", shape=shp1)
+        y = tensor(dtype="floatX", shape=shape_y)
         b = self.rng.random(shp1).astype(config.floatX)
 
         kron_xy = kron(x, y)
@@ -760,20 +765,32 @@ class TestKron(utt.InferShapeTester):
         np.testing.assert_allclose(out, np_val)
 
         # Regression test for issue #1867
-        assert kron_xy.type.shape == np_val.shape
+        # Adjusting the assertion because a non-static tensor won't have integer dimensions in type.shape
+        if static_shape:
+            assert kron_xy.type.shape == np_val.shape
+        else:
+            assert len(kron_xy.type.shape) == len(np_val.shape)
 
+    @pytest.mark.parametrize("static_shape", [True, False])
     @pytest.mark.parametrize(
         "i, shp0, shp1",
         [(0, (2, 3), (6, 7)), (1, (2, 3), (4, 3, 5)), (2, (2, 4, 3), (4, 3, 5))],
     )
-    def test_kron_commutes_with_inv(self, i, shp0, shp1):
+    def test_kron_commutes_with_inv(self, static_shape, i, shp0, shp1):
         if (pytensor.config.floatX == "float32") & (i == 2):
             pytest.skip("Half precision insufficient for test 3 to pass")
-        x = tensor(dtype="floatX", shape=(None,) * len(shp0))
+
+        shape_x = shp0 if static_shape else (None,) * len(shp0)
+        shape_y = shp1 if static_shape else (None,) * len(shp1)
+
+        x = tensor(dtype="floatX", shape=shape_x)
         a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
-        y = tensor(dtype="floatX", shape=(None,) * len(shp1))
+
+        y = tensor(dtype="floatX", shape=shape_y)
         b = self.rng.random(shp1).astype(config.floatX)
+
         lhs_f = function([x, y], pinv(kron(x, y)))
         rhs_f = function([x, y], kron(pinv(x), pinv(y)))
+
         atol = 1e-4 if config.floatX == "float32" else 1e-12
         np.testing.assert_allclose(lhs_f(a, b), rhs_f(a, b), atol=atol)
