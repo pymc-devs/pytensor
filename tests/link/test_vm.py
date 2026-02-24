@@ -544,3 +544,32 @@ def test_Stack_updates():
 
     assert res == [np.array(1.0), np.array(2.0)]
     assert storage_map[a][0] == np.array(2.0)
+
+
+@pytest.mark.parametrize(
+    "linker", [VMLinker(allow_partial_eval=True, use_cloop=False), "cvm"]
+)
+def test_partial_function_output_subset_oob(linker):
+    """Regression test: out-of-bounds output_subset must raise, not segfault."""
+    x = scalar("input")
+    y = x**2
+    f = function(
+        [x], [y + 7, y - 9, y / 14.0], mode=Mode(optimizer=None, linker=linker)
+    )
+
+    # Index equal to n_output_vars (off-by-one)
+    with pytest.raises((IndexError, Exception)):
+        f(3, output_subset=[len(f.output_storage)])
+
+    # Large out-of-bounds index
+    with pytest.raises((IndexError, Exception)):
+        f(3, output_subset=[100])
+
+    # Negative index: the CVM C code must reject it; the Python Stack VM
+    # delegates to Python list indexing which naturally wraps negatives.
+    if linker == "cvm":
+        with pytest.raises((IndexError, Exception)):
+            f(3, output_subset=[-1])
+
+    # Verify the function still works after the error cases
+    utt.assert_allclose(f(5), np.array([32.0, 16.0, 1.7857142857142858]))

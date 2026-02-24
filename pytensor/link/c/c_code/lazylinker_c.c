@@ -775,8 +775,17 @@ static PyObject *CLazyLinker_call(PyObject *_self, PyObject *args,
           err = 1;
           PyErr_SetString(PyExc_RuntimeError,
                           "Some elements of output_subset list are not int");
+          break;
         }
-        output_subset[PyLong_AsLong(elem)] = 1;
+        long idx = PyLong_AsLong(elem);
+        if (idx < 0 || idx >= self->n_output_vars) {
+          err = 1;
+          PyErr_Format(PyExc_IndexError,
+                       "output_subset index %ld is out of range [0, %zd)",
+                       idx, self->n_output_vars);
+          break;
+        }
+        output_subset[idx] = 1;
       }
     }
   }
@@ -981,7 +990,7 @@ static PyTypeObject lazylinker_ext_CLazyLinkerType = {
 };
 
 static PyObject *get_version(PyObject *dummy, PyObject *args) {
-  PyObject *result = PyFloat_FromDouble(0.31);
+  PyObject *result = PyFloat_FromDouble(0.32);
   return result;
 }
 
