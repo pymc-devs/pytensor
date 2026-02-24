@@ -173,6 +173,14 @@ class XTensorType(Type, HasDataType, HasShape):
 
         return None
 
+    @staticmethod
+    def values_eq(a, b, **kwargs):
+        return TensorType.values_eq(a, b, **kwargs)
+
+    @staticmethod
+    def values_eq_approx(a, b, **kwargs):
+        return TensorType.values_eq_approx(a, b, **kwargs)
+
     def __repr__(self):
         return f"XTensorType({self.dtype}, shape={self.shape}, dims={self.dims})"
 
