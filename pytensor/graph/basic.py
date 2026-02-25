@@ -2,6 +2,7 @@
 
 import abc
 import warnings
+import weakref
 from collections.abc import (
     Hashable,
     Iterable,
@@ -836,6 +837,119 @@ class Constant(AtomicVariable[_TypeType]):
     @property
     def value(self):
         return self.data
+
+
+class FrozenConstant(Constant):
+    """A globally-interned Constant for use in frozen graphs.
+
+    Two ``FrozenConstant`` instances with the same type and data are the same object.
+    """
+
+    _cache: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+    _filtered: Any
+
+    # FrozenConstant doesn't inherit the scalar mixin that provides .dtype,
+    # but scalar C code generation expects it on all variables.
+    @property
+    def dtype(self):
+        return self.type.dtype
+
+    def __new__(cls, type: _TypeType, data: Any, name: str | None = None):
+        filtered = type.filter(data)
+        cache_key = cls._make_key(type, filtered)
+        if cache_key is not None:
+            cached = cls._cache.get(cache_key)
+            if cached is not None:
+                return cached
+        instance = object.__new__(cls)
+        # Store filtered data now so __init__ can skip re-filtering
+        instance._filtered = filtered
+        if cache_key is not None:
+            cls._cache[cache_key] = instance
+        return instance
+
+    def __init__(self, type: _TypeType, data: Any, name: str | None = None):
+        if hasattr(self, "data"):
+            return
+        # Use pre-filtered data from __new__ to avoid a second type.filter() call
+        AtomicVariable.__init__(self, type, name=name)
+        self.data = self._filtered
+        del self._filtered
+        add_tag_trace(self)
+
+    @staticmethod
+    def _make_key(type, filtered):
+        if isinstance(filtered, np.ndarray):
+            from pytensor.tensor.utils import hash_from_ndarray
+
+            return type, hash_from_ndarray(filtered)
+        if isinstance(filtered, np.generic):
+            from pytensor.tensor.utils import hash_from_ndarray
+
+            return type, hash_from_ndarray(np.asarray(filtered))
+        try:
+            return type, hash(filtered)
+        except TypeError:
+            return None
+
+    def __reduce__(self):
+        return (type(self), (self.type, self.data, self.name))
+
+
+class FrozenApply(Apply):
+    """An immutable, globally-interned Apply node for frozen graphs.
+
+    Uses tuples for ``inputs`` and ``outputs`` so mutation raises ``TypeError``
+    at the language level.  Interned by ``(op, inputs)`` — constructing a
+    ``FrozenApply`` with an ``op`` and ``inputs`` that match an existing live
+    instance returns that instance.
+    """
+
+    _cache: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+
+    def __new__(
+        cls, op: "Op", inputs: tuple[Variable, ...], output_types: tuple["Type", ...]
+    ):
+        # Canonicalize inputs through their owner's outputs to ensure cache hits after unpickling.
+        inputs = tuple(
+            inp.owner.outputs[inp.index]
+            if inp.owner is not None and isinstance(inp.owner, FrozenApply)
+            else inp
+            for inp in inputs
+        )
+        key = (op, inputs)
+        cached = cls._cache.get(key)
+        if cached is not None:
+            return cached
+
+        instance = object.__new__(cls)
+        instance.op = op
+        instance.inputs = inputs  # type: ignore[assignment]
+        instance.outputs = tuple(  # type: ignore[assignment]
+            t.variable_type(type=t, owner=instance, index=i)
+            for i, t in enumerate(output_types)
+        )
+        instance.tag = Scratchpad()
+        cls._cache[key] = instance
+        return instance
+
+    def __init__(self, op, inputs, output_types):
+        # All initialization is done in __new__
+        pass
+
+    def clone(self, clone_inner_graph: bool = False) -> "Apply":
+        """Clone into a mutable Apply node."""
+        from pytensor.graph.op import HasInnerGraph
+
+        new_op = self.op
+        if isinstance(new_op, HasInnerGraph) and clone_inner_graph:
+            new_op = new_op.clone()
+
+        return Apply(new_op, list(self.inputs), [o.clone() for o in self.outputs])
+
+    def __reduce__(self):
+        output_types = tuple(o.type for o in self.outputs)
+        return (type(self), (self.op, self.inputs, output_types))
 
 
 def clone(

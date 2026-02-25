@@ -471,3 +471,107 @@ def test_dprint():
     o1 = MyOp(r1, r2)
     assert o1.dprint(file="str") == debugprint(o1, file="str")
     assert o1.owner.dprint(file="str") == debugprint(o1.owner, file="str")
+
+
+class TestFrozenConstant:
+    def test_interning(self):
+        from pytensor.graph.basic import Constant, FrozenConstant
+        from pytensor.scalar.basic import float64
+
+        c1 = FrozenConstant(float64, 2.0)
+        c2 = FrozenConstant(float64, 2.0)
+        c3 = FrozenConstant(float64, 3.0)
+
+        assert c1 is c2
+        assert c1 is not c3
+        assert isinstance(c1, Constant)
+        assert c1.data == 2.0
+        assert c3.data == 3.0
+
+        # Usable as dict key / in sets via identity
+        assert len({c1, c2, c3}) == 2
+
+    def test_nan_interning(self):
+        from pytensor.graph.basic import FrozenConstant
+        from pytensor.scalar.basic import float64
+
+        c1 = FrozenConstant(float64, float("nan"))
+        c2 = FrozenConstant(float64, float("nan"))
+        # NaN hashes the same, so these should be the same object
+        assert c1 is c2
+
+    def test_array_interning(self):
+        from pytensor.graph.basic import FrozenConstant
+
+        t = TensorType("float64", shape=(3,))
+        arr = np.array([1.0, 2.0, np.nan])
+
+        c1 = FrozenConstant(t, arr)
+        c2 = FrozenConstant(t, arr.copy())
+        c3 = FrozenConstant(t, np.array([9.0, 9.0, 9.0]))
+
+        assert c1 is c2
+        assert c1 is not c3
+        np.testing.assert_array_equal(c1.data, arr)
+
+    def test_different_types_not_shared(self):
+        from pytensor.graph.basic import FrozenConstant
+        from pytensor.scalar.basic import float32, float64
+
+        c1 = FrozenConstant(float64, 1.0)
+        c2 = FrozenConstant(float32, 1.0)
+        assert c1 is not c2
+
+
+class TestFrozenApply:
+    def test_interning_and_immutability(self):
+        from pytensor.graph.basic import FrozenApply
+        from pytensor.scalar.basic import add, float64, mul
+
+        x = NominalVariable(0, float64)
+        y = NominalVariable(1, float64)
+
+        fa1 = FrozenApply(add, (x, y), (float64,))
+        fa2 = FrozenApply(add, (x, y), (float64,))
+        fa_diff_op = FrozenApply(mul, (x, y), (float64,))
+        fa_diff_order = FrozenApply(add, (y, x), (float64,))
+
+        # Same (op, inputs) implies the same object
+        assert fa1 is fa2
+
+        # Different op or input order implies a different object
+        assert fa1 is not fa_diff_op
+        assert fa1 is not fa_diff_order
+
+        assert isinstance(fa1, Apply)
+
+        assert fa1.outputs[0].owner is fa1
+        assert fa1.outputs[0].index == 0
+
+    def test_cross_graph_identity(self):
+        """Two independently-built identical graphs share all FrozenApply nodes."""
+        from pytensor.graph.basic import FrozenApply
+        from pytensor.scalar.basic import float64, mul, sin, sqr
+
+        def build_graph():
+            a = NominalVariable(0, float64)
+            b = NominalVariable(1, float64)
+            n_sin = FrozenApply(sin, (a,), (float64,))
+            n_sqr = FrozenApply(sqr, (b,), (float64,))
+            n_mul = FrozenApply(mul, (n_sin.outputs[0], n_sqr.outputs[0]), (float64,))
+            return n_mul.outputs[0]
+
+        out1 = build_graph()
+        out2 = build_graph()
+        assert out1 is out2
+
+    def test_frozen_constant_in_key_chain(self):
+        from pytensor.graph.basic import FrozenApply, FrozenConstant
+        from pytensor.scalar.basic import add, float64
+
+        x = NominalVariable(0, float64)
+        c1 = FrozenConstant(float64, 3.14)
+        c2 = FrozenConstant(float64, 3.14)
+        fa1 = FrozenApply(add, (x, c1), (float64,))
+        fa2 = FrozenApply(add, (x, c2), (float64,))
+        assert fa1 is fa2
