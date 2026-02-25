@@ -566,6 +566,9 @@ class Dot(XOp):
         out = xtensor(dtype=out_dtype, shape=out_shape, dims=out_dims)
         return Apply(self, [x, y], [out])
 
+    def vectorize_node(self, node, *new_inputs, new_dim):
+        return self(*new_inputs, return_list=True)
+
 
 def dot(x, y, dim: str | Sequence[str] | EllipsisType | None = None):
     """Generalized dot product for XTensorVariables.
