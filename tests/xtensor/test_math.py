@@ -353,3 +353,13 @@ def test_xelemwise_vectorize():
 
     check_vectorization([ab], [exp(ab)])
     check_vectorization([ab, bc], [ab + bc])
+
+
+def test_dot_vectorize():
+    x = xtensor("x", dims=("a", "b"), shape=(2, 3))
+    y = xtensor("y", dims=("b", "c"), shape=(3, 4))
+
+    check_vectorization([x, y], [x.dot(y)])
+    check_vectorization([x, y], [x.dot(y, dim=("a", "b"))])
+    check_vectorization([x, y], [x.dot(y, dim="c")])
+    check_vectorization([x, y], [x.dot(y, dim=...)])
