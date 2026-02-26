@@ -19,6 +19,7 @@ from pytensor.sparse import (
     SparseDenseVectorMultiply,
     SparseSparseMultiply,
     SpSum,
+    StructuredAddSV,
     StructuredDot,
     StructuredDotGradCSC,
     StructuredDotGradCSR,
@@ -985,3 +986,81 @@ def numba_funcify_AddSSData(op, node, **kwargs):
         return z
 
     return add_ss
+
+
+@register_funcify_default_op_cache_key(StructuredAddSV)
+def numba_funcify_StructuredAddSV(op, node, **kwargs):
+    [z] = node.outputs
+    out_dtype = z.type.dtype
+    out_format = z.type.format
+
+    if out_format == "csr":
+
+        @numba_basic.numba_njit
+        def structured_add_s_v_csr(x, y):
+            assert x.shape[1] == y.shape[0]
+
+            n_row = x.shape[0]
+            x_indices = x.indices.view(np.uint32)
+            x_indptr = x.indptr.view(np.uint32)
+            output_capacity = len(x_indices)
+            z_indptr = np.empty(n_row + 1, dtype=np.int32)
+            z_indices = np.empty(output_capacity, dtype=np.int32)
+            z_data = np.empty(output_capacity, dtype=out_dtype)
+
+            nnz = 0
+            z_indptr[0] = 0
+            # Structured add applies y only on numerically non-zero values of x.
+            # We also prune cancellations to match sparse constructor behavior.
+            x_data = x.data
+            for i in range(n_row):
+                for j_idx in range(x_indptr[i], x_indptr[i + 1]):
+                    if x_data[j_idx] != 0:
+                        j = x_indices[j_idx]
+                        z_val = x_data[j_idx] + y[j]
+                        if z_val != 0:
+                            z_indices[nnz] = j
+                            z_data[nnz] = z_val
+                            nnz += 1
+                z_indptr[i + 1] = nnz
+
+            return sp.csr_matrix(
+                (z_data[:nnz], z_indices[:nnz], z_indptr), shape=x.shape
+            )
+
+        return structured_add_s_v_csr
+    else:
+
+        @numba_basic.numba_njit
+        def structured_add_s_v_csc(x, y):
+            assert x.shape[1] == y.shape[0]
+
+            n_col = x.shape[1]
+            x_indices = x.indices.view(np.uint32)
+            x_indptr = x.indptr.view(np.uint32)
+            output_capacity = len(x_indices)
+            z_indptr = np.empty(n_col + 1, dtype=np.int32)
+            z_indices = np.empty(output_capacity, dtype=np.int32)
+            z_data = np.empty(output_capacity, dtype=out_dtype)
+
+            nnz = 0
+            z_indptr[0] = 0
+            # Structured add applies y only on numerically non-zero values of x.
+            # We also prune cancellations to match sparse constructor behavior.
+            x_data = x.data
+            for j in range(n_col):
+                for i_idx in range(x_indptr[j], x_indptr[j + 1]):
+                    if x_data[i_idx] != 0:
+                        i = x_indices[i_idx]
+                        z_val = x_data[i_idx] + y[j]
+                        if z_val != 0:
+                            z_indices[nnz] = i
+                            z_data[nnz] = z_val
+                            nnz += 1
+                z_indptr[j + 1] = nnz
+
+            return sp.csc_matrix(
+                (z_data[:nnz], z_indices[:nnz], z_indptr), shape=x.shape
+            )
+
+        return structured_add_s_v_csc

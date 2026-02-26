@@ -235,3 +235,39 @@ def test_multiply_dense_sparse_dispatch(x_shape, format):
     y_test = scipy.sparse.random(11, 17, density=0.4, format=format)
 
     compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+def test_structured_add_sparse_vector(format):
+    x = ps.matrix(format=format, name="x", shape=(11, 13))
+    y = pt.vector("y", shape=(13,))
+    z = ps.structured_add_s_v(x, y)
+
+    assert isinstance(z.owner.op, ps.StructuredAddSV)
+
+    x_test = scipy.sparse.random(11, 13, density=0.39, format=format)
+    y_test = np.random.normal(size=(13,))
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+def test_structured_add_sparse_vector_cancellation(format):
+    x = ps.matrix(format=format, name="x", shape=(11, 13))
+    y = pt.vector("y", shape=(13,))
+    z = ps.structured_add_s_v(x, y)
+
+    rows = np.array([0, 5, 10], dtype=np.int32)
+    cols = np.array([1, 3, 10], dtype=np.int32)
+    data = np.array([1.0, 2.5, -4.0], dtype=np.float64)
+
+    if format == "csr":
+        x_test = scipy.sparse.csr_matrix((data, (rows, cols)), shape=(11, 13))
+    else:
+        x_test = scipy.sparse.csc_matrix((data, (rows, cols)), shape=(11, 13))
+
+    y_test = np.zeros((13,), dtype=np.float64)
+    # This cancels the x[5, 3] entry and checks output structural pruning.
+    y_test[3] = -2.5
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
