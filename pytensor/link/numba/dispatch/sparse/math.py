@@ -11,6 +11,9 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_default_op_cache_key,
 )
 from pytensor.sparse import (
+    AddSD,
+    AddSS,
+    AddSSData,
     Dot,
     SparseDenseMultiply,
     SparseDenseVectorMultiply,
@@ -749,3 +752,236 @@ def numba_funcify_SparseSparseMultiply(op, node, **kwargs):
             )
 
         return multiply_s_s_csc
+
+
+@register_funcify_default_op_cache_key(AddSS)
+def numba_funcify_AddSS(op, node, **kwargs):
+    _, y = node.inputs
+    [z] = node.outputs
+    out_dtype = z.type.dtype
+    out_format = z.type.format
+    y_format = y.type.format
+
+    # `out_format` is equal to `x.format`. We only convert `y`, if needed.
+    # One merge pass that merges  rows (cols) and skip zeros so output matches SciPy sparse add
+    # The number of nonzeros is the "union" of nonzeros.
+    if out_format == "csr":
+
+        @numba_basic.numba_njit
+        def add_s_s_csr(x, y):
+            assert x.shape == y.shape
+            if y_format != "csr":
+                y = y.tocsr()
+
+            n_row = x.shape[0]
+            x_indices = x.indices.view(np.uint32)
+            y_indices = y.indices.view(np.uint32)
+            x_indptr = x.indptr.view(np.uint32)
+            y_indptr = y.indptr.view(np.uint32)
+
+            output_capacity = len(x_indices) + len(y_indices)
+            z_indptr = np.empty(n_row + 1, dtype=np.int32)
+            z_indices = np.empty(output_capacity, dtype=np.int32)
+            z_data = np.empty(output_capacity, dtype=out_dtype)
+
+            nnz = 0
+            z_indptr[0] = 0
+            for i in range(n_row):
+                x_ptr = x_indptr[i]
+                x_end = x_indptr[i + 1]
+                y_ptr = y_indptr[i]
+                y_end = y_indptr[i + 1]
+
+                while x_ptr < x_end and y_ptr < y_end:
+                    x_j = x_indices[x_ptr]
+                    y_j = y_indices[y_ptr]
+                    if x_j == y_j:
+                        val = x.data[x_ptr] + y.data[y_ptr]
+                        if val != 0:
+                            z_indices[nnz] = x_j
+                            z_data[nnz] = val
+                            nnz += 1
+                        x_ptr += 1
+                        y_ptr += 1
+                    elif x_j < y_j:
+                        val = x.data[x_ptr]
+                        if val != 0:
+                            z_indices[nnz] = x_j
+                            z_data[nnz] = val
+                            nnz += 1
+                        x_ptr += 1
+                    else:
+                        val = y.data[y_ptr]
+                        if val != 0:
+                            z_indices[nnz] = y_j
+                            z_data[nnz] = val
+                            nnz += 1
+                        y_ptr += 1
+
+                while x_ptr < x_end:
+                    val = x.data[x_ptr]
+                    if val != 0:
+                        z_indices[nnz] = x_indices[x_ptr]
+                        z_data[nnz] = val
+                        nnz += 1
+                    x_ptr += 1
+
+                while y_ptr < y_end:
+                    val = y.data[y_ptr]
+                    if val != 0:
+                        z_indices[nnz] = y_indices[y_ptr]
+                        z_data[nnz] = val
+                        nnz += 1
+                    y_ptr += 1
+
+                z_indptr[i + 1] = nnz
+
+            return sp.csr_matrix(
+                (z_data[:nnz], z_indices[:nnz], z_indptr), shape=x.shape
+            )
+
+        return add_s_s_csr
+    else:
+
+        @numba_basic.numba_njit
+        def add_s_s_csc(x, y):
+            assert x.shape == y.shape
+            if y_format != "csc":
+                y = y.tocsc()
+
+            n_col = x.shape[1]
+            x_indices = x.indices.view(np.uint32)
+            y_indices = y.indices.view(np.uint32)
+            x_indptr = x.indptr.view(np.uint32)
+            y_indptr = y.indptr.view(np.uint32)
+
+            output_capacity = len(x_indices) + len(y_indices)
+            z_indptr = np.empty(n_col + 1, dtype=np.int32)
+            z_indices = np.empty(output_capacity, dtype=np.int32)
+            z_data = np.empty(output_capacity, dtype=out_dtype)
+
+            nnz = 0
+            z_indptr[0] = 0
+            for j in range(n_col):
+                x_ptr = x_indptr[j]
+                x_end = x_indptr[j + 1]
+                y_ptr = y_indptr[j]
+                y_end = y_indptr[j + 1]
+
+                while x_ptr < x_end and y_ptr < y_end:
+                    x_i = x_indices[x_ptr]
+                    y_i = y_indices[y_ptr]
+                    if x_i == y_i:
+                        val = x.data[x_ptr] + y.data[y_ptr]
+                        if val != 0:
+                            z_indices[nnz] = x_i
+                            z_data[nnz] = val
+                            nnz += 1
+                        x_ptr += 1
+                        y_ptr += 1
+                    elif x_i < y_i:
+                        val = x.data[x_ptr]
+                        if val != 0:
+                            z_indices[nnz] = x_i
+                            z_data[nnz] = val
+                            nnz += 1
+                        x_ptr += 1
+                    else:
+                        val = y.data[y_ptr]
+                        if val != 0:
+                            z_indices[nnz] = y_i
+                            z_data[nnz] = val
+                            nnz += 1
+                        y_ptr += 1
+
+                while x_ptr < x_end:
+                    val = x.data[x_ptr]
+                    if val != 0:
+                        z_indices[nnz] = x_indices[x_ptr]
+                        z_data[nnz] = val
+                        nnz += 1
+                    x_ptr += 1
+
+                while y_ptr < y_end:
+                    val = y.data[y_ptr]
+                    if val != 0:
+                        z_indices[nnz] = y_indices[y_ptr]
+                        z_data[nnz] = val
+                        nnz += 1
+                    y_ptr += 1
+
+                z_indptr[j + 1] = nnz
+
+            return sp.csc_matrix(
+                (z_data[:nnz], z_indices[:nnz], z_indptr), shape=x.shape
+            )
+
+        return add_s_s_csc
+
+
+@register_funcify_default_op_cache_key(AddSD)
+def numba_funcify_AddSD(op, node, **kwargs):
+    x, y = node.inputs
+    [z] = node.outputs
+    out_dtype = z.type.dtype
+    x_format = x.type.format
+    y_same_dtype = y.type.dtype == out_dtype
+
+    if x_format == "csr":
+
+        @numba_basic.numba_njit
+        def add_s_d_csr(x, y):
+            assert x.shape == y.shape
+
+            if y_same_dtype:
+                z = y.copy()
+            else:
+                z = y.astype(out_dtype)
+
+            indices = x.indices.view(np.uint32)
+            indptr = x.indptr.view(np.uint32)
+            n_row = x.shape[0]
+            for i in range(n_row):
+                for j_idx in range(indptr[i], indptr[i + 1]):
+                    z[i, indices[j_idx]] += x.data[j_idx]
+
+            return z
+
+        return add_s_d_csr
+    else:
+
+        @numba_basic.numba_njit
+        def add_s_d_csc(x, y):
+            assert x.shape == y.shape
+
+            if y_same_dtype:
+                z = y.copy()
+            else:
+                z = y.astype(out_dtype)
+
+            indices = x.indices.view(np.uint32)
+            indptr = x.indptr.view(np.uint32)
+            n_col = x.shape[1]
+            for j in range(n_col):
+                for i_idx in range(indptr[j], indptr[j + 1]):
+                    z[indices[i_idx], j] += x.data[i_idx]
+
+            return z
+
+        return add_s_d_csc
+
+
+@register_funcify_default_op_cache_key(AddSSData)
+def numba_funcify_AddSSData(op, node, **kwargs):
+    # AddSSData output format follows x, and make_node constrains y to the same format and dtype.
+    # Numba doesn't reliably handle in-place updates through nested attributes
+    @numba_basic.numba_njit
+    def add_ss(x, y):
+        assert x.shape == y.shape
+        assert x.data.shape == y.data.shape
+        z = x.copy()
+        z_data = z.data
+        z_data += y.data
+        return z
+
+    return add_ss

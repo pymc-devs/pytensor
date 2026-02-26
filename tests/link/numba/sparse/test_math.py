@@ -134,6 +134,62 @@ def test_sparse_sum(format, axis):
 
 @pytest.mark.parametrize("x_format", ["csr", "csc"])
 @pytest.mark.parametrize("y_format", ["csr", "csc"])
+def test_sparse_sparse_add(x_format, y_format):
+    x = ps.matrix(x_format, name="x", shape=(11, 17))
+    y = ps.matrix(y_format, name="y", shape=(11, 17))
+    z = ps.add(x, y)
+
+    x_test = scipy.sparse.random(11, 17, density=0.29, format=x_format)
+    y_test = scipy.sparse.random(11, 17, density=0.43, format=y_format)
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+def test_sparse_sparse_data_add(format):
+    x = ps.matrix(format, name="x", shape=(11, 17))
+    y = ps.matrix(format, name="y", shape=(11, 17))
+    z = ps.add_s_s_data(x, y)
+
+    assert isinstance(z.owner.op, ps.AddSSData)
+
+    x_test = scipy.sparse.random(11, 17, density=0.31, format=format)
+    y_test = x_test.copy()
+    y_test.data = np.random.normal(size=y_test.data.shape)
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+def test_add_sparse_dense(format):
+    x = ps.matrix(format=format, name="x", shape=(11, 13))
+    y = pt.matrix("y", shape=(11, 13))
+    z = ps.add(x, y)
+
+    assert isinstance(z.owner.op, ps.AddSD)
+
+    x_test = scipy.sparse.random(11, 13, density=0.41, format=format)
+    y_test = np.random.normal(size=(11, 13))
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+def test_add_dense_sparse(format):
+    x = pt.matrix("x", shape=(11, 13))
+    y = ps.matrix(format=format, name="y", shape=(11, 13))
+    z = ps.add(x, y)
+
+    assert isinstance(z.owner.op, ps.AddSD)
+
+    x_test = np.random.normal(size=(11, 13))
+    y_test = scipy.sparse.random(11, 13, density=0.36, format=format)
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("x_format", ["csr", "csc"])
+@pytest.mark.parametrize("y_format", ["csr", "csc"])
 def test_sparse_sparse_multiply(x_format, y_format):
     x = ps.matrix(x_format, name="x", shape=(11, 17))
     y = ps.matrix(y_format, name="y", shape=(11, 17))
