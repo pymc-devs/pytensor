@@ -23,6 +23,7 @@ from pytensor.sparse import (
     StructuredDot,
     StructuredDotGradCSC,
     StructuredDotGradCSR,
+    Usmm,
 )
 
 
@@ -1064,3 +1065,154 @@ def numba_funcify_StructuredAddSV(op, node, **kwargs):
             )
 
         return structured_add_s_v_csc
+
+
+@register_funcify_default_op_cache_key(Usmm)
+def numba_funcify_Usmm(op, node, **kwargs):
+    """Computes the dense matrix resulting from ``alpha * x @ y + z``.
+
+    ``alpha`` is scalar, at least one of ``x`` and ``y`` is a sparse matrix,
+    and ``z`` is a dense matrix.
+    """
+    alpha, x, y, z = node.inputs
+    [out] = node.outputs
+    out_dtype = out.type.dtype
+
+    alpha_ndim = alpha.ndim
+    x_is_sparse = psb._is_sparse_variable(x)
+    y_is_sparse = psb._is_sparse_variable(y)
+    x_format = x.type.format if x_is_sparse else None
+    y_format = y.type.format if y_is_sparse else None
+    z_same_dtype = z.type.dtype == out_dtype
+
+    if x_is_sparse and not y_is_sparse:
+
+        @numba_basic.numba_njit
+        def usmm_sparse_dense(alpha, x, y, z):
+            if z_same_dtype:
+                out = z.copy()
+            else:
+                out = z.astype(out_dtype)
+
+            if alpha_ndim == 0:
+                alpha_val = alpha
+            elif alpha_ndim == 1:
+                alpha_val = alpha[0]
+            else:
+                alpha_val = alpha[0, 0]
+
+            assert x.shape[1] == y.shape[0]
+            assert out.shape == (x.shape[0], y.shape[1])
+
+            x_indices = x.indices.view(np.uint32)
+            x_indptr = x.indptr.view(np.uint32)
+            if x_format == "csr":
+                n_row = x.shape[0]
+                n_out_col = y.shape[1]
+
+                for i in range(n_row):
+                    for x_idx in range(x_indptr[i], x_indptr[i + 1]):
+                        k = x_indices[x_idx]
+                        x_val = alpha_val * x.data[x_idx]
+                        for j in range(n_out_col):
+                            out[i, j] += x_val * y[k, j]
+            else:
+                n_col = x.shape[1]
+                n_out_col = y.shape[1]
+
+                for k in range(n_col):
+                    for x_idx in range(x_indptr[k], x_indptr[k + 1]):
+                        i = x_indices[x_idx]
+                        x_val = alpha_val * x.data[x_idx]
+                        for j in range(n_out_col):
+                            out[i, j] += x_val * y[k, j]
+
+            return out
+
+        return usmm_sparse_dense
+
+    if not x_is_sparse and y_is_sparse:
+
+        @numba_basic.numba_njit
+        def usmm_dense_sparse(alpha, x, y, z):
+            if z_same_dtype:
+                out = z.copy()
+            else:
+                out = z.astype(out_dtype)
+
+            if alpha_ndim == 0:
+                alpha_val = alpha
+            elif alpha_ndim == 1:
+                alpha_val = alpha[0]
+            else:
+                alpha_val = alpha[0, 0]
+
+            assert x.shape[1] == y.shape[0]
+            assert out.shape == (x.shape[0], y.shape[1])
+
+            n_row = x.shape[0]
+            if y_format == "csc":
+                y_indices = y.indices.view(np.uint32)
+                y_indptr = y.indptr.view(np.uint32)
+                n_col = y.shape[1]
+
+                for j in range(n_col):
+                    for y_idx in range(y_indptr[j], y_indptr[j + 1]):
+                        k = y_indices[y_idx]
+                        y_val = alpha_val * y.data[y_idx]
+                        for i in range(n_row):
+                            out[i, j] += x[i, k] * y_val
+            else:
+                y_indices = y.indices.view(np.uint32)
+                y_indptr = y.indptr.view(np.uint32)
+                k_dim = y.shape[0]
+
+                for k in range(k_dim):
+                    for y_idx in range(y_indptr[k], y_indptr[k + 1]):
+                        j = y_indices[y_idx]
+                        y_val = alpha_val * y.data[y_idx]
+                        for i in range(n_row):
+                            out[i, j] += x[i, k] * y_val
+
+            return out
+
+        return usmm_dense_sparse
+
+    @numba_basic.numba_njit
+    def usmm_sparse_sparse(alpha, x, y, z):
+        if z_same_dtype:
+            out = z.copy()
+        else:
+            out = z.astype(out_dtype)
+
+        if alpha_ndim == 0:
+            alpha_val = alpha
+        elif alpha_ndim == 1:
+            alpha_val = alpha[0]
+        else:
+            alpha_val = alpha[0, 0]
+
+        assert x.shape[1] == y.shape[0]
+        assert out.shape == (x.shape[0], y.shape[1])
+
+        if x_format == "csc":
+            x = x.tocsr()
+        if y_format == "csc":
+            y = y.tocsr()
+
+        x_indices = x.indices.view(np.uint32)
+        x_indptr = x.indptr.view(np.uint32)
+        y_indices = y.indices.view(np.uint32)
+        y_indptr = y.indptr.view(np.uint32)
+
+        n_row = x.shape[0]
+        for i in range(n_row):
+            for x_idx in range(x_indptr[i], x_indptr[i + 1]):
+                k = x_indices[x_idx]
+                x_val = alpha_val * x.data[x_idx]
+                for y_idx in range(y_indptr[k], y_indptr[k + 1]):
+                    out[i, y_indices[y_idx]] += x_val * y.data[y_idx]
+
+        return out
+
+    return usmm_sparse_sparse

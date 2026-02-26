@@ -4,6 +4,7 @@ import scipy
 
 import pytensor.sparse as ps
 import pytensor.tensor as pt
+from pytensor import config
 from tests.link.numba.sparse.test_basic import compare_numba_and_py_sparse
 
 
@@ -271,3 +272,54 @@ def test_structured_add_sparse_vector_cancellation(format):
     y_test[3] = -2.5
 
     compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("alpha_shape", [(), (1,), (1, 1)])
+@pytest.mark.parametrize(
+    "x_format,y_format",
+    [
+        ("csr", "dense"),
+        ("csc", "dense"),
+        ("dense", "csr"),
+        ("dense", "csc"),
+        ("csr", "csr"),
+        ("csr", "csc"),
+        ("csc", "csr"),
+        ("csc", "csc"),
+    ],
+)
+def test_usmm(alpha_shape, x_format, y_format):
+    x_shape = (11, 13)
+    y_shape = (13, 7)
+    z_shape = (x_shape[0], y_shape[1])
+
+    alpha = pt.tensor("alpha", shape=alpha_shape)
+    z = pt.matrix("z", shape=z_shape)
+    if x_format == "dense":
+        x = pt.matrix("x", shape=x_shape)
+    else:
+        x = ps.matrix(format=x_format, name="x", shape=x_shape)
+
+    if y_format == "dense":
+        y = pt.matrix("y", shape=y_shape)
+    else:
+        y = ps.matrix(format=y_format, name="y", shape=y_shape)
+
+    out = ps.usmm(alpha, x, y, z)
+
+    if x_format == "dense":
+        x_test = np.random.normal(size=x_shape)
+    else:
+        x_test = scipy.sparse.random(*x_shape, density=0.31, format=x_format)
+
+    if y_format == "dense":
+        y_test = np.random.normal(size=y_shape)
+    else:
+        y_test = scipy.sparse.random(*y_shape, density=0.29, format=y_format)
+
+    alpha_test = np.array(1.7, dtype=config.floatX).reshape(alpha_shape)
+    z_test = np.random.normal(size=z_shape)
+
+    compare_numba_and_py_sparse(
+        [alpha, x, y, z], out, [alpha_test, x_test, y_test, z_test]
+    )
