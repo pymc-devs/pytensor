@@ -783,15 +783,24 @@ class TestUsmm:
         a = scalar("a", dtype=dtype3)
         z = pytensor.shared(np.asarray(self.z, dtype=dtype4).copy())
 
+        out_dtype = np.result_type(dtype1, dtype2, dtype3, dtype4)
+
         def f_b(z, a, x, y):
+            # Make sure operations are done with the precision of the output dtype
+            x = x.astype(out_dtype)
+            y = y.astype(out_dtype)
+            z = z.astype(out_dtype)
+            a = a.astype(out_dtype)
             return z - a * (x * y)
 
         x_data = np.asarray(self.x, dtype=dtype1)
         if format1 != "dense":
             x_data = as_sparse_format(x_data, format1)
         y_data = np.asarray(self.y, dtype=dtype2)
+
         if format2 != "dense":
             y_data = as_sparse_format(y_data, format2)
+
         a_data = np.asarray(1.5, dtype=dtype3)
         z_data = np.asarray(self.z, dtype=dtype4)
 

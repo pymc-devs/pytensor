@@ -1107,6 +1107,10 @@ def numba_funcify_Usmm(op, node, **kwargs):
 
             x_indices = x.indices.view(np.uint32)
             x_indptr = x.indptr.view(np.uint32)
+
+            x_data = x.data.astype(out_dtype)
+            y = y.astype(out_dtype)
+
             if x_format == "csr":
                 n_row = x.shape[0]
                 n_out_col = y.shape[1]
@@ -1114,7 +1118,7 @@ def numba_funcify_Usmm(op, node, **kwargs):
                 for i in range(n_row):
                     for x_idx in range(x_indptr[i], x_indptr[i + 1]):
                         k = x_indices[x_idx]
-                        x_val = alpha_val * x.data[x_idx]
+                        x_val = alpha_val * x_data[x_idx]
                         for j in range(n_out_col):
                             out[i, j] += x_val * y[k, j]
             else:
@@ -1124,7 +1128,7 @@ def numba_funcify_Usmm(op, node, **kwargs):
                 for k in range(n_col):
                     for x_idx in range(x_indptr[k], x_indptr[k + 1]):
                         i = x_indices[x_idx]
-                        x_val = alpha_val * x.data[x_idx]
+                        x_val = alpha_val * x_data[x_idx]
                         for j in range(n_out_col):
                             out[i, j] += x_val * y[k, j]
 
@@ -1151,27 +1155,27 @@ def numba_funcify_Usmm(op, node, **kwargs):
             assert x.shape[1] == y.shape[0]
             assert out.shape == (x.shape[0], y.shape[1])
 
+            y_indices = y.indices.view(np.uint32)
+            y_indptr = y.indptr.view(np.uint32)
+
+            x = x.astype(out_dtype)
+            y_data = y.data.astype(out_dtype)
+
             n_row = x.shape[0]
             if y_format == "csc":
-                y_indices = y.indices.view(np.uint32)
-                y_indptr = y.indptr.view(np.uint32)
                 n_col = y.shape[1]
-
                 for j in range(n_col):
                     for y_idx in range(y_indptr[j], y_indptr[j + 1]):
                         k = y_indices[y_idx]
-                        y_val = alpha_val * y.data[y_idx]
+                        y_val = alpha_val * y_data[y_idx]
                         for i in range(n_row):
                             out[i, j] += x[i, k] * y_val
             else:
-                y_indices = y.indices.view(np.uint32)
-                y_indptr = y.indptr.view(np.uint32)
                 k_dim = y.shape[0]
-
                 for k in range(k_dim):
                     for y_idx in range(y_indptr[k], y_indptr[k + 1]):
                         j = y_indices[y_idx]
-                        y_val = alpha_val * y.data[y_idx]
+                        y_val = alpha_val * y_data[y_idx]
                         for i in range(n_row):
                             out[i, j] += x[i, k] * y_val
 
@@ -1206,13 +1210,16 @@ def numba_funcify_Usmm(op, node, **kwargs):
         y_indices = y.indices.view(np.uint32)
         y_indptr = y.indptr.view(np.uint32)
 
+        x_data = x.data.astype(out_dtype)
+        y_data = y.data.astype(out_dtype)
+
         n_row = x.shape[0]
         for i in range(n_row):
             for x_idx in range(x_indptr[i], x_indptr[i + 1]):
                 k = x_indices[x_idx]
-                x_val = alpha_val * x.data[x_idx]
+                x_val = alpha_val * x_data[x_idx]
                 for y_idx in range(y_indptr[k], y_indptr[k + 1]):
-                    out[i, y_indices[y_idx]] += x_val * y.data[y_idx]
+                    out[i, y_indices[y_idx]] += x_val * y_data[y_idx]
 
         return out
 
