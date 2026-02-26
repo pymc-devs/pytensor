@@ -15,6 +15,7 @@ from pytensor.sparse import (
     AddSS,
     AddSSData,
     Dot,
+    SamplingDot,
     SparseDenseMultiply,
     SparseDenseVectorMultiply,
     SparseSparseMultiply,
@@ -1216,3 +1217,79 @@ def numba_funcify_Usmm(op, node, **kwargs):
         return out
 
     return usmm_sparse_sparse
+
+
+@register_funcify_default_op_cache_key(SamplingDot)
+def numba_funcify_SamplingDot(op, node, **kwargs):
+    """Computes p * (x @ y.T).
+
+    ``p`` is a sparse matrix, usually binary, both ``x`` and ``y`` are dense matrices, and ``*``
+    represents elementwise multiplication.
+    """
+    _, _, p = node.inputs
+    out_dtype = node.outputs[0].type.dtype
+    p_format = p.type.format
+
+    if p_format == "csr":
+
+        @numba_basic.numba_njit
+        def sampling_dot_csr(x, y, p):
+            assert x.shape[1] == y.shape[1]
+            assert p.shape == (x.shape[0], y.shape[0])
+
+            n_row = p.shape[0]
+            k_dim = x.shape[1]
+            p_indices = p.indices.view(np.uint32)
+            p_indptr = p.indptr.view(np.uint32)
+
+            nnz = len(p_indices)
+            z_indptr = np.empty(n_row + 1, dtype=np.int32)
+            z_indices = np.empty(nnz, dtype=np.int32)
+            z_data = np.zeros(nnz, dtype=out_dtype)
+
+            z_indptr[0] = 0
+            for i in range(n_row):
+                for p_idx in range(p_indptr[i], p_indptr[i + 1]):
+                    j = p_indices[p_idx]
+                    dot_ij = 0.0
+                    for k in range(k_dim):
+                        dot_ij += x[i, k] * y[j, k]
+                    z_indices[p_idx] = j
+                    z_data[p_idx] = p.data[p_idx] * dot_ij
+                z_indptr[i + 1] = p_indptr[i + 1]
+
+            return sp.csr_matrix((z_data, z_indices, z_indptr), shape=p.shape)
+
+        return sampling_dot_csr
+    else:
+
+        @numba_basic.numba_njit
+        def sampling_dot_csc(x, y, p):
+            assert x.shape[1] == y.shape[1]
+            assert p.shape == (x.shape[0], y.shape[0])
+
+            n_col = p.shape[1]
+            k_dim = x.shape[1]
+            p_indices = p.indices.view(np.uint32)
+            p_indptr = p.indptr.view(np.uint32)
+            p_data = p.data
+
+            nnz = len(p_indices)
+            z_indptr = np.empty(n_col + 1, dtype=np.int32)
+            z_indices = np.empty(nnz, dtype=np.int32)
+            z_data = np.zeros(nnz, dtype=out_dtype)
+
+            z_indptr[0] = 0
+            for j in range(n_col):
+                for p_idx in range(p_indptr[j], p_indptr[j + 1]):
+                    i = p_indices[p_idx]
+                    dot_ij = 0.0
+                    for k in range(k_dim):
+                        dot_ij += x[i, k] * y[j, k]
+                    z_indices[p_idx] = i
+                    z_data[p_idx] = p_data[p_idx] * dot_ij
+                z_indptr[j + 1] = p_indptr[j + 1]
+
+            return sp.csc_matrix((z_data, z_indices, z_indptr), shape=p.shape)
+
+        return sampling_dot_csc

@@ -323,3 +323,21 @@ def test_usmm(alpha_shape, x_format, y_format):
     compare_numba_and_py_sparse(
         [alpha, x, y, z], out, [alpha_test, x_test, y_test, z_test]
     )
+
+
+@pytest.mark.parametrize("p_format", ["csr", "csc"])
+def test_sampling_dot(p_format):
+    x_shape = (11, 13)
+    y_shape = (17, 13)
+    p_shape = (x_shape[0], y_shape[0])
+
+    x = pt.matrix(name="x", shape=x_shape)
+    y = pt.matrix(name="y", shape=y_shape)
+    p = ps.matrix(format=p_format, name="p", shape=p_shape)
+    z = ps.sampling_dot(x, y, p)
+
+    x_test = np.random.normal(size=x_shape)
+    y_test = np.random.normal(size=y_shape)
+    p_test = scipy.sparse.random(*p_shape, density=0.27, format=p_format)
+
+    compare_numba_and_py_sparse([x, y, p], z, [x_test, y_test, p_test])
