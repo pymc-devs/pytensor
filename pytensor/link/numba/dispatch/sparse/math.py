@@ -14,6 +14,7 @@ from pytensor.sparse import (
     Dot,
     SparseDenseMultiply,
     SparseDenseVectorMultiply,
+    SparseSparseMultiply,
     SpSum,
     StructuredDot,
     StructuredDotGradCSC,
@@ -647,3 +648,104 @@ def numba_funcify_StructuredDotGrad(op, node, **kwargs):
             return output
 
         return grad_spmspm_csc, cache_key
+
+
+@register_funcify_default_op_cache_key(SparseSparseMultiply)
+def numba_funcify_SparseSparseMultiply(op, node, **kwargs):
+    _, y = node.inputs
+    [z] = node.outputs
+    out_dtype = z.type.dtype
+    out_format = z.type.format
+    y_format = y.type.format
+
+    # `out_format` is equal to `x.format`. We only convert `y`, if needed.
+    # This is a single pass implementation. We may trade memory for fewer passes.
+    # The number of nonzeros is the "intersection" of nonzeros
+    if out_format == "csr":
+
+        @numba_basic.numba_njit
+        def multiply_s_s_csr(x, y):
+            assert x.shape == y.shape
+            if y_format != "csr":
+                y = y.tocsr()
+
+            n_row = x.shape[0]
+            x_indices = x.indices.view(np.uint32)
+            y_indices = y.indices.view(np.uint32)
+            x_indptr = x.indptr.view(np.uint32)
+            y_indptr = y.indptr.view(np.uint32)
+
+            output_capacity = min(len(x_indices), len(y_indices))
+            z_indptr = np.empty(n_row + 1, dtype=np.int32)
+            z_indices = np.empty(output_capacity, dtype=np.int32)
+            z_data = np.empty(output_capacity, dtype=out_dtype)
+
+            nnz = 0
+            z_indptr[0] = 0
+            for i in range(n_row):
+                x_ptr = x_indptr[i]
+                y_ptr = y_indptr[i]
+                while x_ptr < x_indptr[i + 1] and y_ptr < y_indptr[i + 1]:
+                    x_j = x_indices[x_ptr]
+                    y_j = y_indices[y_ptr]
+                    if x_j == y_j:
+                        z_indices[nnz] = x_j
+                        z_data[nnz] = x.data[x_ptr] * y.data[y_ptr]
+                        nnz += 1
+                        x_ptr += 1
+                        y_ptr += 1
+                    elif x_j < y_j:
+                        x_ptr += 1
+                    else:
+                        y_ptr += 1
+                z_indptr[i + 1] = nnz
+
+            return sp.csr_matrix(
+                (z_data[:nnz], z_indices[:nnz], z_indptr), shape=x.shape
+            )
+
+        return multiply_s_s_csr
+    else:
+
+        @numba_basic.numba_njit
+        def multiply_s_s_csc(x, y):
+            assert x.shape == y.shape
+            if y_format != "csc":
+                y = y.tocsc()
+
+            n_col = x.shape[1]
+            x_indices = x.indices.view(np.uint32)
+            y_indices = y.indices.view(np.uint32)
+            x_indptr = x.indptr.view(np.uint32)
+            y_indptr = y.indptr.view(np.uint32)
+
+            output_capacity = min(len(x_indices), len(y_indices))
+            z_indptr = np.empty(n_col + 1, dtype=np.int32)
+            z_indices = np.empty(output_capacity, dtype=np.int32)
+            z_data = np.empty(output_capacity, dtype=out_dtype)
+
+            nnz = 0
+            z_indptr[0] = 0
+            for j in range(n_col):
+                x_ptr = x_indptr[j]
+                y_ptr = y_indptr[j]
+                while x_ptr < x_indptr[j + 1] and y_ptr < y_indptr[j + 1]:
+                    x_i = x_indices[x_ptr]
+                    y_i = y_indices[y_ptr]
+                    if x_i == y_i:
+                        z_indices[nnz] = x_i
+                        z_data[nnz] = x.data[x_ptr] * y.data[y_ptr]
+                        nnz += 1
+                        x_ptr += 1
+                        y_ptr += 1
+                    elif x_i < y_i:
+                        x_ptr += 1
+                    else:
+                        y_ptr += 1
+                z_indptr[j + 1] = nnz
+
+            return sp.csc_matrix(
+                (z_data[:nnz], z_indices[:nnz], z_indptr), shape=x.shape
+            )
+
+        return multiply_s_s_csc

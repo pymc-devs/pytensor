@@ -130,3 +130,52 @@ def test_sparse_sum(format, axis):
     x_test = scipy.sparse.random(7, 5, density=0.4, format=format)
 
     compare_numba_and_py_sparse([x], z, [x_test])
+
+
+@pytest.mark.parametrize("x_format", ["csr", "csc"])
+@pytest.mark.parametrize("y_format", ["csr", "csc"])
+def test_sparse_sparse_multiply(x_format, y_format):
+    x = ps.matrix(x_format, name="x", shape=(11, 17))
+    y = ps.matrix(y_format, name="y", shape=(11, 17))
+    z = ps.multiply(x, y)
+
+    x_test = scipy.sparse.random(11, 17, density=0.3, format=x_format)
+    y_test = scipy.sparse.random(11, 17, density=0.5, format=y_format)
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+@pytest.mark.parametrize("y_shape", [(), (13,), (11, 13)])
+def test_multiply_sparse_dense_dispatch(y_shape, format):
+    x = ps.matrix(format=format, name="x", shape=(11, 13))
+    y = pt.tensor("y", shape=y_shape)
+    z = ps.multiply(x, y)
+
+    expected_op = (
+        ps.SparseDenseVectorMultiply if len(y_shape) == 1 else ps.SparseDenseMultiply
+    )
+    assert isinstance(z.owner.op, expected_op)
+
+    x_test = scipy.sparse.random(11, 13, density=0.37, format=format)
+    y_test = np.random.normal(size=y_shape)
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
+
+
+@pytest.mark.parametrize("format", ["csr", "csc"])
+@pytest.mark.parametrize("x_shape", [(), (17,), (11, 17)])
+def test_multiply_dense_sparse_dispatch(x_shape, format):
+    x = pt.tensor("x", shape=x_shape)
+    y = ps.matrix(format=format, name="y", shape=(11, 17))
+    z = ps.multiply(x, y)
+
+    expected_op = (
+        ps.SparseDenseVectorMultiply if len(x_shape) == 1 else ps.SparseDenseMultiply
+    )
+    assert isinstance(z.owner.op, expected_op)
+
+    x_test = np.random.normal(size=x_shape)
+    y_test = scipy.sparse.random(11, 17, density=0.4, format=format)
+
+    compare_numba_and_py_sparse([x, y], z, [x_test, y_test])
