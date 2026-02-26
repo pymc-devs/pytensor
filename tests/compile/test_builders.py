@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
+from pytensor import Mode
 from pytensor.compile import shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
@@ -18,6 +19,7 @@ from pytensor.gradient import (
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.null_type import NullType, null_type
+from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
@@ -711,6 +713,181 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         g = OpFromGraph([x, x, y], [x + y], on_unused_input="ignore")
         f = g(x, x, y)
         assert f.eval({x: 5, y: 5}) == 10
+
+    def test_equality_and_hashing(self):
+        x, y = dscalars("x", "y")
+        e = x + y * x
+
+        op1 = OpFromGraph([x, y], [e])
+        op2 = OpFromGraph([x, y], [e])
+
+        # Same output with same inputs are equal with consistent hash
+        assert op1 == op2
+        assert hash(op1) == hash(op2)
+        assert {op1: "v"}[op2] == "v"
+
+        # Different graphs are not equal
+        op_different = OpFromGraph([x, y], [x * y + x])
+        assert op1 != op_different
+
+        # inline flag participates in equality
+        op_inline = OpFromGraph([x, y], [e], inline=True)
+        assert op1 != op_inline
+
+        # destroy_map participates in equality
+        op_destroy = OpFromGraph([x, y], [e], destroy_map={0: (0,)})
+        assert op1 != op_destroy
+
+        # Multi-output OFGs are also hashed and compared based on their inner graph structure
+        op_multi1 = OpFromGraph([x, y], [x + y, x * y])
+        op_multi2 = OpFromGraph([x, y], [x + y, x * y])
+        assert op_multi1 == op_multi2
+
+        # OFG is hashable, and different OFGs have different hashes
+        assert hash(op1) != hash(op_inline)
+
+    def test_equality_shared_variables(self):
+        x = scalar("x")
+        s = shared(np.array(1.0, dtype=config.floatX))
+
+        op1 = OpFromGraph([x], [x + s])
+        op2 = OpFromGraph([x], [x + s])
+        assert op1 == op2
+
+        # Same value, different shared object -> not equal
+        s2 = shared(np.array(1.0, dtype=config.floatX))
+        op3 = OpFromGraph([x], [x + s2])
+        assert op1 != op3
+
+    def test_equality_callable_overrides(self):
+        x, y = dscalars("x", "y")
+        e = x + y
+
+        op_plain = OpFromGraph([x, y], [e])
+
+        # lop override present vs absent
+        op_with_lop = OpFromGraph(
+            [x, y],
+            [e],
+            lop_overrides=lambda inps, outs, grads: [grads[0], grads[0]],
+        )
+        assert op_plain != op_with_lop
+
+        # Structurally identical callable overrides are equal
+        op_with_lop2 = OpFromGraph(
+            [x, y],
+            [e],
+            lop_overrides=lambda inps, outs, grads: [grads[0], grads[0]],
+        )
+        assert op_with_lop == op_with_lop2
+
+        # Structurally different callable override are not equal
+        op_with_lop3 = OpFromGraph(
+            [x, y],
+            [e],
+            lop_overrides=lambda inps, outs, grads: [grads[0] * 2, grads[0]],
+        )
+        assert op_with_lop != op_with_lop3
+
+        # Overrides returning disconnected_type for different inputs are not equal
+        op_disc_y = OpFromGraph(
+            [x, y],
+            [e],
+            lop_overrides=lambda inps, outs, grads: [grads[0], disconnected_type()],
+        )
+        op_disc_x = OpFromGraph(
+            [x, y],
+            [e],
+            lop_overrides=lambda inps, outs, grads: [disconnected_type(), grads[0]],
+        )
+        assert op_disc_y != op_disc_x
+
+        # Same disconnected pattern is equal
+        op_disc_y2 = OpFromGraph(
+            [x, y],
+            [e],
+            lop_overrides=lambda inps, outs, grads: [grads[0], disconnected_type()],
+        )
+        assert op_disc_y == op_disc_y2
+
+        # All disconnected is still an override — not equal to no override
+        op_all_disc = OpFromGraph(
+            [x, y],
+            [e],
+            lop_overrides=lambda inps, outs, grads: [
+                disconnected_type(),
+                disconnected_type(),
+            ],
+        )
+        assert op_all_disc != op_plain
+        assert op_all_disc != op_disc_y
+
+        # rop override follows the same logic
+        op_with_rop = OpFromGraph(
+            [x, y],
+            [e],
+            rop_overrides=lambda inps, epts: [epts[0] + epts[1]],
+        )
+        op_with_rop2 = OpFromGraph(
+            [x, y],
+            [e],
+            rop_overrides=lambda inps, epts: [epts[0] + epts[1]],
+        )
+        assert op_with_rop == op_with_rop2
+        assert op_with_rop != op_plain
+
+    def test_equality_list_overrides(self):
+        x, y = dscalars("x", "y")
+        e = x + y
+
+        def scale_grad(inps, outs, grads):
+            return grads[0] * 2
+
+        op1 = OpFromGraph([x, y], [e], lop_overrides=[scale_grad, None])
+        op2 = OpFromGraph([x, y], [e], lop_overrides=[scale_grad, None])
+        assert op1 == op2
+
+        def scale_grad_3x(inps, outs, grads):
+            return grads[0] * 3
+
+        op3 = OpFromGraph([x, y], [e], lop_overrides=[scale_grad_3x, None])
+        assert op1 != op3
+
+        # Position of None vs callable matters
+        op4 = OpFromGraph([x, y], [e], lop_overrides=[None, scale_grad])
+        assert op1 != op4
+
+    def test_merge_identical_ofgs(self):
+        x, y = dscalars("x", "y")
+        e = x + y * x
+
+        op1 = OpFromGraph([x, y], [e])
+        op2 = OpFromGraph([x, y], [e])
+
+        a, b = dscalars("a", "b")
+
+        # Two OFG with the same inputs are collapsed to one node by MergeOptimizer
+        fg = FunctionGraph([a, b], [op1(a, b), op2(a, b)])
+        MergeOptimizer().rewrite(fg)
+        ofg_nodes = [n for n in fg.toposort() if isinstance(n.op, OpFromGraph)]
+        assert len(ofg_nodes) == 1
+
+        # Different inputs are different graphs, so both nodes survive
+        c, d = dscalars("c", "d")
+        fg = FunctionGraph([a, b, c, d], [op1(a, b), op2(c, d)])
+        MergeOptimizer().rewrite(fg)
+        ofg_nodes = [n for n in fg.toposort() if isinstance(n.op, OpFromGraph)]
+        assert len(ofg_nodes) == 2
+
+        # Check numerics to make sure the merged OFG is correct
+        fn = function(
+            [a, b, c, d],
+            [op1(a, b), op2(c, d)],
+            mode=Mode(optimizer="merge", linker="py"),
+        )
+        r1, r2 = fn(2.0, 3.0, 4.0, 5.0)
+        np.testing.assert_allclose(r1, 2.0 + 3.0 * 2.0)
+        np.testing.assert_allclose(r2, 4.0 + 5.0 * 4.0)
 
 
 @config.change_flags(floatX="float64")

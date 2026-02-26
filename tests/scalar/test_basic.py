@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import pytest
 
@@ -91,6 +93,24 @@ class TestComposite:
         CC = Composite([x, y, z], [C(x * y, y), C(x * z, y)])
         # We don't flatten that case.
         assert isinstance(CC.outputs[0].owner.op, Composite)
+
+    def test_shared_identity(self):
+        x, y = floats("xy")
+        c1 = Composite([x, y], [x + y])
+        c2 = Composite([x, y], [x + y])
+        assert c1 == c2
+        assert hash(c1) == hash(c2)
+        assert {c1: 1}[c2] == 1
+
+        c3 = Composite([x, y], [x * y])
+        assert c1 != c3
+
+    def test_pickle_roundtrip(self):
+        x, y = floats("xy")
+        c = Composite([x, y], [x + y])
+        c2 = pickle.loads(pickle.dumps(c))
+        assert c == c2
+        assert hash(c) == hash(c2)
 
     @pytest.mark.parametrize("literal_value", (70.0, -np.inf, np.float32("nan")))
     def test_with_constants(self, literal_value):

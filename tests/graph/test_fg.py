@@ -771,3 +771,84 @@ class TestFunctionGraph:
         cap_out = capsys.readouterr().out
         assert "y->z" not in cap_out
         assert "z->y" not in cap_out
+
+
+class TestFrozenFunctionGraph:
+    def test_hashability_and_comparison(self):
+        var1, var2 = MyVariable("x"), MyVariable("y")
+
+        ffg1 = FunctionGraph([var1, var2], [op1(var1, var2)]).freeze()
+        ffg2 = FunctionGraph([var1, var2], [op1(var1, var2)]).freeze()
+        ffg_different = FunctionGraph([var1, var2], [op2(var1, var2)]).freeze()
+
+        assert ffg1 == ffg2
+        assert hash(ffg1) == hash(ffg2)
+        assert ffg1 != ffg_different
+
+        assert {ffg1: "value"}[ffg2] == "value"
+        assert len({ffg1, ffg2}) == 1
+
+    def test_nominal_inputs_renumbered(self):
+        """Inputs are always renumbered 0..n regardless of original ids."""
+        t = MyType()
+        nm5, nm10 = NominalVariable(5, t), NominalVariable(10, t)
+
+        ffg = FunctionGraph([nm5, nm10], [op1(nm5, nm10)]).freeze()
+        assert [inp.id for inp in ffg.inputs] == [0, 1]
+
+    def test_deduplication(self):
+        var1 = MyVariable("x")
+
+        dup1, dup2 = op1(var1), op1(var1)
+        frozen = FunctionGraph([var1], [op2(dup1, dup2)]).freeze()
+        assert {n.op for n in frozen.apply_nodes} == {op1, op2}
+
+        c1 = MyConstant("c", data=42)
+        c2 = MyConstant("c", data=42)
+        frozen_const = FunctionGraph(
+            [var1], [op2(op1(var1, c1), op1(var1, c2))]
+        ).freeze()
+        assert {n.op for n in frozen_const.apply_nodes} == {op1, op2}
+
+    def test_input_passed_directly_to_output(self):
+        var1 = MyVariable("x")
+        frozen = FunctionGraph([var1], [var1]).freeze()
+
+        assert frozen.apply_nodes == set()
+        assert isinstance(frozen.outputs[0], NominalVariable)
+
+    def test_cross_graph_output_identity(self):
+        var1, var2 = MyVariable("x"), MyVariable("y")
+        ffg1 = FunctionGraph([var1, var2], [op1(var1, var2)]).freeze()
+        ffg2 = FunctionGraph([var1, var2], [op1(var1, var2)]).freeze()
+
+        assert all(a is b for a, b in zip(ffg1.outputs, ffg2.outputs))
+
+    def test_pickle_round_trip(self):
+        from pytensor.scalar.basic import add, float64, mul
+
+        x, y = float64("x"), float64("y")
+        ffg = FunctionGraph([x, y], [mul(add(x, y), y)]).freeze()
+
+        ffg2 = pickle.loads(pickle.dumps(ffg))
+        assert ffg == ffg2
+        assert hash(ffg) == hash(ffg2)
+        # Interned objects survive pickle
+        assert all(o1 is o2 for o1, o2 in zip(ffg.outputs, ffg2.outputs))
+
+    def test_orphan_non_constant_raises(self):
+        from pytensor.graph.fg import FrozenFunctionGraph
+
+        var1 = MyVariable("x")
+        orphan = MyVariable("orphan")
+        out = op1(var1, orphan)
+        with pytest.raises(ValueError, match=r"Non-Constant.*orphan"):
+            FrozenFunctionGraph([var1], [out])
+
+    def test_unmapped_output_raises(self):
+        from pytensor.graph.fg import FrozenFunctionGraph
+
+        var1 = MyVariable("x")
+        disconnected = MyVariable("disconnected")
+        with pytest.raises(ValueError, match="could not be mapped"):
+            FrozenFunctionGraph([var1], [disconnected])

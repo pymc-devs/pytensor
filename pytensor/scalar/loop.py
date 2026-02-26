@@ -67,13 +67,18 @@ class ScalarLoop(ScalarInnerGraphOp):
             inputs, outputs = clone([*init, *constant], update)
 
         self.is_while = until is not None
-        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
-        self._validate_updates(self.inputs, self.outputs)
 
-        self.inputs_type = tuple(input.type for input in self.inputs)
-        self.outputs_type = tuple(output.type for output in self.outputs)
-        self.nin = len(self.inputs) + 1  # n_steps is not part of the inner graph
-        self.nout = len(self.outputs)
+        fgraph = FunctionGraph(inputs, outputs)
+        self._validate_inner_graph(fgraph)
+        self._fgraph = fgraph.freeze()
+        self._validate_updates(self._fgraph.inputs, self._fgraph.outputs)
+
+        self.inputs_type = tuple(inp.type for inp in self._fgraph.inputs)
+        self.outputs_type = tuple(out.type for out in self._fgraph.outputs)
+        self.nin = (
+            len(self._fgraph.inputs) + 1
+        )  # n_steps is not part of the inner graph
+        self.nout = len(self._fgraph.outputs)
         self.name = name
 
         super().__init__(**kwargs)
@@ -107,13 +112,15 @@ class ScalarLoop(ScalarInnerGraphOp):
             )
 
     @property
+    def inputs(self):
+        return self._fgraph.inputs
+
+    @property
+    def outputs(self):
+        return self._fgraph.outputs
+
+    @property
     def fgraph(self):
-        if hasattr(self, "_fgraph"):
-            return self._fgraph
-        # fgraph cannot be a property of the base class because it messes up with C caching.
-        # We also need a `FunctionGraph(clone=True)` (default) according to an old comment
-        fgraph = FunctionGraph(self.inputs, self.outputs)
-        self._fgraph = fgraph
         return self._fgraph
 
     def clone(self, name=None, **kwargs):
