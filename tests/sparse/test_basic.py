@@ -29,7 +29,6 @@ from pytensor.sparse.basic import (
     Remove0,
     SparseFromDense,
     SparseTensorType,
-    SquareDiagonal,
     Transpose,
     VStack,
     _is_sparse,
@@ -966,42 +965,33 @@ class TestDiag(utt.InferShapeTester):
             verify_grad_sparse(self.op, data, structured=False)
 
 
-class TestSquareDiagonal(utt.InferShapeTester):
-    def setup_method(self):
-        super().setup_method()
-        self.op_class = SquareDiagonal
-        self.op = square_diagonal
-
+class TestSquareDiagonal:
     def test_op(self):
-        for format in sparse.sparse_formats:
-            for size in range(5, 9):
-                variable = [vector()]
-                data = [np.random.random(size).astype(config.floatX)]
+        x = vector(dtype=config.floatX)
+        y = square_diagonal(x)
+        f = pytensor.function([x], y)
 
-                f = pytensor.function(variable, self.op(*variable))
-                tested = f(*data).toarray()
+        size = 11
+        values = np.random.random(size).astype(config.floatX)
+        tested = f(values)
 
-                expected = np.diag(*data)
-                utt.assert_allclose(expected, tested)
-                assert tested.dtype == expected.dtype
-                assert tested.shape == expected.shape
-
-    def test_infer_shape(self):
-        for format in sparse.sparse_formats:
-            for size in range(5, 9):
-                variable = [vector()]
-                data = [np.random.random(size).astype(config.floatX)]
-
-                self._compile_and_check(
-                    variable, [self.op(*variable)], data, self.op_class
-                )
+        assert tested.format == "csc"
+        utt.assert_allclose(tested.toarray(), np.diag(values))
+        assert tuple(tested.shape) == (values.size, values.size)
+        np.testing.assert_array_equal(
+            tested.indices, np.arange(values.size, dtype="int32")
+        )
+        np.testing.assert_array_equal(
+            tested.indptr, np.arange(values.size + 1, dtype="int32")
+        )
 
     def test_grad(self):
-        for format in sparse.sparse_formats:
-            for size in range(5, 9):
-                data = [np.random.random(size).astype(config.floatX)]
+        values = [np.random.random(13).astype(config.floatX)]
+        verify_grad_sparse(square_diagonal, values, structured=False)
 
-                verify_grad_sparse(self.op, data, structured=False)
+    def test_rejects_non_vector_input(self):
+        with pytest.raises(TypeError, match="data argument must be a vector"):
+            square_diagonal(matrix(dtype=config.floatX))
 
 
 class TestEnsureSortedIndices(utt.InferShapeTester):
