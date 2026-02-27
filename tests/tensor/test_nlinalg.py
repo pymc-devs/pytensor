@@ -777,18 +777,13 @@ class TestKron(utt.InferShapeTester):
         [(0, (2, 3), (6, 7)), (1, (2, 3), (4, 3, 5)), (2, (2, 4, 3), (4, 3, 5))],
     )
     def test_kron_commutes_with_inv(self, i, shp0, shp1):
-        """Test that kron commutes with matrix inverse."""
         if (pytensor.config.floatX == "float32") & (i == 2):
             pytest.skip("Half precision insufficient for test 3 to pass")
-
-        x = tensor(dtype="floatX", shape=shp0)
+        x = tensor(dtype="floatX", shape=(None,) * len(shp0))
         a = np.asarray(self.rng.random(shp0)).astype(config.floatX)
-
-        y = tensor(dtype="floatX", shape=shp1)
+        y = tensor(dtype="floatX", shape=(None,) * len(shp1))
         b = self.rng.random(shp1).astype(config.floatX)
-
         lhs_f = function([x, y], pinv(kron(x, y)))
         rhs_f = function([x, y], kron(pinv(x), pinv(y)))
-
         atol = 1e-4 if config.floatX == "float32" else 1e-12
         np.testing.assert_allclose(lhs_f(a, b), rhs_f(a, b), atol=atol)
