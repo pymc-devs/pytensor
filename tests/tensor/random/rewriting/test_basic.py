@@ -5,6 +5,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config, shared
+from pytensor.compile import get_default_mode
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.graph.basic import Constant, Variable
@@ -30,10 +31,12 @@ from pytensor.tensor.random.rewriting import (
     local_rv_size_lift,
     local_subtensor_rv_lift,
 )
+from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
 from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
 from pytensor.tensor.type import iscalar, vector
 from pytensor.tensor.type_other import NoneConst
+from tests.unittest_tools import assert_equal_computations
 
 
 no_mode = Mode("py", RewriteDatabaseQuery(include=[], exclude=[]))
@@ -124,13 +127,13 @@ def test_inplace_rewrites(rv_op):
     out = rv_op(np.e)
     node = out.owner
     op = node.op
-    node.inputs[0].default_update = node.outputs[0]
     assert op.inplace is False
 
     f = function(
         [],
         out,
         mode="FAST_RUN",
+        updates={node.inputs[0]: node.outputs[0]},
     )
 
     (new_out, _new_rng) = f.maker.fgraph.outputs
@@ -974,3 +977,34 @@ def test_Dimshuffle_lift_rename(ds_order, lifted, dist_op, dist_params, size, rt
     )
 
     assert new_out.name == "test_name_lifted"
+
+
+def test_unused_rng():
+    rng = random_generator_type("rng")
+    next_rng, x = rng.normal([0], [1], size=3)
+    next_rng, _y = next_rng.normal(x.ones_like(), [1])
+    final_rng, z = next_rng.normal(1, 2)
+
+    fn = function([rng], [final_rng, z], mode=get_default_mode().excluding("inplace"))
+
+    assert_equal_computations(
+        fn.maker.fgraph.outputs,
+        pt.random.normal(1, 2, rng=rng, return_next_rng=True),
+    )
+
+    fn = function(
+        [rng],
+        [final_rng, z],
+        mode=get_default_mode().excluding("inplace", "random_unsafe"),
+    )
+
+    # Rebuild expected graph
+    rng.tag.used = False  # Avoid reuse warnings
+    next_rng, _x = rng.normal([0], [1], size=3)
+    next_rng, _y = next_rng.normal([1.0, 1.0, 1.0], [1])
+    final_rng, z = next_rng.normal(1, 2)
+
+    assert assert_equal_computations(
+        fn.maker.fgraph.outputs,
+        [final_rng, z],
+    )

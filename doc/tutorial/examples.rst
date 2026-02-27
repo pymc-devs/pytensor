@@ -362,45 +362,34 @@ Here's a brief example.  The setup code is:
 
 .. testcode::
 
-    from pytensor.tensor.random.utils import RandomStream
+    from pytensor.tensor.random import rng
     from pytensor import function
 
 
-    srng = RandomStream(seed=234)
-    rv_u = srng.uniform(0, 1, size=(2,2))
-    rv_n = srng.normal(0, 1, size=(2,2))
-    f = function([], rv_u)
-    g = function([], rv_n, no_default_updates=True)
-    nearly_zeros = function([], rv_u + rv_u - 2 * rv_u)
+    srng = rng("rng")
+    next_srng, rv_u = srng.uniform(0, 1, size=(2,2))
+    final_srng = next_srng.normal(0, 1, size=(2,2))
+    f = function([srng], [rv_u])
 
 Here, ``rv_u`` represents a random stream of 2x2 matrices of draws from a uniform
 distribution.  Likewise,  ``rv_n`` represents a random stream of 2x2 matrices of
 draws from a normal distribution.  The distributions that are implemented are
 defined as :class:`RandomVariable`\s
-in :ref:`basic<libdoc_tensor_random_basic>`. They only work on CPU.
+in :ref:`basic<libdoc_tensor_random_basic>`.
 
 
-Now let's use these objects.  If we call ``f()``, we get random uniform numbers.
-The internal state of the random number generator is automatically updated,
-so we get different random numbers every time.
+Now let's use these objects.  If we call ``f()``, with a numpy generator we get random uniform numbers.
+Unlike numpy, PyTensor does not mutate the random generator so we get the same results when called sequentially.
 
->>> f_val0 = f()
->>> f_val1 = f()  #different numbers from f_val0
+>>> rng_np = np.random.default_rng(123)
+>>> f_val0 = f(rng_np)
+>>> f_val1 = f(rng_np)  #different numbers from f_val0
 
-When we add the extra argument ``no_default_updates=True`` to
-``function`` (as in ``g``), then the random number generator state is
-not affected by calling the returned function.  So, for example, calling
-``g`` multiple times will return the same numbers.
+We can tell PyTensor it's safe to mutate the rng by compiling a function like this
 
->>> g_val0 = g()  # different numbers from f_val0 and f_val1
->>> g_val1 = g()  # same numbers as g_val0!
-
-An important remark is that a random variable is drawn at most once during any
-single function execution.  So the `nearly_zeros` function is guaranteed to
-return approximately 0 (except for rounding error) even though the ``rv_u``
-random variable appears three times in the output expression.
-
->>> nearly_zeros = function([], rv_u + rv_u - 2 * rv_u)
+>>> g = function([pytensor.In(srng, mutable=True)], [rv_u])
+>>> g_val0 = g(rng_np)  # different numbers in subsequent calls with the same rng
+>>> g_val1 = g(rng_np)
 
 Seeding Streams
 ---------------

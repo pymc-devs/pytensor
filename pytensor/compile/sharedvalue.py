@@ -1,6 +1,7 @@
 """Provide a simple user friendly API to PyTensor-managed memory."""
 
 import copy
+import warnings
 from contextlib import contextmanager
 from functools import singledispatch
 from typing import TYPE_CHECKING
@@ -161,6 +162,7 @@ class SharedVariable(Variable):
 
     @default_update.setter
     def default_update(self, value):
+        warnings.warn("Setting default_update is deprecated.", DeprecationWarning)
         if value is not None:
             self._default_update = self.type.filter_variable(value, allow_convert=True)
         else:

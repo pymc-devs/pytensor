@@ -4,3 +4,4 @@ import pytensor.tensor.random.utils
 from pytensor.tensor.random.basic import *
 from pytensor.tensor.random.op import default_rng
 from pytensor.tensor.random.utils import RandomStream
+from pytensor.tensor.random.variable import rng

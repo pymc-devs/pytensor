@@ -285,7 +285,7 @@ class NormalRV(RandomVariable):
 normal = NormalRV()
 
 
-def standard_normal(*, size=None, rng=None, dtype=None):
+def standard_normal(*, size=None, rng=None, dtype=None, **kwargs):
     """Draw samples from a standard normal distribution.
 
     Signature
@@ -302,7 +302,7 @@ def standard_normal(*, size=None, rng=None, dtype=None):
         is returned.
 
     """
-    return normal(0.0, 1.0, size=size, rng=rng, dtype=dtype)
+    return normal(0.0, 1.0, size=size, rng=rng, dtype=dtype, **kwargs)
 
 
 class HalfNormalRV(ScipyRandomVariable):
@@ -516,7 +516,7 @@ def chisquare(df, size=None, **kwargs):
     return gamma(shape=df / 2.0, scale=2.0, size=size, **kwargs)
 
 
-def rayleigh(scale=1.0, *, size=None, **kwargs):
+def rayleigh(scale=1.0, *, size=None, return_next_rng=False, **kwargs):
     r"""Draw samples from a Rayleigh distribution.
 
     The probability density function for `rayleigh` with parameter `scale` is given by:
@@ -550,7 +550,13 @@ def rayleigh(scale=1.0, *, size=None, **kwargs):
     scale = as_tensor_variable(scale)
     if size is None:
         size = scale.shape
-    return sqrt(chisquare(df=2, size=size, **kwargs)) * scale
+    next_rng, chisquare_draws = chisquare(
+        df=2, size=size, return_next_rng=True, **kwargs
+    )
+    rayleigh_draws = sqrt(chisquare_draws) * scale
+    if return_next_rng:
+        return next_rng, rayleigh_draws
+    return rayleigh_draws
 
 
 class ParetoRV(ScipyRandomVariable):
@@ -1986,7 +1992,7 @@ class ChoiceWithoutReplacement(RandomVariable):
         return out
 
 
-def choice(a, size=None, replace=True, p=None, rng=None):
+def choice(a, size=None, replace=True, p=None, rng=None, return_next_rng=False):
     r"""Generate a random sample from an array.
 
 
@@ -2016,17 +2022,23 @@ def choice(a, size=None, replace=True, p=None, rng=None):
         # This is equivalent to the numpy implementation:
         # https://github.com/numpy/numpy/blob/2a9b9134270371b43223fc848b753fceab96b4a5/numpy/random/_generator.pyx#L905-L914
         if p is None:
-            idxs = integers(0, a_size, size=size, rng=rng)
+            next_rng, idxs = integers(
+                0, a_size, size=size, rng=rng, return_next_rng=True
+            )
         else:
-            idxs = categorical(p, size=size, rng=rng)
+            next_rng, idxs = categorical(p, size=size, rng=rng, return_next_rng=True)
 
         if a.type.ndim == 0:
             # A was an implicit arange, we don't need to do any indexing
             # TODO: Add rewrite for this optimization if users passed arange
-            return idxs
-
-        # TODO: Can use take(a, idxs, axis) to support numpy axis argument to choice
-        return a[idxs]
+            out = idxs
+        else:
+            # TODO: Can use take(a, idxs, axis) to support numpy axis argument to choice
+            out = a[idxs]
+        if return_next_rng:
+            return next_rng, out
+        else:
+            return out
 
     # Sampling with p is not as trivial
     # It involves some form of rejection sampling or iterative shuffling under the hood.
@@ -2063,7 +2075,7 @@ def choice(a, size=None, replace=True, p=None, rng=None):
     op = ChoiceWithoutReplacement(signature=signature, dtype=dtype)
 
     params = (a, core_shape) if p is None else (a, p, core_shape)
-    return op(*params, size=None, rng=rng)
+    return op(*params, size=None, rng=rng, return_next_rng=return_next_rng)
 
 
 class PermutationRV(RandomVariable):
