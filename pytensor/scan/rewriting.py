@@ -1461,12 +1461,9 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
 
         # FIXME: This is not correct. Scan with 0 steps seems to be supported
         # Make sure the ScanSaveMem optimization never makes the new
-        # number of steps to be 0 (this could happen, for instance, if
-        # the optimization detects that the outputs of the Scan go through
-        # subtensor nodes that end up taking no elements) because Scan with
-        # 0 iterations are not supported. Make sure the new number of steps
-        # is at least 1.
-        nw_steps = select_max(nw_steps, 1)
+        # number of steps to be 0 ... because Scan with 0 iterations are not supported.
+        # Make sure the new number of steps is at least 1, UNLESS explicitly requested as 0.
+        nw_steps = pt.switch(pt.eq(node.inputs[0], 0), 0, select_max(nw_steps, 1))
 
     # 2.4 Loop over the clients again now looking just to see how many
     # intermediate steps to store
@@ -1748,10 +1745,19 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                             isinstance(old_slices[0], ScalarConstant)
                             and old_slices[0].value == -1
                         ):
-                            position = old_slices[0]
+                            # Bypass the padded uninitialized slot when n_steps=0 by fetching the last initialized tap
+                            position = pt.switch(
+                                pt.eq(node.inputs[0], 0), init_l[pos] - 1, old_slices[0]
+                            )
                         else:
-                            position = (
-                                cnf_slice[0] - nw_steps - init_l[pos] + store_steps[pos]
+                            # Bypass the buffer shift when n_steps=0, mapping directly to the canonical tap index
+                            position = pt.switch(
+                                pt.eq(node.inputs[0], 0),
+                                cnf_slice[0],
+                                cnf_slice[0]
+                                - nw_steps
+                                - init_l[pos]
+                                + store_steps[pos],
                             )
 
                         nw_slice = (sanitize(position), *old_slices[1:])
