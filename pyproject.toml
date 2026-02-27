@@ -192,3 +192,67 @@ test-skip = ["*musllinux*", "*i686*"]
 # Testing seems to be running into issues locating libs where expected
 # test-requires = ["pytest", "numba", "jax", "jaxlib"]
 # test-command = "pytest {package}/tests"
+
+[tool.deptry]
+pep621_dev_dependency_groups = ["development", "tests", "rtd"]
+extend_exclude = ["doc", "conftest.py", "versioneer.py", "scripts"]
+
+[tool.deptry.per_rule_ignores]
+# DEP001: Python modules that are imported within a project, for which no
+# corresponding packages are found in the dependencies.
+DEP001=[
+    # Available debuggers are automatically detected, and the first available
+    # is used in the following order: `pudb`, `ipdb`, or `pdb` (stdlib).
+    "pudb",
+    "ipdb",
+
+    # The `mkl` library is used for BLAS when available.
+    "mkl",
+
+    # 'cutils_ext' and 'lazylinker_ext' are dynamically generated code by the C backend.
+    "cutils_ext",
+    "lazylinker_ext",
+
+    # 'numpyro' is an optional backend.
+    "numpyro",
+
+    # 'llvmlite' is only required for the 'numba' backend.
+    "llvmlite",
+
+    # 'tensorflow_probability' provides JAX implementations for some ops.
+    "tensorflow_probability",
+
+    # The 'distutils' import is slated for removal in
+    # <https://github.com/pymc-devs/pytensor/pull/812>
+    "distutils",
+]
+
+# DEP002: Dependencies that are required in a project, but are not used within the
+# codebase.
+DEP002=[
+    # 'jaxlib' is required in the 'jax' group.
+    # jaxlib is the support library for JAX. While JAX itself is a pure Python package,
+    # jaxlib contains the binary (C/C++) parts of the library, including Python
+    # bindings, the XLA compiler, the PJRT runtime, and a handful of handwritten
+    # kernels.
+    "jaxlib",
+]
+
+# DEP004: Dependencies specified as development ones that should be included as
+# regular dependencies.
+DEP004=[
+    # 'pydot' is a Python interface to Graphviz's Dot language, used by d3viz.
+    # See <https://github.com/pymc-devs/pytensor/issues/333>.
+    "pydot",
+
+    # pydot-ng is slated for removal in <https://github.com/pymc-devs/pytensor/pull/341>
+    "pydot_ng",
+]
+
+[tool.deptry.package_module_name_map]
+pydot2 = "pydot2"
+pydot-ng = "pydot_ng"
+jax = "jax"
+jaxlib = "jaxlib"
+numba = "numba"
+llvmlite = "llvmlite"

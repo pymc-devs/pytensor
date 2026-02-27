@@ -50,6 +50,7 @@ core
 /htmlcov/
 
 pytensor-venv/
+venv
 /notebooks/Sandbox*
 .vscode/
 testing-report.html
