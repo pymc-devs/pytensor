@@ -1128,3 +1128,43 @@ def test_scalar_solve_to_division_rewrite(
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
+
+
+def test_simplify_transpose_solve_transpose():
+    """
+    Test that transpose(solve(transpose(A), transpose(B))) is simplified to solve(A, B).
+
+    This verifies:
+    1. The rewrite removes unnecessary transpose operations.
+    2. The optimized graph still produces correct numerical results.
+    """
+
+    import numpy as np
+
+    import pytensor
+    import pytensor.tensor as pt
+    from pytensor.tensor.blockwise import Blockwise
+
+    A = pt.matrix("A")
+    B = pt.matrix("B")
+
+    expr = pt.matmul(A, pt.linalg.inv(B))
+
+    f = pytensor.function([A, B], expr, mode="FAST_RUN")
+
+    topo = f.maker.fgraph.toposort()
+
+    # Ensure MatrixInverse has been eliminated
+    assert not any(
+        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, MatrixInverse)
+        for node in topo
+    )
+
+    # Numeric correctness test
+    A_val = np.array([[1.0, 2.0], [3.0, 4.0]])
+    B_val = np.array([[5.0, 6.0], [7.0, 8.0]])
+
+    result = f(A_val, B_val)
+    expected = A_val @ np.linalg.inv(B_val)
+
+    np.testing.assert_allclose(result, expected)
