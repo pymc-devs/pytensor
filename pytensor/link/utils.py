@@ -313,6 +313,12 @@ def raise_with_op(
         # print a simple traceback from KeyboardInterrupt
         raise exc_value.with_traceback(exc_trace)
 
+    if verbosity == "low":
+        exc_value.add_note(
+            "\nHINT: Set PyTensor `config.exception_verbosity` to `medium` or `high` for more information about the source of the error."
+        )
+        raise exc_value.with_traceback(exc_trace)
+
     trace = getattr(node.outputs[0].tag, "trace", ())
 
     exc_value.__thunk_trace__ = trace
