@@ -55,3 +55,6 @@ pytensor-venv/
 testing-report.html
 coverage.xml
 .coverage.*
+# pixi environments
+.pixi/*
+!.pixi/config.toml
