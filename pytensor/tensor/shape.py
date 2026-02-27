@@ -402,7 +402,7 @@ class SpecifyShape(COp):
     view_map = {0: [0]}
     __props__ = ()
     _f16_ok = True
-    _output_type_depends_on_input_value = True
+    data_dependent_output_shape = True
 
     def make_node(self, x, *shape):
         x = ptb.as_tensor_variable(x)
@@ -638,7 +638,7 @@ class Reshape(COp):
 
     view_map = {0: [0]}  # output 0 is potentially aliased to inputs [0]
     _f16_ok = True
-    _output_type_depends_on_input_value = True
+    data_dependent_output_shape = True
 
     check_input = False
     __props__ = ("ndim",)

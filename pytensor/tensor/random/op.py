@@ -55,7 +55,7 @@ class RandomVariable(RNGConsumerOp):
 
     """
 
-    _output_type_depends_on_input_value = True
+    data_dependent_output_shape = True
 
     __props__ = ("name", "signature", "dtype", "inplace")
     default_output = 1
