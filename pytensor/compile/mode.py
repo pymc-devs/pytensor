@@ -512,7 +512,7 @@ def get_mode(orig_string):
     if upper_string == "FAST_RUN":
         linker = config.linker
         if linker == "auto":
-            return CVM if config.cxx else VM
+            return NUMBA
         return fast_run_linkers_to_mode[linker]
 
     global _CACHED_RUNTIME_MODES
