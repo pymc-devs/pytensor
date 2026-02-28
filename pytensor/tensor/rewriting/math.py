@@ -527,7 +527,7 @@ def local_sqrt_sqr(fgraph, node):
     node_op = node.op.scalar_op
 
     # Case for sqrt(sqr(x)) -> |x|
-    if isinstance(prev_op, ps.Sqrt) and isinstance(node_op, ps.Sqr):
+    if isinstance(prev_op, ps.Sqr) and isinstance(node_op, ps.Sqrt):
         new_out = pt_abs(x.owner.inputs[0])
         old_out = node.outputs[0]
 
@@ -537,7 +537,7 @@ def local_sqrt_sqr(fgraph, node):
         return [new_out]
 
     # Case for sqr(sqrt(x)) -> x
-    if isinstance(prev_op, ps.Sqr) and isinstance(node_op, ps.Sqrt):
+    if isinstance(prev_op, ps.Sqrt) and isinstance(node_op, ps.Sqr):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
         new_out = switch(ge(x, 0), x, np.asarray(np.nan, old_out.dtype))
