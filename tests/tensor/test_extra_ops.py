@@ -252,18 +252,23 @@ class TestCumOp(utt.InferShapeTester):
         f = pytensor.function([x], g)
 
         # Single zero in the middle
-        result = f(np.array([1.0, 0.0, 2.0]))
-        expected = np.array([1.0, 3.0, 0.0])
+        result = f(np.array([3.0, 0.0, 5.0]))
+        expected = np.array([1.0, 18.0, 0.0])
         np.testing.assert_allclose(result, expected)
 
         # Zero at the beginning
-        result = f(np.array([0.0, 2.0, 3.0]))
-        expected = np.array([9.0, 0.0, 0.0])
+        result = f(np.array([0.0, 7.0, 3.0]))
+        expected = np.array([29.0, 0.0, 0.0])
         np.testing.assert_allclose(result, expected)
 
         # Multiple zeros
-        result = f(np.array([1.0, 0.0, 0.0, 2.0]))
-        expected = np.array([1.0, 1.0, 0.0, 0.0])
+        result = f(np.array([3.0, 0.0, 0.0, 5.0]))
+        expected = np.array([1.0, 3.0, 0.0, 0.0])
+        np.testing.assert_allclose(result, expected)
+
+        # All zeros
+        result = f(np.array([0.0, 0.0, 0.0]))
+        expected = np.array([1.0, 0.0, 0.0])
         np.testing.assert_allclose(result, expected)
 
         # 2D with zeros, axis=1
@@ -272,8 +277,8 @@ class TestCumOp(utt.InferShapeTester):
         g2 = pytensor.grad(y2.sum(), x2)
         f2 = pytensor.function([x2], g2)
 
-        result2 = f2(np.array([[1.0, 0.0, 2.0], [3.0, 4.0, 0.0]]))
-        expected2 = np.array([[1.0, 3.0, 0.0], [5.0, 3.0, 12.0]])
+        result2 = f2(np.array([[3.0, 0.0, 5.0], [7.0, 4.0, 0.0]]))
+        expected2 = np.array([[1.0, 18.0, 0.0], [5.0, 7.0, 28.0]])
         np.testing.assert_allclose(result2, expected2)
 
 
