@@ -2082,16 +2082,9 @@ class TestSqrSqrt:
         self.rng = np.random.default_rng()
 
     def test_sqr_sqrt(self):
-        # sqrt(x) ** 2 -> x
+        # sqr(sqrt(x)) -> x for x >= 0, nan for x < 0
         x = pt.tensor("x", shape=(None, None))
         out = sqr(sqrt(x))
-        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
-
-        assert equal_computations([out], [pt_abs(x)])
-
-    def test_sqrt_sqr(self):
-        x = pt.tensor("x", shape=(None, None))
-        out = sqrt(sqr(x))
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
@@ -2102,9 +2095,28 @@ class TestSqrSqrt:
 
         assert equal_computations([out], [expected])
 
-    def test_sqr_sqrt_integer_upcast(self):
+        f = pytensor.function([x], sqr(sqrt(x)), mode=self.mode)
+        test_val = np.array([[-3.0, -1.0, 0.0, 1.0, 3.0]])
+        result = f(test_val)
+        np.testing.assert_array_equal(np.isnan(result[0, :2]), True)
+        np.testing.assert_allclose(result[0, 2:], [0.0, 1.0, 3.0])
+
+    def test_sqrt_sqr(self):
+        # sqrt(sqr(x)) -> |x|
+        x = pt.tensor("x", shape=(None, None))
+        out = sqrt(sqr(x))
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        assert equal_computations([out], [pt_abs(x)])
+
+        f = pytensor.function([x], sqrt(sqr(x)), mode=self.mode)
+        test_val = np.array([[-3.0, -1.0, 0.0, 1.0, 3.0]])
+        result = f(test_val)
+        np.testing.assert_allclose(result, np.abs(test_val))
+
+    def test_sqrt_sqr_integer_upcast(self):
         x = ivector("x")
-        out = sqr(sqrt(x))
+        out = sqrt(sqr(x))
         dtype = out.type.dtype
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
