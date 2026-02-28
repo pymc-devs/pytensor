@@ -132,29 +132,28 @@ def transinv_to_invtrans(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([Dot])
+@node_rewriter([Dot, _matmul])
 def inv_as_solve(fgraph, node):
     """
     This utilizes a boolean `symmetric` tag on the matrices.
     """
-    if isinstance(node.op, Dot):
-        l, r = node.inputs
-        if (
-            l.owner
-            and isinstance(l.owner.op, Blockwise)
-            and isinstance(l.owner.op.core_op, MatrixInverse)
-        ):
-            return [solve(l.owner.inputs[0], r)]
-        if (
-            r.owner
-            and isinstance(r.owner.op, Blockwise)
-            and isinstance(r.owner.op.core_op, MatrixInverse)
-        ):
-            x = r.owner.inputs[0]
-            if getattr(x.tag, "symmetric", None) is True:
-                return [solve(x, (l.mT)).mT]
-            else:
-                return [solve((x.mT), (l.mT)).mT]
+    l, r = node.inputs
+    if (
+        l.owner
+        and isinstance(l.owner.op, Blockwise)
+        and isinstance(l.owner.op.core_op, MatrixInverse)
+    ):
+        return [solve(l.owner.inputs[0], r)]
+    if (
+        r.owner
+        and isinstance(r.owner.op, Blockwise)
+        and isinstance(r.owner.op.core_op, MatrixInverse)
+    ):
+        x = r.owner.inputs[0]
+        if getattr(x.tag, "symmetric", None) is True:
+            return [solve(x, (l.mT)).mT]
+        else:
+            return [solve((x.mT), (l.mT)).mT]
 
 
 @register_stabilize
