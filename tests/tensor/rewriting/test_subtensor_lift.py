@@ -32,6 +32,7 @@ from pytensor.tensor import (
     lscalars,
     matrix,
     shape,
+    slicetype,
     specify_shape,
     tensor,
     tensor3,
@@ -556,7 +557,7 @@ class TestLocalSubtensorSpecifyShapeLift:
             (
                 matrix(),
                 (iscalar(), iscalar()),
-                (slice(iscalar(), iscalar(), iscalar()),),
+                (slicetype(),),
             ),
             (
                 matrix(),
@@ -788,12 +789,12 @@ def test_local_subtensor_shape_constant():
         (lambda x: x[:, [0, 1]][0], True),
         (lambda x: x[:, [0, 1], [0, 0]][1:], True),
         (lambda x: x[:, [[0, 1], [0, 0]]][1:], True),
-        (lambda x: x[:, None, [0, 1]][0], True),
         # Not supported, basic indexing on advanced indexing dim
         (lambda x: x[[0, 1]][0], False),
-        # Not supported, basic indexing on the right of advanced indexing
+        # Not implemented, basic indexing on the right of advanced indexing
         (lambda x: x[[0, 1]][:, 0], False),
         # Not implemented, complex flavors of advanced indexing
+        (lambda x: x[:, None, [0, 1]][0], False),
         (lambda x: x[:, 5:, [0, 1]][0], False),
         (lambda x: x[:, :, np.array([True, False, False])][0], False),
         (lambda x: x[[0, 1], :, [0, 1]][:, 0], False),
