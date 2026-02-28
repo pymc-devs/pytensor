@@ -351,8 +351,7 @@ class CumOp(COp):
 
             # Gradient for non-zero positions (0 at and after zeros)
             naive_grad = (
-                cumsum((fx * gi)[reverse_slicing], axis)[reverse_slicing]
-                / x_safe
+                cumsum((fx * gi)[reverse_slicing], axis)[reverse_slicing] / x_safe
             )
 
             # Gradient for first-zero positions: mask out contributions
