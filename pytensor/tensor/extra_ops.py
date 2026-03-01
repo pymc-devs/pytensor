@@ -44,7 +44,7 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
-from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
+from pytensor.tensor.type import TensorType, int_dtypes, integer_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
@@ -829,48 +829,6 @@ def repeat(
         repeat_shape = list(a_shape)
         repeat_shape[axis] = repeat_shape[axis] * repeats
         return broadcast_a.reshape(repeat_shape)
-
-
-class Bartlett(Op):
-    """
-    .. deprecated::
-        Use :func:`pytensor.tensor.extra_ops.bartlett` instead.
-        This Op class will be removed in a future release.
-    """
-
-    # See function bartlett for docstring
-    __props__ = ()
-
-    def __init__(self):
-        warnings.warn(
-            "The Bartlett Op class is deprecated and will be removed in a future release. "
-            "Use pt.bartlett() instead, which now returns a symbolic graph directly.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__()
-
-    def make_node(self, M):
-        M = ptb.as_tensor_variable(M)
-        if M.ndim != 0:
-            raise TypeError(f"{self.__class__.__name__} only works on scalar input")
-        elif M.dtype not in integer_dtypes:
-            # dtype is an PyTensor attribute here
-            raise TypeError(f"{self.__class__.__name__} only works on integer input")
-        return Apply(self, [M], [dvector()])
-
-    def perform(self, node, inputs, out_):
-        M = inputs[0]
-        (out,) = out_
-        out[0] = np.bartlett(M)
-
-    def infer_shape(self, fgraph, node, in_shapes):
-        temp = node.inputs[0]
-        M = ptb.switch(lt(temp, 0), ptb.cast(0, temp.dtype), temp)
-        return [[M]]
-
-    def grad(self, inputs, output_grads):
-        return [None for i in inputs]
 
 
 def bartlett(M):

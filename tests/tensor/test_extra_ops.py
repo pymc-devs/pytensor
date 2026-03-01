@@ -16,7 +16,6 @@ from pytensor.raise_op import Assert
 from pytensor.tensor import alloc
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import (
-    Bartlett,
     CpuContiguous,
     CumOp,
     FillDiagonal,
@@ -708,11 +707,6 @@ class TestBartlett:
         # Gradient must be computable (not None / DisconnectedType)
         val = gf(7.0)
         assert np.isfinite(val)
-
-    def test_deprecated_class(self):
-        """The Bartlett Op class should emit a DeprecationWarning."""
-        with pytest.warns(DeprecationWarning, match="deprecated"):
-            Bartlett()
 
 
 class TestFillDiagonal(utt.InferShapeTester):
