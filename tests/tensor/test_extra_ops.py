@@ -840,6 +840,19 @@ class TestFillDiagonalOffset(utt.InferShapeTester):
             self.op_class,
         )
 
+    def test_gradient_complex_dtype(self):
+        """Regression test: FillDiagonalOffset.grad must return 3 entries for complex inputs."""
+        a = pt.zmatrix("a")
+        val = pt.zscalar("val")
+        offset = pt.lscalar("offset")
+
+        result = fill_diagonal_offset(a, val, offset)
+        grads = result.owner.op.grad(
+            [a, val, offset], [pt.zmatrix("g")]
+        )
+        assert len(grads) == 3, f"Expected 3 gradient entries, got {len(grads)}"
+        assert all(g is None for g in grads)
+
 
 def test_to_one_hot():
     v = ivector()
