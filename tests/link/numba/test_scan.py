@@ -545,7 +545,7 @@ class TestScanSITSOTBuffer:
     def buffer_tester(self, n_steps, op_size, buffer_size, benchmark=None):
         x0 = pt.vector(shape=(op_size,), dtype="float64")
         xs = pytensor.scan(
-            fn=lambda xtm1: (xtm1 + 1),
+            fn=lambda xtm1: xtm1 + 1,
             outputs_info=[x0],
             n_steps=n_steps - 1,  # 1- makes it easier to align/misalign
             return_updates=False,
