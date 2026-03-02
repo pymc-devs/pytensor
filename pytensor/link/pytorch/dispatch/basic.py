@@ -39,6 +39,7 @@ def pytorch_typify_tensor(data, dtype=None, **kwargs):
 
 
 @pytorch_typify.register(slice)
+@pytorch_typify.register(dict)
 @pytorch_typify.register(NoneType)
 @pytorch_typify.register(np.number)
 def pytorch_typify_no_conversion_needed(data, **kwargs):
