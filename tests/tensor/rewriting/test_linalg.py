@@ -1128,3 +1128,49 @@ def test_scalar_solve_to_division_rewrite(
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
+
+
+def test_solve_diag_vector_b():
+    d = pt.vector("d")
+    b = pt.vector("b")
+    x = solve(pt.diag(d), b)
+
+    f = function([d, b], x, mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert not any(
+        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
+        for node in nodes
+    )
+
+    f_ref = function(
+        [d, b], x, mode=get_default_mode().excluding("rewrite_solve_diag")
+    )
+
+    d_val = np.random.rand(5).astype(config.floatX)
+    b_val = np.random.rand(5).astype(config.floatX)
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
+    assert_allclose(f(d_val, b_val), b_val / d_val, atol=atol, rtol=rtol)
+    assert_allclose(f(d_val, b_val), f_ref(d_val, b_val), atol=atol, rtol=rtol)
+
+
+def test_solve_diag_matrix_b():
+    d = pt.vector("d")
+    b = pt.matrix("b")
+    x = solve(pt.diag(d), b, b_ndim=2)
+
+    f = function([d, b], x, mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert not any(
+        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
+        for node in nodes
+    )
+
+    f_ref = function(
+        [d, b], x, mode=get_default_mode().excluding("rewrite_solve_diag")
+    )
+
+    d_val = np.random.rand(5).astype(config.floatX)
+    b_val = np.random.rand(5, 3).astype(config.floatX)
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
+    assert_allclose(f(d_val, b_val), b_val / d_val[:, None], atol=atol, rtol=rtol)
+    assert_allclose(f(d_val, b_val), f_ref(d_val, b_val), atol=atol, rtol=rtol)
