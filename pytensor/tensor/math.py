@@ -2429,9 +2429,14 @@ def i1(x):
     """Modified Bessel function of the first kind of order 1."""
 
 
-@scalar_elemwise
 def iv(v, x):
-    """Modified Bessel function of the first kind of order v (real)."""
+    """Modified Bessel function of the first kind of order v (real).
+
+    Computed as ``ive(v, x) * exp(abs(x))`` for numerical consistency with
+    ``ive``. For large ``x``, prefer working in log-space:
+    ``log(iv(v, x)) == log(ive(v, x)) + abs(x)`` to avoid overflow.
+    """
+    return ive(v, x) * exp(abs(x))
 
 
 @scalar_elemwise

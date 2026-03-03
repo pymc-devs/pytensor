@@ -38,7 +38,7 @@ from pytensor.link.jax.dispatch import jax_funcify
 
 
 try:
-    pass
+    import tensorflow_probability.substrates.jax.math  # noqa: F401
 
     TFP_INSTALLED = True
 except ModuleNotFoundError:
