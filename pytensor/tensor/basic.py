@@ -3498,47 +3498,6 @@ mgrid = _nd_grid()
 ogrid = _nd_grid(sparse=True)
 
 
-def permute_row_elements(x, y, inverse=False):
-    """Permute the elements of each row (last axis) of a tensor.
-
-    A permutation will be applied to every row (vector) of the input tensor x.
-    x and y are broadcast to the same number of dimensions by padding on the
-    left, then ``take_along_axis`` is used to gather elements along the last axis.
-
-    If ``inverse=True``, the inverse permutation is applied instead (equivalent
-    to ``argsort(y)`` applied along the last axis).
-
-    Parameters
-    ----------
-    x : TensorVariable
-        The input tensor, on which the permutation is applied.
-    y : TensorVariable
-        Tensor containing the permutations to apply (integer dtype).
-    inverse : bool, optional
-        If True, apply the inverse of the permutations in y. Default: False.
-
-    Returns
-    -------
-    TensorVariable
-        Permuted tensor with the same dtype as x.
-    """
-    from pytensor.tensor.sort import argsort
-
-    x = as_tensor_variable(x)
-    y = as_tensor_variable(y)
-
-    # Broadcast x and y to the same number of dimensions (pad on the left)
-    if x.ndim > y.ndim:
-        y = shape_padleft(y, x.ndim - y.ndim)
-    elif x.ndim < y.ndim:
-        x = shape_padleft(x, y.ndim - x.ndim)
-
-    if inverse:
-        y = cast(argsort(y, axis=-1), y.dtype)
-
-    return take_along_axis(x, y, axis=-1)
-
-
 def inverse_permutation(perm):
     """Compute the inverse of permutations along the last axis.
 
@@ -4435,7 +4394,6 @@ __all__ = [
     "ogrid",
     "ones",
     "ones_like",
-    "permute_row_elements",
     "roll",
     "scalar_from_tensor",
     "second",

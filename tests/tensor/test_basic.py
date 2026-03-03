@@ -65,7 +65,6 @@ from pytensor.tensor.basic import (
     nonzero_values,
     ogrid,
     ones_like,
-    permute_row_elements,
     roll,
     scalar_from_tensor,
     second,
@@ -112,7 +111,6 @@ from pytensor.tensor.type import (
     int_dtypes,
     iscalar,
     iscalars,
-    itensor3,
     ivector,
     lscalar,
     lvector,
@@ -2981,133 +2979,6 @@ class TestInversePermutation:
             assert np.all(i_row[p_row] == np.arange(10))
 
 
-class TestPermuteRowElements:
-    def test_1_1(self):
-        # Test PermuteRowElements(vector, vector)
-        input = dvector()
-        p = ivector()
-        out = permute_row_elements(input, p)
-        permute = function([input, p], out)
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        input_val = rng.uniform(size=(5,))
-        p_val = rng.permutation(5).astype("int32")
-        out_val = permute(input_val, p_val)
-
-        # Should be equivalent to advanced indexing
-        out_bis = input_val[p_val]
-        assert np.all(out_val == out_bis)
-
-        # Verify gradient
-        def permute_fixed(s_input):
-            # Auxiliary op defined to get rid of gradient wrt p_val
-            return permute_row_elements(s_input, p_val)
-
-        utt.verify_grad(permute_fixed, [input_val])
-
-    def test_2_1(self):
-        # Test broadcasting in PermuteRowElements(matrix, vector)
-        input = matrix()
-        p = ivector()
-        out = permute_row_elements(input, p)
-        permute = function([input, p], out)
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        input_val = rng.uniform(size=(3, 5)).astype(config.floatX)
-        p_val = rng.permutation(5).astype("int32")
-        out_val = permute(input_val, p_val)
-
-        # The same permutation should be applied to every row of the input matrix.
-        out_bis = np.asarray([r[p_val] for r in input_val])
-        assert np.all(out_val == out_bis)
-
-        # Verify gradient
-        def permute_fixed(s_input):
-            # Auxiliary op defined to get rid of gradient wrt p_val
-            return permute_row_elements(s_input, p_val)
-
-        utt.verify_grad(permute_fixed, [input_val])
-
-    def test_2_2(self):
-        # Test PermuteRowElements(matrix, matrix)
-        input = matrix()
-        p = imatrix()
-        out = permute_row_elements(input, p)
-        permute = function([input, p], out)
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        input_val = rng.uniform(size=(3, 5)).astype(config.floatX)
-        p_val = np.asarray([rng.permutation(5) for i in range(3)], dtype="int32")
-        out_val = permute(input_val, p_val)
-
-        # Each row of p contains a permutation to apply to the corresponding
-        # row of input
-        out_bis = np.asarray(
-            [i_row[p_row] for i_row, p_row in zip(input_val, p_val, strict=True)]
-        )
-        assert np.all(out_val == out_bis)
-
-        # Verify gradient
-        def permute_fixed(s_input):
-            # Auxiliary op defined to get rid of gradient wrt p_val
-            return permute_row_elements(s_input, p_val)
-
-        utt.verify_grad(permute_fixed, [input_val])
-
-    def test_1_2(self):
-        # Test PermuteRowElements(vector, matrix)
-        # Different permutations will be applied to the same input vector
-        input = vector()
-        p = imatrix()
-        out = permute_row_elements(input, p)
-        permute = function([input, p], out)
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        input_val = rng.uniform(size=(5,)).astype(config.floatX)
-        p_val = np.asarray([rng.permutation(5) for i in range(3)], dtype="int32")
-        out_val = permute(input_val, p_val)
-
-        # Each row of p contains a permutation to apply to the input vector
-        out_bis = np.asarray([input_val[p_row] for p_row in p_val])
-        assert np.all(out_val == out_bis)
-
-        # Verify gradient
-        def permute_fixed(s_input):
-            # Auxiliary op defined to get rid of gradient wrt p_val
-            return permute_row_elements(s_input, p_val)
-
-        utt.verify_grad(permute_fixed, [input_val])
-
-    def test_3b_2(self):
-        # Test permute_row_elements on a more complex broadcasting pattern:
-        # input.type.shape = (None, 1, None),
-        # p.type.shape = (None, None).
-
-        input = TensorType("floatX", shape=(None, 1, None))()
-        p = imatrix()
-        out = permute_row_elements(input, p)
-        permute = function([input, p], out)
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        input_val = rng.uniform(size=(4, 1, 5)).astype(config.floatX)
-        p_val = np.asarray([rng.permutation(5) for i in range(3)], dtype="int32")
-        out_val = permute(input_val, p_val)
-
-        # Each row of p contains a permutation to apply to each row
-        # of the input tensor
-        out_bis = np.asarray(
-            [[in_mat[0, p_row] for p_row in p_val] for in_mat in input_val]
-        )
-        assert np.all(out_val == out_bis)
-
-        # Verify gradient
-        def permute_fixed(s_input):
-            # Auxiliary op defined to get rid of gradient wrt p_val
-            return permute_row_elements(s_input, p_val)
-
-        utt.verify_grad(permute_fixed, [input_val])
-
-
 def test_stack():
     sx, sy = dscalar(), dscalar()
 
@@ -3945,49 +3816,6 @@ class TestInferShape(utt.InferShapeTester):
                 [aiscal_val, admat_val, bdmat_val, cdmat_val],
                 Join,
             )
-
-    def test_PermuteRowElements(self):
-        """Verify output shapes of the symbolic permute_row_elements."""
-        advec = dvector()
-        aivec = ivector()
-        admat = dmatrix()
-        adtens3 = dtensor3()
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        advec_val = random(5)
-        aivec_val = rng.permutation(5).astype("int32")
-
-        # vector x vector: shape must be (5,)
-        f = pytensor.function([advec, aivec], permute_row_elements(advec, aivec))
-        assert f(advec_val, aivec_val).shape == (5,)
-
-        # matrix x vector (broadcast y): shape must be (3, 5)
-        admat_val = random(3, 5)
-        f = pytensor.function([admat, aivec], permute_row_elements(admat, aivec))
-        assert f(admat_val, aivec_val).shape == (3, 5)
-
-        # 3d tensor x vector (broadcast y): shape must be (3, 2, 5)
-        adtens3_val = random(3, 2, 5)
-        f = pytensor.function([adtens3, aivec], permute_row_elements(adtens3, aivec))
-        assert f(adtens3_val, aivec_val).shape == (3, 2, 5)
-
-        # matrix x matrix (one perm per row): shape must be (3, 5)
-        aimat = imatrix()
-        perma = rng.permutation(5).astype("int32")
-        permb = rng.permutation(5).astype("int32")
-        permc = rng.permutation(5).astype("int32")
-        aimat_val = np.vstack((perma, permb, permc))
-        f = pytensor.function([admat, aimat], permute_row_elements(admat, aimat))
-        assert f(admat_val, aimat_val).shape == (3, 5)
-
-        # matrix x 3d perm (broadcast x): shape must be (2, 3, 5)
-        aitens3 = itensor3()
-        bimat_val = np.vstack((perma, permb, permc))
-        aitens3_val = np.empty((2, 3, 5), "int32")
-        aitens3_val[0] = aimat_val
-        aitens3_val[1] = bimat_val
-        f = pytensor.function([admat, aitens3], permute_row_elements(admat, aitens3))
-        assert f(admat_val, aitens3_val).shape == (2, 3, 5)
 
     def test_ScalarFromTensor(self):
         aiscal = iscalar()
