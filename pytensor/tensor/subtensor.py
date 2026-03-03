@@ -787,6 +787,36 @@ class BaseSubtensor:
         )
         return hash((type(self), props_values))
 
+    @staticmethod
+    def str_from_slice(entry):
+        if entry.step is not None:
+            return ":".join(
+                (
+                    "start" if entry.start is not None else "",
+                    "stop" if entry.stop is not None else "",
+                    "step",
+                )
+            )
+        if entry.stop is not None:
+            return f"{'start' if entry.start is not None else ''}:stop"
+        if entry.start is not None:
+            return "start:"
+        return ":"
+
+    @staticmethod
+    def str_from_indices(idx_list):
+        indices = []
+        letter_indexes = 0
+        for entry in idx_list:
+            if isinstance(entry, slice):
+                indices.append(BaseSubtensor.str_from_slice(entry))
+            else:
+                indices.append("ijk"[letter_indexes % 3] * (letter_indexes // 3 + 1))
+                letter_indexes += 1
+        return ", ".join(indices)
+
+    def __str__(self):
+        return f"{self.__class__.__name__}{{{self.str_from_indices(self.idx_list)}}}"
 
 class Subtensor(BaseSubtensor, COp):
     """Basic NumPy indexing operator."""
@@ -906,37 +936,6 @@ class Subtensor(BaseSubtensor, COp):
         rval = [[True], *([False] for _ in index_variables)]
 
         return rval
-
-    @staticmethod
-    def str_from_slice(entry):
-        if entry.step is not None:
-            return ":".join(
-                (
-                    "start" if entry.start is not None else "",
-                    "stop" if entry.stop is not None else "",
-                    "step",
-                )
-            )
-        if entry.stop is not None:
-            return f"{'start' if entry.start is not None else ''}:stop"
-        if entry.start is not None:
-            return "start:"
-        return ":"
-
-    @staticmethod
-    def str_from_indices(idx_list):
-        indices = []
-        letter_indexes = 0
-        for entry in idx_list:
-            if isinstance(entry, slice):
-                indices.append(Subtensor.str_from_slice(entry))
-            else:
-                indices.append("ijk"[letter_indexes % 3] * (letter_indexes // 3 + 1))
-                letter_indexes += 1
-        return ", ".join(indices)
-
-    def __str__(self):
-        return f"{self.__class__.__name__}{{{self.str_from_indices(self.idx_list)}}}"
 
     @staticmethod
     def default_helper_c_code_args():
@@ -1407,7 +1406,7 @@ class IncSubtensor(BaseSubtensor, COp):
 
     def __str__(self):
         name = "SetSubtensor" if self.set_instead_of_inc else "IncSubtensor"
-        return f"{name}{{{Subtensor.str_from_indices(self.idx_list)}}}"
+        return f"{name}{{{super().str_from_indices(self.idx_list)}}}"
 
     def make_node(self, x, y, *inputs):
         """
@@ -2576,11 +2575,8 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         self.ignore_duplicates = ignore_duplicates
 
     def __str__(self):
-        return (
-            "AdvancedSetSubtensor"
-            if self.set_instead_of_inc
-            else "AdvancedIncSubtensor"
-        )
+        name = "AdvancedSetSubtensor" if self.set_instead_of_inc else "AdvancedIncSubtensor"
+        return f"{name}{{{super().str_from_indices(self.idx_list)}}}"
 
     def make_node(self, x, y, *index_variables):
         if len(index_variables) != self.n_index_vars:
