@@ -1145,3 +1145,41 @@ def scalar_solve_to_division(fgraph, node):
     copy_stack_trace(old_out, new_out)
 
     return [new_out]
+
+
+@register_canonicalize
+@node_rewriter([blockwise_of(Solve)])
+def rewrite_solve_diag(fgraph, node):
+    """
+    Replace Blockwise(Solve)(diag(d), b) with elementwise b / d.
+
+    When the LHS matrix `a` is explicitly constructed as a diagonal matrix
+    via pt.diag(d) (i.e., AllocDiag), the general matrix solve Ax=b reduces
+    to simple elementwise division x_i = b_i / d_i.
+    """
+    a, b = node.inputs
+    old_out = node.outputs[0]
+
+    # Check that `a` was produced by AllocDiag (i.e. pt.diag(d)) on the main diagonal
+    if not (
+        a.owner
+        and isinstance(a.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(a.owner)
+    ):
+        return None
+
+    # Grab d directly — no need to extract the diagonal from a full matrix
+    d = a.owner.inputs[0]
+
+    # b_ndim tells us whether b's core case is a vector (1) or matrix (2)
+    b_ndim = node.op.core_op.b_ndim
+
+    #   b_ndim=1: b shape (N,)    -> result shape (N,)
+    #   b_ndim=2: b shape (N, K)  -> result shape (N, K)
+    b_transposed = b[None, :] if b_ndim == 1 else b.mT
+    new_out = (b_transposed / pt.expand_dims(d, -2)).mT
+    if b_ndim == 1:
+        new_out = new_out.squeeze(-1)
+
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
