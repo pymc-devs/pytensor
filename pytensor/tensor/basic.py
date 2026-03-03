@@ -60,7 +60,6 @@ from pytensor.tensor.shape import (
     shape_tuple,
     specify_broadcastable,
 )
-from pytensor.tensor.sort import argsort
 from pytensor.tensor.type import (
     TensorType,
     discrete_dtypes,
@@ -3523,6 +3522,8 @@ def permute_row_elements(x, y, inverse=False):
     TensorVariable
         Permuted tensor with the same dtype as x.
     """
+    from pytensor.tensor.sort import argsort
+
     x = as_tensor_variable(x)
     y = as_tensor_variable(y)
 
@@ -3544,6 +3545,8 @@ def inverse_permutation(perm):
     Each row of input should contain a permutation of the first integers.
     Returns the argsort of each row, which is the inverse permutation.
     """
+    from pytensor.tensor.sort import argsort
+
     _perm = as_tensor_variable(perm)
     return cast(argsort(_perm, axis=-1), _perm.dtype)
 
