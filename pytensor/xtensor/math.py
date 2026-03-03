@@ -259,8 +259,12 @@ def isinf(): ...
 def isnan(): ...
 
 
-@_as_xelemwise(ps.iv)
-def iv(): ...
+def iv(v, x):
+    """Modified Bessel function of the first kind of order v (real).
+
+    Computed as ``ive(v, x) * exp(abs(x))`` for numerical consistency.
+    """
+    return ive(v, x) * exp(abs(x))
 
 
 @_as_xelemwise(ps.ive)
