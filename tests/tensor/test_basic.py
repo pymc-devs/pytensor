@@ -31,7 +31,6 @@ from pytensor.tensor.basic import (
     Eye,
     Join,
     MakeVector,
-    PermuteRowElements,
     ScalarFromTensor,
     Split,
     TensorFromScalar,
@@ -3948,64 +3947,47 @@ class TestInferShape(utt.InferShapeTester):
             )
 
     def test_PermuteRowElements(self):
-        admat = dmatrix()
+        """Verify output shapes of the symbolic permute_row_elements."""
         advec = dvector()
         aivec = ivector()
+        admat = dmatrix()
+        adtens3 = dtensor3()
 
         rng = np.random.default_rng(utt.fetch_seed())
         advec_val = random(5)
         aivec_val = rng.permutation(5).astype("int32")
-        self._compile_and_check(
-            [advec, aivec],
-            [PermuteRowElements(inverse=True)(advec, aivec)],
-            [advec_val, aivec_val],
-            PermuteRowElements,
-        )
 
+        # vector x vector: shape must be (5,)
+        f = pytensor.function([advec, aivec], permute_row_elements(advec, aivec))
+        assert f(advec_val, aivec_val).shape == (5,)
+
+        # matrix x vector (broadcast y): shape must be (3, 5)
         admat_val = random(3, 5)
-        self._compile_and_check(
-            [admat, aivec],
-            [PermuteRowElements(inverse=False)(admat, aivec)],
-            [admat_val, aivec_val],
-            PermuteRowElements,
-        )
+        f = pytensor.function([admat, aivec], permute_row_elements(admat, aivec))
+        assert f(admat_val, aivec_val).shape == (3, 5)
 
-        adtens3 = dtensor3()
+        # 3d tensor x vector (broadcast y): shape must be (3, 2, 5)
         adtens3_val = random(3, 2, 5)
-        self._compile_and_check(
-            [adtens3, aivec],
-            [PermuteRowElements(inverse=True)(adtens3, aivec)],
-            [adtens3_val, aivec_val],
-            PermuteRowElements,
-        )
+        f = pytensor.function([adtens3, aivec], permute_row_elements(adtens3, aivec))
+        assert f(adtens3_val, aivec_val).shape == (3, 2, 5)
 
+        # matrix x matrix (one perm per row): shape must be (3, 5)
         aimat = imatrix()
         perma = rng.permutation(5).astype("int32")
         permb = rng.permutation(5).astype("int32")
         permc = rng.permutation(5).astype("int32")
         aimat_val = np.vstack((perma, permb, permc))
-        admat_val = random(3, 5)
-        self._compile_and_check(
-            [admat, aimat],
-            [PermuteRowElements(inverse=False)(admat, aimat)],
-            [admat_val, aimat_val],
-            PermuteRowElements,
-        )
+        f = pytensor.function([admat, aimat], permute_row_elements(admat, aimat))
+        assert f(admat_val, aimat_val).shape == (3, 5)
 
+        # matrix x 3d perm (broadcast x): shape must be (2, 3, 5)
         aitens3 = itensor3()
-        perma = rng.permutation(5).astype("int32")
-        permb = rng.permutation(5).astype("int32")
-        permc = rng.permutation(5).astype("int32")
         bimat_val = np.vstack((perma, permb, permc))
         aitens3_val = np.empty((2, 3, 5), "int32")
-        aitens3_val[0, ::, ::] = aimat_val
-        aitens3_val[1, ::, ::] = bimat_val
-        self._compile_and_check(
-            [admat, aitens3],
-            [PermuteRowElements(inverse=True)(admat, aitens3)],
-            [admat_val, aitens3_val],
-            PermuteRowElements,
-        )
+        aitens3_val[0] = aimat_val
+        aitens3_val[1] = bimat_val
+        f = pytensor.function([admat, aitens3], permute_row_elements(admat, aitens3))
+        assert f(admat_val, aitens3_val).shape == (2, 3, 5)
 
     def test_ScalarFromTensor(self):
         aiscal = iscalar()
