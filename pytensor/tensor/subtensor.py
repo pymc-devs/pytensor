@@ -818,6 +818,7 @@ class BaseSubtensor:
     def __str__(self):
         return f"{self.__class__.__name__}{{{self.str_from_indices(self.idx_list)}}}"
 
+
 class Subtensor(BaseSubtensor, COp):
     """Basic NumPy indexing operator."""
 
@@ -2575,7 +2576,11 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
         self.ignore_duplicates = ignore_duplicates
 
     def __str__(self):
-        name = "AdvancedSetSubtensor" if self.set_instead_of_inc else "AdvancedIncSubtensor"
+        name = (
+            "AdvancedSetSubtensor"
+            if self.set_instead_of_inc
+            else "AdvancedIncSubtensor"
+        )
         return f"{name}{{{super().str_from_indices(self.idx_list)}}}"
 
     def make_node(self, x, y, *index_variables):
