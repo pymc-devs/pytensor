@@ -3498,18 +3498,6 @@ mgrid = _nd_grid()
 ogrid = _nd_grid(sparse=True)
 
 
-def inverse_permutation(perm):
-    """Compute the inverse of permutations along the last axis.
-
-    Each row of input should contain a permutation of the first integers.
-    Returns the argsort of each row, which is the inverse permutation.
-    """
-    from pytensor.tensor.sort import argsort
-
-    _perm = as_tensor_variable(perm)
-    return cast(argsort(_perm, axis=-1), _perm.dtype)
-
-
 class ExtractDiag(COp):
     """
     Return specified diagonals.
@@ -4383,7 +4371,6 @@ __all__ = [
     "horizontal_stack",
     "identity",
     "identity_like",
-    "inverse_permutation",
     "is_flat",
     "join",
     "matrix_transpose",
