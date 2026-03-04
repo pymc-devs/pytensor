@@ -1073,31 +1073,6 @@ class J0(UnaryScalarOp):
 j0 = J0(upgrade_to_float, name="j0")
 
 
-class Iv(BinaryScalarOp):
-    """
-    Modified Bessel function of the first kind of order v (real).
-    """
-
-    nfunc_spec = ("scipy.special.iv", 2, 1)
-
-    def impl(self, v, x):
-        return special.iv(v, x)
-
-    def grad(self, inputs, grads):
-        v, x = inputs
-        (gz,) = grads
-        return [
-            grad_not_implemented(self, 0, v),
-            gz * (iv(v - 1, x) + iv(v + 1, x)) / 2.0,
-        ]
-
-    def c_code(self, *args, **kwargs):
-        raise NotImplementedError()
-
-
-iv = Iv(upgrade_to_float, name="iv")
-
-
 class I1(UnaryScalarOp):
     """
     Modified Bessel function of the first kind of order 1.
@@ -1111,7 +1086,7 @@ class I1(UnaryScalarOp):
     def grad(self, inputs, grads):
         (x,) = inputs
         (gz,) = grads
-        return [gz * (i0(x) + iv(2, x)) / 2.0]
+        return [gz * (i0(x) + ive(2, x) * exp(abs(x))) / 2.0]
 
     def c_code(self, *args, **kwargs):
         raise NotImplementedError()
