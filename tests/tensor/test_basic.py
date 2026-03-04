@@ -56,7 +56,6 @@ from pytensor.tensor.basic import (
     horizontal_stack,
     identity_like,
     infer_static_shape,
-    inverse_permutation,
     join,
     make_vector,
     mgrid,
@@ -2931,52 +2930,6 @@ class TestNdGrid:
         ):
             for ng, tg in zip(n, t, strict=True):
                 utt.assert_allclose(ng, tg)
-
-
-class TestInversePermutation:
-    def test_dim1(self):
-        # Test the inversion of one permutation (int vector)
-        p = ivector()
-        inv = inverse_permutation(p)
-        assert inv.dtype == p.dtype
-        f_inverse = function([p], inv)
-
-        # Generate a random permutation
-        rng = np.random.default_rng(utt.fetch_seed())
-        p_val = rng.permutation(10).astype("int32")
-        inv_val = f_inverse(p_val)
-
-        # Check that the inverse of the inverse is the original permutation
-        assert np.all(f_inverse(inv_val) == p_val)
-        # Check that permutation(inverse) == inverse(permutation) = identity
-        assert np.all(p_val[inv_val] == np.arange(10))
-        assert np.all(inv_val[p_val] == np.arange(10))
-
-        # Test passing a list
-        p = [2, 4, 3, 0, 1]
-        inv = ptb.inverse_permutation(p)
-        f = pytensor.function([], inv)
-        assert np.array_equal(f(), np.array([3, 4, 0, 2, 1]))
-
-    def test_dim2(self):
-        # Test the inversion of several permutations at a time
-        # Each row of p is a different permutation to inverse
-        p = imatrix()
-        inv = inverse_permutation(p)
-        f_inverse = function([p], inv)
-
-        rng = np.random.default_rng(utt.fetch_seed())
-        # Generate 10 random permutations
-        p_val = np.asarray([rng.permutation(10) for i in range(7)], dtype="int32")
-        inv_val = f_inverse(p_val)
-
-        # Check that the inverse of the inverse is the original permutation list
-        assert np.all(f_inverse(inv_val) == p_val)
-        # Check that, for each permutation,
-        # permutation(inverse) == inverse(permutation) = identity
-        for p_row, i_row in zip(p_val, inv_val, strict=True):
-            assert np.all(p_row[i_row] == np.arange(10))
-            assert np.all(i_row[p_row] == np.arange(10))
 
 
 def test_stack():
