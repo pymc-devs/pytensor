@@ -41,16 +41,9 @@ def test_local_join_dims_noop():
     """Test that join_dims with n_axes=1 becomes identity (no-op)."""
     x = tensor("x", shape=(2, 3, 4))
     x_join = join_dims(x, start_axis=1, n_axes=1)
+    rewrite_x_join = rewrite_graph(x_join, include=("canonicalize",))
 
-    fg = FunctionGraph(inputs=[x], outputs=[x_join])
-
-    # Before rewrite: should have 1 JoinDims node
-    assert sum([1 for node in fg.toposort() if isinstance(node.op, JoinDims)]) == 1
-
-    rewrite_graph(fg, include=("canonicalize",))
-
-    # Output should be equivalent to input (identity rewrite)
-    assert_equal_computations([fg.outputs[0]], [x], in_xs=[fg.outputs[0]], in_ys=[x])
+    assert_equal_computations([rewrite_x_join], [x])
 
 
 def test_local_join_dims_expand():
