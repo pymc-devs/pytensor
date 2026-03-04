@@ -2535,19 +2535,22 @@ def test_outputs_taps_check():
         scan(f, x, outputs_info)
 
 
-def test_inconsistent_broadcast_error():
-    x = tensor3()
+def test_relaxed_broadcast_allows_observed_more_specific_and_grad():
     initial_x = pt.constant(np.zeros((1, 10)))
-    y = scan(
-        fn=lambda x, prev_x: x + prev_x,
-        sequences=x,
-        outputs_info=[dict(initial=initial_x)],
-        return_updates=False,
-    )
-    # Error, because the broadcast patterns are inconsistent.
-    with pytest.raises(TypeError):
-        grad(y.sum(), x)
 
+    def get_sum_of_grad(inp):
+        y = scan(
+            fn=lambda x_i, prev_x: x_i + prev_x,
+            sequences=inp,
+            outputs_info=[dict(initial=initial_x)],
+            return_updates=False,
+        )
+        return y.sum()
+
+    floatX = config.floatX
+    rng = np.random.default_rng(utt.fetch_seed())
+    sample = rng.random((2, 1, 10)).astype(floatX)
+    utt.verify_grad(get_sum_of_grad, [sample])
 
 def test_missing_input_error():
     c = shared(0.0)
