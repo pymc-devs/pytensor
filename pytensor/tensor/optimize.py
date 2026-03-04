@@ -199,10 +199,16 @@ class ScipyWrapperOp(Op, HasInnerGraph):
     def inner_outputs(self):
         return self.fgraph.outputs
 
+    def clone_with_new_fgraph(self, fgraph):
+        clone_op = copy(self)
+        clone_op._fn = None
+        clone_op._fn_wrapped = None
+        clone_op.fgraph = fgraph
+        return clone_op
+
     def clone(self):
-        copy_op = copy(self)
-        copy_op.fgraph = self.fgraph.clone(clone_inner_graphs=True)
-        return copy_op
+        clone_fgraph = self.fgraph.clone(clone_inner_graphs=True)
+        return self.clone_with_new_fgraph(clone_fgraph)
 
     def prepare_node(
         self,
