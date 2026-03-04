@@ -2095,11 +2095,12 @@ class TestSqrSqrt:
 
         assert equal_computations([out], [expected])
 
-        f = pytensor.function([x], sqr(sqrt(x)), mode=self.mode)
+        no_opt = Mode(linker="py", optimizer=None)
         test_val = np.array([[-3.0, -1.0, 0.0, 1.0, 3.0]])
-        result = f(test_val)
-        np.testing.assert_array_equal(np.isnan(result[0, :2]), True)
-        np.testing.assert_allclose(result[0, 2:], [0.0, 1.0, 3.0])
+        np.testing.assert_allclose(
+            sqr(sqrt(x)).eval({x: test_val}, mode=self.mode),
+            sqr(sqrt(x)).eval({x: test_val}, mode=no_opt),
+        )
 
     def test_sqrt_sqr(self):
         # sqrt(sqr(x)) -> |x|
@@ -2109,10 +2110,12 @@ class TestSqrSqrt:
 
         assert equal_computations([out], [pt_abs(x)])
 
-        f = pytensor.function([x], sqrt(sqr(x)), mode=self.mode)
+        no_opt = Mode(linker="py", optimizer=None)
         test_val = np.array([[-3.0, -1.0, 0.0, 1.0, 3.0]])
-        result = f(test_val)
-        np.testing.assert_allclose(result, np.abs(test_val))
+        np.testing.assert_allclose(
+            sqrt(sqr(x)).eval({x: test_val}, mode=self.mode),
+            sqrt(sqr(x)).eval({x: test_val}, mode=no_opt),
+        )
 
     def test_sqrt_sqr_integer_upcast(self):
         x = ivector("x")
