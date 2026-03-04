@@ -407,6 +407,9 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
             # No differentiable arguments, return disconnected/null gradients
             return arg_grads
 
+        if is_minimization:
+            implicit_f = grad(implicit_f, inner_x)
+
         # Gradients are computed using the inner graph of the optimization op, not the actual inputs/outputs of the op.
         packed_inner_args, packed_arg_shapes, implicit_f = pack_inputs_of_objective(
             implicit_f,
@@ -426,7 +429,8 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
 
         # Replace inner inputs (abstract dummies) with outer inputs (the actual user-provided symbols)
         # at the solution point. Innner arguments aren't needed anymore, delete them to avoid accidental references.
-        del inner_x, inner_args
+        del inner_x
+        del inner_args
         inner_to_outer_map = tuple(zip(fgraph.inputs, (x_star, *args)))
         df_dx_star, df_dtheta_star = graph_replace(
             [df_dx, df_dtheta],
@@ -455,15 +459,17 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
         for i, (arg, to_diff) in enumerate(zip(args, args_to_diff)):
             if not to_diff:
                 # Store the null grad we got from the initial `grad` call
-                g = arg_grads[i]
-                assert isinstance(g.type, NullType | DisconnectedType)
+                null_grad = arg_grads[i]
+                assert isinstance(null_grad.type, NullType | DisconnectedType)
+                final_grads.append(null_grad)
+                continue
+
+            arg_grad = next(grad_wrt_args_iter)
+
+            if arg_grad.ndim > 0 and output_grad.ndim > 0:
+                g = tensordot(output_grad, arg_grad, [[0], [0]])
             else:
-                # Compute non-null grad and chain with output_grad
-                arg_grad = next(grad_wrt_args_iter)
-                if arg_grad.ndim > 0 and output_grad.ndim > 0:
-                    g = tensordot(output_grad, arg_grad, [[0], [0]])
-                else:
-                    g = arg_grad * output_grad
+                g = arg_grad * output_grad
                 if isinstance(arg.type, ScalarType) and isinstance(g, TensorVariable):
                     g = scalar_from_tensor(g)
             final_grads.append(g)

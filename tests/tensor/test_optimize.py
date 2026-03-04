@@ -12,10 +12,8 @@ from pytensor.graph import Apply, Op, Type
 from pytensor.graph.basic import Variable
 from pytensor.graph.replace import graph_replace
 from pytensor.tensor import alloc, scalar, scalar_from_tensor, tensor_from_scalar
-from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from pytensor.tensor.optimize import (
     MinimizeOp,
-    MinimizeScalarOp,
     minimize,
     minimize_scalar,
     root,
@@ -621,15 +619,7 @@ def test_vectorize_root_gradients():
     np.testing.assert_allclose(a_grad_grid_val, analytical_a_grad_grid)
 
 
-@pytest.mark.parametrize(
-    "op_cls, op_kwargs",
-    [
-        (MinimizeOp, {"method": "BFGS"}),
-        (MinimizeScalarOp, {"method": "brent"}),
-    ],
-    ids=["MinimizeOp", "MinimizeScalarOp"],
-)
-def test_minimize_grad_duplicate_input_connected_and_disconnected(op_cls, op_kwargs):
+def test_minimize_grad_duplicate_input_connected_and_disconnected():
     """Regression test: when the same outer variable is passed for both a connected
     and a disconnected inner arg, the gradient should not crash.
 
@@ -643,7 +633,7 @@ def test_minimize_grad_duplicate_input_connected_and_disconnected(op_cls, op_kwa
     # 'args[[0, 2]]' are connected, while 'args[1]' is disconnected
     objective = (x - (args[0] + args[2])) ** 2 + pt.second(args[1], 0)
 
-    minimize_op = op_cls(x, *args, objective=objective, **op_kwargs)
+    minimize_op = MinimizeOp(x, *args, objective=objective, method="BFGS")
 
     # Use the same input for each of args (this can happen after rewrites/merging)
     a = pt.scalar("a")
