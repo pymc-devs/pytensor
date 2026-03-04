@@ -1130,47 +1130,62 @@ def test_scalar_solve_to_division_rewrite(
     )
 
 
-def test_solve_diag_vector_b():
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector_b", "matrix_b"])
+def test_solve_diag_from_diag(b_ndim):
+    rng = np.random.default_rng(sum(map(ord, "test_solve_diag_from_diag")) + b_ndim)
     d = pt.vector("d")
-    b = pt.vector("b")
-    x = solve(pt.diag(d), b)
+    b = pt.vector("b") if b_ndim == 1 else pt.matrix("b")
+    x = solve(pt.diag(d), b, b_ndim=b_ndim)
 
     f = function([d, b], x, mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
     assert not any(
         isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
-        for node in nodes
+        for node in f.maker.fgraph.apply_nodes
     )
+    f_ref = function([d, b], x, mode=get_default_mode().excluding("rewrite_solve_diag"))
 
-    f_ref = function(
-        [d, b], x, mode=get_default_mode().excluding("rewrite_solve_diag")
+    d_val = rng.uniform(1, 5, size=(5,)).astype(config.floatX)
+    b_val = (
+        rng.standard_normal(size=(5,)).astype(config.floatX)
+        if b_ndim == 1
+        else rng.standard_normal(size=(5, 3)).astype(config.floatX)
     )
-
-    d_val = np.random.rand(5).astype(config.floatX)
-    b_val = np.random.rand(5).astype(config.floatX)
+    expected = b_val / d_val if b_ndim == 1 else b_val / d_val[:, None]
     atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
-    assert_allclose(f(d_val, b_val), b_val / d_val, atol=atol, rtol=rtol)
+    assert_allclose(f(d_val, b_val), expected, atol=atol, rtol=rtol)
     assert_allclose(f(d_val, b_val), f_ref(d_val, b_val), atol=atol, rtol=rtol)
 
 
-def test_solve_diag_matrix_b():
-    d = pt.vector("d")
-    b = pt.matrix("b")
-    x = solve(pt.diag(d), b, b_ndim=2)
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector_b", "matrix_b"])
+@pytest.mark.parametrize(
+    "x_shape",
+    [(), (5,), (5, 5)],
+    ids=["scalar", "vector", "matrix"],
+)
+def test_solve_diag_from_eye_mul(b_ndim, x_shape):
+    rng = np.random.default_rng(
+        sum(map(ord, "test_solve_diag_from_eye_mul")) + b_ndim + sum(x_shape)
+    )
+    n = 5
+    x = pt.tensor("x", shape=x_shape)
+    a = pt.eye(n) * x
+    b = pt.vector("b") if b_ndim == 1 else pt.matrix("b")
+    sol = solve(a, b, b_ndim=b_ndim)
 
-    f = function([d, b], x, mode="FAST_RUN")
-    nodes = f.maker.fgraph.apply_nodes
+    f = function([x, b], sol, mode="FAST_RUN")
     assert not any(
         isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
-        for node in nodes
+        for node in f.maker.fgraph.apply_nodes
     )
-
     f_ref = function(
-        [d, b], x, mode=get_default_mode().excluding("rewrite_solve_diag")
+        [x, b], sol, mode=get_default_mode().excluding("rewrite_solve_diag")
     )
 
-    d_val = np.random.rand(5).astype(config.floatX)
-    b_val = np.random.rand(5, 3).astype(config.floatX)
+    x_val = rng.uniform(1, 5, size=x_shape).astype(config.floatX)
+    b_val = (
+        rng.standard_normal(size=(n,)).astype(config.floatX)
+        if b_ndim == 1
+        else rng.standard_normal(size=(n, 3)).astype(config.floatX)
+    )
     atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
-    assert_allclose(f(d_val, b_val), b_val / d_val[:, None], atol=atol, rtol=rtol)
-    assert_allclose(f(d_val, b_val), f_ref(d_val, b_val), atol=atol, rtol=rtol)
+    assert_allclose(f(x_val, b_val), f_ref(x_val, b_val), atol=atol, rtol=rtol)
