@@ -10,7 +10,13 @@ from pytensor.gradient import (
 )
 from pytensor.graph import Apply, Op, Type
 from pytensor.tensor import alloc, scalar, scalar_from_tensor, tensor_from_scalar
-from pytensor.tensor.optimize import minimize, minimize_scalar, root, root_scalar
+from pytensor.tensor.optimize import (
+    MinimizeOp,
+    minimize,
+    minimize_scalar,
+    root,
+    root_scalar,
+)
 from tests import unittest_tools as utt
 
 
@@ -596,3 +602,33 @@ def test_vectorize_root_gradients():
 
     np.testing.assert_allclose(solution_grid_val, analytical_solution_grid)
     np.testing.assert_allclose(a_grad_grid_val, analytical_a_grad_grid)
+
+
+def test_minimize_grad_duplicate_input_connected_and_disconnected():
+    """Regression test: when the same outer variable is passed for both a connected
+    and a disconnected inner arg, the gradient should not crash.
+
+    The old code used dict(zip(args, grads)) which silently overwrote entries when
+    the same outer variable appeared multiple times, returning a valid gradient for
+    a position that should have been disconnected.
+    """
+    x = pt.scalar("x")
+    args = pt.scalars("a0", "a1", "a2")
+
+    # 'args[[0, 2]]' are connected, while 'args[1]' is disconnected
+    objective = (x - (args[0] + args[2])) ** 2 + pt.second(args[1], 0)
+
+    minimize_op = MinimizeOp(x, *args, objective=objective, method="BFGS")
+
+    # Use the same input for each of args (this can happen after rewrites/merging)
+    a = pt.scalar("a")
+    solution, _success = minimize_op(x, a, a, a)
+
+    assert minimize_op.connection_pattern(minimize_op) == [
+        [True, False],
+        [True, False],
+        [False, False],
+        [True, False],
+    ]
+
+    np.testing.assert_allclose(pt.grad(solution, a).eval({x: np.pi, a: 0}), 2.0)
