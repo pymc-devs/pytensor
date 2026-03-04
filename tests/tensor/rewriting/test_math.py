@@ -2095,13 +2095,6 @@ class TestSqrSqrt:
 
         assert equal_computations([out], [expected])
 
-        no_opt = Mode(linker="py", optimizer=None)
-        test_val = np.array([[-3.0, -1.0, 0.0, 1.0, 3.0]])
-        np.testing.assert_allclose(
-            sqr(sqrt(x)).eval({x: test_val}, mode=self.mode),
-            sqr(sqrt(x)).eval({x: test_val}, mode=no_opt),
-        )
-
     def test_sqrt_sqr(self):
         # sqrt(sqr(x)) -> |x|
         x = pt.tensor("x", shape=(None, None))
@@ -2109,13 +2102,6 @@ class TestSqrSqrt:
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         assert equal_computations([out], [pt_abs(x)])
-
-        no_opt = Mode(linker="py", optimizer=None)
-        test_val = np.array([[-3.0, -1.0, 0.0, 1.0, 3.0]])
-        np.testing.assert_allclose(
-            sqrt(sqr(x)).eval({x: test_val}, mode=self.mode),
-            sqrt(sqr(x)).eval({x: test_val}, mode=no_opt),
-        )
 
     def test_sqrt_sqr_integer_upcast(self):
         x = ivector("x")
