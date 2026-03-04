@@ -219,6 +219,35 @@ def test_matrix_inverse_solve():
     )
 
 
+@pytest.mark.parametrize(
+    "batch_shape",
+    [(), (5,), (3, 5)],
+    ids=["no_batch", "single_batch", "multi_batch"],
+)
+def test_batched_matrix_inverse_solve(batch_shape):
+    """Test that inv_as_solve fires for batched (matmul) operations."""
+    n = 4
+    shape = (*batch_shape, n, n)
+    A = pt.tensor("A", shape=shape, dtype="float64")
+    b = pt.tensor("b", shape=shape, dtype="float64")
+
+    # inv(A) @ b  should be rewritten to solve(A, b)
+    out = matmul(pt.linalg.inv(A), b)
+    f = pytensor.function([A, b], out, mode="FAST_RUN")
+
+    # Graph check: should contain Solve, not MatrixInverse
+    nodes = f.maker.fgraph.apply_nodes
+    has_solve = any(
+        isinstance(getattr(node.op, "core_op", node.op), Solve) for node in nodes
+    )
+    has_inv = any(
+        isinstance(getattr(node.op, "core_op", node.op), MatrixInverse)
+        for node in nodes
+    )
+    assert has_solve, "Expected Solve in the rewritten graph"
+    assert not has_inv, "MatrixInverse should have been rewritten away"
+
+
 @pytest.mark.parametrize("tag", ("lower", "upper", None))
 @pytest.mark.parametrize("cholesky_form", ("lower", "upper"))
 @pytest.mark.parametrize("product", ("lower", "upper", None))
