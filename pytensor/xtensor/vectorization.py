@@ -198,6 +198,8 @@ class XRV(XOp, RNGConsumerOp):
         if len(set(extra_dims)) != len(extra_dims):
             raise ValueError("size_dims must be unique")
         self.extra_dims = tuple(extra_dims)
+        if print_name := getattr(core_op, "_print_name", None):
+            self._print_name = print_name
 
     def __str__(self):
         if self.name is not None:
@@ -207,6 +209,15 @@ class XRV(XOp, RNGConsumerOp):
             name = self.__class__.__name__
             attrs = f"(core_op={self.core_op}, core_dims={self.core_dims}, extra_dims={self.extra_dims})"
         return f"{name}({attrs})"
+
+    def rng_param(self, node):
+        return node.inputs[0]
+
+    def size_params(self, node):
+        return node.inputs[1 : 1 + len(self.extra_dims)]
+
+    def dist_params(self, node):
+        return node.inputs[1 + len(self.extra_dims) :]
 
     def update(self, node):
         # RNG input and update are the first input and output respectively
