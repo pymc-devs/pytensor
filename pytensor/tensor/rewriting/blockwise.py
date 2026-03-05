@@ -5,7 +5,14 @@ from pytensor.graph.replace import vectorize_graph
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter
 from pytensor.graph.rewriting.unify import OpPattern, OpPatternOpTypeType
 from pytensor.graph.traversal import apply_ancestors
-from pytensor.tensor.basic import Alloc, ARange, alloc, shape_padleft
+from pytensor.tensor.basic import (
+    Alloc,
+    AllocEmpty,
+    ARange,
+    alloc,
+    expand_dims,
+    shape_padleft,
+)
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
@@ -89,6 +96,7 @@ optdb.register(
         blockwise_of(
             Dot
             | Alloc
+            | AllocEmpty
             | ARange
             | Subtensor
             | AdvancedSubtensor
@@ -106,7 +114,7 @@ def local_eager_useless_unbatched_blockwise(fgraph, node):
 
 @register_specialize("shape_unsafe")
 @node_rewriter([Blockwise])
-def local_blockwise_alloc(fgraph, node):
+def local_blockwise_alloc_inputs(fgraph, node):
     """Push Allocs from the inputs to the output of Blockwise Ops.
 
     BOp = Blockwise(Op, signature="(x),(x)->(x)")
@@ -216,6 +224,34 @@ def local_blockwise_alloc(fgraph, node):
         ]
     copy_stack_trace(node.outputs, new_outs)
     return new_outs
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([blockwise_of(Alloc)])
+def local_blockwise_alloc(fgraph, node):
+    val, *shape = node.inputs
+
+    if not all(all(s.broadcastable) for s in shape):
+        # May imply a non-square Alloc
+        return None
+
+    batch_ndim = node.op.batch_ndim(node)
+
+    # Add implicit core dims that alloc prepends (alloc aligns val to the right)
+    n_implicit_core_dims = node.outputs[0].ndim - val.ndim
+    if n_implicit_core_dims > 0:
+        val = expand_dims(
+            val, list(range(batch_ndim, batch_ndim + n_implicit_core_dims))
+        )
+
+    new_alloc = alloc(
+        val,
+        *val.shape[:batch_ndim],
+        *(s.squeeze() for s in shape),
+    )
+    copy_stack_trace(node.outputs[0], new_alloc)
+    return [new_alloc]
 
 
 @register_specialize
