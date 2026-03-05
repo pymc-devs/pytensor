@@ -17,7 +17,8 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.gradient import grad, hessian
 from pytensor.graph.basic import Apply, equal_computations
 from pytensor.graph.op import Op
-from pytensor.graph.replace import clone_replace
+from pytensor.graph.replace import clone_replace, vectorize_graph
+from pytensor.graph.traversal import apply_ancestors
 from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import Assert
 from pytensor.scalar import autocast_float, autocast_float_as
@@ -4575,6 +4576,25 @@ def test_vectorize_join(axis, broadcasting_y):
         vectorize_pt(x_test, y_test),
         vectorize_np(x_test, y_test),
     )
+
+
+@pytest.mark.parametrize("implicit_dims", [True, False])
+def test_vectorize_alloc(implicit_dims):
+    x = scalar("x")
+    if implicit_dims:
+        out = alloc(x, 3, 5)
+    else:
+        out = alloc(x[None, None], 3, 5)
+
+    vect_x = tensor("vect_x", shape=(7,))
+    vect_out = vectorize_graph(out, {x: vect_x})
+    assert not any(
+        isinstance(node.op, Blockwise) for node in apply_ancestors([vect_out])
+    )
+
+    x_test = np.random.normal(size=(7,)).astype(config.floatX)
+    expected = np.broadcast_to(x_test[:, None, None], (7, 3, 5))
+    np.testing.assert_allclose(vect_out.eval({vect_x: x_test}), expected)
 
 
 def test_where():
