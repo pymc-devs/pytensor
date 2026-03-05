@@ -676,7 +676,7 @@ def get_constant_idx(
     >>> b.owner.op.idx_list
     (0, slice(1, 2, None))
     >>> get_constant_idx(b.owner.op.idx_list, b.owner.inputs, allow_partial=True)
-    [v, slice(np.int64(1), np.int64(3), None)]
+    [v, slice(1, 3, None)]
     >>> get_constant_idx(b.owner.op.idx_list, b.owner.inputs)
     Traceback (most recent call last):
     pytensor.tensor.exceptions.NotScalarConstantError
@@ -696,7 +696,7 @@ def get_constant_idx(
                     val,
                     only_process_constants=only_process_constants,
                     elemwise=elemwise,
-                )
+                ).item()
             except NotScalarConstantError:
                 if allow_partial:
                     return val

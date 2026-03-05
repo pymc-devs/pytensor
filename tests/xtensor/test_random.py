@@ -132,6 +132,14 @@ def test_dtype():
     assert x.type.dtype == "float32"
 
 
+def test_static_shape():
+    x = xtensor("x", dims=("a", "b"), shape=(1, None))
+    y = xtensor("y", dims=("c", "d"), shape=(2, None))
+    out = normal(x, 1, extra_dims=y.sizes)
+    assert out.type.dims == ("c", "d", "a", "b")
+    assert out.type.shape == (2, None, 1, None)
+
+
 def test_normal():
     rng = random_generator_type("rng")
     c_size = tensor("c_size", shape=(), dtype=int)
