@@ -1802,6 +1802,40 @@ def _get_vector_length_Alloc(var_inst, var):
         raise ValueError(f"Length of {var} cannot be determined")
 
 
+@_vectorize_node.register(Alloc)
+def vectorize_alloc(op, node, val, *shape):
+    old_val, *old_shape = node.inputs
+    [old_alloc] = node.outputs
+
+    assert len(shape) == len(old_shape), (
+        "Number of shape entries can't change in vectorize_alloc"
+    )
+
+    if not all(all(s.broadcastable) for s in shape):
+        # May imply a non-square Alloc
+        return vectorize_node_fallback(op, node, val, *shape)
+
+    val_batch_ndim = val.ndim - old_val.ndim
+    shape_batch_ndim = max((s.ndim for s in shape), default=0)
+
+    # Add implicit core dims that alloc prepends (alloc aligns val to the right)
+    n_implicit_core_dims = len(old_shape) - old_val.ndim
+    if n_implicit_core_dims > 0:
+        val = expand_dims(
+            val, list(range(val_batch_ndim, val_batch_ndim + n_implicit_core_dims))
+        )
+
+    new_alloc = alloc(
+        val,
+        *val.shape[:val_batch_ndim],
+        *(s.squeeze() for s in shape),
+    )
+    # Expand leading batch dims implied by the shape entries (if any)
+    new_alloc = atleast_Nd(new_alloc, n=shape_batch_ndim + old_alloc.ndim)
+
+    return [new_alloc]
+
+
 def full(shape, fill_value, dtype=None):
     """Return a new array of given shape and type, filled with `fill_value`.
 

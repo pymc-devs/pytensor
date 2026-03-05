@@ -1,12 +1,14 @@
 from functools import partial
 
 import numpy as np
+import pytest
 
 from pytensor import Mode, config, function
 from pytensor.graph import FunctionGraph, rewrite_graph, vectorize_graph
 from pytensor.graph.basic import equal_computations
+from pytensor.graph.traversal import apply_ancestors
 from pytensor.scalar import log as scalar_log
-from pytensor.tensor import add, alloc, matrix, tensor, tensor3
+from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.nlinalg import MatrixPinv
@@ -46,7 +48,7 @@ def test_useless_unbatched_blockwise():
     assert isinstance(fn.maker.fgraph.outputs[0].owner.op.core_op, MatrixPinv)
 
 
-def test_blockwise_alloc():
+def test_local_blockwise_alloc_inputs():
     rewrite = partial(
         rewrite_graph,
         include=("ShapeOpt", "specialize"),
@@ -124,6 +126,42 @@ def test_blockwise_alloc():
     out = vector_add(x, alloc(y, 5))
     expected_out = out
     assert equal([rewrite(out)], [expected_out])
+
+
+@pytest.mark.parametrize("implicit_dims", [True, False])
+def test_local_blockwise_alloc(implicit_dims):
+    """Test that Blockwise(Alloc) is rewritten to a plain Alloc."""
+    x = scalar("x")
+    n = iscalar("n")
+    if implicit_dims:
+        out = alloc(x, n)
+    else:
+        out = alloc(x[None], n)
+
+    # Vectorize with a batch shape that is itself an Alloc.
+    # This creates Blockwise(Alloc) because the shape is non-broadcastable.
+    # Other rewrites lift the Alloc above the Blockwise, then
+    # local_blockwise_alloc simplifies the remaining Blockwise(Alloc).
+    vect_x = tensor("vect_x", shape=(5,))
+    vect_out = vectorize_graph(out, {x: vect_x, n: alloc(n, 5)})
+    assert isinstance(vect_out.owner.op, Blockwise)
+
+    rewritten_vect_out = rewrite_graph(
+        vect_out, include=("canonicalize", "specialize"), clone=True
+    )
+    assert not any(
+        isinstance(node.op, Blockwise) for node in apply_ancestors([rewritten_vect_out])
+    )
+
+    n_val = np.int64(3)
+    vect_x_test = np.random.normal(size=(5,)).astype(config.floatX)
+    no_rewrites = Mode(linker="py", optimizer=None)
+    np.testing.assert_allclose(
+        vect_out.eval({"vect_x": vect_x_test, "n": n_val}, mode=no_rewrites),
+        rewritten_vect_out.eval(
+            {"vect_x": vect_x_test, "n": n_val}, on_unused_input="ignore"
+        ),
+    )
 
 
 def test_blockwise_reshape():
