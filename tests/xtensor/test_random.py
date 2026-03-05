@@ -26,7 +26,7 @@ from pytensor.xtensor.random import (
     multivariate_normal,
     normal,
 )
-from pytensor.xtensor.vectorization import XRV
+from pytensor.xtensor.vectorization import XRV, vectorize_graph
 from tests.xtensor.util import check_vectorization
 
 
@@ -462,5 +462,14 @@ def test_xrv_vectorize():
 
 
 def test_xrv_batch_extra_dim_vectorize():
-    # TODO: Check it raises NotImplementedError when we try to batch the extra_dim of an xrv
-    pass
+    extra_size = xtensor("extra_size", dims=(), dtype=int)
+    mu = xtensor("mu", dims=("a",), shape=(3,))
+    out = normal(mu, 1, extra_dims={"extra": extra_size})
+    assert out.type.dims == ("extra", "a")
+
+    # Batching extra_size should raise NotImplementedError
+    batch_extra_size = xtensor(
+        "batch_extra_size", dims=("batch",), shape=(2,), dtype=int
+    )
+    with pytest.raises(NotImplementedError, match="batched extra_dim_lengths"):
+        vectorize_graph([out], {extra_size: batch_extra_size})
