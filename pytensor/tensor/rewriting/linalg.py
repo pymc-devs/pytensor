@@ -11,7 +11,6 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Abs, Exp, Log, Mul, Sign, Sqr
 from pytensor.tensor.basic import (
     AllocDiag,
@@ -132,40 +131,46 @@ def transinv_to_invtrans(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([Dot])
+@node_rewriter([Dot, _matmul])
 def inv_as_solve(fgraph, node):
-    """
-    This utilizes a boolean `symmetric` tag on the matrices.
-    """
-    if isinstance(node.op, Dot):
-        l, r = node.inputs
-        if (
-            l.owner
-            and isinstance(l.owner.op, Blockwise)
-            and isinstance(l.owner.op.core_op, MatrixInverse)
-        ):
-            return [solve(l.owner.inputs[0], r)]
-        if (
-            r.owner
-            and isinstance(r.owner.op, Blockwise)
-            and isinstance(r.owner.op.core_op, MatrixInverse)
-        ):
-            x = r.owner.inputs[0]
-            if getattr(x.tag, "symmetric", None) is True:
-                return [solve(x, (l.mT)).mT]
-            else:
-                return [solve((x.mT), (l.mT)).mT]
+    l, r = node.inputs
+
+    # inv(A) @ B → solve(A, B)
+    if (
+        l.owner
+        and isinstance(l.owner.op, Blockwise)
+        and isinstance(l.owner.op.core_op, MatrixInverse)
+    ):
+        A = l.owner.inputs[0]
+        B = r
+
+        return [solve(A, B)]
+
+    # A @ inv(B) → solve(B.T, A.T).T   ← THIS is the critical fix
+    if (
+        r.owner
+        and isinstance(r.owner.op, Blockwise)
+        and isinstance(r.owner.op.core_op, MatrixInverse)
+    ):
+        B = r.owner.inputs[0]
+        A = l
+
+        return [solve(B.T, A.T).T]
+
+    return None
 
 
 @register_stabilize
 @register_canonicalize
-@node_rewriter([blockwise_of(OpPattern(Solve, assume_a="gen"))])
+@node_rewriter([blockwise_of(Solve)])
 def generic_solve_to_solve_triangular(fgraph, node):
     """
     If any solve() is applied to the output of a cholesky op, then
     replace it with a triangular solve.
 
     """
+    if node.op.core_op.assume_a != "gen":
+        return None
     A, b = node.inputs  # result is the solution to Ax=b
     if (
         A.owner
@@ -194,12 +199,14 @@ def generic_solve_to_solve_triangular(fgraph, node):
 
 
 @register_specialize
-@node_rewriter([blockwise_of(OpPattern(SolveBase, b_ndim=1))])
+@node_rewriter([blockwise_of(SolveBase)])
 def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
     """Replace a batched Solve(a, b, b_ndim=1) by Solve(a, b.T, b_ndim=2).T
 
     `a` must have no batched dimensions, while `b` can have arbitrary batched dimensions.
     """
+    if node.op.core_op.b_ndim != 1:
+        return None
     core_op = node.op.core_op
     [a, b] = node.inputs
 
@@ -251,11 +258,13 @@ def no_transpose_symmetric(fgraph, node):
 
 
 @register_stabilize
-@node_rewriter([blockwise_of(OpPattern(Solve, b_ndim=2))])
+@node_rewriter([blockwise_of(Solve)])
 def psd_solve_with_chol(fgraph, node):
     """
     This utilizes a boolean `psd` tag on matrices.
     """
+    if node.op.core_op.b_ndim != 2:
+        return None
     A, b = node.inputs  # result is the solution to Ax=b
     if getattr(A.tag, "psd", None) is True:
         L = cholesky(A)
