@@ -563,7 +563,7 @@ class TestLstsq:
         z = scalar()
         b = lstsq(x, y, z)
         f = function([x, y, z], b)
-        with pytest.raises(np.linalg.linalg.LinAlgError):
+        with pytest.raises(np.linalg.LinAlgError):
             f([2, 1], [2, 1], 1)
 
     def test_wrong_rcond_dimension(self):
