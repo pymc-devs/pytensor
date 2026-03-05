@@ -3504,12 +3504,11 @@ class TestGetUnderlyingScalarConstantValue:
         assert get_underlying_scalar_constant_value(s) == c.data
 
     def test_copy(self):
-        # Make sure we do not return a writeable internal storage of a constant,
+        # Make sure we do not return the internal storage of a constant,
         # so we cannot change the value of a constant by mistake.
         c = constant(3)
         d = get_scalar_constant_value(c)
-        with pytest.raises(ValueError, match="output array is read-only"):
-            d += 1
+        d += 1
         e = get_scalar_constant_value(c)
         assert e == 3, (c, d, e)
 

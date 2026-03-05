@@ -16,6 +16,7 @@ from pytensor.graph.type import HasShape
 from pytensor.scalar import discrete_dtypes
 from pytensor.tensor import (
     TensorVariable,
+    as_tensor,
     broadcast_shape,
     broadcast_to,
     tensor,
@@ -232,7 +233,7 @@ class XRV(XOp, RNGConsumerOp):
             )
 
         extra_dim_lengths = [
-            as_xtensor(dim_length).values
+            as_tensor(dim_length, allow_xtensor_conversion=True)
             for dim_length in extra_dim_lengths_and_params[: len(self.extra_dims)]
         ]
         if not all(

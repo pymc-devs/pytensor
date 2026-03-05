@@ -123,7 +123,10 @@ class UnStack(XOp):
             raise ValueError(
                 f"Number of unstacked lengths {len(unstacked_length)} must match number of unstacked dims {len(self.unstacked_dims)}"
             )
-        unstacked_lengths = [as_tensor(length, ndim=0) for length in unstacked_length]
+        unstacked_lengths = [
+            as_tensor(length, allow_xtensor_conversion=True)
+            for length in unstacked_length
+        ]
         if not all(length.dtype in discrete_dtypes for length in unstacked_lengths):
             raise TypeError("Unstacked lengths must be discrete dtypes.")
 
@@ -441,7 +444,7 @@ class ExpandDims(XOp):
         if self.dim in x.type.dims:
             raise ValueError(f"Dimension {self.dim} already exists in {x.type.dims}")
 
-        size = as_xtensor(size, dims=())
+        size = as_tensor(size, allow_xtensor_conversion=True)
         if not (size.dtype in integer_dtypes and size.ndim == 0):
             raise ValueError(f"size should be an integer scalar, got {size.type}")
         try:
