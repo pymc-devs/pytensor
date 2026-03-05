@@ -29,13 +29,13 @@ from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.rewriting.db import EquilibriumDB
-from pytensor.graph.type import HasShape, Type
+from pytensor.graph.type import HasDataType, HasShape, Type
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
 from pytensor.raise_op import CheckAndRaise
 from pytensor.scalar import int32
-from pytensor.scalar.basic import ScalarConstant, ScalarType, ScalarVariable
+from pytensor.scalar.basic import ScalarConstant, ScalarVariable
 from pytensor.tensor import (
     _as_tensor_variable,
     _get_vector_length,
@@ -292,13 +292,8 @@ def _get_underlying_scalar_constant_value(
     max_recur : int
         The maximum number of recursion.
 
-    Notes
-    -----
-        There may be another function similar to this one in the code,
-        but I'm not sure where it is.
-
     """
-    from pytensor.compile.ops import DeepCopyOp, OutputGuard
+    from pytensor.compile.ops import DeepCopyOp, OutputGuard, TypeCastingOp
     from pytensor.sparse import CSM
     from pytensor.tensor.subtensor import Subtensor
 
@@ -319,13 +314,20 @@ def _get_underlying_scalar_constant_value(
                 raise NotScalarConstantError()
 
         if isinstance(v, Constant):
-            if isinstance(v.type, TensorType) and v.unique_value is not None:
-                return v.unique_value
+            v_type = v.type
+            if isinstance(v_type, HasShape) and isinstance(v_type, HasDataType):
+                if v_type.ndim == 0:
+                    return np.array(v.data, dtype=v.type.dtype)
 
-            elif isinstance(v.type, ScalarType):
-                return v.data
+                elif (not any(s is None for s in v_type.shape)) and (
+                    np.prod(v_type.shape) == 1
+                ):
+                    return np.array(v.data, dtype=v_type.dtype).squeeze()
 
-            elif isinstance(v.type, NoneTypeT):
+                elif isinstance(v_type, TensorType) and v.unique_value is not None:
+                    return np.array(v.unique_value)
+
+            elif isinstance(v_type, NoneTypeT):
                 return None
 
             raise NotScalarConstantError()
@@ -333,9 +335,9 @@ def _get_underlying_scalar_constant_value(
         if not only_process_constants and getattr(v, "owner", None) and max_recur > 0:
             op = v.owner.op
             max_recur -= 1
-            if isinstance(op, Alloc | DimShuffle | OutputGuard | DeepCopyOp):
-                # OutputGuard is only used in debugmode but we
-                # keep it here to avoid problems with old pickles
+            if isinstance(
+                op, Alloc | DimShuffle | TypeCastingOp | DeepCopyOp | OutputGuard
+            ):
                 v = v.owner.inputs[0]
                 continue
             elif isinstance(op, Shape_i):
@@ -343,7 +345,6 @@ def _get_underlying_scalar_constant_value(
                 inp = v.owner.inputs[0]
                 if isinstance(inp, Constant):
                     return np.asarray(np.shape(inp.data)[i])
-                # The shape of a broadcastable dimension is 1
                 if isinstance(inp.type, HasShape) and inp.type.shape[i] is not None:
                     return np.asarray(inp.type.shape[i])
 
@@ -600,7 +601,10 @@ def get_scalar_constant_value(
     If 'v' is not a scalar, it raises a NotScalarConstantError.
 
     """
-    if isinstance(v, TensorVariable | np.ndarray):
+    if isinstance(v, Variable) and isinstance(v.type, HasShape):
+        if v.type.ndim != 0:
+            raise NotScalarConstantError("Input ndim != 0")
+    elif isinstance(v, np.ndarray):
         if v.ndim != 0:
             raise NotScalarConstantError("Input ndim != 0")
     return get_underlying_scalar_constant_value(

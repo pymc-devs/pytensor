@@ -119,7 +119,6 @@ def lower_expand_dims(fgraph, node):
 
     # Convert inputs to tensors
     x_tensor = tensor_from_xtensor(x)
-    size_tensor = tensor_from_xtensor(size)
 
     # Get the new dimension name and position
     new_axis = 0  # Always insert at front
@@ -130,7 +129,7 @@ def lower_expand_dims(fgraph, node):
         result_tensor = expand_dims(x_tensor, new_axis)
     else:
         # Otherwise broadcast to the requested size
-        result_tensor = broadcast_to(x_tensor, (size_tensor, *x_tensor.shape))
+        result_tensor = broadcast_to(x_tensor, (size, *x_tensor.shape))
 
     # Preserve static shape information
     result_tensor = specify_shape(result_tensor, out.type.shape)

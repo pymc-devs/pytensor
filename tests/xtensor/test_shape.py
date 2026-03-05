@@ -25,7 +25,7 @@ from pytensor.xtensor.shape import (
     unstack,
     zeros_like,
 )
-from pytensor.xtensor.type import as_xtensor, xtensor
+from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
 from pytensor.xtensor.vectorization import vectorize_graph
 from tests.xtensor.util import (
     check_vectorization,
@@ -369,16 +369,22 @@ def test_expand_dims():
 
     # Implicit size 1
     y = x.expand_dims("country")
+    assert y.type.dims == ("country", "city", "year")
+    assert y.type.shape == (1, 2, 2)
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims("country"))
 
     # Test with multiple dimensions
     y = x.expand_dims(["country", "state"])
+    assert y.type.dims == ("country", "state", "city", "year")
+    assert y.type.shape == (1, 1, 2, 2)
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims(["country", "state"]))
 
     # Test with a dict of name-size pairs
     y = x.expand_dims({"country": 2, "state": 3})
+    assert y.type.dims == ("country", "state", "city", "year")
+    assert y.type.shape == (2, 3, 2, 2)
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims({"country": 2, "state": 3}))
 
@@ -390,6 +396,8 @@ def test_expand_dims():
     # Test with a dict of name-coord array pairs
     with pytest.warns(UserWarning, match="only its length is used"):
         y = x.expand_dims({"country": np.array([1, 2]), "state": np.array([3, 4, 5])})
+    assert y.type.dims == ("country", "state", "city", "year")
+    assert y.type.shape == (2, 3, 2, 2)
     fn = xr_function([x], y)
     xr_assert_allclose(
         fn(x_test),
@@ -399,12 +407,16 @@ def test_expand_dims():
     # Symbolic size 1
     size_sym_1 = scalar("size_sym_1", dtype="int64")
     y = x.expand_dims({"country": size_sym_1})
+    assert y.type.dims == ("country", "city", "year")
+    assert y.type.shape == (None, 2, 2)
     fn = xr_function([x, size_sym_1], y)
     xr_assert_allclose(fn(x_test, 1), x_test.expand_dims({"country": 1}))
 
     # Test with symbolic sizes in dict
     size_sym_2 = scalar("size_sym_2", dtype="int64")
     y = x.expand_dims({"country": size_sym_1, "state": size_sym_2})
+    assert y.type.dims == ("country", "state", "city", "year")
+    assert y.type.shape == (None, None, 2, 2)
     fn = xr_function([x, size_sym_1, size_sym_2], y)
     xr_assert_allclose(fn(x_test, 2, 3), x_test.expand_dims({"country": 2, "state": 3}))
 
@@ -415,16 +427,24 @@ def test_expand_dims():
 
     # Test with axis parameter
     y = x.expand_dims("country", axis=1)
+    assert y.type == XTensorType(
+        dtype=x.dtype, dims=("city", "country", "year"), shape=(2, 1, 2)
+    )
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims("country", axis=1))
 
     # Test with negative axis parameter
     y = x.expand_dims("country", axis=-1)
+    assert y.type == XTensorType(
+        dtype=x.dtype, dims=("city", "year", "country"), shape=(2, 2, 1)
+    )
     fn = xr_function([x], y)
     xr_assert_allclose(fn(x_test), x_test.expand_dims("country", axis=-1))
 
     # Add two new dims with axis parameters
     y = x.expand_dims(["country", "state"], axis=[1, 2])
+    assert y.type.dims == ("city", "country", "state", "year")
+    assert y.type.shape == (2, 1, 1, 2)
     fn = xr_function([x], y)
     xr_assert_allclose(
         fn(x_test), x_test.expand_dims(["country", "state"], axis=[1, 2])
