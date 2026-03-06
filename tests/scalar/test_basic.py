@@ -531,6 +531,7 @@ def test_cast_to_complex(inp_type):
     assert res_y == 1
     assert res_y.dtype == "complex64"
 
+
 class TestPow:
     def test_pow_negative_base_fractional_exponent(self):
         """Scalar Pow should return nan, not complex, for fractional powers of negative floats."""
@@ -555,4 +556,3 @@ class TestPow:
 
         result = scalar_pow.impl(-2.0, 3.0)
         assert result == -8.0
-        
