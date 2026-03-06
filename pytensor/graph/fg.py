@@ -10,6 +10,8 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     Apply,
     AtomicVariable,
+    Constant,
+    NominalVariable,
     Variable,
     clone_get_equiv,
 )
@@ -928,3 +930,154 @@ class FunctionGraph(MetaObject):
         from pytensor.printing import debugprint
 
         return debugprint(self, **kwargs)
+
+    def freeze(self) -> "FrozenFunctionGraph":
+        """Return a frozen, hashable version of this FunctionGraph."""
+        return FrozenFunctionGraph(self.inputs, self.outputs)
+
+
+class FrozenFunctionGraph:
+    """Immutable, hashable function graph for inner graphs of Ops.
+
+    All internal nodes are globally interned via ``FrozenApply`` and ``FrozenConstant``.  Two ``FrozenFunctionGraph``
+    instances built from structurally identical source graphs share the same internal objects, so equality reduces to
+    an identity check on the output tuples.
+
+    .. code-block:: python
+
+        from pytensor.scalar.basic import float64, add
+        from pytensor.graph.fg import FunctionGraph
+
+        x, y = float64("x"), float64("y")
+        fg = FunctionGraph([x, y], [add(x, y)])
+        frozen = fg.freeze()
+        frozen2 = FunctionGraph([x, y], [add(x, y)]).freeze()
+
+        assert frozen == frozen2
+        assert {frozen: "value"}[frozen2] == "value"
+    """
+
+    def __init__(
+        self,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+    ):
+        from pytensor.graph.basic import (
+            FrozenApply,
+            FrozenConstant,
+        )
+
+        nominal_inputs = tuple(
+            NominalVariable(i, inp.type, name=inp.name) for i, inp in enumerate(inputs)
+        )
+
+        memo: dict[Variable, Variable] = dict(zip(inputs, nominal_inputs, strict=True))
+
+        var_hash: dict[Variable, int] = {}
+        for i, nm in enumerate(nominal_inputs):
+            var_hash[nm] = hash(("input", i, nm.type))
+
+        for node in toposort(outputs, blockers=inputs):
+            for inp in node.inputs:
+                if inp not in memo:
+                    if isinstance(inp, Constant):
+                        fc = FrozenConstant(inp.type, inp.data)
+                        memo[inp] = fc
+                        if fc not in var_hash:
+                            var_hash[fc] = hash(fc)
+                    elif isinstance(inp, AtomicVariable):
+                        # AtomicVariables (e.g. NominalVariables from outer
+                        # scopes) are already interned and hashable.
+                        memo[inp] = inp
+                        if inp not in var_hash:
+                            var_hash[inp] = hash(inp)
+                    else:
+                        raise ValueError(
+                            f"Non-Constant, non-AtomicVariable orphan {inp} found "
+                            "in the graph. All variables must be graph inputs, "
+                            "Constants, AtomicVariables, or produced by Apply "
+                            "nodes reachable from the inputs."
+                        )
+
+            new_inputs = tuple(memo[i] for i in node.inputs)
+            output_types = tuple(out.type for out in node.outputs)
+            new_node = FrozenApply(node.op, new_inputs, output_types)
+
+            input_hashes = tuple(var_hash[i] for i in new_inputs)
+            node_hash = hash((node.op, input_hashes))
+            for old_out, new_out in zip(node.outputs, new_node.outputs, strict=True):
+                memo[old_out] = new_out
+                var_hash[new_out] = hash((node_hash, new_out.index))
+
+        self.inputs: tuple[Variable, ...] = nominal_inputs
+
+        resolved_outputs = []
+        for o in outputs:
+            mapped = memo.get(o)
+            # After unpickling, o may be a fresh object whose owner is the (correctly interned) FrozenApply.
+            # We thus resolve it through its owner to get back the original variable.
+            if mapped is None and o.owner is not None:
+                mapped = memo.get(o.owner.outputs[o.index])
+            if mapped is None:
+                raise ValueError(
+                    f"Output variable {o} could not be mapped to a frozen graph variable. "
+                    "All outputs must be graph inputs, constants, or produced by Apply nodes "
+                    "reachable from the inputs."
+                )
+            resolved_outputs.append(mapped)
+        self.outputs: tuple[Variable, ...] = tuple(resolved_outputs)
+
+        self._structural_hash: int = hash(tuple(var_hash[o] for o in self.outputs))
+
+    def __hash__(self):
+        return self._structural_hash
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, FrozenFunctionGraph):
+            return False
+        if self._structural_hash != other._structural_hash:
+            return False
+        if self.outputs == other.outputs:
+            return True
+        # Hash match but output identity mismatch — likely a hash collision
+        # or interning bug. Fall back to structural comparison.
+        import warnings
+
+        from pytensor.graph.basic import equal_computations
+
+        if (
+            len(self.outputs) == len(other.outputs)
+            and len(self.inputs) == len(other.inputs)
+            and equal_computations(
+                list(self.outputs),
+                list(other.outputs),
+                in_xs=list(self.inputs),
+                in_ys=list(other.inputs),
+            )
+        ):
+            warnings.warn(
+                "FrozenFunctionGraph: structurally equal graphs did not share "
+                "interned objects. This may indicate an interning bug.",
+                stacklevel=2,
+            )
+            return True
+        return False
+
+    def __repr__(self):
+        return f"FrozenFunctionGraph(inputs={list(self.inputs)}, outputs={list(self.outputs)})"
+
+    def __reduce__(self):
+        return (type(self), (list(self.inputs), list(self.outputs)))
+
+    @property
+    def apply_nodes(self) -> set[Apply]:
+        return set(applys_between(self.inputs, self.outputs))
+
+    def toposort(self) -> list[Apply]:
+        return list(toposort(self.outputs, blockers=self.inputs))
+
+    @property
+    def variables(self) -> set[Variable]:
+        return set(vars_between(self.inputs, self.outputs))

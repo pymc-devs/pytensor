@@ -1,24 +1,26 @@
 """Define new Ops from existing Ops"""
 
+from __future__ import annotations
+
 import warnings
 from collections.abc import Callable, Sequence
 from copy import copy
 from functools import partial
 from itertools import chain
-from typing import Union, cast
+from typing import cast
 
 from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType, Rop, grad
+from pytensor.gradient import DisconnectedType, Rop, disconnected_type, grad
 from pytensor.graph.basic import (
     Apply,
     Constant,
     NominalVariable,
     Variable,
 )
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph
 from pytensor.graph.null_type import NullType
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
 from pytensor.graph.replace import clone_replace
@@ -156,41 +158,37 @@ def construct_nominal_fgraph(
 
 
 class OpFromGraph(Op, HasInnerGraph):
-    r"""
-    This creates an `Op` from inputs and outputs lists of variables.
-    The signature is similar to :func:`pytensor.function <pytensor.function>`
-    and the resulting `Op`'s perform will do the same operation as::
+    r"""Create an Op from inputs and outputs lists of variables.
 
-        orig_function(inputs, outputs, **kwargs)
+    The signature is similar to :func:`pytensor.function` and the resulting Op's perform will do
+    the same operation as ``orig_function(inputs, outputs, **kwargs)``.
 
-    Currently does not support ``updates`` or ``givens`` argument.
+    Does not support ``updates`` or ``givens``.
 
-    .. TODO:
-        - Allow / test merging of OpFromGraph nodes
+    .. TODO::
         - Add support for NullType and DisconnectedType when R_op supports them
-        - Add support to pickle this Op.
         - Add optimization to removing unused inputs/outputs
         - Add optimization to work inplace on inputs when not inline
 
     Notes
     -----
-    - We support shared variables in the inner graph. This is automatic
-      and invisible to the user. They can be as input to the node or in
-      the inner graph.
-    - We support unused inputs. This is needed for the grad.
-    - We support nested OpFromGraph.
-    - ``inline=True`` will cause better runtime optimization at the cost
-      of compilation time. Currently only works with ``fast_compile`` or
-      ``fast_run`` mode.
-    - For overriding, it's recommended to provide pure functions (no side
-      effects like setting global variable) as callable(s). The callable(s)
-      supplied for overriding gradient/rop will be called only once at the
-      first call to L_op/R_op, and will be converted to OpFromGraph instances.
+    - Shared variables in the inner graph are supported. They are detected automatically and added
+      as implicit inputs.
+    - Unused inputs are supported (needed for gradient overrides).
+    - Nested OpFromGraph is supported.
+    - ``inline=True`` causes the Op's inner graph to be inlined during compilation, which gives
+      better runtime optimization at the cost of compilation time. Currently only works with
+      ``fast_compile`` or ``fast_run`` mode.
+    - Override callables should be pure functions (no side effects). They are called once at the
+      first call to L_op/R_op and converted to OpFromGraph instances. They are also called once at
+      construction time with dummy inputs to build a frozen representation for equality comparison.
+    - Two OpFromGraph instances with the same inner graph, overrides, shared variables, and settings
+      are considered equal. This allows the MergeOptimizer to deduplicate identical OpFromGraph
+      nodes.
 
     Examples
     --------
-
-    Example 1:
+    Basic usage:
 
     .. code-block:: python
 
@@ -204,7 +202,7 @@ class OpFromGraph(Op, HasInnerGraph):
         e2 = op(x, y, z) + op(z, y, x)
         fn = function([x, y, z], [e2])
 
-    Example 2 with shared variable:
+    With a shared variable:
 
     .. code-block:: python
 
@@ -217,11 +215,10 @@ class OpFromGraph(Op, HasInnerGraph):
         s = pytensor.shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
         op = OpFromGraph([x, y, z], [e])
-        # op behaves like a normal pytensor op
         e2 = op(x, y, z) + op(z, y, x)
         fn = function([x, y, z], [e2])
 
-    Example 3 override second output of L_op
+    Per-input L_op override:
 
     .. code-block:: python
 
@@ -238,17 +235,12 @@ class OpFromGraph(Op, HasInnerGraph):
             return z * 2
 
 
-        op = OpFromGraph(
-            [x, y, z],
-            [e],
-            lop_overrides=[None, rescale_dy, None],
-        )
+        op = OpFromGraph([x, y, z], [e], lop_overrides=[None, rescale_dy, None])
         e2 = op(x, y, z)
         dx, dy, dz = grad(e2, [x, y, z])
         fn = function([x, y, z], [dx, dy, dz])
         # the gradient wrt y is now doubled
         fn(2.0, 3.0, 4.0)  # [1., 8., 3.]
-
     """
 
     def __init__(
@@ -257,9 +249,9 @@ class OpFromGraph(Op, HasInnerGraph):
         outputs: list[Variable],
         *,
         inline: bool = False,
-        lop_overrides: Union[Callable, "OpFromGraph", None] = None,
-        grad_overrides: Union[Callable, "OpFromGraph", None] = None,
-        rop_overrides: Union[Callable, "OpFromGraph", None] = None,
+        lop_overrides: Callable | list | OpFromGraph | None = None,
+        grad_overrides: Callable | list | OpFromGraph | None = None,
+        rop_overrides: Callable | list | OpFromGraph | None = None,
         connection_pattern: list[list[bool]] | None = None,
         strict: bool = False,
         name: str | None = None,
@@ -269,98 +261,54 @@ class OpFromGraph(Op, HasInnerGraph):
         """
         Parameters
         ----------
-        inputs
+        inputs : list of Variable
             The inputs to the graph.
-
-        outputs
+        outputs : list of Variable
             The outputs to the graph.
+        inline : bool, optional
+            If True, the Op's inner graph is inlined during compilation. If False (default), a
+            pre-compiled function is used instead.
+        lop_overrides : callable or OpFromGraph or list or None, optional
+            Override for the L_op method. Mutually exclusive with ``grad_overrides``.
 
-        inline
-            Defaults to ``False``
+            - None: use the default L_op result.
+            - OpFromGraph: should accept ``(inputs, outputs, output_grads)`` with the same types
+              as the inner graph.
+            - callable: should take three args ``(inputs, outputs, output_grads)``, each a list of
+              Variable, and return a list of Variable.
+            - list: one entry per input. Each entry is None (use default), a DisconnectedType or
+              NullType Variable, or a callable returning a single Variable.
+        grad_overrides : callable or OpFromGraph or list or None, optional
+            Deprecated in favor of ``lop_overrides``. Same as ``lop_overrides`` but the callable
+            signature is ``(inputs, output_grads)`` (no ``outputs`` argument). Mutually exclusive
+            with ``lop_overrides``.
+        rop_overrides : callable or OpFromGraph or list or None, optional
+            Override for the R_op method.
 
-            ``True`` : Cause the :class:`Op`'s original graph being used during
-            compilation, the :class:`Op` will not be visible in the compiled
-            graph but rather its internal graph.
+            - None: use the default R_op result.
+            - OpFromGraph: should accept ``(inputs, eval_points)`` with the same types as the
+              inner graph inputs.
+            - callable: should take two args ``(inputs, eval_points)``, each a list of Variable,
+              and return a list of Variable.
+            - list: one entry per output. Each entry is None (use default), a DisconnectedType or
+              NullType Variable, or a callable returning a single Variable.
 
-            ``False`` : will use a pre-compiled function inside.
+            .. warning::
 
-        grad_overrides
-            Defaults to ``None``.
-            This argument is mutually exclusive with ``lop_overrides``.
-
-            ``None`` : Do not override, use default grad() result
-
-            `OpFromGraph`: Override with another `OpFromGraph`, should
-            accept inputs as the same order and types of ``inputs`` and ``output_grads``
-            arguments as one would specify in :meth:`Op.grad`() method.
-
-            `callable`: Should take two args: ``inputs`` and ``output_grads``.
-            Each argument is expected to be a list of :class:`Variable `.
-            Must return list of :class:`Variable `.
-
-        lop_overrides
-            Defaults to ``None``.
-
-            This argument is mutually exclusive with ``grad_overrides``.
-
-            These options are similar to the ``grad_overrides`` above, but for
-            the :meth:`Op.L_op` method.
-
-            ``None``: Do not override, use the default :meth:`Op.L_op` result
-
-            `OpFromGraph`: Override with another `OpFromGraph`, should
-            accept inputs as the same order and types of ``inputs``,
-            ``outputs`` and ``output_grads`` arguments as one would specify in
-            :meth:`Op.grad` method.
-
-            `callable`: Should take three args: ``inputs``, ``outputs`` and ``output_grads``.
-            Each argument is expected to be a list of :class:`Variable`.
-            Must return list of :class:`Variable`.
-
-            ``list``: Each `OpFromGraph`/callable must return a single
-            :class:`Variable`. Each list element corresponds to gradient of
-            a specific input, length of list must be equal to number of inputs.
-
-        rop_overrides
-            One of ``{None, OpFromGraph, callable, Variable}``.
-
-            Defaults to ``None``.
-
-            ``None``: Do not override, use the default :meth:`Op.R_op` result
-
-            `OpFromGraph`: Override with another `OpFromGraph`, should
-            accept inputs as the same order and types of ``inputs`` and ``eval_points``
-            arguments as one would specify in :meth:`Op.R_op` method.
-
-            `callable`: Should take two args: ``inputs`` and ``eval_points``.
-            Each argument is expected to be a list of :class:`Variable`.  Must
-            return list of :class:`Variable`.
-
-            ``list``:
-            Each :class:`OpFromGraph`/callable must return a single
-            :class:`Variable <pytensor.graph.basic.Variable>`. Each list element
-            corresponds to a specific output of :meth:`Op.R_op`, length of list
-            must be equal to number of outputs.  connection_pattern If not
-            ``None``, this will be used as the connection_pattern for this
-            :class:`Op`.
-
-        .. warning::
-
-            rop overrides is ignored when `pytensor.gradient.Rop` is called with
-            `use_op_rop_implementation=False` (default). In this case the Lop
-            is used twice to obtain a mathematically equivalent Rop.
-
-        strict: bool, default False
-            If true, it raises when any variables needed to compute the inner graph
-            are not provided as explici inputs. This can only happen for graphs with
-            shared variables.
-
-        name
+                R_op overrides are ignored when ``pytensor.gradient.Rop`` is called with
+                ``use_op_rop_implementation=False`` (the default). In that case the L_op is used
+                twice to obtain a mathematically equivalent R_op.
+        connection_pattern : list of list of bool, optional
+            If provided, used as the connection pattern for this Op. Each inner list has one bool
+            per output, and the outer list has one entry per input.
+        strict : bool, optional
+            If True, raises when any variables needed to compute the inner graph are not provided
+            as explicit inputs. Only relevant for graphs with shared variables. Default False.
+        name : str, optional
             A name for debugging purposes.
-
-        kwargs
-            Check :func:`pytensor.function` for more arguments, only works when not
-            inline.
+        **kwargs
+            Additional arguments passed to :func:`pytensor.function`. Only used when
+            ``inline=False``.
         """
         ignore_unused_inputs = kwargs.get("on_unused_input", False) == "ignore"
         if not ignore_unused_inputs and len(inputs) != len(set(inputs)):
@@ -389,6 +337,7 @@ class OpFromGraph(Op, HasInnerGraph):
         self.fgraph, self.shared_inputs, _, _ = construct_nominal_fgraph(
             inputs, outputs
         )
+        self._frozen_fgraph = self.fgraph.freeze()
 
         if strict and self.shared_inputs:
             raise ValueError(
@@ -438,13 +387,117 @@ class OpFromGraph(Op, HasInnerGraph):
         self.name = name
         self.destroy_map = destroy_map if destroy_map is not None else {}
 
+        self._frozen_lop = self._freeze_lop_override()
+        self._frozen_rop = self._freeze_rop_override()
+
+    @staticmethod
+    def _freeze_override_to_fgraph(
+        all_inputs: list[Variable], results: list[Variable]
+    ) -> tuple[tuple[bool, ...], FrozenFunctionGraph | None]:
+        """Build a FrozenFunctionGraph from override results, filtering out disconnected/null types.
+
+        A structural connection pattern is also constructed from the results, indicating where filtering occured.
+        This pattern, together with the FrozenFunctionGraph, participate in the equality comparison of OpFromGraph
+        instances to distinguish different override implementations.
+        """
+        pattern = tuple(
+            isinstance(r.type, DisconnectedType | NullType) for r in results
+        )
+        connected = [
+            r for r, is_disc in zip(results, pattern, strict=True) if not is_disc
+        ]
+        if not connected:
+            return pattern, None
+        return pattern, FunctionGraph(all_inputs, connected).freeze()
+
+    def _freeze_lop_override(self):
+        """Freeze lop/grad override into a FrozenFunctionGraph for equality comparison."""
+        lop = self.lop_overrides if self._lop_op_interface else self.grad_overrides
+        if lop is None:
+            return None
+
+        if isinstance(lop, OpFromGraph):
+            return lop._frozen_fgraph
+
+        dummy_inputs = [t() for t in self.input_types]
+        dummy_outputs = [t() for t in self.output_types]
+        dummy_output_grads = [t() for t in self.output_types]
+
+        if self._lop_op_interface:
+            all_inputs = dummy_inputs + dummy_outputs + dummy_output_grads
+            callable_args = (dummy_inputs, dummy_outputs, dummy_output_grads)
+        else:
+            all_inputs = dummy_inputs + dummy_output_grads
+            callable_args = (dummy_inputs, dummy_output_grads)
+
+        if isinstance(lop, list):
+            results = []
+            for entry in lop:
+                if entry is None:
+                    results.append(disconnected_type())
+                elif isinstance(entry, Variable):
+                    results.append(entry)
+                elif callable(entry):
+                    results.append(entry(*callable_args))
+            return self._freeze_override_to_fgraph(all_inputs, results)
+
+        result = lop(*callable_args)
+        return self._freeze_override_to_fgraph(all_inputs, result)
+
+    def _freeze_rop_override(self):
+        """Freeze rop override into a FrozenFunctionGraph for equality comparison."""
+        rop = self.rop_overrides
+        if rop is None:
+            return None
+
+        if isinstance(rop, OpFromGraph):
+            return rop._frozen_fgraph
+
+        dummy_inputs = [t() for t in self.input_types]
+        dummy_eval_points = [t() for t in self.input_types]
+        all_inputs = dummy_inputs + dummy_eval_points
+        callable_args = (dummy_inputs, dummy_eval_points)
+
+        if isinstance(rop, list):
+            results = []
+            for entry in rop:
+                if entry is None:
+                    results.append(disconnected_type())
+                elif isinstance(entry, Variable):
+                    results.append(entry)
+                elif callable(entry):
+                    results.append(entry(*callable_args))
+            return self._freeze_override_to_fgraph(all_inputs, results)
+
+        result = rop(*callable_args)
+        return self._freeze_override_to_fgraph(all_inputs, result)
+
     def __eq__(self, other):
-        # TODO: recognize a copy
-        return self is other
+        if self is other:
+            return True
+        if type(self) is not type(other):
+            return False
+        if self._frozen_fgraph != other._frozen_fgraph:
+            return False
+        if self.is_inline != other.is_inline:
+            return False
+        if self.destroy_map != other.destroy_map:
+            return False
+        if len(self.shared_inputs) != len(other.shared_inputs):
+            return False
+        if any(
+            a is not b
+            for a, b in zip(self.shared_inputs, other.shared_inputs, strict=True)
+        ):
+            return False
+        if self._frozen_lop != other._frozen_lop:
+            return False
+        if self._frozen_rop != other._frozen_rop:
+            return False
+        return True
 
     def __hash__(self):
-        # TODO: use internal variables in hash
-        return hash(type(self))
+        return hash((type(self), self._frozen_fgraph, self.is_inline))
 
     def __str__(self):
         name = self.__class__.__name__ if self.name is None else self.name
