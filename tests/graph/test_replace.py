@@ -15,6 +15,7 @@ from pytensor.graph.traversal import graph_inputs
 from pytensor.tensor import dvector, fvector, vector
 from tests import unittest_tools as utt
 from tests.graph.utils import MyOp, MyVariable, op_multiple_outputs
+from tests.unittest_tools import assert_equal_computations
 
 
 class TestCloneReplace:
@@ -232,6 +233,24 @@ class TestGraphReplace:
         assert new_out is out
         with pytest.raises(ValueError, match="Some replacements were not used"):
             graph_replace([out], {fake: x.clone()}, strict=True)
+
+    def test_replace_var_and_ancestor(self):
+        """Replacing both a variable and its ancestor should not crash.
+
+        When x depends on a and y only depends on a through x,
+        replacing both x and a should work: x->xx makes a->aa a no-op.
+        """
+        op = MyOp("op")
+        a = MyVariable("a")
+        x = op(a)  # x depends on a
+        y = op(x)  # y depends on x (and transitively on a)
+
+        new_a = MyVariable("new_a")
+        new_x = MyVariable("new_x")
+
+        [new_y] = graph_replace([y], {a: new_a, x: new_x})
+        assert new_y.owner.inputs[0] is new_x
+        assert_equal_computations([new_y], [op(new_x)])
 
 
 class TestVectorizeGraph:
