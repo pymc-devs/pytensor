@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Iterable, Mapping, Sequence
-from functools import partial, singledispatch
+from functools import singledispatch
 from typing import cast, overload
 
 from pytensor.graph.basic import (
@@ -169,6 +169,9 @@ def graph_replace(
     fg_replace = {equiv[c]: c for c in conditions}
     # add the replacements on top of input mappings
     fg_replace.update({equiv[r]: v for r, v in replace_dict.items() if r in equiv})
+    # Filter out replacements whose keys are not in the FunctionGraph
+    # This can happen when a replacement makes an ancestor replacement redundant
+    fg_replace = {k: v for k, v in fg_replace.items() if k in fg.variables}
     # replacements have to be done in reverse topological order so that nested
     # expressions get recursively replaced correctly
 
@@ -183,11 +186,13 @@ def graph_replace(
     toposort = fg.toposort()
 
     def toposort_key(
-        fg: FunctionGraph, ts: list[Apply], pair: tuple[Variable, Variable]
+        pair: tuple[Variable, Variable],
+        toposort=toposort,
+        fg=fg,
     ) -> int:
         key, _ = pair
-        if key.owner is not None:
-            return ts.index(key.owner)
+        if (node := key.owner) is not None:
+            return toposort.index(node)  # type: ignore[no-any-return]
         else:
             if key in fg.variables:
                 return -1
@@ -197,7 +202,7 @@ def graph_replace(
     sorted_replacements = sorted(
         fg_replace.items(),
         # sort based on the fg toposort, if a variable has no owner, it goes first
-        key=partial(toposort_key, fg, toposort),
+        key=toposort_key,
         reverse=True,
     )
     fg.replace_all(sorted_replacements, import_missing=True)
