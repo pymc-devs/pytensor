@@ -1167,9 +1167,19 @@ class Eigvalsh(Op):
             w[0] = scipy_linalg.eigvalsh(a=inputs[0], b=None, lower=self.lower)
 
     def grad(self, inputs, g_outputs):
-        a, b = inputs
         (gw,) = g_outputs
-        return EigvalshGrad(self.lower)(a, b, gw)
+        if len(inputs) == 1:
+            # Standard eigenvalue problem (b=None): use EighGrad
+            (a,) = inputs
+            from pytensor.tensor.nlinalg import EighGrad
+
+            UPLO = "L" if self.lower else "U"
+            w, v = pt.linalg.eigh(a, UPLO=UPLO)
+            gv = v.zeros_like()
+            return [EighGrad(UPLO)(a, w, v, gw, gv)]
+        else:
+            a, b = inputs
+            return EigvalshGrad(self.lower)(a, b, gw)
 
     def infer_shape(self, fgraph, node, shapes):
         n = shapes[0][0]

@@ -210,6 +210,18 @@ def test_eigvalsh_grad():
     )
 
 
+def test_eigvalsh_grad_no_b():
+    """Regression test: Eigvalsh.grad must work when b=NoneConst (standard eigenvalue problem)."""
+    rng = np.random.default_rng(utt.fetch_seed())
+    a = rng.standard_normal((5, 5))
+    a = a + a.T
+    utt.verify_grad(
+        lambda a: eigvalsh(a, pt.NoneConst).dot([1, 2, 3, 4, 5]),
+        [a],
+        rng=np.random,
+    )
+
+
 class TestSolveBase:
     class SolveTest(SolveBase):
         def perform(self, node, inputs, outputs):
