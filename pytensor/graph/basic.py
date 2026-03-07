@@ -2,6 +2,7 @@
 
 import abc
 import warnings
+import weakref
 from collections.abc import (
     Hashable,
     Iterable,
@@ -14,6 +15,7 @@ from typing import (
     Any,
     Generic,
     Optional,
+    Self,
     TypeVar,
     Union,
     cast,
@@ -788,6 +790,93 @@ class Constant(AtomicVariable[_TypeType]):
         return self.data
 
 
+def _get_frozen_output(apply_node: "FrozenApply", index: int) -> Variable:
+    """Resolve a FrozenApply output by index. Used by pickle."""
+    return apply_node.outputs[index]
+
+
+def _make_frozen_output_reduce(out: Variable):
+    """Create a __reduce_ex__ override for a FrozenApply output Variable."""
+    owner = out.owner
+    index = out.index
+
+    def __reduce_ex__(protocol):
+        return (_get_frozen_output, (owner, index))
+
+    return __reduce_ex__
+
+
+class FrozenApply(Apply):
+    """An immutable, globally-interned Apply node for frozen graphs.
+
+    Uses tuples for ``inputs`` and ``outputs`` so mutation raises ``TypeError``
+    at the language level.  Interned by ``(op, cache_key(inputs))`` —
+    constructing a ``FrozenApply`` with the same op and input variables returns
+    the cached instance.
+
+    Constants are keyed by ``(type, data_bytes)`` so that two independently
+    created Constants with the same value resolve to the same cached node.
+    """
+
+    _cache: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+
+    @staticmethod
+    def _input_to_key(inp: Variable):
+        """Convert an input Variable to a hashable, value-based cache key element.
+
+        Non-Constants (NominalVariables, FrozenApply outputs) are already
+        globally interned, so identity works.  Constants use their byte
+        representation so that independently-created equal constants
+        (including NaN) produce the same key.  Object-dtype constants
+        (e.g. slices) fall back to ``signature()`` since their byte
+        representation stores pointers, not values.
+        """
+        if isinstance(inp, Constant):
+            a = np.asarray(inp.data)
+            if a.dtype.kind != "O":
+                return (inp.type, a.tobytes(), a.dtype.str, a.shape)
+            return inp.signature()
+        return inp
+
+    def __new__(
+        cls,
+        op: "Op",
+        inputs: tuple[Variable, ...],
+        output_types: tuple["Type", ...],
+    ):
+        cache_key = (op, tuple(cls._input_to_key(i) for i in inputs))
+        cached = cls._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        instance = object.__new__(cls)
+        instance.op = op
+        instance.inputs = inputs  # type: ignore[assignment]
+        instance.outputs = tuple(  # type: ignore[assignment]
+            t.variable_type(type=t, owner=instance, index=i)
+            for i, t in enumerate(output_types)
+        )
+        # Give each output Variable a __reduce__ that resolves to the
+        # canonical output on unpickle, avoiding fresh Variable objects.
+        for out in instance.outputs:
+            out.__reduce_ex__ = _make_frozen_output_reduce(out)  # type: ignore[method-assign]
+        instance.tag = Scratchpad()
+        cls._cache[cache_key] = instance
+        return instance
+
+    def __init__(self, op, inputs, output_types):
+        # All initialization is done in __new__
+        pass
+
+    def clone(self, clone_inner_graph: bool = False) -> Self:
+        """Frozen nodes are immutable — cloning returns self."""
+        return self
+
+    def __reduce__(self):
+        output_types = tuple(o.type for o in self.outputs)
+        return (type(self), (self.op, self.inputs, output_types))
+
+
 def clone(
     inputs: Sequence[Variable],
     outputs: Sequence[Variable],
@@ -1104,14 +1193,14 @@ def equal_computations(
 
     for x, y in zip(xs, ys, strict=True):
         if not isinstance(x, Variable) and not isinstance(y, Variable):
-            return np.array_equal(x, y)
+            return np.array_equal(x, y, equal_nan=True)
         if not isinstance(x, Variable):
             if isinstance(y, Constant):
-                return np.array_equal(y.data, x)
+                return np.array_equal(y.data, x, equal_nan=True)
             return False
         if not isinstance(y, Variable):
             if isinstance(x, Constant):
-                return np.array_equal(x.data, y)
+                return np.array_equal(x.data, y, equal_nan=True)
             return False
         x_is_owned, y_is_owned = (x.owner is not None, y.owner is not None)
         if x_is_owned != y_is_owned:
