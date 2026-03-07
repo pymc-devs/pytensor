@@ -883,10 +883,9 @@ class FusionOptimizer(GraphRewriter):
                 continue
 
             scalar_inputs, scalar_outputs = self.elemwise_to_scalar(inputs, outputs)
-            composite_outputs = Elemwise(
-                # No need to clone Composite graph, because `self.elemwise_to_scalar` creates fresh variables
-                Composite(scalar_inputs, scalar_outputs, clone_graph=False)
-            )(*inputs, return_list=True)
+            composite_outputs = Elemwise(Composite(scalar_inputs, scalar_outputs))(
+                *inputs, return_list=True
+            )
             assert len(outputs) == len(composite_outputs)
             for old_out, composite_out in zip(outputs, composite_outputs):
                 # Preserve any names on the original outputs
@@ -1061,31 +1060,35 @@ def local_careduce_fusion(fgraph, node):
 def local_inline_composite_constants(fgraph, node):
     """Inline scalar constants in Composite graphs."""
     composite_op = node.op.scalar_op
+
+    # Check if any outer inputs are inlineable constants before unfreezing
+    inlineable = [
+        (i, outer_inp)
+        for i, outer_inp in enumerate(node.inputs)
+        if isinstance(outer_inp, TensorConstant)
+        and "complex" not in outer_inp.type.dtype
+        and outer_inp.unique_value is not None
+    ]
+    if not inlineable:
+        return None
+
+    mutable_fg = composite_op.fgraph.unfreeze()
+    inlineable_indices = {i for i, _ in inlineable}
     new_outer_inputs = []
     new_inner_inputs = []
     inner_replacements = {}
-    for outer_inp, inner_inp in zip(
-        node.inputs, composite_op.fgraph.inputs, strict=True
+    for i, (outer_inp, inner_inp) in enumerate(
+        zip(node.inputs, mutable_fg.inputs, strict=True)
     ):
-        # Complex variables don't have a `c_literal` that can be inlined
-        if (
-            isinstance(outer_inp, TensorConstant)
-            and "complex" not in outer_inp.type.dtype
-        ):
-            if outer_inp.unique_value is not None:
-                inner_replacements[inner_inp] = scalar_constant(
-                    outer_inp.unique_value, dtype=inner_inp.dtype
-                )
-                continue
-        new_outer_inputs.append(outer_inp)
-        new_inner_inputs.append(inner_inp)
+        if i in inlineable_indices:
+            inner_replacements[inner_inp] = scalar_constant(
+                outer_inp.unique_value, dtype=inner_inp.dtype
+            )
+        else:
+            new_outer_inputs.append(outer_inp)
+            new_inner_inputs.append(inner_inp)
 
-    if not inner_replacements:
-        return None
-
-    new_inner_outs = clone_replace(
-        composite_op.fgraph.outputs, replace=inner_replacements
-    )
+    new_inner_outs = clone_replace(mutable_fg.outputs, replace=inner_replacements)
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
     new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
 
