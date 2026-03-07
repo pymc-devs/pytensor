@@ -656,7 +656,11 @@ class TestFusion:
                 (fxv, fyv),
                 1,
                 fxv - (fyv / 2),
-                "float32",
+                {
+                    "custom": "float32",
+                    "numpy+floatX": "float64",
+                    "numpy": "float64",
+                },
             ),
             (
                 fx - true_div(fy, fz),
@@ -673,12 +677,23 @@ class TestFusion:
                 1,
                 fxv - ((ixv * 100) // (iyv * 1000)),
                 {
-                    "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "custom": config.floatX,
+                    "numpy+floatX": "float64",
                     "numpy": "float64",
                 },
             ),  # 40
-            (fx - (fy / 2), (fx, fy), (fxv, fyv), 1, fxv - (fyv / 2), "float32"),
+            (
+                fx - (fy / 2),
+                (fx, fy),
+                (fxv, fyv),
+                1,
+                fxv - (fyv / 2),
+                {
+                    "custom": "float32",
+                    "numpy+floatX": "float64",
+                    "numpy": "float64",
+                },
+            ),
             (
                 fx - (fy % fz),
                 (fx, fy, fz),
@@ -823,8 +838,8 @@ class TestFusion:
                 1,
                 fxv - (iyv | izv),
                 {
-                    "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "custom": config.floatX,
+                    "numpy+floatX": "float64",
                     "numpy": "float64",
                 },
             ),
@@ -835,8 +850,8 @@ class TestFusion:
                 1,
                 fxv - (iyv ^ izv),
                 {
-                    "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "custom": config.floatX,
+                    "numpy+floatX": "float64",
                     "numpy": "float64",
                 },
             ),  # 60
@@ -847,8 +862,8 @@ class TestFusion:
                 1,
                 fxv - (iyv & izv),
                 {
-                    "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "custom": config.floatX,
+                    "numpy+floatX": "float64",
                     "numpy": "float64",
                 },
             ),
@@ -859,8 +874,8 @@ class TestFusion:
                 1,
                 fxv - (~iyv),
                 {
-                    "custom": "float64",
-                    "numpy + floatX": config.floatX,
+                    "custom": config.floatX,
+                    "numpy+floatX": "float64",
                     "numpy": "float64",
                 },
             ),
@@ -957,7 +972,11 @@ class TestFusion:
                     np.sum(-((fxv - fyv) ** 2) / 2),
                     -(fxv - fyv),
                 ),
-                ("float32", "float32"),
+                {
+                    "custom": ("float32", "float32"),
+                    "numpy+floatX": ("float64", "float32"),
+                    "numpy": ("float64", "float32"),
+                },
             ),
             # Two Composite graphs that share the same input, but are split by
             # a non-elemwise operation (Assert)
@@ -995,7 +1014,11 @@ class TestFusion:
                 (fxv,),
                 4,
                 (np.sum(fxv + 5) * np.exp(fxv) / (fxv + 5),),
-                ("float32",),
+                {
+                    "custom": ("float32",),
+                    "numpy+floatX": ("float64",),
+                    "numpy": ("float64",),
+                },
             ),
             pytest.param(
                 (
@@ -1038,7 +1061,10 @@ class TestFusion:
                 self._shared(np.zeros((5,) * g_.ndim, dtype=od), "out")
                 for g_, od in zip(g, out_dtype, strict=True)
             ]
-            assert all(o.dtype == g_.dtype for o, g_ in zip(out, g, strict=True))
+            for o, g_ in zip(out, g, strict=True):
+                assert o.dtype == g_.dtype, (
+                    f"Mismatch! Expected {o.dtype}, but graph evaluated to {g_.dtype}"
+                )
             f = function(
                 sym_inputs, [], updates=list(zip(out, g, strict=True)), mode=self.mode
             )
