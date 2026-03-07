@@ -393,24 +393,13 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
             return_disconnected="disconnected",
         )
 
-        inner_args_to_diff = [
-            arg
-            for arg, g in zip(inner_args, arg_grads)
-            if not isinstance(g.type, DisconnectedType | NullType)
-        ]
+        args_to_diff: tuple[bool, ...] = tuple(
+            not isinstance(g.type, DisconnectedType | NullType) for g in arg_grads
+        )
 
-        if len(inner_args_to_diff) == 0:
+        if not args_to_diff:
             # No differentiable arguments, return disconnected/null gradients
             return arg_grads
-
-        outer_args_to_diff = [
-            arg
-            for inner_arg, arg in zip(inner_args, args)
-            if inner_arg in inner_args_to_diff
-        ]
-        invalid_grad_map = {
-            arg: g for arg, g in zip(args, arg_grads) if arg not in outer_args_to_diff
-        }
 
         if is_minimization:
             implicit_f = grad(implicit_f, inner_x)
@@ -418,7 +407,11 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
         # Gradients are computed using the inner graph of the optimization op, not the actual inputs/outputs of the op.
         packed_inner_args, packed_arg_shapes, implicit_f = pack_inputs_of_objective(
             implicit_f,
-            inner_args_to_diff,
+            [
+                inner_arg
+                for inner_arg, to_diff in zip(inner_args, args_to_diff)
+                if to_diff
+            ],
         )
 
         df_dx, df_dtheta = jacobian(
@@ -432,7 +425,7 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
         # at the solution point. Innner arguments aren't needed anymore, delete them to avoid accidental references.
         del inner_x
         del inner_args
-        inner_to_outer_map = dict(zip(fgraph.inputs, (x_star, *args)))
+        inner_to_outer_map = tuple(zip(fgraph.inputs, (x_star, *args)))
         df_dx_star, df_dtheta_star = graph_replace(
             [df_dx, df_dtheta], inner_to_outer_map
         )
@@ -454,15 +447,17 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
         else:
             grad_wrt_args = [grad_wrt_args_packed]
 
-        arg_to_grad = dict(zip(outer_args_to_diff, grad_wrt_args))
-
         final_grads = []
-        for arg in args:
-            arg_grad = arg_to_grad.get(arg, None)
-
-            if arg_grad is None:
-                final_grads.append(invalid_grad_map[arg])
+        grad_wrt_args_iter = iter(grad_wrt_args)
+        for i, (arg, to_diff) in enumerate(zip(args, args_to_diff)):
+            if not to_diff:
+                # Store the null grad we got from the initial `grad` call
+                null_grad = arg_grads[i]
+                assert isinstance(null_grad.type, NullType | DisconnectedType)
+                final_grads.append(null_grad)
                 continue
+
+            arg_grad = next(grad_wrt_args_iter)
 
             if arg_grad.ndim > 0 and output_grad.ndim > 0:
                 g = tensordot(output_grad, arg_grad, [[0], [0]])
@@ -471,6 +466,8 @@ class ScipyVectorWrapperOp(ScipyWrapperOp):
             if isinstance(arg.type, ScalarType) and isinstance(g, TensorVariable):
                 g = scalar_from_tensor(g)
             final_grads.append(g)
+
+        assert next(grad_wrt_args_iter, None) is None, "Iterator was not exhausted"
 
         return final_grads
 
