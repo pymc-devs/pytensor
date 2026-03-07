@@ -478,7 +478,7 @@ def test_AdvancedIncSubtensor(
         with (
             pytest.warns(
                 UserWarning,
-                match="Numba will use object mode to run AdvancedIncSubtensor's perform method",
+                match="Numba will use object mode to run AdvancedIncSubtensor",
             )
             if duplicate_indices_require_obj_mode
             else contextlib.nullcontext()
