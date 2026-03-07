@@ -1167,9 +1167,16 @@ class Eigvalsh(Op):
             w[0] = scipy_linalg.eigvalsh(a=inputs[0], b=None, lower=self.lower)
 
     def grad(self, inputs, g_outputs):
-        a, b = inputs
         (gw,) = g_outputs
-        return EigvalshGrad(self.lower)(a, b, gw)
+        if len(inputs) == 1:
+            (a,) = inputs
+            import pytensor.tensor as pt
+            b = pt.zeros_like(a)
+            out = EigvalshGrad(self.lower)(a, b, gw)
+            return [out[0]]
+        else:
+            a, b = inputs
+            return list(EigvalshGrad(self.lower)(a, b, gw))
 
     def infer_shape(self, fgraph, node, shapes):
         n = shapes[0][0]
@@ -1218,9 +1225,15 @@ class EigvalshGrad(Op):
 
     def perform(self, node, inputs, outputs):
         (a, b, gw) = inputs
-        w, v = scipy_linalg.eigh(a, b, lower=self.lower)
-        gA = v.dot(np.diag(gw).dot(v.T))
-        gB = -v.dot(np.diag(gw * w).dot(v.T))
+        # Support zero-like placeholder for the standard eigenvalue problem
+        if np.all(b == 0):
+            w, v = scipy_linalg.eigh(a, None, lower=self.lower)
+            gA = v.dot(np.diag(gw).dot(v.T))
+            gB = np.zeros_like(b)
+        else:
+            w, v = scipy_linalg.eigh(a, b, lower=self.lower)
+            gA = v.dot(np.diag(gw).dot(v.T))
+            gB = -v.dot(np.diag(gw * w).dot(v.T))
 
         # See EighGrad comments for an explanation of these lines
         out1 = self.tri0(gA) + self.tri1(gA).T
