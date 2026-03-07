@@ -11,7 +11,7 @@ from numba.cpython.unsafe.tuple import tuple_setitem  # noqa: F401
 
 from pytensor import config
 from pytensor.graph.basic import Apply, Constant, Variable
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import AbstractFunctionGraph
 from pytensor.graph.type import Type
 from pytensor.link.numba.cache import compile_numba_function_src, hash_from_pickle_dump
 from pytensor.link.utils import (
@@ -147,7 +147,7 @@ def get_numba_type(
 
 
 def create_numba_signature(
-    node_or_fgraph: FunctionGraph | Apply,
+    node_or_fgraph: AbstractFunctionGraph | Apply,
     force_scalar: bool = False,
     reduce_to_scalar: bool = False,
 ) -> numba.types.Type:
@@ -472,9 +472,9 @@ def cache_key_for_constant(data):
         return hash_from_pickle_dump(data)
 
 
-@register_funcify_and_cache_key(FunctionGraph)
+@register_funcify_and_cache_key(AbstractFunctionGraph)
 def numba_funcify_FunctionGraph(
-    fgraph: FunctionGraph,
+    fgraph: AbstractFunctionGraph,
     node=None,
     fgraph_name="numba_funcified_fgraph",
     **kwargs,

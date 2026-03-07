@@ -11,7 +11,7 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.configdefaults import config
 from pytensor.graph import Constant
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import AbstractFunctionGraph
 from pytensor.ifelse import IfElse
 from pytensor.link.jax.ops import JAXOp
 from pytensor.link.utils import fgraph_to_python
@@ -46,7 +46,7 @@ def jax_funcify(op, node=None, storage_map=None, **kwargs):
     raise NotImplementedError(f"No JAX conversion for the given `Op`: {op}")
 
 
-@jax_funcify.register(FunctionGraph)
+@jax_funcify.register(AbstractFunctionGraph)
 def jax_funcify_FunctionGraph(
     fgraph,
     node=None,
