@@ -29,6 +29,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError, ShapeError
+from pytensor.tensor.reshape import Reshape
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -38,7 +39,6 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import (
-    Reshape,
     Shape,
     Shape_i,
     SpecifyShape,

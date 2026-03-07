@@ -1,7 +1,8 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+from pytensor.tensor.reshape import Reshape
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
 
 
 @mlx_funcify.register(Shape)

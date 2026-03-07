@@ -14,13 +14,12 @@ from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
 from pytensor.tensor.basic import MakeVector, arange, constant, stack
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.reshape import Reshape, reshape
 from pytensor.tensor.shape import (
-    Reshape,
     Shape,
     Shape_i,
     SpecifyShape,
     _specify_shape,
-    reshape,
     shape,
     shape_tuple,
     specify_broadcastable,

@@ -4,7 +4,8 @@ from pytensor.graph import Constant
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.link.jax.dispatch.basic import jax_funcify
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+from pytensor.tensor.reshape import Reshape
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
 from pytensor.tensor.type import TensorType
 
 

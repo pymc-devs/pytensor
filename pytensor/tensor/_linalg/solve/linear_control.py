@@ -13,8 +13,7 @@ from pytensor.tensor.basic import as_tensor_variable, zeros
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.functional import vectorize
 from pytensor.tensor.nlinalg import kron, matrix_dot, norm
-from pytensor.tensor.reshape import join_dims
-from pytensor.tensor.shape import reshape
+from pytensor.tensor.reshape import join_dims, reshape
 from pytensor.tensor.slinalg import lu, qr, qz, schur, solve, solve_triangular
 from pytensor.tensor.type import matrix
 from pytensor.tensor.variable import TensorVariable

@@ -2,7 +2,8 @@ import torch
 
 from pytensor.graph.basic import Constant
 from pytensor.link.pytorch.dispatch.basic import pytorch_funcify
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+from pytensor.tensor.reshape import Reshape
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
 
 
 @pytorch_funcify.register(Reshape)
