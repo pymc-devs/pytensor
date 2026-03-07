@@ -29,7 +29,7 @@ from pytensor.graph.fg import FunctionGraph, Output
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.rewriting.db import EquilibriumDB
-from pytensor.graph.type import HasDataType, HasShape
+from pytensor.graph.type import HasDataType, HasShape, Type
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
@@ -434,7 +434,7 @@ def _get_underlying_scalar_constant_value(
                         var.ndim == 1 for var in v.owner.inputs[0].owner.inputs[1:]
                     ):
                         idx = v.owner.op.idx_list[0]
-                        if isinstance(idx, int):
+                        if isinstance(idx, Type):
                             idx = _get_underlying_scalar_constant_value(
                                 v.owner.inputs[1], max_recur=max_recur
                             )
@@ -468,7 +468,7 @@ def _get_underlying_scalar_constant_value(
                     and len(v.owner.op.idx_list) == 1
                 ):
                     idx = v.owner.op.idx_list[0]
-                    if isinstance(idx, int):
+                    if isinstance(idx, Type):
                         idx = _get_underlying_scalar_constant_value(
                             v.owner.inputs[1], max_recur=max_recur
                         )
@@ -489,7 +489,7 @@ def _get_underlying_scalar_constant_value(
                     op = owner.op
                     idx_list = op.idx_list
                     idx = idx_list[0]
-                    if isinstance(idx, int):
+                    if isinstance(idx, Type):
                         idx = _get_underlying_scalar_constant_value(
                             owner.inputs[1], max_recur=max_recur
                         )
