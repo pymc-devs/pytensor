@@ -3,7 +3,7 @@ from itertools import chain
 
 from pytensor.compile import rebuild_collect_shared
 from pytensor.graph.basic import Constant, Variable, clone
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import FrozenFunctionGraph
 from pytensor.scalar.basic import ScalarInnerGraphOp, as_scalar
 
 
@@ -41,13 +41,6 @@ class ScalarLoop(ScalarInnerGraphOp):
 
     """
 
-    init_param: tuple[str, ...] = (
-        "init",
-        "update",
-        "constant",
-        "until",
-    )
-
     def __init__(
         self,
         init: Sequence[Variable],
@@ -67,11 +60,15 @@ class ScalarLoop(ScalarInnerGraphOp):
             inputs, outputs = clone([*init, *constant], update)
 
         self.is_while = until is not None
-        self.inputs, self.outputs = self._cleanup_graph(inputs, outputs)
+
+        self.fgraph = FrozenFunctionGraph(inputs, outputs)
+        self._validate_inner_graph(self.fgraph)
+        self.inputs = self.fgraph.inputs
+        self.outputs = self.fgraph.outputs
         self._validate_updates(self.inputs, self.outputs)
 
-        self.inputs_type = tuple(input.type for input in self.inputs)
-        self.outputs_type = tuple(output.type for output in self.outputs)
+        self.inputs_type = tuple(inp.type for inp in self.inputs)
+        self.outputs_type = tuple(out.type for out in self.outputs)
         self.nin = len(self.inputs) + 1  # n_steps is not part of the inner graph
         self.nout = len(self.outputs)
         self.name = name
@@ -106,23 +103,16 @@ class ScalarLoop(ScalarInnerGraphOp):
                 "If you want to return an output as a lagged input, wrap it in an identity Op."
             )
 
-    @property
-    def fgraph(self):
-        if hasattr(self, "_fgraph"):
-            return self._fgraph
-        # fgraph cannot be a property of the base class because it messes up with C caching.
-        # We also need a `FunctionGraph(clone=True)` (default) according to an old comment
-        fgraph = FunctionGraph(self.inputs, self.outputs)
-        self._fgraph = fgraph
-        return self._fgraph
-
     def clone(self, name=None, **kwargs):
+        mutable_fg = self.fgraph.unfreeze()
+        inputs = mutable_fg.inputs
+        outputs = mutable_fg.outputs
         if self.is_while:
-            *update, until = self.outputs
+            *update, until = outputs
         else:
-            update, until = self.outputs, None
-        init = self.inputs[: len(update)]
-        constant = self.inputs[len(update) :]
+            update, until = outputs, None
+        init = inputs[: len(update)]
+        constant = inputs[len(update) :]
         return self.__class__(
             init=init,
             update=update,
@@ -150,9 +140,10 @@ class ScalarLoop(ScalarInnerGraphOp):
             return super().make_node(n_steps, *inputs)
         else:
             # Make a new op with the right input types.
+            mutable_fg = self.fgraph.unfreeze()
             res = rebuild_collect_shared(
-                self.outputs,
-                replace=dict(zip(self.inputs, inputs, strict=True)),
+                mutable_fg.outputs,
+                replace=dict(zip(mutable_fg.inputs, inputs, strict=True)),
                 rebuild_strict=False,
             )
             if self.is_while:
