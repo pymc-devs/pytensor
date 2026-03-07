@@ -1171,6 +1171,7 @@ class Eigvalsh(Op):
         if len(inputs) == 1:
             (a,) = inputs
             import pytensor.tensor as pt
+
             b = pt.zeros_like(a)
             out = EigvalshGrad(self.lower)(a, b, gw)
             return [out[0]]
