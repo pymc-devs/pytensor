@@ -10,13 +10,14 @@ from pytensor.graph.rewriting.basic import out2in
 from pytensor.link.basic import PerformLinker
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import min as pt_min
+from pytensor.tensor.reshape import reshape
 from pytensor.tensor.rewriting.uncanonicalize import (
     local_alloc_dimshuffle,
     local_dimshuffle_alloc,
     local_dimshuffle_subtensor,
     local_reshape_dimshuffle,
 )
-from pytensor.tensor.shape import reshape, specify_shape
+from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import dtensor4, iscalar, matrix, tensor, vector
 from tests.link.test_link import make_function
 

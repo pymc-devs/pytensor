@@ -2,7 +2,8 @@ import numpy as np
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
-from pytensor.tensor.shape import Shape, Shape_i, reshape
+from pytensor.tensor.reshape import reshape
+from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.type import iscalar, vector
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 

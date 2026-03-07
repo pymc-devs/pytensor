@@ -5,7 +5,8 @@ import pytest
 
 from pytensor import Variable, config
 from pytensor import tensor as pt
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+from pytensor.tensor.reshape import Reshape
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
 from tests.link.numba.test_basic import compare_numba_and_py
 
 

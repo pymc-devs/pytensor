@@ -1,6 +1,7 @@
 from collections.abc import Iterable, Sequence
 from itertools import pairwise
-from typing import TypeAlias
+from typing import TypeAlias, Union
+from typing import cast as typing_cast
 
 import numpy as np
 from numpy.lib._array_utils_impl import normalize_axis_index, normalize_axis_tuple
@@ -10,12 +11,16 @@ from pytensor.gradient import disconnected_type
 from pytensor.graph import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
+from pytensor.link.c.op import COp
 from pytensor.scalar import ScalarVariable
-from pytensor.tensor import TensorLike, as_tensor_variable
+from pytensor.tensor import TensorLike, as_tensor_variable, get_vector_length
+from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import infer_static_shape, join, split
+from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import prod
-from pytensor.tensor.type import tensor
-from pytensor.tensor.variable import TensorVariable
+from pytensor.tensor.shape import shape, specify_shape
+from pytensor.tensor.type import int_dtypes, tensor
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
 ShapeValueType: TypeAlias = (
@@ -530,4 +535,261 @@ def unpack(
     ]
 
 
-__all__ = ["join_dims", "pack", "split_dims", "unpack"]
+class Reshape(COp):
+    """Perform a reshape operation of the input x to the new shape shp.
+    The number of dimensions to which to reshape to (ndim) must be
+    known at graph build time.
+    """
+
+    view_map = {0: [0]}  # output 0 is potentially aliased to inputs [0]
+    _f16_ok = True
+    _output_type_depends_on_input_value = True
+
+    check_input = False
+    __props__ = ("ndim",)
+
+    def __init__(self, ndim):
+        self.ndim = int(ndim)
+        if ndim < 0:
+            raise ValueError("The output dimensions after reshape must be 0 or greater")
+
+    def __str__(self):
+        return f"{self.__class__.__name__}{{{self.ndim}}}"
+
+    def make_node(self, x, shp):
+        x = ptb.as_tensor_variable(x)
+        shp_orig = shp
+        shp = ptb.as_tensor_variable(shp, ndim=1)
+        if shp.type.shape == (None,):
+            shp = specify_shape(shp, self.ndim)
+        if not (
+            shp.dtype in int_dtypes
+            or (isinstance(shp, TensorConstant) and shp.data.size == 0)
+        ):
+            # It raises an error if shp is not of integer type,
+            # except when shp is constant and empty
+            # (in this case, shp.dtype does not matter anymore).
+            raise TypeError(f"Shape must be integers; got {shp.dtype}")
+
+        assert shp.ndim == 1
+
+        if isinstance(shp, TensorConstant):
+            out_shape = [int(s) if s >= 0 else None for s in shp.data]
+        else:
+            out_shape = [None] * self.ndim
+            shp_list = shp_orig
+            if hasattr(shp_orig, "ndim") and shp_orig.ndim == 0:
+                shp_list = [shp_orig]
+            for index in range(self.ndim):
+                y = shp_list[index]
+                y = ptb.as_tensor_variable(y)
+                try:
+                    s_val = ptb.get_scalar_constant_value(y).item()
+                    if s_val >= 0:
+                        out_shape[index] = s_val
+                except NotScalarConstantError:
+                    pass
+
+        # If we only don't know the size of one output dimension,
+        # but we know all the input dimensions we can deduce it
+        # This happens often when there is -1 as an input of Reshape
+        if None not in x.type.shape and out_shape.count(None) == 1:
+            full_size = np.prod(x.type.shape)
+            known_size = np.prod([s for s in out_shape if s is not None])
+            out_shape[out_shape.index(None)] = int(full_size // known_size)
+
+        out_shape = tuple(out_shape)
+
+        # Run some eager error checks
+        if len(out_shape) != self.ndim:
+            raise ValueError(
+                "Shape argument to Reshape has incorrect length:"
+                f" {len(out_shape)}, should be {self.ndim}"
+            )
+
+        if None not in x.type.shape and None not in out_shape:
+            if np.prod(x.type.shape) != np.prod(out_shape):
+                raise ValueError(
+                    f"Reshape: Input shape {x.type.shape} is incompatible with new shape {out_shape}"
+                )
+
+        return Apply(self, [x, shp], [tensor(dtype=x.type.dtype, shape=out_shape)])
+
+    def perform(self, node, inp, out_):
+        x, shp = inp
+        (out,) = out_
+        if len(shp) != self.ndim:
+            raise ValueError(
+                "Shape argument to Reshape has incorrect"
+                f" length: {len(shp)}, should be {self.ndim}"
+            )
+        out[0] = np.reshape(x, shp)
+
+    def connection_pattern(self, node):
+        return [[True], [False]]
+
+    def grad(self, inp, grads):
+        x, _shp = inp
+        (g_out,) = grads
+        return [reshape(g_out, shape(x), ndim=x.ndim), disconnected_type()]
+
+    def R_op(self, inputs, eval_points):
+        if eval_points[0] is None:
+            return [None]
+        return self(eval_points[0], *inputs[1:], return_list=True)
+
+    def infer_shape(self, fgraph, node, ishapes):
+        from pytensor.tensor.math import eq, maximum, mul
+
+        # inputs[1] can contain at most one value of '-1', meaning the actual
+        # shape of the output will be automatically computed by reshape, so
+        # that the total number of elements stays the same.
+        # TODO: Maybe put that formula here?
+        # It's not trivial, because we would have to check if the product of
+        # all the non-minus-one shapes is a divisor of the product of the
+        # original shapes.
+        # The following expression leads to cycles in feature_shape,
+        # because it tries to replace the Shape_i node by the switch
+        # statement, which depends on Shape_i.
+        # return [tuple([switch(eq(node.inputs[1][i], -1),
+        #                      Shape_i(i)(node.outputs[0]),
+        #                      node.inputs[1][i])
+        #                    for i in range(self.ndim)]
+        #    )]
+        # Here, we only simplify if the shape (node.inputs[1]) is a constant,
+        # ideally it would suffice to check that it is always non-negative.
+        # If current variable is a scalar and its dimensionality should
+        # change to self.ndim, then use size 1 for all new dimensions.
+        if len(ishapes[0]) == 0:
+            return [(1,) * self.ndim]
+
+        requ = node.inputs[1]
+        input_size = mul(*ishapes[0])
+        if isinstance(requ, TensorConstant):
+            requ = list(requ.data)
+            requ_part = [ele for ele in requ if ele != -1]
+            crit = len(requ) - len(requ_part)
+            if crit == 1 and len(requ_part) > 0:
+                # If there are both 0 and -1 in requ_size, it is impossible
+                # to determine a right output, but we can at least prevent
+                # a division by 0. We do not want to keep a negative
+                # size here as it could lead to further weird errors
+                # after other optimizations.
+                requ_size = mul(*requ_part)
+                missing = input_size // (1 if requ_size == 0 else requ_size)
+                for i, ele in enumerate(requ):
+                    if ele == -1:
+                        requ[i] = missing
+            elif crit == 1:  # we reshape to -1
+                requ = [input_size] if ishapes[0] else [1]
+            elif crit > 1:
+                raise ValueError(
+                    "shape argument to Reshape.perform"
+                    " must have at most one entry equal to -1"
+                )
+            return [requ]
+        else:
+            requ = [requ[i] for i in range(self.ndim)]
+            # since new_dims can have negative value (-1), the
+            # multiplication of all values should be negated
+            # to give a positive value.
+            # To avoid optimization complexity, we avoid checking
+            # for the case when there are two or more '-1' values.
+            if self.ndim:
+                requ_size = -mul(*requ)
+                # If there are both 0 and -1 in requ_size, it is impossible
+                # to determine a right output, but we can at least prevent
+                # a division by 0. We do not want to keep a negative
+                # size here as it could lead to further weird errors
+                # after other optimizations.
+                rest_size = input_size // maximum(requ_size, 1)
+            return [
+                tuple(
+                    ptb.switch(eq(requ[i], -1), rest_size, requ[i])
+                    for i in range(self.ndim)
+                )
+            ]
+
+    def c_code_cache_version(self):
+        return (10,)
+
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, shp = inputs
+        shp_dtype = node.inputs[1].type.dtype_specs()[1]
+        (z,) = outputs
+        fail = sub["fail"]
+        ndim = self.ndim
+
+        return f"""
+        assert (PyArray_NDIM({shp}) == 1);
+
+        // Unpack shape into new_dims
+        npy_intp new_dims[{ndim}];
+        for (int ii = 0; ii < {ndim}; ++ii)
+        {{
+            new_dims[ii] = (({shp_dtype}*)(PyArray_BYTES({shp}) + ii * PyArray_STRIDES({shp})[0]))[0];
+        }}
+
+        PyArray_Dims newshape;
+        newshape.len = {ndim};
+        newshape.ptr = new_dims;
+
+        Py_XDECREF({z});
+        {z} = (PyArrayObject *) PyArray_Newshape({x}, &newshape, NPY_CORDER);
+
+        if (!{z}) {{
+            //The error message should have been set by PyArray_Newshape
+            {fail};
+        }}
+        """
+
+
+@_vectorize_node.register(Reshape)
+def _vectorize_reshape(op, node, x, shape):
+    from pytensor.tensor.blockwise import vectorize_node_fallback
+
+    old_x, old_shape = node.inputs
+    batched_ndims = x.type.ndim - old_x.type.ndim
+
+    if as_tensor_variable(shape).type.ndim != 1:
+        return vectorize_node_fallback(op, node, x, shape)
+
+    if len(tuple(old_shape)) == len(tuple(shape)):
+        new_shape = [*x.shape[:batched_ndims], *shape]
+    elif len(tuple(old_shape)) == (len(tuple(shape)) - batched_ndims):
+        new_shape = shape
+    else:
+        raise ValueError("Invalid shape length passed into vectorize node of Reshape")
+
+    return reshape(x, new_shape, ndim=len(tuple(new_shape))).owner
+
+
+def reshape(
+    x: "TensorLike",
+    newshape: Union["TensorLike", Sequence["TensorLike"]],
+    *,
+    ndim: int | None = None,
+) -> TensorVariable:
+    if ndim is None:
+        newshape = ptb.as_tensor_variable(newshape)  # type: ignore
+        if newshape.type.ndim != 1:
+            raise TypeError(
+                "New shape in reshape must be a vector or a list/tuple of"
+                f" scalar. Got {newshape} after conversion to a vector."
+            )
+        try:
+            ndim = get_vector_length(newshape)
+        except ValueError:
+            raise ValueError(
+                f"The length of the provided shape ({newshape}) cannot "
+                "be automatically determined, so PyTensor is not able "
+                "to know what the number of dimensions of the reshaped "
+                "variable will be. You can provide the 'ndim' keyword "
+                "argument to 'reshape' to avoid this problem."
+            )
+    op = Reshape(ndim)
+    rval = op(x, newshape)
+    return typing_cast(TensorVariable, rval)
+
+
+__all__ = ["Reshape", "join_dims", "pack", "reshape", "split_dims", "unpack"]

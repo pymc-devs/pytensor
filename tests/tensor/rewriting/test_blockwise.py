@@ -10,8 +10,8 @@ from pytensor.tensor import add, alloc, matrix, tensor, tensor3
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.nlinalg import MatrixPinv
+from pytensor.tensor.reshape import Reshape
 from pytensor.tensor.rewriting.blockwise import local_useless_blockwise
-from pytensor.tensor.shape import Reshape
 
 
 def test_useless_blockwise_of_elemwise():

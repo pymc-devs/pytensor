@@ -62,6 +62,7 @@ from pytensor.tensor.math import (
 )
 from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.reshape import Reshape
 from pytensor.tensor.rewriting.basic import (
     assert_op,
     local_alloc_sink_dimshuffle,
@@ -75,7 +76,6 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.math import local_lift_transpose_through_dot
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.shape import (
-    Reshape,
     Shape_i,
     SpecifyShape,
     specify_shape,

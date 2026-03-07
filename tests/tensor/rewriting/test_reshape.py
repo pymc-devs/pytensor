@@ -1,6 +1,5 @@
 from pytensor.graph import FunctionGraph, rewrite_graph
-from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
-from pytensor.tensor.shape import Reshape
+from pytensor.tensor.reshape import JoinDims, Reshape, SplitDims, join_dims, split_dims
 from pytensor.tensor.type import tensor
 
 

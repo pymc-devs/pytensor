@@ -36,8 +36,8 @@ from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.basic import Alloc, alloc, constant
 from pytensor.tensor.elemwise import CAReduce, DimShuffle
 from pytensor.tensor.math import Min, neg
+from pytensor.tensor.reshape import Reshape, reshape
 from pytensor.tensor.rewriting.basic import register_uncanonicalize
-from pytensor.tensor.shape import Reshape, reshape
 from pytensor.tensor.subtensor import Subtensor, indices_from_subtensor
 
 
