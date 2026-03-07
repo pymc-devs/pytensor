@@ -524,6 +524,6 @@ class TestFrozenApply:
         out1 = add(x, ScalarConstant(float64, 3.14))
         out2 = add(x, ScalarConstant(float64, 3.14))
 
-        ffg1 = FrozenFunctionGraph.from_graph([x], [out1])
-        ffg2 = FrozenFunctionGraph.from_graph([x], [out2])
+        ffg1 = FrozenFunctionGraph([x], [out1])
+        ffg2 = FrozenFunctionGraph([x], [out2])
         assert ffg1 == ffg2
