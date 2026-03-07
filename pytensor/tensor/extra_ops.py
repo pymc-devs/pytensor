@@ -333,8 +333,35 @@ class CumOp(COp):
         if self.mode == "add":
             return [cumsum(gi[reverse_slicing], self.axis)[reverse_slicing]]
         elif self.mode == "mul":
-            fx = cumprod(x, axis=self.axis)
-            return [cumsum((fx * gi)[reverse_slicing], self.axis)[reverse_slicing] / x]
+            # The naive formula: cumsum_reverse(cumprod(x) * g) / x
+            # gives 0/0 = NaN when x contains zeros. We handle zeros
+            # by splitting into cases based on cumulative zero count.
+            axis = self.axis
+
+            is_zero = pt_eq(x, 0)
+            x_safe = switch(is_zero, ptb.ones_like(x), x)
+            fx_safe = cumprod(x_safe, axis=axis)
+
+            # Cumulative zero count along axis
+            is_zero_float = switch(is_zero, ptb.ones_like(x), ptb.zeros_like(x))
+            cum_zeros = cumsum(is_zero_float, axis=axis)
+
+            # True cumprod: zero wherever any zero has been seen
+            fx = fx_safe * pt_eq(cum_zeros, 0)
+
+            # Gradient for non-zero positions (0 at and after zeros)
+            naive_grad = (
+                cumsum((fx * gi)[reverse_slicing], axis)[reverse_slicing] / x_safe
+            )
+
+            # Gradient for first-zero positions: mask out contributions
+            # from positions after the second zero
+            h_masked = (fx_safe * gi) * lt(cum_zeros, 2)
+            zero_grad = cumsum(h_masked[reverse_slicing], axis)[reverse_slicing]
+
+            # Combine: use zero_grad at first-zero positions, naive elsewhere
+            first_zero = is_zero * pt_eq(cum_zeros, 1)
+            return [switch(first_zero, zero_grad, naive_grad)]
         else:
             raise NotImplementedError(
                 f'{type(self).__name__}: unknown gradient for mode "{self.mode}"'
