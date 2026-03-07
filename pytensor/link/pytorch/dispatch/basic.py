@@ -10,7 +10,7 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Constant
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import AbstractFunctionGraph
 from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import CheckAndRaise
@@ -53,7 +53,7 @@ def pytorch_funcify(op, node=None, storage_map=None, **kwargs):
     )
 
 
-@pytorch_funcify.register(FunctionGraph)
+@pytorch_funcify.register(AbstractFunctionGraph)
 def pytorch_funcify_FunctionGraph(
     fgraph,
     node=None,
