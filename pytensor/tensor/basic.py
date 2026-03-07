@@ -30,7 +30,6 @@ from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.rewriting.db import EquilibriumDB
 from pytensor.graph.type import HasDataType, HasShape, Type
-from pytensor.graph.type import HasDataType, HasShape
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.printing import Printer, min_informative_str, pprint, set_precedence
