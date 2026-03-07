@@ -1069,7 +1069,7 @@ class FillDiagonalOffset(Op):
         height, width = grad.shape
 
         if a.dtype.startswith("complex"):
-            return [None, None]
+            return [None, None, None]
 
         # only valid for matrices
         wr_a = fill_diagonal_offset(grad, 0, offset)
