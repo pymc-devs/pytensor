@@ -321,10 +321,12 @@ class TestCumprodGradZeros:
 
     def test_cumprod_grad_2d_with_zeros(self):
         """2D cumprod along axis=1 with zeros in each row."""
-        x_val = np.array([
-            [3.0, 0.0, 5.0],
-            [0.0, 7.0, 3.0],
-        ])
+        x_val = np.array(
+            [
+                [3.0, 0.0, 5.0],
+                [0.0, 7.0, 3.0],
+            ]
+        )
         x = pt.matrix("x", dtype="float64")
         y = cumprod(x, axis=1)
         loss = y.sum()
@@ -339,10 +341,12 @@ class TestCumprodGradZeros:
         #   dloss/dx[0] = 1 + x[1] + x[1]*x[2] = 1+7+21 = 29
         #   dloss/dx[1] = x[0] + x[0]*x[2] = 0+0 = 0
         #   dloss/dx[2] = x[0]*x[1] = 0
-        expected = np.array([
-            [1.0, 18.0, 0.0],
-            [29.0, 0.0, 0.0],
-        ])
+        expected = np.array(
+            [
+                [1.0, 18.0, 0.0],
+                [29.0, 0.0, 0.0],
+            ]
+        )
 
         assert not np.any(np.isnan(result)), f"NaN in gradient: {result}"
         np.testing.assert_allclose(result, expected)
