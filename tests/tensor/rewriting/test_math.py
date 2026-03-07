@@ -2128,12 +2128,12 @@ class TestSqrSqrt:
     def test_sqrt_sqr_negative_values(self):
         x = dvector("x")
         out = sqrt(sqr(x))
-        
+
         f = function([x], out, mode=self.mode)
-        
+
         inputs = np.array([-3, -1, 0, 1, 3], dtype=config.floatX)
         expected = np.abs(inputs)
-        
+
         utt.assert_allclose(f(inputs), expected)
 
 
