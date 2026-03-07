@@ -10,7 +10,7 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import MLX
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph import Constant
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import AbstractFunctionGraph
 from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import Assert, CheckAndRaise
@@ -136,7 +136,7 @@ def mlx_funcify(op, node=None, storage_map=None, **kwargs):
     )
 
 
-@mlx_funcify.register(FunctionGraph)
+@mlx_funcify.register(AbstractFunctionGraph)
 def mlx_funcify_FunctionGraph(
     fgraph,
     node=None,
