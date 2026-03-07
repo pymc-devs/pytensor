@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - v3
   pull_request:
     branches:
       - main
+      - v3
 
 # Cancels all previous workflow runs for pull requests that have not completed.
 concurrency:
