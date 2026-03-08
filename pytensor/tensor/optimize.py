@@ -20,6 +20,7 @@ from pytensor.graph.op import (
 from pytensor.graph.replace import graph_replace
 from pytensor.graph.traversal import (
     ancestors,
+    graph_inputs,
     truncated_graph_inputs,
 )
 from pytensor.scalar import ScalarType, ScalarVariable
@@ -147,10 +148,18 @@ def _find_optimization_parameters(
 
     This is used to determine the additional arguments that need to be passed to the objective function.
     """
+
+    def _depends_only_on_constants(var: Variable) -> bool:
+        if isinstance(var, Constant):
+            return True
+        if var.owner is None:
+            return False
+        return all(isinstance(v, Constant) for v in graph_inputs([var]))
+
     return [
         arg
         for arg in truncated_graph_inputs([objective], [x])
-        if (arg is not x and not isinstance(arg, Constant))
+        if (arg is not x and not _depends_only_on_constants(arg))
     ]
 
 
