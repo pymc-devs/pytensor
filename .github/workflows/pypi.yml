@@ -168,7 +168,7 @@ jobs:
           echo "version=$(pyodide config get emscripten_version)" >> $GITHUB_OUTPUT
 
       - name: Set up Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
         with:
           version: ${{ steps.emscripten.outputs.version }}
 
@@ -237,12 +237,9 @@ jobs:
           path: dist
 
       - name: Upload Pyodide wheel to Release
-        uses: softprops/action-gh-release@c20b0eb2e0d72b0e686e246117c0d71a611d7843f # v2.0.0
-        with:
-          tag_name: ${{ github.event.release.tag_name }}
-          files: dist/*.whl
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload_pypi:
     name: Upload to PyPI on release
