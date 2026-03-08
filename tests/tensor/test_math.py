@@ -77,6 +77,7 @@ from pytensor.tensor.math import (
     expm1,
     floor,
     isclose,
+    isfinite,
     isinf,
     isnan,
     isnan_,
@@ -767,6 +768,16 @@ def test_isnan():
         y = isnan_(x)
         assert isinstance(y.owner.op, Elemwise)
         assert y.dtype == "bool"
+        f = function([x], y, allow_input_downcast=True)
+        f([[0, 1, 2]])
+
+
+def test_isfinite():
+    for x in [matrix(), imatrix(), matrix(dtype="bool")]:
+        y = isfinite(x)
+        assert isinstance(y.owner.op, Elemwise) == (x.dtype not in discrete_dtypes)
+        assert y.dtype == "bool"
+
         f = function([x], y, allow_input_downcast=True)
         f([[0, 1, 2]])
 
@@ -3119,7 +3130,7 @@ class TestProd:
         assert not unpickled_prod.no_zeros_in_input
 
 
-class TestIsInfIsNan:
+class TestIsInfIsNanIsFinite:
     def setup_method(self):
         self.test_vals = [
             np.array(x, dtype=config.floatX)
@@ -3158,6 +3169,9 @@ class TestIsInfIsNan:
 
     def test_isnan(self):
         self.run_isfunc(isnan, np.isnan)
+
+    def test_isfinite(self):
+        self.run_isfunc(isfinite, np.isfinite)
 
 
 class TestSumProdReduceDtype:
