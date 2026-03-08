@@ -275,23 +275,6 @@ def function(
     else:
         output_keys = None
 
-    if name is None:
-        # Determine possible file names
-        source_file = re.sub(r"\.pyc?", ".py", __file__)
-        compiled_file = source_file + "c"
-
-        stack = tb.extract_stack()
-        idx = len(stack) - 1
-
-        last_frame = stack[idx]
-        if last_frame[0] == source_file or last_frame[0] == compiled_file:
-            func_frame = stack[idx - 1]
-            while "pytensor/graph" in func_frame[0] and idx > 0:
-                idx -= 1
-                # This can happen if we call var.eval()
-                func_frame = stack[idx - 1]
-            name = func_frame[0] + ":" + str(func_frame[1])
-
     if updates is None:
         updates = []
 
