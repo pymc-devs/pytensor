@@ -237,9 +237,10 @@ jobs:
           path: dist
 
       - name: Upload Pyodide wheel to Release
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl
+        run: gh release upload "$RELEASE_TAG" dist/*.whl
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
 
   upload_pypi:
     name: Upload to PyPI on release
