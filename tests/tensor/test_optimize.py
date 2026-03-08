@@ -17,6 +17,19 @@ from tests import unittest_tools as utt
 floatX = config.floatX
 
 
+def test_constant_expressions_not_in_args():
+    x = pt.scalar("x")
+    a = pt.scalar("a")
+
+    # cast(0, int64) is not a Constant, but depends only on constants
+    constant_expr = pt.cast(pt.constant(0), "int64")
+    out = (x - a) ** 2 + constant_expr
+
+    minimized_x, _ = minimize(out, x)
+    minimize_op_node = minimized_x.owner
+    assert minimize_op_node.inputs == [x, a]
+
+
 def test_minimize_scalar():
     x = pt.scalar("x")
     a = pt.scalar("a")
