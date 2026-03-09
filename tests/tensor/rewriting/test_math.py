@@ -3813,6 +3813,101 @@ def test_local_mul_exp_to_exp_add():
     assert isinstance(graph[0].inputs[0], TensorConstant)
 
 
+def test_local_div_exp_to_mul_exp():
+    mode = get_default_mode().excluding("fusion").including("local_div_exp_to_mul_exp")
+
+    x = scalar("x")
+    y = scalar("y")
+
+    # y / exp(x) -> y * exp(-x)
+    out = y / exp(x)
+    rewritten = rewrite_graph(out, include=["specialize"], exclude=["fusion"])
+    expected = y * exp(neg(x))
+    assert_equal_computations([rewritten], [expected])
+
+    # Also verify numerically
+    f = function([x, y], out, mode)
+    utt.assert_allclose(f(2.0, 3.0), 3.0 * np.exp(-2.0))
+    graph = f.maker.fgraph.toposort()
+    assert not any(
+        isinstance(n.op.scalar_op, ps.TrueDiv)
+        for n in graph
+        if isinstance(n.op, Elemwise)
+    )
+
+    # Matrices
+    mx = matrix("mx")
+    my = matrix("my")
+    f = function([mx, my], my / exp(mx), mode, allow_input_downcast=True)
+    M1 = np.array([[1.0, 2.0], [3.0, 4.0]])
+    M2 = np.array([[5.0, 6.0], [7.0, 8.0]])
+    utt.assert_allclose(f(M1, M2), M2 * np.exp(-M1))
+    graph = f.maker.fgraph.toposort()
+    assert not any(
+        isinstance(n.op.scalar_op, ps.TrueDiv)
+        for n in graph
+        if isinstance(n.op, Elemwise)
+    )
+
+    # exp(x) / exp(y) should NOT be affected (handled by local_mul_exp_to_exp_add)
+    # With only our rewrite enabled, the division should remain untouched
+    only_our_mode = (
+        get_default_mode()
+        .excluding("fusion", "specialize", "stabilize", "canonicalize")
+        .including("local_div_exp_to_mul_exp")
+    )
+    out = exp(x) / exp(y)
+    f = function([x, y], out, only_our_mode)
+    graph = f.maker.fgraph.toposort()
+    # The div should remain because our rewrite skips exp/exp
+    assert any(
+        isinstance(n.op.scalar_op, ps.TrueDiv)
+        for n in graph
+        if isinstance(n.op, Elemwise)
+    )
+
+    # 1 / exp(x) -> exp(-x)
+    out = true_div(np.float64(1.0), exp(x))
+    f = function([x], out, mode)
+    utt.assert_allclose(f(3.0), np.exp(-3.0))
+    graph = f.maker.fgraph.toposort()
+    assert not any(
+        isinstance(n.op.scalar_op, ps.TrueDiv)
+        for n in graph
+        if isinstance(n.op, Elemwise)
+    )
+
+    # Sigmoid pattern exp(x) / (1 + exp(x)) must still work
+    sigmoid_mode = (
+        get_default_mode()
+        .excluding("fusion")
+        .including("local_div_exp_to_mul_exp", "stabilize")
+    )
+    out = exp(x) / (1 + exp(x))
+    f = function([x], out, sigmoid_mode)
+    utt.assert_allclose(f(0.0), 0.5)
+    utt.assert_allclose(f(-50.0), 1.0 / (1.0 + np.exp(50.0)), atol=1e-7)
+    # The sigmoid rewrite should have fired — the denominator (1+exp(x)) is
+    # NOT bare exp(), so local_div_exp_to_mul_exp should not interfere.
+    graph = f.maker.fgraph.toposort()
+    assert any(
+        isinstance(n.op, Elemwise) and isinstance(n.op.scalar_op, ps.Sigmoid)
+        for n in graph
+    )
+
+    # Chain: y / exp(x) with further exp fusion
+    # y / exp(x) * exp(z) -> y * exp(-x) * exp(z) -> y * exp(z - x)
+    z = scalar("z")
+    chain_mode = (
+        get_default_mode()
+        .excluding("fusion")
+        .including("local_div_exp_to_mul_exp", "local_mul_exp_to_exp_add")
+    )
+    out = y / exp(x) * exp(z)
+    f = function([x, y, z], out, chain_mode)
+    utt.assert_allclose(f(2.0, 3.0, 5.0), 3.0 * np.exp(5.0 - 2.0))
+
+
 def test_local_mul_pow_to_pow_add():
     # Default and FAST_RUN modes put a Composite op into the final graph,
     # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
