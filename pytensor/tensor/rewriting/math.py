@@ -729,6 +729,32 @@ def local_mul_exp_to_exp_add(fgraph, node):
 
 
 @register_specialize
+@node_rewriter([true_div])
+def local_div_exp_to_mul_exp(fgraph, node):
+    """Replace ``A / exp(B)`` with ``A * exp(-B)``.
+
+    Multiplication is generally cheaper than division and the resulting
+    ``exp(-B)`` may fuse with other exponentials via
+    ``local_mul_exp_to_exp_add``.
+    """
+    num, denom = node.inputs
+
+    if not (
+        denom.owner
+        and isinstance(denom.owner.op, Elemwise)
+        and isinstance(denom.owner.op.scalar_op, ps.Exp)
+    ):
+        return None
+
+    exp_arg = denom.owner.inputs[0]
+    new_out = num * exp(neg(exp_arg))
+    if new_out.dtype != node.outputs[0].dtype:
+        new_out = cast(new_out, dtype=node.outputs[0].dtype)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_specialize
 @node_rewriter([mul, true_div])
 def local_mul_pow_to_pow_add(fgraph, node):
     """

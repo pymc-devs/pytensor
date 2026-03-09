@@ -3813,6 +3813,24 @@ def test_local_mul_exp_to_exp_add():
     assert isinstance(graph[0].inputs[0], TensorConstant)
 
 
+def test_local_div_exp_to_mul_exp():
+    x = scalar("x")
+    y = scalar("y")
+
+    # y / exp(x) -> y * exp(-x)
+    out = y / exp(x)
+    expected = y * exp(neg(x))
+
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [expected])
+
+    # 1 / exp(x) -> exp(-x)
+    out = true_div(np.float64(1.0), exp(x))
+    expected = exp(neg(x))
+    rewritten = rewrite_graph(out, include=("specialize",))
+    assert_equal_computations([rewritten], [expected])
+
+
 def test_local_mul_pow_to_pow_add():
     # Default and FAST_RUN modes put a Composite op into the final graph,
     # whereas FAST_COMPILE doesn't.  To unify the graph the test cases analyze across runs,
