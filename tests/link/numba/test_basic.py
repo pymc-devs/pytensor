@@ -29,6 +29,7 @@ from pytensor.link.numba.dispatch.basic import (
     _filter_numba_warnings,
     cache_key_for_constant,
     numba_funcify_and_cache_key,
+    numba_njit,
 )
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.scalar.basic import Composite, ScalarOp, as_scalar
@@ -426,14 +427,13 @@ def test_shared_updates():
 
 
 def test_config_options_fastmath():
-    x = pt.dvector()
-
     with config.change_flags(numba__fastmath=True):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
-            "jitable_func"
-        ].py_func.__globals__["impl_sum"]
-        assert numba_sum_fn.targetoptions["fastmath"] == {
+
+        @numba_njit
+        def fn_fast(x):
+            return x + 1
+
+        assert fn_fast.targetoptions["fastmath"] == {
             "afn",
             "arcp",
             "contract",
@@ -442,28 +442,30 @@ def test_config_options_fastmath():
         }
 
     with config.change_flags(numba__fastmath=False):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
-            "jitable_func"
-        ].py_func.__globals__["impl_sum"]
-        assert numba_sum_fn.targetoptions["fastmath"] is False
+
+        @numba_njit
+        def fn_nofast(x):
+            return x + 1
+
+        assert fn_nofast.targetoptions["fastmath"] is False
 
 
 def test_config_options_cached():
-    x = pt.dvector()
-
     with config.change_flags(numba__cache=True):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
-            "jitable_func"
-        ].py_func.__globals__["impl_sum"]
-        assert not isinstance(numba_sum_fn._cache, numba.core.caching.NullCache)
+
+        @numba_njit(cache=True)
+        def fn_cached(x):
+            return x + 1
+
+        assert not isinstance(fn_cached._cache, numba.core.caching.NullCache)
 
     with config.change_flags(numba__cache=False):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        # Without caching we don't wrap the function in jitable_func
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
-        assert isinstance(numba_sum_fn._cache, numba.core.caching.NullCache)
+
+        @numba_njit
+        def fn_uncached(x):
+            return x + 1
+
+        assert isinstance(fn_uncached._cache, numba.core.caching.NullCache)
 
 
 def test_scalar_return_value_conversion():
