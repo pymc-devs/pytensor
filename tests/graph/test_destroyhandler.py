@@ -459,3 +459,13 @@ def test_multiple_inplace():
     ).rewrite(g)
     assert g.consistent()
     assert fail.failures == 1
+
+
+def test_destroy_handler_detach():
+    x, y, z = inputs()
+    g = FunctionGraph([x], [x], clone=False)
+
+    dh = DestroyHandler()
+    dh.on_attach(g)
+
+    dh.on_detach(g)

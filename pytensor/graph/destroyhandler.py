@@ -466,7 +466,7 @@ class DestroyHandler(Bookkeeper):
         del self.view_o
         del self.clients
         del self.stale_droot
-        assert self.fgraph.destroyer_handler is self
+        assert self.fgraph.destroy_handler is self
         delattr(self.fgraph, "destroyers")
         delattr(self.fgraph, "has_destroyers")
         delattr(self.fgraph, "destroy_handler")
