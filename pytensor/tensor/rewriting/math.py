@@ -736,10 +736,6 @@ def local_div_exp_to_mul_exp(fgraph, node):
     Multiplication is generally cheaper than division and the resulting
     ``exp(-B)`` may fuse with other exponentials via
     ``local_mul_exp_to_exp_add``.
-
-    We skip the case where the numerator is also ``exp(...)`` because
-    ``local_mul_exp_to_exp_add`` already handles ``exp(A) / exp(B) → exp(A-B)``
-    directly on the ``true_div`` node.
     """
     num, denom = node.inputs
 
@@ -747,14 +743,6 @@ def local_div_exp_to_mul_exp(fgraph, node):
         denom.owner
         and isinstance(denom.owner.op, Elemwise)
         and isinstance(denom.owner.op.scalar_op, ps.Exp)
-    ):
-        return None
-
-    # Skip if numerator is also exp — local_mul_exp_to_exp_add handles that
-    if (
-        num.owner
-        and isinstance(num.owner.op, Elemwise)
-        and isinstance(num.owner.op.scalar_op, ps.Exp)
     ):
         return None
 
