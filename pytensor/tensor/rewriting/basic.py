@@ -123,6 +123,15 @@ def merge_broadcastables(broadcastables):
     return [all(bcast) for bcast in zip(*broadcastables, strict=True)]
 
 
+def _input_not_broadcast(inp, out):
+    """Check whether input is not broadcast by the output (mixed-ndim safe)."""
+    inp_bcast = inp.type.broadcastable
+    out_bcast = out.type.broadcastable
+    if len(inp_bcast) < len(out_bcast):
+        inp_bcast = (True,) * (len(out_bcast) - len(inp_bcast)) + inp_bcast
+    return inp_bcast == out_bcast
+
+
 def alloc_like(
     value: TensorVariable,
     template: TensorVariable,
@@ -338,9 +347,15 @@ def local_elemwise_alloc(fgraph, node):
     new_outs = node.op(*new_inputs, return_list=True)
 
     if new_outs[0].type.broadcastable != node.outputs[0].type.broadcastable:
-        new_outs = [
-            alloc_like(new_out, node.outputs[0], fgraph) for new_out in new_outs
-        ]
+        missing_ndim = node.outputs[0].type.ndim - new_outs[0].type.ndim
+        if missing_ndim > 0 and all(
+            node.outputs[0].type.broadcastable[i] for i in range(missing_ndim)
+        ):
+            new_outs = [shape_padleft(new_out, missing_ndim) for new_out in new_outs]
+        else:
+            new_outs = [
+                alloc_like(new_out, node.outputs[0], fgraph) for new_out in new_outs
+            ]
 
     copy_stack_trace(node.outputs, new_outs)
     return new_outs
@@ -569,7 +584,6 @@ def local_useless_elemwise(fgraph, node):
     TODO: Allow rewrite when useless input broadcasts output
 
     """
-    out_bcast = node.outputs[0].type.broadcastable
     dtype = node.outputs[0].type.dtype
     scalar_op = node.op.scalar_op
 
@@ -595,9 +609,8 @@ def local_useless_elemwise(fgraph, node):
         return [node.inputs[0]]
 
     elif isinstance(node.op.scalar_op, AND) and len(node.inputs) == 2:
-        if (
-            isinstance(node.inputs[0], TensorConstant)
-            and node.inputs[1].type.broadcastable == out_bcast
+        if isinstance(node.inputs[0], TensorConstant) and _input_not_broadcast(
+            node.inputs[1], node.outputs[0]
         ):
             const_val = node.inputs[0].unique_value
             if const_val is not None:
@@ -608,9 +621,8 @@ def local_useless_elemwise(fgraph, node):
                     # and this rewrite would be wrong
                     return [node.inputs[1].astype(node.outputs[0].dtype)]
 
-        if (
-            isinstance(node.inputs[1], TensorConstant)
-            and node.inputs[0].type.broadcastable == out_bcast
+        if isinstance(node.inputs[1], TensorConstant) and _input_not_broadcast(
+            node.inputs[0], node.outputs[0]
         ):
             const_val = node.inputs[1].unique_value
             if const_val is not None:
@@ -622,9 +634,8 @@ def local_useless_elemwise(fgraph, node):
                     return [node.inputs[0].astype(node.outputs[0].dtype)]
 
     elif isinstance(node.op.scalar_op, OR) and len(node.inputs) == 2:
-        if (
-            isinstance(node.inputs[0], TensorConstant)
-            and node.inputs[1].type.broadcastable == out_bcast
+        if isinstance(node.inputs[0], TensorConstant) and _input_not_broadcast(
+            node.inputs[1], node.outputs[0]
         ):
             const_val = node.inputs[0].unique_value
             if const_val is not None:
@@ -635,9 +646,8 @@ def local_useless_elemwise(fgraph, node):
                     # and this rewrite would be wrong
                     return [ones_like(node.inputs[1], dtype=dtype, opt=True)]
 
-        if (
-            isinstance(node.inputs[1], TensorConstant)
-            and node.inputs[0].type.broadcastable == out_bcast
+        if isinstance(node.inputs[1], TensorConstant) and _input_not_broadcast(
+            node.inputs[0], node.outputs[0]
         ):
             const_val = node.inputs[1].unique_value
             if const_val is not None:

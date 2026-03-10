@@ -1501,8 +1501,13 @@ def local_sum_prod_of_mul_or_div(fgraph, node):
         inner_terms = []
         for term in node_inps.owner.inputs:
             term_bcast = term.type.broadcastable
-            if all(term_bcast[i] for i in reduced_axes):
-                outer_terms.append(term.squeeze(reduced_axes))
+            out_ndim = node_inps.type.ndim
+            offset = out_ndim - term.type.ndim
+            # Left-pad broadcastable for mixed-ndim inputs
+            if all((i < offset or term_bcast[i - offset]) for i in reduced_axes):
+                # Squeeze only the axes that exist on this term
+                term_axes = tuple(i - offset for i in reduced_axes if i >= offset)
+                outer_terms.append(term.squeeze(term_axes) if term_axes else term)
             else:
                 inner_terms.append(term)
 
@@ -1520,8 +1525,16 @@ def local_sum_prod_of_mul_or_div(fgraph, node):
         # We only care about removing the denominator out of the reduction
         numerator, denominator = node_inps.owner.inputs
         denominator_bcast = denominator.type.broadcastable
-        if all(denominator_bcast[i] for i in reduced_axes):
-            outer_term = denominator.squeeze(reduced_axes)
+        out_ndim = node_inps.type.ndim
+        denom_offset = out_ndim - denominator.type.ndim
+        if all(
+            (i < denom_offset or denominator_bcast[i - denom_offset])
+            for i in reduced_axes
+        ):
+            denom_axes = tuple(
+                i - denom_offset for i in reduced_axes if i >= denom_offset
+            )
+            outer_term = denominator.squeeze(denom_axes) if denom_axes else denominator
             inner_term = numerator
         else:
             return None

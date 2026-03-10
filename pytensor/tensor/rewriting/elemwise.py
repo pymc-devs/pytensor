@@ -378,9 +378,26 @@ def local_dimshuffle_lift(fgraph, node):
         and (len(fgraph.clients[inp]) == 1)
     ):
         # Don't use make_node to have tag.test_value set.
+        out_ndim = inode.outputs[0].type.ndim
         new_inputs = []
         for inp in inode.inputs:
-            new_inp = inp.dimshuffle(op.new_order)
+            # For mixed-ndim inputs, adapt new_order per input
+            offset = out_ndim - inp.type.ndim
+            if offset == 0:
+                inp_new_order = op.new_order
+            else:
+                # Strip leading entries that correspond to the implicit padding
+                inp_new_order = []
+                for entry in op.new_order:
+                    if entry == "x":
+                        inp_new_order.append("x")
+                    elif entry < offset:
+                        # This output dim maps to a padded (implicit) dim for this input
+                        inp_new_order.append("x")
+                    else:
+                        inp_new_order.append(entry - offset)
+                inp_new_order = tuple(inp_new_order)
+            new_inp = inp.dimshuffle(inp_new_order)
             new_inputs.append(apply_local_dimshuffle_lift(fgraph, new_inp))
         copy_stack_trace(node.outputs[0], new_inputs)
         ret = inode.op(*new_inputs, return_list=True)

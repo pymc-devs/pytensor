@@ -272,7 +272,7 @@ class TestAlgebraicCanonizer:
             # ((x / x) * (y / y), None),
             (
                 (-1 * x) / y / (-2 * z),
-                (pt.as_tensor([[0.5]], dtype="floatX") * x) / (y * z),
+                (pt.as_tensor(0.5, dtype="floatX") * x) / (y * z),
             ),
         ],
     )
@@ -1008,7 +1008,7 @@ class TestAlgebraicCanonizer:
         new_out = rewrite_graph(
             out, custom_rewrite=in2out(local_mul_canonizer, name="test")
         )
-        expected_out = np.array([2.0]).astype(config.floatX) * specify_shape(x, (5,))
+        expected_out = np.array(2.0).astype(config.floatX) * specify_shape(x, (5,))
         assert equal_computations([new_out], [expected_out])
 
     def test_broadcasted_by_constant(self):
@@ -1019,7 +1019,7 @@ class TestAlgebraicCanonizer:
         new_out = rewrite_graph(
             out, custom_rewrite=in2out(local_mul_canonizer, name="test")
         )
-        expected_out = second(const, np.array([[2.0]], dtype=config.floatX) * x)
+        expected_out = second(const, np.array(2.0, dtype=config.floatX) * x)
         assert equal_computations([new_out], [expected_out])
 
 
@@ -1982,9 +1982,9 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x >= np.array([[0]], dtype=np.int8),
+                    x >= np.array(0, dtype=np.int8),
                     pt.log1p(x),
-                    np.array([[np.nan]], dtype=np.float32),
+                    np.array(np.nan, dtype=np.float32),
                 )
             ],
         )
@@ -2006,9 +2006,9 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x >= np.array([[0]], dtype=np.int8),
+                    x >= np.array(0, dtype=np.int8),
                     pt.log1p(-x),
-                    np.array([[np.nan]], dtype=np.float32),
+                    np.array(np.nan, dtype=np.float32),
                 )
             ],
         )
@@ -2029,9 +2029,9 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x <= np.array([[0]], dtype=np.int8),
+                    x <= np.array(0, dtype=np.int8),
                     x,
-                    np.array([[np.nan]], dtype=np.float32),
+                    np.array(np.nan, dtype=np.float32),
                 )
             ],
         )
@@ -2069,7 +2069,7 @@ def test_log_sqrt() -> None:
 
     assert utt.assert_equal_computations(
         [out],
-        [mul(pt.as_tensor_variable([[0.5]], dtype=x.dtype), log(x))],
+        [mul(pt.as_tensor_variable(0.5, dtype=x.dtype), log(x))],
     )
 
 
@@ -2095,9 +2095,9 @@ class TestSqrSqrt:
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
-            ge(x, np.zeros((1, 1), dtype="int8")),
+            ge(x, np.zeros((), dtype="int8")),
             x,
-            np.full((1, 1), np.nan, dtype=x.type.dtype),
+            np.full((), np.nan, dtype=x.type.dtype),
         )
 
         assert equal_computations([out], [expected])

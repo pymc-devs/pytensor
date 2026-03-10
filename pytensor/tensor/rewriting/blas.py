@@ -272,8 +272,7 @@ def _gemm_canonicalize(fgraph, r, scale, rval, maxclients):
                 # just put the original arguments as in the base case
                 rval.append((scale, r))
                 return rval
-        if len(matrices) == 1:
-            assert len(vectors) == 0
+        if len(matrices) == 1 and len(vectors) == 0:
             m = matrices[0]
             if len(scalars) == 0:
                 _gemm_canonicalize(fgraph, m, scale, rval, 1)
@@ -283,8 +282,7 @@ def _gemm_canonicalize(fgraph, r, scale, rval, maxclients):
                 _gemm_canonicalize(
                     fgraph, m, mul(scaled(scalars[0]), *scalars[1:]), rval, 1
                 )
-        elif len(vectors) == 1:
-            assert len(matrices) == 0
+        elif len(vectors) == 1 and len(matrices) == 0:
             v = vectors[0]
             if len(scalars) == 0:
                 _gemm_canonicalize(fgraph, v, scale, rval, 1)
