@@ -43,10 +43,15 @@ from pytensor.scalar import constant as scalar_constant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.basic import constant as tensor_constant
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import (
+    CAReduce,
+    DimShuffle,
+    Elemwise,
+    input_offset,
+)
 from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
-    alloc_like,
+    broadcast_like_elemwise,
     broadcasted_by,
     elemwise_of,
     register_canonicalize,
@@ -378,9 +383,24 @@ def local_dimshuffle_lift(fgraph, node):
         and (len(fgraph.clients[inp]) == 1)
     ):
         # Don't use make_node to have tag.test_value set.
+        out_ndim = inode.outputs[0].type.ndim
         new_inputs = []
         for inp in inode.inputs:
-            new_inp = inp.dimshuffle(op.new_order)
+            ipt_offset = input_offset(inp, out_ndim)
+            if ipt_offset == 0:
+                inp_new_order = op.new_order
+            else:
+                # Strip leading entries that correspond to the implicit padding
+                inp_new_order = []
+                for entry in op.new_order:
+                    if entry == "x":
+                        inp_new_order.append("x")
+                    elif entry < ipt_offset:
+                        inp_new_order.append("x")
+                    else:
+                        inp_new_order.append(entry - ipt_offset)
+                inp_new_order = tuple(inp_new_order)
+            new_inp = inp.dimshuffle(inp_new_order)
             new_inputs.append(apply_local_dimshuffle_lift(fgraph, new_inp))
         copy_stack_trace(node.outputs[0], new_inputs)
         ret = inode.op(*new_inputs, return_list=True)
@@ -1088,17 +1108,11 @@ def local_inline_composite_constants(fgraph, node):
         composite_op.fgraph.outputs, replace=inner_replacements
     )
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
+
     new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
-
-    # Some of the inlined constants were broadcasting the output shape
-    if node.outputs[0].type.broadcastable != new_outputs[0].type.broadcastable:
-        new_outputs = [
-            alloc_like(new_out, template=node.outputs[0], fgraph=fgraph)
-            for new_out in new_outputs
-        ]
-
-    copy_stack_trace(node.outputs, new_outputs)
-    return new_outputs
+    return broadcast_like_elemwise(
+        list(new_outputs), node, fgraph=fgraph, stack_trace=True
+    )
 
 
 @node_rewriter(tracks=[add, mul])
@@ -1123,6 +1137,7 @@ def constant_fold_branches_of_add_mul(fgraph, node):
                 if i == j:
                     continue
                 other_inp = new_constants[j]
+                # TODO: Adding dummy dims should be fine
                 if not broadcasted_by(reference_inp, other_inp):
                     other_inps.append(other_inp)
             if other_inps:

@@ -870,7 +870,7 @@ def test_Subtensor_lift_restrictions():
     fg = FunctionGraph([rng], [z], clone=False, features=[ShapeFeature()])
     _ = EquilibriumGraphRewriter([local_subtensor_rv_lift], max_use_ratio=100).apply(fg)
 
-    subtensor_node = fg.outputs[0].owner.inputs[1].owner.inputs[0].owner
+    subtensor_node = fg.outputs[0].owner.inputs[1].owner
     assert subtensor_node == y.owner
     assert isinstance(subtensor_node.op, Subtensor)
     assert isinstance(subtensor_node.inputs[0].owner.op, NormalRV)
@@ -890,7 +890,7 @@ def test_Subtensor_lift_restrictions():
     fg = FunctionGraph([rng], [z], clone=False, features=[ShapeFeature()])
     EquilibriumGraphRewriter([local_subtensor_rv_lift], max_use_ratio=100).apply(fg)
 
-    rv_node = fg.outputs[0].owner.inputs[1].owner.inputs[0].owner
+    rv_node = fg.outputs[0].owner.inputs[1].owner
     assert isinstance(rv_node.op, NormalRV)
     assert isinstance(rv_node.inputs[-1].owner.op, Subtensor)
     assert isinstance(rv_node.inputs[-2].owner.op, Subtensor)

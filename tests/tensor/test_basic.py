@@ -205,7 +205,7 @@ TestSecondBroadcast = makeTester(
     ),
 )
 
-# We exclude local_fill_to_alloc because it optimizes the "second" node away from the graph.
+# We exclude local_second_to_alloc because it optimizes the "second" node away from the graph.
 TestSecondSameRank = makeTester(
     name="SecondSameRankTester",
     op=second,
@@ -215,7 +215,7 @@ TestSecondSameRank = makeTester(
         fail1=(random(4, 5), random(5, 4)),
         fail2=(integers(1, 5), integers(5, 4)),
     ),
-    mode=get_default_mode().excluding("local_fill_to_alloc", "local_useless_fill"),
+    mode=get_default_mode().excluding("local_second_to_alloc", "local_useless_fill"),
 )
 
 # Alloc

@@ -27,7 +27,7 @@ from pytensor.tensor.basic import (
     register_infer_shape,
     stack,
 )
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise, input_offset
 from pytensor.tensor.exceptions import NotScalarConstantError, ShapeError
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -1213,6 +1213,7 @@ def local_specify_shape_lift(fgraph, node):
             # We look for a sufficient input to assign all the specify_shape dims
             # We could consider distributing the SpecifyShape across multiple inputs, when none is sufficient
 
+            out_ndim = node.outputs[0].type.ndim
             nonbcast_dims = {
                 i
                 for i, (dim, bcast) in enumerate(
@@ -1222,12 +1223,18 @@ def local_specify_shape_lift(fgraph, node):
             }
             new_elem_inps = elem_inps.copy()
             for i, elem_inp in enumerate(elem_inps):
+                ipt_offset = input_offset(elem_inp, out_ndim)
+                # Check that this input has all the non-broadcastable dims we need
+                # (dims before ipt_offset are implicit leading 1s, always broadcastable)
+                inp_nonbcast_dims = {d for d in nonbcast_dims if d >= ipt_offset}
+                if inp_nonbcast_dims != nonbcast_dims:
+                    continue
                 if all(
-                    bcast_dim is False
-                    for dim, bcast_dim in enumerate(elem_inp.type.broadcastable)
-                    if dim in nonbcast_dims
+                    elem_inp.type.broadcastable[d - ipt_offset] is False
+                    for d in inp_nonbcast_dims
                 ):
-                    new_elem_inps[i] = specify_shape(elem_inp, shape)
+                    inp_shape = shape[ipt_offset:]
+                    new_elem_inps[i] = specify_shape(elem_inp, inp_shape)
                     break
             else:  # no-break, no sufficient candidate found
                 return None

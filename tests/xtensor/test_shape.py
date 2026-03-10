@@ -15,6 +15,7 @@ from xarray import full_like as xr_full_like
 from xarray import ones_like as xr_ones_like
 from xarray import zeros_like as xr_zeros_like
 
+from pytensor.compile.mode import get_default_mode
 from pytensor.tensor import scalar, vector
 from pytensor.xtensor.shape import (
     broadcast,
@@ -561,11 +562,15 @@ class TestBroadcast:
             xr_assert_allclose(res, expected_res)
 
         # Test invalid shape raises an error
-        # Note: We might decide not to raise an error in the lowered graphs for performance reasons
         if "d" not in exclude:
+            fn_safe = xr_function(
+                [x, y, z],
+                out,
+                mode=get_default_mode().excluding("shape_unsafe"),
+            )
             z_test_bad = xr_arange_like(xtensor(dims=z.dims, shape=(4, 7)))
             with pytest.raises(Exception):
-                fn(x_test, y_test, z_test_bad)
+                fn_safe(x_test, y_test, z_test_bad)
 
     def test_broadcast_excluded_dims_in_different_order(self):
         """Test broadcasting excluded dims are aligned with user input."""
