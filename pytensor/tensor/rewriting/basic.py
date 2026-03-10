@@ -135,36 +135,33 @@ def get_simplified_shape(x: TensorVariable, *, fgraph) -> tuple:
 
 
 def get_simplified_broadcast_shape(first, *others, fgraph, batch_ndim=None) -> list:
-    """Per-axis fold of ``first`` with ``others``, prioritizing non-broadcastable lengths.
+    """Fold shapes, prioritizing non-broadcastable lengths from ``first``.
 
-    The shape entry from ``first`` wins on every axis where ``first`` is not
-    broadcastable; only axes where ``first`` is broadcastable look to ``others``
-    for a non-broadcastable length to substitute. Callers therefore pass the
-    "preferred shape source" first (Elemwise's standard broadcast joining is
-    commutative, but the resulting symbolic shape is not — we want the
-    simplest/most-static expression).
-
-    With ``batch_ndim`` only the leading ``batch_ndim`` dimensions are folded and
-    returned, so inputs may differ on their trailing (core) dimensions, as with
-    ``Blockwise``. Otherwise all inputs must share ndim (the Elemwise contract).
+    Elemwise shapes are aligned on the right, including implicit leading axes.
+    With ``batch_ndim``, fold only the already aligned leading batch dimensions
+    of Blockwise inputs, leaving their different core dimensions out of the fold.
     """
-    if batch_ndim is None:
-        batch_ndim = first.type.ndim
+    align_right = batch_ndim is None
+    ndim = max(inp.type.ndim for inp in (first, *others)) if align_right else batch_ndim
+    missing_dims = ndim - first.ndim if align_right else 0
+    broadcastable_dims = [True] * missing_dims + list(first.type.broadcastable[:ndim])
+    broadcast_shape = [1] * missing_dims + list(
+        get_simplified_shape(first, fgraph=fgraph)
+    )[:ndim]
+    if not (any(broadcastable_dims) and others):
+        return broadcast_shape
 
-    first_broadcastable = first.type.broadcastable[:batch_ndim]
-    if not (any(first_broadcastable) and others):
-        return list(get_simplified_shape(first, fgraph=fgraph))[:batch_ndim]
-
-    broadcastable_dims = list(first_broadcastable)
-    broadcast_shape = list(get_simplified_shape(first, fgraph=fgraph))[:batch_ndim]
     for other in others:
-        other_shape = get_simplified_shape(other, fgraph=fgraph)
-        for i in range(batch_ndim):
-            if other.type.broadcastable[i] or not broadcastable_dims[i]:
-                # Doesn't provide any new info
+        missing_dims = ndim - other.ndim if align_right else 0
+        other_shape = [1] * missing_dims + list(
+            get_simplified_shape(other, fgraph=fgraph)
+        )[:ndim]
+        other_bcast = [True] * missing_dims + list(other.type.broadcastable[:ndim])
+        for i in range(ndim):
+            if other_bcast[i] or not broadcastable_dims[i]:
                 continue
             broadcast_shape[i] = other_shape[i]
-            broadcastable_dims[i] = False  # Don't override again
+            broadcastable_dims[i] = False
     return broadcast_shape
 
 
@@ -179,7 +176,11 @@ def broadcast_like_elemwise(
     """Broadcast value(s) to match the output shape and dtype(s) of an elemwise node.
 
     Each value is cast to match its corresponding ``node.outputs[i]`` dtype,
-    then broadcast via ``Alloc`` to the full output shape if needed.
+    then expanded to the correct number of dimensions and, if necessary,
+    broadcast via `Alloc` to the full output shape.
+
+    When only dimension expansion is needed (no size-1 axes must be broadcast),
+    a lightweight ``DimShuffle`` is used instead of ``Alloc``.
 
     The broadcast shape is derived from ``node.inputs`` rather than
     ``node.outputs``, so the result does not depend on the node's outputs.
@@ -220,8 +221,10 @@ def broadcast_like_elemwise(
             v = cast(v, out.type.dtype)
         casted.append(v)
 
-    if broadcasted_by(casted[0], ref_out):
-        # Alloc handles dim expansion (leading 1s) and size-1 broadcasting
+    # Align dimensions and check if broadcasting is needed
+    expanded = [atleast_Nd(v, n=ref_out.type.ndim) for v in casted]
+    if broadcasted_by(expanded[0], ref_out):
+        # Alloc can expand dims itself, so use the original values
         if ref_input_idx is not None:
             inputs = list(node.inputs)
             ref = inputs.pop(ref_input_idx)
@@ -231,7 +234,7 @@ def broadcast_like_elemwise(
         bcast_shape = get_simplified_broadcast_shape(*inputs, fgraph=fgraph)
         results = [alloc(v, *bcast_shape) for v in casted]
     else:
-        results = casted
+        results = expanded
 
     if stack_trace:
         for r in results:

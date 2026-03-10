@@ -499,7 +499,7 @@ def test_implicit_broadcasting_via_repeat():
     assert isinstance(out.owner.inputs[1].owner.op, Reshape)
 
     new_out = rewrite_graph(out, include=("canonicalize", "specialize"))
-    assert equal_computations([new_out], [x[None] <= y[:, None]])
+    assert equal_computations([new_out], [x <= y[:, None]])
 
     no_rewrite_mode = Mode(linker="py", optimizer=None)
     x_test = np.arange(3) + 1

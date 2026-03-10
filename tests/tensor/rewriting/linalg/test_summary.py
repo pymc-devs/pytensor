@@ -187,10 +187,8 @@ def test_slogdet_specialization(batch_dim):
     result.assert_eval(a)
 
     # log(det(x))
-    expected_sign_value = np.array([-1], dtype=np.int8) if batch_dim else -1
-    expected_nan_value = (
-        np.array([np.nan], dtype=config.floatX) if batch_dim else np.nan
-    )
+    expected_sign_value = -1
+    expected_nan_value = np.nan
 
     expected_log_det_x = pt.where(
         pt.eq(expected_sign_det_x, expected_sign_value),
@@ -231,12 +229,14 @@ def test_slogdet_specialization_through_expand_dims():
     x = pt.tensor("x", shape=(3, 3), dtype=config.floatX)
     log_det_x = pt.log(pt.expand_dims(det(x), 0))
 
-    # dimshuffle_lift pushes the expand_dims inside the Switch
     sign_det_x, log_abs_det_x = Blockwise(SLogDet())(x)
-    expected = pt.where(
-        pt.eq(pt.expand_dims(sign_det_x, 0), np.array([-1], dtype=np.int8)),
-        np.array([np.nan], dtype=config.floatX),
-        pt.expand_dims(log_abs_det_x, 0),
+    expected = pt.expand_dims(
+        pt.where(
+            pt.eq(sign_det_x, np.array(-1, dtype=np.int8)),
+            np.array(np.nan, dtype=config.floatX),
+            log_abs_det_x,
+        ),
+        0,
     )
 
     result = RewriteTester([x], [log_det_x], include=["stabilize", "specialize"])
@@ -518,8 +518,7 @@ def test_det_of_inv():
 def test_det_of_inv_through_expand_dims():
     x = pt.tensor("x", shape=(3, 3))
     out = det(pt.expand_dims(pt.linalg.inv(x), 0))
-    # dimshuffle_lift moves the expand_dims inside the division
-    expected = pt.as_tensor([1.0], dtype="float64") / pt.expand_dims(det(x), 0)
+    expected = pt.expand_dims(pt.as_tensor(1.0, dtype="float64") / det(x), 0)
     rewritten = rewrite_graph(out, include=["canonicalize", "stabilize"])
     assert_equal_computations([rewritten], [expected])
 

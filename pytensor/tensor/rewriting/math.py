@@ -41,7 +41,12 @@ from pytensor.tensor.basic import (
     zeros,
     zeros_like,
 )
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import (
+    CAReduce,
+    DimShuffle,
+    Elemwise,
+    aligned_broadcastable_of,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
 from pytensor.tensor.linalg.constructors import BlockDiagonal
@@ -1802,10 +1807,16 @@ def local_sum_prod_of_mul_or_div(fgraph, node):
         # Mul accepts arbitrary inputs, so we need to separate into two groups
         outer_terms = []
         inner_terms = []
+        out_ndim = node_inps.type.ndim
         for term in node_inps.owner.inputs:
-            term_bcast = term.type.broadcastable
-            if all(term_bcast[i] for i in reduced_axes):
-                outer_terms.append(term.squeeze(reduced_axes))
+            aligned_bc = aligned_broadcastable_of(term, out_ndim)
+            if all(aligned_bc[i] for i in reduced_axes):
+                # Squeeze reduced axis (if they exist in the input)
+                term_offset = out_ndim - term.ndim
+                term_axes = tuple(
+                    i - term_offset for i in reduced_axes if i >= term_offset
+                )
+                outer_terms.append(term.squeeze(term_axes))
             else:
                 inner_terms.append(term)
 
@@ -1822,9 +1833,14 @@ def local_sum_prod_of_mul_or_div(fgraph, node):
     else:  # true_div
         # We only care about removing the denominator out of the reduction
         numerator, denominator = node_inps.owner.inputs
-        denominator_bcast = denominator.type.broadcastable
-        if all(denominator_bcast[i] for i in reduced_axes):
-            outer_term = denominator.squeeze(reduced_axes)
+        out_ndim = node_inps.type.ndim
+        aligned_bc = aligned_broadcastable_of(denominator, out_ndim)
+        if all(aligned_bc[i] for i in reduced_axes):
+            denom_offset = out_ndim - denominator.ndim
+            denom_axes = tuple(
+                i - denom_offset for i in reduced_axes if i >= denom_offset
+            )
+            outer_term = denominator.squeeze(denom_axes)
             inner_term = numerator
         else:
             return None

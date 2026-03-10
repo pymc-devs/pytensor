@@ -565,6 +565,11 @@ class TestBroadcast:
         # broadcast shape_ref, removing the runtime broadcast check; excluding
         # shape_unsafe restores it.
         if "d" not in exclude:
+            fn_safe = xr_function(
+                [x, y, z],
+                out,
+                mode=get_default_mode().excluding("shape_unsafe"),
+            )
             z_test_bad = xr_arange_like(xtensor(dims=z.dims, shape=(4, 7)))
             fn_safe = xr_function(
                 [x, y, z], out, mode=get_default_mode().excluding("shape_unsafe")

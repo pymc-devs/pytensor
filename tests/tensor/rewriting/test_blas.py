@@ -124,14 +124,7 @@ def test_gemm_canonicalize():
     can = []
     fg = FunctionGraph([X, Y, v], [X + Y + v], clone=False)
     _gemm_canonicalize(fg, fg.outputs[0], 1.0, can, 0)
-    # [(1.0, X), (1.0, Y), (1.0, InplaceDimShuffle{x,0}(v))]
-    assert can[:2] == [(1.0, X), (1.0, Y)]
-    assert isinstance(can[2], tuple)
-    assert len(can[2]) == 2
-    assert can[2][0] == 1.0
-    assert can[2][1].owner
-    assert isinstance(can[2][1].owner.op, DimShuffle)
-    assert can[2][1].owner.inputs == [v]
+    assert can == [(1.0, X), (1.0, Y), (1.0, v)]
 
     can = []
     fg = FunctionGraph([X, Y, w], [X + Y + w], clone=False)

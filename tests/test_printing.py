@@ -310,19 +310,18 @@ def test_debugprint():
     Gemv_op_name = "CGemv" if pytensor.config.blas__ldflags else "Gemv"
     exp_res = dedent(
         r"""
-        Composite{(i0 + (i1 - i2))} 4
+        Composite{(i0 + (i1 - i2))} 3
         ├─ A
-        ├─ ExpandDims{axis=0} v={0: [0]} 3
         """
-        f"        │  └─ {Gemv_op_name}{{inplace}} d={{0: [0]}} 2"
+        f"        ├─ {Gemv_op_name}{{inplace}} d={{0: [0]}} 2"
         r"""
-        │     ├─ AllocEmpty{dtype='float64'} 1
-        │     │  └─ Shape_i{0} 0
-        │     │     └─ B
-        │     ├─ 1.0
-        │     ├─ B
-        │     ├─ <Vector(float64, shape=(?,))>
-        │     └─ 0.0
+        │  ├─ AllocEmpty{dtype='float64'} 1
+        │  │  └─ Shape_i{0} 0
+        │  │     └─ B
+        │  ├─ 1.0
+        │  ├─ B
+        │  ├─ <Vector(float64, shape=(?,))>
+        │  └─ 0.0
         └─ D
 
         Inner graphs:
@@ -530,14 +529,12 @@ Inner graphs:
 AddOne{inline=False} [id A]
  ← Add [id E]
     ├─ i0 [id F]
-    └─ ExpandDims{axis=0} [id G]
-       └─ 1 [id H]
+    └─ 1 [id G]
 
 Relu{inline=False} [id B, C]
- ← Maximum [id I]
+ ← Maximum [id H]
     ├─ i0 [id F]
-    └─ ExpandDims{axis=0} [id J]
-       └─ 0 [id K]
+    └─ 0 [id I]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
@@ -590,21 +587,18 @@ A{inline=False} [id B]
  ← Add [id E]
     ├─ Relu{inline=False} [id F]
     │  └─ i0 [id G]
-    └─ ExpandDims{axis=0} [id H]
-       └─ 1 [id I]
+    └─ 1 [id H]
 
 B{inline=False} [id D]
- ← Mul [id J]
+ ← Mul [id I]
     ├─ Relu{inline=False} [id F]
     │  └─ ···
-    └─ ExpandDims{axis=0} [id K]
-       └─ 2 [id L]
+    └─ 2 [id J]
 
 Relu{inline=False} [id F]
- ← Maximum [id M]
+ ← Maximum [id K]
     ├─ i0 [id G]
-    └─ ExpandDims{axis=0} [id N]
-       └─ 0 [id O]
+    └─ 0 [id L]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):

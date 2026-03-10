@@ -1017,6 +1017,32 @@ class TestVectorize:
         assert vect_out.owner.op == exp
         assert vect_out.owner.inputs[0] is mat
 
+    @pytest.mark.parametrize("batch_shape", [(2,), (2, 5)])
+    @pytest.mark.parametrize("batched_matrix", [False, True])
+    def test_elemwise_mixed_core_ndim(self, batch_shape, batched_matrix):
+        vec = tensor(shape=(4,))
+        mat = tensor(shape=(3, 4))
+        batch_vec = tensor(shape=(*batch_shape, 4))
+        replacements = {vec: batch_vec}
+        batch_mat = tensor(shape=(*batch_shape, 3, 4)) if batched_matrix else mat
+        if batched_matrix:
+            replacements[mat] = batch_mat
+
+        out = vectorize_graph(vec + mat, replacements)
+        assert out.type.shape == (*batch_shape, 3, 4)
+        fn = function(
+            [batch_vec, batch_mat], out, mode=Mode(linker="py", optimizer=None)
+        )
+        vec_value = np.arange(np.prod(batch_vec.type.shape), dtype="float64").reshape(
+            batch_vec.type.shape
+        )
+        mat_value = np.arange(np.prod(batch_mat.type.shape), dtype="float64").reshape(
+            batch_mat.type.shape
+        )
+        np.testing.assert_array_equal(
+            fn(vec_value, mat_value), vec_value[..., None, :] + mat_value
+        )
+
     def test_dimshuffle(self):
         col_mat = tensor(shape=(None, 1))
         tcol_mat = tensor(shape=(None, None, 1))
@@ -1149,6 +1175,13 @@ def test_XOR_inplace():
         _ = gn(l, r)
         # test the in-place stuff
         assert np.all(l == np.asarray([0, 1, 1, 0])), l
+
+
+def test_inplace_rejects_implicit_leading_axes():
+    vec = vector()
+    row = tensor(shape=(1, None))
+    with pytest.raises(ValueError, match="different ndim"):
+        Elemwise(ps.add, inplace_pattern={0: 0})(vec, row)
 
 
 def test_inplace_dtype_changed():

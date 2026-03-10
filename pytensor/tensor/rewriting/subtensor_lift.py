@@ -472,12 +472,14 @@ def local_subtensor_of_batch_dims(fgraph, node):
     # together, over the consecutive axes they jointly index.
     for inp in elem.owner.inputs:
         input_static_shape = inp.type.shape
+        offset = elem.ndim - inp.ndim if isinstance(elem.owner.op, Elemwise) else 0
         adv_indices_and_dims = [
-            (adv_index, input_static_shape[axis])
-            for axis, adv_index in enumerate(idx_tuple[: inp.type.ndim])
+            (adv_index, input_static_shape[axis - offset])
+            for axis, adv_index in enumerate(idx_tuple)
+            if offset <= axis < offset + inp.ndim
             if isinstance(adv_index, TensorVariable)
             and adv_index.type.ndim > 0
-            and not inp.type.broadcastable[axis]
+            and not inp.type.broadcastable[axis - offset]
         ]
         if not _indices_provably_not_larger(adv_indices_and_dims, fgraph):
             return None
@@ -515,13 +517,15 @@ def local_subtensor_of_batch_dims(fgraph, node):
 
     elem_inputs = elem.owner.inputs
 
-    # Drop indices on broadcast input dims instead of applying them: an advanced
-    # index can't validly index a length-1 dim (only zero is in bounds) and would
-    # wastefully expand it. The Elemwise broadcasts the small inputs back together.
-    indexed_inputs = [
-        _canonical_indexing(inp, idx_tuple, drop_broadcasted_index=True)
-        for inp in elem_inputs
-    ]
+    indexed_inputs = []
+    for inp in elem_inputs:
+        offset = elem.ndim - inp.ndim if isinstance(elem.owner.op, Elemwise) else 0
+        inp_indices = idx_tuple[offset:]
+        indexed_inputs.append(
+            _canonical_indexing(inp, inp_indices, drop_broadcasted_index=True)
+            if inp_indices
+            else inp
+        )
 
     [old_out] = node.outputs
 
@@ -535,7 +539,9 @@ def local_subtensor_of_batch_dims(fgraph, node):
     # We use an alloc to enforce the output shape.
     if broadcasted_by(new_out, old_out):
         batch_shape = get_simplified_broadcast_shape(
-            *elem_inputs, fgraph=fgraph, batch_ndim=batch_ndim
+            *elem_inputs,
+            fgraph=fgraph,
+            batch_ndim=batch_ndim if isinstance(elem.owner.op, Blockwise) else None,
         )
         new_batch_shape = indexed_result_shape(batch_shape, idx_tuple)
         core_shape = tuple(new_out.shape)[len(new_batch_shape) :]

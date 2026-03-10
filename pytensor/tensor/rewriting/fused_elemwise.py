@@ -421,7 +421,9 @@ class FuseElemwise(GraphRewriter):
             if node not in fgraph.apply_nodes:
                 continue
 
-            idx_groups = {}  # (idx_var, axis) -> (reads: list[int], writes: list[int])
+            # Include implicit leading axes in the key: the same index may
+            # select different loop axes for inputs with different ranks.
+            idx_groups = {}  # (idx_var, source_axis, offset) -> (reads, writes)
 
             # Roots of the buffers we read through, used below to skip fusing a
             # write whose target buffer aliases one of them (see aliasing check).
@@ -438,10 +440,12 @@ class FuseElemwise(GraphRewriter):
                 if idx_axis_pairs is None:
                     continue
                 read_source_roots.add(_view_root(view_i, inp_node.inputs[0]))
-                for idx_axis_pair in idx_axis_pairs:
-                    if idx_axis_pair not in idx_groups:
-                        idx_groups[idx_axis_pair] = ([], [])
-                    idx_groups[idx_axis_pair][0].append(i)
+                offset = node.outputs[0].ndim - inp.ndim
+                for idx, axis in idx_axis_pairs:
+                    key = (idx, axis, offset)
+                    if key not in idx_groups:
+                        idx_groups[key] = ([], [])
+                    idx_groups[key][0].append(i)
 
             # For indexed writes to fuse: single client AdvancedIncSubtensor(1)
             # The write may be separated from the output by a right expand_dims DimShuffle
@@ -523,10 +527,11 @@ class FuseElemwise(GraphRewriter):
 
                 leading_write_axes[out_idx] = leading_axes
 
-                for idx_axis_pair in idx_axis_pairs:
-                    if idx_axis_pair not in idx_groups:
-                        idx_groups[idx_axis_pair] = ([], [])
-                    idx_groups[idx_axis_pair][1].append(out_idx)
+                for idx, axis in idx_axis_pairs:
+                    key = (idx, axis, 0)
+                    if key not in idx_groups:
+                        idx_groups[key] = ([], [])
+                    idx_groups[key][1].append(out_idx)
                 write_targets[out_idx] = client_node
 
             # Find reductions to fuse: an Elemwise output whose sole client is an
@@ -713,7 +718,7 @@ class FuseElemwise(GraphRewriter):
                 worklist.append(new_inplace_node)
                 continue
 
-            idx_vars = [idx for idx, _axis in idx_groups]
+            idx_vars = [idx for idx, _axis, _offset in idx_groups]
 
             # The strip-inplace pass above guarantees that reduced and indexed-write
             # outputs carry no inplace
@@ -814,7 +819,7 @@ class FuseElemwise(GraphRewriter):
             # indexed_outputs_spec: ((write_positions, axis, "inc"|"set") | None, ...)
             indexed_inputs_spec = tuple(
                 (tuple(reads), axis) if reads else None
-                for (_, axis), (reads, _) in idx_groups.items()
+                for (_, axis, _), (reads, _) in idx_groups.items()
             )
             indexed_outputs_spec = tuple(
                 (

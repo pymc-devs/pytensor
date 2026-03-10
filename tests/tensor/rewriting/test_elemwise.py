@@ -19,7 +19,7 @@ from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.raise_op import assert_op
 from pytensor.scalar.basic import EQ, Composite, float64
-from pytensor.tensor.basic import MakeVector
+from pytensor.tensor.basic import MakeVector, constant
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import abs as pt_abs
 from pytensor.tensor.math import (
@@ -61,6 +61,7 @@ from pytensor.tensor.rewriting.elemwise import (
     apply_local_dimshuffle_merge,
     local_dimshuffle_lift,
     local_dimshuffle_merge,
+    local_elemwise_sink_left_expand_dims,
 )
 from pytensor.tensor.rewriting.shape import (
     local_fuse_squeeze_reshape,
@@ -98,6 +99,63 @@ def inputs(xbc=(0, 0), ybc=(0, 0), zbc=(0, 0)):
 
 
 class TestDimshuffleLift:
+    @pytest.mark.parametrize("n_leading_dims", [1, 2])
+    def test_keep_left_expansions_after_elemwise(self, n_leading_dims):
+        s = scalar("s")
+        v = vector("v")
+        out = s + v
+        for _ in range(n_leading_dims):
+            out = out[None]
+        result = utt.RewriteTester([s, v], [out])
+        result.assert_graph((s + v).dimshuffle(["x"] * n_leading_dims + [0]))
+        result.assert_eval(2.0, np.arange(3, dtype=config.floatX))
+
+    def test_remove_left_expansions_from_elemwise(self):
+        s = scalar("s")
+        v = vector("v")
+        m = matrix("m")
+        out = s[None, None] * v[None] + m
+        result = utt.RewriteTester([s, v, m], [out])
+        result.assert_graph(s * v + m)
+        result.assert_eval(
+            2.0,
+            np.arange(3, dtype=config.floatX),
+            np.arange(6, dtype=config.floatX).reshape(2, 3),
+        )
+
+    def test_sink_left_expansions_through_multi_output_elemwise(self):
+        x = ps.float64("x")
+        op = Elemwise(Composite([x], [ps.sin(x), ps.cos(x)]))
+        s = scalar("s", dtype="float64")
+        v = vector("v", dtype="float64")
+        result = utt.RewriteTester([s, v], op((s + v)[None]))
+        result.assert_graph(*[out[None] for out in op(s + v)])
+        result.assert_eval(2.0, np.arange(3, dtype="float64"))
+
+    def test_sink_shared_left_expansion(self):
+        v = vector("v")
+        expanded = v[None]
+        reduction = expanded.sum(axis=0)
+        result = utt.RewriteTester(
+            [v],
+            [expanded + expanded, exp(expanded), reduction],
+            include=(),
+            custom_rewrite=local_elemwise_sink_left_expand_dims,
+        )
+        result.assert_graph((v + v)[None], exp(v)[None], reduction)
+        result.assert_eval(np.arange(3, dtype=config.floatX))
+
+    def test_left_expansion_keeps_mixed_rank_squeezes(self):
+        s = vector("s", shape=(1,))
+        v = matrix("v", shape=(1, 3))
+        out = (s.squeeze() + v.squeeze(0))[None]
+        result = utt.RewriteTester([s, v], [out])
+        result.assert_graph(out)
+        result.assert_eval(
+            np.ones(1, dtype=config.floatX),
+            np.arange(3, dtype=config.floatX).reshape(1, 3),
+        )
+
     def test_double_transpose(self):
         x, *_ = inputs()
         e = ds(ds(x, (1, 0)), (1, 0))
@@ -133,7 +191,7 @@ class TestDimshuffleLift:
         dimshuffle_lift.rewrite(g)
         assert equal_computations(
             g.outputs,
-            [(x.dimshuffle("x", "x", 0) + y.dimshuffle("x", 0, 1)) + z],
+            [(x + y) + z],
         )
         # Check stacktrace was copied over correctly after rewrite was applied
         assert check_stack_trace(g, ops_to_check="all")
@@ -146,7 +204,10 @@ class TestDimshuffleLift:
         new_out = local_dimshuffle_lift.transform(g, g.outputs[0].owner)
         assert equal_computations(
             new_out,
-            [(v.dimshuffle(0, "x") + 42) * (m.T + 84)],
+            [
+                (v[:, None] + constant(42)[None, None])
+                * (m.T + constant(84)[None, None])
+            ],
         )
         # Check stacktrace was copied over correctly after rewrite was applied
         new_g = FunctionGraph(g.inputs, new_out, clone=False)
@@ -273,6 +334,16 @@ def test_local_useless_expand_dims_in_reshape():
 
 
 class TestFusion:
+    def test_left_expansion_does_not_interrupt_fusion(self):
+        s, v = dscalar("s"), dvector("v")
+        result = utt.RewriteTester(
+            [s, v], [sin((s + v)[None])], include="fast_run", exclude=["inplace"]
+        )
+        s_inner, v_inner = ps.float64("s"), ps.float64("v")
+        op = Elemwise(Composite([s_inner, v_inner], [ps.sin(s_inner + v_inner)]))
+        result.assert_graph(op(s, v)[None])
+        result.assert_eval(2.0, np.arange(3, dtype="float64"))
+
     @pytest.fixture(autouse=True)
     def _raise_on_opt_error(self):
         # Surface any rewrite failure (including FusionOptimizer planner errors)
@@ -606,7 +677,7 @@ class TestFusion:
                 (fwx.sum()) + (fwx) + (fy + fz),
                 (fw, fx, fy, fz),
                 (fwv, fxv, fyv, fzv),
-                4,
+                3,
                 (fwv + fxv).sum() + fwv + fxv + fyv + fzv,
                 "float32",
             ),
@@ -933,18 +1004,18 @@ class TestFusion:
                 fv + fy**fz,
                 (fv, fy, fz),
                 (fvv, fyv, fzv),
-                2,
+                1,
                 fvv + fyv**fzv,
                 "float32",
-            ),  # fused with a dimshuffle #65
+            ),  # 65
             (
                 fv - fy + tanh(fz),
                 (fv, fy, fz),
                 (fvv, fyv, fzv),
-                2,
+                1,
                 fvv - fyv + np.tanh(fzv),
                 "float32",
-            ),  # fused with a dimshuffle
+            ),
             # Cases where the same input is reused many times.
             (
                 mul(fx, fx, fx, fx),
@@ -982,12 +1053,11 @@ class TestFusion:
             ),  # 70
             # Cases with different broadcast pattern. They should not
             # be merged as this would duplicate computation
-            # The graph should have 2 elemwise and 1 dimshuffle
             (
                 fx * sin(fs),
                 (fx, fs),
                 (fxv, fsv),
-                3,
+                2,
                 fxv * np.sin(fsv),
                 "float32",
             ),
@@ -1042,7 +1112,7 @@ class TestFusion:
                 ),
                 (fx,),
                 (fxv,),
-                4,
+                3,
                 (np.sum(fxv + 5) * np.exp(fxv) / (fxv + 5),),
                 ("float32",),
             ),
@@ -1360,17 +1430,16 @@ class TestFusion:
 
         f = pytensor.function([xs, xm], esm, mode=self.mode)
         apply_nodes = f.maker.fgraph.toposort()
-        assert len(apply_nodes) == 3
-        assert isinstance(apply_nodes[0].op, DimShuffle)
+        assert len(apply_nodes) == 2
         # Inner Vector output Composite
-        assert isinstance(apply_nodes[1].op.scalar_op, Composite)
-        assert {node.op for node in apply_nodes[1].op.scalar_op.fgraph.apply_nodes} == {
+        assert isinstance(apply_nodes[0].op.scalar_op, Composite)
+        assert {node.op for node in apply_nodes[0].op.scalar_op.fgraph.apply_nodes} == {
             ps.add,
             ps.log,
         }
         # Outer Matrix output Composite
-        assert isinstance(apply_nodes[2].op.scalar_op, Composite)
-        assert {node.op for node in apply_nodes[2].op.scalar_op.fgraph.apply_nodes} == {
+        assert isinstance(apply_nodes[1].op.scalar_op, Composite)
+        assert {node.op for node in apply_nodes[1].op.scalar_op.fgraph.apply_nodes} == {
             ps.sub,
             ps.exp,
             ps.mul,

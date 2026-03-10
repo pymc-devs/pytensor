@@ -89,7 +89,19 @@ class TestLogSoftmaxRewrites:
         result = RewriteTester(
             [x], [x - lse, lse], custom_rewrite=local_log_softmax_from_logsumexp
         )
-        result.assert_graph(x - lse, lse)
+        if axis in (None, 0):
+            result.assert_graph(x - logsumexp(x, axis=axis), lse)
+        else:
+            result.assert_graph(x - lse, lse)
+
+    def test_logsumexp_implicit_broadcast_wrong_axis(self):
+        x = matrix("x", shape=(3, 3))
+        out = x - logsumexp(x, axis=1)
+        result = RewriteTester(
+            [x], [out], custom_rewrite=local_log_softmax_from_logsumexp
+        )
+        result.assert_graph(out)
+        result.assert_eval(np.arange(9, dtype=config.floatX).reshape(3, 3))
 
     @pytest.mark.parametrize("axis", [None, 0, -1])
     @pytest.mark.parametrize("idx0", [0, slice(1, None), slice(None)])

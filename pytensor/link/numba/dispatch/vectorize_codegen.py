@@ -56,7 +56,7 @@ def _decode_literal(val, name):
     return pickle.loads(base64.decodebytes(val.literal_value.encode()))
 
 
-def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
+def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims, input_offsets):
     """Compute which loop dimensions load each index array.
 
     For a 1-D index on axis A this is ``(A,)``; for a 2-D index ``(A, A+1)``.
@@ -70,6 +70,8 @@ def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
         Per-index: (output positions, axis, mode) or None.
     idx_ndims : tuple of int
         Number of dimensions of each index array.
+    input_offsets : tuple of int
+        Implicit leading loop dimensions of each indexed input.
     """
     n_indices = len(indexed_inputs)
     if n_indices == 0:
@@ -102,7 +104,8 @@ def _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims):
     group_min_axis: dict[int, int] = {}
     for k, entry in enumerate(indexed_inputs):
         if entry is not None:
-            _, axis = entry
+            sources, axis = entry
+            axis += input_offsets[sources[0]]
             root = find(k)
             group_min_axis[root] = min(group_min_axis.get(root, axis), axis)
     for k, entry in enumerate(indexed_outputs):
@@ -154,14 +157,14 @@ def _compute_vectorized_types(
     output_core_shape_types,
 ):
     """Compute core input/output types and return type for vectorized intrinsics."""
-    batch_ndim = len(input_bc_patterns[0])
+    batch_ndim = len(output_bc_patterns[0])
 
     if not all(isinstance(t, types.Array) for t in input_types):
         raise TypingError("Vectorized inputs must be arrays.")
-    if not all(len(p) == batch_ndim for p in input_bc_patterns + output_bc_patterns):
-        raise TypingError(
-            "Vectorized broadcastable patterns must have the same length."
-        )
+    if not all(len(p) == batch_ndim for p in output_bc_patterns) or any(
+        len(p) > batch_ndim for p in input_bc_patterns
+    ):
+        raise TypingError("Invalid vectorized broadcastable pattern length.")
 
     core_input_types = []
     for input_type, bc_pattern in zip(input_types, input_bc_patterns, strict=True):
@@ -252,7 +255,7 @@ def compute_itershape(
     size: list[ir.Instruction] | None,
 ):
     one = ctx.get_constant(types.intp, 1)
-    batch_ndim = len(broadcast_pattern[0])
+    batch_ndim = max((len(p) for p in broadcast_pattern), default=0)
     shape = [None] * batch_ndim
     if size is not None:
         shape = size
@@ -260,8 +263,13 @@ def compute_itershape(
             for j, (bc, in_shape) in enumerate(
                 zip(broadcast_pattern, in_shapes, strict=True)
             ):
-                length = in_shape[i]
-                if bc[i]:
+                # Offset for inputs with fewer dims than batch_ndim
+                offset = batch_ndim - len(bc)
+                if i < offset:
+                    # Implicit broadcast dim — no array dim to check
+                    continue
+                length = in_shape[i - offset]
+                if bc[i - offset]:
                     with builder.if_then(
                         builder.icmp_unsigned("!=", length, one), likely=False
                     ):
@@ -297,8 +305,11 @@ def compute_itershape(
             for j, (bc, in_shape) in enumerate(
                 zip(broadcast_pattern, in_shapes, strict=True)
             ):
-                length = in_shape[i]
-                if bc[i]:
+                offset = batch_ndim - len(bc)
+                if i < offset:
+                    continue
+                length = in_shape[i - offset]
+                if bc[i - offset]:
                     with builder.if_then(
                         builder.icmp_unsigned("!=", length, one), likely=False
                     ):
@@ -718,6 +729,7 @@ def make_loop_call(
     destroyed_inputs = {in_idx: out_idx for out_idx, in_idx in inplace}
 
     zero = context.get_constant(types.intp, 0)
+    batch_ndim = len(iter_shape)
 
     # These accumulators carry reduced values in scalar slots while the common
     # loop below still handles input indexing and alias metadata.
@@ -812,6 +824,7 @@ def make_loop_call(
             n_index_loop_dims = 0
         core_ndim = inp_type.ndim - len(inp_bc) - n_indexed + n_index_loop_dims
 
+        offset = batch_ndim - len(inp_bc)
         if spec is not None:
             assert idx_arrays_type is not None
             indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
@@ -859,7 +872,7 @@ def make_loop_call(
                         result_dim += n_index_loop_dims
                 elif result_dim < len(inp_bc):
                     read_idx.append(
-                        zero if inp_bc[result_dim] else loop_idxs[result_dim]
+                        zero if inp_bc[result_dim] else loop_idxs[offset + result_dim]
                     )
                     result_dim += 1
                 else:
@@ -867,7 +880,8 @@ def make_loop_call(
                     result_dim += 1
         else:
             read_idx = [
-                zero if bc else idx for idx, bc in zip(loop_idxs, inp_bc, strict=True)
+                zero if bc else idx
+                for idx, bc in zip(loop_idxs[offset:], inp_bc, strict=True)
             ] + [zero] * core_ndim
 
         read_ptr = get_item_pointer2(
@@ -1178,7 +1192,11 @@ def _vectorized(
     )
 
     idx_ndims = tuple(idx_types[k].ndim for k in range(n_indices))
-    idx_load_axes = _compute_idx_load_axes(indexed_inputs, indexed_outputs, idx_ndims)
+    batch_ndim = len(output_bc_patterns[0])
+    input_offsets = tuple(batch_ndim - len(bc) for bc in input_bc_patterns)
+    idx_load_axes = _compute_idx_load_axes(
+        indexed_inputs, indexed_outputs, idx_ndims, input_offsets
+    )
 
     # Aggregate per-input: which (idx_k, source_axis) pairs apply.
     read_spec_dict: dict[int, list[tuple[int, int]]] = {}
@@ -1247,7 +1265,7 @@ def _vectorized(
     if out_idx_to_write_target:
         core_out_types = list(core_out_types)
         out_types = list(out_types)
-        batch_ndim = len(input_bc_patterns[0])
+        batch_ndim = len(output_bc_patterns[0])
         for out_idx, target_idx in out_idx_to_write_target.items():
             target_type = write_target_types[target_idx]
             out_types[out_idx] = target_type
@@ -1385,7 +1403,7 @@ def _vectorized(
         # indices on a given loop dim are bc=True, none constrains the loop
         # size.  Force bc=False in that case so compute_itershape requires
         # the index length to match the loop.
-        batch_ndim = len(input_bc_patterns[0]) if input_bc_patterns else 0
+        batch_ndim = len(output_bc_patterns[0]) if input_bc_patterns else 0
 
         write_all_bc = [True] * batch_ndim
         for k in range(n_indices):

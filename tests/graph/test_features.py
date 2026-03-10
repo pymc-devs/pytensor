@@ -73,7 +73,7 @@ def test_full_history():
         history.prev()
     assert equal_computations(fg.outputs, [out])
 
-    history.goto(2)
+    history.goto(3)
     assert equal_computations(fg.outputs, [pt.log(pt.special.softmax(x, axis=None))])
 
     for i in range(10):

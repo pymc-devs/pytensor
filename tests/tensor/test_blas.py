@@ -599,7 +599,7 @@ def just_gemm(i, o, ishapes=None, max_graphlen=0, expected_nb_gemm=1):
         assert node.op != gemm_inplace, "gemm_inplace in original graph"
 
     graphlen = len(f.maker.fgraph.toposort())
-    assert not (max_graphlen and (graphlen <= max_graphlen)), (
+    assert not max_graphlen or graphlen <= max_graphlen, (
         f"graphlen={graphlen}>{max_graphlen}"
     )
 
@@ -749,14 +749,14 @@ def test_gemm_nested():
         [X, Y, Z, R, S, U, a, b, c, d],
         [a * Z - b * (c * dot(X, Y) + d * Z)],
         ishapes=[(2, 3), (3, 4), (2, 4), (2, 3), (3, 4), (2, 4), (), (), (), ()],
-        max_graphlen=1,
+        max_graphlen=2,
     )
     # print "---------------------"
     just_gemm(
         [X, Y, Z, R, S, U, a, b, c, d],
         [a * Z - b * (c * dot(X, Y) + d * Z + c * Z)],
         ishapes=[(2, 3), (3, 4), (2, 4), (2, 3), (3, 4), (2, 4), (), (), (), ()],
-        max_graphlen=1,
+        max_graphlen=2,
     )
     # print "---------------------"
     just_gemm(

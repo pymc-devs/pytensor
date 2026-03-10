@@ -57,36 +57,35 @@ Getting started
     d = a/a + (M + a).dot(v)
 
     pytensor.dprint(d)
-    #  Add [id A]
-    #  ├─ ExpandDims{axis=0} [id B]
-    #  │  └─ True_div [id C]
-    #  │     ├─ a [id D]
-    #  │     └─ a [id D]
-    #  └─ dot [id E]
-    #     ├─ Add [id F]
-    #     │  ├─ M [id G]
-    #     │  └─ ExpandDims{axes=[0, 1]} [id H]
-    #     │     └─ a [id D]
-    #     └─ v [id I]
+    # Add [id A]
+    #  ├─ True_div [id B]
+    #  │  ├─ a [id C]
+    #  │  └─ a [id C]
+    #  └─ Squeeze{axis=1} [id D]
+    #     └─ Dot [id E]
+    #        ├─ Add [id F]
+    #        │  ├─ M [id G]
+    #        │  └─ a [id C]
+    #        └─ ExpandDims{axis=1} [id H]
+    #           └─ v [id I]
 
     f_d = pytensor.function([a, v, M], d)
 
     # `a/a` -> `1` and the dot product is replaced with a BLAS function
     # (i.e. CGemv)
     pytensor.dprint(f_d)
-    # Add [id A] 5
-    #  ├─ [1.] [id B]
-    #  └─ CGemv{inplace} [id C] 4
-    #     ├─ AllocEmpty{dtype='float64'} [id D] 3
-    #     │  └─ Shape_i{0} [id E] 2
+    # Add [id A] 4
+    #  ├─ 1.0 [id B]
+    #  └─ CGemv{inplace} [id C] 3
+    #     ├─ AllocEmpty{dtype='float64'} [id D] 2
+    #     │  └─ Shape_i{0} [id E] 1
     #     │     └─ M [id F]
-    #     ├─ 1.0 [id G]
-    #     ├─ Add [id H] 1
+    #     ├─ 1.0 [id B]
+    #     ├─ Add [id G] 0
     #     │  ├─ M [id F]
-    #     │  └─ ExpandDims{axes=[0, 1]} [id I] 0
-    #     │     └─ a [id J]
-    #     ├─ v [id K]
-    #     └─ 0.0 [id L]
+    #     │  └─ a [id H]
+    #     ├─ v [id I]
+    #     └─ 0.0 [id J]
 
 See `the PyTensor documentation <https://pytensor.readthedocs.io/en/latest/>`__ for in-depth tutorials.
 
