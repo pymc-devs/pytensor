@@ -21,7 +21,9 @@ Scan
   - Slightly faster than using a *for* loop in Python with a compiled PyTensor function.
   - Can lower the overall memory usage by detecting the actual amount of memory needed.
 
-The full documentation can be found in the library: :ref:`Scan <lib_scan>`.
+For new code, use :ref:`the structured looping API <lib_looping>`. The legacy
+``pytensor.scan`` interface shown below is deprecated. Its full documentation
+can be found in the library: :ref:`Scan <lib_scan>`.
 
 `A good ipython notebook with explanation and more examples.
 <https://github.com/lamblin/ccw_tutorial/blob/master/Scan_W2016/scan_tutorial.ipynb>`_

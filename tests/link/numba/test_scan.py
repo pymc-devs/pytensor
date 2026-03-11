@@ -759,3 +759,36 @@ def test_scan_2d_state_hmm_forward_trace():
         return_updates=False,
     )
     compare_numba_and_py([], trace, [])
+
+
+def test_tensor_untraced_sit_sot():
+    """Regression test: tensor-type untraced sit-sot variables caused a KeyError
+    in the numba linker because they were incorrectly routed through the
+    tap-based indexing path meant for traced sit-sots."""
+    from pytensor.scan.op import Scan, ScanInfo
+
+    inner_x = pt.dvector("inner_x")
+    inner_out = inner_x * 2
+
+    info = ScanInfo(
+        n_seqs=0,
+        mit_mot_in_slices=(),
+        mit_mot_out_slices=(),
+        mit_sot_in_slices=(),
+        sit_sot_in_slices=(),
+        n_untraced_sit_sot=1,
+        n_nit_sot=0,
+        n_non_seqs=0,
+        as_while=False,
+    )
+
+    scan_op = Scan([inner_x], [inner_out], info)
+    n_steps = pt.iscalar("n_steps")
+    init_x = pt.dvector("init_x")
+    out = scan_op(n_steps, init_x)
+
+    compare_numba_and_py(
+        [n_steps, init_x],
+        [out],
+        [np.int32(3), np.array([1.0, 2.0])],
+    )

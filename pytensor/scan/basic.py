@@ -179,6 +179,10 @@ def scan(
 ):
     r"""This function constructs and applies a scan operation to the provided arguments.
 
+    .. deprecated::
+        Use :func:`pytensor.looping.loop` for new code. See the looping API
+        documentation for the carry and stacked-output convention.
+
     Parameters
     ----------
     fn : callable
@@ -425,6 +429,11 @@ def scan(
         Pass this to `pytensor.function` when compiling your function.
 
     """
+    warnings.warn(
+        "pytensor.scan is deprecated; use pytensor.looping.loop instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if mode is not None:
         warnings.warn(
             "The `mode` argument of `scan` is deprecated: the inner graph now "
