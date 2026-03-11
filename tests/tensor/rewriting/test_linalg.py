@@ -15,7 +15,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import dot, matmul, Dot
+from pytensor.tensor.math import Dot, dot, matmul
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
@@ -1153,6 +1153,33 @@ def test_solve_diag_from_diag(b_ndim):
     expected = b_val / d_val if b_ndim == 1 else b_val / d_val[:, None]
     atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
     assert_allclose(f(d_val, b_val), expected, atol=atol, rtol=rtol)
+    assert_allclose(f(d_val, b_val), f_ref(d_val, b_val), atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector_b", "matrix_b"])
+def test_solve_diag_from_diag_batched(b_ndim):
+    rng = np.random.default_rng(
+        sum(map(ord, "test_solve_diag_from_diag_batched")) + b_ndim
+    )
+    d = pt.vector("d")  # shape (N,) — the diagonal; batch dim lives in b
+    b = pt.matrix("b") if b_ndim == 1 else pt.tensor("b", shape=(None, None, None))
+    x = solve(pt.diag(d), b, b_ndim=b_ndim)
+
+    f = function([d, b], x, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
+        for node in f.maker.fgraph.apply_nodes
+    )
+    f_ref = function([d, b], x, mode=get_default_mode().excluding("rewrite_solve_diag"))
+
+    B, N = 4, 5
+    d_val = rng.uniform(1, 5, size=(N,)).astype(config.floatX)
+    b_val = (
+        rng.standard_normal(size=(B, N)).astype(config.floatX)
+        if b_ndim == 1
+        else rng.standard_normal(size=(B, N, 3)).astype(config.floatX)
+    )
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
     assert_allclose(f(d_val, b_val), f_ref(d_val, b_val), atol=atol, rtol=rtol)
 
 

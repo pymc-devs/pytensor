@@ -1164,14 +1164,18 @@ def rewrite_solve_diag(fgraph, node):
     d = None
 
     # Pattern 1: pt.diag(d)
-    if a.owner and isinstance(a.owner.op, AllocDiag) and AllocDiag.is_offset_zero(a.owner):
+    if (
+        a.owner
+        and isinstance(a.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(a.owner)
+    ):
         d = a.owner.inputs[0]  # already 1D
 
     # Pattern 2: eye * x
     else:
         inputs_or_none = _find_diag_from_eye_mul(a)
         if inputs_or_none is not None:
-            eye_input, non_eye_inputs = inputs_or_none
+            _eye_input, non_eye_inputs = inputs_or_none
             if len(non_eye_inputs) == 1:
                 non_eye = non_eye_inputs[0]
                 if non_eye.type.broadcastable[-2:] == (True, True):
@@ -1191,17 +1195,11 @@ def rewrite_solve_diag(fgraph, node):
     # b_ndim tells us whether b's core case is a vector (1) or matrix (2)
     b_ndim = node.op.core_op.b_ndim
 
-    # Scalar d (0D): broadcasts over b directly, no reshape needed
-    if d.ndim == 0:
+    if d.ndim == 0 or b_ndim == 1:
         new_out = b / d
     else:
-        # d is 1D — broadcast it over rows of b:
-        #   b_ndim=1: b shape (N,)   -> result shape (N,)
-        #   b_ndim=2: b shape (N, K) -> result shape (N, K)
-        b_transposed = b[None, :] if b_ndim == 1 else b.mT
-        new_out = (b_transposed / pt.expand_dims(d, -2)).mT
-        if b_ndim == 1:
-            new_out = new_out.squeeze(-1)
+        # b_ndim=2: b.shape==(…,N,K), d.shape==(…,N) → d[...,None] broadcasts over K
+        new_out = b / d[..., None]
 
     copy_stack_trace(old_out, new_out)
     return [new_out]
@@ -1228,7 +1226,7 @@ def _extract_diagonal(x):
     if inputs_or_none is None:
         return None
 
-    eye_input, non_eye_inputs = inputs_or_none
+    _eye_input, non_eye_inputs = inputs_or_none
     if len(non_eye_inputs) != 1:
         return None
 
@@ -1287,6 +1285,6 @@ def rewrite_dot_diag(fgraph, node):
 
     else:
         return None
-    
+
     copy_stack_trace(old_out, new_out)
     return [new_out]
