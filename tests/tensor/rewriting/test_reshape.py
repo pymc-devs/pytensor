@@ -3,7 +3,7 @@ from pytensor.graph.traversal import apply_ancestors
 from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims, join_dims, split_dims
-from pytensor.tensor.shape import Reshape
+from pytensor.tensor.shape import Reshape, specify_shape
 from pytensor.tensor.type import tensor
 from tests.unittest_tools import assert_equal_computations
 
@@ -50,7 +50,7 @@ def test_local_join_dims_noop():
     assert_equal_computations([rewritten], [x])
 
 
-def test_local_join_dims_expand():
+def test_local_join_dims_to_expand_dims():
     """Test that join_dims with n_axes=0 becomes expand_dims."""
     x = tensor("x", shape=(2, 3, 4))
     x_join = join_dims(x, start_axis=1, n_axes=0)
@@ -64,7 +64,7 @@ def test_local_join_dims_expand():
     assert_equal_computations([rewritten], [expected])
 
 
-def test_local_split_dims_to_reshape_squeeze_case():
+def test_local_split_dims_to_squeeze():
     """Test that split_dims with shape tensor of static shape (0,) becomes squeeze via merged rewrite."""
     x = tensor("x", shape=(2, 1, 3, 4))
     x_split = split_dims(x, axis=1, shape=())
@@ -77,3 +77,18 @@ def test_local_split_dims_to_reshape_squeeze_case():
     # Output shape should be (2, 3, 4) - dimension 1 removed
     expected = squeeze(x, axis=1)
     assert_equal_computations([rewritten], [expected])
+
+
+def test_local_split_dims_to_specify_shape():
+    """Test that split_dims with shape tensor of static shape (0,) becomes squeeze via merged rewrite."""
+    x = tensor("x", shape=(2, None, 4))
+    x_split = split_dims(x, axis=1, shape=(5,))
+
+    assert (
+        sum([isinstance(node.op, SplitDims) for node in apply_ancestors([x_split])])
+        == 1
+    )
+    rewritten = rewrite_graph(x_split, include=("canonicalize",))
+    # Output shape should be (2, 3, 4) - dimension 1 removed
+    expected = specify_shape(x, (None, 5, None))
+    assert_equal_computations([rewritten], [expected], strict_dtype=False)

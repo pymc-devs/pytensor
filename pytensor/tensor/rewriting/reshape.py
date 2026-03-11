@@ -4,6 +4,7 @@ from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.reshape import JoinDims, SplitDims
 from pytensor.tensor.rewriting.basic import register_canonicalize
+from pytensor.tensor.shape import specify_shape
 
 
 @register_canonicalize
@@ -23,6 +24,15 @@ def local_split_dims(fgraph, node):
         copy_stack_trace(x, squeezed_x)
         return [squeezed_x]
 
+    # Special case: size 1 shape -> SpecifyShape
+    if shape.type.shape == (1,):
+        specified_shape = [None] * x.type.ndim
+        specified_shape[axis] = shape
+        specified_x = specify_shape(x, specified_shape)
+        copy_stack_trace(x, specified_x)
+        return [specified_x]
+
+    # General case: rewrite to reshape
     output_shape = [
         *x.shape[:axis],
         *shape,
