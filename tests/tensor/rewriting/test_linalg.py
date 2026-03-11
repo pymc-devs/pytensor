@@ -15,7 +15,7 @@ from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.math import dot, matmul
+from pytensor.tensor.math import dot, matmul, Dot
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
@@ -1189,3 +1189,79 @@ def test_solve_diag_from_eye_mul(b_ndim, x_shape):
     )
     atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
     assert_allclose(f(x_val, b_val), f_ref(x_val, b_val), atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    [
+        "both_0d_diag",
+        "both_1d_diag",
+        "left_0d_diag",
+        "left_1d_diag_vector_r",
+        "left_1d_diag_matrix_r",
+        "right_diag",
+    ],
+)
+def test_rewrite_dot_diag(case_id):
+    rng = np.random.default_rng(sum(map(ord, "test_rewrite_dot_diag" + case_id)))
+
+    if case_id == "both_0d_diag":
+        # dl.ndim == 0 and dr.ndim == 0: (eye*scalar) · (eye*scalar)
+        s1, s2 = pt.scalar("s1"), pt.scalar("s2")
+        inputs = [s1, s2]
+        out = pt.dot(pt.eye(3) * s1, pt.eye(3) * s2)
+        vals = [
+            rng.uniform(1, 5, size=()).astype(config.floatX),
+            rng.uniform(1, 5, size=()).astype(config.floatX),
+        ]
+    elif case_id == "both_1d_diag":
+        # both diagonal 1D: diag(d1) · diag(d2)
+        d1, d2 = pt.vector("d1"), pt.vector("d2")
+        inputs = [d1, d2]
+        out = pt.dot(pt.diag(d1), pt.diag(d2))
+        vals = [
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+        ]
+    elif case_id == "left_0d_diag":
+        # dl.ndim == 0: (eye*scalar) · matrix
+        s, M = pt.scalar("s"), pt.matrix("M")
+        inputs = [s, M]
+        out = pt.dot(pt.eye(3) * s, M)
+        vals = [
+            rng.uniform(1, 5, size=()).astype(config.floatX),
+            rng.uniform(size=(3, 4)).astype(config.floatX),
+        ]
+    elif case_id == "left_1d_diag_vector_r":
+        # r.ndim == 1: diag(d) · vector
+        d, v = pt.vector("d"), pt.vector("v")
+        inputs = [d, v]
+        out = pt.dot(pt.diag(d), v)
+        vals = [
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+            rng.uniform(size=(3,)).astype(config.floatX),
+        ]
+    elif case_id == "left_1d_diag_matrix_r":
+        # left diagonal, matrix r: diag(d) · M
+        d, M = pt.vector("d"), pt.matrix("M")
+        inputs = [d, M]
+        out = pt.dot(pt.diag(d), M)
+        vals = [
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+            rng.uniform(size=(3, 4)).astype(config.floatX),
+        ]
+    elif case_id == "right_diag":
+        # right diagonal: M · diag(d)
+        M, d = pt.matrix("M"), pt.vector("d")
+        inputs = [M, d]
+        out = pt.dot(M, pt.diag(d))
+        vals = [
+            rng.uniform(size=(3, 3)).astype(config.floatX),
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+        ]
+    f = function(inputs, out, mode="FAST_RUN")
+    assert not any(isinstance(node.op, Dot) for node in f.maker.fgraph.apply_nodes)
+
+    f_ref = function(inputs, out, mode=get_default_mode().excluding("rewrite_dot_diag"))
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
+    assert_allclose(f(*vals), f_ref(*vals), atol=atol, rtol=rtol)
