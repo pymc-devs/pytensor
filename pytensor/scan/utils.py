@@ -22,7 +22,6 @@ from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.type import HasDataType
 from pytensor.graph.utils import TestValueError
 from pytensor.tensor.basic import AllocEmpty, cast
-from pytensor.tensor.subtensor import set_subtensor
 from pytensor.tensor.variable import TensorConstant
 
 
@@ -223,20 +222,26 @@ def traverse(out, x, x_copy, d, visited=None):
         return d
 
 
-def expand_empty(tensor_var, size):
+def expand_empty(tensor_var, size, new_dim: bool = False):
     """
-    Transforms the shape of a tensor from (d1, d2 ... ) to ( d1+size, d2, ..)
+    Transforms the shape of a tensor from (d1, d2 ... ) to
+    (size, d1, d2, ...) if new_dim else (d1 + size, d2, ...)
     by adding uninitialized memory at the end of the tensor.
-
     """
 
     if size == 0:
         return tensor_var
     shapes = tuple(tensor_var.shape)
-    new_shape = (size + shapes[0], *shapes[1:])
+    if new_dim:
+        new_shape = (size, *shapes)
+    else:
+        new_shape = (size + shapes[0], *shapes[1:])
     empty = AllocEmpty(tensor_var.dtype)(*new_shape)
 
-    ret = set_subtensor(empty[: shapes[0]], tensor_var)
+    if new_dim:
+        ret = empty[0].set(tensor_var)  # type: ignore[index, union-attr]
+    else:
+        ret = empty[: shapes[0]].set(tensor_var)  # type: ignore[index, union-attr]
     ret.tag.nan_guard_mode_check = False
     return ret
 

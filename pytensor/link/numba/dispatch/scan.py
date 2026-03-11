@@ -291,7 +291,8 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
             storage_name = outer_in_to_storage_name[outer_in_name]
 
             is_tensor_type = isinstance(outer_in_var.type, TensorType)
-            if is_tensor_type:
+            is_untraced = outer_in_name in outer_in_untraced_sit_sot_names
+            if is_tensor_type and not is_untraced:
                 storage_size_name = f"{outer_in_name}_len"
                 storage_size_stmt = f"{storage_size_name} = {outer_in_name}.shape[0]"
                 input_taps = inner_in_names_to_input_taps[outer_in_name]
