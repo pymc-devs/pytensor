@@ -823,6 +823,37 @@ def rewrite_inv_diag_to_diag_reciprocal(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
+@node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
+def rewrite_inv_triangular_to_solve(fgraph, node):
+    """
+    Rewrite `inv(A)` -> `solve_triangular(A, I)` when A is triangular.
+    """
+    # node is a Blockwise(MatrixInverse). The input to MatrixInverse is node.inputs[0]
+    inputs = node.inputs[0]
+
+    # Check for tags
+    is_lower = getattr(inputs.tag, "lower_triangular", False)
+    is_upper = getattr(inputs.tag, "upper_triangular", False)
+
+    if is_lower or is_upper:
+        # Create an identity matrix of the same size.
+        # Note: We use the last dimension for the size of the square matrix
+        n = inputs.shape[-1]
+
+        # Ensure the dtype matches the input dtype
+        identity = pt.eye(n, dtype=inputs.type.dtype)
+
+        # We replace the slow Inverse with the fast Triangular Solve.
+        # b_ndim=2 because identity is a 2D matrix.
+        inv_val = solve_triangular(inputs, identity, lower=is_lower, b_ndim=2)
+
+        return [inv_val]
+
+    return None
+
+
+@register_canonicalize
+@register_stabilize
 @node_rewriter([ExtractDiag])
 def rewrite_diag_blockdiag(fgraph, node):
     """

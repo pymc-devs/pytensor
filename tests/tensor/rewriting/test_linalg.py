@@ -10,6 +10,7 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.gradient import verify_grad
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
@@ -1128,3 +1129,32 @@ def test_scalar_solve_to_division_rewrite(
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
     )
+
+
+def test_triangular_inv_rewrite_and_grad():
+    np.random.seed(42)
+    A_val = np.tril(np.random.rand(5, 5) + 5.0)
+
+    A = pt.dmatrix("A")
+    A.tag.lower_triangular = True
+
+    Z = pt.linalg.inv(A)
+
+    f = pytensor.function([A], Z)
+
+    assert not any(
+        isinstance(getattr(node.op, "core_op", node.op), MatrixInverse)
+        for node in f.maker.fgraph.toposort()
+    )
+    assert any(
+        isinstance(getattr(node.op, "core_op", node.op), SolveTriangular)
+        for node in f.maker.fgraph.toposort()
+    )
+
+    def func(x):
+        x = pt.as_tensor_variable(x)
+        x = pt.tril(x)
+        x.tag.lower_triangular = True
+        return pt.sum(pt.linalg.inv(x))
+
+    verify_grad(func, [A_val])
