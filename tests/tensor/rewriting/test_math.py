@@ -2082,29 +2082,43 @@ class TestSqrSqrt:
         self.rng = np.random.default_rng()
 
     def test_sqr_sqrt(self):
-        # sqrt(x) ** 2 -> x
+        # sqr(sqrt(x)) -> switch(x >= 0, x, nan)
         x = pt.tensor("x", shape=(None, None))
         out = sqr(sqrt(x))
-        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
-
-        assert equal_computations([out], [pt_abs(x)])
-
-    def test_sqrt_sqr(self):
-        x = pt.tensor("x", shape=(None, None))
-        out = sqrt(sqr(x))
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
             ge(x, np.zeros((1, 1), dtype="int8")),
             x,
-            np.full((1, 1), np.nan, dtype=x.type.dtype),
+            np.full((1, 1), np.nan, dtype=out.type.dtype),
         )
 
         assert equal_computations([out], [expected])
 
+    def test_sqrt_sqr(self):
+        # sqrt(sqr(x)) -> abs(x)
+        x = pt.tensor("x", shape=(None, None))
+        out = sqrt(sqr(x))
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        assert equal_computations([out], [pt_abs(x)])
+
     def test_sqr_sqrt_integer_upcast(self):
         x = ivector("x")
         out = sqr(sqrt(x))
+        dtype = out.type.dtype
+        out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
+
+        expected = switch(
+            ge(x, np.zeros((1,), dtype="int8")),
+            x,
+            np.full((1,), np.nan, dtype=dtype),
+        )
+        assert equal_computations([out], [expected])
+
+    def test_sqrt_sqr_integer_upcast(self):
+        x = ivector("x")
+        out = sqrt(sqr(x))
         dtype = out.type.dtype
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
