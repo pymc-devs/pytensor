@@ -1,0 +1,9 @@
+{% if date_created or last_updated %}
+<div class="page-dates">
+  <p style="margin: 0.2em 0;">
+    {% if date_created %}<strong>Created:</strong> {{ date_created }}{% endif %}
+    {% if date_created and last_updated %} | {% endif %}
+    {% if last_updated %}<strong>Last updated:</strong> {{ last_updated }}{% endif %}
+  </p>
+</div>
+{% endif %}
