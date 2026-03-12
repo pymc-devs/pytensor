@@ -55,3 +55,4 @@ pytensor-venv/
 testing-report.html
 coverage.xml
 .coverage.*
+.hypothesis/
