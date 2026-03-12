@@ -244,6 +244,114 @@ class TestCumOp(utt.InferShapeTester):
             utt.verify_grad(self.op_class(axis=axis, mode="mul"), [a], eps=4e-4)
 
 
+class TestCumprodGradZeros:
+    """Tests for cumprod gradient correctness when inputs contain zeros.
+
+    The gradient of sum(cumprod(x)) w.r.t. x[k] is:
+        dloss/dx[k] = sum_{i>=k} product(x[j] for j in 0..i, j != k)
+    """
+
+    def _compute_cumprod_grad(self, x_val):
+        """Compile and evaluate cumprod gradient via pytensor."""
+        x = pt.vector("x", dtype="float64")
+        y = cumprod(x)
+        loss = y.sum()
+        (grad,) = pytensor.gradient.grad(loss, [x])
+        f = pytensor.function([x], grad)
+        return f(x_val)
+
+    def test_cumprod_grad_single_zero_middle(self):
+        """x = [3, 0, 5]: single zero in the middle."""
+        x_val = np.array([3.0, 0.0, 5.0])
+        result = self._compute_cumprod_grad(x_val)
+
+        # y = [3, 0, 0]
+        # dloss/dx[0] = 1 + x[1] + x[1]*x[2] = 1 + 0 + 0 = 1
+        # dloss/dx[1] = x[0] + x[0]*x[2] = 3 + 15 = 18
+        # dloss/dx[2] = x[0]*x[1] = 0
+        expected = np.array([1.0, 18.0, 0.0])
+
+        assert not np.any(np.isnan(result)), f"NaN in gradient: {result}"
+        np.testing.assert_allclose(result, expected)
+
+    def test_cumprod_grad_zero_at_beginning(self):
+        """x = [0, 3, 5]: zero at position 0."""
+        x_val = np.array([0.0, 3.0, 5.0])
+        result = self._compute_cumprod_grad(x_val)
+
+        # y = [0, 0, 0]
+        # dloss/dx[0] = 1 + x[1] + x[1]*x[2] = 1 + 3 + 15 = 19
+        # dloss/dx[1] = x[0] + x[0]*x[2] = 0 + 0 = 0
+        # dloss/dx[2] = x[0]*x[1] = 0
+        expected = np.array([19.0, 0.0, 0.0])
+
+        assert not np.any(np.isnan(result)), f"NaN in gradient: {result}"
+        np.testing.assert_allclose(result, expected)
+
+    def test_cumprod_grad_multiple_zeros(self):
+        """x = [3, 0, 0, 5]: two adjacent zeros."""
+        x_val = np.array([3.0, 0.0, 0.0, 5.0])
+        result = self._compute_cumprod_grad(x_val)
+
+        # y = [3, 0, 0, 0]
+        # dloss/dx[0] = 1 + x[1] + x[1]*x[2] + x[1]*x[2]*x[3] = 1+0+0+0 = 1
+        # dloss/dx[1] = x[0] + x[0]*x[2] + x[0]*x[2]*x[3] = 3+0+0 = 3
+        # dloss/dx[2] = x[0]*x[1] + x[0]*x[1]*x[3] = 0+0 = 0
+        #   (two zeros in prefix => gradient contribution is zero)
+        # dloss/dx[3] = x[0]*x[1]*x[2] = 0
+        expected = np.array([1.0, 3.0, 0.0, 0.0])
+
+        assert not np.any(np.isnan(result)), f"NaN in gradient: {result}"
+        np.testing.assert_allclose(result, expected)
+
+    def test_cumprod_grad_all_zeros(self):
+        """x = [0, 0, 0]: all zeros, gradients must not produce NaN."""
+        x_val = np.array([0.0, 0.0, 0.0])
+        result = self._compute_cumprod_grad(x_val)
+
+        # y = [0, 0, 0]
+        # dloss/dx[0] = 1 + x[1] + x[1]*x[2] = 1+0+0 = 1
+        # dloss/dx[1] = x[0] + x[0]*x[2] = 0+0 = 0
+        #   (x[0] is zero, so all terms involving x[0] are zero)
+        # dloss/dx[2] = x[0]*x[1] = 0
+        expected = np.array([1.0, 0.0, 0.0])
+
+        assert not np.any(np.isnan(result)), f"NaN in gradient: {result}"
+        np.testing.assert_allclose(result, expected)
+
+    def test_cumprod_grad_2d_with_zeros(self):
+        """2D cumprod along axis=1 with zeros in each row."""
+        x_val = np.array(
+            [
+                [3.0, 0.0, 5.0],
+                [0.0, 7.0, 3.0],
+            ]
+        )
+        x = pt.matrix("x", dtype="float64")
+        y = cumprod(x, axis=1)
+        loss = y.sum()
+        (grad,) = pytensor.gradient.grad(loss, [x])
+        f = pytensor.function([x], grad)
+        result = f(x_val)
+
+        # Row 0: [3, 0, 5] — same as test_cumprod_grad_single_zero_middle
+        #   expected: [1, 18, 0]
+        # Row 1: [0, 7, 3]
+        #   y = [0, 0, 0]
+        #   dloss/dx[0] = 1 + x[1] + x[1]*x[2] = 1+7+21 = 29
+        #   dloss/dx[1] = x[0] + x[0]*x[2] = 0+0 = 0
+        #   dloss/dx[2] = x[0]*x[1] = 0
+        expected = np.array(
+            [
+                [1.0, 18.0, 0.0],
+                [29.0, 0.0, 0.0],
+            ]
+        )
+
+        assert not np.any(np.isnan(result)), f"NaN in gradient: {result}"
+        np.testing.assert_allclose(result, expected)
+
+
 class TestBinCount(utt.InferShapeTester):
     @pytest.mark.parametrize(
         "dtype",
