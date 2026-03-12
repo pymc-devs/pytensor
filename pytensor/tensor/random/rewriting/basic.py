@@ -15,6 +15,11 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.random.op import RandomVariable
 from pytensor.tensor.random.utils import broadcast_params
+from pytensor.tensor.rewriting.basic import (
+    register_canonicalize,
+    register_stabilize,
+    register_useless,
+)
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
@@ -348,3 +353,24 @@ def local_subtensor_rv_lift(fgraph, node):
         indexed_rv: new_rv,
         next_rng: new_next_rng,
     }
+
+
+@register_useless("random_unsafe")
+@register_canonicalize("random_unsafe")
+@register_stabilize("random_unsafe")
+@node_rewriter([RandomVariable])
+def unused_random_draws(fgraph, node):
+    """Remove RV from graph if the draws aren't used.
+
+    This can happen when chaining multiple RNGs, but only keeping some of the variables
+    Or when only the shape is needed, and is eventually lifted away from the RV.
+
+    This will alter the state of the RNG, and can affect subsequent draws or the final returned RNG (if returned).
+    Hence, this rewrite is tagged as `random_unsafe`.
+    """
+    rng_out, draws_out = node.outputs
+    if fgraph.clients[draws_out]:
+        return None
+
+    rng_inp = node.inputs[0]
+    return {rng_out: rng_inp}

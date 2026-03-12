@@ -82,7 +82,7 @@ def test_rng_copy():
     rng.type.values_eq(rng.get_value(), np.random.default_rng(123))
 
 
-def test_rng_non_default_update():
+def test_rng_custom_update():
     rng = shared(np.random.default_rng(1))
     rng_new = shared(np.random.default_rng(2))
 
