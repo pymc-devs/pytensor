@@ -7,6 +7,7 @@ from pytensor.xtensor.basic import (
     XTensorFromTensor,
     xtensor_from_tensor,
 )
+from pytensor.xtensor.random.type import RNGToXRNG, XRNGToRNG
 from pytensor.xtensor.rewriting.utils import register_lower_xtensor
 
 
@@ -60,3 +61,27 @@ def useless_rename(fgraph, node):
         elif isinstance(renamed_x.owner.op, TensorFromXTensor):
             [x] = renamed_x.owner.inputs
             return [xtensor_from_tensor(x, dims=node.op.new_dims)]
+
+
+@register_infer_shape
+@register_useless
+@register_canonicalize
+@register_lower_xtensor
+@node_rewriter(tracks=[RNGToXRNG])
+def useless_rng_to_xrng(fgraph, node):
+    """RNGToXRNG(XRNGToRNG(x)) -> x"""
+    [x] = node.inputs
+    if x.owner and isinstance(x.owner.op, XRNGToRNG):
+        return [x.owner.inputs[0]]
+
+
+@register_infer_shape
+@register_useless
+@register_canonicalize
+@register_lower_xtensor
+@node_rewriter(tracks=[XRNGToRNG])
+def useless_xrng_to_rng(fgraph, node):
+    """XRNGToRNG(RNGToXRNG(x)) -> x"""
+    [x] = node.inputs
+    if x.owner and isinstance(x.owner.op, RNGToXRNG):
+        return [x.owner.inputs[0]]

@@ -321,7 +321,7 @@ class RandomVariable(RNGConsumerOp):
         name=None,
         rng=None,
         dtype=None,
-        return_next_rng: bool | None = None,
+        return_next_rng: bool = False,
         **kwargs,
     ):
         if dtype is None:
@@ -357,11 +357,6 @@ class RandomVariable(RNGConsumerOp):
         if return_next_rng:
             return outputs
         else:
-            if return_next_rng is None:
-                warnings.warn(
-                    "The default behavior of RandomVariable.__call__ is changing to return both the next RNG and the draws. "
-                    "Please set return_next_rng explicitly to avoid this warning.",
-                )
             out = outputs[self.default_output]
             if kwargs.get("return_list", False):
                 return [out]
