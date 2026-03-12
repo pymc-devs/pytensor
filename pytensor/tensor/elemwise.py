@@ -11,7 +11,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
-from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
+from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.basic import failure_code
 from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
@@ -759,7 +759,12 @@ class Elemwise(OpenMPOp):
     def infer_shape(self, fgraph, node, i_shapes) -> list[tuple[TensorVariable, ...]]:
         from pytensor.tensor.extra_ops import broadcast_shape
 
-        out_shape = broadcast_shape(*i_shapes, arrays_are_shapes=True)
+        # Left-pad shorter input shapes with 1s to match max ndim,
+        # mirroring how Elemwise implicitly broadcasts inputs.
+        max_ndim = max((len(s) for s in i_shapes), default=0)
+        _one = as_tensor_variable(1, dtype="int64")
+        padded = [(_one,) * (max_ndim - len(s)) + s for s in i_shapes]
+        out_shape = broadcast_shape(*padded, arrays_are_shapes=True)
         return [tuple(as_tensor_variable(s) for s in out_shape)] * len(node.outputs)
 
     def _c_all(self, node, nodename, inames, onames, sub):
@@ -1687,7 +1692,33 @@ def _get_vector_length_Elemwise(op, var):
     raise ValueError(f"Length of {var} cannot be determined")
 
 
-_vectorize_node.register(Elemwise, _vectorize_not_needed)
+def _vectorize_elemwise(op, node, *batched_inputs):
+    """Vectorize an Elemwise node with mixed-ndim inputs.
+
+    When inputs have different ndims, right-pad shorter inputs with
+    trailing broadcastable dims so that batch dims (added at the left
+    by vectorize_graph) remain aligned across all inputs.
+    """
+    core_ndims = [inp.type.ndim for inp in node.inputs]
+    max_core_ndim = max(core_ndims, default=0)
+
+    if all(cn == max_core_ndim for cn in core_ndims):
+        return op.make_node(*batched_inputs).outputs
+
+    new_inputs = []
+    for old_inp, new_inp, core_ndim in zip(
+        node.inputs, batched_inputs, core_ndims, strict=True
+    ):
+        n_trailing = max_core_ndim - core_ndim
+        if n_trailing > 0 and new_inp.type.ndim > core_ndim:
+            order = list(range(new_inp.type.ndim)) + ["x"] * n_trailing
+            new_inputs.append(new_inp.dimshuffle(order))
+        else:
+            new_inputs.append(new_inp)
+    return op.make_node(*new_inputs).outputs
+
+
+_vectorize_node.register(Elemwise, _vectorize_elemwise)
 
 
 @_vectorize_node.register(DimShuffle)
