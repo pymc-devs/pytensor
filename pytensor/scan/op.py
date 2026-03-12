@@ -74,7 +74,6 @@ from pytensor.gradient import (
 from pytensor.graph.basic import (
     Apply,
     Variable,
-    equal_computations,
 )
 from pytensor.graph.features import NoOutputFromInplace
 from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
@@ -82,7 +81,6 @@ from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.type import HasShape
 from pytensor.graph.utils import InconsistencyError, MissingInputError
-from pytensor.link.c.basic import CLinker
 from pytensor.link.vm import VMLinker
 from pytensor.printing import op_debug_information
 from pytensor.scan.utils import ScanProfileStats, Validator, forced_replace, safe_new
@@ -939,13 +937,12 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 "Inner-graphs must not contain in-place operations."
             )
 
-        self._cmodule_key = CLinker().cmodule_key_variables(
-            self.inner_inputs, self.inner_outputs, []
-        )
-        self._hash_inner_graph = hash(self._cmodule_key)
+        self._frozen_fgraph = self.fgraph.freeze()
 
     def __setstate__(self, d):
         self.__dict__.update(d)
+        if not hasattr(self, "_frozen_fgraph"):
+            self._frozen_fgraph = self.fgraph.freeze()
         # Ensure that the graph associated with the inner function is valid.
         self.validate_inner_graph()
 
@@ -1324,27 +1321,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if self.allow_gc != other.allow_gc:
             return False
 
-        # Compare inner graphs
-        # TODO: Use `self.inner_fgraph == other.inner_fgraph`
-        if len(self.inner_inputs) != len(other.inner_inputs):
-            return False
-
-        if len(self.inner_outputs) != len(other.inner_outputs):
-            return False
-
-        # strict=False because length already compared above
-        for self_in, other_in in zip(
-            self.inner_inputs, other.inner_inputs, strict=False
-        ):
-            if self_in.type != other_in.type:
-                return False
-
-        return equal_computations(
-            self.inner_outputs,
-            other.inner_outputs,
-            self.inner_inputs,
-            other.inner_inputs,
-        )
+        return self._frozen_fgraph == other._frozen_fgraph
 
     def __str__(self):
         inplace = "none"
@@ -1364,7 +1341,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         return hash(
             (
                 type(self),
-                self._hash_inner_graph,
+                self._frozen_fgraph,
                 self.info,
                 self.profile,
                 self.truncate_gradient,
@@ -1528,7 +1505,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
     def clone(self) -> "Scan":
         res = copy(self)
-        res.fgraph = res.fgraph.clone(clone_inner_graphs=True)
+        res.fgraph = res.fgraph.clone(clone_inner_graphs=True)  # type: ignore[attr-defined]
         return res
 
     def make_thunk(self, node, storage_map, compute_map, no_recycling, impl=None):

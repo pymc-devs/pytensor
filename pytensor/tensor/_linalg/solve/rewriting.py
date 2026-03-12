@@ -187,9 +187,9 @@ def _scan_split_non_sequence_decomposition_and_solve(
                 ):
                     if new_scan_fgraph is scan_op.fgraph:
                         # Clone the first time to avoid mutating the original fgraph
-                        new_scan_fgraph, equiv = new_scan_fgraph.clone_get_equiv()
+                        new_scan_fgraph, equiv = new_scan_fgraph.clone_get_equiv()  # type: ignore[attr-defined]
                         non_sequences = {equiv[non_seq] for non_seq in non_sequences}
-                        inner_node = equiv[inner_node]  # type: ignore
+                        inner_node = equiv[inner_node]
 
                     replace_dict = _split_decomp_and_solve_steps(
                         new_scan_fgraph,
@@ -200,7 +200,7 @@ def _scan_split_non_sequence_decomposition_and_solve(
                     assert isinstance(replace_dict, dict) and len(replace_dict) > 0, (
                         "Rewrite failed"
                     )
-                    new_scan_fgraph.replace_all(replace_dict.items())
+                    new_scan_fgraph.replace_all(replace_dict.items())  # type: ignore[attr-defined]
                     changed = True
                     break  # Break to start over with a fresh toposort
         else:  # no_break
