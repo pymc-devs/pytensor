@@ -52,6 +52,22 @@ def aligned_broadcastable_of(inp, out_ndim):
     return (True,) * (out_ndim - len(inp_bc)) + inp_bc
 
 
+def pad_to_broadcastable(var, target):
+    """Pad var with leading broadcastable dims to match target, or return None.
+
+    If the only difference between var and target is missing leading broadcastable
+    dims, use shape_padleft (a zero-copy DimShuffle) instead of broadcast_arrays/alloc.
+    Returns None if a genuine broadcast is needed.
+    """
+    if var.type.broadcastable == target.type.broadcastable:
+        return var
+    if aligned_broadcastable_of(var, target.type.ndim) == target.type.broadcastable:
+        from pytensor.tensor.shape import shape_padleft
+
+        return shape_padleft(var, target.type.ndim - var.type.ndim)
+    return None
+
+
 def aligned_broadcastable(node, input_idx):
     """Return an Elemwise input's broadcastable left-padded with True to output ndim."""
     return aligned_broadcastable_of(node.inputs[input_idx], node.outputs[0].type.ndim)
@@ -62,11 +78,6 @@ def aligned_shape(node, input_idx):
     out_ndim = node.outputs[0].type.ndim
     inp_shape = node.inputs[input_idx].type.shape
     return (1,) * (out_ndim - len(inp_shape)) + inp_shape
-
-
-def input_not_broadcast(inp, out):
-    """Check whether input is not broadcast by the output (mixed-ndim safe)."""
-    return aligned_broadcastable_of(inp, out.type.ndim) == out.type.broadcastable
 
 
 class DimShuffle(ExternalCOp):

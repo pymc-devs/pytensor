@@ -43,7 +43,12 @@ from pytensor.scalar import constant as scalar_constant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.basic import constant as tensor_constant
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import (
+    CAReduce,
+    DimShuffle,
+    Elemwise,
+    pad_to_broadcastable,
+)
 from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
     alloc_like,
@@ -1109,10 +1114,17 @@ def local_inline_composite_constants(fgraph, node):
 
     # Some of the inlined constants were broadcasting the output shape
     if node.outputs[0].type.broadcastable != new_outputs[0].type.broadcastable:
-        new_outputs = [
-            alloc_like(new_out, template=node.outputs[0], fgraph=fgraph)
-            for new_out in new_outputs
-        ]
+        padded = pad_to_broadcastable(new_outputs[0], node.outputs[0])
+        if padded is not None:
+            new_outputs = [
+                pad_to_broadcastable(new_out, old_out) or new_out
+                for new_out, old_out in zip(new_outputs, node.outputs)
+            ]
+        else:
+            new_outputs = [
+                alloc_like(new_out, template=node.outputs[0], fgraph=fgraph)
+                for new_out in new_outputs
+            ]
 
     copy_stack_trace(node.outputs, new_outputs)
     return new_outputs

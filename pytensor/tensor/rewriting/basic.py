@@ -81,7 +81,11 @@ from pytensor.tensor.basic import (
     zeros,
     zeros_like,
 )
-from pytensor.tensor.elemwise import DimShuffle, Elemwise, input_not_broadcast
+from pytensor.tensor.elemwise import (
+    DimShuffle,
+    Elemwise,
+    pad_to_broadcastable,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq, variadic_add
@@ -121,6 +125,19 @@ def broadcasted_by(x: TensorVariable, y: TensorVariable) -> bool:
 
 def merge_broadcastables(broadcastables):
     return [all(bcast) for bcast in zip(*broadcastables, strict=True)]
+
+
+def _not_broadcast_or_only_padded(inp, out):
+    """True if inp is not broadcast, or only differs by leading dummy dims."""
+    return pad_to_broadcastable(inp, out) is not None
+
+
+def _pad_to_output(var, out):
+    """Add leading broadcastable dims to var if needed to match out's ndim."""
+    result = pad_to_broadcastable(var, out)
+    if result is not None:
+        return result
+    return var
 
 
 def alloc_like(
@@ -600,54 +617,44 @@ def local_useless_elemwise(fgraph, node):
         return [node.inputs[0]]
 
     elif isinstance(node.op.scalar_op, AND) and len(node.inputs) == 2:
-        if isinstance(node.inputs[0], TensorConstant) and input_not_broadcast(
-            node.inputs[1], node.outputs[0]
-        ):
-            const_val = node.inputs[0].unique_value
+        for const_idx in (0, 1):
+            other_idx = 1 - const_idx
+            if not isinstance(node.inputs[const_idx], TensorConstant):
+                continue
+            other = node.inputs[other_idx]
+            out = node.outputs[0]
+            if not _not_broadcast_or_only_padded(other, out):
+                continue
+            const_val = node.inputs[const_idx].unique_value
             if const_val is not None:
                 if const_val == 0:
-                    return [zeros_like(node.inputs[1], dtype=dtype, opt=True)]
-                elif node.outputs[0].dtype == "bool":
+                    return [
+                        _pad_to_output(zeros_like(other, dtype=dtype, opt=True), out)
+                    ]
+                elif out.dtype == "bool":
                     # If the output is not Boolean, it is the bitwise AND,
                     # and this rewrite would be wrong
-                    return [node.inputs[1].astype(node.outputs[0].dtype)]
-
-        if isinstance(node.inputs[1], TensorConstant) and input_not_broadcast(
-            node.inputs[0], node.outputs[0]
-        ):
-            const_val = node.inputs[1].unique_value
-            if const_val is not None:
-                if const_val == 0:
-                    return [zeros_like(node.inputs[0], dtype=dtype, opt=True)]
-                elif node.outputs[0].dtype == "bool":
-                    # If the output is not Boolean, it is the bitwise AND,
-                    # and this rewrite would be wrong
-                    return [node.inputs[0].astype(node.outputs[0].dtype)]
+                    return [_pad_to_output(other.astype(out.dtype), out)]
 
     elif isinstance(node.op.scalar_op, OR) and len(node.inputs) == 2:
-        if isinstance(node.inputs[0], TensorConstant) and input_not_broadcast(
-            node.inputs[1], node.outputs[0]
-        ):
-            const_val = node.inputs[0].unique_value
+        for const_idx in (0, 1):
+            other_idx = 1 - const_idx
+            if not isinstance(node.inputs[const_idx], TensorConstant):
+                continue
+            other = node.inputs[other_idx]
+            out = node.outputs[0]
+            if not _not_broadcast_or_only_padded(other, out):
+                continue
+            const_val = node.inputs[const_idx].unique_value
             if const_val is not None:
                 if const_val == 0:
-                    return [node.inputs[1].astype(node.outputs[0].dtype)]
-                elif node.outputs[0].dtype == "bool":
+                    return [_pad_to_output(other.astype(out.dtype), out)]
+                elif out.dtype == "bool":
                     # If the output is not Boolean, it is the bitwise OR,
                     # and this rewrite would be wrong
-                    return [ones_like(node.inputs[1], dtype=dtype, opt=True)]
-
-        if isinstance(node.inputs[1], TensorConstant) and input_not_broadcast(
-            node.inputs[0], node.outputs[0]
-        ):
-            const_val = node.inputs[1].unique_value
-            if const_val is not None:
-                if const_val == 0:
-                    return [node.inputs[0].astype(node.outputs[0].dtype)]
-                elif node.outputs[0].dtype == "bool":
-                    # If the output is not Boolean, it is the bitwise OR,
-                    # and this rewrite would be wrong
-                    return [ones_like(node.inputs[0], dtype=dtype, opt=True)]
+                    return [
+                        _pad_to_output(ones_like(other, dtype=dtype, opt=True), out)
+                    ]
 
 
 @register_specialize

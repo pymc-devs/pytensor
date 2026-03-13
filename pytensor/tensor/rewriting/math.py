@@ -42,6 +42,7 @@ from pytensor.tensor.elemwise import (
     DimShuffle,
     Elemwise,
     aligned_broadcastable_of,
+    pad_to_broadcastable,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
@@ -831,7 +832,10 @@ def local_expm1(fgraph, node):
     [old_out] = node.outputs
 
     [x] = exp_x.owner.inputs
-    if x.type.broadcastable != old_out.type.broadcastable:
+    padded = pad_to_broadcastable(x, old_out)
+    if padded is not None:
+        x = padded
+    elif x.type.broadcastable != old_out.type.broadcastable:
         x = broadcast_arrays(x, other_inp)[0]
 
     new_out = expm1(x)
@@ -1413,7 +1417,10 @@ class AlgebraicCanonizer(NodeRewriter):
         if new.type.dtype != out.type.dtype:
             new = cast(new, out.type.dtype)
 
-        if new.type.broadcastable != out.type.broadcastable:
+        padded = pad_to_broadcastable(new, out)
+        if padded is not None:
+            new = padded
+        elif new.type.broadcastable != out.type.broadcastable:
             new = broadcast_arrays(new, *node.inputs)[0]
 
         if (new.type.dtype == out.type.dtype) and (
@@ -1680,7 +1687,10 @@ def local_useless_elemwise_comparison(fgraph, node):
         == 0
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
-        if res.type.broadcastable != out_bcast:
+        padded = pad_to_broadcastable(res, node.outputs[0])
+        if padded is not None:
+            res = padded
+        elif res.type.broadcastable != out_bcast:
             res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
@@ -1697,7 +1707,10 @@ def local_useless_elemwise_comparison(fgraph, node):
         == 0
     ):
         res = ones_like(node.inputs[0], dtype=dtype, opt=True)
-        if res.type.broadcastable != out_bcast:
+        padded = pad_to_broadcastable(res, node.outputs[0])
+        if padded is not None:
+            res = padded
+        elif res.type.broadcastable != out_bcast:
             res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
@@ -1717,7 +1730,10 @@ def local_useless_elemwise_comparison(fgraph, node):
                 == 0
             ):
                 res = node.inputs[idx]
-                if res.type.broadcastable != out_bcast:
+                padded = pad_to_broadcastable(res, node.outputs[0])
+                if padded is not None:
+                    res = padded
+                elif res.type.broadcastable != out_bcast:
                     res = broadcast_arrays(res, node.inputs[1 - idx])[0]
                 # No need to copy over stacktrace.
                 return [res]
@@ -1736,7 +1752,10 @@ def local_useless_elemwise_comparison(fgraph, node):
                 == 0
             ):
                 res = zeros_like(node.inputs[idx], dtype=dtype, opt=True)
-                if res.type.broadcastable != out_bcast:
+                padded = pad_to_broadcastable(res, node.outputs[0])
+                if padded is not None:
+                    res = padded
+                elif res.type.broadcastable != out_bcast:
                     res = broadcast_arrays(res, node.inputs[1 - idx])[0]
                 # No need to copy over stacktrace.
                 return [res]
@@ -1757,7 +1776,10 @@ def local_useless_elemwise_comparison(fgraph, node):
         == 0
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
-        if res.type.broadcastable != out_bcast:
+        padded = pad_to_broadcastable(res, node.outputs[0])
+        if padded is not None:
+            res = padded
+        elif res.type.broadcastable != out_bcast:
             res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
@@ -1779,7 +1801,10 @@ def local_useless_elemwise_comparison(fgraph, node):
         == 0
     ):
         res = ones_like(node.inputs[0], dtype=dtype, opt=True)
-        if res.type.broadcastable != out_bcast:
+        padded = pad_to_broadcastable(res, node.outputs[0])
+        if padded is not None:
+            res = padded
+        elif res.type.broadcastable != out_bcast:
             res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
@@ -1822,7 +1847,10 @@ def local_useless_elemwise_comparison(fgraph, node):
         )
     ):
         res = zeros_like(node.inputs[0], dtype=dtype, opt=True)
-        if res.type.broadcastable != out_bcast:
+        padded = pad_to_broadcastable(res, node.outputs[0])
+        if padded is not None:
+            res = padded
+        elif res.type.broadcastable != out_bcast:
             res = broadcast_arrays(res, node.inputs[1])[0]
         # Copy over stacktrace from previous output.
         copy_stack_trace(node.outputs, res)
@@ -2277,7 +2305,10 @@ def local_pow_specialize(fgraph, node):
         if np.all(y == -2):
             rval = [reciprocal(sqr(xsym))]
         if rval:
-            if not rval[0].type.broadcastable == node.outputs[0].type.broadcastable:
+            padded = pad_to_broadcastable(rval[0], node.outputs[0])
+            if padded is not None:
+                rval[0] = padded
+            elif rval[0].type.broadcastable != node.outputs[0].type.broadcastable:
                 return None
             rval[0] = cast(rval[0], odtype)
             assert rval[0].type.dtype == node.outputs[0].type.dtype
@@ -2581,7 +2612,10 @@ def local_log1p(fgraph, node):
         if one != 1:
             return
 
-        if other.type.broadcastable != log_arg.type.broadcastable:
+        padded = pad_to_broadcastable(other, log_arg)
+        if padded is not None:
+            other = padded
+        elif other.type.broadcastable != log_arg.type.broadcastable:
             other = broadcast_arrays(other, one)[0]
 
         if other.type.dtype != log_arg.type.dtype:
