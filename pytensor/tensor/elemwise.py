@@ -40,11 +40,21 @@ from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq, unzip
 
 
+def aligned_broadcastable_of(inp, out_ndim):
+    """Return broadcastable left-padded with True to out_ndim.
+
+    When Elemwise inputs have different ndims, the shorter ones are implicitly
+    left-padded with broadcastable (size-1) dimensions. This helper makes that
+    padding explicit, so callers can reason about aligned dimensions without
+    ad-hoc offset arithmetic.
+    """
+    inp_bc = inp.type.broadcastable
+    return (True,) * (out_ndim - len(inp_bc)) + inp_bc
+
+
 def aligned_broadcastable(node, input_idx):
     """Return an Elemwise input's broadcastable left-padded with True to output ndim."""
-    out_ndim = node.outputs[0].type.ndim
-    inp_bc = node.inputs[input_idx].type.broadcastable
-    return (True,) * (out_ndim - len(inp_bc)) + inp_bc
+    return aligned_broadcastable_of(node.inputs[input_idx], node.outputs[0].type.ndim)
 
 
 def aligned_shape(node, input_idx):
@@ -52,6 +62,11 @@ def aligned_shape(node, input_idx):
     out_ndim = node.outputs[0].type.ndim
     inp_shape = node.inputs[input_idx].type.shape
     return (1,) * (out_ndim - len(inp_shape)) + inp_shape
+
+
+def input_not_broadcast(inp, out):
+    """Check whether input is not broadcast by the output (mixed-ndim safe)."""
+    return aligned_broadcastable_of(inp, out.type.ndim) == out.type.broadcastable
 
 
 class DimShuffle(ExternalCOp):

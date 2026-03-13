@@ -20,7 +20,12 @@ from pytensor.tensor.basic import (
     register_infer_shape,
 )
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import (
+    CAReduce,
+    DimShuffle,
+    Elemwise,
+    aligned_broadcastable_of,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import Dot, ceil_intdiv, dot
@@ -227,8 +232,7 @@ def local_subtensor_of_batch_dims(fgraph, node):
     # Build aligned broadcastable for each input (left-padded with True for implicit dims)
     inp_offsets = [out_ndim - inp.type.ndim for inp in elem_inputs]
     inp_aligned_bcasts = [
-        ((True,) * offset + inp.type.broadcastable)[:batch_ndim]
-        for inp, offset in zip(elem_inputs, inp_offsets)
+        aligned_broadcastable_of(inp, out_ndim)[:batch_ndim] for inp in elem_inputs
     ]
 
     if all(abc == elem_bcast for abc in inp_aligned_bcasts):

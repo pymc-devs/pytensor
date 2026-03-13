@@ -37,7 +37,12 @@ from pytensor.tensor.basic import (
     zeros,
     zeros_like,
 )
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import (
+    CAReduce,
+    DimShuffle,
+    Elemwise,
+    aligned_broadcastable_of,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
 from pytensor.tensor.math import (
@@ -1499,12 +1504,11 @@ def local_sum_prod_of_mul_or_div(fgraph, node):
         # Mul accepts arbitrary inputs, so we need to separate into two groups
         outer_terms = []
         inner_terms = []
+        out_ndim = node_inps.type.ndim
         for term in node_inps.owner.inputs:
-            term_bcast = term.type.broadcastable
-            out_ndim = node_inps.type.ndim
+            aligned_bc = aligned_broadcastable_of(term, out_ndim)
             offset = out_ndim - term.type.ndim
-            # Left-pad broadcastable for mixed-ndim inputs
-            if all((i < offset or term_bcast[i - offset]) for i in reduced_axes):
+            if all(aligned_bc[i] for i in reduced_axes):
                 # Squeeze only the axes that exist on this term
                 term_axes = tuple(i - offset for i in reduced_axes if i >= offset)
                 outer_terms.append(term.squeeze(term_axes) if term_axes else term)
@@ -1524,13 +1528,10 @@ def local_sum_prod_of_mul_or_div(fgraph, node):
     else:  # true_div
         # We only care about removing the denominator out of the reduction
         numerator, denominator = node_inps.owner.inputs
-        denominator_bcast = denominator.type.broadcastable
         out_ndim = node_inps.type.ndim
+        aligned_bc = aligned_broadcastable_of(denominator, out_ndim)
         denom_offset = out_ndim - denominator.type.ndim
-        if all(
-            (i < denom_offset or denominator_bcast[i - denom_offset])
-            for i in reduced_axes
-        ):
+        if all(aligned_bc[i] for i in reduced_axes):
             denom_axes = tuple(
                 i - denom_offset for i in reduced_axes if i >= denom_offset
             )

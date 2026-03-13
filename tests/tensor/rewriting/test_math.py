@@ -3036,6 +3036,68 @@ class TestLocalSumProd:
                 rewritten_out_fn(*test_vals),
             )
 
+    def test_sum_of_mixed_ndim_mul(self):
+        """Test local_sum_prod_of_mul_or_div with mixed-ndim Elemwise inputs."""
+        mode = Mode("vm", optimizer="None")
+        rewrite = out2in(local_sum_prod_of_mul_or_div)
+
+        mat = matrix(shape=(None, None), dtype="float64")
+        vec = vector(dtype="float64")
+        scl = scalar(dtype="float64")
+
+        inputs = [mat, vec, scl]
+        test_vals = [
+            np.random.random((3, 4)),
+            np.random.random((4,)),
+            np.float64(2.5),
+        ]
+
+        for out, expected_out in [
+            # scalar is broadcastable on all axes, can be factored out
+            (
+                mul(mat, scl).sum(axis=0),
+                scl * mat.sum(axis=0),
+            ),
+            (
+                mul(mat, scl).sum(axis=1),
+                scl * mat.sum(axis=1),
+            ),
+            # vector is broadcastable on axis 0, can be factored out of sum over axis 0
+            (
+                mul(mat, vec).sum(axis=0),
+                vec * mat.sum(axis=0),
+            ),
+            # vector is NOT broadcastable on axis 1, stays inside
+            (
+                mul(mat, vec).sum(axis=1),
+                mul(mat, vec).sum(axis=1),
+            ),
+            # division: scalar denominator factored out
+            (
+                true_div(mat, scl).sum(axis=0),
+                true_div(mat.sum(axis=0), scl),
+            ),
+            # division: vector denominator factored out of sum over axis 0
+            (
+                true_div(mat, vec).sum(axis=0),
+                true_div(mat.sum(axis=0), vec),
+            ),
+        ]:
+            out_fn = pytensor.function(inputs, out, mode=mode, on_unused_input="ignore")
+
+            rewritten_out = rewrite_graph(out, custom_rewrite=rewrite)
+            assert equal_computations([rewritten_out], [expected_out]), debugprint(
+                [rewritten_out, expected_out], print_type=True
+            )
+
+            rewritten_out_fn = pytensor.function(
+                inputs, rewritten_out, mode=mode, on_unused_input="ignore"
+            )
+            np.testing.assert_allclose(
+                out_fn(*test_vals),
+                rewritten_out_fn(*test_vals),
+            )
+
     def test_prod_of_non_scalar_mul(self):
         mode = Mode("vm", optimizer="None")
         rewrite = out2in(local_sum_prod_of_mul_or_div)
