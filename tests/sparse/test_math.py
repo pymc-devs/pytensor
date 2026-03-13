@@ -47,7 +47,7 @@ from pytensor.sparse.math import (
     true_dot,
 )
 from pytensor.sparse.rewriting import UsmmCscDense
-from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     TensorType,
@@ -825,14 +825,13 @@ class TestUsmm:
 
         if not pytensor.config.blas__ldflags:
             # Usmm should not be inserted, because it relies on BLAS
-            assert len(topo) == 4, topo
+            assert len(topo) == 3, topo
             assert isinstance(topo[0].op, psm.Dot)
-            assert isinstance(topo[1].op, DimShuffle)
-            assert isinstance(topo[2].op, Elemwise) and isinstance(
-                topo[2].op.scalar_op, pytensor.scalar.Mul
+            assert isinstance(topo[1].op, Elemwise) and isinstance(
+                topo[1].op.scalar_op, pytensor.scalar.Mul
             )
-            assert isinstance(topo[3].op, Elemwise) and isinstance(
-                topo[3].op.scalar_op, pytensor.scalar.Sub
+            assert isinstance(topo[2].op, Elemwise) and isinstance(
+                topo[2].op.scalar_op, pytensor.scalar.Sub
             )
         elif (
             y.type.dtype == up
@@ -848,7 +847,7 @@ class TestUsmm:
                     and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
                     for node in topo
                 )
-                == len(topo) - 5
+                == len(topo) - 4
             )
             new_topo = [
                 node
@@ -859,7 +858,7 @@ class TestUsmm:
                 )
             ]
             topo = new_topo
-            assert len(topo) == 5, topo
+            assert len(topo) == 4, topo
 
             # Usmm is tested at the same time in debugmode
             # Check if the optimization local_usmm and local_usmm_csx is
@@ -869,18 +868,16 @@ class TestUsmm:
                 assert sum(isinstance(n.op, x) for n in topo) == 1
 
             check_once(CSMProperties)
-            check_once(DimShuffle)
             check_once(Subtensor)
             check_once(UsmmCscDense)
             check_once(Elemwise)
             if inplace:
-                assert topo[4].op.inplace
+                assert topo[3].op.inplace
         elif not fast_compile:
             # The op Usmm should be inserted
-            assert len(topo) == 3, topo
-            assert isinstance(topo[0].op, DimShuffle)
-            assert topo[1].op == pytensor.tensor.neg
-            assert isinstance(topo[2].op, psm.Usmm)
+            assert len(topo) == 2, topo
+            assert topo[0].op == pytensor.tensor.neg
+            assert isinstance(topo[1].op, psm.Usmm)
 
     @pytest.mark.parametrize(
         "params",

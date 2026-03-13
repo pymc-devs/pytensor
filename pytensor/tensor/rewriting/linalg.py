@@ -640,14 +640,21 @@ def rewrite_det_diag_to_prod_diag(fgraph, node):
     eye_input, non_eye_input = eye_input[0], non_eye_inputs[0]
 
     # Checking if original x was scalar/vector/matrix
-    if non_eye_input.type.broadcastable[-2:] == (True, True):
-        # For scalar
+    non_eye_ndim = non_eye_input.type.ndim
+    if non_eye_ndim == 0:
+        # Scalar
+        det_val = non_eye_input ** (eye_input.shape[0])
+    elif non_eye_ndim == 1:
+        # Vector
+        det_val = non_eye_input.prod(axis=-1)
+    elif non_eye_input.type.broadcastable[-2:] == (True, True):
+        # Scalar-like (broadcastable in last 2 dims)
         det_val = non_eye_input.squeeze(axis=(-1, -2)) ** (eye_input.shape[0])
     elif non_eye_input.type.broadcastable[-2:] == (False, False):
-        # For Matrix
+        # Matrix
         det_val = non_eye_input.diagonal(axis1=-1, axis2=-2).prod(axis=-1)
     else:
-        # For vector
+        # Vector-like (broadcastable in one of last 2 dims)
         det_val = non_eye_input.prod(axis=(-1, -2))
     det_val = det_val.astype(node.outputs[0].type.dtype)
     return [det_val]
@@ -1033,9 +1040,13 @@ def rewrite_cholesky_diag_to_sqrt_diag(fgraph, node):
 
     # Now, we can simply return the matrix consisting of sqrt values of the original diagonal elements
     # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
-    if non_eye_input.type.broadcastable[-2:] == (False, False):
+    if non_eye_input.type.ndim >= 2 and non_eye_input.type.broadcastable[-2:] == (
+        False,
+        False,
+    ):
         non_eye_input = non_eye_input.diagonal(axis1=-1, axis2=-2)
-        if eye_input.type.ndim > 2:
+        # If the original mul was batched (output ndim > 2), pad so shapes align
+        if input.type.ndim > 2:
             non_eye_input = pt.shape_padaxis(non_eye_input, -2)
 
     return [eye_input * (non_eye_input**0.5)]

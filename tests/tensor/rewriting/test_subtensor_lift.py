@@ -99,11 +99,10 @@ class TestLocalSubtensorOfBatchDims:
         # assert check_stack_trace(f, ops_to_check=Subtensor)
 
         prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, DimShuffle)
-        assert isinstance(prog[1].op.scalar_op, ps.Composite)  # Composite{add,exp}
+        assert isinstance(prog[0].op.scalar_op, ps.Composite)  # Composite{add,exp}
         # first subtensor
-        assert isinstance(prog[2].op, Subtensor)
-        assert len(prog) == 3
+        assert isinstance(prog[1].op, Subtensor)
+        assert len(prog) == 2
 
         x_test = np.array([[0, 1], [2, 3]]).astype(x.dtype)
         y_test = np.array([4, 5]).astype(y.dtype)
