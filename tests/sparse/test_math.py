@@ -47,7 +47,7 @@ from pytensor.sparse.math import (
     true_dot,
 )
 from pytensor.sparse.rewriting import UsmmCscDense
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     TensorType,
@@ -841,14 +841,7 @@ class TestUsmm:
             and up in ("float32", "float64")
         ):
             # The op UsmmCscDense should be inserted
-            assert (
-                sum(
-                    isinstance(node.op, Elemwise)
-                    and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
-                    for node in topo
-                )
-                == len(topo) - 4
-            )
+            # Filter out Cast and DimShuffle (from shape_padleft on scalar alpha)
             new_topo = [
                 node
                 for node in topo
@@ -856,6 +849,7 @@ class TestUsmm:
                     isinstance(node.op, Elemwise)
                     and isinstance(node.op.scalar_op, pytensor.scalar.basic.Cast)
                 )
+                and not isinstance(node.op, DimShuffle)
             ]
             topo = new_topo
             assert len(topo) == 4, topo

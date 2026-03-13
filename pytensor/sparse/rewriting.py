@@ -957,6 +957,11 @@ def local_usmm_csx(fgraph, node):
                 if y.type.dtype != dtype_out:
                     return False
 
+                # UsmmCscDense requires alpha to be 2-d with shape (1, 1)
+                if alpha.ndim < 2:
+                    from pytensor.tensor.shape import shape_padleft
+
+                    alpha = shape_padleft(alpha, 2 - alpha.ndim)
                 return [usmm_csc_dense(alpha, x_val, x_ind, x_ptr, x_nsparse, y, z)]
     return False
 

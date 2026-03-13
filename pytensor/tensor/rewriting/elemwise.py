@@ -1117,7 +1117,10 @@ def local_inline_composite_constants(fgraph, node):
         padded = pad_to_broadcastable(new_outputs[0], node.outputs[0])
         if padded is not None:
             new_outputs = [
-                pad_to_broadcastable(new_out, old_out) or new_out
+                new_out_padded
+                if (new_out_padded := pad_to_broadcastable(new_out, old_out))
+                is not None
+                else new_out
                 for new_out, old_out in zip(new_outputs, node.outputs)
             ]
         else:
