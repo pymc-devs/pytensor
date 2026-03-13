@@ -76,6 +76,7 @@ from pytensor.tensor.type import (
     vectors,
 )
 from tests import unittest_tools as utt
+from tests.unittest_tools import RewriteTester
 
 
 dimshuffle_lift = out2in(local_dimshuffle_lift)
@@ -1609,17 +1610,68 @@ def test_constant_fold_branches_add_mul(op):
     x = pt.vector("x")
     a = rng.normal(size=(1, 512, 5))
     b = rng.normal(size=(1, 512, 1))
-    out = op(op(a, x), b)
-    new_out = rewrite_graph(out, include=("add_mul_fusion",))
-    assert len(new_out.owner.inputs) == 2
-    assert equal_computations([new_out], [op(py_op(a, b), x)])
 
-    # c shouldn't be folded as it would increase the memory usage
+    result = RewriteTester([x], [op(op(a, x), b)], include=["add_mul_fusion"])
+    result.assert_graph(op(py_op(a, b), x))
+
+    # c shouldn't be folded as it would increase the memory usage. The reassociation
+    # then groups the two axis-0-broadcast terms -- op(a, b) and x -- so that only one
+    # operation is left at the full (1024, 512, 5) rank instead of two.
     c = rng.normal(size=(1024, 1, 1))
-    out = op(op(op(a, x), c), b)
-    new_out = rewrite_graph(out, include=("add_mul_fusion",))
-    assert len(new_out.owner.inputs) == 3
-    assert equal_computations([new_out], [op(py_op(a, b), c, x)])
+
+    result = RewriteTester([x], [op(op(op(a, x), c), b)], include=["add_mul_fusion"])
+    result.assert_graph(op(op(py_op(a, b), x), c))
+
+
+@pytest.mark.parametrize("op", (add, mul))
+def test_reassociate_broadcast_aware_add_mul(op):
+    # Terms group by a shared broadcast axis, not by an identical pattern: no two of
+    # a, b, c have the same pattern, yet all three are constant along the last axis.
+    a = pt.tensor("a", shape=(20, 1, 1))
+    b = pt.tensor("b", shape=(1, 5, 1))
+    c = pt.tensor("c", shape=(20, 5, 1))
+    d = pt.tensor("d", shape=(20, 5, 7))
+    result = RewriteTester([a, b, c, d], [op(a, b, c, d)], include=["add_mul_fusion"])
+    result.assert_graph(op(op(a, b, c), d))
+
+    # Flattening dissolves the subgroup and it is put back, collapsed along every axis
+    # a and b share, not just the one they were selected on.
+    a = pt.tensor("a", shape=(1, 1, 5, 5, 1))
+    b = pt.tensor("b", shape=(1, 1, 5, 5, 1))
+    c = pt.tensor("c", shape=(5, 5, 5, 5, 5))
+    result = RewriteTester([a, b, c], [op(op(a, b), c)], include=["add_mul_fusion"])
+    result.assert_graph(op(op(a, b), c))
+
+    # The node a split leaves behind is revisited: a and b group on a second pass.
+    a = pt.tensor("a", shape=(1, 5, 6))
+    b = pt.tensor("b", shape=(1, 5, 6))
+    c = pt.tensor("c", shape=(4, 5, 1))
+    d = pt.tensor("d", shape=(4, 5, 1))
+    e = pt.tensor("e", shape=(4, 5, 1))
+    f = pt.tensor("f", shape=(4, 5, 6))
+    result = RewriteTester(
+        [a, b, c, d, e, f], [op(a, b, c, d, e, f)], include=["add_mul_fusion"]
+    )
+    result.assert_graph(op(op(a, b), op(c, d, e), f))
+
+    # Axis 2 holds four constant terms against two on axes 0 and 1, so it is hoisted
+    # first; the subgroup is then revisited and splits along both of the others.
+    a = pt.tensor("a", shape=(20, 1, 1))
+    b = pt.tensor("b", shape=(20, 1, 1))
+    c = pt.tensor("c", shape=(1, 5, 1))
+    d = pt.tensor("d", shape=(1, 5, 1))
+    e = pt.tensor("e", shape=(20, 5, 7))
+    result = RewriteTester(
+        [a, b, c, d, e], [op(a, b, c, d, e)], include=["add_mul_fusion"]
+    )
+    result.assert_graph(op(op(op(a, b), op(c, d)), e))
+
+    # No two terms share a broadcast axis, so there is nothing to hoist.
+    a = pt.tensor("a", shape=(1, 5, 6))
+    b = pt.tensor("b", shape=(4, 1, 6))
+    c = pt.tensor("c", shape=(4, 5, 1))
+    result = RewriteTester([a, b, c], [op(a, b, c)], include=["add_mul_fusion"])
+    result.assert_graph(op(a, b, c))
 
 
 def test_InplaceElemwiseOptimizer_bug():
