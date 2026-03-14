@@ -29,7 +29,6 @@ from pytensor.scalar.math import (
     Erfinv,
     GammaIncCInv,
     GammaIncInv,
-    Iv,
     Ive,
     Kve,
     Log1mexp,
@@ -275,16 +274,6 @@ def jax_funcify_from_tfp(op, **kwargs):
     tfp_jax_op = try_import_tfp_jax_op(op)
 
     return tfp_jax_op
-
-
-@jax_funcify.register(Iv)
-def jax_funcify_Iv(op, **kwargs):
-    ive = try_import_tfp_jax_op(op, jax_op_name="bessel_ive")
-
-    def iv(v, x):
-        return ive(v, x) / jnp.exp(-jnp.abs(jnp.real(x)))
-
-    return iv
 
 
 @jax_funcify.register(Ive)

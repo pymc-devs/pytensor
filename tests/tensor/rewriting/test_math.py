@@ -4785,6 +4785,19 @@ def test_log_kv_stabilization():
     )
 
 
+def test_log_iv_stabilization():
+    x = pt.scalar("x")
+    out = log(pt.iv(4.5, x))
+
+    # Expression would overflow to inf without rewrite
+    mode = get_default_mode().including("stabilize")
+    # Reference value log(ive(4.5, 1000.0)) + 1000.0
+    np.testing.assert_allclose(
+        out.eval({x: 1000.0}, mode=mode),
+        995.6171788390135,
+    )
+
+
 @pytest.mark.parametrize("shape", [(), (4, 5, 6)], ids=["scalar", "tensor"])
 def test_pow_1_rewrite(shape):
     x = pt.tensor("x", shape=shape)

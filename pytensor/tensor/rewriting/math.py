@@ -63,6 +63,7 @@ from pytensor.tensor.math import (
     ge,
     int_div,
     isinf,
+    ive,
     kve,
     le,
     log,
@@ -3888,3 +3889,17 @@ local_log_kv = PatternNodeRewriter(
 )
 
 register_stabilize(local_log_kv)
+
+
+local_log_iv = PatternNodeRewriter(
+    # Rewrite log(iv(v, x)) = log(ive(v, x) * exp(abs(x))) -> log(ive(v, x)) + abs(x)
+    (log, (mul, (ive, "v", "x"), (exp, (pt_abs, "x")))),
+    (add, (log, (ive, "v", "x")), (pt_abs, "x")),
+    allow_multiple_clients=True,
+    name="local_log_iv",
+    # Start the rewrite from the less likely ive node
+    tracks=[ive],
+    get_nodes=get_clients_at_depth2,
+)
+
+register_stabilize(local_log_iv)
