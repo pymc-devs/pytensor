@@ -144,10 +144,12 @@ jobs:
   build_pyodide_wheel:
     name: Build Pyodide (WASM) wheel
     needs: check_changes
+    # Run if it's a release or if relevant files changed on main
     if: |
       needs.check_changes.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     permissions:
+      # write id-token and attestations are required to attest build provenance
       id-token: write
       attestations: write
     steps:

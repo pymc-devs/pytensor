@@ -2985,7 +2985,7 @@ def default_blas_ldflags() -> str:
     _logger.debug("Failed to identify blas ldflags. Will leave them empty.")
     warnings.warn(
         "PyTensor could not link to a BLAS installation. Operations that might benefit from BLAS will be severely degraded.\n"
-        "This usually happens when PyTensor is installed via pip. We recommend it be installed via conda/mamba instead.\n"
+        "This usually happens when PyTensor is installed via pip. We recommend it be installed via conda/mamba/pixi instead.\n"
         "Alternatively, you can use an experimental backend such as Numba or JAX that perform their own BLAS optimizations, "
         "by setting `pytensor.config.mode == 'NUMBA'` or passing `mode='NUMBA'` when compiling a PyTensor function.\n"
         "For more options and details see https://pytensor.readthedocs.io/en/latest/troubleshooting.html#how-do-i-configure-test-my-blas-library",
