@@ -2282,7 +2282,7 @@ class Pow(BinaryScalarOp):
     nfunc_spec = ("power", 2, 1)
 
     def impl(self, x, y):
-        return x**y
+        return np.power(x, y)
 
     def c_code(self, node, name, inputs, outputs, sub):
         (x, y) = inputs

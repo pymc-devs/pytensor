@@ -530,3 +530,29 @@ def test_cast_to_complex(inp_type):
     res_y = y.eval({x: np.array(1.0, dtype=inp_type.dtype)})
     assert res_y == 1
     assert res_y.dtype == "complex64"
+
+
+class TestPow:
+    def test_pow_negative_base_fractional_exponent(self):
+        """Scalar Pow should return nan, not complex, for fractional powers of negative floats."""
+        from pytensor.scalar.basic import pow as scalar_pow
+
+        result = scalar_pow.impl(-1.0, 0.01)
+        assert isinstance(result, float | np.floating), (
+            f"Expected float, got {type(result)}: {result}"
+        )
+        assert np.isnan(result), f"Expected nan, got {result}"
+
+    def test_pow_positive_base(self):
+        """Sanity check: Pow still works for positive bases."""
+        from pytensor.scalar.basic import pow as scalar_pow
+
+        result = scalar_pow.impl(2.0, 3.0)
+        assert result == 8.0
+
+    def test_pow_negative_base_integer_exponent(self):
+        """Negative base with integer exponent should still work."""
+        from pytensor.scalar.basic import pow as scalar_pow
+
+        result = scalar_pow.impl(-2.0, 3.0)
+        assert result == -8.0
