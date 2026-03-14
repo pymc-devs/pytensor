@@ -115,6 +115,9 @@ The current development branch of |Project Name| can be installed from GitHub, a
     pip install git+https://github.com/pymc-devs/pytensor
 
 
+For browser-based Python environments (Pyodide/JupyterLite), see the `Pyodide installation instructions <https://pytensor.readthedocs.io/en/latest/install.html>`__.
+
+
 Background
 ==========
 
