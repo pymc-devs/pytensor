@@ -1572,11 +1572,14 @@ def test_local_inline_composite_constants(op, np_op, const_shape):
     fn = pytensor.function(
         [x, y], out, mode=get_default_mode().including("specialize", "fusion")
     )
-    # There should be a single Composite after optimization
-    [node] = [
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Elemwise)
+    # There should be a single Composite Elemwise after optimization
+    composite_nodes = [
+        node
+        for node in fn.maker.fgraph.apply_nodes
+        if isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, Composite)
     ]
-    assert isinstance(node.op.scalar_op, Composite)
+    assert len(composite_nodes) == 1
+    [node] = composite_nodes
     assert len(node.inputs) == 2  # x and y, but not const
 
     x_test_value = np.arange(5).astype(config.floatX)

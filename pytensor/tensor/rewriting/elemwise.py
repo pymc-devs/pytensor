@@ -11,7 +11,7 @@ from warnings import warn
 from pytensor.compile.function.types import Supervisor
 from pytensor.compile.mode import get_target_language, optdb
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.fg import FunctionGraph, Output
@@ -41,17 +41,18 @@ from pytensor.scalar import (
 from pytensor.scalar import cast as scalar_cast
 from pytensor.scalar import constant as scalar_constant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
-from pytensor.tensor.basic import MakeVector
+from pytensor.tensor.basic import MakeVector, atleast_Nd
 from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.elemwise import (
     CAReduce,
     DimShuffle,
     Elemwise,
-    pad_to_broadcastable,
 )
 from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
+    broadcast_axes,
     broadcasted_by,
+    broadcasted_by_axes,
     elemwise_of,
     register_canonicalize,
     register_specialize,
@@ -1091,15 +1092,12 @@ def local_inline_composite_constants(fgraph, node):
         node.inputs, composite_op.fgraph.inputs, strict=True
     ):
         # Complex variables don't have a `c_literal` that can be inlined
-        if (
-            isinstance(outer_inp, Constant)
-            and "complex" not in outer_inp.type.dtype
-        ):
+        if isinstance(outer_inp, Constant) and "complex" not in outer_inp.type.dtype:
             if outer_inp.unique_value is not None:
                 inner_replacements[inner_inp] = scalar_constant(
                     outer_inp.unique_value, dtype=inner_inp.dtype
                 )
-                for i, dim_length in enumerate(reversed(outer_inp.type.shape, start=1)):
+                for i, dim_length in enumerate(reversed(outer_inp.type.shape), start=1):
                     # Store constant dim_lengths that may have broadcasted the original graph
                     if dim_length != 1:
                         constant_dim_lengths[-i] = dim_length
@@ -1115,11 +1113,16 @@ def local_inline_composite_constants(fgraph, node):
     )
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
 
-    old_out = node.oututs[0]
-    new_outputs = atleast_Nd(*Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs, n=old_out.type.ndim)
-    if broadcasted_axes := broadcasted_by_axes(new_outputs[0], old_out, negative_indices=True):
+    old_out = node.outputs[0]
+    new_outputs = [
+        atleast_Nd(o, n=old_out.type.ndim)
+        for o in Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
+    ]
+    if bcast_axes := broadcasted_by_axes(
+        new_outputs[0], old_out, negative_indices=True
+    ):
         # Some of the inlined constants were broadcasting the output shape
-        axes_lengths = {constant_dim_lengths[i] for i in broacasted_axes}
+        axes_lengths = {i: constant_dim_lengths[i] for i in bcast_axes}
         new_outputs = [broadcast_axes(new_out, axes_lengths) for new_out in new_outputs]
 
     copy_stack_trace(old_out, new_outputs)

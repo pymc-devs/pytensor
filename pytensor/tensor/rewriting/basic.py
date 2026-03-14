@@ -18,7 +18,7 @@ alloc(x, broadcast_shapes(x.shape, y.shape)) + alloc(y, broadcast_shapes(x.shape
 second(y, x) + second(x, y) -> x + y
 
 Theano developers (mostly) preferred to use the first form during canonicalization and introduce the second form later,
-via rewrites like `local_fill_to_alloc`, and using the `alloc_like` helper inside rewrites.
+via rewrites like `local_second_to_alloc`, and using the `broadcast_like_elemwise` helper inside rewrites.
 Many stabilize and stabilization rewrites refuse to be applied when a variable has multiple clients, so this is important.
 """
 
@@ -30,7 +30,7 @@ from numpy.lib.array_utils import normalize_axis_index
 from pytensor import compile, config
 from pytensor.compile.ops import ViewOp
 from pytensor.graph import FunctionGraph, Op
-from pytensor.graph.basic import Constant
+from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.rewriting.basic import (
     NodeProcessingGraphRewriter,
     NodeRewriter,
@@ -58,6 +58,7 @@ from pytensor.scalar import (
     Second,
     Switch,
 )
+from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
@@ -73,23 +74,21 @@ from pytensor.tensor.basic import (
     fill,
     get_scalar_constant_value,
     join,
-    ones_like,
     register_infer_shape,
+    second,
     switch,
     tensor_copy,
     tile,
     zeros,
-    zeros_like,
 )
 from pytensor.tensor.elemwise import (
     DimShuffle,
     Elemwise,
-    pad_to_broadcastable,
 )
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays
 from pytensor.tensor.math import Sum, add, eq, variadic_add
-from pytensor.tensor.shape import Shape_i, shape_padleft
+from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.type import DenseTensorType, TensorType
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 from pytensor.utils import NoDuplicateOptWarningFilter
@@ -99,18 +98,28 @@ _logger = logging.getLogger("pytensor.tensor.rewriting.basic")
 _logger.addFilter(NoDuplicateOptWarningFilter())
 
 
-def broadcasted_by_axes(x: TensorVariable, y: TensorVariable, negative_indices: bool = False) -> tuple[int, ...]:
+def broadcasted_by_axes(
+    x: TensorVariable, y: TensorVariable, negative_indices: bool = False
+) -> tuple[int, ...]:
     bx = x.type.broadcastable
     by = y.type.broadcastable
     missing_x_dims = len(by) - len(bx)
     indices = (
         *range(missing_x_dims),
-        *(i for i, (xb_dim, by_dim) in enumerate(zip(bx, by[missing_x_dims:], start=missing_x_dims))) if bx_dim and not by_dim),
+        *(
+            i
+            for i, (bx_dim, by_dim) in enumerate(
+                zip(bx, by[missing_x_dims:]), start=missing_x_dims
+            )
+            if bx_dim and not by_dim
+        ),
     )
     if negative_indices:
-        return tuple(-i - 1 for i in reversed(indices))
+        ndim = len(by)
+        return tuple(i - ndim for i in reversed(indices))
     else:
         return indices
+
 
 def broadcasted_by(x: TensorVariable, y: TensorVariable) -> bool:
     """Check whether x would be broadcasted by y in an Elemwise operation
@@ -142,7 +151,8 @@ def get_simplified_shape(x: TensorVariable, *, fgraph) -> tuple:
     except Exception:
         pass
 
-    if not any(d is None for d in (static_shape := x.type.shape)):
+    static_shape = x.type.shape
+    if not any(d is None for d in static_shape):
         return static_shape
 
     return tuple(x.shape)
@@ -152,16 +162,18 @@ def get_simplified_broadcast_shape(first, *others, fgraph):
     broadcast_ndim = max(x.type.ndim for x in (first, *others))
     first_broadcastable = first.type.broadcastable
     first_shape = get_simplified_shape(first, fgraph=fgraph)
-    missing_dims = broadcast_ndim - len(broadcast_shape)
+    missing_dims = broadcast_ndim - len(first_shape)
 
     if not (missing_dims or any(first_broadcastable)):
         return first_shape
 
-    broadcastable_dims = list(*([True] * missing_dims), *first_broadcastable)
-    broadcast_shape = list(*([1] * missing_dims), *first_shape)
+    broadcastable_dims = [*([True] * missing_dims), *first_broadcastable]
+    broadcast_shape = [*([1] * missing_dims), *first_shape]
     for other in others:
         other_shape = get_simplified_shape(other, fgraph=fgraph)
-        for i, (other_broadcastable, other_dim_length) in enumerate(reversed(tuple(zip(other.type.broadcastable, other_shape))), start=1):
+        for i, (other_broadcastable, other_dim_length) in enumerate(
+            reversed(tuple(zip(other.type.broadcastable, other_shape))), start=1
+        ):
             i = -i
             if other_broadcastable or not broadcastable_dims[i]:
                 # Doesn't provide any new info
@@ -171,37 +183,58 @@ def get_simplified_broadcast_shape(first, *others, fgraph):
     return broadcast_shape
 
 
-def broadcast_axes(x: Tensorvariable, axes_lengths: dict[int, TensorLike]) -> TensorVariable:
+def broadcast_axes(
+    x: TensorVariable, axes_lengths: dict[int, TensorLike]
+) -> TensorVariable:
     target_shape = list(x.shape)
     for ax, length in axes_lengths.items():
-       target_shape[ax] = length
+        target_shape[ax] = length
     return alloc(x, *target_shape)
 
 
 def broadcast_like_elemwise(
-    value: TensorVariable,
+    value: TensorVariable | TensorLike | list[TensorVariable],
     node: Apply[Elemwise],
     *,
     fgraph: FunctionGraph,
     auto_copy_stack_trace: bool = False,
-) -> TensorVariable:
-    """Broadcast value to template, trying eagerly not to depend on template node.
+) -> TensorVariable | list[TensorVariable]:
+    """Broadcast value(s) to match the output of an elemwise node.
 
+    Tries eagerly not to depend on the node's outputs, using the node's inputs instead.
     This eagerness may render use cases "shape_unsafe", masking potential shape errors in the original graph.
-    """
-    ref_out = node.outputs[0]
-    if value.type.dtype != (out_dtype := ref_out.type.dtype)
-        value = cast(value, out_dtype)
 
-    value = atleast_Nd(value, n=ref_out.type.ndim)
-    if broadcasted_axes := broadcasted_by_axes(value, out, negative_indices=True):
-        broadcast_shape = get_simplified_broadcast_shape(*node.inputs, fgraph=fgraph)
-        value = broadcast_axes(value, {i: broadcast_shape[i] for i in broadcasted_axes})
+    Parameters
+    ----------
+    value
+        A single variable (or constant), or list of variables to broadcast.
+    """
+    is_list = isinstance(value, list)
+    values = value if is_list else [value]
+
+    ref_out = node.outputs[0]
+    out_dtype = ref_out.type.dtype
+    out_ndim = ref_out.type.ndim
+
+    # Convert, cast and pad dims
+    results = []
+    for v in values:
+        v = as_tensor_variable(v)
+        if v.type.dtype != out_dtype:
+            v = cast(v, out_dtype)
+        v = atleast_Nd(v, n=out_ndim)
+        results.append(v)
+
+    # Compute broadcast shape once for all values
+    if broadcasted_by_axes(results[0], ref_out, negative_indices=True):
+        bcast_shape = get_simplified_broadcast_shape(*node.inputs, fgraph=fgraph)
+        results = [alloc(v, *bcast_shape) for v in results]
 
     if auto_copy_stack_trace:
-        copy_stack_trace(ref_out, value)
+        for v in results:
+            copy_stack_trace(ref_out, v)
 
-    return value
+    return results if is_list else results[0]
 
 
 def register_useless(
@@ -355,29 +388,16 @@ def local_elemwise_alloc(fgraph, node):
         return False
 
     new_inputs = list(node.inputs)
-    alloc_lengths = {}
     for idx in alloc_idxs:
         alloc_inp = node.inputs[idx]
-        new_inp, *alloc_shape = alloc_inp.owner.inputs
-        for i, (alloc_static_dim, alloc_dim_length) in enumerate(reversed(tuple(zip(alloc_inp.type.shape, alloc_shape))), start=1):
-            if alloc_static_dim != 1:
-                # negative indices to align everything correctly
-                alloc_lengths[-i] = alloc_dim_length
-
+        new_inp = alloc_inp.owner.inputs[0]
         copy_stack_trace(alloc_inp, new_inp)
         new_inputs[idx] = new_inp
 
-    old_out = node.outputs[0]
-    new_outs = atleast_Nd(node.op(*new_inputs, return_list=True), n=old_out.type.ndim)
+    new_outs = node.op(*new_inputs, return_list=True)
+    new_outs = broadcast_like_elemwise(new_outs, node, fgraph=fgraph)
 
-    if broadcasted_dims := broadcasted_by_dims(new_outs[0], old_out, negative_indices=True):
-        broadcaste_axes = {i: alloc_lengths[i] for i in broadcasted_dims}
-        new_outs = [
-            broadcast_axis(new_out, broadcaste_axes)
-            for new_out in new_outs
-        ]
-
-    copy_stack_trace(old_out, new_outs)
+    copy_stack_trace(node.outputs[0], new_outs)
     return new_outs
 
 
@@ -440,13 +460,13 @@ def local_second_to_alloc(fgraph, node):
     which could mask shape errors.
     """
     first, second = node.inputs
-    old_out = node.outputs[0].type
+    old_out = node.outputs[0]
 
-    new_out = atleast_Nd(second, n=out.type.ndim)
-    broadcasted_axes = broadcasted_by_axes(new_out, old_out, negative_indices=True)
-    if broadcasted_axes:
+    new_out = atleast_Nd(second, n=old_out.type.ndim)
+    bcast_axes = broadcasted_by_axes(new_out, old_out, negative_indices=True)
+    if bcast_axes:
         first_shape = get_simplified_shape(first, fgraph=fgraph)
-        new_out = broadcast_axes(new_out,  {first_shape[i] for i in broadcasted_axes})
+        new_out = broadcast_axes(new_out, {i: first_shape[i] for i in bcast_axes})
 
     copy_stack_trace(old_out, new_out)
     return [new_out]
@@ -455,9 +475,9 @@ def local_second_to_alloc(fgraph, node):
 # Register this after stabilize at 1.5 to make sure stabilize don't
 # get affected by less canonicalized graph due to alloc.
 compile.optdb.register(
-    "local_fill_to_alloc", in2out(local_fill_to_alloc), "fast_run", position=1.51
+    "local_second_to_alloc", in2out(local_second_to_alloc), "fast_run", position=1.51
 )
-# Needed to clean some extra alloc added by local_fill_to_alloc
+# Needed to clean some extra alloc added by local_second_to_alloc
 compile.optdb.register(
     "local_elemwise_alloc", in2out(local_elemwise_alloc), "fast_run", position=1.52
 )
@@ -471,7 +491,7 @@ def local_useless_fill(fgraph, node):
     """fill(s,v) -> v
 
     This rewrite is only needed in FAST_COMPILE mode to make the code
-    more readable. Normally, it is done by the `local_fill_to_alloc`
+    more readable. Normally, it is done by the `local_second_to_alloc`
     rewrite.
 
     """
@@ -596,7 +616,6 @@ def local_useless_elemwise(fgraph, node):
     dtype = node.outputs[0].type.dtype
     scalar_op = node.op.scalar_op
 
-
     if isinstance(node.op.scalar_op, Mul | Add | Identity) and len(node.inputs) == 1:
         # No need to copy over any stack trace
         return [node.inputs[0]]
@@ -606,14 +625,23 @@ def local_useless_elemwise(fgraph, node):
         return None
 
     if isinstance(scalar_op, EQ) and node.inputs[0] is node.inputs[1]:
-        ret = alloc(np.array(1, dtype=dtype), *get_simplified_shape(node.inputs[0]), fgraph=fgraph)
-        copy_stack_trace(node.outputs[0], ret)
-        return [ret]
+        return [
+            broadcast_like_elemwise(
+                np.array(1, dtype=dtype),
+                node,
+                fgraph=fgraph,
+                auto_copy_stack_trace=True,
+            )
+        ]
     elif isinstance(scalar_op, NEQ | XOR) and node.inputs[0] is node.inputs[1]:
-        ret = alloc(np.array(0, dtype=dtype), *get_simplified_shape(node.inputs[0]), fgraph=fgraph)
-        copy_stack_trace(node.outputs[0], ret)
-        return [ret]
-
+        return [
+            broadcast_like_elemwise(
+                np.array(0, dtype=dtype),
+                node,
+                fgraph=fgraph,
+                auto_copy_stack_trace=True,
+            )
+        ]
 
     elif isinstance(node.op.scalar_op, AND | OR):
         for const_idx in (0, 1):
@@ -624,7 +652,9 @@ def local_useless_elemwise(fgraph, node):
             ):
                 continue
             other = node.inputs[other_idx]
-            if (not all(const_inp.type.broadcastable)) and any(d is None for d in other.type.shape):
+            if (not all(const_inp.type.broadcastable)) and any(
+                d is None for d in other.type.shape
+            ):
                 # Get out if there's any risk the constant may broadcast explicit dimensions of other
                 # (otherwise this rewrite would be `shape_unsafe`, and wouldn't belong in `infer_static_shape`)
                 return None
@@ -634,8 +664,11 @@ def local_useless_elemwise(fgraph, node):
             if const_val == 0:
                 if isinstance(node.op.scalar_op, AND):
                     # x & 0 = 0
-                    broadcast_shape = get_simplified_broadcast_shape(*node.inputs, fgraph=fgraph)
-                    return [alloc(np.array(0, dtype=old_out_dtype), *broadcast_shape)]
+                    return [
+                        broadcast_like_elemwise(
+                            np.array(0, dtype=old_out_dtype), node, fgraph=fgraph
+                        )
+                    ]
                 else:
                     # x | 0 = x
                     return [broadcast_like_elemwise(other, node, fgraph=fgraph)]
@@ -643,13 +676,16 @@ def local_useless_elemwise(fgraph, node):
             elif old_out_dtype == "bool":
                 # If the output is not Boolean, it is the bitwise AND,
                 # and this rewrite would be wrong
-                if isinsance(node.op.scalar_op, OR):
+                if isinstance(node.op.scalar_op, AND):
                     # x & 1 = x
                     return [broadcast_like_elemwise(other, node, fgraph=fgraph)]
                 else:
                     # x | 1 = 1
-                    broadcast_shape = get_simplified_broadcast_shape(*node.inputs, fgraph=fgraph)
-                    return [alloc(np.array(1, dtype=old_out_dtype), *broadcast_shape)]
+                    return [
+                        broadcast_like_elemwise(
+                            np.array(1, dtype=old_out_dtype), node, fgraph=fgraph
+                        )
+                    ]
 
 
 @register_specialize

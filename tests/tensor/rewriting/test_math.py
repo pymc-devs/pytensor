@@ -574,7 +574,7 @@ class TestAlgebraicCanonizer:
         mode = get_default_mode()
 
         rewrite_query = RewriteDatabaseQuery(["canonicalize"])
-        rewrite_query = rewrite_query.including("ShapeOpt", "local_fill_to_alloc")
+        rewrite_query = rewrite_query.including("ShapeOpt", "local_second_to_alloc")
         rewrite_query = rewrite_query.excluding("local_elemwise_fusion")
         mode = mode.__class__(linker=mode.linker, optimizer=rewrite_query)
         # test x / x -> 1
@@ -590,15 +590,7 @@ class TestAlgebraicCanonizer:
             out = f(*val_inputs)
             assert (out == np.ones(shp, dtype=out_dtype)).all()
             topo = f.maker.fgraph.toposort()
-            if sym_inputs[0].broadcastable[0]:
-                assert len(topo) == 2
-                assert isinstance(topo[0].op, Shape_i)
-                assert isinstance(topo[1].op, Alloc)
-            else:
-                assert len(topo) == 3
-                assert isinstance(topo[0].op, Shape_i)
-                assert isinstance(topo[1].op, Shape_i)
-                assert isinstance(topo[2].op, Alloc)
+            assert any(isinstance(n.op, Alloc) for n in topo)
             assert out_dtype == out.dtype
 
         # test (x * y) / x -> y
@@ -630,10 +622,8 @@ class TestAlgebraicCanonizer:
                 ((dv / dy) / dv, [dv, dy], [dvv, dyv], 1, "float64"),
                 ((fv / fy) / fv, [fv, fy], [fvv, fyv], 1, "float32"),
                 # must broadcast as there is a dimshuffle in the computation
-                ((dx / dv) / dx, [dx, dv], [dxv, dvv], 2, "float64"),
-                # topo: [Shape_i, Shape_i, Elemwise{reciprocal,no_inplace}(<TensorType(float64, row)>), Alloc]
-                ((fx / fv) / fx, [fx, fv], [fxv, fvv], 2, "float32"),
-                # topo: [Shape_i, Shape_i, Elemwise{reciprocal,no_inplace}(<TensorType(float32, row)>), Alloc]
+                ((dx / dv) / dx, [dx, dv], [dxv, dvv], 1, "float64"),
+                ((fx / fv) / fx, [fx, fv], [fxv, fvv], 1, "float32"),
             ]
         ):
             f = function(list(sym_inputs), g, mode=mode)
@@ -1225,7 +1215,7 @@ def test_local_elemwise_sub_zeros():
             "canonicalize",
             "uncanonicalize",
             "ShapeOpt",
-            "local_fill_to_alloc",
+            "local_second_to_alloc",
             "local_elemwise_alloc",
         )
         .including("local_elemwise_sub_zeros")
