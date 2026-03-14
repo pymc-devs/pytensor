@@ -31,6 +31,8 @@ To use the Numba and JAX backend you will need to install these libraries in add
 Installing on Pyodide (WebAssembly)
 -----------------------------------
 
+.. _install-pyodide:
+
 PyTensor can be used in browser-based Python environments via `Pyodide <https://pyodide.org/>`__, such as `JupyterLite <https://jupyterlite.readthedocs.io/>`__.
 
 PyPI does not yet accept WebAssembly wheels, so you'll need to install from a GitHub Release:
