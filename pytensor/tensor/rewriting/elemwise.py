@@ -11,7 +11,7 @@ from warnings import warn
 from pytensor.compile.function.types import Supervisor
 from pytensor.compile.mode import get_target_language, optdb
 from pytensor.configdefaults import config
-from pytensor.graph.basic import Apply, Variable
+from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.fg import FunctionGraph, Output
@@ -43,10 +43,14 @@ from pytensor.scalar import constant as scalar_constant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.basic import constant as tensor_constant
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import (
+    CAReduce,
+    DimShuffle,
+    Elemwise,
+)
 from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
-    alloc_like,
+    broadcast_like_elemwise,
     broadcasted_by,
     elemwise_of,
     register_canonicalize,
@@ -378,9 +382,26 @@ def local_dimshuffle_lift(fgraph, node):
         and (len(fgraph.clients[inp]) == 1)
     ):
         # Don't use make_node to have tag.test_value set.
+        out_ndim = inode.outputs[0].type.ndim
         new_inputs = []
         for inp in inode.inputs:
-            new_inp = inp.dimshuffle(op.new_order)
+            # For mixed-ndim inputs, adapt new_order per input
+            offset = out_ndim - inp.type.ndim
+            if offset == 0:
+                inp_new_order = op.new_order
+            else:
+                # Strip leading entries that correspond to the implicit padding
+                inp_new_order = []
+                for entry in op.new_order:
+                    if entry == "x":
+                        inp_new_order.append("x")
+                    elif entry < offset:
+                        # This output dim maps to a padded (implicit) dim for this input
+                        inp_new_order.append("x")
+                    else:
+                        inp_new_order.append(entry - offset)
+                inp_new_order = tuple(inp_new_order)
+            new_inp = inp.dimshuffle(inp_new_order)
             new_inputs.append(apply_local_dimshuffle_lift(fgraph, new_inp))
         copy_stack_trace(node.outputs[0], new_inputs)
         ret = inode.op(*new_inputs, return_list=True)
@@ -1065,18 +1086,20 @@ def local_inline_composite_constants(fgraph, node):
     new_outer_inputs = []
     new_inner_inputs = []
     inner_replacements = {}
+    constant_dim_lengths = {}
     for outer_inp, inner_inp in zip(
         node.inputs, composite_op.fgraph.inputs, strict=True
     ):
         # Complex variables don't have a `c_literal` that can be inlined
-        if (
-            isinstance(outer_inp, TensorConstant)
-            and "complex" not in outer_inp.type.dtype
-        ):
+        if isinstance(outer_inp, Constant) and "complex" not in outer_inp.type.dtype:
             if outer_inp.unique_value is not None:
                 inner_replacements[inner_inp] = scalar_constant(
                     outer_inp.unique_value, dtype=inner_inp.dtype
                 )
+                for i, dim_length in enumerate(reversed(outer_inp.type.shape), start=1):
+                    # Store constant dim_lengths that may have broadcasted the original graph
+                    if dim_length != 1:
+                        constant_dim_lengths[-i] = dim_length
                 continue
         new_outer_inputs.append(outer_inp)
         new_inner_inputs.append(inner_inp)
@@ -1088,17 +1111,11 @@ def local_inline_composite_constants(fgraph, node):
         composite_op.fgraph.outputs, replace=inner_replacements
     )
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
+
     new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
-
-    # Some of the inlined constants were broadcasting the output shape
-    if node.outputs[0].type.broadcastable != new_outputs[0].type.broadcastable:
-        new_outputs = [
-            alloc_like(new_out, template=node.outputs[0], fgraph=fgraph)
-            for new_out in new_outputs
-        ]
-
-    copy_stack_trace(node.outputs, new_outputs)
-    return new_outputs
+    return broadcast_like_elemwise(
+        list(new_outputs), node, fgraph=fgraph, auto_copy_stack_trace=True
+    )
 
 
 @node_rewriter(tracks=[add, mul])
@@ -1123,6 +1140,7 @@ def constant_fold_branches_of_add_mul(fgraph, node):
                 if i == j:
                     continue
                 other_inp = new_constants[j]
+                # TODO: Adding dummy dims should be fine
                 if not broadcasted_by(reference_inp, other_inp):
                     other_inps.append(other_inp)
             if other_inps:

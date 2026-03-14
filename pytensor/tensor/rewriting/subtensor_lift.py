@@ -20,7 +20,12 @@ from pytensor.tensor.basic import (
     register_infer_shape,
 )
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.elemwise import (
+    CAReduce,
+    DimShuffle,
+    Elemwise,
+    aligned_broadcastable_of,
+)
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import squeeze
 from pytensor.tensor.math import Dot, ceil_intdiv, dot
@@ -221,43 +226,39 @@ def local_subtensor_of_batch_dims(fgraph, node):
         return [new_elem]
 
     elem_inputs = elem.owner.inputs
+    out_ndim = elem.type.ndim
     elem_bcast = elem.type.broadcastable[:batch_ndim]
-    if all(inp.type.broadcastable[:batch_ndim] == elem_bcast for inp in elem_inputs):
-        # No need to worry about implicit broadcasting.
-        indexed_inputs = [inp[idx_tuple] for inp in elem_inputs]
+
+    # Build aligned broadcastable for each input (left-padded with True for implicit dims)
+    inp_offsets = [out_ndim - inp.type.ndim for inp in elem_inputs]
+    inp_aligned_bcasts = [
+        aligned_broadcastable_of(inp, out_ndim)[:batch_ndim] for inp in elem_inputs
+    ]
+
+    if all(abc == elem_bcast for abc in inp_aligned_bcasts):
+        # No broadcasting concerns, just skip indices for implicit dims
+        indexed_inputs = []
+        for inp, offset in zip(elem_inputs, inp_offsets):
+            inp_idx = idx_tuple[offset:]
+            indexed_inputs.append(inp[inp_idx] if inp_idx else inp)
 
     else:
-        # The original indices may not make sense on some of the broadcasted dimensions
-        new_idxs = [list(idx_tuple) for _ in elem_inputs]
-        for dim, (dim_idx, dim_bcast_out, *dim_bcast_inputs) in enumerate(
-            zip(
-                idx_tuple,
-                elem_bcast,
-                *(inp.type.broadcastable[:batch_ndim] for inp in elem_inputs),
-                # Indices can be shorter than input ndims
-                strict=False,
-            )
+        # Adapt indices for broadcasting and different ndims
+        indexed_inputs = []
+        for inp, offset, aligned_bc in zip(
+            elem_inputs, inp_offsets, inp_aligned_bcasts
         ):
-            if dim_idx == slice(None):
-                # Full slice can be safely applied to all inputs
-                continue
-
-            if all(dim_bcast_inp == elem_bcast for dim_bcast_inp in dim_bcast_inputs):
-                # This dim is not broadcasted for any of the inputs, original index can be applied to all inputs
-                continue
-
-            # Some dims are broadcasted, so we need to adapt their indices
-            # Slice indexing keeps the dimension, so we use a full slice for broadcasted inputs
-            # Integer indexing drops the dimension, so we index by zero for the broadcsated inputs
-            safe_bcast_dim_idx = slice(None) if isinstance(dim_idx, slice) else 0
-            for inp_idx, dim_bcast_inp in zip(new_idxs, dim_bcast_inputs, strict=True):
-                if dim_bcast_inp:
-                    inp_idx[dim] = safe_bcast_dim_idx
-
-        indexed_inputs = [
-            inp[tuple(new_idx)]
-            for inp, new_idx in zip(elem_inputs, new_idxs, strict=True)
-        ]
+            new_idx = []
+            for dim, dim_idx in enumerate(idx_tuple):
+                if dim < offset:
+                    # Implicit dim for this input: skip entirely
+                    continue
+                if aligned_bc[dim] and not elem_bcast[dim]:
+                    # Input is broadcastable but output isn't: adapt index
+                    new_idx.append(slice(None) if isinstance(dim_idx, slice) else 0)
+                else:
+                    new_idx.append(dim_idx)
+            indexed_inputs.append(inp[tuple(new_idx)] if new_idx else inp)
 
     [old_out] = node.outputs
 

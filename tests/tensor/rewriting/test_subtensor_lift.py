@@ -99,11 +99,10 @@ class TestLocalSubtensorOfBatchDims:
         # assert check_stack_trace(f, ops_to_check=Subtensor)
 
         prog = f.maker.fgraph.toposort()
-        assert isinstance(prog[0].op, DimShuffle)
-        assert isinstance(prog[1].op.scalar_op, ps.Composite)  # Composite{add,exp}
+        assert isinstance(prog[0].op.scalar_op, ps.Composite)  # Composite{add,exp}
         # first subtensor
-        assert isinstance(prog[2].op, Subtensor)
-        assert len(prog) == 3
+        assert isinstance(prog[1].op, Subtensor)
+        assert len(prog) == 2
 
         x_test = np.array([[0, 1], [2, 3]]).astype(x.dtype)
         y_test = np.array([4, 5]).astype(y.dtype)
@@ -167,6 +166,26 @@ class TestLocalSubtensorOfBatchDims:
         np.testing.assert_allclose(
             opt_out.eval({x: x_test, y: y_test}, **eval_kwargs),
             out.eval({x: x_test, y: y_test}, **eval_kwargs),
+        )
+
+    def test_elemwise_mixed_ndim(self):
+        """Test local_subtensor_of_batch_dims with mixed-ndim Elemwise inputs."""
+        rng = np.random.default_rng(258)
+        x = pt.matrix("x", shape=(5, 3))
+        y = pt.vector("y", shape=(3,))
+        x_test = rng.normal(size=x.type.shape).astype(x.dtype)
+        y_test = rng.normal(size=y.type.shape).astype(y.dtype)
+
+        # Index into (matrix + vector) — vector has implicit leading dim
+        out = add(x, y)[2]
+        expected_out = add(x[2], y)
+        opt_out = rewrite_graph(out)
+        assert equal_computations([opt_out], [expected_out]), debugprint(
+            [expected_out, opt_out], print_type=True
+        )
+        np.testing.assert_allclose(
+            opt_out.eval({x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE),
+            out.eval({x: x_test, y: y_test}, mode=NO_OPTIMIZATION_MODE),
         )
 
     def test_elemwise_multiple_clients(self):

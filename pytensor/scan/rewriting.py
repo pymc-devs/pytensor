@@ -476,21 +476,26 @@ def scan_push_out_seq(fgraph, node):
             and isinstance(nd.op, Elemwise)
         ):
             outside_ins = []
+            has_time_dim = []  # Track which inputs have a time dimension
             depends_on_seqs = False
 
             for x in nd.inputs:
                 if x in inner_non_seqs_set:
                     _idx = inner_non_seqs_map[x]
                     new_input = outer_non_seqs[_idx]
+                    has_time_dim.append(False)
                 elif x in inner_seqs_set:
                     new_input = outer_seqs[inner_seqs_map[x]]
+                    has_time_dim.append(True)
                     depends_on_seqs = True
                 elif x in to_replace_set:
                     new_input = replace_with_out[to_replace_map[x]]
+                    has_time_dim.append(True)
                     depends_on_seqs = True
                 else:
                     assert isinstance(x, Constant)
                     new_input = x
+                    has_time_dim.append(False)
 
                 outside_ins.append(new_input)
 
@@ -501,6 +506,20 @@ def scan_push_out_seq(fgraph, node):
                 # to pull sequence-dependant computation out of
                 # scan.
                 continue
+
+            # Inputs with a time dimension (sequences, previously pushed-out
+            # results) have shape (n_steps, *inner_data_shape).  When inner
+            # inputs have mixed ndims, the time dimension of a lower-ndim
+            # sequence can collide with data dimensions of higher-ndim
+            # non-sequences during broadcasting.  Expand time-dim inputs
+            # with trailing broadcast dims so time stays separate from data.
+            inner_out_ndim = max(x.type.ndim for x in nd.inputs)
+            for i, (x, inp) in enumerate(zip(nd.inputs, outside_ins)):
+                if has_time_dim[i]:
+                    n_trailing = inner_out_ndim - x.type.ndim
+                    if n_trailing > 0:
+                        order = list(range(inp.type.ndim)) + ["x"] * n_trailing
+                        outside_ins[i] = inp.dimshuffle(order)
 
             to_remove_set.add(nd)
 

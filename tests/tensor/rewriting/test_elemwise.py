@@ -126,12 +126,11 @@ class TestDimshuffleLift:
         e = x + y + z
         g = FunctionGraph([x, y, z], [e], clone=False)
         dimshuffle_lift.rewrite(g)
+        # With implicit broadcasting, no DimShuffle padding exists to lift
         assert equal_computations(
             g.outputs,
-            [(x.dimshuffle("x", "x", 0) + y.dimshuffle("x", 0, 1)) + z],
+            [(x + y) + z],
         )
-        # Check stacktrace was copied over correctly after rewrite was applied
-        assert check_stack_trace(g, ops_to_check="all")
 
     def test_recursive_lift(self):
         v = vector("v", dtype="float64")
@@ -139,9 +138,14 @@ class TestDimshuffleLift:
         out = ((v + 42) * (m + 84)).T
         g = FunctionGraph([v, m], [out], clone=False)
         new_out = local_dimshuffle_lift.transform(g, g.outputs[0].owner)
+        from pytensor.tensor.basic import constant
+
         assert equal_computations(
             new_out,
-            [(v.dimshuffle(0, "x") + 42) * (m.T + 84)],
+            [
+                (v.dimshuffle(0, "x") + constant(42).dimshuffle("x", "x"))
+                * (m.T + constant(84).dimshuffle("x", "x"))
+            ],
         )
         # Check stacktrace was copied over correctly after rewrite was applied
         new_g = FunctionGraph(g.inputs, new_out, clone=False)
@@ -557,7 +561,7 @@ class TestFusion:
                 (fwx.sum()) + (fwx) + (fy + fz),
                 (fw, fx, fy, fz),
                 (fwv, fxv, fyv, fzv),
-                4,
+                3,
                 (fwv + fxv).sum() + fwv + fxv + fyv + fzv,
                 "float32",
             ),
@@ -884,18 +888,18 @@ class TestFusion:
                 fv + fy**fz,
                 (fv, fy, fz),
                 (fvv, fyv, fzv),
-                2,
+                1,
                 fvv + fyv**fzv,
                 "float32",
-            ),  # fused with a dimshuffle #65
+            ),  # 65
             (
                 fv - fy + tanh(fz),
                 (fv, fy, fz),
                 (fvv, fyv, fzv),
-                2,
+                1,
                 fvv - fyv + np.tanh(fzv),
                 "float32",
-            ),  # fused with a dimshuffle
+            ),
             # Cases where the same input is reused many times.
             (
                 mul(fx, fx, fx, fx),
@@ -932,13 +936,12 @@ class TestFusion:
                 1e-5,
             ),  # 70
             # Cases with different broadcast pattern. They should not
-            # be merged as this would duplicate computation
-            # The graph should have 2 elemwise and 1 dimshuffle
+            # be merged as this would duplicate computation.
             (
                 fx * sin(fs),
                 (fx, fs),
                 (fxv, fsv),
-                3,
+                2,
                 fxv * np.sin(fsv),
                 "float32",
             ),
@@ -993,7 +996,7 @@ class TestFusion:
                 ),
                 (fx,),
                 (fxv,),
-                4,
+                3,
                 (np.sum(fxv + 5) * np.exp(fxv) / (fxv + 5),),
                 ("float32",),
             ),
@@ -1341,17 +1344,16 @@ class TestFusion:
 
         f = pytensor.function([xs, xm], esm, mode=self.mode)
         apply_nodes = f.maker.fgraph.toposort()
-        assert len(apply_nodes) == 3
-        assert isinstance(apply_nodes[0].op, DimShuffle)
+        assert len(apply_nodes) == 2
         # Inner Vector output Composite
-        assert isinstance(apply_nodes[1].op.scalar_op, Composite)
-        assert {node.op for node in apply_nodes[1].op.scalar_op.fgraph.apply_nodes} == {
+        assert isinstance(apply_nodes[0].op.scalar_op, Composite)
+        assert {node.op for node in apply_nodes[0].op.scalar_op.fgraph.apply_nodes} == {
             ps.add,
             ps.log,
         }
         # Outer Matrix output Composite
-        assert isinstance(apply_nodes[2].op.scalar_op, Composite)
-        assert {node.op for node in apply_nodes[2].op.scalar_op.fgraph.apply_nodes} == {
+        assert isinstance(apply_nodes[1].op.scalar_op, Composite)
+        assert {node.op for node in apply_nodes[1].op.scalar_op.fgraph.apply_nodes} == {
             ps.sub,
             ps.exp,
             ps.mul,
@@ -1570,11 +1572,14 @@ def test_local_inline_composite_constants(op, np_op, const_shape):
     fn = pytensor.function(
         [x, y], out, mode=get_default_mode().including("specialize", "fusion")
     )
-    # There should be a single Composite after optimization
-    [node] = [
-        node for node in fn.maker.fgraph.apply_nodes if isinstance(node.op, Elemwise)
+    # There should be a single Composite Elemwise after optimization
+    composite_nodes = [
+        node
+        for node in fn.maker.fgraph.apply_nodes
+        if isinstance(node.op, Elemwise) and isinstance(node.op.scalar_op, Composite)
     ]
-    assert isinstance(node.op.scalar_op, Composite)
+    assert len(composite_nodes) == 1
+    [node] = composite_nodes
     assert len(node.inputs) == 2  # x and y, but not const
 
     x_test_value = np.arange(5).astype(config.floatX)

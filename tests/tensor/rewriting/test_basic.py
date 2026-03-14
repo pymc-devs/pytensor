@@ -246,7 +246,7 @@ def test_local_useless_fill():
     assert np.array_equal(res, exp_res)
 
 
-def test_local_fill_to_alloc():
+def test_local_second_to_alloc():
     x = dvector()
     m = dmatrix()
 
@@ -255,8 +255,8 @@ def test_local_fill_to_alloc():
 
     y = pt.fill(m, x)
 
-    mode = rewrite_mode.including("stabilize", "local_fill_to_alloc").excluding(
-        "useless", "local_useless_fill"
+    mode = rewrite_mode.including("stabilize", "local_second_to_alloc").excluding(
+        "useless", "local_useless_fill", "local_useless_alloc"
     )
 
     f = function([m, x], y, mode=mode)
@@ -325,7 +325,7 @@ class TestLocalCanonicalizeAlloc:
 
         # The rewrite `locall_fill_to_alloc` should call `pt.alloc`,
         # which should return `x` and not `alloc(x, ...)`
-        f = function([x], [y], mode=rewrite_mode.including("local_fill_to_alloc"))
+        f = function([x], [y], mode=rewrite_mode.including("local_second_to_alloc"))
         assert not any(isinstance(node.op, Alloc) for node in f.maker.fgraph.toposort())
 
     def test_basic_tile(self):
@@ -562,7 +562,9 @@ class TestTile:
 
 class TestUselessElemwise:
     def setup_method(self):
-        self.mode = get_default_mode().including("canonicalize", "local_fill_to_alloc")
+        self.mode = get_default_mode().including(
+            "canonicalize", "local_second_to_alloc"
+        )
 
     def test_eq(self):
         x = dmatrix()
@@ -1935,11 +1937,8 @@ class TestLocalElemwiseAlloc:
             self.alloc_w_dep_broad2 + self.mat,
             mode=self.fast_run_mode,
         )
-        # This graph requires one outer Alloc and an Assert
-        # To make sure `mat` is square since we end up doing
-        # broadcast_to(x, mat[..., None].shape) + mat[None, ...]
         self.verify_op_count(func, 1, Alloc)
-        self.verify_op_count(func, 1, Assert)
+        self.verify_op_count(func, 0, Assert)
 
     def test_remove_alloc_w_dimshuffle(self):
         func = function(

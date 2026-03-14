@@ -1221,7 +1221,10 @@ def local_specify_shape_lift(fgraph, node):
                 if (not bcast and not isinstance(dim.type, NoneTypeT))
             }
             new_elem_inps = elem_inps.copy()
+            out_ndim = node.outputs[0].type.ndim
             for i, elem_inp in enumerate(elem_inps):
+                if elem_inp.type.ndim != out_ndim:
+                    continue
                 if all(
                     bcast_dim is False
                     for dim, bcast_dim in enumerate(elem_inp.type.broadcastable)

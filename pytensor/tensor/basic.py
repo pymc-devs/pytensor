@@ -379,7 +379,7 @@ def _get_underlying_scalar_constant_value(
                     ret = [[None]]
                     v.owner.op.perform(v.owner, const, ret)
                     return np.asarray(ret[0][0].copy())
-            # In fast_compile, we don't enable local_fill_to_alloc, so
+            # In fast_compile, we don't enable local_second_to_alloc, so
             # we need to investigate Second as Alloc. So elemwise
             # don't disable the check for Second.
             elif isinstance(op, Elemwise):

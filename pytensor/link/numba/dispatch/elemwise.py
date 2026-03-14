@@ -383,7 +383,9 @@ def numba_funcify_Elemwise(op, node, **kwargs):
                 type(op),
                 tuple(op.inplace_pattern.items()),
                 input_bc_patterns,
+                output_bc_patterns,
                 scalar_cache_key,
+                2,  # cache version
             )
         )
         elemwise_key = sha256(elemwise_key.encode()).hexdigest()

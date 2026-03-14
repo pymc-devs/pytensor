@@ -11,7 +11,7 @@ from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
-from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
+from pytensor.graph.replace import _vectorize_node
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.basic import failure_code
 from pytensor.link.c.op import COp, ExternalCOp, OpenMPOp
@@ -38,6 +38,46 @@ from pytensor.tensor.utils import (
 )
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import uniq, unzip
+
+
+def aligned_broadcastable_of(inp, out_ndim):
+    """Return broadcastable left-padded with True to out_ndim.
+
+    When Elemwise inputs have different ndims, the shorter ones are implicitly
+    left-padded with broadcastable (size-1) dimensions. This helper makes that
+    padding explicit, so callers can reason about aligned dimensions without
+    ad-hoc offset arithmetic.
+    """
+    inp_bc = inp.type.broadcastable
+    return (True,) * (out_ndim - len(inp_bc)) + inp_bc
+
+
+def pad_to_broadcastable(var, target):
+    """Pad var with leading broadcastable dims to match target, or return None.
+
+    If the only difference between var and target is missing leading broadcastable
+    dims, use shape_padleft (a zero-copy DimShuffle) instead of broadcast_arrays/alloc.
+    Returns None if a genuine broadcast is needed.
+    """
+    if var.type.broadcastable == target.type.broadcastable:
+        return var
+    if aligned_broadcastable_of(var, target.type.ndim) == target.type.broadcastable:
+        from pytensor.tensor.shape import shape_padleft
+
+        return shape_padleft(var, target.type.ndim - var.type.ndim)
+    return None
+
+
+def aligned_broadcastable(node, input_idx):
+    """Return an Elemwise input's broadcastable left-padded with True to output ndim."""
+    return aligned_broadcastable_of(node.inputs[input_idx], node.outputs[0].type.ndim)
+
+
+def aligned_shape(node, input_idx):
+    """Return an Elemwise input's shape left-padded with 1 to output ndim."""
+    out_ndim = node.outputs[0].type.ndim
+    inp_shape = node.inputs[input_idx].type.shape
+    return (1,) * (out_ndim - len(inp_shape)) + inp_shape
 
 
 class DimShuffle(ExternalCOp):
@@ -383,7 +423,7 @@ class Elemwise(OpenMPOp):
 
     def get_output_info(self, *inputs):
         """Return the outputs dtype and broadcastable pattern and the
-        dimshuffled inputs.
+        (unchanged) inputs.
 
         """
         shadow = self.scalar_op.make_node(
@@ -392,29 +432,16 @@ class Elemwise(OpenMPOp):
 
         target_length = max(input.type.ndim for input in inputs)
 
-        args = []
-        for input in inputs:
-            length = input.type.ndim
-            difference = target_length - length
-            if not difference:
-                args.append(input)
-            else:
-                args.append(input.dimshuffle(["x"] * difference + list(range(length))))
-        inputs = args
+        # Left-pad shorter input shapes with 1 before broadcasting
+        padded_shapes = [
+            (1,) * (target_length - inp.type.ndim) + inp.type.shape for inp in inputs
+        ]
 
-        # HERE: all the broadcast dims have the same length now
-
-        # cleverness: we iterate over the first, second, third broadcast flag
-        # of all inputs in parallel... the all() gives us each output
-        # broadcastable bit in turn.
-
-        # it is multiplied by nout because Elemwise supports multiple outputs
-        # (nout of them)
         try:
             out_shapes = [
                 [
-                    broadcast_static_dim_lengths(shape)
-                    for shape in zip(*[inp.type.shape for inp in inputs], strict=True)
+                    broadcast_static_dim_lengths(dims)
+                    for dims in zip(*padded_shapes, strict=True)
                 ]
             ] * shadow.nout
         except ValueError:
@@ -426,8 +453,10 @@ class Elemwise(OpenMPOp):
         inplace_pattern = self.inplace_pattern
         if inplace_pattern:
             for overwriter, overwritten in inplace_pattern.items():
+                # Left-pad the overwritten input's shape before comparing
+                padded_in_shape = padded_shapes[overwritten]
                 for out_s, in_s in zip(
-                    out_shapes[overwriter], inputs[overwritten].type.shape, strict=True
+                    out_shapes[overwriter], padded_in_shape, strict=True
                 ):
                     if in_s == 1 and out_s != 1:
                         raise ValueError(
@@ -450,9 +479,9 @@ class Elemwise(OpenMPOp):
 
     def make_node(self, *inputs):
         """
-        If the inputs have different number of dimensions, their shape
-        is left-completed to the greatest number of dimensions with 1s
-        using DimShuffle.
+        If the inputs have different number of dimensions, broadcasting
+        is handled implicitly by left-padding shorter shapes with 1s.
+        No DimShuffle nodes are inserted.
         """
         inputs = [as_tensor_variable(i) for i in inputs]
         out_dtypes, out_shapes, inputs = self.get_output_info(*inputs)
@@ -516,22 +545,30 @@ class Elemwise(OpenMPOp):
         rval = self._bgrad(inputs, outs, ograds)
 
         # sum out the broadcasted dimensions
+        out_ndim = outs[0].type.ndim
         for i, ipt in enumerate(inputs):
             if isinstance(rval[i].type, NullType | DisconnectedType):
                 continue
 
+            # Left-pad input shape with 1s to align with output dims
+            offset = out_ndim - ipt.type.ndim
+            padded_shape = (1,) * offset + ipt.type.shape
+
             # List of all the dimensions that are broadcastable for input[i] so
-            # we can sum over them
-            # TODO: only count dimensions that were effectively broadcasted
+            # we can sum over them (including implicit leading dims)
             to_sum = [
                 j
-                for j, in_s in enumerate(ipt.type.shape)
+                for j, in_s in enumerate(padded_shape)
                 if in_s == 1 and outs[0].type.shape[j] != 1
             ]
 
             if to_sum:
                 sr = pt_sum(rval[i], axis=to_sum, keepdims=True)
                 rval[i] = sr
+
+            # Squeeze out the implicit leading dimensions
+            if offset > 0:
+                rval[i] = rval[i].squeeze(axis=tuple(range(offset)))
 
         return rval
 
@@ -561,7 +598,7 @@ class Elemwise(OpenMPOp):
                 f"{self.scalar_op!s}.grad returned {type(scalar_igrads)!s} instead of list or tuple"
             )
 
-        nd = inputs[0].type.ndim  # this is the same for everyone
+        nd = outputs[0].type.ndim  # this is the same for everyone
 
         def transform(r):
             # From a graph of ScalarOps, make a graph of Broadcast ops.
@@ -730,14 +767,14 @@ class Elemwise(OpenMPOp):
 
     @staticmethod
     def _check_runtime_broadcast(node, inputs):
-        # zip strict not specified because we are in a hot loop
-        for dims_and_bcast in zip(
-            *[
-                zip(input.shape, sinput.type.broadcastable)
-                for input, sinput in zip(inputs, node.inputs)
-            ],
-            strict=False,
-        ):
+        target_ndim = node.outputs[0].type.ndim
+        # Left-pad each input's (shape, broadcastable) pairs to target_ndim
+        padded = []
+        for input, sinput in zip(inputs, node.inputs):
+            offset = target_ndim - sinput.type.ndim
+            shape_bcast = tuple(zip(input.shape, sinput.type.broadcastable))
+            padded.append(((1, True),) * offset + shape_bcast)
+        for dims_and_bcast in zip(*padded):
             if any(d != 1 for d, _ in dims_and_bcast) and (1, False) in dims_and_bcast:
                 raise ValueError(
                     "Runtime broadcasting not allowed. "
@@ -748,7 +785,12 @@ class Elemwise(OpenMPOp):
     def infer_shape(self, fgraph, node, i_shapes) -> list[tuple[TensorVariable, ...]]:
         from pytensor.tensor.extra_ops import broadcast_shape
 
-        out_shape = broadcast_shape(*i_shapes, arrays_are_shapes=True)
+        # Left-pad shorter input shapes with 1s to match max ndim,
+        # mirroring how Elemwise implicitly broadcasts inputs.
+        max_ndim = max((len(s) for s in i_shapes), default=0)
+        _one = as_tensor_variable(1, dtype="int64")
+        padded = [(_one,) * (max_ndim - len(s)) + s for s in i_shapes]
+        out_shape = broadcast_shape(*padded, arrays_are_shapes=True)
         return [tuple(as_tensor_variable(s) for s in out_shape)] * len(node.outputs)
 
     def _c_all(self, node, nodename, inames, onames, sub):
@@ -821,14 +863,18 @@ class Elemwise(OpenMPOp):
 
         # for each input:
         # same as range(ndim), but with 'x' at all broadcastable positions
-        orders = [
-            [(s == 1 and "x") or i for i, s in enumerate(input.type.shape)]
-            for input in inputs
-        ]
+        # Left-pad shorter inputs with 'x' for implicit broadcast dims
+        target_ndim = node.outputs[0].type.ndim
+        orders = []
+        for input in inputs:
+            offset = target_ndim - input.type.ndim
+            order = ["x"] * offset + [
+                ("x" if s == 1 else i) for i, s in enumerate(input.type.shape)
+            ]
+            orders.append(order)
 
-        # number of nested loops we will need (all inputs have same
-        # dimensionality)
-        nnested = len(orders[0])
+        # number of nested loops we will need
+        nnested = target_ndim
         sub = dict(sub)
         for i, (input, iname) in enumerate(zip(inputs, inames, strict=True)):
             # the c generators will substitute the input names for
@@ -1017,7 +1063,11 @@ class Elemwise(OpenMPOp):
                     or all(
                         len(set(inp_shape)) == 1 and None not in inp_shape
                         for inp_shape in zip(
-                            *(inp.type.shape for inp in node.inputs), strict=True
+                            *[
+                                (1,) * (target_ndim - inp.type.ndim) + inp.type.shape
+                                for inp in node.inputs
+                            ],
+                            strict=True,
                         )
                     )
                 ):
@@ -1099,7 +1149,7 @@ class Elemwise(OpenMPOp):
         return support_code
 
     def c_code_cache_version_apply(self, node):
-        version = [17]  # the version corresponding to the c code in this Op
+        version = [18]  # the version corresponding to the c code in this Op
 
         # now we insert versions for the ops on which we depend...
         scalar_node = Apply(
@@ -1668,7 +1718,33 @@ def _get_vector_length_Elemwise(op, var):
     raise ValueError(f"Length of {var} cannot be determined")
 
 
-_vectorize_node.register(Elemwise, _vectorize_not_needed)
+def _vectorize_elemwise(op, node, *batched_inputs):
+    """Vectorize an Elemwise node with mixed-ndim inputs.
+
+    When inputs have different ndims, right-pad shorter inputs with
+    trailing broadcastable dims so that batch dims (added at the left
+    by vectorize_graph) remain aligned across all inputs.
+    """
+    core_ndims = [inp.type.ndim for inp in node.inputs]
+    max_core_ndim = max(core_ndims, default=0)
+
+    if all(cn == max_core_ndim for cn in core_ndims):
+        return op.make_node(*batched_inputs).outputs
+
+    new_inputs = []
+    for old_inp, new_inp, core_ndim in zip(
+        node.inputs, batched_inputs, core_ndims, strict=True
+    ):
+        n_trailing = max_core_ndim - core_ndim
+        if n_trailing > 0 and new_inp.type.ndim > core_ndim:
+            order = list(range(new_inp.type.ndim)) + ["x"] * n_trailing
+            new_inputs.append(new_inp.dimshuffle(order))
+        else:
+            new_inputs.append(new_inp)
+    return op.make_node(*new_inputs).outputs
+
+
+_vectorize_node.register(Elemwise, _vectorize_elemwise)
 
 
 @_vectorize_node.register(DimShuffle)

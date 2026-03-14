@@ -9,11 +9,11 @@ import scipy.linalg as scipy_linalg
 from scipy.linalg import get_lapack_funcs
 
 import pytensor
-from pytensor import ifelse
 from pytensor import tensor as pt
 from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.ifelse import ifelse
 from pytensor.raise_op import Assert, CheckAndRaise
 from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
