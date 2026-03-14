@@ -14,13 +14,10 @@ import numpy as np
 from pytensor import scalar as ps
 from pytensor import tensor as pt
 from pytensor.compile.profiling import ProfileStats
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable, equal_computations
-from pytensor.graph.op import get_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.type import HasDataType
-from pytensor.graph.utils import TestValueError
 from pytensor.tensor.basic import AllocEmpty, cast
 from pytensor.tensor.subtensor import set_subtensor
 from pytensor.tensor.variable import TensorConstant
@@ -73,15 +70,6 @@ def safe_new(
         else:
             nw_x = x.type()
         nw_x.name = nw_name
-        if config.compute_test_value != "off":
-            # Copy test value, cast it if necessary
-            try:
-                x_test_value = get_test_value(x)
-            except TestValueError:
-                pass
-            else:
-                # This clause is executed if no exception was raised
-                nw_x.tag.test_value = nw_x.type.filter(x_test_value)
         return nw_x
     else:
         try:
@@ -100,15 +88,6 @@ def safe_new(
 
     nw_x = x.type()
     nw_x.name = nw_name
-    # Preserve test values so that the `compute_test_value` option can be used.
-    # The test value is deep-copied to ensure there can be no interactions
-    # between test values, due to inplace operations for instance. This may
-    # not be the most efficient memory-wise, though.
-    if config.compute_test_value != "off":
-        try:
-            nw_x.tag.test_value = copy.deepcopy(get_test_value(x))
-        except TestValueError:
-            pass
 
     return type_cast(Variable, nw_x)
 

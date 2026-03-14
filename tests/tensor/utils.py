@@ -542,7 +542,6 @@ def makeTester(
                 # instantiated on the following bad inputs: %s"
                 # % (self.op, testname, node, inputs))
 
-        @config.change_flags(compute_test_value="off")
         @pytest.mark.skipif(skip, reason="Skipped")
         def test_bad_compile(self):
             for testname, inputs in self.bad_compile.items():
@@ -560,7 +559,6 @@ def makeTester(
                 with pytest.raises(Exception):
                     inplace_func([], node.outputs, mode=mode, name="test_bad_runtime")
 
-        @config.change_flags(compute_test_value="off")
         @pytest.mark.skipif(skip, reason="Skipped")
         def test_bad_runtime(self):
             for testname, inputs in self.bad_runtime.items():

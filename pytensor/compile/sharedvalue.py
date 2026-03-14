@@ -133,9 +133,6 @@ class SharedVariable(Variable):
         else:
             self.container.value = copy.deepcopy(new_value)
 
-    def get_test_value(self):
-        return self.get_value(borrow=True, return_internal_type=True)
-
     def clone(self, **kwargs):
         name = kwargs.get("name", self.name)
         cp = self.__class__(

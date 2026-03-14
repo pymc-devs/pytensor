@@ -537,17 +537,6 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         assert opt_res.shape_feature.shape_of[x] is None
         assert opt_res.shape_feature.shape_of[z][0].data == 2
 
-    @config.change_flags(compute_test_value="raise")
-    def test_compute_test_value(self):
-        x = scalar("x")
-        x.tag.test_value = np.array(1.0, dtype=config.floatX)
-        op = OpFromGraph([x], [x**3])
-        y = scalar("y")
-        y.tag.test_value = np.array(1.0, dtype=config.floatX)
-        f = op(y)
-        grad_f = grad(f, y)
-        assert grad_f.tag.test_value is not None
-
     def test_make_node_shared(self):
         """Make sure we can provide `OpFromGraph.make_node` new shared inputs and get a valid `OpFromGraph`."""
 

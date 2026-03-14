@@ -76,11 +76,3 @@ There is no automatic rewrite replacing a ``switch`` with a
 broadcasted scalar to an ``ifelse``, as this is not always faster. See
 this `ticket <http://www.assembla.com/spaces/theano/tickets/764>`_.
 
-.. note::
-
-   If you use :ref:`test values <test_values>`, then all branches of
-   the IfElse will be computed. This is normal, as using test_value
-   means everything will be computed when we build it, due to Python's
-   greedy evaluation and the semantic of test value. As we build both
-   branches, they will be executed for test values. This doesn't cause
-   any changes during the execution of the compiled PyTensor function.

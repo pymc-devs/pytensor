@@ -4,7 +4,6 @@ from typing import Any, Literal, cast, overload
 import numpy as np
 from numpy import broadcast_shapes, empty
 
-from pytensor import config
 from pytensor.compile.builders import OpFromGraph
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import FunctionGraph
@@ -424,29 +423,28 @@ class Blockwise(COp):
         batch_ndim = self.batch_ndim(outputs[0].owner)
 
         # Obtain core_op gradients
-        with config.change_flags(compute_test_value="off"):
-            core_inputs = [
-                tensor(
-                    dtype=inp.type.dtype,
-                    shape=inp.type.shape[batch_ndim:],
-                )
-                for inp in inputs
-            ]
-            core_outputs = self._create_dummy_core_node(core_inputs).outputs
-
-            # Define core output_gradients, but keep original disconnected/null output_gradients (if any)
-            core_output_gradients = [
-                output_grad
-                if isinstance(output_grad.type, NullType | DisconnectedType)
-                else core_output.type()
-                for output_grad, core_output in zip(
-                    output_gradients, core_outputs, strict=True
-                )
-            ]
-
-            core_input_gradients = self.core_op.L_op(
-                core_inputs, core_outputs, core_output_gradients
+        core_inputs = [
+            tensor(
+                dtype=inp.type.dtype,
+                shape=inp.type.shape[batch_ndim:],
             )
+            for inp in inputs
+        ]
+        core_outputs = self._create_dummy_core_node(core_inputs).outputs
+
+        # Define core output_gradients, but keep original disconnected/null output_gradients (if any)
+        core_output_gradients = [
+            output_grad
+            if isinstance(output_grad.type, NullType | DisconnectedType)
+            else core_output.type()
+            for output_grad, core_output in zip(
+                output_gradients, core_outputs, strict=True
+            )
+        ]
+
+        core_input_gradients = self.core_op.L_op(
+            core_inputs, core_outputs, core_output_gradients
+        )
 
         # Vectorize core gradients to original inputs
         input_gradients = list(

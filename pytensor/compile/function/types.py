@@ -1463,7 +1463,6 @@ class FunctionMaker:
 
             with config.change_flags(
                 mode=mode,
-                compute_test_value=config.compute_test_value_opt,
                 traceback__limit=config.traceback__compile_limit,
             ):
                 rewriter_profile = rewriter(fgraph)
@@ -1830,8 +1829,7 @@ def orig_function(
             fgraph=fgraph,
             trust_input=trust_input,
         )
-        with config.change_flags(compute_test_value="off"):
-            fn = m.create(defaults)
+        fn = m.create(defaults)
     finally:
         if profile and fn:
             t2 = time.perf_counter()

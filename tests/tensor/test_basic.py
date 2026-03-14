@@ -571,14 +571,6 @@ class TestAsTensorVariable:
             _ = as_tensor_variable(bad_apply_var)
 
     def test_list(self):
-        # Make sure our exception handling during `Sequence` processing doesn't
-        # mask exceptions caused by unrelated logic (e.g.  computing test
-        # values)
-        with config.change_flags(compute_test_value="raise"), pytest.raises(ValueError):
-            a = lscalar("a")
-            y = (a, a, 1)
-            _ = as_tensor_variable(y)
-
         bad_apply_var = ApplyDefaultTestOp([0, 1]).make_node(self.x)
         with pytest.raises(TypeError):
             as_tensor_variable(bad_apply_var)
@@ -1094,17 +1086,15 @@ class TestTriangle:
 
 
 class TestNonzero:
-    @config.change_flags(compute_test_value="raise")
     def test_nonzero(self):
         def check(m):
             m_symb = tensor(dtype=m.dtype, shape=(None,) * m.ndim)
-            m_symb.tag.test_value = m
 
             res_tuple_pt = nonzero(m_symb, return_matrix=False)
             res_matrix_pt = nonzero(m_symb, return_matrix=True)
 
-            res_tuple = tuple(r.tag.test_value for r in res_tuple_pt)
-            res_matrix = res_matrix_pt.tag.test_value
+            res_tuple = tuple(r.eval({m_symb: m}) for r in res_tuple_pt)
+            res_matrix = res_matrix_pt.eval({m_symb: m})
 
             assert np.allclose(res_matrix, np.vstack(np.nonzero(m)))
 
@@ -1123,15 +1113,13 @@ class TestNonzero:
         rand2d[:4] = 0
         check(rand2d)
 
-    @config.change_flags(compute_test_value="raise")
     def test_flatnonzero(self):
         def check(m):
             m_symb = tensor(dtype=m.dtype, shape=(None,) * m.ndim)
-            m_symb.tag.test_value = m
 
             res_pt = flatnonzero(m_symb)
 
-            result = res_pt.tag.test_value
+            result = res_pt.eval({m_symb: m})
             assert np.allclose(result, np.flatnonzero(m))
 
         rand0d = np.empty(())
@@ -1152,15 +1140,13 @@ class TestNonzero:
         f = function([], out)
         assert np.array_equal(f(), np.flatnonzero(m))
 
-    @config.change_flags(compute_test_value="raise")
     def test_nonzero_values(self):
         def check(m):
             m_symb = tensor(dtype=m.dtype, shape=(None,) * m.ndim)
-            m_symb.tag.test_value = m
 
             res_pt = nonzero_values(m_symb)
 
-            result = res_pt.tag.test_value
+            result = res_pt.eval({m_symb: m})
             assert np.allclose(result, m[np.nonzero(m)], equal_nan=True)
 
         rand0d = np.empty(())
@@ -2068,7 +2054,6 @@ class TestJoinAndSplit:
         assert np.allclose(o1, m.get_value(borrow=True))
         assert np.allclose(o2, m.get_value(borrow=True)[4:])
 
-    @config.change_flags(compute_test_value="off")
     def test_split_neg(self):
         rng = np.random.default_rng(seed=utt.fetch_seed())
         m = self.shared(rng.random((4, 6)).astype(self.floatX))
@@ -3486,11 +3471,10 @@ class TestGetUnderlyingScalarConstantValue:
         a = Assert()(c, c > 1)
         assert get_underlying_scalar_constant_value(a) == 2
 
-        with config.change_flags(compute_test_value="off"):
-            # condition is always False
-            a = Assert()(c, c > 2)
-            with pytest.raises(NotScalarConstantError):
-                get_underlying_scalar_constant_value(a)
+        # condition is always False
+        a = Assert()(c, c > 2)
+        with pytest.raises(NotScalarConstantError):
+            get_underlying_scalar_constant_value(a)
 
         # condition is not constant
         a = Assert()(c, c > x)

@@ -1,6 +1,3 @@
-import copy
-import sys
-import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import (
@@ -11,15 +8,11 @@ from typing import (
     cast,
 )
 
-import pytensor
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.traversal import io_toposort
 from pytensor.graph.utils import (
     MetaObject,
-    TestValueError,
     add_tag_trace,
-    get_variable_trace_string,
 )
 
 
@@ -53,85 +46,6 @@ class ThunkType(Protocol[C]):
 def is_thunk_type(thunk: ThunkCallableType) -> ThunkType:
     res = cast(ThunkType, thunk)
     return res
-
-
-def compute_test_value(node: Apply):
-    r"""Computes the test value of a node.
-
-    Parameters
-    ----------
-    node : Apply
-        The `Apply` node for which the test value is computed.
-
-    Returns
-    -------
-    None
-        The `tag.test_value`\s are updated in each `Variable` in `node.outputs`.
-
-    """
-    # Gather the test values for each input of the node
-    storage_map = {}
-    compute_map = {}
-    for i, ins in enumerate(node.inputs):
-        try:
-            storage_map[ins] = [ins.get_test_value()]
-            compute_map[ins] = [True]
-        except TestValueError:
-            # no test-value was specified, act accordingly
-            if config.compute_test_value == "warn":
-                warnings.warn(
-                    f"Warning, Cannot compute test value: input {i} ({ins}) of Op {node} missing default value",
-                    stacklevel=2,
-                )
-                return
-            elif config.compute_test_value == "raise":
-                detailed_err_msg = get_variable_trace_string(ins)
-
-                raise ValueError(
-                    f"Cannot compute test value: input {i} ({ins}) of Op {node} missing default value. {detailed_err_msg}"
-                )
-            elif config.compute_test_value == "ignore":
-                return
-            elif config.compute_test_value == "pdb":
-                import pdb
-
-                pdb.post_mortem(sys.exc_info()[2])
-            else:
-                raise ValueError(
-                    f"{config.compute_test_value} is invalid for option config.compute_test_value"
-                )
-
-    # All inputs have test-values; perform the `Op`'s computation
-
-    # The original values should not be destroyed, so we copy the values of the
-    # inputs in `destroy_map`
-    destroyed_inputs_idx = set()
-    if node.op.destroy_map:
-        for i_pos_list in node.op.destroy_map.values():
-            destroyed_inputs_idx.update(i_pos_list)
-    for inp_idx in destroyed_inputs_idx:
-        inp = node.inputs[inp_idx]
-        storage_map[inp] = [copy.copy(storage_map[inp][0])]
-
-    # Prepare `storage_map` and `compute_map` for the outputs
-    for o in node.outputs:
-        storage_map[o] = [None]
-        compute_map[o] = [False]
-
-    # Create a thunk that performs the computation
-    thunk = node.op.make_thunk(node, storage_map, compute_map, no_recycling=[])
-    thunk.inputs = [storage_map[v] for v in node.inputs]
-    thunk.outputs = [storage_map[v] for v in node.outputs]
-
-    thunk()
-
-    for output in node.outputs:
-        # Check that the output has been computed
-        assert compute_map[output][0], (output, storage_map[output][0])
-
-        # Add 'test_value' to output tag, so that downstream `Op`s can use
-        # these numerical values as test values
-        output.tag.test_value = storage_map[output][0]
 
 
 class Op(MetaObject):
@@ -300,9 +214,6 @@ class Op(MetaObject):
             else:
                 for i, n in enumerate(node.outputs):
                     n.name = f"{name}_{i}"
-
-        if config.compute_test_value != "off":
-            compute_test_value(node)
 
         if self.default_output is not None:
             rval = node.outputs[self.default_output]
@@ -654,106 +565,6 @@ class HasInnerGraph(ABC):
     @abstractmethod
     def clone(self) -> Op:
         """Clone the `Op` and its inner-graph."""
-
-
-def get_test_value(v: Any) -> Any:
-    """Get the test value for `v`.
-
-    If input `v` is not already a variable, it is turned into one by calling
-    ``as_tensor_variable(v)``.
-
-    Raises
-    ------
-    ``AttributeError`` if no test value is set.
-
-    """
-    if not isinstance(v, Variable):
-        v = pytensor.tensor.as_tensor_variable(v)
-
-    return v.get_test_value()
-
-
-def missing_test_message(msg: str) -> None:
-    """Display a message saying that some test_value is missing.
-
-    This uses the appropriate form based on ``config.compute_test_value``:
-
-        off:
-            The interactive debugger is off, so we do nothing.
-
-        ignore:
-            The interactive debugger is set to ignore missing inputs, so do
-            nothing.
-
-        warn:
-            Display `msg` as a warning.
-
-
-    Raises
-    ------
-    AttributeError
-        With msg as the exception text.
-
-    """
-    action = config.compute_test_value
-    if action == "raise":
-        raise TestValueError(msg)
-    elif action == "warn":
-        warnings.warn(msg, stacklevel=2)
-    else:
-        assert action in ("ignore", "off")
-
-
-def get_test_values(*args: Variable) -> Any | list[Any]:
-    r"""Get test values for multiple `Variable`\s.
-
-    Intended use:
-
-    .. code-block:: python
-
-        for val_1, ..., val_n in get_debug_values(var_1, ..., var_n):
-            if some condition on val_1, ..., val_n is not met:
-                missing_test_message("condition was not met")
-
-
-    Given a list of variables, `get_debug_values` does one of three things:
-
-    1. If the interactive debugger is off, returns an empty list
-    2. If the interactive debugger is on, and all variables have
-       debug values, returns a list containing a single element.
-       This single element is either:
-
-           a) if there is only one variable, the element is its
-               value
-           b) otherwise, a tuple containing debug values of all
-               the variables.
-
-    3. If the interactive debugger is on, and some variable does
-       not have a debug value, issue a `missing_test_message` about
-       the variable, and, if still in control of execution, return
-       an empty list.
-
-    """
-
-    if config.compute_test_value == "off":
-        return []
-
-    rval = []
-
-    for i, arg in enumerate(args):
-        try:
-            rval.append(get_test_value(arg))
-        except TestValueError:
-            if hasattr(arg, "name") and arg.name is not None:
-                missing_test_message(f"Argument {i} ('{arg.name}') has no test value")
-            else:
-                missing_test_message(f"Argument {i} has no test value")
-            return []
-
-    if len(rval) == 1:
-        return rval
-
-    return [tuple(rval)]
 
 
 def io_connection_pattern(inputs, outputs):

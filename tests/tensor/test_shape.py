@@ -681,28 +681,27 @@ class TestRopLop(RopLopChecker):
         )
 
 
-@config.change_flags(compute_test_value="raise")
 def test_nonstandard_shapes():
     a = tensor3(config.floatX)
-    a.tag.test_value = np.random.random((2, 3, 4)).astype(config.floatX)
+    a_val = np.random.random((2, 3, 4)).astype(config.floatX)
     b = tensor3(config.floatX)
-    b.tag.test_value = np.random.random((2, 3, 4)).astype(config.floatX)
+    b_val = np.random.random((2, 3, 4)).astype(config.floatX)
 
     tl = make_list([a, b])
     tl_shape = shape(tl)
-    assert np.array_equal(tl_shape.get_test_value(), (2, 2, 3, 4))
+    assert np.array_equal(tl_shape.eval({a: a_val, b: b_val}), (2, 2, 3, 4))
 
     # Test specific dim
     tl_shape_i = shape(tl)[0]
     assert isinstance(tl_shape_i.owner.op, Subtensor)
-    assert tl_shape_i.get_test_value() == 2
+    assert tl_shape_i.eval({a: a_val, b: b_val}) == 2
 
     tl_shape_i = Shape_i(0)(tl)
     assert not isinstance(tl_shape_i.owner.op, Subtensor)
-    assert tl_shape_i.get_test_value() == 2
+    assert tl_shape_i.eval({a: a_val, b: b_val}) == 2
 
     none_shape = shape(NoneConst)
-    assert np.array_equal(none_shape.get_test_value(), [])
+    assert np.array_equal(none_shape.eval(), [])
 
 
 def test_shape_i_basics():

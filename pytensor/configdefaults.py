@@ -239,14 +239,6 @@ def add_basic_configvars():
     )
 
     config.add(
-        "pickle_test_value",
-        "Dump test values while pickling model. "
-        "If True, test values will be dumped with model.",
-        BoolParam(True),
-        in_c_key=False,
-    )
-
-    config.add(
         "cast_policy",
         "Rules for implicit type casting",
         EnumStr(
@@ -673,40 +665,6 @@ def _is_valid_check_strides(v):
 
 
 def add_testvalue_and_checking_configvars():
-    config.add(
-        "print_test_value",
-        (
-            "If 'True', the __eval__ of an PyTensor variable will return its test_value "
-            "when this is available. This has the practical consequence that, e.g., "
-            "in debugging `my_var` will print the same as `my_var.tag.test_value` "
-            "when a test value is defined."
-        ),
-        BoolParam(False),
-        in_c_key=False,
-    )
-
-    config.add(
-        "compute_test_value",
-        (
-            "If 'True', PyTensor will run each op at graph build time, using "
-            "Constants, SharedVariables and the tag 'test_value' as inputs "
-            "to the function. This helps the user track down problems in the "
-            "graph before it gets optimized."
-        ),
-        EnumStr("off", ["ignore", "warn", "raise", "pdb"]),
-        in_c_key=False,
-    )
-
-    config.add(
-        "compute_test_value_opt",
-        (
-            "For debugging PyTensor optimization only."
-            " Same as compute_test_value, but is used"
-            " during PyTensor optimization"
-        ),
-        EnumStr("off", ["ignore", "warn", "raise", "pdb"]),
-        in_c_key=False,
-    )
     config.add(
         "check_input",
         "Specify if types should check their input in their C code. "

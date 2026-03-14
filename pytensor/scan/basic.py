@@ -10,11 +10,10 @@ from pytensor.compile.function.pfunc import construct_pfunc_ins_and_outs
 from pytensor.compile.sharedvalue import SharedVariable, collect_new_shareds
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable
-from pytensor.graph.op import get_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import explicit_graph_inputs
 from pytensor.graph.type import HasShape
-from pytensor.graph.utils import MissingInputError, TestValueError
+from pytensor.graph.utils import MissingInputError
 from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.utils import expand_empty, safe_new, until
 from pytensor.tensor.exceptions import NotScalarConstantError
@@ -585,20 +584,6 @@ def scan(
                 _seq_val_slice = _seq_val[k - mintap_proxy]
                 nw_slice = _seq_val_slice.type()
 
-                # Try to transfer test_value to the new variable
-                if config.compute_test_value != "off":
-                    try:
-                        nw_slice.tag.test_value = get_test_value(_seq_val_slice)
-                    except TestValueError:
-                        if config.compute_test_value != "ignore":
-                            # No need to print a warning or raise an error now,
-                            # it will be done when fn will be called.
-                            warnings.warn(
-                                "Cannot compute test value for "
-                                "the inner function of scan, input value "
-                                f"missing {_seq_val_slice}"
-                            )
-
                 # Add names to slices for debugging and pretty printing ..
                 # that is if the input already has a name
                 if getattr(seq["input"], "name", None) is not None:
@@ -701,17 +686,6 @@ def scan(
                 # what we need for initial states
                 arg = arg.type()
 
-            # Try to transfer test_value to the new variable
-            if config.compute_test_value != "off":
-                try:
-                    arg.tag.test_value = get_test_value(actual_arg)
-                except TestValueError:
-                    if config.compute_test_value != "ignore":
-                        warnings.warn(
-                            "Cannot compute test value for the "
-                            f"inner function of scan, test value missing: {actual_arg}"
-                        )
-
             if getattr(init_out["initial"], "name", None) is not None:
                 arg.name = init_out["initial"].name + "[t-1]"
 
@@ -769,18 +743,6 @@ def scan(
                 _init_out_var = pt.as_tensor_variable(init_out["initial"])
                 _init_out_var_slice = _init_out_var[k + mintap]
                 nw_slice = _init_out_var_slice.type()
-
-                # Try to transfer test_value to the new variable
-                if config.compute_test_value != "off":
-                    try:
-                        nw_slice.tag.test_value = get_test_value(_init_out_var_slice)
-                    except TestValueError:
-                        if config.compute_test_value != "ignore":
-                            warnings.warn(
-                                "Cannot compute test value for "
-                                "the inner function of scan, test value "
-                                f"missing: {_init_out_var_slice}"
-                            )
 
                 # give it a name or debugging and pretty printing
                 if getattr(init_out["initial"], "name", None) is not None:
