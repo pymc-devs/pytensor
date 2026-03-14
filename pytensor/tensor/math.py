@@ -26,6 +26,7 @@ from pytensor.tensor.basic import (
     concatenate,
     constant,
     expand_dims,
+    ones_like,
     stack,
     switch,
 )
@@ -909,9 +910,8 @@ def isfinite(a):
     """
     a = as_tensor_variable(a)
     if a.dtype in discrete_dtypes:
-        return alloc(
-            np.asarray(True, dtype="bool"), *[a.shape[i] for i in range(a.ndim)]
-        )
+        return ones_like(a, dtype="bool")
+
     return ~isnan_(a) & ~isinf_(a)
 
 
