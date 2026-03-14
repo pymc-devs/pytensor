@@ -44,14 +44,12 @@ def test_jax_Dimshuffle():
 
 def test_jax_CAReduce():
     a_pt = vector("a")
-    a_pt.tag.test_value = np.r_[1, 2, 3].astype(config.floatX)
 
     x = pt_sum(a_pt, axis=None)
 
     compare_jax_and_py([a_pt], [x], [np.r_[1, 2, 3].astype(config.floatX)])
 
     a_pt = matrix("a")
-    a_pt.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
 
     x = pt_sum(a_pt, axis=0)
 
@@ -62,7 +60,6 @@ def test_jax_CAReduce():
     compare_jax_and_py([a_pt], [x], [np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)])
 
     a_pt = matrix("a")
-    a_pt.tag.test_value = np.c_[[1, 2, 3], [1, 2, 3]].astype(config.floatX)
 
     x = prod(a_pt, axis=0)
 

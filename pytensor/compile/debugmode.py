@@ -2040,12 +2040,11 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
             )
             fgraph.equivalence_tracker = equivalence_tracker
 
-            with config.change_flags(compute_test_value=config.compute_test_value_opt):
-                optimizer(fgraph)
+            optimizer(fgraph)
 
-                pytensor.compile.function.types.insert_deepcopy(
-                    fgraph, inputs, list(chain(outputs, additional_outputs))
-                )
+            pytensor.compile.function.types.insert_deepcopy(
+                fgraph, inputs, list(chain(outputs, additional_outputs))
+            )
 
             if i == 0:
                 fgraph0 = fgraph
@@ -2110,12 +2109,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
                 fgraph.attach_feature(DestroyHandler())
             for o in fgraph.outputs:
                 try:
-                    with config.change_flags(
-                        compute_test_value=config.compute_test_value_opt
-                    ):
-                        fgraph.replace_validate(
-                            o, _output_guard(o), reason="output_guard"
-                        )
+                    fgraph.replace_validate(o, _output_guard(o), reason="output_guard")
                     raise Exception(
                         f"Output variable {o} required output_guard, "
                         "how was this output left unprotected against "

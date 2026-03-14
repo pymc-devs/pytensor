@@ -5,7 +5,6 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Any, Union, cast
 
-import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     Apply,
@@ -23,7 +22,7 @@ from pytensor.graph.traversal import (
     toposort_with_orderings,
     vars_between,
 )
-from pytensor.graph.utils import MetaObject, MissingInputError, TestValueError
+from pytensor.graph.utils import MetaObject, MissingInputError
 
 
 ClientType = tuple[Apply, int]
@@ -508,22 +507,6 @@ class FunctionGraph(MetaObject):
             # multiple-output ops
             # raise ValueError()
             return
-
-        if config.compute_test_value != "off":
-            try:
-                tval = pytensor.graph.op.get_test_value(var)
-                new_tval = pytensor.graph.op.get_test_value(new_var)
-            except TestValueError:
-                pass
-            else:
-                tval_shape = getattr(tval, "shape", None)
-                new_tval_shape = getattr(new_tval, "shape", None)
-                if tval_shape != new_tval_shape:
-                    raise AssertionError(
-                        "The replacement variable has a test value with "
-                        "a shape different from the original variable's "
-                        f"test value. Original: {tval_shape}, new: {new_tval_shape}"
-                    )
 
         for node, i in list(self.clients[var]):
             self.change_node_input(

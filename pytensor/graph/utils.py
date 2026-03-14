@@ -174,10 +174,6 @@ class MissingInputError(Exception):
         super().__init__(s)
 
 
-class TestValueError(Exception):
-    """Base exception class for all test value errors."""
-
-
 class MethodNotDefined(Exception):
     """
     To be raised by functions defined as part of an interface.
@@ -284,22 +280,6 @@ class Scratchpad:
 
     def __setattr__(self, name: str, value: Any) -> None:
         self.__dict__[name] = value
-
-
-class ValidatingScratchpad(Scratchpad):
-    """This `Scratchpad` validates attribute values."""
-
-    def __init__(self, attr, attr_filter):
-        super().__init__()
-
-        object.__setattr__(self, "attr", attr)
-        object.__setattr__(self, "attr_filter", attr_filter)
-
-    def __setattr__(self, attr, obj):
-        if getattr(self, "attr", None) == attr:
-            obj = self.attr_filter(obj)
-
-        return object.__setattr__(self, attr, obj)
 
 
 class AssocList:

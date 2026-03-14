@@ -49,9 +49,7 @@ class TestOpDecorator(utt.InferShapeTester):
 
     def test_2arg(self):
         x = dmatrix("x")
-        x.tag.test_value = np.zeros((2, 2))
         y = dvector("y")
-        y.tag.test_value = [0, 0, 0, 0]
 
         @wrap_py([dmatrix, dvector], dvector)
         def cumprod_plus(x, y):
@@ -65,9 +63,7 @@ class TestOpDecorator(utt.InferShapeTester):
 
     def test_infer_shape(self):
         x = dmatrix("x")
-        x.tag.test_value = np.zeros((2, 2))
         y = dvector("y")
-        y.tag.test_value = [0, 0, 0, 0]
 
         def infer_shape(fgraph, node, shapes):
             _x, y = shapes

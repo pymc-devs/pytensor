@@ -577,17 +577,15 @@ class TestLstsq:
 
 
 class TestMatrixPower:
-    @config.change_flags(compute_test_value="raise")
     @pytest.mark.parametrize("n", [-1, 0, 1, 2, 3, 4, 5, 11])
     def test_numpy_compare(self, n):
         a = np.array([[0.1231101, 0.72381381], [0.28748201, 0.43036511]]).astype(
             config.floatX
         )
         A = matrix("A", dtype=config.floatX)
-        A.tag.test_value = a
         Q = matrix_power(A, n)
         n_p = np.linalg.matrix_power(a, n)
-        assert np.allclose(n_p, Q.get_test_value())
+        assert np.allclose(n_p, Q.eval({A: a}))
 
     def test_non_square_matrix(self):
         A = matrix("A", dtype=config.floatX)

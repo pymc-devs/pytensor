@@ -1,9 +1,7 @@
 from itertools import chain
 
 from pytensor.compile import optdb
-from pytensor.configdefaults import config
 from pytensor.graph import ancestors
-from pytensor.graph.op import compute_test_value
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     dfs_rewriter,
@@ -110,9 +108,6 @@ def local_rv_size_lift(fgraph, node):
 
     new_node = node.op.make_node(rng, None, *dist_params)
 
-    if config.compute_test_value != "off":
-        compute_test_value(new_node)
-
     return new_node.outputs
 
 
@@ -183,9 +178,6 @@ def local_dimshuffle_rv_lift(fgraph, node):
         new_dist_params.append(param.dimshuffle(param_new_order))
 
     new_node = rv_op.make_node(rng, new_size, *new_dist_params)
-
-    if config.compute_test_value != "off":
-        compute_test_value(new_node)
 
     new_next_rng, new_rv = new_node.outputs
 

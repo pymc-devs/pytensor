@@ -210,7 +210,6 @@ class ShapeFeature(Feature):
         if hasattr(r.type, "shape") and r.type.shape[i] is not None:
             return constant(r.type.shape[i], dtype="int64")
         else:
-            # Do not call make_node for test_value
             s = Shape_i(i)(r)
             try:
                 s = get_scalar_constant_value(s)

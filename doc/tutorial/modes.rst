@@ -63,9 +63,6 @@ Consider the logistic regression:
     y = pt.vector("y")
     w = pytensor.shared(rng.standard_normal(feats).astype(pytensor.config.floatX), name="w")
     b = pytensor.shared(np.asarray(0., dtype=pytensor.config.floatX), name="b")
-    x.tag.test_value = D[0]
-    y.tag.test_value = D[1]
-
     # Construct PyTensor expression graph
     p_1 = 1 / (1 + pt.exp(-pt.dot(x, w)-b)) # Probability of having a one
     prediction = p_1 > 0.5 # The prediction that is done: 0 or 1
