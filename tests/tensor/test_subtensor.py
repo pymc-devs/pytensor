@@ -18,7 +18,6 @@ from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph.basic import equal_computations
-from pytensor.graph.op import get_test_value
 from pytensor.graph.rewriting.utils import is_same_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
@@ -414,7 +413,6 @@ class TestSubtensor(utt.OptimizationTestMixin):
         with pytest.raises(IndexError):
             n.__getitem__(0)
 
-    @config.change_flags(compute_test_value="off")
     def test_err_bounds(self):
         n = self.shared(np.ones(3, dtype=self.dtype))
         t = n[7]
@@ -495,7 +493,6 @@ class TestSubtensor(utt.OptimizationTestMixin):
         assert tval.shape == (2,)
         assert (tval == [0.0, 2.0]).all()
 
-    @config.change_flags(compute_test_value="off")
     def test_err_bounds0(self):
         n = self.shared(np.ones((2, 3), dtype=self.dtype) * 5)
         for idx in [(0, 4), (0, -4)]:
@@ -511,7 +508,6 @@ class TestSubtensor(utt.OptimizationTestMixin):
             finally:
                 _logger.setLevel(oldlevel)
 
-    @config.change_flags(compute_test_value="off")
     def test_err_bounds1(self):
         n = self.shared(np.ones((2, 3), dtype=self.dtype) * 5)
         t = n[4:5, 3]
@@ -733,81 +729,80 @@ class TestSubtensor(utt.OptimizationTestMixin):
             inc_subtensor(n4[test_array > 2, ..., 0, 1], 1).eval(),
         )
 
-        with config.change_flags(compute_test_value="off"):
-            # the boolean mask should have the correct shape
-            # - too large, padded with True
-            mask = np.array([True, False, True])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                test_array[mask, ...].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask, ...], 1).eval()
-            mask = np.array([[True, False, False, True], [False, True, False, True]])
-            with pytest.raises(IndexError):
-                test_array[mask].eval()
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval()
-            # - too large, padded with False
-            # When padded with False converting boolean to nonzero() will not fail
-            # We exclude that rewrite by excluding `shape_unsafe` more generally
-            # However numba doesn't enforce masked array sizes: https://github.com/numba/numba/issues/10374
-            # So the tests that use numba native impl will not fail.
-            shape_safe_mode = get_default_mode().excluding("shape_unsafe")
-            linker_dependent_expectation = (
-                nullcontext()
-                if isinstance(get_default_mode().linker, NumbaLinker)
-                else pytest.raises(IndexError)
-            )
-            mask = np.array([True, False, False])
-            with linker_dependent_expectation:
-                test_array[mask].eval(mode=shape_safe_mode)
-            with linker_dependent_expectation:
-                test_array[mask, ...].eval(mode=shape_safe_mode)
-            with linker_dependent_expectation:
-                inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
-            with linker_dependent_expectation:
-                inc_subtensor(test_array[mask, ...], 1).eval(mode=shape_safe_mode)
-            mask = np.array([[True, False, False, False], [False, True, False, False]])
-            with pytest.raises(IndexError):
-                test_array[mask].eval(mode=shape_safe_mode)
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
-            # - mask too small
-            mask = np.array([True])
-            with linker_dependent_expectation:
-                test_array[mask].eval(mode=shape_safe_mode)
-            with linker_dependent_expectation:
-                test_array[mask, ...].eval(mode=shape_safe_mode)
-            with linker_dependent_expectation:
-                inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
-            with linker_dependent_expectation:
-                inc_subtensor(test_array[mask, ...], 1).eval(mode=shape_safe_mode)
-            mask = np.array([[True], [True]])
-            with pytest.raises(IndexError):
-                test_array[mask].eval(mode=shape_safe_mode)
-            with pytest.raises(IndexError):
-                inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
-            # - too many dimensions
-            mask = np.array([[[True, False, False], [False, True, False]]])
-            with pytest.raises(IndexError):
-                test_array.__getitem__(mask)
-            with pytest.raises(IndexError):
-                test_array.__getitem__(mask)
+        # the boolean mask should have the correct shape
+        # - too large, padded with True
+        mask = np.array([True, False, True])
+        with pytest.raises(IndexError):
+            test_array[mask].eval()
+        with pytest.raises(IndexError):
+            test_array[mask, ...].eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask, ...], 1).eval()
+        mask = np.array([[True, False, False, True], [False, True, False, True]])
+        with pytest.raises(IndexError):
+            test_array[mask].eval()
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval()
+        # - too large, padded with False
+        # When padded with False converting boolean to nonzero() will not fail
+        # We exclude that rewrite by excluding `shape_unsafe` more generally
+        # However numba doesn't enforce masked array sizes: https://github.com/numba/numba/issues/10374
+        # So the tests that use numba native impl will not fail.
+        shape_safe_mode = get_default_mode().excluding("shape_unsafe")
+        linker_dependent_expectation = (
+            nullcontext()
+            if isinstance(get_default_mode().linker, NumbaLinker)
+            else pytest.raises(IndexError)
+        )
+        mask = np.array([True, False, False])
+        with linker_dependent_expectation:
+            test_array[mask].eval(mode=shape_safe_mode)
+        with linker_dependent_expectation:
+            test_array[mask, ...].eval(mode=shape_safe_mode)
+        with linker_dependent_expectation:
+            inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
+        with linker_dependent_expectation:
+            inc_subtensor(test_array[mask, ...], 1).eval(mode=shape_safe_mode)
+        mask = np.array([[True, False, False, False], [False, True, False, False]])
+        with pytest.raises(IndexError):
+            test_array[mask].eval(mode=shape_safe_mode)
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
+        # - mask too small
+        mask = np.array([True])
+        with linker_dependent_expectation:
+            test_array[mask].eval(mode=shape_safe_mode)
+        with linker_dependent_expectation:
+            test_array[mask, ...].eval(mode=shape_safe_mode)
+        with linker_dependent_expectation:
+            inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
+        with linker_dependent_expectation:
+            inc_subtensor(test_array[mask, ...], 1).eval(mode=shape_safe_mode)
+        mask = np.array([[True], [True]])
+        with pytest.raises(IndexError):
+            test_array[mask].eval(mode=shape_safe_mode)
+        with pytest.raises(IndexError):
+            inc_subtensor(test_array[mask], 1).eval(mode=shape_safe_mode)
+        # - too many dimensions
+        mask = np.array([[[True, False, False], [False, True, False]]])
+        with pytest.raises(IndexError):
+            test_array.__getitem__(mask)
+        with pytest.raises(IndexError):
+            test_array.__getitem__(mask)
 
-            # special cases: Python bools and bools nested in Python arrays are not supported
-            with pytest.raises(TypeError):
-                test_array.__getitem__((True,))
-            with pytest.raises(TypeError):
-                test_array.__getitem__((False,))
-            with pytest.raises(TypeError):
-                test_array.__getitem__((True, False))
-            with pytest.raises(TypeError):
-                test_array.__getitem__(([0, 1], [0, False]))
-            with pytest.raises(TypeError):
-                test_array.__getitem__(([0, 1], [0, pytensor.shared(True)]))
+        # special cases: Python bools and bools nested in Python arrays are not supported
+        with pytest.raises(TypeError):
+            test_array.__getitem__((True,))
+        with pytest.raises(TypeError):
+            test_array.__getitem__((False,))
+        with pytest.raises(TypeError):
+            test_array.__getitem__((True, False))
+        with pytest.raises(TypeError):
+            test_array.__getitem__(([0, 1], [0, False]))
+        with pytest.raises(TypeError):
+            test_array.__getitem__(([0, 1], [0, pytensor.shared(True)]))
 
     def test_grad_1d(self):
         subi = 0
@@ -2703,18 +2698,12 @@ class TestInferShape(utt.InferShapeTester):
             AdvancedSubtensor,
         )
 
-        admat.tag.test_value = admat_val
-        aivec.tag.test_value = aivec_val
-        bivec.tag.test_value = bivec_val
-
-        # Make sure it doesn't complain about test values
-        with config.change_flags(compute_test_value="raise"):
-            self._compile_and_check(
-                [admat, aivec],
-                [admat[1:3, aivec]],
-                [admat_val, aivec_val],
-                AdvancedSubtensor,
-            )
+        self._compile_and_check(
+            [admat, aivec],
+            [admat[1:3, aivec]],
+            [admat_val, aivec_val],
+            AdvancedSubtensor,
+        )
 
     def test_AdvancedSubtensor_bool(self):
         n = dmatrix()
@@ -2808,12 +2797,11 @@ class TestInferShape(utt.InferShapeTester):
         assert tuple(y.shape.eval({x: np.zeros((10, 10))})) == (9, 2, 3)
 
 
-@config.change_flags(compute_test_value="raise")
 def test_basic_shape():
     test_shape = (5, 4)
     test_indices = (slice(1, 3, None),)  # Python slice instead of make_slice()
     res = basic_shape(test_shape, test_indices)
-    assert get_test_value(res) == (2,)
+    assert tuple(r.eval() for r in res) == (2,)
 
 
 def idx_as_tensor(x):
@@ -2865,13 +2853,12 @@ test_idx = np.ix_(np.array([True, True]), np.array([True]), np.array([True, True
         ),
     ],
 )
-@config.change_flags(compute_test_value="raise")
 def test_indexed_result_shape(test_array, test_idx):
     res = indexed_result_shape(
         ptb.as_tensor(test_array).shape, [idx_as_tensor(i) for i in test_idx]
     )
     exp_res = test_array[test_idx].shape
-    assert np.array_equal(tuple(get_test_value(r) for r in res), exp_res)
+    assert np.array_equal(tuple(r.eval() for r in res), exp_res)
 
     # Test shape-only version
     res = indexed_result_shape(
@@ -2880,7 +2867,7 @@ def test_indexed_result_shape(test_array, test_idx):
         indices_are_shapes=True,
     )
     exp_res = test_array[test_idx].shape
-    assert np.array_equal(tuple(get_test_value(r) for r in res), exp_res)
+    assert np.array_equal(tuple(r.eval() for r in res), exp_res)
 
 
 def test_symbolic_slice():

@@ -12,9 +12,8 @@ import pytensor
 from pytensor.compile.ops import ViewOp
 from pytensor.configdefaults import config
 from pytensor.graph import utils, vectorize_graph
-from pytensor.graph.basic import Apply, NominalVariable, Variable
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.null_type import NullType, null_type
-from pytensor.graph.op import get_test_values
 from pytensor.graph.type import Type
 
 
@@ -1297,32 +1296,6 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     for ng in new_output_grads
                 )
 
-                # If config.compute_test_value is turned on, check that the
-                # gradients on the outputs of this node have the right shape.
-                # We also check the gradient on the inputs later--both checks
-                # are needed, because some gradients are only ever specified
-                # by the user, not computed by Op.grad, and some gradients are
-                # only computed and returned, but never passed as another
-                # node's output grads.
-                for idx, packed in enumerate(
-                    zip(node.outputs, new_output_grads, strict=True)
-                ):
-                    orig_output, new_output_grad = packed
-                    if not hasattr(orig_output, "shape"):
-                        continue
-                    if isinstance(new_output_grad.type, DisconnectedType):
-                        continue
-                    for orig_output_v, new_output_grad_v in get_test_values(*packed):
-                        o_shape = orig_output_v.shape
-                        g_shape = new_output_grad_v.shape
-                        if o_shape != g_shape:
-                            raise ValueError(
-                                "Got a gradient of shape "
-                                + str(o_shape)
-                                + " on an output of shape "
-                                + str(g_shape)
-                            )
-
                 input_grads = node.op.L_op(inputs, node.outputs, new_output_grads)
 
                 if input_grads is None:
@@ -1394,21 +1367,6 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                         "the grad_undefined or grad_unimplemented helper "
                         "functions."
                     )
-
-                # Check that the gradient term for this input
-                # has the right shape
-                if hasattr(term, "shape"):
-                    orig_ipt = inputs[i]
-                    if not isinstance(orig_ipt, NominalVariable):
-                        for orig_ipt_v, term_v in get_test_values(orig_ipt, term):
-                            i_shape = orig_ipt_v.shape
-                            t_shape = term_v.shape
-                            if i_shape != t_shape:
-                                raise ValueError(
-                                    f"{node.op}.grad returned object of "
-                                    f"shape {t_shape} as gradient term on input {int(i)} "
-                                    f"of shape {i_shape}"
-                                )
 
                 if not isinstance(term.type, NullType | DisconnectedType):
                     if term.type.dtype not in pytensor.tensor.type.float_dtypes:

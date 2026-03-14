@@ -21,14 +21,10 @@ from typing import (
 
 import numpy as np
 
-from pytensor.configdefaults import config
 from pytensor.graph.utils import (
     MetaObject,
     Scratchpad,
-    TestValueError,
-    ValidatingScratchpad,
     add_tag_trace,
-    get_variable_trace_string,
 )
 
 
@@ -460,7 +456,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
     ) -> None:
         super().__init__()
 
-        self.tag = ValidatingScratchpad("test_value", type.filter)
+        self.tag = Scratchpad()
 
         self.type = type
 
@@ -479,20 +475,6 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
 
         self.auto_name = f"auto_{next(self.__count__)}"
 
-    def get_test_value(self):
-        """Get the test value.
-
-        Raises
-        ------
-        TestValueError
-
-        """
-        if not hasattr(self.tag, "test_value"):
-            detailed_err_msg = get_variable_trace_string(self)
-            raise TestValueError(f"{self} has no test value {detailed_err_msg}")
-
-        return self.tag.test_value
-
     def __str__(self):
         """Return a ``str`` representation of the `Variable`."""
         if self.name is not None:
@@ -506,29 +488,9 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         else:
             return f"<{self.type}>"
 
-    def __repr_test_value__(self):
-        """Return a ``repr`` of the test value.
-
-        Return a printable representation of the test value. It can be
-        overridden by classes with non printable test_value to provide a
-        suitable representation of the test_value.
-        """
-        return repr(self.get_test_value())
-
     def __repr__(self, firstPass=True):
-        """Return a ``repr`` of the `Variable`.
-
-        Return a printable name or description of the Variable. If
-        ``config.print_test_value`` is ``True`` it will also print the test
-        value, if any.
-        """
-        to_print = [str(self)]
-        if config.print_test_value and firstPass:
-            try:
-                to_print.append(self.__repr_test_value__())
-            except TestValueError:
-                pass
-        return "\n".join(to_print)
+        """Return a ``repr`` of the `Variable`."""
+        return str(self)
 
     def clone(self, **kwargs):
         """Return a new, un-owned `Variable` like `self`.
@@ -670,15 +632,6 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
     def __getstate__(self):
         d = self.__dict__.copy()
         d.pop("_fn_cache", None)
-        if (not config.pickle_test_value) and (hasattr(self.tag, "test_value")):
-            if not type(config).pickle_test_value.is_default:
-                warnings.warn(
-                    "pickle_test_value is not default value (True).\n"
-                    f"Test value of variable {d['auto_name']}({d['name']}) will not be dumped."
-                )
-            t = copy(d["tag"])
-            del t.test_value
-            d["tag"] = t
         return d
 
 
@@ -798,9 +751,6 @@ class Constant(AtomicVariable[_TypeType]):
         super().__init__(type, name=name)
         self.data = type.filter(data)
         add_tag_trace(self)
-
-    def get_test_value(self):
-        return self.data
 
     def signature(self):
         return (self.type, self.data)

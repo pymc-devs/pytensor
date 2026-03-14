@@ -23,7 +23,6 @@ from pytensor.graph.basic import (
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.features import ReplaceValidate
 from pytensor.graph.fg import FunctionGraph, Output
-from pytensor.graph.op import compute_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
@@ -304,9 +303,6 @@ def scan_push_out_non_seq(fgraph, node):
 
             pushed_out_node = nd.op.make_node(*new_inputs)
 
-            if config.compute_test_value != "off":
-                compute_test_value(pushed_out_node)
-
             # Step 2. Create variables to replace the old outputs of the node
             # that we're pushing out of the inner-graph
             for idx, y in enumerate(nd.outputs):
@@ -377,7 +373,6 @@ def scan_push_out_non_seq(fgraph, node):
             allow_gc=op.allow_gc,
         )
 
-        # Do not call make_node for test_value
         nw_node = nwScan(*(node.inputs + nw_outer), return_list=True)[0].owner
 
         replacements = dict(zip(node.outputs, nw_node.outputs, strict=True))
@@ -504,11 +499,7 @@ def scan_push_out_seq(fgraph, node):
 
             to_remove_set.add(nd)
 
-            # Do not call make_node for test_value
             nw_outer_node = nd.op.make_node(*outside_ins)
-
-            if config.compute_test_value != "off":
-                compute_test_value(nw_outer_node)
 
             # Step 2. Create variables for replacements
             for idx, y in enumerate(nd.outputs):
@@ -540,12 +531,6 @@ def scan_push_out_seq(fgraph, node):
             add_to_replace(y)
             replace_with_in.append(y_place_holder)
             replace_with_out.append(new_outer)
-
-            if hasattr(new_outer.tag, "test_value"):
-                new_sh = new_outer.tag.test_value.shape
-                ref_sh = (outside_ins.tag.test_value.shape[0],)
-                ref_sh += nd.outputs[0].tag.test_value.shape
-                assert new_sh == ref_sh
 
     # We need to check all candidate replacements and choose those that
     # make sense for us
@@ -607,7 +592,6 @@ def scan_push_out_seq(fgraph, node):
             name=op.name,
             allow_gc=op.allow_gc,
         )
-        # Do not call make_node for test_value
         nw_node = nwScan(
             *(node.inputs[:1] + nw_outer + node.inputs[1:]),
             return_list=True,
@@ -998,9 +982,6 @@ class ScanInplaceOptimizer(GraphRewriter):
             ):
                 new_lsi = inp.owner.op.make_node(*inp.owner.inputs)
 
-                if config.compute_test_value != "off":
-                    compute_test_value(new_lsi)
-
                 new_lsi_out = new_lsi.outputs
 
                 if len(new_lsi_out) == 1:
@@ -1023,7 +1004,6 @@ class ScanInplaceOptimizer(GraphRewriter):
 
         new_op.destroy_map = destroy_map
 
-        # Do not call make_node for test_value
         new_outs = new_op(*inputs, return_list=True)
 
         assert isinstance(new_outs, list)
@@ -1669,7 +1649,6 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
         if get_scalar_constant_value(node_ins[0], raise_not_constant=False) == 0:
             return False
 
-        # Do not call make_node for test_value
         new_op = Scan(
             inps,
             outs,

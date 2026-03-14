@@ -660,42 +660,6 @@ import ``pytensor`` and print the config variable, as in:
     Controls whether ``NanGuardMode`` generates an error when it sees a
     big value (i.e. a value greater than ``1e10``).
 
-.. attribute:: compute_test_value
-
-    String Value: ``'off'``, ``'ignore'``, ``'warn'``, ``'raise'``.
-
-    Default: ``'off'``
-
-    Setting this attribute to something other than ``'off'`` activates a
-    debugging mechanism, for which PyTensor executes the graph on-the-fly, as it
-    is being built. This allows the user to spot errors early on (such as
-    dimension mis-matches) **before** rewrites are applied.
-
-    PyTensor will execute the graph using constants and/or shared variables
-    provided by the user. Purely symbolic variables (e.g. ``x =
-    pytensor.tensor.dmatrix()``) can be augmented with test values, by writing to
-    their ``.tag.test_value`` attributes (e.g. ``x.tag.test_value = np.ones((5, 4))``).
-
-    When not ``'off'``, the value of this option dictates what happens when
-    an :class:`Op`'s inputs do not provide appropriate test values:
-
-        - ``'ignore'`` will do nothing
-        - ``'warn'`` will raise a ``UserWarning``
-        - ``'raise'`` will raise an exception
-
-.. attribute:: compute_test_value_opt
-
-    As ``compute_test_value``, but it is the value used during PyTensor's
-    rewriting phase.  This is used to help debug shape errors in PyTensor's
-    rewrites.
-
-.. attribute:: print_test_value
-
-    Bool value, default: ``False``
-
-    If ``'True'``, PyTensor will include the test values in a variable's
-    ``__str__`` output.
-
 .. attribute:: exception_verbosity
 
     String Value: ``'low'``, ``'high'``.

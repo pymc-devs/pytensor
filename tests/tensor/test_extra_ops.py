@@ -1241,15 +1241,13 @@ def test_broadcast_shape_constants():
 )
 def test_broadcast_shape_symbolic(s1_vals, s2_vals, exp_res):
     s1s = pt.lscalars(len(s1_vals))
-    eval_point = {}
-    for s, s_val in zip(s1s, s1_vals, strict=True):
-        eval_point[s] = s_val
-        s.tag.test_value = s_val
-
     s2s = pt.lscalars(len(s2_vals))
-    for s, s_val in zip(s2s, s2_vals, strict=True):
-        eval_point[s] = s_val
-        s.tag.test_value = s_val
+    eval_point = dict(
+        [
+            *zip(s1s, s1_vals, strict=True),
+            *zip(s2s, s2_vals, strict=True),
+        ]
+    )
 
     res = broadcast_shape(s1s, s2s, arrays_are_shapes=True)
     res = pt.as_tensor(res)

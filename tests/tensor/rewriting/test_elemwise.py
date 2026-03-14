@@ -1204,32 +1204,6 @@ class TestFusion:
             for n in f.maker.fgraph.toposort()
         )
 
-    @pytest.mark.parametrize("test_value", [np.c_[[1.0]], np.c_[[]]])
-    def test_test_values(self, test_value):
-        """Make sure that `local_elemwise_fusion_op` uses test values correctly
-        when they have zero dimensions.
-        """
-        x, y, z = dmatrices("xyz")
-
-        x.tag.test_value = test_value
-        y.tag.test_value = test_value
-        z.tag.test_value = test_value
-
-        with config.change_flags(
-            compute_test_value="raise", compute_test_value_opt="raise"
-        ):
-            out = x * y + z
-            f = function([x, y, z], out, mode=self.mode)
-
-        # Confirm that the fusion happened
-        assert isinstance(f.maker.fgraph.outputs[0].owner.op.scalar_op, Composite)
-        assert len(f.maker.fgraph.toposort()) == 1
-
-        assert np.array_equal(
-            f.maker.fgraph.outputs[0].tag.test_value,
-            np.full_like(test_value, 2.0),
-        )
-
     @pytest.mark.parametrize("linker", ["cvm", "py"])
     @pytest.mark.parametrize("inp_dtype", ("floatX", "int32"))
     @pytest.mark.parametrize("axis", [None, 0, 1, (0, 1), (0, 1, 2)])

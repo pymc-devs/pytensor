@@ -2727,31 +2727,6 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 else:
                     outer_inp_seqs.append(x[::-1])
 
-        if hasattr(inputs[0].tag, "test_value"):
-            # Here we tests that the new scan input sequence all have
-            # the same shape[0]. This is a properties that the scan()
-            # fct add and we want to keep it for all Scan op.  This is
-            # used in T_Scan.test_grad_multiple_outs_taps to test
-            # that.
-            if info.as_while:
-                n = n_steps.tag.test_value
-            else:
-                n = inputs[0].tag.test_value
-            for taps, x in zip(
-                info.mit_sot_in_slices, self.outer_mitsot_outs(outs), strict=True
-            ):
-                mintap = np.min(taps)
-                if hasattr(x[::-1][:mintap], "test_value"):
-                    assert x[::-1][:mintap].tag.test_value.shape[0] == n
-            for x in self.outer_sitsot_outs(outs):
-                if hasattr(x[::-1][:-1].tag, "test_value"):
-                    assert x[::-1][:-1].tag.test_value.shape[0] == n
-            for x in self.outer_nitsot_outs(outs):
-                if hasattr(x[::-1].tag, "test_value"):
-                    if info.as_while:
-                        assert x[n_steps - 1 :: -1].tag.test_value.shape[0] == n
-                    else:
-                        assert x[::-1].tag.test_value.shape[0] == n
         outer_inp_seqs += [
             x[::-1][: np.min(taps)]
             for taps, x in zip(

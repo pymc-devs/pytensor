@@ -13,7 +13,6 @@ from pytensor.compile.debugmode import str_diagnostic
 from pytensor.configdefaults import config
 from pytensor.gradient import verify_grad as orig_verify_grad
 from pytensor.graph.basic import equal_computations
-from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.math import add as pt_add
 
@@ -420,10 +419,3 @@ def assertFailure_fast(f):
         return test_with_assert
     else:
         return f
-
-
-def create_pytensor_param(param_value):
-    """Create a `Variable` from a value and set its test value."""
-    p_at = as_tensor_variable(param_value).type()
-    p_at.tag.test_value = param_value
-    return p_at

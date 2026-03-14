@@ -377,7 +377,6 @@ def local_dimshuffle_lift(fgraph, node):
         and len(inode.outputs) == 1
         and (len(fgraph.clients[inp]) == 1)
     ):
-        # Don't use make_node to have tag.test_value set.
         new_inputs = []
         for inp in inode.inputs:
             new_inp = inp.dimshuffle(op.new_order)
