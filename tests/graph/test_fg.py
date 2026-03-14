@@ -1,7 +1,6 @@
 import itertools
 import pickle
 
-import numpy as np
 import pytest
 
 from pytensor.configdefaults import config
@@ -247,26 +246,6 @@ class TestFunctionGraph:
 
         assert var5.owner.inputs[1] is var1
         assert (var5.owner, 1) not in fg.get_clients(var2)
-
-    @config.change_flags(compute_test_value="raise")
-    def test_replace_test_value(self):
-        var1 = MyVariable("var1")
-        var1.tag.test_value = 1
-        var2 = MyVariable("var2")
-        var2.tag.test_value = 2
-        var3 = op1(var2, var1)
-        var4 = op2(var3, var2)
-        var4.tag.test_value = np.array([1, 2])
-        var5 = op3(var4, var2, var2)
-        fg = FunctionGraph([var1, var2], [var3, var5], clone=False)
-
-        var6 = op3()
-        var6.tag.test_value = np.array(0)
-
-        assert var6.tag.test_value.shape != var4.tag.test_value.shape
-
-        with pytest.raises(AssertionError, match=r"The replacement.*"):
-            fg.replace(var4, var6)
 
     def test_replace(self):
         var1 = MyVariable("var1")

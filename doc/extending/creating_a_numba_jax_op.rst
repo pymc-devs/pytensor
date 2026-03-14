@@ -484,7 +484,6 @@ Step 4: Write tests
             from pytensor.configdefaults import config
             from tests.link.jax.test_basic import compare_jax_and_py
             from pytensor.graph import FunctionGraph
-            from pytensor.graph.op import get_test_value
 
             def test_jax_CumOp():
                 """Test JAX conversion of the `CumOp` `Op`."""
@@ -492,8 +491,7 @@ Step 4: Write tests
                 # Create a symbolic input for the first input of `CumOp`
                 a = pt.matrix("a")
 
-                # Create test value tag for a
-                a.tag.test_value = np.arange(9, dtype=config.floatX).reshape((3, 3))
+                test_value = np.arange(9, dtype=config.floatX).reshape((3, 3))
 
                 # Create the output variable
                 out = pt.cumsum(a, axis=0)
@@ -502,12 +500,12 @@ Step 4: Write tests
                 fgraph = FunctionGraph([a], [out])
 
                 # Pass the graph and inputs to the testing function
-                compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+                compare_jax_and_py(fgraph, [test_value])
 
                 # For the second mode of CumOp
                 out = pt.cumprod(a, axis=1)
                 fgraph = FunctionGraph([a], [out])
-                compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+                compare_jax_and_py(fgraph, [test_value])
 
         If the variant :class:`CumprodOp` is not implemented, we can add a test for it as follows:
 
@@ -518,12 +516,12 @@ Step 4: Write tests
             def test_jax_CumOp():
                 """Test JAX conversion of the `CumOp` `Op`."""
                 a = pt.matrix("a")
-                a.tag.test_value = np.arange(9, dtype=config.floatX).reshape((3, 3))
+                test_value = np.arange(9, dtype=config.floatX).reshape((3, 3))
 
                 with pytest.raises(NotImplementedError):
                     out = pt.cumprod(a, axis=1)
                     fgraph = FunctionGraph([a], [out])
-                    compare_jax_and_py(fgraph, [get_test_value(i) for i in fgraph.inputs])
+                    compare_jax_and_py(fgraph, [test_value])
 
 
     .. tab-item:: Numba
@@ -543,23 +541,23 @@ Step 4: Write tests
 
         .. code:: python
 
+            import numpy as np
+            from pytensor.configdefaults import config
             from tests.link.numba.test_basic import compare_numba_and_py
             from pytensor.graph import FunctionGraph
-            from pytensor.compile.sharedvalue import SharedVariable
-            from pytensor.graph.basic import Constant
             from pytensor.tensor import extra_ops
+            import pytensor.tensor as pt
 
-            def test_CumOp(val, axis, mode):
+            def test_CumOp(axis, mode):
+                val = pt.matrix("val")
+                test_value = np.arange(9, dtype=config.floatX).reshape((3, 3))
+
                 g = extra_ops.CumOp(axis=axis, mode=mode)(val)
                 g_fg = FunctionGraph(outputs=[g])
 
                 compare_numba_and_py(
                     g_fg,
-                    [
-                        i.tag.test_value
-                        for i in g_fg.inputs
-                        if not isinstance(i, SharedVariable | Constant)
-                    ],
+                    [test_value],
                 )
 
 
@@ -601,7 +599,6 @@ Step 4: Write tests
                 # Create a symbolic input for the first input of `CumOp`
                 a = pt.matrix("a", dtype=dtype)
 
-                # Create test value
                 test_value = np.arange(9, dtype=dtype).reshape((3, 3))
 
                 # Create the output variable

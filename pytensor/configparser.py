@@ -68,7 +68,6 @@ class PyTensorConfigParser:
     # add_basic_configvars
     floatX: str
     warn_float64: str
-    pickle_test_value: bool
     cast_policy: str
     device: str
     print_global_stats: bool
@@ -105,9 +104,6 @@ class PyTensorConfigParser:
     warn__ignore_bug_before: int
     exception_verbosity: str
     # add_testvalue_and_checking_configvars
-    print_test_value: bool
-    compute_test_value: str
-    compute_test_value_opt: str
     check_input: bool
     NanGuardMode__nan_is_error: bool
     NanGuardMode__inf_is_error: bool

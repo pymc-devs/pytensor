@@ -1,6 +1,5 @@
 from copy import copy
 
-import numpy as np
 import pytest
 
 import pytensor
@@ -18,14 +17,9 @@ def create_test_hmm():
     srng = pt.random.RandomStream()
 
     N_pt = pt.iscalar("N")
-    N_pt.tag.test_value = 10
     M_pt = pt.iscalar("M")
-    M_pt.tag.test_value = 2
 
     mus_pt = pt.matrix("mus")
-    mus_pt.tag.test_value = np.stack(
-        [np.arange(0.0, 10), np.arange(0.0, -10, -1)], axis=-1
-    ).astype(pytensor.config.floatX)
 
     sigmas_pt = pt.ones((N_pt,))
     sigmas_pt.name = "sigmas"
@@ -137,14 +131,9 @@ def test_ScanArgs_basics_mit_sot():
     srng = pt.random.RandomStream()
 
     N_pt = pt.iscalar("N")
-    N_pt.tag.test_value = 10
     M_pt = pt.iscalar("M")
-    M_pt.tag.test_value = 2
 
     mus_pt = pt.matrix("mus")
-    mus_pt.tag.test_value = np.stack(
-        [np.arange(0.0, 10), np.arange(0.0, -10, -1)], axis=-1
-    ).astype(pytensor.config.floatX)
 
     sigmas_pt = pt.ones((N_pt,))
     sigmas_pt.name = "sigmas"

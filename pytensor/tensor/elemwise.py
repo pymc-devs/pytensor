@@ -538,23 +538,21 @@ class Elemwise(OpenMPOp):
     def _bgrad(self, inputs, outputs, ograds):
         # returns grad, with respect to broadcasted versions of inputs
 
-        with config.change_flags(compute_test_value="off"):
+        def as_scalar(t):
+            if isinstance(t.type, NullType | DisconnectedType):
+                return t
+            return get_scalar_type(t.type.dtype)()
 
-            def as_scalar(t):
-                if isinstance(t.type, NullType | DisconnectedType):
-                    return t
-                return get_scalar_type(t.type.dtype)()
-
-            scalar_inputs = list(map(as_scalar, inputs))
-            scalar_ograds = list(map(as_scalar, ograds))
-            scalar_outputs = self.scalar_op.make_node(
-                *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
-            ).outputs
-            scalar_igrads = self.scalar_op.L_op(
-                scalar_inputs, scalar_outputs, scalar_ograds
-            )
-            for igrad in scalar_igrads:
-                assert igrad is not None, self.scalar_op
+        scalar_inputs = list(map(as_scalar, inputs))
+        scalar_ograds = list(map(as_scalar, ograds))
+        scalar_outputs = self.scalar_op.make_node(
+            *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
+        ).outputs
+        scalar_igrads = self.scalar_op.L_op(
+            scalar_inputs, scalar_outputs, scalar_ograds
+        )
+        for igrad in scalar_igrads:
+            assert igrad is not None, self.scalar_op
 
         if not isinstance(scalar_igrads, list | tuple):
             raise TypeError(

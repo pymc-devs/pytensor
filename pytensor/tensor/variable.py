@@ -107,9 +107,7 @@ class _tensor_py_operators:
         try:
             return pt.math.add(self, other)
         # We should catch the minimum number of exception here.
-        # Otherwise this will convert error when PyTensor flags
-        # compute_test_value is used
-        # Evidently, we need to catch NotImplementedError
+        # We need to catch NotImplementedError
         # TypeError from as_tensor_variable are caught in Elemwise.make_node
         # Otherwise TensorVariable * SparseVariable won't work!
         except (NotImplementedError, TypeError):

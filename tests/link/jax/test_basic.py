@@ -21,7 +21,7 @@ from pytensor.tensor.type import dscalar, matrices, scalar, vector
 
 @pytest.fixture(scope="module", autouse=True)
 def set_pytensor_flags():
-    with config.change_flags(cxx="", compute_test_value="ignore"):
+    with config.change_flags(cxx=""):
         yield
 
 
@@ -204,7 +204,6 @@ def test_jax_ifelse():
 
 def test_jax_checkandraise():
     p = scalar()
-    p.tag.test_value = 0
 
     res = assert_op(p, p < 1.0)
 

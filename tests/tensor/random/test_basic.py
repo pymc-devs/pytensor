@@ -13,7 +13,6 @@ from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.op import get_test_value
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.traversal import graph_inputs
@@ -64,7 +63,6 @@ from pytensor.tensor.random.basic import (
 )
 from pytensor.tensor.rewriting.shape import ShapeFeature
 from pytensor.tensor.type import iscalar, scalar, tensor, vector
-from tests.unittest_tools import create_pytensor_param
 
 
 rewrites_query = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
@@ -106,10 +104,9 @@ def compare_sample_values(rv, *params, rng=None, test_fn=None, **kwargs):
         def test_fn(*args, random_state=None, **kwargs):
             return getattr(random_state, name)(*args, **kwargs)
 
-    param_vals = [get_test_value(p) if isinstance(p, Variable) else p for p in params]
+    param_vals = [p.eval() if isinstance(p, Variable) else p for p in params]
     kwargs_vals = {
-        k: get_test_value(v) if isinstance(v, Variable) else v
-        for k, v in kwargs.items()
+        k: v.eval() if isinstance(v, Variable) else v for k, v in kwargs.items()
     }
 
     pt_rng = shared(rng, borrow=True)
@@ -205,46 +202,38 @@ def test_beta_samples(a, b, size):
     compare_sample_values(beta, a, b, size=size)
 
 
-M_pt = iscalar("M")
-M_pt.tag.test_value = 3
-sd_pt = scalar("sd")
-sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
-
-
 @pytest.mark.parametrize(
-    "M, sd, size",
+    "make_args",
     [
-        (pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)), sd_pt, None),
-        (
+        lambda M_pt, sd_pt: (
+            pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
+            sd_pt,
+            None,
+        ),
+        lambda M_pt, sd_pt: (
             pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
             sd_pt,
             (M_pt,),
         ),
-        (
+        lambda M_pt, sd_pt: (
             pt.as_tensor_variable(np.array(1.0, dtype=config.floatX)),
             sd_pt,
             (2, M_pt),
         ),
-        (pt.zeros((M_pt,)), sd_pt, None),
-        (pt.zeros((M_pt,)), sd_pt, (M_pt,)),
-        (pt.zeros((M_pt,)), sd_pt, (2, M_pt)),
-        (pt.zeros((M_pt,)), pt.ones((M_pt,)), None),
-        (pt.zeros((M_pt,)), pt.ones((M_pt,)), (2, M_pt)),
-        (
-            create_pytensor_param(
-                np.array([[-1, 20], [300, -4000]], dtype=config.floatX)
-            ),
-            create_pytensor_param(np.array([[1e-6, 2e-6]], dtype=config.floatX)),
-            (3, 2, 2),
-        ),
-        (
-            create_pytensor_param(np.array([1], dtype=config.floatX)),
-            create_pytensor_param(np.array([10], dtype=config.floatX)),
-            (1, 2),
-        ),
+        lambda M_pt, sd_pt: (pt.zeros((M_pt,)), sd_pt, None),
+        lambda M_pt, sd_pt: (pt.zeros((M_pt,)), sd_pt, (M_pt,)),
+        lambda M_pt, sd_pt: (pt.zeros((M_pt,)), sd_pt, (2, M_pt)),
+        lambda M_pt, sd_pt: (pt.zeros((M_pt,)), pt.ones((M_pt,)), None),
+        lambda M_pt, sd_pt: (pt.zeros((M_pt,)), pt.ones((M_pt,)), (2, M_pt)),
     ],
 )
-def test_normal_infer_shape(M, sd, size):
+def test_normal_infer_shape(make_args):
+    M_pt = iscalar("M")
+    sd_pt = scalar("sd")
+    test_values = {M_pt: 3, sd_pt: np.array(1.0, dtype=config.floatX)}
+
+    M, sd, size = make_args(M_pt, sd_pt)
+
     rv = normal(M, sd, size=size)
     size_pt = rv.owner.op.size_param(rv.owner)
     rv_shape = list(normal._infer_shape(size_pt, [M, sd], None))
@@ -261,7 +250,7 @@ def test_normal_infer_shape(M, sd, size):
 
     *rv_shape_val, rv_val = pytensor_fn(
         *[
-            i.tag.test_value
+            test_values[i]
             for i in fn_inputs
             if not isinstance(i, SharedVariable | Constant)
         ]
@@ -270,15 +259,55 @@ def test_normal_infer_shape(M, sd, size):
     assert tuple(rv_shape_val) == tuple(rv_val.shape)
 
 
-@config.change_flags(compute_test_value="raise")
+@pytest.mark.parametrize(
+    "M_val, sd_val, size",
+    [
+        (
+            np.array([[-1, 20], [300, -4000]], dtype=config.floatX),
+            np.array([[1e-6, 2e-6]], dtype=config.floatX),
+            (3, 2, 2),
+        ),
+        (
+            np.array([1], dtype=config.floatX),
+            np.array([10], dtype=config.floatX),
+            (1, 2),
+        ),
+    ],
+)
+def test_normal_infer_shape_params(M_val, sd_val, size):
+    M = pt.as_tensor_variable(M_val).type()
+    sd = pt.as_tensor_variable(sd_val).type()
+
+    rv = normal(M, sd, size=size)
+    size_pt = rv.owner.op.size_param(rv.owner)
+    rv_shape = list(normal._infer_shape(size_pt, [M, sd], None))
+
+    all_args = (M, sd, *(() if size is None else size))
+    fn_inputs = [
+        i
+        for i in graph_inputs([a for a in all_args if isinstance(a, Variable)])
+        if not isinstance(i, Constant | SharedVariable)
+    ]
+    pytensor_fn = function(
+        fn_inputs, [pt.as_tensor(o) for o in [*rv_shape, rv]], mode=py_mode
+    )
+
+    *rv_shape_val, rv_val = pytensor_fn(
+        *[
+            {M: M_val, sd: sd_val}[i]
+            for i in fn_inputs
+            if not isinstance(i, SharedVariable | Constant)
+        ]
+    )
+
+    assert tuple(rv_shape_val) == tuple(rv_val.shape)
+
+
 def test_normal_ShapeFeature():
     M_pt = iscalar("M")
-    M_pt.tag.test_value = 3
     sd_pt = scalar("sd")
-    sd_pt.tag.test_value = np.array(1.0, dtype=config.floatX)
 
     d_rv = normal(pt.ones((M_pt,)), sd_pt, size=(2, M_pt))
-    d_rv.tag.test_value
 
     fg = FunctionGraph(
         [i for i in graph_inputs([d_rv]) if not isinstance(i, Constant)],
@@ -288,8 +317,11 @@ def test_normal_ShapeFeature():
     )
     s1, s2 = fg.shape_feature.shape_of[d_rv]
 
-    assert get_test_value(s1) == get_test_value(d_rv).shape[0]
-    assert get_test_value(s2) == get_test_value(d_rv).shape[1]
+    f = function([M_pt, sd_pt], [s1, s2, d_rv], mode=py_mode, on_unused_input="ignore")
+    s1_val, s2_val, d_rv_val = f(3, np.array(1.0, dtype=config.floatX))
+
+    assert s1_val == d_rv_val.shape[0]
+    assert s2_val == d_rv_val.shape[1]
 
 
 @pytest.mark.parametrize(
@@ -645,10 +677,8 @@ def test_mvnormal_impl_catches_incompatible_size():
         )
 
 
-@config.change_flags(compute_test_value="raise")
 def test_mvnormal_ShapeFeature():
     M_pt = iscalar("M")
-    M_pt.tag.test_value = 2
 
     d_rv = multivariate_normal(pt.ones((M_pt,)), pt.eye(M_pt), size=2)
 
@@ -661,17 +691,17 @@ def test_mvnormal_ShapeFeature():
 
     s1, s2 = fg.shape_feature.shape_of[d_rv]
 
-    assert get_test_value(s1) == 2
+    f = function([M_pt], [s1, s2], mode=py_mode)
+    s1_val, s2_val = f(2)
+    assert s1_val == 2
     assert M_pt in graph_inputs([s2])
 
     # Test broadcasted shapes
     mean = tensor(dtype=config.floatX, shape=(1, None))
-    mean.tag.test_value = np.array([[0, 1, 2]], dtype=config.floatX)
 
     test_covar = np.diag(np.array([1, 10, 100], dtype=config.floatX))
     test_covar = np.stack([test_covar, test_covar * 10.0])
     cov = pt.as_tensor(test_covar).type()
-    cov.tag.test_value = test_covar
 
     d_rv = multivariate_normal(mean, cov, size=[2, 3, 2])
 
@@ -683,10 +713,13 @@ def test_mvnormal_ShapeFeature():
 
     s1, s2, s3, s4 = fg.shape_feature.shape_of[d_rv]
 
-    assert s1.get_test_value() == 2
-    assert s2.get_test_value() == 3
-    assert s3.get_test_value() == 2
-    assert s4.get_test_value() == 3
+    mean_val = np.array([[0, 1, 2]], dtype=config.floatX)
+    f = function([mean, cov], [s1, s2, s3, s4], mode=py_mode, on_unused_input="ignore")
+    s1_val, s2_val, s3_val, s4_val = f(mean_val, test_covar)
+    assert s1_val == 2
+    assert s2_val == 3
+    assert s3_val == 2
+    assert s4_val == 3
 
 
 def create_mvnormal_cov_decomposition_method_test(mode):
@@ -769,22 +802,23 @@ def test_dirichlet_rng():
         dirichlet.rng_fn(None, np.broadcast_to(alphas, (1, 3, 3)), size=(3,))
 
 
-M_pt = iscalar("M")
-M_pt.tag.test_value = 3
-
-
 @pytest.mark.parametrize(
-    "M, size",
+    "make_args",
     [
-        (pt.ones((M_pt,)), None),
-        (pt.ones((M_pt,)), (M_pt + 1,)),
-        (pt.ones((M_pt,)), (2, M_pt)),
-        (pt.ones((M_pt, M_pt + 1)), None),
-        (pt.ones((M_pt, M_pt + 1)), (M_pt + 2, M_pt)),
-        (pt.ones((M_pt, M_pt + 1)), (2, M_pt + 2, M_pt + 3, M_pt)),
+        lambda M_pt: (pt.ones((M_pt,)), None),
+        lambda M_pt: (pt.ones((M_pt,)), (M_pt + 1,)),
+        lambda M_pt: (pt.ones((M_pt,)), (2, M_pt)),
+        lambda M_pt: (pt.ones((M_pt, M_pt + 1)), None),
+        lambda M_pt: (pt.ones((M_pt, M_pt + 1)), (M_pt + 2, M_pt)),
+        lambda M_pt: (pt.ones((M_pt, M_pt + 1)), (2, M_pt + 2, M_pt + 3, M_pt)),
     ],
 )
-def test_dirichlet_infer_shape(M, size):
+def test_dirichlet_infer_shape(make_args):
+    M_pt = iscalar("M")
+    test_values = {M_pt: 3}
+
+    M, size = make_args(M_pt)
+
     rv = dirichlet(M, size=size)
     size_pt = rv.owner.op.size_param(rv.owner)
     rv_shape = list(dirichlet._infer_shape(size_pt, [M], None))
@@ -801,7 +835,7 @@ def test_dirichlet_infer_shape(M, size):
 
     *rv_shape_val, rv_val = pytensor_fn(
         *[
-            i.tag.test_value
+            test_values[i]
             for i in fn_inputs
             if not isinstance(i, SharedVariable | Constant)
         ]
@@ -810,13 +844,10 @@ def test_dirichlet_infer_shape(M, size):
     assert tuple(rv_shape_val) == tuple(rv_val.shape)
 
 
-@config.change_flags(compute_test_value="raise")
 def test_dirichlet_ShapeFeature():
     """Make sure `RandomVariable.infer_shape` works with `ShapeFeature`."""
     M_pt = iscalar("M")
-    M_pt.tag.test_value = 2
     N_pt = iscalar("N")
-    N_pt.tag.test_value = 3
 
     d_rv = dirichlet(pt.ones((M_pt, N_pt)), name="Gamma")
 
@@ -1657,7 +1688,6 @@ def test_unnatural_batched_dims(batch_dims_tester):
     batch_dims_tester()
 
 
-@config.change_flags(compute_test_value="off")
 def test_pickle():
     # This is an interesting `Op` case, because it has a conditional dtype
     sample_a = choice(5, replace=False, size=(2, 3))

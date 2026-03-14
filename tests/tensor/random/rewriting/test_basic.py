@@ -32,7 +32,7 @@ from pytensor.tensor.random.rewriting import (
 )
 from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
 from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
-from pytensor.tensor.type import iscalar, vector
+from pytensor.tensor.type import iscalar
 from pytensor.tensor.type_other import NoneConst
 
 
@@ -53,9 +53,10 @@ def apply_local_rewrite_to_rv(
     rewrite, op_fn, dist_op, dist_params, size, rng, name=None
 ):
     dist_params_pt = []
+    input_values = {}
     for i, p in enumerate(dist_params):
         p_pt = pt.as_tensor(p).type(f"p_{i}")
-        p_pt.tag.test_value = p
+        input_values[p_pt] = p
         dist_params_pt.append(p_pt)
 
     if size is None:
@@ -68,7 +69,7 @@ def apply_local_rewrite_to_rv(
                 s_pt = constant(np.array(1, dtype="int32"))
             else:
                 s_pt = iscalar()
-            s_pt.tag.test_value = s
+            input_values[s_pt] = s
             size_pt.append(s_pt)
 
     next_rng, rv = dist_op(
@@ -101,7 +102,7 @@ def apply_local_rewrite_to_rv(
         "Rewritten should have a single RV in the graph"
     )
 
-    return new_rv, f_inputs, dist_st, f_rewritten
+    return new_rv, f_inputs, dist_st, f_rewritten, input_values
 
 
 class TestRVExpraProps(RandomVariable):
@@ -147,7 +148,6 @@ def test_inplace_rewrites(rv_op):
     assert check_stack_trace(f)
 
 
-@config.change_flags(compute_test_value="raise")
 @pytest.mark.parametrize(
     "dist_op, dist_params, size",
     [
@@ -201,13 +201,15 @@ def test_inplace_rewrites(rv_op):
 def test_local_rv_size_lift(dist_op, dist_params, size):
     rng = shared(np.random.default_rng(1233532), borrow=False)
 
-    new_out, _f_inputs, _dist_st, _f_rewritten = apply_local_rewrite_to_rv(
-        local_rv_size_lift,
-        lambda rv: rv,
-        dist_op,
-        dist_params,
-        size,
-        rng,
+    new_out, _f_inputs, _dist_st, _f_rewritten, _input_values = (
+        apply_local_rewrite_to_rv(
+            local_rv_size_lift,
+            lambda rv: rv,
+            dist_op,
+            dist_params,
+            size,
+            rng,
+        )
     )
 
     assert new_out.owner.op.size_param(new_out.owner).data is None
@@ -414,11 +416,10 @@ def test_local_rv_size_lift(dist_op, dist_params, size):
         ),
     ],
 )
-@config.change_flags(compute_test_value_opt="raise", compute_test_value="raise")
 def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
     rng = shared(np.random.default_rng(1233532), borrow=False)
 
-    new_out, f_inputs, dist_st, f_rewritten = apply_local_rewrite_to_rv(
+    new_out, f_inputs, dist_st, f_rewritten, input_values = apply_local_rewrite_to_rv(
         local_dimshuffle_rv_lift,
         lambda rv: rv.dimshuffle(ds_order),
         dist_op,
@@ -444,7 +445,7 @@ def test_DimShuffle_lift(ds_order, lifted, dist_op, dist_params, size, rtol):
         mode=no_mode,
     )
 
-    arg_values = [p.get_test_value() for p in f_inputs]
+    arg_values = [input_values[p] for p in f_inputs]
     res_base = f_base(*arg_values)
     res_rewritten, _ = f_rewritten(*arg_values)
 
@@ -800,7 +801,6 @@ def rand_bool_mask(shape, rng=None):
         ),
     ],
 )
-@config.change_flags(compute_test_value_opt="raise", compute_test_value="raise")
 def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
     from pytensor.tensor.subtensor import as_index_constant
 
@@ -809,11 +809,9 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
     indices_pt = ()
     for i in indices:
         i_pt = as_index_constant(i)
-        if not isinstance(i_pt, slice):
-            i_pt.tag.test_value = i
         indices_pt += (i_pt,)
 
-    new_out, f_inputs, dist_st, f_rewritten = apply_local_rewrite_to_rv(
+    new_out, f_inputs, dist_st, f_rewritten, input_values = apply_local_rewrite_to_rv(
         local_subtensor_rv_lift,
         lambda rv: rv[indices_pt],
         dist_op,
@@ -849,7 +847,7 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
         mode=no_mode,
     )
 
-    arg_values = [p.get_test_value() for p in f_inputs]
+    arg_values = [input_values[p] for p in f_inputs]
     res_base = f_base(*arg_values)
     res_rewritten, _ = f_rewritten(*arg_values)
 
@@ -859,8 +857,6 @@ def test_Subtensor_lift(indices, lifted, dist_op, dist_params, size):
 def test_Subtensor_lift_restrictions():
     rng = shared(np.random.default_rng(1233532), borrow=False)
 
-    std = vector("std")
-    std.tag.test_value = np.array([1e-5, 2e-5, 3e-5], dtype=config.floatX)
     x = normal(pt.arange(2), pt.ones(2), rng=rng)
     y = x[1]
     # The non-`Subtensor` client depends on the RNG state, so we can't perform
@@ -963,7 +959,7 @@ def test_Dimshuffle_lift_restrictions():
 def test_Dimshuffle_lift_rename(ds_order, lifted, dist_op, dist_params, size, rtol):
     rng = shared(np.random.default_rng(1233532), borrow=False)
 
-    new_out, *_ = apply_local_rewrite_to_rv(
+    new_out, *_rest = apply_local_rewrite_to_rv(
         local_dimshuffle_rv_lift,
         lambda rv: rv.dimshuffle(ds_order),
         dist_op,

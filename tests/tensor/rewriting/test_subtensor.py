@@ -16,6 +16,7 @@ from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.traversal import ancestors
 from pytensor.raise_op import Assert
+from pytensor.tensor import as_tensor
 from pytensor.tensor.basic import Alloc, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
@@ -53,7 +54,6 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
-from tests.unittest_tools import create_pytensor_param
 
 
 mode_opt = config.mode
@@ -62,31 +62,32 @@ if mode_opt == "FAST_COMPILE":
 mode_opt = get_mode(mode_opt)
 
 
-y = create_pytensor_param(np.random.default_rng().integers(0, 4, size=(2,)))
-z = create_pytensor_param(np.random.default_rng().integers(0, 4, size=(2, 2)))
-
-
 @pytest.mark.parametrize(
-    ("indices", "is_none"),
+    ("indexer", "is_none"),
     [
-        ((slice(None), y, y), True),
-        ((y, y, slice(None)), True),
-        ((y,), False),
-        ((slice(None), y), False),
-        ((y, slice(None)), False),
-        ((slice(None), y, slice(None)), False),
-        ((slice(None), z, slice(None)), False),
-        ((slice(None), z), False),
-        ((z, slice(None)), False),
-        ((slice(None), z, slice(None)), False),
+        (lambda X, y, z: X[:, y, y], True),
+        (lambda X, y, z: X[y, y, :], True),
+        (lambda X, y, z: X[y], False),
+        (lambda X, y, z: X[:, y], False),
+        (lambda X, y, z: X[y, :], False),
+        (lambda X, y, z: X[:, y, :], False),
+        (lambda X, y, z: X[:, z, :], False),
+        (lambda X, y, z: X[:, z], False),
+        (lambda X, y, z: X[z, :], False),
+        (lambda X, y, z: X[:, z, :], False),
     ],
 )
-def test_local_replace_AdvancedSubtensor(indices, is_none):
+def test_local_replace_AdvancedSubtensor(indexer, is_none):
+    rng = np.random.default_rng()
+    y_val = rng.integers(0, 4, size=(2,))
+    z_val = rng.integers(0, 4, size=(2, 2))
+    y = as_tensor(y_val).type()
+    z = as_tensor(z_val).type()
+
     X_val = np.random.normal(size=(4, 4, 4))
     X = tensor(dtype=np.float64, shape=(None, None, None), name="X")
-    X.tag.test_value = X_val
 
-    Y = X[indices]
+    Y = indexer(X, y, z)
 
     res_pt = local_replace_AdvancedSubtensor.transform(None, Y.owner)
 
@@ -101,10 +102,14 @@ def test_local_replace_AdvancedSubtensor(indices, is_none):
             if v.owner
         )
 
-        inputs = [X] + [i for i in indices if isinstance(i, Variable)]
+        inputs = [X, y, z]
 
-        res_fn = function(inputs, res_pt, mode=Mode("py", None, None))
-        exp_res_fn = function(inputs, Y, mode=Mode("py", None, None))
+        res_fn = function(
+            inputs, res_pt, mode=Mode("py", None, None), on_unused_input="ignore"
+        )
+        exp_res_fn = function(
+            inputs, Y, mode=Mode("py", None, None), on_unused_input="ignore"
+        )
 
         # Make sure that the expected result graph has an `AdvancedSubtensor`
         assert any(
@@ -113,8 +118,8 @@ def test_local_replace_AdvancedSubtensor(indices, is_none):
             if v.owner
         )
 
-        res_val = res_fn(*[i.tag.test_value for i in inputs])
-        exp_res_val = exp_res_fn(*[i.tag.test_value for i in inputs])
+        res_val = res_fn(X_val, y_val, z_val)
+        exp_res_val = exp_res_fn(X_val, y_val, z_val)
 
         assert np.array_equal(res_val, exp_res_val)
 

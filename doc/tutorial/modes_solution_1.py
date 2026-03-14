@@ -24,8 +24,6 @@ x = pt.matrix("x")
 y = pt.vector("y")
 w = pytensor.shared(rng.standard_normal(feats).astype(pytensor.config.floatX), name="w")
 b = pytensor.shared(np.asarray(0.0, dtype=pytensor.config.floatX), name="b")
-x.tag.test_value = D[0]
-y.tag.test_value = D[1]
 # print "Initial model:"
 # print w.get_value(), b.get_value()
 

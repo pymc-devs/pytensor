@@ -10,7 +10,6 @@ from typing import Union, cast
 from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable
-from pytensor.configdefaults import config
 from pytensor.gradient import DisconnectedType, Rop, grad
 from pytensor.graph.basic import (
     Apply,
@@ -490,7 +489,6 @@ class OpFromGraph(Op, HasInnerGraph):
             )
         return outputs
 
-    @config.change_flags(compute_test_value="off")
     def _build_and_cache_lop_op(
         self, disconnected_output_grads: tuple[bool, ...]
     ) -> Callable:
@@ -632,7 +630,6 @@ class OpFromGraph(Op, HasInnerGraph):
         self._lop_op_cache[disconnected_output_grads] = wrapper
         return wrapper
 
-    @config.change_flags(compute_test_value="off")
     def _build_and_cache_rop_op(self):
         """Converts rop_overrides from user supplied form to type(self) instance.
 
