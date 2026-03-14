@@ -222,54 +222,6 @@ Afterward, you can go to `html/index.html` and navigate the changes in a browser
 **Do not commit the `html` directory. The documentation is built automatically.**
 For more documentation customizations such as different formats e.g., PDF, refer to the `Sphinx documentation <https://www.sphinx-doc.org/en/master/usage/builders/index.html>`_.
 
-Building a WebAssembly (Pyodide) wheel
---------------------------------------
-
-To build a wheel targeting WebAssembly for use with `Pyodide <https://pyodide.org/>`_ (e.g. for the browser or JupyterLite), use the Pyodide build tooling. This produces a wheel in ``dist/`` with a name like ``*-cpXXX-cpXXX-pyodide_*_wasm32.whl``.
-
-On Pyodide/wasm32, the **numba** dependency is omitted (via environment markers in ``pyproject.toml``), so the package can be installed with ``micropip.install(url)`` without pulling in numba.
-
-**Full workflow (copy-paste)**
-
-Use Python 3.11, 3.12, or 3.13 (Pyodide does not yet support 3.14). From the project root:
-
-**1. One-time: install Emscripten**
-
-.. code-block:: bash
-
-   # Clone and install the Emscripten SDK
-   git clone https://github.com/emscripten-core/emsdk.git /path/to/emsdk
-   cd /path/to/emsdk
-   # Use the version required by pyodide-build (check with: pyodide config get emscripten_version)
-   ./emsdk install 3.1.45
-   ./emsdk activate 3.1.45
-   source emsdk_env.sh
-
-In every new shell where you will run ``pyodide build``, run ``source /path/to/emsdk/emsdk_env.sh`` first (or add it to your profile).
-
-**2. One-time per machine: create a venv and install the Pyodide build extra**
-
-.. code-block:: bash
-
-   python3.12 -m venv .venv-pyodide
-   source .venv-pyodide/bin/activate   # On Windows: .venv-pyodide\Scripts\activate
-   pip install -e ".[pyodide]"
-
-This installs the project in editable form and the ``pyodide-build`` tool (declared in the ``pyodide`` optional dependency).
-
-**3. Each time you want to build the wasm wheel**
-
-.. code-block:: bash
-
-   source /path/to/emsdk/emsdk_env.sh
-   source .venv-pyodide/bin/activate
-   cd /path/to/pytensor
-   pyodide build
-
-The wheel will appear in ``dist/``. PyPI does not yet accept emscripten/wasm32 wheels; host the file elsewhere (e.g. GitHub Releases) and install in Pyodide with ``micropip.install(url)``.
-
-To see which Emscripten version your installed ``pyodide-build`` expects, run ``pyodide config get emscripten_version`` and use that in step 1 if it differs from ``3.1.45``. For more detail, see `Pyodide: building packages <https://pyodide.org/en/stable/development/building-packages-from-source.html>`_.
-
 Other tools that might help
 ===========================
 
