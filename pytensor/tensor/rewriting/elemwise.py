@@ -51,7 +51,6 @@ from pytensor.tensor.elemwise import (
 )
 from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
-    alloc_like,
     broadcasted_by,
     elemwise_of,
     register_canonicalize,
@@ -1087,18 +1086,23 @@ def local_inline_composite_constants(fgraph, node):
     new_outer_inputs = []
     new_inner_inputs = []
     inner_replacements = {}
+    constant_dim_lengths = {}
     for outer_inp, inner_inp in zip(
         node.inputs, composite_op.fgraph.inputs, strict=True
     ):
         # Complex variables don't have a `c_literal` that can be inlined
         if (
-            isinstance(outer_inp, TensorConstant)
+            isinstance(outer_inp, Constant)
             and "complex" not in outer_inp.type.dtype
         ):
             if outer_inp.unique_value is not None:
                 inner_replacements[inner_inp] = scalar_constant(
                     outer_inp.unique_value, dtype=inner_inp.dtype
                 )
+                for i, dim_length in enumerate(reversed(outer_inp.type.shape, start=1)):
+                    # Store constant dim_lengths that may have broadcasted the original graph
+                    if dim_length != 1:
+                        constant_dim_lengths[-i] = dim_length
                 continue
         new_outer_inputs.append(outer_inp)
         new_inner_inputs.append(inner_inp)
@@ -1110,26 +1114,15 @@ def local_inline_composite_constants(fgraph, node):
         composite_op.fgraph.outputs, replace=inner_replacements
     )
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
-    new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
 
-    # Some of the inlined constants were broadcasting the output shape
-    if node.outputs[0].type.broadcastable != new_outputs[0].type.broadcastable:
-        padded = pad_to_broadcastable(new_outputs[0], node.outputs[0])
-        if padded is not None:
-            new_outputs = [
-                new_out_padded
-                if (new_out_padded := pad_to_broadcastable(new_out, old_out))
-                is not None
-                else new_out
-                for new_out, old_out in zip(new_outputs, node.outputs)
-            ]
-        else:
-            new_outputs = [
-                alloc_like(new_out, template=node.outputs[0], fgraph=fgraph)
-                for new_out in new_outputs
-            ]
+    old_out = node.oututs[0]
+    new_outputs = atleast_Nd(*Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs, n=old_out.type.ndim)
+    if broadcasted_axes := broadcasted_by_axes(new_outputs[0], old_out, negative_indices=True):
+        # Some of the inlined constants were broadcasting the output shape
+        axes_lengths = {constant_dim_lengths[i] for i in broacasted_axes}
+        new_outputs = [broadcast_axes(new_out, axes_lengths) for new_out in new_outputs]
 
-    copy_stack_trace(node.outputs, new_outputs)
+    copy_stack_trace(old_out, new_outputs)
     return new_outputs
 
 
@@ -1155,6 +1148,7 @@ def constant_fold_branches_of_add_mul(fgraph, node):
                 if i == j:
                     continue
                 other_inp = new_constants[j]
+                # TODO: Adding dummy dims should be fine
                 if not broadcasted_by(reference_inp, other_inp):
                     other_inps.append(other_inp)
             if other_inps:

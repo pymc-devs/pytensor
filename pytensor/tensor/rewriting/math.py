@@ -101,8 +101,7 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.rewriting.basic import (
-    alloc_like,
-    broadcasted_by,
+    brodcast_like_elemwise,
     local_fill_sink,
     register_canonicalize,
     register_specialize,
@@ -2178,21 +2177,10 @@ def local_mul_zero(fgraph, node):
 @register_specialize
 @node_rewriter([true_div])
 def local_div_to_reciprocal(fgraph, node):
-    if (
-        get_underlying_scalar_constant_value(
-            node.inputs[0], only_process_constants=True, raise_not_constant=False
-        )
-        == 1.0
-    ):
-        out = node.outputs[0]
-        new_out = reciprocal(local_mul_canonizer.merge_num_denum(node.inputs[1:], []))
-        # The ones could have forced upcasting
-        if new_out.dtype != out.dtype:
-            new_out = cast(new_out, dtype=out.dtype)
-        # The ones could have forced a specific length
-        if not out.type.is_super(new_out.type):
-            new_out = alloc_like(new_out, out, fgraph)
-        return [new_out]
+    numerator, denominator = node.inputs
+    if isinstance(numerator, TensorConstant) and numerator.unique_value == 1.0:
+        new_out = reciprocal(denominator)
+        return [broadcast_like_elemwise(new_out, node, fgraph=fgraph, copy_stack_trace=True)]
 
 
 @register_canonicalize
@@ -2252,68 +2240,56 @@ def local_mul_to_sqr(fgraph, node):
 
 
 @register_canonicalize
-@node_rewriter([int_div])
-def local_intdiv_by_one(fgraph, node):
-    """x // 1 -> x"""
-    if isinstance(node.inputs[1], TensorConstant) and np.all(node.inputs[1].value == 1):
-        return [node.inputs[0].astype(node.outputs[0].dtype)]
+@node_rewriter([true_div, int_div])
+def local_div_by_one(fgraph, node):
+    """x / 1 -> x"""
+    numerator, denominator = node.inputs
+    if isinstance(denominator, TensorConstant) and denominator.unique_value == 1:
+        new_out = numerator
+        new_out = broadcast_like_elemwise(new_out, node, fgraph=fgraph, auto_copy_stack_trace=True)
+        return [new_out]
 
 
 @register_canonicalize
 @register_specialize
-@node_rewriter([int_div, true_div])
+@node_rewriter([true_div, int_div])
 def local_zero_div(fgraph, node):
     """0 / x -> 0"""
-    if (
-        get_underlying_scalar_constant_value(
-            node.inputs[0], only_process_constants=True, raise_not_constant=False
-        )
-        == 0
-    ):
-        ret = alloc_like(0, node.outputs[0], fgraph)
-        ret.tag.values_eq_approx = values_eq_approx_remove_nan
-        return [ret]
+    numerator, denominator = node.inputs
+    if isinstance(numerator, TensorConstant) and numerator.unique_value == 0:
+        old_out = node.outputs[0]
+        new_shape = get_simplified_broadcast_shape(denominator, numerator, fgraph=fgraph)
+        new_out = alloc(0, *new_shape, dtype=old_out.dtype)
+        new_out.tag.values_eq_approx = values_eq_approx_remove_nan
+        return [new_out]
 
 
 @register_specialize
 @node_rewriter([pt_pow])
 def local_pow_specialize(fgraph, node):
-    # the idea here is that we have pow(x, y)
-    odtype = node.outputs[0].dtype
-    xsym = node.inputs[0]
-    ysym = node.inputs[1]
-    try:
-        y = get_underlying_scalar_constant_value(ysym, only_process_constants=True)
-    except NotScalarConstantError:
-        return
-
-    if not broadcasted_by(xsym, ysym):
-        rval = None
-
-        if np.all(y == 2):
-            rval = [sqr(xsym)]
-        if np.all(y == 1):
-            rval = [xsym]
-        if np.all(y == 0):
-            rval = [alloc_like(1, xsym, fgraph)]
-        if np.all(y == 0.5):
-            rval = [sqrt(xsym)]
-        if np.all(y == -0.5):
-            rval = [reciprocal(sqrt(xsym))]
-        if np.all(y == -1):
-            rval = [reciprocal(xsym)]
-        if np.all(y == -2):
-            rval = [reciprocal(sqr(xsym))]
-        if rval:
-            padded = pad_to_broadcastable(rval[0], node.outputs[0])
-            if padded is not None:
-                rval[0] = padded
-            elif rval[0].type.broadcastable != node.outputs[0].type.broadcastable:
+    xsym, ysym = node.inputs
+    if isinstance(ysym, TensorConstant) and (y := ysym.unique_val) is not None:
+        old_out = node.outputs[0]
+        match y:
+            case 2:
+                rval = sqr(xsym)
+            case 1:
+                rval = xsym
+            case 0:
+                broadcast_shape = get_simplified_broadcast_shape(xsym, ysym)
+                rval = alloc(np.array(1.0, dtype=odtype), *broadcast_shape)
+            case 0.5:
+                rval = sqrt(xsym)
+            case -0.5:
+                rval = reciprocal(sqrt(xsym))
+            case -1:
+                rval = reciprocal(xsym)
+            case -2:
+                rval = reciprocal(sqr(xsym))
+            case _:
                 return None
-            rval[0] = cast(rval[0], odtype)
-            assert rval[0].type.dtype == node.outputs[0].type.dtype
-            return rval
 
+        return [broadcast_like_elemwise(rval, node, fgraph=fgraph, copy_stack_trace=True)]
 
 @register_specialize
 @node_rewriter([pt_pow])
@@ -2331,8 +2307,6 @@ def local_pow_to_nested_squaring(fgraph, node):
     except NotScalarConstantError:
         return
 
-    odtype = node.outputs[0].dtype
-
     # the next line is needed to fix a strange case that I don't
     # know how to make a separate test.
     # That happen in the `test_log_erfc` test.
@@ -2347,41 +2321,41 @@ def local_pow_to_nested_squaring(fgraph, node):
             y = y[0]
         except IndexError:
             pass
-    if not broadcasted_by(xsym, ysym):
-        rval = None
-        # 512 is too small for the cpu and too big for some gpu!
-        if abs(y) == int(abs(y)) and abs(y) <= 512:
-            pow2 = [xsym]
-            pow2_scal = [ps.get_scalar_type(xsym.dtype)()]
-            y_to_do = abs(y)
-            for i in range(int(np.log2(y_to_do))):
-                pow2.append(sqr(pow2[i]))
-                pow2_scal.append(ps.sqr(pow2_scal[i]))
-            rval1 = None
-            rval1_scal = None
-            while y_to_do > 0:
-                log_to_do = int(np.log2(y_to_do))
-                if rval1 is not None:
-                    rval1 *= pow2[log_to_do]
-                    rval1_scal *= pow2_scal[log_to_do]
-                else:
-                    rval1 = pow2[log_to_do]
-                    rval1_scal = pow2_scal[log_to_do]
-                y_to_do -= 2**log_to_do
 
-            if abs(y) > 2:
-                # We fuse all the pow together here to make
-                # compilation faster
-                rval1 = Elemwise(ps.Composite([pow2_scal[0]], [rval1_scal])).make_node(
-                    xsym
-                )
-            if y < 0:
-                rval = [reciprocal(rval1)]
+    rval = None
+    # 512 is too small for the cpu and too big for some gpu!
+    if abs(y) == int(abs(y)) and abs(y) <= 512:
+        pow2 = [xsym]
+        pow2_scal = [ps.get_scalar_type(xsym.dtype)()]
+        y_to_do = abs(y)
+        for i in range(int(np.log2(y_to_do))):
+            pow2.append(sqr(pow2[i]))
+            pow2_scal.append(ps.sqr(pow2_scal[i]))
+        rval1 = None
+        rval1_scal = None
+        while y_to_do > 0:
+            log_to_do = int(np.log2(y_to_do))
+            if rval1 is not None:
+                rval1 *= pow2[log_to_do]
+                rval1_scal *= pow2_scal[log_to_do]
             else:
-                rval = [rval1]
-        if rval is not None:
-            rval[0] = cast(rval[0], odtype)
-            return rval
+                rval1 = pow2[log_to_do]
+                rval1_scal = pow2_scal[log_to_do]
+            y_to_do -= 2**log_to_do
+
+        if abs(y) > 2:
+            # We fuse all the pow together here to make
+            # compilation faster
+            rval1 = Elemwise(ps.Composite([pow2_scal[0]], [rval1_scal])).make_node(
+                xsym
+            )
+        if y < 0:
+            rval = reciprocal(rval1)
+        else:
+            rval = rval1
+
+    if rval is not None:
+        return [broadcast_like_elemwise(rval, node, fgraph=fgraph)]
 
 
 @register_specialize
@@ -2399,64 +2373,67 @@ def local_mul_specialize(fgraph, node):
     mul(-1, x, y) -/-> neg(mul(x, y))
 
     """
-
-    # at this point [post canonicalize], mul() may have many inputs.
-    # the idea here is that we have pow(x, y)
     has_neg = False
     new_inputs = []
     nb_neg_node = 0
     nb_cst = 0
+    has_zero = False
     for inp in node.inputs:
         # remove any neg arguments
-        while inp.owner and inp.owner.op == neg:
+        while inp.owner is not None and inp.owner.op == neg:
             has_neg ^= True
-            inp = inp.owner.inputs[0]
+            [inp] = inp.owner.inputs
             nb_neg_node += 1
 
         # remove special case arguments of 1, -1 or 0
-        y = get_underlying_scalar_constant_value(
-            inp, only_process_constants=True, raise_not_constant=False
-        )
-        if y == 1.0:
-            nb_cst += 1
-        elif y == -1.0:
-            nb_cst += 1
-            has_neg ^= True  # toggles
-        elif y == 0.0:
-            # if we find any zero, we just return right away
-            return [alloc_like(0, node.outputs[0], fgraph)]
-        else:
-            new_inputs.append(inp)
+        match get_underlying_scalar_constant_value(inp, only_process_constants=True, raise_not_constant=False):
+            case 1.0:
+                nb_cst += 1
+            case -1.0:
+                nb_cst += 1
+                has_neg ^= True  # toggles
+            case 0.0:
+                # if we find any zero, there's nothing else to do
+               has_zero = True
+               break
+            case _:
+                new_inputs.append(inp)
 
     if new_inputs != node.inputs:
-        if new_inputs:
+        [old_out] = node.outputs
+        if has_zero:
+            new_out = alloc(
+                np.array(0, dtype=node.type.dtype),
+                *get_simplified_broadcast_shape(*node.inputs, fgraph=fgraph)
+            )
+        elif len(new_inputs) == 0:
+            new_out = alloc(
+                np.array(-1 if has neg else 1, dtype=old_out.type.dtype),
+                *get_simplifed_broadcast_shape(*node.inputs, fgraph=fgraph)
+            )
+        else:
             if len(new_inputs) == 1:
                 if has_neg:
-                    if new_inputs[0].dtype in ([*uint_dtypes, "bool"]):
-                        return
-                    else:
-                        rval = -new_inputs[0]
+                    if new_inputs[0].dtype in (*uint_dtypes, "bool"):
+                        return None
+                    new_out = -new_inputs[0]
                 else:
-                    rval = new_inputs[0]
+                    new_out = new_inputs[0]
             else:
                 # The next case would cause a replace by an equivalent case.
                 if has_neg and nb_neg_node == 0 and nb_cst == 1:
-                    return
+                    return None
                 elif has_neg:
-                    # Don't add an extra neg node as we can't
-                    # fully replace this mul by a neg.
-                    m1 = np.asarray(-1, dtype=node.outputs[0].dtype)
+                    # Don't add an extra neg node as we can't fully replace this mul by a neg.
+                    m1 = np.array(-1, dtype=old_out.type.dtype)
                     new_inputs = [m1, *new_inputs]
-                rval = mul(*new_inputs)
+                new_out = mul(*new_inputs)
 
-            return [alloc_like(rval, node.outputs[0], fgraph)]
-        else:
-            # there are no variable inputs to mul
-            # N.B. this could have been constant-folded...
-            if has_neg:
-                return [alloc_like(-1, node.outputs[0], fgraph)]
-            else:
-                return [alloc_like(1, node.outputs[0], fgraph)]
+            new_out = broadcast_like_elemwise(rval, node, fgraph=fgraph)
+
+        copy_stack_trace(old_out, new_out)
+        return [new_out]
+
 
 
 @register_specialize
@@ -2465,35 +2442,17 @@ def local_add_remove_zeros(fgraph, node):
     new_inputs = []
     for inp in node.inputs:
         try:
-            y = get_underlying_scalar_constant_value(inp)
+            not_zero = get_underlying_scalar_constant_value(inp) != 0.0
         except NotScalarConstantError:
-            y = inp
-        if y == 0.0:
-            continue
-        new_inputs.append(inp)
+            not_zero = True
+        if not_zero:
+            new_inputs.append(inp)
 
     if len(new_inputs) == len(node.inputs):
-        return False
+        return None
 
-    node_output = node.outputs[0]
-    dtype = node_output.type.dtype
-
-    if len(new_inputs) == 0:
-        # we got rid of the entire expression!
-        ndim = node_output.type.ndim
-        # Reuse call to constant for cache()
-        cst = constant(np.zeros((1,) * ndim, dtype=dtype))
-        assert cst.type.broadcastable == (True,) * ndim
-        return [alloc_like(cst, node_output, fgraph)]
-
-    ret = [alloc_like(variadic_add(*new_inputs), node_output, fgraph)]
-
-    # The dtype should not be changed. It can happen if the input
-    # that was forcing upcasting was equal to 0.
-    if ret[0].dtype != dtype:
-        ret = [cast(ret[0], dtype)]
-
-    return ret
+    new_out = variadic_add(*new_inputs)
+    return [broadcast_like_elemwise(new_out, node, fgraph=fgraph, auto_copy_stack_trace=True)]
 
 
 mul_canonizer = in2out(
@@ -2597,10 +2556,8 @@ def local_log1p(fgraph, node):
         # scalar_inputs are potentially dimshuffled and fill'd scalars
         if scalars and isclose(np.sum(scalars), 1):
             if nonconsts:
-                ninp = variadic_add(*nonconsts)
-                if ninp.dtype != log_arg.type.dtype:
-                    ninp = ninp.astype(node.outputs[0].dtype)
-                return [alloc_like(log1p(ninp), node.outputs[0], fgraph)]
+                new_out = log1p(variadic_add(*nonconsts))
+                return [brodcast_elemwise_like(new_out, node, fgraph=fgraph, copy_stack_trace=True)]
 
     elif log_arg.owner and log_arg.owner.op == sub:
         one, other = log_arg.owner.inputs
@@ -2612,16 +2569,8 @@ def local_log1p(fgraph, node):
         if one != 1:
             return
 
-        padded = pad_to_broadcastable(other, log_arg)
-        if padded is not None:
-            other = padded
-        elif other.type.broadcastable != log_arg.type.broadcastable:
-            other = broadcast_arrays(other, one)[0]
-
-        if other.type.dtype != log_arg.type.dtype:
-            other = other.astype(log_arg.dtype)
-
-        return [log1p(neg(other))]
+        new_out = log1p(neg(other))
+        return [brodcast_elemwise_like(new_out, node, fgraph=fgraph, copy_stack_trace=True)]
 
 
 @register_stabilize
@@ -3796,21 +3745,16 @@ def local_reciprocal_1_plus_exp(fgraph, node):
         if len(nonconsts) == 1:
             if nonconsts[0].owner and nonconsts[0].owner.op == exp:
                 if scalars_ and isclose(np.sum(scalars_), 1):
-                    out = [
-                        alloc_like(
-                            sigmoid(neg(nonconsts[0].owner.inputs[0])),
-                            node.outputs[0],
-                            fgraph,
-                        )
-                    ]
+                    new_out = sigmoid(neg(nonconsts[0].owner.inputs[0]))
+                    new_out = brodcast_elemwise_like(new_out, node, fgraph=fgraph)
                     # keep combined stack traces of
                     #     exp(x):           nonconsts[0],
                     #     1 + exp(x):       reciprocal_arg,
                     #     1 / (1 + exp(x)): node.outputs[0]
                     copy_stack_trace(
-                        [nonconsts[0], reciprocal_arg, node.outputs[0]], out
+                        [nonconsts[0], reciprocal_arg, node.outputs[0]], new_out
                     )
-                    return out
+                    return [new_out]
 
 
 # 1 - sigmoid(x) -> sigmoid(-x)
