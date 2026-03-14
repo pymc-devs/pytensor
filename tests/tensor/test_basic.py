@@ -95,7 +95,8 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import dense_dot
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.shape import Reshape, Shape_i, shape_padright, specify_shape
+from pytensor.tensor.reshape import Reshape
+from pytensor.tensor.shape import Shape_i, shape_padright, specify_shape
 from pytensor.tensor.type import (
     TensorType,
     bscalar,

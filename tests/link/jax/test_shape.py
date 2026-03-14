@@ -3,7 +3,8 @@ import numpy as np
 import pytensor.tensor as pt
 from pytensor.compile.ops import DeepCopyOp, ViewOp
 from pytensor.configdefaults import config
-from pytensor.tensor.shape import Shape, Shape_i, reshape
+from pytensor.tensor.reshape import reshape
+from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.type import iscalar, vector
 from tests.link.jax.test_basic import compare_jax_and_py
 

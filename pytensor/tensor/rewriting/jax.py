@@ -4,7 +4,7 @@ from pytensor.graph.rewriting.basic import dfs_rewriter, node_rewriter
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import Sum
-from pytensor.tensor.shape import Reshape
+from pytensor.tensor.reshape import Reshape
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, AdvancedSubtensor
 from pytensor.tensor.variable import TensorVariable
 

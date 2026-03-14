@@ -46,7 +46,8 @@ from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.type import RandomGeneratorType, random_generator_type
 from pytensor.tensor.random.utils import RandomStream
-from pytensor.tensor.shape import Shape_i, reshape, specify_shape
+from pytensor.tensor.reshape import reshape
+from pytensor.tensor.shape import Shape_i, specify_shape
 from pytensor.tensor.sharedvar import SharedVariable
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (

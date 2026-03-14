@@ -27,7 +27,8 @@ from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.basic import GraphRewriter, in2out, node_rewriter
 from pytensor.graph.traversal import apply_depends_on
 from pytensor.graph.type import HasDataType, HasShape
-from pytensor.tensor.shape import Reshape, Shape, SpecifyShape
+from pytensor.tensor.reshape import Reshape
+from pytensor.tensor.shape import Shape, SpecifyShape
 
 
 if TYPE_CHECKING:

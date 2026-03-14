@@ -98,6 +98,7 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import min as pt_min
 from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.reshape import Reshape
 from pytensor.tensor.rewriting.elemwise import local_dimshuffle_lift
 from pytensor.tensor.rewriting.math import (
     compute_mul,
@@ -115,7 +116,7 @@ from pytensor.tensor.rewriting.math import (
     perform_sigm_times_exp,
     simplify_mul,
 )
-from pytensor.tensor.shape import Reshape, Shape_i, SpecifyShape, specify_shape
+from pytensor.tensor.shape import Shape_i, SpecifyShape, specify_shape
 from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.type import (
     TensorType,

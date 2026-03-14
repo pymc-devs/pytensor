@@ -15,13 +15,13 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.blockwise import Blockwise, _squeeze_left
 from pytensor.tensor.math import Dot
+from pytensor.tensor.reshape import Reshape
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.elemwise import InplaceGraphOptimizer
-from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedSubtensor,
