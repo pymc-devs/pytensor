@@ -183,56 +183,78 @@ def get_simplified_broadcast_shape(first, *others, fgraph):
     return broadcast_shape
 
 
-def broadcast_axes(
-    x: TensorVariable, axes_lengths: dict[int, TensorLike]
-) -> TensorVariable:
-    target_shape = list(x.shape)
-    for ax, length in axes_lengths.items():
-        target_shape[ax] = length
-    return alloc(x, *target_shape)
-
-
 def broadcast_like_elemwise(
     value: TensorVariable | TensorLike | list[TensorVariable],
     node: Apply[Elemwise],
     *,
     fgraph: FunctionGraph,
+    ref_input_idx: int | None = None,
     auto_copy_stack_trace: bool = False,
 ) -> TensorVariable | list[TensorVariable]:
-    """Broadcast value(s) to match the output of an elemwise node.
+    """Broadcast value(s) to match the output shape and dtype(s) of an elemwise node.
 
-    Tries eagerly not to depend on the node's outputs, using the node's inputs instead.
-    This eagerness may render use cases "shape_unsafe", masking potential shape errors in the original graph.
+    Each value is cast to match its corresponding ``node.outputs[i]`` dtype,
+    then expanded to the correct number of dimensions and, if necessary,
+    broadcast via `Alloc` to the full output shape.
+
+    When only dimension padding is needed (no size-1 axes must be broadcast),
+    a lightweight ``DimShuffle`` is used instead of ``Alloc``.
+
+    The broadcast shape is derived from ``node.inputs`` rather than
+    ``node.outputs``, so the result does not depend on the node's outputs.
+    This eagerness may mask shape errors present in the original graph
+    ("shape_unsafe").
 
     Parameters
     ----------
     value
-        A single variable (or constant), or list of variables to broadcast.
+        A single variable (or constant), or a list of variables.
+        When a list is given each entry corresponds to an output of ``node``.
+    node
+        The elemwise node whose output shape the values should match.
+    fgraph
+        The function graph containing the node (used to simplify shapes).
+    ref_input_idx
+        If given, ``node.inputs[ref_input_idx]`` is passed as the first
+        argument to ``get_simplified_broadcast_shape``, giving its shape
+        priority for non-broadcastable dims. This is useful when the value
+        originates from that input, so the Alloc reuses the value's own
+        shape for dims that don't need broadcasting.
+    auto_copy_stack_trace
+        If ``True``, copy the stack trace from ``node.outputs[0]`` onto every
+        returned variable.
     """
     is_list = isinstance(value, list)
     values = value if is_list else [value]
 
     ref_out = node.outputs[0]
-    out_dtype = ref_out.type.dtype
     out_ndim = ref_out.type.ndim
 
-    # Convert, cast and pad dims
-    results = []
-    for v in values:
+    # Convert and cast to match each output's dtype
+    casted = []
+    for v, out in zip(values, node.outputs):
         v = as_tensor_variable(v)
-        if v.type.dtype != out_dtype:
-            v = cast(v, out_dtype)
-        v = atleast_Nd(v, n=out_ndim)
-        results.append(v)
+        if v.type.dtype != out.type.dtype:
+            v = cast(v, out.type.dtype)
+        casted.append(v)
 
-    # Compute broadcast shape once for all values
-    if broadcasted_by_axes(results[0], ref_out, negative_indices=True):
-        bcast_shape = get_simplified_broadcast_shape(*node.inputs, fgraph=fgraph)
-        results = [alloc(v, *bcast_shape) for v in results]
+    # Pad dims and check if broadcasting is needed
+    padded = [atleast_Nd(v, n=out_ndim) for v in casted]
+    if broadcasted_by_axes(padded[0], ref_out, negative_indices=True):
+        # Alloc can expand dims itself, so use the un-padded values
+        if ref_input_idx is not None:
+            inputs = list(node.inputs)
+            ref = inputs.pop(ref_input_idx)
+            inputs.insert(0, ref)
+        else:
+            inputs = node.inputs
+        bcast_shape = get_simplified_broadcast_shape(*inputs, fgraph=fgraph)
+        results = [alloc(v, *bcast_shape) for v in casted]
+    else:
+        results = padded
 
     if auto_copy_stack_trace:
-        for v in results:
-            copy_stack_trace(ref_out, v)
+        copy_stack_trace(ref_out, results)
 
     return results if is_list else results[0]
 
@@ -459,16 +481,11 @@ def local_second_to_alloc(fgraph, node):
     Like `local_second_sink` this rewrites assumes non-broadcastable shapes are equivalent,
     which could mask shape errors.
     """
-    first, second = node.inputs
-    old_out = node.outputs[0]
+    _first, second = node.inputs
 
-    new_out = atleast_Nd(second, n=old_out.type.ndim)
-    bcast_axes = broadcasted_by_axes(new_out, old_out, negative_indices=True)
-    if bcast_axes:
-        first_shape = get_simplified_shape(first, fgraph=fgraph)
-        new_out = broadcast_axes(new_out, {i: first_shape[i] for i in bcast_axes})
+    new_out = broadcast_like_elemwise(second, node, fgraph=fgraph, ref_input_idx=1)
 
-    copy_stack_trace(old_out, new_out)
+    copy_stack_trace(node.outputs[0], new_out)
     return [new_out]
 
 

@@ -41,7 +41,7 @@ from pytensor.scalar import (
 from pytensor.scalar import cast as scalar_cast
 from pytensor.scalar import constant as scalar_constant
 from pytensor.scalar.math import Grad2F1Loop, _grad_2f1_loop
-from pytensor.tensor.basic import MakeVector, atleast_Nd
+from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.basic import constant as tensor_constant
 from pytensor.tensor.elemwise import (
     CAReduce,
@@ -50,9 +50,8 @@ from pytensor.tensor.elemwise import (
 )
 from pytensor.tensor.math import add, exp, mul
 from pytensor.tensor.rewriting.basic import (
-    broadcast_axes,
+    broadcast_like_elemwise,
     broadcasted_by,
-    broadcasted_by_axes,
     elemwise_of,
     register_canonicalize,
     register_specialize,
@@ -1113,20 +1112,10 @@ def local_inline_composite_constants(fgraph, node):
     )
     new_composite_op = Composite(new_inner_inputs, new_inner_outs)
 
-    old_out = node.outputs[0]
-    new_outputs = [
-        atleast_Nd(o, n=old_out.type.ndim)
-        for o in Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
-    ]
-    if bcast_axes := broadcasted_by_axes(
-        new_outputs[0], old_out, negative_indices=True
-    ):
-        # Some of the inlined constants were broadcasting the output shape
-        axes_lengths = {i: constant_dim_lengths[i] for i in bcast_axes}
-        new_outputs = [broadcast_axes(new_out, axes_lengths) for new_out in new_outputs]
-
-    copy_stack_trace(old_out, new_outputs)
-    return new_outputs
+    new_outputs = Elemwise(new_composite_op).make_node(*new_outer_inputs).outputs
+    return broadcast_like_elemwise(
+        list(new_outputs), node, fgraph=fgraph, auto_copy_stack_trace=True
+    )
 
 
 @node_rewriter(tracks=[add, mul])
