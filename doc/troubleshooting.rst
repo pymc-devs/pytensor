@@ -196,7 +196,7 @@ or running :func:`pytensor.link.c.cmodule.default_blas_ldflags`.
 Here are some different way to configure BLAS:
 
 0) Do nothing and use the default config.
-This will usually work great for installation via conda/mamba (conda-forge channel).
+This will usually work great for installation via conda/mamba/pixi (conda-forge channel).
 It will usually fail to link altogether for installation via pip.
 
 1) Disable the usage of BLAS and fall back on NumPy for dot products. To do
