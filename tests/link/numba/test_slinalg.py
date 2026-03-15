@@ -298,20 +298,34 @@ class TestSolves:
         [(pt.matrix, (5, 1)), (pt.matrix, (5, 5)), (pt.vector, (5,))],
         ids=["b_col_vec", "b_matrix", "b_vec"],
     )
+    @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
     def test_cho_solve(
-        self, b_func, b_shape: tuple[int, ...], lower: bool, overwrite_b: bool
+        self,
+        b_func,
+        b_shape: tuple[int, ...],
+        lower: bool,
+        overwrite_b: bool,
+        is_complex: bool,
     ):
+        complex_dtype = "complex64" if floatX.endswith("32") else "complex128"
+        dtype = complex_dtype if is_complex else floatX
+
         def A_func(x):
             x = x @ x.conj().T
             x = scipy.linalg.cholesky(x, lower=lower)
             return x
 
-        A = pt.matrix("A", dtype=floatX)
-        b = pt.tensor("b", shape=b_shape, dtype=floatX)
+        A = pt.matrix("A", dtype=dtype)
+        b = pt.tensor("b", shape=b_shape, dtype=dtype)
 
         rng = np.random.default_rng(418)
-        A_val = A_func(rng.normal(size=(5, 5))).astype(floatX)
-        b_val = rng.normal(size=b_shape).astype(floatX)
+        A_base = rng.normal(size=(5, 5))
+        if is_complex:
+            A_base = A_base + 1j * rng.normal(size=(5, 5))
+        A_val = A_func(A_base).astype(dtype)
+        b_val = rng.normal(size=b_shape).astype(dtype)
+        if is_complex:
+            b_val = b_val + 1j * rng.normal(size=b_shape).astype(dtype)
 
         X = pt.linalg.cho_solve(
             (A, lower),
