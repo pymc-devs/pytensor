@@ -3,7 +3,7 @@ from typing import cast as typing_cast
 
 import numpy as np
 from numba.core.extending import overload
-from numba.core.types import Float
+from numba.core.types import Complex, Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
@@ -36,7 +36,7 @@ def getrf_impl(
     A: np.ndarray, overwrite_a: bool = False
 ) -> Callable[[np.ndarray, bool], tuple[np.ndarray, np.ndarray, int]]:
     ensure_lapack()
-    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="getrf")
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="getrf")
     dtype = A.dtype
     numba_getrf = _LAPACK().numba_xgetrf(dtype)
 
@@ -76,7 +76,7 @@ def lu_factor_impl(
     A: np.ndarray, overwrite_a: bool = False
 ) -> Callable[[np.ndarray, bool], tuple[np.ndarray, np.ndarray]]:
     ensure_lapack()
-    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="lu_factor")
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="lu_factor")
 
     def impl(A: np.ndarray, overwrite_a: bool = False) -> tuple[np.ndarray, np.ndarray]:
         A_copy, IPIV, info = _getrf(A, overwrite_a=overwrite_a)
