@@ -1,6 +1,6 @@
 import numpy as np
 from numba.core.extending import overload
-from numba.core.types import Float
+from numba.core.types import Complex, Float
 from numba.np.linalg import ensure_lapack
 from scipy import linalg
 
@@ -32,21 +32,24 @@ def _cho_solve(C: np.ndarray, B: np.ndarray, lower: bool, overwrite_b: bool):
 @overload(_cho_solve)
 def cho_solve_impl(C, B, lower=False, overwrite_b=False):
     ensure_lapack()
-    _check_linalg_matrix(C, ndim=2, dtype=Float, func_name="cho_solve")
-    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="cho_solve")
+    _check_linalg_matrix(C, ndim=2, dtype=(Float, Complex), func_name="cho_solve")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=(Float, Complex), func_name="cho_solve")
     _check_dtypes_match((C, B), func_name="cho_solve")
     dtype = C.dtype
+    is_complex = isinstance(dtype, Complex)
     numba_potrs = _LAPACK().numba_xpotrs(dtype)
 
     def impl(C, B, lower=False, overwrite_b=False):
         _solve_check_input_shapes(C, B)
 
         _N = np.int32(C.shape[-1])
-        if C.flags.f_contiguous or C.flags.c_contiguous:
+        if C.flags.f_contiguous:
             C_f = C
-            if C.flags.c_contiguous:
-                # An upper/lower triangular c_contiguous is the same as a lower/upper triangular f_contiguous
-                lower = not lower
+        elif not is_complex and C.flags.c_contiguous:
+            # For real triangular factors, c_contiguous L is f_contiguous U (and vice versa).
+            # Not valid for complex where C^T != C^H.
+            C_f = C
+            lower = not lower
         else:
             C_f = np.asfortranarray(C)
 
