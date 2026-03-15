@@ -1330,6 +1330,46 @@ class TestScan:
         sum_of_grads = sum(g.sum() for g in gradients)
         grad(sum_of_grads, inputs[0])
 
+    def test_high_order_grad_sitsot(self):
+        """Test higher-order derivatives through a sit-sot scan.
+
+        The L_op of a sit-sot scan creates a mit-mot backward scan where
+        one buffer position is both read and written.
+        This is analogous to set_subtensor(x, y, i): the gradient w.r.t. x
+        must zero out position i, routing gradient only through y.
+
+        A bug in the accumulation logic added a spurious gradient at
+        the overwritten position, as if the old value also passed
+        through unchanged. The 2nd derivative graph was wrong but
+        evaluated correctly (the spurious contribution only affected
+        the mit-mot output, which is not on the gradient path for
+        scalar derivatives). The error became visible at the 3rd
+        derivative, where symbolic differentiation through the wrong
+        graph produced incorrect values.
+        """
+        # Avoid costly rewrite/compilation of Scans
+        mode = Mode(linker="py", optimizer=None)
+        x = pt.scalar("x")
+        x_val = np.float64(0.95)
+        ys = scan(
+            fn=lambda xtm1: xtm1**2, outputs_info=[x], n_steps=4, return_updates=False
+        )
+        y = ys[-1]
+
+        # Sanity check
+        np.testing.assert_allclose(y.eval({x: x_val}, mode=mode), x_val**16)
+
+        # Evaluate higher order derivatives
+        deriv = y
+        for order in range(1, 5):
+            deriv = grad(deriv, x)
+            deriv_value = deriv.eval({x: x_val}, mode=mode)
+            # xs[-1] = x^16, so the n-th derivative is 16!/(16-n)! * x^(16-n)
+            expected_deriv_value = np.prod((16, 15, 14, 13)[:order]) * x_val ** (
+                16 - order
+            )
+            np.testing.assert_allclose(deriv_value, expected_deriv_value)
+
     def test_grad_dtype_change(self):
         x = fscalar("x")
         y = fscalar("y")
