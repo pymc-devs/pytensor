@@ -1,7 +1,7 @@
 import numpy as np
 from numba.core.extending import overload
+from numba.core.types import Complex, Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
-from numba.types import Float
 from scipy import linalg
 
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -19,7 +19,7 @@ def _cholesky(a, lower=False, overwrite_a=False):
 @overload(_cholesky)
 def cholesky_impl(A, lower=0, overwrite_a=False):
     ensure_lapack()
-    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="cholesky")
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="cholesky")
     dtype = A.dtype
 
     numba_potrf = _LAPACK().numba_xpotrf(dtype)
@@ -33,7 +33,9 @@ def cholesky_impl(A, lower=0, overwrite_a=False):
         if overwrite_a and A.flags.f_contiguous:
             A_copy = A
         elif overwrite_a and A.flags.c_contiguous:
-            # We can work on the transpose of A directly
+            # c_contiguous A reinterpreted as f_contiguous is A^T.
+            # potrf(A^T, UPLO='U') produces U where U.T == L (the correct lower factor),
+            # even for complex Hermitian matrices. The .T return corrects the result.
             A_copy = A.T
             transposed = True
             lower = not lower

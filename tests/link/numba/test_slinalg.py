@@ -465,12 +465,20 @@ class TestDecompositions:
     @pytest.mark.parametrize(
         "overwrite_a", [False, True], ids=["no_overwrite", "overwrite_a"]
     )
-    def test_cholesky(self, lower: bool, overwrite_a: bool):
-        cov = pt.matrix("cov")
+    @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
+    def test_cholesky(self, lower: bool, overwrite_a: bool, is_complex: bool):
+        complex_dtype = "complex64" if floatX.endswith("32") else "complex128"
+        dtype = complex_dtype if is_complex else floatX
+
+        cov = pt.matrix("cov", dtype=dtype)
         chol = pt.linalg.cholesky(cov, lower=lower)
 
-        x = np.array([0.1, 0.2, 0.3]).astype(floatX)
-        val = np.eye(3).astype(floatX) + x[None, :] * x[:, None]
+        rng = np.random.default_rng(42)
+        x = rng.normal(size=(3, 3))
+        if is_complex:
+            x = x + 1j * rng.normal(size=(3, 3))
+        x = x.astype(dtype)
+        val = np.eye(3, dtype=dtype) + x @ x.conj().T
 
         fn, res = compare_numba_and_py(
             [In(cov, mutable=overwrite_a)],
