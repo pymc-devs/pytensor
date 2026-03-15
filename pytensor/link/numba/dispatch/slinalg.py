@@ -41,6 +41,7 @@ from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
 )
 from pytensor.link.numba.dispatch.linalg.solve.cholesky import _cho_solve
 from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
+from pytensor.link.numba.dispatch.linalg.solve.hermitian import _solve_hermitian
 from pytensor.link.numba.dispatch.linalg.solve.linear_control import (
     _trsyl,
 )
@@ -289,10 +290,10 @@ def numba_funcify_Solve(op, node, **kwargs):
         print("Solve requires casting second input `b`")  # noqa: T201
 
     overwrite_a = op.overwrite_a
-    assume_a = op.assume_a
     lower = op.lower
     overwrite_a = op.overwrite_a
     overwrite_b = op.overwrite_b
+    is_complex = out_dtype.kind == "c"
     transposed = False  # TODO: Solve doesnt currently allow the transposed argument
 
     if assume_a == "gen":
@@ -300,8 +301,8 @@ def numba_funcify_Solve(op, node, **kwargs):
     elif assume_a == "sym":
         solve_fn = _solve_symmetric
     elif assume_a == "her":
-        # We already ruled out complex inputs
-        solve_fn = _solve_symmetric
+        # For real inputs, Hermitian == symmetric
+        solve_fn = _solve_hermitian if is_complex else _solve_symmetric
     elif assume_a == "pos":
         solve_fn = _solve_psd
     elif assume_a == "tridiagonal":
