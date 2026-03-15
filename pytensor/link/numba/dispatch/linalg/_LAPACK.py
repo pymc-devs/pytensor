@@ -391,6 +391,51 @@ class _LAPACK:
         return sysv
 
     @classmethod
+    def numba_xhesv(cls, dtype) -> CPUDispatcher:
+        """
+        Solve a system of linear equations A @ X = B with a Hermitian matrix A using the diagonal pivoting method,
+        factorizing A into LDL^H or UDU^H form, depending on the value of UPLO.
+
+        Called by scipy.linalg.solve when assume_a == "her" with complex inputs.
+        """
+        kind = get_blas_kind(dtype)
+        float_pointer = _get_nb_float_from_dtype(kind)
+        unique_func_name = f"scipy.lapack.{kind}hesv"
+
+        @numba_basic.numba_njit
+        def get_hesv_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "hesv")
+            return ptr
+
+        hesv_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                nb_i32p,  # NRHS
+                float_pointer,  # A
+                nb_i32p,  # LDA
+                nb_i32p,  # IPIV
+                float_pointer,  # B
+                nb_i32p,  # LDB
+                float_pointer,  # WORK
+                nb_i32p,  # LWORK
+                nb_i32p,  # INFO
+            )
+        )
+
+        @numba_basic.numba_njit
+        def hesv(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_hesv_pointer,
+                func_type_ref=hesv_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(UPLO, N, NRHS, A, LDA, IPIV, B, LDB, WORK, LWORK, INFO)
+
+        return hesv
+
+    @classmethod
     def numba_xposv(cls, dtype) -> CPUDispatcher:
         """
         Solve a system of linear equations A @ X = B with a symmetric positive definite matrix A using the Cholesky

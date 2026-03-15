@@ -49,7 +49,9 @@ class TestSolves:
         [(5, 1), (5, 5), (5,)],
         ids=["b_col_vec", "b_matrix", "b_vec"],
     )
-    @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos", "tridiagonal"], ids=str)
+    @pytest.mark.parametrize(
+        "assume_a", ["gen", "sym", "her", "pos", "tridiagonal"], ids=str
+    )
     @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
     def test_solve(
         self,
@@ -76,6 +78,10 @@ class TestSolves:
                 n = x.shape[0]
                 # We have to set the unused triangle to something other than zero
                 # to see lapack destroying it.
+                x[np.triu_indices(n, 1) if lower else np.tril_indices(n, 1)] = np.pi
+            elif assume_a == "her":
+                x = (x + x.conj().T) / 2
+                n = x.shape[0]
                 x[np.triu_indices(n, 1) if lower else np.tril_indices(n, 1)] = np.pi
             elif assume_a == "tridiagonal":
                 _x = x
@@ -152,7 +158,7 @@ class TestSolves:
         # We can destroy C-contiguous A arrays by inverting `transpose/lower` at runtime
         # Complex posdef/hermitian can't use this trick (A^T = conj(A) != A for Hermitian)
         can_destroy_c_contig_A = overwrite_a and not (
-            is_complex and assume_a in ("pos",)
+            is_complex and assume_a in ("pos", "her")
         )
         assert np.allclose(A_val_c_contig, A_val) == (not can_destroy_c_contig_A)
         # b vectors are always f_contiguous if also c_contiguous
