@@ -2687,7 +2687,37 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             else:
                 dC_dXtm1s.append(safe_new(x))
 
+        # Skip accumulation for "overlapping" mit-mot taps.
+        #
+        # A mit-mot tap "overlaps" when the same tap index appears in both the input
+        # and output slices of a single mit-mot state. This means the output *overwrites*
+        # the input at that buffer position — analogous to set_subtensor(x, y, i).
+        #
+        # The gradient of an overwrite must zero out the direct pass-through from the
+        # old value; the only gradient path is through the output expression that replaced
+        # it (already captured by compute_all_gradients via known_grads).
+        #
+        # The gradient for an overlapping tap is NOT zero — the chain-rule contribution
+        # through the output expression remains. We only skip the extra dC_dXtm1
+        # accumulation term, which would incorrectly treat the old value as if it also
+        # passes through unchanged to future steps, double-counting the gradient.
+        #
+        # Overlapping taps arise naturally when differentiating sit-sot or mit-sot scans:
+        # their L_op converts the recurrence into a mit-mot where one tap serves as both
+        # read and write (e.g. in_taps=(0,1), out_taps=(1,) — tap 1 overlaps).
+        overlapping_taps = set()
+        dx_offset = 0
+        for idx in range(info.n_mit_mot):
+            in_taps = info.mit_mot_in_slices[idx]
+            out_taps = info.mit_mot_out_slices[idx]
+            for k, tap in enumerate(in_taps):
+                if tap in out_taps:
+                    overlapping_taps.add(dx_offset + k)
+            dx_offset += len(in_taps)
+
         for dx, dC_dXtm1 in enumerate(dC_dXtm1s):
+            if dx in overlapping_taps:
+                continue  # gradient truncates here
             if isinstance(dC_dinps_t[dx + info.n_seqs].type, NullType):
                 # The accumulated gradient is undefined
                 pass
