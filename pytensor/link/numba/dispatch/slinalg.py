@@ -80,8 +80,6 @@ def numba_funcify_Cholesky(op, node, **kwargs):
     overwrite_a = op.overwrite_a
 
     inp_dtype = node.inputs[0].type.numpy_dtype
-    if inp_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
     discrete_inp = inp_dtype.kind in "ibu"
     if discrete_inp and config.compiler_verbose:
         print("Cholesky requires casting discrete input to float")  # noqa: T201
@@ -281,8 +279,8 @@ def numba_funcify_Solve(op, node, **kwargs):
     A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
 
-    if A_dtype.kind == "c" or b_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
+    assume_a = op.assume_a
+
     must_cast_A = A_dtype != out_dtype
     if must_cast_A and config.compiler_verbose:
         print("Solve requires casting first input `A`")  # noqa: T201
@@ -378,8 +376,6 @@ def numba_funcify_CholeskySolve(op, node, **kwargs):
     c_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
 
-    if c_dtype.kind == "c" or b_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
     must_cast_c = c_dtype != out_dtype
     if must_cast_c and config.compiler_verbose:
         print("CholeskySolve requires casting first input `c`")  # noqa: T201

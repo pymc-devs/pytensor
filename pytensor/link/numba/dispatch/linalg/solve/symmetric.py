@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 import numpy as np
 from numba.core.extending import overload
-from numba.core.types import Float
+from numba.core.types import Complex, Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
@@ -51,8 +51,8 @@ def solve_symmetric_impl(
     transposed: bool,
 ) -> Callable[[np.ndarray, np.ndarray, bool, bool, bool, bool], np.ndarray]:
     ensure_lapack()
-    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
-    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="solve")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=(Float, Complex), func_name="solve")
     _check_dtypes_match((A, B), func_name="solve")
     dtype = A.dtype
     numba_sysv = _LAPACK().numba_xsysv(A.dtype)

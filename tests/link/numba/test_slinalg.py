@@ -50,6 +50,7 @@ class TestSolves:
         ids=["b_col_vec", "b_matrix", "b_vec"],
     )
     @pytest.mark.parametrize("assume_a", ["gen", "sym", "pos", "tridiagonal"], ids=str)
+    @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
     def test_solve(
         self,
         b_shape: tuple[int],
@@ -57,14 +58,18 @@ class TestSolves:
         lower: bool,
         overwrite_a: bool,
         overwrite_b: bool,
+        is_complex: bool,
     ):
         if assume_a not in ("sym", "her", "pos", "tridiagonal") and not lower:
             # Avoid redundant tests with lower=True and lower=False for non symmetric matrices
             pytest.skip("Skipping redundant test already covered by lower=True")
 
+        complex_dtype = "complex64" if floatX.endswith("32") else "complex128"
+        dtype = complex_dtype if is_complex else floatX
+
         def A_func(x):
             if assume_a == "pos":
-                x = x @ x.T
+                x = x @ x.conj().T
                 x = np.tril(x) if lower else np.triu(x)
             elif assume_a == "sym":
                 x = (x + x.T) / 2
@@ -82,12 +87,17 @@ class TestSolves:
                 x[arange_n[:-1], arange_n[1:]] = np.diag(_x, k=1)
             return x
 
-        A = pt.matrix("A", dtype=floatX)
-        b = pt.tensor("b", shape=b_shape, dtype=floatX)
+        A = pt.matrix("A", dtype=dtype)
+        b = pt.tensor("b", shape=b_shape, dtype=dtype)
 
         rng = np.random.default_rng(418)
-        A_val = A_func(rng.normal(size=(5, 5))).astype(floatX)
-        b_val = rng.normal(size=b_shape).astype(floatX)
+        A_base = rng.normal(size=(5, 5))
+        if is_complex:
+            A_base = A_base + 1j * rng.normal(size=(5, 5))
+        A_val = A_func(A_base).astype(dtype)
+        b_val = rng.normal(size=b_shape).astype(dtype)
+        if is_complex:
+            b_val = b_val + 1j * rng.normal(size=b_shape).astype(dtype)
 
         X = pt.linalg.solve(
             A,
@@ -139,8 +149,12 @@ class TestSolves:
         b_val_c_contig = np.copy(b_val, order="C")
         res_c_contig = f(A_val_c_contig, b_val_c_contig)
         np.testing.assert_allclose(res_c_contig, res)
-        # We can destroy C-contiguous A arrays by inverting `tranpose/lower` at runtime
-        assert np.allclose(A_val_c_contig, A_val) == (not overwrite_a)
+        # We can destroy C-contiguous A arrays by inverting `transpose/lower` at runtime
+        # Complex posdef/hermitian can't use this trick (A^T = conj(A) != A for Hermitian)
+        can_destroy_c_contig_A = overwrite_a and not (
+            is_complex and assume_a in ("pos",)
+        )
+        assert np.allclose(A_val_c_contig, A_val) == (not can_destroy_c_contig_A)
         # b vectors are always f_contiguous if also c_contiguous
         assert np.allclose(b_val_c_contig, b_val) == (
             not (overwrite_b and b_val_c_contig.flags.f_contiguous)
