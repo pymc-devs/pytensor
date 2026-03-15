@@ -1,7 +1,6 @@
 import numpy as np
-from numba.core import types
 from numba.core.extending import overload
-from numba.core.types import Float
+from numba.core.types import Complex, Float
 from numba.np.linalg import ensure_lapack
 from scipy import linalg
 
@@ -46,16 +45,15 @@ def _solve_triangular(
 def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
     ensure_lapack()
 
-    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve_triangular")
-    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve_triangular")
+    _check_linalg_matrix(
+        A, ndim=2, dtype=(Float, Complex), func_name="solve_triangular"
+    )
+    _check_linalg_matrix(
+        B, ndim=(1, 2), dtype=(Float, Complex), func_name="solve_triangular"
+    )
     _check_dtypes_match((A, B), func_name="solve_triangular")
     dtype = A.dtype
     numba_trtrs = _LAPACK().numba_xtrtrs(dtype)
-    if isinstance(dtype, types.Complex):
-        # If you want to make this work with complex numbers make sure you handle the c_contiguous trick correctly
-        raise TypeError(
-            "This function is not expected to work with complex numbers yet"
-        )
 
     def impl(A, B, trans, lower, unit_diagonal, overwrite_b):
         _N = np.int32(A.shape[-1])
@@ -66,8 +64,8 @@ def solve_triangular_impl(A, B, trans, lower, unit_diagonal, overwrite_b):
         if A.flags.f_contiguous or (A.flags.c_contiguous and trans in (0, 1)):
             A_f = A
             if A.flags.c_contiguous:
-                # An upper/lower triangular c_contiguous is the same as a lower/upper triangular f_contiguous
-                # Is this valid for complex matrices that were .conj().mT by PyTensor?
+                # A c_contiguous matrix reinterpreted as f_contiguous is A^T (plain transpose, no conjugation).
+                # An upper/lower triangular A^T is lower/upper triangular, so we flip lower.
                 lower = not lower
                 trans = 1 - trans
         else:

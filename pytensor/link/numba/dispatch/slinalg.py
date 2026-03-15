@@ -341,8 +341,6 @@ def numba_funcify_SolveTriangular(op, node, **kwargs):
     A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
     out_dtype = node.outputs[0].type.numpy_dtype
 
-    if A_dtype.kind == "c" or b_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
     must_cast_A = A_dtype != out_dtype
     if must_cast_A and config.compiler_verbose:
         print("SolveTriangular requires casting first input `A`")  # noqa: T201
