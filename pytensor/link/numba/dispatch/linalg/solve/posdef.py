@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 import numpy as np
 from numba.core.extending import overload
-from numba.core.types import Float
+from numba.core.types import Complex, Float
 from numba.np.linalg import _copy_to_fortran_order, ensure_lapack
 from scipy import linalg
 
@@ -51,10 +51,11 @@ def solve_psd_impl(
     transposed: bool,
 ) -> Callable[[np.ndarray, np.ndarray, bool, bool, bool, bool], np.ndarray]:
     ensure_lapack()
-    _check_linalg_matrix(A, ndim=2, dtype=Float, func_name="solve")
-    _check_linalg_matrix(B, ndim=(1, 2), dtype=Float, func_name="solve")
+    _check_linalg_matrix(A, ndim=2, dtype=(Float, Complex), func_name="solve")
+    _check_linalg_matrix(B, ndim=(1, 2), dtype=(Float, Complex), func_name="solve")
     _check_dtypes_match((A, B), func_name="solve")
     numba_posv = _LAPACK().numba_xposv(A.dtype)
+    is_complex = isinstance(A.dtype, Complex)
 
     def impl(
         A: np.ndarray,
@@ -67,11 +68,13 @@ def solve_psd_impl(
         _solve_check_input_shapes(A, B)
         _N = np.int32(A.shape[-1])
 
-        if overwrite_a and (A.flags.f_contiguous or A.flags.c_contiguous):
+        if overwrite_a and A.flags.f_contiguous:
             A_copy = A
-            if A.flags.c_contiguous:
-                # An upper/lower triangular c_contiguous is the same as a lower/upper triangular f_contiguous
-                lower = not lower
+        elif not is_complex and overwrite_a and A.flags.c_contiguous:
+            # For real symmetric matrices, c_contiguous A^T = A, so flipping lower is valid.
+            # Not valid for complex Hermitian where A^T = conj(A) != A.
+            A_copy = A
+            lower = not lower
         else:
             A_copy = _copy_to_fortran_order(A)
 
