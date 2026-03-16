@@ -1099,9 +1099,22 @@ class ScanArgs:
 
 def forced_replace(out, x, y):
     """
-    Check all internal values of the graph that compute the variable ``out``
-    for occurrences of values identical with ``x``. If such occurrences are
-    encountered then they are replaced with variable ``y``.
+    Replace subexpressions in ``out`` that are structurally equal to ``x``
+    with ``y``, using ``equal_computations`` for matching.
+
+    Unlike ``graph_replace`` (which matches by variable identity),
+    this detects when a subexpression *recomputes* ``x`` without
+    being the same variable object. This is used by ``Scan.L_op``
+    to substitute inner-function outputs with placeholders wired to
+    the saved forward values, avoiding redundant recomputation in
+    the backward scan. For example, if ``exp(x).L_op`` returns
+    ``output_gradient * exp(x)`` by recreating ``exp(x)`` instead
+    of referencing the existing output variable, a plain identity
+    check would miss it, but ``equal_computations`` catches it.
+
+    This is not comprehensive: structurally different but semantically
+    equivalent expressions (e.g. ``exp(x + 0)`` vs ``exp(x)``) will
+    not match.
 
     Parameters
     ----------
@@ -1117,7 +1130,7 @@ def forced_replace(out, x, y):
 
     Notes
     -----
-    When it find a match, it don't continue on the corresponding inputs.
+    When it finds a match, it does not continue into that node's inputs.
     """
     if out is None:
         return None
