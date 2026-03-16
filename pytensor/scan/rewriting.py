@@ -1469,8 +1469,11 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
         nw_steps = select_max(nw_steps, 1)
 
     # 2.4 Loop over the clients again now looking just to see how many
-    # intermediate steps to store
-    for i, out in enumerate(node.outputs[:c_outs]):
+    # intermediate steps to store. Skip mit_mot outputs as their
+    # store_steps is always 0 (all intermediate values are needed).
+    for i, out in enumerate(
+        node.outputs[op_info.n_mit_mot : c_outs], start=op_info.n_mit_mot
+    ):
         # look at all its clients
         for cl, _ in fgraph.clients[out]:
             if isinstance(cl.op, Output):
@@ -1495,36 +1498,17 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                         store_steps[i] = 0
                         break
 
-                # Special case for recurrent outputs where only the last result
-                # is requested. This is needed for this rewrite to apply to
-                # do-while Scans at all. Otherwise, `get_canonical_form_slice` in
-                # the `else` branch would reintroduce a shape dependency on the
-                # original Scan which would lead this rewrite to abort in the end.
-                if (
-                    i <= op.info.n_mit_mot
-                    and isinstance(this_slice[0], ScalarConstant)
-                    and this_slice[0].value == -1
-                ):
-                    start = nw_steps - 1
+                length = node.inputs[0] + init_l[i]
+                cf_slice = get_canonical_form_slice(this_slice[0], length)
+
+                if isinstance(cf_slice[0], slice):
+                    start = pt.get_scalar_constant_value(
+                        cf_slice[0].start, raise_not_constant=False
+                    )
                 else:
-                    if i <= op.info.n_mit_mot:
-                        try:
-                            length = shape_of[out][0]
-                        except KeyError:
-                            length = out.shape[0]
-                    else:
-                        length = node.inputs[0] + init_l[i]
-
-                    cf_slice = get_canonical_form_slice(this_slice[0], length)
-
-                    if isinstance(cf_slice[0], slice):
-                        start = pt.get_scalar_constant_value(
-                            cf_slice[0].start, raise_not_constant=False
-                        )
-                    else:
-                        start = pt.get_scalar_constant_value(
-                            cf_slice[0], raise_not_constant=False
-                        )
+                    start = pt.get_scalar_constant_value(
+                        cf_slice[0], raise_not_constant=False
+                    )
 
                 if start == 0 or store_steps[i] == 0:
                     store_steps[i] = 0
