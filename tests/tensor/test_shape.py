@@ -9,7 +9,6 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, equal_computations
 from pytensor.graph.replace import clone_replace, vectorize_graph
-from pytensor.graph.type import Type
 from pytensor.scalar.basic import ScalarConstant
 from pytensor.tensor import as_tensor_variable, broadcast_to, get_vector_length, row
 from pytensor.tensor.basic import MakeVector, arange, constant, stack
@@ -26,7 +25,6 @@ from pytensor.tensor.shape import (
     specify_broadcastable,
     specify_shape,
 )
-from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     TensorType,
     dmatrix,
@@ -60,16 +58,6 @@ def test_shape_basic():
 
     s = shape(lscalar())
     assert s.type.shape == (0,)
-
-    class MyType(Type):
-        def filter(self, *args, **kwargs):
-            raise NotImplementedError()
-
-        def __eq__(self, other):
-            return isinstance(other, MyType) and other.thingy == self.thingy
-
-    s = shape(Variable(MyType(), None))
-    assert s.type.shape == (None,)
 
     s = shape(np.array(1))
     assert np.array_equal(eval_outputs([s]), [])
@@ -681,28 +669,20 @@ class TestRopLop(RopLopChecker):
         )
 
 
-@config.change_flags(compute_test_value="raise")
-def test_nonstandard_shapes():
+def test_shape_rejects_non_tensor_type():
+    """Shape raises TypeError for non-TensorType inputs."""
+    with pytest.raises(TypeError, match="TensorType"):
+        shape(NoneConst)
+
+    unknown_type_var = Variable(MyType2(), None, None)
+    with pytest.raises(TypeError, match="TensorType"):
+        shape(unknown_type_var)
+
     a = tensor3(config.floatX)
-    a.tag.test_value = np.random.random((2, 3, 4)).astype(config.floatX)
     b = tensor3(config.floatX)
-    b.tag.test_value = np.random.random((2, 3, 4)).astype(config.floatX)
-
     tl = make_list([a, b])
-    tl_shape = shape(tl)
-    assert np.array_equal(tl_shape.get_test_value(), (2, 2, 3, 4))
-
-    # Test specific dim
-    tl_shape_i = shape(tl)[0]
-    assert isinstance(tl_shape_i.owner.op, Subtensor)
-    assert tl_shape_i.get_test_value() == 2
-
-    tl_shape_i = Shape_i(0)(tl)
-    assert not isinstance(tl_shape_i.owner.op, Subtensor)
-    assert tl_shape_i.get_test_value() == 2
-
-    none_shape = shape(NoneConst)
-    assert np.array_equal(none_shape.get_test_value(), [])
+    with pytest.raises(TypeError, match="TensorType"):
+        shape(tl)
 
 
 def test_shape_i_basics():

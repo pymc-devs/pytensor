@@ -3,7 +3,6 @@ import pytest
 
 from pytensor import (
     Mode,
-    Variable,
     config,
     function,
     shared,
@@ -16,7 +15,6 @@ from pytensor.graph import (
     FunctionGraph,
     Op,
     RewriteDatabaseQuery,
-    Type,
     rewrite_graph,
 )
 from pytensor.graph.basic import equal_computations
@@ -31,7 +29,6 @@ from pytensor.tensor import (
     lscalar,
     lscalars,
     matrix,
-    shape,
     specify_shape,
     tensor,
     tensor3,
@@ -768,18 +765,6 @@ def test_local_subtensor_shape_constant():
     (res,) = local_subtensor_shape_constant.transform(None, x.owner)
     assert isinstance(res, Constant)
     assert np.array_equal(res.data, [1, 1])
-
-    # A test for a non-`TensorType`
-    class MyType(Type):
-        def filter(self, *args, **kwargs):
-            raise NotImplementedError()
-
-        def __eq__(self, other):
-            return isinstance(other, MyType) and other.thingy == self.thingy
-
-    x = shape(Variable(MyType(), None, None))[0]
-
-    assert not local_subtensor_shape_constant.transform(None, x.owner)
 
 
 @pytest.mark.parametrize(

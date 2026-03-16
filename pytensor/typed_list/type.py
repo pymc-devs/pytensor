@@ -7,12 +7,14 @@ class TypedListType(CType):
     Parameters
     ----------
     ttype
-        Type of pytensor variable this list will contains, can be another list.
+        Type of pytensor variable this list contains, can be another list.
     depth
         Optional parameters, any value above 0 will create a nested list of
         this depth. (0-based)
 
     """
+
+    dtype = property(lambda self: self.ttype)
 
     def __init__(self, ttype, depth=0):
         if depth < 0:
@@ -137,6 +139,3 @@ class TypedListType(CType):
 
     def c_code_cache_version(self):
         return (2,)
-
-    dtype = property(lambda self: self.ttype)
-    ndim = property(lambda self: self.ttype.ndim + 1)
