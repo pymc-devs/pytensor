@@ -1459,15 +1459,6 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
             real_steps = None
         nw_steps = select_min(select_max(sym_steps, real_steps), node.inputs[0])
 
-        # FIXME: This is not correct. Scan with 0 steps seems to be supported
-        # Make sure the ScanSaveMem optimization never makes the new
-        # number of steps to be 0 (this could happen, for instance, if
-        # the optimization detects that the outputs of the Scan go through
-        # subtensor nodes that end up taking no elements) because Scan with
-        # 0 iterations are not supported. Make sure the new number of steps
-        # is at least 1.
-        nw_steps = select_max(nw_steps, 1)
-
     # 2.4 Loop over the clients again now looking just to see how many
     # intermediate steps to store. Skip mit_mot outputs as their
     # store_steps is always 0 (all intermediate values are needed).
@@ -1537,7 +1528,13 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                     if prealloc_outs and preallocable_output:
                         # TODO: If there's only one output or other outputs do not depend
                         #  on the same input, we could reduce the buffer size to the minimum
-                        pval = select_max(nw_steps - start + init_l[i], init_l[i] + 1)
+                        # The extra entry to prevent aliasing between the new
+                        # state and the oldest tap is only needed when the
+                        # scan actually runs (nw_steps >= 1).
+                        pval = select_max(
+                            nw_steps - start + init_l[i],
+                            init_l[i] + minimum(nw_steps, 1),
+                        )
                     else:
                         pval = select_max(nw_steps - start + init_l[i], init_l[i])
 
@@ -1648,10 +1645,6 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
         inv_compress_map = {v: k for k, v in compress_map.items()}
 
         # 3.6 Compose the new scan
-        # TODO: currently we don't support scan with 0 step. So
-        # don't create one.
-        if get_scalar_constant_value(node_ins[0], raise_not_constant=False) == 0:
-            return False
 
         # Do not call make_node for test_value
         new_op = Scan(
