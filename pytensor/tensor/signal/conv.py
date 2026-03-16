@@ -271,7 +271,7 @@ def correlate1d(
     return convolve1d(in1, flip(in2, axis=-1), mode=mode)
 
 
-class Convolve2d(AbstractConvolveNd, Op):
+
 
 class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
     __props__ = ("method",)  # type: ignore[assignment]
