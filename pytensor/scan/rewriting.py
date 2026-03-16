@@ -1259,6 +1259,12 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
     The scan perform implementation takes the output sizes into consideration,
     saving the newest results over the oldest ones whenever the buffer is filled.
 
+    This rewrite must only run at compilation time, after grad() has already
+    built the backward scan. The backward scan needs all intermediate forward
+    states as sequence inputs (to evaluate f'(x[t])). If this rewrite truncates
+    buffers before grad() is called, the gradient will be silently wrong.
+    TODO: Use a subclass that raises explicitly on `L_op`
+
     Paramaters
     ----------
     backend_supports_output_pre_allocation: bool

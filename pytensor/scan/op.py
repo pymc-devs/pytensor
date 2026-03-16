@@ -2437,12 +2437,19 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         return connection_pattern
 
     def L_op(self, inputs, outs, dC_douts):
-        # `grad_step` equals the number of steps the original scan node has
-        # done (if the original scan is a while loop than this number is the
-        # length of the output sequence)
-        # We do not know what kind of outputs the original scan has, so we
-        # try first to see if it has a nit_sot output, then a sit_sot and
-        # then a mit_sot
+        # Computes the gradient of this Scan by constructing a new backward Scan
+        # that runs in reverse. The method:
+        # 1. Differentiates the inner function symbolically (compute_all_gradients)
+        # 2. Adds accumulation terms for state inputs at preserved buffer positions
+        # 3. Builds reversed sequences from the forward outputs
+        # 4. Converts all recurrent states (sit-sot, mit-sot, mit-mot) into mit-mot
+        #    form in the backward scan (initialized with output gradients, accumulate
+        #    total gradients after evaluation)
+        # 5. Constructs and runs the backward Scan, then re-orders its outputs
+
+        # Determine the number of gradient steps from the output shapes (not from
+        # inputs[0] directly, because while-loop scans may execute fewer steps than
+        # the allocated buffer size).
         info = self.info
         if info.n_nit_sot > 0:
             grad_steps = self.outer_nitsot_outs(outs)[0].shape[0]
@@ -2457,8 +2464,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         if info.as_while:
             n_steps = outs[0].shape[0]
 
-        # Restrict the number of grad steps according to
-        # self.truncate_gradient
+        # Restrict the number of grad steps according to self.truncate_gradient
         if self.truncate_gradient != -1:
             grad_steps = minimum(grad_steps, self.truncate_gradient)
 
@@ -2540,13 +2546,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             ]
             gmp = {}
 
-            # Required in case there is a pair of variables X and Y, with X
-            # used to compute Y, for both of which there is an external
-            # gradient signal. Without this, the total gradient signal on X
-            # will be the external gradient  signalknown_grads[X]. With this,
-            # it will be the sum of the external gradient signal and the
-            # gradient obtained by propagating Y's external gradient signal
-            # to X.
+            # The .copy() creates fresh variable nodes so that grad() treats them
+            # as new outputs "equal to" the originals, rather than matching them by
+            # identity to variables already in the graph. This forces grad() to
+            # propagate the known_grads values backward through the computation
+            # instead of short-circuiting at a wrt target.
             known_grads = {k.copy(): v for (k, v) in known_grads.items()}
 
             grads = grad(
@@ -2588,17 +2592,15 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 Xt_placeholder = safe_new(Xt)
                 Xts.append(Xt_placeholder)
 
-            # Different processing based on whether Xt is a nitsot output
-            # or not. NOTE : This cannot be done by using
-            # "if Xt not in self.inner_nitsot_outs(self_outputs)" because
-            # the exact same variable can be used as multiple outputs.
+            # Different processing based on whether Xt is a nitsot output or not.
+            # NOTE : This cannot be done by using "if Xt not in self.inner_nitsot_outs(self_outputs)"
+            # because the exact same variable can be used as multiple outputs.
             if idx < idx_nitsot_out_start or idx >= idx_nitsot_out_end:
-                # What we do here is loop through dC_douts and collect all
+                # loop through dC_douts and collect all
                 # those that are connected to the specific one and do an
                 # upcast on all of their dtypes to get the dtype for this
                 # specific output. Deciding if the gradient with this
-                # specific previous step is defined or not is done somewhere
-                # else.
+                # specific previous step is defined or not is done somewhere else.
                 dtypes = []
                 for pos, inp in enumerate(states):
                     if inp in graph_inputs([Xt]):
@@ -2637,9 +2639,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 continue
 
             # Just some trouble to avoid a +0
-            if diff_outputs[i] in known_grads:
+            try:
                 known_grads[diff_outputs[i]] += dC_dXts[dc_dxts_idx]
-            else:
+            except KeyError:
                 known_grads[diff_outputs[i]] = dC_dXts[dc_dxts_idx]
             dc_dxts_idx += 1
 
@@ -2655,6 +2657,9 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 )
             else:
                 disconnected_dC_dinps_t[dx] = False
+                # Replace inner output subexpressions with placeholders wired to the
+                # saved forward values, so the backward scan reuses them instead of
+                # recomputing them. See forced_replace docstring for details.
                 for Xt, Xt_placeholder in zip(
                     diff_outputs[info.n_mit_mot_outs :], Xts, strict=True
                 ):
@@ -2663,21 +2668,20 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
         # construct dX_dtm1
         dC_dXtm1s = []
+        n_internal_recurrent_states = sum(
+            len(t)
+            for t in chain(
+                info.mit_mot_in_slices,
+                info.mit_sot_in_slices,
+                info.sit_sot_in_slices,
+            )
+        )
         for pos, x in enumerate(dC_dinps_t[info.n_seqs :]):
-            # Get the index of the first inner input corresponding to the
-            # pos-ieth inner input state
+            # Get the index of the first inner input corresponding to the pos-ieth inner input state
             idxs = var_mappings["inner_out_from_inner_inp"][info.n_seqs + pos]
 
-            # Check if the pos-th input is associated with one of the
-            # recurrent states
-            x_is_state = pos < sum(
-                len(t)
-                for t in chain(
-                    info.mit_mot_in_slices,
-                    info.mit_sot_in_slices,
-                    info.sit_sot_in_slices,
-                )
-            )
+            # Check if the pos-th input is associated with one of the recurrent states
+            x_is_state = pos < n_internal_recurrent_states
 
             if x_is_state and len(idxs) > 0:
                 opos = idxs[0]
@@ -2688,23 +2692,12 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 dC_dXtm1s.append(safe_new(x))
 
         # Skip accumulation for "overlapping" mit-mot taps.
-        #
         # A mit-mot tap "overlaps" when the same tap index appears in both the input
         # and output slices of a single mit-mot state. This means the output *overwrites*
         # the input at that buffer position — analogous to set_subtensor(x, y, i).
-        #
         # The gradient of an overwrite must zero out the direct pass-through from the
         # old value; the only gradient path is through the output expression that replaced
         # it (already captured by compute_all_gradients via known_grads).
-        #
-        # The gradient for an overlapping tap is NOT zero — the chain-rule contribution
-        # through the output expression remains. We only skip the extra dC_dXtm1
-        # accumulation term, which would incorrectly treat the old value as if it also
-        # passes through unchanged to future steps, double-counting the gradient.
-        #
-        # Overlapping taps arise naturally when differentiating sit-sot or mit-sot scans:
-        # their L_op converts the recurrence into a mit-mot where one tap serves as both
-        # read and write (e.g. in_taps=(0,1), out_taps=(1,) — tap 1 overlaps).
         overlapping_taps = set()
         dx_offset = 0
         for idx in range(info.n_mit_mot):
@@ -2766,8 +2759,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         outer_inp_seqs += [x[::-1][:-1] for x in self.outer_sitsot_outs(outs)]
         outer_inp_seqs += [x[::-1] for x in self.outer_nitsot_outs(outs)]
 
-        # Restrict the length of the outer sequences to the number of grad
-        # steps
+        # Restrict the length of the outer sequences to the number of grad steps
         outer_inp_seqs = [s_[:grad_steps] for s_ in outer_inp_seqs]
 
         inner_inp_seqs = self.inner_seqs(self_inputs)
@@ -2776,7 +2768,14 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         inner_inp_seqs += self.inner_sitsot(self_inputs)
         inner_inp_seqs += self.inner_nitsot_outs(dC_dXts)
         inner_inp_seqs += Xts
-        # mitmot
+        # Build backward scan's mit-mot states.
+        # Every forward recurrent state (sit-sot, mit-sot, mit-mot) becomes
+        # a mit-mot in the backward scan. The conversion negates the taps:
+        #   forward output tap t  →  backward input tap -t  (gradient signal)
+        #   forward input tap t   →  backward output tap -t (gradient to propagate)
+        # Each backward output tap also needs a backward input tap at the same
+        # position to carry the accumulated gradient (the recurrence). If one
+        # already exists from the first rule, they share the buffer slot.
         outer_inp_mitmot = []
         inner_inp_mitmot = []
         inner_out_mitmot = []
@@ -2815,8 +2814,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     inner_inp_mitmot.append(dC_dXtm1s[ins_pos - info.n_seqs])
 
                 if isinstance(dC_dinps_t[ins_pos].type, NullType):
-                    # We cannot use Null in the inner graph, so we
-                    # use a zero tensor of the appropriate shape instead.
+                    # We cannot use Null in the inner graph,
+                    # so we use a zero tensor of the appropriate shape instead.
                     inner_out_mitmot.append(
                         pt.zeros(diff_inputs[ins_pos].shape, dtype=config.floatX)
                     )
@@ -2924,9 +2923,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 outer_inp_mitmot.append(dC_douts[idx + offset][::-1])
             else:
                 if isinstance(dC_dinps_t[ins_pos].type, NullType):
-                    # Cannot use dC_dinps_t[ins_pos].dtype, so we use
-                    # floatX instead, as it is a dummy value that will not
-                    # be used anyway.
+                    # Cannot use dC_dinps_t[ins_pos].dtype, so we use floatX instead,
+                    # as it is a dummy value that will not be used anyway.
                     outer_inp_mitmot.append(
                         pt.zeros(outs[idx + offset].shape, dtype=config.floatX)
                     )
@@ -2938,8 +2936,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     )
 
             if isinstance(dC_dinps_t[ins_pos].type, NullType):
-                # We cannot use Null in the inner graph, so we
-                # use a zero tensor of the appropriate shape instead.
+                # We cannot use Null in the inner graph,
+                # so we use a zero tensor of the appropriate shape instead.
                 inner_out_mitmot.append(
                     pt.zeros(diff_inputs[ins_pos].shape, dtype=config.floatX)
                 )
@@ -2979,8 +2977,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     through_untraced = True
             if isinstance(vl.type, NullType):
                 type_outs.append(vl.type.why_null)
-                # Replace the inner output with a zero tensor of
-                # the right shape
+                # Replace the inner output with a zero tensor of the right shape
                 inner_out_sitsot[_p] = pt.zeros(
                     diff_inputs[ins_pos + _p].shape, dtype=config.floatX
                 )
@@ -2998,8 +2995,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                     through_untraced = True
             if isinstance(vl.type, NullType):
                 type_outs.append(vl.type.why_null)
-                # Replace the inner output with a zero tensor of
-                # the right shape
+                # Replace the inner output with a zero tensor of the right shape
                 inner_out_nitsot[_p] = pt.zeros(
                     diff_inputs[_p].shape, dtype=config.floatX
                 )
@@ -3094,9 +3090,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             )
         ):
             if t == "connected":
-                # If the forward scan is in as_while mode, we need to pad
-                # the gradients, so that they match the size of the input
-                # sequences.
+                # If the forward scan is in as_while mode, we need to pad the gradients,
+                # so that they match the size of the input sequences.
                 if info.as_while:
                     n_zeros = inputs[0] - n_steps
                     shp = (n_zeros,)
@@ -3122,9 +3117,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         end = info.n_mit_mot + info.n_mit_sot + info.n_sit_sot
         for p, (x, t) in enumerate(zip(outputs[:end], type_outs[:end], strict=True)):
             if t == "connected":
-                # If the forward scan is in as_while mode, we need to pad
-                # the gradients, so that they match the size of the input
-                # sequences.
+                # If the forward scan is in as_while mode, we need to pad the gradients,
+                # so that they match the size of the input sequences.
                 if info.as_while:
                     n_zeros = inputs[0] - grad_steps
                     shp = (n_zeros,)
