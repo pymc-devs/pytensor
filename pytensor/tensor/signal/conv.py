@@ -265,9 +265,9 @@ def correlate1d(
 
     Returns
     -------
-    out: tensor_variable
-        Correlation of in1 with in2.
-    """
+     out: tensor_variable
+         Correlation of in1 with in2.
+     """
     return convolve1d(in1, flip(in2, axis=-1), mode=mode)
 
 
