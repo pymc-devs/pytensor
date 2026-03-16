@@ -1692,13 +1692,16 @@ class TestSaveMem:
 
         # ys_trace is an Alloc that controls the size of the inner buffer,
         # it should have shape[0] == 3, with two entries for the taps and one
-        # entry for the intermediate output
+        # extra entry to prevent aliasing between the inputs and outputs
+        # of the pre-allocation mechanism. JIT linkers don't use pre-allocation
+        # so the buffer is one element smaller.
         [scan_node] = (n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, ys_trace = scan_node.inputs
         debug_fn = pytensor.function(
             [n_steps, x0], ys_trace.shape[0], accept_inplace=True
         )
-        assert debug_fn(n_steps=1000, x0=[1, 1]) == 3
+        expected_size = 2 if isinstance(f.maker.linker, JITLinker) else 3
+        assert debug_fn(n_steps=1000, x0=[1, 1]) == expected_size
 
     def test_while_scan_map(self):
         xs = vector("xs")
@@ -1752,13 +1755,15 @@ class TestSaveMem:
             f(x0=0, seq=test_seq, n_steps=0)
 
         # Evaluate the shape of ys_trace and len_zs to confirm the rewrite worked correctly.
+        # JIT linkers don't use pre-allocation so the buffer is one element smaller.
         [scan_node] = (n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan))
         _, _, ys_trace, len_zs = scan_node.inputs
         debug_fn = pytensor.function(
             [x0, n_steps], [ys_trace.shape[0], len_zs], accept_inplace=True
         )
         stored_ys_steps, stored_zs_steps = debug_fn(x0=0, n_steps=200)
-        assert stored_ys_steps == 2
+        expected_y_steps = 1 if isinstance(f.maker.linker, JITLinker) else 2
+        assert stored_ys_steps == expected_y_steps
         assert stored_zs_steps == 1
 
     @pytest.mark.parametrize("val_ndim", (0, 1))
