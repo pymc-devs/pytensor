@@ -71,13 +71,8 @@ class Shape(COp):
     __props__ = ()
 
     def make_node(self, x):
-        if not isinstance(x, Variable):
-            x = ptb.as_tensor_variable(x)
-
-        if isinstance(x.type, TensorType):
-            out_var = TensorType("int64", (x.type.ndim,))()
-        else:
-            out_var = pytensor.tensor.type.lvector()
+        x = ptb.as_tensor_variable(x)
+        out_var = tensor(dtype="int64", shape=(x.type.ndim,))
 
         return Apply(self, [x], [out_var])
 

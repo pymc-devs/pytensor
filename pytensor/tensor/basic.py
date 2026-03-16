@@ -4270,6 +4270,9 @@ class Choose(Op):
 
     def infer_shape(self, fgraph, node, shapes):
         a_shape, choices_shape = shapes
+        if choices_shape is None:
+            # choices is a TypedList, not a tensor; no shape to broadcast
+            return [a_shape]
         out_shape = pytensor.tensor.extra_ops.broadcast_shape(
             a_shape, choices_shape[1:], arrays_are_shapes=True
         )
@@ -4291,8 +4294,10 @@ class Choose(Op):
         # otherwise use as_tensor_variable
         if isinstance(choices, tuple | list):
             choice = pytensor.typed_list.make_list(choices)
+            choice_dtype = choice.ttype.dtype
         else:
             choice = as_tensor_variable(choices)
+            choice_dtype = choice.dtype
 
         (out_shape,) = self.infer_shape(
             None, None, [shape_tuple(a), shape_tuple(choice)]
@@ -4310,7 +4315,7 @@ class Choose(Op):
             else:
                 static_out_shape += (None,)
 
-        o = TensorType(choice.dtype, shape=static_out_shape)
+        o = TensorType(choice_dtype, shape=static_out_shape)
         return Apply(self, [a, choice], [o()])
 
     def perform(self, node, inputs, outputs):
