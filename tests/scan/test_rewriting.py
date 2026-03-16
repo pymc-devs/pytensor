@@ -1575,10 +1575,7 @@ class TestSaveMem:
     def test_savemem_opt_0_step(self):
         """
         Test a case where the savemem optimization has the opportunity to
-        lower the number of steps of a Scan to 0. It tests that the
-        optimization doesn't do so since Scan nodes with 0
-        steps are not currently supported and doing so would result in a
-        crash during the function execution.
+        lower the number of steps of a Scan to 0.
         """
 
         def inner_scan_step(x_t_t, h_tm1, w):
@@ -1627,6 +1624,32 @@ class TestSaveMem:
 
         output = f(x_value, w_value)
         utt.assert_allclose(output, expected_output)
+
+    def test_savemem_0_steps_does_not_point_to_unitialized_memory(self):
+        # Regression test for https://github.com/pymc-devs/pytensor/issues/1878
+
+        n = pt.tensor("n", shape=(), dtype=int)
+        init_state = pt.tensor("init_state", shape=(3,))
+        buffer_withot_init = pytensor.scan(
+            fn=lambda xtm1: xtm1 * 2,
+            outputs_info=[init_state],
+            n_steps=n,
+            return_updates=False,
+        )
+        # Access the last state of the Scan output buffer (which includes the initial state)
+        # It should never point to unitialized memory
+        full_buffer = buffer_withot_init.owner.inputs[0]
+        buffer_last_entry = full_buffer[-1]
+
+        fn = pytensor.function([init_state, n], buffer_last_entry)
+        init_state_val = np.ones((3,))
+        np.testing.assert_allclose(fn(init_state=init_state_val, n=0), init_state_val)
+        np.testing.assert_allclose(
+            fn(init_state=init_state_val, n=1), init_state_val * 2
+        )
+        np.testing.assert_allclose(
+            fn(init_state=init_state_val, n=2), init_state_val * 4
+        )
 
     @pytest.mark.skip(
         reason="The 'assertion' of this test relied on something that no longer exists "
