@@ -77,6 +77,7 @@ from pytensor.tensor.math import (
     expm1,
     floor,
     isclose,
+    isfinite,
     isinf,
     isnan,
     isnan_,
@@ -769,6 +770,28 @@ def test_isnan():
         assert y.dtype == "bool"
         f = function([x], y, allow_input_downcast=True)
         f([[0, 1, 2]])
+
+
+def test_isfinite():
+    x_float = matrix(dtype="float32")
+    data_float = np.array(
+        [[1.0, np.nan, np.inf], [-np.inf, 0.0, -2.5]], dtype="float32"
+    )
+    y_float = isfinite(x_float)
+    assert y_float.dtype == "bool"
+    assert_array_equal(y_float.eval({x_float: data_float}), np.isfinite(data_float))
+
+    x_int = imatrix()
+    data_int = np.array([[0, 1, 2], [-1, 5, 10]], dtype="int32")
+    y_int = isfinite(x_int)
+    assert y_int.dtype == "bool"
+    assert_array_equal(y_int.eval({x_int: data_int}), np.isfinite(data_int))
+
+    x_bool = matrix(dtype="bool")
+    data_bool = np.array([[True, False, True], [False, True, False]], dtype="bool")
+    y_bool = isfinite(x_bool)
+    assert y_bool.dtype == "bool"
+    assert_array_equal(y_bool.eval({x_bool: data_bool}), np.isfinite(data_bool))
 
 
 class TestMaxAndArgmax:
@@ -3119,7 +3142,7 @@ class TestProd:
         assert not unpickled_prod.no_zeros_in_input
 
 
-class TestIsInfIsNan:
+class TestIsInfIsNanIsFinite:
     def setup_method(self):
         self.test_vals = [
             np.array(x, dtype=config.floatX)
@@ -3158,6 +3181,9 @@ class TestIsInfIsNan:
 
     def test_isnan(self):
         self.run_isfunc(isnan, np.isnan)
+
+    def test_isfinite(self):
+        self.run_isfunc(isfinite, np.isfinite)
 
 
 class TestSumProdReduceDtype:
