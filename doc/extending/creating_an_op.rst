@@ -74,20 +74,12 @@ possibilities you may encounter or need.  For that refer to
         def perform(self, node: Apply, inputs_storage: list[Any], output_storage: list[list[Any]]) -> None:
             pass
 
-        # Defines the symbolic expression for the L-operator based on the input and output variables
-        # and the output gradient variables. Optional.
-        def L_op(self, inputs: list[Variable], outputs: list[Variable], output_grads: list[Variable]) -> list[Variable]:
+        # Defines the vector-Jacobian product (pullback/reverse-mode AD). Optional.
+        def pull_back(self, inputs: list[Variable], outputs: list[Variable], cotangents: list[Variable]) -> list[Variable]:
             pass
 
-        # Equivalent to L_op, but with a "technically"-bad name and without outputs provided.
-        # It exists for historical reasons. Optional.
-        def grad(self, inputs: list[Variable], output_grads: list[Variable]) -> list[Variable]:
-            # Same as self.L_op(inputs, self(inputs), output_grads)
-            pass
-
-        # Defines the symbolic expression for the R-operator based on the input variables
-        # and eval_point variables. Optional.
-        def R_op(self, inputs: list[Variable], eval_points: list[Variable | None]) -> list[Variable | None]:
+        # Defines the Jacobian-vector product (pushforward/forward-mode AD). Optional.
+        def push_forward(self, inputs: list[Variable], outputs: list[Variable], tangents: list[Variable]) -> list[Variable]:
             pass
 
         # Defines the symbolic expression for the output shape based on the input shapes
@@ -182,36 +174,42 @@ This could be helpful if one only needs the shape of the output instead of the
 actual outputs, which can be useful, for instance, for rewriting
 procedures.
 
-:meth:`L_op`
-^^^^^^^^^^^^^^^
+:meth:`pull_back`
+^^^^^^^^^^^^^^^^^^^
 
-The :meth:`L_op` method is required if you want to differentiate some cost
-whose expression includes your :class:`Op`. The gradient is
-specified symbolically in this method. It takes three arguments ``inputs``, ``outputs`` and
-``output_gradients``, which are both lists of :ref:`variable`\s, and
-those must be operated on using PyTensor's symbolic language. The :meth:`L_op`
-method must return a list containing one :ref:`variable` for each
-input. Each returned :ref:`variable` represents the gradient with respect
-to that input computed based on the symbolic gradients with respect
-to each output.
+The :meth:`pull_back` method is required if you want to differentiate some cost
+whose expression includes your :class:`Op`. It implements the vector-Jacobian
+product (VJP) for reverse-mode automatic differentiation.
+
+It takes three arguments ``inputs``, ``outputs`` and ``cotangents``, which are
+all lists of :ref:`variable`\s that must be operated on using PyTensor's
+symbolic language. The :meth:`pull_back` method must return a list containing
+one :ref:`variable` for each input. Each returned :ref:`variable` represents
+the cotangent (gradient) with respect to that input computed based on the
+symbolic cotangents with respect to each output.
 
 If the output is not differentiable with respect to an input then
-this method should be defined to return a variable of type :class:`NullType`
-for that input. Likewise, if you have not implemented the gradient
-computation for some input, you may return a variable of type
-:class:`NullType` for that input. Please refer to :meth:`L_op` for a more detailed
-view.
+this method should return a variable of type :class:`DisconnectedType`
+for that input. If the gradient is not implemented or undefined for some
+input, return a variable of type :class:`NullType` for that input
+(see :func:`pytensor.gradient.grad_not_implemented` and
+:func:`pytensor.gradient.grad_undefined`).
 
-:meth:`R_op`
-^^^^^^^^^^^^^^^
-The :meth:`R_op` method is needed if you want :func:`pytensor.gradient.Rop` to
-work with your :class:`Op`.
+:meth:`push_forward`
+^^^^^^^^^^^^^^^^^^^^^^
 
-This function implements the application of the R-operator on the
-function represented by your :class:`Op`. Let's assume that function is :math:`f`,
-with input :math:`x`, applying the R-operator means computing the
-Jacobian of :math:`f` and right-multiplying it by :math:`v`, the evaluation
-point, namely: :math:`\frac{\partial f}{\partial x} v`.
+The :meth:`push_forward` method is needed if you want :func:`pytensor.gradient.Rop` to
+work with your :class:`Op` via the legacy ``use_op_rop_implementation=True`` path.
+It implements the Jacobian-vector product (JVP) for forward-mode automatic
+differentiation.
+
+Given a function :math:`f` with input :math:`x`, the pushforward computes
+:math:`J \dot{x}` where :math:`J = \frac{\partial f}{\partial x}` is the
+Jacobian and :math:`\dot{x}` are the tangent vectors. It takes ``inputs``,
+``outputs``, and ``tangents`` as arguments. Tangent entries of type
+:class:`DisconnectedType` indicate that the corresponding input is not being
+differentiated. ``None`` must not be used to indicate disconnected entries;
+use :class:`DisconnectedType` variables instead.
 
 
 Example: :class:`Op` definition
@@ -253,22 +251,21 @@ Example: :class:`Op` definition
             # The output shape is the same as the input shape
             return input_shapes
 
-        def L_op(self, inputs: list[TensorVariable], outputs: list[TensorVariable], output_grads: list[TensorVariable]):
-            # Symbolic expression for the gradient
+        def pull_back(self, inputs: list[TensorVariable], outputs: list[TensorVariable], cotangents: list[TensorVariable]):
+            # Symbolic expression for the vector-Jacobian product
             # For this Op, the inputs and outputs aren't part of the expression
-            # output_grads[0] is a TensorVariable!
-            return [output_grads[0] * 2]
+            # cotangents[0] is a TensorVariable!
+            return [cotangents[0] * 2]
 
-        def R_op(self, inputs: list[TensorVariable], eval_points: list[TensorVariable | None]) -> list[TensorVariable] | None:
-            # R_op can receive None as eval_points.
-            # That means there is no differentiable path through that input
-            # If this imply that you cannot compute some outputs,
-            # return None for those.
-            if eval_points[0] is None:
-                return None
-            # For this Op, the R_op is the same as the L_op
-            outputs = self(inputs)
-            return self.L_op(inputs, outputs, eval_points)
+        def push_forward(self, inputs: list[TensorVariable], outputs: list[TensorVariable], tangents: list[TensorVariable]):
+            from pytensor.gradient import DisconnectedType, disconnected_type
+
+            # push_forward receives DisconnectedType for non-differentiable inputs.
+            # If this means you cannot compute some outputs, return disconnected_type() for those.
+            if isinstance(tangents[0].type, DisconnectedType):
+                return [disconnected_type()]
+            # For this Op, the Jacobian-vector product is symmetric
+            return [tangents[0] * 2]
 
     doubleOp1 = DoubleOp1()
 
@@ -486,8 +483,8 @@ Furthermore, this :class:`Op` will work with batched dimensions, meaning we can 
 To achieve this behavior we cannot use `itypes` and `otypes` as those encode specific number of dimensions.
 Instead we will have to define the `make_node` method.
 
-We need to be careful in the :meth:`L_op` method, as one of output gradients may be disconnected from the cost, in which case we should ignore its contribution.
-If both outputs are disconnected PyTensor will not bother calling the :meth:`L_op` method, so we don't need to worry about that case.
+We need to be careful in the :meth:`pull_back` method, as one of output cotangents may be disconnected from the cost, in which case we should ignore its contribution.
+If both outputs are disconnected PyTensor will not bother calling the :meth:`pull_back` method, so we don't need to worry about that case.
 
 .. testcode::
 
@@ -534,23 +531,23 @@ If both outputs are disconnected PyTensor will not bother calling the :meth:`L_o
             out2_shape = y_shapes[:-1]
             return [out1_shape, out2_shape]
 
-        def L_op(self, inputs, outputs, output_grads):
+        def pull_back(self, inputs, outputs, cotangents):
             x, y = inputs
-            out1_grad, out2_grad = output_grads
+            out1_ct, out2_ct = cotangents
 
-            if isinstance(out1_grad.type, DisconnectedType):
-                x_grad = disconnected_type()
+            if isinstance(out1_ct.type, DisconnectedType):
+                x_ct = disconnected_type()
             else:
-                # Transpose the last two dimensions of the output gradient
-                x_grad = pt.swapaxes(out1_grad, -1, -2)
+                # Transpose the last two dimensions of the output cotangent
+                x_ct = pt.swapaxes(out1_ct, -1, -2)
 
-            if isinstance(out2_grad.type, DisconnectedType):
-                y_grad = disconnected_type()
+            if isinstance(out2_ct.type, DisconnectedType):
+                y_ct = disconnected_type()
             else:
-                # Broadcast the output gradient to the same shape as y
-                y_grad = pt.broadcast_to(pt.expand_dims(out2_grad, -1), y.shape)
+                # Broadcast the output cotangent to the same shape as y
+                y_ct = pt.broadcast_to(pt.expand_dims(out2_ct, -1), y.shape)
 
-            return [x_grad, y_grad]
+            return [x_ct, y_ct]
 
 Let's test the `Op` evaluation:
 
@@ -659,8 +656,8 @@ that are added to the codebase, to be used with ``pytest``.
 
 Here we mention those that can be used to test the implementation of:
   :meth:`infer_shape`
-  :meth:`L_op`
-  :meth:`R_op`
+  :meth:`pull_back`
+  :meth:`push_forward`
 
 
 Basic Tests
@@ -763,14 +760,14 @@ If you want to see it fail, you can implement an incorrect gradient
                 rng = rng,
             )
 
-Testing the Rop
-^^^^^^^^^^^^^^^
+Testing the push_forward (Rop)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The class :class:`RopLopChecker` defines the methods
 :meth:`RopLopChecker.check_mat_rop_lop`, :meth:`RopLopChecker.check_rop_lop` and :meth:`RopLopChecker.check_nondiff_rop`.
-These allow to test the implementation of the :meth:`R_op` method of a particular :class:`Op`.
+These allow to test the implementation of the :meth:`push_forward` method of a particular :class:`Op`.
 
-For instance, to verify the :meth:`R_op` method of the ``DoubleOp``, you can use this:
+For instance, to verify the :meth:`push_forward` method of the ``DoubleOp``, you can use this:
 
 .. testcode:: tests
 
@@ -798,7 +795,7 @@ Modify and execute to compute: ``x * y``.
 
 Modify and execute the example to return two outputs: ``x + y`` and `jx - yj`.
 
-You can omit the :meth:`Rop` functions. Try to implement the testing apparatus described above.
+You can omit the :meth:`push_forward` method. Try to implement the testing apparatus described above.
 
 :download:`Solution<extending_pytensor_solution_1.py>`
 
@@ -830,7 +827,7 @@ It takes an optional :meth:`infer_shape` parameter that must have this signature
 
 .. note::
 
-    As no L_op is defined, this means you won't be able to
+    As no pull_back is defined, this means you won't be able to
     differentiate paths that include this :class:`Op`.
 
 .. note::

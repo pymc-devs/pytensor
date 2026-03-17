@@ -256,7 +256,7 @@ def _rop_legacy(
                 )
 
             else:
-                # We actually need to compute the R_op for this node
+                # We actually need to compute the pushforward for this node
 
                 _traverse(inp.owner)
                 local_eval_points.append(
@@ -291,7 +291,15 @@ def _rop_legacy(
             else:
                 same_type_eval_points.append(y)
 
-        seen_nodes[node] = op.R_op(node.inputs, same_type_eval_points)
+        # Convert None tangents to DisconnectedType for push_forward
+        pf_tangents = [
+            disconnected_type() if ep is None else ep for ep in same_type_eval_points
+        ]
+        raw_result = op.push_forward(node.inputs, node.outputs, pf_tangents)
+        # Convert DisconnectedType back to None for _rop_legacy post-processing
+        seen_nodes[node] = [
+            None if isinstance(r.type, DisconnectedType) else r for r in raw_result
+        ]
 
     # end _traverse
 
@@ -1296,11 +1304,11 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     for ng in new_output_grads
                 )
 
-                input_grads = node.op.L_op(inputs, node.outputs, new_output_grads)
+                input_grads = node.op.pull_back(inputs, node.outputs, new_output_grads)
 
                 if input_grads is None:
                     raise TypeError(
-                        f"{node.op}.grad returned NoneType, expected iterable."
+                        f"{node.op}.pull_back returned NoneType, expected iterable."
                     )
 
                 if len(input_grads) != len(inputs):
