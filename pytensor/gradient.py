@@ -2260,12 +2260,12 @@ def _is_zero(x):
 
 
 class ZeroGrad(ViewOp):
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [g_out.zeros_like() for g_out in g_outs]
 
-    def R_op(self, inputs, eval_points):
-        if eval_points[0] is None:
-            return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return [disconnected_type()]
 
         return pytensor.tensor.zeros(1)
 
@@ -2298,11 +2298,11 @@ def zero_grad(x):
 
 
 class UndefinedGrad(ViewOp):
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [grad_undefined(self, i, arg) for i, arg in enumerate(args)]
 
-    def R_op(self, inputs, eval_points):
-        return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        return [disconnected_type()]
 
     def connection_pattern(self, node):
         return [[True]]
@@ -2336,11 +2336,11 @@ def undefined_grad(x):
 
 
 class DisconnectedGrad(ViewOp):
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [disconnected_type() for g_out in g_outs]
 
-    def R_op(self, inputs, eval_points):
-        return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        return [disconnected_type()]
 
     def connection_pattern(self, node):
         return [[False]]
@@ -2391,7 +2391,7 @@ class GradClip(ViewOp):
         if not self.clip_upper_bound >= self.clip_lower_bound:
             raise ValueError("`clip_upper_bound` should be >= `clip_lower_bound`")
 
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [
             pytensor.tensor.clip(g_out, self.clip_lower_bound, self.clip_upper_bound)
             for g_out in g_outs
@@ -2434,7 +2434,7 @@ class GradScale(ViewOp):
     def __init__(self, multiplier):
         self.multiplier = multiplier
 
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [self.multiplier * g_out for g_out in g_outs]
 
 

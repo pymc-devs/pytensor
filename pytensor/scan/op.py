@@ -2436,7 +2436,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         node.tag.connection_pattern = connection_pattern
         return connection_pattern
 
-    def L_op(self, inputs, outs, dC_douts):
+    def pull_back(self, inputs, outs, dC_douts):
         # `grad_step` equals the number of steps the original scan node has
         # done (if the original scan is a while loop than this number is the
         # length of the output sequence)
@@ -3178,7 +3178,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 gradients[idx] = disconnected_type()
         return gradients
 
-    def R_op(self, inputs, eval_points):
+    def push_forward(self, inputs, outputs, eval_points):
         # Step 0. Prepare some shortcut variable
         info = self.info
         self_inputs = self.inner_inputs
@@ -3226,7 +3226,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ie = info.n_seqs
         clean_eval_points = []
         for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3241,7 +3241,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ie = ie + int(sum(len(x) for x in info.mit_mot_in_slices))
         clean_eval_points = []
         for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3256,7 +3256,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ie = ie + int(sum(len(x) for x in info.mit_sot_in_slices))
         clean_eval_points = []
         for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3271,7 +3271,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ie = ie + info.n_sit_sot
         clean_eval_points = []
         for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3295,7 +3295,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # All other arguments
         clean_eval_points = []
         for inp, evp in zip(inputs[e:], eval_points[e:], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3390,7 +3390,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         b = e + info.n_nit_sot
         e = e + info.n_nit_sot * 2
         final_outs += outputs[b:e]
-        final_outs += [None] * info.n_untraced_sit_sot
+        final_outs += [disconnected_type()] * info.n_untraced_sit_sot
 
         return final_outs
 

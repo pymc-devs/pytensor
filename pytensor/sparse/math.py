@@ -293,7 +293,7 @@ class SpSum(Op):
         else:
             z[0] = np.asarray(x.sum(self.axis)).ravel()
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x,) = inputs
         (gz,) = gout
         if x.dtype not in psb.continuous_dtypes:
@@ -397,7 +397,7 @@ class AddSS(Op):
         assert x.shape == y.shape
         out[0] = x + y
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
         assert psb._is_sparse_variable(x) and psb._is_sparse_variable(y)
@@ -459,7 +459,7 @@ class AddSSData(Op):
         out[0] = x.copy()
         out[0].data += y.data
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (gz,) = gout
         is_continuous = [(i.dtype in psb.continuous_dtypes) for i in inputs]
         derivative = {True: gz, False: None}
@@ -500,7 +500,7 @@ class AddSD(Op):
         # numpy.matrixlib.defmatrix.matrix object and not an ndarray.
         out[0] = np.asarray(x + y, dtype=node.outputs[0].type.dtype)
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
         assert psb._is_sparse_variable(x) and psb._is_dense_variable(y)
@@ -560,7 +560,7 @@ class StructuredAddSV(Op):
         assert x.shape[1] == y.shape[0]
         out[0] = x.__class__(x + (x.toarray() != 0) * y)
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
         assert psb._is_sparse_variable(x) and not psb._is_sparse_variable(y)
@@ -692,7 +692,7 @@ class SparseSparseMultiply(Op):
         # x * y calls dot...
         out[0] = x.multiply(y)
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
         return y * gz, x * gz
@@ -779,7 +779,7 @@ class SparseDenseMultiply(Op):
                         j = indices[j_idx]
                         z_data[j_idx] *= y[i, j]
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
         assert psb._is_sparse_variable(x) and psb._is_dense_variable(y)
@@ -853,7 +853,7 @@ class SparseDenseVectorMultiply(Op):
         assert x.shape[1] == y.shape[0]
         out[0] = x.__class__(x.toarray() * y)
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
         assert psb._is_sparse_variable(x) and psb._is_dense_variable(y)
@@ -1270,7 +1270,7 @@ class TrueDot(Op):
                 )
         out[0] = rval
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
         assert psb._is_sparse_variable(gz)
@@ -1400,7 +1400,7 @@ class StructuredDot(Op):
         # _asarray function documentation.
         out[0] = np.asarray(variable, str(variable.dtype))
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         # NOTE: a is sparse; b and g_out are both dense or sparse.
         # Python and Numba backends support sparse b and g_out.
         # C backend only supports dense b and g_out.
@@ -1820,7 +1820,7 @@ class SamplingDot(Op):
 
         out[0] = p.__class__(p.multiply(np.dot(x, y.T)))
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y, p) = inputs
         (gz,) = gout
         rval = [dot(p * gz, y), dot((p * gz).T, x), grad_not_implemented(self, 2, p)]
@@ -1922,7 +1922,7 @@ class Dot(Op):
 
         out[0] = np.asarray(rval, dtype=node.outputs[0].dtype)
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         (x, y) = inputs
         (gz,) = gout
         assert psb._is_sparse_variable(x) or psb._is_sparse_variable(y)
