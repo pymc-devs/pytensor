@@ -91,7 +91,7 @@ class AbstractConvolveNd:
     def connection_pattern(self, node):
         return [[True], [True], [False]]
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         in1, in2, full_mode = inputs
         [grad] = output_grads
 

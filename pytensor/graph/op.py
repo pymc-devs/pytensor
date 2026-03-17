@@ -335,7 +335,7 @@ class Op(MetaObject):
             eval_points: list[Variable | None] = [
                 None if isinstance(t.type, DisconnectedType) else t for t in tangents
             ]
-            result = self.R_op(list(inputs), eval_points)  # type: ignore[arg-type]
+            result = self.R_op(inputs, eval_points)
             # Convert None returns to DisconnectedType
             return [disconnected_type() if r is None else r for r in result]
         raise NotImplementedError(f"push_forward not implemented for {self}")
@@ -419,7 +419,7 @@ class Op(MetaObject):
         return self.grad(inputs, output_grads)
 
     def R_op(
-        self, inputs: list[Variable], eval_points: Variable | list[Variable]
+        self, inputs: Sequence[Variable], eval_points: Sequence[Variable | None]
     ) -> list[Variable]:
         r"""Construct a graph for the R-operator.
 
@@ -448,8 +448,6 @@ class Op(MetaObject):
         if type(self).push_forward is not Op.push_forward:
             outputs = self.make_node(*inputs).outputs
             # Convert None eval_points to DisconnectedType for push_forward
-            if isinstance(eval_points, Variable):
-                eval_points = [eval_points]
             tangents = [disconnected_type() if ep is None else ep for ep in eval_points]
             result = self.push_forward(inputs, outputs, tangents)
             # Convert DisconnectedType back to None for R_op callers

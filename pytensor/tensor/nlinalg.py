@@ -53,7 +53,7 @@ class MatrixPinv(Op):
         (z,) = outputs
         z[0] = np.linalg.pinv(x, hermitian=self.hermitian)
 
-    def L_op(self, inputs, outputs, g_outputs):
+    def pull_back(self, inputs, outputs, g_outputs):
         r"""The gradient function should return
 
             .. math:: V\frac{\partial X^+}{\partial X},
@@ -137,7 +137,7 @@ class MatrixInverse(Op):
         (z,) = outputs
         z[0] = np.linalg.inv(x)
 
-    def grad(self, inputs, g_outputs):
+    def pull_back(self, inputs, outputs, g_outputs):
         r"""The gradient function should return
 
             .. math:: V\frac{\partial X^{-1}}{\partial X},
@@ -156,7 +156,7 @@ class MatrixInverse(Op):
         # ptm.dot(gz.T,xi)
         return [-matrix_dot(xi, gz.T, xi).T]
 
-    def R_op(self, inputs, eval_points):
+    def push_forward(self, inputs, outputs, eval_points):
         r"""The gradient function should return
 
             .. math:: \frac{\partial X^{-1}}{\partial X}V,
@@ -172,8 +172,8 @@ class MatrixInverse(Op):
         (x,) = inputs
         xi = self(x)
         (ev,) = eval_points
-        if ev is None:
-            return [None]
+        if isinstance(ev.type, DisconnectedType):
+            return [disconnected_type()]
         return [-matrix_dot(xi, ev, xi)]
 
     def infer_shape(self, fgraph, node, shapes):
@@ -244,7 +244,7 @@ class Det(Op):
         except Exception as e:
             raise ValueError("Failed to compute determinant", x) from e
 
-    def grad(self, inputs, g_outputs):
+    def pull_back(self, inputs, outputs, g_outputs):
         (gz,) = g_outputs
         (x,) = inputs
         return [gz * self(x) * matrix_inverse(x).T]
@@ -368,7 +368,7 @@ class Eig(Op):
 
         return [(n,), (n, n)]
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         raise NotImplementedError(
             "Gradients for Eig is not implemented because it always returns complex values, "
             "for which autodiff is not yet supported in PyTensor (PRs welcome :) ).\n"
@@ -425,7 +425,7 @@ class Eigh(Eig):
         (w, v) = outputs
         w[0], v[0] = np.linalg.eigh(x, self.UPLO)
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         r"""The gradient function should return
 
            .. math:: \sum_n\left(W_n\frac{\partial\,w_n}
@@ -607,7 +607,7 @@ class SVD(Op):
         else:
             return [s_shape]
 
-    def L_op(
+    def pull_back(
         self,
         inputs: Sequence[Variable],
         outputs: Sequence[Variable],

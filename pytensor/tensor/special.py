@@ -44,7 +44,7 @@ class SoftmaxGrad(COp):
         dx = dy_times_sm - np.sum(dy_times_sm, axis=self.axis, keepdims=True) * sm
         output_storage[0][0] = dx
 
-    def grad(self, inp, grads):
+    def pull_back(self, inp, outputs, grads):
         dy, sm = inp
         (g,) = grads
 
@@ -273,17 +273,17 @@ class Softmax(COp):
         (z,) = output_storage
         z[0] = scipy.special.softmax(x, axis=self.axis)
 
-    def L_op(self, inp, outputs, grads):
+    def pull_back(self, inp, outputs, grads):
         (_x,) = inp
         (g_sm,) = grads
         return [SoftmaxGrad(axis=self.axis)(g_sm, outputs[0])]
 
-    def R_op(self, inputs, eval_points):
-        # I think the Jacobian is symmetric so the R_op
-        # is the same as the grad
-        if None in eval_points:
-            return [None]
-        return self.L_op(inputs, [self(*inputs)], eval_points)
+    def push_forward(self, inputs, outputs, eval_points):
+        from pytensor.gradient import DisconnectedType, disconnected_type
+
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points):
+            return [disconnected_type()]
+        return self.pull_back(inputs, outputs, eval_points)
 
     def infer_shape(self, fgraph, node, shape):
         return shape
@@ -528,17 +528,17 @@ class LogSoftmax(COp):
         (z,) = output_storage
         z[0] = scipy.special.log_softmax(x, axis=self.axis)
 
-    def grad(self, inp, grads):
+    def pull_back(self, inp, outputs, grads):
         (x,) = inp
         sm = Softmax(axis=self.axis)(x)
         return [grads[0] - sum(grads[0], axis=self.axis, keepdims=True) * sm]
 
-    def R_op(self, inputs, eval_points):
-        # I think the Jacobian is symmetric so the R_op
-        # is the same as the grad
-        if None in eval_points:
-            return [None]
-        return self.grad(inputs, eval_points)
+    def push_forward(self, inputs, outputs, eval_points):
+        from pytensor.gradient import DisconnectedType, disconnected_type
+
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points):
+            return [disconnected_type()]
+        return self.pull_back(inputs, outputs, eval_points)
 
     def infer_shape(self, fgraph, node, shape):
         return shape
