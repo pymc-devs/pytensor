@@ -23,6 +23,7 @@ from pytensor.xtensor.type import (
     xtensor_constant,
     xtensor_shared,
 )
+from tests.xtensor.util import xr_assert_allclose, xr_function
 
 
 def test_xtensortype():
@@ -231,3 +232,26 @@ def test_isel_missing_dims():
         x.isel(c=0, missing_dims="warn")
 
     x.isel(c=0, missing_dims="ignore").dims == ("a", "b")
+
+
+def test_where():
+    a = xtensor(dims=("a", "b"))
+    a_test = DataArray(np.arange(6).reshape(2, 3), dims=a.dims)
+
+    # Implicit other
+    out = a.where(a > 1)
+    res = xr_function([a], out)(a_test)
+    expected = a_test.where(a_test > 1)
+    xr_assert_allclose(res, expected)
+
+    # Explicit other
+    out = a.where(a > 1, 99)
+    res = xr_function([a], out)(a_test)
+    expected = a_test.where(a_test > 1, 99)
+    xr_assert_allclose(res, expected)
+
+    # Case that would fail if we didn't transpose
+    out = a[0].where(a > 1, -1)
+    res = xr_function([a], out)(a_test)
+    expected = a_test[0].where(a_test > 1, -1)
+    xr_assert_allclose(res, expected)
