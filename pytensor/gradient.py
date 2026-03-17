@@ -247,9 +247,7 @@ def _rop_legacy(
                 try:
                     local_eval_points.append(inp.zeros_like())
                 except Exception:
-                    # None should be used for non-differentiable
-                    # arguments, like for example random states
-                    local_eval_points.append(None)
+                    local_eval_points.append(disconnected_type())
             elif inp.owner in seen_nodes:
                 local_eval_points.append(
                     seen_nodes[inp.owner][inp.owner.outputs.index(inp)]
@@ -264,7 +262,7 @@ def _rop_legacy(
                 )
         same_type_eval_points = []
         for x, y in zip(inputs, local_eval_points, strict=True):
-            if y is not None:
+            if not isinstance(y.type, DisconnectedType):
                 if not isinstance(x, Variable):
                     x = pytensor.tensor.as_tensor_variable(x)
                 if not isinstance(y, Variable):
@@ -272,18 +270,6 @@ def _rop_legacy(
                 try:
                     y = x.type.filter_variable(y)
                 except TypeError:
-                    # This is a hack
-                    # Originally both grad and Rop were written
-                    # with the assumption that a variable and the
-                    # gradient wrt that variable would have the same
-                    # dtype. This was a bad assumption because the
-                    # gradient wrt an integer can take on non-integer
-                    # values.
-                    # grad is now fixed, but Rop is not, so when grad
-                    # does the right thing and violates this assumption
-                    # we have to make it be wrong for Rop to keep working
-                    # Rop should eventually be upgraded to handle integers
-                    # correctly, the same as grad
                     y = pytensor.tensor.cast(y, x.type.dtype)
                     y = x.type.filter_variable(y)
                 assert x.type.in_same_class(y.type)
@@ -291,15 +277,9 @@ def _rop_legacy(
             else:
                 same_type_eval_points.append(y)
 
-        # Convert None tangents to DisconnectedType for push_forward
-        pf_tangents = [
-            disconnected_type() if ep is None else ep for ep in same_type_eval_points
-        ]
-        raw_result = op.push_forward(node.inputs, node.outputs, pf_tangents)
-        # Convert DisconnectedType back to None for _rop_legacy post-processing
-        seen_nodes[node] = [
-            None if isinstance(r.type, DisconnectedType) else r for r in raw_result
-        ]
+        seen_nodes[node] = op.push_forward(
+            node.inputs, node.outputs, same_type_eval_points
+        )
 
     # end _traverse
 
@@ -311,9 +291,9 @@ def _rop_legacy(
     for out in f:
         if out in wrt:
             rval.append(eval_points[wrt.index(out)])
-        elif (
-            seen_nodes.get(out.owner, None) is None
-            or seen_nodes[out.owner][out.owner.outputs.index(out)] is None
+        elif seen_nodes.get(out.owner, None) is None or isinstance(
+            seen_nodes[out.owner][out.owner.outputs.index(out)].type,
+            DisconnectedType,
         ):
             message = (
                 "Rop method was asked to compute the gradient "
