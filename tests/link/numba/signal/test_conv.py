@@ -9,7 +9,7 @@ from tests.link.numba.test_basic import compare_numba_and_py
 pytestmark = pytest.mark.filterwarnings(
     "error",
     r"ignore:^Numba will use object mode to run.*perform method\.:UserWarning",
-    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph\".*:numba.NumbaWarning",
+    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph.*:numba.NumbaWarning",
 )
 
 
