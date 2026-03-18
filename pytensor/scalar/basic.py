@@ -4194,7 +4194,13 @@ class Composite(ScalarInnerGraphOp):
         if len(self.fgraph.outputs) > 1 or len(self.fgraph.apply_nodes) > 10:
             self._name = "Composite{...}"
         else:
-            outputs_str = ", ".join(pprint(output) for output in self.fgraph.outputs)
+            from pytensor.printing import PrinterState
+
+            pstate = PrinterState(pprinter=pprint)
+            pstate.memo = {inp: f"i{i}" for i, inp in enumerate(self.fgraph.inputs)}
+            outputs_str = ", ".join(
+                pprint.process(output, pstate) for output in self.fgraph.outputs
+            )
             self._name = f"Composite{{{outputs_str}}}"
 
         return self._name
