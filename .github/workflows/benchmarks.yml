@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - v3
+      - asv
   pull_request:
     branches:
       - main
