@@ -44,7 +44,6 @@ from pytensor.tensor.basic import (
     cast,
     choose,
     constant,
-    default,
     diag,
     expand_dims,
     eye,
@@ -3074,42 +3073,6 @@ def test_stack():
     rval = inplace_func([sx, sy], stack([sx, sy]))(-4.0, -2.0)
     assert type(rval) is np.ndarray
     assert [-4, -2] == list(rval)
-
-
-@pytest.mark.skipif(
-    isinstance(get_default_mode(), pytensor.compile.debugmode.DebugMode),
-    reason="This test fails in DEBUG_MODE, but the generated code is OK. "
-    "It is actually a problem of DEBUG_MODE, see #626.",
-)
-def test_default():
-    x, y = scalars("xy")
-    z = default(x, y)
-    f = function([x, y], z)
-    assert f(1, 2) == 1
-    assert f(None, 2) == 2
-    assert f(1, None) == 1
-
-    with pytest.raises(TypeError, match=r".*compatible types.*"):
-        default(x, vector())
-
-
-@pytest.mark.skipif(
-    isinstance(get_default_mode(), pytensor.compile.debugmode.DebugMode),
-    reason="This test fails in DEBUG_MODE, but the generated code is OK. "
-    "It is actually a problem of DEBUG_MODE, see #626.",
-)
-def test_default_state():
-    x, y = scalars("xy")
-    # print config.floatX
-    # print x.type
-    # print y.type
-    z = default(x, 3.8)
-    new_x = y + z
-    f = function([y, compile.In(x, update=new_x, value=12.0)], new_x)
-    assert f(3) == 15
-    f["x"] = None
-    assert np.allclose(f(1), 4.8)
-    assert np.allclose(f(np.asarray(2.2, dtype=config.floatX)), 7)
 
 
 @config.change_flags(cast_policy="custom")
