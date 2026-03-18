@@ -394,7 +394,7 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
             np.arange(8).reshape(test_shape),
         )
 
-    def test_benchmark(self, benchmark):
+    def test_benchmark(self):
         x = tensor3("x")
         x_val = np.random.random((2, 3, 4)).astype(config.floatX)
         y1 = x.reshape((6, 4))
@@ -406,7 +406,7 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
             [Out(y1, borrow=True), Out(y2, borrow=True), Out(y3, borrow=True)],
         )
         reshape_fn.trust_input = True
-        benchmark(reshape_fn, x_val)
+        reshape_fn(x_val)
 
 
 def test_shape_i_hash():

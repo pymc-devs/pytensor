@@ -52,7 +52,7 @@ def test_non_square_blockwise():
         fn([3, 4, 5])
 
 
-def test_blockwise_benchmark(benchmark):
+def test_blockwise_benchmark():
     x = tensor(shape=(5, 3, 3))
     out = cholesky(x)
     assert isinstance(out.owner.op, Blockwise)
@@ -60,7 +60,7 @@ def test_blockwise_benchmark(benchmark):
     fn = function([x], out, mode="NUMBA")
     x_test = np.eye(3) * np.arange(1, 6)[:, None, None]
     fn(x_test)  # JIT compile
-    benchmark(fn, x_test)
+    fn(x_test)
 
 
 def test_repeated_args():

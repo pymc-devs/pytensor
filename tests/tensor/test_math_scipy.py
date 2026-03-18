@@ -337,7 +337,7 @@ def test_gammainc_ddk_tabulated_values():
         )
 
 
-def test_gammaincc_ddk_performance(benchmark):
+def test_gammaincc_ddk_performance():
     rng = np.random.default_rng(1)
     k = vector("k")
     x = vector("x")
@@ -353,7 +353,7 @@ def test_gammaincc_ddk_performance(benchmark):
     ]
 
     verify_grad(gammaincc, vals, rng=rng)
-    benchmark(grad_fn, *vals)
+    grad_fn(*vals)
 
 
 TestGammaUBroadcast = makeBroadcastTester(
@@ -890,7 +890,7 @@ class TestHyp2F1Grad:
 
     @pytest.mark.parametrize("case", (few_iters_case, many_iters_case))
     @pytest.mark.parametrize("wrt", ("a", "all"))
-    def test_benchmark(self, case, wrt, benchmark):
+    def test_benchmark(self, case, wrt):
         a1, a2, b1, z = pt.scalars("a1", "a2", "b1", "z")
         hyp2f1_out = pt.hyp2f1(a1, a2, b1, z)
         hyp2f1_grad = pt.grad(hyp2f1_out, wrt=a1 if wrt == "a" else [a1, a2, b1, z])
@@ -902,7 +902,7 @@ class TestHyp2F1Grad:
         test_b1 = np.array(test_b1, dtype=b1.dtype)
         test_z = np.array(test_z, dtype=z.dtype)
 
-        result = benchmark(f_grad, test_a1, test_a2, test_b1, test_z)
+        result = f_grad(test_a1, test_a2, test_b1, test_z)
 
         rtol = 1e-9 if config.floatX == "float64" else 2e-3
         expected_result = expected_dds[0] if wrt == "a" else np.array(expected_dds)

@@ -79,7 +79,7 @@ def test_careduce_performance(careduce_fn, numpy_fn, axis, inputs, input_vals):
 
 
 @pytest.mark.parametrize("cache", (False, True))
-def test_radon_model_compile_repeatedly_numba_benchmark(cache, radon_model, benchmark):
+def test_radon_model_compile_repeatedly_numba_benchmark(cache, radon_model):
     joined_inputs, [model_logp, model_dlogp] = radon_model
     rng = np.random.default_rng(1)
     x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
@@ -94,12 +94,12 @@ def test_radon_model_compile_repeatedly_numba_benchmark(cache, radon_model, benc
             )
             fn(x)
 
-    benchmark.pedantic(compile_and_call_once, rounds=5, iterations=1)
+    compile_and_call_once()
 
 
 @pytest.mark.parametrize("cache", (False, True))
 def test_radon_model_compile_variants_numba_benchmark(
-    cache, radon_model, radon_model_variants, benchmark
+    cache, radon_model, radon_model_variants
 ):
     """Test compilation speed when a slightly variant of a function is compiled each time.
 
@@ -129,11 +129,11 @@ def test_radon_model_compile_variants_numba_benchmark(
                 )
                 fn(x)
 
-    benchmark.pedantic(compile_and_call_once, rounds=1, iterations=1)
+    compile_and_call_once()
 
 
 @pytest.mark.parametrize("cache", (False, True))
-def test_radon_model_call_numba_benchmark(cache, radon_model, benchmark):
+def test_radon_model_call_numba_benchmark(cache, radon_model):
     joined_inputs, [model_logp, model_dlogp] = radon_model
 
     with config.change_flags(numba__cache=cache):
@@ -144,4 +144,4 @@ def test_radon_model_call_numba_benchmark(cache, radon_model, benchmark):
     x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
     fn(x)  # warmup
 
-    benchmark.pedantic(fn, (x,), rounds=10_000, iterations=10)
+    fn(x)

@@ -103,7 +103,7 @@ def test_softmax_grad(axis):
 
 @pytest.mark.parametrize("size", [(10, 10), (1000, 1000)])
 @pytest.mark.parametrize("axis", [0, 1])
-def test_logsumexp_benchmark(size, axis, benchmark):
+def test_logsumexp_benchmark(size, axis):
     X = pt.matrix("X")
     X_max = pt.max(X, axis=axis, keepdims=True)
     X_max = pt.switch(pt.isinf(X_max), 0, X_max)
@@ -117,7 +117,7 @@ def test_logsumexp_benchmark(size, axis, benchmark):
     # JIT compile first
     _ = X_lse_fn(X_val)
 
-    res = benchmark(X_lse_fn, X_val)
+    res = X_lse_fn(X_val)
 
     exp_res = scipy.special.logsumexp(X_val, axis=axis, keepdims=True)
     np.testing.assert_array_almost_equal(res, exp_res)

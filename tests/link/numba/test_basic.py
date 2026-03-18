@@ -520,7 +520,7 @@ class TestNumbaWarnings:
 
 
 @pytest.mark.parametrize("mode", ("default", "trust_input", "direct"))
-def test_function_overhead(mode, benchmark):
+def test_function_overhead(mode):
     x = pt.vector("x")
     out = pt.exp(x)
 
@@ -533,7 +533,7 @@ def test_function_overhead(mode, benchmark):
     test_x = np.zeros(1000)
     assert np.sum(fn(test_x)) == 1000
 
-    benchmark(fn, test_x)
+    fn(test_x)
 
 
 class ComplexType:

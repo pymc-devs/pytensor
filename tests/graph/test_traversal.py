@@ -433,10 +433,10 @@ def test_get_var_by_name():
         "toposort_with_orderings_and_blockers",
     ],
 )
-def test_traversal_benchmark(func, benchmark):
+def test_traversal_benchmark(func):
     r1 = MyVariable(1)
     out = r1
     for i in range(50):
         out = MyOp(out, out)
 
-    benchmark(func, out)
+    func(out)

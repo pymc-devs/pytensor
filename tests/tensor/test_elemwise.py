@@ -80,7 +80,7 @@ def reduce_bitwise_and(x, axis=-1, dtype="int8"):
     return np.apply_along_axis(custom_reduce, axis, x)
 
 
-def dimshuffle_benchmark(mode, c_contiguous, benchmark):
+def dimshuffle_benchmark(mode, c_contiguous):
     x = tensor3("x")
     if c_contiguous:
         x_val = np.random.random((2, 3, 4)).astype(config.floatX)
@@ -101,7 +101,7 @@ def dimshuffle_benchmark(mode, c_contiguous, benchmark):
     )
     fn.trust_input = True
     fn(x_val)  # JIT compile for JIT backends
-    benchmark(fn, x_val)
+    fn(x_val)
 
 
 class TestDimShuffle(unittest_tools.InferShapeTester):
@@ -262,8 +262,8 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
             DimShuffle(input_ndim=(True, False), new_order=(1, 0))
 
     @pytest.mark.parametrize("c_contiguous", [True, False])
-    def test_benchmark(self, c_contiguous, benchmark):
-        dimshuffle_benchmark("FAST_RUN", c_contiguous, benchmark)
+    def test_benchmark(self, c_contiguous):
+        dimshuffle_benchmark("FAST_RUN", c_contiguous)
 
 
 class TestBroadcast:
@@ -1077,7 +1077,7 @@ class TestVectorize:
         assert vect_out.owner.inputs[0] is bool_tns
 
 
-def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
+def careduce_benchmark_tester(axis, c_contiguous, mode):
     N = 256
     x_test = np.random.uniform(size=(N, N, N))
     transpose_axis = (0, 1, 2) if c_contiguous else (2, 0, 1)
@@ -1090,7 +1090,7 @@ def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
         fn(),
         x_test.transpose(transpose_axis).sum(axis=axis),
     )
-    benchmark(fn)
+    fn()
 
 
 @pytest.mark.parametrize(
@@ -1103,10 +1103,8 @@ def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
     (True, False),
     ids=lambda x: f"c_contiguous={x}",
 )
-def test_c_careduce_benchmark(axis, c_contiguous, benchmark):
-    return careduce_benchmark_tester(
-        axis, c_contiguous, mode="FAST_RUN", benchmark=benchmark
-    )
+def test_c_careduce_benchmark(axis, c_contiguous):
+    return careduce_benchmark_tester(axis, c_contiguous, mode="FAST_RUN")
 
 
 def test_gradient_mixed_discrete_output_scalar_op():

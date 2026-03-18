@@ -47,7 +47,7 @@ def test_convolve1d(mode, bcast_order):
 
 @pytest.mark.parametrize("mode", ("full", "valid"), ids=lambda x: f"mode={x}")
 @pytest.mark.parametrize("batch", (False, True), ids=lambda x: f"batch={x}")
-def test_convolve1d_benchmark_numba(batch, mode, benchmark):
+def test_convolve1d_benchmark_numba(batch, mode):
     x = tensor(shape=(7, 183) if batch else (183,))
     y = tensor(shape=(7, 6) if batch else (6,))
     out = convolve1d(x, y, mode=mode)
@@ -65,9 +65,9 @@ def test_convolve1d_benchmark_numba(batch, mode, benchmark):
         fn(x_test, y_test),
         np_convolve1d(x_test, y_test),
     )
-    benchmark(fn, x_test, y_test)
+    fn(x_test, y_test)
 
 
 @pytest.mark.parametrize("convolve_mode", ["full", "valid"])
-def test_convolve1d_grad_benchmark_numba(convolve_mode, benchmark):
-    convolve1d_grad_benchmarker(convolve_mode, "NUMBA", benchmark)
+def test_convolve1d_grad_benchmark_numba(convolve_mode):
+    convolve1d_grad_benchmarker(convolve_mode, "NUMBA")

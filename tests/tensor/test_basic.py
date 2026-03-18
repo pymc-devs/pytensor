@@ -2126,7 +2126,7 @@ class TestJoinAndSplit:
     @pytest.mark.parametrize("axis", (0, 1), ids=lambda x: f"axis={x}")
     @pytest.mark.parametrize("ndim", (1, 2), ids=["vector", "matrix"])
     @config.change_flags(cmodule__warn_no_version=False)
-    def test_join_performance(self, ndim, axis, memory_layout, gc, benchmark):
+    def test_join_performance(self, ndim, axis, memory_layout, gc):
         if ndim == 1 and not (memory_layout == "C-contiguous" and axis == 0):
             pytest.skip("Redundant parametrization")
         n = 64
@@ -2145,7 +2145,7 @@ class TestJoinAndSplit:
             raise ValueError
 
         assert fn(*test_values).shape == (n * 6, n)[:ndim] if axis == 0 else (n, n * 6)
-        benchmark(fn, *test_values)
+        fn(*test_values)
 
     def test_join_negative_axis_rewrite(self):
         """Test that constant negative axis is rewritten to positive axis in make_node."""

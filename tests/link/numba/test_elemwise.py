@@ -687,7 +687,7 @@ def test_gammainc_wrt_k_grad():
 
 
 class TestsBenchmark:
-    def test_elemwise_speed(self, benchmark):
+    def test_elemwise_speed(self):
         x = pt.dmatrix("y")
         y = pt.dvector("z")
 
@@ -703,9 +703,9 @@ class TestsBenchmark:
         (out,) = func(x_val, y_val)
         np.testing.assert_allclose(np.exp(2 * x_val * y_val + y_val), out)
 
-        benchmark(func, x_val, y_val)
+        func(x_val, y_val)
 
-    def test_fused_elemwise_benchmark(self, benchmark):
+    def test_fused_elemwise_benchmark(self):
         rng = np.random.default_rng(123)
         size = 100_000
         x = pytensor.shared(rng.normal(size=size), name="x")
@@ -717,11 +717,11 @@ class TestsBenchmark:
         func = pytensor.function([], [logp, grad_logp], mode="NUMBA")
         # JIT compile first
         func()
-        benchmark(func)
+        func()
 
     @pytest.mark.parametrize("size", [(10, 10), (1000, 1000), (10000, 10000)])
     @pytest.mark.parametrize("axis", [0, 1])
-    def test_logsumexp_benchmark(self, size, axis, benchmark):
+    def test_logsumexp_benchmark(self, size, axis):
         X = pt.matrix("X")
         X_max = pt.max(X, axis=axis, keepdims=True)
         X_max = pt.switch(pt.isinf(X_max), 0, X_max)
@@ -736,7 +736,7 @@ class TestsBenchmark:
         res = X_lse_fn(X_val)
         exp_res = scipy.special.logsumexp(X_val, axis=axis, keepdims=True)
         np.testing.assert_array_almost_equal(res, exp_res)
-        benchmark(X_lse_fn, X_val)
+        X_lse_fn(X_val)
 
     @pytest.mark.parametrize(
         "axis",
@@ -748,14 +748,12 @@ class TestsBenchmark:
         (True, False),
         ids=lambda x: f"c_contiguous={x}",
     )
-    def test_numba_careduce_benchmark(self, axis, c_contiguous, benchmark):
-        return careduce_benchmark_tester(
-            axis, c_contiguous, mode="NUMBA", benchmark=benchmark
-        )
+    def test_numba_careduce_benchmark(self, axis, c_contiguous):
+        return careduce_benchmark_tester(axis, c_contiguous, mode="NUMBA")
 
     @pytest.mark.parametrize("c_contiguous", (True, False))
-    def test_dimshuffle(self, c_contiguous, benchmark):
-        dimshuffle_benchmark("NUMBA", c_contiguous, benchmark)
+    def test_dimshuffle(self, c_contiguous):
+        dimshuffle_benchmark("NUMBA", c_contiguous)
 
 
 @pytest.mark.parametrize(
@@ -858,7 +856,7 @@ def test_BatchedDot(x, y, exc):
 
 
 @pytest.mark.parametrize("dtype", ("float64", "float32", "mixed"))
-def test_mat_vec_dot_performance(dtype, benchmark):
+def test_mat_vec_dot_performance(dtype):
     A = tensor("A", shape=(512, 512), dtype="float64" if dtype == "mixed" else dtype)
     x = tensor("x", shape=(512,), dtype="float32" if dtype == "mixed" else dtype)
     out = ptm.dot(A, x)
@@ -869,4 +867,4 @@ def test_mat_vec_dot_performance(dtype, benchmark):
     A_test = rng.standard_normal(size=A.type.shape, dtype=A.type.dtype)
     x_test = rng.standard_normal(size=x.type.shape, dtype=x.type.dtype)
     np.testing.assert_allclose(fn(A_test, x_test), np.dot(A_test, x_test), atol=1e-4)
-    benchmark(fn, A_test, x_test)
+    fn(A_test, x_test)

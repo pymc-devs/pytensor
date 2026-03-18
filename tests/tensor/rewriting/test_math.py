@@ -5009,7 +5009,7 @@ class TestBlockDiagDotToDotBlockDiag:
 
     @pytest.mark.parametrize("rewrite", [True, False], ids=["rewrite", "no_rewrite"])
     @pytest.mark.parametrize("size", [10, 100, 1000], ids=["small", "medium", "large"])
-    def test_benchmark(self, benchmark, size, rewrite):
+    def test_benchmark(self, size, rewrite):
         rng = np.random.default_rng()
         a_size = int(rng.uniform(1, int(0.8 * size)))
         b_size = int(rng.uniform(1, int(0.8 * (size - a_size))))
@@ -5033,8 +5033,7 @@ class TestBlockDiagDotToDotBlockDiag:
         c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)
         d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)
 
-        benchmark(
-            fn,
+        fn(
             a_val,
             b_val,
             c_val,

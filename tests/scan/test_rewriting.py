@@ -674,7 +674,7 @@ class TestPushOutAddScan:
         vB = rng.uniform(size=(5, 5)).astype(config.floatX)
         utt.assert_allclose(f(vA, vB), np.dot(vA.T, vB))
 
-    def test_pregreedy_optimizer(self, benchmark):
+    def test_pregreedy_optimizer(self):
         W = pt.zeros((5, 4))
         bv = pt.zeros((5,))
         bh = pt.zeros((4,))
@@ -694,7 +694,7 @@ class TestPushOutAddScan:
         # TODO FIXME: Make this a real test and assert something.
         chain_fn = function([v], chain)
 
-        benchmark(chain_fn, np.zeros((3, 5), dtype=config.floatX))
+        chain_fn(np.zeros((3, 5), dtype=config.floatX))
 
     def test_machine_translation(self):
         """
@@ -1560,7 +1560,7 @@ class TestSaveMem:
         ]
         assert len(scan_nodes) == 1
 
-    def test_savemem_opt(self, benchmark):
+    def test_savemem_opt(self):
         y0 = shared(np.ones((2, 10)))
         [_y1, y2] = scan(
             lambda y: [y, y],
@@ -1570,7 +1570,7 @@ class TestSaveMem:
         )
         # TODO FIXME: Make this a real test and assert something.
         fn = function([], y2.sum(), mode=self.mode)
-        benchmark(fn)
+        fn()
 
     def test_savemem_opt_0_step(self):
         """

@@ -160,7 +160,7 @@ def test_xit_xot_types(
         assert np.allclose(res_val, output_vals)
 
 
-def test_scan_multiple_output(benchmark):
+def test_scan_multiple_output():
     """Test a scan implementation of a SEIR model.
 
     SEIR model definition:
@@ -249,7 +249,7 @@ def test_scan_multiple_output(benchmark):
         test_input_vals,
     )
 
-    benchmark(scan_fn, *test_input_vals)
+    scan_fn(*test_input_vals)
 
 
 def test_scan_tap_output():
@@ -415,7 +415,7 @@ def test_inner_graph_optimized():
     )
 
 
-def test_vector_taps_benchmark(benchmark):
+def test_vector_taps_benchmark():
     """Test vector taps performance.
 
     Vector taps get indexed into numeric types, that must be wrapped back into
@@ -464,7 +464,7 @@ def test_vector_taps_benchmark(benchmark):
     for numba_r, ref_r in zip(numba_res, ref_res, strict=True):
         np.testing.assert_array_almost_equal(numba_r, ref_r)
 
-    benchmark(numba_fn, *test.values())
+    numba_fn(*test.values())
 
 
 @pytest.mark.parametrize("n_steps_constant", (True, False))
@@ -542,7 +542,7 @@ def test_inplace_taps(n_steps_constant):
 )
 @pytest.mark.parametrize("n_steps, op_size", [(10, 2), (512, 2), (512, 256)])
 class TestScanSITSOTBuffer:
-    def buffer_tester(self, n_steps, op_size, buffer_size, benchmark=None):
+    def buffer_tester(self, n_steps, op_size, buffer_size):
         x0 = pt.vector(shape=(op_size,), dtype="float64")
         xs = pytensor.scan(
             fn=lambda xtm1: (xtm1 + 1),
@@ -582,21 +582,17 @@ class TestScanSITSOTBuffer:
         buffer = scan_node.inputs[1]
         assert buffer.type.shape[0] == expected_buffer_size
 
-        if benchmark is not None:
-            numba_fn.trust_input = True
-            benchmark(numba_fn, x_test)
-
     def test_sit_sot_buffer(self, n_steps, op_size, buffer_size):
-        self.buffer_tester(n_steps, op_size, buffer_size, benchmark=None)
+        self.buffer_tester(n_steps, op_size, buffer_size)
 
-    def test_sit_sot_buffer_benchmark(self, n_steps, op_size, buffer_size, benchmark):
-        self.buffer_tester(n_steps, op_size, buffer_size, benchmark=benchmark)
+    def test_sit_sot_buffer_benchmark(self, n_steps, op_size, buffer_size):
+        self.buffer_tester(n_steps, op_size, buffer_size)
 
 
 @pytest.mark.parametrize("constant_n_steps", [False, True])
 @pytest.mark.parametrize("n_steps_val", [1, 1000])
 class TestScanMITSOTBuffer:
-    def buffer_tester(self, constant_n_steps, n_steps_val, benchmark=None):
+    def buffer_tester(self, constant_n_steps, n_steps_val):
         """Make sure we can handle storage changes caused by the `scan_save_mem` rewrite."""
 
         def f_pow2(x_tm2, x_tm1):
@@ -644,15 +640,12 @@ class TestScanMITSOTBuffer:
             on_unused_input="ignore",
         )
         assert tuple(mitsot_buffer_shape) == (2,)
-        if benchmark is not None:
-            numba_fn.trust_input = True
-            benchmark(numba_fn, *test_vals)
 
     def test_mit_sot_buffer(self, constant_n_steps, n_steps_val):
-        self.buffer_tester(constant_n_steps, n_steps_val, benchmark=None)
+        self.buffer_tester(constant_n_steps, n_steps_val)
 
-    def test_mit_sot_buffer_benchmark(self, constant_n_steps, n_steps_val, benchmark):
-        self.buffer_tester(constant_n_steps, n_steps_val, benchmark=benchmark)
+    def test_mit_sot_buffer_benchmark(self, constant_n_steps, n_steps_val):
+        self.buffer_tester(constant_n_steps, n_steps_val)
 
 
 def test_higher_order_derivatives():

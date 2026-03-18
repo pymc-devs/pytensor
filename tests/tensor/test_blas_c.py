@@ -445,7 +445,7 @@ class TestBlasStridesC(TestBlasStrides):
     mode = mode_blas_opt
 
 
-def test_gemv_vector_dot_perf(benchmark):
+def test_gemv_vector_dot_perf():
     n = 400_000
     a = pt.vector("A", shape=(n,))
     b = pt.vector("x", shape=(n,))
@@ -468,7 +468,7 @@ def test_gemv_vector_dot_perf(benchmark):
         np.dot(test_a, test_b),
     )
 
-    benchmark(fn, test_a, test_b)
+    fn(test_a, test_b)
 
 
 @pytest.mark.parametrize(
@@ -478,7 +478,7 @@ def test_gemv_vector_dot_perf(benchmark):
     "neg_stride0", (True, False), ids=["neg_stride0", "pos_stride0"]
 )
 @pytest.mark.parametrize("F_layout", (True, False), ids=["F_layout", "C_layout"])
-def test_gemv_negative_strides_perf(neg_stride0, neg_stride1, F_layout, benchmark):
+def test_gemv_negative_strides_perf(neg_stride0, neg_stride1, F_layout):
     A = pt.matrix("A", shape=(512, 512))
     x = pt.vector("x", shape=(A.type.shape[-1],))
     y = pt.vector("y", shape=(A.type.shape[0],))
@@ -510,12 +510,12 @@ def test_gemv_negative_strides_perf(neg_stride0, neg_stride1, F_layout, benchmar
     res = fn(test_A, test_x, test_y)
     np.testing.assert_allclose(res, fn(test_A.copy(), test_x, test_y))
 
-    benchmark(fn, test_A, test_x, test_y)
+    fn(test_A, test_x, test_y)
 
 
 @pytest.mark.parametrize("inplace", (True, False), ids=["inplace", "no_inplace"])
 @pytest.mark.parametrize("n", [2**7, 2**9, 2**13])
-def test_ger_benchmark(n, inplace, benchmark):
+def test_ger_benchmark(n, inplace):
     alpha = pt.dscalar("alpha")
     x = pt.dvector("x")
     y = pt.dvector("y")
@@ -533,4 +533,4 @@ def test_ger_benchmark(n, inplace, benchmark):
     y_test = rng.normal(size=(n,))
     A_test = rng.normal(size=(n, n))
 
-    benchmark(fn, alpha_test, x_test, y_test, A_test)
+    fn(alpha_test, x_test, y_test, A_test)

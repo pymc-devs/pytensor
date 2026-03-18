@@ -3189,7 +3189,7 @@ class TestBenchmarks:
         "static_shape", (False, True), ids=lambda x: f"static_shape={x}"
     )
     @pytest.mark.parametrize("gc", (False, True), ids=lambda x: f"gc={x}")
-    def test_advanced_subtensor1(self, static_shape, gc, benchmark):
+    def test_advanced_subtensor1(self, static_shape, gc):
         x = vector("x", shape=(85 if static_shape else None,))
 
         x_values = np.random.normal(size=(85,))
@@ -3206,14 +3206,14 @@ class TestBenchmarks:
             trust_input=True,
         )
         fn.vm.allow_gc = gc
-        benchmark(fn, x_values, idxs_values)
+        fn(x_values, idxs_values)
 
     @pytest.mark.parametrize(
         "static_shape", (False, True), ids=lambda x: f"static_shape={x}"
     )
     @pytest.mark.parametrize("gc", (False, True), ids=lambda x: f"gc={x}")
     @pytest.mark.parametrize("func", (inc_subtensor, set_subtensor))
-    def test_advanced_incsubtensor1(self, func, static_shape, gc, benchmark):
+    def test_advanced_incsubtensor1(self, func, static_shape, gc):
         x = vector("x", shape=(85 if static_shape else None,))
         x_values = np.zeros((85,))
         buffer = ptb.zeros_like(x)
@@ -3232,7 +3232,7 @@ class TestBenchmarks:
             trust_input=True,
         )
         fn.vm.allow_gc = gc
-        benchmark(fn, x_values)
+        fn(x_values)
 
 
 def test_subtensor_hash_and_eq():

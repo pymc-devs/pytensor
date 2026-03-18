@@ -1358,7 +1358,7 @@ def test_empty_givens_updates():
 
 
 @pytest.mark.parametrize("trust_input", [True, False])
-def test_minimal_random_function_call_benchmark(trust_input, benchmark):
+def test_minimal_random_function_call_benchmark(trust_input):
     rng = random_generator_type()
     x = normal(rng=rng, size=(100,))
 
@@ -1366,11 +1366,11 @@ def test_minimal_random_function_call_benchmark(trust_input, benchmark):
     f.trust_input = trust_input
 
     rng_val = np.random.default_rng()
-    benchmark(f, rng_val)
+    f(rng_val)
 
 
 @pytest.mark.parametrize("mode", ["C", "CVM"])
-def test_radon_model_compile_repeatedly_benchmark(mode, radon_model, benchmark):
+def test_radon_model_compile_repeatedly_benchmark(mode, radon_model):
     joined_inputs, [model_logp, model_dlogp] = radon_model
     rng = np.random.default_rng(1)
     x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
@@ -1381,12 +1381,12 @@ def test_radon_model_compile_repeatedly_benchmark(mode, radon_model, benchmark):
         )
         fn(x)
 
-    benchmark.pedantic(compile_and_call_once, rounds=5, iterations=1)
+    compile_and_call_once()
 
 
 @pytest.mark.parametrize("mode", ["C", "CVM"])
 def test_radon_model_compile_variants_benchmark(
-    mode, radon_model, radon_model_variants, benchmark
+    mode, radon_model, radon_model_variants
 ):
     """Test compilation speed when a slightly variant of a function is compiled each time.
 
@@ -1412,11 +1412,11 @@ def test_radon_model_compile_variants_benchmark(
             )
             fn(x)
 
-    benchmark.pedantic(compile_and_call_once, rounds=1, iterations=1)
+    compile_and_call_once()
 
 
 @pytest.mark.parametrize("mode", ["C", "CVM", "CVM_NOGC"])
-def test_radon_model_call_benchmark(mode, radon_model, benchmark):
+def test_radon_model_call_benchmark(mode, radon_model):
     joined_inputs, [model_logp, model_dlogp] = radon_model
 
     real_mode = "CVM" if mode == "CVM_NOGC" else mode
@@ -1430,4 +1430,4 @@ def test_radon_model_call_benchmark(mode, radon_model, benchmark):
     x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
     fn(x)  # warmup
 
-    benchmark(fn, x)
+    fn(x)

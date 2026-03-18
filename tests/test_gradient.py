@@ -1137,16 +1137,16 @@ class TestJacobian:
         val = np.ones((4, 4), dtype=config.floatX)
         np.testing.assert_allclose(func_v(val, val), np.zeros((3, 2, 4, 4)))
 
-    def test_benchmark(self, vectorize, benchmark):
+    def test_benchmark(self, vectorize):
         x = vector("x", shape=(3,))
         y = outer(x, x)
 
         jac_y = jacobian(y, x, vectorize=vectorize)
 
         fn = function([x], jac_y, trust_input=True)
-        benchmark(fn, np.array([0, 1, 2], dtype=x.type.dtype))
+        fn(np.array([0, 1, 2], dtype=x.type.dtype))
 
-    def test_benchmark_partial_jacobian(self, vectorize, benchmark):
+    def test_benchmark_partial_jacobian(self, vectorize):
         # Example from https://github.com/jax-ml/jax/discussions/5904#discussioncomment-422956
         N = 1000
         rng = np.random.default_rng(2025)
@@ -1162,7 +1162,7 @@ class TestJacobian:
         partial_jacobian = full_jacobian[:5, :5]
 
         f = pytensor.function([x], partial_jacobian, trust_input=True)
-        benchmark(f, x_test)
+        f(x_test)
 
 
 def test_hessian():

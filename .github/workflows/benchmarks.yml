@@ -1,0 +1,168 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+      - v3
+  pull_request:
+    branches:
+      - main
+      - v3
+
+concurrency:
+  group: benchmarks-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  benchmarks:
+    name: "Run benchmarks"
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: pytensor-bench
+          micromamba-version: "1.5.10-0"
+          init-shell: bash
+          post-cleanup: "all"
+
+      - name: Install dependencies
+        shell: micromamba-shell {0}
+        run: |
+          micromamba install --yes -q -c conda-forge "python~=3.11" mkl numpy scipy pip mkl-service cython "numba>=0.57" jax jaxlib asv virtualenv
+          pip install -e ./
+          python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
+          python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"'
+
+      - name: Fetch previous results from asv-results branch
+        shell: bash
+        run: |
+          git fetch origin asv-results:asv-results 2>/dev/null || true
+          if git rev-parse --verify asv-results 2>/dev/null; then
+            git worktree add /tmp/asv-results asv-results
+            if [ -d /tmp/asv-results/results ]; then
+              cp -r /tmp/asv-results/results .asv/results
+            fi
+            git worktree remove /tmp/asv-results --force
+          fi
+
+      - name: Configure ASV machine
+        shell: micromamba-shell {0}
+        run: asv machine --yes
+
+      - name: Run benchmarks
+        shell: micromamba-shell {0}
+        run: |
+          export PYTENSOR_FLAGS=warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
+          asv run --python=same --show-stderr
+
+      - name: Push results to asv-results branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create or update the asv-results branch
+          if git rev-parse --verify asv-results 2>/dev/null; then
+            git worktree add /tmp/asv-results asv-results
+          else
+            git worktree add --orphan /tmp/asv-results asv-results
+            cd /tmp/asv-results
+            git rm -rf . 2>/dev/null || true
+            cd -
+          fi
+
+          cp -r .asv/results/* /tmp/asv-results/results/ 2>/dev/null || mkdir -p /tmp/asv-results/results && cp -r .asv/results/* /tmp/asv-results/results/
+          cd /tmp/asv-results
+          git add results/
+          git commit -m "Update benchmark results for ${{ github.sha }}" || true
+          git push origin asv-results
+          cd -
+          git worktree remove /tmp/asv-results --force
+
+      - name: Generate HTML
+        shell: micromamba-shell {0}
+        run: asv publish
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .asv/html
+
+  deploy-pages:
+    name: "Deploy benchmark dashboard"
+    if: github.event_name == 'push'
+    needs: benchmarks
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  benchmarks-pr:
+    name: "Benchmark comparison"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: pytensor-bench
+          micromamba-version: "1.5.10-0"
+          init-shell: bash
+          post-cleanup: "all"
+
+      - name: Install dependencies
+        shell: micromamba-shell {0}
+        run: |
+          micromamba install --yes -q -c conda-forge "python~=3.11" mkl numpy scipy pip mkl-service cython "numba>=0.57" jax jaxlib asv virtualenv
+          pip install -e ./
+
+      - name: Configure ASV machine
+        shell: micromamba-shell {0}
+        run: asv machine --yes
+
+      - name: Run benchmark comparison
+        id: bench
+        shell: micromamba-shell {0}
+        run: |
+          export PYTENSOR_FLAGS=warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
+          asv continuous --python=same --factor 1.1 --show-stderr origin/main HEAD | tee bench_output.txt || true
+          # Extract just the results table
+          echo 'BENCH_RESULT<<EOF' >> $GITHUB_OUTPUT
+          cat bench_output.txt >> $GITHUB_OUTPUT
+          echo 'EOF' >> $GITHUB_OUTPUT
+
+      - name: Post benchmark results as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `${{ steps.bench.outputs.BENCH_RESULT }}`;
+            if (output.trim()) {
+              const body = `## Benchmark comparison (main vs PR)\n\n\`\`\`\n${output}\n\`\`\`\n\nBenchmarks that changed by more than 10% are flagged.`;
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }

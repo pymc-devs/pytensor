@@ -1377,7 +1377,7 @@ class TestFusion:
         assert len(nodes) == 1
         assert isinstance(nodes[0].op.scalar_op, Composite)
 
-    def test_eval_benchmark(self, benchmark):
+    def test_eval_benchmark(self):
         rng = np.random.default_rng(123)
         size = 100_000
         x = pytensor.shared(rng.normal(size=size), name="x")
@@ -1387,7 +1387,7 @@ class TestFusion:
         grad_logp = grad(logp.sum(), x)
 
         func = pytensor.function([], [logp, grad_logp], mode="FAST_RUN")
-        benchmark(func)
+        func()
 
     @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
     @pytest.mark.parametrize(
@@ -1397,7 +1397,7 @@ class TestFusion:
             ("large_fuseable_graph", 25, (128, 876)),
         ],
     )
-    def test_rewrite_benchmark(self, graph_fn, n, expected_n_repl, benchmark):
+    def test_rewrite_benchmark(self, graph_fn, n, expected_n_repl):
         inps, outs = getattr(self, graph_fn)(n)
         fg = FunctionGraph(inps, outs)
         opt = FusionOptimizer()
@@ -1409,7 +1409,7 @@ class TestFusion:
             return nb_fused, nb_replacement
 
         assert rewrite_func() == expected_n_repl
-        benchmark.pedantic(rewrite_func, rounds=7, iterations=5)
+        rewrite_func()
 
     def test_no_warning_from_old_client(self):
         # There used to be a warning issued when creating fuseable mapping

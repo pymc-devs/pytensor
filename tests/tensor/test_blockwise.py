@@ -536,7 +536,7 @@ class TestSolveMatrix(BlockwiseOpTester):
 @pytest.mark.parametrize(
     "cov_batch_shape", [(), (1000,), (4, 1000)], ids=lambda arg: f"cov:{arg}"
 )
-def test_batched_mvnormal_logp_and_dlogp(mu_batch_shape, cov_batch_shape, benchmark):
+def test_batched_mvnormal_logp_and_dlogp(mu_batch_shape, cov_batch_shape):
     rng = np.random.default_rng(sum(map(ord, "batched_mvnormal")))
 
     value_batch_shape = mu_batch_shape
@@ -565,10 +565,10 @@ def test_batched_mvnormal_logp_and_dlogp(mu_batch_shape, cov_batch_shape, benchm
     dlogp = grad(logp.sum(), wrt=[value, mu, cov])
 
     fn = pytensor.function([value, mu, cov], [logp, *dlogp])
-    benchmark(fn, *test_values)
+    fn(*test_values)
 
 
-def test_small_blockwise_performance(benchmark):
+def test_small_blockwise_performance():
     a = dmatrix(shape=(7, 128))
     b = dmatrix(shape=(7, 20))
     out = convolve1d(a, b, mode="valid")
@@ -587,7 +587,7 @@ def test_small_blockwise_performance(benchmark):
             for i in range(a_test.shape[0])
         ],
     )
-    benchmark(fn, a_test, b_test)
+    fn(a_test, b_test)
 
 
 def test_cop_with_params():

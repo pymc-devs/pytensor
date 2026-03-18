@@ -122,7 +122,7 @@ def test_convolve1d_valid_grad(static_shape):
         assert full_mode.eval({larger: smaller_test, smaller: larger_test}) == True  # noqa: E712
 
 
-def convolve1d_grad_benchmarker(convolve_mode, mode, benchmark):
+def convolve1d_grad_benchmarker(convolve_mode, mode):
     # Use None core shape so PyTensor doesn't know which mode to use until runtime.
     larger = tensor("larger", shape=(8, None))
     smaller = tensor("smaller", shape=(8, None))
@@ -135,12 +135,12 @@ def convolve1d_grad_benchmarker(convolve_mode, mode, benchmark):
     rng = np.random.default_rng([119, mode == "full"])
     test_larger = rng.normal(size=(8, 1024)).astype(larger.type.dtype)
     test_smaller = rng.normal(size=(8, 16)).astype(smaller.type.dtype)
-    benchmark(fn, test_larger, test_smaller)
+    fn(test_larger, test_smaller)
 
 
 @pytest.mark.parametrize("convolve_mode", ["full", "valid"])
-def test_convolve1d_grad_benchmark_c(convolve_mode, benchmark):
-    convolve1d_grad_benchmarker(convolve_mode, "FAST_RUN", benchmark)
+def test_convolve1d_grad_benchmark_c(convolve_mode):
+    convolve1d_grad_benchmarker(convolve_mode, "FAST_RUN")
 
 
 @pytest.mark.parametrize(

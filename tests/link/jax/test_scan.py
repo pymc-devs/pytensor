@@ -561,7 +561,7 @@ def cyclical_reduction():
 @pytest.mark.parametrize("gradient_backend", ["PYTENSOR", "JAX"])
 @pytest.mark.parametrize("mode", ("0forward", "1backward", "2both"))
 @pytest.mark.parametrize("model", [cyclical_reduction, SEIR_model_logp])
-def test_scan_benchmark(model, mode, gradient_backend, benchmark):
+def test_scan_benchmark(model, mode, gradient_backend):
     model_dict = model()
     graph_inputs = model_dict["graph_inputs"]
     differentiable_vars = model_dict["differentiable_vars"]
@@ -626,7 +626,7 @@ def test_scan_benchmark(model, mode, gradient_backend, benchmark):
 
     block_until_ready(*test_input_vals)  # Warmup
 
-    benchmark.pedantic(block_until_ready, test_input_vals, rounds=200, iterations=1)
+    block_until_ready(*test_input_vals)
 
 
 def test_higher_order_derivatives():
