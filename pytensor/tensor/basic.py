@@ -2060,39 +2060,6 @@ pprint.assign(tensor_copy, printing.IgnorePrinter())
 identity = tensor_copy
 
 
-class Default(Op):
-    """
-    Takes an input x and a default value.
-
-    If the input is not None, a reference to it is returned.
-    If the input is None, a copy of the default value is returned instead.
-    The input and the default must have exactly the same type.
-
-    """
-
-    view_map = {0: [0]}
-    __props__ = ()
-
-    def make_node(self, x, default):
-        x, default = as_tensor_variable(x), as_tensor_variable(default)
-        if not x.type.in_same_class(default.type):
-            raise TypeError("Both arguments must have compatible types")
-        return Apply(self, [x, default], [default.type()])
-
-    def perform(self, node, inp, out_):
-        x, default = inp
-        (out,) = out_
-        if x is None:
-            # why copy?  PyTensor can't yet understand out[0] being a view of
-            # either x or y, so we can be a view of x, but only a copy of y.
-            out[0] = default.copy()
-        else:
-            out[0] = x
-
-
-default = Default()
-
-
 def extract_constant(x, elemwise=True, only_process_constants=False):
     """
     This function is basically a call to tensor.get_underlying_scalar_constant_value.
@@ -4605,7 +4572,6 @@ __all__ = [
     "choose",
     "concatenate",
     "constant",
-    "default",
     "diag",
     "diagonal",
     "empty",
