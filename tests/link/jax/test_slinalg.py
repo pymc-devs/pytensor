@@ -13,6 +13,7 @@ from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor._linalg.solve import linear_control
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
+from pytensor.tensor.type_other import NoneConst
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -257,14 +258,14 @@ def test_jax_eigvalsh(lower):
                 ).astype(config.floatX),
             ],
         )
+    out_no_b = pt_slinalg.eigvalsh(A, NoneConst, lower=lower)
     compare_jax_and_py(
-        [A, B],
-        [out],
+        [A],
+        [out_no_b],
         [
             np.array([[6, 3, 1, 5], [3, 0, 5, 1], [1, 5, 6, 2], [5, 1, 2, 2]]).astype(
                 config.floatX
             ),
-            None,
         ],
     )
 
