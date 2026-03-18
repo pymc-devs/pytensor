@@ -1,3 +1,4 @@
+import re
 import warnings
 from collections.abc import Callable
 from functools import singledispatch, wraps
@@ -13,7 +14,10 @@ from pytensor import config
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.type import Type
-from pytensor.link.numba.cache import compile_numba_function_src, hash_from_pickle_dump
+from pytensor.link.numba.cache import (
+    compile_numba_function_src,
+    hash_from_pickle_dump,
+)
 from pytensor.link.utils import (
     fgraph_to_python,
 )
@@ -33,7 +37,7 @@ def _filter_numba_warnings():
         "ignore",
         message=(
             "(\x1b\\[1m)*"  # ansi escape code for bold text
-            'Cannot cache compiled function "numba_funcified_fgraph" as it uses dynamic globals'
+            'Cannot cache compiled function "numba_funcified_fgraph.*" as it uses dynamic globals'
         ),
         category=NumbaWarning,
     )
@@ -446,12 +450,20 @@ def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | Non
             print(f"{op} of type {type(op)} will not be cached by PyTensor.\n")  # noqa: T201
         return jitable_func, None
     else:
-        op_name = jitable_func.__name__
+        full_cache_key = f"{cache_key}_fastmath{int(config.numba__fastmath)}"
+        # Include cache_key in the wrapper name to ensure unique LLVM symbol names.
+        # Without this, functions with the same __name__ but different behavior
+        # (e.g. all DimShuffle ops produce "dimshuffle")
+        # get identical mangled names when numba's UID counter overlaps after os.fork().
+        # This could cause compilation errors or silent bugs.
+        # See https://github.com/numba/numba/issues/10486
+        safe_key = re.sub(r"[^a-zA-Z0-9_]", "_", full_cache_key)
+        op_name = f"{jitable_func.__name__}_{safe_key}"
         cached_func = compile_numba_function_src(
             src=f"def {op_name}(*args): return jitable_func(*args)",
             function_name=op_name,
             global_env=globals() | {"jitable_func": jitable_func},
-            cache_key=f"{cache_key}_fastmath{int(config.numba__fastmath)}",
+            cache_key=full_cache_key,
         )
         return numba_njit(cached_func, cache=True), cache_key
 
