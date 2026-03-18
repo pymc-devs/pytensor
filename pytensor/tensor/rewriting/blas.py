@@ -272,8 +272,7 @@ def _gemm_canonicalize(fgraph, r, scale, rval, maxclients):
                 # just put the original arguments as in the base case
                 rval.append((scale, r))
                 return rval
-        if len(matrices) == 1:
-            assert len(vectors) == 0
+        if len(matrices) == 1 and len(vectors) == 0:
             m = matrices[0]
             if len(scalars) == 0:
                 _gemm_canonicalize(fgraph, m, scale, rval, 1)
@@ -283,8 +282,7 @@ def _gemm_canonicalize(fgraph, r, scale, rval, maxclients):
                 _gemm_canonicalize(
                     fgraph, m, mul(scaled(scalars[0]), *scalars[1:]), rval, 1
                 )
-        elif len(vectors) == 1:
-            assert len(matrices) == 0
+        elif len(vectors) == 1 and len(matrices) == 0:
             v = vectors[0]
             if len(scalars) == 0:
                 _gemm_canonicalize(fgraph, v, scale, rval, 1)
@@ -358,6 +356,9 @@ def _gemm_from_factored_list(fgraph, lst):
             sm0 = ptb.as_tensor_variable(sm0)
             if pytensor.scalar.upcast(sm0.dtype, sm1.dtype) == sm1.dtype:
                 lst2.append((ptb.cast(sm0, sm1.dtype), sM[1]))
+        else:
+            # Preserve non-decomposable terms (e.g. scalars with ndim not in (1, 2))
+            lst2.append(sM)
 
     lst = lst2
 
@@ -374,9 +375,13 @@ def _gemm_from_factored_list(fgraph, lst):
 
     # Try every pair in the sM_list, trying to turn it into a gemm operation
     for i in range(len(lst) - 1):
+        if not isinstance(lst[i], tuple):
+            continue
         s_i, M_i = lst[i]
 
         for j in range(i + 1, len(lst)):
+            if not isinstance(lst[j], tuple):
+                continue
             s_j, M_j = lst[j]
 
             if not M_j.type.in_same_class(M_i.type):

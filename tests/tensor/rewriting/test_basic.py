@@ -70,7 +70,7 @@ from pytensor.tensor.rewriting.basic import (
     local_useless_elemwise,
     topo_constant_folding,
     topo_unconditional_constant_folding,
-    topological_fill_sink,
+    topological_second_sink,
 )
 from pytensor.tensor.rewriting.math import local_lift_transpose_through_dot
 from pytensor.tensor.rewriting.shape import ShapeFeature
@@ -246,7 +246,7 @@ def test_local_useless_fill():
     assert np.array_equal(res, exp_res)
 
 
-def test_local_fill_to_alloc():
+def test_local_second_to_alloc():
     x = dvector()
     m = dmatrix()
 
@@ -255,8 +255,8 @@ def test_local_fill_to_alloc():
 
     y = pt.fill(m, x)
 
-    mode = rewrite_mode.including("stabilize", "local_fill_to_alloc").excluding(
-        "useless", "local_useless_fill"
+    mode = rewrite_mode.including("stabilize", "local_second_to_alloc").excluding(
+        "useless", "local_useless_fill", "local_useless_alloc"
     )
 
     f = function([m, x], y, mode=mode)
@@ -325,7 +325,7 @@ class TestLocalCanonicalizeAlloc:
 
         # The rewrite `locall_fill_to_alloc` should call `pt.alloc`,
         # which should return `x` and not `alloc(x, ...)`
-        f = function([x], [y], mode=rewrite_mode.including("local_fill_to_alloc"))
+        f = function([x], [y], mode=rewrite_mode.including("local_second_to_alloc"))
         assert not any(isinstance(node.op, Alloc) for node in f.maker.fgraph.toposort())
 
     def test_basic_tile(self):
@@ -562,7 +562,9 @@ class TestTile:
 
 class TestUselessElemwise:
     def setup_method(self):
-        self.mode = get_default_mode().including("canonicalize", "local_fill_to_alloc")
+        self.mode = get_default_mode().including(
+            "canonicalize", "local_second_to_alloc"
+        )
 
     def test_eq(self):
         x = dmatrix()
@@ -1838,7 +1840,9 @@ class TestLocalElemwiseAlloc:
         z_opt = pytensor.function(
             [x, y],
             z,
-            mode=get_default_mode().including("local_elemwise_alloc"),
+            mode=get_default_mode().including(
+                "local_dimshuffle_alloc", "local_elemwise_alloc"
+            ),
             on_unused_input="ignore",
         )
 
@@ -1935,11 +1939,8 @@ class TestLocalElemwiseAlloc:
             self.alloc_w_dep_broad2 + self.mat,
             mode=self.fast_run_mode,
         )
-        # This graph requires one outer Alloc and an Assert
-        # To make sure `mat` is square since we end up doing
-        # broadcast_to(x, mat[..., None].shape) + mat[None, ...]
         self.verify_op_count(func, 1, Alloc)
-        self.verify_op_count(func, 1, Assert)
+        self.verify_op_count(func, 0, Assert)
 
     def test_remove_alloc_w_dimshuffle(self):
         func = function(
@@ -2041,7 +2042,7 @@ def test_shape_unsafe_tag():
         fn([0, 1], [2, 3, 4]), [0, 1]
 
 
-def test_topological_fill_sink_multi_output_client():
+def test_topological_second_sink_multi_output_client():
     x = float64("x")
     elem_op_with_2_outputs = Elemwise(Composite([x], [x + 1, x + 2]))
 
@@ -2051,13 +2052,13 @@ def test_topological_fill_sink_multi_output_client():
     out = pt.add(*elem_op_with_2_outputs(pt.exp(bcast_x)))
 
     fg = FunctionGraph([x, z], [out], copy_inputs=False)
-    topological_fill_sink.rewrite(fg)
+    topological_second_sink.rewrite(fg)
     [new_out] = fg.outputs
     expected_out = pt.full_like(z, pt.add(*elem_op_with_2_outputs(pt.exp(x))))
     assert equal_computations([new_out], [expected_out])
 
 
-def test_topological_fill_sink_broadcastable_change():
+def test_topological_second_sink_broadcastable_change():
     """Test rewrite doesn't fail after a graph replacement that provides a broadcastable change."""
     a = vector("a", shape=(1,))
     b = vector("b", shape=(1,))
@@ -2068,6 +2069,6 @@ def test_topological_fill_sink_broadcastable_change():
     out = graph_replace(initial_out, {zeros: pt.zeros((1,))}, strict=False)
 
     fg = FunctionGraph([a, b], [out], copy_inputs=False)
-    topological_fill_sink.rewrite(fg)
+    topological_second_sink.rewrite(fg)
     [new_out] = fg.outputs
     assert equal_computations([new_out], [a + b])

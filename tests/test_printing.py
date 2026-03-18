@@ -300,19 +300,18 @@ def test_debugprint():
     Gemv_op_name = "CGemv" if pytensor.config.blas__ldflags else "Gemv"
     exp_res = dedent(
         r"""
-        Composite{(i0 + (i1 - i2))} 4
+        Composite{(i0 + (i1 - i2))} 3
         ├─ A
-        ├─ ExpandDims{axis=0} v={0: [0]} 3
         """
-        f"        │  └─ {Gemv_op_name}{{inplace}} d={{0: [0]}} 2"
+        f"        ├─ {Gemv_op_name}{{inplace}} d={{0: [0]}} 2"
         r"""
-        │     ├─ AllocEmpty{dtype='float64'} 1
-        │     │  └─ Shape_i{0} 0
-        │     │     └─ B
-        │     ├─ 1.0
-        │     ├─ B
-        │     ├─ <Vector(float64, shape=(?,))>
-        │     └─ 0.0
+        │  ├─ AllocEmpty{dtype='float64'} 1
+        │  │  └─ Shape_i{0} 0
+        │  │     └─ B
+        │  ├─ 1.0
+        │  ├─ B
+        │  ├─ <Vector(float64, shape=(?,))>
+        │  └─ 0.0
         └─ D
 
         Inner graphs:

@@ -77,8 +77,8 @@ class TestVectorizeGraph:
         assert out_vec.type.dims == ("c", "b", "a")
         expected = as_xtensor(
             (
-                x_new.transpose("c", "a").values[:, None]
-                + y_new.transpose("b", "a").values[None, :]
+                x_new.transpose("c", "a").values[:, :, None]
+                + y_new.transpose("b", "a").values
             ),
             dims=("c", "b", "a"),
         )

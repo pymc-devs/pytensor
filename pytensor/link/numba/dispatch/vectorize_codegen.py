@@ -125,7 +125,7 @@ def _vectorized(
         raise TypeError("allow_core_scalar must be literal.")
     allow_core_scalar = allow_core_scalar.literal_value
 
-    batch_ndim = len(input_bc_patterns[0])
+    batch_ndim = len(output_bc_patterns[0])
     nin = len(constant_inputs_types) + len(input_types)
     nout = len(output_bc_patterns)
 
@@ -137,13 +137,6 @@ def _vectorized(
 
     if not all(isinstance(input, types.Array) for input in input_types):
         raise TypingError("Vectorized inputs must be arrays.")
-
-    if not all(
-        len(pattern) == batch_ndim for pattern in input_bc_patterns + output_bc_patterns
-    ):
-        raise TypingError(
-            "Vectorized broadcastable patterns must have the same length."
-        )
 
     core_input_types = []
     for input_type, bc_pattern in zip(input_types, input_bc_patterns, strict=True):
@@ -291,7 +284,7 @@ def compute_itershape(
     size: list[ir.Instruction] | None,
 ):
     one = ir.IntType(64)(1)
-    batch_ndim = len(broadcast_pattern[0])
+    batch_ndim = max((len(p) for p in broadcast_pattern), default=0)
     shape = [None] * batch_ndim
     if size is not None:
         shape = size
@@ -299,8 +292,13 @@ def compute_itershape(
             for j, (bc, in_shape) in enumerate(
                 zip(broadcast_pattern, in_shapes, strict=True)
             ):
-                length = in_shape[i]
-                if bc[i]:
+                # Offset for inputs with fewer dims than batch_ndim
+                offset = batch_ndim - len(bc)
+                if i < offset:
+                    # Implicit broadcast dim — no array dim to check
+                    continue
+                length = in_shape[i - offset]
+                if bc[i - offset]:
                     with builder.if_then(
                         builder.icmp_unsigned("!=", length, one), likely=False
                     ):
@@ -336,8 +334,11 @@ def compute_itershape(
             for j, (bc, in_shape) in enumerate(
                 zip(broadcast_pattern, in_shapes, strict=True)
             ):
-                length = in_shape[i]
-                if bc[i]:
+                offset = batch_ndim - len(bc)
+                if i < offset:
+                    continue
+                length = in_shape[i - offset]
+                if bc[i - offset]:
                     with builder.if_then(
                         builder.icmp_unsigned("!=", length, one), likely=False
                     ):
@@ -452,6 +453,7 @@ def make_loop_call(
     # output_scope_set = mod.add_metadata([input_scope, output_scope])
 
     zero = ir.Constant(ir.IntType(64), 0)
+    batch_ndim = len(iter_shape)
 
     # Setup loops and initialize accumulators for outputs
     # This part corresponds to opening the loops
@@ -480,9 +482,12 @@ def make_loop_call(
     for input, input_type, bc in zip(inputs, input_types, input_bc, strict=True):
         core_ndim = input_type.ndim - len(bc)
 
-        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)] + [
-            zero
-        ] * core_ndim
+        # For inputs with fewer batch dims than the loop, skip leading loop indices
+        offset = batch_ndim - len(bc)
+        idxs_bc = [
+            zero if bc_dim else idx
+            for idx, bc_dim in zip(idxs[offset:], bc, strict=True)
+        ] + [zero] * core_ndim
         ptr = cgutils.get_item_pointer2(
             context,
             builder,

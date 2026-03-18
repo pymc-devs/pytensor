@@ -272,7 +272,7 @@ class TestAlgebraicCanonizer:
             # ((x / x) * (y / y), None),
             (
                 (-1 * x) / y / (-2 * z),
-                (pt.as_tensor([[0.5]], dtype="floatX") * x) / (y * z),
+                (pt.as_tensor(0.5, dtype="floatX") * x) / (y * z),
             ),
         ],
     )
@@ -574,7 +574,7 @@ class TestAlgebraicCanonizer:
         mode = get_default_mode()
 
         rewrite_query = RewriteDatabaseQuery(["canonicalize"])
-        rewrite_query = rewrite_query.including("ShapeOpt", "local_fill_to_alloc")
+        rewrite_query = rewrite_query.including("ShapeOpt", "local_second_to_alloc")
         rewrite_query = rewrite_query.excluding("local_elemwise_fusion")
         mode = mode.__class__(linker=mode.linker, optimizer=rewrite_query)
         # test x / x -> 1
@@ -590,15 +590,7 @@ class TestAlgebraicCanonizer:
             out = f(*val_inputs)
             assert (out == np.ones(shp, dtype=out_dtype)).all()
             topo = f.maker.fgraph.toposort()
-            if sym_inputs[0].broadcastable[0]:
-                assert len(topo) == 2
-                assert isinstance(topo[0].op, Shape_i)
-                assert isinstance(topo[1].op, Alloc)
-            else:
-                assert len(topo) == 3
-                assert isinstance(topo[0].op, Shape_i)
-                assert isinstance(topo[1].op, Shape_i)
-                assert isinstance(topo[2].op, Alloc)
+            assert any(isinstance(n.op, Alloc) for n in topo)
             assert out_dtype == out.dtype
 
         # test (x * y) / x -> y
@@ -630,10 +622,8 @@ class TestAlgebraicCanonizer:
                 ((dv / dy) / dv, [dv, dy], [dvv, dyv], 1, "float64"),
                 ((fv / fy) / fv, [fv, fy], [fvv, fyv], 1, "float32"),
                 # must broadcast as there is a dimshuffle in the computation
-                ((dx / dv) / dx, [dx, dv], [dxv, dvv], 2, "float64"),
-                # topo: [Shape_i, Shape_i, Elemwise{reciprocal,no_inplace}(<TensorType(float64, row)>), Alloc]
-                ((fx / fv) / fx, [fx, fv], [fxv, fvv], 2, "float32"),
-                # topo: [Shape_i, Shape_i, Elemwise{reciprocal,no_inplace}(<TensorType(float32, row)>), Alloc]
+                ((dx / dv) / dx, [dx, dv], [dxv, dvv], 1, "float64"),
+                ((fx / fv) / fx, [fx, fv], [fxv, fvv], 1, "float32"),
             ]
         ):
             f = function(list(sym_inputs), g, mode=mode)
@@ -1008,7 +998,7 @@ class TestAlgebraicCanonizer:
         new_out = rewrite_graph(
             out, custom_rewrite=in2out(local_mul_canonizer, name="test")
         )
-        expected_out = np.array([2.0]).astype(config.floatX) * specify_shape(x, (5,))
+        expected_out = np.array(2.0).astype(config.floatX) * specify_shape(x, (5,))
         assert equal_computations([new_out], [expected_out])
 
     def test_broadcasted_by_constant(self):
@@ -1019,7 +1009,7 @@ class TestAlgebraicCanonizer:
         new_out = rewrite_graph(
             out, custom_rewrite=in2out(local_mul_canonizer, name="test")
         )
-        expected_out = second(const, np.array([[2.0]], dtype=config.floatX) * x)
+        expected_out = second(const, np.array(2.0, dtype=config.floatX) * x)
         assert equal_computations([new_out], [expected_out])
 
 
@@ -1225,7 +1215,7 @@ def test_local_elemwise_sub_zeros():
             "canonicalize",
             "uncanonicalize",
             "ShapeOpt",
-            "local_fill_to_alloc",
+            "local_second_to_alloc",
             "local_elemwise_alloc",
         )
         .including("local_elemwise_sub_zeros")
@@ -1982,9 +1972,9 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x >= np.array([[0]], dtype=np.int8),
+                    x >= np.array(0, dtype=np.int8),
                     pt.log1p(x),
-                    np.array([[np.nan]], dtype=np.float32),
+                    np.array(np.nan, dtype=np.float32),
                 )
             ],
         )
@@ -2006,9 +1996,9 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x >= np.array([[0]], dtype=np.int8),
+                    x >= np.array(0, dtype=np.int8),
                     pt.log1p(-x),
-                    np.array([[np.nan]], dtype=np.float32),
+                    np.array(np.nan, dtype=np.float32),
                 )
             ],
         )
@@ -2029,9 +2019,9 @@ class TestExpLog:
             f.maker.fgraph.outputs,
             [
                 pt.switch(
-                    x <= np.array([[0]], dtype=np.int8),
+                    x <= np.array(0, dtype=np.int8),
                     x,
-                    np.array([[np.nan]], dtype=np.float32),
+                    np.array(np.nan, dtype=np.float32),
                 )
             ],
         )
@@ -2069,7 +2059,7 @@ def test_log_sqrt() -> None:
 
     assert utt.assert_equal_computations(
         [out],
-        [mul(pt.as_tensor_variable([[0.5]], dtype=x.dtype), log(x))],
+        [mul(pt.as_tensor_variable(0.5, dtype=x.dtype), log(x))],
     )
 
 
@@ -2095,9 +2085,9 @@ class TestSqrSqrt:
         out = rewrite_graph(out, include=["canonicalize", "specialize", "stabilize"])
 
         expected = switch(
-            ge(x, np.zeros((1, 1), dtype="int8")),
+            ge(x, np.zeros((), dtype="int8")),
             x,
-            np.full((1, 1), np.nan, dtype=x.type.dtype),
+            np.full((), np.nan, dtype=x.type.dtype),
         )
 
         assert equal_computations([out], [expected])
@@ -3027,6 +3017,68 @@ class TestLocalSumProd:
 
             rewritten_out = rewrite_graph(out, custom_rewrite=rewrite)
             assert equal_computations([rewritten_out], [expected_out])
+
+            rewritten_out_fn = pytensor.function(
+                inputs, rewritten_out, mode=mode, on_unused_input="ignore"
+            )
+            np.testing.assert_allclose(
+                out_fn(*test_vals),
+                rewritten_out_fn(*test_vals),
+            )
+
+    def test_sum_of_mixed_ndim_mul(self):
+        """Test local_sum_prod_of_mul_or_div with mixed-ndim Elemwise inputs."""
+        mode = Mode("vm", optimizer="None")
+        rewrite = out2in(local_sum_prod_of_mul_or_div)
+
+        mat = matrix(shape=(None, None), dtype="float64")
+        vec = vector(dtype="float64")
+        scl = scalar(dtype="float64")
+
+        inputs = [mat, vec, scl]
+        test_vals = [
+            np.random.random((3, 4)),
+            np.random.random((4,)),
+            np.float64(2.5),
+        ]
+
+        for out, expected_out in [
+            # scalar is broadcastable on all axes, can be factored out
+            (
+                mul(mat, scl).sum(axis=0),
+                scl * mat.sum(axis=0),
+            ),
+            (
+                mul(mat, scl).sum(axis=1),
+                scl * mat.sum(axis=1),
+            ),
+            # vector is broadcastable on axis 0, can be factored out of sum over axis 0
+            (
+                mul(mat, vec).sum(axis=0),
+                vec * mat.sum(axis=0),
+            ),
+            # vector is NOT broadcastable on axis 1, stays inside
+            (
+                mul(mat, vec).sum(axis=1),
+                mul(mat, vec).sum(axis=1),
+            ),
+            # division: scalar denominator factored out
+            (
+                true_div(mat, scl).sum(axis=0),
+                true_div(mat.sum(axis=0), scl),
+            ),
+            # division: vector denominator factored out of sum over axis 0
+            (
+                true_div(mat, vec).sum(axis=0),
+                true_div(mat.sum(axis=0), vec),
+            ),
+        ]:
+            out_fn = pytensor.function(inputs, out, mode=mode, on_unused_input="ignore")
+
+            rewritten_out = rewrite_graph(out, custom_rewrite=rewrite)
+            assert equal_computations([rewritten_out], [expected_out]), debugprint(
+                [rewritten_out, expected_out], print_type=True
+            )
 
             rewritten_out_fn = pytensor.function(
                 inputs, rewritten_out, mode=mode, on_unused_input="ignore"

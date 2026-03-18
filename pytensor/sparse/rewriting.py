@@ -16,7 +16,7 @@ from pytensor.link.c.op import COp, _NoPythonCOp
 from pytensor.sparse.basic import csm_properties
 from pytensor.sparse.math import usmm
 from pytensor.tensor import blas
-from pytensor.tensor.basic import as_tensor_variable, cast
+from pytensor.tensor.basic import as_tensor_variable, atleast_Nd, cast
 from pytensor.tensor.math import mul, neg, sub
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
 from pytensor.tensor.shape import shape, specify_shape
@@ -957,6 +957,9 @@ def local_usmm_csx(fgraph, node):
                 if y.type.dtype != dtype_out:
                     return False
 
+                # UsmmCscDense requires alpha to be 2-d with shape (1, 1)
+                if alpha.ndim < 2:
+                    alpha = atleast_Nd(alpha, n=2)
                 return [usmm_csc_dense(alpha, x_val, x_ind, x_ptr, x_nsparse, y, z)]
     return False
 

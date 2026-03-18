@@ -56,6 +56,7 @@ from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
     atleast_Nd,
+    expand_dims,
     get_scalar_constant_value,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
@@ -503,6 +504,21 @@ def scan_push_out_seq(fgraph, node):
                 continue
 
             to_remove_set.add(nd)
+
+            # When inner Elemwise inputs have different ndims, lower-ndim
+            # inputs are implicitly left-padded. Outer equivalents of inputs
+            # with a time dimension need broadcast dims inserted right after
+            # the time dim (position 0) to match that implicit padding.
+            # E.g., inner (v,) broadcasting with (a, v) → outer (t, v)
+            # must become (t, 1, v) so it broadcasts with (a, v) to (t, a, v).
+            inner_max_ndim = max(x.type.ndim for x in nd.inputs)
+            for i, x in enumerate(nd.inputs):
+                has_time = x in inner_seqs_set or x in to_replace_set
+                n_pad = inner_max_ndim - x.type.ndim
+                if has_time and n_pad > 0:
+                    outside_ins[i] = expand_dims(
+                        outside_ins[i], axis=tuple(range(1, 1 + n_pad))
+                    )
 
             # Do not call make_node for test_value
             nw_outer_node = nd.op.make_node(*outside_ins)

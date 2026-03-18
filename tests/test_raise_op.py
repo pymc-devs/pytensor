@@ -11,7 +11,6 @@ from pytensor.raise_op import Assert, CheckAndRaise, assert_op
 from pytensor.scalar.basic import ScalarType, float64
 from pytensor.sparse import as_sparse_variable
 from pytensor.tensor.basic import second
-from pytensor.tensor.elemwise import DimShuffle
 from tests import unittest_tools as utt
 
 
@@ -227,8 +226,7 @@ def test_vectorize():
     vect_out = vectorize_graph(out, {x: x, y: batch_y})
     assert vect_out.type.shape == (2, None)
     assert vect_out.owner.op == second  # broadcast
-    assert isinstance(vect_out.owner.inputs[1].owner.op, DimShuffle)
-    assert isinstance(vect_out.owner.inputs[1].owner.inputs[0].owner.op, CheckAndRaise)
+    assert isinstance(vect_out.owner.inputs[1].owner.op, CheckAndRaise)
     np.testing.assert_array_equal(
         vect_out.eval({x: test_x, batch_y: test_batch_y}),
         np.broadcast_to(test_x, (2, *test_x.shape)),
