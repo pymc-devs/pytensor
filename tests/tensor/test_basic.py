@@ -154,7 +154,7 @@ from tests.tensor.utils import (
 pytestmark = pytest.mark.filterwarnings(
     "error",
     r"ignore:^Numba will use object mode to run.*perform method\.:UserWarning",
-    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph\".*:numba.NumbaWarning",
+    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph.*:numba.NumbaWarning",
     r"ignore::numba.NumbaPerformanceWarning",
 )
 
