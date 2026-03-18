@@ -4,17 +4,13 @@ from pytensor import Variable, shared
 from pytensor import tensor as pt
 from pytensor.graph import Apply, ancestors, graph_inputs
 from pytensor.graph.traversal import (
-    apply_ancestors,
     apply_depends_on,
     explicit_graph_inputs,
     general_toposort,
     get_var_by_name,
     io_toposort,
     orphans_between,
-    toposort,
-    toposort_with_orderings,
     truncated_graph_inputs,
-    variable_ancestors,
     variable_depends_on,
     vars_between,
     walk,
@@ -406,37 +402,3 @@ def test_get_var_by_name():
 
     exp_res = igo.fgraph.outputs[0]
     assert res == exp_res
-
-
-@pytest.mark.parametrize(
-    "func",
-    [
-        lambda x: all(variable_ancestors([x])),
-        lambda x: all(variable_ancestors([x], blockers=[x.clone()])),
-        lambda x: all(apply_ancestors([x])),
-        lambda x: all(apply_ancestors([x], blockers=[x.clone()])),
-        lambda x: all(toposort([x])),
-        lambda x: all(toposort([x], blockers=[x.clone()])),
-        lambda x: all(toposort_with_orderings([x], orderings={x: []})),
-        lambda x: all(
-            toposort_with_orderings([x], blockers=[x.clone()], orderings={x: []})
-        ),
-    ],
-    ids=[
-        "variable_ancestors",
-        "variable_ancestors_with_blockers",
-        "apply_ancestors",
-        "apply_ancestors_with_blockers)",
-        "toposort",
-        "toposort_with_blockers",
-        "toposort_with_orderings",
-        "toposort_with_orderings_and_blockers",
-    ],
-)
-def test_traversal_benchmark(func, benchmark):
-    r1 = MyVariable(1)
-    out = r1
-    for i in range(50):
-        out = MyOp(out, out)
-
-    benchmark(func, out)

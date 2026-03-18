@@ -1,4 +1,3 @@
-import itertools
 import math
 import re
 import tracemalloc
@@ -11,7 +10,7 @@ import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
-from pytensor import In, Out, config, grad
+from pytensor import In, config, grad
 from pytensor.compile.function import function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.graph.basic import Apply, Variable
@@ -41,7 +40,6 @@ from pytensor.tensor.type import (
     matrix,
     scalar,
     tensor,
-    tensor3,
     vector,
     vectors,
 )
@@ -78,30 +76,6 @@ def reduce_bitwise_and(x, axis=-1, dtype="int8"):
         return out
 
     return np.apply_along_axis(custom_reduce, axis, x)
-
-
-def dimshuffle_benchmark(mode, c_contiguous, benchmark):
-    x = tensor3("x")
-    if c_contiguous:
-        x_val = np.random.random((2, 3, 4)).astype(config.floatX)
-    else:
-        x_val = np.random.random((200, 300, 400)).transpose(1, 2, 0)
-    ys = [x.transpose(t) for t in itertools.permutations((0, 1, 2))]
-    ys += [
-        x[None],
-        x[:, None],
-        x[:, :, None],
-        x[:, :, :, None],
-    ]
-    # Borrow to avoid deepcopy overhead
-    fn = pytensor.function(
-        [In(x, borrow=True)],
-        [Out(y, borrow=True) for y in ys],
-        mode=mode,
-    )
-    fn.trust_input = True
-    fn(x_val)  # JIT compile for JIT backends
-    benchmark(fn, x_val)
 
 
 class TestDimShuffle(unittest_tools.InferShapeTester):
@@ -260,10 +234,6 @@ class TestDimShuffle(unittest_tools.InferShapeTester):
 
         with pytest.raises(TypeError, match="input_ndim must be an integer"):
             DimShuffle(input_ndim=(True, False), new_order=(1, 0))
-
-    @pytest.mark.parametrize("c_contiguous", [True, False])
-    def test_benchmark(self, c_contiguous, benchmark):
-        dimshuffle_benchmark("FAST_RUN", c_contiguous, benchmark)
 
 
 class TestBroadcast:
@@ -1075,38 +1045,6 @@ class TestVectorize:
         assert isinstance(vect_out.owner.op, Any)
         assert vect_out.owner.op.axis == (1,)
         assert vect_out.owner.inputs[0] is bool_tns
-
-
-def careduce_benchmark_tester(axis, c_contiguous, mode, benchmark):
-    N = 256
-    x_test = np.random.uniform(size=(N, N, N))
-    transpose_axis = (0, 1, 2) if c_contiguous else (2, 0, 1)
-
-    x = pytensor.shared(x_test, name="x", shape=x_test.shape)
-    out = x.transpose(transpose_axis).sum(axis=axis)
-    fn = pytensor.function([], out, mode=mode)
-
-    np.testing.assert_allclose(
-        fn(),
-        x_test.transpose(transpose_axis).sum(axis=axis),
-    )
-    benchmark(fn)
-
-
-@pytest.mark.parametrize(
-    "axis",
-    (0, 1, 2, (0, 1), (0, 2), (1, 2), None),
-    ids=lambda x: f"axis={x}",
-)
-@pytest.mark.parametrize(
-    "c_contiguous",
-    (True, False),
-    ids=lambda x: f"c_contiguous={x}",
-)
-def test_c_careduce_benchmark(axis, c_contiguous, benchmark):
-    return careduce_benchmark_tester(
-        axis, c_contiguous, mode="FAST_RUN", benchmark=benchmark
-    )
 
 
 def test_gradient_mixed_discrete_output_scalar_op():

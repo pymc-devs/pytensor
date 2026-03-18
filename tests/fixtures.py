@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 import pytensor.tensor as pt
 from pytensor.graph.replace import graph_replace
@@ -134,23 +133,3 @@ def create_radon_model(
 
     model_logp, model_dlogp = graph_replace([model_logp, model_dlogp], replacement)
     return joined_inputs, [model_logp, model_dlogp]
-
-
-@pytest.fixture(scope="session")
-def radon_model():
-    return create_radon_model()
-
-
-@pytest.fixture(scope="session")
-def radon_model_variants():
-    # Convert to list comp
-    return [
-        create_radon_model(
-            intercept_dist=intercept_dist,
-            sigma_dist=sigma_dist,
-            centered=centered,
-        )
-        for centered in (True, False)
-        for intercept_dist in ("normal", "lognormal")
-        for sigma_dist in ("halfnormal", "lognormal")
-    ]

@@ -674,28 +674,6 @@ class TestPushOutAddScan:
         vB = rng.uniform(size=(5, 5)).astype(config.floatX)
         utt.assert_allclose(f(vA, vB), np.dot(vA.T, vB))
 
-    def test_pregreedy_optimizer(self, benchmark):
-        W = pt.zeros((5, 4))
-        bv = pt.zeros((5,))
-        bh = pt.zeros((4,))
-        v = matrix("v")
-        (bv_t, bh_t) = scan(
-            lambda _: [bv, bh],
-            sequences=v,
-            outputs_info=[None, None],
-            return_updates=False,
-        )
-        chain = scan(
-            lambda x: dot(dot(x, W) + bh_t, W.T) + bv_t,
-            outputs_info=v,
-            n_steps=2,
-            return_updates=False,
-        )
-        # TODO FIXME: Make this a real test and assert something.
-        chain_fn = function([v], chain)
-
-        benchmark(chain_fn, np.zeros((3, 5), dtype=config.floatX))
-
     def test_machine_translation(self):
         """
         This test case comes from https://github.com/rizar/scan-grad-speed and
@@ -1559,18 +1537,6 @@ class TestSaveMem:
             x for x in tmp_fn.maker.fgraph.toposort() if isinstance(x.op, Scan)
         ]
         assert len(scan_nodes) == 1
-
-    def test_savemem_opt(self, benchmark):
-        y0 = shared(np.ones((2, 10)))
-        [_y1, y2] = scan(
-            lambda y: [y, y],
-            outputs_info=[dict(initial=y0, taps=[-2]), None],
-            n_steps=5,
-            return_updates=False,
-        )
-        # TODO FIXME: Make this a real test and assert something.
-        fn = function([], y2.sum(), mode=self.mode)
-        benchmark(fn)
 
     def test_savemem_opt_0_step(self):
         """

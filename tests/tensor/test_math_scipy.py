@@ -12,7 +12,7 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, verify_grad
 from pytensor.scalar import ScalarLoop
-from pytensor.tensor import gammaincc, kn, kv, kve, vector
+from pytensor.tensor import kn, kv, kve, vector
 from pytensor.tensor.elemwise import Elemwise
 from tests import unittest_tools as utt
 from tests.tensor.utils import (
@@ -335,25 +335,6 @@ def test_gammainc_ddk_tabulated_values():
         np.testing.assert_allclose(
             f_grad(test_k, test_x), expected_ddk, rtol=rtol, atol=atol
         )
-
-
-def test_gammaincc_ddk_performance(benchmark):
-    rng = np.random.default_rng(1)
-    k = vector("k")
-    x = vector("x")
-
-    out = gammaincc(k, x)
-    grad_fn = function(
-        [k, x], grad(out.sum(), wrt=[k]), mode="FAST_RUN", trust_input=True
-    )
-    vals = [
-        # Values that hit the second branch of the gradient
-        np.full((1000,), 3.2, dtype=k.dtype),
-        np.full((1000,), 0.01, dtype=x.dtype),
-    ]
-
-    verify_grad(gammaincc, vals, rng=rng)
-    benchmark(grad_fn, *vals)
 
 
 TestGammaUBroadcast = makeBroadcastTester(
@@ -887,30 +868,6 @@ class TestHyp2F1Grad:
                 np.array([expected_dda1, expected_dda2, expected_ddb1, expected_ddz]),
                 rtol=rtol,
             )
-
-    @pytest.mark.parametrize("case", (few_iters_case, many_iters_case))
-    @pytest.mark.parametrize("wrt", ("a", "all"))
-    def test_benchmark(self, case, wrt, benchmark):
-        a1, a2, b1, z = pt.scalars("a1", "a2", "b1", "z")
-        hyp2f1_out = pt.hyp2f1(a1, a2, b1, z)
-        hyp2f1_grad = pt.grad(hyp2f1_out, wrt=a1 if wrt == "a" else [a1, a2, b1, z])
-        f_grad = function([a1, a2, b1, z], hyp2f1_grad, trust_input=True)
-
-        (test_a1, test_a2, test_b1, test_z, *expected_dds) = case
-        test_a1 = np.array(test_a1, dtype=a1.dtype)
-        test_a2 = np.array(test_a2, dtype=a2.dtype)
-        test_b1 = np.array(test_b1, dtype=b1.dtype)
-        test_z = np.array(test_z, dtype=z.dtype)
-
-        result = benchmark(f_grad, test_a1, test_a2, test_b1, test_z)
-
-        rtol = 1e-9 if config.floatX == "float64" else 2e-3
-        expected_result = expected_dds[0] if wrt == "a" else np.array(expected_dds)
-        np.testing.assert_allclose(
-            result,
-            expected_result,
-            rtol=rtol,
-        )
 
     @pytest.mark.parametrize("wrt", ([0], [1], [2], [0, 1], [1, 2], [0, 2], [0, 1, 2]))
     def test_unused_grad_loop_opt(self, wrt):

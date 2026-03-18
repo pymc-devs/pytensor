@@ -1,8 +1,6 @@
 import numpy as np
 import pytest
-import scipy.special
 
-import pytensor
 import pytensor.tensor as pt
 from pytensor.compile import get_mode
 from pytensor.configdefaults import config
@@ -96,28 +94,6 @@ def test_softmax_grad(axis):
     out = SoftmaxGrad(axis=axis)(dy, sm)
 
     compare_jax_and_py([dy, sm], [out], [dy_test_value, sm_test_value])
-
-
-@pytest.mark.parametrize("size", [(10, 10), (1000, 1000)])
-@pytest.mark.parametrize("axis", [0, 1])
-def test_logsumexp_benchmark(size, axis, benchmark):
-    X = pt.matrix("X")
-    X_max = pt.max(X, axis=axis, keepdims=True)
-    X_max = pt.switch(pt.isinf(X_max), 0, X_max)
-    X_lse = pt.log(pt.sum(pt.exp(X - X_max), axis=axis, keepdims=True)) + X_max
-
-    rng = np.random.default_rng(23920)
-    X_val = rng.normal(size=size)
-
-    X_lse_fn = pytensor.function([X], X_lse, mode="JAX")
-
-    # JIT compile first
-    _ = X_lse_fn(X_val)
-
-    res = benchmark(X_lse_fn, X_val)
-
-    exp_res = scipy.special.logsumexp(X_val, axis=axis, keepdims=True)
-    np.testing.assert_array_almost_equal(res, exp_res)
 
 
 def test_multiple_input_multiply():

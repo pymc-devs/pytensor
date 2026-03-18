@@ -49,9 +49,11 @@ core
 .mypy_cache/
 /htmlcov/
 
+.venv/
 pytensor-venv/
 /notebooks/Sandbox*
 .vscode/
 testing-report.html
 coverage.xml
 .coverage.*
+.asv/

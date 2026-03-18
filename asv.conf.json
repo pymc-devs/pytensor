@@ -1,0 +1,13 @@
+{
+    "version": 1,
+    "project": "pytensor",
+    "project_url": "https://github.com/pymc-devs/pytensor",
+    "repo": ".",
+    "branches": ["HEAD"],
+    "dvcs": "git",
+    "environment_type": "existing",
+    "benchmark_dir": "benchmarks",
+    "env_dir": ".asv/env",
+    "results_dir": ".asv/results",
+    "html_dir": ".asv/html"
+}

@@ -522,23 +522,6 @@ class TestNumbaWarnings:
         np.testing.assert_allclose(fn(A_test, b_test), np.dot(A_test, b_test[:, None]))
 
 
-@pytest.mark.parametrize("mode", ("default", "trust_input", "direct"))
-def test_function_overhead(mode, benchmark):
-    x = pt.vector("x")
-    out = pt.exp(x)
-
-    fn = function([x], out, mode="NUMBA")
-    if mode == "trust_input":
-        fn.trust_input = True
-    elif mode == "direct":
-        fn = fn.vm.jit_fn
-
-    test_x = np.zeros(1000)
-    assert np.sum(fn(test_x)) == 1000
-
-    benchmark(fn, test_x)
-
-
 class ComplexType:
     def __init__(self, a, b):
         self.a = a
