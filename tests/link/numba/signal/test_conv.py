@@ -13,7 +13,7 @@ from tests.tensor.signal.test_conv import convolve1d_grad_benchmarker
 pytestmark = pytest.mark.filterwarnings(
     "error",
     r"ignore:^Numba will use object mode to run.*perform method\.:UserWarning",
-    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph\".*:numba.NumbaWarning",
+    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph.*:numba.NumbaWarning",
 )
 
 
