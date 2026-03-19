@@ -1,4 +1,4 @@
-# PyTensor Copilot Instructions
+# PyTensor Agent Instructions
 
 ## Overview
 
@@ -7,7 +7,7 @@
 ## PyTensor Design Principles
 
 Graph manipulation in Python, graph evaluation out of Python.
-Emulate NumPy user-facing API as much as possible. 
+Emulate NumPy user-facing API as much as possible.
 
 ### API Differences from NumPy
 
@@ -19,9 +19,9 @@ Emulate NumPy user-facing API as much as possible.
 
 ## Code Style
 
-**Uses pre-commit with ruff**
+**Uses pre-commit with ruff**. Code should pass pre-commit before being committed.
 
-**Performance** 
+**Performance**
 * Could should be performant
 * Avoid expensive work in hot loops
 * Avoid redundant checks. Let errors raise naturally
@@ -60,63 +60,79 @@ Emulate NumPy user-facing API as much as possible.
 ### Tests (`tests/`)
 Mirrors source structure. `unittest_tools.py` has testing utilities.
 
-## Critical: Environment & Commands
-
-**ALWAYS use micromamba environment**: PyTensor is pre-installed as editable in `.github/workflows/copilot-setup-steps.yml`. 
-
-All commands MUST use: `micromamba run -n pytensor-test <command>`
-
-Example: `micromamba run -n pytensor-test python -c 'import pytensor; print(pytensor.__version__)'`
-
 ## Testing & Building
 
-### Running Tests (ALWAYS use micromamba)
-
 ```bash
-micromamba run -n pytensor-test python -m pytest tests/              # All tests
-micromamba run -n pytensor-test python -m pytest tests/test_updates.py -v  # Single file
-micromamba run -n pytensor-test python -m pytest tests/ --runslow    # Include slow tests
+python -m pytest tests/                        # All tests
+python -m pytest tests/test_updates.py -v      # Single file
+python -m pytest tests/ --runslow              # Include slow tests
 ```
 
-Tests are run with `config.floatX == "float32"` and `config.mode = "FAST_COMPILE"`. If needed:
-- Cast numerical values `test_value.astype(symbolic_var.type.dtype)` 
+Tests are run with `config.mode = "FAST_COMPILE"`. If needed:
+- Cast numerical values `test_value.astype(symbolic_var.type.dtype)`
 - Use custom function mode `get_default_mode().excluding("fusion")` or skip tests in `FAST_COMPILE` if they are not directly relevant to the mode.
 
-Alternative backends (JAX, NUMBA, ...) are optional. Use `pytest.importorskip` to fail gracefully.
-
-### Pre-commit
-
-```bash
-micromamba run -n pytensor-test pre-commit
-```
+Alternative backends (JAX, PyTorch, MLX) are optional. Use `pytest.importorskip` to fail gracefully.
 
 ### MyPy
 
 ```bash
-micromamba run -n pytensor-test python ./scripts/run_mypy.py --verbose
+python ./scripts/run_mypy.py --verbose
 ```
 **PyTensor incompatible with strict mypy**. Type-hints are for users/developers not to appease mypy. Liberal `type: ignore[rule]` and file exclusions are acceptable.
 
 ### Documentation
 
 ```bash
-micromamba run -n pytensor-test python -m sphinx -b html ./doc ./html  # Build docs (2-3 min)
+python -m sphinx -b html ./doc ./html  # Build docs (2-3 min)
 ```
 **Never commit `html` directory**.
+
+
+## Debugging
+
+### Inspecting graphs
+
+Use `pytensor.dprint` to inspect graphs. It works on both raw variables (before optimization) and compiled functions (after optimization):
+
+```python
+pytensor.dprint(y, print_type=True)                          # Before optimization
+pytensor.dprint(f, print_type=True, print_memory_map=True)   # After optimization
+```
+
+`print_type=True` shows the type and shape of each variable. `print_memory_map=True` shows memory allocation labels, useful for spotting whether intermediates share memory.
+
+### Rewriting without compiling
+
+Use `rewrite_graph` to apply rewrites to a graph without the full `pytensor.function` compilation:
+
+```python
+from pytensor.graph.rewriting.utils import rewrite_graph
+y_opt = rewrite_graph(y, include=("canonicalize", "specialize"))
+pytensor.dprint(y_opt, print_type=True)
+```
+
+### Inspecting rewrites
+
+Use `optimizer_verbose=True` to see which rewrites are applied during compilation:
+
+```python
+with pytensor.config.change_flags(optimizer_verbose=True):
+    f = pytensor.function([x], y)
+```
+
+This prints each rewrite that fires, showing what it replaced and with what.
 
 
 ## CI/CD Pipeline
 
 ### Workflows (`.github/workflows/`)
-1. **test.yml**: Main suite - Several Python versions, fast-compile (0/1), float32 (0/1), 7 test parts + backend jobs (numba, jax, torch)
+1. **test.yml**: Main suite - Several Python versions, 7 test parts + backend jobs (jax, torch)
 2. **mypy.yml**: Type checking
-3. **copilot-setup-steps.yml**: Environment setup
+
+CI runs tests under three modes: Default (`"NUMBA"`), `"CVM"`, and `"FAST_COMPILE"`. Tests must pass in all three.
 
 
-## Trust These Instructions
-These instructions are comprehensive and tested. Only search for additional information if:
-1. Instructions are incomplete for your specific task
-2. Instructions are found to be incorrect
-3. You need deeper understanding of an implementation detail
- 
- For most coding tasks, these instructions provide everything needed to build, test, and validate changes efficiently.
+## Known Gotchas
+
+- **Numba scalar outputs**: Numba-compiled scalar functions return Python `float`/`int`, not NumPy scalars. Keep this in mind when writing tests that check output types.
