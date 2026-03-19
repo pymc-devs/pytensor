@@ -5,10 +5,12 @@ on:
     branches:
       - main
       - v3
+      - asv
   pull_request:
     branches:
       - main
       - v3
+      - asv
 
 concurrency:
   group: benchmarks-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
