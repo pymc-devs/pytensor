@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   changes:
+    if: false # TEMPORARY: disabled for benchmarks debugging
     name: "Check for changes"
     runs-on: ubuntu-latest
     outputs:

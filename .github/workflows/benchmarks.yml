@@ -81,7 +81,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
           export PYTENSOR_FLAGS=warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          asv run --python=same --set-commit-hash=$(git rev-parse HEAD) --show-stderr
+          asv run --python=same --set-commit-hash=$(git rev-parse HEAD) --show-stderr --bench "bench_shape|bench_graph"
 
       - name: Push results to asv-results branch
         shell: bash

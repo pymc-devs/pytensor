@@ -22,6 +22,7 @@ permissions: {}
 
 jobs:
   check_changes:
+    if: false # TEMPORARY: disabled for benchmarks debugging
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.set_should_run.outputs.should_run }}
