@@ -1,0 +1,1049 @@
+{
+    "bench_blockwise.BatchedMVNormalLogpAndDlogp.time_batched_mvnormal_logp_and_dlogp": {
+        "code": "class BatchedMVNormalLogpAndDlogp:\n    def time_batched_mvnormal_logp_and_dlogp(self, mu_batch_shape, cov_batch_shape):\n        self.fn(*self.test_values)\n\n    def setup(self, mu_batch_shape, cov_batch_shape):\n        rng = np.random.default_rng(sum(map(ord, \"batched_mvnormal\")))\n    \n        value_batch_shape = mu_batch_shape\n        if len(cov_batch_shape) > len(mu_batch_shape):\n            value_batch_shape = cov_batch_shape\n    \n        value = tensor(\"value\", shape=(*value_batch_shape, 10))\n        mu = tensor(\"mu\", shape=(*mu_batch_shape, 10))\n        cov = tensor(\"cov\", shape=(*cov_batch_shape, 10, 10))\n    \n        self.test_values = [\n            rng.normal(size=value.type.shape),\n            rng.normal(size=mu.type.shape),\n            np.eye(cov.type.shape[-1]) * np.abs(rng.normal(size=cov.type.shape)),\n        ]\n    \n        chol_cov = cholesky(cov, lower=True, on_error=\"raise\")\n        delta_trans = solve_triangular(chol_cov, value - mu, b_ndim=1)\n        quaddist = (delta_trans**2).sum(axis=-1)\n        diag = diagonal(chol_cov, axis1=-2, axis2=-1)\n        logdet = log(diag).sum(axis=-1)\n        k = value.shape[-1]\n        norm = -0.5 * k * (np.log(2 * np.pi))\n        logp = norm - 0.5 * quaddist - logdet\n        dlogp = grad(logp.sum(), wrt=[value, mu, cov])\n    \n        self.fn = pytensor.function([value, mu, cov], [logp, *dlogp])",
+        "min_run_count": 2,
+        "name": "bench_blockwise.BatchedMVNormalLogpAndDlogp.time_batched_mvnormal_logp_and_dlogp",
+        "number": 0,
+        "param_names": [
+            "mu_batch_shape",
+            "cov_batch_shape"
+        ],
+        "params": [
+            [
+                "()",
+                "(1000,)",
+                "(4, 1000)"
+            ],
+            [
+                "()",
+                "(1000,)",
+                "(4, 1000)"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "360f3a83d4c3ca0d472fac4ebb32e0ef81aa36001c689b4be6add798623d15fe",
+        "warmup_time": -1
+    },
+    "bench_blockwise.SmallBlockwisePerformance.time_small_blockwise": {
+        "code": "class SmallBlockwisePerformance:\n    def time_small_blockwise(self):\n        self.fn(self.a_test, self.b_test)\n\n    def setup(self):\n        a = dmatrix(shape=(7, 128))\n        b = dmatrix(shape=(7, 20))\n        out = convolve1d(a, b, mode=\"valid\")\n        self.fn = pytensor.function([a, b], out, trust_input=True)\n    \n        rng = np.random.default_rng(495)\n        self.a_test = rng.normal(size=a.type.shape)\n        self.b_test = rng.normal(size=b.type.shape)",
+        "min_run_count": 2,
+        "name": "bench_blockwise.SmallBlockwisePerformance.time_small_blockwise",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "e933b04059d0db5e8bfaeaeff62c48938a59a2fd4bed1fb34910a6896d440b54",
+        "warmup_time": -1
+    },
+    "bench_compile.MinimalRandomFunctionCall.time_call": {
+        "code": "class MinimalRandomFunctionCall:\n    def time_call(self, trust_input):\n        self.f(self.rng_val)\n\n    def setup(self, trust_input):\n        rng = random_generator_type()\n        x = normal(rng=rng, size=(100,))\n        self.f = function([In(rng, mutable=True)], x)\n        self.f.trust_input = trust_input\n        self.rng_val = np.random.default_rng()",
+        "min_run_count": 2,
+        "name": "bench_compile.MinimalRandomFunctionCall.time_call",
+        "number": 0,
+        "param_names": [
+            "trust_input"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "a060cdce2d9e9faa1463d5b23f65c0381e134324a274143ccddcab5bc5628122",
+        "warmup_time": -1
+    },
+    "bench_compile.RadonModelCall.time_call": {
+        "code": "class RadonModelCall:\n    def time_call(self, mode):\n        self.fn(self.x)\n\n    def setup(self, mode):\n        joined_inputs, [model_logp, model_dlogp] = create_radon_model()\n        real_mode = \"CVM\" if mode == \"CVM_NOGC\" else mode\n        self.fn = function(\n            [joined_inputs],\n            [model_logp, model_dlogp],\n            mode=real_mode,\n            trust_input=True,\n        )\n        if mode == \"CVM_NOGC\":\n            self.fn.vm.allow_gc = False\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)\n        # Warmup\n        self.fn(self.x)",
+        "min_run_count": 2,
+        "name": "bench_compile.RadonModelCall.time_call",
+        "number": 0,
+        "param_names": [
+            "mode"
+        ],
+        "params": [
+            [
+                "'C'",
+                "'CVM'",
+                "'CVM_NOGC'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "f752229cb3607c2e34630561155cb31fb2d04c8f2bc23d9dc0aa3ff727dc0020",
+        "warmup_time": -1
+    },
+    "bench_compile.RadonModelCompileRepeatedly.time_compile_and_call": {
+        "code": "class RadonModelCompileRepeatedly:\n    def time_compile_and_call(self, mode):\n        fn = function(\n            [self.joined_inputs],\n            [self.model_logp, self.model_dlogp],\n            mode=mode,\n            trust_input=True,\n        )\n        fn(self.x)\n\n    def setup(self, mode):\n        self.joined_inputs, [self.model_logp, self.model_dlogp] = create_radon_model()\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=self.joined_inputs.type.shape).astype(config.floatX)",
+        "min_run_count": 2,
+        "name": "bench_compile.RadonModelCompileRepeatedly.time_compile_and_call",
+        "number": 1,
+        "param_names": [
+            "mode"
+        ],
+        "params": [
+            [
+                "'C'",
+                "'CVM'"
+            ]
+        ],
+        "repeat": 5,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "ca499d956c7549ef8d373ba90447dcd1b7a008d25baa47671d95470201537375",
+        "warmup_time": -1
+    },
+    "bench_compile.RadonModelCompileVariants.time_compile_variants": {
+        "code": "class RadonModelCompileVariants:\n    def time_compile_variants(self, mode):\n        for joined_inputs, [model_logp, model_dlogp] in self.radon_model_variants:\n            fn = function(\n                [joined_inputs],\n                [model_logp, model_dlogp],\n                mode=mode,\n                trust_input=True,\n            )\n            fn(self.x)\n\n    def setup(self, mode):\n        # Build the base model and compile once to populate caches\n        self.joined_inputs, [self.model_logp, self.model_dlogp] = create_radon_model()\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=self.joined_inputs.type.shape).astype(config.floatX)\n        fn = function(\n            [self.joined_inputs],\n            [self.model_logp, self.model_dlogp],\n            mode=mode,\n            trust_input=True,\n        )\n        fn(self.x)\n    \n        # Build the 8 variants\n        self.radon_model_variants = [\n            create_radon_model(\n                intercept_dist=intercept_dist,\n                sigma_dist=sigma_dist,\n                centered=centered,\n            )\n            for centered in (True, False)\n            for intercept_dist in (\"normal\", \"lognormal\")\n            for sigma_dist in (\"halfnormal\", \"lognormal\")\n        ]",
+        "min_run_count": 2,
+        "name": "bench_compile.RadonModelCompileVariants.time_compile_variants",
+        "number": 1,
+        "param_names": [
+            "mode"
+        ],
+        "params": [
+            [
+                "'C'",
+                "'CVM'"
+            ]
+        ],
+        "repeat": 5,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "dd54af0ab23d09e2aa4ba29c738043498e0796457d1f3a811c7ad401a3de0805",
+        "warmup_time": -1
+    },
+    "bench_elemwise.CAReduce.time_careduce": {
+        "code": "class CAReduce:\n    def time_careduce(self, axis, c_contiguous):\n        self.fn()\n\n    def setup(self, axis, c_contiguous):\n        N = 256\n        x_test = np.random.uniform(size=(N, N, N))\n        transpose_axis = (0, 1, 2) if c_contiguous else (2, 0, 1)\n        x = pytensor.shared(x_test, name=\"x\", shape=x_test.shape)\n        out = x.transpose(transpose_axis).sum(axis=axis)\n        self.fn = pytensor.function([], out, mode=\"FAST_RUN\")",
+        "min_run_count": 2,
+        "name": "bench_elemwise.CAReduce.time_careduce",
+        "number": 0,
+        "param_names": [
+            "axis",
+            "c_contiguous"
+        ],
+        "params": [
+            [
+                "0",
+                "1",
+                "2",
+                "(0, 1)",
+                "(0, 2)",
+                "(1, 2)",
+                "None"
+            ],
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "2aed2297050a9777f7d6a9ccd4a9be708e812d77c401af6e438981e00f82a964",
+        "warmup_time": -1
+    },
+    "bench_elemwise.DimShuffle.time_dimshuffle": {
+        "code": "class DimShuffle:\n    def time_dimshuffle(self, c_contiguous):\n        self.fn(self.x_val)\n\n    def setup(self, c_contiguous):\n        x = tensor3(\"x\")\n        if c_contiguous:\n            self.x_val = np.random.random((2, 3, 4)).astype(config.floatX)\n        else:\n            self.x_val = np.random.random((200, 300, 400)).transpose(1, 2, 0)\n    \n        ys = [x.transpose(t) for t in itertools.permutations((0, 1, 2))]\n        ys += [x[None], x[:, None], x[:, :, None], x[:, :, :, None]]\n    \n        self.fn = pytensor.function(\n            [In(x, borrow=True)],\n            [Out(y, borrow=True) for y in ys],\n            mode=\"FAST_RUN\",\n        )\n        self.fn.trust_input = True\n        # Warmup / JIT compile\n        self.fn(self.x_val)",
+        "min_run_count": 2,
+        "name": "bench_elemwise.DimShuffle.time_dimshuffle",
+        "number": 0,
+        "param_names": [
+            "c_contiguous"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "413f8f3f80e1a6ad4af9d91b9daaad7dc1480ceaf957fb440dd9cfd72dcd202a",
+        "warmup_time": -1
+    },
+    "bench_elemwise.ElemwiseEval.time_eval": {
+        "code": "class ElemwiseEval:\n    def time_eval(self):\n        self.func()\n\n    def setup(self):\n        rng = np.random.default_rng(123)\n        size = 100_000\n        x = pytensor.shared(rng.normal(size=size), name=\"x\")\n        mu = pytensor.shared(rng.normal(size=size), name=\"mu\")\n        logp = -((x - mu) ** 2) / 2\n        grad_logp = grad(logp.sum(), x)\n        self.func = pytensor.function([], [logp, grad_logp], mode=\"FAST_RUN\")",
+        "min_run_count": 2,
+        "name": "bench_elemwise.ElemwiseEval.time_eval",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "8cd0b47c14f976dc85df437122f02bb33766afe4cb6d8a654bbd4dc88d531f25",
+        "warmup_time": -1
+    },
+    "bench_elemwise.FusionRewrite.time_rewrite": {
+        "code": "class FusionRewrite:\n    def time_rewrite(self, graph_fn, n):\n        fg_clone = self.fg.clone()\n        self.opt.apply(fg_clone)\n\n    def setup(self, graph_fn, n):\n        # Only run matching (graph_fn, n) combinations\n        valid = {\n            \"deep_small_kernels\": 20,\n            \"large_fuseable_graph\": 25,\n        }\n        if valid.get(graph_fn) != n:\n            raise NotImplementedError(\"Skip non-matching parameter combination\")\n    \n        builder = getattr(self, graph_fn)\n        inps, outs = builder(n)\n        self.fg = FunctionGraph(inps, outs)\n        self.opt = FusionOptimizer()",
+        "min_run_count": 2,
+        "name": "bench_elemwise.FusionRewrite.time_rewrite",
+        "number": 5,
+        "param_names": [
+            "graph_fn",
+            "n"
+        ],
+        "params": [
+            [
+                "'deep_small_kernels'",
+                "'large_fuseable_graph'"
+            ],
+            [
+                "20",
+                "25"
+            ]
+        ],
+        "repeat": 7,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "04aa0b2d4ed822bf503922e417af763cf9c677958d2bff4a324de017c6d7f093",
+        "warmup_time": -1
+    },
+    "bench_gradient.Jacobian.time_jacobian": {
+        "code": "class Jacobian:\n    def time_jacobian(self, vectorize):\n        self.fn(self.x_val)\n\n    def setup(self, vectorize):\n        x = vector(\"x\", shape=(3,))\n        y = outer(x, x)\n        jac_y = jacobian(y, x, vectorize=vectorize)\n        self.fn = function([x], jac_y, trust_input=True)\n        self.x_val = np.array([0, 1, 2], dtype=x.type.dtype)\n    \n        # Warmup\n        self.fn(self.x_val)",
+        "min_run_count": 2,
+        "name": "bench_gradient.Jacobian.time_jacobian",
+        "number": 0,
+        "param_names": [
+            "vectorize"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "5760f2f3eff3dc84a8ace02a002cdddaaabad110ac47b5ebaec0117efaea7a03",
+        "warmup_time": -1
+    },
+    "bench_gradient.PartialJacobian.time_partial_jacobian": {
+        "code": "class PartialJacobian:\n    def time_partial_jacobian(self, vectorize):\n        self.fn(self.x_test)\n\n    def setup(self, vectorize):\n        N = 1000\n        rng = np.random.default_rng(2025)\n        self.x_test = rng.random((N,))\n        f_mat = rng.random((N, N))\n    \n        x = vector(\"x\", dtype=\"float64\")\n    \n        def f(x):\n            return sqrt(f_mat @ x / N)\n    \n        full_jacobian = jacobian(f(x), x, vectorize=vectorize)\n        partial_jacobian = full_jacobian[:5, :5]\n        self.fn = pytensor.function([x], partial_jacobian, trust_input=True)\n    \n        # Warmup\n        self.fn(self.x_test)",
+        "min_run_count": 2,
+        "name": "bench_gradient.PartialJacobian.time_partial_jacobian",
+        "number": 0,
+        "param_names": [
+            "vectorize"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "8472cbc5ce035cec5e12346f04f7e653a583de63a5618cb715390ff7d11e2c46",
+        "warmup_time": -1
+    },
+    "bench_graph.Traversal.time_traversal": {
+        "code": "class Traversal:\n    def time_traversal(self, func_name):\n        self.func()\n\n    def setup(self, func_name):\n        r1 = MyVariable(1)\n        out = r1\n        for _ in range(50):\n            out = _my_op(out, out)\n        self.out = out\n    \n        blocker = out.clone()\n        funcs = {\n            \"variable_ancestors\": lambda: all(variable_ancestors([self.out])),\n            \"variable_ancestors_with_blockers\": lambda: all(\n                variable_ancestors([self.out], blockers=[blocker])\n            ),\n            \"apply_ancestors\": lambda: all(apply_ancestors([self.out])),\n            \"apply_ancestors_with_blockers\": lambda: all(\n                apply_ancestors([self.out], blockers=[blocker])\n            ),\n            \"toposort\": lambda: all(toposort([self.out])),\n            \"toposort_with_blockers\": lambda: all(\n                toposort([self.out], blockers=[blocker])\n            ),\n            \"toposort_with_orderings\": lambda: all(\n                toposort_with_orderings([self.out], orderings={self.out.owner: []})\n            ),\n            \"toposort_with_orderings_and_blockers\": lambda: all(\n                toposort_with_orderings(\n                    [self.out],\n                    blockers=[blocker],\n                    orderings={self.out.owner: []},\n                )\n            ),\n        }\n        self.func = funcs[func_name]",
+        "min_run_count": 2,
+        "name": "bench_graph.Traversal.time_traversal",
+        "number": 0,
+        "param_names": [
+            "func_name"
+        ],
+        "params": [
+            [
+                "'variable_ancestors'",
+                "'variable_ancestors_with_blockers'",
+                "'apply_ancestors'",
+                "'apply_ancestors_with_blockers'",
+                "'toposort'",
+                "'toposort_with_blockers'",
+                "'toposort_with_orderings'",
+                "'toposort_with_orderings_and_blockers'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "695acd793b63fbc81a86536ec189d483d85fed356f3f12ddd163cad022bcc6dc",
+        "warmup_time": -1
+    },
+    "bench_jax.JaxLogsumexp.time_logsumexp": {
+        "code": "class JaxLogsumexp:\n    def time_logsumexp(self, size, axis):\n        self.fn(self.X_val)\n\n    def setup(self, size, axis):\n        try:\n            import jax  # noqa: F401\n        except ImportError:\n            raise NotImplementedError(\"JAX not available\")\n    \n        X = pt.matrix(\"X\")\n        X_max = pt.max(X, axis=axis, keepdims=True)\n        X_max = pt.switch(pt.isinf(X_max), 0, X_max)\n        X_lse = pt.log(pt.sum(pt.exp(X - X_max), axis=axis, keepdims=True)) + X_max\n    \n        rng = np.random.default_rng(23920)\n        self.X_val = rng.normal(size=size)\n    \n        self.fn = function([X], X_lse, mode=\"JAX\")\n        self.fn(self.X_val)  # JIT warmup",
+        "min_run_count": 2,
+        "name": "bench_jax.JaxLogsumexp.time_logsumexp",
+        "number": 0,
+        "param_names": [
+            "size",
+            "axis"
+        ],
+        "params": [
+            [
+                "(10, 10)",
+                "(1000, 1000)"
+            ],
+            [
+                "0",
+                "1"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "bcbc40cd8367f38f2f4903414006b615cb654ec25f98767bd2cf37bc074fbe70",
+        "warmup_time": -1
+    },
+    "bench_jax.JaxScan.time_scan": {
+        "code": "class JaxScan:\n    def time_scan(self, mode):\n        self.fn(self.x0_val, self.W_val)\n\n    def setup(self, mode):\n        try:\n            import jax  # noqa: F401\n        except ImportError:\n            raise NotImplementedError(\"JAX not available\")\n    \n        x0 = pt.vector(\"x0\", shape=(10,), dtype=\"float64\")\n        W = pt.matrix(\"W\", shape=(10, 10), dtype=\"float64\")\n    \n        def step(x_prev, W):\n            return pt.tanh(pt.dot(x_prev, W))\n    \n        result = scan(\n            fn=step,\n            outputs_info=[x0],\n            non_sequences=[W],\n            n_steps=50,\n            return_updates=False,\n        )\n        loss = result[-1].sum()\n        dloss = grad(loss, wrt=[x0, W])\n    \n        if mode == \"forward\":\n            self.fn = function([x0, W], result, mode=\"JAX\")\n        elif mode == \"backward\":\n            self.fn = function([x0, W], dloss, mode=\"JAX\")\n        else:  # both\n            self.fn = function([x0, W], [loss, *dloss], mode=\"JAX\")\n    \n        rng = np.random.default_rng(42)\n        self.x0_val = rng.normal(size=(10,))\n        self.W_val = rng.normal(size=(10, 10)) * 0.1\n        self.fn(self.x0_val, self.W_val)  # JIT warmup",
+        "min_run_count": 2,
+        "name": "bench_jax.JaxScan.time_scan",
+        "number": 0,
+        "param_names": [
+            "mode"
+        ],
+        "params": [
+            [
+                "'forward'",
+                "'backward'",
+                "'both'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "3215fb678a7a9d5b1fadadc85281fd757f69b7655db92d7c80f4962fc11fe6f9",
+        "warmup_time": -1
+    },
+    "bench_linalg.Cholesky.time_cholesky": {
+        "code": "class Cholesky:\n    def time_cholesky(self):\n        self.fn(self.pd)\n\n    def setup(self):\n        rng = np.random.default_rng(1234)\n        r = rng.standard_normal((10, 10)).astype(config.floatX)\n        self.pd = np.dot(r, r.T)\n        x = matrix()\n        chol = cholesky(x)\n        self.fn = function([x], chol)",
+        "min_run_count": 2,
+        "name": "bench_linalg.Cholesky.time_cholesky",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "5c8e3a18465b84c457898b6bf394dccc7e08912953f5c0b03a9a64abb716882c",
+        "warmup_time": -1
+    },
+    "bench_linalg.GemvNegativeStrides.time_gemv_negative_strides": {
+        "code": "class GemvNegativeStrides:\n    def time_gemv_negative_strides(self, neg_stride0, neg_stride1, F_layout):\n        self.fn(self.test_A, self.test_x, self.test_y)\n\n    def setup(self, neg_stride0, neg_stride1, F_layout):\n        _check_blas_c()\n        from pytensor.tensor.blas_c import CGemv\n    \n        A = pt.matrix(\"A\", shape=(512, 512))\n        x = pt.vector(\"x\", shape=(512,))\n        y = pt.vector(\"y\", shape=(512,))\n        out = CGemv(inplace=False)(y, 1.0, A, x, 1.0)\n        self.fn = pytensor.function([A, x, y], out, trust_input=True)\n    \n        rng = np.random.default_rng(430)\n        test_A = rng.normal(size=(512, 512))\n        self.test_x = rng.normal(size=(512,))\n        self.test_y = rng.normal(size=(512,))\n    \n        if F_layout:\n            test_A = np.asfortranarray(test_A)\n        if neg_stride0:\n            test_A = test_A[::-1]\n        if neg_stride1:\n            test_A = test_A[:, ::-1]\n        self.test_A = test_A",
+        "min_run_count": 2,
+        "name": "bench_linalg.GemvNegativeStrides.time_gemv_negative_strides",
+        "number": 0,
+        "param_names": [
+            "neg_stride0",
+            "neg_stride1",
+            "F_layout"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ],
+            [
+                "True",
+                "False"
+            ],
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "cfb78a03d0c46eba2e9d59086ba50befd22ea5ba7e3cf83cf29974201463572c",
+        "warmup_time": -1
+    },
+    "bench_linalg.GemvVectorDot.time_gemv_vector_dot": {
+        "code": "class GemvVectorDot:\n    def time_gemv_vector_dot(self):\n        self.fn(self.test_a, self.test_b)\n\n    def setup(self):\n        _check_blas_c()\n        from pytensor.tensor.blas_c import CGemv\n    \n        n = 400_000\n        a = pt.vector(\"A\", shape=(n,))\n        b = pt.vector(\"x\", shape=(n,))\n        out = CGemv(inplace=True)(pt.empty((1,)), 1.0, a[None], b, 0.0)\n        self.fn = pytensor.function([a, b], out, accept_inplace=True, trust_input=True)\n        rng = np.random.default_rng(430)\n        self.test_a = rng.normal(size=n)\n        self.test_b = rng.normal(size=n)",
+        "min_run_count": 2,
+        "name": "bench_linalg.GemvVectorDot.time_gemv_vector_dot",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "089f8ff06f12cd48616f717163e937b51aca1d251ee55206990b8815d4419fcb",
+        "warmup_time": -1
+    },
+    "bench_linalg.Ger.time_ger": {
+        "code": "class Ger:\n    def time_ger(self, n, inplace):\n        self.fn(self.alpha_test, self.x_test, self.y_test, self.A_test)\n\n    def setup(self, n, inplace):\n        alpha = pt.dscalar(\"alpha\")\n        x = pt.dvector(\"x\")\n        y = pt.dvector(\"y\")\n        A = pt.dmatrix(\"A\")\n        out = alpha * pt.outer(x, y) + A\n        self.fn = pytensor.function(\n            [alpha, x, y, In(A, mutable=inplace)], out, trust_input=True\n        )\n    \n        rng = np.random.default_rng([2274, n])\n        self.alpha_test = rng.normal(size=())\n        self.x_test = rng.normal(size=(n,))\n        self.y_test = rng.normal(size=(n,))\n        self.A_test = rng.normal(size=(n, n))",
+        "min_run_count": 2,
+        "name": "bench_linalg.Ger.time_ger",
+        "number": 0,
+        "param_names": [
+            "n",
+            "inplace"
+        ],
+        "params": [
+            [
+                "128",
+                "512",
+                "8192"
+            ],
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "f8ac92c94e28fc45d58a2777f3af1829504ac6fb93217379b235b3b842e6d18a",
+        "warmup_time": -1
+    },
+    "bench_math.GammainccdkGrad.time_gammaincc_grad": {
+        "code": "class GammainccdkGrad:\n    def time_gammaincc_grad(self):\n        self.grad_fn(*self.vals)\n\n    def setup(self):\n        k = vector(\"k\")\n        x = vector(\"x\")\n        out = gammaincc(k, x)\n        self.grad_fn = pytensor.function(\n            [k, x], grad(out.sum(), wrt=[k]), mode=\"FAST_RUN\", trust_input=True\n        )\n        self.vals = [\n            np.full((1000,), 3.2, dtype=k.dtype),\n            np.full((1000,), 0.01, dtype=x.dtype),\n        ]\n    \n        # Warmup\n        self.grad_fn(*self.vals)",
+        "min_run_count": 2,
+        "name": "bench_math.GammainccdkGrad.time_gammaincc_grad",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "3c10bebc28f473150fe240f30b705ceed8e406e7716e210c71452fbcca055b7c",
+        "warmup_time": -1
+    },
+    "bench_math.Hyp2F1Grad.time_hyp2f1_grad": {
+        "code": "class Hyp2F1Grad:\n    def time_hyp2f1_grad(self, case, wrt):\n        self.f_grad(*self.test_vals)\n\n    def setup(self, case, wrt):\n        a1, a2, b1, z = pt.scalars(\"a1\", \"a2\", \"b1\", \"z\")\n        hyp2f1_out = pt.hyp2f1(a1, a2, b1, z)\n        if wrt == \"a\":\n            hyp2f1_grad = pt.grad(hyp2f1_out, wrt=a1)\n        else:\n            hyp2f1_grad = pt.grad(hyp2f1_out, wrt=[a1, a2, b1, z])\n        self.f_grad = pytensor.function([a1, a2, b1, z], hyp2f1_grad, trust_input=True)\n    \n        test_a1, test_a2, test_b1, test_z = self._cases[case]\n        self.test_vals = [\n            np.array(test_a1),\n            np.array(test_a2),\n            np.array(test_b1),\n            np.array(test_z),\n        ]\n    \n        # Warmup\n        self.f_grad(*self.test_vals)",
+        "min_run_count": 2,
+        "name": "bench_math.Hyp2F1Grad.time_hyp2f1_grad",
+        "number": 0,
+        "param_names": [
+            "case",
+            "wrt"
+        ],
+        "params": [
+            [
+                "'few_iters'",
+                "'many_iters'"
+            ],
+            [
+                "'a'",
+                "'all'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "372d2c812a9b376a0dface62f5865f5f8419a52f0349758fb43f9d39007bbcde",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaBlockwise.time_blockwise_cholesky": {
+        "code": "class NumbaBlockwise:\n    def time_blockwise_cholesky(self):\n        self.fn(self.x_test)\n\n    def setup(self):\n        _check_numba()\n        x = tensor(shape=(5, 3, 3))\n        out = cholesky(x)\n        self.fn = function([x], out, mode=\"NUMBA\")\n        self.x_test = np.eye(3) * np.arange(1, 6)[:, None, None]\n        # JIT compile\n        self.fn(self.x_test)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaBlockwise.time_blockwise_cholesky",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "adf08f324cc7f6c31b9d227de003e82660b2fe8b5f32706702601b4a06f17c1f",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaCareduce.time_careduce": {
+        "code": "class NumbaCareduce:\n    def time_careduce(self, axis, c_contiguous):\n        self.fn()\n\n    def setup(self, axis, c_contiguous):\n        _check_numba()\n        N = 256\n        x_test = np.random.uniform(size=(N, N, N))\n        transpose_axis = (0, 1, 2) if c_contiguous else (2, 0, 1)\n        x = pytensor.shared(x_test, name=\"x\", shape=x_test.shape)\n        out = x.transpose(transpose_axis).sum(axis=axis)\n        self.fn = pytensor.function([], out, mode=\"NUMBA\")\n        # JIT compile\n        self.fn()",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaCareduce.time_careduce",
+        "number": 0,
+        "param_names": [
+            "axis",
+            "c_contiguous"
+        ],
+        "params": [
+            [
+                "0",
+                "1",
+                "2",
+                "(0, 1)",
+                "(0, 2)",
+                "(1, 2)",
+                "None"
+            ],
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "b8f78507432af3f76b07680795bdd12f50ce2234651b8462927a5a6b9f9bca92",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaConvolve1d.time_convolve1d": {
+        "code": "class NumbaConvolve1d:\n    def time_convolve1d(self, batch, mode):\n        self.fn(self.x_test, self.y_test)\n\n    def setup(self, batch, mode):\n        _check_numba()\n        x = tensor(shape=(7, 183) if batch else (183,))\n        y = tensor(shape=(7, 6) if batch else (6,))\n        out = convolve1d(x, y, mode=mode)\n        self.fn = function([x, y], out, mode=\"NUMBA\", trust_input=True)\n        rng = np.random.default_rng()\n        self.x_test = rng.normal(size=x.type.shape).astype(x.type.dtype)\n        self.y_test = rng.normal(size=y.type.shape).astype(y.type.dtype)\n        # Warmup\n        self.fn(self.x_test, self.y_test)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaConvolve1d.time_convolve1d",
+        "number": 0,
+        "param_names": [
+            "batch",
+            "mode"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ],
+            [
+                "'full'",
+                "'valid'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "ecfaf4097b21c2ecebd5f4692ec658102fe0c4bc24a0f391ddbd95fb80db35ee",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaConvolve1dGrad.time_convolve1d_grad": {
+        "code": "class NumbaConvolve1dGrad:\n    def time_convolve1d_grad(self, convolve_mode):\n        self.fn(self.test_larger, self.test_smaller)\n\n    def setup(self, convolve_mode):\n        _check_numba()\n        larger = tensor(\"larger\", shape=(8, None))\n        smaller = tensor(\"smaller\", shape=(8, None))\n        grad_wrt_smaller = grad(\n            convolve1d(larger, smaller, mode=convolve_mode).sum(), wrt=smaller\n        )\n        self.fn = pytensor.function(\n            [larger, smaller], grad_wrt_smaller, mode=\"NUMBA\", trust_input=True\n        )\n    \n        rng = np.random.default_rng([119, convolve_mode == \"full\"])\n        self.test_larger = rng.normal(size=(8, 1024)).astype(larger.type.dtype)\n        self.test_smaller = rng.normal(size=(8, 16)).astype(smaller.type.dtype)\n    \n        # Warmup\n        self.fn(self.test_larger, self.test_smaller)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaConvolve1dGrad.time_convolve1d_grad",
+        "number": 0,
+        "param_names": [
+            "convolve_mode"
+        ],
+        "params": [
+            [
+                "'full'",
+                "'valid'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "7b10ba14e46fc7024d78ff7ffb026220be94cc5805f6c63fd5e6e1818dbeb579",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaDimshuffle.time_dimshuffle": {
+        "code": "class NumbaDimshuffle:\n    def time_dimshuffle(self, c_contiguous):\n        self.fn(self.x_val)\n\n    def setup(self, c_contiguous):\n        _check_numba()\n        x = tensor3(\"x\")\n        if c_contiguous:\n            self.x_val = np.random.random((2, 3, 4)).astype(config.floatX)\n        else:\n            self.x_val = np.random.random((200, 300, 400)).transpose(1, 2, 0)\n    \n        ys = [x.transpose(t) for t in itertools.permutations((0, 1, 2))]\n        ys += [x[None], x[:, None], x[:, :, None], x[:, :, :, None]]\n    \n        self.fn = pytensor.function(\n            [In(x, borrow=True)],\n            [Out(y, borrow=True) for y in ys],\n            mode=\"NUMBA\",\n        )\n        self.fn.trust_input = True\n        # Warmup / JIT compile\n        self.fn(self.x_val)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaDimshuffle.time_dimshuffle",
+        "number": 0,
+        "param_names": [
+            "c_contiguous"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "2b11cd4b3db7bab67366b12ed6990af32b7d183104a49c671d6e37674f88fa1c",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaElemwiseSpeed.time_elemwise": {
+        "code": "class NumbaElemwiseSpeed:\n    def time_elemwise(self):\n        self.func(self.x_val, self.y_val)\n\n    def setup(self):\n        _check_numba()\n        x = pt.dmatrix(\"y\")\n        y = pt.dvector(\"z\")\n        out = pt.exp(2 * x * y + y)\n        rng = np.random.default_rng(42)\n        self.x_val = rng.normal(size=(200, 500))\n        self.y_val = rng.normal(size=500)\n        func = function([x, y], out, mode=\"NUMBA\")\n        self.func = func.vm.jit_fn\n        # Warmup\n        self.func(self.x_val, self.y_val)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaElemwiseSpeed.time_elemwise",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "20645356874e97065f0d3c00640bc454d5d917f51d9115412bc97ca251fc792d",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaFunctionOverhead.time_function_overhead": {
+        "code": "class NumbaFunctionOverhead:\n    def time_function_overhead(self, mode):\n        self.fn(self.test_x)\n\n    def setup(self, mode):\n        _check_numba()\n        x = pt.vector(\"x\")\n        out = pt.exp(x)\n        fn = function([x], out, mode=\"NUMBA\")\n        if mode == \"trust_input\":\n            fn.trust_input = True\n            self.fn = fn\n        elif mode == \"direct\":\n            self.fn = fn.vm.jit_fn\n        else:\n            self.fn = fn\n        self.test_x = np.zeros(1000)\n        # Warmup\n        self.fn(self.test_x)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaFunctionOverhead.time_function_overhead",
+        "number": 0,
+        "param_names": [
+            "mode"
+        ],
+        "params": [
+            [
+                "'default'",
+                "'trust_input'",
+                "'direct'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "73346f852f0fd44e699f5c59f884428faad624232c1eb65fe1aed12498fe37ce",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaFusedElemwise.time_fused_elemwise": {
+        "code": "class NumbaFusedElemwise:\n    def time_fused_elemwise(self):\n        self.func()\n\n    def setup(self):\n        _check_numba()\n        rng = np.random.default_rng(123)\n        size = 100_000\n        x = pytensor.shared(rng.normal(size=size), name=\"x\")\n        mu = pytensor.shared(rng.normal(size=size), name=\"mu\")\n        logp = -((x - mu) ** 2) / 2\n        grad_logp = grad(logp.sum(), x)\n        self.func = pytensor.function([], [logp, grad_logp], mode=\"NUMBA\")\n        # JIT compile\n        self.func()",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaFusedElemwise.time_fused_elemwise",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "db711890834804743bf7d6f3bbfb42162b8c37ad2063dd4081971625f7516e05",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaLogsumexp.time_logsumexp": {
+        "code": "class NumbaLogsumexp:\n    def time_logsumexp(self, size, axis):\n        self.fn(self.X_val)\n\n    def setup(self, size, axis):\n        _check_numba()\n        X = pt.matrix(\"X\")\n        X_max = pt.max(X, axis=axis, keepdims=True)\n        X_max = pt.switch(pt.isinf(X_max), 0, X_max)\n        X_lse = pt.log(pt.sum(pt.exp(X - X_max), axis=axis, keepdims=True)) + X_max\n        rng = np.random.default_rng(23920)\n        self.X_val = rng.normal(size=size)\n        self.fn = pytensor.function([X], X_lse, mode=\"NUMBA\")\n        # JIT compile\n        self.fn(self.X_val)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaLogsumexp.time_logsumexp",
+        "number": 0,
+        "param_names": [
+            "size",
+            "axis"
+        ],
+        "params": [
+            [
+                "(10, 10)",
+                "(1000, 1000)",
+                "(10000, 10000)"
+            ],
+            [
+                "0",
+                "1"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "124d01fddc9e226daced2161d7ccf54c1a53ca4cb2d552f208e6e57c56d746c5",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaMatVecDot.time_matvec_dot": {
+        "code": "class NumbaMatVecDot:\n    def time_matvec_dot(self, dtype):\n        self.fn(self.A_test, self.x_test)\n\n    def setup(self, dtype):\n        _check_numba()\n        A_dtype = \"float64\" if dtype == \"mixed\" else dtype\n        x_dtype = \"float32\" if dtype == \"mixed\" else dtype\n        A = tensor(\"A\", shape=(512, 512), dtype=A_dtype)\n        x = tensor(\"x\", shape=(512,), dtype=x_dtype)\n        out = pt.dot(A, x)\n        self.fn = function([A, x], out, mode=\"NUMBA\", trust_input=True)\n        rng = np.random.default_rng(948)\n        self.A_test = rng.standard_normal(size=A.type.shape).astype(A.type.dtype)\n        self.x_test = rng.standard_normal(size=x.type.shape).astype(x.type.dtype)\n        # Warmup\n        self.fn(self.A_test, self.x_test)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaMatVecDot.time_matvec_dot",
+        "number": 0,
+        "param_names": [
+            "dtype"
+        ],
+        "params": [
+            [
+                "'float64'",
+                "'float32'",
+                "'mixed'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "1aee9bd7fb15e9b57e124ce89accae32e2a884ada7d262d71e5e6c083ada2f18",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaRadonCall.time_call": {
+        "code": "class NumbaRadonCall:\n    def time_call(self, cache):\n        self.fn(self.x)\n\n    def setup(self, cache):\n        _check_numba()\n        joined_inputs, [model_logp, model_dlogp] = create_radon_model()\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)\n        with config.change_flags(numba__cache=cache):\n            self.fn = function(\n                [joined_inputs],\n                [model_logp, model_dlogp],\n                mode=\"NUMBA\",\n                trust_input=True,\n            )\n        # Warmup\n        self.fn(self.x)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaRadonCall.time_call",
+        "number": 0,
+        "param_names": [
+            "cache"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "65ef75c95e692b5c62d1c8397c0ae898f2f54cc16df51e8116b406668f2cd35f",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaRadonCompile.time_compile_and_call": {
+        "code": "class NumbaRadonCompile:\n    def time_compile_and_call(self, cache):\n        with config.change_flags(numba__cache=cache):\n            fn = function(\n                [self.joined_inputs],\n                [self.model_logp, self.model_dlogp],\n                mode=\"NUMBA\",\n                trust_input=True,\n            )\n            fn(self.x)\n\n    def setup(self, cache):\n        _check_numba()\n        self.joined_inputs, [self.model_logp, self.model_dlogp] = create_radon_model()\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=self.joined_inputs.type.shape).astype(config.floatX)\n        self.cache = cache",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaRadonCompile.time_compile_and_call",
+        "number": 1,
+        "param_names": [
+            "cache"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 5,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "2722e68555d9ea7a75a32a8f68ae585bb7572c1ff5ca1d41bdba2a99fe841532",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaScanSEIR.time_scan_seir": {
+        "code": "class NumbaScanSEIR:\n    def time_scan_seir(self):\n        self.fn(*self.test_input_vals)\n\n    def setup(self):\n        _check_numba()\n    \n        def binomln(n, k):\n            return pt.exp(n + 1) - pt.exp(k + 1) - pt.exp(n - k + 1)\n    \n        def binom_log_prob(n, p, value):\n            return binomln(n, value) + value * pt.exp(p) + (n - value) * pt.exp(1 - p)\n    \n        pt_C = pt.ivector(\"C_t\")\n        pt_D = pt.ivector(\"D_t\")\n        st0 = pt.lscalar(\"s_t0\")\n        et0 = pt.lscalar(\"e_t0\")\n        it0 = pt.lscalar(\"i_t0\")\n        logp_c = pt.scalar(\"logp_c\")\n        logp_d = pt.scalar(\"logp_d\")\n        beta = pt.scalar(\"beta\")\n        gamma = pt.scalar(\"gamma\")\n        delta = pt.scalar(\"delta\")\n    \n        def seir_one_step(ct0, dt0, st0, et0, it0, logp_c, logp_d, beta, gamma, delta):\n            bt0 = (st0 * beta).astype(st0.dtype)\n            logp_c1 = binom_log_prob(et0, gamma, ct0).astype(logp_c.dtype)\n            logp_d1 = binom_log_prob(it0, delta, dt0).astype(logp_d.dtype)\n            return (\n                st0 - bt0,\n                et0 + bt0 - ct0,\n                it0 + ct0 - dt0,\n                logp_c1,\n                logp_d1,\n            )\n    \n        (st, et, it, logp_c_all, logp_d_all) = scan(\n            fn=seir_one_step,\n            sequences=[pt_C, pt_D],\n            outputs_info=[st0, et0, it0, logp_c, logp_d],\n            non_sequences=[beta, gamma, delta],\n            return_updates=False,\n        )\n        out = [st, et, it, logp_c_all, logp_d_all]\n        self.fn = function(\n            [pt_C, pt_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],\n            out,\n            mode=\"NUMBA\",\n        )\n        self.test_input_vals = [\n            np.array([3, 5, 8, 13, 21, 26, 10, 3], dtype=np.int32),\n            np.array([1, 2, 3, 7, 9, 11, 5, 1], dtype=np.int32),\n            np.array(100, dtype=np.int64),\n            np.array(50, dtype=np.int64),\n            np.array(25, dtype=np.int64),\n            np.array(0.0, dtype=config.floatX),\n            np.array(0.0, dtype=config.floatX),\n            np.array(0.277792, dtype=config.floatX),\n            np.array(0.135330, dtype=config.floatX),\n            np.array(0.108753, dtype=config.floatX),\n        ]\n        # Warmup / JIT compile\n        self.fn(*self.test_input_vals)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaScanSEIR.time_scan_seir",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "719484233e18df6eea7ed5dc0d4f1b7eeb38daa06521114de28d319a200c1c3e",
+        "warmup_time": -1
+    },
+    "bench_numba.NumbaVectorTaps.time_vector_taps": {
+        "code": "class NumbaVectorTaps:\n    def time_vector_taps(self):\n        self.fn(*self.test_vals)\n\n    def setup(self):\n        _check_numba()\n        from pytensor.tensor.type import scalar, vector\n    \n        n_steps = 1000\n        seq1 = vector(\"seq1\", dtype=\"float64\", shape=(n_steps,))\n        seq2 = vector(\"seq2\", dtype=\"float64\", shape=(n_steps,))\n        mitsot_init = vector(\"mitsot_init\", dtype=\"float64\", shape=(2,))\n        sitsot_init = scalar(\"sitsot_init\", dtype=\"float64\")\n    \n        def step(seq1, seq2, mitsot1, mitsot2, sitsot1):\n            mitsot3 = (mitsot1 + seq2 + mitsot2 + seq1) / np.sqrt(4)\n            sitsot2 = (sitsot1 + mitsot3) / np.sqrt(2)\n            return mitsot3, sitsot2\n    \n        outs = scan(\n            fn=step,\n            sequences=[seq1, seq2],\n            outputs_info=[\n                dict(initial=mitsot_init, taps=[-2, -1]),\n                dict(initial=sitsot_init, taps=[-1]),\n            ],\n            return_updates=False,\n        )\n        rng = np.random.default_rng(474)\n        self.test_vals = [\n            rng.normal(size=n_steps),\n            rng.normal(size=n_steps),\n            rng.normal(size=(2,)),\n            rng.normal(),\n        ]\n        self.fn = pytensor.function(\n            [seq1, seq2, mitsot_init, sitsot_init], outs, mode=\"NUMBA\"\n        )\n        # Warmup\n        self.fn(*self.test_vals)",
+        "min_run_count": 2,
+        "name": "bench_numba.NumbaVectorTaps.time_vector_taps",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "067c54e6df7cd68dc4a284eed9ef531a8679b9898de0ecffe2ecad65cb94c810",
+        "warmup_time": -1
+    },
+    "bench_rewriting.BlockDiagDot.time_block_diag_dot": {
+        "code": "class BlockDiagDot:\n    def time_block_diag_dot(self, size, rewrite):\n        self.fn(self.a_val, self.b_val, self.c_val, self.d_val)\n\n    def setup(self, size, rewrite):\n        rng = np.random.default_rng(sum(ord(c) for c in f\"{size}_{rewrite}\"))\n    \n        a_size = int(rng.uniform(1, int(0.8 * size)))\n        b_size = int(rng.uniform(1, int(0.8 * (size - a_size))))\n        c_size = size - a_size - b_size\n    \n        a = tensor(\"a\", shape=(a_size, a_size))\n        b = tensor(\"b\", shape=(b_size, b_size))\n        c = tensor(\"c\", shape=(c_size, c_size))\n        d = tensor(\"d\", shape=(size,))\n    \n        x = pt.linalg.block_diag(a, b, c)\n        out = x @ d\n    \n        mode = get_default_mode()\n        if not rewrite:\n            mode = mode.excluding(\"local_block_diag_dot_to_dot_block_diag\")\n    \n        self.fn = pytensor.function([a, b, c, d], out, mode=mode)\n    \n        self.a_val = rng.normal(size=a.type.shape).astype(a.type.dtype)\n        self.b_val = rng.normal(size=b.type.shape).astype(b.type.dtype)\n        self.c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)\n        self.d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)\n    \n        # Warmup\n        self.fn(self.a_val, self.b_val, self.c_val, self.d_val)",
+        "min_run_count": 2,
+        "name": "bench_rewriting.BlockDiagDot.time_block_diag_dot",
+        "number": 0,
+        "param_names": [
+            "size",
+            "rewrite"
+        ],
+        "params": [
+            [
+                "10",
+                "100",
+                "1000"
+            ],
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "7ddae3507f826185189f4bcbee7769315d7b192aee279a2d894112b76328f814",
+        "warmup_time": -1
+    },
+    "bench_scan.CythonPerformance.time_cython_scan": {
+        "code": "class CythonPerformance:\n    def time_cython_scan(self):\n        self.f_cvm()\n\n    def setup(self):\n        N = 200\n        M = -1 / np.arange(1, 11).astype(config.floatX)\n        r = np.arange(N * 10).astype(config.floatX).reshape(N, 10)\n        s_r = pt.as_tensor_variable(r, dtype=config.floatX)\n        s_y = scan(\n            fn=lambda ri, rii, M: ri + M * rii,\n            sequences=[s_r[1:]],\n            non_sequences=[pt.as_tensor_variable(M, dtype=config.floatX)],\n            outputs_info=s_r[0],\n            mode=Mode(linker=\"cvm\", optimizer=\"fast_run\"),\n            return_updates=False,\n        )\n        self.f_cvm = function([], s_y, mode=\"FAST_RUN\")\n        self.f_cvm.trust_input = True",
+        "min_run_count": 2,
+        "name": "bench_scan.CythonPerformance.time_cython_scan",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "ecdd6391427c82e5e12cb75069f4842b7a5a34e41964c3d7bf24b216528493a9",
+        "warmup_time": -1
+    },
+    "bench_scan.HessianBugGradGradTwoScans.time_hessian_two_scans": {
+        "code": "class HessianBugGradGradTwoScans:\n    def time_hessian_two_scans(self):\n        self.f(np.ones((8,), dtype=\"float32\"), 1)\n\n    def setup(self):\n        W = fvector(name=\"W\")\n        n_steps = iscalar(name=\"Nb_steps\")\n    \n        def loss_outer(sum_outer, W):\n            def loss_inner(sum_inner, W):\n                return sum_inner + (W**2).sum()\n    \n            result_inner = scan(\n                fn=loss_inner,\n                outputs_info=pt.as_tensor_variable(np.asarray(0, dtype=np.float32)),\n                non_sequences=[W],\n                n_steps=1,\n                return_updates=False,\n            )\n            return sum_outer + result_inner[-1]\n    \n        result_outer = scan(\n            fn=loss_outer,\n            outputs_info=pt.as_tensor_variable(np.asarray(0, dtype=np.float32)),\n            non_sequences=[W],\n            n_steps=n_steps,\n            return_list=True,\n            return_updates=False,\n        )\n        cost = result_outer[0][-1]\n        H = hessian(cost, W)\n        self.f = function([W, n_steps], H)",
+        "min_run_count": 2,
+        "name": "bench_scan.HessianBugGradGradTwoScans.time_hessian_two_scans",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "a1cf08665f67eccb8ebd085ba03467bbec6a5b2ba4ae724fafb6e97e5e81ea7e",
+        "warmup_time": -1
+    },
+    "bench_scan.MultipleOutsTaps.time_multiple_outs_taps": {
+        "code": "class MultipleOutsTaps:\n    def time_multiple_outs_taps(self):\n        self.f(self.v_u1, self.v_u2, self.v_x0, self.v_y0, self.vW_in1)\n\n    def setup(self):\n        l = 5\n        rng = np.random.default_rng(1234)\n        vW_in2 = rng.uniform(-2.0, 2.0, size=(2,)).astype(config.floatX)\n        vW = rng.uniform(-2.0, 2.0, size=(2, 2)).astype(config.floatX)\n        vWout = rng.uniform(-2.0, 2.0, size=(2,)).astype(config.floatX)\n        self.vW_in1 = rng.uniform(-2.0, 2.0, size=(2, 2)).astype(config.floatX)\n        self.v_u1 = rng.uniform(-2.0, 2.0, size=(l, 2)).astype(config.floatX)\n        self.v_u2 = rng.uniform(-2.0, 2.0, size=(l + 2, 2)).astype(config.floatX)\n        self.v_x0 = rng.uniform(-2.0, 2.0, size=(2,)).astype(config.floatX)\n        self.v_y0 = rng.uniform(size=(3,)).astype(config.floatX)\n    \n        W_in2 = shared(vW_in2, name=\"win2\")\n        W = shared(vW, name=\"w\")\n        W_out = shared(vWout, name=\"wout\")\n        W_in1 = matrix(\"win\")\n        u1 = matrix(\"u1\")\n        u2 = matrix(\"u2\")\n        x0 = vector(\"x0\")\n        y0 = vector(\"y0\")\n    \n        def f_rnn_cmpl(u1_t, u2_tm1, u2_t, u2_tp1, x_tm1, y_tm1, y_tm3, W_in1):\n            return [\n                dot(u1_t, W_in1) + (u2_t + u2_tm1 * u2_tp1) * W_in2 + dot(x_tm1, W),\n                (y_tm1 + y_tm3) * dot(x_tm1, W_out),\n                dot(u1_t, W_in1),\n            ]\n    \n        outputs = scan(\n            f_rnn_cmpl,\n            [u1, dict(input=u2, taps=[-1, 0, 1])],\n            [x0, dict(initial=y0, taps=[-1, -3]), None],\n            W_in1,\n            n_steps=None,\n            truncate_gradient=-1,\n            go_backwards=False,\n            return_updates=False,\n        )\n        self.f = function([u1, u2, x0, y0, W_in1], outputs, allow_input_downcast=True)",
+        "min_run_count": 2,
+        "name": "bench_scan.MultipleOutsTaps.time_multiple_outs_taps",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "70535ac9b5406716d88314201eecad8469ab8675b6a64fec8319625ec523f4f6",
+        "warmup_time": -1
+    },
+    "bench_scan.PregreedyOptimizer.time_pregreedy_optimizer": {
+        "code": "class PregreedyOptimizer:\n    def time_pregreedy_optimizer(self):\n        self.chain_fn(self.v_data)\n\n    def setup(self):\n        W = pt.zeros((5, 4))\n        bv = pt.zeros((5,))\n        bh = pt.zeros((4,))\n        v = matrix(\"v\")\n    \n        (bv_t, bh_t) = scan(\n            lambda _: [bv, bh],\n            sequences=v,\n            outputs_info=[None, None],\n            return_updates=False,\n        )\n        chain = scan(\n            lambda x: dot(dot(x, W) + bh_t, W.T) + bv_t,\n            outputs_info=v,\n            n_steps=2,\n            return_updates=False,\n        )\n        self.chain_fn = function([v], chain)\n        self.v_data = np.zeros((3, 5), dtype=config.floatX)",
+        "min_run_count": 2,
+        "name": "bench_scan.PregreedyOptimizer.time_pregreedy_optimizer",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "9a762f63bfa659987bc963d1045833174e74747bbb8f2fa8781d9e2c1c7b1a25",
+        "warmup_time": -1
+    },
+    "bench_scan.Reordering.time_reordering": {
+        "code": "class Reordering:\n    def time_reordering(self):\n        self.f(self.v_u1, self.v_u2, self.v_x0, self.v_y0, self.vW_in1)\n\n    def setup(self):\n        rng = np.random.default_rng(1234)\n        vW_in2 = rng.uniform(-0.5, 0.5, size=(2,)).astype(config.floatX)\n        vW = rng.uniform(-0.5, 0.5, size=(2, 2)).astype(config.floatX)\n        vWout = rng.uniform(-0.5, 0.5, size=(2,)).astype(config.floatX)\n        self.vW_in1 = rng.uniform(-0.5, 0.5, size=(2, 2)).astype(config.floatX)\n        self.v_u1 = rng.uniform(-0.5, 0.5, size=(3, 2)).astype(config.floatX)\n        self.v_u2 = rng.uniform(-0.5, 0.5, size=(3,)).astype(config.floatX)\n        self.v_x0 = rng.uniform(-0.5, 0.5, size=(2,)).astype(config.floatX)\n        self.v_y0 = rng.uniform(size=(3,)).astype(config.floatX)\n    \n        W_in2 = shared(vW_in2, name=\"win2\")\n        W = shared(vW, name=\"w\")\n        W_out = shared(vWout, name=\"wout\")\n        W_in1 = matrix(\"win\")\n        u1 = matrix(\"u1\")\n        u2 = vector(\"u2\")\n        x0 = vector(\"x0\")\n        y0 = vector(\"y0\")\n    \n        def f_rnn_cmpl(u1_t, u2_t, x_tm1, y_tm1, y_tm3, W_in1):\n            return [\n                y_tm3 + 1,\n                y_tm3 + 2,\n                dot(u1_t, W_in1) + u2_t * W_in2 + dot(x_tm1, W),\n                y_tm1 + dot(x_tm1, W_out),\n            ]\n    \n        outputs = scan(\n            f_rnn_cmpl,\n            [u1, u2],\n            [None, None, x0, dict(initial=y0, taps=[-1, -3])],\n            W_in1,\n            n_steps=None,\n            truncate_gradient=-1,\n            go_backwards=False,\n            return_updates=False,\n        )\n        self.f = function([u1, u2, x0, y0, W_in1], outputs, allow_input_downcast=True)",
+        "min_run_count": 2,
+        "name": "bench_scan.Reordering.time_reordering",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "4d6a35cf82ff8be7f9b76871cb00c8783ce25779db727aba5725b33b9573b36a",
+        "warmup_time": -1
+    },
+    "bench_scan.SavememOpt.time_savemem_opt": {
+        "code": "class SavememOpt:\n    def time_savemem_opt(self):\n        self.fn()\n\n    def setup(self):\n        y0 = shared(np.ones((2, 10)))\n        [_y1, y2] = scan(\n            lambda y: [y, y],\n            outputs_info=[dict(initial=y0, taps=[-2]), None],\n            n_steps=5,\n            return_updates=False,\n        )\n        self.fn = function([], y2.sum())",
+        "min_run_count": 2,
+        "name": "bench_scan.SavememOpt.time_savemem_opt",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "3a801802a7ece43ef7e04efc6ece61c68837c9b25540ae09dde9f571d2cc87e0",
+        "warmup_time": -1
+    },
+    "bench_scan.ScanAsTensorOnGradients.time_compile_grad": {
+        "code": "class ScanAsTensorOnGradients:\n    def time_compile_grad(self):\n        function(\n            inputs=self.inputs,\n            outputs=self.t_grad,\n            allow_input_downcast=True,\n        )\n\n    def setup(self):\n        to_scan = dvector(\"to_scan\")\n        seq = dmatrix(\"seq\")\n        f1 = dscalar(\"f1\")\n    \n        def scanStep(prev, seq, f1):\n            return prev + f1 * seq\n    \n        scanned = scan(\n            fn=scanStep,\n            sequences=[seq],\n            outputs_info=[to_scan],\n            non_sequences=[f1],\n            return_updates=False,\n        )\n        function(\n            inputs=[to_scan, seq, f1],\n            outputs=scanned,\n            allow_input_downcast=True,\n        )\n        self.t_grad = grad(scanned.sum(), wrt=[to_scan, f1], consider_constant=[seq])\n        self.inputs = [to_scan, seq, f1]",
+        "min_run_count": 2,
+        "name": "bench_scan.ScanAsTensorOnGradients.time_compile_grad",
+        "number": 1,
+        "param_names": [],
+        "params": [],
+        "repeat": 5,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "e15ec408b3942274c8bf782219e6cefef2b2c8a3f97e2c73ca39c9c1be28bee4",
+        "warmup_time": -1
+    },
+    "bench_shape.Reshape.time_reshape": {
+        "code": "class Reshape:\n    def time_reshape(self):\n        self.reshape_fn(self.x_val)\n\n    def setup(self):\n        x = tensor3(\"x\")\n        self.x_val = np.random.random((2, 3, 4)).astype(config.floatX)\n    \n        y1 = x.reshape((6, 4))\n        y2 = x.reshape((2, 12))\n        y3 = x.reshape((-1,))\n    \n        self.reshape_fn = pytensor.function(\n            [In(x, borrow=True)],\n            [Out(y1, borrow=True), Out(y2, borrow=True), Out(y3, borrow=True)],\n        )\n        self.reshape_fn.trust_input = True\n    \n        # Warmup\n        self.reshape_fn(self.x_val)",
+        "min_run_count": 2,
+        "name": "bench_shape.Reshape.time_reshape",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "ba1db863e4f3131758d7ccd475f584b7596716d24f7884e41f09f1e6bd826668",
+        "warmup_time": -1
+    },
+    "bench_signal.Convolve1dGrad.time_convolve1d_grad": {
+        "code": "class Convolve1dGrad:\n    def time_convolve1d_grad(self, convolve_mode):\n        self.fn(self.test_larger, self.test_smaller)\n\n    def setup(self, convolve_mode):\n        larger = tensor(\"larger\", shape=(8, None))\n        smaller = tensor(\"smaller\", shape=(8, None))\n        grad_wrt_smaller = grad(\n            convolve1d(larger, smaller, mode=convolve_mode).sum(), wrt=smaller\n        )\n        self.fn = pytensor.function(\n            [larger, smaller], grad_wrt_smaller, trust_input=True\n        )\n    \n        rng = np.random.default_rng([119, convolve_mode == \"full\"])\n        self.test_larger = rng.normal(size=(8, 1024)).astype(larger.type.dtype)\n        self.test_smaller = rng.normal(size=(8, 16)).astype(smaller.type.dtype)\n    \n        # Warmup\n        self.fn(self.test_larger, self.test_smaller)",
+        "min_run_count": 2,
+        "name": "bench_signal.Convolve1dGrad.time_convolve1d_grad",
+        "number": 0,
+        "param_names": [
+            "convolve_mode"
+        ],
+        "params": [
+            [
+                "'full'",
+                "'valid'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "57314b5433a7e9888b9e5f045567ceb97384d0d29b847cb349282e001d910ae7",
+        "warmup_time": -1
+    },
+    "bench_subtensor.AdvancedIncSubtensor1.time_advanced_incsubtensor1": {
+        "code": "class AdvancedIncSubtensor1:\n    def time_advanced_incsubtensor1(self, func, static_shape, gc):\n        self.fn(self.x_values)\n\n    def setup(self, func, static_shape, gc):\n        func_map = {\"inc_subtensor\": inc_subtensor, \"set_subtensor\": set_subtensor}\n        subtensor_func = func_map[func]\n    \n        x = vector(\"x\", shape=(85 if static_shape else None,))\n        x_values = np.zeros((85,), dtype=x.type.dtype)\n        buffer = ptb.zeros_like(x)\n        y_values = np.random.normal(size=(85 * 11,)).astype(x.type.dtype)\n        idxs_values = np.arange(85).repeat(11)\n        out1 = subtensor_func(buffer[idxs_values], y_values)\n        out2 = subtensor_func(buffer[idxs_values[::-1]], y_values)\n        self.fn = pytensor.function(\n            [x],\n            [pytensor.Out(out1, borrow=True), pytensor.Out(out2, borrow=True)],\n            on_unused_input=\"ignore\",\n            trust_input=True,\n        )\n        self.fn.vm.allow_gc = gc\n        self.x_values = x_values\n    \n        # Warmup\n        self.fn(self.x_values)",
+        "min_run_count": 2,
+        "name": "bench_subtensor.AdvancedIncSubtensor1.time_advanced_incsubtensor1",
+        "number": 0,
+        "param_names": [
+            "func",
+            "static_shape",
+            "gc"
+        ],
+        "params": [
+            [
+                "'inc_subtensor'",
+                "'set_subtensor'"
+            ],
+            [
+                "True",
+                "False"
+            ],
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "8ea6d4e0dc44743b5168c2d49e95239ac69130c390a046cf33988580ffb9f239",
+        "warmup_time": -1
+    },
+    "bench_subtensor.AdvancedSubtensor1.time_advanced_subtensor1": {
+        "code": "class AdvancedSubtensor1:\n    def time_advanced_subtensor1(self, static_shape, gc):\n        self.fn(self.x_values)\n\n    def setup(self, static_shape, gc):\n        x = vector(\"x\", shape=(85 if static_shape else None,))\n        x_values = np.random.normal(size=(85,)).astype(x.type.dtype)\n        idxs_values = np.arange(85).repeat(11)\n        out = x[idxs_values]\n        self.fn = pytensor.function(\n            [x],\n            pytensor.Out(out, borrow=True),\n            on_unused_input=\"ignore\",\n            trust_input=True,\n        )\n        self.fn.vm.allow_gc = gc\n        self.x_values = x_values\n    \n        # Warmup\n        self.fn(self.x_values)",
+        "min_run_count": 2,
+        "name": "bench_subtensor.AdvancedSubtensor1.time_advanced_subtensor1",
+        "number": 0,
+        "param_names": [
+            "static_shape",
+            "gc"
+        ],
+        "params": [
+            [
+                "True",
+                "False"
+            ],
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "50e657a19b6b7cbb26b1eec0f2313d086cc749917f55f98bd55a0e4f7633d6fb",
+        "warmup_time": -1
+    },
+    "bench_subtensor.JoinPerformance.time_join": {
+        "code": "class JoinPerformance:\n    def time_join(self, ndim, axis, memory_layout, gc):\n        self.fn(*self.test_values)\n\n    def setup(self, ndim, axis, memory_layout, gc):\n        # Skip invalid combinations\n        if ndim == 1 and not (memory_layout == \"C\" and axis == 0):\n            raise NotImplementedError(\"Skip invalid combination\")\n    \n        n = 64\n        if ndim == 1:\n            inputs = vectors(\"abcdef\")\n        else:\n            inputs = matrices(\"abcdef\")\n    \n        out = join(axis, *inputs)\n        self.fn = pytensor.function(inputs, Out(out, borrow=True), trust_input=True)\n        self.fn.vm.allow_gc = gc\n    \n        test_values = [np.zeros((n, n)[:ndim], dtype=inputs[0].dtype) for _ in inputs]\n        if memory_layout == \"F\":\n            test_values = [np.asfortranarray(t) for t in test_values]\n        elif memory_layout == \"Mixed\":\n            test_values = [\n                np.asfortranarray(t) if i % 2 else t for i, t in enumerate(test_values)\n            ]\n        self.test_values = test_values\n    \n        # Warmup\n        self.fn(*self.test_values)",
+        "min_run_count": 2,
+        "name": "bench_subtensor.JoinPerformance.time_join",
+        "number": 0,
+        "param_names": [
+            "ndim",
+            "axis",
+            "memory_layout",
+            "gc"
+        ],
+        "params": [
+            [
+                "1",
+                "2"
+            ],
+            [
+                "0",
+                "1"
+            ],
+            [
+                "'C'",
+                "'F'",
+                "'Mixed'"
+            ],
+            [
+                "True",
+                "False"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "4c36d5187ff36531d60e6f25f52a75860e311ee32af05267ba7d25da2de8dea9",
+        "warmup_time": -1
+    },
+    "version": 2
+}
