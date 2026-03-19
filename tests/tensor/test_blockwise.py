@@ -15,9 +15,6 @@ from pytensor.graph.replace import _vectorize_node, vectorize_graph
 from pytensor.link.numba import NumbaLinker
 from pytensor.raise_op import assert_op
 from pytensor.tensor import (
-    diagonal,
-    dmatrix,
-    log,
     matrices,
     matrix,
     ones_like,
@@ -34,7 +31,6 @@ from pytensor.tensor.nlinalg import MatrixInverse, eig
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.op import default_rng
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
-from pytensor.tensor.signal import convolve1d
 from pytensor.tensor.slinalg import (
     Cholesky,
     Solve,
@@ -528,66 +524,6 @@ class TestSolveVector(BlockwiseOpTester):
 class TestSolveMatrix(BlockwiseOpTester):
     core_op = Solve(lower=True, b_ndim=2)
     signature = "(m, m),(m, n) -> (m, n)"
-
-
-@pytest.mark.parametrize(
-    "mu_batch_shape", [(), (1000,), (4, 1000)], ids=lambda arg: f"mu:{arg}"
-)
-@pytest.mark.parametrize(
-    "cov_batch_shape", [(), (1000,), (4, 1000)], ids=lambda arg: f"cov:{arg}"
-)
-def test_batched_mvnormal_logp_and_dlogp(mu_batch_shape, cov_batch_shape, benchmark):
-    rng = np.random.default_rng(sum(map(ord, "batched_mvnormal")))
-
-    value_batch_shape = mu_batch_shape
-    if len(cov_batch_shape) > len(mu_batch_shape):
-        value_batch_shape = cov_batch_shape
-
-    value = tensor("value", shape=(*value_batch_shape, 10))
-    mu = tensor("mu", shape=(*mu_batch_shape, 10))
-    cov = tensor("cov", shape=(*cov_batch_shape, 10, 10))
-
-    test_values = [
-        rng.normal(size=value.type.shape),
-        rng.normal(size=mu.type.shape),
-        np.eye(cov.type.shape[-1]) * np.abs(rng.normal(size=cov.type.shape)),
-    ]
-
-    chol_cov = cholesky(cov, lower=True, on_error="raise")
-    delta_trans = solve_triangular(chol_cov, value - mu, b_ndim=1)
-    quaddist = (delta_trans**2).sum(axis=-1)
-    diag = diagonal(chol_cov, axis1=-2, axis2=-1)
-    logdet = log(diag).sum(axis=-1)
-    k = value.shape[-1]
-    norm = -0.5 * k * (np.log(2 * np.pi))
-
-    logp = norm - 0.5 * quaddist - logdet
-    dlogp = grad(logp.sum(), wrt=[value, mu, cov])
-
-    fn = pytensor.function([value, mu, cov], [logp, *dlogp])
-    benchmark(fn, *test_values)
-
-
-def test_small_blockwise_performance(benchmark):
-    a = dmatrix(shape=(7, 128))
-    b = dmatrix(shape=(7, 20))
-    out = convolve1d(a, b, mode="valid")
-    fn = pytensor.function([a, b], out, trust_input=True)
-    assert isinstance(
-        fn.maker.fgraph.outputs[0].owner.op, Blockwise | BlockwiseWithCoreShape
-    )
-
-    rng = np.random.default_rng(495)
-    a_test = rng.normal(size=a.type.shape)
-    b_test = rng.normal(size=b.type.shape)
-    np.testing.assert_allclose(
-        fn(a_test, b_test),
-        [
-            np.convolve(a_test[i], b_test[i], mode="valid")
-            for i in range(a_test.shape[0])
-        ],
-    )
-    benchmark(fn, a_test, b_test)
 
 
 def test_cop_with_params():

@@ -1,0 +1,245 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+      - v3
+      - asv
+  pull_request:
+    branches:
+      - main
+      - v3
+      - asv
+
+concurrency:
+  group: benchmarks-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  benchmarks:
+    name: "Run benchmarks"
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0 # zizmor: ignore[artipacked]
+        with:
+          fetch-depth: 0
+          # persist-credentials is true (default) because this job pushes to asv-results branch
+
+      - name: Set up Python
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-name: pytensor-bench
+          micromamba-version: "1.5.10-0"
+          init-shell: bash
+          post-cleanup: "all"
+          cache-environment: true
+          create-args: >-
+            -c conda-forge
+            python=3.11
+            mkl
+            numpy
+            scipy
+            pip
+            mkl-service
+            cython
+            numba>=0.57
+            jax
+            jaxlib
+            asv
+
+      - name: Install dependencies
+        shell: micromamba-shell {0}
+        run: |
+          pip install -e ./
+          python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
+          python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"'
+
+      - name: Fetch previous results from asv-results branch
+        shell: bash
+        run: |
+          git fetch origin asv-results:asv-results 2>/dev/null || true
+          if git rev-parse --verify asv-results 2>/dev/null; then
+            git worktree add /tmp/asv-results asv-results
+            if [ -d /tmp/asv-results/results ]; then
+              mkdir -p .asv/results
+              cp -r /tmp/asv-results/results/* .asv/results/
+            fi
+            git worktree remove /tmp/asv-results --force
+          fi
+
+      - name: Configure ASV machine
+        shell: micromamba-shell {0}
+        run: asv machine --yes --machine github-actions
+
+      - name: Run benchmarks
+        shell: micromamba-shell {0}
+        run: |
+          export PYTENSOR_FLAGS=warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
+          asv run --python=same --set-commit-hash=$(git rev-parse HEAD) --show-stderr --bench "bench_shape|bench_graph"
+
+      - name: Push results to asv-results branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create or update the asv-results branch
+          if git rev-parse --verify asv-results 2>/dev/null; then
+            git worktree add /tmp/asv-results asv-results
+          else
+            git worktree add --orphan -b asv-results /tmp/asv-results
+            cd /tmp/asv-results
+            git rm -rf . 2>/dev/null || true
+            cd -
+          fi
+
+          mkdir -p /tmp/asv-results/results
+          cp -r .asv/results/* /tmp/asv-results/results/
+          cd /tmp/asv-results
+          git add results/
+          git commit -m "Update benchmark results for ${{ github.sha }}" || true
+          git push origin asv-results
+          cd -
+          git worktree remove /tmp/asv-results --force
+
+      - name: Generate HTML
+        shell: micromamba-shell {0}
+        run: asv publish
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: .asv/html
+
+  deploy-pages:
+    name: "Deploy benchmark dashboard"
+    if: github.event_name == 'push'
+    needs: benchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+
+  benchmarks-pr:
+    name: "Benchmark comparison"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-name: pytensor-bench
+          micromamba-version: "1.5.10-0"
+          init-shell: bash
+          post-cleanup: "all"
+          cache-environment: true
+          create-args: >-
+            -c conda-forge
+            python=3.11
+            mkl
+            numpy
+            scipy
+            pip
+            mkl-service
+            cython
+            numba>=0.57
+            jax
+            jaxlib
+            asv
+
+      - name: Install dependencies
+        shell: micromamba-shell {0}
+        run: |
+          pip install -e ./
+
+      - name: Configure ASV machine
+        shell: micromamba-shell {0}
+        run: asv machine --yes --machine github-actions
+
+      - name: Run benchmark comparison
+        id: bench
+        shell: micromamba-shell {0}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          export PYTENSOR_FLAGS=warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
+
+          HEAD_SHA=$(git rev-parse HEAD)
+          BASE_SHA=$(git merge-base "origin/$BASE_REF" HEAD)
+
+          # Benchmark the PR head (already installed)
+          asv run --python=same --set-commit-hash="$HEAD_SHA" --show-stderr
+
+          # Checkout base, reinstall, and benchmark
+          git checkout "$BASE_SHA"
+          pip install -e ./
+          asv run --python=same --set-commit-hash="$BASE_SHA" --show-stderr
+
+          # Return to PR head so asv.conf.json is available for compare
+          git checkout "$HEAD_SHA"
+
+          # Compare results (only regressions)
+          asv compare "$BASE_SHA" "$HEAD_SHA" --factor 1.2 --split --only-changed | tee bench_output.txt
+          # Check if there are regressions (lines after "Benchmarks that have got worse:")
+          if sed -n '/Benchmarks that have got worse:/,/^$/p' bench_output.txt | grep -qE '\S'; then
+            echo "has_regressions=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post benchmark regressions as PR comment
+        if: always() && steps.bench.outcome != 'cancelled' && steps.bench.outputs.has_regressions == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- asv-benchmark-results -->';
+            let output = '';
+            try {
+              output = fs.readFileSync('bench_output.txt', 'utf8');
+            } catch (e) {
+              output = 'Benchmark comparison failed to produce results.';
+            }
+            const body = `${marker}\n## Benchmark regressions (main vs PR)\n\n\`\`\`\n${output}\n\`\`\`\n\nBenchmarks that regressed by more than 20% are shown.`;
+
+            // Find existing comment to update
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                comment_id: existing.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body,
+              });
+            }

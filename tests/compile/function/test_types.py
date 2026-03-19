@@ -20,8 +20,6 @@ from pytensor.link.vm import VMLinker
 from pytensor.printing import debugprint
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.random import normal
-from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,
@@ -34,13 +32,12 @@ from pytensor.tensor.type import (
     scalars,
     vector,
 )
-from tests.fixtures import *  # noqa: F403
 
 
 pytestmark = pytest.mark.filterwarnings(
     "error",
     r"ignore:^Numba will use object mode to run.*perform method\.:UserWarning",
-    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph\".*:numba.NumbaWarning",
+    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph.*:numba.NumbaWarning",
 )
 
 
@@ -1355,79 +1352,3 @@ def test_empty_givens_updates():
     y = x * 2
     function([In(x)], y, givens={})
     function([In(x)], y, updates={})
-
-
-@pytest.mark.parametrize("trust_input", [True, False])
-def test_minimal_random_function_call_benchmark(trust_input, benchmark):
-    rng = random_generator_type()
-    x = normal(rng=rng, size=(100,))
-
-    f = function([In(rng, mutable=True)], x)
-    f.trust_input = trust_input
-
-    rng_val = np.random.default_rng()
-    benchmark(f, rng_val)
-
-
-@pytest.mark.parametrize("mode", ["C", "CVM"])
-def test_radon_model_compile_repeatedly_benchmark(mode, radon_model, benchmark):
-    joined_inputs, [model_logp, model_dlogp] = radon_model
-    rng = np.random.default_rng(1)
-    x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
-
-    def compile_and_call_once():
-        fn = function(
-            [joined_inputs], [model_logp, model_dlogp], mode=mode, trust_input=True
-        )
-        fn(x)
-
-    benchmark.pedantic(compile_and_call_once, rounds=5, iterations=1)
-
-
-@pytest.mark.parametrize("mode", ["C", "CVM"])
-def test_radon_model_compile_variants_benchmark(
-    mode, radon_model, radon_model_variants, benchmark
-):
-    """Test compilation speed when a slightly variant of a function is compiled each time.
-
-    This test more realistically simulates a use case where a model is recompiled
-    multiple times with small changes, such as in an interactive environment.
-
-    NOTE: For this test to be meaningful on subsequent runs, the cache must be cleared
-    """
-    joined_inputs, [model_logp, model_dlogp] = radon_model
-    rng = np.random.default_rng(1)
-    x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
-
-    # Compile base function once to populate the cache
-    fn = function(
-        [joined_inputs], [model_logp, model_dlogp], mode=mode, trust_input=True
-    )
-    fn(x)
-
-    def compile_and_call_once():
-        for joined_inputs, [model_logp, model_dlogp] in radon_model_variants:
-            fn = function(
-                [joined_inputs], [model_logp, model_dlogp], mode=mode, trust_input=True
-            )
-            fn(x)
-
-    benchmark.pedantic(compile_and_call_once, rounds=1, iterations=1)
-
-
-@pytest.mark.parametrize("mode", ["C", "CVM", "CVM_NOGC"])
-def test_radon_model_call_benchmark(mode, radon_model, benchmark):
-    joined_inputs, [model_logp, model_dlogp] = radon_model
-
-    real_mode = "CVM" if mode == "CVM_NOGC" else mode
-    fn = function(
-        [joined_inputs], [model_logp, model_dlogp], mode=real_mode, trust_input=True
-    )
-    if mode == "CVM_NOGC":
-        fn.vm.allow_gc = False
-
-    rng = np.random.default_rng(1)
-    x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)
-    fn(x)  # warmup
-
-    benchmark(fn, x)

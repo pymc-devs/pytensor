@@ -30,7 +30,6 @@ dependencies:
   - pytest
   - pytest-cov
   - pytest-xdist
-  - pytest-benchmark
   - pytest-mock
   - pytest-sphinx
   # For building docs

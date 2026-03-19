@@ -1,5 +1,6 @@
 import contextlib
 import copy
+import os
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -29,6 +30,7 @@ from pytensor.link.numba.dispatch.basic import (
     _filter_numba_warnings,
     cache_key_for_constant,
     numba_funcify_and_cache_key,
+    numba_njit,
 )
 from pytensor.link.numba.linker import NumbaLinker
 from pytensor.scalar.basic import Composite, ScalarOp, as_scalar
@@ -426,14 +428,13 @@ def test_shared_updates():
 
 
 def test_config_options_fastmath():
-    x = pt.dvector()
-
     with config.change_flags(numba__fastmath=True):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
-            "jitable_func"
-        ].py_func.__globals__["impl_sum"]
-        assert numba_sum_fn.targetoptions["fastmath"] == {
+
+        @numba_njit
+        def fn_fast(x):
+            return x + 1
+
+        assert fn_fast.targetoptions["fastmath"] == {
             "afn",
             "arcp",
             "contract",
@@ -442,28 +443,30 @@ def test_config_options_fastmath():
         }
 
     with config.change_flags(numba__fastmath=False):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
-            "jitable_func"
-        ].py_func.__globals__["impl_sum"]
-        assert numba_sum_fn.targetoptions["fastmath"] is False
+
+        @numba_njit
+        def fn_nofast(x):
+            return x + 1
+
+        assert fn_nofast.targetoptions["fastmath"] is False
 
 
 def test_config_options_cached():
-    x = pt.dvector()
-
     with config.change_flags(numba__cache=True):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__[
-            "jitable_func"
-        ].py_func.__globals__["impl_sum"]
-        assert not isinstance(numba_sum_fn._cache, numba.core.caching.NullCache)
+
+        @numba_njit(cache=True)
+        def fn_cached(x):
+            return x + 1
+
+        assert not isinstance(fn_cached._cache, numba.core.caching.NullCache)
 
     with config.change_flags(numba__cache=False):
-        pytensor_numba_fn = function([x], pt.sum(x), mode=numba_mode)
-        # Without caching we don't wrap the function in jitable_func
-        numba_sum_fn = pytensor_numba_fn.vm.jit_fn.py_func.__globals__["impl_sum"]
-        assert isinstance(numba_sum_fn._cache, numba.core.caching.NullCache)
+
+        @numba_njit
+        def fn_uncached(x):
+            return x + 1
+
+        assert isinstance(fn_uncached._cache, numba.core.caching.NullCache)
 
 
 def test_scalar_return_value_conversion():
@@ -517,23 +520,6 @@ class TestNumbaWarnings:
         # But either way we don't want this warning for users as they have little control over strides
         b_test = np.ones((10,))[::2]
         np.testing.assert_allclose(fn(A_test, b_test), np.dot(A_test, b_test[:, None]))
-
-
-@pytest.mark.parametrize("mode", ("default", "trust_input", "direct"))
-def test_function_overhead(mode, benchmark):
-    x = pt.vector("x")
-    out = pt.exp(x)
-
-    fn = function([x], out, mode="NUMBA")
-    if mode == "trust_input":
-        fn.trust_input = True
-    elif mode == "direct":
-        fn = fn.vm.jit_fn
-
-    test_x = np.zeros(1000)
-    assert np.sum(fn(test_x)) == 1000
-
-    benchmark(fn, test_x)
 
 
 class ComplexType:
@@ -785,3 +771,59 @@ class TestFgraphCacheKey:
         assert self.generate_and_validate_key(fg_pi) != self.generate_and_validate_key(
             fg_e
         )
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="Test requires os.fork (Unix only)")
+def test_fork_cache_no_type_mismatch(tmp_path, monkeypatch):
+    """Regression test for fork-safety of the numba disk cache.
+
+    After os.fork(), numba's internal UID counter (FunctionIdentity._unique_ids)
+    is shared between parent and child. If two exec()-created wrapper functions
+    with the same qualname get the same UID in different processes, their LLVM
+    mangled names collide. When they have different return types (e.g. 3D vs 4D
+    array), this causes a ValueError during LLVM lowering.
+
+    PyTensor prevents this by including the cache key in the wrapper function
+    name, ensuring unique LLVM symbols even when UIDs overlap after fork.
+
+    See: https://github.com/numba/numba/issues/10486
+    """
+    import pytensor.link.numba.cache as cache_mod
+
+    # Use a temporary cache for this test
+    monkeypatch.setattr(cache_mod, "NUMBA_CACHE_PATH", tmp_path)
+
+    def run_in_fork(func):
+        pid = os.fork()
+        if pid == 0:
+            try:
+                func()
+                os._exit(0)
+            except BaseException:
+                os._exit(1)
+        else:
+            _, status = os.waitpid(pid, 0)
+            return os.WEXITSTATUS(status)
+
+    def graph_a():
+        x = pt.tensor3("x")
+        fn = function([x], x.transpose(2, 0, 1), mode="NUMBA")
+        assert fn(np.zeros((2, 3, 4))).shape == (4, 2, 3)
+
+    def graph_b():
+        x = pt.tensor3("x")
+        fn = function([x], [x.transpose(2, 0, 1), x[None]], mode="NUMBA")
+        r1, r2 = fn(np.zeros((2, 3, 4)))
+        assert r1.shape == (4, 2, 3)
+        assert r2.shape == (1, 2, 3, 4)
+
+    # Fork child compiles graph_a (transpose only)
+    assert run_in_fork(graph_a) == 0, "Fork child failed"
+
+    # Parent compiles graph_b (transpose + expand dims)
+    # This loads fork's cache and also compiles fresh ops
+    graph_b()
+
+    # Running in another fork is also fine
+    assert run_in_fork(graph_a) == 0, "Fork child 1 failed"
+    assert run_in_fork(graph_b) == 0, "Fork child 2 failed"

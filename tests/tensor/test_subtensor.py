@@ -3171,57 +3171,6 @@ def test_flip(size: tuple[int]):
         np.testing.assert_allclose(expected, f(x), atol=ATOL, rtol=RTOL)
 
 
-class TestBenchmarks:
-    @pytest.mark.parametrize(
-        "static_shape", (False, True), ids=lambda x: f"static_shape={x}"
-    )
-    @pytest.mark.parametrize("gc", (False, True), ids=lambda x: f"gc={x}")
-    def test_advanced_subtensor1(self, static_shape, gc, benchmark):
-        x = vector("x", shape=(85 if static_shape else None,))
-
-        x_values = np.random.normal(size=(85,))
-        idxs_values = np.arange(85).repeat(11)
-
-        # With static shape and constant indices we know all idxs are valid
-        # And can use faster mode in numpy.take
-        out = x[idxs_values]
-
-        fn = pytensor.function(
-            [x],
-            pytensor.Out(out, borrow=True),
-            on_unused_input="ignore",
-            trust_input=True,
-        )
-        fn.vm.allow_gc = gc
-        benchmark(fn, x_values, idxs_values)
-
-    @pytest.mark.parametrize(
-        "static_shape", (False, True), ids=lambda x: f"static_shape={x}"
-    )
-    @pytest.mark.parametrize("gc", (False, True), ids=lambda x: f"gc={x}")
-    @pytest.mark.parametrize("func", (inc_subtensor, set_subtensor))
-    def test_advanced_incsubtensor1(self, func, static_shape, gc, benchmark):
-        x = vector("x", shape=(85 if static_shape else None,))
-        x_values = np.zeros((85,))
-        buffer = ptb.zeros_like(x)
-        y_values = np.random.normal(size=(85 * 11,))
-        idxs_values = np.arange(85).repeat(11)
-
-        # With static shape and constant indices we know all idxs are valid
-        # Reuse same buffer of zeros, to check we rather allocate twice than copy inside IncSubtensor
-        out1 = func(buffer[idxs_values], y_values)
-        out2 = func(buffer[idxs_values[::-1]], y_values)
-
-        fn = pytensor.function(
-            [x],
-            [pytensor.Out(out1, borrow=True), pytensor.Out(out2, borrow=True)],
-            on_unused_input="ignore",
-            trust_input=True,
-        )
-        fn.vm.allow_gc = gc
-        benchmark(fn, x_values)
-
-
 def test_subtensor_hash_and_eq():
     s1 = Subtensor(idx_list=[slice(None, None, None), 0])
     s2 = Subtensor(idx_list=[slice(None, None, None), 0])

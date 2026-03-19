@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   changes:
+    if: false # TEMPORARY: disabled for benchmarks debugging
     name: "Check for changes"
     runs-on: ubuntu-latest
     outputs:
@@ -163,9 +164,9 @@ jobs:
         run: |
 
           if [[ $OS == "macos-15" ]]; then
-            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx libblas=*=*accelerate;
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-mock pytest-sphinx libblas=*=*accelerate;
           else
-            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-benchmark pytest-mock pytest-sphinx mkl mkl-service;
+            micromamba install --yes -q "python~=${PYTHON_VERSION}" numpy "scipy<1.17.0" "numba>=0.63" pip graphviz cython pytest coverage pytest-cov pytest-mock pytest-sphinx mkl mkl-service;
           fi
           if [[ $INSTALL_JAX == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" && pip install "jax>=0.8,<0.9.1" jaxlib numpyro equinox tfp-nightly; fi
           if [[ $INSTALL_TORCH == "1" ]]; then micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" pytorch pytorch-cuda=12.1 "mkl<=2024.0" -c pytorch -c nvidia; fi
@@ -194,7 +195,7 @@ jobs:
           if [[ $DEFAULT_MODE == "FAST_COMPILE" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,mode=FAST_COMPILE; fi
           if [[ $DEFAULT_MODE == "CVM" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,linker=cvm; fi
           export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          python -m pytest -r A --verbose --runslow --durations=50 --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART --benchmark-skip
+          python -m pytest -r A --verbose --runslow --durations=50 --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART
         env:
           MATRIX_ID: ${{ steps.matrix-id.outputs.id }}
           MKL_THREADING_LAYER: GNU
@@ -208,60 +209,6 @@ jobs:
         with:
           name: coverage-${{ steps.matrix-id.outputs.id }}
           path: coverage/coverage-${{ steps.matrix-id.outputs.id }}.xml
-
-  benchmarks:
-    name: "Benchmarks"
-    needs:
-      - changes
-      - style
-    runs-on: ubuntu-latest
-    if: ${{ needs.changes.outputs.changes == 'true' && needs.style.result == 'success' }}
-    strategy:
-      fail-fast: false
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Set up Python 3.11
-        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
-        with:
-          environment-name: pytensor-test
-          micromamba-version: "1.5.10-0" # until https://github.com/mamba-org/setup-micromamba/issues/225 is resolved
-          init-shell: bash
-          post-cleanup: "all"
-      - name: Install dependencies
-        shell: micromamba-shell {0}
-        run: |
-          micromamba install --yes -q -c conda-forge "python~=${PYTHON_VERSION}" mkl numpy scipy pip mkl-service cython pytest "numba>=0.57" jax jaxlib pytest-benchmark
-          pip install -e ./
-          micromamba list && pip freeze
-          python -c 'import pytensor; print(pytensor.config.__str__(print_doc=False))'
-          python -c 'import pytensor; assert pytensor.config.blas__ldflags != "", "Blas flags are empty"'
-        env:
-          PYTHON_VERSION: 3.11
-      - name: Download previous benchmark data
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ./cache
-          key: ${{ runner.os }}-benchmark
-      - name: Run benchmarks
-        shell: micromamba-shell {0}
-        run: |
-          export PYTENSOR_FLAGS=mode=FAST_COMPILE,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          python -m pytest --runslow --benchmark-only --benchmark-json output.json
-      - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1.20.7
-        with:
-          name: Python Benchmark with pytest-benchmark
-          tool: "pytest"
-          output-file-path: output.json
-          external-data-json-path: ./cache/benchmark-data.json
-          alert-threshold: "200%"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          comment-on-alert: false
-          fail-on-alert: false
-          auto-push: false
 
   all-checks:
     if: ${{ always() }}

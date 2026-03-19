@@ -75,13 +75,13 @@ tests = [
     "pre-commit",
     "pytest-cov>=2.6.1",
     "coverage>=5.1",
-    "pytest-benchmark",
     "pytest-mock",
     "pytest-sphinx",
 ]
 rtd = ["sphinx>=5.1.0,<6", "pygments", "pydot"]
 jax = ["jax", "jaxlib"]
 numba = ["numba>=0.57", "llvmlite"]
+benchmark = ["asv", "virtualenv"]
 
 [tool.setuptools.packages.find]
 include = ["pytensor*"]

@@ -11,7 +11,6 @@ from pytensor.compile.function import function
 from pytensor.compile.function.types import add_supervisor_to_fgraph
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
-from pytensor.gradient import grad
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
@@ -1350,40 +1349,6 @@ class TestFusion:
         nodes = tuple(f.maker.fgraph.apply_nodes)
         assert len(nodes) == 1
         assert isinstance(nodes[0].op.scalar_op, Composite)
-
-    def test_eval_benchmark(self, benchmark):
-        rng = np.random.default_rng(123)
-        size = 100_000
-        x = pytensor.shared(rng.normal(size=size), name="x")
-        mu = pytensor.shared(rng.normal(size=size), name="mu")
-
-        logp = -((x - mu) ** 2) / 2
-        grad_logp = grad(logp.sum(), x)
-
-        func = pytensor.function([], [logp, grad_logp], mode="FAST_RUN")
-        benchmark(func)
-
-    @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
-    @pytest.mark.parametrize(
-        "graph_fn, n, expected_n_repl",
-        [
-            ("deep_small_kernels", 20, (20, 60)),
-            ("large_fuseable_graph", 25, (128, 876)),
-        ],
-    )
-    def test_rewrite_benchmark(self, graph_fn, n, expected_n_repl, benchmark):
-        inps, outs = getattr(self, graph_fn)(n)
-        fg = FunctionGraph(inps, outs)
-        opt = FusionOptimizer()
-
-        def rewrite_func():
-            fg_clone = fg.clone()
-            _, nb_fused, nb_replacement, *_ = opt.apply(fg_clone)
-            # fg_clone.dprint()
-            return nb_fused, nb_replacement
-
-        assert rewrite_func() == expected_n_repl
-        benchmark.pedantic(rewrite_func, rounds=7, iterations=5)
 
     def test_no_warning_from_old_client(self):
         # There used to be a warning issued when creating fuseable mapping

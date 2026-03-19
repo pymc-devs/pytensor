@@ -2,7 +2,6 @@ import contextlib
 
 import numpy as np
 import pytest
-import scipy.special
 
 import pytensor
 import pytensor.tensor as pt
@@ -13,7 +12,7 @@ from pytensor.compile.ops import deep_copy_op
 from pytensor.gradient import grad
 from pytensor.scalar import Composite, float64
 from pytensor.scalar import add as scalar_add
-from pytensor.tensor import blas, matrix, tensor, tensor3
+from pytensor.tensor import blas, matrix, tensor3
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.math import All, Any, Max, Min, Prod, ProdWithoutZeros, Sum
 from pytensor.tensor.special import LogSoftmax, Softmax, SoftmaxGrad
@@ -22,11 +21,7 @@ from tests.link.numba.test_basic import (
     numba_mode,
     scalar_my_multi_out,
 )
-from tests.tensor.test_elemwise import (
-    careduce_benchmark_tester,
-    check_elemwise_runtime_broadcast,
-    dimshuffle_benchmark,
-)
+from tests.tensor.test_elemwise import check_elemwise_runtime_broadcast
 
 
 rng = np.random.default_rng(42849)
@@ -686,78 +681,6 @@ def test_gammainc_wrt_k_grad():
     )
 
 
-class TestsBenchmark:
-    def test_elemwise_speed(self, benchmark):
-        x = pt.dmatrix("y")
-        y = pt.dvector("z")
-
-        out = np.exp(2 * x * y + y)
-
-        rng = np.random.default_rng(42)
-
-        x_val = rng.normal(size=(200, 500))
-        y_val = rng.normal(size=500)
-
-        func = function([x, y], out, mode="NUMBA")
-        func = func.vm.jit_fn
-        (out,) = func(x_val, y_val)
-        np.testing.assert_allclose(np.exp(2 * x_val * y_val + y_val), out)
-
-        benchmark(func, x_val, y_val)
-
-    def test_fused_elemwise_benchmark(self, benchmark):
-        rng = np.random.default_rng(123)
-        size = 100_000
-        x = pytensor.shared(rng.normal(size=size), name="x")
-        mu = pytensor.shared(rng.normal(size=size), name="mu")
-
-        logp = -((x - mu) ** 2) / 2
-        grad_logp = grad(logp.sum(), x)
-
-        func = pytensor.function([], [logp, grad_logp], mode="NUMBA")
-        # JIT compile first
-        func()
-        benchmark(func)
-
-    @pytest.mark.parametrize("size", [(10, 10), (1000, 1000), (10000, 10000)])
-    @pytest.mark.parametrize("axis", [0, 1])
-    def test_logsumexp_benchmark(self, size, axis, benchmark):
-        X = pt.matrix("X")
-        X_max = pt.max(X, axis=axis, keepdims=True)
-        X_max = pt.switch(pt.isinf(X_max), 0, X_max)
-        X_lse = pt.log(pt.sum(pt.exp(X - X_max), axis=axis, keepdims=True)) + X_max
-
-        rng = np.random.default_rng(23920)
-        X_val = rng.normal(size=size)
-
-        X_lse_fn = pytensor.function([X], X_lse, mode="NUMBA")
-
-        # JIT compile first
-        res = X_lse_fn(X_val)
-        exp_res = scipy.special.logsumexp(X_val, axis=axis, keepdims=True)
-        np.testing.assert_array_almost_equal(res, exp_res)
-        benchmark(X_lse_fn, X_val)
-
-    @pytest.mark.parametrize(
-        "axis",
-        (0, 1, 2, (0, 1), (0, 2), (1, 2), None),
-        ids=lambda x: f"axis={x}",
-    )
-    @pytest.mark.parametrize(
-        "c_contiguous",
-        (True, False),
-        ids=lambda x: f"c_contiguous={x}",
-    )
-    def test_numba_careduce_benchmark(self, axis, c_contiguous, benchmark):
-        return careduce_benchmark_tester(
-            axis, c_contiguous, mode="NUMBA", benchmark=benchmark
-        )
-
-    @pytest.mark.parametrize("c_contiguous", (True, False))
-    def test_dimshuffle(self, c_contiguous, benchmark):
-        dimshuffle_benchmark("NUMBA", c_contiguous, benchmark)
-
-
 @pytest.mark.parametrize(
     "x, y",
     [
@@ -855,18 +778,3 @@ def test_BatchedDot(x, y, exc):
             g,
             [x_test_value, y_test_value],
         )
-
-
-@pytest.mark.parametrize("dtype", ("float64", "float32", "mixed"))
-def test_mat_vec_dot_performance(dtype, benchmark):
-    A = tensor("A", shape=(512, 512), dtype="float64" if dtype == "mixed" else dtype)
-    x = tensor("x", shape=(512,), dtype="float32" if dtype == "mixed" else dtype)
-    out = ptm.dot(A, x)
-
-    fn = function([A, x], out, mode="NUMBA", trust_input=True)
-
-    rng = np.random.default_rng(948)
-    A_test = rng.standard_normal(size=A.type.shape, dtype=A.type.dtype)
-    x_test = rng.standard_normal(size=x.type.shape, dtype=x.type.dtype)
-    np.testing.assert_allclose(fn(A_test, x_test), np.dot(A_test, x_test), atol=1e-4)
-    benchmark(fn, A_test, x_test)
