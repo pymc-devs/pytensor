@@ -705,7 +705,7 @@
         "warmup_time": -1
     },
     "bench_numba.NumbaRadonCall.time_call": {
-        "code": "class NumbaRadonCall:\n    def time_call(self, cache):\n        self.fn(self.x)\n\n    def setup(self, cache):\n        _check_numba()\n        joined_inputs, [model_logp, model_dlogp] = create_radon_model()\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)\n        with config.change_flags(numba__cache=cache):\n            self.fn = function(\n                [joined_inputs],\n                [model_logp, model_dlogp],\n                mode=\"NUMBA\",\n                trust_input=True,\n            )\n        # Warmup\n        self.fn(self.x)",
+        "code": "class NumbaRadonCall:\n    def time_call(self, cache):\n        self.fn(self.x)\n\n    def setup(self, cache):\n        _check_numba()\n        if cache:\n            import tempfile\n    \n            import pytensor.link.numba.cache as cache_mod\n    \n            self._tmp_dir = tempfile.TemporaryDirectory()\n            self._orig_cache_path = cache_mod.NUMBA_CACHE_PATH\n            cache_mod.NUMBA_CACHE_PATH = Path(self._tmp_dir.name)\n        joined_inputs, [model_logp, model_dlogp] = create_radon_model()\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=joined_inputs.type.shape).astype(config.floatX)\n        with config.change_flags(numba__cache=cache):\n            self.fn = function(\n                [joined_inputs],\n                [model_logp, model_dlogp],\n                mode=\"NUMBA\",\n                trust_input=True,\n            )\n        # Warmup\n        self.fn(self.x)",
         "min_run_count": 2,
         "name": "bench_numba.NumbaRadonCall.time_call",
         "number": 0,
@@ -723,11 +723,11 @@
         "sample_time": 0.01,
         "type": "time",
         "unit": "seconds",
-        "version": "65ef75c95e692b5c62d1c8397c0ae898f2f54cc16df51e8116b406668f2cd35f",
+        "version": "fc65e3c5fc34261c22a9079a44c16d204b6fb682515c10a6b833696fa8bb3356",
         "warmup_time": -1
     },
     "bench_numba.NumbaRadonCompile.time_compile_and_call": {
-        "code": "class NumbaRadonCompile:\n    def time_compile_and_call(self, cache):\n        with config.change_flags(numba__cache=cache):\n            fn = function(\n                [self.joined_inputs],\n                [self.model_logp, self.model_dlogp],\n                mode=\"NUMBA\",\n                trust_input=True,\n            )\n            fn(self.x)\n\n    def setup(self, cache):\n        _check_numba()\n        self.joined_inputs, [self.model_logp, self.model_dlogp] = create_radon_model()\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=self.joined_inputs.type.shape).astype(config.floatX)\n        self.cache = cache",
+        "code": "class NumbaRadonCompile:\n    def time_compile_and_call(self, cache):\n        with config.change_flags(numba__cache=cache):\n            fn = function(\n                [self.joined_inputs],\n                [self.model_logp, self.model_dlogp],\n                mode=\"NUMBA\",\n                trust_input=True,\n            )\n            fn(self.x)\n\n    def setup(self, cache):\n        _check_numba()\n        if cache:\n            import tempfile\n    \n            import pytensor.link.numba.cache as cache_mod\n    \n            self._tmp_dir = tempfile.TemporaryDirectory()\n            self._orig_cache_path = cache_mod.NUMBA_CACHE_PATH\n            cache_mod.NUMBA_CACHE_PATH = Path(self._tmp_dir.name)\n        self.joined_inputs, [self.model_logp, self.model_dlogp] = create_radon_model()\n        rng = np.random.default_rng(1)\n        self.x = rng.normal(size=self.joined_inputs.type.shape).astype(config.floatX)",
         "min_run_count": 2,
         "name": "bench_numba.NumbaRadonCompile.time_compile_and_call",
         "number": 1,
@@ -745,7 +745,7 @@
         "sample_time": 0.01,
         "type": "time",
         "unit": "seconds",
-        "version": "2722e68555d9ea7a75a32a8f68ae585bb7572c1ff5ca1d41bdba2a99fe841532",
+        "version": "1619320e83423424972f7551b00068cb4ef4d062143d2415d4807bf9a11aa0ab",
         "warmup_time": -1
     },
     "bench_numba.NumbaScanSEIR.time_scan_seir": {
