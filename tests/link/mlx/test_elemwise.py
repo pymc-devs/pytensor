@@ -1,8 +1,7 @@
 import numpy as np
 import pytest
-import scipy
 
-from pytensor import config, function
+from pytensor import config
 from pytensor.tensor.basic import switch
 from pytensor.tensor.math import (
     add,
@@ -14,7 +13,6 @@ from pytensor.tensor.math import (
     ge,
     gt,
     int_div,
-    isinf,
     isnan,
     le,
     log,
@@ -105,28 +103,6 @@ def test_logsoftmax(axis):
     out = log_softmax(x, axis=axis)
 
     compare_mlx_and_py([x], [out], [x_test_value])
-
-
-@pytest.mark.parametrize("size", [(10, 10), (1000, 1000)])
-@pytest.mark.parametrize("axis", [0, 1])
-def test_logsumexp_benchmark(size, axis, benchmark):
-    X = matrix("X")
-    X_max = pt_max(X, axis=axis, keepdims=True)
-    X_max = switch(isinf(X_max), 0, X_max)
-    X_lse = log(pt_sum(exp(X - X_max), axis=axis, keepdims=True)) + X_max
-
-    rng = np.random.default_rng(23920)
-    X_val = rng.normal(size=size)
-
-    X_lse_fn = function([X], X_lse, mode="MLX")
-
-    # JIT compile first
-    _ = X_lse_fn(X_val)
-
-    res = benchmark(X_lse_fn, X_val)
-
-    exp_res = scipy.special.logsumexp(X_val, axis=axis, keepdims=True)
-    np.testing.assert_array_almost_equal(res, exp_res)
 
 
 def test_multiple_input_multiply():

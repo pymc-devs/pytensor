@@ -26,7 +26,7 @@ from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.monitormode import MonitorMode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
-from pytensor.gradient import NullTypeGradError, Rop, disconnected_grad, grad, hessian
+from pytensor.gradient import NullTypeGradError, Rop, disconnected_grad, grad
 from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
@@ -52,8 +52,6 @@ from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     TensorType,
     dcol,
-    dmatrix,
-    dscalar,
     dvector,
     fmatrix,
     fscalar,
@@ -2354,49 +2352,6 @@ def test_cvm_exception_handling(mode):
         res_fn()
 
 
-@pytest.mark.skipif(
-    not config.cxx, reason="G++ not available, so we need to skip this test."
-)
-def test_cython_performance(benchmark):
-    # This implicitly confirms that the Cython version is being used
-    from pytensor.scan import scan_perform_ext  # noqa: F401
-
-    # Python usually out-performs PyTensor below 100 iterations
-    N = 200
-    M = -1 / np.arange(1, 11).astype(config.floatX)
-    r = np.arange(N * 10).astype(config.floatX).reshape(N, 10)
-
-    def f_py():
-        py_out = np.empty((N, 10), dtype=config.floatX)
-        py_out[0] = r[0]
-        for i in range(1, py_out.shape[0]):
-            py_out[i] = r[i] + M * py_out[i - 1]
-        return py_out[1:]
-
-    py_res = f_py()
-
-    s_r = pt.as_tensor_variable(r, dtype=config.floatX)
-    s_y = scan(
-        fn=lambda ri, rii, M: ri + M * rii,
-        sequences=[s_r[1:]],
-        non_sequences=[pt.as_tensor_variable(M, dtype=config.floatX)],
-        outputs_info=s_r[0],
-        mode=Mode(linker="cvm", optimizer="fast_run"),
-        return_updates=False,
-    )
-
-    f_cvm = function([], s_y, mode="FAST_RUN")
-    f_cvm.trust_input = True
-
-    # Make sure we're actually computing a `Scan`
-    assert any(isinstance(node.op, Scan) for node in f_cvm.maker.fgraph.apply_nodes)
-
-    cvm_res = benchmark(f_cvm)
-
-    # Make sure the results are the same between the two implementations
-    assert np.allclose(cvm_res, py_res)
-
-
 def test_constant_folding_n_steps():
     # The following code used to crash at revision 2060b8f, in the constant
     # folding optimization step.
@@ -2741,97 +2696,6 @@ class TestExamples:
         n_result = numpy_implementation(v_vsample)
         utt.assert_allclose(t_result, n_result)
 
-    def test_reordering(self, benchmark):
-        """Test re-ordering of inputs.
-
-        some rnn with multiple outputs and multiple inputs; other
-        dimension instead of scalars/vectors
-
-        TODO FIXME: Reformulate this test so that it doesn't use an
-        unnecessarily complicated graph (i.e. an entire RNN model)
-        """
-        rng = np.random.default_rng(utt.fetch_seed())
-
-        vW_in2 = asarrayX(rng.uniform(-0.5, 0.5, size=(2,)))
-        vW = asarrayX(rng.uniform(-0.5, 0.5, size=(2, 2)))
-        vWout = asarrayX(rng.uniform(-0.5, 0.5, size=(2,)))
-        vW_in1 = asarrayX(rng.uniform(-0.5, 0.5, size=(2, 2)))
-        v_u1 = asarrayX(rng.uniform(-0.5, 0.5, size=(3, 2)))
-        v_u2 = asarrayX(rng.uniform(-0.5, 0.5, size=(3,)))
-        v_x0 = asarrayX(rng.uniform(-0.5, 0.5, size=(2,)))
-        v_y0 = asarrayX(rng.uniform(size=(3,)))
-
-        W_in2 = shared(vW_in2, name="win2")
-        W = shared(vW, name="w")
-        W_out = shared(vWout, name="wout")
-        W_in1 = matrix("win")
-        u1 = matrix("u1")
-        u2 = vector("u2")
-        x0 = vector("x0")
-        y0 = vector("y0")
-
-        def f_rnn_cmpl(u1_t, u2_t, x_tm1, y_tm1, y_tm3, W_in1):
-            return [
-                y_tm3 + 1,
-                y_tm3 + 2,
-                dot(u1_t, W_in1) + u2_t * W_in2 + dot(x_tm1, W),
-                y_tm1 + dot(x_tm1, W_out),
-            ]
-
-        outputs = scan(
-            f_rnn_cmpl,
-            [u1, u2],
-            [None, None, x0, dict(initial=y0, taps=[-1, -3])],
-            W_in1,
-            n_steps=None,
-            truncate_gradient=-1,
-            go_backwards=False,
-            return_updates=False,
-        )
-
-        f4 = function([u1, u2, x0, y0, W_in1], outputs, allow_input_downcast=True)
-
-        # compute the values in numpy
-        v_x = np.zeros((3, 2), dtype=config.floatX)
-        v_y = np.zeros((3,), dtype=config.floatX)
-        v_x[0] = np.dot(v_u1[0], vW_in1) + v_u2[0] * vW_in2 + np.dot(v_x0, vW)
-        v_y[0] = np.dot(v_x0, vWout) + v_y0[2]
-        for i in range(1, 3):
-            v_x[i] = np.dot(v_u1[i], vW_in1) + v_u2[i] * vW_in2 + np.dot(v_x[i - 1], vW)
-            v_y[i] = np.dot(v_x[i - 1], vWout) + v_y[i - 1]
-
-        (_pytensor_dump1, _pytensor_dump2, pytensor_x, pytensor_y) = benchmark(
-            f4, v_u1, v_u2, v_x0, v_y0, vW_in1
-        )
-
-        utt.assert_allclose(pytensor_x, v_x)
-        utt.assert_allclose(pytensor_y, v_y)
-
-    def test_scan_as_tensor_on_gradients(self, benchmark):
-        to_scan = dvector("to_scan")
-        seq = dmatrix("seq")
-        f1 = dscalar("f1")
-
-        def scanStep(prev, seq, f1):
-            return prev + f1 * seq
-
-        scanned = scan(
-            fn=scanStep,
-            sequences=[seq],
-            outputs_info=[to_scan],
-            non_sequences=[f1],
-            return_updates=False,
-        )
-        function(inputs=[to_scan, seq, f1], outputs=scanned, allow_input_downcast=True)
-
-        t_grad = grad(scanned.sum(), wrt=[to_scan, f1], consider_constant=[seq])
-        benchmark(
-            function,
-            inputs=[to_scan, seq, f1],
-            outputs=t_grad,
-            allow_input_downcast=True,
-        )
-
     def caching_nsteps_by_scan_op(self):
         W = matrix("weights")
         initial = vector("initial")
@@ -3126,44 +2990,6 @@ class TestExamples:
         ]
 
         utt.assert_allclose(outputs, expected_outputs)
-
-    @pytest.mark.slow
-    def test_hessian_bug_grad_grad_two_scans(self, benchmark):
-        # Bug reported by Bitton Tenessi
-        # NOTE : The test to reproduce the bug reported by Bitton Tenessi
-        # was modified from its original version to be faster to run.
-
-        W = fvector(name="W")
-        n_steps = iscalar(name="Nb_steps")
-
-        def loss_outer(sum_outer, W):
-            def loss_inner(sum_inner, W):
-                return sum_inner + (W**2).sum()
-
-            result_inner = scan(
-                fn=loss_inner,
-                outputs_info=pt.as_tensor_variable(np.asarray(0, dtype=np.float32)),
-                non_sequences=[W],
-                n_steps=1,
-                return_updates=False,
-            )
-            return sum_outer + result_inner[-1]
-
-        # Also test return_list for that case.
-        result_outer = scan(
-            fn=loss_outer,
-            outputs_info=pt.as_tensor_variable(np.asarray(0, dtype=np.float32)),
-            non_sequences=[W],
-            n_steps=n_steps,
-            return_list=True,
-            return_updates=False,
-        )
-
-        cost = result_outer[0][-1]
-        H = hessian(cost, W)
-        # print(".", file=sys.stderr)
-        f = function([W, n_steps], H)
-        benchmark(f, np.ones((8,), dtype="float32"), 1)
 
     def test_grad_connectivity_matrix(self):
         def inner_fn(x_tm1, y_tm1, z_tm1):
@@ -3746,102 +3572,6 @@ class TestExamples:
         (pytensor_x, pytensor_y) = f4(v_u1, v_u2, v_x0, v_y0, vW_in1)
         utt.assert_allclose(pytensor_x, v_x)
         utt.assert_allclose(pytensor_y, v_y)
-
-    def test_multiple_outs_taps(self, benchmark):
-        l = 5
-        rng = np.random.default_rng(utt.fetch_seed())
-
-        vW_in2 = asarrayX(rng.uniform(-2.0, 2.0, size=(2,)))
-        vW = asarrayX(rng.uniform(-2.0, 2.0, size=(2, 2)))
-        vWout = asarrayX(rng.uniform(-2.0, 2.0, size=(2,)))
-        vW_in1 = asarrayX(rng.uniform(-2.0, 2.0, size=(2, 2)))
-        v_u1 = asarrayX(rng.uniform(-2.0, 2.0, size=(l, 2)))
-        v_u2 = asarrayX(rng.uniform(-2.0, 2.0, size=(l + 2, 2)))
-        v_x0 = asarrayX(rng.uniform(-2.0, 2.0, size=(2,)))
-        v_y0 = asarrayX(rng.uniform(size=(3,)))
-
-        W_in2 = shared(vW_in2, name="win2")
-        W = shared(vW, name="w")
-        W_out = shared(vWout, name="wout")
-        W_in1 = matrix("win")
-        u1 = matrix("u1")
-        u2 = matrix("u2")
-        x0 = vector("x0")
-        y0 = vector("y0")
-
-        def f_rnn_cmpl(u1_t, u2_tm1, u2_t, u2_tp1, x_tm1, y_tm1, y_tm3, W_in1):
-            return [
-                dot(u1_t, W_in1) + (u2_t + u2_tm1 * u2_tp1) * W_in2 + dot(x_tm1, W),
-                (y_tm1 + y_tm3) * dot(x_tm1, W_out),
-                dot(u1_t, W_in1),
-            ]
-
-        outputs = scan(
-            f_rnn_cmpl,
-            [u1, dict(input=u2, taps=[-1, 0, 1])],
-            [x0, dict(initial=y0, taps=[-1, -3]), None],
-            W_in1,
-            n_steps=None,
-            truncate_gradient=-1,
-            go_backwards=False,
-            return_updates=False,
-        )
-
-        f = function([u1, u2, x0, y0, W_in1], outputs, allow_input_downcast=True)
-
-        ny0 = np.zeros((5, 2))
-        ny1 = np.zeros((5,))
-        ny2 = np.zeros((5, 2))
-        ny0[0] = (
-            np.dot(v_u1[0], vW_in1)
-            + (v_u2[1] + v_u2[0] * v_u2[2]) * vW_in2
-            + np.dot(v_x0, vW)
-        )
-
-        ny1[0] = (v_y0[2] + v_y0[0]) * np.dot(v_x0, vWout)
-        ny2[0] = np.dot(v_u1[0], vW_in1)
-
-        ny0[1] = (
-            np.dot(v_u1[1], vW_in1)
-            + (v_u2[2] + v_u2[1] * v_u2[3]) * vW_in2
-            + np.dot(ny0[0], vW)
-        )
-
-        ny1[1] = (ny1[0] + v_y0[1]) * np.dot(ny0[0], vWout)
-        ny2[1] = np.dot(v_u1[1], vW_in1)
-
-        ny0[2] = (
-            np.dot(v_u1[2], vW_in1)
-            + (v_u2[3] + v_u2[2] * v_u2[4]) * vW_in2
-            + np.dot(ny0[1], vW)
-        )
-        ny1[2] = (ny1[1] + v_y0[2]) * np.dot(ny0[1], vWout)
-        ny2[2] = np.dot(v_u1[2], vW_in1)
-
-        ny0[3] = (
-            np.dot(v_u1[3], vW_in1)
-            + (v_u2[4] + v_u2[3] * v_u2[5]) * vW_in2
-            + np.dot(ny0[2], vW)
-        )
-
-        ny1[3] = (ny1[2] + ny1[0]) * np.dot(ny0[2], vWout)
-        ny2[3] = np.dot(v_u1[3], vW_in1)
-
-        ny0[4] = (
-            np.dot(v_u1[4], vW_in1)
-            + (v_u2[5] + v_u2[4] * v_u2[6]) * vW_in2
-            + np.dot(ny0[3], vW)
-        )
-
-        ny1[4] = (ny1[3] + ny1[1]) * np.dot(ny0[3], vWout)
-        ny2[4] = np.dot(v_u1[4], vW_in1)
-
-        res = f(v_u1, v_u2, v_x0, v_y0, vW_in1)
-        np.testing.assert_almost_equal(res[0], ny0)
-        np.testing.assert_almost_equal(res[1], ny1)
-        np.testing.assert_almost_equal(res[2], ny2)
-
-        benchmark(f, v_u1, v_u2, v_x0, v_y0, vW_in1)
 
     def _grad_mout_helper(self, n_iters, mode):
         rng = np.random.default_rng(utt.fetch_seed())

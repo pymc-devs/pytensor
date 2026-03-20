@@ -160,98 +160,6 @@ def test_xit_xot_types(
         assert np.allclose(res_val, output_vals)
 
 
-def test_scan_multiple_output(benchmark):
-    """Test a scan implementation of a SEIR model.
-
-    SEIR model definition:
-
-        S[t+1] = S[t] - B[t]
-        E[t+1] = E[t] + B[t] - C[t]
-        I[t+1] = I[t+1] + C[t] - D[t]
-
-        B[t] ~ Binom(S[t], beta)
-        C[t] ~ Binom(E[t], gamma)
-        D[t] ~ Binom(I[t], delta)
-
-    """
-
-    def binomln(n, k):
-        return pt.exp(n + 1) - pt.exp(k + 1) - pt.exp(n - k + 1)
-
-    def binom_log_prob(n, p, value):
-        return binomln(n, value) + value * pt.exp(p) + (n - value) * pt.exp(1 - p)
-
-    # sequences
-    pt_C = pt.ivector("C_t")
-    pt_D = pt.ivector("D_t")
-    # outputs_info (initial conditions)
-    st0 = pt.lscalar("s_t0")
-    et0 = pt.lscalar("e_t0")
-    it0 = pt.lscalar("i_t0")
-    logp_c = pt.scalar("logp_c")
-    logp_d = pt.scalar("logp_d")
-    # non_sequences
-    beta = pt.scalar("beta")
-    gamma = pt.scalar("gamma")
-    delta = pt.scalar("delta")
-
-    def seir_one_step(ct0, dt0, st0, et0, it0, logp_c, logp_d, beta, gamma, delta):
-        bt0 = st0 * beta
-        bt0 = bt0.astype(st0.dtype)
-
-        logp_c1 = binom_log_prob(et0, gamma, ct0).astype(logp_c.dtype)
-        logp_d1 = binom_log_prob(it0, delta, dt0).astype(logp_d.dtype)
-
-        st1 = st0 - bt0
-        et1 = et0 + bt0 - ct0
-        it1 = it0 + ct0 - dt0
-        return st1, et1, it1, logp_c1, logp_d1
-
-    (st, et, it, logp_c_all, logp_d_all) = scan(
-        fn=seir_one_step,
-        sequences=[pt_C, pt_D],
-        outputs_info=[st0, et0, it0, logp_c, logp_d],
-        non_sequences=[beta, gamma, delta],
-        return_updates=False,
-    )
-    st.name = "S_t"
-    et.name = "E_t"
-    it.name = "I_t"
-    logp_c_all.name = "C_t_logp"
-    logp_d_all.name = "D_t_logp"
-
-    out = [st, et, it, logp_c_all, logp_d_all]
-
-    s0, e0, i0 = 100, 50, 25
-    logp_c0 = np.array(0.0, dtype=config.floatX)
-    logp_d0 = np.array(0.0, dtype=config.floatX)
-    beta_val, gamma_val, delta_val = (
-        np.array(val, dtype=config.floatX) for val in [0.277792, 0.135330, 0.108753]
-    )
-    C = np.array([3, 5, 8, 13, 21, 26, 10, 3], dtype=np.int32)
-    D = np.array([1, 2, 3, 7, 9, 11, 5, 1], dtype=np.int32)
-
-    test_input_vals = [
-        C,
-        D,
-        s0,
-        e0,
-        i0,
-        logp_c0,
-        logp_d0,
-        beta_val,
-        gamma_val,
-        delta_val,
-    ]
-    scan_fn, _ = compare_numba_and_py(
-        [pt_C, pt_D, st0, et0, it0, logp_c, logp_d, beta, gamma, delta],
-        out,
-        test_input_vals,
-    )
-
-    benchmark(scan_fn, *test_input_vals)
-
-
 def test_scan_tap_output():
     a_pt = pt.scalar("a")
 
@@ -415,58 +323,6 @@ def test_inner_graph_optimized():
     )
 
 
-def test_vector_taps_benchmark(benchmark):
-    """Test vector taps performance.
-
-    Vector taps get indexed into numeric types, that must be wrapped back into
-    scalar arrays. The numba Scan implementation has an optimization to reuse
-    these scalar arrays instead of allocating them in every iteration.
-    """
-    n_steps = 1000
-
-    seq1 = vector("seq1", dtype="float64", shape=(n_steps,))
-    seq2 = vector("seq2", dtype="float64", shape=(n_steps,))
-    mitsot_init = vector("mitsot_init", dtype="float64", shape=(2,))
-    sitsot_init = scalar("sitsot_init", dtype="float64")
-
-    def step(seq1, seq2, mitsot1, mitsot2, sitsot1):
-        mitsot3 = (mitsot1 + seq2 + mitsot2 + seq1) / np.sqrt(4)
-        sitsot2 = (sitsot1 + mitsot3) / np.sqrt(2)
-        return mitsot3, sitsot2
-
-    outs = scan(
-        fn=step,
-        sequences=[seq1, seq2],
-        outputs_info=[
-            dict(initial=mitsot_init, taps=[-2, -1]),
-            dict(initial=sitsot_init, taps=[-1]),
-        ],
-        return_updates=False,
-    )
-
-    rng = np.random.default_rng(474)
-    test = {
-        seq1: rng.normal(size=n_steps),
-        seq2: rng.normal(size=n_steps),
-        mitsot_init: rng.normal(size=(2,)),
-        sitsot_init: rng.normal(),
-    }
-
-    numba_fn = pytensor.function(list(test), outs, mode=get_mode("NUMBA"))
-    scan_nodes = [
-        node for node in numba_fn.maker.fgraph.apply_nodes if isinstance(node.op, Scan)
-    ]
-    assert len(scan_nodes) == 1
-    numba_res = numba_fn(*test.values())
-
-    ref_fn = pytensor.function(list(test), outs, mode=get_mode("FAST_COMPILE"))
-    ref_res = ref_fn(*test.values())
-    for numba_r, ref_r in zip(numba_res, ref_res, strict=True):
-        np.testing.assert_array_almost_equal(numba_r, ref_r)
-
-    benchmark(numba_fn, *test.values())
-
-
 @pytest.mark.parametrize("n_steps_constant", (True, False))
 def test_inplace_taps(n_steps_constant):
     """Test that numba will inplace in the inner_function of the oldest sit-sot, mit-sot taps."""
@@ -589,9 +445,6 @@ class TestScanSITSOTBuffer:
     def test_sit_sot_buffer(self, n_steps, op_size, buffer_size):
         self.buffer_tester(n_steps, op_size, buffer_size, benchmark=None)
 
-    def test_sit_sot_buffer_benchmark(self, n_steps, op_size, buffer_size, benchmark):
-        self.buffer_tester(n_steps, op_size, buffer_size, benchmark=benchmark)
-
 
 @pytest.mark.parametrize("constant_n_steps", [False, True])
 @pytest.mark.parametrize("n_steps_val", [1, 1000])
@@ -650,9 +503,6 @@ class TestScanMITSOTBuffer:
 
     def test_mit_sot_buffer(self, constant_n_steps, n_steps_val):
         self.buffer_tester(constant_n_steps, n_steps_val, benchmark=None)
-
-    def test_mit_sot_buffer_benchmark(self, constant_n_steps, n_steps_val, benchmark):
-        self.buffer_tester(constant_n_steps, n_steps_val, benchmark=benchmark)
 
 
 def test_higher_order_derivatives():

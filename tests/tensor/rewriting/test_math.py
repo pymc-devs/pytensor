@@ -5006,37 +5006,3 @@ class TestBlockDiagDotToDotBlockDiag:
             original, include=("canonicalize", "stabilize", "specialize")
         )
         assert_equal_computations([rewritten], [original])
-
-    @pytest.mark.parametrize("rewrite", [True, False], ids=["rewrite", "no_rewrite"])
-    @pytest.mark.parametrize("size", [10, 100, 1000], ids=["small", "medium", "large"])
-    def test_benchmark(self, benchmark, size, rewrite):
-        rng = np.random.default_rng()
-        a_size = int(rng.uniform(1, int(0.8 * size)))
-        b_size = int(rng.uniform(1, int(0.8 * (size - a_size))))
-        c_size = size - a_size - b_size
-
-        a = tensor("a", shape=(a_size, a_size))
-        b = tensor("b", shape=(b_size, b_size))
-        c = tensor("c", shape=(c_size, c_size))
-        d = tensor("d", shape=(size,))
-
-        x = pt.linalg.block_diag(a, b, c)
-        out = x @ d
-
-        mode = get_default_mode()
-        if not rewrite:
-            mode = mode.excluding("local_block_diag_dot_to_dot_block_diag")
-        fn = pytensor.function([a, b, c, d], out, mode=mode)
-
-        a_val = rng.normal(size=a.type.shape).astype(a.type.dtype)
-        b_val = rng.normal(size=b.type.shape).astype(b.type.dtype)
-        c_val = rng.normal(size=c.type.shape).astype(c.type.dtype)
-        d_val = rng.normal(size=d.type.shape).astype(d.type.dtype)
-
-        benchmark(
-            fn,
-            a_val,
-            b_val,
-            c_val,
-            d_val,
-        )

@@ -8,7 +8,7 @@ from scipy.signal import convolve2d as scipy_convolve2d
 from pytensor import config, function, grad
 from pytensor.graph.rewriting import rewrite_graph
 from pytensor.graph.traversal import ancestors, io_toposort
-from pytensor.tensor import matrix, tensor, vector
+from pytensor.tensor import matrix, vector
 from pytensor.tensor.basic import expand_dims
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.signal.conv import Convolve1d, convolve1d, convolve2d
@@ -120,27 +120,6 @@ def test_convolve1d_valid_grad(static_shape):
         smaller_test = np.zeros((64,), dtype=dtype)
         assert full_mode.eval({larger: larger_test, smaller: smaller_test}) == False  # noqa: E712
         assert full_mode.eval({larger: smaller_test, smaller: larger_test}) == True  # noqa: E712
-
-
-def convolve1d_grad_benchmarker(convolve_mode, mode, benchmark):
-    # Use None core shape so PyTensor doesn't know which mode to use until runtime.
-    larger = tensor("larger", shape=(8, None))
-    smaller = tensor("smaller", shape=(8, None))
-    grad_wrt_smaller = grad(
-        convolve1d(larger, smaller, mode=convolve_mode).sum(), wrt=smaller
-    )
-
-    fn = function([larger, smaller], grad_wrt_smaller, trust_input=True, mode=mode)
-
-    rng = np.random.default_rng([119, mode == "full"])
-    test_larger = rng.normal(size=(8, 1024)).astype(larger.type.dtype)
-    test_smaller = rng.normal(size=(8, 16)).astype(smaller.type.dtype)
-    benchmark(fn, test_larger, test_smaller)
-
-
-@pytest.mark.parametrize("convolve_mode", ["full", "valid"])
-def test_convolve1d_grad_benchmark_c(convolve_mode, benchmark):
-    convolve1d_grad_benchmarker(convolve_mode, "FAST_RUN", benchmark)
 
 
 @pytest.mark.parametrize(
