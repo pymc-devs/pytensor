@@ -72,6 +72,8 @@ def list_all_equal(x, y):
         def all_equal(x, y):
             return (
                 x.shape == y.shape
+                and len(x.data) == len(y.data)
+                and len(x.indices) == len(y.indices)
                 and (x.data == y.data).all()
                 and (x.indptr == y.indptr).all()
                 and (x.indices == y.indices).all()
