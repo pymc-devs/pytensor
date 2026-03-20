@@ -81,16 +81,6 @@ def test_cholesky():
     check_upper_triangular(pd, ch_f)
 
 
-def test_cholesky_performance(benchmark):
-    rng = np.random.default_rng(utt.fetch_seed())
-    r = rng.standard_normal((10, 10)).astype(config.floatX)
-    pd = np.dot(r, r.T)
-    x = matrix()
-    chol = cholesky(x)
-    ch_f = function([x], chol)
-    benchmark(ch_f, pd)
-
-
 def test_cholesky_empty():
     empty = np.empty([0, 0], dtype=config.floatX)
     x = matrix()

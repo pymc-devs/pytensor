@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor import In, Mode, Out, function, grad
+from pytensor import Mode, function, grad
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable, equal_computations
@@ -381,20 +381,6 @@ class TestReshape(utt.InferShapeTester, utt.OptimizationTestMixin):
             fn(test_shape),
             np.arange(8).reshape(test_shape),
         )
-
-    def test_benchmark(self, benchmark):
-        x = tensor3("x")
-        x_val = np.random.random((2, 3, 4)).astype(config.floatX)
-        y1 = x.reshape((6, 4))
-        y2 = x.reshape((2, 12))
-        y3 = x.reshape((-1,))
-        # Borrow to avoid deepcopy overhead
-        reshape_fn = pytensor.function(
-            [In(x, borrow=True)],
-            [Out(y1, borrow=True), Out(y2, borrow=True), Out(y3, borrow=True)],
-        )
-        reshape_fn.trust_input = True
-        benchmark(reshape_fn, x_val)
 
 
 def test_shape_i_hash():

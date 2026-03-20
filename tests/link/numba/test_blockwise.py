@@ -9,7 +9,7 @@ from pytensor.tensor.basic import Alloc, ARange, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.nlinalg import SVD, Det
-from pytensor.tensor.slinalg import Cholesky, cholesky
+from pytensor.tensor.slinalg import Cholesky
 from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
 
 
@@ -50,17 +50,6 @@ def test_non_square_blockwise():
 
     with pytest.raises(ValueError):
         fn([3, 4, 5])
-
-
-def test_blockwise_benchmark(benchmark):
-    x = tensor(shape=(5, 3, 3))
-    out = cholesky(x)
-    assert isinstance(out.owner.op, Blockwise)
-
-    fn = function([x], out, mode="NUMBA")
-    x_test = np.eye(3) * np.arange(1, 6)[:, None, None]
-    fn(x_test)  # JIT compile
-    benchmark(fn, x_test)
 
 
 def test_repeated_args():
