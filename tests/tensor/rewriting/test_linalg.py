@@ -19,6 +19,7 @@ from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
+    Eig,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
@@ -1127,4 +1128,277 @@ def test_scalar_solve_to_division_rewrite(
     c_val = np.vectorize(np.linalg.solve, signature=signature)(a_val, b_val)
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector_b", "matrix_b"])
+def test_solve_diag_from_diag(b_ndim):
+    rng = np.random.default_rng(sum(map(ord, "test_solve_diag_from_diag")) + b_ndim)
+    d = pt.vector("d")
+    b = pt.vector("b") if b_ndim == 1 else pt.matrix("b")
+    x = solve(pt.diag(d), b, b_ndim=b_ndim)
+
+    f = function([d, b], x, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
+        for node in f.maker.fgraph.apply_nodes
+    )
+    f_ref = function([d, b], x, mode=get_default_mode().excluding("rewrite_solve_diag"))
+
+    d_val = rng.uniform(1, 5, size=(5,)).astype(config.floatX)
+    b_val = (
+        rng.standard_normal(size=(5,)).astype(config.floatX)
+        if b_ndim == 1
+        else rng.standard_normal(size=(5, 3)).astype(config.floatX)
+    )
+    expected = b_val / d_val if b_ndim == 1 else b_val / d_val[:, None]
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
+    assert_allclose(f(d_val, b_val), expected, atol=atol, rtol=rtol)
+    assert_allclose(f(d_val, b_val), f_ref(d_val, b_val), atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector_b", "matrix_b"])
+def test_solve_diag_from_diag_batched(b_ndim):
+    rng = np.random.default_rng(
+        sum(map(ord, "test_solve_diag_from_diag_batched")) + b_ndim
+    )
+    d = pt.vector("d")  # shape (N,) — the diagonal; batch dim lives in b
+    b = pt.matrix("b") if b_ndim == 1 else pt.tensor("b", shape=(None, None, None))
+    x = solve(pt.diag(d), b, b_ndim=b_ndim)
+
+    f = function([d, b], x, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
+        for node in f.maker.fgraph.apply_nodes
+    )
+    f_ref = function([d, b], x, mode=get_default_mode().excluding("rewrite_solve_diag"))
+
+    B, N = 4, 5
+    d_val = rng.uniform(1, 5, size=(N,)).astype(config.floatX)
+    b_val = (
+        rng.standard_normal(size=(B, N)).astype(config.floatX)
+        if b_ndim == 1
+        else rng.standard_normal(size=(B, N, 3)).astype(config.floatX)
+    )
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
+    assert_allclose(f(d_val, b_val), f_ref(d_val, b_val), atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=["vector_b", "matrix_b"])
+@pytest.mark.parametrize(
+    "x_shape",
+    [(), (5,), (5, 5)],
+    ids=["scalar", "vector", "matrix"],
+)
+def test_solve_diag_from_eye_mul(b_ndim, x_shape):
+    rng = np.random.default_rng(
+        sum(map(ord, "test_solve_diag_from_eye_mul")) + b_ndim + sum(x_shape)
+    )
+    n = 5
+    x = pt.tensor("x", shape=x_shape)
+    a = pt.eye(n) * x
+    b = pt.vector("b") if b_ndim == 1 else pt.matrix("b")
+    sol = solve(a, b, b_ndim=b_ndim)
+
+    f = function([x, b], sol, mode="FAST_RUN")
+    assert not any(
+        isinstance(node.op, Blockwise) and isinstance(node.op.core_op, Solve)
+        for node in f.maker.fgraph.apply_nodes
+    )
+    f_ref = function(
+        [x, b], sol, mode=get_default_mode().excluding("rewrite_solve_diag")
+    )
+
+    x_val = rng.uniform(1, 5, size=x_shape).astype(config.floatX)
+    b_val = (
+        rng.standard_normal(size=(n,)).astype(config.floatX)
+        if b_ndim == 1
+        else rng.standard_normal(size=(n, 3)).astype(config.floatX)
+    )
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
+    assert_allclose(f(x_val, b_val), f_ref(x_val, b_val), atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    [
+        "both_0d_diag",
+        "both_1d_diag",
+        "left_0d_diag",
+        "left_1d_diag_vector_r",
+        "left_1d_diag_matrix_r",
+        "right_diag",
+    ],
+)
+def test_rewrite_dot_diag(case_id):
+    rng = np.random.default_rng(sum(map(ord, "test_rewrite_dot_diag" + case_id)))
+
+    if case_id == "both_0d_diag":
+        # dl.ndim == 0 and dr.ndim == 0: (eye*scalar) · (eye*scalar)
+        s1, s2 = pt.scalar("s1"), pt.scalar("s2")
+        inputs = [s1, s2]
+        out = pt.dot(pt.eye(3) * s1, pt.eye(3) * s2)
+        vals = [
+            rng.uniform(1, 5, size=()).astype(config.floatX),
+            rng.uniform(1, 5, size=()).astype(config.floatX),
+        ]
+    elif case_id == "both_1d_diag":
+        # both diagonal 1D: diag(d1) · diag(d2)
+        d1, d2 = pt.vector("d1"), pt.vector("d2")
+        inputs = [d1, d2]
+        out = pt.dot(pt.diag(d1), pt.diag(d2))
+        vals = [
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+        ]
+    elif case_id == "left_0d_diag":
+        # dl.ndim == 0: (eye*scalar) · matrix
+        s, M = pt.scalar("s"), pt.matrix("M")
+        inputs = [s, M]
+        out = pt.dot(pt.eye(3) * s, M)
+        vals = [
+            rng.uniform(1, 5, size=()).astype(config.floatX),
+            rng.uniform(size=(3, 4)).astype(config.floatX),
+        ]
+    elif case_id == "left_1d_diag_vector_r":
+        # r.ndim == 1: diag(d) · vector
+        d, v = pt.vector("d"), pt.vector("v")
+        inputs = [d, v]
+        out = pt.dot(pt.diag(d), v)
+        vals = [
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+            rng.uniform(size=(3,)).astype(config.floatX),
+        ]
+    elif case_id == "left_1d_diag_matrix_r":
+        # left diagonal, matrix r: diag(d) · M
+        d, M = pt.vector("d"), pt.matrix("M")
+        inputs = [d, M]
+        out = pt.dot(pt.diag(d), M)
+        vals = [
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+            rng.uniform(size=(3, 4)).astype(config.floatX),
+        ]
+    elif case_id == "right_diag":
+        # right diagonal: M · diag(d)
+        M, d = pt.matrix("M"), pt.vector("d")
+        inputs = [M, d]
+        out = pt.dot(M, pt.diag(d))
+        vals = [
+            rng.uniform(size=(3, 3)).astype(config.floatX),
+            rng.uniform(1, 5, size=(3,)).astype(config.floatX),
+        ]
+    f = function(inputs, out, mode="FAST_RUN")
+    assert not any(isinstance(node.op, Dot) for node in f.maker.fgraph.apply_nodes)
+
+    f_ref = function(inputs, out, mode=get_default_mode().excluding("rewrite_dot_diag"))
+    atol = rtol = 1e-3 if config.floatX == "float32" else 1e-8
+    assert_allclose(f(*vals), f_ref(*vals), atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(), (7,), (1, 7), (7, 1), (7, 7)],
+    ids=["scalar", "vector", "row_vec", "col_vec", "matrix"],
+)
+def test_eig_diag_from_eye_mul(shape):
+    # Initializing x based on scalar/vector/matrix
+    x = pt.tensor("x", shape=shape)
+    y = pt.eye(7) * x
+
+    # Calculating eigval and eigvec using pt.linalg.eig
+    eigval, eigvec = pt.linalg.eig(y)
+
+    # REWRITE TEST
+    f_rewritten = function([x], [eigval, eigvec], mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    assert not any(
+        isinstance(node.op, Eig) or isinstance(getattr(node.op, "core_op", None), Eig)
+        for node in nodes
+    )
+
+    # NUMERIC VALUE TEST
+    if len(shape) == 0:
+        x_test = np.array(np.random.rand()).astype(config.floatX)
+    elif len(shape) == 1:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    else:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+
+    x_test_matrix = np.eye(7) * x_test
+    eigval, eigvec = np.linalg.eig(x_test_matrix)
+    rewritten_eigval, rewritten_eigvec = f_rewritten(x_test)
+
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        eigvec,
+        rewritten_eigvec,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_eig_eye():
+    n = pt.iscalar("n")
+    x = pt.eye(n)
+    eigval, eigvec = pt.linalg.eig(x)
+
+    # REWRITE TEST
+    f_rewritten = function([n], [eigval, eigvec], mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(
+        isinstance(node.op, Eig) or isinstance(getattr(node.op, "core_op", None), Eig)
+        for node in nodes
+    )
+
+    # NUMERIC VALUE TEST
+    n_test = 10
+    x_test = np.eye(n_test)
+    eigval, eigvec = np.linalg.eig(x_test)
+    rewritten_eigval, rewritten_eigvec = f_rewritten(n_test)
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        eigvec,
+        rewritten_eigvec,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_eig_diag():
+    x = pt.tensor("x", shape=(None,))
+    x_diag = pt.diag(x)
+    eigval, eigvec = pt.linalg.eig(x_diag)
+
+    # REWRITE TEST
+    f_rewritten = function([x], [eigval, eigvec], mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, Eig) for node in nodes)
+
+    # NUMERIC VALUE TEST
+    x_test = np.random.rand(7).astype(config.floatX)
+    x_test_matrix = np.eye(7) * x_test
+    eigval, eigvec = np.linalg.eig(x_test_matrix)
+    rewritten_eigval, rewritten_eigvec = f_rewritten(x_test)
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        eigvec,
+        rewritten_eigvec,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
