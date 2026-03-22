@@ -1215,7 +1215,8 @@ def rewrite_eig_diag(fgraph, node):
         and AllocDiag.is_offset_zero(inputs.owner)
     ):
         eigval_rewritten = inputs.owner.inputs[0].astype(node.outputs[0].dtype)
-        eigvec_rewritten = pt.eye(inputs.shape[-1], dtype=node.outputs[1].dtype)
+        base_eye = pt.eye(inputs.shape[-1], dtype=node.outputs[1].dtype)
+        eigvec_rewritten = pt.broadcast_to(base_eye, inputs.shape)
         return [eigval_rewritten, eigvec_rewritten]
 
     # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
@@ -1229,21 +1230,29 @@ def rewrite_eig_diag(fgraph, node):
     if len(non_eye_inputs) != 1:
         return None
 
-    eye_input, non_eye_input = eye_input, non_eye_inputs[0]
-    # eigval_rewritten = pt.diag(non_eye_input)
-    eigvec_rewritten = eye_input.astype(node.outputs[1].dtype)
+    _eye_input, non_eye_input = eye_input, non_eye_inputs[0]
+
+    n = inputs.shape[-1]
+    base_eye = pt.eye(n, dtype=node.outputs[1].dtype)
+    eigvec_rewritten = (
+        base_eye
+        if inputs.ndim == 2
+        else pt.broadcast_to(pt.shape_padleft(base_eye, inputs.ndim - 2), inputs.shape)
+    )
 
     # Checking if original x was scalar/vector/matrix
     if non_eye_input.type.broadcastable[-2:] == (True, True):
         # For scalar
         eigval_rewritten = pt.full(
-            (eye_input.shape[0],),
+            node.outputs[0].shape,
             non_eye_input.squeeze(axis=(-1, -2)),
             dtype=node.outputs[0].dtype,
         )
     elif non_eye_input.type.broadcastable[-2:] == (False, False):
-        # For Matrix
-        eigval_rewritten = pt.diag(non_eye_input).astype(node.outputs[0].dtype)
+        # For Matrix (including batched matrices)
+        eigval_rewritten = non_eye_input.diagonal(axis1=-1, axis2=-2).astype(
+            node.outputs[0].dtype
+        )
     else:
         # For vector
         eigval_rewritten = non_eye_input.squeeze().astype(node.outputs[0].dtype)

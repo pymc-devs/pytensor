@@ -1219,7 +1219,10 @@ def test_eig_diag():
     # REWRITE TEST
     f_rewritten = function([x], [eigval, eigvec], mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
-    assert not any(isinstance(node.op, Eig) for node in nodes)
+    assert not any(
+        isinstance(node.op, Eig) or isinstance(getattr(node.op, "core_op", None), Eig)
+        for node in nodes
+    )
 
     # NUMERIC VALUE TEST
     x_test = np.random.rand(7).astype(config.floatX)
