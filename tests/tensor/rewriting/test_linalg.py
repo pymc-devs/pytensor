@@ -1162,7 +1162,7 @@ def test_eig_diag_from_eye_mul(shape):
         x_test = np.random.rand(*shape).astype(config.floatX)
 
     x_test_matrix = np.eye(7) * x_test
-    eigval, eigvec = np.linalg.eig(x_test_matrix)
+    eigval, _ = np.linalg.eig(x_test_matrix)
     rewritten_eigval, rewritten_eigvec = f_rewritten(x_test)
 
     assert_allclose(
@@ -1172,8 +1172,8 @@ def test_eig_diag_from_eye_mul(shape):
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
     assert_allclose(
-        eigvec,
-        rewritten_eigvec,
+        x_test_matrix @ rewritten_eigvec,
+        rewritten_eigvec @ np.diag(rewritten_eigval),
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
@@ -1195,7 +1195,7 @@ def test_eig_eye():
     # NUMERIC VALUE TEST
     n_test = 10
     x_test = np.eye(n_test)
-    eigval, eigvec = np.linalg.eig(x_test)
+    eigval, _ = np.linalg.eig(x_test)
     rewritten_eigval, rewritten_eigvec = f_rewritten(n_test)
     assert_allclose(
         eigval,
@@ -1204,8 +1204,8 @@ def test_eig_eye():
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
     assert_allclose(
-        eigvec,
-        rewritten_eigvec,
+        x_test @ rewritten_eigvec,
+        rewritten_eigvec @ np.diag(rewritten_eigval),
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
@@ -1224,7 +1224,7 @@ def test_eig_diag():
     # NUMERIC VALUE TEST
     x_test = np.random.rand(7).astype(config.floatX)
     x_test_matrix = np.eye(7) * x_test
-    eigval, eigvec = np.linalg.eig(x_test_matrix)
+    eigval, _ = np.linalg.eig(x_test_matrix)
     rewritten_eigval, rewritten_eigvec = f_rewritten(x_test)
     assert_allclose(
         eigval,
@@ -1233,8 +1233,8 @@ def test_eig_diag():
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
     assert_allclose(
-        eigvec,
-        rewritten_eigvec,
+        x_test_matrix @ rewritten_eigvec,
+        rewritten_eigvec @ np.diag(rewritten_eigval),
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
