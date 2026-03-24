@@ -30,7 +30,7 @@ import numpy as np
 
 # we will abuse the lockfile mechanism when reading and writing the registry
 from pytensor.compile.compilelock import lock_ctx
-from pytensor.configdefaults import config, gcc_version_str
+from pytensor.configdefaults import config
 from pytensor.configparser import BoolParam, StrParam
 from pytensor.graph.op import Op
 from pytensor.utils import (
@@ -1817,10 +1817,6 @@ def std_lib_dirs():
     return std_lib_dirs_and_libs()[1]
 
 
-def gcc_version():
-    return gcc_version_str
-
-
 @is_GCCLLVMType
 def gcc_llvm() -> bool | None:
     """
@@ -2063,10 +2059,6 @@ class GCC_compiler(Compiler):
     supports_amdlibm = True
 
     @staticmethod
-    def version_str():
-        return config.cxx + " " + gcc_version_str
-
-    @staticmethod
     def compile_args(march_flags=True):
         cxxflags = [flag for flag in config.gcc__cxxflags.split(" ") if flag]
         if "-fopenmp" in cxxflags:
@@ -2266,7 +2258,7 @@ class GCC_compiler(Compiler):
                                     # OK
                                     continue
                                 # Check the version of GCC
-                                version = gcc_version_str.split(".")
+                                version = config.gcc_version_str.split(".")
                                 if len(version) != 3:
                                     # Unexpected, but should not be a problem
                                     continue

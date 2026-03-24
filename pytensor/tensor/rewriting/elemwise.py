@@ -9,7 +9,7 @@ from operator import or_
 from warnings import warn
 
 from pytensor.compile.aliasing import Supervisor
-from pytensor.compile.mode import get_target_language, optdb
+from pytensor.compile.mode import optdb
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.destroyhandler import DestroyHandler, inplace_candidates
@@ -517,6 +517,7 @@ def flatten_nested_add_mul(fgraph, node):
 
 def elemwise_max_operands_fct(node) -> int:
     # `Elemwise.perform` uses NumPy ufuncs and they are limited to 32 operands (inputs and outputs)
+    # FIXME: config.cxx is not a good criteria!
     if not config.cxx:
         return 32
     return 1024
@@ -999,10 +1000,6 @@ def local_careduce_fusion(fgraph, node):
     if len(fgraph.clients[elm_outputs[0]]) > 1:
         return False
 
-    # Don't form the fusion when the target language is Python
-    if get_target_language() == ("py",):
-        return False
-
     if not elm_scalar_op.supports_c_code(elm_inputs, elm_outputs):
         return None
 
@@ -1203,6 +1200,7 @@ fuse_seqopt.register(
     dfs_rewriter(local_careduce_fusion),
     "fast_run",
     "fusion",
+    "cxx_only",
     position=10,
 )
 fuse_seqopt.register(

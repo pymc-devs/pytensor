@@ -1630,13 +1630,6 @@ def round(a, mode=None):
     Default to half_to_even."""
     if mode is None:
         mode = "half_to_even"
-        if config.warn__round:
-            warnings.warn(
-                "pytensor.tensor.round() changed its default from"
-                " `half_away_from_zero` to `half_to_even` to have"
-                " the same default as NumPy. Use the PyTensor flag"
-                " `warn__round=False` to disable this warning."
-            )
     if mode == "half_away_from_zero":
         return round_half_away_from_zero(a)
     elif mode == "half_to_even":
