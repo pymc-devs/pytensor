@@ -2,7 +2,7 @@ from collections.abc import Callable
 from difflib import get_close_matches
 from typing import Literal, get_args
 
-from pytensor import Variable
+from pytensor.graph import Variable
 from pytensor.tensor.basic import as_tensor_variable, switch
 from pytensor.tensor.extra_ops import searchsorted
 from pytensor.tensor.functional import vectorize

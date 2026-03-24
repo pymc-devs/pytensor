@@ -1,8 +1,9 @@
 import pytest
 
-from pytensor import Variable, shared
+from pytensor import shared
 from pytensor import tensor as pt
 from pytensor.graph import Apply, ancestors, graph_inputs
+from pytensor.graph.basic import Variable
 from pytensor.graph.traversal import (
     apply_depends_on,
     explicit_graph_inputs,
