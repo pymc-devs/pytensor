@@ -7,6 +7,7 @@ from numpy.testing import assert_array_almost_equal
 import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
+from pytensor.graph.replace import clone_replace
 from pytensor.tensor.basic import arange, as_tensor_variable
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.nlinalg import (
@@ -147,7 +148,7 @@ class TestMatrixInverse(utt.InferShapeTester):
 
         with pytest.raises(ValueError):
             pytensor.gradient.Rop(
-                pytensor.clone_replace(y, replace={mx: break_op(mx)}),
+                clone_replace(y, replace={mx: break_op(mx)}),
                 mx,
                 mv,
                 use_op_rop_implementation=True,

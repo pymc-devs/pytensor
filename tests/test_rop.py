@@ -26,6 +26,7 @@ from pytensor.gradient import (
 )
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
+from pytensor.graph.replace import clone_replace
 from pytensor.tensor.math import argmax, dot
 from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.type import matrix, vector
@@ -135,7 +136,7 @@ class RopLopChecker:
         np.testing.assert_allclose(rop_through_lop_f(vx, vv), v_ref)
 
         self.check_nondiff_rop(
-            pytensor.clone_replace(y, replace={self.mx: break_op(self.mx)}),
+            clone_replace(y, replace={self.mx: break_op(self.mx)}),
             self.mx,
             self.mv,
         )
@@ -184,7 +185,7 @@ class RopLopChecker:
 
         if check_nondiff_rop:
             self.check_nondiff_rop(
-                pytensor.clone_replace(y, replace={self.x: break_op(self.x)}),
+                clone_replace(y, replace={self.x: break_op(self.x)}),
                 self.x,
                 self.v,
             )

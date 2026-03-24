@@ -6,7 +6,7 @@ import pytest
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor import graph_replace, shared
+from pytensor import shared
 from pytensor.compile import optdb
 from pytensor.compile.maker import function
 from pytensor.compile.mode import get_default_mode, get_mode
@@ -15,6 +15,7 @@ from pytensor.configdefaults import config
 from pytensor.graph import Op
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import graph_replace
 from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph

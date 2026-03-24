@@ -3,8 +3,9 @@ import contextlib
 import numpy as np
 import pytest
 
-from pytensor import Variable, config
+from pytensor import config
 from pytensor import tensor as pt
+from pytensor.graph.basic import Variable
 from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from tests.link.numba.test_basic import compare_numba_and_py
 

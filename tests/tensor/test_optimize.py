@@ -3,12 +3,14 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor import Variable, config, function
+from pytensor import config, function
 from pytensor.gradient import (
     DisconnectedInputError,
     disconnected_type,
 )
 from pytensor.graph import Apply, Op, Type
+from pytensor.graph.basic import Variable
+from pytensor.graph.replace import graph_replace
 from pytensor.tensor import alloc, scalar, scalar_from_tensor, tensor_from_scalar
 from pytensor.tensor.optimize import minimize, minimize_scalar, root, root_scalar
 from tests import unittest_tools as utt
@@ -249,7 +251,7 @@ def test_minimize_mvn_logp_mu_and_cov():
     )
 
     # This replace + gradient was the original source of the error in #1550, check that no longer raises
-    y_star = pytensor.graph_replace(neg_logp, {mu: mu_star})
+    y_star = graph_replace(neg_logp, {mu: mu_star})
     _ = pt.grad(y_star, [mu, cov, data])
 
     rng = np.random.default_rng(242)
