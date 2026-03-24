@@ -32,7 +32,8 @@ from typing import Any, Literal, TypeVar
 import numpy as np
 
 import pytensor.xtensor as px
-from pytensor import _as_symbolic, config
+from pytensor import config
+from pytensor.basic import _as_symbolic
 from pytensor.compile.sharedvalue import shared_constructor
 from pytensor.graph import Apply, Constant
 from pytensor.graph.basic import OptionalApplyType, Variable

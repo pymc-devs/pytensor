@@ -5,9 +5,9 @@ import scipy.stats as stats
 import pytensor
 import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
-from pytensor import clone_replace
 from pytensor.compile.maker import function
 from pytensor.compile.sharedvalue import shared
+from pytensor.graph.replace import clone_replace
 from pytensor.tensor.random.basic import RandomVariable
 from pytensor.tensor.random.type import RandomType
 from pytensor.tensor.random.utils import RandomStream
