@@ -1,6 +1,5 @@
 import logging
 import sys
-import warnings
 from copy import copy, deepcopy
 from functools import wraps
 from numbers import Number
@@ -10,7 +9,6 @@ import pytest
 
 import pytensor
 from pytensor.compile.debugmode import str_diagnostic
-from pytensor.configdefaults import config
 from pytensor.gradient import verify_grad as orig_verify_grad
 from pytensor.graph.basic import equal_computations
 from pytensor.tensor.math import _allclose
@@ -24,17 +22,13 @@ def fetch_seed(pseed=None):
     """
     Returns the seed to use for running the unit tests.
     If an explicit seed is given, it will be used for seeding numpy's rng.
-    If not, it will use config.unittest.rseed (its default value is 666).
-    If config.unittest.rseed is set to "random", it will seed the rng with
-    None, which is equivalent to seeding with a random seed.
+    If not, it will default to 666.
 
     Useful for seeding Generator objects.
     >>> rng = np.random.default_rng(fetch_seed())
     """
 
-    seed = pseed or config.unittests__rseed
-    if seed == "random":
-        seed = None
+    seed = pseed or 666
 
     try:
         if seed:
@@ -42,9 +36,6 @@ def fetch_seed(pseed=None):
         else:
             seed = None
     except ValueError:
-        warnings.warn(
-            "Error: config.unittests__rseed contains invalid seed, using None instead"
-        )
         seed = None
 
     return seed
@@ -346,11 +337,7 @@ class AttemptManyTimes:
         # of propagate the raised exception if it doesn't.
         @wraps(fct)
         def attempt_multiple_times(*args, **kwargs):
-            # Keep a copy of the current seed for unittests so that we can use
-            # a different seed for every run of the decorated test and restore
-            # the original after
-            original_seed = config.unittests__rseed
-            current_seed = original_seed
+            current_seed = 666
 
             # If the decorator has received only one, unnamed, argument
             # and that argument has an attribute _testMethodName, it means
@@ -373,8 +360,6 @@ class AttemptManyTimes:
             # raises an exception at every attempt, it fails.
             for i in range(self.n_attempts):
                 try:
-                    # Attempt to make the test use the current seed
-                    config.unittests__rseed = current_seed
                     if test_in_class and hasattr(class_instance, "setUp"):
                         class_instance.setup_method()
 
@@ -394,8 +379,6 @@ class AttemptManyTimes:
                         raise
 
                 finally:
-                    # Clean up after the test
-                    config.unittests__rseed = original_seed
                     if test_in_class and hasattr(class_instance, "teardown_method"):
                         class_instance.teardown_method()
 

@@ -1492,7 +1492,7 @@ class _Linker(LocalLinker):
             ]
 
         # Precompute some things for storage pre-allocation
-        def_val = int(config.unittests__rseed)
+        def_val = 666
 
         #####
         # This is the function that runs when you evaluate the graph
