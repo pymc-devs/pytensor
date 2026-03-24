@@ -30,6 +30,7 @@ from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.type import TensorType, ivector, scalar, tensor, vector
 from pytensor.tensor.type import continuous_dtypes as tensor_continuous_dtypes
 from pytensor.tensor.type import discrete_dtypes as tensor_discrete_dtypes
+from pytensor.tensor.variable import TensorVariable
 
 
 sparse_formats = ["csc", "csr"]
@@ -244,7 +245,7 @@ continuous_dtypes = complex_dtypes + float_dtypes
 discrete_dtypes = int_dtypes + uint_dtypes
 
 
-class CSMProperties(Op):
+class CSMProperties(Op[TensorVariable]):
     """Create arrays containing all the properties of a given sparse matrix.
 
     More specifically, this `Op` extracts the ``.data``, ``.indices``,
@@ -360,7 +361,7 @@ def csm_shape(csm):
     return csm_properties(csm)[3]
 
 
-class CSM(Op):
+class CSM(Op[TensorVariable]):
     """Construct a CSM matrix from constituent parts.
 
     Notes
@@ -504,7 +505,7 @@ CSC = CSM("csc")
 CSR = CSM("csr")
 
 
-class CSMGrad(Op):
+class CSMGrad(Op[TensorVariable]):
     """Compute the gradient of a CSM.
 
     Note
@@ -591,7 +592,7 @@ class CSMGrad(Op):
 csm_grad = CSMGrad
 
 
-class Cast(Op):
+class Cast(Op[TensorVariable]):
     __props__ = ("out_type",)
 
     def __init__(self, out_type):
@@ -669,7 +670,7 @@ def cast(variable, dtype):
     return Cast(dtype)(variable)
 
 
-class DenseFromSparse(Op):
+class DenseFromSparse(Op[TensorVariable]):
     """Convert a sparse matrix to a dense one.
 
     Notes
@@ -749,7 +750,7 @@ class DenseFromSparse(Op):
 dense_from_sparse = DenseFromSparse()
 
 
-class SparseFromDense(Op):
+class SparseFromDense(Op[TensorVariable]):
     """Convert a dense matrix to a sparse matrix."""
 
     __props__ = ()
@@ -815,7 +816,7 @@ csr_from_dense = SparseFromDense("csr")
 csc_from_dense = SparseFromDense("csc")
 
 
-class GetItemList(Op):
+class GetItemList(Op[TensorVariable]):
     """Select row of sparse matrix, returning them as a new sparse matrix."""
 
     __props__ = ()
@@ -862,7 +863,7 @@ class GetItemList(Op):
 get_item_list = GetItemList()
 
 
-class GetItemListGrad(Op):
+class GetItemListGrad(Op[TensorVariable]):
     __props__ = ()
 
     def infer_shape(self, fgraph, node, shapes):
@@ -905,7 +906,7 @@ class GetItemListGrad(Op):
 get_item_list_grad = GetItemListGrad()
 
 
-class GetItem2Lists(Op):
+class GetItem2Lists(Op[TensorVariable]):
     """Select elements of sparse matrix, returning them in a vector."""
 
     __props__ = ()
@@ -955,7 +956,7 @@ class GetItem2Lists(Op):
 get_item_2lists = GetItem2Lists()
 
 
-class GetItem2ListsGrad(Op):
+class GetItem2ListsGrad(Op[TensorVariable]):
     __props__ = ()
 
     def infer_shape(self, fgraph, node, shapes):
@@ -996,7 +997,7 @@ class GetItem2ListsGrad(Op):
 get_item_2lists_grad = GetItem2ListsGrad()
 
 
-class GetItem2d(Op):
+class GetItem2d(Op[TensorVariable]):
     """Implement a subtensor of sparse variable, returning a sparse matrix.
 
     If you want to take only one element of a sparse matrix see
@@ -1125,7 +1126,7 @@ class GetItem2d(Op):
 get_item_2d = GetItem2d()
 
 
-class GetItemScalar(Op):
+class GetItemScalar(Op[TensorVariable]):
     """Subtensor of a sparse variable that takes two scalars as index and returns a scalar.
 
     If you want to take a slice of a sparse matrix see `GetItem2d` that returns a
@@ -1186,7 +1187,7 @@ class GetItemScalar(Op):
 get_item_scalar = GetItemScalar()
 
 
-class Transpose(Op):
+class Transpose(Op[TensorVariable]):
     """Transpose of a sparse matrix.
 
     Notes
@@ -1246,7 +1247,7 @@ class Transpose(Op):
 transpose = Transpose()
 
 
-class ColScaleCSC(Op):
+class ColScaleCSC(Op[TensorVariable]):
     # Scale each columns of a sparse matrix by the corresponding
     # element of a dense vector
 
@@ -1292,7 +1293,7 @@ class ColScaleCSC(Op):
         return [ins_shapes[0]]
 
 
-class RowScaleCSC(Op):
+class RowScaleCSC(Op[TensorVariable]):
     # Scale each row of a sparse matrix by the corresponding element of
     # a dense vector
 
@@ -1400,7 +1401,7 @@ def row_scale(x, s):
     return col_scale(x.T, s).T
 
 
-class Diag(Op):
+class Diag(Op[TensorVariable]):
     """Extract the diagonal of a square sparse matrix as a dense vector.
 
     Notes
@@ -1454,7 +1455,7 @@ def square_diagonal(diag):
     return CSC(data, indices, indptr, ptb.as_tensor((n, n)))
 
 
-class EnsureSortedIndices(Op):
+class EnsureSortedIndices(Op[TensorVariable]):
     """Re-sort indices of a sparse matrix.
 
     CSR column indices are not necessarily sorted. Likewise
@@ -1539,7 +1540,7 @@ def clean(x):
     return ensure_sorted_indices(remove0(x))
 
 
-class Stack(Op):
+class Stack(Op[TensorVariable]):
     __props__ = ("format", "dtype")
 
     def __init__(self, format=None, dtype=None):
@@ -1750,7 +1751,7 @@ def vstack(blocks, format=None, dtype=None):
     return VStack(format=format, dtype=dtype)(*blocks)
 
 
-class Remove0(Op):
+class Remove0(Op[TensorVariable]):
     """Remove explicit zeros from a sparse matrix.
 
     Notes
@@ -1807,7 +1808,7 @@ class Remove0(Op):
 remove0 = Remove0()
 
 
-class ConstructSparseFromList(Op):
+class ConstructSparseFromList(Op[TensorVariable]):
     """Constructs a sparse matrix out of a list of 2-D matrix rows.
 
     Notes

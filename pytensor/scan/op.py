@@ -710,7 +710,7 @@ class ScanMethodsMixin:
                     )
 
 
-class Scan(Op, ScanMethodsMixin, HasInnerGraph):
+class Scan(Op[Variable], ScanMethodsMixin, HasInnerGraph):
     r"""An `Op` implementing `for` and `while` loops.
 
     This `Op` has an "inner-graph" that represents the steps performed during

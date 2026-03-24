@@ -151,7 +151,7 @@ def _check_runtime_broadcast_core(numerical_inputs, batch_bcast_patterns, batch_
             )
 
 
-class Blockwise(COp):
+class Blockwise(COp[TensorVariable]):
     """Generalizes a core `Op` to work with batched dimensions.
 
     TODO: C implementation?

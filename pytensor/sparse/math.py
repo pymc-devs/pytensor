@@ -15,6 +15,7 @@ from pytensor.link.c.op import COp
 from pytensor.sparse.type import SparseTensorType
 from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.type import TensorType, Variable, complex_dtypes, tensor
+from pytensor.tensor.variable import TensorVariable
 
 
 def structured_elemwise(tensor_op):
@@ -254,7 +255,7 @@ def conjugate(x):
 structured_conjugate = conj = conjugate
 
 
-class SpSum(Op):
+class SpSum(Op[TensorVariable]):
     """
 
     WARNING: judgement call...
@@ -374,7 +375,7 @@ def sp_sum(x, axis=None, sparse_grad=False):
     return SpSum(axis, sparse_grad)(x)
 
 
-class AddSS(Op):
+class AddSS(Op[TensorVariable]):
     # add(sparse, sparse).
     # see the doc of add() for more detail.
     __props__ = ()
@@ -411,7 +412,7 @@ class AddSS(Op):
 add_s_s = AddSS()
 
 
-class AddSSData(Op):
+class AddSSData(Op[TensorVariable]):
     """Add two sparse matrices assuming they have the same sparsity pattern.
 
     Notes
@@ -472,7 +473,7 @@ class AddSSData(Op):
 add_s_s_data = AddSSData()
 
 
-class AddSD(Op):
+class AddSD(Op[TensorVariable]):
     # add(sparse, sparse).
     # see the doc of add() for more detail.
     __props__ = ()
@@ -514,7 +515,7 @@ class AddSD(Op):
 add_s_d = AddSD()
 
 
-class StructuredAddSV(Op):
+class StructuredAddSV(Op[TensorVariable]):
     """Structured addition of a sparse matrix and a dense vector.
 
     The elements of the vector are only added to the corresponding
@@ -666,7 +667,7 @@ def sub(x, y):
 sub.__doc__ = subtract.__doc__
 
 
-class SparseSparseMultiply(Op):
+class SparseSparseMultiply(Op[TensorVariable]):
     # mul(sparse, sparse)
     # See the doc of mul() for more detail
     __props__ = ()
@@ -704,7 +705,7 @@ class SparseSparseMultiply(Op):
 mul_s_s = SparseSparseMultiply()
 
 
-class SparseDenseMultiply(Op):
+class SparseDenseMultiply(Op[TensorVariable]):
     # mul(sparse, dense)
     # See the doc of mul() for more detail
     __props__ = ()
@@ -793,7 +794,7 @@ class SparseDenseMultiply(Op):
 mul_s_d = SparseDenseMultiply()
 
 
-class SparseDenseVectorMultiply(Op):
+class SparseDenseVectorMultiply(Op[TensorVariable]):
     """Element-wise multiplication of sparse matrix by a broadcasted dense vector element wise.
 
     Notes
@@ -941,7 +942,7 @@ def mul(x, y):
 mul.__doc__ = multiply.__doc__
 
 
-class __ComparisonOpSS(Op):
+class __ComparisonOpSS(Op[TensorVariable]):
     """
     Used as a superclass for all comparisons between two sparses matrices.
 
@@ -991,7 +992,7 @@ class __ComparisonOpSS(Op):
         return [ins_shapes[0]]
 
 
-class __ComparisonOpSD(Op):
+class __ComparisonOpSD(Op[TensorVariable]):
     """
     Used as a superclass for all comparisons between sparse and dense matrix.
 
@@ -1195,7 +1196,7 @@ le = __ComparisonSwitch(less_equal_s_s, less_equal_s_d, greater_equal_s_d)
 ge = __ComparisonSwitch(greater_equal_s_s, greater_equal_s_d, less_equal_s_d)
 
 
-class TrueDot(Op):
+class TrueDot(Op[TensorVariable]):
     # TODO
     # Simplify code by splitting into DotSS and DotSD.
 
@@ -1335,7 +1336,7 @@ def true_dot(x, y, grad_preserves_dense=True):
         return psb.transpose(TrueDot(grad_preserves_dense)(y.T, x.T))
 
 
-class StructuredDot(Op):
+class StructuredDot(Op[TensorVariable]):
     __props__ = ()
 
     def make_node(self, a, b):
@@ -1466,7 +1467,7 @@ def structured_dot(x, y):
         return _structured_dot(y.T, x.T).T
 
 
-class StructuredDotGradCSC(COp):
+class StructuredDotGradCSC(COp[TensorVariable]):
     # Op that produces the grad of StructuredDot.
 
     # :param a_indices: Matrix indices
@@ -1601,7 +1602,7 @@ class StructuredDotGradCSC(COp):
 sdg_csc = StructuredDotGradCSC()
 
 
-class StructuredDotGradCSR(COp):
+class StructuredDotGradCSR(COp[TensorVariable]):
     # Op that produces the grad of StructuredDot.
 
     # :param a_indices: Matrix indices
@@ -1758,7 +1759,7 @@ def structured_dot_grad(sparse_A, dense_B, ga):
         raise NotImplementedError()
 
 
-class SamplingDot(Op):
+class SamplingDot(Op[TensorVariable]):
     """Compute the dot product ``dot(x, y.T) = z`` for only a subset of `z`.
 
     This is equivalent to ``p * (x . y.T)`` where ``*`` is the element-wise
@@ -1834,7 +1835,7 @@ class SamplingDot(Op):
 sampling_dot = SamplingDot()
 
 
-class Dot(Op):
+class Dot(Op[TensorVariable]):
     __props__ = ()
 
     def __str__(self):
@@ -1985,7 +1986,7 @@ def dot(x, y):
     return _dot(x, y)
 
 
-class Usmm(Op):
+class Usmm(Op[TensorVariable]):
     """Computes the dense matrix resulting from ``alpha * x @ y + z``.
 
     Notes

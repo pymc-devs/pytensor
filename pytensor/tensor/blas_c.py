@@ -8,9 +8,10 @@ from pytensor.tensor.blas import (
     blas_header_version,
     ldflags,
 )
+from pytensor.tensor.variable import TensorVariable
 
 
-class BaseBLAS(COp):
+class BaseBLAS(COp[TensorVariable]):
     def c_libraries(self, **kwargs):
         return ldflags()
 

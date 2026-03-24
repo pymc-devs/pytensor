@@ -946,7 +946,10 @@ class ScanInplaceOptimizer(GraphRewriter):
         fgraph.attach_feature(DestroyHandler())
 
     def attempt_scan_inplace(
-        self, fgraph: FunctionGraph, node: Apply[Scan], output_indices: list[int]
+        self,
+        fgraph: FunctionGraph,
+        node: Apply[Scan, Variable],
+        output_indices: list[int],
     ) -> Apply | None:
         """Attempt to replace a `Scan` node by one which computes the specified outputs inplace.
 
@@ -1012,7 +1015,7 @@ class ScanInplaceOptimizer(GraphRewriter):
                 k: v for k, v in new_op.view_map.items() if k not in destroy_map
             }
 
-        new_node: Apply = new_op.make_node(*inputs)
+        new_node: Apply[Scan, Variable] = new_op.make_node(*inputs)
 
         try:
             fgraph.replace_all_validate_remove(  # type: ignore

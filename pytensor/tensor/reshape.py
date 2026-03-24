@@ -23,7 +23,7 @@ ShapeValueType: TypeAlias = (
 )
 
 
-class JoinDims(Op):
+class JoinDims(Op[TensorVariable]):
     __props__ = ("start_axis", "n_axes")
     view_map = {0: [0]}
 
@@ -154,7 +154,7 @@ def join_dims(
     return JoinDims(start_axis, n_axes)(x)  # type: ignore[return-value]
 
 
-class SplitDims(Op):
+class SplitDims(Op[TensorVariable]):
     __props__ = ("axis",)
     view_map = {0: [0]}
 

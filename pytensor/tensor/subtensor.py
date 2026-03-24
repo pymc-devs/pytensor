@@ -788,7 +788,7 @@ class BaseSubtensor:
         return hash((type(self), props_values))
 
 
-class Subtensor(BaseSubtensor, COp):
+class Subtensor(BaseSubtensor, COp[TensorVariable]):
     """Basic NumPy indexing operator."""
 
     check_input = False
@@ -1362,7 +1362,7 @@ class SubtensorPrinter(Printer):
 pprint.assign(Subtensor, SubtensorPrinter())
 
 
-class IncSubtensor(BaseSubtensor, COp):
+class IncSubtensor(BaseSubtensor, COp[TensorVariable]):
     """
     Increment a subtensor.
 
@@ -1792,7 +1792,7 @@ def _sum_grad_over_bcasted_dims(x, gx):
     return gx
 
 
-class AdvancedSubtensor1(COp):
+class AdvancedSubtensor1(COp[TensorVariable]):
     """
     Implement x[ilist] where ilist is a vector of integers.
 
@@ -1957,7 +1957,7 @@ class AdvancedSubtensor1(COp):
 advanced_subtensor1 = AdvancedSubtensor1()
 
 
-class AdvancedIncSubtensor1(BaseSubtensor, COp):
+class AdvancedIncSubtensor1(BaseSubtensor, COp[TensorVariable]):
     """
     Increments a subtensor using advanced slicing (list of index).
 
@@ -2269,7 +2269,7 @@ def as_tensor_index_variable(idx):
     return idx
 
 
-class AdvancedSubtensor(BaseSubtensor, COp):
+class AdvancedSubtensor(BaseSubtensor, COp[TensorVariable]):
     """Implements NumPy's advanced indexing."""
 
     __props__ = ("idx_list",)
@@ -2550,7 +2550,7 @@ def vectorize_advanced_subtensor(op: AdvancedSubtensor, node, *batch_inputs):
     return type(op)(new_idx_list).make_node(batch_x, *batch_idxs)
 
 
-class AdvancedIncSubtensor(BaseSubtensor, Op):
+class AdvancedIncSubtensor(BaseSubtensor, Op[TensorVariable]):
     """Increments a subtensor using advanced indexing."""
 
     __props__ = (
