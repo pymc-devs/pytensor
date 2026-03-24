@@ -138,7 +138,6 @@ from pytensor.compile.executor import Function
 from pytensor.gradient import Lop, Rop, grad, subgraph_grad
 from pytensor.printing import debugprint as dprint
 from pytensor.printing import pp, pprint
-from pytensor.updates import OrderedUpdates
 
 # isort: on
 
