@@ -20,7 +20,7 @@ from pytensor.tensor.type import matrix
 from pytensor.tensor.variable import TensorVariable
 
 
-class TRSYL(Op):
+class TRSYL(Op[TensorVariable]):
     """
     Wrapper around LAPACK's `trsyl` function to solve the Sylvester equation:
 

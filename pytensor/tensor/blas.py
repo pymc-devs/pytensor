@@ -108,6 +108,7 @@ from pytensor.tensor.blas_headers import blas_header_text, blas_header_version
 from pytensor.tensor.math import dot, tensordot
 from pytensor.tensor.shape import specify_broadcastable
 from pytensor.tensor.type import DenseTensorType, tensor
+from pytensor.tensor.variable import TensorVariable
 
 
 _logger = logging.getLogger("pytensor.tensor.blas")
@@ -150,7 +151,7 @@ def must_initialize_y_gemv():
 must_initialize_y_gemv._result = None  # type: ignore
 
 
-class Gemv(Op):
+class Gemv(Op[TensorVariable]):
     """
     expression is beta * y + alpha * A x
 
@@ -256,7 +257,7 @@ gemv_inplace = Gemv(inplace=True)
 gemv = gemv_no_inplace
 
 
-class Ger(Op):
+class Ger(Op[TensorVariable]):
     """
     BLAS defines general rank-1 update GER as A <- A + alpha x y'
 
@@ -468,7 +469,7 @@ def _ldflags(
     return rval
 
 
-class GemmRelated(COp):
+class GemmRelated(COp[TensorVariable]):
     """Base class for Gemm and Dot22.
 
     This class provides a kind of templated gemm Op.
@@ -1304,7 +1305,7 @@ class Dot22Scalar(GemmRelated):
 _dot22scalar = Dot22Scalar()
 
 
-class BatchedDot(COp):
+class BatchedDot(COp[TensorVariable]):
     """
     Computes a batch matrix-matrix dot with tensor3 variables
 

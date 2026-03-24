@@ -28,7 +28,7 @@ from pytensor.utils import unzip
 logger = logging.getLogger(__name__)
 
 
-class Cholesky(Op):
+class Cholesky(Op[TensorVariable]):
     # TODO: LAPACK wrapper with in-place behavior, for solve also
 
     __props__ = ("lower", "overwrite_a")
@@ -210,7 +210,7 @@ def cholesky(
     return res
 
 
-class SolveBase(Op):
+class SolveBase(Op[TensorVariable]):
     """Base class for `scipy.linalg` matrix equation solvers."""
 
     __props__: tuple[str, ...] = (
@@ -412,7 +412,7 @@ def cho_solve(
     return Blockwise(CholeskySolve(lower=lower, b_ndim=b_ndim))(A, b)
 
 
-class LU(Op):
+class LU(Op[TensorVariable]):
     """Decompose a matrix into lower and upper triangular matrices."""
 
     __props__ = ("permute_l", "overwrite_a", "p_indices")
@@ -504,10 +504,10 @@ class LU(Op):
 
     def L_op(
         self,
-        inputs: Sequence[ptb.Variable],
-        outputs: Sequence[ptb.Variable],
-        output_grads: Sequence[ptb.Variable],
-    ) -> list[ptb.Variable]:
+        inputs,
+        outputs,
+        output_grads,
+    ):
         r"""
         Derivation is due to Differentiation of Matrix Functionals Using Triangular Factorization
         F. R. De Hoog, R.S. Anderssen, M. A. Lukas
@@ -521,9 +521,7 @@ class LU(Op):
 
             # TODO: Rewrite into permute_l = False for graphs where we need to compute the gradient
             # We need L, not PL. It's not possible to recover it from PL, though. So we need to do a new forward pass
-            P_or_indices, L, U = lu(  # type: ignore
-                A, permute_l=False, p_indices=False
-            )
+            P_or_indices, L, U = lu(A, permute_l=False, p_indices=False)
 
         else:
             # In both other cases, there are 3 outputs. The first output will either be the permutation index itself,
@@ -603,7 +601,7 @@ def lu(
     )
 
 
-class PivotToPermutations(Op):
+class PivotToPermutations(Op[TensorVariable]):
     gufunc_signature = "(x)->(x)"
     __props__ = ("inverse",)
 
@@ -636,7 +634,7 @@ def pivot_to_permutation(p: TensorLike, inverse=False):
     return PivotToPermutations(inverse=inverse)(p)
 
 
-class LUFactor(Op):
+class LUFactor(Op[TensorVariable]):
     __props__ = ("overwrite_a",)
     gufunc_signature = "(m,m)->(m,m),(m)"
 
@@ -1129,7 +1127,7 @@ def solve(
     )(a, b)
 
 
-class Eigvalsh(Op):
+class Eigvalsh(Op[TensorVariable]):
     """
     Generalized eigenvalues of a Hermitian positive definite eigensystem.
 
@@ -1176,7 +1174,7 @@ class Eigvalsh(Op):
         return [(n,)]
 
 
-class EigvalshGrad(Op):
+class EigvalshGrad(Op[TensorVariable]):
     """
     Gradient of generalized eigenvalues of a Hermitian positive definite
     eigensystem.
@@ -1236,7 +1234,7 @@ def eigvalsh(a, b, lower=True):
     return Eigvalsh(lower)(a, b)
 
 
-class Expm(Op):
+class Expm(Op[TensorVariable]):
     """
     Compute the matrix exponential of a square array.
     """
@@ -1299,7 +1297,7 @@ def _largest_common_dtype(tensors: Sequence[TensorVariable]) -> np.dtype:
     return reduce(lambda l, r: np.promote_types(l, r), [x.dtype for x in tensors])
 
 
-class BaseBlockDiagonal(Op):
+class BaseBlockDiagonal(Op[TensorVariable]):
     __props__: tuple[str, ...] = ("n_inputs",)
 
     def __init__(self, n_inputs):
@@ -1410,7 +1408,7 @@ def block_diag(*matrices: TensorVariable):
     return _block_diagonal_matrix(*matrices)
 
 
-class QR(Op):
+class QR(Op[TensorVariable]):
     """
     QR Decomposition
     """
@@ -1780,7 +1778,7 @@ def qr(
     return Blockwise(QR(mode=mode, pivoting=pivoting, overwrite_a=False))(A)
 
 
-class Schur(Op):
+class Schur(Op[TensorVariable]):
     """
     Schur Decomposition
     """
@@ -1967,7 +1965,7 @@ def schur(
     return Blockwise(Schur(output=output, sort=sort))(A)  # type: ignore[return-value]
 
 
-class QZ(Op):
+class QZ(Op[TensorVariable]):
     """
     QZ Decomposition
     """

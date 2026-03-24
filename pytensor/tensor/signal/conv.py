@@ -113,7 +113,7 @@ class AbstractConvolveNd:
         ]
 
 
-class Convolve1d(AbstractConvolveNd, COp):  # type: ignore[misc]
+class Convolve1d(AbstractConvolveNd, COp[TensorVariable]):  # type: ignore[misc]
     __props__ = ()
     ndim = 1
 
@@ -246,7 +246,7 @@ def convolve1d(
     return type_cast(TensorVariable, _blockwise_convolve_1d(in1, in2, full_mode))
 
 
-class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
+class Convolve2d(AbstractConvolveNd, Op[TensorVariable]):  # type: ignore[misc]
     __props__ = ("method",)  # type: ignore[assignment]
     ndim = 2
 

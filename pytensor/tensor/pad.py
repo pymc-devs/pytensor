@@ -413,7 +413,7 @@ def _reflect_pad(x, pad_width):
     return x
 
 
-class Pad(OpFromGraph):
+class Pad(OpFromGraph[TensorVariable]):
     """
     Wrapper Op for Pad graphs
     """

@@ -21,6 +21,7 @@ from pytensor.tensor.math import mul, neg, sub
 from pytensor.tensor.rewriting.basic import register_canonicalize, register_specialize
 from pytensor.tensor.shape import shape, specify_shape
 from pytensor.tensor.type import TensorType, tensor
+from pytensor.tensor.variable import TensorVariable
 
 
 _is_sparse_variable = sparse._is_sparse_variable
@@ -241,7 +242,7 @@ pytensor.compile.optdb.register(
 )
 
 
-class StructuredDotCSC(COp):
+class StructuredDotCSC(COp[TensorVariable]):
     """
     Structured Dot CSC is like `dot`, except that only the gradient wrt non-zero
     elements of a sparse matrix are calculated and propagated.
@@ -438,7 +439,7 @@ class StructuredDotCSC(COp):
 sd_csc = StructuredDotCSC()
 
 
-class StructuredDotCSR(COp):
+class StructuredDotCSR(COp[TensorVariable]):
     """
     Structured Dot CSR is like dot, except that only the
     gradient wrt non-zero elements of a sparse matrix
