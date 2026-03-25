@@ -95,7 +95,10 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         accept_inplace=True,
     )
     rewriter(fgraph)
-    output_specs = [Out(x, borrow=False) for x in fgraph.outputs]
+    untraced_sit_sot_inner_outputs = set(op.inner_untraced_sit_sot_outs(fgraph.outputs))
+    output_specs = [
+        Out(x, borrow=x in untraced_sit_sot_inner_outputs) for x in fgraph.outputs
+    ]
     insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
