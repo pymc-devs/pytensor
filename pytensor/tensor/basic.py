@@ -633,7 +633,7 @@ class TensorFromScalar(COp):
     def infer_shape(self, fgraph, node, in_shapes):
         return [()]
 
-    def grad(self, inp, grads):
+    def pull_back(self, inp, outputs, grads):
         (s,) = inp
         (dt,) = grads
         if s.type.dtype in float_dtypes:
@@ -694,14 +694,14 @@ class ScalarFromTensor(COp):
     def infer_shape(self, fgraph, node, in_shapes):
         return [()]
 
-    def grad(self, inp, grads):
+    def pull_back(self, inp, outputs, grads):
         (_s,) = inp
         (dt,) = grads
         return [tensor_from_scalar(dt)]
 
-    def R_op(self, inputs, eval_points):
-        if None in eval_points:
-            return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points):
+            return [disconnected_type()]
         return self.make_node(*eval_points).outputs
 
     def c_code(self, node, name, inputs, outputs, sub):
@@ -987,7 +987,7 @@ class Nonzero(Op):
         for i, res in enumerate(result_tuple):
             out_[i][0] = res.astype("int64")
 
-    def grad(self, inp, grads):
+    def pull_back(self, inp, outputs, grads):
         return [grad_undefined(self, 0, inp[0])]
 
 
@@ -1376,7 +1376,7 @@ class Eye(Op):
         out_shape = [node.inputs[0], node.inputs[1]]
         return [out_shape]
 
-    def grad(self, inp, grads):
+    def pull_back(self, inp, outputs, grads):
         return [grad_undefined(self, i, inp[i]) for i in range(3)]
 
     @staticmethod
@@ -1709,7 +1709,7 @@ class Alloc(COp):
 
         return rval
 
-    def grad(self, inputs, grads):
+    def pull_back(self, inputs, outputs, grads):
         x = inputs[0]
         gz = grads[0]
         n_axes_to_sum = gz.ndim - x.ndim
@@ -1744,9 +1744,9 @@ class Alloc(COp):
         # change.
         return [gx, *(disconnected_type() for _ in range(len(inputs) - 1))]
 
-    def R_op(self, inputs, eval_points):
-        if eval_points[0] is None:
-            return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return [disconnected_type()]
         return self(eval_points[0], *inputs[1:], return_list=True)
 
     def do_constant_folding(self, fgraph, node):
@@ -1962,7 +1962,7 @@ class MakeVector(COp):
     def infer_shape(self, fgraph, node, ishapes):
         return [(len(ishapes),)]
 
-    def grad(self, inputs, output_gradients):
+    def pull_back(self, inputs, outputs, output_gradients):
         # If the output is of an integer dtype, no gradient shall pass
         if self.dtype in discrete_dtypes:
             return [ipt.zeros_like(dtype=config.floatX) for ipt in inputs]
@@ -1970,9 +1970,9 @@ class MakeVector(COp):
         grads = [output_gradients[0][i] for i in range(len(inputs))]
         return grads
 
-    def R_op(self, inputs, eval_points):
-        if None in eval_points:
-            return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points):
+            return [disconnected_type()]
         return self.make_node(*eval_points).outputs
 
 
@@ -2300,7 +2300,7 @@ class Split(COp):
             [False] * n_out,
         ]
 
-    def L_op(self, inputs, outputs, g_outputs):
+    def pull_back(self, inputs, outputs, g_outputs):
         """Join the gradients along the axis that was used to split x."""
         _x, axis, _n = inputs
 
@@ -2318,9 +2318,9 @@ class Split(COp):
             disconnected_type(),
         ]
 
-    def R_op(self, inputs, eval_points):
-        if eval_points[0] is None:
-            return [None for i in self.len_splits]
+    def push_forward(self, inputs, outputs, eval_points):
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return [disconnected_type() for i in self.len_splits]
         return self.make_node(eval_points[0], *inputs[1:]).outputs
 
     def c_code_cache_version(self):
@@ -2695,12 +2695,12 @@ class Join(COp):
         """
         return code
 
-    def R_op(self, inputs, eval_points):
-        if None in eval_points[1:]:
-            return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points[1:]):
+            return [disconnected_type()]
         return self.make_node(inputs[0], *eval_points[1:]).outputs
 
-    def L_op(self, inputs, outputs, grads):
+    def pull_back(self, inputs, outputs, grads):
         """The gradient wrt a join op is a `Split`, used to partition
         the gradient along the `axis` which was used for joining.
         """
@@ -3364,7 +3364,7 @@ class ARange(COp):
     def connection_pattern(self, node):
         return [[True], [False], [True]]
 
-    def L_op(self, inputs, outputs, grads):
+    def pull_back(self, inputs, outputs, grads):
         start, _stop, step = inputs
         (gz,) = grads
         # `start` and `step` affect the output values
@@ -3389,8 +3389,8 @@ class ARange(COp):
                 (gz * arange(num_steps_taken, dtype=self.dtype)).sum(),
             ]
 
-    def R_op(self, inputs, eval_points):
-        return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        return [disconnected_type()]
 
 
 _arange = {}
@@ -3676,7 +3676,7 @@ class PermuteRowElements(Op):
         out_shape = [maximum(sx, sy) for sx, sy in zip(shp_x, shp_y, strict=True)]
         return [out_shape]
 
-    def grad(self, inp, grads):
+    def pull_back(self, inp, outputs, grads):
         from pytensor.tensor.math import Sum
 
         x, y = inp
@@ -3894,7 +3894,7 @@ class ExtractDiag(COp):
     def c_code_cache_version(self):
         return (0,)
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         # Avoid circular import
         from pytensor.tensor.subtensor import set_subtensor
 
@@ -4416,10 +4416,10 @@ class AllocEmpty(COp):
     def connection_pattern(self, node):
         return [[False] for i in node.inputs]
 
-    def grad(self, inputs, grads):
+    def pull_back(self, inputs, outputs, grads):
         return [disconnected_type() for _ in range(len(inputs))]
 
-    def R_op(self, inputs, eval_points):
+    def push_forward(self, inputs, outputs, eval_points):
         return [zeros(inputs, self.dtype)]
 
 

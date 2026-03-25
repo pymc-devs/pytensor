@@ -96,7 +96,7 @@ class Cholesky(Op):
             # Transpose result if input was transposed
             out[0] = c.T if c_contiguous_input else c
 
-    def L_op(self, inputs, outputs, gradients):
+    def pull_back(self, inputs, outputs, gradients):
         """
         Cholesky decomposition reverse-mode gradient update.
 
@@ -282,7 +282,7 @@ class SolveBase(Op):
             cols = Bshape[1]
             return [(rows, cols)]
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def pull_back(self, inputs, outputs, output_gradients):
         r"""Reverse-mode gradient updates for matrix solve operation :math:`c = A^{-1} b`.
 
         Symbolic expression for updates taken from [#]_.
@@ -374,7 +374,7 @@ class CholeskySolve(SolveBase):
 
         output_storage[0][0] = x
 
-    def L_op(self, *args, **kwargs):
+    def pull_back(self, *args, **kwargs):
         # TODO: Base impl should work, let's try it
         raise NotImplementedError()
 
@@ -502,7 +502,7 @@ class LU(Op):
         else:
             return self
 
-    def L_op(
+    def pull_back(
         self,
         inputs: Sequence[ptb.Variable],
         outputs: Sequence[ptb.Variable],
@@ -687,7 +687,7 @@ class LUFactor(Op):
         outputs[0][0] = LU
         outputs[1][0] = p
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def pull_back(self, inputs, outputs, output_gradients):
         [A] = inputs
         LU_bar, _ = output_gradients
         LU, p_indices = outputs
@@ -882,8 +882,8 @@ class SolveTriangular(SolveBase):
 
         outputs[0][0] = x
 
-    def L_op(self, inputs, outputs, output_gradients):
-        res = super().L_op(inputs, outputs, output_gradients)
+    def pull_back(self, inputs, outputs, output_gradients):
+        res = super().pull_back(inputs, outputs, output_gradients)
 
         if self.lower:
             res[0] = ptb.tril(res[0])
@@ -1166,7 +1166,7 @@ class Eigvalsh(Op):
         else:
             w[0] = scipy_linalg.eigvalsh(a=inputs[0], b=None, lower=self.lower)
 
-    def grad(self, inputs, g_outputs):
+    def pull_back(self, inputs, outputs, g_outputs):
         a, b = inputs
         (gw,) = g_outputs
         return EigvalshGrad(self.lower)(a, b, gw)
@@ -1257,7 +1257,7 @@ class Expm(Op):
         (expm,) = outputs
         expm[0] = scipy_linalg.expm(A)
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         # Kalbfleisch and Lawless, J. Am. Stat. Assoc. 80 (1985) Equation 3.4
         # Kind of... You need to do some algebra from there to arrive at
         # this expression.
@@ -1310,7 +1310,7 @@ class BaseBlockDiagonal(Op):
             raise ValueError("n_inputs must be greater than 1")
         self.n_inputs = n_inputs
 
-    def grad(self, inputs, gout):
+    def pull_back(self, inputs, outputs, gout):
         shapes = pt.stack([i.shape for i in inputs])
         index_end = shapes.cumsum(0)
         index_begin = index_end - shapes
@@ -1617,7 +1617,7 @@ class QR(Op):
         if self.pivoting:
             outputs[2][0] = jpvt
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         """
         Reverse-mode gradient of the QR function.
 

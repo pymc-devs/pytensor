@@ -431,7 +431,7 @@ class RandomVariable(RNGConsumerOp):
             dtype=self.dtype,
         )
 
-    def grad(self, inputs, outputs):
+    def pull_back(self, inputs, outputs, output_grads):
         return [
             pytensor.gradient.grad_undefined(
                 self, k, inp, "No gradient defined for random variables"
@@ -439,8 +439,10 @@ class RandomVariable(RNGConsumerOp):
             for k, inp in enumerate(inputs)
         ]
 
-    def R_op(self, inputs, eval_points):
-        return [None for i in eval_points]
+    def push_forward(self, inputs, outputs, eval_points):
+        from pytensor.gradient import disconnected_type
+
+        return [disconnected_type() for i in eval_points]
 
 
 class AbstractRNGConstructor(Op):

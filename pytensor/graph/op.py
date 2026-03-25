@@ -1,3 +1,4 @@
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import (
@@ -235,10 +236,122 @@ class Op(MetaObject):
     # just to self.add_tag_trace
     add_tag_trace = staticmethod(add_tag_trace)
 
+    def pull_back(
+        self,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+        cotangents: Sequence[Variable],
+    ) -> list[Variable]:
+        r"""Construct a graph for the vector-Jacobian product (pullback).
+
+        Given a function :math:`f` implemented by this `Op` with inputs :math:`x`
+        and outputs :math:`y = f(x)`, the pullback computes :math:`\bar{x} = \bar{y}^T J`
+        where :math:`J` is the Jacobian :math:`\frac{\partial f}{\partial x}` and
+        :math:`\bar{y}` are the cotangent vectors (upstream gradients).
+
+        This is the core method for reverse-mode automatic differentiation.
+
+        If the output is not differentiable with respect to an input,
+        return a variable of type `DisconnectedType` for that input. If the
+        gradient is not implemented for some input, return a variable of type
+        `NullType` (see :func:`pytensor.gradient.grad_not_implemented` and
+        :func:`pytensor.gradient.grad_undefined`).
+
+        Parameters
+        ----------
+        inputs
+            The input variables of the `Apply` node using this `Op`.
+        outputs
+            The output variables of the `Apply` node using this `Op`.
+        cotangents
+            The cotangent vectors (gradients w.r.t. each output).
+
+        Returns
+        -------
+        list of Variable
+            The cotangent vectors w.r.t. each input. One `Variable` per input.
+
+        References
+        ----------
+        .. [1] Giles, Mike. 2008. "An Extended Collection of Matrix Derivative
+           Results for Forward and Reverse Mode Automatic Differentiation."
+
+        """
+        # Fall back to deprecated L_op/grad if overridden by subclass
+        if type(self).L_op is not Op.L_op or type(self).grad is not Op.grad:
+            warnings.warn(
+                f"{type(self).__name__} should implement `pull_back` instead of "
+                f"`L_op`/`grad`. Direct `L_op`/`grad` implementations are deprecated "
+                f"and will stop being called in a future version.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            return self.L_op(inputs, outputs, cotangents)
+        raise NotImplementedError(f"pull_back not implemented for {self}")
+
+    def push_forward(
+        self,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+        tangents: Sequence[Variable],
+    ) -> list[Variable]:
+        r"""Construct a graph for the Jacobian-vector product (pushforward).
+
+        Given a function :math:`f` implemented by this `Op` with inputs :math:`x`
+        and outputs :math:`y = f(x)`, the pushforward computes :math:`\dot{y} = J \dot{x}`
+        where :math:`J` is the Jacobian :math:`\frac{\partial f}{\partial x}` and
+        :math:`\dot{x}` are the tangent vectors.
+
+        This is the core method for forward-mode automatic differentiation.
+
+        If an output is not differentiable with respect to any input, return a
+        variable of type `DisconnectedType` for that output. Unlike the legacy
+        `R_op` method, `push_forward` must never use ``None`` to indicate
+        disconnected outputs.
+
+        Parameters
+        ----------
+        inputs
+            The input variables of the `Apply` node using this `Op`.
+        outputs
+            The output variables of the `Apply` node using this `Op`.
+        tangents
+            The tangent vectors. One per input. A variable of `DisconnectedType`
+            indicates that the corresponding input is not being differentiated.
+
+        Returns
+        -------
+        list of Variable
+            The tangent vectors w.r.t. each output. One `Variable` per output.
+
+        """
+        from pytensor.gradient import DisconnectedType, disconnected_type
+
+        # Fall back to deprecated R_op if overridden by subclass
+        if type(self).R_op is not Op.R_op:
+            warnings.warn(
+                f"{type(self).__name__} should implement `push_forward` instead of "
+                f"`R_op`. Direct `R_op` implementations are deprecated "
+                f"and will stop being called in a future version.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            # Convert DisconnectedType tangents to None for R_op compatibility
+            eval_points: list[Variable | None] = [
+                None if isinstance(t.type, DisconnectedType) else t for t in tangents
+            ]
+            result = self.R_op(inputs, eval_points)
+            # Convert None returns to DisconnectedType
+            return [disconnected_type() if r is None else r for r in result]
+        raise NotImplementedError(f"push_forward not implemented for {self}")
+
     def grad(
         self, inputs: Sequence[Variable], output_grads: Sequence[Variable]
     ) -> list[Variable]:
         r"""Construct a graph for the gradient with respect to each input variable.
+
+        .. deprecated::
+            Implement :meth:`pull_back` instead.
 
         Each returned `Variable` represents the gradient with respect to that
         input computed based on the symbolic gradients with respect to each
@@ -275,7 +388,7 @@ class Op(MetaObject):
 
         References
         ----------
-        .. [1] Giles, Mike. 2008. “An Extended Collection of Matrix Derivative Results for Forward and Reverse Mode Automatic Differentiation.”
+        .. [1] Giles, Mike. 2008. "An Extended Collection of Matrix Derivative Results for Forward and Reverse Mode Automatic Differentiation."
 
         """
         raise NotImplementedError(f"grad not implemented for Op {self}")
@@ -288,14 +401,13 @@ class Op(MetaObject):
     ) -> list[Variable]:
         r"""Construct a graph for the L-operator.
 
+        .. deprecated::
+            Implement :meth:`pull_back` instead.
+
         The L-operator computes a row vector times the Jacobian.
 
-        This method dispatches to :meth:`Op.grad` by default.  In one sense,
-        this method provides the original outputs when they're needed to
-        compute the return value, whereas `Op.grad` doesn't.
-
-        See `Op.grad` for a mathematical explanation of the inputs and outputs
-        of this method.
+        This method dispatches to :meth:`pull_back` if overridden by a
+        subclass, otherwise falls back to :meth:`Op.grad`.
 
         Parameters
         ----------
@@ -307,14 +419,20 @@ class Op(MetaObject):
             The gradients with respect to each `Variable` in `inputs`.
 
         """
+        if type(self).pull_back is not Op.pull_back:
+            return self.pull_back(inputs, outputs, output_grads)
         return self.grad(inputs, output_grads)
 
     def R_op(
-        self, inputs: list[Variable], eval_points: Variable | list[Variable]
+        self, inputs: Sequence[Variable], eval_points: Sequence[Variable | None]
     ) -> list[Variable]:
         r"""Construct a graph for the R-operator.
 
-        This method is primarily used by `Rop`.
+        .. deprecated::
+            Implement :meth:`push_forward` instead.
+
+        This method is primarily used by `Rop`. It dispatches to
+        :meth:`push_forward` if overridden by a subclass.
 
         Parameters
         ----------
@@ -330,6 +448,15 @@ class Op(MetaObject):
         ``rval[i]`` should be ``Rop(f=f_i(inputs), wrt=inputs, eval_points=eval_points)``.
 
         """
+        from pytensor.gradient import DisconnectedType, disconnected_type
+
+        if type(self).push_forward is not Op.push_forward:
+            outputs = self.make_node(*inputs).outputs
+            # Convert None eval_points to DisconnectedType for push_forward
+            tangents = [disconnected_type() if ep is None else ep for ep in eval_points]
+            result = self.push_forward(inputs, outputs, tangents)
+            # Convert DisconnectedType back to None for R_op callers
+            return [None if isinstance(r.type, DisconnectedType) else r for r in result]  # type: ignore[misc]
         raise NotImplementedError()
 
     @abstractmethod
