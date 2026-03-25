@@ -163,7 +163,7 @@ def rebuild_collect_shared(
 
     # This function implements similar functionality as graph.clone
     # and it should be merged with that
-    clone_d = {}
+    clone_d: dict = {}
     update_d = {}
     update_expr = []
     # list of shared inputs that are used as inputs of the graph
@@ -300,32 +300,32 @@ def rebuild_collect_shared(
         update_expr.append((store_into, update_val))
 
     # Elements of "outputs" are here cloned to "cloned_outputs"
+    cloned_outputs: list[Variable] | Variable | Out | list[Out]
     if isinstance(outputs, list):
-        cloned_outputs = []
+        cloned_outputs_list = []
         for v in outputs:
             if isinstance(v, Variable):
                 cloned_v = clone_v_get_shared_updates(v, copy_inputs_over)
-                cloned_outputs.append(cloned_v)
+                cloned_outputs_list.append(cloned_v)
             elif isinstance(v, Out):
-                cloned_v = clone_v_get_shared_updates(v.variable, copy_inputs_over)
-                cloned_outputs.append(Out(cloned_v, borrow=v.borrow))
+                cloned_o = clone_v_get_shared_updates(v.variable, copy_inputs_over)
+                cloned_outputs_list.append(Out(cloned_o, borrow=v.borrow))
             else:
                 raise TypeError(
                     "Outputs must be pytensor Variable or "
                     "Out instances. Received " + str(v) + " of type " + str(type(v))
                 )
             # computed_list.append(cloned_v)
+        cloned_outputs = cloned_outputs_list
     else:
         if isinstance(outputs, Variable):
             cloned_v = clone_v_get_shared_updates(outputs, copy_inputs_over)
             cloned_outputs = cloned_v
             # computed_list.append(cloned_v)
         elif isinstance(outputs, Out):
-            cloned_v = clone_v_get_shared_updates(outputs.variable, copy_inputs_over)
-            cloned_outputs = Out(cloned_v, borrow=outputs.borrow)
+            cloned_o = clone_v_get_shared_updates(outputs.variable, copy_inputs_over)
+            cloned_outputs = Out(cloned_o, borrow=outputs.borrow)
             # computed_list.append(cloned_v)
-        elif outputs is None:
-            cloned_outputs = []  # TODO: get Function.__call__ to return None
         else:
             raise TypeError(
                 "output must be an PyTensor Variable or Out instance (or list of them)",

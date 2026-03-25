@@ -417,7 +417,7 @@ required methods of the interface, except ``filter``.
 
    class DoubleType(Type):
 
-       def filter(self, x, strict=False, allow_downcast=None):
+       def filter(self, data, strict=False, allow_downcast=None):
            # See code above.
            ...
 

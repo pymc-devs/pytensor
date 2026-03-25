@@ -184,10 +184,10 @@ class Argmax(COp):
                 "You are trying to compile a graph with an old Argmax node.  Either reoptimize your graph or rebuild it to get the new node format."
             )
 
-    def perform(self, node, inp, outs):
-        (x,) = inp
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
         axes = self.axis
-        (max_idx,) = outs
+        (max_idx,) = output_storage
         if axes is None:
             axes = tuple(range(x.ndim))
         # Numpy does not support multiple axes for argmax
@@ -204,9 +204,9 @@ class Argmax(COp):
 
         max_idx[0] = np.asarray(np.argmax(reshaped_x, axis=-1), dtype="int64")
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (argmax,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (argmax,) = outputs
         fail = sub["fail"]
         params = sub["params"]
         if self.axis is None:
@@ -266,8 +266,8 @@ class Argmax(COp):
     def R_op(self, inputs, eval_points):
         raise ValueError("Argmax is non-diifferentiable")
 
-    def grad(self, inp, grads):
-        (x,) = inp
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
 
         return [x.zeros_like()]
 
@@ -404,11 +404,18 @@ class Max(NonZeroDimsCAReduce):
     def __init__(self, axis):
         super().__init__(ps.maximum, axis)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
         return type(self)(axis=axis)
 
-    def L_op(self, inputs, outputs, grads):
+    def L_op(self, inputs, outputs, output_grads):
         # The strict sense mathematical gradient of the maximum function is
         # not calculated here for it is not defined at every point where some
         # coordinates are identical. However, since the latter set has null
@@ -424,7 +431,7 @@ class Max(NonZeroDimsCAReduce):
         # does it automatically
         [x] = inputs
         [out] = outputs
-        [g_out] = grads
+        [g_out] = output_grads
 
         axis = tuple(range(x.ndim)) if self.axis is None else self.axis
         out_pad = expand_dims(out, axis)
@@ -462,8 +469,15 @@ class Min(NonZeroDimsCAReduce):
     def __init__(self, axis):
         super().__init__(ps.minimum, axis)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
         return type(self)(axis=axis)
 
 
@@ -3025,9 +3039,9 @@ class Dot(Op):
     def perform(self, node, inputs, output_storage):
         output_storage[0][0] = np.matmul(*inputs)
 
-    def grad(self, inp, grads):
-        x, y = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        x, y = inputs
+        (gz,) = output_grads
 
         xgrad = self(gz, y.T)
         ygrad = self(x.T, gz)
@@ -3394,12 +3408,19 @@ class All(FixedOpCAReduce):
         ret = super().make_node(input)
         return ret
 
-    def grad(self, inp, grads):
-        (x,) = inp
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
         return [x.zeros_like(config.floatX)]
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
         return type(self)(axis=axis)
 
 
@@ -3424,12 +3445,19 @@ class Any(FixedOpCAReduce):
         ret = super().make_node(input)
         return ret
 
-    def grad(self, inp, grads):
-        (x,) = inp
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
         return [x.zeros_like(config.floatX)]
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
         return type(self)(axis=axis)
 
 
@@ -3454,13 +3482,13 @@ class Sum(FixedOpCAReduce):
             upcast_discrete_output=True,
         )
 
-    def L_op(self, inp, out, grads):
-        (x,) = inp
+    def L_op(self, inputs, outputs, output_grads):
+        (x,) = inputs
 
-        if out[0].dtype not in continuous_dtypes:
+        if outputs[0].dtype not in continuous_dtypes:
             return [x.zeros_like(dtype=config.floatX)]
 
-        (gz,) = grads
+        (gz,) = output_grads
         gz = as_tensor_variable(gz)
         axis = self.axis
         if axis is None:
@@ -3485,10 +3513,17 @@ class Sum(FixedOpCAReduce):
             return [None]
         return self(*eval_points, return_list=True)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        dtype = kwargs.get("dtype", self.dtype)
-        acc_dtype = kwargs.get("acc_dtype", self.acc_dtype)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
+        dtype = dtype or self.dtype
+        acc_dtype = acc_dtype or self.acc_dtype
         return type(self)(axis=axis, dtype=dtype, acc_dtype=acc_dtype)
 
 
@@ -3545,7 +3580,7 @@ class Prod(FixedOpCAReduce):
         )
         self.no_zeros_in_input = no_zeros_in_input
 
-    def L_op(self, inp, out, grads):
+    def L_op(self, inputs, outputs, output_grads):
         """
         The grad of this Op could be very easy, if it is was not for the case
         where zeros are present in a given "group" (ie. elements reduced
@@ -3591,10 +3626,10 @@ class Prod(FixedOpCAReduce):
         based on the result of this count.
 
         """
-        (prod_in,) = inp
-        (gz,) = grads
+        (prod_in,) = inputs
+        (gz,) = output_grads
 
-        if out[0].dtype in discrete_dtypes or self.acc_dtype in discrete_dtypes:
+        if outputs[0].dtype in discrete_dtypes or self.acc_dtype in discrete_dtypes:
             # There is an int conversion in the way
             return [prod_in.zeros_like(dtype=config.floatX)]
 
@@ -3666,10 +3701,17 @@ class Prod(FixedOpCAReduce):
     def c_code_cache_version(self):
         return (1,)
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        dtype = kwargs.get("dtype", self.dtype)
-        acc_dtype = kwargs.get("acc_dtype", self.acc_dtype)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
+        dtype = dtype or self.dtype
+        acc_dtype = acc_dtype or self.acc_dtype
         no_zeros_in_input = kwargs.get("no_zeros_in_input", self.no_zeros_in_input)
         return type(self)(
             axis=axis,
@@ -3739,9 +3781,9 @@ class MulWithoutZeros(BinaryScalarOp):
             return x
         return x * y
 
-    def c_code(self, node, name, inp, out, sub):
-        x, y = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y = inputs
+        (z,) = outputs
         return f"{z} = (({x} == 0) ? ({y}) : (({y} == 0) ? ({x}) : (({y})*({x}))) );"
 
     def c_code_cache_version(self):
@@ -3761,10 +3803,10 @@ class ProdWithoutZeros(FixedOpCAReduce):
             upcast_discrete_output=True,
         )
 
-    def grad(self, inp, grads):
+    def grad(self, inputs, output_grads):
         from pytensor.gradient import grad_not_implemented
 
-        (a,) = inp
+        (a,) = inputs
         a_grad = grad_not_implemented(
             self,
             0,
@@ -3775,10 +3817,17 @@ class ProdWithoutZeros(FixedOpCAReduce):
         )
         return [a_grad]
 
-    def clone(self, **kwargs):
-        axis = kwargs.get("axis", self.axis)
-        dtype = kwargs.get("dtype", self.dtype)
-        acc_dtype = kwargs.get("acc_dtype", self.acc_dtype)
+    def clone(
+        self,
+        axis=None,
+        dtype=None,
+        acc_dtype=None,
+        upcast_discrete_output=None,
+        **kwargs,
+    ):
+        axis = axis or self.axis
+        dtype = dtype or self.dtype
+        acc_dtype = acc_dtype or self.acc_dtype
         return type(self)(axis=axis, dtype=dtype, acc_dtype=acc_dtype)
 
 

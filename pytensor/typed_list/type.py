@@ -25,12 +25,12 @@ class TypedListType(CType):
         else:
             self.ttype = TypedListType(ttype, depth - 1)
 
-    def filter(self, x, strict=False, allow_downcast=None):
+    def filter(self, data, strict: bool = False, allow_downcast=None):
         """
 
         Parameters
         ----------
-        x
+        data
             Value to filter.
         strict
             If true, only native python list will be accepted.
@@ -39,13 +39,13 @@ class TypedListType(CType):
 
         """
         if strict:
-            if not isinstance(x, list):
+            if not isinstance(data, list):
                 raise TypeError("Expected a python list")
         else:
-            x = [self.ttype.filter(y) for y in x]
+            data = [self.ttype.filter(y) for y in data]
 
-            if all(self.ttype.is_valid_value(y) for y in x):
-                return x
+            if all(self.ttype.is_valid_value(y) for y in data):
+                return data
 
             else:
                 raise TypeError(f"Expected all elements to be {self.ttype}")
