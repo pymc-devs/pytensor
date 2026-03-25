@@ -13,6 +13,7 @@ you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 import builtins
 import math
 from collections.abc import Callable
+from enum import IntEnum
 from itertools import chain
 from textwrap import dedent
 from typing import Any, TypeAlias
@@ -1182,9 +1183,29 @@ def _cast_to_promised_scalar_dtype(x, dtype):
             return getattr(np, dtype)(x)
 
 
+class Monotonicity(IntEnum):
+    """
+    Indicates monotonicity of a scalar operation over its domain.
+    Attributes
+    ----------
+    DECREASING : int
+        Operation is monotonically decreasing (f(x) > f(y) when x < y)
+    NONMONOTONIC : int
+        Operation is not monotonic or monotonicity is unknown
+    INCREASING : int
+        Operation is monotonically increasing (f(x) < f(y) when x < y)
+    """
+
+    DECREASING = -1
+    NONMONOTONIC = 0
+    INCREASING = 1
+
+
 class ScalarOp(COp):
     nin = -1
     nout = 1
+
+    monotonicity = Monotonicity.NONMONOTONIC
 
     def __init__(self, output_types_preference=None, name=None):
         self.name = name
@@ -2852,6 +2873,8 @@ class Neg(UnaryScalarOp):
     # does not have a Boolean type for tensors.
     nfunc_spec = ("negative", 1, 1)
 
+    monotonicity = Monotonicity.DECREASING
+
     def impl(self, x):
         return -x
 
@@ -2922,6 +2945,8 @@ class Log(UnaryScalarOp):
 
     """
 
+    monotonicity = Monotonicity.INCREASING
+
     nfunc_spec = ("log", 1, 1)
     amd_float32 = "amd_vrsa_logf"
     amd_float64 = "amd_vrda_log"
@@ -2968,6 +2993,8 @@ class Log2(UnaryScalarOp):
 
     """
 
+    monotonicity = Monotonicity.INCREASING
+
     nfunc_spec = ("log2", 1, 1)
     amd_float32 = "amd_vrsa_log2f"
     amd_float64 = "amd_vrda_log2"
@@ -3010,6 +3037,8 @@ class Log10(UnaryScalarOp):
     log base 10.
 
     """
+
+    monotonicity = Monotonicity.INCREASING
 
     nfunc_spec = ("log10", 1, 1)
     amd_float32 = "amd_vrsa_log10f"
@@ -3054,6 +3083,8 @@ class Log1p(UnaryScalarOp):
 
     """
 
+    monotonicity = Monotonicity.INCREASING
+
     nfunc_spec = ("log1p", 1, 1)
 
     def impl(self, x):
@@ -3094,6 +3125,8 @@ class Exp(UnaryScalarOp):
     amd_float32 = "amd_vrsa_expf"
     amd_float64 = "amd_vrda_exp"
 
+    monotonicity = Monotonicity.INCREASING
+
     def impl(self, x):
         # If x is an int8 or uint8, numpy.exp will compute the result in
         # half-precision (float16), where we want float32.
@@ -3130,6 +3163,8 @@ exp = Exp(upgrade_to_float, name="exp")
 class Exp2(UnaryScalarOp):
     nfunc_spec = ("exp2", 1, 1)
 
+    monotonicity = Monotonicity.INCREASING
+
     def impl(self, x):
         # If x is an int8 or uint8, numpy.exp2 will compute the result in
         # half-precision (float16), where we want float32.
@@ -3165,6 +3200,8 @@ exp2 = Exp2(upgrade_to_float, name="exp2")
 
 class Expm1(UnaryScalarOp):
     nfunc_spec = ("expm1", 1, 1)
+
+    monotonicity = Monotonicity.INCREASING
 
     def impl(self, x):
         # If x is an int8 or uint8, numpy.expm1 will compute the result in
@@ -3233,6 +3270,8 @@ sqr = Sqr(same_out, name="sqr")
 class Sqrt(UnaryScalarOp):
     nfunc_spec = ("sqrt", 1, 1)
 
+    monotonicity = Monotonicity.INCREASING
+
     def impl(self, x):
         # If x is an int8 or uint8, numpy.sqrt will compute the result in
         # half-precision (float16), where we want float32.
@@ -3269,6 +3308,8 @@ sqrt = Sqrt(upgrade_to_float, name="sqrt")
 class Deg2Rad(UnaryScalarOp):
     nfunc_spec = ("deg2rad", 1, 1)
 
+    monotonicity = Monotonicity.INCREASING
+
     def impl(self, x):
         # If x is an int8 or uint8, numpy.deg2rad will compute the result in
         # half-precision (float16), where we want float32.
@@ -3303,6 +3344,8 @@ deg2rad = Deg2Rad(upgrade_to_float, name="deg2rad")
 
 class Rad2Deg(UnaryScalarOp):
     nfunc_spec = ("rad2deg", 1, 1)
+
+    monotonicity = Monotonicity.INCREASING
 
     def impl(self, x):
         # If x is an int8 or uint8, numpy.rad2deg will compute the result in
@@ -3376,6 +3419,8 @@ cos = Cos(upgrade_to_float, name="cos")
 
 class ArcCos(UnaryScalarOp):
     nfunc_spec = ("arccos", 1, 1)
+
+    monotonicity = Monotonicity.DECREASING
 
     def impl(self, x):
         # If x is an int8 or uint8, numpy.arccos will compute the result in
@@ -3451,6 +3496,8 @@ sin = Sin(upgrade_to_float, name="sin")
 class ArcSin(UnaryScalarOp):
     nfunc_spec = ("arcsin", 1, 1)
 
+    monotonicity = Monotonicity.INCREASING
+
     def impl(self, x):
         # If x is an int8 or uint8, numpy.arcsin will compute the result in
         # half-precision (float16), where we want float32.
@@ -3522,6 +3569,8 @@ tan = Tan(upgrade_to_float, name="tan")
 
 class ArcTan(UnaryScalarOp):
     nfunc_spec = ("arctan", 1, 1)
+
+    monotonicity = Monotonicity.INCREASING
 
     def impl(self, x):
         # If x is an int8 or uint8, numpy.arctan will compute the result in
@@ -3646,6 +3695,8 @@ cosh = Cosh(upgrade_to_float, name="cosh")
 class ArcCosh(UnaryScalarOp):
     nfunc_spec = ("arccosh", 1, 1)
 
+    monotonicity = Monotonicity.INCREASING
+
     def impl(self, x):
         # If x is an int8 or uint8, numpy.arccosh will compute the result in
         # half-precision (float16), where we want float32.
@@ -3685,6 +3736,8 @@ class Sinh(UnaryScalarOp):
 
     """
 
+    monotonicity = Monotonicity.INCREASING
+
     nfunc_spec = ("sinh", 1, 1)
 
     def impl(self, x):
@@ -3722,6 +3775,8 @@ sinh = Sinh(upgrade_to_float, name="sinh")
 
 class ArcSinh(UnaryScalarOp):
     nfunc_spec = ("arcsinh", 1, 1)
+
+    monotonicity = Monotonicity.INCREASING
 
     def impl(self, x):
         # If x is an int8 or uint8, numpy.arcsinh will compute the result in
@@ -3763,6 +3818,8 @@ class Tanh(UnaryScalarOp):
 
     """
 
+    monotonicity = Monotonicity.INCREASING
+
     nfunc_spec = ("tanh", 1, 1)
 
     def impl(self, x):
@@ -3800,6 +3857,8 @@ tanh = Tanh(upgrade_to_float, name="tanh")
 
 class ArcTanh(UnaryScalarOp):
     nfunc_spec = ("arctanh", 1, 1)
+
+    monotonicity = Monotonicity.INCREASING
 
     def impl(self, x):
         # If x is an int8 or uint8, numpy.arctanh will compute the result in
