@@ -4138,3 +4138,42 @@ def test_scan_mapped_and_non_traced_output_ordering(single_step):
     )
     assert all(isinstance(xs.type, TensorType) for xs in (xs1, xs2, xs3))
     assert isinstance(final_rng.type, RandomGeneratorType)
+
+
+@pytest.mark.parametrize("mode", [Mode(linker="py"), Mode(linker="cvm"), "numba"])
+def test_zero_steps_untraced_sit_sot(mode):
+    """Regression test: 0-step scan with untraced sit_sot must return initial state, not None.
+
+    When n_steps is 0 and the scan has untraced_sit_sot outputs (e.g. an RNG update),
+    the perform method must populate those output storages with the initial input values.
+    A previous implementation left those as None.
+    """
+    rng = shared(np.random.default_rng())
+    # n_steps must be symbolic so optimizations don't eagerly remove the scan
+    n_steps = iscalar("n_steps")
+
+    x0 = pt.pi
+    final_rng, xs = scan(
+        fn=lambda rng, xtm1: pt.random.normal(xtm1, rng=rng).owner.outputs,
+        outputs_info=[rng, x0],
+        n_steps=n_steps,
+        return_updates=False,
+        mode=mode,
+    )
+    x = xs[-1]
+
+    f = function([n_steps], x, updates={rng: final_rng}, mode=mode)
+
+    assert f(n_steps=0) == np.pi
+
+    # This is a regression test, scan would return None for the final_rng
+    # and cause a failure in the second coll
+    assert f(n_steps=0) == np.pi
+
+    # Non-zero steps should still work
+    res1, res2 = f(n_steps=1), f(n_steps=1)
+    assert res1 != np.pi
+    assert res2 != np.pi
+    assert res1 != res2
+
+    assert f(n_steps=0) == np.pi

@@ -28,10 +28,10 @@
          v) nit_sot: no input tap single output tap arguments.
          At each step don't use any previous values, only produce new onese
 
-         vi) shared_outs: arguments corresponding to shared variables with
-         updates.
+         vi) untraced_sit_sot: single input tap single output tap arguments
+         whose intermediate values are not traced (not stored in the output).
          At each step use its value as input, and afterwards replace it with
-         a new value.
+         a new value. Only the final value is returned.
          vii) other_args: arguments that are passed to every call of the
          inner function as they are ( no slicing is performed)
 
@@ -62,7 +62,7 @@ numpy.import_array()
 
 
 def get_version():
-    return 0.326
+    return 0.327
 
 
 @cython.cdivision(True)
@@ -74,7 +74,7 @@ cdef inline unsigned int pymod(int a, unsigned int b):
 @cython.cdivision(True)
 @cython.boundscheck(False)
 def perform(
-    const unsigned int n_shared_outs,
+    const unsigned int n_untraced_sit_sot,
     const unsigned int n_mit_mot_outs,
     const unsigned int n_seqs,
     const unsigned int n_mit_mot,
@@ -105,9 +105,9 @@ def perform(
     """
     Parameters
     ----------
-    n_shared_outs
-        Number of arguments that correspond to shared variables with
-        updates
+    n_untraced_sit_sot
+        Number of untraced sit_sot arguments (single input/output tap
+        whose intermediate values are not stored in the output)
     n_mit_mot_outs
         Sum over the number of output taps for each mit_mot sequence
     n_seqs
@@ -158,7 +158,7 @@ def perform(
         Array of boolean saying if an output is computed inplace
     outer_inputs
         The inputs of scan in a given order ( n_steps, sequences, mit_mot,
-        mit_sot, sit_sot, nit_sot, shared_outs, other_args)
+        mit_sot, sit_sot, nit_sot, untraced_sit_sot, other_args)
     outer_outputs
         This is where we need to copy the new outputs.
     outer_output_dtypes
@@ -177,10 +177,10 @@ def perform(
     cdef unsigned int n_steps = outer_inputs[0].item()
     cdef unsigned int n_outs = n_mit_mot + n_mit_sot + n_sit_sot
     cdef unsigned int seqs_arg_offset = n_seqs + 1
-    cdef unsigned int shared_arg_offset = ( 1 + n_seqs + n_mit_mot +
+    cdef unsigned int untraced_sit_sot_arg_offset = ( 1 + n_seqs + n_mit_mot +
                                            n_mit_sot + n_sit_sot)
-    cdef unsigned int nit_sot_arg_offset = ( shared_arg_offset +
-                                            n_shared_outs)
+    cdef unsigned int nit_sot_arg_offset = ( untraced_sit_sot_arg_offset +
+                                            n_untraced_sit_sot)
     cdef unsigned int offset_out
     cdef unsigned int lenpos = n_outs + n_nit_sot
     cdef unsigned int l
@@ -202,7 +202,7 @@ def perform(
     cdef int cond
     cdef unsigned int len_output_storage = (n_mit_mot_outs + n_mit_sot +
                                             n_sit_sot + n_nit_sot +
-                                            n_shared_outs)
+                                            n_untraced_sit_sot)
     cdef unsigned int mitmot_inp_offset
     cdef unsigned int mitmot_out_idx
     cdef unsigned int inp_idx
@@ -240,7 +240,7 @@ def perform(
     for idx in range(n_nit_sot):
         store_steps[<unsigned int>(idx + n_mit_mot + n_mit_sot + n_sit_sot)]=\
                 outer_inputs[<unsigned int>(idx + n_mit_mot + n_mit_sot + n_sit_sot
-                                    + n_shared_outs + n_seqs+1)]
+                                    + n_untraced_sit_sot + n_seqs+1)]
 
     # 2.1 Create storage space for outputs
     for idx in range(n_outs):
@@ -278,6 +278,8 @@ def perform(
                 outer_outputs[idx][0] = numpy.empty((0,) * outer_output_ndims[idx], dtype=outer_output_dtypes[idx])
             else:
                 outer_outputs[idx][0] = None
+        for j in range(n_untraced_sit_sot):
+            outer_outputs[<unsigned int>(n_outs + n_nit_sot + j)][0] = outer_inputs[<unsigned int>(untraced_sit_sot_arg_offset + j)]
         return 0.0, 0
 
     for idx in range(lenpos):
@@ -297,7 +299,7 @@ def perform(
     offset = n_seqs
     for idx in range(n_outs):
         offset += tap_array_len[idx]
-    offset += n_shared_outs
+    offset += n_untraced_sit_sot
 
     for idx in range(len(other_args)):
         inner_input_storage[<unsigned int>(idx+offset)][0] = other_args[idx]
@@ -336,14 +338,14 @@ def perform(
                     offset += 1
 
 
-        a_offset = shared_arg_offset
+        a_offset = untraced_sit_sot_arg_offset
         o_offset = n_outs + n_nit_sot
         if i == 0:
-            for j in range(n_shared_outs):
+            for j in range(n_untraced_sit_sot):
                 inner_input_storage[offset][0] = outer_inputs[<unsigned int>(a_offset+j)]
                 offset += 1
         else:
-            for j in range(n_shared_outs):
+            for j in range(n_untraced_sit_sot):
                 inner_input_storage[offset][0] = outer_outputs[<unsigned int>(o_offset+j)][0]
                 offset += 1
 
@@ -370,14 +372,14 @@ def perform(
             for idx in range(n_outs + n_nit_sot - n_mit_mot):
                 inner_output_storage[<unsigned int>(idx+offset)][0] = None
 
-        # 4.3. Collect slices for shared outputs
+        # 4.3. Collect slices for untraced sit_sot outputs
         offset += n_outs+n_nit_sot - n_mit_mot
-        for idx in range(n_shared_outs):
+        for idx in range(n_untraced_sit_sot):
             inner_output_storage[<unsigned int>(idx+offset)][0] = None
 
         # 4.4. If there is a condition add it to the mix
         if as_while:
-            pdx = offset + n_shared_outs
+            pdx = offset + n_untraced_sit_sot
             inner_output_storage[<unsigned int>pdx][0] = None
 
         # 4.5. Keep a reference to the variables (ndarrays,
@@ -422,7 +424,7 @@ def perform(
         dt_fn = time(NULL) - t0_fn
         t_fn += dt_fn
         if as_while:
-            pdx = offset + n_shared_outs
+            pdx = offset + n_untraced_sit_sot
             cond = inner_output_storage[pdx][0] == 0
 
         offset_out = 0
@@ -527,10 +529,9 @@ def perform(
                 if old_var is not new_var or old_data is None:
                     outer_outputs[j][0][pos[j]] = new_var
 
-        # 5.6 Copy over the values for outputs corresponding to shared
-        # variables
+        # 5.6 Copy over the values for untraced sit_sot outputs
         begin  = end
-        end   += n_shared_outs
+        end   += n_untraced_sit_sot
         for j in range(begin,end):
             jout = j +offset_out
             outer_outputs[j][0] = inner_output_storage[jout][0]
