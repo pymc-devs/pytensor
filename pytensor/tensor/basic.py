@@ -616,7 +616,7 @@ def get_scalar_constant_value(
     )
 
 
-class TensorFromScalar(COp):
+class TensorFromScalar(COp[TensorVariable]):
     __props__ = ()
 
     def make_node(self, s):
@@ -673,7 +673,7 @@ def vectorize_tensor_from_scalar(op, node, batch_x):
     return identity(batch_x).owner
 
 
-class ScalarFromTensor(COp):
+class ScalarFromTensor(COp[ScalarVariable]):
     __props__ = ()
 
     def __call__(self, *args, **kwargs) -> ScalarVariable:
@@ -949,7 +949,7 @@ def ones(shape, dtype=None) -> TensorVariable:
     return alloc(np.array(1, dtype=dtype), *shape)
 
 
-class Nonzero(Op):
+class Nonzero(Op[TensorVariable]):
     """
     Return the indices of the elements that are non-zero.
 
@@ -1340,7 +1340,7 @@ def triu_indices_from(
     return triu_indices(a.shape[0], k=k, m=a.shape[1])
 
 
-class Eye(Op):
+class Eye(Op[TensorVariable]):
     _output_type_depends_on_input_value = True
     __props__ = ("dtype",)
 
@@ -1534,7 +1534,7 @@ def infer_static_shape(
     return sh, static_shape
 
 
-class Alloc(COp):
+class Alloc(COp[TensorVariable]):
     """Create a `TensorVariable` from an initial value and a desired shape.
 
     Usage:
@@ -1879,7 +1879,7 @@ def full_like(
     return fill(a, fill_value)
 
 
-class MakeVector(COp):
+class MakeVector(COp[TensorVariable]):
     """Concatenate a number of scalars together into a vector.
 
     This is a simple version of stack() that introduces far less cruft
@@ -2060,7 +2060,7 @@ pprint.assign(tensor_copy, printing.IgnorePrinter())
 identity = tensor_copy
 
 
-class Default(Op):
+class Default(Op[TensorVariable]):
     """
     Takes an input x and a default value.
 
@@ -2191,7 +2191,7 @@ def split(x, splits_size, *, n_splits=None, axis=0):
     return Split(n_splits)(x, axis, splits_size)
 
 
-class Split(COp):
+class Split(COp[TensorVariable]):
     """Partition a `TensorVariable` along some axis.
 
     Examples
@@ -2428,7 +2428,7 @@ class Split(COp):
         """
 
 
-class Join(COp):
+class Join(COp[TensorVariable]):
     r"""
     Concatenate multiple `TensorVariable`\s along some axis.
 
@@ -3249,7 +3249,7 @@ def tile(
     return A_replicated.reshape(tiled_shape)
 
 
-class ARange(COp):
+class ARange(COp[TensorVariable]):
     """Create an array containing evenly spaced values within a given interval.
 
     Parameters and behaviour are the same as numpy.arange().
@@ -3536,7 +3536,7 @@ mgrid = _nd_grid()
 ogrid = _nd_grid(sparse=True)
 
 
-class PermuteRowElements(Op):
+class PermuteRowElements(Op[TensorVariable]):
     """Permute the elements of each row (inner-most dim) of a tensor.
 
     A permutation will be applied to every row (vector) of the input tensor x.
@@ -3746,7 +3746,7 @@ def inverse_permutation(perm):
     )
 
 
-class ExtractDiag(COp):
+class ExtractDiag(COp[TensorVariable]):
     """
     Return specified diagonals.
 
@@ -4261,7 +4261,7 @@ def choose(a, choices, mode="raise"):
     return Choose(mode)(a, choices)
 
 
-class Choose(Op):
+class Choose(Op[TensorVariable]):
     __props__ = ("mode",)
 
     def __init__(self, mode):
@@ -4326,7 +4326,7 @@ class Choose(Op):
         z[0] = np.choose(a, choice, mode=self.mode)
 
 
-class AllocEmpty(COp):
+class AllocEmpty(COp[TensorVariable]):
     """Implement Alloc on the cpu, but without initializing memory."""
 
     _output_type_depends_on_input_value = True

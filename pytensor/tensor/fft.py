@@ -7,9 +7,10 @@ from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.math import sqrt
 from pytensor.tensor.subtensor import set_subtensor
 from pytensor.tensor.type import TensorType, integer_dtypes
+from pytensor.tensor.variable import TensorVariable
 
 
-class RFFTOp(Op):
+class RFFTOp(Op[TensorVariable]):
     __props__ = ()
 
     def output_type(self, inp):
@@ -69,7 +70,7 @@ class RFFTOp(Op):
 rfft_op = RFFTOp()
 
 
-class IRFFTOp(Op):
+class IRFFTOp(Op[TensorVariable]):
     __props__ = ()
 
     def output_type(self, inp):

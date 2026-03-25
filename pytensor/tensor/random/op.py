@@ -33,7 +33,7 @@ from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
 
 
-class RNGConsumerOp(Op):
+class RNGConsumerOp(Op[TensorVariable]):
     """Baseclass for Ops that consume RNGs."""
 
     @abc.abstractmethod

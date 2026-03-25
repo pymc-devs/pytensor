@@ -35,7 +35,7 @@ PATH = tuple[tuple[int] | tuple[int, int], ...]
 CONTRACTION_STEP = tuple[tuple[int, ...], set[str], str]
 
 
-class Einsum(OpFromGraph):
+class Einsum(OpFromGraph[TensorVariable]):
     """
     Wrapper Op for Einsum graphs
 

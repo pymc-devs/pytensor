@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from copy import copy
 from functools import partial
 from itertools import chain
-from typing import Union, cast
+from typing import Generic, Union, cast
 
 from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
@@ -19,7 +19,7 @@ from pytensor.graph.basic import (
 )
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.null_type import NullType
-from pytensor.graph.op import HasInnerGraph, Op, io_connection_pattern
+from pytensor.graph.op import HasInnerGraph, Op, OpOutputType, io_connection_pattern
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs
 from pytensor.graph.utils import MissingInputError
@@ -154,7 +154,7 @@ def construct_nominal_fgraph(
     return fgraph, implicit_shared_inputs, update_d, update_expr
 
 
-class OpFromGraph(Op, HasInnerGraph):
+class OpFromGraph(Op, HasInnerGraph, Generic[OpOutputType]):
     r"""
     This creates an `Op` from inputs and outputs lists of variables.
     The signature is similar to :func:`pytensor.function <pytensor.function>`
@@ -253,7 +253,7 @@ class OpFromGraph(Op, HasInnerGraph):
     def __init__(
         self,
         inputs: list[Variable],
-        outputs: list[Variable],
+        outputs: list[OpOutputType],
         *,
         inline: bool = False,
         lop_overrides: Union[Callable, "OpFromGraph", None] = None,
@@ -713,18 +713,27 @@ class OpFromGraph(Op, HasInnerGraph):
         self._rop_op_cache = wrapper
         return wrapper
 
-    def L_op(self, inputs, outputs, output_grads):
+    def L_op(
+        self,
+        inputs: Sequence[Variable],
+        outputs: Sequence[OpOutputType],
+        output_grads: Sequence[OpOutputType],
+    ) -> list[OpOutputType]:
         disconnected_output_grads = tuple(
             isinstance(og.type, DisconnectedType) for og in output_grads
         )
         lop_op = self._build_and_cache_lop_op(disconnected_output_grads)
         return lop_op(*inputs, *outputs, *output_grads, return_list=True)
 
-    def R_op(self, inputs, eval_points):
+    def R_op(
+        self,
+        inputs: Sequence[Variable],
+        eval_points: OpOutputType | list[OpOutputType],
+    ) -> list[OpOutputType]:
         rop_op = self._build_and_cache_rop_op()
         return rop_op(*inputs, *eval_points, return_list=True)
 
-    def __call__(self, *inputs, **kwargs):
+    def __call__(self, *inputs, **kwargs) -> OpOutputType | list[OpOutputType]:
         # The user interface doesn't expect the shared variable inputs of the
         # inner-graph, but, since `Op.make_node` does (and `Op.__call__`
         # dispatches to `Op.make_node`), we need to compensate here

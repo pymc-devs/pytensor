@@ -37,6 +37,7 @@ OpType = TypeVar("OpType", bound="Op")
 OptionalApplyType = TypeVar("OptionalApplyType", None, "Apply", covariant=True)
 _TypeType = TypeVar("_TypeType", bound="Type")
 _IdType = TypeVar("_IdType", bound=Hashable)
+ApplyOutType = TypeVar("ApplyOutType", bound="Variable")
 
 _MOVED_FUNCTIONS = {
     "walk",
@@ -106,7 +107,7 @@ class Node(MetaObject):
         return debugprint(self, **kwargs)
 
 
-class Apply(Node, Generic[OpType]):
+class Apply(Node, Generic[OpType, ApplyOutType]):
     """A `Node` representing the application of an operation to inputs.
 
     Basically, an `Apply` instance is an object that represents the
@@ -145,7 +146,7 @@ class Apply(Node, Generic[OpType]):
         self,
         op: OpType,
         inputs: Sequence["Variable"],
-        outputs: Sequence["Variable"],
+        outputs: Sequence[ApplyOutType],
     ):
         if not isinstance(inputs, Sequence):
             raise TypeError("The inputs of an Apply must be a sequence type")
@@ -165,7 +166,7 @@ class Apply(Node, Generic[OpType]):
                 raise TypeError(
                     f"The 'inputs' argument to Apply must contain Variable instances, not {input}"
                 )
-        self.outputs: list[Variable] = []
+        self.outputs: list[ApplyOutType] = []
         # filter outputs to make sure each element is a Variable
         for i, output in enumerate(outputs):
             if isinstance(output, Variable):
@@ -192,7 +193,7 @@ class Apply(Node, Generic[OpType]):
             d["tag"] = t
         return d
 
-    def default_output(self):
+    def default_output(self) -> ApplyOutType:
         """
         Returns the default output for this node.
 
@@ -215,7 +216,7 @@ class Apply(Node, Generic[OpType]):
                 raise ValueError(
                     f"Multi-output Op {self.op} default_output not specified"
                 )
-        return self.outputs[do]
+        return cast(ApplyOutType, self.outputs[do])
 
     def __str__(self):
         # FIXME: The called function is too complicated for this simple use case.
@@ -224,7 +225,7 @@ class Apply(Node, Generic[OpType]):
     def __repr__(self):
         return str(self)
 
-    def clone(self, clone_inner_graph: bool = False) -> "Apply[OpType]":
+    def clone(self, clone_inner_graph: bool = False) -> "Apply[OpType, ApplyOutType]":
         r"""Clone this `Apply` instance.
 
         Parameters
@@ -256,7 +257,7 @@ class Apply(Node, Generic[OpType]):
 
     def clone_with_new_inputs(
         self, inputs: Sequence["Variable"], strict=True, clone_inner_graph=False
-    ) -> "Apply[OpType]":
+    ) -> "Apply[OpType, ApplyOutType]":
         r"""Duplicate this `Apply` instance in a new graph.
 
         Parameters
@@ -324,7 +325,7 @@ class Apply(Node, Generic[OpType]):
         return list(self.inputs)
 
     @property
-    def out(self):
+    def out(self) -> ApplyOutType:
         """An alias for `self.default_output`"""
         return self.default_output()
 

@@ -946,7 +946,10 @@ class ScanInplaceOptimizer(GraphRewriter):
         fgraph.attach_feature(DestroyHandler())
 
     def attempt_scan_inplace(
-        self, fgraph: FunctionGraph, node: Apply[Scan], output_indices: list[int]
+        self,
+        fgraph: FunctionGraph,
+        node: Apply[Scan, Variable],
+        output_indices: list[int],
     ) -> Apply | None:
         """Attempt to replace a `Scan` node by one which computes the specified outputs inplace.
 
@@ -1021,7 +1024,7 @@ class ScanInplaceOptimizer(GraphRewriter):
                 remove=[node],
                 reason="scan_make_inplace",
             )
-            return cast(Apply[Scan], new_outs[0].owner)
+            return cast(Apply[Scan, Variable], new_outs[0].owner)
         except InconsistencyError:
             # Failed moving output to be computed inplace
             return None

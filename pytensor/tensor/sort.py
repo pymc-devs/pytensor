@@ -8,6 +8,7 @@ from pytensor.graph.op import Op
 from pytensor.tensor.basic import arange, as_tensor_variable, switch
 from pytensor.tensor.math import eq, ge
 from pytensor.tensor.type import TensorType
+from pytensor.tensor.variable import TensorVariable
 
 
 KIND = typing.Literal["quicksort", "mergesort", "heapsort", "stable"]
@@ -28,7 +29,7 @@ def _parse_sort_args(kind: KIND | None, order, stable: bool | None) -> KIND:
     return kind
 
 
-class SortOp(Op):
+class SortOp(Op[TensorVariable]):
     """
     This class is a wrapper for numpy sort function.
 
@@ -153,7 +154,7 @@ def sort(
     return SortOp(kind)(a, axis)
 
 
-class ArgSortOp(Op):
+class ArgSortOp(Op[TensorVariable]):
     """
     This class is a wrapper for numpy argsort function.
 
