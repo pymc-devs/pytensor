@@ -39,8 +39,8 @@ from pytensor.tensor.blockwise import vectorize_node_fallback
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.math import add, clip
+from pytensor.tensor.reshape import Reshape
 from pytensor.tensor.shape import (
-    Reshape,
     Shape_i,
     specify_broadcastable,
 )

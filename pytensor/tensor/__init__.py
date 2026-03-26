@@ -139,7 +139,6 @@ from pytensor.tensor.pad import pad
 # reshape needs to be imported before shape.reshape, otherwise the tensor.reshape imports fail
 from pytensor.tensor.reshape import *
 from pytensor.tensor.shape import (
-    reshape,
     shape,
     shape_padaxis,
     shape_padleft,

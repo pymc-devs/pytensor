@@ -7,7 +7,8 @@ from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
 from pytensor.link.utils import compile_function_src
 from pytensor.tensor import NoneConst
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
+from pytensor.tensor.reshape import Reshape
+from pytensor.tensor.shape import Shape, Shape_i, SpecifyShape
 
 
 @register_funcify_default_op_cache_key(Shape)

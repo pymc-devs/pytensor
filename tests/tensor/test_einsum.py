@@ -12,7 +12,7 @@ from pytensor.tensor import matrix
 from pytensor.tensor.basic import moveaxis
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.einsum import _delta, _general_dot, _iota, einsum
-from pytensor.tensor.shape import Reshape
+from pytensor.tensor.reshape import Reshape
 from pytensor.tensor.type import tensor
 
 

@@ -24,7 +24,8 @@ from pytensor.tensor.blas import Dot22
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
-from pytensor.tensor.shape import reshape, shape, specify_shape
+from pytensor.tensor.reshape import reshape
+from pytensor.tensor.shape import shape, specify_shape
 from pytensor.tensor.type import (
     dmatrix,
     dvector,

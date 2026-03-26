@@ -18,6 +18,7 @@ from pytensor.graph.type import Type
 from pytensor.tensor.basic import alloc, as_tensor_variable
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import add, exp, maximum
+from pytensor.tensor.reshape import Reshape, reshape
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.shape import (
     ShapeFeature,
@@ -26,10 +27,8 @@ from pytensor.tensor.rewriting.shape import (
     local_useless_specify_shape,
 )
 from pytensor.tensor.shape import (
-    Reshape,
     Shape_i,
     SpecifyShape,
-    reshape,
     shape,
     specify_shape,
 )

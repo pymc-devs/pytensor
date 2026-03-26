@@ -55,12 +55,12 @@ from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import pow as pt_pow
 from pytensor.tensor.math import round as pt_round
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.reshape import reshape
 from pytensor.tensor.rewriting.elemwise import FusionOptimizer, local_dimshuffle_lift
 from pytensor.tensor.rewriting.shape import (
     local_fuse_squeeze_reshape,
     local_useless_expand_dims_in_reshape,
 )
-from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import (
     TensorType,
     dmatrices,
