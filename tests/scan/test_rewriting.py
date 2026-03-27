@@ -24,6 +24,7 @@ from pytensor.tensor.blas import Dot22
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, sigmoid, tanh
 from pytensor.tensor.math import sum as pt_sum
+from pytensor.tensor.random.op import RandomVariableWithCoreShape
 from pytensor.tensor.shape import reshape, shape, specify_shape
 from pytensor.tensor.type import (
     dmatrix,
@@ -1231,7 +1232,49 @@ class TestScanInplaceOptimizer:
         utt.assert_allclose(pytensor_x0, numpy_x0)
         utt.assert_allclose(pytensor_x1, numpy_x1)
 
-    @utt.assertFailure_fast
+    @pytest.mark.skipif(
+        config.mode == "FAST_COMPILE",
+        reason="FAST_COMPILE does not trigger inplace optimizations",
+    )
+    def test_inplace_untraced_sit_sot(self):
+        rng = shared(np.random.default_rng())
+        next_rng, x0 = pt.random.normal(rng=rng).owner.outputs
+
+        final_rng, xs = scan(
+            fn=lambda rng_tm1, x_tm1: pt.random.normal(
+                x_tm1, rng=rng_tm1
+            ).owner.outputs,
+            outputs_info=[next_rng, x0],
+            n_steps=5,
+            return_updates=False,
+        )
+
+        f = function([], xs[-1], updates={rng: final_rng})
+        [scan_node] = [n for n in f.maker.fgraph.toposort() if isinstance(n.op, Scan)]
+        op = scan_node.op
+
+        # Both outputs (sit_sot, and untraced_sit_sot), should be in the destory map.
+        # Respective inputs are shifted by one, since input 0 is n_steps
+        assert op.destroy_map == {0: [1], 1: [2]}
+
+        # The view_map should not contain the untraced_sit_sot entry anymore
+        assert op.view_map == {}
+
+        # The inner function should have inplace RNG operations
+        from pytensor.tensor.random.op import RandomVariable
+
+        [inner_rv_node] = [
+            n
+            for n in op.fgraph.toposort()
+            if isinstance(n.op, RandomVariable | RandomVariableWithCoreShape)
+        ]
+        # Rng is first input and output, should be inplace
+        # If it's a RandomVariableWithCoreShape, the rng input is shifted
+        assert inner_rv_node.op.destroy_map in ({0: [0]}, {0: [1]})
+
+        # Evaluate and check non equality
+        assert f() != f()
+
     def test_inplace3(self):
         rng = np.random.default_rng(utt.fetch_seed())
 

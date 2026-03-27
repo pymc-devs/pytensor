@@ -957,10 +957,12 @@ class ScanInplaceOptimizer(GraphRewriter):
         node
             Scan node to replace by an inplace version
         output_indices
-            Indices of the outputs to attempt to compute inplace
+            Indices of the outputs to attempt to compute inplace.
         """
 
         op = node.op
+        n_tap_outs = op.info.n_mit_mot + op.info.n_mit_sot + op.info.n_sit_sot
+        untraced_out_start = n_tap_outs + op.info.n_nit_sot
 
         # inputs corresponding to sequences and n_steps
         ls_begin = node.inputs[: 1 + op.info.n_seqs]
@@ -977,16 +979,10 @@ class ScanInplaceOptimizer(GraphRewriter):
             inp = ls[i]
             if (
                 len(fgraph.clients[inp]) > 1
-                and inp.owner
+                and inp.owner is not None
                 and isinstance(inp.owner.op, self.alloc_ops)
             ):
-                new_lsi = inp.owner.op.make_node(*inp.owner.inputs)
-
-                new_lsi_out = new_lsi.outputs
-
-                if len(new_lsi_out) == 1:
-                    new_lsi_out = new_lsi_out[0]
-
+                [new_lsi_out] = inp.owner.op.make_node(*inp.owner.inputs).outputs
                 ls[i] = new_lsi_out
 
         n_outs = len(ls)
@@ -1000,67 +996,78 @@ class ScanInplaceOptimizer(GraphRewriter):
 
         destroy_map = op.destroy_map.copy()
         for out_idx in output_indices:
-            destroy_map[out_idx] = [out_idx + 1 + op.info.n_seqs]
+            if out_idx < n_tap_outs:
+                # Recurrent output: input is at position out_idx + 1 + n_seqs
+                destroy_map[out_idx] = [out_idx + 1 + op.info.n_seqs]
+            else:
+                # Untraced sit_sot output: input is at untraced_sit_sot_arg_offset + j
+                j = out_idx - untraced_out_start
+                destroy_map[out_idx] = [op.untraced_sit_sot_arg_offset + j]
 
         new_op.destroy_map = destroy_map
 
-        new_outs = new_op(*inputs, return_list=True)
+        # Remove view_map entries for outputs that are now in destroy_map
+        if hasattr(new_op, "view_map"):
+            new_op.view_map = {
+                k: v for k, v in new_op.view_map.items() if k not in destroy_map
+            }
 
-        assert isinstance(new_outs, list)
+        new_node: Apply = new_op.make_node(*inputs)
 
         try:
-            # TODO FIXME: We need to stop using this approach (i.e. attempt
-            # in-place replacements and wait for downstream failures to revert
-            # the changes).  It prevents us from making smart, clear
-            # rewrites and it adds a lot of unnecessary overhead that
-            # involves dealing with inconsistent graphs.
-            # This whole rewrite should be a simple local rewrite, but, because
-            # of this awful approach, it can't be.
             fgraph.replace_all_validate_remove(  # type: ignore
-                list(zip(node.outputs, new_outs, strict=True)),
+                list(zip(node.outputs, new_node.outputs, strict=True)),
                 remove=[node],
                 reason="scan_make_inplace",
             )
-            return cast(Apply[Scan], new_outs[0].owner)
+            return new_node
         except InconsistencyError:
             # Failed moving output to be computed inplace
             return None
 
     def apply(self, fgraph):
-        for scan_idx, original_node in enumerate(reversed(fgraph.toposort())):
+        for original_node in reversed(fgraph.toposort()):
             if not isinstance(original_node.op, Scan):
                 continue
 
-            # First attempt to make the Scan compute inplace every recurrent
-            # output that seems like it could be computed inplace. If that
-            # fails, go through these outputs individually, trying each of
-            # them.
+            # First attempt to make the Scan eagerly compute inplace every output
+            #  that seems like it could be computed inplace.
+            # If that fails, go through these outputs individually, trying each one at a time.
             op = original_node.op
-            n_outs = op.info.n_mit_mot + op.info.n_mit_sot + op.info.n_sit_sot
+            n_tap_outs = op.info.n_mit_mot + op.info.n_mit_sot + op.info.n_sit_sot
+            untraced_out_start = n_tap_outs + op.info.n_nit_sot
 
             # Generate a list of outputs on which the node could potentially
-            # operate inplace.
+            # operate inplace: recurrent outputs and untraced_sit_sot outputs.
+            candidate_out_indices = list(range(n_tap_outs)) + list(
+                range(
+                    untraced_out_start, untraced_out_start + op.info.n_untraced_sit_sot
+                )
+            )
+
             out_indices = []
-            for out_idx in range(n_outs):
-                inp_idx = 1 + op.info.n_seqs + out_idx
+            for out_idx in candidate_out_indices:
+                if out_idx < n_tap_outs:
+                    inp_idx = 1 + op.info.n_seqs + out_idx
+                else:
+                    j = out_idx - untraced_out_start
+                    inp_idx = op.untraced_sit_sot_arg_offset + j
+
                 inp = original_node.inputs[inp_idx]
 
                 # If the input is from an eligible allocation node, attempt to
-                # be inplace on it, even if other nodes are modifying it
-                # inplace.
+                # be inplace on it, even if other nodes are modifying it inplace.
                 if inp.owner and isinstance(inp.owner.op, self.alloc_ops):
                     out_indices.append(out_idx)
                     continue
 
                 # If the input is not from an eligible allocation node, only
-                # attempt to be inplace on it if nothing else is currently
-                # inplace on it.
+                # attempt to be inplace on it if nothing else is currently inplace on it.
                 input_used_inplace = False
-                for c in fgraph.clients[original_node.inputs[inp_idx]]:
+                for c in fgraph.clients[inp]:
                     client = c[0]
 
-                    # Get the indices of this client's inputs on which it
-                    # operates inplace
+                    # Get the indices of this client's inputs on which it operates inplace
                     if client.op.destroy_map:
                         # This flattens the content of destroy_map.values()
                         # which is a list of lists
@@ -1068,8 +1075,7 @@ class ScanInplaceOptimizer(GraphRewriter):
                             client.op.destroy_map.values()
                         )
 
-                        inplace_inps = [client.inputs[i] for i in inplace_inp_indices]
-                        if original_node.inputs[inp_idx] in inplace_inps:
+                        if inp in (client.inputs[i] for i in inplace_inp_indices):
                             input_used_inplace = True
                             break
 
@@ -1083,9 +1089,7 @@ class ScanInplaceOptimizer(GraphRewriter):
 
             if new_node is None:
                 # Making the scan compute all plausible recurrent outputs
-                # inplace has failed. Attempt all plausible recurrent outputs
-                # individually.
-
+                # inplace has failed. Attempt all plausible recurrent outputs individually.
                 new_node = original_node
                 for pos in out_indices:
                     new_node = (

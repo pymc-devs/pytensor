@@ -66,6 +66,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         .excluding(*NUMBA._optimizer.exclude)
         .optimizer
     )
+    destroy_map = op.destroy_map
     fgraph = op.fgraph
     # When the buffer can only hold one SITSOT or as as many MITSOT as there are taps,
     # We must always discard the oldest tap, so it's safe to destroy it in the inner function.
@@ -87,7 +88,21 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         )
         if outer_mitsot.type.shape[0] == abs(min(taps))
     ]
-    destroyable = {*destroyable_sitsot, *destroyable_mitsot}
+    # Untraced sit_sot or destroyable if on destroy_map
+    destroyable_untraced_sit_sot = [
+        inner_u_sit_sot
+        for (outer_u_sit_sot_idx, _), inner_u_sit_sot in zip(
+            op.outer_untraced_sit_sot_outs(node.inputs, with_idx=True),
+            op.inner_untraced_sit_sot(fgraph.inputs),
+            strict=True,
+        )
+        if outer_u_sit_sot_idx in destroy_map
+    ]
+    destroyable = {
+        *destroyable_sitsot,
+        *destroyable_mitsot,
+        *destroyable_untraced_sit_sot,
+    }
     input_specs = [In(x, borrow=True, mutable=x in destroyable) for x in fgraph.inputs]
     add_supervisor_to_fgraph(
         fgraph=fgraph,
