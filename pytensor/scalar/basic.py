@@ -10,6 +10,7 @@ If you want to use a scalar variable in an PyTensor graph,
 you probably want to use pytensor.tensor.[c,z,f,d,b,w,i,l,]scalar!
 """
 
+import abc
 import builtins
 import math
 from collections.abc import Callable
@@ -1250,8 +1251,9 @@ class ScalarOp(COp):
             ):
                 storage[0] = _cast_to_promised_scalar_dtype(variable, out.dtype)
 
+    @abc.abstractmethod
     def impl(self, *inputs):
-        raise MethodNotDefined("impl", type(self), self.__class__.__name__)
+        raise NotImplementedError()
 
     def grad(self, inputs, output_gradients):
         raise MethodNotDefined("grad", type(self), self.__class__.__name__)

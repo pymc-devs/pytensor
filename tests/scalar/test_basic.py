@@ -193,8 +193,8 @@ class TestComposite:
             def make_node(self, x):
                 return Apply(self, [x], [x.type(), x.type()])
 
-            def perform(self, node, inputs, outputs):
-                outputs[1][0] = outputs[0][0] = inputs[0]
+            def impl(self, x):
+                return x, x
 
             def c_code(self, *args):
                 return "dummy"

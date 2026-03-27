@@ -1118,7 +1118,7 @@ def test_gradient_mixed_discrete_output_scalar_op():
             outputs = [float_op(), int_op()]
             return Apply(self, inputs, outputs)
 
-        def perform(self, node, inputs, outputs):
+        def impl(self, *inputs):
             raise NotImplementedError()
 
         def L_op(self, inputs, outputs, output_gradients):
