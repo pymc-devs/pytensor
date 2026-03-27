@@ -208,6 +208,35 @@ class TestComposite:
 
         assert fn(1.0) == [1.0, 1.0]
 
+    def test_composite_without_c_code(self):
+        """Composite of scalar ops without C code should work for py-only execution."""
+        from pytensor.scalar.basic import UnaryScalarOp, float64, upcast_out
+
+        class _NoCodeExp(UnaryScalarOp):
+            nfunc_spec = None
+
+            def impl(self, x):
+                return np.exp(x)
+
+            def output_types(self, types):
+                return upcast_out(*types)
+
+        class _NoCodeLog(UnaryScalarOp):
+            nfunc_spec = None
+
+            def impl(self, x):
+                return np.log(x)
+
+            def output_types(self, types):
+                return upcast_out(*types)
+
+        xs = float64("xs")
+        comp = Composite(
+            [xs],
+            [_NoCodeExp(name="no_code_exp")(_NoCodeLog(name="no_code_log")(xs))],
+        )
+        assert comp.impl(2.0) == pytest.approx(2.0)
+
 
 class TestLogical:
     def test_gt(self):
