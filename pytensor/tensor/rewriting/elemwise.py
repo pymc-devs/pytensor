@@ -516,15 +516,26 @@ def flatten_nested_add_mul(fgraph, node):
         return [output]
 
 
-def elemwise_max_operands_fct(node) -> int:
-    # `Elemwise.perform` uses NumPy ufuncs and they are limited to 32 operands (inputs and outputs)
-    if not config.cxx:
-        return 32
-    return 1024
-
-
 class FusionOptimizer(GraphRewriter):
-    """Graph optimizer that fuses consecutive Elemwise operations."""
+    """Graph optimizer that fuses consecutive Elemwise operations.
+
+    Parameters
+    ----------
+    backend : str
+        The compilation backend: ``"c"`` or ``"numba"``.
+        ``"c"`` checks that every scalar op has a C implementation before fusing.
+        ``"numba"`` fuses unconditionally.
+        Python mode does not benefit from fusion (``frompyfunc`` iteration
+        in C is faster than fused ``Composite.impl`` per-element overhead).
+    """
+
+    def __init__(self, backend: str):
+        super().__init__()
+        if backend not in ("c", "numba"):
+            raise ValueError(
+                f"Unsupported backend {backend!r}. Expected 'c' or 'numba'."
+            )
+        self.backend = backend
 
     def add_requirements(self, fgraph):
         fgraph.attach_feature(ReplaceValidate())
@@ -578,18 +589,23 @@ class FusionOptimizer(GraphRewriter):
             This function yields subgraph in reverse topological order so they can be safely replaced one at a time
             """
 
-            @cache
-            def elemwise_scalar_op_has_c_code(
-                node: Apply, optimizer_verbose=config.optimizer_verbose
-            ) -> bool:
-                # TODO: This should not play a role in non-c backends!
-                if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
+            if self.backend == "c":
+                # supports_c_code is expensive, cache results
+                @cache
+                def elemwise_scalar_op_is_fuseable(
+                    node: Apply, optimizer_verbose=config.optimizer_verbose
+                ) -> bool:
+                    if node.op.scalar_op.supports_c_code(node.inputs, node.outputs):
+                        return True
+                    elif optimizer_verbose:
+                        warn(
+                            f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
+                        )
+                    return False
+            else:
+                # numba: fuse unconditionally
+                def elemwise_scalar_op_is_fuseable(node: Apply) -> bool:
                     return True
-                elif optimizer_verbose:
-                    warn(
-                        f"Loop fusion interrupted because {node.op.scalar_op} does not provide a C implementation."
-                    )
-                return False
 
             # Create a map from node to a set of fuseable client (successor) nodes
             # A node and a client are fuseable if they are both single output Elemwise
@@ -608,7 +624,7 @@ class FusionOptimizer(GraphRewriter):
                     out_node is not None
                     and len(out_node.outputs) == 1
                     and isinstance(out_node.op, Elemwise)
-                    and elemwise_scalar_op_has_c_code(out_node)
+                    and elemwise_scalar_op_is_fuseable(out_node)
                 ):
                     continue
 
@@ -621,7 +637,7 @@ class FusionOptimizer(GraphRewriter):
                         len(client.outputs) == 1
                         and isinstance(client.op, Elemwise)
                         and out_bcast == client.outputs[0].type.broadcastable
-                        and elemwise_scalar_op_has_c_code(client)
+                        and elemwise_scalar_op_is_fuseable(client)
                     )
                 }
                 if out_fuseable_clients:
@@ -872,17 +888,10 @@ class FusionOptimizer(GraphRewriter):
             # Yield from sorted_subgraphs, discarding the subgraph_bitset
             yield from (io for _, io in sorted_subgraphs)
 
-        max_operands = elemwise_max_operands_fct(None)
         reason = self.__class__.__name__
         nb_fused = 0
         nb_replacement = 0
         for inputs, outputs in find_fuseable_subgraphs(fgraph):
-            if (len(inputs) + len(outputs)) > max_operands:
-                warn(
-                    "Loop fusion failed because the resulting node would exceed the kernel argument limit."
-                )
-                continue
-
             scalar_inputs, scalar_outputs = self.elemwise_to_scalar(inputs, outputs)
             composite_outputs = Elemwise(
                 # No need to clone Composite graph, because `self.elemwise_to_scalar` creates fresh variables
@@ -1172,6 +1181,11 @@ add_mul_fusion_seqopt.register(
 )
 
 # Register fusion database just before AddDestroyHandler(49.5) (inplace rewrites)
+# The outer SequenceDB is backend-agnostic; the actual FusionOptimizer inside
+# is registered per-backend (C with "cxx_only", Numba with "numba").
+# Python mode does not benefit from fusion: frompyfunc's C iteration loop is
+# faster than fused Composite.impl per-element overhead.
+# Shared cleanup rewrites run for any backend that performed fusion.
 fuse_seqopt = SequenceDB()
 optdb.register(
     "elemwise_fusion",
@@ -1182,12 +1196,21 @@ optdb.register(
     "FusionOptimizer",
     position=49,
 )
+# C backend fusion: checks that scalar ops have C implementations
 fuse_seqopt.register(
     "composite_elemwise_fusion",
-    FusionOptimizer(),
+    FusionOptimizer(backend="c"),
     "fast_run",
     "fusion",
+    "cxx_only",
     position=1,
+)
+# Numba backend fusion: fuses unconditionally
+fuse_seqopt.register(
+    "numba_composite_elemwise_fusion",
+    FusionOptimizer(backend="numba"),
+    "numba",
+    position=1.5,
 )
 fuse_seqopt.register(
     "local_useless_composite_outputs",
@@ -1201,6 +1224,7 @@ fuse_seqopt.register(
     dfs_rewriter(local_careduce_fusion),
     "fast_run",
     "fusion",
+    "cxx_only",
     position=10,
 )
 fuse_seqopt.register(

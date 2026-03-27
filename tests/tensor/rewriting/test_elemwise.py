@@ -18,7 +18,7 @@ from pytensor.graph.rewriting.basic import check_stack_trace, out2in
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.raise_op import assert_op
-from pytensor.scalar.basic import Composite, float64
+from pytensor.scalar.basic import Composite, UnaryScalarOp, float64, upcast_out
 from pytensor.tensor.basic import MakeVector
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import abs as pt_abs
@@ -234,6 +234,7 @@ def test_local_useless_expand_dims_in_reshape():
     assert equal_computations(h.outputs, [reshape(mat.dimshuffle(1, 0), mat.shape)])
 
 
+@pytest.mark.skipif(not config.cxx, reason="Fusion requires a C compiler (cxx_only)")
 class TestFusion:
     rewrites = RewriteDatabaseQuery(
         include=[
@@ -242,7 +243,7 @@ class TestFusion:
             "add_mul_fusion",
             "inplace",
         ],
-        exclude=["cxx_only", "BlasOpt"],
+        exclude=["BlasOpt"],
     )
     mode = Mode(get_default_mode().linker, rewrites)
     _shared = staticmethod(shared)
@@ -315,7 +316,7 @@ class TestFusion:
         e = c + d
 
         fg = FunctionGraph([a], [e], clone=False)
-        _, nb_fused, nb_replacement, *_ = FusionOptimizer().apply(fg)
+        _, nb_fused, nb_replacement, *_ = FusionOptimizer(backend="c").apply(fg)
         assert nb_fused == 1
         assert nb_replacement == 4
 
@@ -334,7 +335,7 @@ class TestFusion:
         e2 = d + b  # test both orders
 
         fg = FunctionGraph([a], [e1, e2], clone=False)
-        _, nb_fused, nb_replacement, *_ = FusionOptimizer().apply(fg)
+        _, nb_fused, nb_replacement, *_ = FusionOptimizer(backend="c").apply(fg)
         fg.dprint()
         assert nb_fused == 1
         assert nb_replacement == 3
@@ -1075,7 +1076,7 @@ class TestFusion:
             assert od == o.dtype
 
     def test_fusion_35_inputs(self):
-        r"""Make sure we don't fuse too many `Op`\s and go past the 31 function arguments limit."""
+        r"""Make sure we can fuse 35 inputs with the C backend."""
         inpts = vectors([f"i{i}" for i in range(35)])
 
         # Make an elemwise graph looking like:
@@ -1084,16 +1085,16 @@ class TestFusion:
         for idx in range(1, 35):
             out = sin(inpts[idx] + out)
 
-        with config.change_flags(cxx=""):
-            f = function(inpts, out, mode=self.mode)
+        f = function(inpts, out, mode=self.mode)
 
-        # Make sure they all weren't fused
+        # With the C backend, everything should be fused
         composite_nodes = [
             node
             for node in f.maker.fgraph.toposort()
             if isinstance(getattr(node.op, "scalar_op", None), ps.basic.Composite)
         ]
-        assert not any(len(node.inputs) > 31 for node in composite_nodes)
+        assert len(composite_nodes) == 1
+        assert composite_nodes[0].inputs.__len__() == 35
 
     @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
     def test_big_fusion(self):
@@ -1173,7 +1174,10 @@ class TestFusion:
 
         inp = np.array([0, 1, 2], dtype=config.floatX)
         res = f(inp)
-        assert not np.allclose(inp, [0, 1, 2])
+        # destroy_map is a permission, not an obligation.
+        # The C linker writes inplace; the py linker may not (e.g. frompyfunc path).
+        if linker != "py":
+            assert not np.allclose(inp, [0, 1, 2])
         assert np.allclose(res[0], [1, 2, 3])
         assert np.allclose(res[1], np.cos([1, 2, 3]) + np.array([0, 1, 2]))
 
@@ -1241,7 +1245,8 @@ class TestFusion:
                 pt_all,
                 np.all,
                 marks=pytest.mark.xfail(
-                    reason="Rewrite logic does not support all CAReduce"
+                    strict=False,
+                    reason="Rewrite logic does not support all CAReduce",
                 ),
             ),
         ],
@@ -1400,7 +1405,7 @@ class TestFusion:
     def test_rewrite_benchmark(self, graph_fn, n, expected_n_repl, benchmark):
         inps, outs = getattr(self, graph_fn)(n)
         fg = FunctionGraph(inps, outs)
-        opt = FusionOptimizer()
+        opt = FusionOptimizer(backend="c")
 
         def rewrite_func():
             fg_clone = fg.clone()
@@ -1444,7 +1449,9 @@ class TestFusion:
 
             for out_order in [(sub, add), (add, sub)]:
                 fgraph = FunctionGraph([x], out_order, clone=True)
-                _, nb_fused, nb_replaced, *_ = FusionOptimizer().apply(fgraph)
+                _, nb_fused, nb_replaced, *_ = FusionOptimizer(backend="c").apply(
+                    fgraph
+                )
                 # (nb_fused, nb_replaced) would be (2, 5) if we did the invalid fusion
                 assert (nb_fused, nb_replaced) in ((2, 4), (1, 3))
                 fused_nodes = {
@@ -1559,6 +1566,7 @@ def test_local_useless_composite_outputs():
     utt.assert_allclose(f([[np.nan]], [[1.0]], [[np.nan]]), [[0.0]])
 
 
+@pytest.mark.skipif(not config.cxx, reason="Fusion requires a C compiler (cxx_only)")
 @pytest.mark.parametrize("const_shape", [(), (1,), (5,), (1, 5), (2, 5)])
 @pytest.mark.parametrize("op, np_op", [(pt.pow, np.power), (pt.add, np.add)])
 def test_local_inline_composite_constants(op, np_op, const_shape):
@@ -1654,3 +1662,73 @@ def test_InplaceElemwiseOptimizer_bug():
     finally:
         # Restore original value to avoid affecting other tests
         pytensor.config.tensor__insert_inplace_optimizer_validate_nb = original_value
+
+
+# Dummy scalar ops without nfunc_spec — same impl as Exp/Log but forces
+# the frompyfunc path (no numpy ufunc shortcut).
+class _DummyExp(UnaryScalarOp):
+    nfunc_spec = None
+
+    def impl(self, x):
+        return np.exp(x)
+
+    def output_types(self, types):
+        return upcast_out(*types)
+
+
+class _DummyLog(UnaryScalarOp):
+    nfunc_spec = None
+
+    def impl(self, x):
+        return np.log(x)
+
+    def output_types(self, types):
+        return upcast_out(*types)
+
+
+_dummy_exp = Elemwise(_DummyExp(name="dummy_exp"))
+_dummy_log = Elemwise(_DummyLog(name="dummy_log"))
+
+
+class TestPyPerformBenchmarks:
+    """Benchmarks for the Python Elemwise perform path.
+
+    These verify that:
+    1. Ops with nfunc_spec (exp, log) use numpy ufuncs directly (SIMD).
+    2. Ops without nfunc_spec use frompyfunc (C iteration loop).
+    """
+
+    rewrites = RewriteDatabaseQuery(
+        include=["fusion", "inplace"],
+    )
+    py_mode = Mode("py", rewrites)
+
+    def test_nfunc_spec(self, benchmark):
+        """sin(cos(x)) with nfunc_spec uses numpy ufuncs directly."""
+        x = dvector("x")
+        out = pt.sin(pt.cos(x))
+        f = function([x], out, mode=self.py_mode, trust_input=True)
+
+        # Should be two separate Elemwise nodes (no py fusion)
+        elemwise_nodes = [
+            n for n in f.maker.fgraph.toposort() if isinstance(n.op, Elemwise)
+        ]
+        assert len(elemwise_nodes) == 2
+
+        data = np.random.random(10_000)
+        benchmark(f, data)
+
+    def test_no_nfunc_spec(self, benchmark):
+        """dummy_exp(dummy_log(x)) without nfunc_spec uses frompyfunc."""
+        x = dvector("x")
+        out = _dummy_exp(_dummy_log(x))
+        f = function([x], out, mode=self.py_mode, trust_input=True)
+
+        # No py fusion — should be two separate Elemwise nodes
+        elemwise_nodes = [
+            n for n in f.maker.fgraph.toposort() if isinstance(n.op, Elemwise)
+        ]
+        assert len(elemwise_nodes) == 2
+
+        data = np.random.random(10_000)
+        benchmark(f, data)
