@@ -16,7 +16,6 @@ from pytensor.link.numba.dispatch.basic import (
 from pytensor.npy_2_compat import old_np_unique
 from pytensor.tensor import TensorVariable
 from pytensor.tensor.extra_ops import (
-    Bartlett,
     CumOp,
     FillDiagonal,
     FillDiagonalOffset,
@@ -26,15 +25,6 @@ from pytensor.tensor.extra_ops import (
     Unique,
     UnravelIndex,
 )
-
-
-@register_funcify_default_op_cache_key(Bartlett)
-def numba_funcify_Bartlett(op, **kwargs):
-    @numba_basic.numba_njit
-    def bartlett(x):
-        return np.bartlett(x.item())
-
-    return bartlett
 
 
 @register_funcify_default_op_cache_key(CumOp)
