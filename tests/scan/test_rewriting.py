@@ -1828,6 +1828,54 @@ class TestSaveMem:
         assert buffer_size_fn(val_test) == 52 if keep_beginning else 50
 
 
+def test_scan_sit_sot_to_untraced():
+    """Test sit_sot to untraced_sit_sot conversion.
+
+    4 outputs: xs (sit_sot, all values used → stays), ys (sit_sot, only last
+    → converted), ws (nit_sot, unaffected), rs (sit_sot, required orphan
+    → converted). Result: 1 sit_sot, 1 nit_sot, 2 untraced_sit_sot.
+    """
+    mode = (
+        get_default_mode()
+        .excluding("scan_save_mem")
+        .including("scan_save_mem_no_prealloc", "scan_sit_sot_to_untraced")
+    )
+
+    x0 = vector("x0")
+    y0 = vector("y0")
+    r0 = vector("r0")
+
+    def step(x_tm1, y_tm1, r_tm1):
+        r = 1.0 - x_tm1
+        x = x_tm1 + 0.5 * r + 0.3 * r_tm1
+        y = y_tm1 + 1
+        w = x_tm1 * 2
+        return x, y, w, r
+
+    [xs, ys, ws, _rs] = scan(
+        step, outputs_info=[x0, y0, None, r0], n_steps=10, return_updates=False
+    )
+    # xs: all values used (stays sit_sot)
+    # ys[-1]: only last value (converted)
+    # ws[-1]: nit_sot (unaffected)
+    # rs: never used externally, required orphan (converted)
+    f = function([x0, y0, r0], [xs, ys[-1], ws[-1]], mode=mode)
+
+    [scan_node] = [n for n in f.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]
+    assert scan_node.op.info.n_sit_sot == 1
+    assert scan_node.op.info.n_nit_sot == 1
+    assert scan_node.op.info.n_untraced_sit_sot == 2
+
+    x0_val = np.zeros(3, dtype=config.floatX)
+    y0_val = np.zeros(3, dtype=config.floatX)
+    r0_val = np.zeros(3, dtype=config.floatX)
+    res_xs, res_y, res_w = f(x0_val, y0_val, r0_val)
+    np.testing.assert_allclose(res_y, y0_val + 10)
+    assert res_xs.shape == (10, 3)
+    assert np.all(np.isfinite(res_xs))
+    assert np.isfinite(res_w).all()
+
+
 def test_inner_replace_dot():
     """
     This tests that rewrites are applied to the inner-graph.

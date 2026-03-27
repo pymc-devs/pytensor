@@ -16,7 +16,6 @@ from pytensor.link.numba.dispatch.basic import (
 )
 from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
 from pytensor.scan.op import Scan
-from pytensor.tensor.type import TensorType
 
 
 def idx_to_str(
@@ -308,8 +307,8 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         if outer_in_name not in outer_in_nit_sot_names:
             storage_name = outer_in_to_storage_name[outer_in_name]
 
-            is_tensor_type = isinstance(outer_in_var.type, TensorType)
-            if is_tensor_type:
+            is_tapped = outer_in_name not in outer_in_untraced_sit_sot_names
+            if is_tapped:
                 storage_size_name = f"{outer_in_name}_len"
                 storage_size_stmt = f"{storage_size_name} = {outer_in_name}.shape[0]"
                 input_taps = inner_in_names_to_input_taps[outer_in_name]
@@ -352,7 +351,7 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 inner_out_to_outer_in_stmts.append(storage_name)
 
             output_idx = outer_output_names.index(storage_name)
-            if output_idx in node.op.destroy_map or not is_tensor_type:
+            if output_idx in node.op.destroy_map or not is_tapped:
                 storage_alloc_stmt = f"{storage_name} = {outer_in_name}"
             else:
                 storage_alloc_stmt = f"{storage_name} = np.copy({outer_in_name})"
