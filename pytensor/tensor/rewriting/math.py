@@ -506,7 +506,9 @@ def local_exp_log(fgraph, node):
     # Case for exp(softplus(x)) aka exp(log1pexp) -> 1 + exp(x)
     if isinstance(prev_op, ps_math.Softplus) and isinstance(node_op, ps.Exp):
         x = x.owner.inputs[0]
-        return [add(1, exp(x))]
+        old_out = node.outputs[0]
+        one_cast = np.asarray(1, dtype=old_out.dtype)
+        return [add(one_cast, exp(x))]
 
     # Case for expm1(softplus(x)) aka expm1(log1pexp) -> exp(x)
     if isinstance(prev_op, ps_math.Softplus) and isinstance(node_op, ps.Expm1):
@@ -591,14 +593,16 @@ def local_exp_log_nan_switch(fgraph, node):
     if isinstance(prev_op, ps.Log1p) and isinstance(node_op, ps.Exp):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
-        new_out = switch(ge(x, -1), add(1, x), np.asarray(np.nan, old_out.dtype))
+        one_cast = np.asarray(1, dtype=old_out.dtype)
+        new_out = switch(ge(x, -1), add(one_cast, x), np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
     # Case for expm1(log(x)) -> x - 1
     if isinstance(prev_op, ps.Log) and isinstance(node_op, ps.Expm1):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
-        new_out = switch(ge(x, 0), sub(x, 1), np.asarray(np.nan, old_out.dtype))
+        one_cast = np.asarray(1, dtype=old_out.dtype)
+        new_out = switch(ge(x, 0), sub(x, one_cast), np.asarray(np.nan, old_out.dtype))
         return [new_out]
 
     # Case for expm1(log1p(x)) -> x
@@ -612,7 +616,10 @@ def local_exp_log_nan_switch(fgraph, node):
     if isinstance(prev_op, ps_math.Log1mexp) and isinstance(node_op, ps.Exp):
         x = x.owner.inputs[0]
         old_out = node.outputs[0]
-        new_out = switch(le(x, 0), sub(1, exp(x)), np.asarray(np.nan, old_out.dtype))
+        one_cast = np.asarray(1, dtype=old_out.dtype)
+        new_out = switch(
+            le(x, 0), sub(one_cast, exp(x)), np.asarray(np.nan, old_out.dtype)
+        )
         return [new_out]
 
     # Case for expm1(log1mexp(x)) -> -exp(x)
@@ -3393,11 +3400,14 @@ def local_exp_over_1_plus_exp(fgraph, node):
     copy_stack_trace(num, new_num)
 
     if len(denom_rest) == 0:
-        return [new_num]
+        out = new_num
     elif len(denom_rest) == 1:
         out = new_num / denom_rest[0]
     else:
         out = new_num / mul(*denom_rest)
+
+    if out.dtype != node.outputs[0].dtype:
+        out = cast(out, node.outputs[0].dtype)
 
     copy_stack_trace(node.outputs[0], out)
     return [out]
