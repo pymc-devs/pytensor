@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from copy import copy
 from textwrap import dedent
 from typing import Literal
 
@@ -357,6 +356,8 @@ class Elemwise(OpenMPOp):
         assert not isinstance(scalar_op, type(self))
         if inplace_pattern is None:
             inplace_pattern = frozendict({})
+        elif not isinstance(inplace_pattern, frozendict):
+            inplace_pattern = frozendict(inplace_pattern)
         self.name = name
         self.scalar_op = scalar_op
         self.inplace_pattern = inplace_pattern
@@ -365,21 +366,7 @@ class Elemwise(OpenMPOp):
         if nfunc_spec is None:
             nfunc_spec = getattr(scalar_op, "nfunc_spec", None)
         self.nfunc_spec = nfunc_spec
-        self.__setstate__(self.__dict__)
         super().__init__(openmp=openmp)
-
-    def __getstate__(self):
-        d = copy(self.__dict__)
-        d.pop("ufunc")
-        d.pop("nfunc")
-        d.pop("__epydoc_asRoutine", None)
-        return d
-
-    def __setstate__(self, d):
-        super().__setstate__(d)
-        self.ufunc = None
-        self.nfunc = None
-        self.inplace_pattern = frozendict(self.inplace_pattern)
 
     def get_output_info(self, *inputs):
         """Return the outputs dtype and broadcastable pattern and the
@@ -599,53 +586,149 @@ class Elemwise(OpenMPOp):
 
         return ret
 
-    def prepare_node(self, node, storage_map, compute_map, impl):
-        # Postpone the ufunc building to the last minutes due to:
-        # - NumPy ufunc support only up to 32 operands (inputs and outputs)
-        #   But our c code support more.
-        # - nfunc is reused for scipy and scipy is optional
-        if (len(node.inputs) + len(node.outputs)) > 32 and impl == "py":
-            impl = "c"
+    def _create_node_ufunc(self, node: Apply):
+        """Define (or retrieve) the node ufunc used in `perform`.
 
-        if getattr(self, "nfunc_spec", None) and impl != "c":
-            self.nfunc = import_func_from_string(self.nfunc_spec[0])
+        For scalar (0-d) outputs, calls ``scalar_op.impl`` directly.
+        For tensor outputs with ``nfunc_spec``, uses the numpy/scipy ufunc.
+        Otherwise, ``np.frompyfunc`` (≤32 operands) or Blockwise vectorize (>32).
 
-        if (
-            (len(node.inputs) + len(node.outputs)) <= 32
-            and (self.nfunc is None or self.scalar_op.nin != len(node.inputs))
-            and self.ufunc is None
-            and impl == "py"
-        ):
+        All returned callables accept ``(*inputs)`` and return a tuple of outputs.
+        The ``inplace_pattern`` is baked into the closure so that inplace outputs
+        are written directly into the corresponding input arrays.
+
+        The ufunc is stored in the tag of the node.
+        """
+        inplace_pattern = self.inplace_pattern
+        nout = len(node.outputs)
+        out_dtypes = tuple(out.type.numpy_dtype for out in node.outputs)
+        # Pre-compute output→input index mapping for inplace
+        out_to_in = (
+            tuple(inplace_pattern.get(i) for i in range(nout))
+            if inplace_pattern
+            else ()
+        )
+
+        if (nfunc_spec := self.nfunc_spec) is not None and len(
+            node.inputs
+        ) == nfunc_spec[1]:
+            ufunc = import_func_from_string(nfunc_spec[0])
+            if ufunc is None:
+                raise ValueError(f"Could not import gufunc {nfunc_spec[0]} for {self}")
+            # When inputs are discrete and output is float, pass a signature
+            # to prevent numpy from computing in float16 for int8 inputs
+            ufunc_kwargs = {}
+            if (
+                isinstance(ufunc, np.ufunc)
+                and any(inp.dtype in discrete_dtypes for inp in node.inputs)
+                and any(out.dtype in float_dtypes for out in node.outputs)
+            ):
+                in_sig = "".join(np.dtype(inp.dtype).char for inp in node.inputs)
+                out_sig = "".join(np.dtype(out.dtype).char for out in node.outputs)
+                ufunc_kwargs["sig"] = f"{in_sig}->{out_sig}"
+
+            if out_to_in and isinstance(ufunc, np.ufunc):
+                # Only numpy ufuncs support out=; other nfunc_spec functions (e.g. np.where) don't
+                if nout == 1:
+
+                    def ufunc_fn(
+                        *inputs, _ufunc=ufunc, _kwargs=ufunc_kwargs, _j=out_to_in[0]
+                    ):
+                        _ufunc(*inputs, out=inputs[_j], **_kwargs)
+                        return (inputs[_j],)
+                else:
+
+                    def ufunc_fn(
+                        *inputs,
+                        _ufunc=ufunc,
+                        _kwargs=ufunc_kwargs,
+                        _out_to_in=out_to_in,
+                    ):
+                        out = tuple(
+                            inputs[j] if j is not None else None for j in _out_to_in
+                        )
+                        return _ufunc(*inputs, out=out, **_kwargs)
+            elif nout == 1:
+
+                def ufunc_fn(*inputs, _ufunc=ufunc, _kwargs=ufunc_kwargs):
+                    return (_ufunc(*inputs, **_kwargs),)
+            else:
+
+                def ufunc_fn(*inputs, _ufunc=ufunc, _kwargs=ufunc_kwargs):
+                    return _ufunc(*inputs, **_kwargs)
+
+            node.tag.ufunc = ufunc_fn
+            return ufunc_fn
+
+        # No nfunc_spec path
+        if node.outputs[0].type.ndim == 0:
+            # Scalar outputs: call impl directly, wrap with np.asarray
+            impl = self.scalar_op.impl
+            if nout == 1:
+
+                def ufunc_fn(*inputs, _impl=impl, _dt=out_dtypes[0]):
+                    return (np.asarray(_impl(*inputs), dtype=_dt),)
+            else:
+
+                def ufunc_fn(*inputs, _impl=impl, _dts=out_dtypes):
+                    return tuple(
+                        np.asarray(r, dtype=dt) for r, dt in zip(_impl(*inputs), _dts)
+                    )
+
+            node.tag.ufunc = ufunc_fn
+            return ufunc_fn
+
+        # ndim > 0 without nfunc_spec: frompyfunc (≤32 operands) or Blockwise vectorize (>32)
+        # frompyfunc returns object arrays — .astype() converts to the correct dtype.
+        # No inplace: destroy_map is a permission, not an obligation. frompyfunc
+        # already allocates an object array, so copying into the input would just waste time.
+        if len(node.inputs) + len(node.outputs) <= 32:
             ufunc = np.frompyfunc(
                 self.scalar_op.impl, len(node.inputs), self.scalar_op.nout
             )
-            if self.scalar_op.nin > 0:
-                # We can reuse it for many nodes
-                self.ufunc = ufunc
+
+            if nout == 1:
+
+                def ufunc_fn(*inputs, _ufunc=ufunc, _dt=out_dtypes[0]):
+                    return (_ufunc(*inputs).astype(_dt),)
             else:
-                node.tag.ufunc = ufunc
 
-        # Numpy ufuncs will sometimes perform operations in
-        # float16, in particular when the input is int8.
-        # This is not something that we want, and we do not
-        # do it in the C code, so we specify that the computation
-        # should be carried out in the returned dtype.
-        # This is done via the "sig" kwarg of the ufunc, its value
-        # should be something like "ff->f", where the characters
-        # represent the dtype of the inputs and outputs.
+                def ufunc_fn(*inputs, _ufunc=ufunc, _dts=out_dtypes):
+                    return tuple(r.astype(dt) for r, dt in zip(_ufunc(*inputs), _dts))
+        else:
+            # frompyfunc limited to 32 operands, fall back to Blockwise vectorize
+            from pytensor.tensor.blockwise import _vectorize_node_perform
 
-        # NumPy 1.10.1 raise an error when giving the signature
-        # when the input is complex. So add it only when inputs is int.
-        out_dtype = node.outputs[0].dtype
-        if (
-            out_dtype in float_dtypes
-            and isinstance(self.nfunc, np.ufunc)
-            and node.inputs[0].dtype in discrete_dtypes
-        ):
-            char = np.dtype(out_dtype).char
-            sig = char * node.nin + "->" + char * node.nout
-            node.tag.sig = sig
-        node.tag.fake_node = Apply(
+            core_node = Apply(
+                self.scalar_op,
+                [
+                    get_scalar_type(dtype=inp.type.dtype).make_variable()
+                    for inp in node.inputs
+                ],
+                [
+                    get_scalar_type(dtype=out.type.dtype).make_variable()
+                    for out in node.outputs
+                ],
+            )
+            batch_ndim = node.outputs[0].type.ndim
+            batch_bcast_patterns = tuple(inp.type.broadcastable for inp in node.inputs)
+            ufunc_fn = _vectorize_node_perform(
+                core_node,
+                batch_bcast_patterns,
+                batch_ndim,
+                impl="py",
+                inplace_mapping=out_to_in or None,
+            )
+
+        node.tag.ufunc = ufunc_fn
+        return ufunc_fn
+
+    def prepare_node(self, node, storage_map, compute_map, impl=None):
+        if impl != "c":
+            node.tag.ufunc = self._create_node_ufunc(node)
+
+        # Create a dummy scalar node for the scalar_op to prepare itself
+        node.tag.dummy_node = dummy_node = Apply(
             self.scalar_op,
             [
                 get_scalar_type(dtype=input.type.dtype).make_variable()
@@ -656,77 +739,18 @@ class Elemwise(OpenMPOp):
                 for output in node.outputs
             ],
         )
-
-        self.scalar_op.prepare_node(node.tag.fake_node, None, None, impl)
+        self.scalar_op.prepare_node(dummy_node, None, None, impl)
 
     def perform(self, node, inputs, output_storage):
-        if (len(node.inputs) + len(node.outputs)) > 32:
-            # Some versions of NumPy will segfault, other will raise a
-            # ValueError, if the number of operands in an ufunc is more than 32.
-            # In that case, the C version should be used, or Elemwise fusion
-            # should be disabled.
-            # FIXME: This no longer calls the C implementation!
-            super().perform(node, inputs, output_storage)
-
         self._check_runtime_broadcast(node, inputs)
-
-        ufunc_args = inputs
-        ufunc_kwargs = {}
-        # We supported in the past calling manually op.perform.
-        # To keep that support we need to sometimes call self.prepare_node
-        if self.nfunc is None and self.ufunc is None:
-            self.prepare_node(node, None, None, "py")
-        if self.nfunc and len(inputs) == self.nfunc_spec[1]:
-            ufunc = self.nfunc
-            nout = self.nfunc_spec[2]
-            if hasattr(node.tag, "sig"):
-                ufunc_kwargs["sig"] = node.tag.sig
-            # Unfortunately, the else case does not allow us to
-            # directly feed the destination arguments to the nfunc
-            # since it sometimes requires resizing. Doing this
-            # optimization is probably not worth the effort, since we
-            # should normally run the C version of the Op.
-        else:
-            # the second calling form is used because in certain versions of
-            # numpy the first (faster) version leads to segfaults
-            if self.ufunc:
-                ufunc = self.ufunc
-            elif not hasattr(node.tag, "ufunc"):
-                # It happen that make_thunk isn't called, like in
-                # get_underlying_scalar_constant_value
-                self.prepare_node(node, None, None, "py")
-                # prepare_node will add ufunc to self or the tag
-                # depending if we can reuse it or not. So we need to
-                # test both again.
-                if self.ufunc:
-                    ufunc = self.ufunc
-                else:
-                    ufunc = node.tag.ufunc
-            else:
-                ufunc = node.tag.ufunc
-
-            nout = ufunc.nout
+        try:
+            ufunc = node.tag.ufunc
+        except AttributeError:
+            ufunc = node.tag.ufunc = self._create_node_ufunc(node)
 
         with np.errstate(all="ignore"):
-            variables = ufunc(*ufunc_args, **ufunc_kwargs)
-
-        if nout == 1:
-            variables = [variables]
-
-        # zip strict not specified because we are in a hot loop
-        for i, (variable, storage, nout) in enumerate(
-            zip(variables, output_storage, node.outputs)
-        ):
-            storage[0] = variable = np.asarray(variable, dtype=nout.dtype)
-
-            if i in self.inplace_pattern:
-                odat = inputs[self.inplace_pattern[i]]
-                odat[...] = variable
-                storage[0] = odat
-
-            # numpy.real return a view!
-            if not variable.flags.owndata:
-                storage[0] = variable.copy()
+            for s, result in zip(output_storage, ufunc(*inputs)):
+                s[0] = result
 
     @staticmethod
     def _check_runtime_broadcast(node, inputs):
@@ -754,8 +778,7 @@ class Elemwise(OpenMPOp):
     def _c_all(self, node, nodename, inames, onames, sub):
         # Some `Op`s directly call `Elemwise._c_all` or `Elemwise.c_code`
         # To not request all of them to call prepare_node(), do it here.
-        # There is no harm if it get called multiple times.
-        if not hasattr(node.tag, "fake_node"):
+        if not hasattr(node.tag, "dummy_node"):
             self.prepare_node(node, None, None, "c")
         _inames = inames
         _onames = onames
@@ -903,7 +926,7 @@ class Elemwise(OpenMPOp):
         else:
             fail = sub["fail"]
         task_code = self.scalar_op.c_code(
-            node.tag.fake_node,
+            node.tag.dummy_node,
             nodename + "_scalar_",
             [f"{s}_i" for s in _inames],
             [f"{s}_i" for s in onames],

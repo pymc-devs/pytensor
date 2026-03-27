@@ -417,7 +417,10 @@ class TestBroadcast:
             xv = rval((5, 5))
             yv = rval((1, 1))
             f(xv, yv)
-            assert (xv == yv).all()
+            # destroy_map is a permission, not an obligation.
+            # PerformLinker with frompyfunc may not write inplace.
+            if not isinstance(linker(), PerformLinker):
+                assert (xv == yv).all()
 
     def test_fill_var(self):
         x = matrix()

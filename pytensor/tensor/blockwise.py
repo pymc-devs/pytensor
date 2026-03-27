@@ -49,10 +49,17 @@ def _vectorize_node_perform(
     batch_bcast_patterns: Sequence[tuple[bool, ...]],
     batch_ndim: int,
     impl: str | None,
+    inplace_mapping: tuple[int | None, ...] | None = None,
 ) -> Callable:
     """Creates a vectorized `perform` function for a given core node.
 
     Similar behavior of np.vectorize, but specialized for PyTensor Blockwise Op.
+
+    Parameters
+    ----------
+    inplace_mapping
+        Optional tuple of length ``nout``. Entry ``i`` is the input index that
+        output ``i`` should be written into, or ``None`` to allocate a fresh array.
     """
 
     storage_map = {var: [None] for var in core_node.inputs + core_node.outputs}
@@ -75,6 +82,7 @@ def _vectorize_node_perform(
 
     def vectorized_perform(
         *args,
+        out=None,
         batch_bcast_patterns=batch_bcast_patterns,
         batch_ndim=batch_ndim,
         single_in=single_in,
@@ -82,7 +90,11 @@ def _vectorize_node_perform(
         core_input_storage=core_input_storage,
         core_output_storage=core_output_storage,
         core_storage=core_storage,
+        inplace_mapping=inplace_mapping,
     ):
+        if inplace_mapping is not None:
+            out = tuple(args[j] if j is not None else None for j in inplace_mapping)
+
         if single_in:
             batch_shape = args[0].shape[:batch_ndim]
         else:
@@ -106,10 +118,22 @@ def _vectorize_node_perform(
             for core_input, arg in zip(core_input_storage, args):
                 core_input[0] = np.asarray(arg[index0])
             core_thunk()
-            outputs = tuple(
-                empty(batch_shape + core_output[0].shape, dtype=core_output[0].dtype)
-                for core_output in core_output_storage
-            )
+            if out is None:
+                outputs = tuple(
+                    empty(
+                        batch_shape + core_output[0].shape, dtype=core_output[0].dtype
+                    )
+                    for core_output in core_output_storage
+                )
+            else:
+                outputs = tuple(
+                    o
+                    if o is not None
+                    else empty(
+                        batch_shape + core_output[0].shape, dtype=core_output[0].dtype
+                    )
+                    for o, core_output in zip(out, core_output_storage)
+                )
             for output, core_output in zip(outputs, core_output_storage):
                 output[index0] = core_output[0]
 
