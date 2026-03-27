@@ -432,23 +432,19 @@ class ScanMethodsMixin:
         offset = self.info.n_mit_mot + self.info.n_mit_sot + self.info.n_sit_sot
         return list_outputs[offset : offset + self.info.n_nit_sot]
 
-    def inner_untraced_sit_sot(self, list_inputs):
+    def inner_untraced_sit_sot(self, list_inputs, with_idx=False):
         n_taps_upto_sit_sot = sum(
             len(x)
             for x in chain(self.info.mit_mot_in_slices, self.info.mit_sot_in_slices)
         )
         offset = self.info.n_seqs + n_taps_upto_sit_sot + self.info.n_sit_sot
-        return list_inputs[offset : offset + self.info.n_untraced_sit_sot]
+        res = list_inputs[offset : offset + self.info.n_untraced_sit_sot]
+        if with_idx:
+            return tuple(enumerate(res, start=offset))
+        else:
+            return res
 
-    def inner_shared(self, list_inputs):
-        warnings.warn(
-            "The 'inner_shared' method is deprecated. Use 'inner_untraced_sit_sot' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.inner_untraced_sit_sot(list_inputs)
-
-    def outer_untraced_sit_sot(self, list_inputs):
+    def outer_untraced_sit_sot(self, list_inputs, with_idx=False):
         offset = (
             1
             + self.info.n_seqs
@@ -456,47 +452,35 @@ class ScanMethodsMixin:
             + self.info.n_mit_sot
             + self.info.n_sit_sot
         )
-        return list_inputs[offset : offset + self.info.n_untraced_sit_sot]
+        res = list_inputs[offset : offset + self.info.n_untraced_sit_sot]
+        if with_idx:
+            return tuple(enumerate(res, start=offset))
+        else:
+            return res
 
-    def outer_shared(self, list_inputs):
-        warnings.warn(
-            "The 'outer_shared' method is deprecated. Use 'outer_untraced_sit_sot' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.outer_untraced_sit_sot(list_inputs)
-
-    def inner_untraced_sit_sot_outs(self, list_outputs):
+    def inner_untraced_sit_sot_outs(self, list_outputs, with_idx=False):
         n_taps = sum(len(x) for x in self.info.mit_mot_out_slices)
         offset = (
             self.info.n_mit_sot + n_taps + self.info.n_sit_sot + self.info.n_nit_sot
         )
-        return list_outputs[offset : offset + self.info.n_untraced_sit_sot]
+        res = list_outputs[offset : offset + self.info.n_untraced_sit_sot]
+        if with_idx:
+            return tuple(enumerate(res, start=offset))
+        else:
+            return res
 
-    def inner_shared_outs(self, list_outputs):
-        warnings.warn(
-            "The 'inner_shared_outs' method is deprecated. Use 'inner_untraced_sit_sot_outs' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.inner_untraced_sit_sot_outs(list_outputs)
-
-    def outer_untraced_sit_sot_outs(self, list_outputs):
+    def outer_untraced_sit_sot_outs(self, list_outputs, with_idx=False):
         offset = (
             self.info.n_mit_mot
             + self.info.n_mit_sot
             + self.info.n_sit_sot
             + self.info.n_nit_sot
         )
-        return list_outputs[offset : offset + self.info.n_untraced_sit_sot]
-
-    def outer_shared_outs(self, list_outputs):
-        warnings.warn(
-            "The 'outer_shared_outs' method is deprecated. Use 'outer_untraced_sit_sot_outs' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.outer_untraced_sit_sot_outs(list_outputs)
+        res = list_outputs[offset : offset + self.info.n_untraced_sit_sot]
+        if with_idx:
+            return tuple(enumerate(res, start=offset))
+        else:
+            return res
 
     def inner_non_seqs(self, list_inputs):
         n_taps_upto_sit_sot = sum(
@@ -1443,13 +1427,23 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         )
                     input_idx += 1
 
-            # Wrap the inputs not associated to mitmots and wrap the remaining
-            # outputs
+            # Wrap the inputs not associated to mitmots and wrap the remaining outputs.
+            # Untraced sit_sot inputs that are in the destroy_map are marked mutable.
             untraced_sit_sot_inner_inputs = set(
                 self.inner_untraced_sit_sot(fgraph.inputs)
             )
+            untraced_out_start = self.n_tap_outs + info.n_nit_sot
+            mutable_untraced_inner_inputs = {
+                self.inner_untraced_sit_sot(fgraph.inputs)[j]
+                for j in range(info.n_untraced_sit_sot)
+                if untraced_out_start + j in self.destroy_map
+            }
             wrapped_inputs += [
-                In(x, borrow=x in untraced_sit_sot_inner_inputs)
+                In(
+                    x,
+                    borrow=x in untraced_sit_sot_inner_inputs,
+                    mutable=x in mutable_untraced_inner_inputs,
+                )
                 for x in fgraph.inputs[input_idx:]
             ]
             wrapped_outputs = [Out(x, borrow=True) for x in fgraph.outputs[:slices]]
