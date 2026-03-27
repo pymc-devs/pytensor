@@ -37,7 +37,6 @@ from pytensor.printing import pprint
 from pytensor.utils import (
     apply_across_args,
     difference,
-    to_return_values,
 )
 
 
@@ -3842,7 +3841,7 @@ class Real(UnaryScalarOp):
 
     """
 
-    # numpy.real(float32) return a view on the inputs.
+    # numpy.real(float32) return a view on the inputs, which ain't good for elemwise.
     # nfunc_spec = ('real', 1, 1)
 
     def impl(self, x):
@@ -4056,39 +4055,27 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
 
     @property
     def py_perform_fn(self):
-        if hasattr(self, "_py_perform_fn"):
+        """Compiled Python function that chains inner ops' ``impl`` methods.
+
+        Returns a callable that takes scalar inputs and returns a tuple of outputs.
+        """
+        try:
             return self._py_perform_fn
+        except AttributeError:
+            pass
 
         from pytensor.link.utils import fgraph_to_python
 
-        def python_convert(op, node=None, **kwargs):
-            assert node is not None
+        def impl_convert(op, node=None, **kwargs):
+            return op.impl
 
-            n_outs = len(node.outputs)
-
-            if n_outs > 1:
-
-                def _perform(*inputs, outputs=[[None]] * n_outs):
-                    op.perform(node, inputs, outputs)
-                    return tuple(o[0] for o in outputs)
-
-            else:
-
-                def _perform(*inputs, outputs=[[None]]):
-                    op.perform(node, inputs, outputs)
-                    return outputs[0][0]
-
-            return _perform
-
-        self._py_perform_fn = fgraph_to_python(self.fgraph, python_convert)
+        self._py_perform_fn = fgraph_to_python(self.fgraph, impl_convert)
         return self._py_perform_fn
 
     def impl(self, *inputs):
-        output_storage = [[None] for i in range(self.nout)]
-        self.perform(None, inputs, output_storage)
-        ret = to_return_values([storage[0] for storage in output_storage])
-        if self.nout > 1:
-            ret = tuple(ret)
+        ret = self.py_perform_fn(*inputs)
+        if self.nout == 1:
+            return ret[0]
         return ret
 
     def c_code_cache_version(self):
@@ -4313,9 +4300,7 @@ class Composite(ScalarInnerGraphOp):
             return node
 
     def perform(self, node, inputs, output_storage):
-        outputs = self.py_perform_fn(*inputs)
-        # zip strict not specified because we are in a hot loop
-        for storage, out_val in zip(output_storage, outputs):
+        for storage, out_val in zip(output_storage, self.py_perform_fn(*inputs)):
             storage[0] = out_val
 
     def grad(self, inputs, output_grads):
