@@ -28,6 +28,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, Prod, _matmul, log, outer, prod
 from pytensor.tensor.nlinalg import (
     SVD,
+    Eig,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
@@ -1145,3 +1146,115 @@ def scalar_solve_to_division(fgraph, node):
     copy_stack_trace(old_out, new_out)
 
     return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Eig)])
+def rewrite_eig_eye(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that for any identity matrix, all the eigenvalues are 1 and the eigenvectors are the standard basis.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    # Check whether input to Eig is Eye and the 1's are on main diagonal
+    potential_eye = node.inputs[0]
+    if not (
+        potential_eye.owner
+        and isinstance(potential_eye.owner.op, Eye)
+        and Eye.is_offset_zero(potential_eye.owner)
+    ):
+        return None
+
+    eigval_rewritten = pt.ones(potential_eye.shape[-1], dtype=node.outputs[0].dtype)
+    eigvec_rewritten = pt.eye(potential_eye.shape[-1], dtype=node.outputs[1].dtype)
+
+    return [eigval_rewritten, eigvec_rewritten]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Eig)])
+def rewrite_eig_diag(fgraph, node):
+    """
+     This rewrite takes advantage of the fact that for a diagonal matrix, the eigenvalues are simply the diagonal elements and the eigenvectors are the standard basis.
+
+    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices
+    that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to
+    make this rewrite as efficient as possible, depending on whether the multiplication was with a scalar,
+    vector or a matrix.
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    inputs = node.inputs[0]
+
+    # Check for use of pt.diag first
+    if (
+        inputs.owner
+        and isinstance(inputs.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(inputs.owner)
+    ):
+        eigval_rewritten = inputs.owner.inputs[0].astype(node.outputs[0].dtype)
+        base_eye = pt.eye(inputs.shape[-1], dtype=node.outputs[1].dtype)
+        eigvec_rewritten = pt.broadcast_to(base_eye, inputs.shape)
+        return [eigval_rewritten, eigvec_rewritten]
+
+    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
+    inputs_or_none = _find_diag_from_eye_mul(inputs)
+    if inputs_or_none is None:
+        return None
+
+    eye_input, non_eye_inputs = inputs_or_none
+
+    # Dealing with only one other input
+    if len(non_eye_inputs) != 1:
+        return None
+
+    _eye_input, non_eye_input = eye_input, non_eye_inputs[0]
+
+    n = inputs.shape[-1]
+    base_eye = pt.eye(n, dtype=node.outputs[1].dtype)
+    eigvec_rewritten = (
+        base_eye
+        if inputs.ndim == 2
+        else pt.broadcast_to(pt.shape_padleft(base_eye, inputs.ndim - 2), inputs.shape)
+    )
+
+    # Checking if original x was scalar/vector/matrix
+    if non_eye_input.type.broadcastable[-2:] == (True, True):
+        # For scalar
+        eigval_rewritten = pt.full(
+            node.outputs[0].shape,
+            non_eye_input.squeeze(axis=(-1, -2)),
+            dtype=node.outputs[0].dtype,
+        )
+    elif non_eye_input.type.broadcastable[-2:] == (False, False):
+        # For Matrix (including batched matrices)
+        eigval_rewritten = non_eye_input.diagonal(axis1=-1, axis2=-2).astype(
+            node.outputs[0].dtype
+        )
+    else:
+        # For vector
+        eigval_rewritten = non_eye_input.squeeze().astype(node.outputs[0].dtype)
+
+    return [eigval_rewritten, eigvec_rewritten]
