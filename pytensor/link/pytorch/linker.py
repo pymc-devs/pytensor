@@ -1,3 +1,5 @@
+from numpy.random import Generator, RandomState
+
 from pytensor.link.basic import JITLinker
 from pytensor.link.utils import unique_name_generator
 
@@ -84,7 +86,9 @@ class PytorchLinker(JITLinker):
                     if getattr(pytensor.link.utils, n[1:], False):
                         delattr(pytensor.link.utils, n[1:])
 
-                return tuple(out.cpu().numpy() for out in outs)
+                return tuple(
+                    out.cpu().numpy() if torch.is_tensor(out) else out for out in outs
+                )
 
             def __del__(self):
                 del self.gen_functors
@@ -95,9 +99,16 @@ class PytorchLinker(JITLinker):
         return inner_fn
 
     def create_thunk_inputs(self, storage_map):
+        from pytensor.link.pytorch.dispatch import pytorch_typify
+
         thunk_inputs = []
         for n in self.fgraph.inputs:
             sinput = storage_map[n]
+            if isinstance(sinput[0], RandomState | Generator):
+                new_value = pytorch_typify(
+                    sinput[0], dtype=getattr(sinput[0], "dtype", None)
+                )
+                sinput[0] = new_value
             thunk_inputs.append(sinput)
 
         return thunk_inputs
