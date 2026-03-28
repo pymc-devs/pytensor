@@ -25,7 +25,7 @@ from pytensor.graph.utils import (
 
 if TYPE_CHECKING:
     from pytensor.compile.function.types import Function
-    from pytensor.graph.fg import FunctionGraph
+    from pytensor.graph.fg import AbstractFunctionGraph, FunctionGraph
     from pytensor.graph.type import Type
 
 StorageCellType = list[Any | None]
@@ -459,16 +459,18 @@ class Op(MetaObject):
         """
 
     def do_constant_folding(self, fgraph: "FunctionGraph", node: Apply) -> bool:
-        """Determine whether or not constant folding should be performed for the given node.
+        """Determine whether constant folding should be performed for the given node.
 
         This allows each `Op` to determine if it wants to be constant
         folded when all its inputs are constant. This allows it to choose where
         it puts its memory/speed trade-off. Also, it could make things faster
-        as constants can't be used for in-place operations (see
-        ``*IncSubtensor``).
+        as constants can't be used for in-place operations (see ``*IncSubtensor``).
 
         Parameters
         ----------
+        fgraph : FunctionGraph
+            Function graph to which `node` belongs. This is passed in case the `Op` needs to inspect the graph to make
+            its decision.
         node : Apply
             The node for which the constant folding determination is made.
 
@@ -633,8 +635,8 @@ class _NoPythonOp(Op):
 class HasInnerGraph(ABC):
     r"""A mixin for an `Op` that contain an inner graph."""
 
-    fgraph: "FunctionGraph"
-    """A `FunctionGraph` of the inner function."""
+    fgraph: "AbstractFunctionGraph"
+    """The inner function graph (FunctionGraph or FrozenFunctionGraph)."""
 
     @property
     @abstractmethod

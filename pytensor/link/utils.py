@@ -24,7 +24,7 @@ import numpy as np
 
 from pytensor import config, utils
 from pytensor.graph.basic import Apply, Constant, Variable
-from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.fg import AbstractFunctionGraph, FunctionGraph
 
 
 if TYPE_CHECKING:
@@ -664,7 +664,7 @@ def unique_name_generator(
 
 
 def fgraph_to_python(
-    fgraph: FunctionGraph,
+    fgraph: AbstractFunctionGraph,
     op_conversion_fn: Callable,
     *,
     type_conversion_fn: Callable = lambda x, **kwargs: x,

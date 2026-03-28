@@ -1,6 +1,7 @@
 """A container for specifying and manipulating a graph with distinct inputs and outputs."""
 
 import time
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Any, Union, cast
@@ -10,6 +11,8 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     Apply,
     AtomicVariable,
+    Constant,
+    NominalVariable,
     Variable,
     clone_get_equiv,
 )
@@ -23,10 +26,23 @@ from pytensor.graph.traversal import (
     toposort_with_orderings,
     vars_between,
 )
-from pytensor.graph.utils import MetaObject, MissingInputError, TestValueError
+from pytensor.graph.utils import MissingInputError, TestValueError
 
 
 ClientType = tuple[Apply, int]
+
+
+class AbstractFunctionGraph(ABC):
+    """Read-only interface shared by FunctionGraph and FrozenFunctionGraph."""
+
+    inputs: Sequence[Variable]
+    outputs: Sequence[Variable]
+    apply_nodes: set[Apply]
+    variables: set[Variable]
+    clients: dict[Variable, list[ClientType]]
+
+    @abstractmethod
+    def toposort(self) -> list[Apply]: ...
 
 
 class Output(Op):
@@ -47,7 +63,7 @@ class Output(Op):
         return f"output[{self.idx}]"
 
 
-class FunctionGraph(MetaObject):
+class FunctionGraph(AbstractFunctionGraph):
     r"""
     A `FunctionGraph` represents a subgraph bound by a set of input variables and
     a set of output variables, ie a subgraph that specifies an PyTensor function.
@@ -928,3 +944,167 @@ class FunctionGraph(MetaObject):
         from pytensor.printing import debugprint
 
         return debugprint(self, **kwargs)
+
+    def freeze(self) -> "FrozenFunctionGraph":
+        """Return a frozen, hashable version of this FunctionGraph."""
+        return FrozenFunctionGraph(self.inputs, self.outputs)
+
+
+class FrozenFunctionGraph(AbstractFunctionGraph):
+    """Immutable, hashable function graph for inner graphs of Ops.
+
+    All internal nodes are globally interned via ``FrozenApply``.  Two
+    ``FrozenFunctionGraph`` instances built from structurally identical source
+    graphs share the same interned output objects, so equality reduces to
+    identity comparison on the outputs tuple.
+
+    Use ``FunctionGraph.freeze()`` or ``FrozenFunctionGraph(inputs, outputs)``
+    to create instances.
+
+    .. code-block:: python
+
+        from pytensor.scalar.basic import float64, add
+        from pytensor.graph.fg import FunctionGraph
+
+        x, y = float64("x"), float64("y")
+        frozen = FunctionGraph([x, y], [add(x, y)]).freeze()
+        frozen2 = FunctionGraph([x, y], [add(x, y)]).freeze()
+
+        assert frozen == frozen2
+        assert {frozen: "value"}[frozen2] == "value"
+    """
+
+    def __init__(
+        self,
+        inputs: Sequence[Variable],
+        outputs: Sequence[Variable],
+    ):
+        from pytensor.graph.basic import FrozenApply
+
+        nominal_inputs = tuple(
+            NominalVariable(i, inp.type, name=inp.name) for i, inp in enumerate(inputs)
+        )
+
+        memo: dict[Variable, Variable] = dict(zip(inputs, nominal_inputs, strict=True))
+
+        for node in toposort(outputs, blockers=inputs):
+            for inp in node.inputs:
+                if inp not in memo:
+                    if isinstance(inp, Constant):
+                        memo[inp] = inp
+                    elif isinstance(inp, AtomicVariable):
+                        memo[inp] = inp
+                    else:
+                        raise ValueError(
+                            f"Non-Constant, non-AtomicVariable orphan {inp} found "
+                            "in the graph. All variables must be graph inputs, "
+                            "Constants, AtomicVariables, or produced by Apply "
+                            "nodes reachable from the inputs."
+                        )
+
+            new_inputs = tuple(memo[i] for i in node.inputs)
+            output_types = tuple(out.type for out in node.outputs)
+            new_node = FrozenApply(node.op, new_inputs, output_types)
+
+            memo.update(zip(node.outputs, new_node.outputs, strict=True))
+
+        # Handle outputs that are Constants or AtomicVariables not
+        # encountered during toposort (e.g. a graph with no Apply nodes)
+        for o in outputs:
+            if o not in memo:
+                if isinstance(o, Constant):
+                    memo[o] = o
+                elif isinstance(o, AtomicVariable):
+                    memo[o] = o
+
+        try:
+            frozen_outputs = tuple(memo[o] for o in outputs)
+        except KeyError:
+            unmapped = [o for o in outputs if o not in memo]
+            raise ValueError(
+                f"Output variable {unmapped[0]} could not be mapped to a frozen "
+                "graph variable. All outputs must be graph inputs, "
+                "constants, or produced by Apply nodes reachable from "
+                "the inputs."
+            )
+
+        self.inputs: tuple[Variable, ...] = nominal_inputs
+        self.outputs: tuple[Variable, ...] = frozen_outputs
+        self._variables: set[Variable] | None = None
+        self._apply_nodes: set[Apply] | None = None
+        self._clients: dict[Variable, list[ClientType]] | None = None
+        self._toposort: list[Apply] | None = None
+
+    def __reduce__(self):
+        return FrozenFunctionGraph, (self.inputs, self.outputs)
+
+    def __hash__(self):
+        return hash(self.outputs)
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, FrozenFunctionGraph):
+            return False
+        return self.outputs == other.outputs and self.inputs == other.inputs
+
+    def __repr__(self):
+        return f"FrozenFunctionGraph(inputs={list(self.inputs)}, outputs={list(self.outputs)})"
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    @property
+    def apply_nodes(self) -> set[Apply]:  # type: ignore[override]
+        if self._apply_nodes is None:
+            self._apply_nodes = set(applys_between(self.inputs, self.outputs))
+        return self._apply_nodes
+
+    def toposort(self) -> list[Apply]:
+        if self._toposort is None:
+            self._toposort = list(toposort(self.outputs, blockers=self.inputs))
+        return self._toposort
+
+    @property
+    def variables(self) -> set[Variable]:  # type: ignore[override]
+        if self._variables is None:
+            self._variables = set(vars_between(self.inputs, self.outputs))
+        return self._variables
+
+    @property
+    def clients(self) -> dict[Variable, list[ClientType]]:  # type: ignore[override]
+        if self._clients is None:
+            clients: dict[Variable, list[ClientType]] = {v: [] for v in self.inputs}
+            for node in self.toposort():
+                for i, inp in enumerate(node.inputs):
+                    clients.setdefault(inp, []).append((node, i))
+                for out in node.outputs:
+                    clients.setdefault(out, [])
+            self._clients = clients
+        return self._clients
+
+    def unfreeze(self) -> "FunctionGraph":
+        """Return a mutable FunctionGraph with fresh mutable Apply nodes."""
+        memo: dict[Variable, Variable] = {inp: inp.type() for inp in self.inputs}
+
+        for node in self.toposort():
+            for i in node.inputs:
+                if i not in memo:
+                    if isinstance(i, AtomicVariable):
+                        memo[i] = i
+                    else:
+                        memo[i] = i.clone()
+            new_inputs = [memo[i] for i in node.inputs]
+            new_node = Apply(
+                node.op,
+                new_inputs,
+                [o.type() for o in node.outputs],
+            )
+            memo.update(zip(node.outputs, new_node.outputs))
+
+        new_inputs = [memo[i] for i in self.inputs]
+        new_outputs = [memo[o] for o in self.outputs]
+        return FunctionGraph(new_inputs, new_outputs, clone=False)
