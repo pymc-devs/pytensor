@@ -194,6 +194,7 @@ def _test_sit_sot_buffer_benchmark(
     if buffer_size == "unit":
         xs_kept = xs[-1]
         expected_buffer_size = 1 + mode_preallocs_output
+        expected_untraced_sit_sot = not mode_preallocs_output
     elif buffer_size == "aligned":
         xs_kept = xs[-2:]
         expected_buffer_size = 2
@@ -217,8 +218,13 @@ def _test_sit_sot_buffer_benchmark(
     [scan_node] = [
         node for node in fn.maker.fgraph.toposort() if isinstance(node.op, Scan)
     ]
-    buffer = scan_node.inputs[1]
-    assert buffer.type.shape[0] == expected_buffer_size
+    if buffer_size == "unit" and expected_untraced_sit_sot:
+        # sit_sot was converted to untraced_sit_sot (no buffer dimension)
+        assert scan_node.op.info.n_sit_sot == 0
+        assert scan_node.op.info.n_untraced_sit_sot == 1
+    else:
+        buffer = scan_node.inputs[1]
+        assert buffer.type.shape[0] == expected_buffer_size
     benchmark(fn, x_test)
 
 

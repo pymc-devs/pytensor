@@ -373,7 +373,8 @@ def test_inplace_taps(n_steps_constant):
         mit_sot_inps[:2][scan_op.info.mit_sot_in_slices[0].index(-3)],
         mit_sot_inps[2:][scan_op.info.mit_sot_in_slices[1].index(-2)],
     ]
-    [sit_sot_inp] = scan_op.inner_sitsot(inner_inps)
+    sit_sot_inps = scan_op.inner_sitsot(inner_inps)
+    untraced_sit_sot_inps = scan_op.inner_untraced_sit_sot(inner_inps)
 
     destroyed_inputs = []
     for inner_out in scan_op.fgraph.outputs:
@@ -385,8 +386,9 @@ def test_inplace_taps(n_steps_constant):
             )
 
     if n_steps_constant:
-        assert len(destroyed_inputs) == 3
-        assert set(destroyed_inputs) == {*oldest_mit_sot_inps, sit_sot_inp}
+        assert len(sit_sot_inps) == 0
+        assert len(untraced_sit_sot_inps) == 1
+        assert set(destroyed_inputs) == {*oldest_mit_sot_inps, untraced_sit_sot_inps[0]}
     else:
         # This is not a feature, but a current limitation
         # https://github.com/pymc-devs/pytensor/issues/1283
@@ -435,8 +437,13 @@ class TestScanSITSOTBuffer:
             for node in numba_fn.maker.fgraph.toposort()
             if isinstance(node.op, Scan)
         ]
-        buffer = scan_node.inputs[1]
-        assert buffer.type.shape[0] == expected_buffer_size
+        if expected_buffer_size == 1:
+            # sit_sot_to_untraced converts unit-buffer sit_sot to untraced_sit_sot
+            assert scan_node.op.info.n_sit_sot == 0
+            assert scan_node.op.info.n_untraced_sit_sot == 1
+        else:
+            buffer = scan_node.inputs[1]
+            assert buffer.type.shape[0] == expected_buffer_size
 
         if benchmark is not None:
             numba_fn.trust_input = True

@@ -14,9 +14,9 @@ from pytensor.link.numba.dispatch.basic import (
     numba_funcify_and_cache_key,
     register_funcify_and_cache_key,
 )
+from pytensor.link.numba.dispatch.compile_ops import numba_deepcopy
 from pytensor.link.numba.dispatch.string_codegen import create_tuple_string
 from pytensor.scan.op import Scan
-from pytensor.tensor.type import TensorType
 
 
 def idx_to_str(
@@ -66,7 +66,6 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         .excluding(*NUMBA._optimizer.exclude)
         .optimizer
     )
-    destroy_map = op.destroy_map
     fgraph = op.fgraph
     # When the buffer can only hold one SITSOT or as as many MITSOT as there are taps,
     # We must always discard the oldest tap, so it's safe to destroy it in the inner function.
@@ -88,16 +87,11 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         )
         if outer_mitsot.type.shape[0] == abs(min(taps))
     ]
-    # Untraced sit_sot or destroyable if on destroy_map
-    destroyable_untraced_sit_sot = [
-        inner_u_sit_sot
-        for (outer_u_sit_sot_idx, _), inner_u_sit_sot in zip(
-            op.outer_untraced_sit_sot_outs(node.inputs, with_idx=True),
-            op.inner_untraced_sit_sot(fgraph.inputs),
-            strict=True,
-        )
-        if outer_u_sit_sot_idx in destroy_map
-    ]
+    # Always allow the inner function to destroy untraced_sit_sot inputs.
+    # After the first iteration, these come from the previous output so
+    # destroying is always safe. For the first iteration, the codegen
+    # copies the outer input if the Scan's destroy_map doesn't allow it.
+    destroyable_untraced_sit_sot = list(op.inner_untraced_sit_sot(fgraph.inputs))
     destroyable = {
         *destroyable_sitsot,
         *destroyable_mitsot,
@@ -115,6 +109,17 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         Out(x, borrow=x in untraced_sit_sot_inner_outputs) for x in fgraph.outputs
     ]
     insert_deepcopy(fgraph, wrapped_inputs=input_specs, wrapped_outputs=output_specs)
+
+    # Track which untraced_sit_sot outputs have their inner input destroyed
+    # by the optimized inner function (transitively, via DestroyHandler).
+    untraced_start = (
+        op.info.n_mit_mot + op.info.n_mit_sot + op.info.n_sit_sot + op.info.n_nit_sot
+    )
+    inner_destroyed_untraced_out_idxs = set()
+    if hasattr(fgraph, "destroyers"):
+        for j, inner_inp in enumerate(op.inner_untraced_sit_sot(fgraph.inputs)):
+            if fgraph.destroyers(inner_inp):
+                inner_destroyed_untraced_out_idxs.add(untraced_start + j)
 
     scan_inner_func, inner_func_cache_key = numba_funcify_and_cache_key(
         op.fgraph, fgraph_name="numba_scan"
@@ -308,8 +313,8 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         if outer_in_name not in outer_in_nit_sot_names:
             storage_name = outer_in_to_storage_name[outer_in_name]
 
-            is_tensor_type = isinstance(outer_in_var.type, TensorType)
-            if is_tensor_type:
+            is_tapped = outer_in_name not in outer_in_untraced_sit_sot_names
+            if is_tapped:
                 storage_size_name = f"{outer_in_name}_len"
                 storage_size_stmt = f"{storage_size_name} = {outer_in_name}.shape[0]"
                 input_taps = inner_in_names_to_input_taps[outer_in_name]
@@ -352,10 +357,17 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
                 inner_out_to_outer_in_stmts.append(storage_name)
 
             output_idx = outer_output_names.index(storage_name)
-            if output_idx in node.op.destroy_map or not is_tensor_type:
-                storage_alloc_stmt = f"{storage_name} = {outer_in_name}"
+            # Copy the outer input when it will be mutated during the loop
+            # but the Scan's destroy_map doesn't grant ownership.
+            # Tapped outputs: the loop writes into the buffer via circular indexing.
+            # Untraced sit_sot: the inner function may destroy the input inplace.
+            needs_copy = output_idx not in node.op.destroy_map and (
+                is_tapped or output_idx in inner_destroyed_untraced_out_idxs
+            )
+            if needs_copy:
+                storage_alloc_stmt = f"{storage_name} = numba_deepcopy({outer_in_name})"
             else:
-                storage_alloc_stmt = f"{storage_name} = np.copy({outer_in_name})"
+                storage_alloc_stmt = f"{storage_name} = {outer_in_name}"
 
             storage_alloc_stmt = dedent(
                 f"""
@@ -472,7 +484,12 @@ def scan({", ".join(outer_in_names)}):
     scan_op_fn = compile_numba_function_src(
         scan_op_src,
         "scan",
-        globals() | {"np": np, "scan_inner_func": scan_inner_func},
+        globals()
+        | {
+            "np": np,
+            "scan_inner_func": scan_inner_func,
+            "numba_deepcopy": numba_deepcopy,
+        },
     )
 
     if inner_func_cache_key is None:

@@ -79,6 +79,7 @@ from pytensor.tensor.subtensor import (
     advanced_subtensor1,
     as_index_constant,
     basic_subtensor,
+    flatten_index_variables,
     get_canonical_form_slice,
     get_constant_idx,
     get_idx_list,
@@ -271,29 +272,32 @@ def local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1(fgraph, node):
 @register_canonicalize
 @register_specialize
 @register_stabilize
-@node_rewriter([Subtensor])
+@node_rewriter([Subtensor, IncSubtensor, AdvancedSubtensor, AdvancedIncSubtensor])
 def local_useless_slice(fgraph, node):
+    """Remove useless slices and canonicalize redundant slice bounds to ``None``.
+
+    Applies to all Subtensor Ops with slices (basic and advanced, get and set).
+
+    - ``X[0, :]`` → ``X[0]`` (trailing full slices dropped)
+    - ``X[:]`` → ``X``
+    - ``X[0:7:1]`` → ``X[:]`` when ``X.shape[0] <= 7``
+    - ``X[-1:-8:-1]`` → ``X[::-1]`` when ``X.shape[0] <= 7``
     """
-    Remove useless slice(None) of the form:
-        1. X[0, :] -> X[0]
-        2. X[:] -> X
+    op = node.op
+    idx_list = op.idx_list
+    if not idx_list:
+        if isinstance(op, Subtensor | AdvancedSubtensor):
+            return [node.inputs[0]]
+        else:
+            # We let local_useless_inc_subtensor handle these
+            return None
 
-    Also, canonicalize slices of the form:
-        X[0:7:1] -> X[None:None:None]
-        where X is a vector of length 7
+    if is_inc_subtensor := isinstance(op, IncSubtensor | AdvancedIncSubtensor):
+        x, y, *idx_vars = node.inputs
+    else:
+        x, *idx_vars = node.inputs
 
-    And:
-        X[-1:-8:-1] -> X[::-1]
-        where x is a vector of length 7
-
-    """
-    idxs = get_idx_list(node.inputs, node.op.idx_list)
-    x = node.inputs[0]
-
-    if not idxs:
-        return [node.inputs[0]]
-
-    new_idxs = list(idxs)
+    new_idxs = list(indices_from_subtensor(idx_vars, idx_list))
     change_flag = False
     last_useful_idx = -1
     for dim, s in enumerate(new_idxs):
@@ -322,32 +326,53 @@ def local_useless_slice(fgraph, node):
         start = s.start
         stop = s.stop
 
-        if start is not None and get_scalar_constant_value(
-            start, only_process_constants=True, raise_not_constant=False
-        ) == (0 if positive_step else -1):
-            change_flag = True
-            start = None
+        dim_length = x.type.shape[dim] if dim < x.type.ndim else None
+        if start is not None and isinstance(start, Constant):
+            start_val = start.data
+            if positive_step:
+                if (
+                    start_val == 0
+                    # Negative start that wraps to or before index 0
+                    or (dim_length is not None and -start_val >= dim_length)
+                ):
+                    change_flag = True
+                    start = None
+            else:
+                if (
+                    start_val == -1
+                    # Positive start at or beyond the last index
+                    or (dim_length is not None and start_val >= dim_length - 1)
+                ):
+                    change_flag = True
+                    start = None
 
-        if (
-            stop is not None
-            and x.type.shape[dim] is not None
-            and get_scalar_constant_value(
-                stop, only_process_constants=True, raise_not_constant=False
-            )
-            == (x.type.shape[dim] if positive_step else -x.type.shape[dim] - 1)
-        ):
-            change_flag = True
-            stop = None
+        if dim_length is not None and stop is not None and isinstance(stop, Constant):
+            stop_val = stop.data
+            if positive_step:
+                # Positive stop at or beyond the length
+                if stop_val >= dim_length:
+                    change_flag = True
+                    stop = None
+            else:
+                # Negative stop that wraps to or before index 0
+                if -stop_val > dim_length:
+                    change_flag = True
+                    stop = None
 
         if start is not None or stop is not None or step is not None:
             last_useful_idx = dim
 
         new_idxs[dim] = slice(start, stop, step)
 
-    if change_flag or ((last_useful_idx + 1) < len(idxs)):
-        new_idxs = tuple(new_idxs[: last_useful_idx + 1])
-        out = x[new_idxs] if new_idxs else x
-        # Copy over previous output stacktrace
+    if change_flag or (last_useful_idx + 1) < len(idx_list):
+        new_idxs = new_idxs[: last_useful_idx + 1]
+        new_idx_list, new_flat_vars = flatten_index_variables(new_idxs)
+        props = op._props_dict() | {"idx_list": new_idx_list}
+        if is_inc_subtensor:
+            # We let local_useless_inc_subtensor handle empty new_idx_list
+            out = type(op)(**props)(x, y, *new_flat_vars)
+        else:
+            out = type(op)(**props)(x, *new_flat_vars) if new_idx_list else x
         copy_stack_trace(node.outputs, out)
         return [out]
 
@@ -515,26 +540,17 @@ def local_subtensor_inc_subtensor(fgraph, node):
             return
 
 
-@register_useless
 @register_canonicalize
 @register_specialize
-@node_rewriter([IncSubtensor])
+@node_rewriter([IncSubtensor, AdvancedIncSubtensor])
 def local_useless_inc_subtensor(fgraph, node):
     r"""Remove redundant `IncSubtensor`\s.
 
-    More specifically, ``set_subtensor(x[indices], y)`` is replaced by
-    ``y[indices]`` when ``indices`` are full `slice`\s and ``y``'s shape is
-    equal to ``x[indices]``, and ``inc_subtensor(x[indices], y)`` is replaced
-    by ``y[indices]`` when ``x[indices]`` is some array of ``0``\s, ``indices``
-    are full slices, and the shapes are equal.
+    Replace set_subtensor (or inc_subtensor on zero) that overwrite their whole buffers
+    by the written value (perhaps broadcasted and/or reversed).
     """
-    if not isinstance(node.op, IncSubtensor):
-        return
 
-    if not hasattr(fgraph, "shape_feature"):
-        return
-
-    x, y, *index_inputs = node.inputs
+    x, y, *index_vars = node.inputs
 
     if node.op.set_instead_of_inc is False:
         # This is an increment operation, so the array being incremented must
@@ -546,12 +562,9 @@ def local_useless_inc_subtensor(fgraph, node):
         except NotScalarConstantError:
             return
 
-    idx_cst = indices_from_subtensor(list(index_inputs), node.op.idx_list)
+    indices = indices_from_subtensor(index_vars, node.op.idx_list)
 
-    # Check that all indices are full slices with only reversals and no step
-    # sizes
-    # TODO: It seems like there should be a basic `IncSubtensor`
-    # canonicalization that removes these redundant slices.
+    # Check that all indices are full slices or full reversals
     if all(
         isinstance(e, slice)
         and e.start is None
@@ -563,23 +576,32 @@ def local_useless_inc_subtensor(fgraph, node):
             )
             == -1
         )
-        for e in idx_cst
+        for e in indices
     ):
-        # `IncSubtensor` broadcasts `x` on `y` based on run-time shapes, so we
-        # must check that they are the same
-        if not fgraph.shape_feature.same_shape(x, y):
-            return
+        # IncSubtensor casts y to x's dtype and broadcasts y onto x's shape
+        out_dtype = node.outputs[0].type.dtype
 
-        # There are no reversals, so we don't need a replacement.
-        if all(e.step is None for e in node.op.idx_list):
-            # They are exactly the same shapes, so we can remove this `IncSubtensor`
-            return [y]
+        # Check shapes before casting, as cast creates a new node not in the fgraph
+        static_same = x.type.shape == y.type.shape and all(
+            s is not None for s in x.type.shape
+        )
+        if not static_same:
+            if hasattr(fgraph, "shape_feature") and fgraph.shape_feature.same_shape(
+                x, y
+            ):
+                static_same = True
 
-        new_node = Subtensor(node.op.idx_list).make_node(y, *index_inputs)
-        new_out = new_node.outputs[0]
-        copy_stack_trace(node.outputs, new_out)
+        if y.type.dtype != out_dtype:
+            y = cast(y, out_dtype)
 
-        return [new_out]
+        if not static_same:
+            y = alloc(y, *x.shape)
+            copy_stack_trace(node.outputs[0], y)
+
+        if not all(e.step is None for e in node.op.idx_list):
+            y = Subtensor(node.op.idx_list)(y, *index_vars)
+
+        return [y]
 
 
 @register_canonicalize
