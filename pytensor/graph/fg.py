@@ -1046,7 +1046,7 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             return True
         if not isinstance(other, FrozenFunctionGraph):
             return False
-        return self.inputs == other.inputs and self.outputs == other.outputs
+        return self.outputs == other.outputs and self.inputs == other.inputs
 
     def __repr__(self):
         return f"FrozenFunctionGraph(inputs={list(self.inputs)}, outputs={list(self.outputs)})"
