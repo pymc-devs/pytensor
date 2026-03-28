@@ -10,6 +10,7 @@ from pytensor.compile import shared
 from pytensor.compile.function import function, function_dump
 from pytensor.compile.io import In
 from pytensor.configdefaults import config
+from pytensor.link.basic import Container
 from pytensor.tensor.type import (
     bscalar,
     bvector,
@@ -116,7 +117,9 @@ class TestFunctionIn:
 
     def test_in_update(self):
         a = dscalar("a")
-        f = function([In(a, value=0.0, update=a + 1)], a, mode="FAST_RUN")
+        # A shared variable by any other name
+        c = Container(a, storage=[np.array(0.0)])
+        f = function([In(a, value=c, implicit=True, update=a + 1)], a, mode="FAST_RUN")
 
         # Ensure that, through the executions of the function, the state of the
         # input is persistent and is updated as it should
@@ -137,7 +140,8 @@ class TestFunctionIn:
         # updates in the same function behaves as expected
         shared_var = shared(1.0)
         a = dscalar("a")
-        a_wrapped = In(a, value=0.0, update=shared_var)
+        container = Container(a, storage=[np.array(0.0)])
+        a_wrapped = In(a, value=container, update=shared_var)
         f = function([a_wrapped], [], updates={shared_var: a}, mode="FAST_RUN")
 
         # Ensure that, through the executions of the function, the state of
