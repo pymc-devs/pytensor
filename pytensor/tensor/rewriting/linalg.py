@@ -897,6 +897,49 @@ def rewrite_det_blockdiag(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
+@node_rewriter([SLogDet])
+def rewrite_slogdet_blockdiag(fgraph, node):
+    """
+    This rewrite simplifies the slogdet of a blockdiagonal matrix by computing
+    slogdet of each sub-matrix independently.
+
+    slogdet(block_diag(a,b,c,...)) = (prod(sign(a), sign(b), ...), sum(logabsdet(a), logabsdet(b), ...))
+
+    Parameters
+    ----------
+    fgraph: FunctionGraph
+        Function graph being optimized
+    node: Apply
+        Node of the function graph to be optimized
+
+    Returns
+    -------
+    list of Variable, optional
+        List of optimized variables, or None if no optimization was performed
+    """
+    # Check for inner block_diag operation
+    potential_block_diag = node.inputs[0].owner
+    if not (
+        potential_block_diag
+        and isinstance(potential_block_diag.op, Blockwise)
+        and isinstance(potential_block_diag.op.core_op, BlockDiagonal)
+    ):
+        return None
+
+    # Find the composing sub_matrices
+    sub_matrices = potential_block_diag.inputs
+    signs = []
+    logabsdets = []
+    for sub_mat in sub_matrices:
+        sign_i, logabsdet_i = SLogDet()(sub_mat)
+        signs.append(sign_i)
+        logabsdets.append(logabsdet_i)
+
+    return [prod(signs), pt.add(*logabsdets)]
+
+
+@register_canonicalize
+@register_stabilize
 @node_rewriter([ExtractDiag])
 def rewrite_diag_kronecker(fgraph, node):
     """
