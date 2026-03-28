@@ -309,10 +309,10 @@ def test_local_subtensor_of_reduce(original_fn, expected_fn):
         (lambda x: softmax(x, axis=0)[1:, 0], lambda x: softmax(x[:, 0], axis=0)[1:]),
         (lambda x: softmax(x, axis=1)[1:, 0], lambda x: softmax(x[1:], axis=1)[:, 0]),
         (
-            lambda x: softmax(x, axis=0)[0, :5:2],
-            lambda x: softmax(x[:, :5:2], axis=0)[0],
+            lambda x: softmax(x, axis=0)[0, :2:2],
+            lambda x: softmax(x[:, :2:2], axis=0)[0],
         ),
-        (lambda x: softmax(x, axis=1)[0, :5:2], lambda x: softmax(x[0], axis=0)[:5:2]),
+        (lambda x: softmax(x, axis=1)[0, :2:2], lambda x: softmax(x[0], axis=0)[:2:2]),
     ],
 )
 def test_local_subtensor_of_softmax(original_fn, expected_fn):

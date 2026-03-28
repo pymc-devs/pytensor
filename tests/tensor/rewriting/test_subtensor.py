@@ -129,26 +129,40 @@ def test_local_useless_inc_subtensor(s):
     x = matrix("x")
     y = matrix("y")
 
-    o = set_subtensor(x[:, s], y)
-
     mode = get_default_mode().including("local_useless_inc_subtensor")
 
-    # Test without shape info (i.e. don't apply the opt)
+    # Without shape info: rewrite fires but inserts alloc to handle broadcast
+    o = set_subtensor(x[:, s], y)
     f = function([x, y], o, mode=mode)
-
     topo = f.maker.fgraph.toposort()
-    assert len(topo) == 1
-    assert isinstance(topo[0].op, IncSubtensor)
+    assert not any(isinstance(n.op, IncSubtensor) for n in topo)
+    out = f([[2, 3]], [[3, 4]])
+    assert np.array_equal(out, np.asarray([[3, 4]])[::, s])
 
-    # Test with shape info
+    # With shape info: rewrite fires without alloc
     o_shape = set_subtensor(x[:, s], specify_shape(y, x.shape))
     f_shape = function([x, y], o_shape, mode=mode)
-
     topo = f_shape.maker.fgraph.toposort()
-    assert not any(isinstance(n.op, IncSubtensor) for n in topo)
-
+    assert not any(isinstance(n.op, IncSubtensor | Alloc) for n in topo)
     out = f_shape([[2, 3]], [[3, 4]])
     assert np.array_equal(out, np.asarray([[3, 4]])[::, s])
+
+
+def test_local_useless_setsubtensor_alloc_empty():
+    """SetSubtensor(AllocEmpty(1, n), y, :1) -> y when y fills the buffer.
+
+    This is the pattern produced by scan_save_mem for sit_sot with buffer=1.
+    local_useless_slice canonicalizes [:1] to [:] on the size-1 dim,
+    then local_useless_inc_subtensor removes the SetSubtensor entirely.
+    """
+    from pytensor.graph.rewriting.utils import rewrite_graph
+    from pytensor.tensor.basic import AllocEmpty
+
+    y = matrix("y", shape=(1, 5))
+    x = AllocEmpty("float64")(pt.constant(1), pt.constant(5))
+    buf = set_subtensor(x[:1], y)
+    result = rewrite_graph(buf, include=("specialize",))
+    utt.assert_equal_computations([result], [y], original=[buf])
 
 
 def test_local_useless_inc_subtensor_increment_zeros():
@@ -1335,7 +1349,7 @@ class TestSubtensorAllocRewrites:
     def test_incsubtensor_x_zeros(self):
         x = pt.constant(np.asarray(np.zeros((4, 4)), dtype=config.floatX))
         y = matrix()
-        z = inc_subtensor(x[:4], y)
+        z = inc_subtensor(x[:3], y)
         f = function([y], z)
         inc_nodes = [
             n for n in f.maker.fgraph.toposort() if isinstance(n.op, IncSubtensor)
@@ -1344,23 +1358,27 @@ class TestSubtensorAllocRewrites:
         assert len(inc_nodes) == 1
         node_is_set_instead_of_inc = inc_nodes[0].op.set_instead_of_inc
         assert node_is_set_instead_of_inc
-        test_X = np.random.random((4, 4)).astype(config.floatX)
-        utt.assert_allclose(f(test_X), test_X)
+        test_y = np.random.random((3, 4)).astype(config.floatX)
+        expected = np.zeros((4, 4), dtype=config.floatX)
+        expected[:3] += test_y
+        utt.assert_allclose(f(test_y), expected)
 
         # also check the flag doesn't get set if first input is not zeros:
         not_all_zeros = np.zeros((4, 4))
         not_all_zeros[1, 0] = 0.001
         x = pt.constant(np.asarray(not_all_zeros, dtype=config.floatX))
         y = matrix()
-        z = inc_subtensor(x[:4], y)
+        z = inc_subtensor(x[:3], y)
         f = function([y], z)
         inc_nodes = [
             n for n in f.maker.fgraph.toposort() if isinstance(n.op, IncSubtensor)
         ]
         assert len(inc_nodes) == 1
         assert inc_nodes[0].op.set_instead_of_inc is False
-        test_X = np.random.random((4, 4)).astype(config.floatX)
-        utt.assert_allclose(f(test_X), test_X + not_all_zeros)
+        test_y = np.random.random((3, 4)).astype(config.floatX)
+        expected = not_all_zeros.copy()
+        expected[:3] += test_y
+        utt.assert_allclose(f(test_y), expected)
 
     def test_advancedincsubtensor1_allocs0(self):
         x = matrix()
