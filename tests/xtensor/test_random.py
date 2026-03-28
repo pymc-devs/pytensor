@@ -2,7 +2,9 @@ import pytest
 
 
 pytest.importorskip("xarray")
-pytestmark = pytest.mark.filterwarnings("error")
+pytestmark = [
+    pytest.mark.filterwarnings("error"),
+]
 
 import inspect
 import re
