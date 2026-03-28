@@ -2172,8 +2172,12 @@ def hessian_vector_product(cost, wrt, p, **grad_kwargs):
     Parameters
     ----------
     cost: Scalar (0-dimensional) variable.
-    wrt: Vector (1-dimensional tensor) 'Variable' or list of Vectors
-    p: Vector (1-dimensional tensor) 'Variable' or list of Vectors
+    wrt: TensorVariable or list of TensorVariables
+    Input variable(s). Need not be 1-dimensional;
+    wrt and p must have the same shape(s).   
+    p: TensorVariable or list of TensorVariables
+    Variable(s) to multiply with the Hessian.
+    Must have the same shape(s) as wrt.
         Each vector will be used for the hessp wirt to exach input variable
     **grad_kwargs:
         Keyword arguments passed to `grad` function.
