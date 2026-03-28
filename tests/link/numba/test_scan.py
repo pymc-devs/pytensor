@@ -387,11 +387,14 @@ def test_inplace_taps(n_steps_constant):
 
     if n_steps_constant:
         # The scalar sit_sot (x) is converted to untraced_sit_sot
-        # by the scan_sit_sot_to_untraced rewrite when only the last value is used
+        # by the scan_sit_sot_to_untraced rewrite when only the last value is used.
+        # With constant n_steps, scan_save_mem + local_useless_slice strip the
+        # AllocEmpty buffers, so inputs become raw function inputs that can't
+        # be inplaced.
         assert len(sit_sot_inps) == 0
         assert len(untraced_sit_sot_inps) == 1
-        assert len(destroyed_inputs) == 3
-        assert set(destroyed_inputs) == {*oldest_mit_sot_inps, untraced_sit_sot_inps[0]}
+        assert len(destroyed_inputs) == 2
+        assert set(destroyed_inputs) == set(oldest_mit_sot_inps)
     else:
         # This is not a feature, but a current limitation
         # https://github.com/pymc-devs/pytensor/issues/1283

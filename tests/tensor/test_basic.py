@@ -741,7 +741,7 @@ class TestAlloc:
         "subtensor_fn, expected_grad_n_alloc",
         [
             # IncSubtensor1
-            (lambda x: x[:60], 1),
+            (lambda x: x[:59], 1),
             # AdvancedIncSubtensor1
             (lambda x: x[np.arange(60)], 1),
             # AdvancedIncSubtensor
