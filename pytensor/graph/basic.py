@@ -910,7 +910,6 @@ class FrozenApply(Apply):
         # canonical output on unpickle, avoiding fresh Variable objects.
         for out in instance.outputs:
             out.__reduce_ex__ = _make_frozen_output_reduce(out)  # type: ignore[method-assign]
-        instance.tag = Scratchpad()
         cls._cache[cache_key] = instance
         return instance
 
