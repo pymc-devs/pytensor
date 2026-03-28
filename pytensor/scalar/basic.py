@@ -4001,6 +4001,8 @@ complex_from_polar = ComplexFromPolar(name="complex_from_polar")
 class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
     """Includes boilerplate code for Python and C-implementation of Scalar Ops with inner graph."""
 
+    __props__ = ("fgraph",)
+
     def __init__(self, *args, **kwargs):
         self.prepare_node_called = set()
         super().__init__(*args, **kwargs)
@@ -4112,16 +4114,6 @@ class ScalarInnerGraphOp(ScalarOp, HasInnerGraph):
             for n in applys_between(self.inputs, self.outputs):
                 n.op.prepare_node(n, None, None, impl)
             self.prepare_node_called.add(impl)
-
-    def __eq__(self, other):
-        if self is other:
-            return True
-        if type(self) is not type(other):
-            return False
-        return self.fgraph == other.fgraph
-
-    def __hash__(self):
-        return hash((type(self), self.fgraph))
 
     def __getstate__(self):
         rval = dict(self.__dict__)
