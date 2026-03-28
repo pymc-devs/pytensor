@@ -2,7 +2,8 @@ import re
 
 import pytest
 
-from pytensor import as_symbolic, shared
+from pytensor import shared
+from pytensor.basic import as_symbolic
 from pytensor.compile import SharedVariable
 
 

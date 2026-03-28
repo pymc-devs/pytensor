@@ -1,18 +1,14 @@
 import copy
 
-import pytest
-
 from pytensor.compile.function import function
 from pytensor.compile.mode import (
     AddFeatureOptimizer,
     Mode,
     get_default_mode,
-    get_target_language,
 )
 from pytensor.configdefaults import config
 from pytensor.graph.features import NoOutputFromInplace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery, SequenceDB
-from pytensor.link.basic import LocalLinker
 from pytensor.link.jax import JAXLinker
 from pytensor.tensor.math import dot, tanh
 from pytensor.tensor.type import matrix, vector
@@ -123,41 +119,6 @@ class TestOldModesProblem:
         # More straightforward test
         linker = get_default_mode().linker
         assert not hasattr(linker, "fgraph") or linker.fgraph is None
-
-
-def test_get_target_language():
-    with config.change_flags(mode=Mode(linker="py")):
-        res = get_target_language()
-        assert res == ("py",)
-
-    res = get_target_language(Mode(linker="py"))
-    assert res == ("py",)
-
-    res = get_target_language(Mode(linker="c"))
-    assert res == ("c",)
-
-    res = get_target_language(Mode(linker="c|py"))
-    assert res == ("c", "py")
-
-    res = get_target_language(Mode(linker="vm"))
-    assert res == ("c", "py")
-
-    with config.change_flags(cxx=""):
-        res = get_target_language(Mode(linker="vm"))
-        assert res == ("py",)
-
-    res = get_target_language(Mode(linker="jax"))
-    assert res == ("jax",)
-
-    res = get_target_language(Mode(linker="numba"))
-    assert res == ("numba",)
-
-    class MyLinker(LocalLinker):
-        pass
-
-    test_mode = Mode(linker=MyLinker())
-    with pytest.raises(Exception):
-        get_target_language(test_mode)
 
 
 def test_predefined_modes_respected():

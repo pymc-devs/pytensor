@@ -11,6 +11,7 @@ from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
+from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
@@ -137,7 +138,7 @@ def test_matrix_inverse_rop_lop():
 
     with pytest.raises(ValueError):
         pytensor.gradient.Rop(
-            pytensor.clone_replace(y, replace={mx: break_op(mx)}),
+            clone_replace(y, replace={mx: break_op(mx)}),
             mx,
             mv,
             use_op_rop_implementation=True,

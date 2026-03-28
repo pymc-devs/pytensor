@@ -1368,7 +1368,7 @@ class CLinker(Linker):
         # DynamicModule always add the include <numpy/arrayobject.h>
         sig.append(f"NPY_ABI_VERSION=0x{NDARRAY_C_VERSION:X}")
         if c_compiler:
-            sig.append("c_compiler_str=" + c_compiler.version_str())
+            sig.append(f"c_compiler_str={config.cxx} {config.gcc_version_str}")
 
         # IMPORTANT: The 'md5' prefix is used to isolate the compilation
         # parameters from the rest of the key. If you want to add more key
