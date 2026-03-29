@@ -3,7 +3,7 @@ import mlx.core as mx
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
 from pytensor.scalar.basic import Cast, Composite, Identity, Mod, ScalarOp, Second
-from pytensor.scalar.math import Erfc, Erfcx, Sigmoid, Softplus
+from pytensor.scalar.math import Erfc, Erfcx, Log1mexp, Sigmoid, Softplus
 
 
 # MLX name overrides for nfunc_spec names that don't match mlx.core
@@ -159,6 +159,14 @@ def mlx_funcify_Softplus(op, **kwargs):
         )
 
     return softplus
+
+
+@mlx_funcify.register(Log1mexp)
+def mlx_funcify_Log1mexp(op, node, **kwargs):
+    def log1mexp(x):
+        return mx.where(x < mx.log(0.5), mx.log1p(-mx.exp(x)), mx.log(-mx.expm1(x)))
+
+    return log1mexp
 
 
 @mlx_funcify.register(Composite)
