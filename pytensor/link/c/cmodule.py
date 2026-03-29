@@ -2382,6 +2382,20 @@ class GCC_compiler(Compiler):
             cxxflags.append("-DMS_WIN64")
 
         if sys.platform == "darwin":
+            try:
+                import subprocess
+                sdk_path = subprocess.check_output(
+                    ["xcrun", "--show-sdk-path"], encoding="utf-8"
+                ).strip()
+                if sdk_path:
+                    # Explicitly add the SDK libc++ include path since clang may
+                    # fail to find these standard headers on macOS.
+                    cxxflags.append(f"-isysroot")
+                    cxxflags.append(sdk_path)
+                    cxxflags.append(f"-I{sdk_path}/usr/include/c++/v1")
+            except Exception:
+                pass
+
             # Use the already-loaded python symbols.
             cxxflags.extend(["-undefined", "dynamic_lookup"])
             # XCode15 introduced ld_prime linker. At the time of writing, this linker
