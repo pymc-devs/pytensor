@@ -956,18 +956,35 @@ def local_useless_composite_outputs(fgraph, node):
     comp_fgraph = FunctionGraph(
         inputs=comp.inputs, outputs=used_inner_outputs, clone=False
     )
+    # Inputs that are inplace targets must be kept even if unused in the scalar graph
+    destroyed_input_idxs = set()
+    for in_idxs in node.op.inplace_pattern.values():
+        if isinstance(in_idxs, int):
+            destroyed_input_idxs.add(in_idxs)
+        else:
+            destroyed_input_idxs.update(in_idxs)
+
     used_inputs_idxs = [
         i
         for i, i_intern in enumerate(comp_fgraph.inputs)
-        if comp_fgraph.clients[i_intern]
+        if comp_fgraph.clients[i_intern] or i in destroyed_input_idxs
     ]
     used_inner_inputs = [comp.inputs[i] for i in used_inputs_idxs]
     if len(used_inner_inputs) < len(node.inputs) or len(used_inner_outputs) < len(
         node.outputs
     ):
         used_inputs = [node.inputs[i] for i in used_inputs_idxs]
+        # Remap inplace_pattern indices to the new input positions
+        old_to_new = {old: new for new, old in enumerate(used_inputs_idxs)}
+        new_inplace_pattern = {
+            out_idx: old_to_new[in_idx]
+            for out_idx, in_idx in node.op.inplace_pattern.items()
+            if in_idx in old_to_new
+        }
         c = Composite(inputs=used_inner_inputs, outputs=used_inner_outputs)
-        e = Elemwise(scalar_op=c)(*used_inputs, return_list=True)
+        e = Elemwise(scalar_op=c, inplace_pattern=new_inplace_pattern)(
+            *used_inputs, return_list=True
+        )
         return dict(zip([node.outputs[i] for i in used_outputs_idxs], e, strict=True))
 
 
