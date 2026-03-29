@@ -1,6 +1,7 @@
 # isort: off
 from pytensor.link.mlx.dispatch.basic import mlx_funcify, mlx_typify
 
+import pytensor.link.mlx.dispatch.blas
 import pytensor.link.mlx.dispatch.math
 import pytensor.link.mlx.dispatch.basic
 import pytensor.link.mlx.dispatch.scalar
