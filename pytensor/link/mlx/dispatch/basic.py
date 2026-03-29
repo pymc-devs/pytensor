@@ -11,6 +11,7 @@ from pytensor.compile.mode import MLX
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph import Constant
 from pytensor.graph.fg import FunctionGraph
+from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import Assert, CheckAndRaise
 
@@ -160,6 +161,17 @@ def mlx_funcify_DeepCopyOp(op, **kwargs):
 
     return deepcopyop
 
+
+@mlx_funcify.register(IfElse)
+def mlx_funcify_IfElse(op, **kwargs):
+    n_outs = op.n_outs
+
+    def ifelse(cond, *args, n_outs=n_outs):
+        # MLX has no conditional Op, the best we can do is mx.where to select between branches elementwise.
+        res = tuple(mx.where(cond, args[i], args[n_outs + i]) for i in range(n_outs))
+        return res if n_outs > 1 else res[0]
+
+    return ifelse
 
 @mlx_funcify.register(Assert)
 @mlx_funcify.register(CheckAndRaise)
