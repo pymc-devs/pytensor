@@ -2897,6 +2897,25 @@ class TestTensorInstanceMethods:
         assert_array_equal(Z.real.eval({Z: z}), x)
         assert_array_equal(Z.imag.eval({Z: z}), y)
 
+    def test_real_no_input_mutation(self):
+        """Regression test: real() must not return a view that lets inplace ops corrupt the input.
+
+        numpy.real returns a view, so Elemwise.perform copies non-owned data.
+        This test ensures that pattern stays safe with mutable inputs.
+        """
+        from pytensor import In, function
+
+        Z = zvector("z")
+        out = Z.real[0].set(99.0)
+        f = function([In(Z, mutable=True)], out)
+
+        z = np.array([1 + 2j, 3 + 4j])
+        original = z.copy()
+        result = f(z)
+
+        np.testing.assert_allclose(result, [99.0, 3.0])
+        np.testing.assert_array_equal(z, original)
+
     def test_conj(self):
         X, Y = self.vars
         x, y = self.vals

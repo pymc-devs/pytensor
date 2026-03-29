@@ -6,6 +6,7 @@ from pytensor.scalar.basic import (
     Composite,
     Identity,
     Mod,
+    Real,
     ScalarOp,
     Second,
 )
@@ -178,3 +179,11 @@ def mlx_funcify_Log1mexp(op, node, **kwargs):
 @mlx_funcify.register(Composite)
 def mlx_funcify_Composite(op, node=None, **kwargs):
     return mlx_funcify(op.fgraph, squeeze_output=True)
+
+
+@mlx_funcify.register(Real)
+def mlx_funcify_Real(op, node, **kwargs):
+    def real(x):
+        return mx.real(x)
+
+    return real

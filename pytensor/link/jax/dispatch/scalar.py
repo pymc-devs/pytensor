@@ -16,6 +16,7 @@ from pytensor.scalar.basic import (
     IntDiv,
     Mod,
     Mul,
+    Real,
     ScalarOp,
     Second,
     Sub,
@@ -330,3 +331,11 @@ def jax_funcify_Softplus(op, **kwargs):
         )
 
     return softplus
+
+
+@jax_funcify.register(Real)
+def jax_funcify_Real(op, node, **kwargs):
+    def real(x):
+        return jnp.real(x)
+
+    return real
