@@ -19,7 +19,7 @@ def test_alloc_with_different_shape_types():
     This addresses the TypeError that occurred when shape parameters
     contained MLX arrays instead of Python integers.
     """
-    from pytensor.link.mlx.dispatch.core import (
+    from pytensor.link.mlx.dispatch.tensor_basic import (
         mlx_funcify_Alloc,
     )
 
