@@ -29,12 +29,8 @@ def mlx_funcify_ScalarOp(op, node=None, **kwargs):
             "It has no nfunc_spec and no specific dispatch."
         )
 
-    func_name = nfunc_spec[0]
-    # MLX doesn't have scipy submodules
-    if func_name.startswith("scipy."):
-        raise NotImplementedError(
-            f"No MLX conversion for scalar op {op} (scipy function: {func_name})"
-        )
+    # MLX doesn't have scipy submodules, everything is in the main mlx.core namespace
+    func_name = nfunc_spec[0].removeprefix("scipy.special.")
 
     func_name = MLX_NFUNC_OVERRIDES.get(func_name, func_name)
     mlx_func = getattr(mx, func_name, None)

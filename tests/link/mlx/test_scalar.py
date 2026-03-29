@@ -7,6 +7,12 @@ from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.math import (
+    erf,
+    erfc,
+    erfcx,
+    erfinv,
+)
 from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
 
@@ -98,3 +104,27 @@ def test_mlx_Composite_multi_output():
         outs,
         [np.arange(10, dtype=config.floatX)],
     )
+
+
+def test_erf():
+    x = scalar("x")
+    out = erf(x)
+    compare_mlx_and_py([x], [out], [1.0])
+
+
+def test_erfc():
+    x = scalar("x")
+    out = erfc(x)
+    compare_mlx_and_py([x], [out], [1.0])
+
+
+def test_erfinv():
+    x = scalar("x")
+    out = erfinv(x)
+    compare_mlx_and_py([x], [out], [0.95])
+
+
+def test_erfcx():
+    x = scalar("x")
+    out = erfcx(x)
+    compare_mlx_and_py([x], [out], [0.7])
