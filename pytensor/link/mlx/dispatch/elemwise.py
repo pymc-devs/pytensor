@@ -8,36 +8,13 @@ from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
 from pytensor.scalar.basic import (
     AND,
-    EQ,
-    GE,
-    GT,
-    LE,
-    LT,
-    NEQ,
     OR,
-    Abs,
     Add,
     Cast,
-    Cos,
-    Exp,
-    IntDiv,
-    Invert,
-    IsInf,
-    IsNan,
-    Log,
-    Log1p,
     Maximum,
     Minimum,
     Mul,
-    Neg,
-    Pow,
-    Sign,
-    Sin,
-    Sqr,
-    Sqrt,
-    Sub,
-    Switch,
-    TrueDiv,
+    ScalarOp,
 )
 from pytensor.scalar.math import Erfc, Erfcx, Sigmoid, Softplus
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
@@ -153,6 +130,116 @@ def mlx_funcify_LogSoftmax(op, **kwargs):
     return log_softmax
 
 
+# MLX name overrides for nfunc_spec names that don't match mlx.core
+MLX_NFUNC_OVERRIDES = {
+    "true_divide": "divide",
+    "invert": "bitwise_invert",
+}
+
+
+@mlx_funcify.register(ScalarOp)
+def mlx_funcify_ScalarOp(op, node=None, **kwargs):
+    """Generic handler for scalar ops, using nfunc_spec for auto-resolution.
+
+    Most scalar ops have a ``nfunc_spec`` attribute like ``('add', 2, 1)`` that names the corresponding numpy function,
+    along with the number of inputs and outputs.
+    Since MLX mirrors numpy's API, we can resolve most ops via ``getattr(mx, name)``.
+    """
+    nfunc_spec = getattr(op, "nfunc_spec", None)
+    if nfunc_spec is None:
+        raise NotImplementedError(
+            f"No MLX conversion for scalar op {op}. "
+            "It has no nfunc_spec and no specific dispatch."
+        )
+
+    func_name = nfunc_spec[0]
+    # Strip scipy prefix — MLX doesn't have scipy submodules
+    if func_name.startswith("scipy."):
+        raise NotImplementedError(
+            f"No MLX conversion for scalar op {op} (scipy function: {func_name})"
+        )
+
+    func_name = MLX_NFUNC_OVERRIDES.get(func_name, func_name)
+    mlx_func = getattr(mx, func_name, None)
+    if mlx_func is None:
+        raise NotImplementedError(
+            f"No MLX conversion for scalar op {op} (mx.{func_name} not found)"
+        )
+
+    # Handle variadic ops (e.g. Add with 3+ inputs)
+    if node is not None and len(node.inputs) > nfunc_spec[1]:
+        variadic_name = getattr(op, "nfunc_variadic", None)
+        if variadic_name:
+            mlx_variadic_func = getattr(mx, variadic_name, None)
+            if mlx_variadic_func:
+
+                def variadic_fn(*args):
+                    return mlx_variadic_func(mx.stack(list(args), axis=0), axis=0)
+
+                return variadic_fn
+
+        # Fallback: fold binary op
+        def fold_fn(*args):
+            result = args[0]
+            for arg in args[1:]:
+                result = mlx_func(result, arg)
+            return result
+
+        return fold_fn
+
+    return mlx_func
+
+
+@mlx_funcify.register(Cast)
+def mlx_funcify_Cast(op, **kwargs):
+    # Cast can be called as a tensor-level op (op.scalar_op.o_type)
+    # or as a scalar op directly (op.o_type). Handle both.
+    scalar_op = getattr(op, "scalar_op", op)
+
+    def cast(x):
+        dtype = convert_dtype_to_mlx(scalar_op.o_type.dtype)
+        try:
+            return x.astype(dtype)
+        except ValueError as e:
+            if "is not supported on the GPU" in str(e):
+                import warnings
+
+                warnings.warn(
+                    f"MLX GPU limitation: {e}. Attempting automatic fallback casting.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                fallback_dtype = convert_dtype_to_mlx(
+                    scalar_op.o_type.dtype, auto_cast_unsupported=True
+                )
+                return x.astype(fallback_dtype)
+            else:
+                raise
+
+    return cast
+
+
+@mlx_funcify.register(Sigmoid)
+def mlx_funcify_Sigmoid(op, **kwargs):
+    return mx.sigmoid
+
+
+@mlx_funcify.register(Erfc)
+def mlx_funcify_Erfc(op, **kwargs):
+    def erfc(x):
+        return 1.0 - mx.erf(x)
+
+    return erfc
+
+
+@mlx_funcify.register(Erfcx)
+def mlx_funcify_Erfcx(op, **kwargs):
+    def erfcx(x):
+        return mx.exp(x * x) * (1.0 - mx.erf(x))
+
+    return erfcx
+
+
 @mlx_funcify.register(Softplus)
 def mlx_funcify_Softplus(op, **kwargs):
     def softplus(x):
@@ -173,285 +260,7 @@ def mlx_funcify_Softplus(op, **kwargs):
     return softplus
 
 
-@mlx_funcify.register(Cast)
-def mlx_funcify_Cast(op, **kwargs):
-    def cast(x):
-        dtype = convert_dtype_to_mlx(op.scalar_op.o_type.dtype)
-        try:
-            return x.astype(dtype)
-        except ValueError as e:
-            if "is not supported on the GPU" in str(e):
-                # MLX GPU limitation - try auto-casting with warning
-                import warnings
-
-                warnings.warn(
-                    f"MLX GPU limitation: {e}. Attempting automatic fallback casting.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                # Get the auto-cast version
-                fallback_dtype = convert_dtype_to_mlx(
-                    op.scalar_op.o_type.dtype, auto_cast_unsupported=True
-                )
-                return x.astype(fallback_dtype)
-            else:
-                # Re-raise other ValueError exceptions
-                raise
-
-    return cast
-
-
-@singledispatch
-def mlx_funcify_Elemwise_scalar_op(scalar_op):
-    """Simplified implementation for MLX scalar operations."""
-
-    # Try using the operation name directly (most common case)
-    op_name = getattr(scalar_op, "name", None)
-    if op_name is not None:
-        try:
-            mlx_func = getattr(mx, op_name)
-            # Handle variadic functions like Add
-            if hasattr(scalar_op, "inputs") and len(scalar_op.inputs) > 2:
-
-                def variadic_func(*args):
-                    result = args[0]
-                    for arg in args[1:]:
-                        result = mlx_func(result, arg)
-                    return result
-
-                return variadic_func
-            else:
-                return mlx_func
-        except AttributeError:
-            pass
-
-    raise NotImplementedError(f"MLX does not support Elemwise scalar op {scalar_op}")
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Add)
-def mlx_funcify_Elemwise_scalar_Add(scalar_op):
-    def add(*args):
-        result = args[0]
-        for arg in args[1:]:
-            result = mx.add(result, arg)
-        return result
-
-    return add
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Sub)
-def mlx_funcify_Elemwise_scalar_Sub(scalar_op):
-    return mx.subtract
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Mul)
-def mlx_funcify_Elemwise_scalar_Mul(scalar_op):
-    def mul(*args):
-        result = args[0]
-        for arg in args[1:]:
-            result = mx.multiply(result, arg)
-        return result
-
-    return mul
-
-
-@mlx_funcify_Elemwise_scalar_op.register(TrueDiv)
-def mlx_funcify_Elemwise_scalar_TrueDiv(scalar_op):
-    return mx.divide
-
-
-@mlx_funcify_Elemwise_scalar_op.register(IntDiv)
-def mlx_funcify_Elemwise_scalar_IntDiv(scalar_op):
-    return mx.floor_divide
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Pow)
-def mlx_funcify_Elemwise_scalar_Pow(scalar_op):
-    return mx.power
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Exp)
-def mlx_funcify_Elemwise_scalar_Exp(scalar_op):
-    return mx.exp
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Log)
-def mlx_funcify_Elemwise_scalar_Log(scalar_op):
-    return mx.log
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Log1p)
-def mlx_funcify_Elemwise_scalar_Log1p(scalar_op):
-    return mx.log1p
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Sin)
-def mlx_funcify_Elemwise_scalar_Sin(scalar_op):
-    return mx.sin
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Cos)
-def mlx_funcify_Elemwise_scalar_Cos(scalar_op):
-    return mx.cos
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Sqrt)
-def mlx_funcify_Elemwise_scalar_Sqrt(scalar_op):
-    return mx.sqrt
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Sqr)
-def mlx_funcify_Elemwise_scalar_Sqr(scalar_op):
-    return mx.square
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Abs)
-def mlx_funcify_Elemwise_scalar_Abs(scalar_op):
-    return mx.abs
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Neg)
-def mlx_funcify_Elemwise_scalar_Neg(scalar_op):
-    return mx.negative
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Sign)
-def mlx_funcify_Elemwise_scalar_Sign(scalar_op):
-    return mx.sign
-
-
-@mlx_funcify_Elemwise_scalar_op.register(LE)
-def mlx_funcify_Elemwise_scalar_LE(scalar_op):
-    return mx.less_equal
-
-
-@mlx_funcify_Elemwise_scalar_op.register(LT)
-def mlx_funcify_Elemwise_scalar_LT(scalar_op):
-    return mx.less
-
-
-@mlx_funcify_Elemwise_scalar_op.register(GE)
-def mlx_funcify_Elemwise_scalar_GE(scalar_op):
-    return mx.greater_equal
-
-
-@mlx_funcify_Elemwise_scalar_op.register(GT)
-def mlx_funcify_Elemwise_scalar_GT(scalar_op):
-    return mx.greater
-
-
-@mlx_funcify_Elemwise_scalar_op.register(EQ)
-def mlx_funcify_Elemwise_scalar_EQ(scalar_op):
-    return mx.equal
-
-
-@mlx_funcify_Elemwise_scalar_op.register(NEQ)
-def mlx_funcify_Elemwise_scalar_NEQ(scalar_op):
-    return mx.not_equal
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Switch)
-def mlx_funcify_Elemwise_scalar_Switch(scalar_op):
-    return mx.where
-
-
-@mlx_funcify_Elemwise_scalar_op.register(AND)
-def mlx_funcify_Elemwise_scalar_AND(scalar_op):
-    return mx.bitwise_and
-
-
-@mlx_funcify_Elemwise_scalar_op.register(OR)
-def mlx_funcify_Elemwise_scalar_OR(scalar_op):
-    return mx.bitwise_or
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Maximum)
-def mlx_funcify_Elemwise_scalar_Maximum(scalar_op):
-    return mx.maximum
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Minimum)
-def mlx_funcify_Elemwise_scalar_Minimum(scalar_op):
-    return mx.minimum
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Cast)
-def mlx_funcify_Elemwise_scalar_Cast(scalar_op):
-    def cast(x):
-        dtype = convert_dtype_to_mlx(scalar_op.o_type.dtype)
-        try:
-            return x.astype(dtype)
-        except ValueError as e:
-            if "is not supported on the GPU" in str(e):
-                import warnings
-
-                warnings.warn(
-                    f"MLX GPU limitation: {e}. Attempting automatic fallback casting.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                fallback_dtype = convert_dtype_to_mlx(
-                    scalar_op.o_type.dtype, auto_cast_unsupported=True
-                )
-                return x.astype(fallback_dtype)
-            else:
-                raise e
-
-    return cast
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Sigmoid)
-def mlx_funcify_Elemwise_scalar_Sigmoid(scalar_op):
-    return mx.sigmoid
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Invert)
-def mlx_funcify_Elemwise_scalar_Invert(scalar_op):
-    return mx.bitwise_invert
-
-
-@mlx_funcify_Elemwise_scalar_op.register(IsNan)
-def mlx_funcify_Elemwise_scalar_IsNan(scalar_op):
-    return mx.isnan
-
-
-@mlx_funcify_Elemwise_scalar_op.register(IsInf)
-def mlx_funcify_Elemwise_scalar_IsInf(scalar_op):
-    return mx.isinf
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Erfc)
-def mlx_funcify_Elemwise_scalar_Erfc(scalar_op):
-    def erfc(x):
-        return 1.0 - mx.erf(x)
-
-    return erfc
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Erfcx)
-def mlx_funcify_Elemwise_scalar_Erfcx(scalar_op):
-    def erfcx(x):
-        return mx.exp(x * x) * (1.0 - mx.erf(x))
-
-    return erfcx
-
-
-@mlx_funcify_Elemwise_scalar_op.register(Softplus)
-def mlx_funcify_Elemwise_scalar_softplus(scalar_op):
-    def softplus(x):
-        # Numerically stable implementation of log(1 + exp(x))
-        # Following the same logic as the original PyTensor implementation
-        return mx.where(
-            x < -37.0,
-            mx.exp(x),
-            mx.where(
-                x < 18.0, mx.log1p(mx.exp(x)), mx.where(x < 33.3, x + mx.exp(-x), x)
-            ),
-        )
-
-    return softplus
-
-
 @mlx_funcify.register(Elemwise)
 def mlx_funcify_Elemwise(op, node, **kwargs):
-    return mlx_funcify_Elemwise_scalar_op(op.scalar_op)
+    scalar_op = op.scalar_op
+    return mlx_funcify(scalar_op, node=node, **kwargs)
