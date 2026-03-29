@@ -6,9 +6,10 @@ from types import NoneType
 import mlx.core as mx
 import numpy as np
 
-from pytensor.compile.ops import DeepCopyOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph import Constant
 from pytensor.graph.fg import FunctionGraph
+from pytensor.ifelse import IfElse
 from pytensor.link.utils import fgraph_to_python
 from pytensor.raise_op import Assert, CheckAndRaise
 
@@ -81,6 +82,26 @@ def mlx_funcify_DeepCopyOp(op, **kwargs):
         return deepcopy(x)
 
     return deepcopyop
+
+
+@mlx_funcify.register(TypeCastingOp)
+def mlx_funcify_TypeCastingOp(op, **kwargs):
+    def type_cast(x):
+        return x
+
+    return type_cast
+
+
+@mlx_funcify.register(IfElse)
+def mlx_funcify_IfElse(op, **kwargs):
+    n_outs = op.n_outs
+
+    def ifelse(cond, *args, n_outs=n_outs):
+        # MLX has no conditional Op, the best we can do is mx.where to select between branches elementwise.
+        res = tuple(mx.where(cond, args[i], args[n_outs + i]) for i in range(n_outs))
+        return res if n_outs > 1 else res[0]
+
+    return ifelse
 
 
 @mlx_funcify.register(Assert)
