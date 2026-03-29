@@ -2,7 +2,7 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
-from pytensor.scalar.basic import Cast, Composite, Identity, ScalarOp, Second
+from pytensor.scalar.basic import Cast, Composite, Identity, Mod, ScalarOp, Second
 from pytensor.scalar.math import Erfc, Erfcx, Sigmoid, Softplus
 
 
@@ -90,6 +90,15 @@ def mlx_funcify_Cast(op, **kwargs):
                 raise
 
     return cast
+
+
+@mlx_funcify.register(Mod)
+def mlx_funcify_Mod(op, **kwargs):
+    def mlx_mod(x, y):
+        _, res = mx.divmod(x, y)
+        return res
+
+    return mlx_mod
 
 
 @mlx_funcify.register(Identity)
