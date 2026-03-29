@@ -2,8 +2,9 @@ import numpy as np
 import pytest
 
 from pytensor import Out, function
+from pytensor.compile.mode import get_mode
 from pytensor.configdefaults import config
-from pytensor.tensor import join, matrices, vectors
+from pytensor.tensor import concatenate, dvector, join, matrices, tanh, vectors
 
 
 def _test_join_benchmark(mode, ndim, axis, memory_layout, gc, benchmark):
@@ -44,3 +45,24 @@ def test_join_benchmark_c(ndim, axis, memory_layout, gc, benchmark):
 @config.change_flags(cmodule__warn_no_version=False)
 def test_join_benchmark_numba(ndim, axis, memory_layout, benchmark):
     _test_join_benchmark("NUMBA", ndim, axis, memory_layout, False, benchmark)
+
+
+@pytest.mark.parametrize("n_streams", [2, 4, 8])
+@pytest.mark.parametrize("mode", ["CVM", "NUMBA"])
+@pytest.mark.parametrize(
+    "rewrite",
+    [True, False],
+    ids=["with_join_buffer_elimination", "without_join_buffer_elimination"],
+)
+def test_join_buffer_elimination_benchmark(n_streams, mode, rewrite, benchmark):
+    """Benchmark Join buffer elimination: concat(tanh(x0), tanh(x1), ...)."""
+    sz = 1000
+    xs = [dvector(f"x{i}", shape=(sz,)) for i in range(n_streams)]
+    out = concatenate([tanh(x) for x in xs])
+    compile_mode = get_mode(mode)
+    if not rewrite:
+        compile_mode = compile_mode.excluding("join_buffer_elimination")
+    fn = function(xs, out, mode=compile_mode, trust_input=True)
+    vals = [np.random.default_rng(i).standard_normal(sz) for i in range(n_streams)]
+    fn(*vals)  # warmup
+    benchmark(fn, *vals)
