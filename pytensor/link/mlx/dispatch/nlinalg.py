@@ -4,6 +4,7 @@ from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.nlinalg import (
     SVD,
     Eig,
+    Eigh,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
@@ -63,6 +64,19 @@ def mlx_funcify_Eig(op, node, **kwargs):
         return mx.linalg.eig(x.astype(dtype=X_dtype, stream=mx.cpu), stream=mx.cpu)
 
     return eig
+
+
+@mlx_funcify.register(Eigh)
+def mlx_funcify_Eigh(op, node, **kwargs):
+    uplo = op.UPLO
+    X_dtype = getattr(mx, node.inputs[0].dtype)
+
+    def eigh(x):
+        return mx.linalg.eigh(
+            x.astype(dtype=X_dtype, stream=mx.cpu), UPLO=uplo, stream=mx.cpu
+        )
+
+    return eigh
 
 
 @mlx_funcify.register(MatrixInverse)
