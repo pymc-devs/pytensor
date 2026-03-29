@@ -2,12 +2,33 @@ from functools import partial
 
 import numpy as np
 import pytest
+from packaging.version import parse as V
 
 import pytensor.tensor as pt
 from pytensor import config
 from pytensor.tensor.linalg.decomposition import lu, svd
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
+
+
+mx = pytest.importorskip("mlx.core")
+
+
+@pytest.mark.skipif(
+    V(mx.__version__) < V("0.30.1"),
+    reason="mx.linalg.eig causes a Fatal Python error (Abort trap) on MLX <0.30.1 "
+    "(maybe -- the exact version cutoff is unknown)",
+)
+def test_mlx_eig():
+    rng = np.random.default_rng(15)
+
+    M = rng.normal(size=(3, 3))
+    A_val = (M @ M.T).astype(config.floatX)
+
+    A = pt.matrix(name="A")
+    outs = pt.linalg.eig(A)
+
+    compare_mlx_and_py([A], outs, [A_val])
 
 
 @pytest.mark.parametrize("compute_uv", [True, False])
