@@ -2,7 +2,7 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor.linalg.decomposition.eigen import Eig
+from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh
 from pytensor.tensor.linalg.decomposition.lu import LU
 from pytensor.tensor.linalg.decomposition.svd import SVD
 
@@ -80,3 +80,16 @@ def mlx_funcify_Eig(op, node, **kwargs):
         return mx.linalg.eig(x.astype(dtype=X_dtype, stream=mx.cpu), stream=mx.cpu)
 
     return eig
+
+
+@mlx_funcify.register(Eigh)
+def mlx_funcify_Eigh(op, node, **kwargs):
+    uplo = op.UPLO
+    X_dtype = getattr(mx, node.inputs[0].dtype)
+
+    def eigh(x):
+        return mx.linalg.eigh(
+            x.astype(dtype=X_dtype, stream=mx.cpu), UPLO=uplo, stream=mx.cpu
+        )
+
+    return eigh
