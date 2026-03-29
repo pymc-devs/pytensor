@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 import pytensor
+from pytensor import config
 from pytensor import tensor as pt
 from pytensor.compile.function import function
 from pytensor.compile.mode import MLX, Mode
@@ -311,3 +312,21 @@ def test_mlx_checkandraise_warning_and_execution():
     out = mlx_fn(np.array(0.5, dtype=np.float32))
     assert isinstance(out, mx.array)
     assert np.allclose(out, 0.5)
+
+
+def test_OpFromGraph():
+    from pytensor.compile.builders import OpFromGraph
+    from pytensor.tensor import matrices
+
+    x, y, z = matrices("xyz")
+    ofg_1 = OpFromGraph([x, y], [x + y], inline=False)
+    ofg_2 = OpFromGraph([x, y], [x * y, x - y], inline=False)
+
+    o1, o2 = ofg_2(y, z)
+    out = ofg_1(x, o1) + o2
+
+    xv = np.ones((2, 2), dtype=config.floatX)
+    yv = np.ones((2, 2), dtype=config.floatX) * 3
+    zv = np.ones((2, 2), dtype=config.floatX) * 5
+
+    compare_mlx_and_py([x, y, z], [out], [xv, yv, zv])

@@ -6,6 +6,7 @@ from types import NoneType
 import mlx.core as mx
 import numpy as np
 
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph import Constant
 from pytensor.graph.fg import FunctionGraph
@@ -99,3 +100,25 @@ def mlx_funcify_CheckAndRaise(op, node, **kwargs):
         return x
 
     return assert_fn
+
+
+@mlx_funcify.register(OpFromGraph)
+def mlx_funcify_OpFromGraph(ofg: OpFromGraph, node=None, **kwargs):
+    _ = kwargs.pop("storage_map", None)
+
+    from pytensor.compile.mode import MLX
+
+    MLX.optimizer(ofg.fgraph)
+    fgraph_fn = mlx_funcify(ofg.fgraph, **kwargs)
+
+    if len(ofg.fgraph.outputs) == 1:
+
+        def opfromgraph(*inputs):
+            return fgraph_fn(*inputs)[0]
+
+    else:
+
+        def opfromgraph(*inputs):
+            return fgraph_fn(*inputs)
+
+    return opfromgraph
