@@ -7,6 +7,7 @@ from pytensor.scalar.basic import (
     Cast,
     Clip,
     Invert,
+    Real,
     ScalarOp,
 )
 from pytensor.scalar.loop import ScalarLoop
@@ -112,3 +113,11 @@ def pytorch_funicify_ScalarLoop(op, node, **kwargs):
                 return carry
 
     return scalar_loop
+
+
+@pytorch_funcify.register(Real)
+def pytorch_funcify_Real(op, node, **kwargs):
+    def real(x):
+        return torch.real(x)
+
+    return real
