@@ -8,6 +8,18 @@ from pytensor import config
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
+def test_mlx_eig():
+    rng = np.random.default_rng(15)
+
+    M = rng.normal(size=(3, 3))
+    A_val = (M @ M.T).astype(config.floatX)
+
+    A = pt.matrix(name="A")
+    outs = pt.linalg.eig(A)
+
+    compare_mlx_and_py([A], outs, [A_val])
+
+
 @pytest.mark.parametrize("compute_uv", [True, False])
 def test_mlx_svd(compute_uv):
     rng = np.random.default_rng(15)
