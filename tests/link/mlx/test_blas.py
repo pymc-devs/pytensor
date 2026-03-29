@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-from pytensor.compile.function import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -22,12 +21,14 @@ def test_mlx_BatchedDot():
         np.linspace(1, -1, 10 * 3 * 2).astype(config.floatX).reshape((10, 3, 2))
     )
     out = pt_blas.BatchedDot()(a, b)
-    compare_mlx_and_py([a, b], [out], [a_test_value, b_test_value])
+
+    opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
+    mlx_mode = Mode(MLXLinker(), opts)
+    pytensor_mlx_fn, _ = compare_mlx_and_py(
+        [a, b], [out], [a_test_value, b_test_value], mlx_mode=mlx_mode
+    )
 
     # A dimension mismatch should raise a TypeError for compatibility
     inputs = [a_test_value[:-1], b_test_value]
-    opts = RewriteDatabaseQuery(include=[None], exclude=["cxx_only", "BlasOpt"])
-    mlx_mode = Mode(MLXLinker(), opts)
-    pytensor_mlx_fn = function([a, b], [out], mode=mlx_mode)
     with pytest.raises(TypeError):
         pytensor_mlx_fn(*inputs)
