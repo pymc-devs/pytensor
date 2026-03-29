@@ -20,6 +20,19 @@ def test_mlx_eig():
     compare_mlx_and_py([A], outs, [A_val])
 
 
+@pytest.mark.parametrize("UPLO", ["L", "U"])
+def test_mlx_eigh(UPLO):
+    rng = np.random.default_rng(15)
+
+    M = rng.normal(size=(3, 3))
+    A_val = (M @ M.T).astype(config.floatX)
+
+    A = pt.matrix(name="A")
+    outs = pt.linalg.eigh(A, UPLO=UPLO)
+
+    compare_mlx_and_py([A], outs, [A_val])
+
+
 @pytest.mark.parametrize("compute_uv", [True, False])
 def test_mlx_svd(compute_uv):
     rng = np.random.default_rng(15)
