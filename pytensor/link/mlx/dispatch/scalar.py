@@ -1,8 +1,13 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
-from pytensor.scalar.basic import Cast, Composite, Identity, Mod, ScalarOp, Second
-from pytensor.scalar.math import Erfc, Erfcx, Log1mexp, Sigmoid, Softplus
+from pytensor.scalar.basic import (
+    Cast,
+    Composite,
+    ScalarOp,
+    Second,
+)
+from pytensor.scalar.math import Erfc, Erfcx, Sigmoid, Softplus
 
 
 # MLX name overrides for nfunc_spec names that don't match mlx.core
@@ -93,6 +98,17 @@ def mlx_funcify_Cast(op, **kwargs):
                 raise
 
     return cast
+
+
+@mlx_funcify.register(Second)
+def mlx_funcify_Second(op, **kwargs):
+    def second(x, y):
+        x = mx.array(x)
+        y = mx.array(y)
+        _, out = mx.broadcast_arrays(x, y)
+        return out
+
+    return second
 
 
 @mlx_funcify.register(Sigmoid)
