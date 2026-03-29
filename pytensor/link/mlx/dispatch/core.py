@@ -300,6 +300,16 @@ def _coerce_to_int(value):
     )
 
 
+def mlx_to_list_shape(size) -> list[int]:
+    """Convert a size value (mx.array, np.ndarray, or sequence) to a plain Python list of ints.
+
+    Used by random variable dispatch to normalise the ``size`` argument, which
+    PyTensor may pass as an ``mx.array`` or ``np.ndarray`` rather than a plain
+    Python list.
+    """
+    return [_coerce_to_int(x) for x in size]
+
+
 def _rethrow_dynamic_shape_error(exc):
     msg = str(exc)
     if "[eval] Attempting to eval an array during function transformations" in msg:
