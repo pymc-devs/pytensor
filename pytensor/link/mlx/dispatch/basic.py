@@ -8,7 +8,7 @@ import numpy as np
 
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.mode import MLX
-from pytensor.compile.ops import DeepCopyOp
+from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph import Constant
 from pytensor.graph.fg import FunctionGraph
 from pytensor.ifelse import IfElse
@@ -162,6 +162,14 @@ def mlx_funcify_DeepCopyOp(op, **kwargs):
     return deepcopyop
 
 
+@mlx_funcify.register(TypeCastingOp)
+def mlx_funcify_TypeCastingOp(op, **kwargs):
+    def type_cast(x):
+        return x
+
+    return type_cast
+
+
 @mlx_funcify.register(IfElse)
 def mlx_funcify_IfElse(op, **kwargs):
     n_outs = op.n_outs
@@ -172,6 +180,7 @@ def mlx_funcify_IfElse(op, **kwargs):
         return res if n_outs > 1 else res[0]
 
     return ifelse
+
 
 @mlx_funcify.register(Assert)
 @mlx_funcify.register(CheckAndRaise)

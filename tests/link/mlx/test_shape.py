@@ -98,7 +98,6 @@ def test_mlx_Reshape_shape_graph_input():
     )
 
 
-@pytest.mark.xfail(reason="ViewOp Op is not supported yet")
 def test_mlx_compile_ops():
     x = DeepCopyOp()(pt.as_tensor_variable(1.1))
     compare_mlx_and_py([], [x], [])
