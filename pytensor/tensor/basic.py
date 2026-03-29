@@ -396,7 +396,12 @@ def _get_underlying_scalar_constant_value(
                         for i in v.owner.inputs
                     ]
                     ret = [[None]]
-                    v.owner.op.perform(v.owner, const, ret)
+                    try:
+                        v.owner.op.perform(v.owner, const, ret)
+                    except Exception:
+                        # Elemwise.perform may not work in Python mode
+                        # (e.g. fused Composites with >32 operands)
+                        raise NotScalarConstantError(v)
                     return np.asarray(ret[0][0].copy())
             elif isinstance(op, Subtensor) and v.ndim == 0:
                 if isinstance(v.owner.inputs[0], TensorConstant):
