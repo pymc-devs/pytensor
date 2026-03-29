@@ -1,11 +1,12 @@
 import mlx.core as mx
 import numpy as np
 
-from pytensor.link.mlx.dispatch.basic import mlx_funcify
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
+    ARange,
     ExtractDiag,
     Eye,
     Join,
@@ -115,82 +116,6 @@ def mlx_funcify_Eye(op, node, **kwargs):
     return eye
 
 
-def convert_dtype_to_mlx(dtype_str, auto_cast_unsupported=True):
-    """Convert PyTensor dtype strings to MLX dtype objects.
-
-    MLX expects dtype objects rather than string literals for type conversion.
-    This function maps common dtype strings to their MLX equivalents.
-
-    Parameters
-    ----------
-    dtype_str : str or MLX dtype
-        The dtype to convert
-    auto_cast_unsupported : bool
-        If True, automatically cast unsupported dtypes to supported ones with warnings
-
-    Returns
-    -------
-    MLX dtype object
-    """
-    import warnings
-
-    if isinstance(dtype_str, str):
-        if dtype_str == "bool":
-            return mx.bool_
-        elif dtype_str == "int8":
-            return mx.int8
-        elif dtype_str == "int16":
-            return mx.int16
-        elif dtype_str == "int32":
-            return mx.int32
-        elif dtype_str == "int64":
-            return mx.int64
-        elif dtype_str == "uint8":
-            return mx.uint8
-        elif dtype_str == "uint16":
-            return mx.uint16
-        elif dtype_str == "uint32":
-            return mx.uint32
-        elif dtype_str == "uint64":
-            return mx.uint64
-        elif dtype_str == "float16":
-            return mx.float16
-        elif dtype_str == "float32":
-            return mx.float32
-        elif dtype_str == "float64":
-            if auto_cast_unsupported:
-                warnings.warn(
-                    "MLX does not support float64 on GPU. Automatically casting to float32. "
-                    "This may result in reduced precision. To avoid this warning, "
-                    "explicitly use float32 in your code or set floatX='float32' in PyTensor config.",
-                    UserWarning,
-                    stacklevel=3,
-                )
-                return mx.float32
-            else:
-                return mx.float64
-        elif dtype_str == "bfloat16":
-            return mx.bfloat16
-        elif dtype_str == "complex64":
-            return mx.complex64
-        elif dtype_str == "complex128":
-            if auto_cast_unsupported:
-                warnings.warn(
-                    "MLX does not support complex128. Automatically casting to complex64. "
-                    "This may result in reduced precision. To avoid this warning, "
-                    "explicitly use complex64 in your code.",
-                    UserWarning,
-                    stacklevel=3,
-                )
-                return mx.complex64
-            else:
-                # Return the original even though it might fail
-                # This allows users to opt out of auto-casting if needed
-                return mx.complex64  # MLX doesn't have complex128, so fallback
-    # Return as is if it's already an MLX dtype or not a recognized string
-    return dtype_str
-
-
 @mlx_funcify.register(MakeVector)
 def mlx_funcify_MakeVector(op, **kwargs):
     dtype = convert_dtype_to_mlx(op.dtype)
@@ -263,6 +188,34 @@ def mlx_funcify_Alloc(op, node, **kwargs):
     return alloc
 
 
+ARANGE_CONCRETE_VALUE_ERROR = (
+    "MLX's arange requires all arguments (start, stop, step) to be concrete "
+    "Python int/float values, not symbolic variables. Unlike NumPy and JAX, "
+    "MLX does not accept array inputs for arange at all."
+    "\n\nAn example of a valid graph:"
+    "\n>>> import pytensor.tensor as pt"
+    "\n>>> pt.arange(1, 10, 2)"
+)
+
+
+@mlx_funcify.register(ARange)
+def mlx_funcify_ARange(op, node, **kwargs):
+    # MLX's arange only accepts Python int/float, not arrays,
+    # so all arguments must be known at graph-construction time.
+    try:
+        start, stop, step = [
+            get_scalar_constant_value(arg).item() for arg in node.inputs
+        ]
+    except NotScalarConstantError:
+        raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
+    dtype = convert_dtype_to_mlx(op.dtype)
+
+    def arange(*_args):
+        return mx.arange(start, stop, step, dtype=dtype)
+
+    return arange
+
+
 def _extract_static_dims(shape_inputs):
     static_dims = []
     for dim in shape_inputs:
@@ -294,10 +247,6 @@ def _coerce_to_int(value):
     except (ValueError, TypeError) as exc:
         _rethrow_dynamic_shape_error(exc)
         raise
-    raise TypeError(
-        "MLX Alloc expects integer shape components; got value of type "
-        f"{type(value).__name__}."
-    )
 
 
 def _rethrow_dynamic_shape_error(exc):

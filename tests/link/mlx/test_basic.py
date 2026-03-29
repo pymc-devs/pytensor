@@ -250,7 +250,7 @@ def test_mlx_float64_no_warning_when_disabled():
     """Test that auto-casting can be controlled."""
     import warnings
 
-    from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
+    from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx
 
     # Test that we can disable auto-casting
     with warnings.catch_warnings(record=True) as warning_list:
@@ -271,7 +271,7 @@ def test_mlx_complex128_auto_casting():
     """Test automatic casting of complex128 to complex64."""
     import warnings
 
-    from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
+    from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx
 
     with warnings.catch_warnings(record=True) as warning_list:
         warnings.simplefilter("always")
