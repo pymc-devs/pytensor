@@ -4,8 +4,7 @@ import mlx.core as mx
 import mlx.nn as mlx_nn
 import numpy as np
 
-from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx
+from pytensor.link.mlx.dispatch.basic import convert_dtype_to_mlx, mlx_funcify
 from pytensor.scalar.basic import (
     AND,
     EQ,

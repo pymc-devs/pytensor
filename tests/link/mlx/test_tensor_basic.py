@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor
+import pytensor.tensor.basic as ptb
 from pytensor import config
 from pytensor import tensor as pt
 from pytensor.tensor.basic import Alloc
@@ -19,7 +20,7 @@ def test_alloc_with_different_shape_types():
     This addresses the TypeError that occurred when shape parameters
     contained MLX arrays instead of Python integers.
     """
-    from pytensor.link.mlx.dispatch.core import (
+    from pytensor.link.mlx.dispatch.tensor_basic import (
         mlx_funcify_Alloc,
     )
 
@@ -164,3 +165,9 @@ def test_split_dynamic_axis_const_splits():
         ValueError, match="Symbolic axis is not supported in MLX Split implementation"
     ):
         compare_mlx_and_py([x, axis], outs, [test_input, np.array(1)])
+
+
+def test_arange():
+    out = ptb.arange(1, 10, 2)
+
+    compare_mlx_and_py([], [out], [])
