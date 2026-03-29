@@ -146,3 +146,15 @@ def test_mlx_pivot_to_permutations():
     out = pivot_to_permutation(lu_and_pivots[1])
 
     compare_mlx_and_py([A], [out], [A_val])
+
+
+@pytest.mark.parametrize("mode", ["economic", "r"])
+def test_mlx_qr(mode):
+    rng = np.random.default_rng(15)
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(5, 3)).astype(config.floatX)
+
+    out = pt.linalg.qr(A, mode=mode)
+
+    compare_mlx_and_py([A], out, [A_val])
