@@ -7,11 +7,17 @@ from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.math import (
+    cosh,
     erf,
     erfc,
     erfcx,
     erfinv,
+    log,
+    log1mexp,
+    sigmoid,
+    softplus,
 )
 from pytensor.tensor.type import matrix, scalar, vector
 from tests.link.mlx.test_basic import compare_mlx_and_py
@@ -128,3 +134,107 @@ def test_erfcx():
     x = scalar("x")
     out = erfcx(x)
     compare_mlx_and_py([x], [out], [0.7])
+
+
+def test_log1mexp():
+    x = vector("x")
+    out = log1mexp(x)
+
+    compare_mlx_and_py([x], [out], [[-1.0, -0.75, -0.5, -0.25]])
+
+
+def test_nnet():
+    x = vector("x")
+    x_test_value = np.r_[1.0, 2.0].astype(config.floatX)
+
+    out = sigmoid(x)
+    compare_mlx_and_py([x], [out], [x_test_value])
+
+    out = softplus(x)
+    compare_mlx_and_py([x], [out], [x_test_value])
+
+
+def test_mlx_variadic_Scalar():
+    mu = vector("mu", dtype=config.floatX)
+    mu_test_value = np.r_[0.1, 1.1].astype(config.floatX)
+    tau = vector("tau", dtype=config.floatX)
+    tau_test_value = np.r_[1.0, 2.0].astype(config.floatX)
+
+    res = -tau * mu
+
+    compare_mlx_and_py([mu, tau], [res], [mu_test_value, tau_test_value])
+
+    res = -tau * (tau - mu) ** 2
+
+    compare_mlx_and_py([mu, tau], [res], [mu_test_value, tau_test_value])
+
+
+def test_add_scalars():
+    x = pt.matrix("x")
+    size = x.shape[0] + x.shape[0] + x.shape[1]
+    out = pt.ones(size).astype(config.floatX)
+
+    compare_mlx_and_py([x], [out], [np.ones((2, 3)).astype(config.floatX)])
+
+
+def test_mul_scalars():
+    x = pt.matrix("x")
+    size = x.shape[0] * x.shape[0] * x.shape[1]
+    out = pt.ones(size).astype(config.floatX)
+
+    compare_mlx_and_py([x], [out], [np.ones((2, 3)).astype(config.floatX)])
+
+
+def test_div_scalars():
+    x = pt.matrix("x")
+    size = x.shape[0] // x.shape[1]
+    out = pt.ones(size).astype(config.floatX)
+
+    compare_mlx_and_py([x], [out], [np.ones((12, 3)).astype(config.floatX)])
+
+
+def test_mod_scalars():
+    x = pt.matrix("x")
+    size = x.shape[0] % x.shape[1]
+    out = pt.ones(size).astype(config.floatX)
+
+    compare_mlx_and_py([x], [out], [np.ones((12, 3)).astype(config.floatX)])
+
+
+def test_mlx_multioutput():
+    x = vector("x")
+    x_test_value = np.r_[1.0, 2.0].astype(config.floatX)
+    y = vector("y")
+    y_test_value = np.r_[3.0, 4.0].astype(config.floatX)
+
+    w = cosh(x**2 + y / 3.0)
+    v = cosh(x / 3.0 + y**2)
+
+    compare_mlx_and_py([x, y], [w, v], [x_test_value, y_test_value])
+
+
+def test_mlx_logp():
+    mu = vector("mu")
+    mu_test_value = np.r_[0.0, 0.0].astype(config.floatX)
+    tau = vector("tau")
+    tau_test_value = np.r_[1.0, 1.0].astype(config.floatX)
+    sigma = vector("sigma")
+    sigma_test_value = (1.0 / tau_test_value).astype(config.floatX)
+    value = vector("value")
+    value_test_value = np.r_[0.1, -10].astype(config.floatX)
+
+    logp = (-tau * (value - mu) ** 2 + log(tau / np.pi / 2.0)) / 2.0
+    conditions = [sigma > 0]
+    alltrue = pt_all([pt_all(1 * val) for val in conditions])
+    normal_logp = pt.switch(alltrue, logp, -np.inf)
+
+    compare_mlx_and_py(
+        [mu, tau, sigma, value],
+        [normal_logp],
+        [
+            mu_test_value,
+            tau_test_value,
+            sigma_test_value,
+            value_test_value,
+        ],
+    )
