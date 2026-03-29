@@ -107,3 +107,17 @@ def test_mlx_LU():
         mlx_mode=mlx_mode,
         assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
+
+
+@pytest.mark.parametrize("lower", [True, False])
+def test_mlx_eigvalsh(lower):
+    rng = np.random.default_rng(15)
+
+    M = rng.normal(size=(3, 3))
+    A_val = (M @ M.T).astype(config.floatX)
+
+    A = pt.matrix(name="A")
+    B = pt.matrix(name="B")
+    out = pt.linalg.eigvalsh(A, B, lower=lower)
+
+    compare_mlx_and_py([A, B], [out], [A_val, None])

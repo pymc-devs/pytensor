@@ -4,6 +4,31 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.slinalg import LU, Cholesky, Solve, SolveTriangular
+from pytensor.tensor.slinalg import (
+    Cholesky,
+    Eigvalsh,
+    LU,
+    Solve,
+    SolveTriangular,
+)
+
+
+@mlx_funcify.register(Eigvalsh)
+def mlx_funcify_Eigvalsh(op, node, **kwargs):
+    UPLO = "L" if op.lower else "U"
+    X_dtype = getattr(mx, node.inputs[0].dtype)
+
+    def eigvalsh(a, b=None):
+        if b is not None:
+            raise NotImplementedError(
+                "mlx.core.linalg.eigvalsh does not support generalized "
+                "eigenvector problems (b != None)"
+            )
+        return mx.linalg.eigvalsh(
+            a.astype(dtype=X_dtype, stream=mx.cpu), UPLO=UPLO, stream=mx.cpu
+        )
+
+    return eigvalsh
 
 
 @mlx_funcify.register(Cholesky)
