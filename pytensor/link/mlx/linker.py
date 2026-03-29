@@ -7,7 +7,7 @@ class MLXLinker(JITLinker):
     incompatible_rewrites = (
         "cxx_only",
         "BlasOpt",
-        "fusion",
+        "local_careduce_fusion",
         "inplace",
         "scan_save_mem_prealloc",
     )

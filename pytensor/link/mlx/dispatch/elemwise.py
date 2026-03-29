@@ -11,6 +11,7 @@ from pytensor.scalar.basic import (
     OR,
     Add,
     Cast,
+    Composite,
     Maximum,
     Minimum,
     Mul,
@@ -258,6 +259,23 @@ def mlx_funcify_Softplus(op, **kwargs):
         )
 
     return softplus
+
+
+@mlx_funcify.register(Composite)
+def mlx_funcify_Composite(op, node=None, **kwargs):
+    mlx_impl = mlx_funcify(op.fgraph)
+
+    if len(op.fgraph.outputs) == 1:
+
+        def composite(*args):
+            return mlx_impl(*args)[0]
+
+    else:
+
+        def composite(*args):
+            return mlx_impl(*args)
+
+    return composite
 
 
 @mlx_funcify.register(Elemwise)
