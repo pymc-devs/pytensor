@@ -1,7 +1,13 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor.nlinalg import SVD, KroneckerProduct, MatrixInverse, MatrixPinv
+from pytensor.tensor.nlinalg import (
+    SVD,
+    Eig,
+    KroneckerProduct,
+    MatrixInverse,
+    MatrixPinv,
+)
 
 
 @mlx_funcify.register(SVD)
@@ -47,6 +53,16 @@ def mlx_funcify_KroneckerProduct(op, node, **kwargs):
         )
 
     return kron
+
+
+@mlx_funcify.register(Eig)
+def mlx_funcify_Eig(op, node, **kwargs):
+    X_dtype = getattr(mx, node.inputs[0].dtype)
+
+    def eig(x):
+        return mx.linalg.eig(x.astype(dtype=X_dtype, stream=mx.cpu), stream=mx.cpu)
+
+    return eig
 
 
 @mlx_funcify.register(MatrixInverse)
