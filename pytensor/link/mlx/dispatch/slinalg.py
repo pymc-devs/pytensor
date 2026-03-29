@@ -5,6 +5,7 @@ import mlx.core as mx
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.slinalg import (
     LU,
+    QR,
     Cholesky,
     Eigvalsh,
     LUFactor,
@@ -108,6 +109,33 @@ def mlx_funcify_LU(op, node, **kwargs):
         )
 
     return lu
+
+
+@mlx_funcify.register(QR)
+def mlx_funcify_QR(op, node, **kwargs):
+    mode = op.mode
+    A_dtype = getattr(mx, node.inputs[0].dtype)
+
+    if mode not in ("economic", "r"):
+        raise NotImplementedError(
+            f"mode='{mode}' is not supported in the MLX backend. "
+            "Only 'economic' and 'r' modes are available."
+        )
+
+    def qr(a):
+        Q, R = mx.linalg.qr(a.astype(dtype=A_dtype, stream=mx.cpu), stream=mx.cpu)
+        if mode == "r":
+            M = a.shape[-2]
+            K = R.shape[-2]
+            if M > K:
+                # Pytensor follows scipy convention for mode = 'r', which returns R with the same
+                # leading shape as the input.
+                pad_width = [(0, 0)] * (R.ndim - 2) + [(0, M - K), (0, 0)]
+                return mx.pad(R, pad_width, stream=mx.cpu)
+            return R
+        return Q, R
+
+    return qr
 
 
 @mlx_funcify.register(LUFactor)
