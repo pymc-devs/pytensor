@@ -4,6 +4,7 @@ from functools import partial
 import numpy as np
 import pytest
 
+from pytensor.compile import SymbolicInput
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.function import function
 from pytensor.compile.mode import JAX, Mode
@@ -71,7 +72,11 @@ def compare_jax_and_py(
     if assert_fn is None:
         assert_fn = partial(np.testing.assert_allclose, rtol=1e-4)
 
-    if any(inp.owner is not None for inp in graph_inputs):
+    if any(
+        inp.owner is not None
+        for inp in graph_inputs
+        if not isinstance(inp, SymbolicInput)
+    ):
         raise ValueError("Inputs must be root variables")
 
     pytensor_jax_fn = function(graph_inputs, graph_outputs, mode=jax_mode)
