@@ -6,6 +6,7 @@ from pytensor.tensor import get_vector_length
 from pytensor.tensor.basic import (
     Alloc,
     AllocEmpty,
+    ARange,
     ExtractDiag,
     Eye,
     Join,
@@ -185,6 +186,34 @@ def mlx_funcify_Alloc(op, node, **kwargs):
         return result
 
     return alloc
+
+
+ARANGE_CONCRETE_VALUE_ERROR = (
+    "MLX's arange requires all arguments (start, stop, step) to be concrete "
+    "Python int/float values, not symbolic variables. Unlike NumPy and JAX, "
+    "MLX does not accept array inputs for arange at all."
+    "\n\nAn example of a valid graph:"
+    "\n>>> import pytensor.tensor as pt"
+    "\n>>> pt.arange(1, 10, 2)"
+)
+
+
+@mlx_funcify.register(ARange)
+def mlx_funcify_ARange(op, node, **kwargs):
+    # MLX's arange only accepts Python int/float, not arrays,
+    # so all arguments must be known at graph-construction time.
+    try:
+        start, stop, step = [
+            get_scalar_constant_value(arg).item() for arg in node.inputs
+        ]
+    except NotScalarConstantError:
+        raise NotImplementedError(ARANGE_CONCRETE_VALUE_ERROR)
+    dtype = convert_dtype_to_mlx(op.dtype)
+
+    def arange(*_args):
+        return mx.arange(start, stop, step, dtype=dtype)
+
+    return arange
 
 
 def _extract_static_dims(shape_inputs):
