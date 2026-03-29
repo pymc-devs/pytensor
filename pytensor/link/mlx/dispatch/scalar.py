@@ -5,6 +5,7 @@ from pytensor.scalar.basic import (
     Cast,
     Composite,
     Identity,
+    Mod,
     ScalarOp,
     Second,
 )
@@ -95,6 +96,15 @@ def mlx_funcify_Cast(op, **kwargs):
                 raise
 
     return cast
+
+
+@mlx_funcify.register(Mod)
+def mlx_funcify_Mod(op, **kwargs):
+    def mlx_mod(x, y):
+        _, res = mx.divmod(x, y)
+        return res
+
+    return mlx_mod
 
 
 @mlx_funcify.register(Identity)
