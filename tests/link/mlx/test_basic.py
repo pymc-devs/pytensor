@@ -14,6 +14,7 @@ from pytensor.compile.function import function
 from pytensor.compile.mode import MLX, Mode
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Variable
+from pytensor.ifelse import ifelse
 from pytensor.link.mlx import MLXLinker
 from pytensor.raise_op import assert_op
 
@@ -311,3 +312,19 @@ def test_mlx_checkandraise_warning_and_execution():
     out = mlx_fn(np.array(0.5, dtype=np.float32))
     assert isinstance(out, mx.array)
     assert np.allclose(out, 0.5)
+
+
+def test_mlx_ifelse():
+    true_vals = np.r_[1, 2, 3]
+    false_vals = np.r_[-1, -2, -3]
+
+    x = ifelse(np.array(True), true_vals, false_vals)
+    compare_mlx_and_py([], [x], [], must_be_device_array=False)
+
+    a = pt.scalar("a")
+    a_test = np.array(0.2, dtype="float64")
+    x = ifelse(a < 0.5, true_vals, false_vals)
+    compare_mlx_and_py([a], [x], [a_test])
+
+    a_test = np.array(0.8, dtype="float64")
+    compare_mlx_and_py([a], [x], [a_test])
