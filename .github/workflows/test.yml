@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - main
-      - v3
   pull_request:
     branches:
       - main
-      - v3
 
 # Cancels all previous workflow runs for pull requests that have not completed.
 concurrency:
@@ -76,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # default-mode: "NUMBA" is actually a no-op, to make sure we're testing default config settings
+        # default-mode: "CVM" is actually a no-op, to make sure we're testing default config settings
         default-mode: ["CVM", "NUMBA", "FAST_COMPILE"]
         python-version: ["3.11", "3.14"]
         os: ["ubuntu-latest"]
@@ -192,9 +190,9 @@ jobs:
         shell: micromamba-shell {0}
         run: |
           if [[ $DEFAULT_MODE == "FAST_COMPILE" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,mode=FAST_COMPILE; fi
-          if [[ $DEFAULT_MODE == "CVM" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,linker=cvm; fi
+          if [[ $DEFAULT_MODE == "NUMBA" ]]; then export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,linker=numba; fi
           export PYTENSOR_FLAGS=$PYTENSOR_FLAGS,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
-          python -m pytest -r A --verbose --runslow --durations=50 --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --no-cov-on-fail $PART --benchmark-skip
+          python -m pytest -r A --verbose --runslow --durations=50 --cov=pytensor/ --cov-report=xml:coverage/coverage-${MATRIX_ID}.xml --junitxml=pytest-${MATRIX_ID}.xml --no-cov-on-fail $PART --benchmark-skip
         env:
           MATRIX_ID: ${{ steps.matrix-id.outputs.id }}
           MKL_THREADING_LAYER: GNU
@@ -208,6 +206,14 @@ jobs:
         with:
           name: coverage-${{ steps.matrix-id.outputs.id }}
           path: coverage/coverage-${{ steps.matrix-id.outputs.id }}.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: pytest-results-${{ steps.matrix-id.outputs.id }}
+          path: pytest-${{ steps.matrix-id.outputs.id }}.xml
+          if-no-files-found: ignore
 
   benchmarks:
     name: "Benchmarks"
@@ -248,7 +254,7 @@ jobs:
       - name: Run benchmarks
         shell: micromamba-shell {0}
         run: |
-          export PYTENSOR_FLAGS=warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
+          export PYTENSOR_FLAGS=mode=FAST_COMPILE,warn__ignore_bug_before=all,on_opt_error=raise,on_shape_error=raise,gcc__cxxflags=-pipe
           python -m pytest --runslow --benchmark-only --benchmark-json output.json
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@4bdcce38c94cec68da58d012ac24b7b1155efe8b # v1.20.7
@@ -269,6 +275,59 @@ jobs:
     name: "All tests"
     needs: [changes, style, test]
     steps:
+      - name: Download all test results
+        if: ${{ needs.changes.outputs.changes == 'true' }}
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          pattern: pytest-results-*
+          path: pytest-results
+          merge-multiple: true
+
+      - name: Display failed tests
+        if: ${{ needs.changes.outputs.changes == 'true' }}
+        run: |
+          python -c '
+          import xml.etree.ElementTree as ET
+          import glob
+          import os
+
+          failed = False
+          summary_lines = ["### Failing Tests", ""]
+          
+          for f in glob.glob("pytest-results/**/*.xml", recursive=True):
+              try:
+                  tree = ET.parse(f)
+              except Exception as e:
+                  print(f"Failed to parse {f}: {e}")
+                  continue
+              root = tree.getroot()
+              for testcase in root.iter("testcase"):
+                  for failure in testcase.iter("failure"):
+                      if not failed:
+                          print("FAILING TESTS:")
+                          print("=" * 80)
+                      failed = True
+                      classname = testcase.attrib.get("classname", "")
+                      testname = testcase.attrib.get("name", "")
+                      name = classname + "." + testname
+                      print(f"FAILED: {name} in {f}")
+                      print(failure.text)
+                      print("-" * 80)
+                      
+                      summary_lines.append(f"<details><summary><code>{name}</code></summary>")
+                      summary_lines.append("")
+                      summary_lines.append("```python")
+                      summary_lines.append(failure.text or "")
+                      summary_lines.append("```")
+                      summary_lines.append("</details>")
+          
+          if failed:
+              summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+              if summary_file:
+                  with open(summary_file, "a") as sf:
+                      sf.write("\n".join(summary_lines) + "\n")
+          '
+
       - name: Check build matrix status
         if: ${{ needs.changes.outputs.changes == 'true' && (needs.style.result != 'success' || needs.test.result != 'success') }}
         run: exit 1
