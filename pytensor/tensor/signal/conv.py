@@ -81,10 +81,18 @@ class AbstractConvolveNd:
     def infer_shape(self, fgraph, node, shapes):
         _, _, full_mode = node.inputs
         in1_shape, in2_shape, _ = shapes
-        out_shape = [
-            switch(full_mode, n + k - 1, maximum(n, k) - minimum(n, k) + 1)
-            for n, k in zip(in1_shape, in2_shape)
-        ]
+        
+        from pytensor.graph.basic import Constant
+        
+        out_shape = []
+        for n, k in zip(in1_shape, in2_shape):
+            if getattr(full_mode, "data", None) is not None:
+                if full_mode.data:
+                    out_shape.append(n + k - 1)
+                else:
+                    out_shape.append(maximum(n, k) - minimum(n, k) + 1)
+            else:
+                out_shape.append(switch(full_mode, n + k - 1, maximum(n, k) - minimum(n, k) + 1))
 
         return [out_shape]
 
