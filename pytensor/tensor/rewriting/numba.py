@@ -1,3 +1,5 @@
+# Import to trigger registration of IndexedElemwise rewrites
+import pytensor.tensor.rewriting.indexed_elemwise  # noqa: F401
 from pytensor.compile import optdb
 from pytensor.graph import node_rewriter
 from pytensor.graph.rewriting.basic import dfs_rewriter
