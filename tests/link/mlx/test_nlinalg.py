@@ -1,7 +1,9 @@
 from functools import partial
 
+import mlx.core as mx
 import numpy as np
 import pytest
+from packaging.version import parse as V
 
 import pytensor.tensor as pt
 from pytensor import config
@@ -31,6 +33,11 @@ def test_mlx_slogdet():
     compare_mlx_and_py([A], [sign, logabsdet], [A_val], mlx_mode=get_mode("MLX"))
 
 
+@pytest.mark.skipif(
+    V(mx.__version__) < V("0.30.1"),
+    reason="mx.linalg.eig causes a Fatal Python error (Abort trap) on MLX <0.30.1 "
+    "(maybe -- the exact version cutoff is unknown)",
+)
 def test_mlx_eig():
     rng = np.random.default_rng(15)
 
