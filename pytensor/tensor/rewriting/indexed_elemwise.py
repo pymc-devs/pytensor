@@ -1,9 +1,9 @@
-"""Fuse indexed reads into Elemwise iteration loops.
+"""Fuse indexed reads and updates into Elemwise iteration loops.
 
 Introduces ``IndexedElemwise``, an ``OpFromGraph`` that wraps
-``AdvancedSubtensor1`` + ``Elemwise`` subgraphs so the Numba backend can
-generate a single loop with indirect indexing, eliminating materialised
-intermediate arrays.
+``AdvancedSubtensor1`` + ``Elemwise`` + ``AdvancedIncSubtensor1`` subgraphs
+so the Numba backend can generate a single loop with indirect indexing,
+eliminating materialised intermediate arrays.
 """
 
 from pytensor.compile import optdb
@@ -11,9 +11,11 @@ from pytensor.compile.builders import OpFromGraph
 from pytensor.graph.rewriting.basic import GraphRewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.printing import op_debug_information
+from pytensor.scalar.basic import Composite, identity
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
 from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor1,
     AdvancedSubtensor1,
 )
 
@@ -30,9 +32,10 @@ optdb.register(
 
 
 class IndexedElemwise(OpFromGraph):
-    """Fuse indexed reads into a single Elemwise iteration loop.
+    """Fuse indexed reads and updates into a single Elemwise iteration loop.
 
-    Absorbs ``AdvancedSubtensor1`` (indexed reads on inputs) into one loop,
+    Absorbs ``AdvancedSubtensor1`` (indexed reads on inputs) and
+    ``AdvancedIncSubtensor1`` (indexed updates on outputs) into one loop,
     avoiding materialisation of intermediate arrays.
 
     Inner fgraph contains the unfused subgraph.
@@ -41,7 +44,7 @@ class IndexedElemwise(OpFromGraph):
 
     Outer inputs are ordered as::
 
-        [elemwise_inputs..., idx_0, idx_1, ...]
+        [elemwise_inputs..., idx_0, idx_1, ..., update_target_0, ...]
 
     Elemwise inputs whose values are read via an index have their source
     arrays substituted in place.
@@ -50,11 +53,14 @@ class IndexedElemwise(OpFromGraph):
     ----------
     indexed_inputs : tuple of (tuple[int, ...], int, tuple[bool, ...])
         One entry per index array: ``(elemwise_input_positions, axis, idx_broadcastable)``.
+    indexed_outputs : tuple of ((tuple[int, ...], str, int) | None)
+        One entry per index array: ``(output_positions, mode, axis)`` or ``None``.
     """
 
-    def __init__(self, *args, indexed_inputs=(), **kwargs):
+    def __init__(self, *args, indexed_inputs=(), indexed_outputs=(), **kwargs):
         self.indexed_inputs = indexed_inputs
-        super().__init__(*args, on_unused_input="ignore", **kwargs)
+        self.indexed_outputs = indexed_outputs
+        super().__init__(*args, on_unused_input="ignore", accept_inplace=True, **kwargs)
 
     def __str__(self):
         for node in self.fgraph.apply_nodes:
@@ -68,7 +74,8 @@ def _op_debug_information_IndexedElemwise(op, node):
     info = {}
 
     n_idx = len(op.indexed_inputs)
-    n_elemwise = len(node.inputs) - n_idx
+    n_update_targets = sum(1 for e in op.indexed_outputs if e is not None)
+    n_elemwise = len(node.inputs) - n_idx - n_update_targets
 
     # Annotate indexed-read inputs
     for k, (positions, _axis, _bc) in enumerate(op.indexed_inputs):
@@ -83,18 +90,42 @@ def _op_debug_information_IndexedElemwise(op, node):
         if idx_pos < len(node.inputs):
             info[node.inputs[idx_pos]] = f"idx_{k}"
 
+    # Annotate update targets and outputs
+    buf_counter = 0
+    target_start = n_elemwise + n_idx
+    target_offset = 0
+    for k, entry in enumerate(op.indexed_outputs):
+        if entry is None:
+            continue
+        out_positions, mode, _axis = entry
+        buf_label = f"buf_{buf_counter}"
+        buf_counter += 1
+        idx_label = f"idx_{k}"
+
+        target_pos = target_start + target_offset
+        target_offset += 1
+        if target_pos < len(node.inputs):
+            info[node.inputs[target_pos]] = buf_label
+
+        for out_idx in out_positions:
+            if out_idx < len(node.outputs):
+                info[node.outputs[out_idx]] = (
+                    f"indexed {mode} ({buf_label}, {idx_label})"
+                )
+
     return {node: info}
 
 
 class FuseIndexedElemwise(GraphRewriter):
-    """Fuse indexed reads into Elemwise loops.
+    """Fuse indexed reads and indexed updates into Elemwise loops.
 
     Absorbs single-client ``AdvancedSubtensor1`` on inputs (indexed reads)
+    and single-client ``AdvancedIncSubtensor1`` on outputs (indexed updates)
     into the Elemwise iteration, avoiding intermediate arrays.
 
     Supports multiple index arrays: e.g. ``x[idx_a] + y[idx_b]`` produces
-    two index groups.  Index arrays are shared between reads when they refer
-    to the same variable.
+    two index groups.  Index arrays are shared between reads and updates
+    when they refer to the same variable.
     """
 
     def apply(self, fgraph):
@@ -134,13 +165,49 @@ class FuseIndexedElemwise(GraphRewriter):
 
             return [(var, axis, tuple(pos)) for var, axis, pos in groups.values()]
 
+        def find_indexed_update_consumers(fgraph, node):
+            """Find AdvancedIncSubtensor1 consumers of Elemwise outputs.
+
+            Returns ``{out_idx: (update_node, target, idx_var, mode)}``.
+            Only considers outputs that are the value input (position 1) of
+            the indexed update.
+            """
+            update_info = {}
+            for out_idx, out in enumerate(node.outputs):
+                clients = fgraph.clients[out]
+                # Find AdvancedIncSubtensor1 client at val position (1)
+                inc_clients = [
+                    (c, ci)
+                    for c, ci in clients
+                    if ci == 1 and isinstance(c.op, AdvancedIncSubtensor1)
+                ]
+                if len(inc_clients) != 1:
+                    continue
+                [(client_node, _client_inp_idx)] = inc_clients
+                target, val, idx_var = client_node.inputs
+                # Don't fuse if the value broadcasts on the index loop dim
+                # (constant across index — recomputing per position is wasteful)
+                # or against non-indexed target axes.
+                if val.type.broadcastable[0]:
+                    continue
+                val_bc = val.type.broadcastable[1:]
+                target_bc = target.type.broadcastable[1:]
+                if len(val_bc) < len(target_bc) or any(
+                    vbc and not tbc for vbc, tbc in zip(val_bc, target_bc, strict=False)
+                ):
+                    continue
+                mode = "set" if client_node.op.set_instead_of_inc else "inc"
+                update_info[out_idx] = (client_node, target, idx_var, mode)
+            return update_info
+
         for node in reversed(fgraph.toposort()):
             if not isinstance(node.op, Elemwise):
                 continue
 
             read_groups = find_indexed_input_groups(fgraph, node)
+            update_consumers = find_indexed_update_consumers(fgraph, node)
 
-            if not read_groups:
+            if not read_groups and not update_consumers:
                 continue
 
             indexed_positions = {
@@ -168,11 +235,17 @@ class FuseIndexedElemwise(GraphRewriter):
                     reason="fuse_indexed_elemwise_reinplace",
                     extra_protected_inputs=protected,
                 )
+                # Re-detect after inplace change
+                update_consumers = find_indexed_update_consumers(fgraph, node)
 
-            # Merge read index arrays into a unified ordered list
+            # Merge read and update index arrays into a unified ordered list
             all_idx_groups = {}  # (idx_var, axis) -> (idx_var, position)
             for idx_var, _ax, _ in read_groups:
                 key = (idx_var, _ax)
+                if key not in all_idx_groups:
+                    all_idx_groups[key] = (idx_var, len(all_idx_groups))
+            for _un, _target, idx_var, _mode in update_consumers.values():
+                key = (idx_var, 0)  # updates are axis 0 for now
                 if key not in all_idx_groups:
                     all_idx_groups[key] = (idx_var, len(all_idx_groups))
 
@@ -184,18 +257,94 @@ class FuseIndexedElemwise(GraphRewriter):
             # Build destroy_map
             outer_destroy_map = {}
             for out_idx, inp_idx in node.op.inplace_pattern.items():
-                if inp_idx not in indexed_positions:
+                if inp_idx not in indexed_positions and out_idx not in update_consumers:
                     outer_destroy_map[out_idx] = [inp_idx]
 
             # Inner fgraph inputs:
-            #   [elemwise_inputs (sources substituted)..., idx_0, ...]
+            #   [elemwise_inputs (sources substituted)..., idx_0, ..., target_0, ...]
             inner_inputs = [
                 inp.owner.inputs[0] if i in indexed_positions else inp
                 for i, inp in enumerate(node.inputs)
             ]
             inner_inputs = inner_inputs + idx_vars
 
-            outer_inputs = list(inner_inputs)
+            # If any scatter output also has other consumers, duplicate
+            # the elemwise output via Composite so the scatter can replace
+            # the duplicate while the original stays available.
+            multi_client_outs = set()
+            for out_idx in update_consumers:
+                update_node = update_consumers[out_idx][0]
+                if any(
+                    c is not update_node
+                    for c, _ in fgraph.clients[node.outputs[out_idx]]
+                ):
+                    multi_client_outs.add(out_idx)
+
+            if multi_client_outs:
+                scalar_op = node.op.scalar_op
+                if isinstance(scalar_op, Composite):
+                    s_inputs = list(scalar_op.inputs)
+                    s_outputs = list(scalar_op.outputs)
+                else:
+                    scalar_node = scalar_op.make_node(
+                        *[inp.type.to_scalar_type()() for inp in node.inputs]
+                    )
+                    s_inputs = list(scalar_node.inputs)
+                    s_outputs = list(scalar_node.outputs)
+
+                # Wrap duplicates with identity so Composite._cleanup_graph
+                # doesn't clone the entire subgraph for repeated outputs.
+                # TODO: _cleanup_graph should use identity instead of clone
+                # for duplicate outputs.
+                dup_map = {}
+                for out_idx in sorted(multi_client_outs):
+                    dup_map[out_idx] = len(s_outputs)
+                    s_outputs.append(identity(s_outputs[out_idx]))
+
+                new_scalar_op = Composite(s_inputs, s_outputs)
+                new_elemwise = Elemwise(new_scalar_op)(*node.inputs, return_list=True)
+
+                old_node = node
+                node = new_elemwise[0].owner
+
+                inner_inputs = [
+                    inp.owner.inputs[0] if i in indexed_positions else inp
+                    for i, inp in enumerate(node.inputs)
+                ]
+                inner_inputs = inner_inputs + idx_vars
+            else:
+                dup_map = {}
+
+            # Inner fgraph outputs; add update targets
+            inner_outputs = list(node.outputs)
+            call_inputs = list(inner_inputs)
+            for out_idx in sorted(update_consumers.keys()):
+                update_node, target, idx_var, _mode = update_consumers[out_idx]
+
+                inner_inputs.append(target)
+
+                target_pos = len(call_inputs)
+                if update_node.op.inplace:
+                    call_inputs.append(target)
+                else:
+                    call_inputs.append(target.copy())
+
+                scatter_idx = dup_map.get(out_idx, out_idx)
+                scatter_value = node.outputs[scatter_idx]
+
+                if update_node.op.inplace:
+                    scatter_out = update_node.op(
+                        target, scatter_value, update_node.inputs[2]
+                    )
+                else:
+                    inplace_op = AdvancedIncSubtensor1(
+                        inplace=True,
+                        set_instead_of_inc=update_node.op.set_instead_of_inc,
+                    )
+                    scatter_out = inplace_op(target, scatter_value, idx_var)
+
+                inner_outputs[scatter_idx] = scatter_out
+                outer_destroy_map[scatter_idx] = [target_pos]
 
             # Build indexed_inputs spec for the Op
             indexed_inputs_spec = [None] * n_indices
@@ -207,7 +356,7 @@ class FuseIndexedElemwise(GraphRewriter):
                     _ax,
                     idx_var.type.broadcastable,
                 )
-            # Fill entries for index arrays with no reads
+            # Fill entries for index arrays with no reads (write-only)
             for k in range(n_indices):
                 if indexed_inputs_spec[k] is None:
                     for (iv, ax), (v, p) in all_idx_groups.items():
@@ -215,15 +364,46 @@ class FuseIndexedElemwise(GraphRewriter):
                             indexed_inputs_spec[k] = ((), ax, iv.type.broadcastable)
                             break
 
+            # Build indexed_outputs spec for the Op
+            indexed_outputs_spec = [None] * n_indices
+            for out_idx in sorted(update_consumers.keys()):
+                _update_node, _target, idx_var, mode = update_consumers[out_idx]
+                key = (idx_var, 0)
+                idx_pos = all_idx_groups[key][1]
+                scatter_idx = dup_map.get(out_idx, out_idx)
+                if indexed_outputs_spec[idx_pos] is None:
+                    indexed_outputs_spec[idx_pos] = ([scatter_idx], mode, 0)
+                else:
+                    indexed_outputs_spec[idx_pos][0].append(scatter_idx)
+            indexed_outputs_spec = tuple(
+                (tuple(e[0]), e[1], e[2]) if e is not None else None
+                for e in indexed_outputs_spec
+            )
+
             new_outs = IndexedElemwise(
                 inner_inputs,
-                node.outputs,
+                inner_outputs,
                 destroy_map=outer_destroy_map,
                 indexed_inputs=tuple(indexed_inputs_spec),
-            )(*outer_inputs, return_list=True)
+                indexed_outputs=indexed_outputs_spec,
+            )(*call_inputs, return_list=True)
+
+            orig_node = old_node if multi_client_outs else node
+            replacements = []
+            for out_idx in range(len(orig_node.outputs)):
+                if out_idx in update_consumers:
+                    update_node = update_consumers[out_idx][0]
+                    scatter_idx = dup_map.get(out_idx, out_idx)
+                    replacements.append((update_node.outputs[0], new_outs[scatter_idx]))
+                    if out_idx in dup_map:
+                        replacements.append(
+                            (orig_node.outputs[out_idx], new_outs[out_idx])
+                        )
+                else:
+                    replacements.append((orig_node.outputs[out_idx], new_outs[out_idx]))
 
             fgraph.replace_all_validate(
-                list(zip(node.outputs, new_outs)),
+                replacements,
                 reason="fuse_indexed_into_elemwise",
             )
 
