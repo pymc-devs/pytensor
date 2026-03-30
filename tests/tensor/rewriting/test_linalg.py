@@ -12,9 +12,10 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.scalar.basic import Add
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
-from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.nlinalg import (
     SVD,
@@ -1127,4 +1128,98 @@ def test_scalar_solve_to_division_rewrite(
     c_val = np.vectorize(np.linalg.solve, signature=signature)(a_val, b_val)
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+
+def test_add_diag_rewrite_from_diag_inputs():
+    x = pt.vector("x")
+    y = pt.vector("y")
+    z = pt.diag(x) + pt.diag(y)
+
+    rng = np.random.default_rng(sum(map(ord, "test_add_diag_rewrite_from_diag_inputs")))
+    x_test = rng.normal(size=(7,)).astype(config.floatX)
+    y_test = rng.normal(size=(7,)).astype(config.floatX)
+
+    _assert_rewrite_add_diag_no_dense_add(
+        x=x,
+        y=y,
+        z=z,
+        out_ndim=2,
+        x_test=x_test,
+        y_test=y_test,
+        expected=np.diag(x_test + y_test),
+    )
+
+
+def _assert_rewrite_add_diag_no_dense_add(x, y, z, out_ndim, x_test, y_test, expected):
+    f_rewritten = function([x, y], z, mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    # The rewrite should avoid dense matrix additions.
+    has_dense_matrix_add = any(
+        isinstance(node.op, Elemwise)
+        and isinstance(node.op.scalar_op, Add)
+        and node.outputs[0].type.ndim == out_ndim
+        and node.outputs[0].type.broadcastable[-2:] == (False, False)
+        for node in nodes
+    )
+    assert not has_dense_matrix_add
+
+    assert_allclose(f_rewritten(x_test, y_test), expected)
+
+
+@pytest.mark.parametrize(
+    "case_name",
+    [
+        "scalar_eye_mul",
+        "batched_scalar_eye_mul",
+        "batched_vector_eye_mul",
+    ],
+)
+def test_add_diag_rewrite_for_eye_mul_cases(case_name):
+    rng = np.random.default_rng(sum(map(ord, f"test_add_diag_rewrite_for_{case_name}")))
+
+    if case_name == "scalar_eye_mul":
+        x = pt.scalar("x")
+        y = pt.scalar("y")
+        z = pt.eye(5) * x + pt.eye(5) * y
+
+        x_test = np.asarray(rng.normal(), dtype=config.floatX)
+        y_test = np.asarray(rng.normal(), dtype=config.floatX)
+        expected = np.eye(5) * (x_test + y_test)
+        out_ndim = 2
+
+    elif case_name == "batched_scalar_eye_mul":
+        x = pt.vector("x")
+        y = pt.vector("y")
+        z = pt.eye(5) * x[:, None, None] + pt.eye(5) * y[:, None, None]
+
+        x_test = rng.normal(size=(4,)).astype(config.floatX)
+        y_test = rng.normal(size=(4,)).astype(config.floatX)
+        expected = np.eye(5)[None, :, :] * (
+            x_test[:, None, None] + y_test[:, None, None]
+        )
+        out_ndim = 3
+
+    elif case_name == "batched_vector_eye_mul":
+        x = pt.matrix("x")
+        y = pt.matrix("y")
+        z = pt.eye(5) * x[:, None, :] + pt.eye(5) * y[:, None, :]
+
+        x_test = rng.normal(size=(4, 5)).astype(config.floatX)
+        y_test = rng.normal(size=(4, 5)).astype(config.floatX)
+        expected = np.eye(5)[None, :, :] * (x_test[:, None, :] + y_test[:, None, :])
+        out_ndim = 3
+
+    else:  # pragma: no cover
+        raise ValueError(f"Unexpected case_name: {case_name}")
+
+    _assert_rewrite_add_diag_no_dense_add(
+        x=x,
+        y=y,
+        z=z,
+        out_ndim=out_ndim,
+        x_test=x_test,
+        y_test=y_test,
+        expected=expected,
     )
