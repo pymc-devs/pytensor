@@ -397,19 +397,35 @@ def numba_funcify_Elemwise(op, node, **kwargs):
 
 @register_funcify_and_cache_key(IndexedElemwise)
 def numba_funcify_IndexedElemwise(op, node, **kwargs):
-    """Generate fused Elemwise Numba code with indexed reads.
+    """Generate fused Elemwise Numba code with indexed reads and updates.
 
-    Reads indexed_inputs specs stored on the Op by the rewriting pass,
-    and generates a single vectorized loop with indirect indexing.
+    Reads indexed_inputs/indexed_outputs specs stored on the Op by the
+    rewriting pass, and generates a single vectorized loop with indirect
+    indexing.
 
     Outer inputs are ordered as::
 
-        [elemwise_inputs..., idx_0, idx_1, ...]
+        [elemwise_inputs..., idx_0, idx_1, ..., update_target_0, ...]
     """
     [elemwise_node] = [n for n in op.fgraph.apply_nodes if isinstance(n.op, Elemwise)]
 
     indexed_inputs = op.indexed_inputs
-    indexed_outputs_enc = encode_literals(())
+    indexed_outputs = op.indexed_outputs
+
+    # Derive update_out_set and inc_outputs from stored specs
+    update_out_set = frozenset(
+        out_idx
+        for entry in indexed_outputs
+        if entry is not None
+        for out_idx in entry[0]
+    )
+    inc_outputs = frozenset(
+        out_idx
+        for entry in indexed_outputs
+        if entry is not None
+        for out_idx in entry[0]
+        if entry[1] == "inc"
+    )
 
     # --- Scalar function and core op --------------------------------------
     scalar_node = elemwise_node.op.make_scalar_node(*elemwise_node.inputs)
@@ -419,13 +435,21 @@ def numba_funcify_IndexedElemwise(op, node, **kwargs):
 
     nin_elemwise = len(elemwise_node.inputs)
     nout = len(elemwise_node.outputs)
-    core_op_fn = store_core_outputs(scalar_op_fn, nin=nin_elemwise, nout=nout)
+
+    core_op_fn = store_core_outputs(
+        scalar_op_fn, nin=nin_elemwise, nout=nout, inc_outputs=inc_outputs
+    )
 
     # --- Broadcast and type encodings -------------------------------------
     input_bc_patterns = tuple(inp.type.broadcastable for inp in elemwise_node.inputs)
     output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
     output_dtypes = tuple(out.type.dtype for out in node.outputs)
-    inplace_pattern = tuple(elemwise_node.op.inplace_pattern.items())
+    # Filter out inplace entries for update outputs (handled by scatter)
+    inplace_pattern = tuple(
+        (out_idx, inp_idx)
+        for out_idx, inp_idx in elemwise_node.op.inplace_pattern.items()
+        if out_idx not in update_out_set
+    )
     core_output_shapes = tuple(() for _ in range(nout))
 
     input_bc_patterns_enc = encode_literals(input_bc_patterns)
@@ -433,6 +457,7 @@ def numba_funcify_IndexedElemwise(op, node, **kwargs):
     output_dtypes_enc = encode_literals(output_dtypes)
     inplace_pattern_enc = encode_literals(inplace_pattern)
     indexed_inputs_enc = encode_literals(indexed_inputs)
+    indexed_outputs_enc = encode_literals(indexed_outputs)
 
     def indexed_elemwise_fn(*outer_inputs):
         raise NotImplementedError(
@@ -459,7 +484,7 @@ def numba_funcify_IndexedElemwise(op, node, **kwargs):
 
         return impl
 
-    cache_version = (0, 1)
+    cache_version = (0, 2)
     if scalar_cache_key is None:
         key = None
     else:
@@ -471,6 +496,7 @@ def numba_funcify_IndexedElemwise(op, node, **kwargs):
                 inplace_pattern,
                 input_bc_patterns,
                 indexed_inputs,
+                indexed_outputs,
                 scalar_cache_key,
             )
         )

@@ -41,14 +41,23 @@ def encode_literals(literals: Sequence) -> str:
     return base64.encodebytes(pickle.dumps(literals)).decode()
 
 
-def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
+def store_core_outputs(
+    core_op_fn: Callable, nin: int, nout: int, inc_outputs: frozenset = frozenset()
+) -> Callable:
     """Create a Numba function that wraps a core function and stores its vectorized outputs.
 
     @njit
     def store_core_outputs(i0, i1, ..., in, o0, o1, ..., on):
         to0, to1, ..., ton = core_op_fn(i0, i1, ..., in)
-        o0[...] = to0
+        o0[...] = to0       # direct outputs
+        o1[...] += to1      # inc outputs (indexed update)
         ...
+
+    Parameters
+    ----------
+    inc_outputs : frozenset
+        Output indices that use ``+=`` (increment) instead of ``=`` (assign).
+        Used for indexed-update outputs in fused loops.
     """
     inputs = [f"i{i}" for i in range(nin)]
     outputs = [f"o{i}" for i in range(nout)]
@@ -58,8 +67,12 @@ def store_core_outputs(core_op_fn: Callable, nin: int, nout: int) -> Callable:
     out_signature = ", ".join(outputs)
     inner_out_signature = ", ".join(inner_outputs)
     store_outputs = "\n".join(
-        f"{output}[...] = {inner_output}"
-        for output, inner_output in zip(outputs, inner_outputs, strict=True)
+        f"{output}[...] += {inner_output}"
+        if i in inc_outputs
+        else f"{output}[...] = {inner_output}"
+        for i, (output, inner_output) in enumerate(
+            zip(outputs, inner_outputs, strict=True)
+        )
     )
     func_src = f"""
 def store_core_outputs({inp_signature}, {out_signature}):
@@ -160,9 +173,18 @@ def _compute_vectorized_types(
     return core_input_types, core_out_types, out_types, ret_type
 
 
-def _codegen_return_outputs(ctx, builder, sig, outputs, inplace_pattern):
-    """Generate LLVM IR to return output arrays, handling incref for inplace."""
-    incref_set = set(dict(inplace_pattern).keys())
+def _codegen_return_outputs(
+    ctx, builder, sig, outputs, inplace_pattern, extra_incref=frozenset()
+):
+    """Generate LLVM IR to return output arrays, handling incref for inplace.
+
+    Parameters
+    ----------
+    extra_incref : frozenset
+        Additional output indices (e.g. indexed-update outputs) that alias an input
+        buffer and need an incref before returning, beyond inplace outputs.
+    """
+    incref_set = set(dict(inplace_pattern).keys()) | set(extra_incref)
 
     if len(outputs) == 1:
         if incref_set:
@@ -287,8 +309,16 @@ def make_outputs(
     inputs: tuple[Any, ...],
     input_types: tuple[Any, ...],
     output_core_shapes: tuple,
+    update_outputs: dict | None = None,
 ) -> tuple[list[ir.Value], list[types.Array]]:
-    """Allocate output arrays for vectorized loop."""
+    """Allocate output arrays for vectorized loop.
+
+    Parameters
+    ----------
+    update_outputs : dict, optional
+        Mapping ``{output_idx: (array, array_type)}`` for outputs that reuse
+        a scatter-target input buffer instead of being freshly allocated.
+    """
     output_arrays = []
     output_arry_types = []
     one = ir.IntType(64)(1)
@@ -296,6 +326,10 @@ def make_outputs(
     for i, (core_shape, bc, dtype) in enumerate(
         zip(output_core_shapes, out_bc, dtypes, strict=True)
     ):
+        if update_outputs is not None and i in update_outputs:
+            output_arrays.append(update_outputs[i][0])
+            output_arry_types.append(update_outputs[i][1])
+            continue
         if i in inplace_dict:
             output_arrays.append(inputs[inplace_dict[i]])
             output_arry_types.append(input_types[inplace_dict[i]])
@@ -315,9 +349,9 @@ def make_outputs(
         array = arrayobj._empty_nd_impl(ctx, builder, arrtype, shape)
         output_arrays.append(array)
 
-    # If there is no inplace operation, we know that all output
+    # If there is no inplace or scatter operation, we know that all output
     # arrays don't alias. Informing llvm can make it easier to vectorize.
-    if not inplace:
+    if not inplace and not update_outputs:
         # The first argument is the output pointer
         arg = builder.function.args[0]
         arg.add_attribute("noalias")
@@ -344,10 +378,21 @@ def make_loop_call(
     idx_types: tuple | None = None,
     idx_load_axis: tuple[int, ...] | None = None,
     idx_bc: tuple[tuple[bool, ...], ...] | None = None,
+    output_update_spec: tuple[tuple[int, int] | None, ...] | None = None,
 ):
     safe = (False, False)
 
     n_outputs = len(outputs)
+
+    # TODO I think this is better than the noalias attribute
+    # for the input, but self_ref isn't supported in a released
+    # llvmlite version yet
+    # mod = builder.module
+    # domain = mod.add_metadata([], self_ref=True)
+    # input_scope = mod.add_metadata([domain], self_ref=True)
+    # output_scope = mod.add_metadata([domain], self_ref=True)
+    # input_scope_set = mod.add_metadata([input_scope, output_scope])
+    # output_scope_set = mod.add_metadata([input_scope, output_scope])
 
     zero = ir.Constant(ir.IntType(64), 0)
 
@@ -467,6 +512,8 @@ def make_loop_call(
         if core_scalar and core_ndim == 0:
             # Retrive scalar item at index
             val = builder.load(ptr)
+            # val.set_metadata("alias.scope", input_scope_set)
+            # val.set_metadata("noalias", output_scope_set)
         else:
             # Retrieve array item at index
             # This is a streamlined version of Numba's `GUArrayArg.load`
@@ -506,9 +553,33 @@ def make_loop_call(
         output_shape = cgutils.unpack_tuple(builder, output.shape)  # pyright: ignore[reportAttributeAccessIssue]
         output_strides = cgutils.unpack_tuple(builder, output.strides)  # pyright: ignore[reportAttributeAccessIssue]
 
-        idxs_bc = [zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)] + [
-            zero
-        ] * core_ndim
+        spec = output_update_spec[output_i] if output_update_spec is not None else None
+        if spec is not None:
+            assert idx_types is not None
+            # Indexed-update output: same logic as indexed-read input
+            indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
+            n_indexed = len(indexed_axes)
+            source_batch_ndim = len(bc) + n_indexed - 1
+            idxs_bc = []
+            loop_dim = 0
+            for src_dim in range(source_batch_ndim):
+                if src_dim in indexed_axes:
+                    idx_k = indexed_axes[src_dim]
+                    idx_val = _wrap_negative_index(
+                        indirect_idxs[idx_k],
+                        output_shape[src_dim],
+                        signed=idx_types[idx_k].dtype.signed,
+                    )
+                    idxs_bc.append(idx_val)
+                else:
+                    bc_dim = bc[loop_dim] if loop_dim < len(bc) else False
+                    idxs_bc.append(zero if bc_dim else idxs[loop_dim])
+                    loop_dim += 1
+            idxs_bc += [zero] * core_ndim
+        else:
+            idxs_bc = [
+                zero if bc else idx for idx, bc in zip(idxs, bc, strict=True)
+            ] + [zero] * core_ndim
         ptr = cgutils.get_item_pointer2(
             context,
             builder,
@@ -571,25 +642,28 @@ def _vectorized(
     indexed_inputs,
     indexed_outputs,
 ):
-    """Like _vectorized but with indirect indexing for reads.
+    """Like _vectorized but with indirect indexing for reads and updates.
 
     Outer inputs are ordered as
-    ``[elemwise_inputs..., idx_0, idx_1, ...]``.
+    ``[elemwise_inputs..., idx_0, idx_1, ..., update_target_0, ...]``.
 
     ``indexed_inputs`` groups elemwise input positions by which index they
     read through: e.g. ``((0, 2), (1,))`` means idx_0 reads inputs 0 and 2,
     idx_1 reads input 1.  Entries may be empty ``()`` for update-only indices.
 
-    ``indexed_outputs`` is unused (always empty tuple for reads-only).
+    ``indexed_outputs`` has one entry per index array (same length as
+    ``indexed_inputs``).  ``None`` means that index is not used for updates.
+    ``((out_0, out_1), mode)`` means that index updates outputs out_0 and
+    out_1 with *mode* ``"set"`` or ``"inc"``.
 
     Parameters
     ----------
     outer_input_types : tuple of Array types
-        ``(elemwise_input_0, ..., elemwise_input_N, idx_0, ...)``
+        ``(elemwise_input_0, ..., elemwise_input_N, idx_0, ..., update_target_0, ...)``
     indexed_inputs : literal str
         Encoded ``tuple[tuple[int, ...], ...]``.
     indexed_outputs : literal str
-        Encoded ``tuple`` (always empty).
+        Encoded ``tuple[tuple[tuple[int, ...], str] | None, ...]``.
     """
     arg_types = [
         core_func,
@@ -617,19 +691,23 @@ def _vectorized(
         raise TypingError("allow_core_scalar must be literal.")
     allow_core_scalar = allow_core_scalar.literal_value
 
-    n_indices = len(indexed_inputs)
-    n_elemwise = len(outer_input_types) - n_indices
-    source_input_types = tuple(outer_input_types[i] for i in range(n_elemwise))
-    idx_types = tuple(outer_input_types[n_elemwise + k] for k in range(n_indices))
+    # Count scatter targets (one per scattered output)
+    n_update_targets = sum(
+        len(entry[0]) for entry in indexed_outputs if entry is not None
+    )
 
-    # indexed_inputs entries are (positions, axis) -- one per index array.
-    # For multi-index (e.g. x[idx_row, idx_col]), an input appears in multiple
-    # entries with different axes.  We aggregate per-input into a tuple of
-    # (idx_k, src_axis) pairs.
+    n_indices = len(indexed_inputs)
+    n_elemwise = len(outer_input_types) - n_indices - n_update_targets
+    input_types = tuple(outer_input_types[i] for i in range(n_elemwise))
+    idx_types = tuple(outer_input_types[n_elemwise + k] for k in range(n_indices))
+    update_target_types = tuple(
+        outer_input_types[n_elemwise + n_indices + j] for j in range(n_update_targets)
+    )
+
+    # indexed_inputs entries are (positions, axis) — one per index array.
+    # We aggregate per-input into a tuple of (idx_k, src_axis) pairs.
     #
     # idx_load_axis[k] = which loop dim loads index array k.
-    # For multi-index on consecutive axes starting at A, all arrays in the
-    # group load from loop dim A (the first dim of the group in the output).
     _read_spec_dict: dict[int, list[tuple[int, int]]] = {}
     idx_load_axis = []
     idx_bc_list = []  # per index array: broadcastable tuple
@@ -642,37 +720,36 @@ def _vectorized(
     # idx_load_axis[k] = which loop dim to use when loading index array k.
     for k, entry in enumerate(indexed_inputs):
         _positions, axis = entry[0], entry[1]
-        # Find if this index array shares an input with other indexed axes
-        # If so, the loop dim is the minimum axis in that group
-        min_axis = axis
-        for p in _positions:
-            if p in _read_spec_dict:
-                for _other_k, other_axis in _read_spec_dict[p]:
-                    min_axis = min(min_axis, other_axis)
-        idx_load_axis.append(min_axis)
+        idx_load_axis.append(axis)
     input_read_spec = tuple(
         tuple(_read_spec_dict[p]) if p in _read_spec_dict else None
         for p in range(n_elemwise)
     )
     idx_load_axis = tuple(idx_load_axis)
 
-    # Build effective input types that match input_bc_patterns ndim.
-    # For multi-indexed inputs, the source has more dims than the bc pattern
-    # (multiple source axes collapse into fewer loop dims).
-    input_types = []
-    for p, src_type in enumerate(source_input_types):
-        spec = input_read_spec[p]
-        if spec is not None and len(spec) > 1:
-            # Multi-index: effective ndim = source ndim - n_indexed + 1
-            effective_ndim = src_type.ndim - len(spec) + 1
-            input_types.append(
-                types.Array(src_type.dtype, effective_ndim, src_type.layout)
-            )
-        else:
-            input_types.append(src_type)
-    input_types = tuple(input_types)
+    # Per-output: tuple of (idx_k, axis) pairs, or None.
+    # Same format as input_read_spec.
+    # indexed_outputs entries are (positions, mode, axis) or None.
+    _update_spec_dict: dict[int, list[tuple[int, int]]] = {}
+    update_out_to_target = {}
+    update_out_indices = set()
+    target_counter = 0
+    for k, entry in enumerate(indexed_outputs):
+        if entry is None:
+            continue
+        output_indices, _mode, axis = entry
+        for out_idx in output_indices:
+            _update_spec_dict.setdefault(out_idx, []).append((k, axis))
+            update_out_to_target[out_idx] = target_counter
+            update_out_indices.add(out_idx)
+            target_counter += 1
+    output_update_spec = tuple(
+        tuple(_update_spec_dict[p]) if p in _update_spec_dict else None
+        for p in range(len(output_bc_patterns))
+    )
+    update_out_indices = frozenset(update_out_indices)
 
-    core_input_types, core_out_types, _out_types, ret_type = _compute_vectorized_types(
+    core_input_types, core_out_types, out_types, ret_type = _compute_vectorized_types(
         input_types,
         input_bc_patterns,
         output_bc_patterns,
@@ -681,6 +758,27 @@ def _vectorized(
         allow_core_scalar,
         output_core_shape_types,
     )
+
+    # Fix up output types for scattered outputs: they match the target buffer
+    if update_out_to_target:
+        core_out_types = list(core_out_types)
+        out_types = list(out_types)
+        batch_ndim = len(input_bc_patterns[0])
+        for out_idx, target_idx in update_out_to_target.items():
+            target_type = update_target_types[target_idx]
+            out_types[out_idx] = target_type
+            core_out_types[out_idx] = types.Array(
+                dtype=target_type.dtype,
+                ndim=target_type.ndim - batch_ndim,
+                layout=target_type.layout,
+            )
+        out_types = tuple(out_types)
+        core_out_types = tuple(core_out_types)
+
+        if len(out_types) == 1:
+            ret_type = out_types[0]
+        else:
+            ret_type = types.Tuple(out_types)
 
     sig = ret_type(*arg_types)
 
@@ -695,6 +793,10 @@ def _vectorized(
     idx_types_val = idx_types
     idx_load_axis_val = idx_load_axis
     idx_bc_list_val = idx_bc_list
+    output_update_spec_val = output_update_spec
+    update_out_to_target_val = update_out_to_target
+    update_target_types_val = update_target_types
+    update_out_indices_val = update_out_indices
 
     def codegen(ctx, builder, sig, args):
         [
@@ -722,7 +824,7 @@ def _vectorized(
 
         # First n_elemwise outer inputs are elemwise inputs (source arrays)
         inputs = [
-            arrayobj.make_array(source_input_types[i])(ctx, builder, all_outer[i])
+            arrayobj.make_array(input_types[i])(ctx, builder, all_outer[i])
             for i in range(n_elemwise)
         ]
         in_shapes = [cgutils.unpack_tuple(builder, obj.shape) for obj in inputs]
@@ -735,12 +837,17 @@ def _vectorized(
             for k in range(n_indices)
         ]
 
+        # Remaining inputs are scatter target buffers
+        update_target_arrs = [
+            arrayobj.make_array(update_target_types_val[j])(
+                ctx, builder, all_outer[n_elemwise + n_indices + j]
+            )
+            for j in range(n_update_targets)
+        ]
+
         # Build iter_shapes for compute_itershape.
-        # For indexed inputs, the source array may have more dims than the
-        # iteration shape (multi-index collapses multiple source axes into one
-        # loop dim).  Replace the source shape with a constructed shape that
-        # matches the bc pattern: one entry per loop dim, with index lengths
-        # substituted for the indexed loop dim(s).
+        # For indexed inputs, substitute the index array length on the
+        # indexed axis of the source shape.
         iter_shapes = list(in_shapes)
         iter_bc = list(input_bc_patterns_val)
         idx_shapes = [
@@ -749,41 +856,32 @@ def _vectorized(
         for p, spec in enumerate(input_read_spec_val):
             if spec is None:
                 continue
-            indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
-            n_indexed = len(indexed_axes)
-            if n_indexed <= 1:
-                # Single-index: substitute on the indexed axis
-                idx_k, axis = spec[0]
-                iter_shapes[p] = list(iter_shapes[p])
-                iter_shapes[p][axis] = idx_shapes[idx_k][0]
-            else:
-                # Multi-index: build collapsed shape from non-indexed source
-                # dims + index length for the indexed loop dim.
-                source_shape = cgutils.unpack_tuple(builder, inputs[p].shape)
-                batch_ndim = len(input_bc_patterns_val[p])
-                new_shape = []
-                for loop_d in range(batch_ndim):
-                    if loop_d == 0:
-                        # First loop dim = index length
-                        new_shape.append(idx_shapes[spec[0][0]][0])
-                    else:
-                        # Remaining loop dims = non-indexed source axes
-                        src_d = n_indexed - 1 + loop_d
-                        new_shape.append(source_shape[src_d])
-                iter_shapes[p] = new_shape
+            # Single-index: substitute on the indexed axis
+            idx_k, axis = spec[0]
+            iter_shapes[p] = list(iter_shapes[p])
+            iter_shapes[p][axis] = idx_shapes[idx_k][0]
 
         # Each index array participates in iter_shape validation on its load
-        # axis, just like any direct input.  Its bc comes from the PyTensor
-        # type (encoded in idx_bc_list), so shape-1 indices broadcast correctly.
+        # axis, just like any direct input.
+        #
+        # Read indices use their static broadcastable so shape-1 indices
+        # broadcast correctly against other inputs.
+        #
+        # Write indices are forced to bc=False: unlike reads, numpy does
+        # not allow the index to broadcast against the update value.  A
+        # shape-1 write index at runtime must match a size-1 loop, not
+        # silently repeat writes to the same target position.
         batch_ndim = len(input_bc_patterns_val[0]) if input_bc_patterns_val else 0
         one = ir.IntType(64)(1)
         for k in range(n_indices):
             ax = idx_load_axis_val[k]
+            is_write = indexed_outputs[k] is not None
             idx_shape_entry = [one] * batch_ndim
             idx_shape_entry[ax] = idx_shapes[k][0]
             iter_shapes.append(idx_shape_entry)
-            # bc on load axis from the index's own broadcastable; True elsewhere
             idx_bc_on_ax = idx_bc_list_val[k][0] if idx_bc_list_val[k] else False
+            if is_write:
+                idx_bc_on_ax = False
             iter_bc.append(
                 tuple(True if d != ax else idx_bc_on_ax for d in range(batch_ndim))
             )
@@ -796,6 +894,19 @@ def _vectorized(
             size,
         )
 
+        # Build update_outputs dict for make_outputs: out_idx -> (array, type)
+        update_outputs_dict = (
+            {
+                out_idx: (
+                    update_target_arrs[target_idx],
+                    update_target_types_val[target_idx],
+                )
+                for out_idx, target_idx in update_out_to_target_val.items()
+            }
+            if update_out_to_target_val
+            else None
+        )
+
         outputs, output_types = make_outputs(
             ctx,
             builder,
@@ -804,8 +915,9 @@ def _vectorized(
             output_dtypes_val,
             inplace_pattern_val,
             inputs,
-            source_input_types,
+            input_types,
             output_core_shapes,
+            update_outputs=update_outputs_dict,
         )
 
         core_signature = typingctx.resolve_function_type(
@@ -830,7 +942,7 @@ def _vectorized(
             outputs,
             input_bc_patterns_val,
             output_bc_patterns_val,
-            source_input_types,
+            input_types,
             output_types,
             core_scalar=allow_core_scalar,
             input_read_spec=input_read_spec_val,
@@ -838,6 +950,7 @@ def _vectorized(
             idx_types=idx_types_val,
             idx_load_axis=idx_load_axis_val,
             idx_bc=idx_bc_list_val,
+            output_update_spec=output_update_spec_val,
         )
 
         return _codegen_return_outputs(
@@ -846,6 +959,7 @@ def _vectorized(
             sig,
             outputs,
             inplace_pattern,
+            extra_incref=update_out_indices_val,
         )
 
     return sig, codegen
