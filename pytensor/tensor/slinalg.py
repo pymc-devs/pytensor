@@ -28,7 +28,7 @@ from pytensor.utils import unzip
 logger = logging.getLogger(__name__)
 
 
-class Cholesky(Op[TensorVariable]):
+class Cholesky(Op[tuple[TensorVariable], TensorVariable]):
     # TODO: LAPACK wrapper with in-place behavior, for solve also
 
     __props__ = ("lower", "overwrite_a")
@@ -210,7 +210,7 @@ def cholesky(
     return res
 
 
-class SolveBase(Op[TensorVariable]):
+class SolveBase(Op[tuple[TensorVariable], TensorVariable]):
     """Base class for `scipy.linalg` matrix equation solvers."""
 
     __props__: tuple[str, ...] = (
@@ -412,7 +412,7 @@ def cho_solve(
     return Blockwise(CholeskySolve(lower=lower, b_ndim=b_ndim))(A, b)
 
 
-class LU(Op[TensorVariable]):
+class LU(Op[tuple[TensorVariable], TensorVariable]):
     """Decompose a matrix into lower and upper triangular matrices."""
 
     __props__ = ("permute_l", "overwrite_a", "p_indices")
@@ -601,7 +601,7 @@ def lu(
     )
 
 
-class PivotToPermutations(Op[TensorVariable]):
+class PivotToPermutations(Op[tuple[TensorVariable], TensorVariable]):
     gufunc_signature = "(x)->(x)"
     __props__ = ("inverse",)
 
@@ -634,7 +634,7 @@ def pivot_to_permutation(p: TensorLike, inverse=False):
     return PivotToPermutations(inverse=inverse)(p)
 
 
-class LUFactor(Op[TensorVariable]):
+class LUFactor(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ("overwrite_a",)
     gufunc_signature = "(m,m)->(m,m),(m)"
 
@@ -1127,7 +1127,7 @@ def solve(
     )(a, b)
 
 
-class Eigvalsh(Op[TensorVariable]):
+class Eigvalsh(Op[tuple[TensorVariable], TensorVariable]):
     """
     Generalized eigenvalues of a Hermitian positive definite eigensystem.
 
@@ -1174,7 +1174,7 @@ class Eigvalsh(Op[TensorVariable]):
         return [(n,)]
 
 
-class EigvalshGrad(Op[TensorVariable]):
+class EigvalshGrad(Op[tuple[TensorVariable], TensorVariable]):
     """
     Gradient of generalized eigenvalues of a Hermitian positive definite
     eigensystem.
@@ -1234,7 +1234,7 @@ def eigvalsh(a, b, lower=True):
     return Eigvalsh(lower)(a, b)
 
 
-class Expm(Op[TensorVariable]):
+class Expm(Op[tuple[TensorVariable], TensorVariable]):
     """
     Compute the matrix exponential of a square array.
     """
@@ -1297,7 +1297,7 @@ def _largest_common_dtype(tensors: Sequence[TensorVariable]) -> np.dtype:
     return reduce(lambda l, r: np.promote_types(l, r), [x.dtype for x in tensors])
 
 
-class BaseBlockDiagonal(Op[TensorVariable]):
+class BaseBlockDiagonal(Op[tuple[TensorVariable], TensorVariable]):
     __props__: tuple[str, ...] = ("n_inputs",)
 
     def __init__(self, n_inputs):
@@ -1408,7 +1408,7 @@ def block_diag(*matrices: TensorVariable):
     return _block_diagonal_matrix(*matrices)
 
 
-class QR(Op[TensorVariable]):
+class QR(Op[tuple[TensorVariable], TensorVariable]):
     """
     QR Decomposition
     """
@@ -1778,7 +1778,7 @@ def qr(
     return Blockwise(QR(mode=mode, pivoting=pivoting, overwrite_a=False))(A)
 
 
-class Schur(Op[TensorVariable]):
+class Schur(Op[tuple[TensorVariable], TensorVariable]):
     """
     Schur Decomposition
     """
@@ -1965,7 +1965,7 @@ def schur(
     return Blockwise(Schur(output=output, sort=sort))(A)  # type: ignore[return-value]
 
 
-class QZ(Op[TensorVariable]):
+class QZ(Op[tuple[TensorVariable], TensorVariable]):
     """
     QZ Decomposition
     """

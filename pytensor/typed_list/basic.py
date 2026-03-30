@@ -69,7 +69,7 @@ class TypedListConstant(_typed_list_py_operators, Constant):
 TypedListType.constant_type = TypedListConstant
 
 
-class GetItem(COp[Variable]):
+class GetItem(COp[tuple[Variable], Variable]):
     # See doc in instance of this Op or function after this class definition.
     view_map = {0: [0]}
     __props__ = ()
@@ -131,7 +131,7 @@ index
 """
 
 
-class Append(COp[TypedListVariable]):
+class Append(COp[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -210,7 +210,7 @@ y
 """
 
 
-class Extend(COp[TypedListVariable]):
+class Extend(COp[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -294,7 +294,7 @@ toAppend
 """
 
 
-class Insert(COp[TypedListVariable]):
+class Insert(COp[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -380,7 +380,7 @@ toInsert
 """
 
 
-class Remove(Op[TypedListVariable]):
+class Remove(Op[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -437,7 +437,7 @@ from a list. This implementation works in that case.
 """
 
 
-class Reverse(COp[TypedListVariable]):
+class Reverse(COp[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -504,7 +504,7 @@ x
 """
 
 
-class Index(Op[ScalarVariable]):
+class Index(Op[tuple[ScalarVariable], ScalarVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ()
 
@@ -533,7 +533,7 @@ class Index(Op[ScalarVariable]):
 index_ = Index()
 
 
-class Count(Op[ScalarVariable]):
+class Count(Op[tuple[ScalarVariable], ScalarVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ()
 
@@ -580,7 +580,7 @@ from a list. This implementation works in that case.
 """
 
 
-class Length(COp[ScalarVariable]):
+class Length(COp[tuple[ScalarVariable], ScalarVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ()
 
@@ -621,7 +621,7 @@ x
 """
 
 
-class MakeList(Op[TypedListVariable]):
+class MakeList(Op[tuple[TypedListVariable], TypedListVariable]):
     __props__ = ()
 
     def make_node(self, a):

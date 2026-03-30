@@ -29,7 +29,7 @@ from pytensor.tensor.type import (
 from pytensor.tensor.variable import TensorVariable
 
 
-class MatrixPinv(Op[TensorVariable]):
+class MatrixPinv(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ("hermitian",)
     gufunc_signature = "(m,n)->(n,m)"
 
@@ -209,7 +209,7 @@ def trace(X):
     return diagonal(X).sum()
 
 
-class Det(Op[TensorVariable]):
+class Det(Op[tuple[TensorVariable], TensorVariable]):
     """
     Matrix determinant. Input should be a square matrix.
 
@@ -260,7 +260,7 @@ class Det(Op[TensorVariable]):
 det = Blockwise(Det())
 
 
-class SLogDet(Op[TensorVariable]):
+class SLogDet(Op[tuple[TensorVariable], TensorVariable]):
     """
     Compute the log determinant and its sign of the matrix. Input should be a square matrix.
     """
@@ -324,7 +324,7 @@ def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
     return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
 
 
-class Eig(Op[TensorVariable]):
+class Eig(Op[tuple[TensorVariable], TensorVariable]):
     """
     Compute the eigenvalues and right eigenvectors of a square array.
     """
@@ -466,7 +466,7 @@ def _zero_disconnected(outputs, grads):
     return l
 
 
-class EighGrad(Op[TensorVariable]):
+class EighGrad(Op[tuple[TensorVariable], TensorVariable]):
     """
     Gradient of an eigensystem of a Hermitian matrix.
 
@@ -536,7 +536,7 @@ def eigh(a, UPLO="L"):
     return Eigh(UPLO)(a)
 
 
-class SVD(Op[TensorVariable]):
+class SVD(Op[tuple[TensorVariable], TensorVariable]):
     """
     Computes singular value decomposition of matrix A, into U, S, V such that A = U @ S @ V
 
@@ -742,7 +742,7 @@ def svd(a, full_matrices: bool = True, compute_uv: bool = True):
     return Blockwise(SVD(full_matrices, compute_uv))(a)
 
 
-class Lstsq(Op[TensorVariable]):
+class Lstsq(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ()
 
     def make_node(self, x, y, rcond):
@@ -1013,7 +1013,7 @@ def norm(
         )
 
 
-class TensorInv(Op[TensorVariable]):
+class TensorInv(Op[tuple[TensorVariable], TensorVariable]):
     """
     Class wrapper for tensorinv() function;
     PyTensor utilization of numpy.linalg.tensorinv;
@@ -1071,7 +1071,7 @@ def tensorinv(a, ind=2):
     return TensorInv(ind)(a)
 
 
-class TensorSolve(Op[TensorVariable]):
+class TensorSolve(Op[tuple[TensorVariable], TensorVariable]):
     """
     PyTensor utilization of numpy.linalg.tensorsolve
     Class wrapper for tensorsolve function.

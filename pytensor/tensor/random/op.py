@@ -1,14 +1,14 @@
 import abc
 import warnings
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, Generic, Self, cast
 
 import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
-from pytensor.graph.op import Op
+from pytensor.graph.op import Op, OpDefaultOutputType, OpOutputsType
 from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
@@ -26,6 +26,7 @@ from pytensor.tensor.random.utils import (
     explicit_expand_dims,
     normalize_size_param,
 )
+from pytensor.tensor.random.var import RandomGeneratorSharedVariable
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst, NoneTypeT
@@ -33,7 +34,9 @@ from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
 
 
-class RNGConsumerOp(Op[TensorVariable]):
+class RNGConsumerOp(
+    Op[tuple[RandomGeneratorSharedVariable, TensorVariable], TensorVariable]
+):
     """Baseclass for Ops that consume RNGs."""
 
     @abc.abstractmethod
@@ -443,8 +446,8 @@ class RandomVariable(RNGConsumerOp):
         return [None for i in eval_points]
 
 
-class AbstractRNGConstructor(Op):
-    def make_node(self, seed=None):
+class AbstractRNGConstructor(Op, Generic[OpOutputsType, OpDefaultOutputType]):
+    def make_node(self, seed=None) -> Apply[Self, OpOutputsType, OpDefaultOutputType]:
         if seed is None:
             seed = NoneConst
         elif isinstance(seed, Variable) and isinstance(seed.type, NoneTypeT):
@@ -462,7 +465,11 @@ class AbstractRNGConstructor(Op):
         output_storage[0][0] = getattr(np.random, self.random_constructor)(seed=seed)
 
 
-class DefaultGeneratorMakerOp(AbstractRNGConstructor):
+class DefaultGeneratorMakerOp(
+    AbstractRNGConstructor[
+        tuple[RandomGeneratorSharedVariable], RandomGeneratorSharedVariable
+    ]
+):
     random_type = RandomGeneratorType()
     random_constructor = "default_rng"
 
@@ -496,7 +503,11 @@ def vectorize_random_variable(
     return op.make_node(rng, size, *dist_params)
 
 
-class RandomVariableWithCoreShape(OpWithCoreShape):
+class RandomVariableWithCoreShape(
+    OpWithCoreShape[
+        tuple[RandomGeneratorSharedVariable, TensorVariable], TensorVariable
+    ]
+):
     """Generalizes a random variable `Op` to include a core shape parameter."""
 
     @property

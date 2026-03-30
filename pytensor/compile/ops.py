@@ -9,7 +9,7 @@ import copy
 import pickle
 import warnings
 
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.link.c.op import COp
 from pytensor.link.c.type import CType
@@ -221,7 +221,7 @@ def load_back(mod, name):
     return obj
 
 
-class FromFunctionOp(Op):
+class FromFunctionOp(Op[tuple[Variable, ...], Variable]):
     """
     Build a basic PyTensor Op around a function.
 

@@ -1182,7 +1182,7 @@ def _cast_to_promised_scalar_dtype(x, dtype):
             return getattr(np, dtype)(x)
 
 
-class ScalarOp(COp[ScalarVariable]):
+class ScalarOp(COp[tuple[ScalarVariable], ScalarVariable]):
     nin = -1
     nout = 1
 

@@ -1,5 +1,5 @@
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, cast, overload
+from typing import Any, Generic, Literal, cast, overload
 
 import numpy as np
 from numpy import broadcast_shapes, empty
@@ -9,7 +9,7 @@ from pytensor.gradient import DisconnectedType
 from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.null_type import NullType
-from pytensor.graph.op import Op
+from pytensor.graph.op import Op, OpDefaultOutputType, OpOutputsType
 from pytensor.graph.replace import (
     _vectorize_node,
     _vectorize_not_needed,
@@ -151,7 +151,7 @@ def _check_runtime_broadcast_core(numerical_inputs, batch_bcast_patterns, batch_
             )
 
 
-class Blockwise(COp[TensorVariable]):
+class Blockwise(COp[tuple[TensorVariable], TensorVariable]):
     """Generalizes a core `Op` to work with batched dimensions.
 
     TODO: C implementation?
@@ -589,7 +589,7 @@ def vectorize_node_fallback(op: Op, node: Apply, *bached_inputs) -> Apply:
 _vectorize_node.register(Blockwise, _vectorize_not_needed)
 
 
-class OpWithCoreShape(OpFromGraph):
+class OpWithCoreShape(OpFromGraph, Generic[OpOutputsType, OpDefaultOutputType]):
     """Generalizes an `Op` to include core shape as an additional input."""
 
     def __init__(self, *args, on_unused_input="ignore", **kwargs):
@@ -600,7 +600,9 @@ class OpWithCoreShape(OpFromGraph):
         return super().__init__(*args, on_unused_input=on_unused_input, **kwargs)
 
 
-class BlockwiseWithCoreShape(OpWithCoreShape):
+class BlockwiseWithCoreShape(
+    OpWithCoreShape, Generic[OpOutputsType, OpDefaultOutputType]
+):
     """Generalizes a Blockwise `Op` to include a core shape parameter."""
 
     @property

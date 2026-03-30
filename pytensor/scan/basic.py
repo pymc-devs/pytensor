@@ -1106,9 +1106,8 @@ def scan(
             # to make sure all inputs are tensors.
             pass
         scan_inputs += [arg]
-    scan_outs = local_op(*scan_inputs)
-    if not isinstance(scan_outs, list | tuple):
-        scan_outs = [scan_outs]
+    _scan_outs = local_op(*scan_inputs)
+    scan_outs = [_scan_outs] if not isinstance(_scan_outs, list | tuple) else _scan_outs
     ##
     # Step 9. Figure out which outs are update rules for shared variables
     # and so on ...

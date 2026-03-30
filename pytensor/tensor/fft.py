@@ -10,7 +10,7 @@ from pytensor.tensor.type import TensorType, integer_dtypes
 from pytensor.tensor.variable import TensorVariable
 
 
-class RFFTOp(Op[TensorVariable]):
+class RFFTOp(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ()
 
     def output_type(self, inp):
@@ -70,7 +70,7 @@ class RFFTOp(Op[TensorVariable]):
 rfft_op = RFFTOp()
 
 
-class IRFFTOp(Op[TensorVariable]):
+class IRFFTOp(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ()
 
     def output_type(self, inp):

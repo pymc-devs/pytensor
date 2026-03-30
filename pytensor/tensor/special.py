@@ -12,7 +12,7 @@ from pytensor.tensor.math import gamma, gammaln, log, neg, sum
 from pytensor.tensor.variable import TensorVariable
 
 
-class SoftmaxGrad(COp[TensorVariable]):
+class SoftmaxGrad(COp[tuple[TensorVariable], TensorVariable]):
     """
     Gradient wrt x of the Softmax Op.
 
@@ -240,7 +240,7 @@ class SoftmaxGrad(COp[TensorVariable]):
         )
 
 
-class Softmax(COp[TensorVariable]):
+class Softmax(COp[tuple[TensorVariable], TensorVariable]):
     r"""
     Softmax activation function
     :math:`\\varphi(\\mathbf{x})_j =
@@ -495,7 +495,7 @@ def softmax(c, axis=None):
     return Softmax(axis=axis)(c)
 
 
-class LogSoftmax(COp[TensorVariable]):
+class LogSoftmax(COp[tuple[TensorVariable], TensorVariable]):
     r"""
     LogSoftmax activation function
     :math:`\\varphi(\\mathbf{x})_j =

@@ -7,7 +7,7 @@ from pytensor.tensor.type import TensorType
 from pytensor.xtensor.type import XTensorType, XTensorVariable, as_xtensor, xtensor
 
 
-class XOp(Op[XTensorVariable]):
+class XOp(Op[tuple[XTensorVariable], XTensorVariable]):
     """A base class for XOps that shouldn't be materialized"""
 
     def perform(self, node, inputs, outputs):

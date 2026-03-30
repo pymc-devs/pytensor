@@ -13,7 +13,8 @@ from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import (
     ComputeMapType,
     Op,
-    OpOutputType,
+    OpDefaultOutputType,
+    OpOutputsType,
     StorageMapType,
     ThunkType,
 )
@@ -38,7 +39,7 @@ def is_cthunk_wrapper_type(thunk: Callable[[], None]) -> CThunkWrapperType:
     return res
 
 
-class COp(Op, CLinkerOp, Generic[OpOutputType]):
+class COp(Op, CLinkerOp, Generic[OpOutputsType, OpDefaultOutputType]):
     """An `Op` with a C implementation."""
 
     def make_c_thunk(
@@ -139,7 +140,7 @@ class COp(Op, CLinkerOp, Generic[OpOutputType]):
         )
 
 
-class OpenMPOp(COp, Generic[OpOutputType]):
+class OpenMPOp(COp, Generic[OpOutputsType, OpDefaultOutputType]):
     r"""Base class for `Op`\s using OpenMP.
 
     This `Op` will check that the compiler support correctly OpenMP code.
@@ -260,7 +261,7 @@ def get_io_macros(inputs: list[str], outputs: list[str]) -> tuple[str, str]:
     return define_all, undef_all
 
 
-class ExternalCOp(COp, Generic[OpOutputType]):
+class ExternalCOp(COp, Generic[OpOutputsType, OpDefaultOutputType]):
     """Class for an `Op` with an external C implementation.
 
     One can inherit from this class, provide its constructor with a path to

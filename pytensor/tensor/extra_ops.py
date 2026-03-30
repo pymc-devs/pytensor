@@ -50,7 +50,7 @@ from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
 
 
-class CpuContiguous(COp[TensorVariable]):
+class CpuContiguous(COp[tuple[TensorVariable], TensorVariable]):
     """
     Check to see if the input is c-contiguous.
 
@@ -109,7 +109,7 @@ class CpuContiguous(COp[TensorVariable]):
 cpu_contiguous = CpuContiguous()
 
 
-class SearchsortedOp(COp[TensorVariable]):
+class SearchsortedOp(COp[tuple[TensorVariable], TensorVariable]):
     """Wrapper for ``numpy.searchsorted``.
 
     For full documentation, see :func:`searchsorted`.
@@ -284,7 +284,7 @@ def searchsorted(x, v, side="left", sorter=None):
     return SearchsortedOp(side=side)(x, v, sorter)
 
 
-class CumOp(COp[TensorVariable]):
+class CumOp(COp[tuple[TensorVariable], TensorVariable]):
     # See function cumsum/cumprod for docstring
 
     __props__ = ("axis", "mode")
@@ -620,7 +620,7 @@ def compress(condition, x, axis=None):
     return _x.take(indices, axis=axis)
 
 
-class Repeat(Op[TensorVariable]):
+class Repeat(Op[tuple[TensorVariable], TensorVariable]):
     # See the repeat function for docstring
 
     __props__ = ("axis",)
@@ -831,7 +831,7 @@ def repeat(
         return broadcast_a.reshape(repeat_shape)
 
 
-class Bartlett(Op[TensorVariable]):
+class Bartlett(Op[tuple[TensorVariable], TensorVariable]):
     # See function bartlett for docstring
     __props__ = ()
 
@@ -888,7 +888,7 @@ def bartlett(M):
     return bartlett_(M)
 
 
-class FillDiagonal(Op[TensorVariable]):
+class FillDiagonal(Op[tuple[TensorVariable], TensorVariable]):
     # See function fill_diagonal for docstring
     __props__ = ()
 
@@ -989,7 +989,7 @@ def fill_diagonal(a, val):
     return fill_diagonal_(a, val)
 
 
-class FillDiagonalOffset(Op[TensorVariable]):
+class FillDiagonalOffset(Op[tuple[TensorVariable], TensorVariable]):
     # See function fill_diagonal_offset for docstring
     __props__ = ()
 
@@ -1161,7 +1161,7 @@ def to_one_hot(y, nb_class, dtype=None):
     return ret
 
 
-class Unique(Op[TensorVariable]):
+class Unique(Op[tuple[TensorVariable], TensorVariable]):
     """
     Wraps `numpy.unique`.
 
@@ -1283,7 +1283,7 @@ def unique(
     return Unique(return_index, return_inverse, return_counts, axis)(ar)
 
 
-class UnravelIndex(Op[TensorVariable]):
+class UnravelIndex(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ("order",)
 
     def __init__(self, order="C"):
@@ -1360,7 +1360,7 @@ def unravel_index(indices, dims, order="C"):
         return tuple(res)
 
 
-class RavelMultiIndex(Op[TensorVariable]):
+class RavelMultiIndex(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ("mode", "order")
 
     def __init__(self, mode="raise", order="C"):

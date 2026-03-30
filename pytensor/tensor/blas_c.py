@@ -11,7 +11,7 @@ from pytensor.tensor.blas import (
 from pytensor.tensor.variable import TensorVariable
 
 
-class BaseBLAS(COp[TensorVariable]):
+class BaseBLAS(COp[tuple[TensorVariable], TensorVariable]):
     def c_libraries(self, **kwargs):
         return ldflags()
 

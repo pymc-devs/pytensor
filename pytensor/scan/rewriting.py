@@ -775,7 +775,7 @@ def add_nitsot_outputs(
 
     # Create the Apply node for the scan op
     new_scan_outs = new_scan_op(*new_scan_args.outer_inputs, return_list=True)
-    assert isinstance(new_scan_outs, list)
+    assert isinstance(new_scan_outs, list | tuple)
     new_scan_node = new_scan_outs[0].owner
     assert new_scan_node is not None
 
@@ -948,9 +948,9 @@ class ScanInplaceOptimizer(GraphRewriter):
     def attempt_scan_inplace(
         self,
         fgraph: FunctionGraph,
-        node: Apply[Scan, Variable],
+        node: Apply[Scan, tuple[Variable, ...], Variable],
         output_indices: list[int],
-    ) -> Apply | None:
+    ) -> Apply[Scan, tuple[Variable, ...], Variable] | None:
         """Attempt to replace a `Scan` node by one which computes the specified outputs inplace.
 
         Parameters
@@ -1015,7 +1015,9 @@ class ScanInplaceOptimizer(GraphRewriter):
                 k: v for k, v in new_op.view_map.items() if k not in destroy_map
             }
 
-        new_node: Apply[Scan, Variable] = new_op.make_node(*inputs)
+        new_node: Apply[Scan, tuple[Variable, ...], Variable] = new_op.make_node(
+            *inputs
+        )
 
         try:
             fgraph.replace_all_validate_remove(  # type: ignore

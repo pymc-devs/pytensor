@@ -24,7 +24,7 @@ class ExceptionType(Generic):
 exception_type = ExceptionType()
 
 
-class CheckAndRaise(COp[TensorVariable]):
+class CheckAndRaise(COp[tuple[TensorVariable], TensorVariable]):
     """An `Op` that checks conditions and raises an exception if they fail.
 
     This `Op` returns its "value" argument if its condition arguments are all

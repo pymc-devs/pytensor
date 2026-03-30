@@ -29,7 +29,7 @@ def _parse_sort_args(kind: KIND | None, order, stable: bool | None) -> KIND:
     return kind
 
 
-class SortOp(Op[TensorVariable]):
+class SortOp(Op[tuple[TensorVariable], TensorVariable]):
     """
     This class is a wrapper for numpy sort function.
 
@@ -154,7 +154,7 @@ def sort(
     return SortOp(kind)(a, axis)
 
 
-class ArgSortOp(Op[TensorVariable]):
+class ArgSortOp(Op[tuple[TensorVariable], TensorVariable]):
     """
     This class is a wrapper for numpy argsort function.
 

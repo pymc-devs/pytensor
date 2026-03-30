@@ -163,7 +163,7 @@ def _find_optimization_parameters(
     ]
 
 
-class ScipyWrapperOp(Op[TensorVariable], HasInnerGraph):
+class ScipyWrapperOp(Op[tuple[TensorVariable], TensorVariable], HasInnerGraph):
     """Shared logic for scipy optimization ops"""
 
     def build_fn(self):

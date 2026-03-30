@@ -139,7 +139,7 @@ def _allclose(a, b, rtol=None, atol=None):
     return np.allclose(a, b, atol=atol_, rtol=rtol_)
 
 
-class Argmax(COp[TensorVariable]):
+class Argmax(COp[tuple[TensorVariable], TensorVariable]):
     """
     Calculate the argmax over a given axis or over all axes.
     """
@@ -3019,7 +3019,7 @@ pprint.assign(int_div, printing.OperatorPrinter("//", -1, "left"))
 pprint.assign(pow, printing.OperatorPrinter("**", 1, "right"))
 
 
-class Dot(Op[TensorVariable]):
+class Dot(Op[tuple[TensorVariable], TensorVariable]):
     """
     Computes the dot product of two matrices variables
 

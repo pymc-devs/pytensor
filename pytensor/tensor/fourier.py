@@ -19,7 +19,7 @@ from pytensor.tensor.type import TensorType, integer_dtypes
 from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
-class Fourier(Op[TensorVariable]):
+class Fourier(Op[tuple[TensorVariable], TensorVariable]):
     """
     WARNING: for officially supported FFTs, use pytensor.tensor.fft, which
     provides real-input FFTs. Gradients are supported.

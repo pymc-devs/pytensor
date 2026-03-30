@@ -151,7 +151,7 @@ def must_initialize_y_gemv():
 must_initialize_y_gemv._result = None  # type: ignore
 
 
-class Gemv(Op[TensorVariable]):
+class Gemv(Op[tuple[TensorVariable], TensorVariable]):
     """
     expression is beta * y + alpha * A x
 
@@ -257,7 +257,7 @@ gemv_inplace = Gemv(inplace=True)
 gemv = gemv_no_inplace
 
 
-class Ger(Op[TensorVariable]):
+class Ger(Op[tuple[TensorVariable], TensorVariable]):
     """
     BLAS defines general rank-1 update GER as A <- A + alpha x y'
 
@@ -469,7 +469,7 @@ def _ldflags(
     return rval
 
 
-class GemmRelated(COp[TensorVariable]):
+class GemmRelated(COp[tuple[TensorVariable], TensorVariable]):
     """Base class for Gemm and Dot22.
 
     This class provides a kind of templated gemm Op.
@@ -1305,7 +1305,7 @@ class Dot22Scalar(GemmRelated):
 _dot22scalar = Dot22Scalar()
 
 
-class BatchedDot(COp[TensorVariable]):
+class BatchedDot(COp[tuple[TensorVariable], TensorVariable]):
     """
     Computes a batch matrix-matrix dot with tensor3 variables
 
