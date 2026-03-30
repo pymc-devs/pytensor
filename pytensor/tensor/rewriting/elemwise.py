@@ -75,6 +75,91 @@ class InplaceGraphOptimizer(GraphRewriter):
     ) -> Apply:
         pass
 
+    def _get_protected_inputs(self, fgraph):
+        """Collect inputs protected from in-place destruction."""
+        protected = set(
+            itertools.chain.from_iterable(
+                f.protected for f in fgraph._features if isinstance(f, Supervisor)
+            )
+        )
+        protected.update(fgraph.outputs)
+        return protected
+
+    def try_inplace_on_node(
+        self,
+        fgraph,
+        node,
+        candidate_pairs=None,
+        reason="inplace_optimizer",
+        extra_protected_inputs=frozenset(),
+    ):
+        """Try to make a single node operate in-place.
+
+        First attempts all candidate pairs at once, then falls back to
+        one-at-a-time. Returns the (possibly replaced) node.
+
+        Parameters
+        ----------
+        candidate_pairs
+            Pre-filtered and sorted list of ``((out_idx, out), (in_idx, inp))``
+            pairs. If None, computed from ``filter_candidate_pairs`` using
+            the standard protections plus ``extra_protected_inputs``.
+        extra_protected_inputs
+            Additional variables that must not be used as in-place targets,
+            only used when ``candidate_pairs`` is None.
+        """
+        if candidate_pairs is None:
+            protected_inputs = self._get_protected_inputs(fgraph)
+            protected_inputs.update(extra_protected_inputs)
+            candidate_pairs = self.filter_candidate_pairs(
+                fgraph, node, protected_inputs
+            )
+        if not candidate_pairs:
+            return node
+
+        # Try in-placing all outputs at once
+        tried_inputs = set()
+        inplace_pattern = {}
+        for (o, _), (i, _) in candidate_pairs:
+            if o not in inplace_pattern and i not in tried_inputs:
+                inplace_pattern[o] = [i]
+                tried_inputs.add(i)
+
+        inplace_node = self.create_inplace_node(node, inplace_pattern)
+        if inplace_node.op.destroy_map == inplace_pattern:
+            replacements = tuple(zip(node.outputs, inplace_node.outputs))
+            try:
+                fgraph.replace_all_validate(replacements, reason=reason)
+            except InconsistencyError:
+                pass
+            else:
+                copy_stack_trace(node.outputs, inplace_node.outputs)
+                return inplace_node
+
+        # Fall back to one output/input at a time
+        tried_inputs = set()
+        inplace_pattern = {}
+        original_node = node
+        for (o, _), (i, _) in candidate_pairs:
+            if o not in inplace_pattern and i not in tried_inputs:
+                inplace_pattern[o] = [i]
+                tried_inputs.add(i)
+
+                inplace_node = self.create_inplace_node(node, inplace_pattern)
+                if inplace_node.op.destroy_map != inplace_pattern:
+                    # This Op can't respect this partial inplace pattern,
+                    # We assume it can't support any other cases
+                    break
+                replacements = tuple(zip(node.outputs, inplace_node.outputs))
+                try:
+                    fgraph.replace_all_validate(replacements, reason=reason)
+                    node = inplace_node
+                except InconsistencyError:
+                    inplace_pattern.pop(o)
+        if node is not original_node:
+            copy_stack_trace(original_node.outputs, node.outputs)
+        return node
+
     def apply(self, fgraph):
         r"""
 
@@ -128,12 +213,7 @@ class InplaceGraphOptimizer(GraphRewriter):
         }
         large_graph = len(fgraph.apply_nodes) > 500
 
-        protected_inputs = set(
-            itertools.chain.from_iterable(
-                f.protected for f in fgraph._features if isinstance(f, Supervisor)
-            )
-        )
-        protected_inputs.update(fgraph.outputs)
+        protected_inputs = self._get_protected_inputs(fgraph)
         root_destroyer = fgraph.destroy_handler.root_destroyer
 
         self_op = self.op
@@ -164,14 +244,15 @@ class InplaceGraphOptimizer(GraphRewriter):
             if not candidate_pairs:
                 continue
 
+            # If the fgraph has updates, we try to prioritize in-placing
+            # on the pairs that correspond to the update
             sorted_candidate_pairs = candidate_pairs
             if op_updates and (node_updates := set(node.outputs) & set_op_updates):
-                # If the fgraph has updates, we try to prioritize in-placing on the pairs that correspond to the update
                 direct_update_pairs = []
                 indirect_update_pairs = []
                 other_update_pairs = []
                 for pair in candidate_pairs:
-                    ((o, out), (i, inp)) = pair
+                    ((_o, out), (_i, inp)) = pair
                     if out in node_updates:
                         direct_update_inp = op_updates[out]
                         if direct_update_inp is inp:
@@ -191,54 +272,11 @@ class InplaceGraphOptimizer(GraphRewriter):
                     direct_update_pairs + indirect_update_pairs + other_update_pairs
                 )
 
-            # Try in-placing all outputs at once
-            tried_inputs = set()
-            inplace_pattern = {}
-            for (o, _), (i, _) in sorted_candidate_pairs:
-                if o not in inplace_pattern and i not in tried_inputs:
-                    inplace_pattern[o] = [i]
-                    tried_inputs.add(i)
-
-            inplace_node = self.create_inplace_node(node, inplace_pattern)
-            if inplace_node.op.destroy_map == inplace_pattern:
-                replacements = tuple(zip(node.outputs, inplace_node.outputs))
-                try:
-                    fgraph.replace_all_validate(replacements, reason=reason)
-                except InconsistencyError:
-                    prof["nb_eager_inconsistent"] += 1
-                else:
-                    prof["nb_replaced"] += 1
-                    copy_stack_trace(node.outputs, inplace_node.outputs)
-                    continue
-
-            # If it fails or doesn't match the desired inplace pattern, try one output/input at a time
-            tried_inputs = set()
-            inplace_pattern = {}
-            replaced = False
-            original_node = node
-            for (o, _), (i, _) in sorted_candidate_pairs:
-                if o not in inplace_pattern and i not in tried_inputs:
-                    inplace_pattern[o] = [i]
-                    tried_inputs.add(i)
-
-                    inplace_node = self.create_inplace_node(node, inplace_pattern)
-                    if inplace_node.op.destroy_map != inplace_pattern:
-                        # This Op can't respect this partial inplace pattern,
-                        # We assume it can't support any other cases
-                        break
-                    else:
-                        replacements = tuple(zip(node.outputs, inplace_node.outputs))
-                        try:
-                            fgraph.replace_all_validate(replacements, reason=reason)
-                            node = inplace_node
-                            replaced = True
-                        except InconsistencyError:
-                            prof["nb_inconsistent"] += 1
-                            # The input, not the output caused inconsistencies
-                            inplace_pattern.pop(o)
-            if replaced:
-                copy_stack_trace(original_node.outputs, node.outputs)
-                prof["nb_replaced"] += replaced
+            result = self.try_inplace_on_node(
+                fgraph, node, sorted_candidate_pairs, reason=reason
+            )
+            if result is not node:
+                prof["nb_replaced"] += 1
 
         return prof
 
