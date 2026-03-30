@@ -1,6 +1,5 @@
 from functools import partial
 
-import mlx.core as mx
 import numpy as np
 import pytest
 from packaging.version import parse as V
@@ -9,6 +8,9 @@ import pytensor.tensor as pt
 from pytensor import config
 from pytensor.compile.mode import get_mode
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
+
+
+mx = pytest.importorskip("mlx.core")
 
 
 def test_mlx_det():
