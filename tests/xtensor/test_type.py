@@ -255,3 +255,137 @@ def test_where():
     res = xr_function([a], out)(a_test)
     expected = a_test[0].where(a_test > 1, -1)
     xr_assert_allclose(res, expected)
+
+
+def test_sel_basic_scalar():
+    """Test sel with scalar label selection."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": [10, 20, 30], "b": ["x", "y"]}
+
+    # Select scalar label
+    result = sel(x, coords=coords, a=20)
+    assert result.dims == ("b",)
+
+    x_test = DataArray(np.arange(6).reshape(3, 2), dims=("a", "b"))
+    fn = xr_function([x], result)
+    res = fn(x_test)
+    expected = x_test.isel(a=1)
+    xr_assert_allclose(res, expected)
+
+
+def test_sel_multiple_labels():
+    """Test sel with multiple label selection."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": [10, 20, 30], "b": ["x", "y"]}
+
+    # Select multiple labels
+    result = sel(x, coords=coords, a=[30, 10])
+    assert result.dims == ("a", "b")
+
+    x_test = DataArray(np.arange(6).reshape(3, 2), dims=("a", "b"))
+    fn = xr_function([x], result)
+    res = fn(x_test)
+    expected = x_test.isel(a=[2, 0])
+    xr_assert_allclose(res, expected)
+
+
+def test_sel_multi_dimension():
+    """Test sel with multiple dimensions."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": [10, 20, 30], "b": ["x", "y"]}
+
+    # Select from multiple dimensions
+    result = sel(x, coords=coords, a=30, b="y")
+    assert result.dims == ()  # scalar
+
+    x_test = DataArray(np.arange(6).reshape(3, 2), dims=("a", "b"))
+    fn = xr_function([x], result)
+    res = fn(x_test)
+    expected = x_test.isel(a=2, b=1)
+    xr_assert_allclose(res, expected)
+
+
+def test_sel_missing_coords():
+    """Test sel raises error when coords not provided."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": [10, 20, 30]}  # Missing 'b'
+
+    with pytest.raises(ValueError, match="No coordinates provided for dimension 'b'"):
+        sel(x, coords=coords, a=20, b="y")
+
+
+def test_sel_label_not_found():
+    """Test sel raises error when label not found in coords."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": [10, 20, 30], "b": ["x", "y"]}
+
+    # Try to select a label that doesn't exist
+    with pytest.raises(ValueError, match="Label 'z' not found"):
+        sel(x, coords=coords, b="z")
+
+
+def test_sel_invalid_dimension():
+    """Test sel raises error for invalid dimension."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": [10, 20, 30], "b": ["x", "y"], "c": [1, 2, 3]}
+
+    # Try to select from non-existent dimension
+    with pytest.raises(ValueError, match="Dimension 'c' does not exist"):
+        sel(x, coords=coords, c=1)
+
+
+def test_sel_missing_dims_warn():
+    """Test sel missing_dims='warn' option."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": [10, 20, 30], "b": ["x", "y"]}
+
+    # Should warn but not raise
+    with pytest.warns(
+        UserWarning,
+        match=re.escape("Dimension 'c' does not exist. Expected one of ('a', 'b')"),
+    ):
+        result = sel(x, coords=coords, a=20, c=0, missing_dims="warn")
+    assert result.dims == ("b",)
+
+
+def test_sel_missing_dims_ignore():
+    """Test sel missing_dims='ignore' option."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": [10, 20, 30], "b": ["x", "y"]}
+
+    # Should silently ignore non-existent dimension
+    result = sel(x, coords=coords, a=20, c=0, missing_dims="ignore")
+    assert result.dims == ("b",)
+
+
+def test_sel_numpy_array_coords():
+    """Test sel with numpy array coordinates."""
+    from pytensor.xtensor.type import sel
+
+    x = xtensor("x", dims=("a", "b"), shape=(3, 2))
+    coords = {"a": np.array([10, 20, 30]), "b": np.array(["x", "y"])}
+
+    result = sel(x, coords=coords, a=20)
+    assert result.dims == ("b",)
+
+    x_test = DataArray(np.arange(6).reshape(3, 2), dims=("a", "b"))
+    fn = xr_function([x], result)
+    res = fn(x_test)
+    expected = x_test.isel(a=1)
+    xr_assert_allclose(res, expected)

@@ -6,6 +6,7 @@ from pytensor.xtensor.math import dot, where
 from pytensor.xtensor.shape import broadcast, concat, full_like, ones_like, zeros_like
 from pytensor.xtensor.type import (
     as_xtensor,
+    sel,
     xtensor,
     xtensor_constant,
 )

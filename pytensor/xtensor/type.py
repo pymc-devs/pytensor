@@ -1107,6 +1107,211 @@ def as_xtensor(x, dims: Sequence[str] | None = None, *, name: str | None = None)
         raise TypeError(f"Cannot convert {x} to XTensorType {type(x)}") from err
 
 
+def sel(
+    x: XTensorVariable,
+    coords: dict[str, Any] | None = None,
+    missing_dims: Literal["raise", "warn", "ignore"] = "raise",
+    **label_indexers,
+) -> XTensorVariable:
+    """Label-based selection for an XTensorVariable using coordinate values.
+
+    This function provides xarray-like label-based indexing for XTensorVariable.
+    It maps coordinate labels to positional indices and delegates to `isel` for
+    the actual indexing operation.
+
+    Parameters
+    ----------
+    x : XTensorVariable
+        The XTensorVariable to index.
+    coords : dict of {dim: array-like of coordinate values}, optional
+        Mapping from dimension names to arrays of coordinate labels.
+        Each key should match a dimension name in `x.dims`.
+        Each value should be an array-like object whose indices correspond to
+        positional selections along that dimension.
+    missing_dims : {"raise", "warn", "ignore"}, default "raise"
+        How to handle labels/dimensions in the indexers that are not in `x.dims`.
+        - "raise": raise a ValueError
+        - "warn": raise a UserWarning
+        - "ignore": silently ignore
+    **label_indexers : dim=label or dim=list_of_labels
+        Keyword arguments for label-based indexing. Keys should be dimension names
+        from `x.dims`. Values can be:
+        - A scalar label to select a single position
+        - A list/array of labels to select multiple positions
+
+    Returns
+    -------
+    XTensorVariable
+        Indexed XTensorVariable. Dimensions corresponding to scalar selection
+        are reduced (like standard numpy indexing).
+
+    Raises
+    ------
+    ValueError
+        If a dimension in label_indexers is not found in x.dims and missing_dims="raise"
+        If a label is not found in the corresponding coordinate array
+        If coords is None or a coordinate array is missing
+
+    Notes
+    -----
+    This function implements label-based selection similar to xarray's `.sel` method,
+    but adapted for PyTensor's symbolic XTensorVariable.
+
+    **Important limitations:**
+    - Coordinates must be provided explicitly each time (they are not stored on the variable)
+    - You are responsible for keeping coordinates synchronized with the data,
+      especially after operations like slicing (e.g., `x[1:]`) or reversing (e.g., `x[::-1]`)
+    - Unlike xarray, this does not automatically broadcast or align coordinates
+    - Coordinates must be 1D arrays with unique values
+    - The coordinate values must support equality comparison and indexing (`.index()` method)
+
+    Examples
+    --------
+    >>> import pytensor
+    >>> import pytensor.xtensor as px
+    >>> import numpy as np
+    >>> from pytensor.xtensor.type import as_xtensor, sel
+
+    Create a simple example with time and space dimensions:
+
+    >>> # Create a matrix variable
+    >>> t = pytensor.matrix("t", shape=(3, 2))
+    >>> # Convert to XTensorVariable with dimension names
+    >>> xt = as_xtensor(t, dims=("time", "space"))
+
+    Define coordinates for each dimension:
+
+    >>> coords = {
+    ...     "time": [10, 20, 30],      # coordinate labels for time dimension
+    ...     "space": ["x", "y"],        # coordinate labels for space dimension
+    ... }
+
+    Use `sel` for label-based indexing (similar to xarray.DataArray.sel):
+
+    >>> # Select single time label
+    >>> result1 = sel(xt, coords=coords, time=20)  # Gets the row where time=20 (position 1)
+
+    >>> # Select multiple labels
+    >>> result2 = sel(xt, coords=coords, time=[30, 10])  # Gets rows for time=30,10 in that order
+
+    >>> # Select across multiple dimensions
+    >>> result3 = sel(xt, coords=coords, time=30, space="y")  # Gets scalar at time=30, space="y"
+
+    Compile and execute:
+
+    >>> fn = pytensor.function([t], [result1, result2, result3])
+    >>> data = np.arange(6, dtype="float64").reshape(3, 2)
+    >>> r1, r2, r3 = fn(data)
+    >>> print("Input:\\n", data)
+    >>> print("sel(time=20):\\n", r1)
+    >>> print("sel(time=[30,10]):\\n", r2)
+    >>> print("sel(time=30, space='y'):", r3)
+
+    See Also
+    --------
+    isel : Position-based selection for XTensorVariable
+    as_xtensor : Convert a variable or data to an XTensorVariable
+    """
+    if coords is None:
+        coords = {}
+
+    if not isinstance(x.type, XTensorType):
+        raise TypeError(
+            f"sel requires an XTensorVariable, got {type(x.type).__name__}"
+        )
+
+    # Map each label indexer to a positional index
+    pos_indexers = {}
+    for dim, labels in label_indexers.items():
+        # Check if dimension exists
+        if dim not in x.type.dims:
+            if missing_dims == "raise":
+                raise ValueError(
+                    f"Dimension '{dim}' does not exist. Expected one of {x.type.dims}"
+                )
+            elif missing_dims == "warn":
+                warnings.warn(
+                    f"Dimension '{dim}' does not exist. Expected one of {x.type.dims}",
+                    UserWarning,
+                )
+                continue
+            else:  # ignore
+                continue
+
+        # Get the coordinate array for this dimension
+        if dim not in coords:
+            raise ValueError(
+                f"No coordinates provided for dimension '{dim}'. "
+                f"Must provide coords['{dim}'] when using sel with dimension '{dim}'."
+            )
+
+        coord_vals = coords[dim]
+
+        # Convert scalar or list of labels to positional indices
+        if isinstance(labels, (list, tuple, np.ndarray)) or (
+            hasattr(labels, "__iter__") and not isinstance(labels, str)
+        ):
+            # Multiple labels
+            try:
+                pos_indexers[dim] = [_find_label_index(coord_vals, l) for l in labels]
+            except ValueError as e:
+                raise ValueError(
+                    f"Label lookup failed for dimension '{dim}': {e}"
+                ) from e
+        else:
+            # Single label (scalar)
+            try:
+                pos_indexers[dim] = _find_label_index(coord_vals, labels)
+            except ValueError as e:
+                raise ValueError(
+                    f"Label '{labels}' not found in coordinates for dimension '{dim}'. "
+                    f"Available coordinates: {list(coord_vals)}"
+                ) from e
+
+    # Delegate to isel for positional indexing
+    return x.isel(pos_indexers, missing_dims=missing_dims)
+
+
+def _find_label_index(coord_vals: Any, label: Any) -> int:
+    """Find the positional index of a label in a coordinate array.
+
+    Parameters
+    ----------
+    coord_vals : array-like
+        Coordinate values (must support `.index()` method or be indexable with `==`)
+    label : scalar
+        The label to find
+
+    Returns
+    -------
+    int
+        The positional index of the label
+
+    Raises
+    ------
+    ValueError
+        If the label is not found in coord_vals
+    """
+    # Try using .index() method (works for lists, tuples)
+    if hasattr(coord_vals, "index"):
+        try:
+            return coord_vals.index(label)
+        except ValueError as e:
+            raise ValueError(f"Label {label!r} not found in {coord_vals}") from e
+
+    # Try numpy array comparison
+    coord_vals = np.asarray(coord_vals)
+    matches = np.where(coord_vals == label)[0]
+    if len(matches) == 0:
+        raise ValueError(f"Label {label!r} not found in {coord_vals}")
+    if len(matches) > 1:
+        raise ValueError(
+            f"Label {label!r} is not unique in coordinates. "
+            f"Found {len(matches)} matches at indices {matches}"
+        )
+    return int(matches[0])
+
+
 register_view_op_c_code(
     XTensorType,
     # XTensorType is just TensorType under the hood
