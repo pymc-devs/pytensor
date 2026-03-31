@@ -3,7 +3,9 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
+from pytensor.compile.function import function
 from pytensor.compile.mode import MLX, Mode
+from pytensor.compile.sharedvalue import shared
 from pytensor.link.mlx.linker import MLXLinker
 from pytensor.tensor.random.utils import RandomStream
 
@@ -173,3 +175,82 @@ def test_beta_not_implemented():
     rv = srng.beta(alpha=2.0, beta=5.0, size=(3,))
     with pytest.raises(NotImplementedError, match="No MLX implementation"):
         pytensor.function([], rv, mode="MLX", updates=srng.updates())
+
+
+def compile_shared_rng_function(*args, mode="MLX", **kwargs):
+    with pytest.warns(
+        UserWarning, match=r"The RandomType SharedVariables \[.+\] will not be used"
+    ):
+        return function(*args, mode=mode, **kwargs)
+
+
+def test_random_updates():
+    original_value = np.random.default_rng(seed=98)
+    rng = shared(original_value, name="original_rng", borrow=False)
+    next_rng, x = pt.random.normal(name="x", rng=rng).owner.outputs
+
+    f = compile_shared_rng_function([], [x], updates={rng: next_rng})
+    assert f() != f()
+
+    # Check that the original shared variable was not overwritten when typifying
+    assert all(
+        a == b if not isinstance(a, np.ndarray) else np.array_equal(a, b)
+        for a, b in zip(
+            rng.get_value().bit_generator.state,
+            original_value.bit_generator.state,
+            strict=True,
+        )
+    )
+
+
+@pytest.mark.parametrize("noise_first", (False, True))
+def test_replaced_shared_rng_storage_order(noise_first):
+    # Test that replacing the RNG variable in the linker does not cause
+    # a disalignment between the compiled graph and the storage_map.
+
+    mu = pytensor.shared(np.array(1.0), name="mu")
+    rng = pytensor.shared(np.random.default_rng(123))
+    next_rng, noise = pt.random.normal(rng=rng).owner.outputs
+
+    out = noise * mu if noise_first else mu * noise
+
+    updates = {
+        mu: pt.grad(out, mu),
+        rng: next_rng,
+    }
+    f = compile_shared_rng_function([], [out], updates=updates)
+
+    # Confirm that input_storage type and fgraph input order are aligned
+    for storage, fgraph_input in zip(
+        f.input_storage, f.maker.fgraph.inputs, strict=True
+    ):
+        assert storage.type == fgraph_input.type
+
+    assert mu.get_value() == 1
+    f()
+    assert mu.get_value() != 1
+
+
+def test_replaced_shared_rng_storage_ordering_equality():
+    """Test that storage identity comparison works when numpy arrays precede
+    the RNG in input_storage (regression test for issue #314)."""
+    pt_rng = RandomStream(1)
+
+    batchshape = (3, 1, 4, 4)
+    inp_shared = pytensor.shared(
+        np.zeros(batchshape, dtype="float64"), name="inp_shared"
+    )
+
+    inp = pt.tensor4(dtype="float64", name="inp")
+    inp_update = inp + pt_rng.normal(size=inp.shape, loc=5, scale=1e-5)
+
+    fn = compile_shared_rng_function(
+        inputs=[],
+        outputs=[],
+        updates={inp_shared: inp_update},
+        givens={inp: inp_shared},
+    )
+    fn()
+    np.testing.assert_allclose(np.array(inp_shared.get_value()), 5, rtol=1e-2)
+    fn()
+    np.testing.assert_allclose(np.array(inp_shared.get_value()), 10, rtol=1e-2)

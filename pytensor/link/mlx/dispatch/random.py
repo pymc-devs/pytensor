@@ -8,18 +8,18 @@ from pytensor.link.mlx.dispatch.basic import mlx_funcify, mlx_typify
 from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx, mlx_to_list_shape
 
 
-def _truncate_pcg64_state_to_uint64(rng: Generator) -> int:
-    return int(rng.bit_generator.state["state"]["state"]) & 0xFFFFFFFFFFFFFFFF
-
-
 def numpy_generator_to_mlx_key(rng: Generator) -> mx.array:
     """Convert a NumPy Generator to an MLX random key.
 
     MLX uses a functional RNG model where each random call takes an explicit
-    key rather than mutating shared state. This extracts the lower 64 bits of
-    the PCG64 state integer as a seed for the MLX key.
+    key rather than mutating shared state. The PCG64 state is 128 bits, which
+    MLX cannot accept directly. We fold both 64-bit halves together via XOR
+    to use all 128 bits of entropy in a single 64-bit seed.
     """
-    return mx.random.key(_truncate_pcg64_state_to_uint64(rng))
+    state_128 = int(rng.bit_generator.state["state"]["state"])
+    upper = (state_128 >> 64) & 0xFFFFFFFFFFFFFFFF
+    lower = state_128 & 0xFFFFFFFFFFFFFFFF
+    return mx.random.key(upper ^ lower)
 
 
 @mlx_typify.register(Generator)
