@@ -1004,16 +1004,13 @@ class TestFusion:
                 (np.sum(fxv + 5) * np.exp(fxv) / (fxv + 5),),
                 ("float32",),
             ),
-            pytest.param(
-                (
-                    (sin(exp(fx)), exp(sin(fx))),
-                    (fx,),
-                    (fxv,),
-                    1,
-                    (np.sin(np.exp(fxv)), np.exp(np.sin(fxv))),
-                    ("float32", "float32"),
-                ),
-                marks=pytest.mark.xfail,  # Not implemented yet
+            (
+                (sin(exp(fx)), exp(sin(fx))),
+                (fx,),
+                (fxv,),
+                1,
+                (np.sin(np.exp(fxv)), np.exp(np.sin(fxv))),
+                ("float32", "float32"),
             ),
         ],
     )
@@ -1148,7 +1145,6 @@ class TestFusion:
 
         new_out = f.maker.fgraph.outputs[0]
         assert isinstance(new_out.owner.op, Elemwise)
-        assert isinstance(new_out.owner.op.scalar_op, ps.basic.Add)
         assert len(new_out.owner.inputs) == 4
 
         # TODO: Do we really need to do this?

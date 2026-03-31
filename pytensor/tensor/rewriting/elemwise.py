@@ -2,6 +2,7 @@ import abc
 import itertools
 import operator
 import sys
+from collections import defaultdict
 from collections.abc import Generator, Sequence
 from functools import cache, reduce
 from heapq import heapify, heappop, heappush
@@ -557,7 +558,7 @@ class FusionOptimizer(GraphRewriter):
 
         def find_fuseable_subgraphs(
             fg: FunctionGraph,
-        ) -> Generator[tuple[tuple[Variable], tuple[Variable]], None, None]:
+        ) -> Generator[tuple[tuple[Variable, ...], tuple[Variable, ...]], None, None]:
             """Find subgraphs of Elemwise nodes that can be fused together.
 
             In general, there is no single solution. We try to find large subgraphs eagerly
@@ -668,7 +669,9 @@ class FusionOptimizer(GraphRewriter):
 
             # Start main loop to find collection of fuseable subgraphs. We collect them in
             # discovery order; the final yield order is topologically sorted at the end.
-            discovered_subgraphs: list[tuple[tuple[Variable], tuple[Variable]]] = []
+            discovered_subgraphs: list[
+                tuple[int, tuple[tuple[Variable], tuple[Variable]]]
+            ] = []
             # Keep a bitset of nodes that have been claimed by subgraphs
             all_subgraphs_bitset = 0
             # Start exploring in reverse topological order from candidate sink nodes
@@ -831,28 +834,148 @@ class FusionOptimizer(GraphRewriter):
                     )
 
                 # Collect the subgraph
-                discovered_subgraphs.append((subgraph_inputs, subgraph_outputs))
+                discovered_subgraphs.append(
+                    (subgraph_bitset, (subgraph_inputs, subgraph_outputs))
+                )
                 all_subgraphs_bitset |= subgraph_bitset
+
+            # Merge sibling groups: independent subgraphs or remaining
+            # candidate nodes that share inputs but have no producer-consumer
+            # edge between them. The eager expansion above only walks
+            # producer-consumer edges, so it misses siblings like f(x) and
+            # g(x) that share an input without one feeding into the other.
+            sibling_candidates: list = list(discovered_subgraphs)
+            n_discovered = len(sibling_candidates)
+            for node, bf in nodes_bitflags.items():
+                if node not in candidate_starting_nodes:
+                    continue
+                if not (bf & all_subgraphs_bitset):
+                    sibling_candidates.append(
+                        (bf, (tuple(dict.fromkeys(node.inputs)), node.outputs))
+                    )
+            # Create a mapping from inputs to sibling groups that consume them.
+            # Skip scalar constants as they get inlined later and don't
+            # represent meaningful shared computation between siblings.
+            input_to_sibling_idxs: dict[Variable, list[int]] = defaultdict(list)
+            for sibling_idx, (_, (inputs, outputs)) in enumerate(sibling_candidates):
+                out_bcast = outputs[0].type.broadcastable
+                for inp in inputs:
+                    if isinstance(inp, TensorConstant) and inp.unique_value is not None:
+                        continue
+                    # Only group siblings through inputs that aren't broadcasted
+                    # As we may be dealing with sibiling of different shapes.
+                    # This is conservative, we could check if other shared inputs
+                    # jointly imply equal shapes (or look at static shapes if available)
+                    if inp.type.broadcastable != out_bcast:
+                        continue
+                    input_to_sibling_idxs[inp].append(sibling_idx)
+
+            # Track which candidate each index was merged into (union-find)
+            merged_into: dict[int, int] = {}
+            merge_targets: set[int] = set()
+
+            def find_canonical(idx):
+                """Follow merge chain to find the live candidate."""
+                try:
+                    while True:
+                        idx = merged_into[idx]
+                except KeyError:
+                    return idx
+
+            for sibling_idxs in input_to_sibling_idxs.values():
+                if len(sibling_idxs) < 2:
+                    continue
+
+                for i in range(len(sibling_idxs) - 1):
+                    sibling_i = find_canonical(sibling_idxs[i])
+
+                    bitset_i, (inputs_i, outputs_i) = sibling_candidates[sibling_i]
+                    bcast_i = outputs_i[0].type.broadcastable
+                    merged = False
+                    for sibling_j in sibling_idxs[i + 1 :]:
+                        sibling_j = find_canonical(sibling_j)
+                        if sibling_j == sibling_i:
+                            continue
+                        bitset_j, (inputs_j, outputs_j) = sibling_candidates[sibling_j]
+                        if bcast_i != outputs_j[0].type.broadcastable:
+                            continue
+
+                        # Independence: neither is ancestor of the other
+                        if (
+                            bitset_i & ancestors_bitsets[outputs_j[0].owner]
+                            or bitset_j & ancestors_bitsets[outputs_i[0].owner]
+                        ):
+                            continue
+
+                        # Merge sibling_j into sibling_i
+                        merged_bitset = bitset_i | bitset_j
+                        merged_outputs = (*outputs_i, *outputs_j)
+                        merged_inputs = list(inputs_i)
+                        merged_inputs_set = set(inputs_i)
+                        for input_j in inputs_j:
+                            if input_j not in merged_inputs_set:
+                                merged_inputs.append(input_j)
+                                merged_inputs_set.add(input_j)
+                        merged_into[sibling_j] = sibling_i
+                        merge_targets.add(sibling_i)
+
+                        # Update ancestor bitsets so that any node
+                        # depending on part of the merged group now
+                        # depends on all of it (mirrors the main loop).
+                        merged_ancestors = reduce(
+                            or_,
+                            (ancestors_bitsets[o.owner] for o in merged_outputs),
+                        )
+                        ancestors_bitsets |= (
+                            (n, n_anc | merged_ancestors)
+                            for n, n_anc in ancestors_bitsets.items()
+                            if n_anc & merged_bitset
+                        )
+
+                        # Update locals for next iteration
+                        bitset_i = merged_bitset
+                        inputs_i = tuple(merged_inputs)
+                        outputs_i = merged_outputs
+                        merged = True
+
+                    if merged:
+                        sibling_candidates[sibling_i] = (
+                            bitset_i,
+                            (inputs_i, outputs_i),
+                        )
+                        all_subgraphs_bitset |= bitset_i
+
+            # Build final list from canonical entries only.
+            # Singleton nodes added as sibling candidates are only included
+            # if they were actually merged with another subgraph.
+            discovered_subgraphs_io: list[
+                tuple[tuple[Variable, ...], tuple[Variable, ...]]
+            ] = [
+                io
+                for idx, (_, io) in enumerate(sibling_candidates)
+                if find_canonical(idx) == idx
+                and (idx < n_discovered or idx in merge_targets)
+            ]
 
             # Yield sorted subgraphs
             # A client must be fused before its direct ancestors,
             # otherwise it would reintroduce the old nodes back into the graph.
             # Indirect ancestry through non-fused variables is order-independent.
-
             # Map each subgraph output variable to the respective subgraph index
             # Materialized list ensures the same int objects are reused everywhere,
             # which is required by walk_toposort's identity-based dependency removal.
-            subgraph_indices = list(range(len(discovered_subgraphs)))
+            subgraph_indices = list(range(len(discovered_subgraphs_io)))
             sg_idx_of_out = {
                 out: idx
-                for idx, (_, sg_outputs) in zip(subgraph_indices, discovered_subgraphs)
+                for idx, (_, sg_outputs) in zip(
+                    subgraph_indices, discovered_subgraphs_io
+                )
                 for out in sg_outputs
             }
 
             def direct_ancestors(
-                i, sg_idx_of_out=sg_idx_of_out, sgs=discovered_subgraphs
+                i, sg_idx_of_out=sg_idx_of_out, sgs=discovered_subgraphs_io
             ):
-                # Return edges: inputs of this subgraph that are outputs of another subgraph
                 sg_inputs, _ = sgs[i]
                 return [
                     ancestor_sg_idx
@@ -863,7 +986,7 @@ class FusionOptimizer(GraphRewriter):
             for i in reversed(
                 tuple(walk_toposort(subgraph_indices, deps=direct_ancestors))  # type: ignore[type-var]
             ):
-                yield discovered_subgraphs[i]
+                yield discovered_subgraphs_io[i]
 
         max_operands = elemwise_max_operands_fct(None)
         reason = self.__class__.__name__
