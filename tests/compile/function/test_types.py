@@ -491,6 +491,8 @@ class TestFunction:
             assert in1.value is in2.value
 
     def test_copy_delete_updates(self):
+        from contextlib import nullcontext
+
         w = iscalar("w")
         x = fscalar("x")
         # SharedVariable for tests, one of them has update
@@ -498,19 +500,27 @@ class TestFunction:
         z = shared(value=2, name="z")
         out = x + y + z
 
-        # Test for different linkers
-        # for mode in ["FAST_RUN","FAST_COMPILE"]:
-        # second_time = False
-        for mode in ("FAST_RUN", "FAST_COMPILE"):
-            ori = function([x], out, mode=mode, updates={z: z * 2})
-            cpy = ori.copy(delete_updates=True)
+        inplace_warn = pytest.warns(UserWarning, match="will still be mutated")
 
-            assert cpy(1) == 4
-            assert cpy(1) == 4
-            assert cpy(1) == 4
+        for mode in ("FAST_RUN", "FAST_COMPILE"):
+            y.set_value(1)
+            z.set_value(2)
+            # FAST_RUN applies inplace rewrites, so z will be destroyed.
+            # A warning is issued because dropping the update doesn't prevent
+            # the shared variable storage from being mutated.
+            ctx = inplace_warn if mode == "FAST_RUN" else nullcontext()
+            ori = function([x], out, mode=mode, updates={z: z * 2})
+            with ctx:
+                cpy = ori.copy(delete_updates=True)
+            if mode == "FAST_COMPILE":
+                assert cpy(1) == 4
+                assert cpy(1) == 4
+                assert cpy(1) == 4
 
         # Test if unused implicit and explicit inputs from delete_updates
         # are ignored as intended.
+        # No inplace warning here because z is not reachable from the output,
+        # so the destroying node won't be in the cloned graph.
         for mode in ("FAST_RUN", "FAST_COMPILE"):
             ori = function([x], x, mode=mode, updates={z: z * 2})
             cpy = ori.copy(delete_updates=True)

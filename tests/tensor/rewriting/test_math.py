@@ -4651,7 +4651,9 @@ def test_polygamma_specialization():
     y3 = polygamma(2, x)
 
     fn = pytensor.function(
-        [x], [y1, y2, y3], mode=get_default_mode().including("specialize")
+        [x],
+        [y1, y2, y3],
+        mode=get_default_mode().including("specialize").excluding("fusion"),
     )
     fn_outs = fn.maker.fgraph.outputs
     assert isinstance(fn_outs[0].owner.op.scalar_op, Psi)
