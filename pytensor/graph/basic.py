@@ -695,7 +695,7 @@ class NominalVariable(Generic[_TypeType, _IdType], AtomicVariable[_TypeType]):
                 return cls, (self.id, self.type)
 
             def _str(self):
-                return f"*{self.id}-{var_type.__str__(self)}"
+                return f"i{self.id}"
 
             new_type = type(
                 type_name, (cls, var_type), {"__reduce__": _reduce, "__str__": _str}
