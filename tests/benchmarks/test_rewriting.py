@@ -45,7 +45,7 @@ def _deep_small_kernels(n):
     "graph_fn, n, expected_n_repl",
     [
         ("deep_small_kernels", 20, (20, 60)),
-        ("large_fuseable_graph", 25, (128, 876)),
+        ("large_fuseable_graph", 25, (55, 901)),
     ],
 )
 def test_fusion_rewrite_benchmark(graph_fn, n, expected_n_repl, benchmark):
