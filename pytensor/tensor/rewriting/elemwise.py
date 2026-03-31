@@ -2,6 +2,7 @@ import abc
 import itertools
 import operator
 import sys
+from collections import defaultdict
 from collections.abc import Generator, Sequence
 from functools import cache, reduce
 from heapq import heapify, heappop, heappush
@@ -555,6 +556,26 @@ class FusionOptimizer(GraphRewriter):
             callbacks_before = fgraph.execute_callbacks_times.copy()
             callback_before = fgraph.execute_callbacks_time
 
+        def _insert_sorted_subgraph(
+            sorted_subgraphs, all_subgraphs_bitset, ancestors_bitset, entry
+        ):
+            """Insert a subgraph entry into sorted_subgraphs respecting topological order."""
+            if not (ancestors_bitset & all_subgraphs_bitset):
+                # No dependency on previous subgraphs, append at the end
+                sorted_subgraphs.append(entry)
+            else:
+                # Find the right insertion point by iterating in topological
+                # order (reverse of stored order), cumulatively excluding each
+                # subgraph until the dependency check passes.
+                remaining_bitset = all_subgraphs_bitset
+                for index, (other_bitset, _) in enumerate(reversed(sorted_subgraphs)):
+                    remaining_bitset &= ~other_bitset
+                    if not (ancestors_bitset & remaining_bitset):
+                        break
+                else:
+                    raise RuntimeError("Failed to find insertion point for subgraph")
+                sorted_subgraphs.insert(-(index + 1), entry)
+
         def find_fuseable_subgraphs(
             fg: FunctionGraph,
         ) -> Generator[tuple[tuple[Variable], tuple[Variable]], None, None]:
@@ -832,43 +853,136 @@ class FusionOptimizer(GraphRewriter):
                         if node_ancestors_bitset & subgraph_bitset
                     )
 
-                # Add new subgraph to sorted_subgraphs
-                # Because we start from sink nodes in reverse topological order, most times new subgraphs
-                # don't depend on previous subgraphs, so we can just append them at the end.
-                if not (unfuseable_ancestors_bitset & all_subgraphs_bitset):
-                    # That's the case here
-                    # None of the unfuseable_ancestors (i.e, the ancestors) are present in the previous collected subgraphs
-                    sorted_subgraphs.append(
-                        (subgraph_bitset, (subgraph_inputs, subgraph_outputs))
-                    )
-                else:
-                    # But not here, so we need to find the right position for insertion.
-                    # We iterate through the previous subgraphs in topological order (reverse of the stored order).
-                    # We cumulatively exclude each subgraph_bitset and perform the same dependency check again, until it passes.
-                    remaining_subgraphs_bitset = all_subgraphs_bitset
-                    for index, (other_subgraph_bitset, _) in enumerate(
-                        reversed(sorted_subgraphs)
-                    ):
-                        # Exclude subgraph bitset
-                        remaining_subgraphs_bitset &= ~other_subgraph_bitset
-                        if not (
-                            unfuseable_ancestors_bitset & remaining_subgraphs_bitset
-                        ):
-                            break  # bingo
-                    else:  # no-break
-                        raise RuntimeError(
-                            "Failed to find insertion point for fused subgraph"
-                        )
-                    sorted_subgraphs.insert(
-                        -(index + 1),
-                        (subgraph_bitset, (subgraph_inputs, subgraph_outputs)),
-                    )
+                _insert_sorted_subgraph(
+                    sorted_subgraphs,
+                    all_subgraphs_bitset,
+                    unfuseable_ancestors_bitset,
+                    (subgraph_bitset, (subgraph_inputs, subgraph_outputs)),
+                )
 
-                # Add subgraph to all_subgraphs_bitset
                 all_subgraphs_bitset |= subgraph_bitset
 
-            # Finished exploring the whole graph
-            # Yield from sorted_subgraphs, discarding the subgraph_bitset
+            # Merge sibling groups: independent subgraphs or remaining
+            # candidate nodes that share inputs but have no producer-consumer
+            # edge between them. The eager expansion above only walks
+            # producer-consumer edges, so it misses siblings like f(x) and
+            # g(x) that share an input without one feeding into the other.
+            sibling_candidates: list = list(sorted_subgraphs)
+            for node in candidate_starting_nodes:
+                bf = nodes_bitflags.get(node)
+                if (bf is not None) and not (bf & all_subgraphs_bitset):
+                    sibling_candidates.append(
+                        (bf, (tuple(dict.fromkeys(node.inputs)), node.outputs))
+                    )
+            # Create a mapping from inputs to sibling groups that consume them.
+            # Skip scalar constants as they get inlined later and don't
+            # represent meaningful shared computation between siblings.
+            input_to_sibling_idxs: dict[Variable, list[int]] = defaultdict(list)
+            for sibling_idx, (_, (inputs, _)) in enumerate(sibling_candidates):
+                for inp in inputs:
+                    if isinstance(inp, TensorConstant) and inp.unique_value is not None:
+                        continue
+                    input_to_sibling_idxs[inp].append(sibling_idx)
+
+            for sibling_idxs in input_to_sibling_idxs.values():
+                if len(sibling_idxs) < 2:
+                    continue
+
+                for i in range(len(sibling_idxs) - 1):
+                    sibling_i = sibling_idxs[i]
+                    if sibling_candidates[sibling_i] is None:
+                        # Already merged in a previous iteration
+                        continue
+
+                    bitset_i, (inputs_i, outputs_i) = sibling_candidates[sibling_i]
+                    bcast_i = outputs_i[0].type.broadcastable
+                    merged = False
+                    for sibling_j in sibling_idxs[i + 1 :]:
+                        if sibling_candidates[sibling_j] is None:
+                            # Already merged in a previous iteration
+                            continue
+                        bitset_j, (inputs_j, outputs_j) = sibling_candidates[sibling_j]
+                        if bcast_i != outputs_j[0].type.broadcastable:
+                            continue
+                        # Independence: neither is ancestor of the other
+                        if (
+                            bitset_i & ancestors_bitsets[outputs_j[0].owner]
+                            or bitset_j & ancestors_bitsets[outputs_i[0].owner]
+                        ):
+                            continue
+
+                        # Merge sibling_j into sibling_i
+                        merged_bitset = bitset_i | bitset_j
+                        merged_outputs = (*outputs_i, *outputs_j)
+                        merged_inputs = list(inputs_i)
+                        merged_inputs_set = set(inputs_i)
+                        for input_j in inputs_j:
+                            if input_j not in merged_inputs_set:
+                                merged_inputs.append(input_j)
+                                merged_inputs_set.add(input_j)
+                        # Hide sibling_j from future merges
+                        sibling_candidates[sibling_j] = None
+
+                        # Update ancestor bitsets so that any node
+                        # depending on part of the merged group now
+                        # depends on all of it (mirrors the main loop).
+                        merged_ancestors = reduce(
+                            or_,
+                            (ancestors_bitsets[o.owner] for o in merged_outputs),
+                        )
+                        ancestors_bitsets |= (
+                            (n, n_anc | merged_ancestors)
+                            for n, n_anc in ancestors_bitsets.items()
+                            if n_anc & merged_bitset
+                        )
+
+                        # Update locals for next iteration
+                        bitset_i = merged_bitset
+                        inputs_i = tuple(merged_inputs)
+                        outputs_i = merged_outputs
+                        merged = True
+
+                    if merged:
+                        # Write back so other input lists see the merged state
+                        sibling_candidates[sibling_i] = (
+                            bitset_i,
+                            (inputs_i, outputs_i),
+                        )
+
+                        # Update sorted_subgraphs
+                        merged_entry = (bitset_i, (inputs_i, outputs_i))
+
+                        # Replace earliest existing sibling with merged graph; drop the rest
+                        pos = next(
+                            (
+                                sg_idx
+                                for sg_idx, (sg_bitset, _) in enumerate(
+                                    sorted_subgraphs
+                                )
+                                if sg_bitset & bitset_i
+                            ),
+                            None,
+                        )
+                        if pos is not None:
+                            sorted_subgraphs[:] = [
+                                *sorted_subgraphs[:pos],
+                                merged_entry,
+                                *(
+                                    e
+                                    for e in sorted_subgraphs[pos + 1 :]
+                                    if not (e[0] & bitset_i)
+                                ),
+                            ]
+                        else:
+                            # All siblings were singletons: need a sorted insertion
+                            _insert_sorted_subgraph(
+                                sorted_subgraphs,
+                                all_subgraphs_bitset,
+                                ancestors_bitsets[outputs_i[0].owner],
+                                merged_entry,
+                            )
+                        all_subgraphs_bitset |= bitset_i
+
             yield from (io for _, io in sorted_subgraphs)
 
         max_operands = elemwise_max_operands_fct(None)
