@@ -904,10 +904,10 @@ Inner graphs:
 
 OpFromGraph{inline=False} [id A]
  ← Add [id E]
-    ├─ *0-<Matrix(float64, shape=(?, ?))> [id F]
+    ├─ i0 [id F]
     └─ Mul [id G]
-       ├─ *1-<Matrix(float64, shape=(?, ?))> [id H]
-       └─ *2-<Matrix(float64, shape=(?, ?))> [id I]
+       ├─ i1 [id H]
+       └─ i2 [id I]
 """
 
     for truth, out in zip(exp_res.split("\n"), lines, strict=True):

@@ -965,7 +965,7 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
         from pytensor.graph.basic import FrozenApply
 
         nominal_inputs = tuple(
-            NominalVariable(i, inp.type, name=inp.name) for i, inp in enumerate(inputs)
+            NominalVariable(i, inp.type) for i, inp in enumerate(inputs)
         )
 
         memo: dict[Variable, Variable] = dict(zip(inputs, nominal_inputs, strict=True))
@@ -1013,6 +1013,8 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
 
         self.inputs: tuple[Variable, ...] = nominal_inputs
         self.outputs: tuple[Variable, ...] = frozen_outputs
+        for i, out in enumerate(frozen_outputs):
+            out.name = f"o{i}"
         self._variables: set[Variable] | None = None
         self._apply_nodes: set[Apply] | None = None
         self._clients: dict[Variable, list[ClientType]] | None = None
