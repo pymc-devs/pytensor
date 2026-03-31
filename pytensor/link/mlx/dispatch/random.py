@@ -5,7 +5,10 @@ from numpy.random import Generator
 
 import pytensor.tensor.random.basic as ptr
 from pytensor.link.mlx.dispatch.basic import mlx_funcify, mlx_typify
-from pytensor.link.mlx.dispatch.core import convert_dtype_to_mlx, mlx_to_list_shape
+from pytensor.link.mlx.dispatch.tensor_basic import (
+    convert_dtype_to_mlx,
+    mlx_to_list_shape,
+)
 
 
 def numpy_generator_to_mlx_key(rng: Generator) -> mx.array:
