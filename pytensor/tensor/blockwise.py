@@ -419,7 +419,7 @@ class Blockwise(COp):
 
         return [[True for _ in node.outputs] for _ in node.inputs]
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def pull_back(self, inputs, outputs, output_gradients):
         batch_ndim = self.batch_ndim(outputs[0].owner)
 
         # Obtain core_op gradients
@@ -442,7 +442,7 @@ class Blockwise(COp):
             )
         ]
 
-        core_input_gradients = self.core_op.L_op(
+        core_input_gradients = self.core_op.pull_back(
             core_inputs, core_outputs, core_output_gradients
         )
 

@@ -86,7 +86,7 @@ class JoinDims(Op):
 
         out[0] = x.reshape(output_shape)
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         (x,) = inputs
         (g_out,) = output_grads
 
@@ -210,7 +210,7 @@ class SplitDims(Op):
     def connection_pattern(self, node):
         return [[True], [False]]
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         (x, _) = inputs
         (g_out,) = output_grads
         n_axes = g_out.ndim - x.ndim + 1

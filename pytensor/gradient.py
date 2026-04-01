@@ -247,16 +247,14 @@ def _rop_legacy(
                 try:
                     local_eval_points.append(inp.zeros_like())
                 except Exception:
-                    # None should be used for non-differentiable
-                    # arguments, like for example random states
-                    local_eval_points.append(None)
+                    local_eval_points.append(disconnected_type())
             elif inp.owner in seen_nodes:
                 local_eval_points.append(
                     seen_nodes[inp.owner][inp.owner.outputs.index(inp)]
                 )
 
             else:
-                # We actually need to compute the R_op for this node
+                # We actually need to compute the pushforward for this node
 
                 _traverse(inp.owner)
                 local_eval_points.append(
@@ -264,7 +262,7 @@ def _rop_legacy(
                 )
         same_type_eval_points = []
         for x, y in zip(inputs, local_eval_points, strict=True):
-            if y is not None:
+            if not isinstance(y.type, DisconnectedType):
                 if not isinstance(x, Variable):
                     x = pytensor.tensor.as_tensor_variable(x)
                 if not isinstance(y, Variable):
@@ -272,18 +270,6 @@ def _rop_legacy(
                 try:
                     y = x.type.filter_variable(y)
                 except TypeError:
-                    # This is a hack
-                    # Originally both grad and Rop were written
-                    # with the assumption that a variable and the
-                    # gradient wrt that variable would have the same
-                    # dtype. This was a bad assumption because the
-                    # gradient wrt an integer can take on non-integer
-                    # values.
-                    # grad is now fixed, but Rop is not, so when grad
-                    # does the right thing and violates this assumption
-                    # we have to make it be wrong for Rop to keep working
-                    # Rop should eventually be upgraded to handle integers
-                    # correctly, the same as grad
                     y = pytensor.tensor.cast(y, x.type.dtype)
                     y = x.type.filter_variable(y)
                 assert x.type.in_same_class(y.type)
@@ -291,7 +277,9 @@ def _rop_legacy(
             else:
                 same_type_eval_points.append(y)
 
-        seen_nodes[node] = op.R_op(node.inputs, same_type_eval_points)
+        seen_nodes[node] = op.push_forward(
+            node.inputs, node.outputs, same_type_eval_points
+        )
 
     # end _traverse
 
@@ -303,9 +291,9 @@ def _rop_legacy(
     for out in f:
         if out in wrt:
             rval.append(eval_points[wrt.index(out)])
-        elif (
-            seen_nodes.get(out.owner, None) is None
-            or seen_nodes[out.owner][out.owner.outputs.index(out)] is None
+        elif seen_nodes.get(out.owner, None) is None or isinstance(
+            seen_nodes[out.owner][out.owner.outputs.index(out)].type,
+            DisconnectedType,
         ):
             message = (
                 "Rop method was asked to compute the gradient "
@@ -1296,11 +1284,11 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                     for ng in new_output_grads
                 )
 
-                input_grads = node.op.L_op(inputs, node.outputs, new_output_grads)
+                input_grads = node.op.pull_back(inputs, node.outputs, new_output_grads)
 
                 if input_grads is None:
                     raise TypeError(
-                        f"{node.op}.grad returned NoneType, expected iterable."
+                        f"{node.op}.pull_back returned NoneType, expected iterable."
                     )
 
                 if len(input_grads) != len(inputs):
@@ -2272,12 +2260,12 @@ def _is_zero(x):
 
 
 class ZeroGrad(ViewOp):
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [g_out.zeros_like() for g_out in g_outs]
 
-    def R_op(self, inputs, eval_points):
-        if eval_points[0] is None:
-            return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return [disconnected_type()]
 
         return pytensor.tensor.zeros(1)
 
@@ -2310,11 +2298,11 @@ def zero_grad(x):
 
 
 class UndefinedGrad(ViewOp):
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [grad_undefined(self, i, arg) for i, arg in enumerate(args)]
 
-    def R_op(self, inputs, eval_points):
-        return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        return [disconnected_type()]
 
     def connection_pattern(self, node):
         return [[True]]
@@ -2348,11 +2336,11 @@ def undefined_grad(x):
 
 
 class DisconnectedGrad(ViewOp):
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [disconnected_type() for g_out in g_outs]
 
-    def R_op(self, inputs, eval_points):
-        return [None]
+    def push_forward(self, inputs, outputs, eval_points):
+        return [disconnected_type()]
 
     def connection_pattern(self, node):
         return [[False]]
@@ -2403,7 +2391,7 @@ class GradClip(ViewOp):
         if not self.clip_upper_bound >= self.clip_lower_bound:
             raise ValueError("`clip_upper_bound` should be >= `clip_lower_bound`")
 
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [
             pytensor.tensor.clip(g_out, self.clip_lower_bound, self.clip_upper_bound)
             for g_out in g_outs
@@ -2446,7 +2434,7 @@ class GradScale(ViewOp):
     def __init__(self, multiplier):
         self.multiplier = multiplier
 
-    def grad(self, args, g_outs):
+    def pull_back(self, args, outputs, g_outs):
         return [self.multiplier * g_out for g_out in g_outs]
 
 

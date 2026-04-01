@@ -543,7 +543,7 @@ class MinimizeScalarOp(ScipyScalarWrapperOp):
         outputs[0][0] = np.array(res.x, dtype=x0.dtype)
         outputs[1][0] = np.bool_(res.success)
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         # TODO: Handle disconnected inputs
         x, *args = inputs
         x_star, _ = outputs
@@ -686,7 +686,7 @@ class MinimizeOp(ScipyVectorWrapperOp):
         outputs[0][0] = res.x.reshape(x0.shape).astype(x0.dtype)
         outputs[1][0] = np.bool_(res.success)
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         x, *args = inputs
         x_star, _success = outputs
         output_grad, _ = output_grads
@@ -879,7 +879,7 @@ class RootScalarOp(ScipyScalarWrapperOp):
         outputs[0][0] = np.array(res.root)
         outputs[1][0] = np.bool_(res.converged)
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         x, *args = inputs
         x_star, _ = outputs
         output_grad, _ = output_grads
@@ -1052,7 +1052,7 @@ class RootOp(ScipyVectorWrapperOp):
         outputs[0][0] = res.x.reshape(variables.shape).astype(variables.dtype)
         outputs[1][0] = np.bool_(res.success)
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pull_back(self, inputs, outputs, output_grads):
         x, *args = inputs
         x_star, _ = outputs
         output_grad, _ = output_grads
