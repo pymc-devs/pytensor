@@ -5,6 +5,7 @@ from pytensor.compile.debugmode import _lessbroken_deepcopy
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
 from pytensor.link.c.op import COp
+from pytensor.scalar.basic import ScalarVariable
 from pytensor.tensor.type import lscalar
 from pytensor.tensor.type_other import SliceType
 from pytensor.tensor.variable import TensorVariable
@@ -68,7 +69,7 @@ class TypedListConstant(_typed_list_py_operators, Constant):
 TypedListType.constant_type = TypedListConstant
 
 
-class GetItem(COp):
+class GetItem(COp[tuple[Variable], Variable]):
     # See doc in instance of this Op or function after this class definition.
     view_map = {0: [0]}
     __props__ = ()
@@ -130,7 +131,7 @@ index
 """
 
 
-class Append(COp):
+class Append(COp[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -209,7 +210,7 @@ y
 """
 
 
-class Extend(COp):
+class Extend(COp[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -293,7 +294,7 @@ toAppend
 """
 
 
-class Insert(COp):
+class Insert(COp[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -379,7 +380,7 @@ toInsert
 """
 
 
-class Remove(Op):
+class Remove(Op[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -436,7 +437,7 @@ from a list. This implementation works in that case.
 """
 
 
-class Reverse(COp):
+class Reverse(COp[tuple[TypedListVariable], TypedListVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ("inplace",)
 
@@ -503,7 +504,7 @@ x
 """
 
 
-class Index(Op):
+class Index(Op[tuple[ScalarVariable], ScalarVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ()
 
@@ -532,7 +533,7 @@ class Index(Op):
 index_ = Index()
 
 
-class Count(Op):
+class Count(Op[tuple[ScalarVariable], ScalarVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ()
 
@@ -579,7 +580,7 @@ from a list. This implementation works in that case.
 """
 
 
-class Length(COp):
+class Length(COp[tuple[ScalarVariable], ScalarVariable]):
     # See doc in instance of this Op after the class definition.
     __props__ = ()
 
@@ -620,7 +621,7 @@ x
 """
 
 
-class MakeList(Op):
+class MakeList(Op[tuple[TypedListVariable], TypedListVariable]):
     __props__ = ()
 
     def make_node(self, a):

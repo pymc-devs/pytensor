@@ -9,9 +9,10 @@ from pytensor.link.c.op import COp
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.elemwise import get_normalized_batch_axes
 from pytensor.tensor.math import gamma, gammaln, log, neg, sum
+from pytensor.tensor.variable import TensorVariable
 
 
-class SoftmaxGrad(COp):
+class SoftmaxGrad(COp[tuple[TensorVariable], TensorVariable]):
     """
     Gradient wrt x of the Softmax Op.
 
@@ -239,7 +240,7 @@ class SoftmaxGrad(COp):
         )
 
 
-class Softmax(COp):
+class Softmax(COp[tuple[TensorVariable], TensorVariable]):
     r"""
     Softmax activation function
     :math:`\\varphi(\\mathbf{x})_j =
@@ -494,7 +495,7 @@ def softmax(c, axis=None):
     return Softmax(axis=axis)(c)
 
 
-class LogSoftmax(COp):
+class LogSoftmax(COp[tuple[TensorVariable], TensorVariable]):
     r"""
     LogSoftmax activation function
     :math:`\\varphi(\\mathbf{x})_j =

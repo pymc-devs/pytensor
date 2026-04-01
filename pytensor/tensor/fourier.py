@@ -16,10 +16,10 @@ from pytensor.tensor.math import exp, lt, outer, tensordot
 from pytensor.tensor.shape import shape
 from pytensor.tensor.subtensor import set_subtensor
 from pytensor.tensor.type import TensorType, integer_dtypes
-from pytensor.tensor.variable import TensorConstant
+from pytensor.tensor.variable import TensorConstant, TensorVariable
 
 
-class Fourier(Op):
+class Fourier(Op[tuple[TensorVariable], TensorVariable]):
     """
     WARNING: for officially supported FFTs, use pytensor.tensor.fft, which
     provides real-input FFTs. Gradients are supported.

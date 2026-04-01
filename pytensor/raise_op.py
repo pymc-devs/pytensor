@@ -10,6 +10,7 @@ from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import Generic
 from pytensor.scalar.basic import ScalarType, as_scalar
 from pytensor.tensor.type import DenseTensorType
+from pytensor.tensor.variable import TensorVariable
 
 
 class ExceptionType(Generic):
@@ -23,7 +24,7 @@ class ExceptionType(Generic):
 exception_type = ExceptionType()
 
 
-class CheckAndRaise(COp):
+class CheckAndRaise(COp[tuple[TensorVariable], TensorVariable]):
     """An `Op` that checks conditions and raises an exception if they fail.
 
     This `Op` returns its "value" argument if its condition arguments are all

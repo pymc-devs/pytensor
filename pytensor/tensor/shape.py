@@ -50,7 +50,7 @@ def register_shape_c_code(type, code, version=()):
     Shape.c_code_and_version[type] = (code, version)
 
 
-class Shape(COp):
+class Shape(COp[tuple[TensorVariable], TensorVariable]):
     """
     L{Op} to return the shape of a matrix.
 
@@ -198,7 +198,7 @@ def shape_tuple(x: TensorVariable) -> tuple[Variable, ...]:
     return res
 
 
-class Shape_i(COp):
+class Shape_i(COp[tuple[TensorVariable], TensorVariable]):
     """
     L{Op} to return the shape of a matrix.
 
@@ -380,7 +380,7 @@ def register_shape_i_c_code(typ, code, check_input, version=()):
     Shape_i.c_code_and_version[typ] = (code, check_input, version)
 
 
-class SpecifyShape(COp):
+class SpecifyShape(COp[tuple[TensorVariable], TensorVariable]):
     """
     L{Op} that puts into the graph the user-provided shape.
 
@@ -625,7 +625,7 @@ def _vectorize_specify_shape(op, node, x, *shape):
     return specify_shape(x, new_shape).owner
 
 
-class Reshape(COp):
+class Reshape(COp[tuple[TensorVariable], TensorVariable]):
     """Perform a reshape operation of the input x to the new shape shp.
     The number of dimensions to which to reshape to (ndim) must be
     known at graph build time.

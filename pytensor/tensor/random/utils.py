@@ -3,7 +3,8 @@ from copy import deepcopy
 from functools import wraps
 from itertools import zip_longest
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
+from typing import cast as typing_cast
 
 import numpy as np
 from numpy.random import Generator
@@ -15,6 +16,7 @@ from pytensor.tensor import NoneConst, get_vector_length
 from pytensor.tensor.basic import as_tensor_variable, cast
 from pytensor.tensor.extra_ops import broadcast_arrays, broadcast_to
 from pytensor.tensor.math import maximum
+from pytensor.tensor.random.var import RandomGeneratorSharedVariable
 from pytensor.tensor.shape import shape_padleft, specify_shape
 from pytensor.tensor.type import int_dtypes
 from pytensor.tensor.type_other import NoneTypeT
@@ -79,9 +81,30 @@ def params_broadcast_shapes(
     return bcast_shapes
 
 
+@overload
+def broadcast_params(  # type: ignore[overload-overlap]
+    params: Sequence[np.ndarray], ndims_params: Sequence[int]
+) -> list[np.ndarray]: ...
+
+
+@overload
+def broadcast_params(
+    params: Sequence[TensorVariable], ndims_params: Sequence[int]
+) -> list[TensorVariable]: ...
+
+
+@overload
 def broadcast_params(
     params: Sequence[np.ndarray | TensorVariable], ndims_params: Sequence[int]
-) -> list[np.ndarray]:
+) -> list[TensorVariable]: ...
+
+
+def broadcast_params(
+    params: Sequence[np.ndarray]
+    | Sequence[TensorVariable]
+    | Sequence[np.ndarray | TensorVariable],
+    ndims_params: Sequence[int],
+) -> list[np.ndarray] | list[TensorVariable]:
     """Broadcast parameters that have different dimensions.
 
     >>> ndims_params = [1, 2]
@@ -187,23 +210,23 @@ def normalize_size_param(
         return shape
 
     if isinstance(shape, int):
-        shape = as_tensor_variable([shape], ndim=1)
+        _shape = as_tensor_variable([shape], ndim=1)
     else:
         if not isinstance(shape, Sequence | Variable | np.ndarray):
             raise TypeError(
                 "Parameter size must be None, an integer, or a sequence with integers."
             )
-        shape = cast(as_tensor_variable(shape, ndim=1, dtype="int64"), "int64")
+        _shape = cast(as_tensor_variable(shape, ndim=1, dtype="int64"), "int64")
 
-        if shape.type.shape == (None,):
+        if _shape.type.shape == (None,):
             # This should help ensure that the length of non-constant `size`s
             # will be available after certain types of cloning (e.g. the kind `Scan` performs)
-            shape = specify_shape(shape, (get_vector_length(shape),))
+            _shape = specify_shape(_shape, (get_vector_length(_shape),))
 
-    assert shape.type.shape != (None,)
-    assert shape.dtype in int_dtypes
+    assert _shape.type.shape != (None,)
+    assert _shape.dtype in int_dtypes
 
-    return shape
+    return _shape
 
 
 def custom_rng_deepcopy(rng):
@@ -254,7 +277,9 @@ class RandomStream:
             self.namespaces = [(namespace, set(namespace.__all__))]
 
         self.default_instance_seed = seed
-        self.state_updates = []
+        self.state_updates: list[
+            tuple[RandomGeneratorSharedVariable, RandomGeneratorSharedVariable]
+        ] = []
         self.gen_seedgen = np.random.SeedSequence(seed)
         self.rng_ctor = rng_ctor
 
@@ -335,7 +360,7 @@ class RandomStream:
         rng = shared(self.rng_ctor(seed), borrow=True)
 
         # Generate the sample
-        out = op(*args, **kwargs, rng=rng)
+        out: TensorVariable = op(*args, **kwargs, rng=rng)
 
         # This is the value that should be used to replace the old state
         # (i.e. `rng`) after `out` is sampled/evaluated.
@@ -353,7 +378,7 @@ class RandomStream:
 def supp_shape_from_ref_param_shape(
     *,
     ndim_supp: int,
-    dist_params: Sequence[Variable],
+    dist_params: Sequence[TensorVariable],
     param_shapes: Sequence[tuple[ScalarVariable, ...]] | None = None,
     ref_param_idx: int,
 ) -> TensorVariable | tuple[ScalarVariable, ...]:
@@ -390,8 +415,8 @@ def supp_shape_from_ref_param_shape(
     if ndim_supp <= 0:
         raise ValueError("ndim_supp must be greater than 0")
     if param_shapes is not None:
-        ref_param = param_shapes[ref_param_idx]
-        return tuple(ref_param[i] for i in range(-ndim_supp, 0))
+        ref_param_shape = param_shapes[ref_param_idx]
+        return tuple(ref_param_shape[i] for i in range(-ndim_supp, 0))
     else:
         ref_param = dist_params[ref_param_idx]
         if ref_param.ndim < ndim_supp:
@@ -399,4 +424,4 @@ def supp_shape_from_ref_param_shape(
                 "Reference parameter does not match the expected dimensions; "
                 f"{ref_param} has less than {ndim_supp} dim(s)."
             )
-        return ref_param.shape[-ndim_supp:]
+        return typing_cast(TensorVariable, ref_param.shape[-ndim_supp:])

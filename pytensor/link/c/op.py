@@ -4,13 +4,20 @@ import warnings
 from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 from re import Pattern
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, cast
 
 import numpy as np
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.op import ComputeMapType, Op, StorageMapType, ThunkType
+from pytensor.graph.op import (
+    ComputeMapType,
+    Op,
+    OpDefaultOutputType,
+    OpOutputsType,
+    StorageMapType,
+    ThunkType,
+)
 from pytensor.graph.type import HasDataType
 from pytensor.graph.utils import MethodNotDefined
 from pytensor.link.c.interface import CLinkerOp
@@ -32,7 +39,7 @@ def is_cthunk_wrapper_type(thunk: Callable[[], None]) -> CThunkWrapperType:
     return res
 
 
-class COp(Op, CLinkerOp):
+class COp(Op, CLinkerOp, Generic[OpOutputsType, OpDefaultOutputType]):
     """An `Op` with a C implementation."""
 
     def make_c_thunk(
@@ -133,7 +140,7 @@ class COp(Op, CLinkerOp):
         )
 
 
-class OpenMPOp(COp):
+class OpenMPOp(COp, Generic[OpOutputsType, OpDefaultOutputType]):
     r"""Base class for `Op`\s using OpenMP.
 
     This `Op` will check that the compiler support correctly OpenMP code.
@@ -254,7 +261,7 @@ def get_io_macros(inputs: list[str], outputs: list[str]) -> tuple[str, str]:
     return define_all, undef_all
 
 
-class ExternalCOp(COp):
+class ExternalCOp(COp, Generic[OpOutputsType, OpDefaultOutputType]):
     """Class for an `Op` with an external C implementation.
 
     One can inherit from this class, provide its constructor with a path to

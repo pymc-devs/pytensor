@@ -16,9 +16,6 @@ pytensor/tensor/elemwise.py
 pytensor/tensor/extra_ops.py
 pytensor/tensor/math.py
 pytensor/tensor/optimize.py
-pytensor/tensor/random/basic.py
-pytensor/tensor/random/op.py
-pytensor/tensor/random/utils.py
 pytensor/tensor/rewriting/basic.py
 pytensor/tensor/type.py
 pytensor/tensor/type_other.py
