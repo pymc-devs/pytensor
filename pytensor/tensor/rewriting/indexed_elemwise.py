@@ -15,6 +15,7 @@ from pytensor.printing import op_debug_information
 from pytensor.scalar.basic import Composite, identity
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
+from pytensor.tensor.shape import Reshape
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -61,7 +62,9 @@ def undo_take_dimshuffle_for_fusion(fgraph, node):
         return None
     asub1_node = inner.owner
 
-    # AdvancedSubtensor1's input must be an inverse DimShuffle (same swap)
+    # AdvancedSubtensor1's input must be the inverse DimShuffle.
+    # For a pair swap, the inverse is the same permutation (swap is self-inverse).
+    # A general permutation would need argsort(order) here.
     inner_ds_var = asub1_node.inputs[0]
     if inner_ds_var.owner is None or not isinstance(inner_ds_var.owner.op, DimShuffle):
         return None
@@ -93,6 +96,106 @@ def undo_take_dimshuffle_for_fusion(fgraph, node):
     return [new_out]
 
 
+@node_rewriter([Reshape])
+def undo_take_reshape_for_fusion(fgraph, node):
+    """Undo ``Reshape(AdvancedSubtensor1(x, flatten(idx)), shape)`` for ND indices.
+
+    ``transform_take`` rewrites ``x[mat_idx]`` (ND integer index) into
+    ``AdvancedSubtensor1(x, mat_idx.ravel()).reshape(mat_idx.shape + ...)``,
+    possibly with DimShuffle axis-swaps for non-zero axes.  This rewrite
+    undoes that so ``FuseIndexedElemwise`` can absorb the ND index directly.
+    """
+    [reshape_out] = node.outputs
+
+    # Must feed a single Elemwise (or chain to one via another pre-fusion rewrite)
+    clients = fgraph.clients[reshape_out]
+    if len(clients) != 1:
+        return None
+    client_node, _ = clients[0]
+    if not isinstance(getattr(client_node, "op", None), Elemwise):
+        return None
+
+    inner = node.inputs[0]
+    if inner.owner is None:
+        return None
+
+    # --- Detect axis-0 pattern: Reshape(AdvancedSubtensor1(src, flatten(idx)), shape)
+    # --- Detect axis>0 pattern: Reshape(DimShuffle(AdvancedSubtensor1(DimShuffle(src), flatten(idx))), shape)
+    axis = 0
+    asub1_node = None
+
+    if isinstance(inner.owner.op, AdvancedSubtensor1):
+        asub1_node = inner.owner
+    elif isinstance(inner.owner.op, DimShuffle):
+        # Check for axis-swap DimShuffle wrapping AdvancedSubtensor1
+        outer_ds = inner.owner.op
+        if outer_ds.augment or outer_ds.drop:
+            return None
+        order = outer_ds.new_order
+        ndim_ds = len(order)
+        if ndim_ds < 2:
+            return None
+        swapped = [i for i in range(ndim_ds) if order[i] != i]
+        if len(swapped) != 2:
+            return None
+        ax_a, ax_b = swapped
+        if order[ax_a] != ax_b or order[ax_b] != ax_a:
+            return None
+        axis = max(ax_a, ax_b)
+
+        ds_inner = inner.owner.inputs[0]
+        if ds_inner.owner is None or not isinstance(
+            ds_inner.owner.op, AdvancedSubtensor1
+        ):
+            return None
+        asub1_node = ds_inner.owner
+
+        # AdvancedSubtensor1's source must be the inverse DimShuffle
+        src_var = asub1_node.inputs[0]
+        if src_var.owner is None or not isinstance(src_var.owner.op, DimShuffle):
+            return None
+        if src_var.owner.op.new_order != tuple(order):
+            return None
+
+        # Intermediates must be single-client
+        if len(fgraph.clients[ds_inner]) != 1:
+            return None
+        if len(fgraph.clients[src_var]) != 1:
+            return None
+    else:
+        return None
+
+    if asub1_node is None:
+        return None
+
+    # The index input to AdvancedSubtensor1 must be Reshape{1}(mat_idx, [-1]) (flatten)
+    flat_idx = asub1_node.inputs[1]
+    if flat_idx.owner is None or not isinstance(flat_idx.owner.op, Reshape):
+        return None
+    if flat_idx.owner.op.ndim != 1:
+        return None
+    mat_idx = flat_idx.owner.inputs[0]
+    if mat_idx.ndim < 2:
+        return None
+
+    # AdvancedSubtensor1 output must be single-client
+    if len(fgraph.clients[asub1_node.outputs[0]]) != 1:
+        return None
+
+    # Recover the original source (unwrap inner DimShuffle if axis > 0)
+    if axis > 0:
+        source = asub1_node.inputs[0].owner.inputs[0]
+    else:
+        source = asub1_node.inputs[0]
+
+    # Build AdvancedSubtensor: source[:, ..., mat_idx, :, ...]
+    src_ndim = source.type.ndim
+    idx_list = [slice(None)] * src_ndim
+    idx_list[axis] = 0  # pointer to the single index variable
+    new_out = AdvancedSubtensor(idx_list=idx_list)(source, mat_idx)
+    return [new_out]
+
+
 indexed_elemwise_optdb = SequenceDB()
 optdb.register(
     "fuse_indexed_into_elemwise",
@@ -108,6 +211,13 @@ indexed_elemwise_optdb.register(
     dfs_rewriter(undo_take_dimshuffle_for_fusion),
     "numba",
     position=0,
+)
+
+indexed_elemwise_optdb.register(
+    "undo_take_reshape_for_fusion",
+    dfs_rewriter(undo_take_reshape_for_fusion),
+    "numba",
+    position=0.5,
 )
 
 
@@ -232,7 +342,7 @@ class FuseIndexedElemwise(GraphRewriter):
                     if idx == slice(None):
                         if adv:
                             break  # trailing slices after the advanced group
-                    elif hasattr(idx, "ndim") and idx.ndim >= 1 and idx.dtype != "bool":
+                    elif hasattr(idx, "ndim") and idx.dtype != "bool":
                         if adv and adv[-1][1] != i - 1:
                             return None  # non-consecutive
                         adv.append((idx, i))
@@ -290,7 +400,7 @@ class FuseIndexedElemwise(GraphRewriter):
                     if idx == slice(None):
                         if adv:
                             break
-                    elif hasattr(idx, "ndim") and idx.ndim >= 1 and idx.dtype != "bool":
+                    elif hasattr(idx, "ndim") and idx.dtype != "bool":
                         if adv and adv[-1][1] != i - 1:
                             return None
                         adv.append((idx, i))
@@ -441,6 +551,10 @@ class FuseIndexedElemwise(GraphRewriter):
                     multi_client_outs.add(out_idx)
 
             if multi_client_outs:
+                # Rebuild the Elemwise with duplicated outputs.
+                # e.g. Exp(x) -> Composite([x], [exp(x), exp(x)])(x)
+                # so the Elemwise produces [out0, out1] where out1 is
+                # available for the scatter to replace.
                 scalar_op = node.op.scalar_op
                 if isinstance(scalar_op, Composite):
                     s_inputs = list(scalar_op.inputs)
@@ -452,6 +566,7 @@ class FuseIndexedElemwise(GraphRewriter):
                     s_inputs = list(scalar_node.inputs)
                     s_outputs = list(scalar_node.outputs)
 
+                # Map from original out_idx to the new duplicate out_idx.
                 # Wrap duplicates with identity so Composite._cleanup_graph
                 # doesn't clone the entire subgraph for repeated outputs.
                 # TODO: _cleanup_graph should use identity instead of clone
@@ -464,9 +579,11 @@ class FuseIndexedElemwise(GraphRewriter):
                 new_scalar_op = Composite(s_inputs, s_outputs)
                 new_elemwise = Elemwise(new_scalar_op)(*node.inputs, return_list=True)
 
+                # Update node reference and remap outputs
                 old_node = node
                 node = new_elemwise[0].owner
 
+                # Rebuild inner_inputs with the new node's inputs
                 inner_inputs = [
                     inp.owner.inputs[0] if i in indexed_positions else inp
                     for i, inp in enumerate(node.inputs)
@@ -489,10 +606,14 @@ class FuseIndexedElemwise(GraphRewriter):
                 else:
                     call_inputs.append(target.copy())
 
+                # Use the duplicate output for scatter if multi-client
                 scatter_idx = dup_map.get(out_idx, out_idx)
+                # The value to scatter: use the (possibly duplicated) Elemwise output
                 scatter_value = node.outputs[scatter_idx]
 
+                # Build the scatter output using the correct value
                 if update_node.op.inplace:
+                    # Rebuild with the new value
                     if isinstance(update_node.op, AdvancedIncSubtensor1):
                         scatter_out = update_node.op(
                             target, scatter_value, update_node.inputs[2]
@@ -518,7 +639,6 @@ class FuseIndexedElemwise(GraphRewriter):
                     scatter_out = inplace_op(
                         target, scatter_value, *update_node.inputs[2:]
                     )
-
                 inner_outputs[scatter_idx] = scatter_out
                 outer_destroy_map[scatter_idx] = [target_pos]
 
@@ -565,6 +685,7 @@ class FuseIndexedElemwise(GraphRewriter):
                 indexed_outputs=indexed_outputs_spec,
             )(*call_inputs, return_list=True)
 
+            # The node whose outputs we need to replace in the outer graph
             orig_node = old_node if multi_client_outs else node
             replacements = []
             for out_idx in range(len(orig_node.outputs)):
@@ -573,6 +694,7 @@ class FuseIndexedElemwise(GraphRewriter):
                     scatter_idx = dup_map.get(out_idx, out_idx)
                     replacements.append((update_node.outputs[0], new_outs[scatter_idx]))
                     if out_idx in dup_map:
+                        # Multi-client: also replace the raw elemwise output
                         replacements.append(
                             (orig_node.outputs[out_idx], new_outs[out_idx])
                         )
