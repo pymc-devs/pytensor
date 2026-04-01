@@ -269,10 +269,13 @@ class TestIndexedReadFusion:
 class TestIndexedUpdateFusion:
     """Test indexed updates (AdvancedIncSubtensor1) fused into Elemwise."""
 
-    def test_no_fusion_when_val_broadcasts_against_target(self):
-        """Don't fuse (yet) if elemwise output broadcasts against target's trailing axes.
+    def test_no_fusion_when_idx_axes_outside_elemwise_loop(self):
+        """Don't fuse if the indexed axes are not within the Elemwise loop.
 
-        TODO: support this by making the update output's core_ndim > 0.
+        Here the index is on axis 0 of target(5, 10), but the Elemwise
+        output (10,) corresponds to axis 1 (the non-indexed trailing axis).
+        The indexed axis doesn't overlap with the Elemwise computation, so
+        fusing would misalign which input dims map to which target dims.
         """
         rng = np.random.default_rng(42)
         idx = rng.integers(5, size=10).astype(np.int64)
@@ -282,9 +285,9 @@ class TestIndexedUpdateFusion:
         elemwise_out = advanced_subtensor1(x, idx) + y  # shape (10,)
         out = pt.inc_subtensor(target[idx], elemwise_out)
         fn, fn_u = fused_and_unfused([x, y, target], out)
-        # Write not fused — val (10,) would broadcast to (10, 10) in the target.
-        # Read fusion still creates an IndexedElemwise, but the
-        # AdvancedIncSubtensor1 must remain outside it.
+        # Write not fused — the Elemwise loop dim is the non-indexed axis,
+        # not the indexed axis. Read fusion may still create an
+        # IndexedElemwise, but the AdvancedIncSubtensor1 must remain outside.
         assert any(
             isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
         )
@@ -313,6 +316,35 @@ class TestIndexedUpdateFusion:
         xv = rng.normal(size=(1,))
         tv = rng.normal(size=(5,))
         np.testing.assert_allclose(fn(xv, tv), fn_u(xv, tv), rtol=1e-10)
+
+    def test_broadcast_val_into_non_indexed_dims(self):
+        """Fuse when Elemwise output broadcasts into target's non-indexed dims.
+
+        target(5, 3)[:, idx] += exp(val) — the Elemwise loop covers the
+        index axis (axis 1), and the scalar result broadcasts into the
+        non-indexed leading axis (axis 0, core_ndim=1).
+
+        Requires excluding local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1
+        so we keep AdvancedIncSubtensor on the correct axis.
+        """
+        rng = np.random.default_rng(42)
+        idx = rng.integers(3, size=10).astype(np.int64)
+        target = pt.matrix("target", shape=(5, 3))
+        val = pt.vector("val", shape=(10,))
+        out = pt.inc_subtensor(target[:, idx], pt.exp(val))
+
+        mode = NUMBA_MODE.excluding(
+            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
+        )
+        mode_u = NUMBA_NO_FUSION.excluding(
+            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
+        )
+        fn = pytensor.function([val, target], out, mode=mode, trust_input=True)
+        fn_u = pytensor.function([val, target], out, mode=mode_u, trust_input=True)
+        assert_fused(fn)
+        valv = rng.normal(size=(10,))
+        tv = rng.normal(size=(5, 3))
+        np.testing.assert_allclose(fn(valv, tv), fn_u(valv, tv), rtol=1e-10)
 
     def test_inc_subtensor(self):
         rng = np.random.default_rng(42)
