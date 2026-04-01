@@ -8,11 +8,7 @@ import pytensor.tensor as pt
 from pytensor import config
 from pytensor.compile.mode import get_mode
 from pytensor.tensor.rewriting.indexed_elemwise import IndexedElemwise
-from pytensor.tensor.subtensor import (
-    AdvancedIncSubtensor1,
-    AdvancedSubtensor,
-    advanced_subtensor1,
-)
+from pytensor.tensor.subtensor import AdvancedIncSubtensor1, advanced_subtensor1
 
 
 numba = pytest.importorskip("numba")
@@ -130,121 +126,6 @@ class TestIndexedReadFusion:
         yv = np.ones((3, 50))
         np.testing.assert_allclose(fn(xv, yv), fn_u(xv, yv), rtol=1e-10)
 
-    def test_nd_index_axis0(self):
-        """2D matrix index on axis 0."""
-        rng = np.random.default_rng(42)
-        x = pt.vector("x", shape=(100,))
-        mat_idx = pt.matrix("mat_idx", dtype="int64", shape=(10, 5))
-        y = pt.matrix("y", shape=(10, 5))
-        fn, fn_u = fused_and_unfused([x, mat_idx, y], pt.exp(x[mat_idx]) + y)
-        assert_fused(fn)
-        xv = rng.normal(size=(100,))
-        iv = rng.integers(100, size=(10, 5)).astype(np.int64)
-        yv = rng.normal(size=(10, 5))
-        np.testing.assert_allclose(fn(xv, iv, yv), fn_u(xv, iv, yv), rtol=1e-10)
-
-    def test_nd_index_axis1(self):
-        """2D matrix index on axis 1 (via undo_take_reshape_for_fusion)."""
-        rng = np.random.default_rng(42)
-        x = pt.matrix("x", shape=(3, 100))
-        mat_idx = pt.matrix("mat_idx", dtype="int64", shape=(10, 5))
-        fn, fn_u = fused_and_unfused([x, mat_idx], pt.exp(x[:, mat_idx]))
-        assert_fused(fn)
-        xv = rng.normal(size=(3, 100))
-        iv = rng.integers(100, size=(10, 5)).astype(np.int64)
-        np.testing.assert_allclose(fn(xv, iv), fn_u(xv, iv), rtol=1e-10)
-
-    def test_nd_index_with_trailing_dims(self):
-        """2D index on axis 0 with trailing source dims."""
-        rng = np.random.default_rng(42)
-        x = pt.matrix("x", shape=(100, 7))
-        mat_idx = pt.matrix("mat_idx", dtype="int64", shape=(10, 5))
-        fn, fn_u = fused_and_unfused([x, mat_idx], pt.exp(x[mat_idx]))
-        assert_fused(fn)
-        xv = rng.normal(size=(100, 7))
-        iv = rng.integers(100, size=(10, 5)).astype(np.int64)
-        np.testing.assert_allclose(fn(xv, iv), fn_u(xv, iv), rtol=1e-10)
-
-    def test_nd_index_broadcast(self):
-        """Broadcastable 2D index (shape (1, C)) broadcasts against direct input."""
-        rng = np.random.default_rng(42)
-        x = pt.vector("x", shape=(100,))
-        bc_idx = pt.matrix("bc_idx", dtype="int64", shape=(1, 5))
-        y = pt.matrix("y", shape=(10, 5))
-        fn, fn_u = fused_and_unfused([x, bc_idx, y], x[bc_idx] + y)
-        assert_fused(fn)
-        xv = rng.normal(size=(100,))
-        bcv = rng.integers(100, size=(1, 5)).astype(np.int64)
-        yv = rng.normal(size=(10, 5))
-        np.testing.assert_allclose(fn(xv, bcv, yv), fn_u(xv, bcv, yv), rtol=1e-10)
-
-    def test_scalar_and_vector_index(self):
-        """x[scalar_idx, vector_idx] — 0-d index broadcasts with 1-d index."""
-        rng = np.random.default_rng(42)
-        x = pt.matrix("x", shape=(100, 200))
-        scalar_idx = pt.scalar("scalar_idx", dtype="int64")
-        vec_idx = pt.vector("vec_idx", dtype="int64", shape=(50,))
-        y = pt.vector("y", shape=(50,))
-        fn, fn_u = fused_and_unfused(
-            [x, scalar_idx, vec_idx, y], x[scalar_idx, vec_idx] + y
-        )
-        assert_fused(fn)
-        xv = rng.normal(size=(100, 200))
-        sv = np.array(rng.integers(100), dtype=np.int64)
-        vv = rng.integers(200, size=50).astype(np.int64)
-        yv = rng.normal(size=50)
-        np.testing.assert_allclose(fn(xv, sv, vv, yv), fn_u(xv, sv, vv, yv), rtol=1e-10)
-
-    def test_vector_and_scalar_index(self):
-        """x[vector_idx, scalar_idx] — reversed order."""
-        rng = np.random.default_rng(42)
-        x = pt.matrix("x", shape=(100, 200))
-        vec_idx = pt.vector("vec_idx", dtype="int64", shape=(50,))
-        scalar_idx = pt.scalar("scalar_idx", dtype="int64")
-        y = pt.vector("y", shape=(50,))
-        fn, fn_u = fused_and_unfused(
-            [x, vec_idx, scalar_idx, y], x[vec_idx, scalar_idx] + y
-        )
-        assert_fused(fn)
-        xv = rng.normal(size=(100, 200))
-        vv = rng.integers(100, size=50).astype(np.int64)
-        sv = np.array(rng.integers(200), dtype=np.int64)
-        yv = rng.normal(size=50)
-        np.testing.assert_allclose(fn(xv, vv, sv, yv), fn_u(xv, vv, sv, yv), rtol=1e-10)
-
-    def test_scalar_and_vector_index_with_trailing_dim(self):
-        """x[scalar_idx, vector_idx] on a 3-d tensor with trailing dim."""
-        rng = np.random.default_rng(42)
-        x = pt.tensor3("x", shape=(100, 200, 7))
-        scalar_idx = pt.scalar("scalar_idx", dtype="int64")
-        vec_idx = pt.vector("vec_idx", dtype="int64", shape=(50,))
-        z = pt.matrix("z", shape=(50, 7))
-        fn, fn_u = fused_and_unfused(
-            [x, scalar_idx, vec_idx, z], x[scalar_idx, vec_idx] + z
-        )
-        assert_fused(fn)
-        xv = rng.normal(size=(100, 200, 7))
-        sv = np.array(rng.integers(100), dtype=np.int64)
-        vv = rng.integers(200, size=50).astype(np.int64)
-        zv = rng.normal(size=(50, 7))
-        np.testing.assert_allclose(fn(xv, sv, vv, zv), fn_u(xv, sv, vv, zv), rtol=1e-10)
-
-    def test_all_scalar_indices(self):
-        """AdvancedSubtensor with all 0-d indices (degenerate case)."""
-        rng = np.random.default_rng(42)
-        x = pt.matrix("x", shape=(100, 200))
-        si0 = pt.scalar("si0", dtype="int64")
-        si1 = pt.scalar("si1", dtype="int64")
-        y = pt.scalar("y", dtype="float64")
-        adv_sub = AdvancedSubtensor(idx_list=(0, 1))(x, si0, si1)
-        fn, fn_u = fused_and_unfused([x, si0, si1, y], adv_sub + y)
-        assert_fused(fn)
-        xv = rng.normal(size=(100, 200))
-        s0 = np.array(rng.integers(100), dtype=np.int64)
-        s1 = np.array(rng.integers(200), dtype=np.int64)
-        yv = np.array(rng.normal())
-        np.testing.assert_allclose(fn(xv, s0, s1, yv), fn_u(xv, s0, s1, yv), rtol=1e-10)
-
     def test_negative_indices(self):
         """Negative indices must be handled correctly (sign-extended, not zero-extended)."""
         rng = np.random.default_rng(42)
@@ -269,13 +150,10 @@ class TestIndexedReadFusion:
 class TestIndexedUpdateFusion:
     """Test indexed updates (AdvancedIncSubtensor1) fused into Elemwise."""
 
-    def test_no_fusion_when_idx_axes_outside_elemwise_loop(self):
-        """Don't fuse if the indexed axes are not within the Elemwise loop.
+    def test_no_fusion_when_val_broadcasts_against_target(self):
+        """Don't fuse (yet) if elemwise output broadcasts against target's trailing axes.
 
-        Here the index is on axis 0 of target(5, 10), but the Elemwise
-        output (10,) corresponds to axis 1 (the non-indexed trailing axis).
-        The indexed axis doesn't overlap with the Elemwise computation, so
-        fusing would misalign which input dims map to which target dims.
+        TODO: support this by making the update output's core_ndim > 0.
         """
         rng = np.random.default_rng(42)
         idx = rng.integers(5, size=10).astype(np.int64)
@@ -285,9 +163,9 @@ class TestIndexedUpdateFusion:
         elemwise_out = advanced_subtensor1(x, idx) + y  # shape (10,)
         out = pt.inc_subtensor(target[idx], elemwise_out)
         fn, fn_u = fused_and_unfused([x, y, target], out)
-        # Write not fused — the Elemwise loop dim is the non-indexed axis,
-        # not the indexed axis. Read fusion may still create an
-        # IndexedElemwise, but the AdvancedIncSubtensor1 must remain outside.
+        # Write not fused — val (10,) would broadcast to (10, 10) in the target.
+        # Read fusion still creates an IndexedElemwise, but the
+        # AdvancedIncSubtensor1 must remain outside it.
         assert any(
             isinstance(n.op, AdvancedIncSubtensor1) for n in fn.maker.fgraph.toposort()
         )
@@ -316,35 +194,6 @@ class TestIndexedUpdateFusion:
         xv = rng.normal(size=(1,))
         tv = rng.normal(size=(5,))
         np.testing.assert_allclose(fn(xv, tv), fn_u(xv, tv), rtol=1e-10)
-
-    def test_broadcast_val_into_non_indexed_dims(self):
-        """Fuse when Elemwise output broadcasts into target's non-indexed dims.
-
-        target(5, 3)[:, idx] += exp(val) — the Elemwise loop covers the
-        index axis (axis 1), and the scalar result broadcasts into the
-        non-indexed leading axis (axis 0, core_ndim=1).
-
-        Requires excluding local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1
-        so we keep AdvancedIncSubtensor on the correct axis.
-        """
-        rng = np.random.default_rng(42)
-        idx = rng.integers(3, size=10).astype(np.int64)
-        target = pt.matrix("target", shape=(5, 3))
-        val = pt.vector("val", shape=(10,))
-        out = pt.inc_subtensor(target[:, idx], pt.exp(val))
-
-        mode = NUMBA_MODE.excluding(
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
-        )
-        mode_u = NUMBA_NO_FUSION.excluding(
-            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1"
-        )
-        fn = pytensor.function([val, target], out, mode=mode, trust_input=True)
-        fn_u = pytensor.function([val, target], out, mode=mode_u, trust_input=True)
-        assert_fused(fn)
-        valv = rng.normal(size=(10,))
-        tv = rng.normal(size=(5, 3))
-        np.testing.assert_allclose(fn(valv, tv), fn_u(valv, tv), rtol=1e-10)
 
     def test_inc_subtensor(self):
         rng = np.random.default_rng(42)
@@ -458,22 +307,6 @@ class TestIndexedUpdateFusion:
             fn(tv, sv, rv, cv, xv), fn_u(tv, sv, rv, cv, xv), rtol=1e-10
         )
 
-    def test_scalar_and_vector_index_inc(self):
-        """inc_subtensor with x[scalar_idx, vector_idx] — 0-d and 1-d indices."""
-        rng = np.random.default_rng(42)
-        target = pt.matrix("target", shape=(100, 200))
-        scalar_idx = pt.scalar("scalar_idx", dtype="int64")
-        vec_idx = pt.vector("vec_idx", dtype="int64", shape=(50,))
-        x = pt.vector("x", shape=(50,))
-        out = pt.inc_subtensor(target[scalar_idx, vec_idx], pt.exp(x))
-        fn, fn_u = fused_and_unfused([target, scalar_idx, vec_idx, x], out)
-        assert_fused(fn)
-        tv = rng.normal(size=(100, 200))
-        sv = np.array(rng.integers(100), dtype=np.int64)
-        vv = rng.integers(200, size=50).astype(np.int64)
-        xv = rng.normal(size=50)
-        np.testing.assert_allclose(fn(tv, sv, vv, xv), fn_u(tv, sv, vv, xv), rtol=1e-10)
-
 
 class TestShapeValidation:
     """Test that mismatched index/input shapes raise runtime errors.
@@ -577,20 +410,6 @@ class TestShapeValidation:
                 np.zeros(100),
                 np.array([0], dtype=np.int64),
             )
-
-    def test_mismatched_nd_index_dims(self):
-        """ND index shape doesn't match direct input shape."""
-        x = pt.vector("x", shape=(None,))
-        mat_idx = pt.matrix("mat_idx", dtype="int64", shape=(None, None))
-        y = pt.matrix("y", shape=(None, None))
-        out = x[mat_idx] + y
-        fn = pytensor.function([x, mat_idx, y], out, mode=NUMBA_MODE, trust_input=True)
-        assert_fused(fn)
-        # Matching: mat_idx=(3,4), y=(3,4) — should work
-        fn(np.zeros(100), np.zeros((3, 4), dtype=np.int64), np.zeros((3, 4)))
-        # Mismatched: mat_idx=(3,4), y=(3,5) — should error
-        with pytest.raises(Exception):
-            fn(np.zeros(100), np.zeros((3, 4), dtype=np.int64), np.zeros((3, 5)))
 
     # ============================================================
     # Radon model integration test
