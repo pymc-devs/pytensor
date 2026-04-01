@@ -107,3 +107,54 @@ def test_mlx_LU():
         mlx_mode=mlx_mode,
         assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
+
+
+@pytest.mark.parametrize("lower", [True, False])
+def test_mlx_eigvalsh(lower):
+    rng = np.random.default_rng(15)
+
+    M = rng.normal(size=(3, 3))
+    A_val = (M @ M.T).astype(config.floatX)
+
+    A = pt.matrix(name="A")
+    B = pt.matrix(name="B")
+    out = pt.linalg.eigvalsh(A, B, lower=lower)
+
+    compare_mlx_and_py([A, B], [out], [A_val, None])
+
+
+def test_mlx_lu_factor():
+    rng = np.random.default_rng(15)
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    out = pt.linalg.lu_factor(A)
+
+    compare_mlx_and_py([A], out, [A_val])
+
+
+def test_mlx_pivot_to_permutations():
+    rng = np.random.default_rng(15)
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    from pytensor.tensor.slinalg import pivot_to_permutation
+
+    lu_and_pivots = pt.linalg.lu_factor(A)
+    out = pivot_to_permutation(lu_and_pivots[1])
+
+    compare_mlx_and_py([A], [out], [A_val])
+
+
+@pytest.mark.parametrize("mode", ["economic", "r"])
+def test_mlx_qr(mode):
+    rng = np.random.default_rng(15)
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(5, 3)).astype(config.floatX)
+
+    out = pt.linalg.qr(A, mode=mode)
+
+    compare_mlx_and_py([A], out, [A_val])

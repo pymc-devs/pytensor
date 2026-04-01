@@ -2,10 +2,67 @@ from functools import partial
 
 import numpy as np
 import pytest
+from packaging.version import parse as V
 
 import pytensor.tensor as pt
 from pytensor import config
+from pytensor.compile.mode import get_mode
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
+
+
+mx = pytest.importorskip("mlx.core")
+
+
+def test_mlx_det():
+    rng = np.random.default_rng(15)
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(3, 3)).astype(config.floatX)
+
+    out = pt.linalg.det(A)
+
+    compare_mlx_and_py([A], [out], [A_val])
+
+
+def test_mlx_slogdet():
+    rng = np.random.default_rng(15)
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(3, 3)).astype(config.floatX)
+
+    sign, logabsdet = pt.linalg.slogdet(A)
+
+    compare_mlx_and_py([A], [sign, logabsdet], [A_val], mlx_mode=get_mode("MLX"))
+
+
+@pytest.mark.skipif(
+    V(mx.__version__) < V("0.30.1"),
+    reason="mx.linalg.eig causes a Fatal Python error (Abort trap) on MLX <0.30.1 "
+    "(maybe -- the exact version cutoff is unknown)",
+)
+def test_mlx_eig():
+    rng = np.random.default_rng(15)
+
+    M = rng.normal(size=(3, 3))
+    A_val = (M @ M.T).astype(config.floatX)
+
+    A = pt.matrix(name="A")
+    outs = pt.linalg.eig(A)
+
+    compare_mlx_and_py([A], outs, [A_val])
+
+
+@pytest.mark.parametrize("UPLO", ["L", "U"])
+def test_mlx_eigh(UPLO):
+    rng = np.random.default_rng(15)
+
+    M = rng.normal(size=(3, 3))
+    A_val = (M @ M.T).astype(config.floatX)
+
+    A = pt.matrix(name="A")
+    outs = pt.linalg.eigh(A, UPLO=UPLO)
+
+    compare_mlx_and_py([A], outs, [A_val])
 
 
 @pytest.mark.parametrize("compute_uv", [True, False])
