@@ -940,6 +940,7 @@ def _vectorized(
         # loop dim).  Replace the source shape with a constructed shape that
         # matches the bc pattern: one entry per loop dim, with index lengths
         # substituted for the indexed loop dim(s).
+        one = ir.IntType(64)(1)
         iter_shapes = list(in_shapes)
         iter_bc = list(input_bc_patterns_val)
         idx_shapes = [
@@ -966,19 +967,24 @@ def _vectorized(
                 indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
                 max_axis = max(a for _, a in spec)
                 new_shape = []
+                new_bc = []
                 src_d = 0
                 idx_d = 0
                 for loop_d in range(batch_ndim):
                     if src_d in indexed_axes and idx_d < n_index_loop_dims:
-                        idx_k_first = spec[0][0]
-                        new_shape.append(idx_shapes[idx_k_first][idx_d])
+                        # Placeholder — actual index shapes are contributed
+                        # separately by each index array's iter_shape entry.
+                        new_shape.append(one)
+                        new_bc.append(True)
                         idx_d += 1
                         if idx_d >= n_index_loop_dims:
                             src_d = max_axis + 1
                     else:
                         new_shape.append(source_shape[src_d])
+                        new_bc.append(iter_bc[p][loop_d])
                         src_d += 1
                 iter_shapes[p] = new_shape
+                iter_bc[p] = tuple(new_bc)
 
         # Each index array participates in iter_shape validation.
         #
@@ -989,7 +995,6 @@ def _vectorized(
         # repeat writes.  In that case we force bc=False so
         # compute_itershape requires the index length to match the loop.
         batch_ndim = len(input_bc_patterns_val[0]) if input_bc_patterns_val else 0
-        one = ir.IntType(64)(1)
 
         # Per loop dim: is every write index broadcastable?
         _write_all_bc = [True] * batch_ndim
