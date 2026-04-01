@@ -15,7 +15,7 @@ from pytensor.printing import op_debug_information
 from pytensor.scalar.basic import Composite, identity
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
-from pytensor.tensor.shape import Reshape
+from pytensor.tensor.shape import Reshape, shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -438,23 +438,51 @@ class FuseIndexedElemwise(GraphRewriter):
                 if info is None:
                     continue
                 target, idx_axis_pairs, mode = info
-                # Don't fuse if the value broadcasts on the index loop dim
-                # (constant across index — recomputing per position is wasteful)
-                # or against non-indexed target axes.
+                # Don't fuse if val is broadcastable on any index loop dim —
+                # the Elemwise result is constant across the index and
+                # recomputing it per index position is wasteful.
                 val = client_node.inputs[1]
                 n_idx_dims = max((idx.ndim for idx, _ in idx_axis_pairs), default=0)
                 val_idx_bc = list(val.type.broadcastable)[:n_idx_dims]
                 if any(val_idx_bc):
                     continue
+
+                # Check broadcast compatibility between val and target on
+                # non-indexed axes.  Val may have fewer non-indexed dims
+                # than target — the extra target dims become core dims
+                # (broadcast output) — but ONLY when the indexed axes are
+                # rightmost in the target so that val's dims align with the
+                # index loop (numpy broadcasts from the right).  When
+                # indexed axes are NOT rightmost, val's dims would align
+                # with trailing non-indexed axes instead, giving wrong
+                # results if fused.
                 indexed_axes = {a for _, a in idx_axis_pairs}
+                max_indexed_axis = max(indexed_axes)
+                has_trailing_non_indexed = any(
+                    a > max_indexed_axis
+                    for a in range(target.type.ndim)
+                    if a not in indexed_axes
+                )
                 non_indexed_target_bc = [
                     bc
                     for i, bc in enumerate(target.type.broadcastable)
                     if i not in indexed_axes
                 ]
                 non_indexed_val_bc = list(val.type.broadcastable)
+                n_idx_dims = max((idx.ndim for idx, _ in idx_axis_pairs), default=0)
                 non_indexed_val_bc = non_indexed_val_bc[n_idx_dims:]
-                if len(non_indexed_val_bc) < len(non_indexed_target_bc) or any(
+                if len(non_indexed_val_bc) < len(non_indexed_target_bc):
+                    # Val has fewer dims — broadcasting into extra target
+                    # dims.  Only safe when indexed axes are rightmost
+                    # (no trailing non-indexed dims).
+                    # TODO: could also handle trailing non-indexed dims
+                    # that are broadcastable (size-1) in the val — squeeze
+                    # them away before fusing.  Requires excluding
+                    # local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1
+                    # to encounter these graphs naturally.
+                    if has_trailing_non_indexed:
+                        continue
+                elif any(
                     vbc and not tbc
                     for vbc, tbc in zip(
                         non_indexed_val_bc, non_indexed_target_bc, strict=False
@@ -593,15 +621,59 @@ class FuseIndexedElemwise(GraphRewriter):
                 dup_map = {}
 
             # Inner fgraph outputs; add update targets
+            # For non-axis-0 indexed updates, transpose the target so the
+            # indexed axis moves to position 0 and core dims are trailing
+            # (matching the gufunc convention assumed by the codegen).
             inner_outputs = list(node.outputs)
             call_inputs = list(inner_inputs)
+            scatter_transpose_back = {}  # scatter_idx -> inverse perm
+            # Save original idx_axis_pairs before transpose may remap axes,
+            # so we can look up the correct key in all_idx_groups later.
+            original_idx_axis_pairs = {
+                out_idx: list(entry[2]) for out_idx, entry in update_consumers.items()
+            }
             for out_idx in sorted(update_consumers.keys()):
                 update_node, target, idx_axis_pairs, _mode = update_consumers[out_idx]
+
+                # If there are batch dims on the target (beyond the elemwise loop),
+                # we transpose them to the right, so they work as "core_ndim"
+                # in the vectorized codegen (which must always be on the right)
+                # (e.g. target(5,3)[:,idx].inc(exp(vector)) -> target(3, 5)[idx, :].inc(exp(vector)),
+                idx_axes_set = {a for _, a in idx_axis_pairs}
+                max_idx_axis = max(idx_axes_set)
+                n_indexed_axes = len(idx_axes_set)
+                n_idx_dims = max((idx.ndim for idx, _ in idx_axis_pairs), default=0)
+                elemwise_batch_ndim = len(node.outputs[0].type.broadcastable)
+                source_batch = elemwise_batch_ndim + n_indexed_axes - n_idx_dims
+                needs_transpose = max_idx_axis >= source_batch
+                if needs_transpose:
+                    # Build permutation: indexed axes first, then rest
+                    idx_axes_sorted = sorted({a for _, a in idx_axis_pairs})
+                    non_idx_axes = [
+                        a for a in range(target.type.ndim) if a not in idx_axes_sorted
+                    ]
+                    perm = idx_axes_sorted + non_idx_axes
+                    inv_perm = [0] * len(perm)
+                    for i, p in enumerate(perm):
+                        inv_perm[p] = i
+                    target = target.dimshuffle(perm)
+                    # Remap idx_axis_pairs to the transposed axes
+                    axis_remap = {old: new for new, old in enumerate(perm)}
+                    idx_axis_pairs = [
+                        (idx_var, axis_remap[axis]) for idx_var, axis in idx_axis_pairs
+                    ]
+                    # Update the consumers entry with remapped axes
+                    update_consumers[out_idx] = (
+                        update_node,
+                        target,
+                        idx_axis_pairs,
+                        _mode,
+                    )
 
                 inner_inputs.append(target)
 
                 target_pos = len(call_inputs)
-                if update_node.op.inplace:
+                if update_node.op.inplace and not needs_transpose:
                     call_inputs.append(target)
                 else:
                     call_inputs.append(target.copy())
@@ -611,9 +683,29 @@ class FuseIndexedElemwise(GraphRewriter):
                 # The value to scatter: use the (possibly duplicated) Elemwise output
                 scatter_value = node.outputs[scatter_idx]
 
-                # Build the scatter output using the correct value
-                if update_node.op.inplace:
-                    # Rebuild with the new value
+                # To work with IndexedElemwise codegen, we moved indexed update batch dims to the right.
+                # target(5,3)[:,idx].inc(exp(vector)) -> target(3, 5)[idx, :].inc(exp(vector))
+                # For this operation to be strictly valid, we need to add expand dims the scattered value.
+                # target(5,3)[:,idx].inc(exp(vector)) -> target(3, 5)[idx, :].inc(exp(vector)[:, None])
+                # This expand_dims is subsumed by the IndexedElemwise, but makes the inner graph valid.
+                core_ndim = target.type.ndim - source_batch
+                if needs_transpose and core_ndim > 0:
+                    scatter_value = shape_padright(scatter_value, core_ndim)
+
+                # Build the scatter output
+                # After transpose, indexed axes are at position 0+,
+                # so always use AdvancedIncSubtensor1 for single axis-0.
+                if len(idx_axis_pairs) == 1 and idx_axis_pairs[0][1] == 0:
+                    inplace_op = AdvancedIncSubtensor1(
+                        inplace=True,
+                        set_instead_of_inc=update_node.op.set_instead_of_inc,
+                    )
+                    scatter_out = inplace_op(
+                        target,
+                        scatter_value,
+                        idx_axis_pairs[0][0],
+                    )
+                elif update_node.op.inplace and not needs_transpose:
                     if isinstance(update_node.op, AdvancedIncSubtensor1):
                         scatter_out = update_node.op(
                             target, scatter_value, update_node.inputs[2]
@@ -622,14 +714,6 @@ class FuseIndexedElemwise(GraphRewriter):
                         scatter_out = update_node.op(
                             target, scatter_value, *update_node.inputs[2:]
                         )
-                elif isinstance(update_node.op, AdvancedIncSubtensor1):
-                    inplace_op = AdvancedIncSubtensor1(
-                        inplace=True,
-                        set_instead_of_inc=update_node.op.set_instead_of_inc,
-                    )
-                    scatter_out = inplace_op(
-                        target, scatter_value, update_node.inputs[2]
-                    )
                 else:
                     inplace_op = AdvancedIncSubtensor(
                         idx_list=update_node.op.idx_list,
@@ -641,6 +725,9 @@ class FuseIndexedElemwise(GraphRewriter):
                     )
                 inner_outputs[scatter_idx] = scatter_out
                 outer_destroy_map[scatter_idx] = [target_pos]
+
+                if needs_transpose:
+                    scatter_transpose_back[scatter_idx] = inv_perm
 
             # Build indexed_inputs spec for the Op
             indexed_inputs_spec = [None] * n_indices
@@ -660,13 +747,21 @@ class FuseIndexedElemwise(GraphRewriter):
                             indexed_inputs_spec[k] = ((), ax, iv.type.broadcastable)
                             break
 
-            # Build indexed_outputs spec for the Op
+            # Build indexed_outputs spec for the Op.
+            # Use the (possibly remapped) axis from update_consumers for the
+            # spec value, but the ORIGINAL axis for the all_idx_groups lookup
+            # (since all_idx_groups was built before any transpose).
             indexed_outputs_spec = [None] * n_indices
             for out_idx in sorted(update_consumers.keys()):
                 _update_node, _target, idx_axis_pairs, mode = update_consumers[out_idx]
-                for idx_var, axis in idx_axis_pairs:
-                    key = (idx_var, axis)
-                    idx_pos = all_idx_groups[key][1]
+                orig_pairs = original_idx_axis_pairs[out_idx]
+                for (idx_var, axis), (_orig_var, orig_axis) in zip(
+                    idx_axis_pairs, orig_pairs
+                ):
+                    key = (idx_var, orig_axis)
+                    idx_pos = all_idx_groups.get(key, (None, None))[1]
+                    if idx_pos is None:
+                        continue
                     scatter_idx = dup_map.get(out_idx, out_idx)
                     if indexed_outputs_spec[idx_pos] is None:
                         indexed_outputs_spec[idx_pos] = ([scatter_idx], mode, axis)
@@ -684,6 +779,10 @@ class FuseIndexedElemwise(GraphRewriter):
                 indexed_inputs=tuple(indexed_inputs_spec),
                 indexed_outputs=indexed_outputs_spec,
             )(*call_inputs, return_list=True)
+
+            # Transpose back any scatter outputs that were transposed
+            for scatter_idx, inv_perm in scatter_transpose_back.items():
+                new_outs[scatter_idx] = new_outs[scatter_idx].dimshuffle(inv_perm)
 
             # The node whose outputs we need to replace in the outer graph
             orig_node = old_node if multi_client_outs else node

@@ -21,20 +21,23 @@ from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 
 
-# Numba is missing getitem(0d_array, Ellipsis), so o[...] += val fails.
+# Numba is missing getitem(array, Ellipsis), so o[...] += val fails.
 # Register it so store_core_outputs can use o[...] += val naturally.
 @overload(operator.getitem, inline="always")
 def _getitem_0d_ellipsis(arr, idx):
-    if (
-        isinstance(arr, types.Array)
-        and arr.ndim == 0
-        and isinstance(idx, types.EllipsisType)
-    ):
+    if isinstance(arr, types.Array) and isinstance(idx, types.EllipsisType):
+        if arr.ndim == 0:
 
-        def impl(arr, idx):
-            return arr[()]
+            def impl(arr, idx):
+                return arr[()]
 
-        return impl
+            return impl
+        else:
+
+            def impl(arr, idx):
+                return arr
+
+            return impl
 
 
 def encode_literals(literals: Sequence) -> str:
