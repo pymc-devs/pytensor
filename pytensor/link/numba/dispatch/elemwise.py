@@ -435,16 +435,21 @@ def numba_funcify_IndexedElemwise(op, node, **kwargs):
 
     nin_elemwise = len(elemwise_node.inputs)
     nout = len(elemwise_node.outputs)
-
     core_op_fn = store_core_outputs(
         scalar_op_fn, nin=nin_elemwise, nout=nout, inc_outputs=inc_outputs
     )
 
     # --- Broadcast and type encodings -------------------------------------
+    # Use each input's result broadcastable (not the source's).
+    # For indexed reads, the result has the index dim(s) substituted.
+    # For multi-index, the result has fewer dims than the source.
     input_bc_patterns = tuple(inp.type.broadcastable for inp in elemwise_node.inputs)
-    output_bc_patterns = tuple(out.type.broadcastable for out in node.outputs)
+    # Use Elemwise output bc (loop dims) for ALL outputs — including updates.
+    # The fix-up block in _vectorized corrects the actual output/return types
+    # for update outputs to match the target buffer.
+    output_bc_patterns = tuple(out.type.broadcastable for out in elemwise_node.outputs)
     output_dtypes = tuple(out.type.dtype for out in node.outputs)
-    # Filter out inplace entries for update outputs (handled by scatter)
+    # Filter out elemwise inplace for indexed-update outputs (they use update targets)
     inplace_pattern = tuple(
         (out_idx, inp_idx)
         for out_idx, inp_idx in elemwise_node.op.inplace_pattern.items()
@@ -484,7 +489,7 @@ def numba_funcify_IndexedElemwise(op, node, **kwargs):
 
         return impl
 
-    cache_version = (0, 2)
+    cache_version = (0, 3)
     if scalar_cache_key is None:
         key = None
     else:

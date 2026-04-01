@@ -8,16 +8,89 @@ eliminating materialised intermediate arrays.
 
 from pytensor.compile import optdb
 from pytensor.compile.builders import OpFromGraph
-from pytensor.graph.rewriting.basic import GraphRewriter
+from pytensor.graph import node_rewriter
+from pytensor.graph.rewriting.basic import GraphRewriter, dfs_rewriter
 from pytensor.graph.rewriting.db import SequenceDB
 from pytensor.printing import op_debug_information
 from pytensor.scalar.basic import Composite, identity
-from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
 from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
+    AdvancedSubtensor,
     AdvancedSubtensor1,
+    indices_from_subtensor,
 )
+
+
+@node_rewriter([DimShuffle])
+def undo_take_dimshuffle_for_fusion(fgraph, node):
+    """Undo ``DimShuffle(AdvancedSubtensor1(DimShuffle(x), idx))`` -> ``AdvancedSubtensor(x, :, ..., idx, :, ...)``.
+
+    The ``local_replace_AdvancedSubtensor`` specialize rewrite converts
+    ``x[:, idx]`` into ``x.T[idx].T`` (axis-swap + AdvancedSubtensor1 +
+    axis-swap).  This rewrite undoes that when the result feeds a single
+    Elemwise, so ``FuseIndexedElemwise`` can absorb the indexing directly
+    on the correct axis.
+
+    See also ``undo_take_reshape_for_fusion`` which handles the analogous
+    Reshape+flatten pattern for ND indices.
+    """
+    # Outer DimShuffle must be an axis swap
+    outer_ds = node.op
+    if outer_ds.augment or outer_ds.drop:
+        return None
+    order = outer_ds.new_order
+    ndim = len(order)
+    if ndim < 2:
+        return None
+
+    # Find the swapped axis: exactly two positions differ from identity
+    swapped = [i for i in range(ndim) if order[i] != i]
+    if len(swapped) != 2:
+        return None
+    ax_a, ax_b = swapped
+    if order[ax_a] != ax_b or order[ax_b] != ax_a:
+        return None
+    axis = max(ax_a, ax_b)  # the non-zero axis (0 was swapped to axis)
+
+    # Inner must be AdvancedSubtensor1
+    inner = node.inputs[0]
+    if inner.owner is None or not isinstance(inner.owner.op, AdvancedSubtensor1):
+        return None
+    asub1_node = inner.owner
+
+    # AdvancedSubtensor1's input must be an inverse DimShuffle (same swap)
+    inner_ds_var = asub1_node.inputs[0]
+    if inner_ds_var.owner is None or not isinstance(inner_ds_var.owner.op, DimShuffle):
+        return None
+    inner_ds = inner_ds_var.owner.op
+    if inner_ds.new_order != tuple(order):
+        return None
+
+    # Both intermediates must be single-client
+    if len(fgraph.clients[inner]) != 1:
+        return None
+    if len(fgraph.clients[inner_ds_var]) != 1:
+        return None
+
+    # Outer DimShuffle must be consumed only by a single Elemwise
+    clients = fgraph.clients[node.outputs[0]]
+    if len(clients) != 1:
+        return None
+    client_node, _client_idx = clients[0]
+    if not isinstance(getattr(client_node, "op", None), Elemwise):
+        return None
+
+    # Build AdvancedSubtensor: x[:, ..., idx, :, ...]
+    source = inner_ds_var.owner.inputs[0]
+    idx_var = asub1_node.inputs[1]
+
+    idx_list = [slice(None)] * ndim
+    idx_list[axis] = 0  # pointer to the single index variable
+    new_out = AdvancedSubtensor(idx_list=idx_list)(source, idx_var)
+    return [new_out]
 
 
 indexed_elemwise_optdb = SequenceDB()
@@ -28,6 +101,13 @@ optdb.register(
     # After inplace_elemwise (position=50.5) so we see final inplace patterns,
     # same position as other numba-specific rewrites (BlockwiseWithCoreShape).
     position=100,
+)
+
+indexed_elemwise_optdb.register(
+    "undo_take_dimshuffle_for_fusion",
+    dfs_rewriter(undo_take_dimshuffle_for_fusion),
+    "numba",
+    position=0,
 )
 
 
@@ -135,19 +215,44 @@ class FuseIndexedElemwise(GraphRewriter):
             Returns ``(source, [(idx_var, axis), ...])`` or ``None``.
             Handles:
             - ``AdvancedSubtensor1(source, idx)`` -> single index on axis 0
+            - ``AdvancedSubtensor(source, :, ..., idx, :, ...)`` -> single or
+              multi-index with tensor indices on consecutive axes,
+              followed only by full slices.
             """
             if var.owner is None:
                 return None
             op = var.owner.op
             if isinstance(op, AdvancedSubtensor1):
                 return (var.owner.inputs[0], [(var.owner.inputs[1], 0)])
+            if isinstance(op, AdvancedSubtensor):
+                indices = indices_from_subtensor(var.owner.inputs[1:], op.idx_list)
+                # Collect consecutive advanced (tensor) indices
+                adv = []
+                for i, idx in enumerate(indices):
+                    if idx == slice(None):
+                        if adv:
+                            break  # trailing slices after the advanced group
+                    elif hasattr(idx, "ndim") and idx.ndim >= 1 and idx.dtype != "bool":
+                        if adv and adv[-1][1] != i - 1:
+                            return None  # non-consecutive
+                        adv.append((idx, i))
+                    else:
+                        return None  # unsupported index type
+                if not adv:
+                    return None
+                # Verify only full slices remain after the advanced group
+                for idx in indices[adv[-1][1] + 1 :]:
+                    if idx != slice(None):
+                        return None
+                return (var.owner.inputs[0], adv)
             return None
 
         def find_indexed_input_groups(fgraph, node):
             """Find single-client indexed-read inputs grouped by (index, axis).
 
             Returns ``[(idx_var, axis, (pos, ...))]`` -- one entry per distinct
-            ``(idx_var, axis)`` pair.
+            ``(idx_var, axis)`` pair.  A multi-index input contributes multiple
+            entries (one per indexed axis).
             """
             groups = {}  # (idx_var, axis) -> (idx_var, axis, list of positions)
             for i, inp in enumerate(node.inputs):
@@ -165,39 +270,93 @@ class FuseIndexedElemwise(GraphRewriter):
 
             return [(var, axis, tuple(pos)) for var, axis, pos in groups.values()]
 
-        def find_indexed_update_consumers(fgraph, node):
-            """Find AdvancedIncSubtensor1 consumers of Elemwise outputs.
+        def _get_indexed_update_info(client_node):
+            """Extract indexed-update info from an AdvancedInc node.
 
-            Returns ``{out_idx: (update_node, target, idx_var, mode)}``.
+            Returns ``(target, [(idx_var, axis), ...], mode)`` or ``None``.
+            """
+            op = client_node.op
+            if isinstance(op, AdvancedIncSubtensor1):
+                target, _val, idx_var = client_node.inputs
+                mode = "set" if op.set_instead_of_inc else "inc"
+                return (target, [(idx_var, 0)], mode)
+            if isinstance(op, AdvancedIncSubtensor):
+                target = client_node.inputs[0]
+                _val = client_node.inputs[1]
+                index_vars = client_node.inputs[2:]
+                indices = indices_from_subtensor(index_vars, op.idx_list)
+                adv = []
+                for i, idx in enumerate(indices):
+                    if idx == slice(None):
+                        if adv:
+                            break
+                    elif hasattr(idx, "ndim") and idx.ndim >= 1 and idx.dtype != "bool":
+                        if adv and adv[-1][1] != i - 1:
+                            return None
+                        adv.append((idx, i))
+                    else:
+                        return None
+                if not adv:
+                    return None
+                for idx in indices[adv[-1][1] + 1 :]:
+                    if idx != slice(None):
+                        return None
+                mode = "set" if op.set_instead_of_inc else "inc"
+                return (target, adv, mode)
+            return None
+
+        def find_indexed_update_consumers(fgraph, node):
+            """Find indexed-update consumers of Elemwise outputs.
+
+            Returns ``{out_idx: (update_node, target, [(idx_var, axis), ...], mode)}``.
             Only considers outputs that are the value input (position 1) of
             the indexed update.
             """
             update_info = {}
             for out_idx, out in enumerate(node.outputs):
                 clients = fgraph.clients[out]
-                # Find AdvancedIncSubtensor1 client at val position (1)
                 inc_clients = [
                     (c, ci)
                     for c, ci in clients
-                    if ci == 1 and isinstance(c.op, AdvancedIncSubtensor1)
+                    if ci == 1
+                    and isinstance(c.op, AdvancedIncSubtensor1 | AdvancedIncSubtensor)
                 ]
                 if len(inc_clients) != 1:
                     continue
-                [(client_node, _client_inp_idx)] = inc_clients
-                target, val, idx_var = client_node.inputs
+                [(client_node, _)] = inc_clients
+                info = _get_indexed_update_info(client_node)
+                if info is None:
+                    continue
+                target, idx_axis_pairs, mode = info
                 # Don't fuse if the value broadcasts on the index loop dim
                 # (constant across index — recomputing per position is wasteful)
                 # or against non-indexed target axes.
-                if val.type.broadcastable[0]:
+                val = client_node.inputs[1]
+                n_idx_dims = max((idx.ndim for idx, _ in idx_axis_pairs), default=0)
+                val_idx_bc = list(val.type.broadcastable)[:n_idx_dims]
+                if any(val_idx_bc):
                     continue
-                val_bc = val.type.broadcastable[1:]
-                target_bc = target.type.broadcastable[1:]
-                if len(val_bc) < len(target_bc) or any(
-                    vbc and not tbc for vbc, tbc in zip(val_bc, target_bc, strict=False)
+                indexed_axes = {a for _, a in idx_axis_pairs}
+                non_indexed_target_bc = [
+                    bc
+                    for i, bc in enumerate(target.type.broadcastable)
+                    if i not in indexed_axes
+                ]
+                non_indexed_val_bc = list(val.type.broadcastable)
+                non_indexed_val_bc = non_indexed_val_bc[n_idx_dims:]
+                if len(non_indexed_val_bc) < len(non_indexed_target_bc) or any(
+                    vbc and not tbc
+                    for vbc, tbc in zip(
+                        non_indexed_val_bc, non_indexed_target_bc, strict=False
+                    )
                 ):
                     continue
-                mode = "set" if client_node.op.set_instead_of_inc else "inc"
-                update_info[out_idx] = (client_node, target, idx_var, mode)
+                update_info[out_idx] = (
+                    client_node,
+                    target,
+                    idx_axis_pairs,
+                    mode,
+                )
             return update_info
 
         for node in reversed(fgraph.toposort()):
@@ -244,10 +403,11 @@ class FuseIndexedElemwise(GraphRewriter):
                 key = (idx_var, _ax)
                 if key not in all_idx_groups:
                     all_idx_groups[key] = (idx_var, len(all_idx_groups))
-            for _un, _target, idx_var, _mode in update_consumers.values():
-                key = (idx_var, 0)  # updates are axis 0 for now
-                if key not in all_idx_groups:
-                    all_idx_groups[key] = (idx_var, len(all_idx_groups))
+            for _un, _target, idx_axis_pairs, _mode in update_consumers.values():
+                for idx_var, axis in idx_axis_pairs:
+                    key = (idx_var, axis)
+                    if key not in all_idx_groups:
+                        all_idx_groups[key] = (idx_var, len(all_idx_groups))
 
             n_indices = len(all_idx_groups)
             idx_vars = [None] * n_indices
@@ -319,7 +479,7 @@ class FuseIndexedElemwise(GraphRewriter):
             inner_outputs = list(node.outputs)
             call_inputs = list(inner_inputs)
             for out_idx in sorted(update_consumers.keys()):
-                update_node, target, idx_var, _mode = update_consumers[out_idx]
+                update_node, target, idx_axis_pairs, _mode = update_consumers[out_idx]
 
                 inner_inputs.append(target)
 
@@ -333,15 +493,31 @@ class FuseIndexedElemwise(GraphRewriter):
                 scatter_value = node.outputs[scatter_idx]
 
                 if update_node.op.inplace:
-                    scatter_out = update_node.op(
-                        target, scatter_value, update_node.inputs[2]
-                    )
-                else:
+                    if isinstance(update_node.op, AdvancedIncSubtensor1):
+                        scatter_out = update_node.op(
+                            target, scatter_value, update_node.inputs[2]
+                        )
+                    else:
+                        scatter_out = update_node.op(
+                            target, scatter_value, *update_node.inputs[2:]
+                        )
+                elif isinstance(update_node.op, AdvancedIncSubtensor1):
                     inplace_op = AdvancedIncSubtensor1(
                         inplace=True,
                         set_instead_of_inc=update_node.op.set_instead_of_inc,
                     )
-                    scatter_out = inplace_op(target, scatter_value, idx_var)
+                    scatter_out = inplace_op(
+                        target, scatter_value, update_node.inputs[2]
+                    )
+                else:
+                    inplace_op = AdvancedIncSubtensor(
+                        idx_list=update_node.op.idx_list,
+                        inplace=True,
+                        set_instead_of_inc=update_node.op.set_instead_of_inc,
+                    )
+                    scatter_out = inplace_op(
+                        target, scatter_value, *update_node.inputs[2:]
+                    )
 
                 inner_outputs[scatter_idx] = scatter_out
                 outer_destroy_map[scatter_idx] = [target_pos]
@@ -367,14 +543,15 @@ class FuseIndexedElemwise(GraphRewriter):
             # Build indexed_outputs spec for the Op
             indexed_outputs_spec = [None] * n_indices
             for out_idx in sorted(update_consumers.keys()):
-                _update_node, _target, idx_var, mode = update_consumers[out_idx]
-                key = (idx_var, 0)
-                idx_pos = all_idx_groups[key][1]
-                scatter_idx = dup_map.get(out_idx, out_idx)
-                if indexed_outputs_spec[idx_pos] is None:
-                    indexed_outputs_spec[idx_pos] = ([scatter_idx], mode, 0)
-                else:
-                    indexed_outputs_spec[idx_pos][0].append(scatter_idx)
+                _update_node, _target, idx_axis_pairs, mode = update_consumers[out_idx]
+                for idx_var, axis in idx_axis_pairs:
+                    key = (idx_var, axis)
+                    idx_pos = all_idx_groups[key][1]
+                    scatter_idx = dup_map.get(out_idx, out_idx)
+                    if indexed_outputs_spec[idx_pos] is None:
+                        indexed_outputs_spec[idx_pos] = ([scatter_idx], mode, axis)
+                    else:
+                        indexed_outputs_spec[idx_pos][0].append(scatter_idx)
             indexed_outputs_spec = tuple(
                 (tuple(e[0]), e[1], e[2]) if e is not None else None
                 for e in indexed_outputs_spec

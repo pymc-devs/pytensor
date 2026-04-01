@@ -373,12 +373,12 @@ def make_loop_call(
     input_types: tuple[Any, ...],
     output_types: tuple[Any, ...],
     core_scalar: bool = True,
-    input_read_spec: tuple[tuple[int, int] | None, ...] | None = None,
+    input_read_spec: tuple[tuple[tuple[int, int], ...] | None, ...] | None = None,
     idx_arrs: list | None = None,
     idx_types: tuple | None = None,
-    idx_load_axis: tuple[int, ...] | None = None,
+    idx_load_axes: tuple[tuple[int, ...], ...] | None = None,
     idx_bc: tuple[tuple[bool, ...], ...] | None = None,
-    output_update_spec: tuple[tuple[int, int] | None, ...] | None = None,
+    output_update_spec: tuple[tuple[tuple[int, int], ...] | None, ...] | None = None,
 ):
     safe = (False, False)
 
@@ -431,15 +431,17 @@ def make_loop_call(
     idxs = [loopval.index for loopval in loops]
 
     # Load indirect indices for all index arrays.
-    # Each index array is 1D and is accessed by the loop counter for its axis.
+    # Each index array may be ND (e.g. a 2D matrix index), accessed by
+    # multiple loop counters corresponding to its load axes.
     indirect_idxs = []
-    if idx_arrs is not None and idx_load_axis is not None:
-        for gi_k, (gi_arr, gi_type, ax) in enumerate(
-            zip(idx_arrs, idx_types, idx_load_axis)
+    if idx_arrs is not None and idx_types is not None and idx_load_axes is not None:
+        for gi_k, (gi_arr, gi_type, load_axes) in enumerate(
+            zip(idx_arrs, idx_types, idx_load_axes)
         ):
-            # Use zero if the index is statically broadcastable, loop counter otherwise
-            idx_is_bc = idx_bc[gi_k][0] if idx_bc and idx_bc[gi_k] else False
-            load_idx = zero if idx_is_bc else idxs[ax]
+            load_idxs = []
+            for d, ax in enumerate(load_axes):
+                is_bc = idx_bc[gi_k][d] if idx_bc and len(idx_bc[gi_k]) > d else False
+                load_idxs.append(zero if is_bc else idxs[ax])
             gi_ptr = cgutils.get_item_pointer2(
                 context,
                 builder,
@@ -447,7 +449,7 @@ def make_loop_call(
                 cgutils.unpack_tuple(builder, gi_arr.shape),
                 cgutils.unpack_tuple(builder, gi_arr.strides),
                 gi_type.layout,
-                [load_idx],
+                load_idxs,
                 False,
                 False,
             )
@@ -470,14 +472,27 @@ def make_loop_call(
         zip(inputs, input_types, input_bc, strict=True)
     ):
         spec = input_read_spec[input_i] if input_read_spec is not None else None
-        core_ndim = input_type.ndim - len(bc)
+        n_indexed = len(spec) if spec else 0
+        # n_indexed source axes are replaced by the index arrays' broadcast
+        # loop dims.  n_index_loop_dims = max ndim of the index arrays in the
+        # group (1 for 1D vectors, 2 for 2D matrices, etc.).
+        n_index_loop_dims = (
+            max((idx_types[idx_k].ndim for idx_k, _ in spec), default=0) if spec else 0  # type: ignore[index]
+        )
+        core_ndim = input_type.ndim - len(bc) - n_indexed + n_index_loop_dims
 
         if spec is not None:
             assert idx_types is not None
-            # Single-index on one axis: replace that axis with the indirect index
             indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
             input_shape = cgutils.unpack_tuple(builder, input.shape)
             idxs_bc = []
+            # Result dims correspond to: [indexed_loop_dim(s), then non-indexed source axes].
+            # For 1D multi-index on consecutive axes 0..n-1:
+            #   result dim 0 = indexed loop dim
+            #   result dim 1 = source dim n, etc.
+            # For ND single-index on axis A (e.g. 2D mat_idx):
+            #   result dims A..A+D-1 = index loop dims
+            #   remaining = non-indexed source axes
             result_dim = 0
             for src_dim in range(input_type.ndim):
                 if src_dim in indexed_axes:
@@ -488,7 +503,10 @@ def make_loop_call(
                         signed=idx_types[idx_k].dtype.signed,
                     )
                     idxs_bc.append(idx_val)
-                    result_dim += 1
+                    if n_indexed == 1:
+                        result_dim += n_index_loop_dims
+                    elif src_dim == max(indexed_axes):
+                        result_dim += n_index_loop_dims
                 else:
                     if result_dim < len(bc):
                         idxs_bc.append(zero if bc[result_dim] else idxs[result_dim])
@@ -556,10 +574,18 @@ def make_loop_call(
         spec = output_update_spec[output_i] if output_update_spec is not None else None
         if spec is not None:
             assert idx_types is not None
-            # Indexed-update output: same logic as indexed-read input
+            # Indexed-update output: same logic as indexed-read input.
+            # Recompute core_ndim from the target's actual dims since
+            # output_bc may not match (it's the Elemwise output bc).
             indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
             n_indexed = len(indexed_axes)
-            source_batch_ndim = len(bc) + n_indexed - 1
+            n_index_loop_dims = max(
+                (idx_types[idx_k].ndim for idx_k, _ in spec), default=0
+            )
+            # Number of source (target) batch dims
+            source_batch_ndim = len(bc) + n_indexed - n_index_loop_dims
+            core_ndim = output_type.ndim - source_batch_ndim
+            max_indexed_axis = max(indexed_axes)
             idxs_bc = []
             loop_dim = 0
             for src_dim in range(source_batch_ndim):
@@ -571,6 +597,8 @@ def make_loop_call(
                         signed=idx_types[idx_k].dtype.signed,
                     )
                     idxs_bc.append(idx_val)
+                    if src_dim >= max_indexed_axis:
+                        loop_dim += n_index_loop_dims
                 else:
                     bc_dim = bc[loop_dim] if loop_dim < len(bc) else False
                     idxs_bc.append(zero if bc_dim else idxs[loop_dim])
@@ -691,25 +719,31 @@ def _vectorized(
         raise TypingError("allow_core_scalar must be literal.")
     allow_core_scalar = allow_core_scalar.literal_value
 
-    # Count scatter targets (one per scattered output)
-    n_update_targets = sum(
-        len(entry[0]) for entry in indexed_outputs if entry is not None
-    )
+    # Count scatter targets (one per unique output index)
+    _update_out_idxs = set()
+    for entry in indexed_outputs:
+        if entry is not None:
+            _update_out_idxs.update(entry[0])
+    n_update_targets = len(_update_out_idxs)
 
     n_indices = len(indexed_inputs)
     n_elemwise = len(outer_input_types) - n_indices - n_update_targets
-    input_types = tuple(outer_input_types[i] for i in range(n_elemwise))
+    source_input_types = tuple(outer_input_types[i] for i in range(n_elemwise))
     idx_types = tuple(outer_input_types[n_elemwise + k] for k in range(n_indices))
     update_target_types = tuple(
         outer_input_types[n_elemwise + n_indices + j] for j in range(n_update_targets)
     )
 
     # indexed_inputs entries are (positions, axis) — one per index array.
-    # We aggregate per-input into a tuple of (idx_k, src_axis) pairs.
+    # For multi-index (e.g. x[idx_row, idx_col]), an input appears in multiple
+    # entries with different axes.  We aggregate per-input into a tuple of
+    # (idx_k, src_axis) pairs.
     #
-    # idx_load_axis[k] = which loop dim loads index array k.
+    # idx_load_axes[k] = tuple of loop dims used to load index array k.
+    # For a 1-D index on axis A this is (A,); for a 2-D index it is (A, A+1), etc.
+    # For multi-index on consecutive axes, the group's min_axis is the start.
     _read_spec_dict: dict[int, list[tuple[int, int]]] = {}
-    idx_load_axis = []
+    idx_load_axes = []
     idx_bc_list = []  # per index array: broadcastable tuple
     for k, entry in enumerate(indexed_inputs):
         positions, axis = entry[0], entry[1]
@@ -717,15 +751,57 @@ def _vectorized(
         idx_bc_list.append(idx_bc)
         for p in positions:
             _read_spec_dict.setdefault(p, []).append((k, axis))
-    # idx_load_axis[k] = which loop dim to use when loading index array k.
+    # Build write-side grouping: index arrays that update the same output
+    # share a group and should use the same min_axis.
+    _write_group: dict[int, list[tuple[int, int]]] = {}  # out_idx -> [(k, axis)]
+    for k, entry in enumerate(indexed_outputs):
+        if entry is None:
+            continue
+        output_indices, _mode, axis = entry
+        for out_idx in output_indices:
+            _write_group.setdefault(out_idx, []).append((k, axis))
+
+    # idx_load_axes[k] = tuple of loop dims for loading index array k.
     for k, entry in enumerate(indexed_inputs):
         _positions, axis = entry[0], entry[1]
-        idx_load_axis.append(axis)
+        idx_ndim = idx_types[k].ndim
+        # Find the group's min_axis from reads and writes
+        min_axis = axis
+        for p in _positions:
+            if p in _read_spec_dict:
+                for _other_k, other_axis in _read_spec_dict[p]:
+                    min_axis = min(min_axis, other_axis)
+        for out_idx, group in _write_group.items():
+            if any(gk == k for gk, _ in group):
+                for _other_k, other_axis in group:
+                    min_axis = min(min_axis, other_axis)
+        idx_load_axes.append(tuple(range(min_axis, min_axis + idx_ndim)))
     input_read_spec = tuple(
         tuple(_read_spec_dict[p]) if p in _read_spec_dict else None
         for p in range(n_elemwise)
     )
-    idx_load_axis = tuple(idx_load_axis)
+    idx_load_axes = tuple(idx_load_axes)
+
+    # Build effective input types that match input_bc_patterns ndim.
+    # For indexed inputs, the source ndim differs from the result ndim:
+    # - Multi-index (N 1-D indices on N axes): collapses N source axes into 1 loop dim
+    # - ND index (1 index with ndim D on 1 axis): expands 1 source axis into D loop dims
+    input_types = []
+    for p, src_type in enumerate(source_input_types):
+        spec = input_read_spec[p]
+        if spec is not None:
+            n_indexed_axes = len(spec)
+            n_index_loop_dims = max(idx_types[idx_k].ndim for idx_k, _ in spec)
+            if n_indexed_axes != n_index_loop_dims:
+                effective_ndim = src_type.ndim - n_indexed_axes + n_index_loop_dims
+                input_types.append(
+                    types.Array(src_type.dtype, effective_ndim, src_type.layout)
+                )
+            else:
+                input_types.append(src_type)
+        else:
+            input_types.append(src_type)
+    input_types = tuple(input_types)
 
     # Per-output: tuple of (idx_k, axis) pairs, or None.
     # Same format as input_read_spec.
@@ -740,9 +816,10 @@ def _vectorized(
         output_indices, _mode, axis = entry
         for out_idx in output_indices:
             _update_spec_dict.setdefault(out_idx, []).append((k, axis))
-            update_out_to_target[out_idx] = target_counter
+            if out_idx not in update_out_to_target:
+                update_out_to_target[out_idx] = target_counter
+                target_counter += 1
             update_out_indices.add(out_idx)
-            target_counter += 1
     output_update_spec = tuple(
         tuple(_update_spec_dict[p]) if p in _update_spec_dict else None
         for p in range(len(output_bc_patterns))
@@ -767,9 +844,20 @@ def _vectorized(
         for out_idx, target_idx in update_out_to_target.items():
             target_type = update_target_types[target_idx]
             out_types[out_idx] = target_type
+            # Core ndim = target dims minus the dims addressed by the loop.
+            # For multi-index or ND, the indexed axes are replaced by loop dims
+            # via indirect indexing, so the "batch" portion of the target is
+            # the number of source dims addressed by indirect + loop counters.
+            spec = output_update_spec[out_idx]
+            if spec is not None:
+                n_indexed = len(spec)
+                n_index_loop_dims = max(idx_types[idx_k].ndim for idx_k, _ in spec)
+                effective_batch = batch_ndim + n_indexed - n_index_loop_dims
+            else:
+                effective_batch = batch_ndim
             core_out_types[out_idx] = types.Array(
                 dtype=target_type.dtype,
-                ndim=target_type.ndim - batch_ndim,
+                ndim=target_type.ndim - effective_batch,
                 layout=target_type.layout,
             )
         out_types = tuple(out_types)
@@ -791,12 +879,13 @@ def _vectorized(
     inplace_pattern_val = inplace_pattern
     input_read_spec_val = input_read_spec
     idx_types_val = idx_types
-    idx_load_axis_val = idx_load_axis
+    idx_load_axes_val = idx_load_axes
     idx_bc_list_val = idx_bc_list
     output_update_spec_val = output_update_spec
     update_out_to_target_val = update_out_to_target
     update_target_types_val = update_target_types
     update_out_indices_val = update_out_indices
+    indexed_outputs_val = indexed_outputs
 
     def codegen(ctx, builder, sig, args):
         [
@@ -824,7 +913,7 @@ def _vectorized(
 
         # First n_elemwise outer inputs are elemwise inputs (source arrays)
         inputs = [
-            arrayobj.make_array(input_types[i])(ctx, builder, all_outer[i])
+            arrayobj.make_array(source_input_types[i])(ctx, builder, all_outer[i])
             for i in range(n_elemwise)
         ]
         in_shapes = [cgutils.unpack_tuple(builder, obj.shape) for obj in inputs]
@@ -846,8 +935,11 @@ def _vectorized(
         ]
 
         # Build iter_shapes for compute_itershape.
-        # For indexed inputs, substitute the index array length on the
-        # indexed axis of the source shape.
+        # For indexed inputs, the source array may have more dims than the
+        # iteration shape (multi-index collapses multiple source axes into one
+        # loop dim).  Replace the source shape with a constructed shape that
+        # matches the bc pattern: one entry per loop dim, with index lengths
+        # substituted for the indexed loop dim(s).
         iter_shapes = list(in_shapes)
         iter_bc = list(input_bc_patterns_val)
         idx_shapes = [
@@ -856,35 +948,83 @@ def _vectorized(
         for p, spec in enumerate(input_read_spec_val):
             if spec is None:
                 continue
-            # Single-index: substitute on the indexed axis
-            idx_k, axis = spec[0]
-            iter_shapes[p] = list(iter_shapes[p])
-            iter_shapes[p][axis] = idx_shapes[idx_k][0]
+            indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
+            n_indexed = len(indexed_axes)
+            n_index_loop_dims = max(idx_types_val[idx_k].ndim for idx_k, _ in spec)
+            if n_indexed == n_index_loop_dims:
+                # Simple case (1 index on 1 axis, or N 1-D indices on N axes):
+                # substitute each indexed axis with the index's shape dim.
+                idx_k, axis = spec[0]
+                iter_shapes[p] = list(iter_shapes[p])
+                iter_shapes[p][axis] = idx_shapes[idx_k][0]
+            else:
+                # Mismatch: ND index on fewer axes or multi-index collapsing.
+                # Build shape mapping result loop dims to source dims or index dims.
+                # Indexed source axes expand to n_index_loop_dims result dims.
+                source_shape = cgutils.unpack_tuple(builder, inputs[p].shape)
+                batch_ndim = len(input_bc_patterns_val[p])
+                indexed_axes = {src_axis: idx_k for idx_k, src_axis in spec}
+                max_axis = max(a for _, a in spec)
+                new_shape = []
+                src_d = 0
+                idx_d = 0
+                for loop_d in range(batch_ndim):
+                    if src_d in indexed_axes and idx_d < n_index_loop_dims:
+                        idx_k_first = spec[0][0]
+                        new_shape.append(idx_shapes[idx_k_first][idx_d])
+                        idx_d += 1
+                        if idx_d >= n_index_loop_dims:
+                            src_d = max_axis + 1
+                    else:
+                        new_shape.append(source_shape[src_d])
+                        src_d += 1
+                iter_shapes[p] = new_shape
 
-        # Each index array participates in iter_shape validation on its load
-        # axis, just like any direct input.
+        # Each index array participates in iter_shape validation.
         #
-        # Read indices use their static broadcastable so shape-1 indices
-        # broadcast correctly against other inputs.
-        #
-        # Write indices are forced to bc=False: unlike reads, numpy does
-        # not allow the index to broadcast against the update value.  A
-        # shape-1 write index at runtime must match a size-1 loop, not
-        # silently repeat writes to the same target position.
+        # Write indices can broadcast against each other (e.g. ir=(3,1)
+        # and ic=(1,4) → (3,4)), so we honour their static bc.  But if
+        # ALL write indices on a given loop dim are bc=True, none of them
+        # constrains the loop size and a shape-1 index would silently
+        # repeat writes.  In that case we force bc=False so
+        # compute_itershape requires the index length to match the loop.
         batch_ndim = len(input_bc_patterns_val[0]) if input_bc_patterns_val else 0
         one = ir.IntType(64)(1)
+
+        # Per loop dim: is every write index broadcastable?
+        _write_all_bc = [True] * batch_ndim
         for k in range(n_indices):
-            ax = idx_load_axis_val[k]
-            is_write = indexed_outputs[k] is not None
+            if indexed_outputs_val[k] is None:
+                continue
+            load_axes = idx_load_axes_val[k]
+            for d, ax in enumerate(load_axes):
+                if ax < batch_ndim:
+                    idx_bc_on_d = (
+                        idx_bc_list_val[k][d] if d < len(idx_bc_list_val[k]) else False
+                    )
+                    if not idx_bc_on_d:
+                        _write_all_bc[ax] = False
+
+        for k in range(n_indices):
+            load_axes = idx_load_axes_val[k]
+            is_write = indexed_outputs_val[k] is not None
             idx_shape_entry = [one] * batch_ndim
-            idx_shape_entry[ax] = idx_shapes[k][0]
+            bc_entry = [True] * batch_ndim
+            for d, ax in enumerate(load_axes):
+                if ax < batch_ndim and d < len(idx_shapes[k]):
+                    idx_shape_entry[ax] = idx_shapes[k][d]
+                idx_bc_on_d = (
+                    idx_bc_list_val[k][d] if d < len(idx_bc_list_val[k]) else False
+                )
+                # Force non-bc if this is a write index and all write
+                # indices on this dim are bc — otherwise the loop dim
+                # is unconstrained by any write index.
+                if is_write and idx_bc_on_d and _write_all_bc[ax]:
+                    idx_bc_on_d = False
+                if ax < batch_ndim:
+                    bc_entry[ax] = idx_bc_on_d
             iter_shapes.append(idx_shape_entry)
-            idx_bc_on_ax = idx_bc_list_val[k][0] if idx_bc_list_val[k] else False
-            if is_write:
-                idx_bc_on_ax = False
-            iter_bc.append(
-                tuple(True if d != ax else idx_bc_on_ax for d in range(batch_ndim))
-            )
+            iter_bc.append(tuple(bc_entry))
 
         iter_shape = compute_itershape(
             ctx,
@@ -915,7 +1055,7 @@ def _vectorized(
             output_dtypes_val,
             inplace_pattern_val,
             inputs,
-            input_types,
+            source_input_types,
             output_core_shapes,
             update_outputs=update_outputs_dict,
         )
@@ -942,13 +1082,13 @@ def _vectorized(
             outputs,
             input_bc_patterns_val,
             output_bc_patterns_val,
-            input_types,
+            source_input_types,
             output_types,
             core_scalar=allow_core_scalar,
             input_read_spec=input_read_spec_val,
             idx_arrs=idx_arrs,
             idx_types=idx_types_val,
-            idx_load_axis=idx_load_axis_val,
+            idx_load_axes=idx_load_axes_val,
             idx_bc=idx_bc_list_val,
             output_update_spec=output_update_spec_val,
         )
