@@ -1,9 +1,9 @@
 import abc
 import warnings
-from typing import Literal
+from types import ModuleType
+from typing import Literal, cast
 
 import numpy as np
-from numpy import broadcast_shapes as np_broadcast_shapes
 from numpy import einsum as np_einsum
 from numpy import sqrt as np_sqrt
 from numpy.linalg import cholesky as np_cholesky
@@ -23,16 +23,7 @@ from pytensor.tensor.utils import faster_broadcast_to, faster_ndindex
 
 # Scipy.stats is considerably slow to import
 # We import scipy.stats lazily inside `ScipyRandomVariable`
-stats = None
-
-
-try:
-    broadcast_shapes = np.broadcast_shapes
-except AttributeError:
-    from numpy.lib.stride_tricks import _broadcast_shape
-
-    def broadcast_shapes(*shapes):
-        return _broadcast_shape(*[np.empty(x, dtype=[]) for x in shapes])
+stats: ModuleType = None  # type: ignore[assignment]
 
 
 class ScipyRandomVariable(RandomVariable):
@@ -76,7 +67,7 @@ class ScipyRandomVariable(RandomVariable):
         if size is None:
             # SciPy will sometimes drop broadcastable dimensions; we need to
             # check and, if necessary, add them back
-            exp_shape = broadcast_shapes(*[np.shape(a) for a in args[1:-1]])
+            exp_shape = np.broadcast_shape(*[np.shape(a) for a in args[1:-1]])
             if res.shape != exp_shape:
                 return np.broadcast_to(res, exp_shape).copy()
 
@@ -622,13 +613,14 @@ class GumbelRV(ScipyRandomVariable):
     dtype = "floatX"
     _print_name = ("Gumbel", "\\operatorname{Gumbel}")
 
-    def __call__(
+    # mypy doesn't like the added scale kwarg because it breaks the signature of the parent class.
+    def __call__(  # type: ignore[override]
         self,
         loc: np.ndarray | float,
         scale: np.ndarray | float = 1.0,
         size: list[int] | int | None = None,
         **kwargs,
-    ) -> RandomVariable:
+    ):
         r"""Draw samples from a gumbel distribution.
 
         Signature
@@ -659,7 +651,10 @@ class GumbelRV(ScipyRandomVariable):
         scale: np.ndarray | float,
         size: list[int] | int | None,
     ) -> np.ndarray:
-        return stats.gumbel_r.rvs(loc=loc, scale=scale, size=size, random_state=rng)
+        return cast(
+            np.ndarray,
+            stats.gumbel_r.rvs(loc=loc, scale=scale, size=size, random_state=rng),
+        )
 
 
 gumbel = GumbelRV()
@@ -906,7 +901,7 @@ class MvNormalRV(RandomVariable):
 
     def rng_fn(self, rng, mean, cov, size):
         if size is None:
-            size = np_broadcast_shapes(mean.shape[:-1], cov.shape[:-2])
+            size = np.broadcast_shape(mean.shape[:-1], cov.shape[:-2])
 
         if self.method == "cholesky":
             A = np_cholesky(cov)
