@@ -25,7 +25,6 @@ from pytensor.tensor.random.basic import (
     beta,
     betabinom,
     binomial,
-    broadcast_shapes,
     categorical,
     cauchy,
     chisquare,
@@ -78,7 +77,7 @@ def fixed_scipy_rvs(rvs_name):
             res,
             size
             if size is not None
-            else broadcast_shapes(*[np.shape(a) for a in args]),
+            else np.broadcast_shapes(*[np.shape(a) for a in args]),
         )
         return res
 
