@@ -24,6 +24,7 @@ from pytensor.scalar.basic import (
     Identity,
     Mul,
     Pow,
+    Real,
     Reciprocal,
     ScalarOp,
     Second,
@@ -412,3 +413,12 @@ def numba_funcify_ScalarLoop(op, node, **kwargs):
                 return carry
 
         return for_loop, loop_cache_key
+
+
+@register_funcify_and_cache_key(Real)
+def numba_funcify_Real(op, node, **kwargs):
+    @numba_basic.numba_njit
+    def real(x):
+        return np.real(x)
+
+    return real, scalar_op_cache_key(op)

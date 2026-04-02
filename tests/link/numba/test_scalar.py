@@ -7,6 +7,7 @@ import pytensor.scalar.basic as psb
 import pytensor.scalar.math as psm
 import pytensor.tensor as pt
 from pytensor import config, function
+from pytensor.compile.io import In
 from pytensor.graph import Apply
 from pytensor.scalar import ScalarLoop, UnaryScalarOp
 from pytensor.scalar.basic import Composite
@@ -312,3 +313,13 @@ class TestScalarLoop:
         res = fn(x_test)
         expected_res = ps.psi(x).eval({x: x_test})
         np.testing.assert_allclose(res, expected_res)
+
+
+def test_numba_real():
+    x = pt.zvector("x")
+    out = pt.real(x)[0].set(99.0)
+    x_val = np.array([1 + 2j, 3 + 4j])
+    _, output = compare_numba_and_py([In(x, mutable=True)], [out], [x_val])
+
+    # Verify that the real Op does not return a view, resulting in mutation of the input
+    assert output[0].item(0) != x_val.real.item(0)

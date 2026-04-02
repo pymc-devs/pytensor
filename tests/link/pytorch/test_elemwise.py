@@ -192,3 +192,31 @@ def test_vmap_elemwise():
     vals = torch.zeros(2, 3).normal_()
     np.testing.assert_allclose(f(vals), torch.relu(vals))
     assert op.call_shapes == [torch.Size([])], op.call_shapes
+
+
+def test_Real():
+    x = pt.zvector("x")
+    out = pt.real(x)
+    compare_pytorch_and_py([x], [out], [np.array([1 + 2j, 3 + 4j])])
+
+
+def test_Real_no_input_mutation():
+    """Regression test: real() must not return a view that lets inplace ops corrupt the input.
+
+    numpy.real returns a view, so if the backend dispatch also returns a view
+    and the inplace optimization fires on a downstream SetSubtensor, the
+    original mutable input can be silently corrupted.
+    """
+    from pytensor import In, function
+    from tests.link.pytorch.test_basic import pytorch_mode
+
+    x = pt.zvector("x")
+    out = pt.real(x)[0].set(99.0)
+    f = function([In(x, mutable=True)], out, mode=pytorch_mode)
+
+    test_input = np.array([1 + 2j, 3 + 4j])
+    original = test_input.copy()
+    result = f(test_input)
+
+    np.testing.assert_allclose(result, [99.0, 3.0])
+    np.testing.assert_array_equal(test_input, original)
