@@ -18,6 +18,7 @@ from pytensor.tensor.basic import (
     ExtractDiag,
     Eye,
     TensorVariable,
+    alloc_diag,
     concatenate,
     diag,
     diagonal,
@@ -25,7 +26,7 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.math import Dot, Prod, _matmul, log, outer, prod
+from pytensor.tensor.math import Dot, Prod, _matmul, add, log, outer, prod
 from pytensor.tensor.nlinalg import (
     SVD,
     KroneckerProduct,
@@ -1144,4 +1145,79 @@ def scalar_solve_to_division(fgraph, node):
 
     copy_stack_trace(old_out, new_out)
 
+    return [new_out]
+
+
+def _extract_diagonal(x):
+    """Return the diagonal entries when ``x`` is provably diagonal; otherwise ``None``.
+
+    The supported patterns are:
+    - ``AllocDiag`` with zero offset
+    - elementwise multiplication with an identity matrix
+    """
+    if not x.owner:
+        return None
+
+    if isinstance(x.owner.op, AllocDiag) and AllocDiag.is_offset_zero(x.owner):
+        return x.owner.inputs[0]
+
+    inputs_or_none = _find_diag_from_eye_mul(x)
+    if inputs_or_none is None:
+        return None
+
+    eye_input, non_eye_inputs = inputs_or_none
+    if len(non_eye_inputs) != 1:
+        return None
+
+    [non_eye_input] = non_eye_inputs
+
+    if non_eye_input.type.broadcastable[-2:] == (True, True):
+        scalar_input = non_eye_input.squeeze(axis=(-1, -2))
+        if scalar_input.ndim == 0:
+            return scalar_input
+        # For batched scalar * eye, return batched diagonal entries (B, N),
+        # not batch scalars (B), so downstream alloc_diag reconstructs (B, N, N).
+        return scalar_input[..., None] * pt.ones(
+            (eye_input.shape[-1],), dtype=scalar_input.dtype
+        )
+    if non_eye_input.type.broadcastable[-2:] == (False, False):
+        return non_eye_input.diagonal(axis1=-1, axis2=-2)
+
+    squeeze_axis = -2 if non_eye_input.type.broadcastable[-2] else -1
+    return non_eye_input.squeeze(axis=squeeze_axis)
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([add])
+def rewrite_add_diag_to_diag_add(fgraph, node):
+    """Rewrite sums of diagonal matrices into one diagonal construction.
+
+    Uses ``diag(A + B) = diag(A) + diag(B)`` in reverse to avoid full matrix adds.
+    """
+    old_out = node.outputs[0]
+
+    if old_out.type.ndim < 2:
+        return None
+
+    diagonal_inputs = []
+    for inp in node.inputs:
+        diagonal_input = _extract_diagonal(inp)
+        if diagonal_input is None:
+            return None
+        diagonal_inputs.append(diagonal_input)
+
+    summed_diag = add(*diagonal_inputs)
+    if summed_diag.ndim == 0:
+        new_out = (
+            pt.eye(old_out.shape[-2], old_out.shape[-1], dtype=old_out.dtype)
+            * summed_diag
+        )
+    else:
+        new_out = alloc_diag(summed_diag, axis1=-2, axis2=-1)
+
+    if new_out.dtype != old_out.dtype:
+        new_out = pt.cast(new_out, old_out.dtype)
+
+    copy_stack_trace(old_out, new_out)
     return [new_out]
