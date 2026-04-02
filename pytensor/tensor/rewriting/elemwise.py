@@ -906,9 +906,10 @@ class FusionOptimizer(GraphRewriter):
             # producer-consumer edges, so it misses siblings like f(x) and
             # g(x) that share an input without one feeding into the other.
             sibling_candidates: list = list(sorted_subgraphs)
-            for node in candidate_starting_nodes:
-                bf = nodes_bitflags.get(node)
-                if (bf is not None) and not (bf & all_subgraphs_bitset):
+            for node, bf in nodes_bitflags.items():
+                if node not in candidate_starting_nodes:
+                    continue
+                if not (bf & all_subgraphs_bitset):
                     sibling_candidates.append(
                         (bf, (tuple(dict.fromkeys(node.inputs)), node.outputs))
                     )
@@ -916,32 +917,49 @@ class FusionOptimizer(GraphRewriter):
             # Skip scalar constants as they get inlined later and don't
             # represent meaningful shared computation between siblings.
             input_to_sibling_idxs: dict[Variable, list[int]] = defaultdict(list)
-            for sibling_idx, (_, (inputs, _)) in enumerate(sibling_candidates):
+            for sibling_idx, (_, (inputs, outputs)) in enumerate(sibling_candidates):
+                out_bcast = outputs[0].type.broadcastable
                 for inp in inputs:
                     if isinstance(inp, TensorConstant) and inp.unique_value is not None:
                         continue
+                    # Only group siblings through inputs that aren't broadcasted
+                    # As we may be dealing with sibiling of different shapes.
+                    # This is conservative, we could check if other shared inputs
+                    # jointly imply equal shapes (or look at static shapes if available)
+                    if inp.type.broadcastable != out_bcast:
+                        continue
                     input_to_sibling_idxs[inp].append(sibling_idx)
+
+            # Track which candidate each index was merged into (union-find)
+            merged_into: dict[int, int] = {}
+
+            def find_canonical(idx):
+                """Follow merge chain to find the live candidate."""
+                try:
+                    while True:
+                        idx = merged_into[idx]
+                except KeyError:
+                    return idx
 
             for sibling_idxs in input_to_sibling_idxs.values():
                 if len(sibling_idxs) < 2:
                     continue
 
                 for i in range(len(sibling_idxs) - 1):
-                    sibling_i = sibling_idxs[i]
-                    if sibling_candidates[sibling_i] is None:
-                        # Already merged in a previous iteration
-                        continue
+                    sibling_i = find_canonical(sibling_idxs[i])
 
                     bitset_i, (inputs_i, outputs_i) = sibling_candidates[sibling_i]
                     bcast_i = outputs_i[0].type.broadcastable
                     merged = False
                     for sibling_j in sibling_idxs[i + 1 :]:
-                        if sibling_candidates[sibling_j] is None:
-                            # Already merged in a previous iteration
+                        sibling_j = find_canonical(sibling_j)
+                        if sibling_j == sibling_i:
+                            # Already in the same group
                             continue
                         bitset_j, (inputs_j, outputs_j) = sibling_candidates[sibling_j]
                         if bcast_i != outputs_j[0].type.broadcastable:
                             continue
+
                         # Independence: neither is ancestor of the other
                         if (
                             bitset_i & ancestors_bitsets[outputs_j[0].owner]
@@ -958,8 +976,7 @@ class FusionOptimizer(GraphRewriter):
                             if input_j not in merged_inputs_set:
                                 merged_inputs.append(input_j)
                                 merged_inputs_set.add(input_j)
-                        # Hide sibling_j from future merges
-                        sibling_candidates[sibling_j] = None
+                        merged_into[sibling_j] = sibling_i
 
                         # Update ancestor bitsets so that any node
                         # depending on part of the merged group now

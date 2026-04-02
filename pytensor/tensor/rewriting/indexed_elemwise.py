@@ -15,7 +15,7 @@ from pytensor.printing import op_debug_information
 from pytensor.scalar.basic import Composite, identity
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.rewriting.elemwise import InplaceElemwiseOptimizer
-from pytensor.tensor.shape import Reshape
+from pytensor.tensor.shape import Reshape, shape_padright
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -250,7 +250,7 @@ class IndexedElemwise(OpFromGraph):
     def __init__(self, *args, indexed_inputs=(), indexed_outputs=(), **kwargs):
         self.indexed_inputs = indexed_inputs
         self.indexed_outputs = indexed_outputs
-        super().__init__(*args, on_unused_input="ignore", **kwargs)
+        super().__init__(*args, on_unused_input="ignore", accept_inplace=True, **kwargs)
 
     def __str__(self):
         for node in self.fgraph.apply_nodes:
@@ -627,16 +627,25 @@ class FuseIndexedElemwise(GraphRewriter):
             inner_outputs = list(node.outputs)
             call_inputs = list(inner_inputs)
             scatter_transpose_back = {}  # scatter_idx -> inverse perm
+            # Save original idx_axis_pairs before transpose may remap axes,
+            # so we can look up the correct key in all_idx_groups later.
+            original_idx_axis_pairs = {
+                out_idx: list(entry[2]) for out_idx, entry in update_consumers.items()
+            }
             for out_idx in sorted(update_consumers.keys()):
                 update_node, target, idx_axis_pairs, _mode = update_consumers[out_idx]
 
-                # Check if we need to transpose the target
-                max_idx_axis = max(a for _, a in idx_axis_pairs)
-                needs_transpose = any(
-                    a < max_idx_axis
-                    for a in range(target.type.ndim)
-                    if a not in {a for _, a in idx_axis_pairs}
-                )
+                # If there are batch dims on the target (beyond the elemwise loop),
+                # we transpose them to the right, so they work as "core_ndim"
+                # in the vectorized codegen (which must always be on the right)
+                # (e.g. target(5,3)[:,idx].inc(exp(vector)) -> target(3, 5)[idx, :].inc(exp(vector)),
+                idx_axes_set = {a for _, a in idx_axis_pairs}
+                max_idx_axis = max(idx_axes_set)
+                n_indexed_axes = len(idx_axes_set)
+                n_idx_dims = max((idx.ndim for idx, _ in idx_axis_pairs), default=0)
+                elemwise_batch_ndim = len(node.outputs[0].type.broadcastable)
+                source_batch = elemwise_batch_ndim + n_indexed_axes - n_idx_dims
+                needs_transpose = max_idx_axis >= source_batch
                 if needs_transpose:
                     # Build permutation: indexed axes first, then rest
                     idx_axes_sorted = sorted({a for _, a in idx_axis_pairs})
@@ -673,6 +682,15 @@ class FuseIndexedElemwise(GraphRewriter):
                 scatter_idx = dup_map.get(out_idx, out_idx)
                 # The value to scatter: use the (possibly duplicated) Elemwise output
                 scatter_value = node.outputs[scatter_idx]
+
+                # To work with IndexedElemwise codegen, we moved indexed update batch dims to the right.
+                # target(5,3)[:,idx].inc(exp(vector)) -> target(3, 5)[idx, :].inc(exp(vector))
+                # For this operation to be strictly valid, we need to add expand dims the scattered value.
+                # target(5,3)[:,idx].inc(exp(vector)) -> target(3, 5)[idx, :].inc(exp(vector)[:, None])
+                # This expand_dims is subsumed by the IndexedElemwise, but makes the inner graph valid.
+                core_ndim = target.type.ndim - source_batch
+                if needs_transpose and core_ndim > 0:
+                    scatter_value = shape_padright(scatter_value, core_ndim)
 
                 # Build the scatter output
                 # After transpose, indexed axes are at position 0+,
@@ -730,18 +748,18 @@ class FuseIndexedElemwise(GraphRewriter):
                             break
 
             # Build indexed_outputs spec for the Op.
-            # Use the (possibly remapped) axis from update_consumers.
+            # Use the (possibly remapped) axis from update_consumers for the
+            # spec value, but the ORIGINAL axis for the all_idx_groups lookup
+            # (since all_idx_groups was built before any transpose).
             indexed_outputs_spec = [None] * n_indices
             for out_idx in sorted(update_consumers.keys()):
                 _update_node, _target, idx_axis_pairs, mode = update_consumers[out_idx]
-                for idx_var, axis in idx_axis_pairs:
-                    # Look up in all_idx_groups using the ORIGINAL key
-                    # (all_idx_groups was built before any transpose).
-                    idx_pos = None
-                    for (iv, _), (v, p) in all_idx_groups.items():
-                        if iv is idx_var and p is not None:
-                            idx_pos = p
-                            break
+                orig_pairs = original_idx_axis_pairs[out_idx]
+                for (idx_var, axis), (_orig_var, orig_axis) in zip(
+                    idx_axis_pairs, orig_pairs
+                ):
+                    key = (idx_var, orig_axis)
+                    idx_pos = all_idx_groups.get(key, (None, None))[1]
                     if idx_pos is None:
                         continue
                     scatter_idx = dup_map.get(out_idx, out_idx)

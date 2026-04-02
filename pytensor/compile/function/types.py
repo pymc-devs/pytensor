@@ -723,6 +723,22 @@ class Function:
             # The first len(maker.outputs) variables are original variables.
             # The rest are the updates.
             out_vars = maker.fgraph.outputs[: len(maker.outputs)]
+
+            # Warn if any shared variable with a deleted update is being
+            # destroyed (mutated inplace) by a node in the graph. In that case
+            # the shared variable storage will still be mutated even though the
+            # update is not applied.
+            if hasattr(maker.fgraph, "destroyers"):
+                for in_idx in maker.fgraph.update_mapping.values():
+                    input_var = maker.fgraph.inputs[in_idx]
+                    if maker.fgraph.destroyers(input_var):
+                        warnings.warn(
+                            f"Shared variable '{input_var.name}' will still be mutated "
+                            "even though its update is being deleted, because an "
+                            "operation in the graph modifies it inplace.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
         else:
             out_vars = maker.fgraph.outputs
 
