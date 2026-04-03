@@ -11,6 +11,9 @@ from pytensor.link.numba.dispatch.basic import (
     register_funcify_and_cache_key,
 )
 from pytensor.link.numba.dispatch.vectorize_codegen import (
+    NO_INDEXED_INPUTS,
+    NO_INDEXED_OUTPUTS,
+    NO_SIZE,
     _jit_options,
     _vectorized,
     encode_literals,
@@ -90,7 +93,9 @@ def numba_funcify_Blockwise(op: BlockwiseWithCoreShape, node, **kwargs):
                 (),  # constant_inputs
                 inputs,
                 tuple_core_shapes,
-                None,  # size
+                NO_SIZE,
+                NO_INDEXED_INPUTS,
+                NO_INDEXED_OUTPUTS,
             )
 
         return impl
