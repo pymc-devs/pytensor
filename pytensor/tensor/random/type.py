@@ -28,21 +28,13 @@ class RandomType(Type[T]):
     r"""A Type wrapper for `numpy.random.Generator."""
 
 
-class RandomGeneratorType(RandomType[Generator]):
-    r"""A Type wrapper for `numpy.random.Generator`.
+class AbstractRandomGeneratorType(RandomType[Generator]):
+    r"""Abstract base for random generator types wrapping `numpy.random.Generator`.
 
-    The reason this exists (and `Generic` doesn't suffice) is that
-    `Generator` objects that would appear to be equal do not compare equal
-    with the ``==`` operator.
-
-    This `Type` also works with a ``dict`` derived from
-    `Generator.__get_state__`, unless the ``strict`` argument to `Type.filter`
-    is explicitly set to ``True``.
-
+    Provides shared ``filter``, ``values_eq``, and ``may_share_memory``
+    implementations.  Concrete subclasses (``RandomGeneratorType``,
+    ``XRandomGeneratorType``) add their own ``__eq__``/``__hash__``.
     """
-
-    def __repr__(self):
-        return "RandomGeneratorType"
 
     @staticmethod
     def may_share_memory(a: Generator, b: Generator):
@@ -107,6 +99,23 @@ class RandomGeneratorType(RandomType[Generator]):
 
         return _eq(sa, sb)
 
+
+class RandomGeneratorType(AbstractRandomGeneratorType):
+    r"""A Type wrapper for `numpy.random.Generator`.
+
+    The reason this exists (and `Generic` doesn't suffice) is that
+    `Generator` objects that would appear to be equal do not compare equal
+    with the ``==`` operator.
+
+    This `Type` also works with a ``dict`` derived from
+    `Generator.__get_state__`, unless the ``strict`` argument to `Type.filter`
+    is explicitly set to ``True``.
+
+    """
+
+    def __repr__(self):
+        return "RandomGeneratorType"
+
     def __eq__(self, other):
         return type(self) is type(other)
 
@@ -114,9 +123,9 @@ class RandomGeneratorType(RandomType[Generator]):
         return hash(type(self))
 
 
-# Register `RandomGeneratorType`'s C code for `ViewOp`.
+# Register C code for `ViewOp` on the abstract base so all subclasses inherit it.
 pytensor.compile.register_view_op_c_code(
-    RandomGeneratorType,
+    AbstractRandomGeneratorType,
     """
     Py_XDECREF(%(oname)s);
     %(oname)s = %(iname)s;

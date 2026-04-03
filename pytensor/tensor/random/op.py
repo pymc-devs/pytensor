@@ -314,7 +314,16 @@ class RandomVariable(RNGConsumerOp):
 
         return [None, list(shape)]
 
-    def __call__(self, *args, size=None, name=None, rng=None, dtype=None, **kwargs):
+    def __call__(
+        self,
+        *args,
+        size=None,
+        name=None,
+        rng=None,
+        dtype=None,
+        return_next_rng: bool = False,
+        **kwargs,
+    ):
         if dtype is None:
             dtype = self.dtype
         if dtype == "floatX":
@@ -332,15 +341,26 @@ class RandomVariable(RNGConsumerOp):
             props["dtype"] = dtype
             new_op = type(self)(**props)
             return new_op.__call__(
-                *args, size=size, name=name, rng=rng, dtype=dtype, **kwargs
+                *args,
+                size=size,
+                name=name,
+                rng=rng,
+                dtype=dtype,
+                return_next_rng=return_next_rng,
+                **kwargs,
             )
 
-        res = super().__call__(rng, size, *args, **kwargs)
-
+        node = self.make_node(rng, size, *args)
+        outputs = node.outputs
         if name is not None:
-            res.name = name
-
-        return res
+            outputs[self.default_output].name = name
+        if return_next_rng:
+            return outputs
+        else:
+            out = outputs[self.default_output]
+            if kwargs.get("return_list", False):
+                return [out]
+            return out
 
     def make_node(self, rng, size, *dist_params):
         """Create a random variable node.
