@@ -1,6 +1,6 @@
 import numpy as np
 
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.compile.sharedvalue import shared
 from pytensor.gradient import grad
 from pytensor.tensor.math import dot, sigmoid
@@ -53,7 +53,7 @@ class NNet:
         self.output_from_hidden = function([self.hidden], self.output)
 
 
-def test_nnet():
+def test_nn_workflow():
     rng = np.random.default_rng(279)
     data = rng.random((10, 4))
     nnet = NNet(n_input=3, n_hidden=10)

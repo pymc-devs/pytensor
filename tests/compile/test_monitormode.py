@@ -4,7 +4,7 @@ from io import StringIO
 import numpy as np
 
 from pytensor.compile import MonitorMode
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.printing import debugprint
 from pytensor.tensor import log, outer
 from pytensor.tensor.type import dscalar, vector

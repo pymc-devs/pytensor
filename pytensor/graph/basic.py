@@ -117,7 +117,7 @@ class Apply(Node, Generic[OpType]):
     This class is typically instantiated by a `Op.make_node` method, which
     is called by `Op.__call__`.
 
-    The function `pytensor.compile.function.function` uses `Apply.inputs`
+    The function `pytensor.compile.maker.function` uses `Apply.inputs`
     together with `Variable.owner` to search the expression graph and determine
     which inputs are necessary to compute the function's outputs.
 
@@ -583,7 +583,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         This way of computing has more overhead than a normal PyTensor
         function, so don't use it too much in real scripts.
         """
-        from pytensor.compile.function import function
+        from pytensor.compile.maker import function
         from pytensor.graph.traversal import get_var_by_name
 
         ignore_unused_input = kwargs.get("on_unused_input", None) in ("ignore", "warn")

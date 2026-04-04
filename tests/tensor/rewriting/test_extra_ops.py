@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor.scalar as ps
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.compile.mode import OPT_NONE, Mode, get_default_mode
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.utils import rewrite_graph

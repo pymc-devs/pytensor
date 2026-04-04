@@ -10,8 +10,8 @@ from functools import partial
 from itertools import chain
 from typing import cast
 
-from pytensor.compile.function import function
-from pytensor.compile.function.pfunc import rebuild_collect_shared
+from pytensor.compile.maker import function
+from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import DisconnectedType, Rop, disconnected_type, grad
 from pytensor.graph.basic import (

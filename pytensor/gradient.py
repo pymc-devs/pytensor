@@ -1823,7 +1823,7 @@ def verify_grad(
     there is an experimental `verify_grad` that covers that case as well by
     using random projections.
     """
-    from pytensor.compile.function import function
+    from pytensor.compile.maker import function
     from pytensor.compile.sharedvalue import shared
 
     if not isinstance(pt, list | tuple):

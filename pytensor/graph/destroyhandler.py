@@ -234,7 +234,7 @@ def inplace_candidates(fgraph, inputs, protected_inputs=None):
 
     """
     if protected_inputs is None:
-        from pytensor.compile.function.types import Supervisor
+        from pytensor.compile.aliasing import Supervisor
 
         protected_inputs = set(
             itertools.chain.from_iterable(

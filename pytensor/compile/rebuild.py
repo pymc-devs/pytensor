@@ -7,11 +7,17 @@ from collections.abc import Sequence
 from copy import copy
 from typing import overload
 
-from pytensor.compile.function.types import UnusedInputError
 from pytensor.compile.io import In, Out
 from pytensor.compile.sharedvalue import SharedVariable, shared
 from pytensor.graph.basic import Constant, Variable, clone_node_and_cache
 from pytensor.graph.fg import FunctionGraph
+
+
+class UnusedInputError(Exception):
+    """
+    A symbolic input passed to function is not needed.
+
+    """
 
 
 @overload
@@ -270,34 +276,31 @@ def rebuild_collect_shared(
             )
 
     # Fill update_d and update_expr with provided updates
-    if updates is None:
-        updates = []
-    for store_into, update_val in (
-        updates.items() if isinstance(updates, dict) else updates
-    ):
-        if not isinstance(store_into, SharedVariable):
-            raise TypeError("update target must be a SharedVariable", store_into)
-        if store_into in update_d:
-            raise ValueError(
-                "this shared variable already has an update expression",
-                (store_into, update_d[store_into]),
-            )
+    if updates:
+        update_pairs = updates.items() if isinstance(updates, dict) else updates
+        for store_into, update_val in update_pairs:
+            if not isinstance(store_into, SharedVariable):
+                raise TypeError("update target must be a SharedVariable", store_into)
+            if store_into in update_d:
+                raise ValueError(
+                    "this shared variable already has an update expression",
+                    (store_into, update_d[store_into]),
+                )
 
-        try:
-            update_val = store_into.type.filter_variable(update_val, allow_convert=True)
-        except TypeError:
-            err_msg = (
-                "An update must have the same type as the"
-                f" original shared variable (shared_var={store_into},"
-                f" shared_var.type={store_into.type},"
-                f" update_val={update_val}, update_val.type={getattr(update_val, 'type', None)})."
-            )
+            try:
+                update_val = store_into.type.filter_variable(
+                    update_val, allow_convert=True
+                )
+            except TypeError:
+                raise TypeError(
+                    "An update must have the same type as the original shared variable "
+                    f"(shared_var={store_into}, shared_var.type={store_into.type}, "
+                    f"update_val={update_val}, update_val.type={getattr(update_val, 'type', None)})."
+                )
+            assert store_into.type.is_super(update_val.type)
 
-            raise TypeError(err_msg)
-        assert store_into.type.is_super(update_val.type)
-
-        update_d[store_into] = update_val
-        update_expr.append((store_into, update_val))
+            update_d[store_into] = update_val
+            update_expr.append((store_into, update_val))
 
     # Elements of "outputs" are here cloned to "cloned_outputs"
     if isinstance(outputs, list):
@@ -367,16 +370,12 @@ def construct_function_ins_and_outs(
 ):
     """Construct inputs and outputs for `pytensor.function`.
 
-    This function works by cloning the graph (except for the inputs).
-
-    First, it clones the replacements named in the `givens` argument,
-    and points each ``Var1`` to the clone of ``Var2``.  Then it sets the
-    inputs in the clone dictionary.  After these steps, we are
-    assuming that the clone dictionary contains all the inputs to
-    the computation graph.
-
-    Then it clones the outputs and the update expressions.  This
-    rebuilds a computation graph from the inputs and the `givens`.
+    This function clones the graph (via ``rebuild_collect_shared``),
+    applies ``givens`` substitutions, discovers shared variables, and
+    wires up ``updates``.  The cloned outputs are then passed to
+    ``FunctionMaker``, where ``FunctionMaker.create_fgraph`` wraps them in a
+    ``FunctionGraph`` without cloning again (since the inputs are
+    already atomic after cloning here).
 
     When `fgraph` is non-``None``, nothing is cloned and the given `fgraph` is
     simply prepared for direct use.
@@ -394,15 +393,17 @@ def construct_function_ins_and_outs(
     if not isinstance(no_default_updates, bool | list):
         raise TypeError("The `no_default_update` argument must be a boolean or list")
 
-    if len(updates) > 0 and not all(
-        isinstance(pair, tuple | list)
-        and len(pair) == 2
-        and isinstance(pair[0], Variable)
-        for pair in (updates.items() if isinstance(updates, dict) else updates)
-    ):
-        raise TypeError(
-            "The `updates` parameter must be an ordered mapping or a list of pairs"
-        )
+    if updates:
+        update_pairs = updates.items() if isinstance(updates, dict) else updates
+        if not all(
+            isinstance(pair, tuple | list)
+            and len(pair) == 2
+            and isinstance(pair[0], Variable)
+            for pair in update_pairs
+        ):
+            raise TypeError(
+                "The `updates` parameter must be an ordered mapping or a list of pairs"
+            )
 
     # Transform params into pytensor.compile.In objects.
     def param_to_in(param, allow_downcast=None):
@@ -452,8 +453,7 @@ def construct_function_ins_and_outs(
                 )
 
     if not fgraph:
-        # Extend the outputs with the updates on input variables so they are
-        # also cloned
+        # Extend the outputs with the updates on input variables so they are also cloned
         additional_outputs = [i.update for i in inputs if i.update is not None]
         if outputs is None:
             out_list = []

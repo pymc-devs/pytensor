@@ -421,7 +421,7 @@ def makeSharedTester(
             topo_cst = shape_constant_fct.maker.fgraph.toposort()
             if pytensor.config.mode != "FAST_COMPILE":
                 assert len(topo_cst) == 1
-                topo_cst[0].op == pytensor.compile.function.types.deep_copy_op
+                topo_cst[0].op == pytensor.compile.ops.deep_copy_op
 
             # Test that we can take the grad.
             shape_grad = pytensor.gradient.grad(x1_specify_shape.sum(), x1_shared)

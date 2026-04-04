@@ -1,18 +1,22 @@
-from pytensor.compile.function.pfunc import rebuild_collect_shared
-from pytensor.compile.function.types import (
-    AliasedMemoryError,
-    Function,
-    FunctionMaker,
+from pytensor.compile.aliasing import (
     Supervisor,
-    UnusedInputError,
+    add_supervisor_to_fgraph,
     alias_root,
-    fgraph_updated_vars,
-    get_info_on_inputs,
     infer_reuse_pattern,
     insert_deepcopy,
     view_tree_set,
 )
+from pytensor.compile.executor import (
+    AliasedMemoryError,
+    Function,
+)
 from pytensor.compile.io import In, Out, SymbolicInput, SymbolicOutput
+from pytensor.compile.maker import (
+    FunctionMaker,
+    UnusedInputError,
+    function,
+    function_dump,
+)
 from pytensor.compile.mode import (
     CVM,
     FAST_COMPILE,
@@ -57,4 +61,5 @@ from pytensor.compile.ops import (
     wrap_py,
 )
 from pytensor.compile.profiling import ProfileStats
+from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable, shared, shared_constructor

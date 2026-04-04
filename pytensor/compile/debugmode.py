@@ -18,11 +18,9 @@ from warnings import warn
 import numpy as np
 
 import pytensor
-from pytensor.compile.function.types import (
-    Function,
-    FunctionMaker,
-    infer_reuse_pattern,
-)
+from pytensor.compile.aliasing import infer_reuse_pattern
+from pytensor.compile.executor import Function
+from pytensor.compile.maker import FunctionMaker
 from pytensor.compile.mode import Mode, register_mode
 from pytensor.compile.ops import OutputGuard, _output_guard
 from pytensor.configdefaults import config
@@ -2008,7 +2006,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
 
             optimizer(fgraph)
 
-            pytensor.compile.function.types.insert_deepcopy(
+            pytensor.compile.aliasing.insert_deepcopy(
                 fgraph, inputs, list(chain(outputs, additional_outputs))
             )
 
@@ -2213,15 +2211,9 @@ class DebugMode(Mode):
 
     """
 
-    # This function will be used to create a FunctionMaker in
-    # function.types.function
-    def function_maker(self, i, o, m, *args, **kwargs):
-        """
-        Return an instance of `_Maker` which handles much of the debugging work.
-
-        """
-        assert m is self
-        return _Maker(i, o, self, *args, **kwargs)
+    @property
+    def function_maker(self):
+        return _Maker
 
     def __init__(
         self,

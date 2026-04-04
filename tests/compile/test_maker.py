@@ -8,11 +8,10 @@ import pytest
 import scipy as sp
 
 import pytensor.tensor as pt
-from pytensor.compile import get_mode, shared
-from pytensor.compile.function import function, function_dump
-from pytensor.compile.function.pfunc import rebuild_collect_shared
-from pytensor.compile.function.types import UnusedInputError
+from pytensor.compile import get_mode
 from pytensor.compile.io import In
+from pytensor.compile.maker import UnusedInputError, function, function_dump
+from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.basic import Container
@@ -27,10 +26,8 @@ from pytensor.tensor.type import (
     dvector,
     fscalar,
     fvector,
-    imatrix,
     iscalar,
     ivector,
-    ivectors,
     lscalar,
     vector,
     wvector,
@@ -39,11 +36,6 @@ from pytensor.utils import PYTHON_INT_BITWIDTH
 
 
 floatX = "float32"
-
-
-def data_of(s):
-    # Return the raw value of a shared variable
-    return s.container.storage[0]
 
 
 def test_function_dump():
@@ -70,16 +62,6 @@ def test_function_name():
     func = function([x], x + 1.0)
 
     assert __file__ in func.name
-
-
-def test_trust_input():
-    x = dvector()
-    y = shared(1)
-    z = x + y
-    f = function([x], z)
-    assert f.trust_input is False
-    f = function([x], z, trust_input=True)
-    assert f.trust_input is True
 
 
 class TestFunctionIn:
@@ -258,6 +240,11 @@ class TestFunctionIn:
         # If allow_downcast is None, like False
         with pytest.raises(TypeError):
             f(z, z, [0.1])
+
+
+def data_of(s):
+    # Return the raw value of a shared variable
+    return s.container.storage[0]
 
 
 class TestFunction:
@@ -1144,24 +1131,3 @@ class TestAliasingRules:
             # further and further from the (e.g. data_of_a) with each
             # call.  The memory leak is in the increasing number of view
             # objects forming a chain to the underlying data.
-
-
-class TestRebuildStrict:
-    def test_rebuild_strict(self):
-        # Test fix for error reported at
-        # https://groups.google.com/d/topic/theano-users/BRK0UEB72XA/discussion
-        w = imatrix()
-        x, y = ivectors("x", "y")
-        z = x * y
-        f = function([w, y], z, givens=[(x, w)], rebuild_strict=False)
-        z_val = f(np.ones((3, 5), dtype="int32"), np.arange(5, dtype="int32"))
-        assert z_val.ndim == 2
-        assert np.all(z_val == np.ones((3, 5)) * np.arange(5))
-
-
-def test_rebuild_collect_shared():
-    x, y = ivectors("x", "y")
-    z = x * y
-
-    with pytest.raises(TypeError):
-        rebuild_collect_shared([z], replace={1: 2})

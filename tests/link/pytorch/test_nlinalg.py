@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.tensor import nlinalg as pt_nla
 from pytensor.tensor.type import matrix
