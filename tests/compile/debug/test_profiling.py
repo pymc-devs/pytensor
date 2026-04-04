@@ -6,7 +6,7 @@ from io import StringIO
 import numpy as np
 
 import pytensor.tensor as pt
-from pytensor.compile import ProfileStats
+from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.ifelse import ifelse

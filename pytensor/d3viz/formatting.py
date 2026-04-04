@@ -9,7 +9,8 @@ from pathlib import Path
 import numpy as np
 
 import pytensor
-from pytensor.compile import Function, builders
+from pytensor.compile import builders
+from pytensor.compile.executor import Function
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.traversal import graph_inputs

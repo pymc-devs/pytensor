@@ -729,7 +729,7 @@ def values_eq_approx_always_true(a, b):
     return True
 
 
-pytensor.compile.register_view_op_c_code(
+pytensor.compile.ops.register_view_op_c_code(
     TensorType,
     """
     Py_XDECREF(%(oname)s);
@@ -740,7 +740,7 @@ pytensor.compile.register_view_op_c_code(
 )
 
 
-pytensor.compile.register_deep_copy_op_c_code(
+pytensor.compile.ops.register_deep_copy_op_c_code(
     TensorType,
     """
     int alloc = %(oname)s == NULL;

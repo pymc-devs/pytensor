@@ -58,9 +58,9 @@ import pytensor.link.utils as link_utils
 from pytensor import tensor as pt
 from pytensor.compile.aliasing import add_supervisor_to_fgraph
 from pytensor.compile.builders import construct_nominal_fgraph, infer_shape
+from pytensor.compile.debug.profiling import register_profiler_printer
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_mode
-from pytensor.compile.profiling import register_profiler_printer
 from pytensor.configdefaults import config
 from pytensor.gradient import (
     DisconnectedType,

@@ -2,9 +2,9 @@ import typing
 import warnings
 from types import EllipsisType
 
-from pytensor.compile import (
+from pytensor.compile import SharedVariable
+from pytensor.compile.ops import (
     DeepCopyOp,
-    SharedVariable,
     ViewOp,
     register_deep_copy_op_c_code,
     register_view_op_c_code,

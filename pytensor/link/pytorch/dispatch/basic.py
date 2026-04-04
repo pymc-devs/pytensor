@@ -5,9 +5,9 @@ import numpy as np
 import torch
 
 from pytensor import In
-from pytensor.compile import PYTORCH
 from pytensor.compile.aliasing import add_supervisor_to_fgraph
 from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.mode import PYTORCH
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.graph.basic import Constant
 from pytensor.graph.fg import AbstractFunctionGraph

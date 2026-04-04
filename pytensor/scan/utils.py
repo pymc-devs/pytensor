@@ -13,7 +13,7 @@ import numpy as np
 
 from pytensor import scalar as ps
 from pytensor import tensor as pt
-from pytensor.compile.profiling import ProfileStats
+from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import graph_inputs

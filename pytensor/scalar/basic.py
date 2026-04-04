@@ -766,7 +766,7 @@ def get_scalar_type(dtype, cache: dict[str, ScalarType] = {}) -> ScalarType:
 
 
 # Register C code for ViewOp on Scalars.
-pytensor.compile.register_view_op_c_code(
+pytensor.compile.ops.register_view_op_c_code(
     ScalarType,
     """
     %(oname)s = %(iname)s;

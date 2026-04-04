@@ -17,7 +17,7 @@ numba = pytest.importorskip("numba")
 import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import config, shared
-from pytensor.compile import SymbolicInput
+from pytensor.compile.io import SymbolicInput
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode
 from pytensor.graph.basic import Apply, Variable

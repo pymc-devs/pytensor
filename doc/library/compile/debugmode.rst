@@ -5,7 +5,7 @@
 :mod:`debugmode`
 ================
 
-.. module:: pytensor.compile.debugmode
+.. module:: pytensor.compile.debug.debugmode
    :platform: Unix, Windows
    :synopsis: defines DebugMode
 .. moduleauthor:: LISA
@@ -29,7 +29,7 @@ a cluster.
 
     import pytensor
     from pytensor import tensor as pt
-    from pytensor.compile.debugmode import DebugMode
+    from pytensor.compile.debug.debugmode import DebugMode
 
     x = pt.dscalar('x')
 

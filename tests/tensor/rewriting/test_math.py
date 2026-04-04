@@ -11,7 +11,7 @@ import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import pprint, shared
 from pytensor.compile import optdb
-from pytensor.compile.debugmode import DebugMode
+from pytensor.compile.debug.debugmode import DebugMode
 from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp, deep_copy_op
@@ -4321,7 +4321,7 @@ class TestSigmoidRewrites:
         # Before the rewriting, inf and NaN will be produced in the graph,
         # and DebugMode will complain. Everything is fine afterwards.
         mode = self.get_mode()
-        if not isinstance(mode, pytensor.compile.debugmode.DebugMode):
+        if not isinstance(mode, pytensor.compile.debug.debugmode.DebugMode):
             f = pytensor.function([x, lr], ux, mode=mode)
             ux_v = f([[50]], 0.1)
             assert not np.isnan(ux_v)
