@@ -3,8 +3,8 @@ import pytest
 import scipy as sp
 
 import pytensor.tensor as pt
-from pytensor.compile import UnusedInputError, get_mode
-from pytensor.compile.function import function, pfunc
+from pytensor.compile import get_mode
+from pytensor.compile.function import function
 from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.io import In
 from pytensor.compile.sharedvalue import shared
@@ -42,25 +42,25 @@ class TestPfunc:
         b = shared(1)
 
         with pytest.raises(TypeError):
-            pfunc({a}, a + b)
+            function({a}, a + b)
 
         with pytest.raises(TypeError):
-            pfunc([a], a + b, no_default_updates=1)
+            function([a], a + b, no_default_updates=1)
 
         with pytest.raises(TypeError):
-            pfunc([a], a + b, updates=[{b, a}])
+            function([a], a + b, updates=[{b, a}])
 
         with pytest.raises(TypeError):
-            pfunc([a], a + b, updates=[(1, b)])
+            function([a], a + b, updates=[(1, b)])
 
     def test_doc(self):
-        # Ensure the code given in pfunc.txt works as expected
+        # Ensure the code given in the docs works as expected
 
         # Example #1.
         a = lscalar()
         b = shared(1)
-        f1 = pfunc([a], (a + b))
-        f2 = pfunc([In(a)], a + b, updates={b: b + 1})
+        f1 = function([a], (a + b))
+        f2 = function([In(a)], a + b, updates={b: b + 1})
         assert b.get_value() == 1
         assert f1(3) == 4
         assert f2(3) == 4
@@ -72,8 +72,8 @@ class TestPfunc:
         # Example #2.
         a = lscalar()
         b = shared(7)
-        f1 = pfunc([a], a + b)
-        f2 = pfunc([a], a * b)
+        f1 = function([a], a + b)
+        f2 = function([a], a * b)
         assert f1(5) == 12
         b.set_value(8)
         assert f1(5) == 13
@@ -87,14 +87,14 @@ class TestPfunc:
         x = dmatrix()
         out1 = w + x
         out2 = w * x
-        f1 = pfunc([x], [out1])
-        f2 = pfunc([x], [out2])
+        f1 = function([x], [out1])
+        f2 = function([x], [out2])
         xval = np.random.random((2, 2))
         assert np.all(f1(xval) == xval + wval)
         assert np.all(f2(xval) == xval * wval)
 
         # CHECK: updating a shared value
-        f3 = pfunc([x], out1, updates=[(w, (w - 1))])
+        f3 = function([x], out1, updates=[(w, (w - 1))])
         # f3 changes the value of w
         assert np.all(f3(xval) == xval + wval)
         # this same value is read by f1
@@ -111,7 +111,7 @@ class TestPfunc:
         with pytest.raises(
             TypeError, match=r"^Cannot use a shared variable \(w\) as explicit input"
         ):
-            pfunc([w], pt_sum(w * w))
+            function([w], pt_sum(w * w))
 
     def test_default_container(self):
         # Ensure it is possible to (implicitly) use a shared variable in a
@@ -121,7 +121,7 @@ class TestPfunc:
         w_init = rng.random(5)
         w = shared(w_init.copy(), "w")
         reg = pt_sum(w * w)
-        f = pfunc([], reg)
+        f = function([], reg)
 
         assert f() == np.sum(w_init * w_init)
         # Change the value of w and ensure the output changes accordingly.
@@ -132,7 +132,7 @@ class TestPfunc:
         # Similar in spirit to test_default_container, but updating a scalar
         # variable. This is a sanity check for non mutable types.
         x = shared(0.0, "x")
-        f = pfunc([], x)
+        f = function([], x)
         assert f() == 0
         x.set_value(x.get_value(borrow=True) + 1, borrow=True)
         assert f() == 1
@@ -142,13 +142,13 @@ class TestPfunc:
         b = shared(7)
         out = a + b
 
-        f = pfunc([In(a, strict=False)], [out])
+        f = function([In(a, strict=False)], [out])
         # works, random( generates float64 by default
         f(np.random.random(8))
         # works, casting is allowed
         f(np.array([1, 2, 3, 4], dtype="int32"))
 
-        f = pfunc([In(a, strict=True)], [out])
+        f = function([In(a, strict=True)], [out])
         try:
             # fails, f expects float64
             f(np.array([1, 2, 3, 4], dtype="int32"))
@@ -160,14 +160,14 @@ class TestPfunc:
         a_out = a * 2  # assuming the op which makes this "in place" triggers
 
         # using mutable=True will let fip change the value in aval
-        fip = pfunc([In(a, mutable=True)], [a_out], mode="FAST_RUN")
+        fip = function([In(a, mutable=True)], [a_out], mode="FAST_RUN")
         aval = np.random.random(10)
         aval2 = aval.copy()
         assert np.all(fip(aval) == (aval2 * 2))
         assert not np.all(aval == aval2)
 
         # using mutable=False should leave the input untouched
-        f = pfunc([In(a, mutable=False)], [a_out], mode="FAST_RUN")
+        f = function([In(a, mutable=False)], [a_out], mode="FAST_RUN")
         aval = np.random.random(10)
         aval2 = aval.copy()
         assert np.all(f(aval) == (aval2 * 2))
@@ -184,12 +184,12 @@ class TestPfunc:
         bval = data_of(b)
 
         # by default, shared are not mutable unless doing an explicit update
-        f = pfunc([], [b_out], mode="FAST_RUN")
+        f = function([], [b_out], mode="FAST_RUN")
         assert (f() == np.arange(5) * 2).all()
         assert np.all(b.get_value(borrow=True) == np.arange(5))
 
         # using updates, b is now a mutable parameter
-        f = pfunc([], [b_out], updates=[(b, b_out)], mode="FAST_RUN")
+        f = function([], [b_out], updates=[(b, b_out)], mode="FAST_RUN")
         assert (f() == (np.arange(5) * 2)).all()
         # because of the update
         assert (b.get_value(borrow=True) == (np.arange(5) * 2)).all()
@@ -199,7 +199,7 @@ class TestPfunc:
         bval = np.arange(5)
         b.set_value(bval, borrow=True)
         bval = data_of(b)
-        f = pfunc(
+        f = function(
             [],
             [b_out],
             updates=[(b, (b_out + 3))],
@@ -217,7 +217,7 @@ class TestPfunc:
         a = wvector("a")  # int16
         b = bvector("b")  # int8
         c = bscalar("c")  # int8
-        f = pfunc(
+        f = function(
             [
                 In(a, allow_downcast=True),
                 In(b, allow_downcast=False),
@@ -252,7 +252,7 @@ class TestPfunc:
         b = fscalar("b")
         c = fscalar("c")
 
-        f = pfunc(
+        f = function(
             [
                 In(a, allow_downcast=True),
                 In(b, allow_downcast=False),
@@ -283,7 +283,7 @@ class TestPfunc:
         b = fvector("b")
         c = fvector("c")
 
-        f = pfunc(
+        f = function(
             [
                 In(a, allow_downcast=True),
                 In(b, allow_downcast=False),
@@ -312,13 +312,13 @@ class TestPfunc:
         b = bvector("b")  # int8
         c = bscalar("c")  # int8
 
-        f = pfunc([a, b, c], (a + b + c), allow_input_downcast=True)
+        f = function([a, b, c], (a + b + c), allow_input_downcast=True)
         # Value too big for a, b, or c, silently ignored
         assert f([2**20], [1], 0) == 1
         assert f([3], [312], 0) == 59
         assert f([3], [1], 806) == 42
 
-        g = pfunc([a, b, c], (a + b + c), allow_input_downcast=False)
+        g = function([a, b, c], (a + b + c), allow_input_downcast=False)
         # All values are in range. Since they're not ndarrays (but lists
         # or scalars), they will be converted, and their value checked.
         assert np.all(g([3], [6], 0) == 9)
@@ -333,7 +333,7 @@ class TestPfunc:
         with pytest.raises(OverflowError):
             g([3], [312], 0)
 
-        h = pfunc([a, b, c], (a + b + c))  # Default: allow_input_downcast=None
+        h = function([a, b, c], (a + b + c))  # Default: allow_input_downcast=None
         # Everything here should behave like with False
         assert np.all(h([3], [6], 0) == 9)
 
@@ -348,9 +348,9 @@ class TestPfunc:
         a = fscalar("a")
         b = fvector("b")
 
-        f = pfunc([a, b], (a + b), allow_input_downcast=True)
-        g = pfunc([a, b], (a + b), allow_input_downcast=False)
-        h = pfunc([a, b], (a + b), allow_input_downcast=None)
+        f = function([a, b], (a + b), allow_input_downcast=True)
+        g = function([a, b], (a + b), allow_input_downcast=False)
+        h = function([a, b], (a + b), allow_input_downcast=None)
 
         # If the values can be accurately represented, OK
         assert np.all(f(0, [0]) == 0)
@@ -380,20 +380,20 @@ class TestPfunc:
 
         # Simple value assignment.
         x = shared(0)
-        assign = pfunc([], [], updates={x: 3})
+        assign = function([], [], updates={x: 3})
         assign()
         assert x.get_value() == 3
 
         # Basic increment function.
         x.set_value(0)
-        inc = pfunc([], [], updates={x: x + 1})
+        inc = function([], [], updates={x: x + 1})
         inc()
         assert x.get_value() == 1
 
         # Increment by a constant value.
         x.set_value(-1)
         y = shared(2)
-        inc_by_y = pfunc([], [], updates={x: x + y})
+        inc_by_y = function([], [], updates={x: x + y})
         inc_by_y()
         assert x.get_value() == 1
 
@@ -419,18 +419,18 @@ class TestPfunc:
 
     def test_givens(self):
         x = shared(0)
-        assign = pfunc([], x, givens={x: 3})
+        assign = function([], x, givens={x: 3})
         assert assign() == 3
         assert x.get_value(borrow=True) == 0
 
         y = ivector()
-        f = pfunc([y], (y * x), givens={x: 6})
+        f = function([y], (y * x), givens={x: 6})
         assert np.all(f([1, 1, 1]) == [6, 6, 6])
         assert x.get_value() == 0
 
         z = ivector()
         c = z * y
-        f = pfunc([y], (c + 7), givens={z: np.asarray([4, 4, 4], dtype="int32")})
+        f = function([y], (c + 7), givens={z: np.asarray([4, 4, 4], dtype="int32")})
         assert np.all(f([1, 1, 1]) == [11, 11, 11])
         assert x.get_value() == 0
 
@@ -438,7 +438,7 @@ class TestPfunc:
         x = shared(np.asarray([4, 4, 4]))
         y = shared(np.asarray([4, 4, 4]))
         z = shared(np.asarray([2, 2, 2]))
-        up = pfunc(
+        up = function(
             [], [], updates={x: (x * 5), y: ((x * 5) + y), z: (((x * 5) + y) ** z)}
         )
 
@@ -451,7 +451,7 @@ class TestPfunc:
         x = shared(0)
         x.default_update = x + 1
 
-        f = pfunc([], [x])
+        f = function([], [x])
         f()
         assert x.get_value() == 1
 
@@ -460,7 +460,7 @@ class TestPfunc:
         f()
         assert x.get_value() == 2
 
-        g = pfunc([], [x])
+        g = function([], [x])
         g()
         assert x.get_value() == 2
 
@@ -470,59 +470,59 @@ class TestPfunc:
         x.default_update = x + 2
 
         # Test that the default update is taken into account in the right cases
-        f1 = pfunc([], [x], no_default_updates=True)
+        f1 = function([], [x], no_default_updates=True)
         f1()
         assert x.get_value() == 0
 
-        f2 = pfunc([], [x], no_default_updates=[x])
+        f2 = function([], [x], no_default_updates=[x])
         f2()
         assert x.get_value() == 0
 
-        f3 = pfunc([], [x], no_default_updates=[x, y])
+        f3 = function([], [x], no_default_updates=[x, y])
         f3()
         assert x.get_value() == 0
 
-        f4 = pfunc([], [x], no_default_updates=[y])
+        f4 = function([], [x], no_default_updates=[y])
         f4()
         assert x.get_value() == 2
 
-        f5 = pfunc([], [x], no_default_updates=[])
+        f5 = function([], [x], no_default_updates=[])
         f5()
         assert x.get_value() == 4
 
-        f5 = pfunc([], [x], no_default_updates=False)
+        f5 = function([], [x], no_default_updates=False)
         f5()
         assert x.get_value() == 6
 
         with pytest.raises(TypeError):
-            pfunc([], [x], no_default_updates=(x))
+            function([], [x], no_default_updates=(x))
         with pytest.raises(TypeError):
-            pfunc([], [x], no_default_updates=x)
+            function([], [x], no_default_updates=x)
         with pytest.raises(TypeError):
-            pfunc([], [x], no_default_updates="canard")
+            function([], [x], no_default_updates="canard")
 
         # Mix explicit updates and no_default_updates
-        g1 = pfunc([], [x], updates=[(x, (x - 1))], no_default_updates=True)
+        g1 = function([], [x], updates=[(x, (x - 1))], no_default_updates=True)
         g1()
         assert x.get_value() == 5
 
-        g2 = pfunc([], [x], updates=[(x, (x - 1))], no_default_updates=[x])
+        g2 = function([], [x], updates=[(x, (x - 1))], no_default_updates=[x])
         g2()
         assert x.get_value() == 4
 
-        g3 = pfunc([], [x], updates=[(x, (x - 1))], no_default_updates=[x, y])
+        g3 = function([], [x], updates=[(x, (x - 1))], no_default_updates=[x, y])
         g3()
         assert x.get_value() == 3
 
-        g4 = pfunc([], [x], updates=[(x, (x - 1))], no_default_updates=[y])
+        g4 = function([], [x], updates=[(x, (x - 1))], no_default_updates=[y])
         g4()
         assert x.get_value() == 2
 
-        g5 = pfunc([], [x], updates=[(x, (x - 1))], no_default_updates=[])
+        g5 = function([], [x], updates=[(x, (x - 1))], no_default_updates=[])
         g5()
         assert x.get_value() == 1
 
-        g5 = pfunc([], [x], updates=[(x, (x - 1))], no_default_updates=False)
+        g5 = function([], [x], updates=[(x, (x - 1))], no_default_updates=False)
         g5()
         assert x.get_value() == 0
 
@@ -534,15 +534,15 @@ class TestPfunc:
         z = a * x
         x.default_update = x + y
 
-        f1 = pfunc([a], z)
+        f1 = function([a], z)
         f1(12)
         assert x.get_value() == 1
 
-        f2 = pfunc([a], z, no_default_updates=True)
+        f2 = function([a], z, no_default_updates=True)
         assert f2(7) == 7
         assert x.get_value() == 1
 
-        f3 = pfunc([a], z, no_default_updates=[x])
+        f3 = function([a], z, no_default_updates=[x])
         assert f3(9) == 9
         assert x.get_value() == 1
 
@@ -553,22 +553,22 @@ class TestPfunc:
         x.default_update = x - 1
         y.default_update = y + 1
 
-        f1 = pfunc([], [x, y])
+        f1 = function([], [x, y])
         f1()
         assert x.get_value() == -1
         assert y.get_value() == 2
 
-        f2 = pfunc([], [x, y], updates=[(x, (x - 2))], no_default_updates=[y])
+        f2 = function([], [x, y], updates=[(x, (x - 2))], no_default_updates=[y])
         f2()
         assert x.get_value() == -3
         assert y.get_value() == 2
 
-        f3 = pfunc([], [x, y], updates=[(x, (x - 2))], no_default_updates=True)
+        f3 = function([], [x, y], updates=[(x, (x - 2))], no_default_updates=True)
         f3()
         assert x.get_value() == -5
         assert y.get_value() == 2
 
-        f4 = pfunc([], [x, y], updates=[(y, (y - 2))])
+        f4 = function([], [x, y], updates=[(y, (y - 2))])
         f4()
         assert x.get_value() == -6
         assert y.get_value() == 0
@@ -582,31 +582,31 @@ class TestPfunc:
         y.default_update = z
         z.default_update = z - 1
 
-        f1 = pfunc([], [x])
+        f1 = function([], [x])
         f1()
         assert x.get_value() == 1
         assert y.get_value() == -1
         assert z.get_value() == -2
 
-        f2 = pfunc([], [x, y])
+        f2 = function([], [x, y])
         f2()
         assert x.get_value() == 2
         assert y.get_value() == -2
         assert z.get_value() == -3
 
-        f3 = pfunc([], [y])
+        f3 = function([], [y])
         f3()
         assert x.get_value() == 2
         assert y.get_value() == -3
         assert z.get_value() == -4
 
-        f4 = pfunc([], [x, y], no_default_updates=[x])
+        f4 = function([], [x, y], no_default_updates=[x])
         f4()
         assert x.get_value() == 2
         assert y.get_value() == -4
         assert z.get_value() == -5
 
-        f5 = pfunc([], [x, y, z], no_default_updates=[z])
+        f5 = function([], [x, y, z], no_default_updates=[z])
         f5()
         assert x.get_value() == 6
         assert y.get_value() == -5
@@ -623,41 +623,41 @@ class TestPfunc:
         x.default_update = y
         y.default_update = y + a
 
-        f1 = pfunc([], x, no_default_updates=True)
+        f1 = function([], x, no_default_updates=True)
         f1()
         assert x.get_value() == 0
         assert y.get_value() == 1
 
-        f2 = pfunc([], x, no_default_updates=[x])
+        f2 = function([], x, no_default_updates=[x])
         f2()
         assert x.get_value() == 0
         assert y.get_value() == 1
 
-        f3 = pfunc([], x, no_default_updates=[y])
+        f3 = function([], x, no_default_updates=[y])
         f3()
         assert x.get_value() == 1
         assert y.get_value() == 1
 
-        f4 = pfunc([a], x)
+        f4 = function([a], x)
         f4(2)
         assert x.get_value() == 1
         assert y.get_value() == 3
 
-        f5 = pfunc([], x, updates={y: (y - 1)})
+        f5 = function([], x, updates={y: (y - 1)})
         f5()
         assert x.get_value() == 3
         assert y.get_value() == 2
 
         # a is needed as input if y.default_update is used
         with pytest.raises(MissingInputError):
-            pfunc([], x)
+            function([], x)
 
     def test_default_updates_partial_graph(self):
         a = shared(0)
         a.default_update = a + 1  # Increment a each time it is used
         b = 2 * a
         # Use only the tip of the graph, a is not used
-        f = pfunc([b], b)
+        f = function([b], b)
         assert a.get_value() == 0
         f(21)
         assert a.get_value() == 0
@@ -667,7 +667,7 @@ class TestPfunc:
         a.default_update = a + 3.0
         b = dscalar("b")
         c = a + 10
-        f = pfunc([b], c, givens={a: b})
+        f = function([b], c, givens={a: b})
 
         assert len(f.maker.fgraph.inputs) == 1
         assert len(f.maker.fgraph.outputs) == 1
@@ -676,14 +676,14 @@ class TestPfunc:
         a = shared(1.0, "a")
         a.default_update = a + 3
         c = a + 10
-        f = pfunc([], c, givens={a: (a + 10)})
+        f = function([], c, givens={a: (a + 10)})
 
         assert f() == 21
         assert f() == 34
 
     def test_duplicate_inputs(self):
         x = lscalar("x")
-        with pytest.raises(UnusedInputError):
+        with pytest.raises(ValueError, match="is used twice in inputs"):
             function([x, x, x], x)
 
     def test_update_same(self):
@@ -916,40 +916,40 @@ class TestAliasingRules:
         D = dmatrix()
         DD = D + 5
 
-        f = pfunc([D], [], updates=[(A, D), (B, D)])
+        f = function([D], [], updates=[(A, D), (B, D)])
         f(C)
 
         assert not np.may_share_memory(data_of(A), data_of(B))
-        f = pfunc([D], [], updates=[(A, D[:]), (B, D)])
+        f = function([D], [], updates=[(A, D[:]), (B, D)])
         f(C)
         assert not np.may_share_memory(data_of(A), data_of(B))
-        f = pfunc([D], [], updates=[(A, (D + 5)), (B, D[:])])
-        f(C)
-        assert not np.may_share_memory(data_of(A), data_of(B))
-
-        f = pfunc([D], [], updates=[(A, (D + 5)), (B, D)])
+        f = function([D], [], updates=[(A, (D + 5)), (B, D[:])])
         f(C)
         assert not np.may_share_memory(data_of(A), data_of(B))
 
-        f = pfunc([D], DD, updates=[(A, DD[:1]), (B, DD)])
+        f = function([D], [], updates=[(A, (D + 5)), (B, D)])
+        f(C)
+        assert not np.may_share_memory(data_of(A), data_of(B))
+
+        f = function([D], DD, updates=[(A, DD[:1]), (B, DD)])
         R = f(C)
         assert not np.may_share_memory(data_of(A), data_of(B))
         assert not np.may_share_memory(R, data_of(B))
         assert not np.may_share_memory(R, data_of(A))
 
-        f = pfunc([D], DD, updates=[(A, DD[:1]), (B, (DD[:1] * 2))])
+        f = function([D], DD, updates=[(A, DD[:1]), (B, (DD[:1] * 2))])
         R = f(C)
         assert not np.may_share_memory(data_of(A), data_of(B))
         assert not np.may_share_memory(R, data_of(B))
         assert not np.may_share_memory(R, data_of(A))
 
-        f = pfunc([D], (DD * 4), updates=[(A, (DD[:1] * 3)), (B, (DD[:1] * 2))])
+        f = function([D], (DD * 4), updates=[(A, (DD[:1] * 3)), (B, (DD[:1] * 2))])
         R = f(C)
         assert not np.may_share_memory(data_of(A), data_of(B))
         assert not np.may_share_memory(R, data_of(B))
         assert not np.may_share_memory(R, data_of(A))
 
-        f = pfunc([D], (DD * 4), updates=[(A, (DD[:1] * 3)), (B, (DD[:1] * 3))])
+        f = function([D], (DD * 4), updates=[(A, (DD[:1] * 3)), (B, (DD[:1] * 3))])
         R = f(C)
         assert not np.may_share_memory(data_of(A), data_of(B))
         assert not np.may_share_memory(R, data_of(B))
@@ -960,7 +960,7 @@ class TestAliasingRules:
         # we need A to be copied to avoid aliasing
         A = self.shared(np.zeros((2, 2)) + 0.5)
         B = self.shared(np.zeros((2, 2)) - 0.5)
-        f = pfunc([], [], updates=[(A, B)])
+        f = function([], [], updates=[(A, B)])
         f()
         assert not np.may_share_memory(data_of(A), data_of(B))
 
@@ -971,7 +971,7 @@ class TestAliasingRules:
         A = self.shared(np.zeros((2, 2)) + 0.5)
         B = self.shared(np.zeros((2, 2)) - 0.5)
         C = dmatrix()
-        f = pfunc([C], [], updates=[(A, B), (B, C)])
+        f = function([C], [], updates=[(A, B), (B, C)])
         z = np.zeros((2, 2))
         f(z)
         assert not np.may_share_memory(data_of(A), data_of(B))
@@ -990,7 +990,7 @@ class TestAliasingRules:
         data_of_a = data_of(A)
         data_of_b = data_of(B)
 
-        f = pfunc([], [], updates=[(A, B), (B, A)])
+        f = function([], [], updates=[(A, B), (B, A)])
         f()
         # correctness
         assert np.all(data_of(A) == -0.5)
@@ -1017,7 +1017,7 @@ class TestAliasingRules:
         data_of_a = data_of(A)
         data_of_b = data_of(B)
 
-        f = pfunc([], [], updates=[(A, B[:, ::-1]), (B, A.T)])
+        f = function([], [], updates=[(A, B[:, ::-1]), (B, A.T)])
         # pytensor.printing.debugprint(f)
         f()
         # correctness (doesn't actually test the view...)

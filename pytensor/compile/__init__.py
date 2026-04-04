@@ -1,4 +1,4 @@
-from pytensor.compile.function.pfunc import pfunc, rebuild_collect_shared
+from pytensor.compile.function.pfunc import rebuild_collect_shared
 from pytensor.compile.function.types import (
     AliasedMemoryError,
     Function,

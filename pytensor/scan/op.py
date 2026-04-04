@@ -57,8 +57,7 @@ import pytensor
 import pytensor.link.utils as link_utils
 from pytensor import tensor as pt
 from pytensor.compile.builders import construct_nominal_fgraph, infer_shape
-from pytensor.compile.function.pfunc import pfunc
-from pytensor.compile.function.types import add_supervisor_to_fgraph
+from pytensor.compile.function.types import add_supervisor_to_fgraph, orig_function
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.compile.profiling import register_profiler_printer
@@ -1512,7 +1511,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 raise NotImplementedError(
                     f"Python/Cython implementation of Scan with preallocated MIT-MOT outputs requires a VMLinker, got {mode_instance.linker}"
                 )
-        self._fn = pfunc(
+        self._fn = orig_function(
             wrapped_inputs,
             wrapped_outputs,
             mode=mode_instance,

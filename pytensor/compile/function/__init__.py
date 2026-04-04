@@ -5,14 +5,15 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import pytensor.misc.pkl_utils
-from pytensor.compile.function.pfunc import pfunc
-from pytensor.compile.function.types import orig_function
-from pytensor.compile.mode import Mode
+from pytensor.compile.function.pfunc import construct_function_ins_and_outs
+from pytensor.compile.function.types import FunctionMaker
+from pytensor.compile.mode import Mode, get_mode
 from pytensor.compile.profiling import ProfileStats
+from pytensor.configdefaults import config
 from pytensor.graph import Variable
 
 
-__all__ = ["pfunc", "types"]
+__all__ = ["types"]
 
 __docformat__ = "restructuredtext en"
 _logger = logging.getLogger("pytensor.compile.function")
@@ -21,7 +22,7 @@ _logger = logging.getLogger("pytensor.compile.function")
 def function_dump(
     filename: str | Path,
     inputs: Iterable[Variable],
-    outputs: Variable | Iterable[Variable] | dict[str, Variable] | None = None,
+    outputs: Variable | Iterable[Variable] | None = None,
     mode: str | Mode | None = None,
     updates: Iterable[tuple[Variable, Variable]]
     | dict[Variable, Variable]
@@ -94,7 +95,7 @@ def function_dump(
 
 def function(
     inputs: Iterable[Variable],
-    outputs: Variable | Iterable[Variable] | dict[str, Variable] | None = None,
+    outputs: Variable | Iterable[Variable] | None = None,
     mode: str | Mode | None = None,
     updates: Iterable[tuple[Variable, Variable]]
     | dict[Variable, Variable]
@@ -119,8 +120,8 @@ def function(
     ----------
     inputs : list of either Variable or In instances.
         Function parameters, these are not allowed to be shared variables.
-    outputs : list or dict of Variables or Out instances.
-        If it is a dict, the keys must be strings. Expressions to compute.
+    outputs : list of Variables or Out instances.
+        Expressions to compute.
     mode : string or `Mode` instance.
         Compilation mode.
     updates : iterable over pairs (shared_variable, new_expression). List, tuple
@@ -289,31 +290,55 @@ def function(
                 func_frame = stack[idx - 1]
             name = func_frame[0] + ":" + str(func_frame[1])
 
-    if updates is None:
-        updates = []
-
-    if givens is None:
-        givens = []
     if not isinstance(inputs, list | tuple):
-        raise Exception(
+        raise TypeError(
             "Input variables of an PyTensor function should be "
             "contained in a list, even when there is a single "
             "input."
         )
 
-    fn = pfunc(
-        params=inputs,
-        outputs=outputs,
-        mode=mode,
+    # Check for duplicate input variables
+    seen = {}
+    for i, inp in enumerate(inputs):
+        v = getattr(inp, "variable", inp)
+        if v in seen:
+            raise ValueError(
+                f"Variable {v} is used twice in inputs to pytensor.function, "
+                f"at indices {seen[v]} and {i}. Please do not duplicate "
+                "variables in the inputs list."
+            )
+        seen[v] = i
+
+    if profile is None:
+        profile = config.profile or config.print_global_stats
+        if profile is False:
+            profile = None
+    if profile is True:
+        profile = ProfileStats(message=name)
+    elif isinstance(profile, str):
+        profile = ProfileStats(message=profile)
+
+    inputs, cloned_outputs = construct_function_ins_and_outs(
+        inputs,
+        outputs,
         updates=updates,
         givens=givens,
         no_default_updates=no_default_updates,
-        accept_inplace=accept_inplace,
-        name=name,
         rebuild_strict=rebuild_strict,
         allow_input_downcast=allow_input_downcast,
-        on_unused_input=on_unused_input,
+    )
+
+    mode = get_mode(mode)
+    Maker = getattr(mode, "function_maker", FunctionMaker)
+    m = Maker(
+        inputs,
+        cloned_outputs,
+        mode,
+        accept_inplace=accept_inplace,
         profile=profile,
+        on_unused_input=on_unused_input,
+        name=name,
         trust_input=trust_input,
     )
-    return fn
+    shared_variable_containers = [getattr(inp, "value", None) for inp in inputs]
+    return m.create(shared_variable_containers)

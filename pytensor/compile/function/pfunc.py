@@ -7,11 +7,8 @@ from collections.abc import Sequence
 from copy import copy
 from typing import overload
 
-from pytensor.compile.function.types import Function, UnusedInputError, orig_function
 from pytensor.compile.io import In, Out
-from pytensor.compile.profiling import ProfileStats
 from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable, clone_node_and_cache
 from pytensor.graph.fg import FunctionGraph
 
@@ -127,7 +124,7 @@ def rebuild_collect_shared(
 
     It returns a set of dictionaries and lists which collect (partial?)
     different information about shared variables. This info is required by
-    `pfunc`.
+    `pytensor.function`.
 
     Parameters
     ----------
@@ -355,125 +352,7 @@ def rebuild_collect_shared(
     )
 
 
-def pfunc(
-    params,
-    outputs=None,
-    mode=None,
-    updates=None,
-    givens=None,
-    no_default_updates=False,
-    accept_inplace=False,
-    name=None,
-    rebuild_strict=True,
-    allow_input_downcast=None,
-    profile=None,
-    on_unused_input=None,
-    fgraph: FunctionGraph | None = None,
-    trust_input: bool = False,
-) -> Function:
-    """
-    Function-constructor for graphs with shared variables.
-
-    Parameters
-    ----------
-    params : list of either Variable or In instances
-        Function parameters, these are not allowed to be shared variables.
-    outputs : list of Variables or Out instances
-        Expressions to compute.
-    mode : string or `pytensor.compile.mode.Mode` instance
-        Compilation mode.
-    updates : iterable over pairs (shared_variable, new_expression). List, tuple or dict.
-        Update the values for SharedVariable inputs according to these
-        expressions
-    givens : iterable over pairs (Var1, Var2) of Variables. List, tuple or dict.
-        The Var1 and Var2 in each pair must have the same Type. Specific
-        substitutions to make in the computation graph (Var2 replaces Var1).
-    no_default_updates : either bool or list of Variables
-        If True, do not perform any automatic update on Variables.
-        If False (default), perform them all. Else, perform automatic updates
-        on all Variables that are neither in "updates" nor in
-        "no_default_updates".
-    accept_inplace : bool
-        True iff the graph can contain inplace operations prior to the
-        optimization phase (default is False). *Note* this parameter is unsupported,
-        and its use is not recommended.
-    name : None or string
-        Attaches a name to the profiling result of this function.
-    allow_input_downcast : bool
-        True means that the values passed as inputs when calling the function
-        can be silently downcasted to fit the dtype of the corresponding
-        Variable, which may lose precision. False means that it will only be cast to a more
-        general, or precise, type. None (default) is almost like
-        False, but allows downcasting of Python float scalars to
-        floatX.
-    profile : None, True, str, or ProfileStats instance
-        Accumulate profiling information into a given ProfileStats instance.
-        None is the default, and means to use the value of config.profile.
-        If argument is `True` then a new ProfileStats instance will be used.
-        If argument is a string, a new ProfileStats instance will be created
-        with that string as its `message` attribute. This profiling object will
-        be available via self.profile.
-    on_unused_input : {'raise', 'warn','ignore', None}
-        What to do if a variable in the 'inputs' list is not used in the graph.
-    fgraph
-        An existing `FunctionGraph` from which to construct the returned
-        `Function`.  When this is non-``None``, nothing is cloned.
-    trust_input : bool, default False
-        If True, no input validation checks are performed when the function is
-        called. This includes checking the number of inputs, their types and
-        that multiple inputs are not aliased to each other. Failure to meet any
-        of these conditions can lead to computational errors or to the
-        interpreter crashing.
-
-    Returns
-    -------
-    A callable object that will compute the outputs (given the inputs) and
-    update the implicit function arguments according to the `updates`.
-
-    Notes
-    -----
-    Regarding givens: Be careful to make sure that these substitutions are
-    independent--behaviour when ``Var1`` of one pair appears in the graph leading
-    to ``Var2`` in another expression is undefined. Replacements specified with
-    givens are different from optimizations in that ``Var2`` is not expected to
-    be equivalent to ``Var1``.
-
-    """
-
-    if profile is None:
-        profile = config.profile or config.print_global_stats
-        if profile is False:
-            profile = None
-    if profile is True:
-        profile = ProfileStats(message=name)
-    elif isinstance(profile, str):
-        profile = ProfileStats(message=profile)
-
-    inputs, cloned_outputs = construct_pfunc_ins_and_outs(
-        params,
-        outputs,
-        updates,
-        givens,
-        no_default_updates,
-        rebuild_strict,
-        allow_input_downcast,
-        fgraph=fgraph,
-    )
-
-    return orig_function(
-        inputs,
-        cloned_outputs,
-        mode,
-        accept_inplace=accept_inplace,
-        name=name,
-        profile=profile,
-        on_unused_input=on_unused_input,
-        fgraph=fgraph,
-        trust_input=trust_input,
-    )
-
-
-def construct_pfunc_ins_and_outs(
+def construct_function_ins_and_outs(
     params,
     outputs=None,
     updates=None,
@@ -483,7 +362,7 @@ def construct_pfunc_ins_and_outs(
     allow_input_downcast=None,
     fgraph: FunctionGraph | None = None,
 ):
-    """Construct inputs and outputs for `pfunc`.
+    """Construct inputs and outputs for `pytensor.function`.
 
     This function works by cloning the graph (except for the
     inputs), and then shipping it off to pytensor.compile.function.function
@@ -530,17 +409,7 @@ def construct_pfunc_ins_and_outs(
         _pfunc_param_to_in(p, allow_downcast=allow_input_downcast) for p in params
     ]
 
-    # Check if some variable is present more than once in inputs
     in_variables = [input.variable for input in inputs]
-    for i, v in enumerate(in_variables):
-        if v in in_variables[(i + 1) :]:
-            dup_v_i = in_variables.index(v, (i + 1))
-            raise UnusedInputError(
-                f"Variable {v} is used twice in inputs to pytensor.function, "
-                f"at indices {i} and {dup_v_i}.  This would result in values "
-                "provided for it being ignored. Please do not duplicate "
-                "variables in the inputs list."
-            )
 
     if givens:
         # Check that we are not using `givens` to replace input variables, because

@@ -216,7 +216,7 @@ class ProfileStats:
     show_sum: bool = True
 
     compile_time: float = 0.0
-    # Total time spent in body of orig_function,
+    # Total time spent in compilation,
     # dominated by graph rewriting and compilation of C
     #
 
