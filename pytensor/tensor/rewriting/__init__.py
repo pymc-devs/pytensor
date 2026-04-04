@@ -6,6 +6,7 @@ import pytensor.tensor.rewriting.einsum
 import pytensor.tensor.rewriting.elemwise
 import pytensor.tensor.rewriting.extra_ops
 import pytensor.tensor.rewriting.jax
+import pytensor.tensor.rewriting.join_inplace
 import pytensor.tensor.rewriting.linalg
 import pytensor.tensor.rewriting.math
 import pytensor.tensor.rewriting.numba
