@@ -1,6 +1,6 @@
 import numpy as np
 
-from pytensor.compile.function.pfunc import pfunc
+from pytensor.compile.function import function
 from pytensor.compile.sharedvalue import shared
 from pytensor.gradient import grad
 from pytensor.tensor.math import dot, sigmoid
@@ -42,15 +42,15 @@ class NNet:
             self.w2: self.w2 - self.lr * grad(self.cost, self.w2),
         }
 
-        self.sgd_step = pfunc(
-            params=[self.input, self.target],
+        self.sgd_step = function(
+            inputs=[self.input, self.target],
             outputs=[self.output, self.cost],
             updates=self.sgd_updates,
         )
 
-        self.compute_output = pfunc([self.input], self.output)
+        self.compute_output = function([self.input], self.output)
 
-        self.output_from_hidden = pfunc([self.hidden], self.output)
+        self.output_from_hidden = function([self.hidden], self.output)
 
 
 def test_nnet():
