@@ -35,7 +35,7 @@ of the following two options:
       .. doctest::
           :hide:
 
-          profile = pytensor.compile.ProfileStats()
+          profile = pytensor.compile.debug.profiling.ProfileStats()
           f = pytensor.function(..., profile=profile)  # doctest: +SKIP
           g = pytensor.function(..., profile=profile)  # doctest: +SKIP
           ...  # doctest: +SKIP

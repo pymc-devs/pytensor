@@ -12,9 +12,9 @@ import pytensor
 import pytensor.scalar as scal
 import pytensor.tensor.basic as ptb
 from pytensor import function, shared
-from pytensor.compile import DeepCopyOp
 from pytensor.compile.io import In
 from pytensor.compile.mode import Mode, get_default_mode
+from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph.basic import equal_computations

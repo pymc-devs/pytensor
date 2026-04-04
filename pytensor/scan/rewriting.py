@@ -7,11 +7,10 @@ from typing import cast
 
 import numpy as np
 
-import pytensor
 from pytensor import scalar as ps
 from pytensor import tensor as pt
 from pytensor.compile import optdb
-from pytensor.compile.ops import deep_copy_op
+from pytensor.compile.ops import DeepCopyOp, ViewOp, deep_copy_op
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     Apply,
@@ -271,8 +270,8 @@ def scan_push_out_non_seq(fgraph, node):
             # We can (supposedly) do this because the assumption is that a
             # `ViewOp` or `DeepCopyOp` will be just at the end of the
             # function and not somewhere in the middle
-            and not isinstance(nd.op, pytensor.compile.ViewOp)
-            and not isinstance(nd.op, pytensor.compile.DeepCopyOp)
+            and not isinstance(nd.op, ViewOp)
+            and not isinstance(nd.op, DeepCopyOp)
         ):
             # We have a candidate node to remove from the inner-graph
 

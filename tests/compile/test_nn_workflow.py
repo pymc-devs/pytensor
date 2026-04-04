@@ -1,6 +1,6 @@
 import numpy as np
 
-from pytensor.compile.function_maker import function
+from pytensor.compile.maker import function
 from pytensor.compile.sharedvalue import shared
 from pytensor.gradient import grad
 from pytensor.tensor.math import dot, sigmoid

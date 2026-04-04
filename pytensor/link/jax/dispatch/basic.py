@@ -6,8 +6,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from pytensor.compile import JAX
 from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.mode import JAX
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
 from pytensor.configdefaults import config
 from pytensor.graph import Constant

@@ -2917,7 +2917,7 @@ def check_stack_trace(f_or_fgraph, ops_to_check="last", bug_print="raise"):
         otherwise.
 
     """
-    from pytensor.compile.function_maker import Function
+    from pytensor.compile.executor import Function
 
     if isinstance(f_or_fgraph, FunctionGraph):
         fgraph = f_or_fgraph

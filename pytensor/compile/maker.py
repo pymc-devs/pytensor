@@ -40,20 +40,18 @@ import time
 import traceback as tb
 import warnings
 from collections.abc import Iterable
-from pathlib import Path
 
 import pytensor
-import pytensor.compile.profiling
-import pytensor.misc.pkl_utils
 from pytensor.compile.aliasing import (
     add_supervisor_to_fgraph,
     infer_reuse_pattern,
     insert_deepcopy,
 )
+from pytensor.compile.debug import profiling as compile_profiling
+from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.executor import Function
 from pytensor.compile.io import SymbolicInput, SymbolicOutput
 from pytensor.compile.mode import Mode, get_mode
-from pytensor.compile.profiling import ProfileStats
 from pytensor.compile.rebuild import construct_function_ins_and_outs
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
@@ -64,80 +62,6 @@ from pytensor.link.basic import Container
 
 
 _logger = logging.getLogger("pytensor.compile.maker")
-
-
-def function_dump(
-    filename: str | Path,
-    inputs: Iterable[Variable],
-    outputs: Variable | Iterable[Variable] | None = None,
-    mode: str | Mode | None = None,
-    updates: Iterable[tuple[Variable, Variable]]
-    | dict[Variable, Variable]
-    | None = None,
-    givens: Iterable[tuple[Variable, Variable]]
-    | dict[Variable, Variable]
-    | None = None,
-    no_default_updates: bool = False,
-    accept_inplace: bool = False,
-    name: str | None = None,
-    rebuild_strict: bool = True,
-    allow_input_downcast: bool | None = None,
-    profile: bool | ProfileStats | None = None,
-    on_unused_input: str | None = None,
-    extra_tag_to_remove: str | None = None,
-    trust_input: bool = False,
-):
-    """
-    This is helpful to make a reproducible case for problems during PyTensor
-    compilation.
-
-    Ex:
-
-    replace `pytensor.function(...)` by
-    `pytensor.function_dump('filename.pkl', ...)`.
-
-    If you see this, you were probably asked to use this function to
-    help debug a particular case during the compilation of an PyTensor
-    function. `function_dump` allows you to easily reproduce your
-    compilation without generating any code. It pickles all the objects and
-    parameters needed to reproduce a call to `pytensor.function()`. This
-    includes shared variables and their values. If you do not want
-    that, you can choose to replace shared variables values with zeros by
-    calling set_value(...) on them before calling `function_dump`.
-
-    To load such a dump and do the compilation:
-
-    >>> import pickle
-    >>> import pytensor
-    >>> d = pickle.load(open("func_dump.bin", "rb"))  # doctest: +SKIP
-    >>> f = pytensor.function(**d)  # doctest: +SKIP
-
-    Note:
-    The parameter `extra_tag_to_remove` is passed to the StripPickler used.
-    To pickle graph made by Blocks, it must be:
-    `['annotations', 'replacement_of', 'aggregation_scheme', 'roles']`
-
-    """
-    d = {
-        "inputs": inputs,
-        "outputs": outputs,
-        "mode": mode,
-        "updates": updates,
-        "givens": givens,
-        "no_default_updates": no_default_updates,
-        "accept_inplace": accept_inplace,
-        "name": name,
-        "rebuild_strict": rebuild_strict,
-        "allow_input_downcast": allow_input_downcast,
-        "profile": profile,
-        "on_unused_input": on_unused_input,
-        "trust_input": trust_input,
-    }
-    with Path(filename).open("wb") as f:
-        pickler = pytensor.misc.pkl_utils.StripPickler(
-            f, protocol=-1, extra_tag_to_remove=extra_tag_to_remove
-        )
-        pickler.dump(d)
 
 
 def function(
@@ -160,7 +84,7 @@ def function(
     trust_input: bool = False,
 ):
     """
-    Return a :class:`callable object <pytensor.compile.function_maker.Function>`
+    Return a :class:`callable object <pytensor.compile.executor.Function>`
     that will calculate `outputs` from `inputs`.
 
     Parameters
@@ -224,7 +148,7 @@ def function(
 
     Returns
     -------
-    :class:`pytensor.compile.function_maker.Function` instance
+    :class:`pytensor.compile.executor.Function` instance
         A callable object that will compute the outputs (given the inputs) and
         update the implicit function arguments according to the `updates`.
 
@@ -537,7 +461,7 @@ class FunctionMaker:
                 end_rewriter = time.perf_counter()
                 rewrite_time = end_rewriter - start_rewriter
 
-            pytensor.compile.profiling.total_graph_rewrite_time += rewrite_time
+            compile_profiling.total_graph_rewrite_time += rewrite_time
 
             if profile:
                 if rewriter_profile is None and hasattr(rewriter, "pre_profile"):
@@ -747,7 +671,7 @@ class FunctionMaker:
         end_linker = time.perf_counter()
 
         linker_time = end_linker - start_linker
-        pytensor.compile.profiling.total_time_linker += linker_time
+        compile_profiling.total_time_linker += linker_time
         _logger.debug(f"Linker took {linker_time:f} seconds")
         if self.profile:
             self.profile.linker_time += linker_time

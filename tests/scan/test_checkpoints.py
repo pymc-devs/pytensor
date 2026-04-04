@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pytensor.compile.function_maker import function
+from pytensor.compile.maker import function
 from pytensor.gradient import grad
 from pytensor.scan.basic import scan
 from pytensor.scan.checkpoints import scan_checkpoints

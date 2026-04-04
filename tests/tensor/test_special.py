@@ -7,7 +7,7 @@ from scipy.special import logit as scipy_logit
 from scipy.special import poch as scipy_poch
 from scipy.special import softmax as scipy_softmax
 
-from pytensor.compile.function_maker import function
+from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.graph.replace import vectorize_graph
 from pytensor.tensor.blockwise import Blockwise

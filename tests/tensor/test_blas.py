@@ -9,8 +9,8 @@ from numpy.testing import assert_array_almost_equal
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor.compile.function_maker import function
 from pytensor.compile.io import In
+from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config

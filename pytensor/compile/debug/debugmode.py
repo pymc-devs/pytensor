@@ -22,7 +22,7 @@ from pytensor.compile.aliasing import infer_reuse_pattern
 from pytensor.compile.executor import Function
 from pytensor.compile.maker import FunctionMaker
 from pytensor.compile.mode import Mode, register_mode
-from pytensor.compile.ops import OutputGuard, _output_guard
+from pytensor.compile.ops import ViewOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.destroyhandler import DestroyHandler
@@ -42,6 +42,20 @@ from pytensor.utils import NoDuplicateOptWarningFilter, difference, get_unbound_
 __docformat__ = "restructuredtext en"
 _logger: Logger = logging.getLogger("pytensor.compile.debugmode")
 _logger.addFilter(NoDuplicateOptWarningFilter())
+
+
+class OutputGuard(ViewOp):
+    """A ViewOp that pretends to be destructive.
+
+    Used only by DebugMode to prevent the destroy handler from allowing
+    real in-place operations on function outputs.
+    """
+
+    destroy_map = {0: [0]}
+    check_input = False
+
+
+output_guard = OutputGuard()
 
 
 class DebugModeError(Exception):
@@ -2073,7 +2087,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
                 fgraph.attach_feature(DestroyHandler())
             for o in fgraph.outputs:
                 try:
-                    fgraph.replace_validate(o, _output_guard(o), reason="output_guard")
+                    fgraph.replace_validate(o, output_guard(o), reason="output_guard")
                     raise Exception(
                         f"Output variable {o} required output_guard, "
                         "how was this output left unprotected against "

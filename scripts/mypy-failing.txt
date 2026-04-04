@@ -1,6 +1,7 @@
 pytensor/compile/builders.py
-pytensor/compile/debugmode.py
-pytensor/compile/function_maker.py
+pytensor/compile/debug/debugmode.py
+pytensor/compile/maker.py
+pytensor/compile/runner.py
 pytensor/compile/rebuild.py
 pytensor/compile/mode.py
 pytensor/graph/rewriting/basic.py

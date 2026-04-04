@@ -11,7 +11,7 @@ import pytest
 import pytensor
 from pytensor import config
 from pytensor import tensor as pt
-from pytensor.compile.function_maker import function
+from pytensor.compile.maker import function
 from pytensor.compile.mode import MLX, Mode
 from pytensor.graph import RewriteDatabaseQuery
 from pytensor.graph.basic import Variable

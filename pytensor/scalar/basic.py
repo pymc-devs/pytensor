@@ -767,7 +767,7 @@ def get_scalar_type(dtype, cache: dict[str, ScalarType] = {}) -> ScalarType:
 
 
 # Register C code for ViewOp on Scalars.
-pytensor.compile.register_view_op_c_code(
+pytensor.compile.ops.register_view_op_c_code(
     ScalarType,
     """
     %(oname)s = %(iname)s;
@@ -4222,12 +4222,12 @@ class Composite(ScalarInnerGraphOp):
             assert len(outputs) == 1
             # 1. Create a new graph from inputs up to the
             # Composite
-            res = pytensor.compile.rebuild_collect_shared(
+            res = pytensor.compile.rebuild.rebuild_collect_shared(
                 inputs=inputs, outputs=outputs[0].owner.inputs, copy_inputs_over=False
             )  # Clone also the inputs
             # 2. We continue this partial clone with the graph in
             # the inner Composite
-            res2 = pytensor.compile.rebuild_collect_shared(
+            res2 = pytensor.compile.rebuild.rebuild_collect_shared(
                 inputs=outputs[0].owner.op.inputs,
                 outputs=outputs[0].owner.op.outputs,
                 replace=dict(zip(outputs[0].owner.op.inputs, res[1], strict=True)),
@@ -4297,7 +4297,7 @@ class Composite(ScalarInnerGraphOp):
         else:
             # Make a new op with the right input type.
             assert len(inputs) == self.nin
-            res = pytensor.compile.rebuild_collect_shared(
+            res = pytensor.compile.rebuild.rebuild_collect_shared(
                 self.outputs,
                 replace=dict(zip(self.inputs, inputs, strict=True)),
                 rebuild_strict=False,

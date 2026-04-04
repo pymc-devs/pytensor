@@ -7,8 +7,8 @@ from numpy.testing import assert_array_equal, assert_equal, assert_string_equal
 
 import pytensor
 import tests.unittest_tools as utt
-from pytensor.compile import DeepCopyOp
 from pytensor.compile.mode import get_default_mode
+from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.traversal import io_toposort
 from pytensor.tensor import get_vector_length

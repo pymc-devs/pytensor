@@ -33,7 +33,7 @@ is, as the name suggests, unsafe.  See :ref:`unsafe_rewrites`.
 
     .. code-block:: bash
 
-        python -c "import pytensor; pytensor.compile.optdb.query(pytensor.compile.predefined_optimizers['<OPT_ID>']).print_summary()"
+        python -c "import pytensor; pytensor.compile.optdb.query(pytensor.compile.mode.predefined_optimizers['<OPT_ID>']).print_summary()"
 
     where <OPT_ID> can be one of o1 (:ref:`† <o1=>`), o2, o3, o4 (:ref:`* <o4=>`),
     Stabilization or unsafe.

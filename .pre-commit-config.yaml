@@ -16,7 +16,7 @@ repos:
           (?x)^(
               pytensor/breakpoint\.py|
               pytensor/graph/op\.py|
-              pytensor/compile/nanguardmode\.py|
+              pytensor/compile/debug/nanguardmode\.py|
               pytensor/graph/rewriting/basic\.py|
               pytensor/tensor/variable\.py|
           )$

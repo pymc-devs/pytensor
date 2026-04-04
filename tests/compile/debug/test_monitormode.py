@@ -3,8 +3,8 @@ from io import StringIO
 
 import numpy as np
 
-from pytensor.compile import MonitorMode
-from pytensor.compile.function_maker import function
+from pytensor.compile.debug.monitormode import MonitorMode
+from pytensor.compile.maker import function
 from pytensor.printing import debugprint
 from pytensor.tensor import log, outer
 from pytensor.tensor.type import dscalar, vector

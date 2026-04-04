@@ -581,7 +581,7 @@ class Variable(Node, Generic[_TypeType, OptionalApplyType]):
         This way of computing has more overhead than a normal PyTensor
         function, so don't use it too much in real scripts.
         """
-        from pytensor.compile.function_maker import function
+        from pytensor.compile.maker import function
         from pytensor.graph.traversal import get_var_by_name
 
         ignore_unused_input = kwargs.get("on_unused_input", None) in ("ignore", "warn")

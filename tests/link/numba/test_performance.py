@@ -8,7 +8,7 @@ pytest.importorskip("numba")
 
 import pytensor.tensor as aet
 from pytensor import config
-from pytensor.compile.function_maker import function
+from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.link.numba.linker import NumbaLinker

@@ -57,7 +57,7 @@ def d3viz(fct, outfile: Path | str, copy_deps: bool = True, *args, **kwargs):
 
     Parameters
     ----------
-    fct : pytensor.compile.function_maker.Function
+    fct : pytensor.compile.executor.Function
         A compiled PyTensor function, variable, apply or a list of variables.
     outfile : Path | str
         Path to output HTML file.
@@ -113,7 +113,7 @@ def d3write(fct, path, *args, **kwargs):
 
     Parameters
     ----------
-    fct : pytensor.compile.function_maker.Function
+    fct : pytensor.compile.executor.Function
         A compiled PyTensor function, variable, apply or a list of variables.
     path: str
         Path to output file

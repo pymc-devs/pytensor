@@ -7,7 +7,7 @@ from functools import partial
 from itertools import chain
 from typing import Union, cast
 
-from pytensor.compile.function_maker import function
+from pytensor.compile.maker import function
 from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable
 from pytensor.gradient import DisconnectedType, Rop, grad

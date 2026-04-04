@@ -2,7 +2,8 @@ import warnings
 
 import numpy as np
 
-from pytensor.compile import SharedVariable, shared_constructor
+from pytensor.compile import SharedVariable
+from pytensor.compile.sharedvalue import shared_constructor
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorVariable
 

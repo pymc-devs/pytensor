@@ -5,7 +5,7 @@ from functools import wraps
 
 import numpy as np
 
-from pytensor.compile.function_maker import function
+from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode
 from pytensor.gradient import DisconnectedType
 from pytensor.graph import Apply, Op, Variable
