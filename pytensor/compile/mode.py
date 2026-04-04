@@ -52,6 +52,7 @@ predefined_linkers = {
     "pytorch": PytorchLinker(),
     "numba": NumbaLinker(),
     "mlx": MLXLinker(),
+    "python": PerformLinker(),
 }
 
 
@@ -474,7 +475,10 @@ FAST_COMPILE = Mode(
     VMLinker(use_cloop=False, c_thunks=False),
     RewriteDatabaseQuery(include=["fast_compile", "py_only"]),
 )
-
+PYTHON = Mode(
+    PerformLinker(),
+    RewriteDatabaseQuery(include=["fast_run"]).excluding("blas_opt"),
+)
 fast_run_linkers_to_mode = {
     "cvm": CVM,
     "vm": VM,
@@ -489,6 +493,7 @@ predefined_modes = {
     "NUMBA": NUMBA,
     "PYTORCH": PYTORCH,
     "MLX": MLX,
+    "PYTHON": PYTHON,
 }
 
 _CACHED_RUNTIME_MODES: dict[Any, Mode] = {}

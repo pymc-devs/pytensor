@@ -939,11 +939,15 @@ class Function:
                 # See discussion about None as input
                 # https://groups.google.com/group/theano-dev/browse_thread/thread/920a5e904e8a8525/4f1b311a28fc27e5
                 if arg is None:
-                    arg_container.storage[0] = arg
+                      raise TypeError(
+                          "None is not allowed as function argument"
+                         )
+                          
                 else:
+                
                     try:
                         arg_container.storage[0] = arg_container.type.filter(
-                            arg,
+                          arg,
                             strict=arg_container.strict,
                             allow_downcast=arg_container.allow_downcast,
                         )
