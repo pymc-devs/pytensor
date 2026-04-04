@@ -4,7 +4,6 @@ import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
 from pytensor.tensor.extra_ops import (
-    Bartlett,
     CumOp,
     FillDiagonal,
     FillDiagonalOffset,
@@ -14,14 +13,6 @@ from pytensor.tensor.extra_ops import (
     Unique,
     UnravelIndex,
 )
-
-
-@jax_funcify.register(Bartlett)
-def jax_funcify_Bartlett(op, **kwargs):
-    def bartlett(x):
-        return jnp.bartlett(x)
-
-    return bartlett
 
 
 @jax_funcify.register(CumOp)
