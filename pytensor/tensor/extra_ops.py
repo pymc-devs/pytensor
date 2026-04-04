@@ -2006,6 +2006,38 @@ def concat_with_broadcast(tensor_list, axis=0):
         bcast_tensor_inputs.append(broadcast_to(tensor_inp, non_concat_shape))
 
     return join(axis, *bcast_tensor_inputs)
+def diag_indices(n, ndim=2):
+    """Return the indices to access the main diagonal of an array.
+
+    Parameters
+    ----------
+    n : int
+        The size of each dimension.
+    ndim : int, optional
+        The number of dimensions. Default is 2.
+
+    Returns
+    -------
+    tuple of TensorVariable
+        Indices to access the diagonal.
+    """
+    idx = ptb.arange(n)
+    return (idx,) * ndim
+def diag_indices_from(arr):
+    """Return the indices to access the main diagonal of an n-dimensional array.
+
+    Parameters
+    ----------
+    arr : TensorVariable
+        Input array. Must be at least 2-dimensional.
+
+    Returns
+    -------
+    tuple of TensorVariable
+        Indices to access the diagonal.
+    """
+    idx = ptb.arange(pt_min(arr.shape))
+    return (idx,) * arr.ndim
 
 
 __all__ = [
@@ -2022,6 +2054,8 @@ __all__ = [
     "fill_diagonal",
     "fill_diagonal_offset",
     "geomspace",
+    "diag_indices",
+    "diag_indices_from",
     "linspace",
     "logspace",
     "ravel_multi_index",

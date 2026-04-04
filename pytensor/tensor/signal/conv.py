@@ -244,6 +244,33 @@ def convolve1d(
 
     full_mode = as_scalar(np.bool_(mode == "full"))
     return type_cast(TensorVariable, _blockwise_convolve_1d(in1, in2, full_mode))
+    return type_cast(TensorVariable, _blockwise_convolve_1d(in1, in2, full_mode))
+
+
+def correlate1d(
+    in1: "TensorLike",
+    in2: "TensorLike",
+    mode: Literal["full", "valid", "same"] = "full",
+) -> TensorVariable:
+    """Correlate two one-dimensional arrays.
+
+    Parameters
+    ----------
+    in1 : (..., N,) tensor_like
+        First input.
+    in2 : (..., M,) tensor_like
+        Second input.
+    mode : {'full', 'valid', 'same'}, optional
+        Size of output.
+
+    Returns
+    -------
+    out: tensor_variable
+        Correlation of in1 with in2.
+    """
+    return convolve1d(in1, flip(in2, axis=-1), mode=mode)
+
+
 
 
 class Convolve2d(AbstractConvolveNd, Op):  # type: ignore[misc]
