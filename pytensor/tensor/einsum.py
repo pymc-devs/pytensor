@@ -13,9 +13,6 @@ from numpy._core.einsumfunc import (  # type: ignore[attr-defined]
 from numpy.lib.array_utils import normalize_axis_index, normalize_axis_tuple
 
 from pytensor.compile.builders import OpFromGraph
-from pytensor.graph.basic import Apply
-from pytensor.graph.op import Op
-from pytensor.scalar.basic import upcast
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import (
     arange,
@@ -31,44 +28,11 @@ from pytensor.tensor.extra_ops import broadcast_to
 from pytensor.tensor.functional import vectorize
 from pytensor.tensor.math import and_, eq, tensordot
 from pytensor.tensor.shape import shape_padright
-from pytensor.tensor.type import TensorType
 from pytensor.tensor.variable import TensorVariable
 
 
 PATH = tuple[tuple[int] | tuple[int, int], ...]
 CONTRACTION_STEP = tuple[tuple[int, ...], set[str], str]
-
-
-class AbstractEinsum(Op):
-    """Thin einsum Op that holds only the subscript string.
-
-    Unlike :class:`Einsum` (an ``OpFromGraph``), this Op has no inner graph.
-    Backends that natively support einsum (e.g. MLX, JAX) can dispatch it
-    directly to their own ``einsum`` implementation, avoiding decomposition
-    into lower-level ops that may not be supported.
-
-    ``perform`` falls back to :func:`numpy.einsum` so the Op is always
-    executable on the Python backend.
-    """
-
-    __props__ = ("subscripts", "out_ndim")
-
-    def __init__(self, subscripts: str, out_ndim: int):
-        self.subscripts = subscripts
-        self.out_ndim = out_ndim
-        super().__init__()
-
-    def make_node(self, *operands):
-        operands = [as_tensor(op) for op in operands]
-        dtype = upcast(*[op.dtype for op in operands])
-        out_type = TensorType(dtype=dtype, shape=(None,) * self.out_ndim)
-        return Apply(self, list(operands), [out_type()])
-
-    def perform(self, node, inputs, output_storage):
-        output_storage[0][0] = np.einsum(self.subscripts, *inputs)
-
-    def __str__(self):
-        return f"AbstractEinsum{{{self.subscripts}}}"
 
 
 class Einsum(OpFromGraph):

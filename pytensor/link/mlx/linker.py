@@ -10,6 +10,7 @@ class MLXLinker(JITLinker):
         "local_careduce_fusion",
         "inplace",
         "scan_save_mem_prealloc",
+        "inline_einsum",
     )
 
     def __init__(self, use_compile=True, *args, **kwargs):
