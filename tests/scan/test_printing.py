@@ -59,8 +59,8 @@ def test_debugprint_sitsot():
 
     Scan{scan_fn, while_loop=False, inplace=none} [id C]
      ← Mul [id U] (inner_out_sit_sot-0)
-        ├─ *0-<Vector(float64, shape=(?,))> [id V] -> [id E] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id W] -> [id L] (inner_in_non_seqs-0)
+        ├─ i0 [id V] -> [id E] (inner_in_sit_sot-0)
+        └─ i1 [id W] -> [id L] (inner_in_non_seqs-0)
     """
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
@@ -116,8 +116,8 @@ def test_debugprint_sitsot_no_extra_info():
 
     Scan{scan_fn, while_loop=False, inplace=none} [id C]
      ← Mul [id U]
-        ├─ *0-<Vector(float64, shape=(?,))> [id V] -> [id E]
-        └─ *1-<Vector(float64, shape=(?,))> [id W] -> [id L]
+        ├─ i0 [id V] -> [id E]
+        └─ i1 [id W] -> [id L]
     """
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
@@ -183,10 +183,10 @@ def test_debugprint_nitsot():
 
     Scan{scan_fn, while_loop=False, inplace=none} [id B]
      ← Mul [id X] (inner_out_nit_sot-0)
-        ├─ *0-<Scalar(float64, shape=())> [id Y] -> [id S] (inner_in_seqs-0)
+        ├─ i0 [id Y] -> [id S] (inner_in_seqs-0)
         └─ Pow [id Z]
-           ├─ *2-<Scalar(float64, shape=())> [id BA] -> [id W] (inner_in_non_seqs-0)
-           └─ *1-<Scalar(int64, shape=())> [id BB] -> [id U] (inner_in_seqs-1)
+           ├─ i2 [id BA] -> [id W] (inner_in_non_seqs-0)
+           └─ i1 [id BB] -> [id U] (inner_in_seqs-1)
    """
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
@@ -264,21 +264,21 @@ def test_debugprint_nested_scans():
     Scan{scan_fn, while_loop=False, inplace=none} [id B]
      ← Mul [id Y] (inner_out_nit_sot-0)
         ├─ ExpandDims{axis=0} [id Z]
-        │  └─ *0-<Scalar(float64, shape=())> [id BA] -> [id S] (inner_in_seqs-0)
+        │  └─ i0 [id BA] -> [id S] (inner_in_seqs-0)
         └─ Pow [id BB]
            ├─ Subtensor{i} [id BC]
            │  ├─ Subtensor{start:} [id BD]
            │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id BE] (outer_out_sit_sot-0)
-           │  │  │  ├─ *3-<Scalar(int32, shape=())> [id BF] -> [id X] (inner_in_non_seqs-1) (n_steps)
+           │  │  │  ├─ i3 [id BF] -> [id X] (inner_in_non_seqs-1) (n_steps)
            │  │  │  ├─ SetSubtensor{:stop} [id BG] (outer_in_sit_sot-0)
            │  │  │  │  ├─ AllocEmpty{dtype='float64'} [id BH]
            │  │  │  │  │  ├─ Add [id BI]
-           │  │  │  │  │  │  ├─ *3-<Scalar(int32, shape=())> [id BF] -> [id X] (inner_in_non_seqs-1)
+           │  │  │  │  │  │  ├─ i3 [id BF] -> [id X] (inner_in_non_seqs-1)
            │  │  │  │  │  │  └─ Subtensor{i} [id BJ]
            │  │  │  │  │  │     ├─ Shape [id BK]
            │  │  │  │  │  │     │  └─ ExpandDims{axis=0} [id BL]
            │  │  │  │  │  │     │     └─ Second [id BM]
-           │  │  │  │  │  │     │        ├─ *2-<Vector(float64, shape=(?,))> [id BN] -> [id W] (inner_in_non_seqs-0)
+           │  │  │  │  │  │     │        ├─ i2 [id BN] -> [id W] (inner_in_non_seqs-0)
            │  │  │  │  │  │     │        └─ ExpandDims{axis=0} [id BO]
            │  │  │  │  │  │     │           └─ 1.0 [id BP]
            │  │  │  │  │  │     └─ 0 [id BQ]
@@ -291,16 +291,16 @@ def test_debugprint_nested_scans():
            │  │  │  │  └─ ScalarFromTensor [id BT]
            │  │  │  │     └─ Subtensor{i} [id BJ]
            │  │  │  │        └─ ···
-           │  │  │  └─ *2-<Vector(float64, shape=(?,))> [id BN] -> [id W] (inner_in_non_seqs-0) (outer_in_non_seqs-0)
+           │  │  │  └─ i2 [id BN] -> [id W] (inner_in_non_seqs-0) (outer_in_non_seqs-0)
            │  │  └─ 1 [id BU]
            │  └─ -1 [id BV]
            └─ ExpandDims{axis=0} [id BW]
-              └─ *1-<Scalar(int64, shape=())> [id BX] -> [id U] (inner_in_seqs-1)
+              └─ i1 [id BX] -> [id U] (inner_in_seqs-1)
 
     Scan{scan_fn, while_loop=False, inplace=none} [id BE]
      ← Mul [id BY] (inner_out_sit_sot-0)
-        ├─ *0-<Vector(float64, shape=(?,))> [id BZ] -> [id BG] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id CA] -> [id BN] (inner_in_non_seqs-0)
+        ├─ i0 [id BZ] -> [id BG] (inner_in_sit_sot-0)
+        └─ i1 [id CA] -> [id BN] (inner_in_non_seqs-0)
     """
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
@@ -354,27 +354,27 @@ def test_debugprint_nested_scans():
     Inner graphs:
 
     Scan{scan_fn, while_loop=False, inplace=none} [id E]
-     → *0-<Scalar(float64, shape=())> [id Y] -> [id U] (inner_in_seqs-0)
-     → *1-<Scalar(int64, shape=())> [id Z] -> [id W] (inner_in_seqs-1)
-     → *2-<Vector(float64, shape=(?,))> [id BA] -> [id C] (inner_in_non_seqs-0)
-     → *3-<Scalar(int32, shape=())> [id BB] -> [id B] (inner_in_non_seqs-1)
+     → i0 [id Y] -> [id U] (inner_in_seqs-0)
+     → i1 [id Z] -> [id W] (inner_in_seqs-1)
+     → i2 [id BA] -> [id C] (inner_in_non_seqs-0)
+     → i3 [id BB] -> [id B] (inner_in_non_seqs-1)
      ← Mul [id BC] (inner_out_nit_sot-0)
         ├─ ExpandDims{axis=0} [id BD]
-        │  └─ *0-<Scalar(float64, shape=())> [id Y] (inner_in_seqs-0)
+        │  └─ i0 [id Y] (inner_in_seqs-0)
         └─ Pow [id BE]
            ├─ Subtensor{i} [id BF]
            │  ├─ Subtensor{start:} [id BG]
            │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id BH] (outer_out_sit_sot-0)
-           │  │  │  ├─ *3-<Scalar(int32, shape=())> [id BB] (inner_in_non_seqs-1) (n_steps)
+           │  │  │  ├─ i3 [id BB] (inner_in_non_seqs-1) (n_steps)
            │  │  │  ├─ SetSubtensor{:stop} [id BI] (outer_in_sit_sot-0)
            │  │  │  │  ├─ AllocEmpty{dtype='float64'} [id BJ]
            │  │  │  │  │  ├─ Add [id BK]
-           │  │  │  │  │  │  ├─ *3-<Scalar(int32, shape=())> [id BB] (inner_in_non_seqs-1)
+           │  │  │  │  │  │  ├─ i3 [id BB] (inner_in_non_seqs-1)
            │  │  │  │  │  │  └─ Subtensor{i} [id BL]
            │  │  │  │  │  │     ├─ Shape [id BM]
            │  │  │  │  │  │     │  └─ ExpandDims{axis=0} [id BN]
            │  │  │  │  │  │     │     └─ Second [id BO]
-           │  │  │  │  │  │     │        ├─ *2-<Vector(float64, shape=(?,))> [id BA] (inner_in_non_seqs-0)
+           │  │  │  │  │  │     │        ├─ i2 [id BA] (inner_in_non_seqs-0)
            │  │  │  │  │  │     │        └─ ExpandDims{axis=0} [id BP]
            │  │  │  │  │  │     │           └─ 1.0 [id BQ]
            │  │  │  │  │  │     └─ 0 [id BR]
@@ -387,18 +387,18 @@ def test_debugprint_nested_scans():
            │  │  │  │  └─ ScalarFromTensor [id BU]
            │  │  │  │     └─ Subtensor{i} [id BL]
            │  │  │  │        └─ ···
-           │  │  │  └─ *2-<Vector(float64, shape=(?,))> [id BA] (inner_in_non_seqs-0) (outer_in_non_seqs-0)
+           │  │  │  └─ i2 [id BA] (inner_in_non_seqs-0) (outer_in_non_seqs-0)
            │  │  └─ 1 [id BV]
            │  └─ -1 [id BW]
            └─ ExpandDims{axis=0} [id BX]
-              └─ *1-<Scalar(int64, shape=())> [id Z] (inner_in_seqs-1)
+              └─ i1 [id Z] (inner_in_seqs-1)
 
     Scan{scan_fn, while_loop=False, inplace=none} [id BH]
-     → *0-<Vector(float64, shape=(?,))> [id BY] -> [id BI] (inner_in_sit_sot-0)
-     → *1-<Vector(float64, shape=(?,))> [id BZ] -> [id BA] (inner_in_non_seqs-0)
+     → i0 [id BY] -> [id BI] (inner_in_sit_sot-0)
+     → i1 [id BZ] -> [id BA] (inner_in_non_seqs-0)
      ← Mul [id CA] (inner_out_sit_sot-0)
-        ├─ *0-<Vector(float64, shape=(?,))> [id BY] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id BZ] (inner_in_non_seqs-0)
+        ├─ i0 [id BY] (inner_in_sit_sot-0)
+        └─ i1 [id BZ] (inner_in_non_seqs-0)
     """
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
@@ -470,11 +470,11 @@ def test_debugprint_mitsot():
 
     Scan{scan_fn, while_loop=False, inplace=none} [id C]
      ← Add [id BB] (inner_out_mit_sot-0)
-        ├─ *1-<Scalar(int64, shape=())> [id BC] -> [id E] (inner_in_mit_sot-0-1)
-        └─ *0-<Scalar(int64, shape=())> [id BD] -> [id E] (inner_in_mit_sot-0-0)
+        ├─ i1 [id BC] -> [id E] (inner_in_mit_sot-0-1)
+        └─ i0 [id BD] -> [id E] (inner_in_mit_sot-0-0)
      ← Add [id BE] (inner_out_mit_sot-1)
-        ├─ *3-<Scalar(int64, shape=())> [id BF] -> [id O] (inner_in_mit_sot-1-1)
-        └─ *2-<Scalar(int64, shape=())> [id BG] -> [id O] (inner_in_mit_sot-1-0)
+        ├─ i3 [id BF] -> [id O] (inner_in_mit_sot-1-1)
+        └─ i2 [id BG] -> [id O] (inner_in_mit_sot-1-0)
     """
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
@@ -597,19 +597,19 @@ def test_debugprint_mitmot():
     Scan{grad_of_scan_fn, while_loop=False, inplace=none} [id B]
      ← Add [id CK] (inner_out_mit_mot-0-0)
         ├─ Mul [id CL]
-        │  ├─ *2-<Vector(float64, shape=(?,))> [id CM] -> [id BJ] (inner_in_mit_mot-0-0)
-        │  └─ *5-<Vector(float64, shape=(?,))> [id CN] -> [id O] (inner_in_non_seqs-0)
-        └─ *3-<Vector(float64, shape=(?,))> [id CO] -> [id BJ] (inner_in_mit_mot-0-1)
+        │  ├─ i2 [id CM] -> [id BJ] (inner_in_mit_mot-0-0)
+        │  └─ i5 [id CN] -> [id O] (inner_in_non_seqs-0)
+        └─ i3 [id CO] -> [id BJ] (inner_in_mit_mot-0-1)
      ← Add [id CP] (inner_out_sit_sot-0)
         ├─ Mul [id CQ]
-        │  ├─ *2-<Vector(float64, shape=(?,))> [id CM] -> [id BJ] (inner_in_mit_mot-0-0)
-        │  └─ *0-<Vector(float64, shape=(?,))> [id CR] -> [id X] (inner_in_seqs-0)
-        └─ *4-<Vector(float64, shape=(?,))> [id CS] -> [id CC] (inner_in_sit_sot-0)
+        │  ├─ i2 [id CM] -> [id BJ] (inner_in_mit_mot-0-0)
+        │  └─ i0 [id CR] -> [id X] (inner_in_seqs-0)
+        └─ i4 [id CS] -> [id CC] (inner_in_sit_sot-0)
 
     Scan{scan_fn, while_loop=False, inplace=none} [id F]
      ← Mul [id CT] (inner_out_sit_sot-0)
-        ├─ *0-<Vector(float64, shape=(?,))> [id CR] -> [id H] (inner_in_sit_sot-0)
-        └─ *1-<Vector(float64, shape=(?,))> [id CU] -> [id O] (inner_in_non_seqs-0)
+        ├─ i0 [id CR] -> [id H] (inner_in_sit_sot-0)
+        └─ i1 [id CU] -> [id O] (inner_in_non_seqs-0)
     """
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
@@ -655,11 +655,11 @@ Inner graphs:
 Scan{scan_fn, while_loop=False, inplace=all} [id B]
  ← Composite{switch(lt(0, i0), 1, 0)} [id K] (inner_out_sit_sot-0)
     └─ Subtensor{i, j, k} [id L]
-       ├─ *2-<Tensor3(float64, shape=(20000, 2, 2))> [id M] -> [id J] (inner_in_non_seqs-0)
+       ├─ i2 [id M] -> [id J] (inner_in_non_seqs-0)
        ├─ ScalarFromTensor [id N]
-       │  └─ *0-<Scalar(int64, shape=())> [id O] -> [id D] (inner_in_seqs-0)
+       │  └─ i0 [id O] -> [id D] (inner_in_seqs-0)
        ├─ ScalarFromTensor [id P]
-       │  └─ *1-<Scalar(int64, shape=())> [id Q] -> [id E] (inner_in_sit_sot-0)
+       │  └─ i1 [id Q] -> [id E] (inner_in_sit_sot-0)
        └─ 0 [id R]
 
 Composite{switch(lt(0, i0), 1, 0)} [id K]

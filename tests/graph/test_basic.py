@@ -471,3 +471,59 @@ def test_dprint():
     o1 = MyOp(r1, r2)
     assert o1.dprint(file="str") == debugprint(o1, file="str")
     assert o1.owner.dprint(file="str") == debugprint(o1.owner, file="str")
+
+
+class TestFrozenApply:
+    def test_interning_and_immutability(self):
+        from pytensor.graph.basic import FrozenApply
+        from pytensor.scalar.basic import add, float64, mul
+
+        x = NominalVariable(0, float64)
+        y = NominalVariable(1, float64)
+
+        fa1 = FrozenApply(add, (x, y), (float64,))
+        fa2 = FrozenApply(add, (x, y), (float64,))
+        fa_diff_op = FrozenApply(mul, (x, y), (float64,))
+        fa_diff_order = FrozenApply(add, (y, x), (float64,))
+
+        # Same (op, inputs) implies the same object
+        assert fa1 is fa2
+
+        # Different op or input order implies a different object
+        assert fa1 is not fa_diff_op
+        assert fa1 is not fa_diff_order
+
+        assert isinstance(fa1, Apply)
+
+        assert fa1.outputs[0].owner is fa1
+        assert fa1.outputs[0].index == 0
+
+    def test_cross_graph_identity(self):
+        """Two independently-built identical graphs share all FrozenApply nodes."""
+        from pytensor.graph.basic import FrozenApply
+        from pytensor.scalar.basic import float64, mul, sin, sqr
+
+        def build_graph():
+            a = NominalVariable(0, float64)
+            b = NominalVariable(1, float64)
+            n_sin = FrozenApply(sin, (a,), (float64,))
+            n_sqr = FrozenApply(sqr, (b,), (float64,))
+            n_mul = FrozenApply(mul, (n_sin.outputs[0], n_sqr.outputs[0]), (float64,))
+            return n_mul.outputs[0]
+
+        out1 = build_graph()
+        out2 = build_graph()
+        assert out1 is out2
+
+    def test_constant_deduplication_via_frozen_fgraph(self):
+        """Constants with the same value are deduplicated via FrozenFunctionGraph's cache_key."""
+        from pytensor.graph.fg import FrozenFunctionGraph
+        from pytensor.scalar.basic import ScalarConstant, add, float64
+
+        x = float64("x")
+        out1 = add(x, ScalarConstant(float64, 3.14))
+        out2 = add(x, ScalarConstant(float64, 3.14))
+
+        ffg1 = FrozenFunctionGraph([x], [out1])
+        ffg2 = FrozenFunctionGraph([x], [out2])
+        assert ffg1 == ffg2
