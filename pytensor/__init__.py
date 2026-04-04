@@ -119,20 +119,21 @@ def _as_symbolic(x: Any, **kwargs) -> Variable:
 # isort: off
 from pytensor import scalar, tensor
 from pytensor.compile import (
-    In,
     Mode,
-    Out,
-    ProfileStats,
+    shared,
+)
+from pytensor.compile.debug.profiling import ProfileStats
+from pytensor.compile.io import In, Out
+from pytensor.compile.mode import (
     predefined_linkers,
     predefined_modes,
     predefined_optimizers,
-    shared,
 )
 from pytensor.compile.maker import (
     FunctionMaker,
     function,
-    function_dump,
 )
+from pytensor.compile.debug.dump import function_dump
 from pytensor.compile.executor import Function
 from pytensor.gradient import Lop, Rop, grad, subgraph_grad
 from pytensor.printing import debugprint as dprint

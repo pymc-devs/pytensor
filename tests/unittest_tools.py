@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 import pytensor
-from pytensor.compile.debugmode import str_diagnostic
+from pytensor.compile.debug.debugmode import str_diagnostic
 from pytensor.configdefaults import config
 from pytensor.gradient import verify_grad as orig_verify_grad
 from pytensor.graph.basic import equal_computations

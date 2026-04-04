@@ -14,9 +14,10 @@ from typing import Any, Literal, TextIO
 
 import numpy as np
 
-from pytensor.compile import Function, SharedVariable
+from pytensor.compile import SharedVariable
+from pytensor.compile.debug.profiling import ProfileStats
+from pytensor.compile.executor import Function
 from pytensor.compile.io import In, Out
-from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.fg import FunctionGraph

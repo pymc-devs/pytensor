@@ -4,8 +4,8 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor import function, scan, shared
-from pytensor.compile import Function
 from pytensor.compile.builders import OpFromGraph
+from pytensor.compile.executor import Function
 from pytensor.compile.io import In
 from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.configdefaults import config

@@ -14,7 +14,7 @@ from pytensor.utils import difference
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from pytensor.compile.profiling import ProfileStats
+    from pytensor.compile.debug.profiling import ProfileStats
     from pytensor.graph.op import (
         BasicThunkType,
         InputStorageType,

@@ -3,7 +3,7 @@ import pytest
 
 from pytensor import In, Mode, OpFromGraph, Out, config, function, ifelse, scan
 from pytensor import tensor as pt
-from pytensor.compile import ViewOp
+from pytensor.compile.ops import ViewOp
 from pytensor.graph import vectorize_graph
 from pytensor.ifelse import IfElse
 from pytensor.raise_op import assert_op

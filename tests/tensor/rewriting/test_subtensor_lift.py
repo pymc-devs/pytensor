@@ -9,7 +9,8 @@ from pytensor import (
 )
 from pytensor import scalar as ps
 from pytensor import tensor as pt
-from pytensor.compile import DeepCopyOp, get_default_mode, get_mode
+from pytensor.compile import get_default_mode, get_mode
+from pytensor.compile.ops import DeepCopyOp
 from pytensor.graph import (
     Constant,
     FunctionGraph,

@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 import pytensor
-import pytensor.compile.profiling
+from pytensor.compile.debug import profiling
+from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.io import In, SymbolicOutput
-from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
 from pytensor.graph.basic import clone_get_equiv
 from pytensor.graph.fg import FunctionGraph
@@ -446,9 +446,9 @@ class Function:
         if profile is None:
             profile = config.profile or config.print_global_stats
         if profile is True:
-            profile = pytensor.compile.profiling.ProfileStats(message=name)
+            profile = profiling.ProfileStats(message=name)
         elif isinstance(profile, str):
-            profile = pytensor.compile.profiling.ProfileStats(message=profile)
+            profile = profiling.ProfileStats(message=profile)
 
         f_cpy = type(maker)(
             inputs=ins,
@@ -693,7 +693,7 @@ class Function:
         if self.profile:
             profile = self.profile
             dt_call = time.perf_counter() - t0
-            pytensor.compile.profiling.total_fct_exec_time += dt_call
+            profiling.total_fct_exec_time += dt_call
             self.maker.mode.call_time += dt_call
             profile.fct_callcount += 1
             profile.fct_call_time += dt_call

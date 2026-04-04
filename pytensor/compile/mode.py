@@ -534,12 +534,12 @@ def get_mode(orig_string):
     if upper_string == "MODE":
         ret = Mode(linker=config.linker, optimizer=config.optimizer)
     elif upper_string in ("DEBUGMODE", "DEBUG_MODE"):
-        from pytensor.compile.debugmode import DebugMode
+        from pytensor.compile.debug.debugmode import DebugMode
 
         # DebugMode use its own linker.
         ret = DebugMode(optimizer=config.optimizer)
     elif upper_string == "NANGUARDMODE":
-        from pytensor.compile.nanguardmode import NanGuardMode
+        from pytensor.compile.debug.nanguardmode import NanGuardMode
 
         # NanGuardMode use its own linker.
         ret = NanGuardMode(True, True, True, optimizer=config.optimizer)

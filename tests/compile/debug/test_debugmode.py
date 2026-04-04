@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.compile.debugmode import (
+from pytensor.compile.debug.debugmode import (
     BadDestroyMap,
     BadThunkOutput,
     BadViewMap,

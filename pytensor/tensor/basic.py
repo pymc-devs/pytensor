@@ -273,7 +273,7 @@ def _get_underlying_scalar_constant_value(
     """Return the constant scalar(0-D) value underlying variable `v`.
 
     If `v` is the output of dimshuffles, fills, allocs, etc,
-    cast, OutputGuard, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
+    cast, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
     and some pattern with Subtensor, this function digs through them.
 
     If `v` is not some view of constant scalar data, then raise a
@@ -293,7 +293,7 @@ def _get_underlying_scalar_constant_value(
         The maximum number of recursion.
 
     """
-    from pytensor.compile.ops import DeepCopyOp, OutputGuard, TypeCastingOp
+    from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
     from pytensor.sparse import CSM
     from pytensor.tensor.subtensor import Subtensor
 
@@ -335,9 +335,7 @@ def _get_underlying_scalar_constant_value(
         if not only_process_constants and getattr(v, "owner", None) and max_recur > 0:
             op = v.owner.op
             max_recur -= 1
-            if isinstance(
-                op, Alloc | DimShuffle | TypeCastingOp | DeepCopyOp | OutputGuard
-            ):
+            if isinstance(op, Alloc | DimShuffle | TypeCastingOp | DeepCopyOp):
                 v = v.owner.inputs[0]
                 continue
             elif isinstance(op, Shape_i):
@@ -538,7 +536,7 @@ def get_underlying_scalar_constant_value(
     """Return the unique constant scalar(0-D) value underlying variable `v`.
 
     If `v` is the output of dimshuffles, fills, allocs, etc,
-    cast, OutputGuard, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
+    cast, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
     and some pattern with Subtensor, this function digs through them.
 
     If `v` is not some view of constant scalar data, then raise a

@@ -6,6 +6,9 @@ from pytensor.compile.aliasing import (
     insert_deepcopy,
     view_tree_set,
 )
+from pytensor.compile.debug.dump import function_dump
+from pytensor.compile.debug.monitormode import MonitorMode
+from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.executor import (
     AliasedMemoryError,
     Function,
@@ -15,7 +18,6 @@ from pytensor.compile.maker import (
     FunctionMaker,
     UnusedInputError,
     function,
-    function_dump,
 )
 from pytensor.compile.mode import (
     CVM,
@@ -48,7 +50,6 @@ from pytensor.compile.mode import (
     register_mode,
     register_optimizer,
 )
-from pytensor.compile.monitormode import MonitorMode
 from pytensor.compile.ops import (
     DeepCopyOp,
     FromFunctionOp,
@@ -60,6 +61,5 @@ from pytensor.compile.ops import (
     view_op,
     wrap_py,
 )
-from pytensor.compile.profiling import ProfileStats
 from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable, shared, shared_constructor

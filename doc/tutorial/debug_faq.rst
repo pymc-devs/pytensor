@@ -211,7 +211,7 @@ computations, which can be achieved as follows:
     # This is the current suggested detect_nan implementation to
     # show you how it work.  That way, you can modify it for your
     # need.  If you want exactly this method, you can use
-    # `pytensor.compile.monitormode.detect_nan` that will always
+    # `pytensor.compile.debug.monitormode.detect_nan` that will always
     # contain the current suggested version.
 
     def detect_nan(fgraph, i, node, fn):

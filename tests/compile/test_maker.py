@@ -1,8 +1,3 @@
-import pickle
-import shutil
-import tempfile
-from pathlib import Path
-
 import numpy as np
 import pytest
 import scipy as sp
@@ -10,7 +5,7 @@ import scipy as sp
 import pytensor.tensor as pt
 from pytensor.compile import get_mode
 from pytensor.compile.io import In
-from pytensor.compile.maker import UnusedInputError, function, function_dump
+from pytensor.compile.maker import UnusedInputError, function
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph.utils import MissingInputError
@@ -36,25 +31,6 @@ from pytensor.utils import PYTHON_INT_BITWIDTH
 
 
 floatX = "float32"
-
-
-def test_function_dump():
-    v = vector()
-    fct1 = function([v], v + 1)
-
-    try:
-        tmpdir = Path(tempfile.mkdtemp())
-        fname = tmpdir / "test_function_dump.pkl"
-        function_dump(fname, [v], v + 1)
-        with fname.open("rb") as f:
-            l = pickle.load(f)
-    finally:
-        if tmpdir is not None:
-            shutil.rmtree(tmpdir)
-
-    fct2 = function(**l)
-    x = [1, 2, 3]
-    assert np.allclose(fct1(x), fct2(x))
 
 
 def test_function_name():

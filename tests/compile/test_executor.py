@@ -6,10 +6,9 @@ import pytest
 from numba.core.errors import TypingError as NumbaTypingError
 
 import pytensor.tensor as pt
-from pytensor.compile import UnusedInputError
-from pytensor.compile.debugmode import DebugMode, InvalidValueError
+from pytensor.compile.debug.debugmode import DebugMode, InvalidValueError
 from pytensor.compile.io import In, Out
-from pytensor.compile.maker import function
+from pytensor.compile.maker import UnusedInputError, function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config

@@ -242,7 +242,7 @@ class SparseTensorType(TensorType, HasDataType):
         return False
 
 
-pytensor.compile.register_view_op_c_code(
+pytensor.compile.ops.register_view_op_c_code(
     SparseTensorType,
     """
     Py_XDECREF(%(oname)s);

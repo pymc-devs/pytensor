@@ -5,7 +5,7 @@
 :mod:`nanguardmode`
 ===================
 
-.. module:: pytensor.compile.nanguardmode
+.. module:: pytensor.compile.debug.nanguardmode
    :platform: Unix, Windows
    :synopsis: defines NanGuardMode
 .. moduleauthor:: LISA
@@ -26,7 +26,7 @@ of abnormal values: NaNs, Infs, and abnormally big values.
     import numpy as np
     import pytensor
     import pytensor.tensor as pt
-    from pytensor.compile.nanguardmode import NanGuardMode
+    from pytensor.compile.debug.nanguardmode import NanGuardMode
 
     x = pt.matrix()
     w = pytensor.shared(np.random.standard_normal((5, 7)).astype(pytensor.config.floatX))
@@ -70,4 +70,4 @@ set to be ``True`` by default.
 Reference
 =========
 
-.. autoclass:: pytensor.compile.nanguardmode.NanGuardMode
+.. autoclass:: pytensor.compile.debug.nanguardmode.NanGuardMode
