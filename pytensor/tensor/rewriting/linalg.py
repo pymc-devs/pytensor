@@ -4,9 +4,8 @@ from typing import cast
 
 import numpy as np
 
-from pytensor import Variable
 from pytensor import tensor as pt
-from pytensor.graph import Apply, FunctionGraph
+from pytensor.graph import Apply, FunctionGraph, Variable
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,

@@ -9,7 +9,7 @@ import pytest
 import pytensor
 import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pytensor import pprint, shared
+from pytensor import shared
 from pytensor.compile import optdb
 from pytensor.compile.debugmode import DebugMode
 from pytensor.compile.function import function
@@ -29,7 +29,7 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.graph.traversal import ancestors
-from pytensor.printing import debugprint
+from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
