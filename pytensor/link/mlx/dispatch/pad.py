@@ -16,19 +16,19 @@ def mlx_funcify_pad(op, node, **kwargs):
                 "not per-side tuples like NumPy/JAX."
             )
 
-        def pad_fn(x, pad_width, constant_values):
+        def constant_pad_fn(x, pad_width, constant_values):
             return mx.pad(
                 x, pad_width, mode="constant", constant_values=constant_values
             )
 
-        return pad_fn
+        return constant_pad_fn
 
     elif pad_mode == "edge":
 
-        def pad_fn(x, pad_width):
+        def edge_pad_fn(x, pad_width):
             return mx.pad(x, pad_width, mode="edge")
 
-        return pad_fn
+        return edge_pad_fn
 
     else:
         raise NotImplementedError(
