@@ -7,8 +7,10 @@ import pytensor
 from pytensor import In, shared
 from pytensor import scalar as ps
 from pytensor import tensor as pt
-from pytensor.compile.function import function
-from pytensor.compile.function.types import add_supervisor_to_fgraph
+from pytensor.compile.aliasing import add_supervisor_to_fgraph
+from pytensor.compile.function_maker import function
+from pytensor.compile.aliasing import add_supervisor_to_fgraph
+from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, equal_computations

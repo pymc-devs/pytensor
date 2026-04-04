@@ -3,7 +3,7 @@ from collections import Counter
 import numpy as np
 import pytest
 
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.compile.io import In
 from pytensor.compile.mode import Mode, get_mode
 from pytensor.configdefaults import config

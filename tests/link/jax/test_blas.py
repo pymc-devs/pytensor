@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery

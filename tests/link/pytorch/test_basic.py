@@ -7,7 +7,7 @@ import pytest
 import pytensor.tensor as pt
 import pytensor.tensor.basic as ptb
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.compile.mode import PYTORCH, Mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config

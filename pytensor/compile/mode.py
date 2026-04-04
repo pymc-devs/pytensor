@@ -7,7 +7,7 @@ import logging
 import warnings
 from typing import Any, Literal
 
-from pytensor.compile.function.types import Supervisor
+from pytensor.compile.aliasing import Supervisor
 from pytensor.configdefaults import config
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.rewriting.basic import (
@@ -141,7 +141,7 @@ class AddDestroyHandler(GraphRewriter):
                 (
                     f"A Supervisor feature is missing from {fgraph}.\n"
                     "This is needed for inplace rewrites. Either exclude inplace rewrites or add a Supervisor feature.\n"
-                    "A Supervisor feature can be added via `pytensor.compile.function.types.add_supervisor_to_fgraph`."
+                    "A Supervisor feature can be added via `pytensor.compile.aliasing.add_supervisor_to_fgraph`."
                 ),
                 stacklevel=3,
             )
@@ -367,6 +367,12 @@ class Mode:
             f"optimizer={self.provided_optimizer}, "
             f"optdb={self.optdb})"
         )
+
+    @property
+    def function_maker(self):
+        from pytensor.compile.function_maker import FunctionMaker
+
+        return FunctionMaker
 
     @property
     def optimizer(self):

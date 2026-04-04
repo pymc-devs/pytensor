@@ -98,7 +98,7 @@ class PyDotFormatter:
 
         Parameters
         ----------
-        fct : pytensor.compile.function.types.Function
+        fct : pytensor.compile.function_maker.Function
             A compiled PyTensor function, variable, apply or a list of variables.
         graph: pydot.Dot
             `pydot` graph to which nodes are added. Creates new one if

@@ -9,7 +9,7 @@ import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
 from pytensor import shared
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.tensor.random.op import RandomVariableWithCoreShape
 from tests.link.numba.test_basic import (
     compare_numba_and_py,

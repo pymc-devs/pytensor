@@ -6,7 +6,7 @@ from itertools import chain
 import numpy as np
 
 import pytensor.tensor as pt
-from pytensor.compile.function.pfunc import construct_function_ins_and_outs
+from pytensor.compile.rebuild import construct_function_ins_and_outs
 from pytensor.compile.sharedvalue import SharedVariable, collect_new_shareds
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable

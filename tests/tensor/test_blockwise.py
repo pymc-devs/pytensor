@@ -8,7 +8,7 @@ import scipy.linalg
 import pytensor
 from pytensor import In, config, function, scan
 from pytensor.compile import get_default_mode, get_mode
-from pytensor.compile.function.types import add_supervisor_to_fgraph
+from pytensor.compile.aliasing import add_supervisor_to_fgraph
 from pytensor.gradient import grad
 from pytensor.graph import Apply, FunctionGraph, Op, rewrite_graph
 from pytensor.graph.replace import _vectorize_node, vectorize_graph

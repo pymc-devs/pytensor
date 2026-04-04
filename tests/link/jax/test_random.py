@@ -6,7 +6,7 @@ import pytensor
 import pytensor.tensor as pt
 import pytensor.tensor.random.basic as ptr
 from pytensor import clone_replace
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.compile.sharedvalue import shared
 from pytensor.tensor.random.basic import RandomVariable
 from pytensor.tensor.random.type import RandomType

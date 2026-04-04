@@ -3,7 +3,7 @@ import pytest
 
 from pytensor import Out
 from pytensor.compile import shared
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.compile.mode import Mode
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Constant, NominalVariable, Variable

@@ -66,7 +66,7 @@ def test_gc_never_pickles_temporaries():
 
         def b(fn):
             return len(
-                pickle.dumps(pytensor.compile.function.types._pickle_Function(fn))
+                pickle.dumps(pytensor.compile.function_maker._pickle_Function(fn))
             )
 
         assert b(f) == b(f)  # some sanity checks on the pickling mechanism

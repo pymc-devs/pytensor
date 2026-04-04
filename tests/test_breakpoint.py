@@ -1,7 +1,7 @@
 import numpy as np
 
 from pytensor.breakpoint import PdbBreakpoint
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.gradient import grad
 from pytensor.tensor.math import dot, gt
 from pytensor.tensor.type import fmatrix, fscalar

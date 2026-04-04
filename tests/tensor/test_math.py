@@ -14,7 +14,7 @@ from scipy.special import logsumexp as scipy_logsumexp
 import pytensor
 import pytensor.scalar as ps
 from pytensor.compile.debugmode import DebugMode
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.compile.mode import get_default_mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config

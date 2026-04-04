@@ -5,7 +5,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import shared
-from pytensor.compile.function import function
+from pytensor.compile.function_maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import deep_copy_op
 from pytensor.configdefaults import config
