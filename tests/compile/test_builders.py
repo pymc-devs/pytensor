@@ -7,7 +7,7 @@ import pytensor.tensor as pt
 from pytensor import Mode
 from pytensor.compile import shared
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.gradient import (
     DisconnectedType,

@@ -43,7 +43,7 @@ Graph
 
 .. function:: function(...)
 
-   Alias for :func:`pytensor.compile.function.function`
+   Alias for :func:`pytensor.compile.maker.function`
 
 .. autofunction:: pytensor.clone_replace(...)
 

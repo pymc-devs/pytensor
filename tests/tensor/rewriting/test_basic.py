@@ -8,7 +8,7 @@ import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import graph_replace, shared
 from pytensor.compile import optdb
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.compile.mode import get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp, deep_copy_op
 from pytensor.configdefaults import config

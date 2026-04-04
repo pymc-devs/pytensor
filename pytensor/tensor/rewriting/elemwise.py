@@ -8,7 +8,7 @@ from heapq import heapify, heappop, heappush
 from operator import or_
 from warnings import warn
 
-from pytensor.compile.function.types import Supervisor
+from pytensor.compile.aliasing import Supervisor
 from pytensor.compile.mode import get_target_language, optdb
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable

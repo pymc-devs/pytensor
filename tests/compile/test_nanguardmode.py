@@ -9,7 +9,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor.compile import shared
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.compile.nanguardmode import NanGuardMode
 from pytensor.configdefaults import config
 from pytensor.tensor.math import dot

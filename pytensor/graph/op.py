@@ -17,7 +17,7 @@ from pytensor.graph.utils import (
 
 
 if TYPE_CHECKING:
-    from pytensor.compile.function.types import Function
+    from pytensor.compile.executor import Function
     from pytensor.graph.fg import AbstractFunctionGraph, FunctionGraph
     from pytensor.graph.type import Type
 

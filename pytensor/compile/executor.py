@@ -1,223 +1,29 @@
-"""Objects that orchestrate graph construction, rewriting, and linking."""
+"""Compiled function runtime: the Function callable and its pickle support."""
 
 import copy
 import copyreg
-import logging
 import time
 import warnings
-from collections.abc import Sequence
-from itertools import chain
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 import pytensor
 import pytensor.compile.profiling
-from pytensor.compile.io import In, SymbolicInput, SymbolicOutput
-from pytensor.compile.ops import deep_copy_op, view_op
+from pytensor.compile.io import In, SymbolicOutput
 from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
-from pytensor.graph.basic import (
-    Variable,
-    clone_get_equiv,
-)
-from pytensor.graph.destroyhandler import DestroyHandler
-from pytensor.graph.features import AlreadyThere, Feature, PreserveVariableAttributes
+from pytensor.graph.basic import clone_get_equiv
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import HasInnerGraph
-from pytensor.graph.traversal import ancestors, graph_inputs
-from pytensor.graph.utils import InconsistencyError, get_variable_trace_string
+from pytensor.graph.utils import get_variable_trace_string
 from pytensor.link.basic import Container
 from pytensor.link.utils import raise_with_op
 
 
 if TYPE_CHECKING:
-    from pytensor.compile.mode import Mode
+    from pytensor.compile.maker import FunctionMaker
     from pytensor.link.vm import VM
-
-
-_logger = logging.getLogger("pytensor.compile.function.types")
-
-
-class UnusedInputError(Exception):
-    """
-    A symbolic input passed to function is not needed.
-
-    """
-
-
-def alias_root(v):
-    """
-    Return the variable to which v is aliased by view_maps and destroy_maps.
-
-    """
-    if v.owner is None:
-        return v
-    vmap = v.owner.op.view_map
-    dmap = v.owner.op.destroy_map
-    outpos = v.owner.outputs.index(v)
-    v_views = vmap.get(outpos, []) + dmap.get(outpos, [])
-    if len(v_views) > 1:
-        raise NotImplementedError(
-            f"{v} is a view/destroyed version of more then one inputs. "
-            "Currently, we only support the case where an output is a view or "
-            "a destroyed version of one input."
-        )
-    elif v_views:
-        return alias_root(v.owner.inputs[v_views[0]])
-    else:
-        return v
-
-
-def view_tree_set(fgraph, v, treeset):
-    """
-    Add to `treeset` all variables that are views of v, given that v is
-    not a view.
-
-    """
-    treeset.add(v)
-    for cl, v_input_pos_to_cl in fgraph.clients[v]:
-        vmap = cl.op.view_map
-        dmap = cl.op.destroy_map
-        for opos, iposlist in chain(vmap.items(), dmap.items()):
-            if v_input_pos_to_cl in iposlist:
-                if cl.outputs[opos] not in treeset:
-                    view_tree_set(fgraph, cl.outputs[opos], treeset)
-
-
-def infer_reuse_pattern(fgraph, outputs_to_disown):
-    """
-    Given an fgraph and a list of variables, returns the list or set
-    of all variables which may share the same underlying data storage
-    as any of the specified variables. Used internally by function,
-    FunctionMaker.
-
-    This list (or set) is also referred to as no_recycling sometimes,
-    especially by linker code.
-
-    """
-    rval = set()
-    for o in outputs_to_disown:
-        view_tree_set(fgraph, alias_root(o), rval)
-    # remove from rval all of the inputs, constants, values.
-    rval = {r for r in rval if r.owner is not None}
-
-    return rval
-
-
-def fgraph_updated_vars(fgraph, expanded_inputs):
-    """
-    Reconstruct the full "updates" dictionary, mapping from FunctionGraph input
-    variables to the fgraph outputs that will replace their values.
-
-    TODO: Get rid of all this `expanded_inputs` nonsense and use
-    only `fgraph.update_mapping`.
-
-    Returns
-    -------
-    dict variable -> variable
-
-    """
-    updated_vars = {}
-
-    if len(expanded_inputs) != len(fgraph.inputs):
-        raise ValueError("expanded_inputs must match len(fgraph.inputs)")
-
-    for out_idx, in_idx in fgraph.update_mapping.items():
-        assert expanded_inputs[in_idx].update is not None
-        updated_vars[fgraph.inputs[in_idx]] = fgraph.outputs[out_idx]
-
-    return updated_vars
-
-
-class Supervisor(Feature):
-    """
-    Listener for FunctionGraph events which makes sure that no
-    operation overwrites the contents of protected Variables. The
-    outputs of the FunctionGraph are protected by default.
-
-    """
-
-    def __init__(self, protected):
-        self.fgraph = None
-        self.protected = list(protected)
-
-    def clone(self):
-        return type(self)(self.protected)
-
-    def on_attach(self, fgraph):
-        if hasattr(fgraph, "_supervisor"):
-            raise AlreadyThere(f"A Supervisor is already attached to {fgraph}.")
-
-        if self.fgraph is not None and self.fgraph != fgraph:
-            raise Exception("This Feature is already associated with a FunctionGraph")
-
-        fgraph._supervisor = self
-        self.fgraph = fgraph
-
-    def validate(self, fgraph):
-        if config.cycle_detection == "fast" and hasattr(fgraph, "has_destroyers"):
-            if fgraph.has_destroyers(self.protected):
-                raise InconsistencyError("Trying to destroy protected variables.")
-            return True
-        if not hasattr(fgraph, "destroyers"):
-            return True
-        for r in self.protected + list(fgraph.outputs):
-            if fgraph.destroyers(r):
-                raise InconsistencyError(f"Trying to destroy a protected variable: {r}")
-
-
-def add_supervisor_to_fgraph(
-    fgraph: FunctionGraph,
-    input_specs: Sequence[SymbolicInput],
-    accept_inplace: bool = False,
-) -> None:
-    """Setup Supervisor Feature in a FunctionGraph, so that inplace rewrites can be used.
-
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        The FunctionGraph to setup the Supervisor Feature in.
-    input_specs: Sequence of SymbolicInput
-        The input specifications for the FunctionGraph.
-        Inputs with the attribute `mutable=False` and which are not already destroyed by an inplace operation
-        (if `accept_inplace` is True) will be protected from inplace operations.
-        Otherwise, they will be allowed to be destroyed.
-    accept_inplace: bool
-        Whether to allow inplace operations to already be present in the graph.
-
-    Raises
-    ------
-    TypeError
-        If inplace operations are not allowed and the graph already contains inplace operations.
-
-    """
-
-    has_destroy_handler = hasattr(fgraph, "destroyers")
-    if not (has_destroy_handler and accept_inplace):
-        # Check if fgraph already contains destructive operations,
-        # in which case we need to add a DestroyHandler or raise an error
-        for node in fgraph.apply_nodes:
-            if node.op.destroy_map:
-                if not accept_inplace:
-                    raise TypeError(
-                        f"Graph must not contain inplace operations: {node}"
-                    )
-                else:
-                    has_destroy_handler = True
-                    fgraph.attach_feature(DestroyHandler())
-                    break
-
-    # Protect all immutable inputs from inplace operations.
-    fgraph.attach_feature(
-        Supervisor(
-            input
-            for spec, input in zip(input_specs, fgraph.inputs, strict=True)
-            if not (
-                spec.mutable or (has_destroy_handler and fgraph.has_destroyers([input]))
-            )
-        )
-    )
 
 
 class AliasedMemoryError(Exception):
@@ -399,6 +205,8 @@ class Function:
             c.allow_downcast = getattr(input, "allow_downcast", None)
             c.required = input.value is None
             c.implicit = input.implicit
+            # this is a count of how many times the input has been
+            # provided (reinitialized to 0 on __call__)
             c.provided = 0
             finder[i] = c
             finder[input.variable] = c
@@ -749,7 +557,9 @@ class Function:
                     kwarg_container = self._finder[key]
                 except KeyError:
                     # Print informative error message.
-                    msg = get_info_on_inputs(self._named_inputs, self._n_unnamed_inputs)
+                    msg = Function._get_info_on_inputs(
+                        self._named_inputs, self._n_unnamed_inputs
+                    )
                     raise TypeError(f"Unknown input: {key}. {msg}")
                 if kwarg_container is DUPLICATE:
                     raise TypeError(
@@ -917,6 +727,47 @@ class Function:
                 if hasattr(node.op.fn, "free"):
                     node.op.fn.free()
 
+    @staticmethod
+    def _get_info_on_inputs(named_inputs, n_unnamed_inputs):
+        """Return a human-readable description of named and un-named inputs."""
+        n_named_inputs = len(named_inputs)
+
+        def get_plural(n):
+            if n > 1:
+                return "s"
+            else:
+                return ""
+
+        if n_named_inputs == 0:
+            if n_unnamed_inputs == 0:
+                msg = "The function is supposed to have no input."
+            else:
+                if n_unnamed_inputs == 1:
+                    msg = (
+                        "The function has a single input variable which has no "
+                        "name, and thus cannot be assigned through a keyword"
+                        " argument (use 'name=...' in a Variable's "
+                        "constructor to give it a name)."
+                    )
+                else:
+                    msg = (
+                        f"The function has {n_unnamed_inputs} inputs, but none of them is named,"
+                        " and thus they cannot be assigned through keyword "
+                        "arguments (use 'name=...' in a Variable's "
+                        "constructor to give it a name)."
+                    )
+        else:
+            if n_unnamed_inputs == 0:
+                msg = f"The function has {n_named_inputs} named input{get_plural(n_named_inputs)} ({', '.join(named_inputs)})."
+            else:
+                msg = (
+                    f"The function has {n_named_inputs} named input{get_plural(n_named_inputs)} ({', '.join(named_inputs)}), and {n_unnamed_inputs} unnamed "
+                    f"input{get_plural(n_unnamed_inputs)} which thus cannot be accessed through keyword "
+                    f"argument{get_plural(n_unnamed_inputs)} (use 'name=...' in a variable's constructor "
+                    "to give it a name)."
+                )
+        return msg
+
     def get_shared(self):
         """
         Return the shared variable read or updated by by this function.
@@ -937,6 +788,8 @@ class Function:
 
 
 # pickling/deepcopy support for Function
+
+
 def _pickle_Function(f):
     f.free()
 
@@ -988,615 +841,3 @@ def _constructor_Function(maker, input_storage, inputs_data, trust_input=False):
 
 
 copyreg.pickle(Function, _pickle_Function)
-
-
-def insert_deepcopy(fgraph, wrapped_inputs, wrapped_outputs):
-    """Insert deepcopy in the fgraph to break aliasing of outputs.
-
-    This loop was inserted to remove aliasing between outputs when they all
-    evaluate to the same value. Originally it was OK for outputs to be aliased,
-    but some of the outputs can be shared variables, and is not good for shared
-    variables to be aliased. It might be possible to rewrite this by making
-    sure there is no aliasing only between shared variables.
-
-    If some outputs are constant, we add deep copy to respect the memory
-    contract
-
-    We don't insert deep copy when :attr:`SymbolicOutput.borrow` is ``True``
-    for all concerned outputs.
-    """
-
-    assert len(wrapped_inputs) == len(fgraph.inputs)
-    assert len(wrapped_outputs) == len(fgraph.outputs)
-    reason = "insert_deepcopy"
-    updated_fgraph_inputs = {
-        fgraph_i
-        for i, fgraph_i in zip(wrapped_inputs, fgraph.inputs, strict=True)
-        if getattr(i, "update", None) is not None
-    }
-
-    # We can't use fgraph.inputs as this don't include Constant Value.
-    all_graph_inputs = list(graph_inputs(fgraph.outputs))
-    has_destroyers_attr = hasattr(fgraph, "has_destroyers")
-
-    for i in range(len(fgraph.outputs)):
-        original_out = fgraph.outputs[i]
-        output_client = fgraph.get_output_client(i)
-
-        views_of_output_i = set()
-        view_tree_set(fgraph, alias_root(original_out), views_of_output_i)
-        copied = False
-        # do not allow outputs to be aliased
-        for j in range(i + 1, len(fgraph.outputs)):
-            # We could don't put deep copy if both outputs have borrow==True
-            # and not(wrapped_outputs[i].borrow and wrapped_outputs[j].borrow):
-            if fgraph.outputs[j] in views_of_output_i:
-                if wrapped_outputs[i].borrow and wrapped_outputs[j].borrow:
-                    fgraph.change_node_input(
-                        *output_client, view_op(original_out), reason=reason
-                    )
-                else:
-                    fgraph.change_node_input(
-                        *output_client, deep_copy_op(original_out), reason=reason
-                    )
-                copied = True
-                break
-
-        if not copied:  # no-break
-            for input_j in all_graph_inputs:
-                # do not allow outputs to be aliased to an inputs (j), unless
-                # a) that j'th input has been 'destroyed' by
-                #    e.g. in-place computations
-                # b) that j'th input is a shared variable that is also
-                #    being updated
-                if input_j in updated_fgraph_inputs:
-                    continue
-                if input_j in views_of_output_i and not (
-                    has_destroyers_attr and fgraph.has_destroyers([input_j])
-                ):
-                    # We don't put deep_copy_op if the input and the
-                    # output have borrow==True
-                    if input_j in fgraph.inputs:
-                        j = fgraph.inputs.index(input_j)
-                        if wrapped_outputs[i].borrow and wrapped_inputs[j].borrow:
-                            fgraph.change_node_input(
-                                *output_client,
-                                view_op(original_out),
-                                reason=reason,
-                            )
-                            break
-                        else:
-                            fgraph.change_node_input(
-                                *output_client,
-                                deep_copy_op(original_out),
-                                reason=reason,
-                            )
-                            break
-                    elif wrapped_outputs[i].borrow:
-                        fgraph.change_node_input(
-                            *output_client,
-                            view_op(original_out),
-                            reason=reason,
-                        )
-                        break
-                    else:
-                        fgraph.change_node_input(
-                            *output_client,
-                            deep_copy_op(original_out),
-                            reason=reason,
-                        )
-                        break
-
-
-class FunctionMaker:
-    """
-    `FunctionMaker` is the class to `create` `Function` instances.
-
-    This class has the fgraph, the rewriter, and the linker. When
-    copying a `Function`, there is no need to duplicate the
-    `FunctionMaker` instance. Deepcopy still copies both, which can
-    variable in re-compilation.
-
-    Parameters
-    ----------
-    inputs : list of SymbolicInput instances
-    outputs : list of SymbolicOutput instances
-        Outputs may also be a single Variable (not a list), in which case the
-        functions produced by FunctionMaker will return their output value
-        directly.
-    mode : Mode instance
-        Telling FunctionMaker how to rewrite and link. None means to use the
-        `config.mode`.
-    accept_inplace : bool
-        True iff it is acceptable to have inplace operations in the graph from
-        the inputs to the outputs.
-    on_unused_input : {'raise', 'warn', 'ignore', None}
-        What to do if a variable in the 'inputs' list is not used in the graph.
-        Possible values are:
-        - 'raise': raise an error
-        - 'warn': log a warning
-        - 'ignore': do not do anything
-        - None: Use the value in the PyTensor flags on_unused_input.
-    name : str
-        An optional name for this function. If used, the profile mode will
-        print the time spent in this function.
-    trust_input : bool, default False
-        If True, no input validation checks are performed when the function is
-        called. This includes checking the number of inputs, their types and
-        that multiple inputs are not aliased to each other. Failure to meet any
-        of these conditions can lead to computational errors or to the
-        interpreter crashing.
-    """
-
-    @staticmethod
-    def create_fgraph(
-        input_specs: list[SymbolicInput],
-        output_specs: list[SymbolicOutput],
-        accept_inplace: bool = False,
-        fgraph: FunctionGraph | None = None,
-        features: list[type[Feature]] = [PreserveVariableAttributes],
-        force_clone=False,
-    ) -> tuple[FunctionGraph, list[SymbolicOutput]]:
-        """Make or set up a `FunctionGraph` from input and output specs.
-
-        Any `SymbolicInput` whose `update` field is not ``None`` will add
-        a corresponding output to the `FunctionGraph`.  Returns the
-        `FunctionGraph` and a list of `SymbolicOutput` for the updates.
-
-        If `accept_inplace` is ``False``, the graph will be checked for
-        in-place operations and an exception raised if any are found.
-
-        If `fgraph` is ``None``, a new `FunctionGraph` is created.
-        The graph is cloned only if `force_clone` is ``True`` or if
-        any input variable has an owner (i.e. is not a root variable).
-
-        """
-        updates = []
-        update_mapping = {}
-        out_idx = len(output_specs)
-        for idx, input_spec in enumerate(input_specs):
-            if input_spec.update is not None:
-                updates.append(input_spec.update)
-                update_mapping[out_idx] = idx
-                out_idx += 1
-
-        found_updates = []
-        if fgraph and fgraph.update_mapping is None:
-            fgraph.update_mapping = update_mapping
-            for update in updates:
-                fgraph.add_output(update, reason="create_fgraph")
-
-            found_updates.extend(map(SymbolicOutput, updates))
-        elif fgraph is None:
-            input_vars = [spec.variable for spec in input_specs]
-            clone = force_clone or any(var.owner is not None for var in input_vars)
-
-            fgraph = FunctionGraph(
-                input_vars,
-                [spec.variable for spec in output_specs] + updates,
-                update_mapping=update_mapping,
-                clone=clone,
-            )
-
-            found_updates.extend(map(SymbolicOutput, updates))
-
-        add_supervisor_to_fgraph(
-            fgraph=fgraph, input_specs=input_specs, accept_inplace=accept_inplace
-        )
-
-        for feature in features:
-            fgraph.attach_feature(feature())
-
-        return fgraph, found_updates
-
-    @staticmethod
-    def wrap_in(input):
-        if isinstance(input, (SymbolicInput)):
-            return input
-        elif isinstance(input, Variable):
-            # r -> SymbolicInput(variable=r)
-            return SymbolicInput(input)
-        elif isinstance(input, list | tuple):
-            # (r, u) -> SymbolicInput(variable=r, update=u)
-            if len(input) == 2:
-                return SymbolicInput(input[0], update=input[1])
-            else:
-                raise TypeError(
-                    f"Expected two elements in the list or tuple; got {input}"
-                )
-        else:
-            raise TypeError(
-                f"Unknown input type: {type(input)} ({input}), expected Variable "
-                "instance"
-            )
-
-    @staticmethod
-    def wrap_out(output):
-        if isinstance(output, SymbolicOutput):
-            return output
-        elif isinstance(output, Variable):
-            return SymbolicOutput(output)
-        else:
-            raise TypeError(f"Unknown output type: {type(output)} ({output})")
-
-    @staticmethod
-    def check_unused_inputs(inputs, outputs, on_unused_input):
-        if on_unused_input is None:
-            on_unused_input = config.on_unused_input
-
-        if on_unused_input == "ignore":
-            return
-
-        # There should be two categories of variables in inputs:
-        #  - variables that have to be provided (used_inputs)
-        #  - shared variables that will be updated
-        used_inputs = list(
-            ancestors(
-                (
-                    [o.variable for o in outputs]
-                    + [
-                        i.update
-                        for i in inputs
-                        if getattr(i, "update", None) is not None
-                    ]
-                ),
-                blockers=[i.variable for i in inputs],
-            )
-        )
-
-        msg = (
-            "pytensor.function was asked to create a function computing "
-            "outputs given certain inputs, but the provided input "
-            "variable at index %i is not part of the computational graph "
-            "needed to compute the outputs: %s.\n%s"
-        )
-        warn_msg = (
-            "To make this warning into an error, you can pass the "
-            "parameter on_unused_input='raise' to pytensor.function. "
-            "To disable it completely, use on_unused_input='ignore'."
-        )
-        err_msg = (
-            "To make this error into a warning, you can pass the "
-            "parameter on_unused_input='warn' to pytensor.function. "
-            "To disable it completely, use on_unused_input='ignore'."
-        )
-
-        for i in inputs:
-            if (i.variable not in used_inputs) and (i.update is None):
-                if on_unused_input == "warn":
-                    warnings.warn(
-                        msg % (inputs.index(i), i.variable, warn_msg), stacklevel=6
-                    )
-                elif on_unused_input == "raise":
-                    raise UnusedInputError(msg % (inputs.index(i), i.variable, err_msg))
-                else:
-                    raise ValueError(
-                        "Invalid value for keyword on_unused_input of pytensor.function: "
-                        f"'{on_unused_input}'.\n"
-                        "Valid values are 'raise', 'warn', and 'ignore'."
-                    )
-
-    @staticmethod
-    def prepare_fgraph(
-        inputs,
-        outputs,
-        additional_outputs,
-        fgraph: FunctionGraph,
-        mode: "Mode",
-        profile,
-    ):
-        rewriter = mode.optimizer
-
-        try:
-            start_rewriter = time.perf_counter()
-
-            rewriter_profile = None
-            rewrite_time = None
-
-            with config.change_flags(
-                mode=mode,
-                traceback__limit=config.traceback__compile_limit,
-            ):
-                rewriter_profile = rewriter(fgraph)
-
-                end_rewriter = time.perf_counter()
-                rewrite_time = end_rewriter - start_rewriter
-                _logger.debug(f"Rewriting took {rewrite_time:f} seconds")
-
-                # Add deep copy to respect the memory interface
-                insert_deepcopy(fgraph, inputs, outputs + additional_outputs)
-        finally:
-            # If the rewriter got interrupted
-            if rewrite_time is None:
-                end_rewriter = time.perf_counter()
-                rewrite_time = end_rewriter - start_rewriter
-
-            pytensor.compile.profiling.total_graph_rewrite_time += rewrite_time
-
-            if profile:
-                if rewriter_profile is None and hasattr(rewriter, "pre_profile"):
-                    rewriter_profile = rewriter.pre_profile
-
-                profile.rewriting_time += rewrite_time
-
-                if config.profile_optimizer:
-                    profile.rewriter_profile = (rewriter, rewriter_profile)
-            elif config.profile_optimizer and profile is not False:
-                # If False, it means the profiling for that function was
-                # explicitly disabled
-                warnings.warn(
-                    (
-                        "config.profile_optimizer requires config.profile to "
-                        " be set to True as well"
-                    ),
-                    stacklevel=3,
-                )
-
-        if not hasattr(mode.linker, "accept"):
-            raise ValueError(
-                "'linker' parameter of FunctionMaker should be "
-                f"a Linker with an accept method or one of {list(pytensor.compile.mode.predefined_linkers)}"
-            )
-
-    def __init__(
-        self,
-        inputs,
-        outputs,
-        mode=None,
-        accept_inplace=False,
-        function_class=Function,
-        profile=None,
-        on_unused_input=None,
-        fgraph=None,
-        name=None,
-        no_fgraph_prep=False,
-        trust_input=False,
-    ):
-        if profile:
-            self._compile_start = time.perf_counter()
-
-        # Save the provided mode, not the instantiated mode.
-        # The instantiated mode don't pickle and if we unpickle an PyTensor
-        # function and it get re-compiled, we want the current rewriter to be
-        # used, not the rewriter when it was saved.
-        self.mode = mode
-        mode = pytensor.compile.mode.get_mode(mode)
-
-        # Assert old way of working isn't used
-        if getattr(mode, "profile", None):
-            raise TypeError("profile passed via 'mode'. This isn't supported anymore")
-        self.profile = profile
-        if profile and config.cxx:
-            # This is very important:
-            # 1) We preload the cache here to not have its timing
-            #    included with the rewrites.
-            # 2) Do not refresh the cache here by default. It cause
-            #    too much execution time during testing as we compile
-            #    much more functions then the number of compile c
-            #    module.
-            start_get_cache = time.perf_counter()
-            pytensor.link.c.basic.get_module_cache().refresh()
-            get_cache_time = time.perf_counter() - start_get_cache
-            self.profile.linker_time += get_cache_time
-            self.profile.preload_cache_time += get_cache_time
-
-        # Handle the case where inputs and/or outputs is a single
-        # Variable (not in a list)
-        unpack_single = False
-        return_none = False
-        if outputs is None:
-            return_none = True
-            outputs = []
-        if not isinstance(outputs, list | tuple):
-            unpack_single = True
-            outputs = [outputs]
-        if not isinstance(inputs, list | tuple):
-            inputs = [inputs]
-
-        # Wrap them in In or Out instances if needed.
-        inputs = [self.wrap_in(i) for i in inputs]
-
-        # TODO: Remove this deprecation error after a while
-        if any(
-            (
-                i.value is not None
-                and not isinstance(i.value, Container)
-                and i.update is None
-            )
-            for i in inputs
-        ):
-            raise ValueError(
-                "Inputs with default values are deprecated. Use `functools.partial` instead."
-            )
-
-        outputs = [self.wrap_out(o) for o in outputs]
-
-        # Check if some input variables are unused
-        self.check_unused_inputs(inputs, outputs, on_unused_input)
-
-        fgraph, found_updates = self.create_fgraph(
-            inputs, outputs, accept_inplace, fgraph=fgraph
-        )
-
-        if fgraph.profile is None:
-            fgraph.profile = profile
-
-        self.fgraph = fgraph
-
-        if not no_fgraph_prep:
-            self.prepare_fgraph(inputs, outputs, found_updates, fgraph, mode, profile)
-
-        assert len(fgraph.outputs) == len(outputs + found_updates)
-
-        # The 'no_borrow' outputs are the ones for which that we can't
-        # return the internal storage pointer.
-        no_borrow = [
-            output
-            for output, spec in zip(
-                fgraph.outputs, outputs + found_updates, strict=True
-            )
-            if not spec.borrow
-        ]
-
-        linker = copy.copy(mode.linker)
-
-        if no_borrow:
-            self.linker = linker.accept(
-                fgraph,
-                no_recycling=infer_reuse_pattern(fgraph, no_borrow),
-                profile=profile,
-            )
-        else:
-            self.linker = linker.accept(fgraph, profile=profile)
-
-        if hasattr(linker, "accept_var_updates"):
-            # TODO: This is a hack that makes `VMLinker` aware of updates;
-            # clean this up.
-            self.linker.accept_var_updates(fgraph_updated_vars(fgraph, inputs))
-
-        fgraph.name = name
-        self.inputs = inputs
-
-        # TODO: Get rid of all this `expanded_inputs` nonsense
-        self.expanded_inputs = inputs
-        self.outputs = outputs
-        self.unpack_single = unpack_single
-        self.return_none = return_none
-        self.accept_inplace = accept_inplace
-        self.function_class = function_class
-        self.on_unused_input = on_unused_input  # Used for the pickling/copy
-        self.name = name
-        self.trust_input = trust_input
-        self.required = [(i.value is None) for i in self.inputs]
-
-    def create(self, input_storage=None, storage_map=None):
-        """
-        Create a function.
-
-        Parameters
-        ----------
-        input_storage
-            A list matching the inputs list and providing default values if the
-            default for an input is None, then that input is a required input.
-            For an input with an update, the default acts as initialization.
-        """
-
-        if input_storage is None:
-            input_storage = [None] * len(self.inputs)
-        # list of independent one-element lists, will be passed to the linker
-        input_storage_lists = []
-
-        # The following loop is to fill in the input_storage_lists and
-        # defaults lists.
-        assert len(self.expanded_inputs) == len(input_storage)
-        for i, (input, input_storage_i) in enumerate(
-            zip(self.expanded_inputs, input_storage, strict=True)
-        ):
-            # Replace any default value given as a variable by its
-            # container.  Note that this makes sense only in the
-            # context of shared variables, but for now we avoid
-            # dealing directly with them to avoid dependency on the
-            # shared variables work-in-progress repository.
-            if isinstance(input_storage_i, Variable):
-                input_storage_i = input_storage_i.container
-
-            if isinstance(input_storage_i, Container):
-                # If the default is a Container, this means we want to
-                # share the same storage. This is done by appending
-                # input_storage_i.storage to input_storage_lists.
-                input_storage_lists.append(input_storage_i.storage)
-
-            else:
-                # Normal case: one new, independent storage unit
-                input_storage_lists.append([input_storage_i])
-
-            required = self.required[i]
-
-            # shared variables need neither be input by the user nor refed
-            if input.shared:
-                assert not required
-
-        # Get a function instance
-        start_linker = time.perf_counter()
-        start_import_time = pytensor.link.c.cmodule.import_time
-
-        with config.change_flags(traceback__limit=config.traceback__compile_limit):
-            _fn, _i, _o = self.linker.make_thunk(
-                input_storage=input_storage_lists, storage_map=storage_map
-            )
-
-        end_linker = time.perf_counter()
-
-        linker_time = end_linker - start_linker
-        pytensor.compile.profiling.total_time_linker += linker_time
-        _logger.debug(f"Linker took {linker_time:f} seconds")
-        if self.profile:
-            self.profile.linker_time += linker_time
-            _fn.time_thunks = self.profile.flag_time_thunks
-            import_time = pytensor.link.c.cmodule.import_time - start_import_time
-            self.profile.import_time += import_time
-
-        fn = self.function_class(
-            vm=_fn,
-            input_storage=_i,
-            output_storage=_o,
-            outputs=self.outputs,
-            unpack_single=self.unpack_single,
-            return_none=self.return_none,
-            maker=self,
-            trust_input=self.trust_input,
-            name=self.name,
-        )
-
-        fn.profile = self.profile
-
-        if self.profile and hasattr(self, "_compile_start"):
-            self.profile.compile_time += time.perf_counter() - self._compile_start
-            self.profile.nb_nodes = len(self.fgraph.apply_nodes)
-
-        return fn
-
-
-def get_info_on_inputs(named_inputs, n_unnamed_inputs):
-    """
-    Return a human-readable description of named and un-named inputs.
-
-    """
-    n_named_inputs = len(named_inputs)
-
-    def get_plural(n):
-        if n > 1:
-            return "s"
-        else:
-            return ""
-
-    if n_named_inputs == 0:
-        if n_unnamed_inputs == 0:
-            msg = "The function is supposed to have no input."
-        else:
-            if n_unnamed_inputs == 1:
-                msg = (
-                    "The function has a single input variable which has no "
-                    "name, and thus cannot be assigned through a keyword"
-                    " argument (use 'name=...' in a Variable's "
-                    "constructor to give it a name)."
-                )
-            else:
-                # Use plural.
-                msg = (
-                    f"The function has {n_unnamed_inputs} inputs, but none of them is named,"
-                    " and thus they cannot be assigned through keyword "
-                    "arguments (use 'name=...' in a Variable's "
-                    "constructor to give it a name)."
-                )
-    else:
-        if n_unnamed_inputs == 0:
-            msg = f"The function has {n_named_inputs} named input{get_plural(n_named_inputs)} ({', '.join(named_inputs)})."
-        else:
-            msg = (
-                f"The function has {n_named_inputs} named input{get_plural(n_named_inputs)} ({', '.join(named_inputs)}), and {n_unnamed_inputs} unnamed "
-                f"input{get_plural(n_unnamed_inputs)} which thus cannot be accessed through keyword "
-                f"argument{get_plural(n_unnamed_inputs)} (use 'name=...' in a variable's constructor "
-                "to give it a name)."
-            )
-    return msg

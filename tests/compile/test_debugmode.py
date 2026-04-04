@@ -11,7 +11,7 @@ from pytensor.compile.debugmode import (
     DebugMode,
     StochasticOrder,
 )
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.features import BadOptimization

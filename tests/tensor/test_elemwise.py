@@ -11,7 +11,7 @@ import pytensor.scalar as ps
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
 from pytensor import In, config, grad
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.fg import FunctionGraph

@@ -11,7 +11,7 @@ import pytensor
 from pytensor import scalar as ps
 from pytensor import tensor as pt
 from pytensor.compile import optdb
-from pytensor.compile.function.types import deep_copy_op
+from pytensor.compile.ops import deep_copy_op
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
     Apply,

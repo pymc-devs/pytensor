@@ -75,7 +75,7 @@ def clone_replace(
         Keywords to `rebuild_collect_shared`.
 
     """
-    from pytensor.compile.function.pfunc import rebuild_collect_shared
+    from pytensor.compile.rebuild import rebuild_collect_shared
 
     items = list(_format_replace(replace).items())
 

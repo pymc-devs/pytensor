@@ -6,15 +6,14 @@ import pytest
 from numba.core.errors import TypingError as NumbaTypingError
 
 import pytensor.tensor as pt
-from pytensor.compile import shared
+from pytensor.compile import UnusedInputError
 from pytensor.compile.debugmode import DebugMode, InvalidValueError
-from pytensor.compile.function import function
-from pytensor.compile.function.types import UnusedInputError
 from pytensor.compile.io import In, Out
+from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode
+from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant
-from pytensor.graph.rewriting.basic import PatternNodeRewriter, WalkingGraphRewriter
 from pytensor.graph.utils import MissingInputError
 from pytensor.link.basic import Container
 from pytensor.printing import debugprint
@@ -26,7 +25,9 @@ from pytensor.tensor.type import (
     dscalars,
     dvector,
     fscalar,
+    imatrix,
     iscalar,
+    ivectors,
     matrix,
     scalar,
     scalars,
@@ -34,17 +35,11 @@ from pytensor.tensor.type import (
 )
 
 
-pytestmark = pytest.mark.filterwarnings(
+@pytest.mark.filterwarnings(
     "error",
     r"ignore:^Numba will use object mode to run.*perform method\.:UserWarning",
-    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph.*:numba.NumbaWarning",
+    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph\".*:numba.NumbaWarning",
 )
-
-
-def PatternOptimizer(p1, p2, ign=True):
-    return WalkingGraphRewriter(PatternNodeRewriter(p1, p2), ignore_newtrees=ign)
-
-
 class TestFunction:
     @pytest.mark.xfail()
     def test_none(self):
@@ -223,6 +218,15 @@ class TestFunction:
 
         with pytest.raises(TypeError):
             t()
+
+    def test_trust_input(self):
+        x = dvector()
+        y = shared(1)
+        z = x + y
+        f = function([x], z)
+        assert f.trust_input is False
+        f = function([x], z, trust_input=True)
+        assert f.trust_input is True
 
     def test_copy(self):
         a = scalar()
@@ -703,7 +707,69 @@ class TestFunction:
         f = function([x], out)
         assert f.dprint(file="str") == debugprint(f, file="str")
 
+    def test_empty_givens_updates(self):
+        # Regression test for bug fixed in 8625e03.
 
+        # Empty givens / updates dictionaries were not properly detected before,
+        # triggering useless crashes at compile time.
+        x = scalar()
+        y = x * 2
+        function([In(x)], y, givens={})
+        function([In(x)], y, updates={})
+
+    def test_rebuild_strict(self):
+        # Test fix for error reported at
+        # https://groups.google.com/d/topic/theano-users/BRK0UEB72XA/discussion
+        w = imatrix()
+        x, y = ivectors("x", "y")
+        z = x * y
+        f = function([w, y], z, givens=[(x, w)], rebuild_strict=False)
+        z_val = f(np.ones((3, 5), dtype="int32"), np.arange(5, dtype="int32"))
+        assert z_val.ndim == 2
+        assert np.all(z_val == np.ones((3, 5)) * np.arange(5))
+
+
+class SomethingToPickle:
+    def __init__(self):
+        a = scalar()  # the a is for 'anonymous' (un-named).
+        x, s = scalars("xs")
+        v = vector("v")
+
+        self.s = s
+        self.x = x
+        self.v = v
+
+        self.e = a * x + s
+
+        self.f1 = function(
+            [
+                x,
+                In(a, name="a"),
+                In(
+                    s,
+                    value=Container(s, storage=[np.array(0.0)]),
+                    update=s + a * x,
+                    mutable=True,
+                ),
+            ],
+            s + a * x,
+        )
+
+        self.f2 = function(
+            [
+                x,
+                In(a, name="a"),
+                In(s, value=self.f1._finder[s], update=s + a * x, mutable=True),
+            ],
+            s + a * x,
+        )
+
+
+@pytest.mark.filterwarnings(
+    "error",
+    r"ignore:^Numba will use object mode to run.*perform method\.:UserWarning",
+    r"ignore:Cannot cache compiled function \"numba_funcified_fgraph\".*:numba.NumbaWarning",
+)
 class TestPicklefunction:
     def test_deepcopy(self):
         a = scalar()  # the a is for 'anonymous' (un-named).
@@ -1036,50 +1102,3 @@ class TestPicklefunction:
 
         blah.f2(5, 1)
         assert blah.f1._finder[blah.s].value != blah2.f1._finder[blah2.s].value
-
-
-class SomethingToPickle:
-    def __init__(self):
-        a = scalar()  # the a is for 'anonymous' (un-named).
-        x, s = scalars("xs")
-        v = vector("v")
-
-        self.s = s
-        self.x = x
-        self.v = v
-
-        self.e = a * x + s
-
-        self.f1 = function(
-            [
-                x,
-                In(a, name="a"),
-                In(
-                    s,
-                    value=Container(s, storage=[np.array(0.0)]),
-                    update=s + a * x,
-                    mutable=True,
-                ),
-            ],
-            s + a * x,
-        )
-
-        self.f2 = function(
-            [
-                x,
-                In(a, name="a"),
-                In(s, value=self.f1._finder[s], update=s + a * x, mutable=True),
-            ],
-            s + a * x,
-        )
-
-
-def test_empty_givens_updates():
-    # Regression test for bug fixed in 8625e03.
-
-    # Empty givens / updates dictionaries were not properly detected before,
-    # triggering useless crashes at compile time.
-    x = scalar()
-    y = x * 2
-    function([In(x)], y, givens={})
-    function([In(x)], y, updates={})

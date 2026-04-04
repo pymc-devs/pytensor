@@ -5,8 +5,8 @@ from textwrap import dedent
 import numba
 import numpy as np
 
+from pytensor.compile.aliasing import add_supervisor_to_fgraph, insert_deepcopy
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.function.types import add_supervisor_to_fgraph, insert_deepcopy
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import NUMBA
 from pytensor.compile.ops import DeepCopyOp, TypeCastingOp

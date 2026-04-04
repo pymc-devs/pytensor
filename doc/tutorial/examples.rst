@@ -291,7 +291,7 @@ Copying functions
 =================
 PyTensor functions can be copied, which can be useful for creating similar
 functions but with different shared variables or updates. This is done using
-the :func:`pytensor.compile.function.types.Function.copy` method of :class:`Function` objects.
+the :func:`pytensor.compile.executor.Function.copy` method of :class:`Function` objects.
 The optimized graph of the original function is copied, so compilation only
 needs to be performed once.
 

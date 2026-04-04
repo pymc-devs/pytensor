@@ -5,7 +5,7 @@
 :mod:`function` - defines pytensor.function
 ===========================================
 
-.. module:: pytensor.compile.function
+.. module:: pytensor.compile.maker
    :platform: Unix, Windows
    :synopsis: defines pytensor.function and related classes
 .. moduleauthor:: LISA
@@ -106,7 +106,7 @@ Reference
 
 .. function:: function(inputs, outputs, mode=None, updates=None, givens=None, no_default_updates=False, accept_inplace=False, name=None, rebuild_strict=True, allow_input_downcast=None, profile=None, on_unused_input='raise')
 
-    Return a :class:`callable object <pytensor.compile.function.types.Function>` that will calculate `outputs` from `inputs`.
+    Return a :class:`callable object <pytensor.compile.executor.Function>` that will calculate `outputs` from `inputs`.
 
     :type params: list of either Variable or In instances, but not shared
         variables.
@@ -174,7 +174,7 @@ Reference
         list is not used in the graph. Possible values are 'raise',
         'warn', and 'ignore'.
 
-    :rtype: :class:`Function <pytensor.compile.function.types.Function>`
+    :rtype: :class:`Function <pytensor.compile.executor.Function>`
             instance
 
     :returns: a callable object that will compute the outputs (given the inputs)
@@ -212,7 +212,7 @@ Reference
     occur during normal rewriting, in that ``Var2`` is not expected to be
     equivalent to ``Var1``.
 
-.. autofunction:: pytensor.compile.function.function_dump
+.. autofunction:: pytensor.compile.function_dump
 
-.. autoclass:: pytensor.compile.function.types.Function
+.. autoclass:: pytensor.compile.executor.Function
    :members: free, copy, __call__
