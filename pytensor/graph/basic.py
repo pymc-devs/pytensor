@@ -825,10 +825,14 @@ class FrozenApply(Apply):
         """Convert an input Variable to a hashable, value-based cache key element.
 
         Non-Constants (NominalVariables, FrozenApply outputs) are already
-        globally interned, so identity works.  Constants use their byte
-        representation so that independently-created equal constants
-        (including NaN) produce the same key.  Object-dtype constants
-        (e.g. slices) fall back to ``signature()`` since their byte
+        globally interned, so ``id()`` is a correct identity key.  Using
+        ``id()`` instead of the object itself avoids strong references in
+        cache keys that would prevent GC from collecting chains of
+        FrozenApply nodes in a single pass.
+
+        Constants use their byte representation so that independently-created
+        equal constants (including NaN) produce the same key.  Object-dtype
+        constants (e.g. slices) fall back to ``signature()`` since their byte
         representation stores pointers, not values.
         """
         if isinstance(inp, Constant):
@@ -836,7 +840,7 @@ class FrozenApply(Apply):
             if a.dtype.kind != "O":
                 return (inp.type, a.tobytes(), a.dtype.str, a.shape)
             return inp.signature()
-        return inp
+        return id(inp)
 
     def __new__(
         cls,
