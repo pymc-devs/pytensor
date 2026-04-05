@@ -272,7 +272,9 @@ def rebuild_collect_shared(
     # Fill update_d and update_expr with provided updates
     if updates is None:
         updates = []
-    for store_into, update_val in iter_over_pairs(updates):
+    for store_into, update_val in (
+        updates.items() if isinstance(updates, dict) else updates
+    ):
         if not isinstance(store_into, SharedVariable):
             raise TypeError("update target must be a SharedVariable", store_into)
         if store_into in update_d:
@@ -396,7 +398,7 @@ def construct_function_ins_and_outs(
         isinstance(pair, tuple | list)
         and len(pair) == 2
         and isinstance(pair[0], Variable)
-        for pair in iter_over_pairs(updates)
+        for pair in (updates.items() if isinstance(updates, dict) else updates)
     ):
         raise TypeError(
             "The `updates` parameter must be an ordered mapping or a list of pairs"
@@ -536,26 +538,3 @@ def construct_function_ins_and_outs(
         new_outputs = outputs
 
     return new_inputs, new_outputs
-
-
-def iter_over_pairs(pairs):
-    """
-    Return an iterator over pairs present in the 'pairs' input.
-
-    Parameters
-    ----------
-    pairs : dictionary or iterable
-        The pairs to iterate upon. These may be stored either as (key, value)
-        items in a dictionary, or directly as pairs in any kind of iterable
-        structure.
-
-    Returns
-    -------
-    iterable
-        An iterable yielding pairs.
-
-    """
-    if isinstance(pairs, dict):
-        return pairs.items()
-    else:
-        return pairs
