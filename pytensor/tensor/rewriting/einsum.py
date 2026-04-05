@@ -36,14 +36,14 @@ def optimize_einsum_inner_graph(
     return [new_out]
 
 
-@register_specialize
+@register_specialize("inline_einsum")
 @node_rewriter([Einsum])
 def inline_optimized_einsum(
     fgraph: FunctionGraph, node: Apply
 ) -> list[TensorVariable] | None:
     """Inline einsums that are already optimized.
 
-    This allows the inner garph to be optimized with the rest of the graph, now that we got ordering right.
+    This allows the inner graph to be optimized with the rest of the graph, now that we got ordering right.
     """
     op: Einsum = node.op
 

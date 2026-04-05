@@ -467,7 +467,7 @@ PYTORCH = Mode(
 
 MLX = Mode(
     MLXLinker(),
-    RewriteDatabaseQuery(include=["fast_run"]),
+    RewriteDatabaseQuery(include=["fast_run", "mlx"]),
 )
 
 FAST_COMPILE = Mode(
