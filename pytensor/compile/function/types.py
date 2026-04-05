@@ -655,7 +655,7 @@ class Function:
             # but could change it to 'warn' if this might
             # cause problems.
             on_unused_input="ignore",
-            function_builder=maker.function_builder,
+            function_class=maker.function_class,
             # As this is an rewritten graph, it can contain inplace. DebugMode
             # check that.
             accept_inplace=True,
@@ -1351,7 +1351,7 @@ class FunctionMaker:
         outputs,
         mode=None,
         accept_inplace=False,
-        function_builder=Function,
+        function_class=Function,
         profile=None,
         on_unused_input=None,
         fgraph=None,
@@ -1467,7 +1467,7 @@ class FunctionMaker:
         self.unpack_single = unpack_single
         self.return_none = return_none
         self.accept_inplace = accept_inplace
-        self.function_builder = function_builder
+        self.function_class = function_class
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
         self.name = name
         self.trust_input = trust_input
@@ -1540,7 +1540,7 @@ class FunctionMaker:
             import_time = pytensor.link.c.cmodule.import_time - start_import_time
             self.profile.import_time += import_time
 
-        fn = self.function_builder(
+        fn = self.function_class(
             vm=_fn,
             input_storage=_i,
             output_storage=_o,
