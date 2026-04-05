@@ -2,7 +2,10 @@ import pytest
 
 
 pytest.importorskip("xarray")
-pytestmark = pytest.mark.filterwarnings("error")
+pytestmark = [
+    pytest.mark.filterwarnings("error"),
+    pytest.mark.filterwarnings("ignore::DeprecationWarning"),
+]
 
 import inspect
 import re

@@ -56,9 +56,10 @@ class TypeCastingOp(COp):
         fail = sub["fail"]
 
         itype = node.inputs[0].type.__class__
-        if itype in self.c_code_and_version:
-            code, version = self.c_code_and_version[itype]
-            return code % locals()
+        for cls in itype.__mro__:
+            if cls in self.c_code_and_version:
+                code, version = self.c_code_and_version[cls]
+                return code % locals()
 
         # Else, no C code
         raise NotImplementedError()

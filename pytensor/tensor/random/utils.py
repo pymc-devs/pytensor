@@ -1,14 +1,13 @@
+import warnings
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from functools import wraps
 from itertools import zip_longest
 from types import ModuleType
-from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.random import Generator
 
-from pytensor.compile.sharedvalue import shared
 from pytensor.graph.basic import Variable
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor import NoneConst, get_vector_length
@@ -20,10 +19,6 @@ from pytensor.tensor.type import int_dtypes
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.utils import faster_broadcast_to
 from pytensor.tensor.variable import TensorVariable
-
-
-if TYPE_CHECKING:
-    from pytensor.tensor.random.op import RandomVariable
 
 
 def params_broadcast_shapes(
@@ -219,22 +214,8 @@ def custom_rng_deepcopy(rng):
 class RandomStream:
     """Module component with similar interface to `numpy.random.Generator`.
 
-    Attributes
-    ----------
-    seed: None or int
-        A default seed to initialize the `Generator` instances after build.
-    state_updates: list
-        A list of pairs of the form ``(input_r, output_r)``.  This will be
-        over-ridden by the module instance to contain stream generators.
-    default_instance_seed: int
-        Instance variable should take None or integer value. Used to seed the
-        random number generator that provides seeds for member streams.
-    gen_seedgen: numpy.random.Generator
-        `Generator` instance that `RandomStream.gen` uses to seed new
-        streams.
-    rng_ctor: type
-        Constructor used to create the underlying RNG objects.  The default
-        is `np.random.default_rng`.
+    .. deprecated::
+        Use ``pt.random.shared_rng()`` and the ``rng.method()`` API instead.
 
     """
 
@@ -246,8 +227,14 @@ class RandomStream:
             [np.random.SeedSequence], np.random.Generator
         ] = np.random.default_rng,
     ):
+        warnings.warn(
+            "RandomStream is deprecated. Use pt.random.shared_rng() and "
+            "the rng.method() API instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         if namespace is None:
-            from pytensor.tensor.random import basic  # pylint: disable=import-self
+            from pytensor.tensor.random import basic
 
             self.namespaces = [(basic, set(basic.__all__))]
         else:
@@ -282,20 +269,6 @@ class RandomStream:
         return list(self.state_updates)
 
     def seed(self, seed=None):
-        """
-        Re-initialize each random stream.
-
-        Parameters
-        ----------
-        seed : None or integer
-            Each random stream will be assigned a unique state that depends
-            deterministically on this value.
-
-        Returns
-        -------
-        None
-
-        """
         if seed is None:
             seed = self.default_instance_seed
 
@@ -307,44 +280,21 @@ class RandomStream:
         ):
             old_r.set_value(self.rng_ctor(old_r_seed), borrow=True)
 
-    def gen(self, op: "RandomVariable", *args, **kwargs) -> TensorVariable:
-        r"""Generate a draw from `op` seeded from this `RandomStream`.
+    def gen(self, op, *args, **kwargs):
+        from pytensor.compile.sharedvalue import shared
 
-        Parameters
-        ----------
-        op
-            A `RandomVariable` instance
-        args
-            Positional arguments passed to `op`.
-        kwargs
-            Keyword arguments passed to `op`.
-
-        Returns
-        -------
-        The symbolic random draw performed by `op`.  This function stores
-        the updated `RandomType`\s for use at compile time.
-
-        """
         if "rng" in kwargs:
             raise ValueError(
                 "The `rng` option cannot be used with a variate in a `RandomStream`"
             )
 
-        # Generate a new random state
         (seed,) = self.gen_seedgen.spawn(1)
         rng = shared(self.rng_ctor(seed), borrow=True)
 
-        # Generate the sample
         out = op(*args, **kwargs, rng=rng)
-
-        # This is the value that should be used to replace the old state
-        # (i.e. `rng`) after `out` is sampled/evaluated.
-        # The updates mechanism in `pytensor.function` is supposed to perform
-        # this replace action.
         new_rng = out.owner.outputs[0]
 
         self.state_updates.append((rng, new_rng))
-
         rng.default_update = new_rng
 
         return out

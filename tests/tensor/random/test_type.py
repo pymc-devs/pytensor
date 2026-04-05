@@ -6,7 +6,7 @@ import pytest
 from pytensor import shared
 from pytensor.compile.ops import ViewOp
 from pytensor.tensor.random.type import (
-    RandomGeneratorType,
+    AbstractRandomGeneratorType,
     random_generator_type,
 )
 
@@ -26,7 +26,7 @@ def test_view_op_c_code():
     #     rng_view,
     #     mode=Mode(optimizer=None, linker=CLinker()),
     # )
-    assert ViewOp.c_code_and_version[RandomGeneratorType]
+    assert ViewOp.c_code_and_version[AbstractRandomGeneratorType]
 
 
 class TestRandomGeneratorType:

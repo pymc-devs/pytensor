@@ -285,7 +285,7 @@ class NormalRV(RandomVariable):
 normal = NormalRV()
 
 
-def standard_normal(*, size=None, rng=None, dtype=None):
+def standard_normal(*, size=None, rng=None, dtype=None, return_next_rng=False):
     """Draw samples from a standard normal distribution.
 
     Signature
@@ -302,7 +302,9 @@ def standard_normal(*, size=None, rng=None, dtype=None):
         is returned.
 
     """
-    return normal(0.0, 1.0, size=size, rng=rng, dtype=dtype)
+    return normal(
+        0.0, 1.0, size=size, rng=rng, dtype=dtype, return_next_rng=return_next_rng
+    )
 
 
 class HalfNormalRV(ScipyRandomVariable):
@@ -483,7 +485,7 @@ def gamma(shape, rate=None, scale=None, **kwargs):
     return _gamma(shape, scale, **kwargs)
 
 
-def chisquare(df, size=None, **kwargs):
+def chisquare(df, size=None, rng=None, return_next_rng=False):
     r"""Draw samples from a chisquare distribution.
 
     The probability density function for `chisquare` in terms of the number of degrees of
@@ -513,10 +515,12 @@ def chisquare(df, size=None, **kwargs):
         returned. Default is `None` in which case a single random variable
         is returned.
     """
-    return gamma(shape=df / 2.0, scale=2.0, size=size, **kwargs)
+    return gamma(
+        shape=df / 2.0, scale=2.0, size=size, rng=rng, return_next_rng=return_next_rng
+    )
 
 
-def rayleigh(scale=1.0, *, size=None, **kwargs):
+def rayleigh(scale=1.0, *, size=None, rng=None, return_next_rng=False):
     r"""Draw samples from a Rayleigh distribution.
 
     The probability density function for `rayleigh` with parameter `scale` is given by:
@@ -550,7 +554,13 @@ def rayleigh(scale=1.0, *, size=None, **kwargs):
     scale = as_tensor_variable(scale)
     if size is None:
         size = scale.shape
-    return sqrt(chisquare(df=2, size=size, **kwargs)) * scale
+    next_rng, chisquare_draws = chisquare(
+        df=2, size=size, rng=rng, return_next_rng=True
+    )
+    rayleigh_draws = sqrt(chisquare_draws) * scale
+    if return_next_rng:
+        return next_rng, rayleigh_draws
+    return rayleigh_draws
 
 
 class ParetoRV(ScipyRandomVariable):
@@ -1986,7 +1996,7 @@ class ChoiceWithoutReplacement(RandomVariable):
         return out
 
 
-def choice(a, size=None, replace=True, p=None, rng=None):
+def choice(a, size=None, replace=True, p=None, rng=None, return_next_rng=False):
     r"""Generate a random sample from an array.
 
 
@@ -2012,21 +2022,20 @@ def choice(a, size=None, replace=True, p=None, rng=None):
         p = specify_shape(p, (a_size,))
 
     if replace or size is None:
-        # In this case we build an expression out of simpler RVs
-        # This is equivalent to the numpy implementation:
-        # https://github.com/numpy/numpy/blob/2a9b9134270371b43223fc848b753fceab96b4a5/numpy/random/_generator.pyx#L905-L914
         if p is None:
-            idxs = integers(0, a_size, size=size, rng=rng)
+            next_rng, idxs = integers(
+                0, a_size, size=size, rng=rng, return_next_rng=True
+            )
         else:
-            idxs = categorical(p, size=size, rng=rng)
+            next_rng, idxs = categorical(p, size=size, rng=rng, return_next_rng=True)
 
         if a.type.ndim == 0:
-            # A was an implicit arange, we don't need to do any indexing
-            # TODO: Add rewrite for this optimization if users passed arange
-            return idxs
-
-        # TODO: Can use take(a, idxs, axis) to support numpy axis argument to choice
-        return a[idxs]
+            out = idxs
+        else:
+            out = a[idxs]
+        if return_next_rng:
+            return next_rng, out
+        return out
 
     # Sampling with p is not as trivial
     # It involves some form of rejection sampling or iterative shuffling under the hood.
@@ -2063,7 +2072,7 @@ def choice(a, size=None, replace=True, p=None, rng=None):
     op = ChoiceWithoutReplacement(signature=signature, dtype=dtype)
 
     params = (a, core_shape) if p is None else (a, p, core_shape)
-    return op(*params, size=None, rng=rng)
+    return op(*params, size=None, rng=rng, return_next_rng=return_next_rng)
 
 
 class PermutationRV(RandomVariable):
@@ -2103,7 +2112,7 @@ class PermutationRV(RandomVariable):
             return rng.permutation(x.item() if self.ndims_params[0] == 0 else x)
 
 
-def permutation(x, **kwargs):
+def permutation(x, size=None, rng=None, return_next_rng=False):
     r"""Randomly permute a sequence or a range of values.
 
     Signature
@@ -2121,14 +2130,14 @@ def permutation(x, **kwargs):
     x = as_tensor_variable(x)
     x_ndim = x.type.ndim
     x_dtype = x.type.dtype
-    # PermutationRV has a signature () -> (x) if x is a scalar
-    # and (*x) -> (*x) otherwise, with has many entries as the dimensionsality of x
     if x_ndim == 0:
         signature = "()->(x)"
     else:
         arg_sig = ",".join(f"x{i}" for i in range(x_ndim))
         signature = f"({arg_sig})->({arg_sig})"
-    return PermutationRV(signature=signature, dtype=x_dtype)(x, **kwargs)
+    return PermutationRV(signature=signature, dtype=x_dtype)(
+        x, size=size, rng=rng, return_next_rng=return_next_rng
+    )
 
 
 __all__ = [

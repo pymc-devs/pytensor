@@ -28,21 +28,13 @@ class RandomType(Type[T]):
     r"""A Type wrapper for `numpy.random.Generator."""
 
 
-class RandomGeneratorType(RandomType[Generator]):
-    r"""A Type wrapper for `numpy.random.Generator`.
+class AbstractRandomGeneratorType(RandomType[Generator]):
+    r"""Abstract base for random generator types wrapping `numpy.random.Generator`.
 
-    The reason this exists (and `Generic` doesn't suffice) is that
-    `Generator` objects that would appear to be equal do not compare equal
-    with the ``==`` operator.
-
-    This `Type` also works with a ``dict`` derived from
-    `Generator.__get_state__`, unless the ``strict`` argument to `Type.filter`
-    is explicitly set to ``True``.
-
+    Provides shared ``filter``, ``values_eq``, and ``may_share_memory``
+    implementations.  Concrete subclasses (``RandomGeneratorType``,
+    ``XRandomGeneratorType``) add their own ``__eq__``/``__hash__``.
     """
-
-    def __repr__(self):
-        return "RandomGeneratorType"
 
     @staticmethod
     def may_share_memory(a: Generator, b: Generator):
@@ -107,16 +99,40 @@ class RandomGeneratorType(RandomType[Generator]):
 
         return _eq(sa, sb)
 
+
+class RandomGeneratorType(AbstractRandomGeneratorType):
+    r"""A Type wrapper for `numpy.random.Generator`.
+
+    The reason this exists (and `Generic` doesn't suffice) is that
+    `Generator` objects that would appear to be equal do not compare equal
+    with the ``==`` operator.
+
+    This `Type` also works with a ``dict`` derived from
+    `Generator.__get_state__`, unless the ``strict`` argument to `Type.filter`
+    is explicitly set to ``True``.
+
+    """
+
+    def __repr__(self):
+        return "RandomGeneratorType"
+
     def __eq__(self, other):
         return type(self) is type(other)
 
     def __hash__(self):
         return hash(type(self))
 
+    def convert_variable(self, var):
+        from pytensor.xtensor.random.type import XRandomGeneratorType, xrng_to_rng
 
-# Register `RandomGeneratorType`'s C code for `ViewOp`.
+        if isinstance(var.type, XRandomGeneratorType):
+            return xrng_to_rng(var)
+        return super().convert_variable(var)
+
+
+# Register C code for `ViewOp` on the abstract base so all subclasses inherit it.
 pytensor.compile.ops.register_view_op_c_code(
-    RandomGeneratorType,
+    AbstractRandomGeneratorType,
     """
     Py_XDECREF(%(oname)s);
     %(oname)s = %(iname)s;
@@ -126,3 +142,34 @@ pytensor.compile.ops.register_view_op_c_code(
 )
 
 random_generator_type = RandomGeneratorType()
+
+
+def as_rng(x):
+    """Validate and cast a variable to a RandomGeneratorVariable.
+
+    Accepts RandomGeneratorVariables (passthrough) and
+    XRandomGeneratorVariables (inserts XRNGToRNG cast).
+    Raises on None and numpy Generators with informative messages.
+    """
+    if x is None:
+        raise TypeError(
+            "rng must not be None. Use pt.random.rng() for a symbolic input "
+            "or pt.random.shared_rng() for a shared RNG."
+        )
+
+    if isinstance(x, np.random.Generator):
+        raise TypeError(
+            "as_rng does not accept numpy Generators directly. "
+            "Use pt.random.shared_rng(x) to create a shared RNG variable, "
+            "or pt.random.rng() for a symbolic input."
+        )
+
+    if isinstance(x.type, RandomGeneratorType):
+        return x
+
+    from pytensor.xtensor.random.type import XRandomGeneratorType, xrng_to_rng
+
+    if isinstance(x.type, XRandomGeneratorType):
+        return xrng_to_rng(x)
+
+    raise TypeError(f"Expected a RandomGeneratorVariable, got {type(x)}")
