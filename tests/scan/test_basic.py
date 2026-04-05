@@ -196,15 +196,15 @@ class multiple_outputs_numeric_grad:
 # verify_grad method so that other ops with multiple outputs can be tested.
 # DONE - rp
 def scan_project_sum(*args, **kwargs):
-    rng = RandomStream(123)
+    kwargs["return_list"] = True
     scan_outputs, updates = scan(*args, **kwargs)
-    if not isinstance(scan_outputs, list | tuple):
-        scan_outputs = [scan_outputs]
-    # we should ignore the random-state updates so that
-    # the uniform numbers are the same every evaluation and on every call
-    rng.add_default_updates = False
-    factors = [rng.uniform(0.1, 0.9, size=s.shape) for s in scan_outputs]
-    # Random values (?)
+
+    # We don't recur on the rng so uniform numbers are the same every evaluation and on every call
+    rng = shared(np.random.default_rng(123))
+    factors = []
+    for s in scan_outputs:
+        rng, f = rng.uniform(0.1, 0.9, size=s.shape)
+        factors.append(f)
     return (
         sum((s * f).sum() for s, f in zip(scan_outputs, factors, strict=True)),
         updates,
@@ -1418,14 +1418,12 @@ class TestScan:
             [u, x0, W_in, W],
             [gu, gx0, gW_in, gW],
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
         cost_fn = function(
             [u, x0, W_in, W],
             cost,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
 
@@ -1485,14 +1483,12 @@ class TestScan:
             [u1, u2, x0, y0, W_in1],
             gparams,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
         cost_fn = function(
             [u1, u2, x0, y0, W_in1],
             cost,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
 
@@ -1550,14 +1546,12 @@ class TestScan:
                 [u1, u2, x0, y0, W_in1],
                 cost,
                 updates=updates,
-                no_default_updates=True,
                 allow_input_downcast=True,
             )
             grad_fn = function(
                 [u1, u2, x0, y0, W_in1],
                 gparams,
                 updates=updates,
-                no_default_updates=True,
                 allow_input_downcast=True,
             )
 
@@ -1620,14 +1614,12 @@ class TestScan:
             [u1, u2, x0, y0, W_in1],
             gparams,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
         cost_fn = function(
             [u1, u2, x0, y0, W_in1],
             cost,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
 
@@ -1676,14 +1668,12 @@ class TestScan:
             [u, u2, x0, W_in],
             gparams,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
         cost_fn = function(
             [u, u2, x0, W_in],
             cost,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
 
@@ -1759,14 +1749,12 @@ class TestScan:
             [u, x0, W_in],
             gparams,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
         cost_fn = function(
             [u, x0, W_in],
             cost,
             updates=updates,
-            no_default_updates=True,
             allow_input_downcast=True,
         )
 
@@ -1978,9 +1966,7 @@ class TestScan:
             non_sequences=w,
         )
         loss = (xseq[-1] ** 2).sum()
-        cost_fn = function(
-            [xinit, w], loss, no_default_updates=True, allow_input_downcast=True
-        )
+        cost_fn = function([xinit, w], loss, allow_input_downcast=True)
 
         gw, gx = grad(loss, [w, xinit])
         grad_fn = function([xinit, w], [gx, gw], allow_input_downcast=True)

@@ -74,7 +74,7 @@ def function(
     givens: Iterable[tuple[Variable, Variable]]
     | dict[Variable, Variable]
     | None = None,
-    no_default_updates: bool = False,
+    no_default_updates: bool | None = None,
     accept_inplace: bool = False,
     name: str | None = None,
     rebuild_strict: bool = True,
@@ -162,6 +162,15 @@ def function(
     equivalent to Var1.
 
     """
+    if no_default_updates is not None:
+        warnings.warn(
+            "The no_default_updates parameter is deprecated and will be "
+            "removed in a future version of PyTensor. Please set updates manually.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    else:
+        no_default_updates = False
     if not isinstance(inputs, list | tuple):
         raise TypeError(
             "Input variables of a PyTensor function should be "

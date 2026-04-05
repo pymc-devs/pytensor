@@ -1,8 +1,11 @@
 from pytensor.graph import node_rewriter
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.random.type import as_rng
 from pytensor.tensor.random.utils import compute_batch_shape
 from pytensor.xtensor.basic import xtensor_from_tensor
+from pytensor.xtensor.random.type import XRandomGeneratorType
+from pytensor.xtensor.random.type import as_rng as as_xrng
 from pytensor.xtensor.rewriting.utils import lower_aligned, register_lower_xtensor
 from pytensor.xtensor.vectorization import XRV, XBlockwise, XElemwise
 
@@ -93,8 +96,18 @@ def lower_rv(fgraph, node):
             param_batch_shape = ()
         size = [*extra_dim_lengths, *param_batch_shape]
 
+    # Cast xtensor RNG to tensor RNG for the core op
+    input_is_xrng = isinstance(rng.type, XRandomGeneratorType)
+    tensor_rng = as_rng(rng)
+
     # RVs are their own core Op
-    new_next_rng, tensor_out = core_op.make_node(rng, size, *tensor_params).outputs
+    new_next_rng, tensor_out = core_op.make_node(
+        tensor_rng, size, *tensor_params
+    ).outputs
+
+    # Cast back to xtensor RNG if the input was xtensor
+    if input_is_xrng:
+        new_next_rng = as_xrng(new_next_rng)
 
     # Convert output Tensors to XTensors
     new_out = xtensor_from_tensor(tensor_out, dims=old_out.type.dims)
