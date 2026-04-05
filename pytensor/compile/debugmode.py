@@ -22,7 +22,6 @@ from pytensor.compile.function.types import (
     Function,
     FunctionMaker,
     infer_reuse_pattern,
-    std_fgraph,
 )
 from pytensor.compile.mode import Mode, register_mode
 from pytensor.compile.ops import OutputGuard, _output_guard
@@ -410,34 +409,6 @@ def str_diagnostic(expected, value, rtol, atol):
         atol_ = atol
     print("  rtol, atol:", rtol_, atol_, file=sio)
     return sio.getvalue()
-
-
-def _optcheck_fgraph(input_specs, output_specs, accept_inplace=False):
-    """
-    Create a FunctionGraph for debugging.
-
-    Parameters
-    ----------
-    input_specs: WRITEME
-        fgraph inputs.
-    output_specs: WRITEME
-        fgraph outputs.
-    accept_inplace : bool
-        Are inplace ops permitted in the original graph?
-
-    Returns
-    -------
-    FunctionGraph
-        A new FunctionGraph with a cloned graph, with debugging `Feature`
-        instances already installed.
-
-    """
-    equivalence_tracker = _VariableEquivalenceTracker()
-    fgraph, updates = std_fgraph(
-        input_specs, output_specs, accept_inplace, force_clone=True
-    )
-    fgraph.attach_feature(equivalence_tracker)
-    return fgraph, updates, equivalence_tracker
 
 
 class DataDestroyed:
@@ -2028,9 +1999,11 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
 
         # make the fgraph
         for i in range(mode.stability_patience):
-            fgraph, additional_outputs, equivalence_tracker = _optcheck_fgraph(
-                inputs, outputs, accept_inplace
+            equivalence_tracker = _VariableEquivalenceTracker()
+            fgraph, additional_outputs = self.create_fgraph(
+                inputs, outputs, accept_inplace, force_clone=True
             )
+            fgraph.attach_feature(equivalence_tracker)
             fgraph.equivalence_tracker = equivalence_tracker
 
             optimizer(fgraph)

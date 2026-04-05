@@ -220,78 +220,6 @@ def add_supervisor_to_fgraph(
     )
 
 
-def std_fgraph(
-    input_specs: list[SymbolicInput],
-    output_specs: list[SymbolicOutput],
-    accept_inplace: bool = False,
-    fgraph: FunctionGraph | None = None,
-    features: list[type[Feature]] = [PreserveVariableAttributes],
-    force_clone=False,
-) -> tuple[FunctionGraph, list[SymbolicOutput]]:
-    """Make or set up `FunctionGraph` corresponding to the input specs and the output specs.
-
-    Any `SymbolicInput` in the `input_specs`, if its `update` field is not
-    ``None``, will add an output corresponding to that update to the
-    `FunctionGraph`. The return value is the `FunctionGraph` as well as a list
-    of `SymbolicOutput` instances corresponding to the updates.
-
-    If `accept_inplace` is ``False``, the graph will be checked for in-place
-    operations and an exception will be raised if it has any. If
-    `accept_inplace` is ``True``, a `DestroyHandler` will be added to the
-    `FunctionGraph` if there are any in-place operations.
-
-    If `fgraph` is ``None``, the returned `FunctionGraph` is a clone of the
-    graph between the provided inputs and outputs.
-
-    """
-    # Extract the updates and the mapping between update outputs and the
-    # updated inputs
-    updates = []
-    update_mapping = {}
-    out_idx = len(output_specs)
-    for idx, input_spec in enumerate(input_specs):
-        if input_spec.update is not None:
-            updates.append(input_spec.update)
-            update_mapping[out_idx] = idx
-            out_idx += 1
-
-    found_updates = []
-    if fgraph and fgraph.update_mapping is None:
-        fgraph.update_mapping = update_mapping
-        for update in updates:
-            fgraph.add_output(update, reason="std_fgraph")
-
-        found_updates.extend(map(SymbolicOutput, updates))
-    elif fgraph is None:
-        # If one of the inputs is non-atomic (i.e. has a non-`None` `Variable.owner`),
-        # then we need to create/clone the graph starting at these inputs.
-        # The result will be atomic versions of the given inputs connected to
-        # the same outputs.
-        # Otherwise, when all the inputs are already atomic, there's no need to
-        # clone the graph.
-        input_vars = [spec.variable for spec in input_specs]
-        clone = force_clone or any(var.owner is not None for var in input_vars)
-
-        fgraph = FunctionGraph(
-            input_vars,
-            [spec.variable for spec in output_specs] + updates,
-            update_mapping=update_mapping,
-            clone=clone,
-        )
-
-        found_updates.extend(map(SymbolicOutput, updates))
-
-    add_supervisor_to_fgraph(
-        fgraph=fgraph, input_specs=input_specs, accept_inplace=accept_inplace
-    )
-
-    # If named nodes are replaced, keep the name
-    for feature in features:
-        fgraph.attach_feature(feature())
-
-    return fgraph, found_updates
-
-
 class AliasedMemoryError(Exception):
     """
     Memory is aliased that should not be.
@@ -1201,6 +1129,67 @@ class FunctionMaker:
     """
 
     @staticmethod
+    def create_fgraph(
+        input_specs: list[SymbolicInput],
+        output_specs: list[SymbolicOutput],
+        accept_inplace: bool = False,
+        fgraph: FunctionGraph | None = None,
+        features: list[type[Feature]] = [PreserveVariableAttributes],
+        force_clone=False,
+    ) -> tuple[FunctionGraph, list[SymbolicOutput]]:
+        """Make or set up a `FunctionGraph` from input and output specs.
+
+        Any `SymbolicInput` whose `update` field is not ``None`` will add
+        a corresponding output to the `FunctionGraph`.  Returns the
+        `FunctionGraph` and a list of `SymbolicOutput` for the updates.
+
+        If `accept_inplace` is ``False``, the graph will be checked for
+        in-place operations and an exception raised if any are found.
+
+        If `fgraph` is ``None``, a new `FunctionGraph` is created.
+        The graph is cloned only if `force_clone` is ``True`` or if
+        any input variable has an owner (i.e. is not a root variable).
+
+        """
+        updates = []
+        update_mapping = {}
+        out_idx = len(output_specs)
+        for idx, input_spec in enumerate(input_specs):
+            if input_spec.update is not None:
+                updates.append(input_spec.update)
+                update_mapping[out_idx] = idx
+                out_idx += 1
+
+        found_updates = []
+        if fgraph and fgraph.update_mapping is None:
+            fgraph.update_mapping = update_mapping
+            for update in updates:
+                fgraph.add_output(update, reason="create_fgraph")
+
+            found_updates.extend(map(SymbolicOutput, updates))
+        elif fgraph is None:
+            input_vars = [spec.variable for spec in input_specs]
+            clone = force_clone or any(var.owner is not None for var in input_vars)
+
+            fgraph = FunctionGraph(
+                input_vars,
+                [spec.variable for spec in output_specs] + updates,
+                update_mapping=update_mapping,
+                clone=clone,
+            )
+
+            found_updates.extend(map(SymbolicOutput, updates))
+
+        add_supervisor_to_fgraph(
+            fgraph=fgraph, input_specs=input_specs, accept_inplace=accept_inplace
+        )
+
+        for feature in features:
+            fgraph.attach_feature(feature())
+
+        return fgraph, found_updates
+
+    @staticmethod
     def wrap_in(input):
         if isinstance(input, (SymbolicInput)):
             return input
@@ -1425,7 +1414,7 @@ class FunctionMaker:
         # Check if some input variables are unused
         self.check_unused_inputs(inputs, outputs, on_unused_input)
 
-        fgraph, found_updates = std_fgraph(
+        fgraph, found_updates = self.create_fgraph(
             inputs, outputs, accept_inplace, fgraph=fgraph
         )
 
