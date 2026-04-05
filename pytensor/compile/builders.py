@@ -161,7 +161,7 @@ class OpFromGraph(Op, HasInnerGraph):
     r"""Create an Op from inputs and outputs lists of variables.
 
     The signature is similar to :func:`pytensor.function` and the resulting Op's perform will do
-    the same operation as ``orig_function(inputs, outputs, **kwargs)``.
+    the same operation as ``pytensor.function(inputs, outputs, **kwargs)``.
 
     Does not support ``updates`` or ``givens``.
 

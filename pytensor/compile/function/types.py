@@ -18,7 +18,6 @@ from pytensor.compile.ops import deep_copy_op, view_op
 from pytensor.compile.profiling import ProfileStats
 from pytensor.configdefaults import config
 from pytensor.graph.basic import (
-    Constant,
     Variable,
     clone_get_equiv,
 )
@@ -1364,6 +1363,9 @@ class FunctionMaker:
         no_fgraph_prep=False,
         trust_input=False,
     ):
+        if profile:
+            self._compile_start = time.perf_counter()
+
         # Save the provided mode, not the instantiated mode.
         # The instantiated mode don't pickle and if we unpickle an PyTensor
         # function and it get re-compiled, we want the current rewriter to be
@@ -1558,101 +1560,12 @@ class FunctionMaker:
         )
 
         fn.profile = self.profile
+
+        if self.profile and hasattr(self, "_compile_start"):
+            self.profile.compile_time += time.perf_counter() - self._compile_start
+            self.profile.nb_nodes = len(self.fgraph.apply_nodes)
+
         return fn
-
-
-def orig_function(
-    inputs,
-    outputs,
-    mode=None,
-    accept_inplace=False,
-    name=None,
-    profile=None,
-    on_unused_input=None,
-    fgraph: FunctionGraph | None = None,
-    trust_input: bool = False,
-) -> Function:
-    """
-    Return a Function that will calculate the outputs from the inputs.
-
-    Parameters
-    ----------
-    inputs : list of `SymbolicInput` or `In` instances
-    outputs : a SymbolicOutput or a list of `SymbolicOutput` or `Out` instances
-        The return value of the returned function will match the format of this
-        argument (either the value itself or a list of one or more return
-        values).
-    mode : descriptive string or Mode instance
-        Default of None means to use `config.mode` (see below for descriptive
-        string list).
-    name : str
-        An optional name for this function. If used, the profile mode will print the
-        time spent in this function.
-    accept_inplace : bool
-        True iff the graph can contain inplace operations prior to the
-        rewrite phase (default is False).
-    profile : None or ProfileStats instance
-    on_unused_input : {'raise', 'warn', 'ignore', None}
-        What to do if a variable in the 'inputs' list is not used in the graph.
-    fgraph
-        An existing `FunctionGraph` to use instead of constructing a new one
-        from cloned `outputs`.
-    trust_input : bool, default False
-        If True, no input validation checks are performed when the function is
-        called. This includes checking the number of inputs, their types and
-        that multiple inputs are not aliased to each other. Failure to meet any
-        of these conditions can lead to computational errors or to the
-        interpreter crashing.
-    """
-
-    if profile:
-        t1 = time.perf_counter()
-    mode = pytensor.compile.mode.get_mode(mode)
-
-    inputs = [
-        In(i) if isinstance(i, Variable) and not isinstance(i, Constant) else i
-        for i in inputs
-    ]
-    for i in inputs:
-        if not isinstance(i, SymbolicInput):
-            raise TypeError(
-                f"Expected a Variable or In instance as function input, got {type(i)}: {i}"
-            )
-
-    if outputs is not None:
-        if isinstance(outputs, list | tuple):
-            outputs = list(map(FunctionMaker.wrap_out, outputs))
-        else:
-            outputs = FunctionMaker.wrap_out(outputs)
-
-    shared_variable_containers = [getattr(input, "value", None) for input in inputs]
-
-    if isinstance(mode, list | tuple):
-        raise ValueError("We do not support the passing of multiple modes")
-
-    fn = None
-    try:
-        Maker = getattr(mode, "function_maker", FunctionMaker)
-        m = Maker(
-            inputs,
-            outputs,
-            mode,
-            accept_inplace=accept_inplace,
-            profile=profile,
-            on_unused_input=on_unused_input,
-            name=name,
-            fgraph=fgraph,
-            trust_input=trust_input,
-        )
-        fn = m.create(shared_variable_containers)
-    finally:
-        if profile and fn:
-            t2 = time.perf_counter()
-            profile.compile_time += t2 - t1
-            # TODO: append
-            profile.nb_nodes = len(fn.maker.fgraph.apply_nodes)
-
-    return fn
 
 
 def get_info_on_inputs(named_inputs, n_unnamed_inputs):
