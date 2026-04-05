@@ -1964,7 +1964,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         outputs,
         mode,
         accept_inplace=False,
-        function_builder=Function,
+        function_class=Function,
         profile=None,
         on_unused_input=None,
         fgraph=None,  # If present the optimized graph. we ignore it.
@@ -2113,7 +2113,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         self.unpack_single = unpack_single
         self.return_none = return_none
         self.accept_inplace = accept_inplace
-        self.function_builder = function_builder
+        self.function_class = function_class
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
         self.name = name
         self.trust_input = trust_input
