@@ -11,8 +11,13 @@ from pytensor.tensor import TensorVariable
 from pytensor.tensor.basic import constant
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import broadcast_to
-from pytensor.tensor.random.op import RandomVariable
+from pytensor.tensor.random.op import RandomVariable, RNGConsumerOp
 from pytensor.tensor.random.utils import broadcast_params
+from pytensor.tensor.rewriting.basic import (
+    register_canonicalize,
+    register_stabilize,
+    register_useless,
+)
 from pytensor.tensor.shape import Shape, Shape_i
 from pytensor.tensor.subtensor import (
     AdvancedSubtensor,
@@ -340,3 +345,36 @@ def local_subtensor_rv_lift(fgraph, node):
         indexed_rv: new_rv,
         next_rng: new_next_rng,
     }
+
+
+@register_useless("random_unsafe")
+@register_canonicalize("fast_compile", "random_unsafe")
+@register_stabilize("random_unsafe")
+@node_rewriter(tracks=[RNGConsumerOp])
+def sidestep_unused_rng_consumer(fgraph, node):
+    """Bypass an RNGConsumerOp when only the RNG outputs are used.
+
+    When an RNGConsumerOp's non-RNG outputs have no clients, the op can be
+    removed by connecting each RNG output directly to its corresponding
+    RNG input (as given by `op.update(node)`).
+
+    This can happen when chaining multiple RNGs but only keeping some of
+    the draws, or when only the shape is needed and is eventually lifted
+    away from the RV.
+
+    This alters the RNG state and can affect subsequent draws or the
+    final returned RNG. Hence, this rewrite is tagged as `random_unsafe`.
+    """
+    op = node.op
+    update_map = op.update(node)
+    if not update_map:
+        return None
+
+    rng_outputs = set(update_map.values())
+    non_rng_outputs = [out for out in node.outputs if out not in rng_outputs]
+
+    if any(fgraph.clients[out] for out in non_rng_outputs):
+        return None
+
+    # Bypass: map each RNG output back to its corresponding RNG input
+    return {rng_out: rng_in for rng_in, rng_out in update_map.items()}
