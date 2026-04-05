@@ -115,7 +115,7 @@ class RandomGeneratorType(RandomType[Generator]):
 
 
 # Register `RandomGeneratorType`'s C code for `ViewOp`.
-pytensor.compile.register_view_op_c_code(
+pytensor.compile.ops.register_view_op_c_code(
     RandomGeneratorType,
     """
     Py_XDECREF(%(oname)s);

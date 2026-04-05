@@ -6,7 +6,7 @@ from itertools import chain
 import numpy as np
 
 import pytensor.tensor as pt
-from pytensor.compile.function.pfunc import construct_pfunc_ins_and_outs
+from pytensor.compile.rebuild import construct_function_ins_and_outs
 from pytensor.compile.sharedvalue import SharedVariable, collect_new_shareds
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable
@@ -859,7 +859,7 @@ def scan(
     # Perform a try-except to provide a meaningful error message to the
     # user if inputs of the inner function are missing.
     try:
-        dummy_inputs, dummy_outputs = construct_pfunc_ins_and_outs(
+        dummy_inputs, dummy_outputs = construct_function_ins_and_outs(
             dummy_args, dummy_outs, updates=updates
         )
     except MissingInputError as err:

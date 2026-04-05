@@ -7,7 +7,7 @@ import pytest
 
 import pytensor.d3viz as d3v
 from pytensor import compile
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.printing import _try_pydot_import
 from tests.d3viz import models

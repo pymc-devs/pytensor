@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 
+import pytensor.tensor as pt
 from pytensor import In, function
+from pytensor.compile.io import Out
+from pytensor.compile.mode import Mode
 from pytensor.tensor import exp, vector
 from pytensor.tensor.random.basic import normal
 from pytensor.tensor.random.type import random_generator_type
@@ -46,3 +49,18 @@ def test_numba_function_overhead_benchmark(mode, benchmark):
     assert np.sum(fn(test_x)) == 1000
 
     benchmark(fn, test_x)
+
+
+@pytest.mark.parametrize("trust_input", [True, False], ids=lambda x: f"trust_input={x}")
+@pytest.mark.parametrize("linker", ["cvm", "cvm_nogc"])
+def test_identity_function_overhead_benchmark(trust_input, linker, benchmark):
+    x = pt.vector("x")
+    fn = function(
+        [In(x, borrow=True)],
+        Out(x, borrow=True),
+        trust_input=trust_input,
+        mode=Mode(linker=linker, optimizer=None),
+    )
+    fn.dprint(print_memory_map=True)
+    x_test = np.zeros(10)
+    benchmark(fn, x_test)

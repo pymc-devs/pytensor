@@ -56,12 +56,11 @@ import numpy as np
 import pytensor
 import pytensor.link.utils as link_utils
 from pytensor import tensor as pt
+from pytensor.compile.aliasing import add_supervisor_to_fgraph
 from pytensor.compile.builders import construct_nominal_fgraph, infer_shape
-from pytensor.compile.function.pfunc import pfunc
-from pytensor.compile.function.types import add_supervisor_to_fgraph
+from pytensor.compile.debug.profiling import register_profiler_printer
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import Mode, get_mode
-from pytensor.compile.profiling import register_profiler_printer
 from pytensor.configdefaults import config
 from pytensor.gradient import (
     DisconnectedType,
@@ -1403,20 +1402,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
 
                         preallocated_mitmot_outs.append(output_idx)
 
-                        # Make it so that the input is automatically updated to
-                        # the output value, possibly inplace, at the end of the
-                        # function execution. Also, since an update is defined,
-                        # a default value must also be (this is verified by
-                        # DebugMode).
-                        # TODO FIXME: Why do we need a "default value" here?
-                        # This sounds like a serious design issue.
-                        default_shape = tuple(
-                            s if s is not None else 0 for s in inp.type.shape
-                        )
-                        default_val = np.empty(default_shape, dtype=inp.type.dtype)
                         wrapped_inp = In(
                             variable=inp,
-                            value=default_val,
                             update=fgraph.outputs[output_idx],
                         )
                         update_mapping[output_idx] = input_idx
@@ -1524,7 +1511,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 raise NotImplementedError(
                     f"Python/Cython implementation of Scan with preallocated MIT-MOT outputs requires a VMLinker, got {mode_instance.linker}"
                 )
-        self._fn = pfunc(
+        self._fn = mode_instance.function_maker(
             wrapped_inputs,
             wrapped_outputs,
             mode=mode_instance,
@@ -1532,7 +1519,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             profile=profile,
             on_unused_input="ignore",
             fgraph=self.fgraph,
-        )
+        ).create()
 
         return self._fn
 

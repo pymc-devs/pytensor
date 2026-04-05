@@ -156,7 +156,7 @@ lines-after-imports = 2
 "pytensor/misc/check_duplicate_key.py" = ["T201"]
 "pytensor/misc/check_blas.py" = ["T201"]
 "pytensor/bin/pytensor_cache.py" = ["T201"]
-"tests/compile/test_monitormode.py" = ["T201"]
+"tests/compile/debug/test_monitormode.py" = ["T201"]
 "scripts/run_mypy.py" = ["T201"]
 # Test modules of optional backends that use `pytest.importorskip`, skip "E402"
 "tests/link/jax/**/test_*.py" = ["E402"]

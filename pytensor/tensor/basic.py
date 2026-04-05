@@ -273,7 +273,7 @@ def _get_underlying_scalar_constant_value(
     """Return the constant scalar(0-D) value underlying variable `v`.
 
     If `v` is the output of dimshuffles, fills, allocs, etc,
-    cast, OutputGuard, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
+    cast, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
     and some pattern with Subtensor, this function digs through them.
 
     If `v` is not some view of constant scalar data, then raise a
@@ -293,7 +293,7 @@ def _get_underlying_scalar_constant_value(
         The maximum number of recursion.
 
     """
-    from pytensor.compile.ops import DeepCopyOp, OutputGuard, TypeCastingOp
+    from pytensor.compile.ops import DeepCopyOp, TypeCastingOp
     from pytensor.sparse import CSM
     from pytensor.tensor.subtensor import Subtensor
 
@@ -335,9 +335,7 @@ def _get_underlying_scalar_constant_value(
         if not only_process_constants and getattr(v, "owner", None) and max_recur > 0:
             op = v.owner.op
             max_recur -= 1
-            if isinstance(
-                op, Alloc | DimShuffle | TypeCastingOp | DeepCopyOp | OutputGuard
-            ):
+            if isinstance(op, Alloc | DimShuffle | TypeCastingOp | DeepCopyOp):
                 v = v.owner.inputs[0]
                 continue
             elif isinstance(op, Shape_i):
@@ -538,7 +536,7 @@ def get_underlying_scalar_constant_value(
     """Return the unique constant scalar(0-D) value underlying variable `v`.
 
     If `v` is the output of dimshuffles, fills, allocs, etc,
-    cast, OutputGuard, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
+    cast, DeepCopyOp, ScalarFromTensor, ScalarOp, Elemwise
     and some pattern with Subtensor, this function digs through them.
 
     If `v` is not some view of constant scalar data, then raise a
@@ -2058,39 +2056,6 @@ def register_transfer(fn):
 tensor_copy = Elemwise(ps.identity)
 pprint.assign(tensor_copy, printing.IgnorePrinter())
 identity = tensor_copy
-
-
-class Default(Op):
-    """
-    Takes an input x and a default value.
-
-    If the input is not None, a reference to it is returned.
-    If the input is None, a copy of the default value is returned instead.
-    The input and the default must have exactly the same type.
-
-    """
-
-    view_map = {0: [0]}
-    __props__ = ()
-
-    def make_node(self, x, default):
-        x, default = as_tensor_variable(x), as_tensor_variable(default)
-        if not x.type.in_same_class(default.type):
-            raise TypeError("Both arguments must have compatible types")
-        return Apply(self, [x, default], [default.type()])
-
-    def perform(self, node, inp, out_):
-        x, default = inp
-        (out,) = out_
-        if x is None:
-            # why copy?  PyTensor can't yet understand out[0] being a view of
-            # either x or y, so we can be a view of x, but only a copy of y.
-            out[0] = default.copy()
-        else:
-            out[0] = x
-
-
-default = Default()
 
 
 def extract_constant(x, elemwise=True, only_process_constants=False):
@@ -4605,7 +4570,6 @@ __all__ = [
     "choose",
     "concatenate",
     "constant",
-    "default",
     "diag",
     "diagonal",
     "empty",

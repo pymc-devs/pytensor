@@ -18,14 +18,11 @@ from warnings import warn
 import numpy as np
 
 import pytensor
-from pytensor.compile.function.types import (
-    Function,
-    FunctionMaker,
-    infer_reuse_pattern,
-    std_fgraph,
-)
+from pytensor.compile.aliasing import infer_reuse_pattern
+from pytensor.compile.executor import Function
+from pytensor.compile.maker import FunctionMaker
 from pytensor.compile.mode import Mode, register_mode
-from pytensor.compile.ops import OutputGuard, _output_guard
+from pytensor.compile.ops import ViewOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.destroyhandler import DestroyHandler
@@ -45,6 +42,20 @@ from pytensor.utils import NoDuplicateOptWarningFilter, difference, get_unbound_
 __docformat__ = "restructuredtext en"
 _logger: Logger = logging.getLogger("pytensor.compile.debugmode")
 _logger.addFilter(NoDuplicateOptWarningFilter())
+
+
+class OutputGuard(ViewOp):
+    """A ViewOp that pretends to be destructive.
+
+    Used only by DebugMode to prevent the destroy handler from allowing
+    real in-place operations on function outputs.
+    """
+
+    destroy_map = {0: [0]}
+    check_input = False
+
+
+output_guard = OutputGuard()
 
 
 class DebugModeError(Exception):
@@ -410,34 +421,6 @@ def str_diagnostic(expected, value, rtol, atol):
         atol_ = atol
     print("  rtol, atol:", rtol_, atol_, file=sio)
     return sio.getvalue()
-
-
-def _optcheck_fgraph(input_specs, output_specs, accept_inplace=False):
-    """
-    Create a FunctionGraph for debugging.
-
-    Parameters
-    ----------
-    input_specs: WRITEME
-        fgraph inputs.
-    output_specs: WRITEME
-        fgraph outputs.
-    accept_inplace : bool
-        Are inplace ops permitted in the original graph?
-
-    Returns
-    -------
-    FunctionGraph
-        A new FunctionGraph with a cloned graph, with debugging `Feature`
-        instances already installed.
-
-    """
-    equivalence_tracker = _VariableEquivalenceTracker()
-    fgraph, updates = std_fgraph(
-        input_specs, output_specs, accept_inplace, force_clone=True
-    )
-    fgraph.attach_feature(equivalence_tracker)
-    return fgraph, updates, equivalence_tracker
 
 
 class DataDestroyed:
@@ -1967,10 +1950,6 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
     on_unused_input
         What to do if a variable in the 'inputs' list is not used in the
         graph. Possible values are 'raise', 'warn' and 'ignore'.
-    output_keys
-        If the outputs argument for pytensor.function was a list, then
-        output_keys is None. If the outputs argument was a dict, then
-        output_keys is a sorted list of the keys from that dict.
     trust_input : bool, default False
         If True, no input validation checks are performed when the function is
         called. This includes checking the number of inputs, their types and
@@ -1997,11 +1976,10 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         outputs,
         mode,
         accept_inplace=False,
-        function_builder=Function,
+        function_class=Function,
         profile=None,
         on_unused_input=None,
         fgraph=None,  # If present the optimized graph. we ignore it.
-        output_keys=None,
         name=None,
         no_fgraph_prep=False,
         trust_input=False,
@@ -2031,18 +2009,18 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         # Check if some input variables are unused
         self.check_unused_inputs(inputs, outputs, on_unused_input)
 
-        indices = [[input, None, [input]] for input in inputs]
-
         # make the fgraph
         for i in range(mode.stability_patience):
-            fgraph, additional_outputs, equivalence_tracker = _optcheck_fgraph(
-                inputs, outputs, accept_inplace
+            equivalence_tracker = _VariableEquivalenceTracker()
+            fgraph, additional_outputs = self.create_fgraph(
+                inputs, outputs, accept_inplace, force_clone=True
             )
+            fgraph.attach_feature(equivalence_tracker)
             fgraph.equivalence_tracker = equivalence_tracker
 
             optimizer(fgraph)
 
-            pytensor.compile.function.types.insert_deepcopy(
+            pytensor.compile.aliasing.insert_deepcopy(
                 fgraph, inputs, list(chain(outputs, additional_outputs))
             )
 
@@ -2109,7 +2087,7 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
                 fgraph.attach_feature(DestroyHandler())
             for o in fgraph.outputs:
                 try:
-                    fgraph.replace_validate(o, _output_guard(o), reason="output_guard")
+                    fgraph.replace_validate(o, output_guard(o), reason="output_guard")
                     raise Exception(
                         f"Output variable {o} required output_guard, "
                         "how was this output left unprotected against "
@@ -2140,7 +2118,6 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         else:
             self.linker = linker.accept(fgraph)
         fgraph.name = name
-        self.indices = indices
         self.inputs = inputs
         # TODO: Get rid of all this `expanded_inputs` nonsense
         self.expanded_inputs = inputs
@@ -2148,9 +2125,8 @@ class _Maker(FunctionMaker):  # inheritance buys a few helper functions
         self.unpack_single = unpack_single
         self.return_none = return_none
         self.accept_inplace = accept_inplace
-        self.function_builder = function_builder
+        self.function_class = function_class
         self.on_unused_input = on_unused_input  # Used for the pickling/copy
-        self.output_keys = output_keys
         self.name = name
         self.trust_input = trust_input
 
@@ -2249,15 +2225,9 @@ class DebugMode(Mode):
 
     """
 
-    # This function will be used to create a FunctionMaker in
-    # function.types.function
-    def function_maker(self, i, o, m, *args, **kwargs):
-        """
-        Return an instance of `_Maker` which handles much of the debugging work.
-
-        """
-        assert m is self
-        return _Maker(i, o, self, *args, **kwargs)
+    @property
+    def function_maker(self):
+        return _Maker
 
     def __init__(
         self,

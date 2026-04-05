@@ -181,7 +181,7 @@ shows how to print all inputs and outputs:
 
     x = pytensor.tensor.dscalar('x')
     f = pytensor.function([x], [5 * x],
-                        mode=pytensor.compile.MonitorMode(
+                        mode=pytensor.compile.debug.monitormode.MonitorMode(
                             pre_func=inspect_inputs,
                             post_func=inspect_outputs))
     f(3)
@@ -227,7 +227,7 @@ computations, which can be achieved as follows:
     x = pytensor.tensor.dscalar('x')
     f = pytensor.function(
         [x], [pytensor.tensor.log(x) * x],
-        mode=pytensor.compile.MonitorMode(
+        mode=pytensor.compile.debug.monitormode.MonitorMode(
         post_func=detect_nan)
     )
     f(0)  # log(0) * 0 = -inf * 0 = NaN
@@ -252,7 +252,7 @@ function. To disable those rewrites, define the `MonitorMode` like this:
 
 .. testcode:: compiled
 
-   mode = pytensor.compile.MonitorMode(post_func=detect_nan).excluding(
+   mode = pytensor.compile.debug.monitormode.MonitorMode(post_func=detect_nan).excluding(
        'local_elemwise_fusion', 'inplace')
    f = pytensor.function([x], [pytensor.tensor.log(x) * x],
                        mode=mode)

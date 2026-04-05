@@ -99,33 +99,6 @@ class ViewOp(TypeCastingOp):
 view_op = ViewOp()
 
 
-class OutputGuard(ViewOp):
-    """
-    This op is used only internally by PyTensor.
-
-    Only the AddDestroyHandler optimizer tries to insert them in the graph.
-
-    This Op is declared as destructive while it is not destroying anything.
-    It returns a view. This is used to prevent destruction of the output
-    variables of an PyTensor function.
-
-    There is a mechanism in PyTensor that should prevent this, but the use
-    of OutputGuard adds a safeguard: it may be possible for some optimization
-    run before the add_destroy_handler phase to bypass this mechanism, by
-    making in-place optimizations.
-
-    TODO: find a current full explanation.
-
-    """
-
-    destroy_map = {0: [0]}
-
-    check_input = False
-
-
-_output_guard = OutputGuard()
-
-
 def register_deep_copy_op_c_code(typ, code, version=()):
     """
     Tell DeepCopyOp how to generate C code for an PyTensor Type.

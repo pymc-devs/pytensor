@@ -7,7 +7,7 @@ import logging
 import warnings
 from typing import Any, Literal
 
-from pytensor.compile.function.types import Supervisor
+from pytensor.compile.aliasing import Supervisor
 from pytensor.configdefaults import config
 from pytensor.graph.destroyhandler import DestroyHandler
 from pytensor.graph.rewriting.basic import (
@@ -141,7 +141,7 @@ class AddDestroyHandler(GraphRewriter):
                 (
                     f"A Supervisor feature is missing from {fgraph}.\n"
                     "This is needed for inplace rewrites. Either exclude inplace rewrites or add a Supervisor feature.\n"
-                    "A Supervisor feature can be added via `pytensor.compile.function.types.add_supervisor_to_fgraph`."
+                    "A Supervisor feature can be added via `pytensor.compile.aliasing.add_supervisor_to_fgraph`."
                 ),
                 stacklevel=3,
             )
@@ -369,6 +369,12 @@ class Mode:
         )
 
     @property
+    def function_maker(self):
+        from pytensor.compile.maker import FunctionMaker
+
+        return FunctionMaker
+
+    @property
     def optimizer(self):
         if isinstance(self._optimizer, RewriteDatabaseQuery):
             return self.optdb.query(self._optimizer)
@@ -528,12 +534,12 @@ def get_mode(orig_string):
     if upper_string == "MODE":
         ret = Mode(linker=config.linker, optimizer=config.optimizer)
     elif upper_string in ("DEBUGMODE", "DEBUG_MODE"):
-        from pytensor.compile.debugmode import DebugMode
+        from pytensor.compile.debug.debugmode import DebugMode
 
         # DebugMode use its own linker.
         ret = DebugMode(optimizer=config.optimizer)
     elif upper_string == "NANGUARDMODE":
-        from pytensor.compile.nanguardmode import NanGuardMode
+        from pytensor.compile.debug.nanguardmode import NanGuardMode
 
         # NanGuardMode use its own linker.
         ret = NanGuardMode(True, True, True, optimizer=config.optimizer)

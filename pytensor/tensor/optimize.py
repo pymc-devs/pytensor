@@ -5,7 +5,7 @@ from copy import copy
 import numpy as np
 
 import pytensor.scalar as ps
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.gradient import DisconnectedType, grad, jacobian
 from pytensor.graph.basic import Apply, Constant
 from pytensor.graph.fg import FunctionGraph

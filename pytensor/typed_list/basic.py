@@ -1,7 +1,7 @@
 import numpy as np
 
 import pytensor.tensor as pt
-from pytensor.compile.debugmode import _lessbroken_deepcopy
+from pytensor.compile.debug.debugmode import _lessbroken_deepcopy
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
 from pytensor.link.c.op import COp

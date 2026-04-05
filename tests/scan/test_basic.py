@@ -19,11 +19,11 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.compile.debugmode import DebugMode
-from pytensor.compile.function import function
-from pytensor.compile.function.pfunc import rebuild_collect_shared
+from pytensor.compile.debug.debugmode import DebugMode
+from pytensor.compile.debug.monitormode import MonitorMode
+from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
-from pytensor.compile.monitormode import MonitorMode
+from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
 from pytensor.gradient import NullTypeGradError, Rop, disconnected_grad, grad

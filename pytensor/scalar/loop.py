@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from itertools import chain
 
-from pytensor.compile import rebuild_collect_shared
+from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.graph.basic import Constant, Variable, clone
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import ScalarInnerGraphOp, as_scalar

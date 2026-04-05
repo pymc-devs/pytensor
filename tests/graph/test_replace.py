@@ -21,8 +21,7 @@ from tests.unittest_tools import assert_equal_computations
 class TestCloneReplace:
     def test_cloning_no_replace_strict_copy_inputs(self):
         # This has nothing to do with scan, but it refers to the clone
-        # function that scan uses internally and that pfunc uses now and
-        # that users might want to use
+        # This tests the clone function that scan uses internally
         x = vector("x")
         y = vector("y")
         z = shared(0.25)
@@ -37,8 +36,7 @@ class TestCloneReplace:
 
     def test_cloning_no_replace_strict_not_copy_inputs(self):
         # This has nothing to do with scan, but it refers to the clone
-        # function that scan uses internally and that pfunc uses now and
-        # that users might want to use
+        # This tests the clone function that scan uses internally
         x = vector("x")
         y = vector("y")
         z = shared(0.25)
@@ -55,8 +53,7 @@ class TestCloneReplace:
 
     def test_cloning_replace_strict_copy_inputs(self):
         # This has nothing to do with scan, but it refers to the clone
-        # function that scan uses internally and that pfunc uses now and
-        # that users might want to use
+        # This tests the clone function that scan uses internally
         x = vector("x")
         y = vector("y")
         y2 = vector("y2")
@@ -73,8 +70,7 @@ class TestCloneReplace:
 
     def test_cloning_replace_not_strict_copy_inputs(self):
         # This has nothing to do with scan, but it refers to the clone
-        # function that scan uses internally and that pfunc uses now and
-        # that users might want to use
+        # This tests the clone function that scan uses internally
         x = vector("x")
         y = fvector("y")
         y2 = dvector("y2")
@@ -91,8 +87,7 @@ class TestCloneReplace:
 
     def test_cloning_replace_strict_not_copy_inputs(self):
         # This has nothing to do with scan, but it refers to the clone
-        # function that scan uses internally and that pfunc uses now and
-        # that users might want to use
+        # This tests the clone function that scan uses internally
         x = vector("x")
         y = vector("y")
         y2 = vector("y2")
@@ -109,8 +104,7 @@ class TestCloneReplace:
 
     def test_cloning_replace_not_strict_not_copy_inputs(self):
         # This has nothing to do with scan, but it refers to the clone
-        # function that scan uses internally and that pfunc uses now and
-        # that users might want to use
+        # This tests the clone function that scan uses internally
         x = vector("x")
         y = fvector("y")
         y2 = dvector("y2")

@@ -7,11 +7,8 @@ from collections.abc import Sequence
 from copy import copy
 from typing import overload
 
-from pytensor.compile.function.types import Function, UnusedInputError, orig_function
 from pytensor.compile.io import In, Out
-from pytensor.compile.profiling import ProfileStats
 from pytensor.compile.sharedvalue import SharedVariable, shared
-from pytensor.configdefaults import config
 from pytensor.graph.basic import Constant, Variable, clone_node_and_cache
 from pytensor.graph.fg import FunctionGraph
 
@@ -127,7 +124,7 @@ def rebuild_collect_shared(
 
     It returns a set of dictionaries and lists which collect (partial?)
     different information about shared variables. This info is required by
-    `pfunc`.
+    `pytensor.function`.
 
     Parameters
     ----------
@@ -272,32 +269,31 @@ def rebuild_collect_shared(
             )
 
     # Fill update_d and update_expr with provided updates
-    if updates is None:
-        updates = []
-    for store_into, update_val in iter_over_pairs(updates):
-        if not isinstance(store_into, SharedVariable):
-            raise TypeError("update target must be a SharedVariable", store_into)
-        if store_into in update_d:
-            raise ValueError(
-                "this shared variable already has an update expression",
-                (store_into, update_d[store_into]),
-            )
+    if updates:
+        update_pairs = updates.items() if isinstance(updates, dict) else updates
+        for store_into, update_val in update_pairs:
+            if not isinstance(store_into, SharedVariable):
+                raise TypeError("update target must be a SharedVariable", store_into)
+            if store_into in update_d:
+                raise ValueError(
+                    "this shared variable already has an update expression",
+                    (store_into, update_d[store_into]),
+                )
 
-        try:
-            update_val = store_into.type.filter_variable(update_val, allow_convert=True)
-        except TypeError:
-            err_msg = (
-                "An update must have the same type as the"
-                f" original shared variable (shared_var={store_into},"
-                f" shared_var.type={store_into.type},"
-                f" update_val={update_val}, update_val.type={getattr(update_val, 'type', None)})."
-            )
+            try:
+                update_val = store_into.type.filter_variable(
+                    update_val, allow_convert=True
+                )
+            except TypeError:
+                raise TypeError(
+                    "An update must have the same type as the original shared variable "
+                    f"(shared_var={store_into}, shared_var.type={store_into.type}, "
+                    f"update_val={update_val}, update_val.type={getattr(update_val, 'type', None)})."
+                )
+            assert store_into.type.is_super(update_val.type)
 
-            raise TypeError(err_msg)
-        assert store_into.type.is_super(update_val.type)
-
-        update_d[store_into] = update_val
-        update_expr.append((store_into, update_val))
+            update_d[store_into] = update_val
+            update_expr.append((store_into, update_val))
 
     # Elements of "outputs" are here cloned to "cloned_outputs"
     if isinstance(outputs, list):
@@ -355,127 +351,7 @@ def rebuild_collect_shared(
     )
 
 
-def pfunc(
-    params,
-    outputs=None,
-    mode=None,
-    updates=None,
-    givens=None,
-    no_default_updates=False,
-    accept_inplace=False,
-    name=None,
-    rebuild_strict=True,
-    allow_input_downcast=None,
-    profile=None,
-    on_unused_input=None,
-    output_keys=None,
-    fgraph: FunctionGraph | None = None,
-    trust_input: bool = False,
-) -> Function:
-    """
-    Function-constructor for graphs with shared variables.
-
-    Parameters
-    ----------
-    params : list of either Variable or In instances
-        Function parameters, these are not allowed to be shared variables.
-    outputs : list of Variables or Out instances
-        Expressions to compute.
-    mode : string or `pytensor.compile.mode.Mode` instance
-        Compilation mode.
-    updates : iterable over pairs (shared_variable, new_expression). List, tuple or dict.
-        Update the values for SharedVariable inputs according to these
-        expressions
-    givens : iterable over pairs (Var1, Var2) of Variables. List, tuple or dict.
-        The Var1 and Var2 in each pair must have the same Type. Specific
-        substitutions to make in the computation graph (Var2 replaces Var1).
-    no_default_updates : either bool or list of Variables
-        If True, do not perform any automatic update on Variables.
-        If False (default), perform them all. Else, perform automatic updates
-        on all Variables that are neither in "updates" nor in
-        "no_default_updates".
-    accept_inplace : bool
-        True iff the graph can contain inplace operations prior to the
-        optimization phase (default is False). *Note* this parameter is unsupported,
-        and its use is not recommended.
-    name : None or string
-        Attaches a name to the profiling result of this function.
-    allow_input_downcast : bool
-        True means that the values passed as inputs when calling the function
-        can be silently downcasted to fit the dtype of the corresponding
-        Variable, which may lose precision. False means that it will only be cast to a more
-        general, or precise, type. None (default) is almost like
-        False, but allows downcasting of Python float scalars to
-        floatX.
-    profile : None, True, str, or ProfileStats instance
-        Accumulate profiling information into a given ProfileStats instance.
-        None is the default, and means to use the value of config.profile.
-        If argument is `True` then a new ProfileStats instance will be used.
-        If argument is a string, a new ProfileStats instance will be created
-        with that string as its `message` attribute. This profiling object will
-        be available via self.profile.
-    on_unused_input : {'raise', 'warn','ignore', None}
-        What to do if a variable in the 'inputs' list is not used in the graph.
-    fgraph
-        An existing `FunctionGraph` from which to construct the returned
-        `Function`.  When this is non-``None``, nothing is cloned.
-    trust_input : bool, default False
-        If True, no input validation checks are performed when the function is
-        called. This includes checking the number of inputs, their types and
-        that multiple inputs are not aliased to each other. Failure to meet any
-        of these conditions can lead to computational errors or to the
-        interpreter crashing.
-
-    Returns
-    -------
-    A callable object that will compute the outputs (given the inputs) and
-    update the implicit function arguments according to the `updates`.
-
-    Notes
-    -----
-    Regarding givens: Be careful to make sure that these substitutions are
-    independent--behaviour when ``Var1`` of one pair appears in the graph leading
-    to ``Var2`` in another expression is undefined. Replacements specified with
-    givens are different from optimizations in that ``Var2`` is not expected to
-    be equivalent to ``Var1``.
-
-    """
-
-    if profile is None:
-        profile = config.profile or config.print_global_stats
-        if profile is False:
-            profile = None
-    if profile is True:
-        profile = ProfileStats(message=name)
-    elif isinstance(profile, str):
-        profile = ProfileStats(message=profile)
-
-    inputs, cloned_outputs = construct_pfunc_ins_and_outs(
-        params,
-        outputs,
-        updates,
-        givens,
-        no_default_updates,
-        rebuild_strict,
-        allow_input_downcast,
-        fgraph=fgraph,
-    )
-
-    return orig_function(
-        inputs,
-        cloned_outputs,
-        mode,
-        accept_inplace=accept_inplace,
-        name=name,
-        profile=profile,
-        on_unused_input=on_unused_input,
-        output_keys=output_keys,
-        fgraph=fgraph,
-        trust_input=trust_input,
-    )
-
-
-def construct_pfunc_ins_and_outs(
+def construct_function_ins_and_outs(
     params,
     outputs=None,
     updates=None,
@@ -485,21 +361,14 @@ def construct_pfunc_ins_and_outs(
     allow_input_downcast=None,
     fgraph: FunctionGraph | None = None,
 ):
-    """Construct inputs and outputs for `pfunc`.
+    """Construct inputs and outputs for `pytensor.function`.
 
-    This function works by cloning the graph (except for the
-    inputs), and then shipping it off to pytensor.compile.function.function
-    (There it will be cloned again, unnecessarily, because it doesn't know
-    that we already cloned it.)
-
-    First, it clones the replacements named in the `givens` argument,
-    and points each ``Var1`` to the clone of ``Var2``.  Then it sets the
-    inputs in the clone dictionary.  After these steps, we are
-    assuming that the clone dictionary contains all the inputs to
-    the computation graph.
-
-    Then it clones the outputs and the update expressions.  This
-    rebuilds a computation graph from the inputs and the `givens`.
+    This function clones the graph (via ``rebuild_collect_shared``),
+    applies ``givens`` substitutions, discovers shared variables, and
+    wires up ``updates``.  The cloned outputs are then passed to
+    ``FunctionMaker``, where ``FunctionMaker.create_fgraph`` wraps them in a
+    ``FunctionGraph`` without cloning again (since the inputs are
+    already atomic after cloning here).
 
     When `fgraph` is non-``None``, nothing is cloned and the given `fgraph` is
     simply prepared for direct use.
@@ -517,32 +386,32 @@ def construct_pfunc_ins_and_outs(
     if not isinstance(no_default_updates, bool | list):
         raise TypeError("The `no_default_update` argument must be a boolean or list")
 
-    if len(updates) > 0 and not all(
-        isinstance(pair, tuple | list)
-        and len(pair) == 2
-        and isinstance(pair[0], Variable)
-        for pair in iter_over_pairs(updates)
-    ):
-        raise TypeError(
-            "The `updates` parameter must be an ordered mapping or a list of pairs"
-        )
+    if updates:
+        update_pairs = updates.items() if isinstance(updates, dict) else updates
+        if not all(
+            isinstance(pair, tuple | list)
+            and len(pair) == 2
+            and isinstance(pair[0], Variable)
+            for pair in update_pairs
+        ):
+            raise TypeError(
+                "The `updates` parameter must be an ordered mapping or a list of pairs"
+            )
 
     # Transform params into pytensor.compile.In objects.
-    inputs = [
-        _pfunc_param_to_in(p, allow_downcast=allow_input_downcast) for p in params
-    ]
 
-    # Check if some variable is present more than once in inputs
+    def pfunc_param_to_in(param, allow_downcast=None):
+        if isinstance(param, Constant):
+            raise TypeError("Constants not allowed in param list", param)
+        if isinstance(param, Variable):  # N.B. includes SharedVariable
+            return In(variable=param, strict=False, allow_downcast=allow_downcast)
+        elif isinstance(param, In):
+            return param
+        raise TypeError(f"Unknown parameter type: {type(param)}")
+
+    inputs = [pfunc_param_to_in(p, allow_downcast=allow_input_downcast) for p in params]
+
     in_variables = [input.variable for input in inputs]
-    for i, v in enumerate(in_variables):
-        if v in in_variables[(i + 1) :]:
-            dup_v_i = in_variables.index(v, (i + 1))
-            raise UnusedInputError(
-                f"Variable {v} is used twice in inputs to pytensor.function, "
-                f"at indices {i} and {dup_v_i}.  This would result in values "
-                "provided for it being ignored. Please do not duplicate "
-                "variables in the inputs list."
-            )
 
     if givens:
         # Check that we are not using `givens` to replace input variables, because
@@ -567,8 +436,7 @@ def construct_pfunc_ins_and_outs(
                 )
 
     if not fgraph:
-        # Extend the outputs with the updates on input variables so they are
-        # also cloned
+        # Extend the outputs with the updates on input variables so they are also cloned
         additional_outputs = [i.update for i in inputs if i.update is not None]
         if outputs is None:
             out_list = []
@@ -653,36 +521,3 @@ def construct_pfunc_ins_and_outs(
         new_outputs = outputs
 
     return new_inputs, new_outputs
-
-
-def _pfunc_param_to_in(param, strict=False, allow_downcast=None):
-    if isinstance(param, Constant):
-        raise TypeError("Constants not allowed in param list", param)
-    if isinstance(param, Variable):  # N.B. includes SharedVariable
-        return In(variable=param, strict=strict, allow_downcast=allow_downcast)
-    elif isinstance(param, In):
-        return param
-    raise TypeError(f"Unknown parameter type: {type(param)}")
-
-
-def iter_over_pairs(pairs):
-    """
-    Return an iterator over pairs present in the 'pairs' input.
-
-    Parameters
-    ----------
-    pairs : dictionary or iterable
-        The pairs to iterate upon. These may be stored either as (key, value)
-        items in a dictionary, or directly as pairs in any kind of iterable
-        structure.
-
-    Returns
-    -------
-    iterable
-        An iterable yielding pairs.
-
-    """
-    if isinstance(pairs, dict):
-        return pairs.items()
-    else:
-        return pairs

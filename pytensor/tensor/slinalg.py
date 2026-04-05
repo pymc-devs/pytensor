@@ -12,7 +12,7 @@ import pytensor
 from pytensor import ifelse
 from pytensor import tensor as pt
 from pytensor.gradient import DisconnectedType, disconnected_type
-from pytensor.graph.basic import Apply
+from pytensor.graph.basic import Apply, Variable
 from pytensor.graph.op import Op
 from pytensor.raise_op import Assert, CheckAndRaise
 from pytensor.tensor import TensorLike
@@ -21,6 +21,7 @@ from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import matrix, tensor, vector
+from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import unzip
 
@@ -1141,16 +1142,14 @@ class Eigvalsh(Op):
         assert lower in [True, False]
         self.lower = lower
 
-    def make_node(self, a, b):
-        if b == pytensor.tensor.type_other.NoneConst:
-            a = as_tensor_variable(a)
-            assert a.ndim == 2
+    def make_node(self, a, b=None):
+        a = as_tensor_variable(a)
+        assert a.ndim == 2
 
-            out_dtype = pytensor.scalar.upcast(a.dtype)
-            w = vector(dtype=out_dtype)
+        if b is None or (isinstance(b, Variable) and isinstance(b.type, NoneTypeT)):
+            w = vector(dtype=a.dtype)
             return Apply(self, [a], [w])
         else:
-            a = as_tensor_variable(a)
             b = as_tensor_variable(b)
             assert a.ndim == 2
             assert b.ndim == 2

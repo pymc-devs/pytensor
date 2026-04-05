@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.compile.mode import (
     AddFeatureOptimizer,
     Mode,

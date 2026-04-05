@@ -6,7 +6,7 @@ import pytest
 
 from pytensor import shared
 from pytensor import tensor as pt
-from pytensor.compile import UnusedInputError
+from pytensor.compile.maker import UnusedInputError
 from pytensor.graph.basic import (
     Apply,
     NominalVariable,

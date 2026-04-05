@@ -5,7 +5,7 @@ import numpy as np
 from numba import types
 from numba.extending import overload
 
-from pytensor.compile.function.types import add_supervisor_to_fgraph, insert_deepcopy
+from pytensor.compile.aliasing import add_supervisor_to_fgraph, insert_deepcopy
 from pytensor.compile.io import In, Out
 from pytensor.compile.mode import NUMBA, get_mode
 from pytensor.link.numba.cache import compile_numba_function_src

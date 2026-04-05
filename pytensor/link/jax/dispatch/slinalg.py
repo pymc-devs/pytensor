@@ -21,17 +21,18 @@ from pytensor.tensor.slinalg import (
 
 
 @jax_funcify.register(Eigvalsh)
-def jax_funcify_Eigvalsh(op, **kwargs):
+def jax_funcify_Eigvalsh(op, node, **kwargs):
     if op.lower:
         UPLO = "L"
     else:
         UPLO = "U"
 
-    def eigvalsh(a, b):
-        if b is not None:
-            raise NotImplementedError(
-                "jax.numpy.linalg.eigvalsh does not support generalized eigenvector problems (b != None)"
-            )
+    if len(node.inputs) == 2:
+        raise NotImplementedError(
+            "jax.numpy.linalg.eigvalsh does not support generalized eigenvector problems (b != None)"
+        )
+
+    def eigvalsh(a):
         return jax.numpy.linalg.eigvalsh(a, UPLO=UPLO)
 
     return eigvalsh

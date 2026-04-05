@@ -11,8 +11,8 @@ import pytensor.scalar as ps
 import pytensor.tensor as pt
 from pytensor import pprint, shared
 from pytensor.compile import optdb
-from pytensor.compile.debugmode import DebugMode
-from pytensor.compile.function import function
+from pytensor.compile.debug.debugmode import DebugMode
+from pytensor.compile.maker import function
 from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.ops import DeepCopyOp, deep_copy_op
 from pytensor.configdefaults import config

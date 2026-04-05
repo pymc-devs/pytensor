@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from pytensor.compile.builders import OpFromGraph
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.compile.mode import JAX, Mode
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config

@@ -1718,6 +1718,7 @@ class _CThunk:
         self.error_storage = error_storage
         self.module = module
         self.nodes = None
+        self.allow_gc = False
 
     def find_task(self, failure_code):
         """
@@ -1869,9 +1870,10 @@ class OpWiseCLinker(LocalLinker):
             fgraph,
             thunks,
             order,
-            post_thunk_old_storage,
+            post_thunk_old_storage=post_thunk_old_storage,
             no_recycling=no_recycling,
             nice_errors=self.nice_errors,
+            output_storage=output_storage,
         )
 
         f.allow_gc = self.allow_gc
