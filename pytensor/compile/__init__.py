@@ -10,7 +10,6 @@ from pytensor.compile.function.types import (
     get_info_on_inputs,
     infer_reuse_pattern,
     insert_deepcopy,
-    orig_function,
     std_fgraph,
     view_tree_set,
 )

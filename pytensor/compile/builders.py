@@ -160,7 +160,7 @@ class OpFromGraph(Op, HasInnerGraph):
     The signature is similar to :func:`pytensor.function <pytensor.function>`
     and the resulting `Op`'s perform will do the same operation as::
 
-        orig_function(inputs, outputs, **kwargs)
+        pytensor.function(inputs, outputs, **kwargs)
 
     Currently does not support ``updates`` or ``givens`` argument.
 
