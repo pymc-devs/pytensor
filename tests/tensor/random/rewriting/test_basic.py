@@ -5,9 +5,10 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config, shared
-from pytensor.compile.maker import function
-from pytensor.compile.mode import Mode
+from pytensor.compile import function
+from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.graph.basic import Constant, Variable
+from pytensor.graph.basic import equal_computations as assert_equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter, check_stack_trace
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
@@ -30,6 +31,7 @@ from pytensor.tensor.random.rewriting import (
     local_rv_size_lift,
     local_subtensor_rv_lift,
 )
+from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
 from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
 from pytensor.tensor.type import iscalar
@@ -970,3 +972,45 @@ def test_Dimshuffle_lift_rename(ds_order, lifted, dist_op, dist_params, size, rt
     )
 
     assert new_out.name == "test_name_lifted"
+
+
+def test_unused_rng():
+    rng = random_generator_type("rng")
+    next_rng, x = rng.normal([0], [1], size=3)
+    next_rng, _y = next_rng.normal(x.ones_like(), [1])
+    final_rng, z = next_rng.normal(1, 2)
+
+    fn = function([rng], [final_rng, z], mode=get_default_mode().excluding("inplace"))
+
+    assert_equal_computations(
+        fn.maker.fgraph.outputs,
+        list(pt.random.normal(1, 2, rng=rng, return_next_rng=True)),
+    )
+
+    fn_excluding = function(
+        [rng],
+        [final_rng, z],
+        mode=get_default_mode().excluding("inplace", "random_unsafe"),
+    )
+
+    # Without random_unsafe, sidestep rewrite should not fire,
+    # so all three normal_rv nodes should remain
+    assert (
+        sum(
+            isinstance(node.op, NormalRV)
+            for node in fn_excluding.maker.fgraph.apply_nodes
+        )
+        == 3
+    )
+
+    if config.mode != "FAST_COMPILE":
+        # Strict graph comparison (ones_like gets constant-folded outside FAST_COMPILE)
+        rng.tag.used = False  # Avoid reuse warnings
+        next_rng, _x = rng.normal([0], [1], size=3)
+        next_rng, _y = next_rng.normal([1.0, 1.0, 1.0], [1])
+        final_rng, z = next_rng.normal(1, 2)
+
+        assert assert_equal_computations(
+            fn_excluding.maker.fgraph.outputs,
+            [final_rng, z],
+        )
