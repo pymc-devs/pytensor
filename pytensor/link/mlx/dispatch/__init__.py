@@ -14,6 +14,7 @@ import pytensor.link.mlx.dispatch.signal
 import pytensor.link.mlx.dispatch.signal.conv
 import pytensor.link.mlx.dispatch.blockwise
 import pytensor.link.mlx.dispatch.extra_ops
+import pytensor.link.mlx.dispatch.pad
 import pytensor.link.mlx.dispatch.sort
 import pytensor.link.mlx.dispatch.slinalg
 import pytensor.link.mlx.dispatch.nlinalg
