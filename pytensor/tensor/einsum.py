@@ -608,11 +608,11 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
                 case 3:
                     # New API doesn't have index removed
                     contraction_list = []
-                    for pos, step_ein_str, _ in contraction_list_raw:  # type: ignore[misc]
+                    for pos, step_ein_str, _ in contraction_list_raw:  # type: ignore[str-unpack]
                         # e.g., 'ijp,oij->op' -> removed_str = {'i', 'j'}
-                        inp_str, out_str = step_ein_str.replace(",", "").split("->")  # type: ignore[has-type]
+                        inp_str, out_str = step_ein_str.replace(",", "").split("->")
                         removed_idx = set(inp_str) - set(out_str)
-                        contraction_list.append((pos, removed_idx, step_ein_str))  # type: ignore[has-type]
+                        contraction_list.append((pos, removed_idx, step_ein_str))  # type: ignore[arg-type]
                 case _:
                     raise ValueError("Unexpected contraction list template")
         del contraction_list_raw
