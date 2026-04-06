@@ -1,14 +1,14 @@
 import abc
 import warnings
-from collections.abc import Sequence
-from typing import Any, cast
+from collections.abc import Callable, Sequence
+from typing import Generic, cast
 
 import numpy as np
 
 import pytensor
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Apply, Variable, equal_computations
-from pytensor.graph.op import Op
+from pytensor.graph.op import Op, OpDefaultOutputType, OpOutputsType
 from pytensor.graph.replace import _vectorize_node
 from pytensor.scalar import ScalarVariable
 from pytensor.tensor.basic import (
@@ -26,6 +26,7 @@ from pytensor.tensor.random.utils import (
     explicit_expand_dims,
     normalize_size_param,
 )
+from pytensor.tensor.random.var import RandomGeneratorSharedVariable
 from pytensor.tensor.shape import shape_tuple
 from pytensor.tensor.type import TensorType
 from pytensor.tensor.type_other import NoneConst, NoneTypeT
@@ -33,7 +34,9 @@ from pytensor.tensor.utils import _parse_gufunc_signature, safe_signature
 from pytensor.tensor.variable import TensorVariable
 
 
-class RNGConsumerOp(Op):
+class RNGConsumerOp(
+    Op[tuple[RandomGeneratorSharedVariable, TensorVariable], TensorVariable]
+):
     """Baseclass for Ops that consume RNGs."""
 
     @abc.abstractmethod
@@ -57,7 +60,7 @@ class RandomVariable(RNGConsumerOp):
 
     _output_type_depends_on_input_value = True
 
-    __props__ = ("name", "signature", "dtype", "inplace")
+    __props__: tuple[str, ...] = ("name", "signature", "dtype", "inplace")
     default_output = 1
 
     def __init__(
@@ -65,7 +68,7 @@ class RandomVariable(RNGConsumerOp):
         name=None,
         ndim_supp=None,
         ndims_params=None,
-        dtype: str | None = None,
+        dtype: str | np.dtype | None = None,
         inplace=None,
         signature: str | None = None,
     ):
@@ -109,13 +112,13 @@ class RandomVariable(RNGConsumerOp):
             )
             if not isinstance(ndims_params, Sequence):
                 raise TypeError("Parameter ndims_params must be sequence type.")
-            self.ndims_params = tuple(ndims_params)
+            self.ndims_params: tuple[int, ...] = tuple(ndims_params)
 
         self.signature = signature or getattr(self, "signature", None)
         if self.signature is not None:
             # Assume a single output. Several methods need to be updated to handle multiple outputs.
             self.inputs_sig, [self.output_sig] = _parse_gufunc_signature(self.signature)
-            self.ndims_params = [len(input_sig) for input_sig in self.inputs_sig]
+            self.ndims_params = tuple([len(input_sig) for input_sig in self.inputs_sig])
             self.ndim_supp = len(self.output_sig)
         else:
             if (
@@ -189,9 +192,11 @@ class RandomVariable(RNGConsumerOp):
             "when signature is not sufficient to infer the support shape"
         )
 
-    def rng_fn(self, rng, *args, **kwargs) -> int | float | np.ndarray:
+    def rng_fn(
+        self, rng: np.random.Generator, *args, **kwargs
+    ) -> int | float | np.ndarray:
         """Sample a numeric random variate."""
-        return getattr(rng, self.name)(*args, **kwargs)
+        return getattr(rng, self.name)(*args, **kwargs)  # type: ignore[no-any-return]
 
     def __str__(self):
         # Only show signature from core props
@@ -238,7 +243,7 @@ class RandomVariable(RNGConsumerOp):
 
         from pytensor.tensor.extra_ops import broadcast_shape_iter
 
-        supp_shape: tuple[Any]
+        supp_shape: tuple[int | ScalarVariable, ...]
         if self.ndim_supp == 0:
             supp_shape = ()
         else:
@@ -261,7 +266,9 @@ class RandomVariable(RNGConsumerOp):
                         f"Size must be None or have length >= {param_batched_dims}"
                     )
 
-            return tuple(size) + supp_shape
+            # TODO: This type ignore is because the size tensor is not interpreted as an iterable.
+            # Once that's fixed, this ignore could be removed.
+            return (*tuple(size), *supp_shape)  # type: ignore[arg-type]
 
         # Size was not provided, we must infer it from the shape of the parameters
         if param_shapes is None:
@@ -302,7 +309,7 @@ class RandomVariable(RNGConsumerOp):
             # Distribution has no parameters
             batch_shape = ()
 
-        shape = batch_shape + supp_shape
+        shape = (*batch_shape, *supp_shape)
 
         return shape
 
@@ -330,9 +337,14 @@ class RandomVariable(RNGConsumerOp):
                     )
             props = self._props_dict()
             props["dtype"] = dtype
-            new_op = type(self)(**props)
-            return new_op.__call__(
-                *args, size=size, name=name, rng=rng, dtype=dtype, **kwargs
+            new_op: RandomVariable = type(self)(**props)
+            return cast(
+                tuple[RandomGeneratorSharedVariable, TensorVariable]
+                | TensorVariable
+                | tuple[TensorVariable],
+                new_op.__call__(
+                    *args, size=size, name=name, rng=rng, dtype=dtype, **kwargs
+                ),
             )
 
         res = super().__call__(rng, size, *args, **kwargs)
@@ -382,7 +394,7 @@ class RandomVariable(RNGConsumerOp):
         inferred_shape = self._infer_shape(size, dist_params)
         _, static_shape = infer_static_shape(inferred_shape)
 
-        dist_params = explicit_expand_dims(
+        _dist_params = explicit_expand_dims(
             dist_params,
             self.ndims_params,
             size_length=None
@@ -390,9 +402,12 @@ class RandomVariable(RNGConsumerOp):
             else get_vector_length(size),
         )
 
-        inputs = (rng, size, *dist_params)
+        inputs = (rng, size, *_dist_params)
         out_type = TensorType(dtype=self.dtype, shape=static_shape)
-        outputs = (rng.type(), out_type())
+        outputs = cast(
+            tuple[RandomGeneratorSharedVariable, TensorVariable],
+            (rng.type(), out_type()),
+        )
 
         if self.dtype == "floatX":
             # Commit to a specific float type if the Op is still using "floatX"
@@ -401,22 +416,27 @@ class RandomVariable(RNGConsumerOp):
             props["dtype"] = dtype
             self = type(self)(**props)
 
-        return Apply(self, inputs, outputs)
+        node: Apply[
+            RandomVariable,
+            tuple[RandomGeneratorSharedVariable, TensorVariable],
+            TensorVariable,
+        ] = Apply(self, inputs, outputs)
+        return node
 
     def batch_ndim(self, node: Apply) -> int:
         return cast(int, node.default_output().type.ndim - self.ndim_supp)
 
-    def rng_param(self, node) -> Variable:
+    def rng_param(self, node) -> RandomGeneratorSharedVariable:
         """Return the node input corresponding to the rng"""
-        return node.inputs[0]
+        return cast(RandomGeneratorSharedVariable, node.inputs[0])
 
-    def size_param(self, node) -> Variable:
+    def size_param(self, node) -> TensorVariable:
         """Return the node input corresponding to the size"""
-        return node.inputs[1]
+        return cast(TensorVariable, node.inputs[1])
 
-    def dist_params(self, node) -> Sequence[Variable]:
+    def dist_params(self, node) -> Sequence[TensorVariable]:
         """Return the node inpust corresponding to dist params"""
-        return node.inputs[2:]
+        return tuple(cast(TensorVariable, inp) for inp in node.inputs[2:])
 
     def perform(self, node, inputs, outputs):
         rng, size, *args = inputs
@@ -443,7 +463,9 @@ class RandomVariable(RNGConsumerOp):
         return [None for i in eval_points]
 
 
-class AbstractRNGConstructor(Op):
+class AbstractRNGConstructor(Op, Generic[OpOutputsType, OpDefaultOutputType]):
+    random_type: Callable[[], OpDefaultOutputType]
+
     def make_node(self, seed=None):
         if seed is None:
             seed = NoneConst
@@ -462,8 +484,14 @@ class AbstractRNGConstructor(Op):
         output_storage[0][0] = getattr(np.random, self.random_constructor)(seed=seed)
 
 
-class DefaultGeneratorMakerOp(AbstractRNGConstructor):
-    random_type = RandomGeneratorType()
+class DefaultGeneratorMakerOp(
+    AbstractRNGConstructor[
+        tuple[RandomGeneratorSharedVariable], RandomGeneratorSharedVariable
+    ]
+):
+    random_type = cast(
+        Callable[[], RandomGeneratorSharedVariable], RandomGeneratorType()
+    )
     random_constructor = "default_rng"
 
 
@@ -471,9 +499,7 @@ default_rng = DefaultGeneratorMakerOp()
 
 
 @_vectorize_node.register(RandomVariable)
-def vectorize_random_variable(
-    op: RandomVariable, node: Apply, rng, size, *dist_params
-) -> Apply:
+def vectorize_random_variable(op: RandomVariable, node: Apply, rng, size, *dist_params):
     # If size was provided originally and a new size hasn't been provided,
     # We extend it to accommodate the new input batch dimensions.
     # Otherwise, we assume the new size already has the right values
@@ -496,7 +522,11 @@ def vectorize_random_variable(
     return op.make_node(rng, size, *dist_params)
 
 
-class RandomVariableWithCoreShape(OpWithCoreShape):
+class RandomVariableWithCoreShape(
+    OpWithCoreShape[
+        tuple[RandomGeneratorSharedVariable, TensorVariable], TensorVariable
+    ]
+):
     """Generalizes a random variable `Op` to include a core shape parameter."""
 
     @property

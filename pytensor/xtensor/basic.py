@@ -4,10 +4,10 @@ from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph import Apply, Op
 from pytensor.graph.basic import Variable
 from pytensor.tensor.type import TensorType
-from pytensor.xtensor.type import XTensorType, as_xtensor, xtensor
+from pytensor.xtensor.type import XTensorType, XTensorVariable, as_xtensor, xtensor
 
 
-class XOp(Op):
+class XOp(Op[tuple[XTensorVariable], XTensorVariable]):
     """A base class for XOps that shouldn't be materialized"""
 
     def perform(self, node, inputs, outputs):

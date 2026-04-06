@@ -1,5 +1,5 @@
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from functools import partial
 from typing import Literal, cast
 
@@ -26,9 +26,10 @@ from pytensor.tensor.type import (
     tensor,
     vector,
 )
+from pytensor.tensor.variable import TensorVariable
 
 
-class MatrixPinv(Op):
+class MatrixPinv(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ("hermitian",)
     gufunc_signature = "(m,n)->(n,m)"
 
@@ -208,7 +209,7 @@ def trace(X):
     return diagonal(X).sum()
 
 
-class Det(Op):
+class Det(Op[tuple[TensorVariable], TensorVariable]):
     """
     Matrix determinant. Input should be a square matrix.
 
@@ -259,7 +260,7 @@ class Det(Op):
 det = Blockwise(Det())
 
 
-class SLogDet(Op):
+class SLogDet(Op[tuple[TensorVariable], TensorVariable]):
     """
     Compute the log determinant and its sign of the matrix. Input should be a square matrix.
     """
@@ -323,7 +324,7 @@ def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
     return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
 
 
-class Eig(Op):
+class Eig(Op[tuple[TensorVariable], TensorVariable]):
     """
     Compute the eigenvalues and right eigenvectors of a square array.
     """
@@ -465,7 +466,7 @@ def _zero_disconnected(outputs, grads):
     return l
 
 
-class EighGrad(Op):
+class EighGrad(Op[tuple[TensorVariable], TensorVariable]):
     """
     Gradient of an eigensystem of a Hermitian matrix.
 
@@ -535,7 +536,7 @@ def eigh(a, UPLO="L"):
     return Eigh(UPLO)(a)
 
 
-class SVD(Op):
+class SVD(Op[tuple[TensorVariable], TensorVariable]):
     """
     Computes singular value decomposition of matrix A, into U, S, V such that A = U @ S @ V
 
@@ -607,12 +608,7 @@ class SVD(Op):
         else:
             return [s_shape]
 
-    def L_op(
-        self,
-        inputs: Sequence[Variable],
-        outputs: Sequence[Variable],
-        output_grads: Sequence[Variable],
-    ) -> list[Variable]:
+    def L_op(self, inputs, outputs, output_grads):
         """
         Reverse-mode gradient of the SVD function. Adapted from the autograd implementation here:
         https://github.com/HIPS/autograd/blob/01eacff7a4f12e6f7aebde7c4cb4c1c2633f217d/autograd/numpy/linalg.py#L194
@@ -746,7 +742,7 @@ def svd(a, full_matrices: bool = True, compute_uv: bool = True):
     return Blockwise(SVD(full_matrices, compute_uv))(a)
 
 
-class Lstsq(Op):
+class Lstsq(Op[tuple[TensorVariable], TensorVariable]):
     __props__ = ()
 
     def make_node(self, x, y, rcond):
@@ -1017,7 +1013,7 @@ def norm(
         )
 
 
-class TensorInv(Op):
+class TensorInv(Op[tuple[TensorVariable], TensorVariable]):
     """
     Class wrapper for tensorinv() function;
     PyTensor utilization of numpy.linalg.tensorinv;
@@ -1075,7 +1071,7 @@ def tensorinv(a, ind=2):
     return TensorInv(ind)(a)
 
 
-class TensorSolve(Op):
+class TensorSolve(Op[tuple[TensorVariable], TensorVariable]):
     """
     PyTensor utilization of numpy.linalg.tensorsolve
     Class wrapper for tensorsolve function.

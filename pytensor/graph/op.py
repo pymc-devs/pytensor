@@ -3,7 +3,9 @@ from collections.abc import Callable, Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
+    Generic,
     Protocol,
+    Self,
     TypeVar,
     cast,
 )
@@ -48,7 +50,11 @@ def is_thunk_type(thunk: ThunkCallableType) -> ThunkType:
     return res
 
 
-class Op(MetaObject):
+OpOutputsType = TypeVar("OpOutputsType", bound=tuple[Variable, ...])
+OpDefaultOutputType = TypeVar("OpDefaultOutputType", bound=Variable)
+
+
+class Op(MetaObject, Generic[OpOutputsType, OpDefaultOutputType]):
     """A class that models and constructs operations in a graph.
 
     A `Op` instance has several responsibilities:
@@ -119,7 +125,9 @@ class Op(MetaObject):
     as nodes with these Ops must be rebuilt even if the input types haven't changed.
     """
 
-    def make_node(self, *inputs: Variable) -> Apply:
+    def make_node(
+        self, *inputs: Variable
+    ) -> Apply[Self, OpOutputsType, OpDefaultOutputType]:
         """Construct an `Apply` node that represent the application of this operation to the given inputs.
 
         This must be implemented by sub-classes.
@@ -159,11 +167,13 @@ class Op(MetaObject):
                     if inp != out
                 )
             )
-        return Apply(self, inputs, [o() for o in self.otypes])
+        return Apply(
+            self, inputs, cast(OpOutputsType, tuple([o() for o in self.otypes]))
+        )
 
     def __call__(
-        self, *inputs: Any, name=None, return_list=False, **kwargs
-    ) -> Variable | list[Variable]:
+        self, *inputs: Any, name=None, return_list: bool = False, **kwargs
+    ) -> OpOutputsType | OpDefaultOutputType | tuple[OpDefaultOutputType]:
         r"""Construct an `Apply` node using :meth:`Op.make_node` and return its outputs.
 
         This method is just a wrapper around :meth:`Op.make_node`.
@@ -218,15 +228,15 @@ class Op(MetaObject):
         if self.default_output is not None:
             rval = node.outputs[self.default_output]
             if return_list:
-                return [rval]
-            return rval
+                return cast(tuple[OpDefaultOutputType], (rval,))
+            return cast(OpDefaultOutputType, rval)
         else:
             if return_list:
-                return list(node.outputs)
+                return cast(OpOutputsType, tuple(node.outputs))
             elif len(node.outputs) == 1:
-                return node.outputs[0]
+                return cast(OpDefaultOutputType, node.outputs[0])
             else:
-                return node.outputs
+                return cast(OpOutputsType, tuple(node.outputs))
 
     def __ne__(self, other: Any) -> bool:
         return not (self == other)
@@ -236,8 +246,8 @@ class Op(MetaObject):
     add_tag_trace = staticmethod(add_tag_trace)
 
     def grad(
-        self, inputs: Sequence[Variable], output_grads: Sequence[Variable]
-    ) -> list[Variable]:
+        self, inputs: Sequence[Variable], output_grads: Sequence[OpDefaultOutputType]
+    ) -> list[OpDefaultOutputType]:
         r"""Construct a graph for the gradient with respect to each input variable.
 
         Each returned `Variable` represents the gradient with respect to that
@@ -283,9 +293,9 @@ class Op(MetaObject):
     def L_op(
         self,
         inputs: Sequence[Variable],
-        outputs: Sequence[Variable],
-        output_grads: Sequence[Variable],
-    ) -> list[Variable]:
+        outputs: Sequence[OpDefaultOutputType],
+        output_grads: Sequence[OpDefaultOutputType],
+    ) -> list[OpDefaultOutputType]:
         r"""Construct a graph for the L-operator.
 
         The L-operator computes a row vector times the Jacobian.
@@ -310,8 +320,10 @@ class Op(MetaObject):
         return self.grad(inputs, output_grads)
 
     def R_op(
-        self, inputs: list[Variable], eval_points: Variable | list[Variable]
-    ) -> list[Variable]:
+        self,
+        inputs: list[Variable],
+        eval_points: OpDefaultOutputType | list[OpDefaultOutputType],
+    ) -> list[OpDefaultOutputType]:
         r"""Construct a graph for the R-operator.
 
         This method is primarily used by `Rop`.

@@ -72,7 +72,8 @@ def override_dense(method):
 
 class _sparse_py_operators:
     T = property(
-        lambda self: transpose(self), doc="Return aliased transpose of self (read-only)"
+        lambda self: transpose(self),  # type: ignore
+        doc="Return aliased transpose of self (read-only)",
     )
 
     def astype(self, dtype):

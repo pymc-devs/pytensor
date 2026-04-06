@@ -247,7 +247,7 @@ class _tensor_py_operators:
             return pt.basic.transpose(self, axes)
 
     @property
-    def shape(self):
+    def shape(self) -> "TensorVariable":
         return pt.shape(self)
 
     @property

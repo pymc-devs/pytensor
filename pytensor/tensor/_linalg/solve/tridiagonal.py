@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from pytensor.tensor import TensorLike
 
 
-class LUFactorTridiagonal(Op):
+class LUFactorTridiagonal(Op[tuple[TensorVariable], TensorVariable]):
     """Compute LU factorization of a tridiagonal matrix (lapack gttrf)"""
 
     __props__ = (
@@ -89,7 +89,7 @@ class LUFactorTridiagonal(Op):
         output_storage[4][0] = ipiv
 
 
-class SolveLUFactorTridiagonal(Op):
+class SolveLUFactorTridiagonal(Op[tuple[TensorVariable], TensorVariable]):
     """Solve a system of linear equations with a tridiagonal coefficient matrix (lapack gttrs)."""
 
     __props__ = ("b_ndim", "overwrite_b", "transposed")

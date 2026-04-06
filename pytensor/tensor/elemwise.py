@@ -1134,7 +1134,7 @@ class Elemwise(OpenMPOp):
         return self(x_, y_)
 
 
-class CAReduce(COp):
+class CAReduce(COp[tuple[TensorVariable], TensorVariable]):
     """Reduces a scalar operation along specified axes.
 
     The scalar op should be both commutative and associative.
