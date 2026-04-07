@@ -975,14 +975,12 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
                 if inp not in memo:
                     if isinstance(inp, Constant):
                         memo[inp] = inp
-                    elif isinstance(inp, AtomicVariable):
-                        memo[inp] = inp
                     else:
                         raise ValueError(
-                            f"Non-Constant, non-AtomicVariable orphan {inp} found "
-                            "in the graph. All variables must be graph inputs, "
-                            "Constants, AtomicVariables, or produced by Apply "
-                            "nodes reachable from the inputs."
+                            f"Orphan {inp} found in the graph. "
+                            "All variables must be graph inputs, "
+                            "Constants, or produced by Apply nodes "
+                            "reachable from the inputs."
                         )
 
             new_inputs = tuple(memo[i] for i in node.inputs)
@@ -990,20 +988,24 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             new_node = FrozenApply(node.op, new_inputs, output_types)
             sorted_apply_nodes.append(new_node)
 
+            # FrozenApply interning may return a cached node whose inputs
+            # reference different (interned) constant objects.
+            # Update memo so that variables tracks the actual interned objects.
+            memo.update(zip(node.inputs, new_node.inputs))
             memo.update(zip(node.outputs, new_node.outputs, strict=True))
 
         # Handle outputs that are Constants or AtomicVariables not
         # encountered during toposort (e.g. a graph with no Apply nodes)
         for o in outputs:
             if o not in memo:
+                # TODO: We could create those dummy ApplyOutput here and get the interned constant
                 if isinstance(o, Constant):
-                    memo[o] = o
-                elif isinstance(o, AtomicVariable):
                     memo[o] = o
 
         try:
             frozen_outputs = tuple(memo[o] for o in outputs)
         except KeyError:
+            # TODO: Can this ever happen if we didn't fail in the previous look?
             unmapped = [o for o in outputs if o not in memo]
             raise ValueError(
                 f"Output variable {unmapped[0]} could not be mapped to a frozen "

@@ -883,7 +883,7 @@ class TestFrozenFunctionGraph:
         var1 = MyVariable("x")
         orphan = MyVariable("orphan")
         out = op1(var1, orphan)
-        with pytest.raises(ValueError, match=r"Non-Constant.*orphan"):
+        with pytest.raises(ValueError, match=r"Orphan.*orphan"):
             FrozenFunctionGraph([var1], [out])
 
     def test_unmapped_output_raises(self):
