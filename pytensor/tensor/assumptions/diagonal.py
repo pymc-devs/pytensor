@@ -45,9 +45,11 @@ from pytensor.tensor.basic import (
     get_underlying_scalar_constant_value,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.math import Dot
-from pytensor.tensor.nlinalg import KroneckerProduct, MatrixInverse, MatrixPinv
-from pytensor.tensor.slinalg import BlockDiagonal, Cholesky
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, IncSubtensor
 
 
