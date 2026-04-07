@@ -974,17 +974,17 @@ def constant(x, name=None, dtype=None) -> ScalarConstant:
 
 
 def as_scalar(x: Any, name: str | None = None) -> ScalarVariable:
-    if isinstance(x, ScalarVariable):
-        return x
-
     if isinstance(x, Variable):
+        if isinstance(x.type, ScalarType):
+            # NOTE: We may have a Variable with ScalarType that is not ScalarVariable/ScalarConstant/ScalarSharedVariable
+            # if it bypasses those constructs (same issue with TensorVariables). We should make that impossible to happen!
+            return x  # type: ignore[return-value]
+
         from pytensor.tensor.basic import scalar_from_tensor
         from pytensor.tensor.type import TensorType
 
         if isinstance(x.type, TensorType) and x.type.ndim == 0:
             return scalar_from_tensor(x)
-        elif isinstance(x, Constant) and isinstance(x.type, ScalarType):
-            return ScalarConstant(x.type, x.data, name=x.name)
         else:
             raise TypeError(f"Cannot convert {x} to a scalar type")
 
