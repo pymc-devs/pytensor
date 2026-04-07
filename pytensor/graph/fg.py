@@ -970,28 +970,26 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
         memo: dict[Variable, Variable] = dict(zip(inputs, nominal_inputs, strict=True))
         sorted_apply_nodes: list[Apply] = []
 
-        for node in toposort(outputs, blockers=inputs):
-            for inp in node.inputs:
-                if inp not in memo:
-                    if isinstance(inp, Constant):
-                        memo[inp] = inp
-                    else:
-                        raise ValueError(
-                            f"Orphan {inp} found in the graph. "
-                            "All variables must be graph inputs, "
-                            "Constants, or produced by Apply nodes "
-                            "reachable from the inputs."
-                        )
+        def _resolve_input(inp, memo=memo):
+            mapped = memo.get(inp)
+            if mapped is not None:
+                return mapped
+            if isinstance(inp, Constant):
+                memo[inp] = inp
+                return inp
+            raise ValueError(
+                f"Orphan {inp} found in the graph. "
+                "All variables must be graph inputs, "
+                "Constants, or produced by Apply nodes "
+                "reachable from the inputs."
+            )
 
-            new_inputs = tuple(memo[i] for i in node.inputs)
+        for node in toposort(outputs, blockers=inputs):
+            new_inputs = tuple(_resolve_input(inp) for inp in node.inputs)
             output_types = tuple(out.type for out in node.outputs)
             new_node = FrozenApply(node.op, new_inputs, output_types)
             sorted_apply_nodes.append(new_node)
 
-            # FrozenApply interning may return a cached node whose inputs
-            # reference different (interned) constant objects.
-            # Update memo so that variables tracks the actual interned objects.
-            memo.update(zip(node.inputs, new_node.inputs))
             memo.update(zip(node.outputs, new_node.outputs, strict=True))
 
         # Handle outputs that are Constants or AtomicVariables not
@@ -1016,7 +1014,7 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
 
         self.inputs: tuple[Variable, ...] = nominal_inputs
         self.outputs: tuple[Variable, ...] = frozen_outputs
-        self.variables: frozenset[Variable] = frozenset(memo.values())
+        self._variables: frozenset[Variable] | None = None
         self.apply_nodes: frozenset[Apply] = frozenset(sorted_apply_nodes)
         self._clients: dict[Variable, list[ClientType]] | None = None
         self._toposort: tuple[Apply, ...] = tuple(sorted_apply_nodes)
@@ -1045,6 +1043,12 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
 
     def toposort(self) -> tuple[Apply, ...]:
         return self._toposort
+
+    @property
+    def variables(self) -> frozenset[Variable]:  # type: ignore[override]
+        if self._variables is None:
+            self._variables = frozenset(vars_between(self.inputs, self.outputs))
+        return self._variables
 
     @property
     def clients(self) -> dict[Variable, list[ClientType]]:  # type: ignore[override]

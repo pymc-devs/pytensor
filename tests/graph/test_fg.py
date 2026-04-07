@@ -894,6 +894,37 @@ class TestFrozenFunctionGraph:
         with pytest.raises(ValueError, match="could not be mapped"):
             FrozenFunctionGraph([var1], [disconnected])
 
+    def test_interned_constant_in_variables(self):
+        """Regression test: all node inputs must appear in variables.
+
+        FrozenApply interns whole nodes, not individual constants. A cache
+        miss stores the current constant (c2), while a cache hit for a
+        different node returns a previously interned constant (c1). If the
+        cache hit overwrites memo[c2]=c1, c2 is evicted from variables
+        while the cache-miss node still references it.
+        """
+        from pytensor.graph.fg import FrozenFunctionGraph
+
+        op_shared = MyOp("shared")
+        op_unique = MyOp("unique")
+
+        # Populate FrozenApply cache: op_shared(NomVar_0, c1)
+        x1 = MyVariable("x")
+        c1 = MyConstant("c", data=42)
+        FrozenFunctionGraph([x1], [op_shared(x1, c1)])
+
+        # New graph with a fresh constant c2 (same value, different object).
+        # op_unique: cache miss → FrozenApply stores c2
+        # op_shared: cache hit from above → FrozenApply has c1
+        # Both c1 and c2 must be in variables.
+        x2 = MyVariable("x")
+        c2 = MyConstant("c", data=42)
+        fg = FrozenFunctionGraph([x2], [op_shared(x2, c2), op_unique(x2, c2)])
+
+        for node in fg.toposort():
+            for inp in node.inputs:
+                assert inp in fg.variables
+
     def test_freeze_unfreeze_round_trip(self):
         x, y = float64("x"), float64("y")
         ffg = FunctionGraph([x, y], [mul(add(x, y), y)]).freeze()
