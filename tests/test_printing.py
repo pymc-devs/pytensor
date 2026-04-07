@@ -318,7 +318,7 @@ def test_debugprint():
         Inner graphs:
 
         Composite{(i0 + (i1 - i2))}
-        ← add 'o0'
+        ← add
             ├─ i0
             └─ sub
             ├─ i1

@@ -3,7 +3,7 @@
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Sequence, Set
 from typing import Any, Union, cast
 
 from pytensor.configdefaults import config
@@ -11,6 +11,7 @@ from pytensor.graph.basic import (
     Apply,
     AtomicVariable,
     Constant,
+    FrozenApply,
     NominalVariable,
     Variable,
     clone_get_equiv,
@@ -36,12 +37,12 @@ class AbstractFunctionGraph(ABC):
 
     inputs: Sequence[Variable]
     outputs: Sequence[Variable]
-    apply_nodes: set[Apply]
-    variables: set[Variable]
+    apply_nodes: Set[Apply]  # abc.Set covers both set and frozenset
+    variables: Set[Variable]
     clients: dict[Variable, list[ClientType]]
 
     @abstractmethod
-    def toposort(self) -> list[Apply]: ...
+    def toposort(self) -> Sequence[Apply]: ...
 
 
 class Output(Op):
@@ -962,13 +963,12 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
         inputs: Sequence[Variable],
         outputs: Sequence[Variable],
     ):
-        from pytensor.graph.basic import FrozenApply
-
         nominal_inputs = tuple(
             NominalVariable(i, inp.type) for i, inp in enumerate(inputs)
         )
 
         memo: dict[Variable, Variable] = dict(zip(inputs, nominal_inputs, strict=True))
+        sorted_apply_nodes: list[Apply] = []
 
         for node in toposort(outputs, blockers=inputs):
             for inp in node.inputs:
@@ -988,6 +988,7 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             new_inputs = tuple(memo[i] for i in node.inputs)
             output_types = tuple(out.type for out in node.outputs)
             new_node = FrozenApply(node.op, new_inputs, output_types)
+            sorted_apply_nodes.append(new_node)
 
             memo.update(zip(node.outputs, new_node.outputs, strict=True))
 
@@ -1013,12 +1014,10 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
 
         self.inputs: tuple[Variable, ...] = nominal_inputs
         self.outputs: tuple[Variable, ...] = frozen_outputs
-        for i, out in enumerate(frozen_outputs):
-            out.name = f"o{i}"
-        self._variables: set[Variable] | None = None
-        self._apply_nodes: set[Apply] | None = None
+        self.variables: frozenset[Variable] = frozenset(memo.values())
+        self.apply_nodes: frozenset[Apply] = frozenset(sorted_apply_nodes)
         self._clients: dict[Variable, list[ClientType]] | None = None
-        self._toposort: list[Apply] | None = None
+        self._toposort: tuple[Apply, ...] = tuple(sorted_apply_nodes)
 
     def __reduce__(self):
         return FrozenFunctionGraph, (self.inputs, self.outputs)
@@ -1042,32 +1041,16 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
     def __deepcopy__(self, memo):
         return self
 
-    @property
-    def apply_nodes(self) -> set[Apply]:  # type: ignore[override]
-        if self._apply_nodes is None:
-            self._apply_nodes = set(applys_between(self.inputs, self.outputs))
-        return self._apply_nodes
-
-    def toposort(self) -> list[Apply]:
-        if self._toposort is None:
-            self._toposort = list(toposort(self.outputs, blockers=self.inputs))
+    def toposort(self) -> tuple[Apply, ...]:
         return self._toposort
-
-    @property
-    def variables(self) -> set[Variable]:  # type: ignore[override]
-        if self._variables is None:
-            self._variables = set(vars_between(self.inputs, self.outputs))
-        return self._variables
 
     @property
     def clients(self) -> dict[Variable, list[ClientType]]:  # type: ignore[override]
         if self._clients is None:
-            clients: dict[Variable, list[ClientType]] = {v: [] for v in self.inputs}
+            clients: dict[Variable, list[ClientType]] = {v: [] for v in self.variables}
             for node in self.toposort():
                 for i, inp in enumerate(node.inputs):
-                    clients.setdefault(inp, []).append((node, i))
-                for out in node.outputs:
-                    clients.setdefault(out, [])
+                    clients[inp].append((node, i))
             self._clients = clients
         return self._clients
 
@@ -1082,14 +1065,16 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
                         memo[i] = i
                     else:
                         memo[i] = i.clone()
-            new_inputs = [memo[i] for i in node.inputs]
+
             new_node = Apply(
                 node.op,
-                new_inputs,
+                [memo[i] for i in node.inputs],
                 [o.type() for o in node.outputs],
             )
             memo.update(zip(node.outputs, new_node.outputs))
 
-        new_inputs = [memo[i] for i in self.inputs]
-        new_outputs = [memo[o] for o in self.outputs]
-        return FunctionGraph(new_inputs, new_outputs, clone=False)
+        return FunctionGraph(
+            [memo[i] for i in self.inputs],
+            [memo[o] for o in self.outputs],
+            clone=False,
+        )

@@ -877,8 +877,7 @@ class FrozenApply(Apply):
         return self
 
     def __reduce__(self):
-        output_types = tuple(o.type for o in self.outputs)
-        return (type(self), (self.op, self.inputs, output_types))
+        return (type(self), (self.op, self.inputs, tuple(o.type for o in self.outputs)))
 
 
 def clone(
