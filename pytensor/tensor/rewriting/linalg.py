@@ -898,3 +898,146 @@ def scalar_solve_to_division(fgraph, node):
     copy_stack_trace(old_out, new_out)
 
     return [new_out]
+
+
+@register_canonicalize
+@node_rewriter([blockwise_of(Solve)])
+def rewrite_solve_diag(fgraph, node):
+    """
+    Replace Blockwise(Solve)(diag(d), b) with elementwise b / d.
+
+    When the LHS matrix `a` is explicitly constructed as a diagonal matrix
+    via pt.diag(d) (i.e., AllocDiag), the general matrix solve Ax=b reduces
+    to simple elementwise division x_i = b_i / d_i.
+    """
+    a, b = node.inputs
+    old_out = node.outputs[0]
+
+    # Step 1: try to get d (the effective diagonal) from either pattern
+    d = None
+
+    # Pattern 1: pt.diag(d)
+    if (
+        a.owner
+        and isinstance(a.owner.op, AllocDiag)
+        and AllocDiag.is_offset_zero(a.owner)
+    ):
+        d = a.owner.inputs[0]  # already 1D
+
+    # Pattern 2: eye * x
+    else:
+        inputs_or_none = _find_diag_from_eye_mul(a)
+        if inputs_or_none is not None:
+            _eye_input, non_eye_inputs = inputs_or_none
+            if len(non_eye_inputs) == 1:
+                non_eye = non_eye_inputs[0]
+                if non_eye.type.broadcastable[-2:] == (True, True):
+                    # scalar case — squeeze to 0D
+                    d = non_eye.squeeze((-1, -2))
+                elif non_eye.type.broadcastable[-2:] == (False, False):
+                    # matrix case — extract diagonal to get 1D
+                    d = non_eye.diagonal(axis1=-1, axis2=-2)
+                else:
+                    # vector case — squeeze the length-1 axis to get 1D
+                    d = non_eye.squeeze(-2 if non_eye.type.broadcastable[-2] else -1)
+
+    if d is None:
+        return None
+
+    # Step 2: apply b / d
+    # b_ndim tells us whether b's core case is a vector (1) or matrix (2)
+    b_ndim = node.op.core_op.b_ndim
+
+    if d.ndim == 0 or b_ndim == 1:
+        new_out = b / d
+    else:
+        # b_ndim=2: b.shape==(…,N,K), d.shape==(…,N) → d[...,None] broadcasts over K
+        new_out = b / d[..., None]
+
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
+
+
+def _extract_diagonal(x):
+    """
+    If x is provably a diagonal matrix, return its 1D diagonal vector.
+    Otherwise return None.
+
+    Handles two patterns:
+      - AllocDiag (pt.diag(d))
+      - eye * scalar/vector/matrix  (via _find_diag_from_eye_mul)
+    """
+    if not x.owner:
+        return None
+
+    # Pattern 1: pt.diag(d)
+    if isinstance(x.owner.op, AllocDiag) and AllocDiag.is_offset_zero(x.owner):
+        return x.owner.inputs[0]  # already 1D
+
+    # Pattern 2: eye * x
+    inputs_or_none = _find_diag_from_eye_mul(x)
+    if inputs_or_none is None:
+        return None
+
+    _eye_input, non_eye_inputs = inputs_or_none
+    if len(non_eye_inputs) != 1:
+        return None
+
+    non_eye = non_eye_inputs[0]
+
+    if non_eye.type.broadcastable[-2:] == (True, True):
+        # scalar case — 0D
+        return non_eye.squeeze((-1, -2))
+    elif non_eye.type.broadcastable[-2:] == (False, False):
+        # matrix case — extract diagonal to 1D
+        return non_eye.diagonal(axis1=-1, axis2=-2)
+    else:
+        # vector case — already effectively 1D, squeeze the length-1 axis
+        return non_eye.squeeze(-2 if non_eye.type.broadcastable[-2] else -1)
+
+
+@register_canonicalize
+@node_rewriter([Dot])
+def rewrite_dot_diag(fgraph, node):
+    """
+    Replace Dot(l, r) with elementwise ops when one or both inputs are diagonal.
+
+    Cases:
+      diag(dl) . diag(dr)  ->  diag(dl * dr)
+      diag(dl) . r         ->  dl * r           (r is vector)
+                           ->  dl[:, None] * r  (r is matrix)
+      l . diag(dr)         ->  l * dr           (l is matrix or vector)
+    """
+    l, r = node.inputs
+    old_out = node.outputs[0]
+
+    dl = _extract_diagonal(l)
+    dr = _extract_diagonal(r)
+
+    if dl is not None and dr is not None:
+        # Both diagonal: diag(dl) . diag(dr) = diag(dl * dr)
+        # If both are 0D scalars, pt.diag needs a 1D input — use eye instead
+        if dl.ndim == 0 and dr.ndim == 0:
+            new_out = pt.eye(l.shape[-1]) * (dl * dr)
+        else:
+            new_out = pt.diag(dl * dr)
+
+    elif dl is not None:
+        # Left diagonal: diag(dl) . r
+        if dl.ndim == 0:
+            # scalar dl broadcasts trivially over any r
+            new_out = dl * r
+        elif r.ndim == 1:
+            new_out = dl * r
+        else:
+            new_out = dl[:, None] * r
+
+    elif dr is not None:
+        # Right diagonal: l . diag(dr)
+        new_out = pt.mul(l, dr)
+
+    else:
+        return None
+
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
