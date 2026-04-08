@@ -144,17 +144,17 @@ matrix which corresponds to the Jacobian.
 Using automatic vectorization
 -----------------------------
 An alternative way to build the Jacobian is to vectorize the graph that computes a single row or colum of the jacobian
-We can use `Lop` or `Rop` (more about it below) to obtain the row or column of the jacobian and `vectorize_graph`
+We can use `pullback` or `pushforward` (more about it below) to obtain the row or column of the jacobian and `vectorize_graph`
 to vectorize it to the full jacobian matrix.
 
 >>> import pytensor
 >>> import pytensor.tensor as pt
->>> from pytensor.gradient import Lop
+>>> from pytensor.gradient import pullback
 >>> from pytensor.graph import vectorize_graph
 >>> x = pt.dvector('x')
 >>> y = x ** 2
 >>> row_cotangent = pt.dvector("row_cotangent")  # Helper variable, it will be replaced during vectorization
->>> J_row = Lop(y, x, row_cotangent)
+>>> J_row = pullback(y, x, row_cotangent)
 >>> J = vectorize_graph(J_row, replace={row_cotangent: pt.eye(x.size)})
 >>> f = pytensor.function([x], J)
 >>> f([4, 4])
@@ -207,16 +207,16 @@ in practice, implementing such optimizations in a generic manner is extremely
 difficult. Therefore, we provide special functions dedicated to these tasks.
 
 
-R-operator
-----------
+Pushforward (Jacobian-vector product)
+-------------------------------------
 
-The **R operator** is built to evaluate the product between a Jacobian and a
+The **pushforward** evaluates the product between a Jacobian and a
 vector, namely :math:`\frac{\partial f(x)}{\partial x} v`. The formulation
 can be extended even for :math:`x` being a matrix, or a tensor in general, case in
 which also the Jacobian becomes a tensor and the product becomes some kind
 of tensor product. Because in practice we end up needing to compute such
 expressions in terms of weight matrices, PyTensor supports this more generic
-form of the operation. In order to evaluate the R-operation of
+form of the operation. In order to evaluate the pushforward of
 expression ``y``, with respect to ``x``, multiplying the Jacobian with ``V``
 you need to do something similar to this:
 
@@ -224,40 +224,40 @@ you need to do something similar to this:
 >>> V = pt.dmatrix('V')
 >>> x = pt.dvector('x')
 >>> y = pt.dot(x, W)
->>> JV = pytensor.gradient.Rop(y, W, V)
+>>> JV = pytensor.gradient.pushforward(y, W, V)
 >>> f = pytensor.function([W, V, x], JV)
 >>> f([[1, 1], [1, 1]], [[2, 2], [2, 2]], [0,1])
 array([ 2.,  2.])
 
-By default, the R-operator is implemented as a double application of the L_operator
+By default, the pushforward is implemented as a double application of the pullback
 (see `reference <https://j-towns.github.io/2017/06/12/A-new-trick.html>`_).
-In most cases this should be as performant as a specialized implementation of the R-operator.
+In most cases this should be as performant as a specialized implementation of the pushforward.
 However, PyTensor may sometimes fail to prune dead branches or fuse common expressions within composite operators,
-such as Scan and OpFromGraph, that would be more easily avoidable in a direct implentation of the R-operator.
+such as Scan and OpFromGraph, that would be more easily avoidable in a direct implentation of the pushforward.
 
-When this is a concern, it is possible to force `Rop` to use the specialized `Op.R_op` methods by passing
-`use_op_rop_implementation=True`. Note that this will fail if the graph contains `Op`s that don't implement this method.
+When this is a concern, it is possible to force `pushforward` to use the specialized `Op.pushforward` methods by passing
+`use_op_pushforward=True`. Note that this will fail if the graph contains `Op`s that don't implement this method.
 
 
->>> JV = pytensor.gradient.Rop(y, W, V, use_op_rop_implementation=True)
+>>> JV = pytensor.gradient.pushforward(y, W, V, use_op_pushforward=True)
 >>> f = pytensor.function([W, V, x], JV)
 >>> f([[1, 1], [1, 1]], [[2, 2], [2, 2]], [0,1])
 array([ 2.,  2.])
 
 
-L-operator
-----------
+Pullback (vector-Jacobian product)
+----------------------------------
 
-In similitude to the R-operator, the **L-operator** would compute a row vector times
+The **pullback** computes a row vector times
 the Jacobian. The mathematical formula would be :math:`v \frac{\partial
-f(x)}{\partial x}`. The L-operator is also supported for generic tensors
+f(x)}{\partial x}`. The pullback is also supported for generic tensors
 (not only for vectors). Similarly, it can be implemented as follows:
 
 >>> W = pt.dmatrix('W')
 >>> v = pt.dvector('v')
 >>> x = pt.dvector('x')
 >>> y = pt.dot(x, W)
->>> VJ = pytensor.gradient.Lop(y, W, v)
+>>> VJ = pytensor.gradient.pullback(y, W, v)
 >>> f = pytensor.function([v,x], VJ)
 >>> f([2, 2], [0, 1])
 array([[ 0.,  0.],
@@ -265,12 +265,12 @@ array([[ 0.,  0.],
 
 .. note::
 
-    ``v``, the point of evaluation, differs between the L-operator and the R-operator.
-    For the L-operator, the point of evaluation needs to have the same shape
-    as the output, whereas for the R-operator this point should
+    The cotangent/tangent vectors differ between the pullback and the pushforward.
+    For the pullback, the cotangent vectors need to have the same shape
+    as the output, whereas for the pushforward the tangent vectors should
     have the same shape as the input parameter. Furthermore, the results of these two
-    operations differ. The result of the L-operator is of the same shape
-    as the input parameter, while the result of the R-operator has a shape similar
+    operations differ. The result of the pullback is of the same shape
+    as the input parameter, while the result of the pushforward has a shape similar
     to that of the output.
 
 
@@ -294,13 +294,13 @@ Hence, we suggest profiling the methods before using either one of the two:
 array([ 4.,  4.])
 
 
-or, making use of the R-operator:
+or, making use of the pushforward:
 
 >>> x = pt.dvector('x')
 >>> v = pt.dvector('v')
 >>> y = pt.sum(x ** 2)
 >>> gy = pt.grad(y, x)
->>> Hv = pytensor.gradient.Rop(gy, x, v)
+>>> Hv = pytensor.gradient.pushforward(gy, x, v)
 >>> f = pytensor.function([x, v], Hv)
 >>> f([4, 4], [2, 2])
 array([ 4.,  4.])
