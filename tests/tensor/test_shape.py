@@ -46,7 +46,7 @@ from pytensor.typed_list import make_list
 from tests import unittest_tools as utt
 from tests.graph.utils import MyType2
 from tests.tensor.utils import eval_outputs, random
-from tests.test_rop import RopLopChecker
+from tests.test_rop import PushforwardPullbackChecker
 
 
 def test_shape_basic():
@@ -638,19 +638,21 @@ class TestSpecifyBroadcastable:
             specify_broadcastable(x, axis)
 
 
-class TestRopLop(RopLopChecker):
+class TestPushforwardPullback(PushforwardPullbackChecker):
     def test_shape(self):
-        self.check_nondiff_rop(self.x.shape[0], self.x, self.v)
+        self.check_nondiff_pushforward(self.x.shape[0], self.x, self.v)
 
     def test_specifyshape(self):
-        self.check_rop_lop(specify_shape(self.x, self.in_shape), self.in_shape)
+        self.check_pushforward_pullback(
+            specify_shape(self.x, self.in_shape), self.in_shape
+        )
 
     def test_reshape(self):
         new_shape = constant(
             np.asarray([self.mat_in_shape[0] * self.mat_in_shape[1]], dtype="int64")
         )
 
-        self.check_mat_rop_lop(
+        self.check_mat_pushforward_pullback(
             self.mx.reshape(new_shape), (self.mat_in_shape[0] * self.mat_in_shape[1],)
         )
 

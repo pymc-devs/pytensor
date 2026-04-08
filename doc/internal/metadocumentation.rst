@@ -61,11 +61,11 @@ For example::
 
 Link to the generated doc of a class this way::
 
-    :class:`RopLop_checker`
+    :class:`PushforwardPullbackChecker`
 
 For example::
 
-    The class :class:`RopLop_checker`, give the functions
+    The class :class:`PushforwardPullbackChecker`, give the functions
 
 
 However, if the link target is ambiguous, Sphinx will generate warning or errors.

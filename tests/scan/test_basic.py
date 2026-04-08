@@ -1333,7 +1333,7 @@ class TestScan:
     def test_high_order_grad_sitsot(self):
         """Test higher-order derivatives through a sit-sot scan.
 
-        The L_op of a sit-sot scan creates a mit-mot backward scan where
+        The pullback of a sit-sot scan creates a mit-mot backward scan where
         one buffer position is both read and written.
         This is analogous to set_subtensor(x, y, i): the gradient w.r.t. x
         must zero out position i, routing gradient only through y.
@@ -2002,7 +2002,7 @@ class TestScan:
         assert fgrad() == 1
 
     @pytest.mark.parametrize("use_op_pushforward", [True, False])
-    def test_R_op(self, use_op_pushforward):
+    def test_pushforward(self, use_op_pushforward):
         seed = utt.fetch_seed()
         rng = np.random.default_rng(seed)
         floatX = config.floatX
@@ -2045,7 +2045,7 @@ class TestScan:
         nwo_u = pushforward(o, _u, eu, use_op_pushforward=use_op_pushforward)
         nwo_h0 = pushforward(o, _h0, eh0, use_op_pushforward=use_op_pushforward)
         nwo_W = pushforward(o, _W, eW, use_op_pushforward=use_op_pushforward)
-        fn_rop = function(
+        fn_pushforward = function(
             [u, h0, W, eu, eh0, eW], [nwo_u, nwo_h0, nwo_W], on_unused_input="ignore"
         )
 
@@ -2077,7 +2077,7 @@ class TestScan:
             [u, h0, W, eu, eh0, eW], [n2o_u, n2o_h0, n2o_W], on_unused_input="ignore"
         )
 
-        vnu, vnh0, vnW = fn_rop(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
+        vnu, vnh0, vnW = fn_pushforward(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
         tnu, tnh0, tnW = fn_test(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
 
         np.testing.assert_allclose(vnu, tnu, atol=1e-6)
@@ -2086,7 +2086,7 @@ class TestScan:
 
     @pytest.mark.slow
     @pytest.mark.parametrize("use_op_pushforward", [True, False])
-    def test_R_op_2(self, use_op_pushforward):
+    def test_pushforward_2(self, use_op_pushforward):
         seed = utt.fetch_seed()
         rng = np.random.default_rng(seed)
         floatX = config.floatX
@@ -2132,10 +2132,10 @@ class TestScan:
         nwo_u = pushforward(o, _u, eu, use_op_pushforward=use_op_pushforward)
         nwo_h0 = pushforward(o, _h0, eh0, use_op_pushforward=use_op_pushforward)
         nwo_W = pushforward(o, _W, eW, use_op_pushforward=use_op_pushforward)
-        fn_rop = function(
+        fn_pushforward = function(
             [u, h0, W, eu, eh0, eW], [nwo_u, nwo_h0, nwo_W, o], on_unused_input="ignore"
         )
-        vnu, vnh0, vnW, _vno = fn_rop(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
+        vnu, vnh0, vnW, _vno = fn_pushforward(v_u, v_h0, v_W, v_eu, v_eh0, v_eW)
 
         n2o_u, _ = scan(
             lambda i, o, u, h0, W, eu: (grad(o[i], u) * eu).sum(),
@@ -2168,7 +2168,7 @@ class TestScan:
         np.testing.assert_allclose(vnW, tnW, atol=2e-6)
 
     @pytest.mark.parametrize("use_op_pushforward", [True, False])
-    def test_R_op_mitmot(self, use_op_pushforward):
+    def test_pushforward_mitmot(self, use_op_pushforward):
         # this test is a copy paste from the script given by Justin Bayer to
         # reproduce this bug
         # We have 2 parameter groups with the following shapes.
