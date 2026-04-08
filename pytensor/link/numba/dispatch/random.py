@@ -49,7 +49,9 @@ def numba_deepcopy_random_generator(x):
 
 
 @singledispatch
-def numba_core_rv_funcify(op: Op, node: Apply) -> Callable:
+def numba_core_rv_funcify(
+    op: Op, node: Apply
+) -> Callable | tuple[Callable, int | None]:
     """Return the core function for a random variable operation."""
     raise NotImplementedError(f"Core implementation of {op} not implemented.")
 
@@ -422,6 +424,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
         return fallback_rv, None
 
+    core_cache_key: int | str | None
     match core_rv_fn_and_cache_key:
         case (core_rv_fn, (int() | None) as core_cache_key):
             pass
@@ -484,7 +487,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
     if core_cache_key is None:
         # If the core RV can't be cached, then the whole RV can't be cached
-        random_rv_key = None  # type: ignore[unreachable]
+        random_rv_key = None
     else:
         random_rv_key_contents = (
             type(op),
