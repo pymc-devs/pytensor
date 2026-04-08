@@ -24,7 +24,7 @@ from pytensor.compile import (
 )
 from pytensor.compile.maker import function
 from pytensor.compile.mode import get_mode
-from pytensor.gradient import Lop, Rop, grad
+from pytensor.gradient import Lop, Rop, grad, pullback, pushforward
 from pytensor.printing import debugprint as dprint
 
 from pytensor.ifelse import ifelse
