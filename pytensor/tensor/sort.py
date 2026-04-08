@@ -59,7 +59,7 @@ class SortOp(Op):
         assert inputs_shapes[1] == ()
         return [inputs_shapes[0]]
 
-    def grad(self, inputs, output_grads):
+    def pullback(self, inputs, outputs, output_grads):
         a, axis = inputs
         indices = self.__get_argsort_indices(a, axis)
         inp_grad = output_grads[0][tuple(indices)]
@@ -109,14 +109,14 @@ class SortOp(Op):
         return indices
 
     """
-    def R_op(self, inputs, eval_points):
-        # R_op can receive None as eval_points.
+    def pushforward(self, inputs, outputs, eval_points):
+        # pushforward can receive DisconnectedType as eval_points.
         # That mean there is no diferientiable path through that input
         # If this imply that you cannot compute some outputs,
-        # return None for those.
-        if eval_points[0] is None:
-            return eval_points
-        return self.grad(inputs, eval_points)
+        # return disconnected_type() for those.
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return list(eval_points)
+        return self.pullback(inputs, outputs, eval_points)
     """
 
 
@@ -190,7 +190,7 @@ class ArgSortOp(Op):
         assert inputs_shapes[1] == ()
         return [inputs_shapes[0]]
 
-    def grad(self, inputs, output_grads):
+    def pullback(self, inputs, outputs, output_grads):
         # No grad defined for integers.
         inp, axis = inputs
         inp_grad = inp.zeros_like()
@@ -204,14 +204,14 @@ class ArgSortOp(Op):
         return [inp_grad, axis_grad]
 
     """
-    def R_op(self, inputs, eval_points):
-        # R_op can receive None as eval_points.
+    def pushforward(self, inputs, outputs, eval_points):
+        # pushforward can receive DisconnectedType as eval_points.
         # That mean there is no diferientiable path through that input
         # If this imply that you cannot compute some outputs,
-        # return None for those.
-        if eval_points[0] is None:
-            return eval_points
-        return self.grad(inputs, eval_points)
+        # return disconnected_type() for those.
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return list(eval_points)
+        return self.pullback(inputs, outputs, eval_points)
     """
 
 

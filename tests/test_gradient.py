@@ -11,9 +11,7 @@ from pytensor.gradient import (
     DisconnectedType,
     GradClip,
     GradScale,
-    Lop,
     NullTypeGradError,
-    Rop,
     UndefinedGrad,
     disconnected_grad,
     disconnected_grad_,
@@ -25,6 +23,8 @@ from pytensor.gradient import (
     hessian,
     hessian_vector_product,
     jacobian,
+    pullback,
+    pushforward,
     subgraph_grad,
     zero_grad,
     zero_grad_,
@@ -815,7 +815,7 @@ class TestZeroGrad:
         v = vector()
         y = zero_grad(x)
 
-        rop = Rop(y, x, v)
+        rop = pushforward(y, x, v)
         f = pytensor.function([x, v], rop, on_unused_input="ignore")
 
         a = np.asarray(self.rng.standard_normal(5), dtype=config.floatX)
@@ -1188,6 +1188,6 @@ def test_scalar_Lop():
     xt = xtm1**2
 
     dout_dxt = float64("dout_dxt")
-    dout_dxtm1 = Lop(xt, wrt=xtm1, eval_points=dout_dxt)
+    dout_dxtm1 = pullback(xt, wrt=xtm1, cotangents=dout_dxt)
     assert dout_dxtm1.type == dout_dxt.type
     assert dout_dxtm1.eval({xtm1: 3.0, dout_dxt: 1.5}) == 2 * 3.0 * 1.5

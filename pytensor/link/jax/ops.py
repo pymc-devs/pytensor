@@ -135,7 +135,7 @@ class JAXOp(Op):
             return outputs[0]
         return outputs
 
-    def grad(self, inputs, output_gradients):
+    def pullback(self, inputs, outputs, output_gradients):
         """Compute gradients using JAX's vector-Jacobian product (VJP)."""
         import jax
 

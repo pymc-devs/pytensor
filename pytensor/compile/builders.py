@@ -13,7 +13,7 @@ from typing import cast
 from pytensor.compile.maker import function
 from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import SharedVariable
-from pytensor.gradient import DisconnectedType, Rop, disconnected_type, grad
+from pytensor.gradient import DisconnectedType, disconnected_type, grad, pushforward
 from pytensor.graph.basic import (
     Apply,
     Constant,
@@ -235,7 +235,11 @@ class OpFromGraph(Op, HasInnerGraph):
             return z * 2
 
 
-        op = OpFromGraph([x, y, z], [e], lop_overrides=[None, rescale_dy, None])
+        op = OpFromGraph(
+            [x, y, z],
+            [e],
+            pullback=[None, rescale_dy, None],
+        )
         e2 = op(x, y, z)
         dx, dy, dz = grad(e2, [x, y, z])
         fn = function([x, y, z], [dx, dy, dz])
@@ -249,8 +253,10 @@ class OpFromGraph(Op, HasInnerGraph):
         outputs: list[Variable],
         *,
         inline: bool = False,
-        lop_overrides: Callable | list | OpFromGraph | None = None,
-        rop_overrides: Callable | list | OpFromGraph | None = None,
+        pullback: Callable | OpFromGraph | None = None,
+        pushforward: Callable | OpFromGraph | None = None,
+        lop_overrides: Callable | OpFromGraph | None = None,
+        rop_overrides: Callable | OpFromGraph | None = None,
         connection_pattern: list[list[bool]] | None = None,
         strict: bool = False,
         name: str | None = None,
@@ -267,32 +273,54 @@ class OpFromGraph(Op, HasInnerGraph):
         inline : bool, optional
             If True, the Op's inner graph is inlined during compilation. If False (default), a
             pre-compiled function is used instead.
-        lop_overrides : callable or OpFromGraph or list or None, optional
-            Override for the L_op method.
+        pullback
+            Overrides the :meth:`Op.pullback` (vector-Jacobian product) method.
 
-            - None: use the default L_op result.
-            - OpFromGraph: should accept ``(inputs, outputs, output_grads)`` with the same types
-              as the inner graph.
-            - callable: should take three args ``(inputs, outputs, output_grads)``, each a list of
-              Variable, and return a list of Variable.
-            - list: one entry per input. Each entry is None (use default), a DisconnectedType or
-              NullType Variable, or a callable returning a single Variable.
-        rop_overrides : callable or OpFromGraph or list or None, optional
-            Override for the R_op method.
+            ``None``: Do not override, use the default :meth:`Op.pullback` result
 
-            - None: use the default R_op result.
-            - OpFromGraph: should accept ``(inputs, eval_points)`` with the same types as the
-              inner graph inputs.
-            - callable: should take two args ``(inputs, eval_points)``, each a list of Variable,
-              and return a list of Variable.
-            - list: one entry per output. Each entry is None (use default), a DisconnectedType or
-              NullType Variable, or a callable returning a single Variable.
+            `OpFromGraph`: Override with another `OpFromGraph`, should
+            accept inputs as the same order and types of ``inputs``,
+            ``outputs`` and ``cotangents`` arguments as one would specify in
+            :meth:`Op.pullback`.
+
+            `callable`: Should take three args: ``inputs``, ``outputs`` and ``cotangents``.
+            Each argument is expected to be a list of :class:`Variable`.
+            Must return list of :class:`Variable`.
+
+            ``list``: Each `OpFromGraph`/callable must return a single
+            :class:`Variable`. Each list element corresponds to gradient of
+            a specific input, length of list must be equal to number of inputs.
+
+        pushforward
+            Overrides the :meth:`Op.pushforward` (Jacobian-vector product) method.
+
+            ``None``: Do not override, use the default :meth:`Op.pushforward` result
+
+            `OpFromGraph`: Override with another `OpFromGraph`, should
+            accept inputs as the same order and types of ``inputs`` and ``tangents``
+            arguments as one would specify in :meth:`Op.pushforward`.
+
+            `callable`: Should take two args: ``inputs`` and ``tangents``.
+            Each argument is expected to be a list of :class:`Variable`.  Must
+            return list of :class:`Variable`.
+
+            ``list``:
+            Each :class:`OpFromGraph`/callable must return a single
+            :class:`Variable <pytensor.graph.basic.Variable>`. Each list element
+            corresponds to a specific output of :meth:`Op.pushforward`, length of list
+            must be equal to number of outputs.
 
             .. warning::
 
-                R_op overrides are ignored when ``pytensor.gradient.Rop`` is called with
-                ``use_op_rop_implementation=False`` (the default). In that case the L_op is used
-                twice to obtain a mathematically equivalent R_op.
+                pushforward is ignored when ``pytensor.gradient.pushforward`` is called with
+                ``use_op_pushforward=False`` (the default). In that case the pullback is used
+                twice to obtain a mathematically equivalent pushforward.
+
+        lop_overrides
+            .. deprecated:: Use ``pullback`` instead.
+
+        rop_overrides
+            .. deprecated:: Use ``pushforward`` instead.
         connection_pattern : list of list of bool, optional
             If provided, used as the connection pattern for this Op. Each inner list has one bool
             per output, and the outer list has one entry per input.
@@ -344,10 +372,28 @@ class OpFromGraph(Op, HasInnerGraph):
         self.input_types = [inp.type for inp in inputs]
         self.output_types = [out.type for out in outputs]
 
-        self.lop_overrides = lop_overrides
-        self.rop_overrides = rop_overrides
-        # Dictionary where we cache OpFromGraph that represent the L_op
-        # A distinct OpFromGraph is needed to represent each pattern of output_grads connection
+        if lop_overrides is not None:
+            if pullback is not None:
+                raise ValueError("lop_overrides and pullback are mutually exclusive")
+            warnings.warn(
+                "lop_overrides is deprecated in favor of pullback.",
+                FutureWarning,
+            )
+            pullback = lop_overrides
+
+        if rop_overrides is not None:
+            if pushforward is not None:
+                raise ValueError("rop_overrides and pushforward are mutually exclusive")
+            warnings.warn(
+                "rop_overrides is deprecated in favor of pushforward.",
+                FutureWarning,
+            )
+            pushforward = rop_overrides
+
+        self.pullback_overrides = pullback
+        self.pushforward_overrides = pushforward
+        # Dictionary where we cache OpFromGraph that represent the pullback
+        # A distinct OpFromGraph is needed to represent each pattern of cotangents connection
         # It also returns a tuple that indicates which input_gradients are disconnected
         self._lop_op_cache: dict[tuple[bool, ...], Callable] = {}
         self._rop_op_cache: Callable | None = None
@@ -409,8 +455,8 @@ class OpFromGraph(Op, HasInnerGraph):
         if self._frozen_lop is not None or self._frozen_rop is not None:
             return
 
-        lop = self.lop_overrides
-        rop = self.rop_overrides
+        lop = self.pullback_overrides
+        rop = self.pushforward_overrides
         if lop is None and rop is None:
             return
 
@@ -511,11 +557,11 @@ class OpFromGraph(Op, HasInnerGraph):
         outputs = op_overrides(*callable_args)
         if not isinstance(outputs, list):
             raise TypeError(
-                f"Lop/Rop overriding function should return a list, got {type(outputs)}"
+                f"pullback/pushforward overriding function should return a list, got {type(outputs)}"
             )
         if len(outputs) != nout:
             raise ValueError(
-                f"Lop/Rop overriding function {self.rop_overrides} should return "
+                f"pullback/pushforward overriding function {self.pushforward_overrides} should return "
                 f"a list of {nout} outputs, got {len(outputs)}"
             )
         return outputs
@@ -523,8 +569,8 @@ class OpFromGraph(Op, HasInnerGraph):
     def _build_and_cache_lop_op(
         self, disconnected_output_grads: tuple[bool, ...]
     ) -> Callable:
-        """converts lop_overrides from user supplied form to type(self) instance,
-        specialized for the pattern of disconnected_output_grads
+        """Converts pullback_overrides from user supplied form to type(self) instance,
+        specialized for the pattern of disconnected_output_grads.
 
         Results are cached in self._lop_op_cache
         """
@@ -537,12 +583,12 @@ class OpFromGraph(Op, HasInnerGraph):
         inner_outputs = self.inner_outputs
         nin = len(inner_inputs)
         nout = len(inner_outputs)
-        lop_overrides = self.lop_overrides
+        pullback_overrides = self.pullback_overrides
 
-        if isinstance(lop_overrides, OpFromGraph):
-            self._lop_op_cache[disconnected_output_grads] = lop_overrides
-            lop_overrides.kwargs["on_unused_input"] = "ignore"
-            return lop_overrides
+        if isinstance(pullback_overrides, OpFromGraph):
+            self._lop_op_cache[disconnected_output_grads] = pullback_overrides
+            pullback_overrides.kwargs["on_unused_input"] = "ignore"
+            return pullback_overrides
 
         # We try to compute the gradient with respect to connected outputs only
         connected_inner_outputs = [
@@ -579,10 +625,10 @@ class OpFromGraph(Op, HasInnerGraph):
         )
 
         # we need to convert _lop_op into an OfG instance
-        if lop_overrides is None:
+        if pullback_overrides is None:
             input_grads = fn_grad(wrt=inner_inputs)
-        elif isinstance(lop_overrides, list):
-            custom_input_grads = lop_overrides
+        elif isinstance(pullback_overrides, list):
+            custom_input_grads = pullback_overrides
             if len(custom_input_grads) != nin:
                 raise ValueError(
                     f"Need to override {nin} gradients, got {len(custom_input_grads)}",
@@ -600,7 +646,9 @@ class OpFromGraph(Op, HasInnerGraph):
                 default_input_grads, custom_input_grads, callable_args
             )
         else:
-            input_grads = self._call_custom_override(lop_overrides, callable_args, nin)
+            input_grads = self._call_custom_override(
+                pullback_overrides, callable_args, nin
+            )
 
         # Filter out disconnected/null input generated from the inner graph grad
         # We append them in the outer wrapper function below
@@ -650,7 +698,7 @@ class OpFromGraph(Op, HasInnerGraph):
         return wrapper
 
     def _build_and_cache_rop_op(self):
-        """Converts rop_overrides from user supplied form to type(self) instance.
+        """Converts pushforward_overrides from user supplied form to type(self) instance.
 
         Results are cached in self._rop_op_cache
         """
@@ -660,31 +708,31 @@ class OpFromGraph(Op, HasInnerGraph):
         inner_inputs = self.inner_inputs
         inner_outputs = self.inner_outputs
         nout = len(inner_outputs)
-        rop_overrides = self.rop_overrides
+        pushforward_overrides = self.pushforward_overrides
 
-        if isinstance(rop_overrides, OpFromGraph):
-            self._rop_op_cache = rop_overrides
-            return rop_overrides
+        if isinstance(pushforward_overrides, OpFromGraph):
+            self._rop_op_cache = pushforward_overrides
+            return pushforward_overrides
 
         eval_points = [inp_t() for inp_t in self.input_types]
-        fn_rop = partial(
-            Rop,
+        fn_pf = partial(
+            pushforward,
             wrt=inner_inputs,
-            eval_points=eval_points,
-            use_op_rop_implementation=True,
+            tangents=eval_points,
+            use_op_pushforward=True,
         )
 
         callable_args = (inner_inputs, eval_points)
-        if rop_overrides is None:
-            output_grads = fn_rop(f=inner_outputs)
-        elif isinstance(rop_overrides, list):
-            custom_output_grads = rop_overrides
+        if pushforward_overrides is None:
+            output_grads = fn_pf(f=inner_outputs)
+        elif isinstance(pushforward_overrides, list):
+            custom_output_grads = pushforward_overrides
             if len(custom_output_grads) != nout:
                 raise ValueError(
-                    f"Need to override {int(nout)} Rop, got {len(custom_output_grads)}",
+                    f"Need to override {int(nout)} pushforward, got {len(custom_output_grads)}",
                     custom_output_grads,
                 )
-            # get outputs that does not have Rop override
+            # get outputs that don't have pushforward override
             f = [
                 output
                 for output, custom_output_grad in zip(
@@ -692,13 +740,13 @@ class OpFromGraph(Op, HasInnerGraph):
                 )
                 if custom_output_grad is None
             ]
-            default_output_grads = fn_rop(f=f) if f else []
+            default_output_grads = fn_pf(f=f) if f else []
             output_grads = self._combine_list_overrides(
                 default_output_grads, custom_output_grads, callable_args
             )
         else:
             output_grads = self._call_custom_override(
-                rop_overrides, callable_args, nout
+                pushforward_overrides, callable_args, nout
             )
 
         # Filter out disconnected output gradients
@@ -716,13 +764,12 @@ class OpFromGraph(Op, HasInnerGraph):
         )
 
         # Return a wrapper that combines connected and disconnected output gradients
-        def wrapper(*inputs: Variable, **kwargs) -> list[Variable | None]:
+        def wrapper(*inputs: Variable, **kwargs) -> list[Variable]:
             connected_output_grads = iter(rop_op(*inputs, **kwargs))
             all_output_grads = []
             for out_grad in output_grads:
                 if isinstance(out_grad.type, DisconnectedType):
-                    # R_Op does not have DisconnectedType yet, None should be used instead
-                    all_output_grads.append(None)
+                    all_output_grads.append(disconnected_type())
                 elif isinstance(out_grad.type, NullType):
                     all_output_grads.append(out_grad)
                 else:
@@ -732,14 +779,14 @@ class OpFromGraph(Op, HasInnerGraph):
         self._rop_op_cache = wrapper
         return wrapper
 
-    def L_op(self, inputs, outputs, output_grads):
+    def pullback(self, inputs, outputs, output_grads):
         disconnected_output_grads = tuple(
             isinstance(og.type, DisconnectedType) for og in output_grads
         )
         lop_op = self._build_and_cache_lop_op(disconnected_output_grads)
         return lop_op(*inputs, *outputs, *output_grads, return_list=True)
 
-    def R_op(self, inputs, eval_points):
+    def pushforward(self, inputs, outputs, eval_points):
         rop_op = self._build_and_cache_rop_op()
         return rop_op(*inputs, *eval_points, return_list=True)
 
@@ -806,8 +853,8 @@ class OpFromGraph(Op, HasInnerGraph):
                 inputs=new_inner_inputs,
                 outputs=new_inner_outputs,
                 inline=self.is_inline,
-                lop_overrides=self.lop_overrides,
-                rop_overrides=self.rop_overrides,
+                pullback=self.pullback_overrides,
+                pushforward=self.pushforward_overrides,
                 connection_pattern=self._connection_pattern,
                 name=self.name,
                 destroy_map=self.destroy_map,

@@ -65,10 +65,10 @@ from pytensor.configdefaults import config
 from pytensor.gradient import (
     DisconnectedType,
     NullType,
-    Rop,
     disconnected_type,
     grad,
     grad_undefined,
+    pushforward,
 )
 from pytensor.graph.basic import (
     Apply,
@@ -2423,7 +2423,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         node.tag.connection_pattern = connection_pattern
         return connection_pattern
 
-    def L_op(self, inputs, outs, dC_douts):
+    def pullback(self, inputs, outs, dC_douts):
         # Computes the gradient of this Scan by constructing a new backward Scan
         # that runs in reverse. The method:
         # 1. Differentiates the inner function symbolically (compute_all_gradients)
@@ -3189,7 +3189,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 gradients[idx] = disconnected_type()
         return gradients
 
-    def R_op(self, inputs, eval_points):
+    def pushforward(self, inputs, outputs, eval_points):
         # Step 0. Prepare some shortcut variable
         info = self.info
         self_inputs = self.inner_inputs
@@ -3207,11 +3207,11 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             rop_self_outputs = self_outputs
         if info.n_untraced_sit_sot > 0:
             rop_self_outputs = rop_self_outputs[: -info.n_untraced_sit_sot]
-        rop_outs = Rop(
+        rop_outs = pushforward(
             rop_self_outputs,
             rop_of_inputs,
-            inner_eval_points,
-            use_op_rop_implementation=True,
+            tangents=inner_eval_points,
+            use_op_pushforward=True,
         )
         if not isinstance(rop_outs, list | tuple):
             rop_outs = [rop_outs]
@@ -3237,7 +3237,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ie = info.n_seqs
         clean_eval_points = []
         for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3252,7 +3252,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ie = ie + int(sum(len(x) for x in info.mit_mot_in_slices))
         clean_eval_points = []
         for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3267,7 +3267,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ie = ie + int(sum(len(x) for x in info.mit_sot_in_slices))
         clean_eval_points = []
         for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3282,7 +3282,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         ie = ie + info.n_sit_sot
         clean_eval_points = []
         for inp, evp in zip(inputs[b:e], eval_points[b:e], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3306,7 +3306,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         # All other arguments
         clean_eval_points = []
         for inp, evp in zip(inputs[e:], eval_points[e:], strict=True):
-            if evp is not None:
+            if not isinstance(evp.type, DisconnectedType):
                 clean_eval_points.append(evp)
             else:
                 clean_eval_points.append(inp.zeros_like())
@@ -3401,7 +3401,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         b = e + info.n_nit_sot
         e = e + info.n_nit_sot * 2
         final_outs += outputs[b:e]
-        final_outs += [None] * info.n_untraced_sit_sot
+        final_outs += [disconnected_type()] * info.n_untraced_sit_sot
 
         return final_outs
 

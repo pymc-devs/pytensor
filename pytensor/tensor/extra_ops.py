@@ -75,7 +75,7 @@ class CpuContiguous(COp):
         assert x.flags["C_CONTIGUOUS"]
         y[0] = x
 
-    def grad(self, inputs, dout):
+    def pullback(self, inputs, outputs, dout):
         return [ptb.as_tensor_variable(dout[0])]
 
     def c_code(self, node, name, inames, onames, sub):
@@ -209,7 +209,7 @@ class SearchsortedOp(COp):
     def c_code_cache_version(self):
         return (2,)
 
-    def grad(self, inputs, output_gradients):
+    def pullback(self, inputs, outputs, output_gradients):
         num_ins = len(inputs)
         if num_ins == 3:
             x, v, _sorter = inputs
@@ -321,7 +321,7 @@ class CumOp(COp):
         else:
             z[0] = np.cumprod(x, axis=self.axis)
 
-    def L_op(self, inputs, outputs, output_gradients):
+    def pullback(self, inputs, outputs, output_gradients):
         (x,) = inputs
         (gi,) = output_gradients
 
@@ -700,7 +700,7 @@ class Repeat(Op):
     def connection_pattern(self, node):
         return [[True], [False]]
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (x, repeats) = inputs
         (gz,) = gout
         axis = self.axis
@@ -854,7 +854,7 @@ class Bartlett(Op):
         M = ptb.switch(lt(temp, 0), ptb.cast(0, temp.dtype), temp)
         return [[M]]
 
-    def grad(self, inputs, output_grads):
+    def pullback(self, inputs, outputs, output_grads):
         return [None for i in inputs]
 
 
@@ -931,7 +931,7 @@ class FillDiagonal(Op):
 
         output_storage[0][0] = a
 
-    def grad(self, inp, cost_grad):
+    def pullback(self, inp, outputs, cost_grad):
         """
         Notes
         -----
@@ -1058,7 +1058,7 @@ class FillDiagonalOffset(Op):
 
         output_storage[0][0] = a
 
-    def grad(self, inp, cost_grad):
+    def pullback(self, inp, outputs, cost_grad):
         """
         Notes
         -----

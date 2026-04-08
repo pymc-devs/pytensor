@@ -8,7 +8,7 @@ from numpy.lib.array_utils import normalize_axis_tuple
 
 import pytensor.tensor.basic
 from pytensor.configdefaults import config
-from pytensor.gradient import DisconnectedType
+from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.null_type import NullType
 from pytensor.graph.replace import _vectorize_node, _vectorize_not_needed
@@ -267,12 +267,12 @@ class DimShuffle(ExternalCOp):
             rval.insert(augm, 1)
         return [rval]
 
-    def R_op(self, inputs, eval_points):
-        if None in eval_points:
-            return [None]
-        return self(*eval_points, return_list=True)
+    def pushforward(self, inputs, outputs, tangents):
+        if any(isinstance(t.type, DisconnectedType) for t in tangents):
+            return [disconnected_type()]
+        return self(*tangents, return_list=True)
 
-    def grad(self, inp, grads):
+    def pullback(self, inp, outputs, grads):
         (x,) = inp
         (gz,) = grads
         grad_order = ["x"] * x.type.ndim
@@ -481,9 +481,9 @@ class Elemwise(OpenMPOp):
             return self.name
         return str(self.scalar_op).capitalize()
 
-    def R_op(self, inputs, eval_points):
+    def pushforward(self, inputs, outputs, tangents):
         outs = self(*inputs, return_list=True)
-        rval = [None for x in outs]
+        rval = [disconnected_type() for x in outs]
         # For each output
         for idx, out in enumerate(outs):
             # make such that _bgrads computes only the gradients of the
@@ -494,9 +494,7 @@ class Elemwise(OpenMPOp):
             bgrads = self._bgrad(inputs, outs, ograds)
             rop_out = None
 
-            for jdx, (inp, eval_point) in enumerate(
-                zip(inputs, eval_points, strict=True)
-            ):
+            for jdx, (inp, eval_point) in enumerate(zip(inputs, tangents, strict=True)):
                 # if None, then we can just ignore this branch ..
                 # what we do is to assume that for any non-differentiable
                 # branch, the gradient is actually 0, which I think is not
@@ -507,13 +505,13 @@ class Elemwise(OpenMPOp):
                     bgrads[jdx].type, DisconnectedType
                 ):
                     pass
-                elif eval_point is not None:
+                elif not isinstance(eval_point.type, DisconnectedType):
                     if rop_out is None:
                         rop_out = bgrads[jdx] * eval_point
                     else:
                         rop_out = rop_out + bgrads[jdx] * eval_point
 
-            rval[idx] = rop_out
+            rval[idx] = disconnected_type() if rop_out is None else rop_out
 
         return rval
 
@@ -523,7 +521,7 @@ class Elemwise(OpenMPOp):
 
         return [[True for output in node.outputs] for ipt in node.inputs]
 
-    def L_op(self, inputs, outs, ograds):
+    def pullback(self, inputs, outs, ograds):
         from pytensor.tensor.math import sum as pt_sum
 
         # Compute grad with respect to broadcasted input
@@ -562,7 +560,7 @@ class Elemwise(OpenMPOp):
         scalar_outputs = self.scalar_op.make_node(
             *[get_scalar_type(dtype=i.type.dtype).make_variable() for i in inputs]
         ).outputs
-        scalar_igrads = self.scalar_op.L_op(
+        scalar_igrads = self.scalar_op.pullback(
             scalar_inputs, scalar_outputs, scalar_ograds
         )
         for igrad in scalar_igrads:

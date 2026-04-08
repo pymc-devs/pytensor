@@ -307,7 +307,7 @@ class CSMProperties(Op):
         out[2][0] = np.asarray(csm.indptr, dtype="int32")
         out[3][0] = np.asarray(csm.shape, dtype="int32")
 
-    def grad(self, inputs, g):
+    def pullback(self, inputs, outputs, g):
         # g[1:] is all integers, so their Jacobian in this op
         # is 0. We thus don't need to worry about what their values
         # are.
@@ -479,7 +479,7 @@ class CSM(Op):
     def connection_pattern(self, node):
         return [[True], [False], [False], [False]]
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (x_data, x_indices, x_indptr, x_shape) = inputs
         (g_out,) = gout
         g_data, g_indices, g_indptr, g_shape = csm_properties(g_out)
@@ -610,7 +610,7 @@ class Cast(Op):
         assert _is_sparse(x)
         out[0] = x.astype(self.out_type)
 
-    def grad(self, inputs, outputs_gradients):
+    def pullback(self, inputs, outputs, outputs_gradients):
         gz = outputs_gradients[0]
 
         if gz.dtype in complex_dtypes:
@@ -722,7 +722,7 @@ class DenseFromSparse(Op):
             out[0] = x.toarray()
         assert _is_dense(out[0])
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (x,) = inputs
         (gz,) = gout
         if self.sparse_grad:
@@ -797,7 +797,7 @@ class SparseFromDense(Op):
         (out,) = outputs
         out[0] = SparseTensorType.format_cls[self.format](x)
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (x,) = inputs
         (gz,) = gout
         gx = dense_from_sparse(gz)
@@ -850,7 +850,7 @@ class GetItemList(Op):
         assert _is_sparse(x)
         out[0] = x[indices]
 
-    def grad(self, inputs, g_outputs):
+    def pullback(self, inputs, outputs, g_outputs):
         x, indices = inputs
         (gout,) = g_outputs
         return [
@@ -942,7 +942,7 @@ class GetItem2Lists(Op):
         # which isn't what we want, so we convert it into an `ndarray`
         out[0] = np.asarray(x[ind1, ind2]).flatten()
 
-    def grad(self, inputs, g_outputs):
+    def pullback(self, inputs, outputs, g_outputs):
         x, ind1, ind2 = inputs
         (gout,) = g_outputs
         return [
@@ -1233,7 +1233,7 @@ class Transpose(Op):
         assert _is_sparse(x)
         out[0] = x.transpose()
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (x,) = inputs
         (gz,) = gout
         assert _is_sparse_variable(x) and _is_sparse_variable(gz)
@@ -1281,7 +1281,7 @@ class ColScaleCSC(Op):
 
         z[0] = y
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         from pytensor.sparse.math import sp_sum
 
         (x, s) = inputs
@@ -1332,7 +1332,7 @@ class RowScaleCSC(Op):
 
         z[0] = scipy.sparse.csc_matrix((y_data, indices, indptr), (M, N))
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         from pytensor.sparse.math import sp_sum
 
         (x, s) = inputs
@@ -1433,7 +1433,7 @@ class Diag(Op):
             raise ValueError("Diag only apply on square matrix")
         z[0] = x.diagonal()
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (_x,) = inputs
         (gz,) = gout
         return [square_diagonal(gz)]
@@ -1495,7 +1495,7 @@ class EnsureSortedIndices(Op):
         else:
             z[0] = x.sorted_indices()
 
-    def grad(self, inputs, output_grad):
+    def pullback(self, inputs, outputs, output_grad):
         return [output_grad[0]]
 
     def infer_shape(self, fgraph, node, i0_shapes):
@@ -1591,7 +1591,7 @@ class HStack(Stack):
         if out[0].dtype != self.dtype:
             out[0] = out[0].astype(self.dtype)
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (gz,) = gout
         is_continuous = [
             (inputs[i].dtype in tensor_continuous_dtypes) for i in range(len(inputs))
@@ -1688,7 +1688,7 @@ class VStack(Stack):
         if out[0].dtype != self.dtype:
             out[0] = out[0].astype(self.dtype)
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (gz,) = gout
         is_continuous = [
             (inputs[i].dtype in tensor_continuous_dtypes) for i in range(len(inputs))
@@ -1795,7 +1795,7 @@ class Remove0(Op):
         c.eliminate_zeros()
         z[0] = c
 
-    def grad(self, inputs, gout):
+    def pullback(self, inputs, outputs, gout):
         (_x,) = inputs
         (gz,) = gout
         return [gz]
@@ -1884,16 +1884,16 @@ class ConstructSparseFromList(Op):
         x = node.inputs[0]
         return [[x[0], x[1]]]
 
-    def R_op(self, inputs, eval_points):
-        if None in eval_points[:2]:
-            return [None]
+    def pushforward(self, inputs, outputs, eval_points):
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points[:2]):
+            return [disconnected_type()]
         return self.make_node(eval_points[0], eval_points[1], *inputs[2:]).outputs
 
     def connection_pattern(self, node):
         rval = [[True], [True], [False]]
         return rval
 
-    def grad(self, inputs, grads):
+    def pullback(self, inputs, outputs, grads):
         (g_output,) = grads
         _x, _y = inputs[:2]
         idx_list = inputs[2:]

@@ -47,7 +47,7 @@ class RFFTOp(Op):
         out[..., 0], out[..., 1] = np.real(A), np.imag(A)
         output_storage[0][0] = out
 
-    def grad(self, inputs, output_grads):
+    def pullback(self, inputs, outputs, output_grads):
         (gout,) = output_grads
         s = inputs[1]
         # Divide the last dimension of the output gradients by 2, they are
@@ -108,7 +108,7 @@ class IRFFTOp(Op):
         # Cast to input type (numpy outputs float64 by default)
         output_storage[0][0] = (out * s.prod()).astype(a.dtype)
 
-    def grad(self, inputs, output_grads):
+    def pullback(self, inputs, outputs, output_grads):
         (gout,) = output_grads
         s = inputs[1]
         gf = rfft_op(gout, s)
