@@ -18,7 +18,6 @@ from pytensor.gradient import (
 )
 from pytensor.graph.basic import equal_computations
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.null_type import NullType, null_type
 from pytensor.graph.rewriting.basic import MergeOptimizer
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.graph.utils import MissingInputError
@@ -31,7 +30,6 @@ from pytensor.tensor.random.utils import RandomStream
 from pytensor.tensor.rewriting.shape import ShapeOptimizer
 from pytensor.tensor.shape import specify_shape
 from pytensor.tensor.type import (
-    TensorType,
     dscalars,
     matrices,
     matrix,
@@ -112,16 +110,9 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
     def test_overrides_deprecated_api(self):
         inp = scalar("x")
         out = inp + 1
-        for kwarg in ("lop_overrides", "grad_overrides", "rop_overrides"):
-            with pytest.raises(
-                ValueError, match="'default' is no longer a valid value for overrides"
-            ):
-                OpFromGraph([inp], [out], **{kwarg: "default"})
-
-            with pytest.raises(
-                TypeError, match="Variables are no longer valid types for overrides"
-            ):
-                OpFromGraph([inp], [out], **{kwarg: null_type()})
+        for kwarg in ("lop_overrides", "rop_overrides"):
+            with pytest.warns(FutureWarning):
+                OpFromGraph([inp], [out], **{kwarg: lambda *args: [inp + 1]})
 
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
@@ -196,85 +187,6 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         f = f - grad(pt_sum(f), s)
         fn = function([x, y, z], f)
         np.testing.assert_array_almost_equal(15.0 + s.get_value(), fn(xv, yv, zv), 4)
-
-    @pytest.mark.parametrize(
-        "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
-    )
-    def test_grad_override(self, cls_ofg):
-        x, y = vectors("xy")
-
-        def go(inps, gs):
-            x, y = inps
-            (g,) = gs
-            return [g * y * 2, g * x * 1.5]
-
-        dedz = vector("dedz")
-        op_mul_grad = cls_ofg([x, y, dedz], go([x, y], [dedz]))
-
-        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
-            op_mul = cls_ofg([x, y], [x * y], grad_overrides=go)
-            op_mul2 = cls_ofg([x, y], [x * y], grad_overrides=op_mul_grad)
-
-        # single override case (function or OfG instance)
-        xx, yy = vector("xx"), vector("yy")
-        for op in [op_mul, op_mul2]:
-            zz = pt_sum(op(xx, yy))
-            dx, dy = grad(zz, [xx, yy])
-            fn = function([xx, yy], [dx, dy])
-            xv = np.random.random((16,)).astype(config.floatX)
-            yv = np.random.random((16,)).astype(config.floatX)
-            dxv, dyv = fn(xv, yv)
-            np.testing.assert_array_almost_equal(yv * 2, dxv, 4)
-            np.testing.assert_array_almost_equal(xv * 1.5, dyv, 4)
-
-        # list override case
-        def go1(inps, gs):
-            _x, w, _b = inps
-            g = gs[0]
-            return g * w * 2
-
-        def go2(inps, gs):
-            x, _w, _b = inps
-            g = gs[0]
-            return g * x * 1.5
-
-        w, b = vectors("wb")
-        # we make the 3rd gradient default (no override)
-        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
-            op_linear = cls_ofg([x, w, b], [x * w + b], grad_overrides=[go1, go2, None])
-        xx, ww, bb = vector("xx"), vector("yy"), vector("bb")
-        zz = pt_sum(op_linear(xx, ww, bb))
-        dx, dw, db = grad(zz, [xx, ww, bb])
-        fn = function([xx, ww, bb], [dx, dw, db])
-        xv = np.random.random((16,)).astype(config.floatX)
-        wv = np.random.random((16,)).astype(config.floatX)
-        bv = np.random.random((16,)).astype(config.floatX)
-        dxv, dwv, dbv = fn(xv, wv, bv)
-        np.testing.assert_array_almost_equal(wv * 2, dxv, 4)
-        np.testing.assert_array_almost_equal(xv * 1.5, dwv, 4)
-        np.testing.assert_array_almost_equal(np.ones(16, dtype=config.floatX), dbv, 4)
-
-        # NullType and DisconnectedType
-        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
-            op_linear2 = cls_ofg(
-                [x, w, b],
-                [x * w + b],
-                grad_overrides=[go1, NullType()(), DisconnectedType()()],
-                # This is a fake override, so a fake connection_pattern must be provided as well
-                connection_pattern=[[True], [True], [False]],
-            )
-        zz2 = pt_sum(op_linear2(xx, ww, bb))
-        dx2, dw2, db2 = grad(
-            zz2,
-            [xx, ww, bb],
-            return_disconnected="Disconnected",
-            disconnected_inputs="ignore",
-            null_gradients="return",
-        )
-        assert isinstance(dx2.type, TensorType)
-        assert dx2.ndim == 1
-        assert isinstance(dw2.type, NullType)
-        assert isinstance(db2.type, DisconnectedType)
 
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
@@ -420,17 +332,16 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             # and we don't care about the gradient wrt y.
             return y + pt_round(y)
 
-        def f1_back(inputs, output_gradients):
+        def f1_back(inputs, outputs, output_gradients):
             return [output_gradients[0], disconnected_type()]
 
-        with pytest.warns(FutureWarning, match="grad_overrides is deprecated"):
-            op = cls_ofg(
-                inputs=[x, y],
-                outputs=[f1(x, y)],
-                grad_overrides=f1_back,
-                connection_pattern=[[True], [False]],
-                on_unused_input="ignore",
-            )
+        op = cls_ofg(
+            inputs=[x, y],
+            outputs=[f1(x, y)],
+            lop_overrides=f1_back,
+            connection_pattern=[[True], [False]],
+            on_unused_input="ignore",
+        )
 
         c = op(x, y)
 
