@@ -763,8 +763,8 @@ If you want to see it fail, you can implement an incorrect gradient
 Testing the pushforward
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The class :class:`RopLopChecker` defines the methods
-:meth:`RopLopChecker.check_mat_rop_lop`, :meth:`RopLopChecker.check_rop_lop` and :meth:`RopLopChecker.check_nondiff_rop`.
+The class :class:`PushforwardPullbackChecker` defines the methods
+:meth:`PushforwardPullbackChecker.check_mat_pushforward_pullback`, :meth:`PushforwardPullbackChecker.check_pushforward_pullback` and :meth:`PushforwardPullbackChecker.check_nondiff_pushforward`.
 These allow to test the implementation of the :meth:`pushforward` method of a particular :class:`Op`.
 
 For instance, to verify the :meth:`pushforward` method of the ``DoubleOp``, you can use this:
@@ -773,12 +773,12 @@ For instance, to verify the :meth:`pushforward` method of the ``DoubleOp``, you 
 
    import numpy
    import tests
-   from tests.test_rop import RopLopChecker
+   from tests.test_rop import PushforwardPullbackChecker
 
-   class TestDoubleOpRop(RopLopChecker):
+   class TestDoubleOpPushforward(PushforwardPullbackChecker):
 
-       def test_double_rop(self):
-           self.check_rop_lop(DoubleOp()(self.x), self.in_shape)
+       def test_double_pushforward(self):
+           self.check_pushforward_pullback(DoubleOp()(self.x), self.in_shape)
 
 
 Running Your Tests

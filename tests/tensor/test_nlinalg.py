@@ -118,7 +118,7 @@ class TestMatrixInverse(utt.InferShapeTester):
 
         self._compile_and_check([x], [xi], [r], self.op_class, warn=False)
 
-    def test_rop_lop(self):
+    def test_pushforward_pullback(self):
         rtol = 1e-7 if config.floatX == "float64" else 1e-5
         mx = matrix("mx")
         mv = matrix("mv")
@@ -126,10 +126,10 @@ class TestMatrixInverse(utt.InferShapeTester):
         y = MatrixInverse()(mx).sum(axis=0)
 
         yv = pytensor.gradient.pushforward(y, mx, mv, use_op_pushforward=True)
-        rop_f = function([mx, mv], yv)
+        pushforward_f = function([mx, mv], yv)
 
         yv_via_lop = pytensor.gradient.pushforward(y, mx, mv, use_op_pushforward=False)
-        rop_via_lop_f = function([mx, mv], yv_via_lop)
+        pushforward_via_pullback_f = function([mx, mv], yv_via_lop)
 
         sy, _ = pytensor.scan(
             lambda i, y, x, v: (pytensor.gradient.grad(y[i], x) * v).sum(),
@@ -143,8 +143,8 @@ class TestMatrixInverse(utt.InferShapeTester):
         vv = np.asarray(rng.standard_normal((4, 4)), pytensor.config.floatX)
 
         v_ref = scan_f(vx, vv)
-        np.testing.assert_allclose(rop_f(vx, vv), v_ref, rtol=rtol)
-        np.testing.assert_allclose(rop_via_lop_f(vx, vv), v_ref, rtol=rtol)
+        np.testing.assert_allclose(pushforward_f(vx, vv), v_ref, rtol=rtol)
+        np.testing.assert_allclose(pushforward_via_pullback_f(vx, vv), v_ref, rtol=rtol)
 
         with pytest.raises(ValueError):
             pytensor.gradient.pushforward(
@@ -156,13 +156,13 @@ class TestMatrixInverse(utt.InferShapeTester):
 
         vv = np.asarray(rng.uniform(size=(4,)), pytensor.config.floatX)
         yv = pytensor.gradient.pullback(y, mx, v)
-        lop_f = function([mx, v], yv)
+        pullback_f = function([mx, v], yv)
 
         sy = pytensor.gradient.grad((v * y).sum(), mx)
         scan_f = function([mx, v], sy)
 
         v_ref = scan_f(vx, vv)
-        v = lop_f(vx, vv)
+        v = pullback_f(vx, vv)
         np.testing.assert_allclose(v, v_ref, rtol=rtol)
 
 
