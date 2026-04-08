@@ -192,11 +192,11 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
     )
     @pytest.mark.parametrize("use_deprecated_name", [False, True])
-    def test_lop_override(self, cls_ofg, use_deprecated_name):
+    def test_pullback_override(self, cls_ofg, use_deprecated_name):
         x = vector()
         y = 1.0 / (1.0 + exp(-x))
 
-        def lop_ov(inps, outs, grads):
+        def pullback_ov(inps, outs, grads):
             (y_,) = outs
             (dedy_,) = grads
             return [2.0 * y_ * (1.0 - y_) * dedy_]
@@ -208,7 +208,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         yy1 = pt_sum(sigmoid(xx))
         gyy1 = 2.0 * grad(yy1, xx)
 
-        for ov in [lop_ov, op_lop_ov]:
+        for ov in [pullback_ov, op_lop_ov]:
             if use_deprecated_name:
                 with pytest.warns(FutureWarning, match="lop_overrides is deprecated"):
                     op = cls_ofg([x], [y], lop_overrides=ov)
@@ -226,7 +226,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
     )
     @pytest.mark.parametrize("use_op_pushforward", [True, False])
-    def test_rop(self, cls_ofg, use_op_pushforward):
+    def test_pushforward(self, cls_ofg, use_op_pushforward):
         a = vector()
         M = matrix()
         b = dot(a, M)
@@ -245,7 +245,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         np.testing.assert_array_almost_equal(dvval2, dvval, 4)
 
     @pytest.mark.parametrize("use_op_pushforward", [True, False])
-    def test_rop_multiple_outputs(self, use_op_pushforward):
+    def test_pushforward_multiple_outputs(self, use_op_pushforward):
         a = vector()
         M = matrix()
         b = dot(a, M)
@@ -293,7 +293,9 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         ],
     )
     @pytest.mark.parametrize("use_deprecated_name", [False, True])
-    def test_rop_override(self, cls_ofg, use_op_pushforward, use_deprecated_name):
+    def test_pushforward_override(
+        self, cls_ofg, use_op_pushforward, use_deprecated_name
+    ):
         x, y = vectors("xy")
 
         def ro(inps, epts):
@@ -581,7 +583,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         out = test_ofg(y, y)
         assert out.eval() == 4
 
-    def test_L_op_disconnected_output_grad(self):
+    def test_pullback_disconnected_output_grad(self):
         x, y = dscalars("x", "y")
         rng = np.random.default_rng(594)
         point = list(rng.normal(size=(2,)))

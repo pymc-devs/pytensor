@@ -810,7 +810,7 @@ class TestZeroGrad:
 
             assert np.allclose(f(a), f2(a))
 
-    def test_rop(self):
+    def test_pushforward(self):
         x = vector()
         v = vector()
         y = zero_grad(x)
@@ -1183,7 +1183,7 @@ class TestHessianVectorProduct:
         np.testing.assert_allclose(hessp_y_eval, [-6, -4, -2])
 
 
-def test_scalar_Lop():
+def test_scalar_pullback():
     xtm1 = float64("xtm1")
     xt = xtm1**2
 
