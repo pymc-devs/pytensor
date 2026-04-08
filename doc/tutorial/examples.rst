@@ -46,8 +46,8 @@ Well, what you do is this:
 >>> s = 1 / (1 + pt.exp(-x))
 >>> logistic = pytensor.function([x], s)
 >>> logistic([[0, 1], [-1, -2]])
-array([[ 0.5       ,  0.73105858],
-       [ 0.26894142,  0.11920292]])
+array([[0.5       , 0.73105858],
+       [0.26894142, 0.11920292]])
 
 The reason the logistic is applied element-wise is because all of its
 operations--division, addition, exponentiation, and division--are
@@ -67,8 +67,8 @@ We can verify that this alternate form produces the same values:
 >>> s2 = (1 + pt.tanh(x / 2)) / 2
 >>> logistic2 = pytensor.function([x], s2)
 >>> logistic2([[0, 1], [-1, -2]])
-array([[ 0.5       ,  0.73105858],
-       [ 0.26894142,  0.11920292]])
+array([[0.5       , 0.73105858],
+       [0.26894142, 0.11920292]])
 
 
 Computing More than one Thing at the Same Time
@@ -97,9 +97,9 @@ was reformatted for readability):
 
 >>> f([[1, 1], [1, 1]], [[0, 1], [2, 3]])
 [array([[ 1.,  0.],
-       [-1., -2.]]), array([[ 1.,  0.],
-       [ 1.,  2.]]), array([[ 1.,  0.],
-       [ 1.,  4.]])]
+       [-1., -2.]]), array([[1., 0.],
+       [1., 2.]]), array([[1., 0.],
+       [1., 4.]])]
 
 
 Setting a Default Value for an Argument
@@ -118,9 +118,9 @@ one. You can do it like this:
 >>> z = x + y
 >>> f = function([x, In(y, value=1)], z)
 >>> f(33)
-array(34.0)
+array(34.)
 >>> f(33, 2)
-array(35.0)
+array(35.)
 
 This makes use of the :ref:`In <function_inputs>` class which allows
 you to specify properties of your function's parameters with greater detail. Here we
@@ -139,15 +139,15 @@ parameters can be set positionally or by name, as in standard Python:
 >>> z = (x + y) * w
 >>> f = function([x, In(y, value=1), In(w, value=2, name='w_by_name')], z)
 >>> f(33)
-array(68.0)
+array(68.)
 >>> f(33, 2)
-array(70.0)
+array(70.)
 >>> f(33, 0, 1)
-array(33.0)
+array(33.)
 >>> f(33, w_by_name=1)
-array(34.0)
+array(34.)
 >>> f(33, w_by_name=1, y=0)
-array(33.0)
+array(33.)
 
 .. note::
    `In` does not know the name of the local variables ``y`` and ``w``
@@ -316,7 +316,7 @@ using the ``swap`` parameter, which is a dictionary of shared variables to excha
 >>> new_state = pytensor.shared(0)
 >>> new_accumulator = accumulator.copy(swap={state:new_state})
 >>> new_accumulator(100)
-[array(0)]
+array(0)
 >>> print(new_state.get_value())
 100
 
@@ -333,11 +333,12 @@ parameter, which is set to ``False`` by default:
 As expected, the shared state is no longer updated:
 
 >>> null_accumulator(9000)
-[array(10)]
+array(10)
 >>> print(state.get_value())
 10
 
 .. _using_random_numbers:
+
 
 Using Random Numbers
 ====================
@@ -347,100 +348,56 @@ afterwards compile this expression to get functions,
 using pseudo-random numbers is not as straightforward as it is in
 NumPy, though also not too complicated.
 
-The general user-facing API is documented in :ref:`RandomStream<libdoc_tensor_random_basic>`
-
+The API is documented in :ref:`pytensor.tensor.random<libdoc_tensor_random>`.
 For a more technical explanation of how PyTensor implements random variables see :ref:`prng`.
 
 
 Brief Example
 -------------
 
-Here's a brief example.  The setup code is:
+Here's a brief example. We create a shared RNG, draw from two distributions,
+and compile a function with update rules so the RNG state advances between calls:
 
 .. If you modify this code, also change :
 .. tests/test_tutorial.py:T_examples.test_examples_9
 
 .. testcode::
 
-    from pytensor.tensor.random.utils import RandomStream
-    from pytensor import function
+    import numpy as np
+    import pytensor
+    import pytensor.tensor as pt
 
+    rng = pt.random.shared_rng(seed=123)
+    next_rng, rv_u = rng.uniform(0, 1, size=(2, 2))
+    final_rng, rv_n = next_rng.normal(0, 1, size=(2, 2))
 
-    srng = RandomStream(seed=234)
-    rv_u = srng.uniform(0, 1, size=(2,2))
-    rv_n = srng.normal(0, 1, size=(2,2))
-    f = function([], rv_u)
-    g = function([], rv_n, no_default_updates=True)
-    nearly_zeros = function([], rv_u + rv_u - 2 * rv_u)
+    f = pytensor.function([], [rv_u, rv_n], updates={rng: final_rng})
 
-Here, ``rv_u`` represents a random stream of 2x2 matrices of draws from a uniform
-distribution.  Likewise,  ``rv_n`` represents a random stream of 2x2 matrices of
-draws from a normal distribution.  The distributions that are implemented are
-defined as :class:`RandomVariable`\s
-in :ref:`basic<libdoc_tensor_random_basic>`. They only work on CPU.
+Here, ``rv_u`` represents a 2x2 matrix of draws from a uniform
+distribution and ``rv_n`` a 2x2 matrix of draws from a normal distribution.
+Note how we thread ``next_rng`` into the second draw to ensure each gets a different RNG state.
+The ``updates`` dictionary tells the function to update the shared RNG with the
+final state after each call, so subsequent calls produce different numbers.
 
+Reseeding
+---------
 
-Now let's use these objects.  If we call ``f()``, we get random uniform numbers.
-The internal state of the random number generator is automatically updated,
-so we get different random numbers every time.
+You can reseed a shared RNG by setting its value to a fresh generator or seed:
 
->>> f_val0 = f()
->>> f_val1 = f()  #different numbers from f_val0
+.. testcode::
 
-When we add the extra argument ``no_default_updates=True`` to
-``function`` (as in ``g``), then the random number generator state is
-not affected by calling the returned function.  So, for example, calling
-``g`` multiple times will return the same numbers.
+    rng.set_value(np.random.default_rng(42))
+    # Or equivalently
+    rng.set_value(seed=42)
 
->>> g_val0 = g()  # different numbers from f_val0 and f_val1
->>> g_val1 = g()  # same numbers as g_val0!
-
-An important remark is that a random variable is drawn at most once during any
-single function execution.  So the `nearly_zeros` function is guaranteed to
-return approximately 0 (except for rounding error) even though the ``rv_u``
-random variable appears three times in the output expression.
-
->>> nearly_zeros = function([], rv_u + rv_u - 2 * rv_u)
-
-Seeding Streams
----------------
-
-You can seed all of the random variables allocated by a :class:`RandomStream`
-object by that object's :meth:`RandomStream.seed` method.  This seed will be used to seed a
-temporary random number generator, that will in turn generate seeds for each
-of the random variables.
-
->>> srng.seed(902340)  # seeds rv_u and rv_n with different seeds each
-
-Sharing Streams Between Functions
----------------------------------
-
-As usual for shared variables, the random number generators used for random
-variables are common between functions.  So our ``nearly_zeros`` function will
-update the state of the generators used in function ``f`` above.
-
-Copying Random State Between PyTensor Graphs
---------------------------------------------
-
-In some use cases, a user might want to transfer the "state" of all random
-number generators associated with a given PyTensor graph (e.g. ``g1``, with compiled
-function ``f1`` below) to a second graph (e.g. ``g2``, with function ``f2``). This might
-arise for example if you are trying to initialize the state of a model, from
-the parameters of a pickled version of a previous model. For
-:class:`pytensor.tensor.random.utils.RandomStream` and
-:class:`pytensor.sandbox.rng_mrg.MRG_RandomStream`
-this can be achieved by copying elements of the `state_updates` parameter.
-
-Each time a random variable is drawn from a `RandomStream` object, a tuple is
-added to its :attr:`state_updates` list. The first element is a shared variable,
-which represents the state of the random number generator associated with this
-*particular* variable, while the second represents the PyTensor graph
-corresponding to the random number generation process.
+This resets the RNG state so subsequent calls to ``f()``
+will produce a new deterministic sequence.
 
 Other Random Distributions
 --------------------------
 
-There are :ref:`other distributions implemented <libdoc_tensor_random_basic>`.
+There are :ref:`many distributions available <libdoc_tensor_random>`
+as methods on RNG variables (e.g. ``rng.normal()``, ``rng.uniform()``).
 
 
 .. _logistic_regression:
