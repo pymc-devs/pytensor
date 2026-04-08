@@ -143,6 +143,9 @@ def as_xrv(
             return next_rng, out
         return out
 
+    xrv_constructor.__name__ = name or core_op.name
+    xrv_constructor.__qualname__ = name or core_op.name
+    xrv_constructor.__doc__ = core_op.__doc__
     return xrv_constructor
 
 

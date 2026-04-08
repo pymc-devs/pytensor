@@ -269,28 +269,36 @@ the following:
     bvis = pytensor.shared(bvis_values)
     bhid = pytensor.shared(bhid_values)
 
-    srng = pt.random.RandomStream(1234)
+    rng = pt.random.shared_rng(seed=1234, name="rng_h")
 
-    def one_step(vsample):
+    def one_step(rng, vsample):
         hmean = pt.sigmoid(pt.dot(vsample, W) + bhid)
-        hsample = srng.binomial(1, hmean, size=hmean.shape)
+        next_rng, hsample = rng.binomial(1, hmean, size=hmean.shape)
         vmean = pt.sigmoid(pt.dot(hsample, W.T) + bvis)
+        next_rng, vsample = next_rng.binomial(1, vmean, size=vsample.shape)
 
-        return srng.binomial(1, vmean, size=vsample.shape)
+        return next_rng, vsample
 
     sample = pt.lvector()
 
-    values, updates = pytensor.scan(one_step, outputs_info=sample, n_steps=10)
+    final_rng, values = pytensor.scan(
+        one_step,
+        outputs_info=[rng, sample],
+        n_steps=10,
+        return_updates=False,
+    )
 
-    gibbs10 = pytensor.function([sample], values[-1], updates=updates)
+    gibbs10 = pytensor.function(
+        [sample], values[-1],
+        updates={rng: final_rng},
+    )
 
 The first, and probably most crucial observation is that the updates
 dictionary becomes important in this case. It links a shared variable
 with its updated value after k steps. In this case it tells how the
-random streams get updated after 10 iterations. If you do not pass this
+random generators get updated after 10 iterations. If you do not pass this
 update dictionary to your function, you will always get the same 10
-sets of random numbers. You can even use the ``updates`` dictionary
-afterwards. Look at this example :
+sets of random numbers. Look at this example :
 
 .. testsetup:: scan2
 
@@ -349,25 +357,30 @@ updated:
     bvis = pytensor.shared(bvis_values)
     bhid = pytensor.shared(bhid_values)
 
-    trng = pytensor.tensor.random.utils.RandomStream(1234)
+    rng = pt.random.shared_rng(seed=1234, name="rng")
 
     # OneStep, with explicit use of the shared variables (W, bvis, bhid)
-    def OneStep(vsample, W, bvis, bhid):
+    def OneStep(rng, vsample, W, bvis, bhid):
         hmean = pt.sigmoid(pytensor.dot(vsample, W) + bhid)
-        hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
+        next_rng, hsample = rng.binomial(n=1, p=hmean, size=hmean.shape)
         vmean = pt.sigmoid(pytensor.dot(hsample, W.T) + bvis)
-        return trng.binomial(size=vsample.shape, n=1, p=vmean,
-                         dtype=pytensor.config.floatX)
+        next_rng, vsample = next_rng.binomial(n=1, p=vmean, size=vsample.shape)
+        return next_rng, vsample,
 
     sample = pytensor.tensor.vector()
 
     # The new scan, with the shared variables passed as non_sequences
-    values, updates = pytensor.scan(fn=OneStep,
-                                  outputs_info=sample,
-                                  non_sequences=[W, bvis, bhid],
-                                  n_steps=10)
+    final_rng, values = pytensor.scan(
+        fn=OneStep,
+        outputs_info=[rng, sample],
+        non_sequences=[W, bvis, bhid],
+        n_steps=10,
+        return_updates=False,
+    )
 
-    gibbs10 = pytensor.function([sample], values[-1], updates=updates)
+    gibbs10 = pytensor.function(
+        [sample], values[-1],
+        updates={rng: final_rng})
 
 
 .. _lib_scan_strict:
@@ -387,19 +400,22 @@ Using the original Gibbs sampling example, with ``strict=True`` added to the
 
 .. testcode:: scan1
 
-    # Same OneStep as in original example.
-    def OneStep(vsample) :
+    # Same OneStep as in original example, but without explicit non_sequences.
+    def OneStep(rng, vsample) :
         hmean = pt.sigmoid(pytensor.dot(vsample, W) + bhid)
-        hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
+        next_rng, hsample = rng.binomial(n=1, p=hmean, size=hmean.shape)
         vmean = pt.sigmoid(pytensor.dot(hsample, W.T) + bvis)
-        return trng.binomial(size=vsample.shape, n=1, p=vmean,
-                             dtype=pytensor.config.floatX)
+        next_rng, vsample = next_rng.binomial(n=1, p=vmean, size=vsample.shape)
+        return next_rng, vsample
 
     # The new scan, adding strict=True to the original call.
-    values, updates = pytensor.scan(OneStep,
-                                  outputs_info=sample,
-                                  n_steps=10,
-                                  strict=True)
+    final_rng, values, = pytensor.scan(
+        OneStep,
+        outputs_info=[rng, sample],
+        n_steps=10,
+        strict=True,
+        return_updates=False,
+    )
 
 .. testoutput:: scan1
 
@@ -417,20 +433,23 @@ variables passed explicitly to ``OneStep`` and to scan:
 .. testcode:: scan1
 
     # OneStep, with explicit use of the shared variables (W, bvis, bhid)
-    def OneStep(vsample, W, bvis, bhid) :
+    def OneStep(rng, vsample, W, bvis, bhid) :
         hmean = pt.sigmoid(pytensor.dot(vsample, W) + bhid)
-        hsample = trng.binomial(size=hmean.shape, n=1, p=hmean)
+        next_rng, hsample = rng.binomial(n=1, p=hmean, size=hmean.shape)
         vmean = pt.sigmoid(pytensor.dot(hsample, W.T) + bvis)
-        return trng.binomial(size=vsample.shape, n=1, p=vmean,
-                             dtype=pytensor.config.floatX)
+        next_rng, vsample = next_rng.binomial(n=1, p=vmean, size=vsample.shape)
+        return next_rng, vsample
 
     # The new scan, adding strict=True to the original call, and passing
-    # explicitly W, bvis and bhid.
-    values, updates = pytensor.scan(OneStep,
-                                  outputs_info=sample,
-                                  non_sequences=[W, bvis, bhid],
-                                  n_steps=10,
-                                  strict=True)
+    # explicitly W, bvis, and bhid as non-sequences.
+    final_rng, values = pytensor.scan(
+        OneStep,
+        outputs_info=[rng, sample],
+        non_sequences=[W, bvis, bhid],
+        n_steps=10,
+        strict=True,
+        return_updates=False,
+    )
 
 
 Multiple outputs, several taps values - Recurrent Neural Network with Scan

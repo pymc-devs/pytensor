@@ -327,13 +327,14 @@ Note that we need to iterate over the indices of ``y`` and not over the elements
   W = pt.matrix("W")
   b_sym = pt.vector("b_sym")
 
-  # define shared random stream
-  trng = pytensor.tensor.random.utils.RandomStream(1234)
-  d=trng.binomial(size=W[1].shape)
+  # define shared random generator
+  rng = pt.random.shared_rng(seed=1234)
+  next_rng, d = rng.binomial(n=1, p=0.5, size=W[1].shape)
 
-  results, updates = pytensor.scan(lambda v: pt.tanh(pt.dot(v, W) + b_sym) * d, sequences=X)
+  results = pytensor.scan(lambda v: pt.tanh(pt.dot(v, W) + b_sym) * d,
+                          sequences=X, return_updates=False)
   compute_with_bnoise = pytensor.function(inputs=[X, W, b_sym], outputs=results,
-                            updates=updates, allow_input_downcast=True)
+                            updates={rng: next_rng}, allow_input_downcast=True)
   x = np.eye(10, 2, dtype=pytensor.config.floatX)
   w = np.ones((2, 2), dtype=pytensor.config.floatX)
   b = np.ones((2), dtype=pytensor.config.floatX)
@@ -342,16 +343,16 @@ Note that we need to iterate over the indices of ``y`` and not over the elements
 
 .. testoutput::
 
-    [[ 0.96402758  0.        ]
-     [ 0.          0.96402758]
-     [ 0.          0.        ]
-     [ 0.76159416  0.76159416]
-     [ 0.76159416  0.        ]
-     [ 0.          0.76159416]
-     [ 0.          0.76159416]
-     [ 0.          0.76159416]
-     [ 0.          0.        ]
-     [ 0.76159416  0.76159416]]
+    [[0.96402758 0.        ]
+     [0.96402758 0.        ]
+     [0.76159416 0.        ]
+     [0.76159416 0.        ]
+     [0.76159416 0.        ]
+     [0.76159416 0.        ]
+     [0.76159416 0.        ]
+     [0.76159416 0.        ]
+     [0.76159416 0.        ]
+     [0.76159416 0.        ]]
 
 Note that if you want to use a random variable ``d`` that will not be updated through scan loops, you should pass this variable as a ``non_sequences`` arguments.
 

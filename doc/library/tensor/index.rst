@@ -19,7 +19,7 @@ symbolic expressions using calls that look just like numpy calls, such as
     :maxdepth: 1
 
     basic
-    random/index
+    random
     utils
     elemwise
     extra_ops
