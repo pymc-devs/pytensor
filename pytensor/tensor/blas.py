@@ -96,6 +96,7 @@ except ImportError:
 
 import pytensor.scalar
 from pytensor.configdefaults import config
+from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.graph.utils import InconsistencyError, MethodNotDefined
@@ -1597,7 +1598,7 @@ class BatchedDot(COp):
 
         return (6, blas_header_version())
 
-    def grad(self, inp, grads):
+    def pullback(self, inp, outputs, grads):
         x, y = inp
         (gz,) = grads
 
@@ -1619,23 +1620,24 @@ class BatchedDot(COp):
 
         return xgrad, ygrad
 
-    def R_op(self, inputs, eval_points):
-        # R_op for batched_dot(a, b) evaluated at c for a and d for b is
-        # simply batched_dot(c, b) + batched_dot(a, d)
-
+    def pushforward(self, inputs, outputs, eval_points):
         assert len(inputs) == 2
         assert len(eval_points) == 2
-        if eval_points[0] is None and eval_points[1] is None:
-            return [None]
+        if isinstance(eval_points[0].type, DisconnectedType) and isinstance(
+            eval_points[1].type, DisconnectedType
+        ):
+            return [disconnected_type()]
 
-        if eval_points[0]:
+        if not isinstance(eval_points[0].type, DisconnectedType):
             t1 = self(eval_points[0], inputs[1])
-        if eval_points[1]:
+        if not isinstance(eval_points[1].type, DisconnectedType):
             t2 = self(inputs[0], eval_points[1])
 
-        if eval_points[0] and eval_points[1]:
+        if not isinstance(eval_points[0].type, DisconnectedType) and not isinstance(
+            eval_points[1].type, DisconnectedType
+        ):
             return [t1 + t2]
-        elif eval_points[0]:
+        elif not isinstance(eval_points[0].type, DisconnectedType):
             return [t1]
         else:
             return [t2]

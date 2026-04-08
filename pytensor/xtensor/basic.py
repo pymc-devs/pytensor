@@ -48,7 +48,7 @@ class TensorFromXTensor(XTypeCastOp):
         output = TensorType(x.type.dtype, shape=x.type.shape)()
         return Apply(self, [x], [output])
 
-    def L_op(self, inputs, outs, g_outs):
+    def pullback(self, inputs, outs, g_outs):
         [x] = inputs
         [g_out] = g_outs
         return [xtensor_from_tensor(g_out, dims=x.type.dims)]
@@ -81,7 +81,7 @@ class XTensorFromTensor(XTypeCastOp):
         output = xtensor(dtype=x.type.dtype, dims=self.dims, shape=x.type.shape)
         return Apply(self, [x], [output])
 
-    def L_op(self, inputs, outs, g_outs):
+    def pullback(self, inputs, outs, g_outs):
         [g_out] = g_outs
         return [tensor_from_xtensor(g_out)]
 
@@ -114,7 +114,7 @@ class Rename(XTypeCastOp):
         output = x.type.clone(dims=self.new_dims)()
         return Apply(self, [x], [output])
 
-    def L_op(self, inputs, outs, g_outs):
+    def pullback(self, inputs, outs, g_outs):
         [x] = inputs
         [g_out] = g_outs
         return [rename(g_out, dims=x.type.dims)]

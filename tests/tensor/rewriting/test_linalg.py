@@ -117,10 +117,10 @@ def test_matrix_inverse_rop_lop():
     v = vector("v")
     y = MatrixInverse()(mx).sum(axis=0)
 
-    yv = pytensor.gradient.Rop(y, mx, mv, use_op_rop_implementation=True)
+    yv = pytensor.gradient.pushforward(y, mx, mv, use_op_pushforward=True)
     rop_f = function([mx, mv], yv)
 
-    yv_via_lop = pytensor.gradient.Rop(y, mx, mv, use_op_rop_implementation=False)
+    yv_via_lop = pytensor.gradient.pushforward(y, mx, mv, use_op_pushforward=False)
     rop_via_lop_f = function([mx, mv], yv_via_lop)
 
     sy, _ = pytensor.scan(
@@ -139,15 +139,15 @@ def test_matrix_inverse_rop_lop():
     np.testing.assert_allclose(rop_via_lop_f(vx, vv), v_ref, rtol=rtol)
 
     with pytest.raises(ValueError):
-        pytensor.gradient.Rop(
+        pytensor.gradient.pushforward(
             clone_replace(y, replace={mx: break_op(mx)}),
             mx,
             mv,
-            use_op_rop_implementation=True,
+            use_op_pushforward=True,
         )
 
     vv = np.asarray(rng.uniform(size=(4,)), pytensor.config.floatX)
-    yv = pytensor.gradient.Lop(y, mx, v)
+    yv = pytensor.gradient.pullback(y, mx, v)
     lop_f = function([mx, v], yv)
 
     sy = pytensor.gradient.grad((v * y).sum(), mx)

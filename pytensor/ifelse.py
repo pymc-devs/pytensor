@@ -241,10 +241,10 @@ class IfElse(_NoPythonOp):
             output_vars,
         )
 
-    def R_op(self, inputs, eval_points):
+    def pushforward(self, inputs, outputs, eval_points):
         return self(inputs[0], *eval_points[1:], return_list=True)
 
-    def grad(self, ins, grads):
+    def pullback(self, ins, outputs, grads):
         condition = ins[0]
         inputs_true_branch = ins[1:][: self.n_outs]
         inputs_false_branch = ins[1:][self.n_outs :]

@@ -88,7 +88,7 @@ class CheckAndRaise(COp):
         if not all(conds):
             raise self.exc_type(self.msg)
 
-    def grad(self, input, output_gradients):
+    def pullback(self, input, outputs, output_gradients):
         return [
             *output_gradients,
             *(disconnected_type() for _ in range(len(input) - 1)),

@@ -127,7 +127,7 @@ class Fourier(Op):
         axis = inputs[2]
         output_storage[0][0] = np.fft.fft(a, n=int(n), axis=axis.item())
 
-    def grad(self, inputs, cost_grad):
+    def pullback(self, inputs, outputs, cost_grad):
         """
         In defining the gradient, the Finite Fourier Transform is viewed as
         a complex-differentiable function of a complex variable

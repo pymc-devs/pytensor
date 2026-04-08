@@ -25,6 +25,8 @@ def test_root_module_not_polluted():
         "grad",
         "ifelse",
         "map",
+        "pullback",
+        "pushforward",
         "scan",
         "shared",
         "wrap_jax",

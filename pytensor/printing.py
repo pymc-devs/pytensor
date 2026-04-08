@@ -805,10 +805,10 @@ class Print(Op):
         xout[0] = xin
         self.global_fn(self, xin)
 
-    def grad(self, input, output_gradients):
+    def pullback(self, input, outputs, output_gradients):
         return output_gradients
 
-    def R_op(self, inputs, eval_points):
+    def pushforward(self, inputs, outputs, eval_points):
         return list(eval_points)
 
     def __setstate__(self, dct):
