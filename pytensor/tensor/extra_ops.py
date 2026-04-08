@@ -44,7 +44,7 @@ from pytensor.tensor.math import max as pt_max
 from pytensor.tensor.math import sum as pt_sum
 from pytensor.tensor.shape import Shape_i
 from pytensor.tensor.subtensor import advanced_inc_subtensor1, set_subtensor
-from pytensor.tensor.type import TensorType, dvector, int_dtypes, integer_dtypes
+from pytensor.tensor.type import TensorType, int_dtypes, integer_dtypes
 from pytensor.tensor.utils import normalize_reduce_axis
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import LOCAL_BITWIDTH, PYTHON_INT_BITWIDTH
@@ -831,43 +831,18 @@ def repeat(
         return broadcast_a.reshape(repeat_shape)
 
 
-class Bartlett(Op):
-    # See function bartlett for docstring
-    __props__ = ()
-
-    def make_node(self, M):
-        M = ptb.as_tensor_variable(M)
-        if M.ndim != 0:
-            raise TypeError(f"{self.__class__.__name__} only works on scalar input")
-        elif M.dtype not in integer_dtypes:
-            # dtype is an PyTensor attribute here
-            raise TypeError(f"{self.__class__.__name__} only works on integer input")
-        return Apply(self, [M], [dvector()])
-
-    def perform(self, node, inputs, out_):
-        M = inputs[0]
-        (out,) = out_
-        out[0] = np.bartlett(M)
-
-    def infer_shape(self, fgraph, node, in_shapes):
-        temp = node.inputs[0]
-        M = ptb.switch(lt(temp, 0), ptb.cast(0, temp.dtype), temp)
-        return [[M]]
-
-    def grad(self, inputs, output_grads):
-        return [None for i in inputs]
-
-
-bartlett_ = Bartlett()
-
-
 def bartlett(M):
     """
-    An instance of this class returns the Bartlett spectral window in the
-    time-domain. The Bartlett window is very similar to a triangular window,
-    except that the end points are at zero. It is often used in signal
-    processing for tapering a signal, without generating too much ripple in
-    the frequency domain.
+    Return the Bartlett spectral window as a symbolic vector.
+
+    The Bartlett window is very similar to a triangular window, except that
+    the end points are at zero. It is often used in signal processing for
+    tapering a signal without generating too much ripple in the frequency
+    domain.
+
+    This is a pure symbolic implementation — no custom Op is used — so
+    gradients flow through it automatically and it works on all backends
+    (NumPy, Numba, JAX) without extra dispatcher code.
 
     .. versionadded:: 0.6
 
@@ -879,13 +854,33 @@ def bartlett(M):
 
     Returns
     -------
-    vector of doubles
-        The triangular window, with the maximum value normalized to one
-        (the value one appears only if the number of samples is odd), with
-        the first and last samples equal to zero.
+    TensorVariable
+        A 1-D tensor of length ``max(M, 0)`` with the triangular window
+        values, dtype float64, first and last samples equal to zero.
 
+    Notes
+    -----
+    Equivalent to ``numpy.bartlett(M)`` for all integer M.
     """
-    return bartlett_(M)
+    M = ptb.as_tensor_variable(M)
+    if M.ndim != 0:
+        raise TypeError("bartlett only works on scalar input")
+    if M.dtype not in integer_dtypes:
+        raise TypeError("bartlett only works on integer input")
+
+    M_int = ptb.cast(M, "int64")
+    M_f = ptb.cast(M_int, "float64")
+
+    # n = [1-M, 3-M, ..., M-2]: length M for M>=1, empty for M<=0
+    # pt.arange returns an empty vector when start >= stop, which
+    # happens whenever M <= 0, so no explicit edge-case needed.
+    n = ptb.arange(1 - M_int, M_int, 2, dtype="float64")
+
+    # Clamp denominator to avoid 0/0 at M==1.
+    # When M==1, n==[0.], so n/denom==0. regardless of denom.
+    denom = maximum(M_f - 1.0, ptb.constant(1.0, dtype="float64"))
+
+    return switch(n <= 0, 1.0 + n / denom, 1.0 - n / denom)
 
 
 class FillDiagonal(Op):

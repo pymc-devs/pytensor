@@ -16,7 +16,6 @@ from pytensor.raise_op import Assert
 from pytensor.tensor import alloc
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.extra_ops import (
-    Bartlett,
     CpuContiguous,
     CumOp,
     FillDiagonal,
@@ -669,15 +668,10 @@ class TestRepeat(utt.InferShapeTester):
         assert r.type.shape == (None, 1, None)
 
 
-class TestBartlett(utt.InferShapeTester):
-    def setup_method(self):
-        super().setup_method()
-        self.op_class = Bartlett
-        self.op = bartlett
-
+class TestBartlett:
     def test_perform(self):
         x = lscalar()
-        f = function([x], self.op(x))
+        f = function([x], bartlett(x))
         M = np.random.default_rng().integers(3, 51, size=())
         assert np.allclose(f(M), np.bartlett(M))
         assert np.allclose(f(0), np.bartlett(0))
@@ -686,15 +680,33 @@ class TestBartlett(utt.InferShapeTester):
         assert np.allclose(f(b[0]), np.bartlett(b[0]))
 
     def test_infer_shape(self):
+        """Verify that the output shape is M for M>0 and 0 for M<=0."""
         x = lscalar()
-        self._compile_and_check(
-            [x],
-            [self.op(x)],
-            [np.random.default_rng().integers(3, 51, size=())],
-            self.op_class,
-        )
-        self._compile_and_check([x], [self.op(x)], [0], self.op_class)
-        self._compile_and_check([x], [self.op(x)], [1], self.op_class)
+        f_shape = pytensor.function([x], bartlett(x).shape[0])
+        assert f_shape(5) == 5
+        assert f_shape(1) == 1
+        assert f_shape(0) == 0
+        assert f_shape(-3) == 0
+
+    def test_M1_no_nan(self):
+        """M=1 must return [1.0], not [nan] (tests denominator-clamp fix)."""
+        x = lscalar()
+        f = function([x], bartlett(x))
+        result = f(1)
+        assert len(result) == 1
+        assert result[0] == 1.0
+        assert not np.isnan(result[0])
+
+    def test_grad(self):
+        """Gradients should flow through the symbolic bartlett graph."""
+        # Use a float proxy that casts to int internally
+        M_f = pt.dscalar("M_f")
+        w = bartlett(pt.cast(M_f, "int64"))
+        g = pt.grad(w.sum(), M_f)
+        gf = pytensor.function([M_f], g)
+        # Gradient must be computable (not None / DisconnectedType)
+        val = gf(7.0)
+        assert np.isfinite(val)
 
 
 class TestFillDiagonal(utt.InferShapeTester):
