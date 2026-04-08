@@ -11,9 +11,9 @@ from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.gradient import (
     DisconnectedType,
-    Rop,
     disconnected_type,
     grad,
+    pushforward,
     verify_grad,
 )
 from pytensor.graph.basic import equal_computations
@@ -191,7 +191,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
     )
-    def test_lop_override(self, cls_ofg):
+    @pytest.mark.parametrize("use_deprecated_name", [False, True])
+    def test_lop_override(self, cls_ofg, use_deprecated_name):
         x = vector()
         y = 1.0 / (1.0 + exp(-x))
 
@@ -208,7 +209,11 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         gyy1 = 2.0 * grad(yy1, xx)
 
         for ov in [lop_ov, op_lop_ov]:
-            op = cls_ofg([x], [y], lop_overrides=ov)
+            if use_deprecated_name:
+                with pytest.warns(FutureWarning, match="lop_overrides is deprecated"):
+                    op = cls_ofg([x], [y], lop_overrides=ov)
+            else:
+                op = cls_ofg([x], [y], pullback=ov)
             yy2 = pt_sum(op(xx))
             gyy2 = grad(yy2, xx)
             fn = function([xx], [gyy1, gyy2])
@@ -220,8 +225,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
     @pytest.mark.parametrize(
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
     )
-    @pytest.mark.parametrize("use_op_rop_implementation", [True, False])
-    def test_rop(self, cls_ofg, use_op_rop_implementation):
+    @pytest.mark.parametrize("use_op_pushforward", [True, False])
+    def test_rop(self, cls_ofg, use_op_pushforward):
         a = vector()
         M = matrix()
         b = dot(a, M)
@@ -230,7 +235,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         W = matrix()
         y = op_matmul(x, W)
         du = vector()
-        dv = Rop(y, x, du, use_op_rop_implementation=use_op_rop_implementation)
+        dv = pushforward(y, x, du, use_op_pushforward=use_op_pushforward)
         fn = function([x, W, du], dv)
         xval = np.random.random((16,)).astype(config.floatX)
         Wval = np.random.random((16, 16)).astype(config.floatX)
@@ -239,8 +244,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         dvval2 = fn(xval, Wval, duval)
         np.testing.assert_array_almost_equal(dvval2, dvval, 4)
 
-    @pytest.mark.parametrize("use_op_rop_implementation", [True, False])
-    def test_rop_multiple_outputs(self, use_op_rop_implementation):
+    @pytest.mark.parametrize("use_op_pushforward", [True, False])
+    def test_rop_multiple_outputs(self, use_op_pushforward):
         a = vector()
         M = matrix()
         b = dot(a, M)
@@ -255,21 +260,21 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         duval = np.random.random((16,)).astype(config.floatX)
 
         y = op_matmul(x, W)[0]
-        dv = Rop(y, x, du, use_op_rop_implementation=use_op_rop_implementation)
+        dv = pushforward(y, x, du, use_op_pushforward=use_op_pushforward)
         fn = function([x, W, du], dv)
         result_dvval = fn(xval, Wval, duval)
         expected_dvval = np.dot(duval, Wval)
         np.testing.assert_array_almost_equal(result_dvval, expected_dvval, 4)
 
         y = op_matmul(x, W)[1]
-        dv = Rop(y, x, du, use_op_rop_implementation=use_op_rop_implementation)
+        dv = pushforward(y, x, du, use_op_pushforward=use_op_pushforward)
         fn = function([x, W, du], dv)
         result_dvval = fn(xval, Wval, duval)
         expected_dvval = -np.dot(duval, Wval)
         np.testing.assert_array_almost_equal(result_dvval, expected_dvval, 4)
 
         y = pt.add(*op_matmul(x, W))
-        dv = Rop(y, x, du, use_op_rop_implementation=use_op_rop_implementation)
+        dv = pushforward(y, x, du, use_op_pushforward=use_op_pushforward)
         fn = function([x, W, du], dv)
         result_dvval = fn(xval, Wval, duval)
         expected_dvval = np.zeros_like(np.dot(duval, Wval))
@@ -279,7 +284,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         "cls_ofg", [OpFromGraph, partial(OpFromGraph, inline=True)]
     )
     @pytest.mark.parametrize(
-        "use_op_rop_implementation",
+        "use_op_pushforward",
         [
             True,
             pytest.param(
@@ -287,7 +292,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             ),
         ],
     )
-    def test_rop_override(self, cls_ofg, use_op_rop_implementation):
+    @pytest.mark.parametrize("use_deprecated_name", [False, True])
+    def test_rop_override(self, cls_ofg, use_op_pushforward, use_deprecated_name):
         x, y = vectors("xy")
 
         def ro(inps, epts):
@@ -297,19 +303,24 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         u, v = vectors("uv")
         op_mul_rop = cls_ofg([x, y, u, v], ro([x, y], [u, v]))
-        op_mul = cls_ofg([x, y], [x * y], rop_overrides=ro)
-        op_mul2 = cls_ofg([x, y], [x * y], rop_overrides=op_mul_rop)
+        if use_deprecated_name:
+            with pytest.warns(FutureWarning, match="rop_overrides is deprecated"):
+                op_mul = cls_ofg([x, y], [x * y], rop_overrides=ro)
+                op_mul2 = cls_ofg([x, y], [x * y], rop_overrides=op_mul_rop)
+        else:
+            op_mul = cls_ofg([x, y], [x * y], pushforward=ro)
+            op_mul2 = cls_ofg([x, y], [x * y], pushforward=op_mul_rop)
 
         # single override case
         xx, yy = vector("xx"), vector("yy")
         du, dv = vector("du"), vector("dv")
         for op in [op_mul, op_mul2]:
             zz = op_mul(xx, yy)
-            dw = Rop(
+            dw = pushforward(
                 zz,
                 [xx, yy],
                 [du, dv],
-                use_op_rop_implementation=use_op_rop_implementation,
+                use_op_pushforward=use_op_pushforward,
             )
             fn = function([xx, yy, du, dv], dw)
             vals = np.random.random((4, 32)).astype(config.floatX)
@@ -338,7 +349,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op = cls_ofg(
             inputs=[x, y],
             outputs=[f1(x, y)],
-            lop_overrides=f1_back,
+            pullback=f1_back,
             connection_pattern=[[True], [False]],
             on_unused_input="ignore",
         )
@@ -675,7 +686,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op_with_lop = OpFromGraph(
             [x, y],
             [e],
-            lop_overrides=lambda inps, outs, grads: [grads[0], grads[0]],
+            pullback=lambda inps, outs, grads: [grads[0], grads[0]],
         )
         assert op_plain != op_with_lop
 
@@ -683,7 +694,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op_with_lop2 = OpFromGraph(
             [x, y],
             [e],
-            lop_overrides=lambda inps, outs, grads: [grads[0], grads[0]],
+            pullback=lambda inps, outs, grads: [grads[0], grads[0]],
         )
         assert op_with_lop == op_with_lop2
 
@@ -691,7 +702,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op_with_lop3 = OpFromGraph(
             [x, y],
             [e],
-            lop_overrides=lambda inps, outs, grads: [grads[0] * 2, grads[0]],
+            pullback=lambda inps, outs, grads: [grads[0] * 2, grads[0]],
         )
         assert op_with_lop != op_with_lop3
 
@@ -699,12 +710,12 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op_disc_y = OpFromGraph(
             [x, y],
             [e],
-            lop_overrides=lambda inps, outs, grads: [grads[0], disconnected_type()],
+            pullback=lambda inps, outs, grads: [grads[0], disconnected_type()],
         )
         op_disc_x = OpFromGraph(
             [x, y],
             [e],
-            lop_overrides=lambda inps, outs, grads: [disconnected_type(), grads[0]],
+            pullback=lambda inps, outs, grads: [disconnected_type(), grads[0]],
         )
         assert op_disc_y != op_disc_x
 
@@ -712,7 +723,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op_disc_y2 = OpFromGraph(
             [x, y],
             [e],
-            lop_overrides=lambda inps, outs, grads: [grads[0], disconnected_type()],
+            pullback=lambda inps, outs, grads: [grads[0], disconnected_type()],
         )
         assert op_disc_y == op_disc_y2
 
@@ -720,7 +731,7 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op_all_disc = OpFromGraph(
             [x, y],
             [e],
-            lop_overrides=lambda inps, outs, grads: [
+            pullback=lambda inps, outs, grads: [
                 disconnected_type(),
                 disconnected_type(),
             ],
@@ -732,12 +743,12 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         op_with_rop = OpFromGraph(
             [x, y],
             [e],
-            rop_overrides=lambda inps, epts: [epts[0] + epts[1]],
+            pushforward=lambda inps, epts: [epts[0] + epts[1]],
         )
         op_with_rop2 = OpFromGraph(
             [x, y],
             [e],
-            rop_overrides=lambda inps, epts: [epts[0] + epts[1]],
+            pushforward=lambda inps, epts: [epts[0] + epts[1]],
         )
         assert op_with_rop == op_with_rop2
         assert op_with_rop != op_plain
@@ -749,18 +760,18 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         def scale_grad(inps, outs, grads):
             return grads[0] * 2
 
-        op1 = OpFromGraph([x, y], [e], lop_overrides=[scale_grad, None])
-        op2 = OpFromGraph([x, y], [e], lop_overrides=[scale_grad, None])
+        op1 = OpFromGraph([x, y], [e], pullback=[scale_grad, None])
+        op2 = OpFromGraph([x, y], [e], pullback=[scale_grad, None])
         assert op1 == op2
 
         def scale_grad_3x(inps, outs, grads):
             return grads[0] * 3
 
-        op3 = OpFromGraph([x, y], [e], lop_overrides=[scale_grad_3x, None])
+        op3 = OpFromGraph([x, y], [e], pullback=[scale_grad_3x, None])
         assert op1 != op3
 
         # Position of None vs callable matters
-        op4 = OpFromGraph([x, y], [e], lop_overrides=[None, scale_grad])
+        op4 = OpFromGraph([x, y], [e], pullback=[None, scale_grad])
         assert op1 != op4
 
     def test_merge_identical_ofgs(self):

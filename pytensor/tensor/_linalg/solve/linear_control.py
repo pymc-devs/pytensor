@@ -157,7 +157,7 @@ def solve_sylvester(A: TensorLike, B: TensorLike, Q: TensorLike) -> TensorVariab
     op = SolveSylvester(
         inputs=[A_matrix, B_matrix, Q_matrix],
         outputs=[X],
-        lop_overrides=_lop_solve_continuous_sylvester,
+        pullback=_lop_solve_continuous_sylvester,
     )
 
     return cast(TensorVariable, Blockwise(op)(A, B, Q))
@@ -443,7 +443,7 @@ def solve_discrete_are(
     core_op = SolveDiscreteARE(
         inputs=[A_core, B_core, Q_core, R_core],
         outputs=[result],
-        lop_overrides=_lop_solve_discrete_are,
+        pullback=_lop_solve_discrete_are,
     )
 
     return cast(TensorVariable, Blockwise(core_op)(A, B, Q, R))

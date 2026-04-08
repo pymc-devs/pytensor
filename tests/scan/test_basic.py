@@ -26,7 +26,7 @@ from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.compile.rebuild import rebuild_collect_shared
 from pytensor.compile.sharedvalue import shared
 from pytensor.configdefaults import config
-from pytensor.gradient import NullTypeGradError, Rop, disconnected_grad, grad
+from pytensor.gradient import NullTypeGradError, disconnected_grad, grad, pushforward
 from pytensor.graph.basic import Apply, Variable, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
@@ -2001,8 +2001,8 @@ class TestScan:
         fgrad = function([], g_sh)
         assert fgrad() == 1
 
-    @pytest.mark.parametrize("use_op_rop_implementation", [True, False])
-    def test_R_op(self, use_op_rop_implementation):
+    @pytest.mark.parametrize("use_op_pushforward", [True, False])
+    def test_R_op(self, use_op_pushforward):
         seed = utt.fetch_seed()
         rng = np.random.default_rng(seed)
         floatX = config.floatX
@@ -2042,9 +2042,9 @@ class TestScan:
         eh0 = vector("eh0")
         eW = matrix("eW")
 
-        nwo_u = Rop(o, _u, eu, use_op_rop_implementation=use_op_rop_implementation)
-        nwo_h0 = Rop(o, _h0, eh0, use_op_rop_implementation=use_op_rop_implementation)
-        nwo_W = Rop(o, _W, eW, use_op_rop_implementation=use_op_rop_implementation)
+        nwo_u = pushforward(o, _u, eu, use_op_pushforward=use_op_pushforward)
+        nwo_h0 = pushforward(o, _h0, eh0, use_op_pushforward=use_op_pushforward)
+        nwo_W = pushforward(o, _W, eW, use_op_pushforward=use_op_pushforward)
         fn_rop = function(
             [u, h0, W, eu, eh0, eW], [nwo_u, nwo_h0, nwo_W], on_unused_input="ignore"
         )
@@ -2085,8 +2085,8 @@ class TestScan:
         np.testing.assert_allclose(vnW, tnW, atol=1e-6)
 
     @pytest.mark.slow
-    @pytest.mark.parametrize("use_op_rop_implementation", [True, False])
-    def test_R_op_2(self, use_op_rop_implementation):
+    @pytest.mark.parametrize("use_op_pushforward", [True, False])
+    def test_R_op_2(self, use_op_pushforward):
         seed = utt.fetch_seed()
         rng = np.random.default_rng(seed)
         floatX = config.floatX
@@ -2129,9 +2129,9 @@ class TestScan:
         eh0 = vector("eh0")
         eW = matrix("eW")
 
-        nwo_u = Rop(o, _u, eu, use_op_rop_implementation=use_op_rop_implementation)
-        nwo_h0 = Rop(o, _h0, eh0, use_op_rop_implementation=use_op_rop_implementation)
-        nwo_W = Rop(o, _W, eW, use_op_rop_implementation=use_op_rop_implementation)
+        nwo_u = pushforward(o, _u, eu, use_op_pushforward=use_op_pushforward)
+        nwo_h0 = pushforward(o, _h0, eh0, use_op_pushforward=use_op_pushforward)
+        nwo_W = pushforward(o, _W, eW, use_op_pushforward=use_op_pushforward)
         fn_rop = function(
             [u, h0, W, eu, eh0, eW], [nwo_u, nwo_h0, nwo_W, o], on_unused_input="ignore"
         )
@@ -2167,8 +2167,8 @@ class TestScan:
         np.testing.assert_allclose(vnh0, tnh0, atol=1e-6)
         np.testing.assert_allclose(vnW, tnW, atol=2e-6)
 
-    @pytest.mark.parametrize("use_op_rop_implementation", [True, False])
-    def test_R_op_mitmot(self, use_op_rop_implementation):
+    @pytest.mark.parametrize("use_op_pushforward", [True, False])
+    def test_R_op_mitmot(self, use_op_pushforward):
         # this test is a copy paste from the script given by Justin Bayer to
         # reproduce this bug
         # We have 2 parameter groups with the following shapes.
@@ -2216,12 +2216,12 @@ class TestScan:
         d_cost_wrt_pars = grad(cost, pars)
 
         p = dvector()
-        # TODO: We should test something about the Rop!
-        Rop(
+        # TODO: We should test something about the pushforward!
+        pushforward(
             d_cost_wrt_pars,
             pars,
             p,
-            use_op_rop_implementation=use_op_rop_implementation,
+            use_op_pushforward=use_op_pushforward,
         )
 
     def test_second_derivative_disconnected_cost_with_mit_mot(self):

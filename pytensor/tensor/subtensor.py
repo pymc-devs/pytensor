@@ -11,7 +11,7 @@ from numpy.lib.array_utils import normalize_axis_tuple
 import pytensor
 from pytensor import scalar as ps
 from pytensor.configdefaults import config
-from pytensor.gradient import disconnected_type
+from pytensor.gradient import DisconnectedType, disconnected_type
 from pytensor.graph.basic import Apply, Constant, Variable
 from pytensor.graph.op import Op
 from pytensor.graph.replace import _vectorize_node
@@ -887,8 +887,8 @@ class Subtensor(BaseSubtensor, COp):
         assert len(outshp) == node.outputs[0].ndim
         return [outshp]
 
-    def grad(self, inputs, grads):
-        (gz,) = grads
+    def pullback(self, inputs, outputs, output_grads):
+        (gz,) = output_grads
         x, *index_variables = inputs
         if x.dtype in discrete_dtypes:
             first = x.zeros_like(dtype=config.floatX)
@@ -1259,12 +1259,12 @@ class Subtensor(BaseSubtensor, COp):
             return ()
         return (4, hv)
 
-    def R_op(self, inputs, eval_points):
+    def pushforward(self, inputs, outputs, eval_points):
         # Subtensor is not differentiable wrt to its indices, therefore we
         # do not even need to consider the eval_points provided for those
         # (they should be defaulted to zeros_like by the global R_op)
-        if eval_points[0] is None:
-            return [None]
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return [disconnected_type()]
         _x, *index_variables = inputs
         return self(eval_points[0], *index_variables, return_list=True)
 
@@ -1692,9 +1692,11 @@ class IncSubtensor(BaseSubtensor, COp):
     def infer_shape(self, fgraph, node, shapes):
         return [shapes[0]]
 
-    def R_op(self, inputs, eval_points):
-        if eval_points[0] is None or eval_points[1] is None:
-            return [None]
+    def pushforward(self, inputs, outputs, eval_points):
+        if isinstance(eval_points[0].type, DisconnectedType) or isinstance(
+            eval_points[1].type, DisconnectedType
+        ):
+            return [disconnected_type()]
         # Again we ignore eval points for indices because incsubtensor is
         # not differentiable wrt to those
         _x, _y, *index_variables = inputs
@@ -1706,8 +1708,8 @@ class IncSubtensor(BaseSubtensor, COp):
 
         return rval
 
-    def grad(self, inputs, grads):
-        (g_output,) = grads
+    def pullback(self, inputs, outputs, output_grads):
+        (g_output,) = output_grads
         x, y, *index_variables = inputs
 
         if x.dtype in discrete_dtypes:
@@ -1836,9 +1838,9 @@ class AdvancedSubtensor1(COp):
 
         return rval
 
-    def grad(self, inputs, grads):
+    def pullback(self, inputs, outputs, output_grads):
         x, ilist = inputs
-        (gz,) = grads
+        (gz,) = output_grads
         assert len(inputs) == 2
         if self.sparse_grad:
             if x.type.ndim != 2:
@@ -1859,9 +1861,9 @@ class AdvancedSubtensor1(COp):
             rval1 = advanced_inc_subtensor1(gx, gz, ilist)
         return [rval1, *(disconnected_type() for _ in range(len(inputs) - 1))]
 
-    def R_op(self, inputs, eval_points):
-        if eval_points[0] is None:
-            return [None]
+    def pushforward(self, inputs, outputs, eval_points):
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return [disconnected_type()]
         _x, *index_variables = inputs
         return self.make_node(eval_points[0], *index_variables).outputs
 
@@ -2219,9 +2221,9 @@ class AdvancedIncSubtensor1(BaseSubtensor, COp):
         x, _y, _ilist = ishapes
         return [x]
 
-    def R_op(self, inputs, eval_points):
-        if None in eval_points[:2]:
-            return [None]
+    def pushforward(self, inputs, outputs, eval_points):
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points[:2]):
+            return [disconnected_type()]
         _x, _y, *index_variables = inputs
         return self.make_node(eval_points[0], eval_points[1], *index_variables).outputs
 
@@ -2229,8 +2231,8 @@ class AdvancedIncSubtensor1(BaseSubtensor, COp):
         rval = [[True], [True], [False]]
         return rval
 
-    def grad(self, inputs, grads):
-        (g_output,) = grads
+    def pullback(self, inputs, outputs, output_grads):
+        (g_output,) = output_grads
         x, y, idx_list = inputs
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
@@ -2384,9 +2386,9 @@ class AdvancedSubtensor(BaseSubtensor, COp):
             [tensor(dtype=x.type.dtype, shape=tuple(indexed_shape))],
         )
 
-    def R_op(self, inputs, eval_points):
-        if eval_points[0] is None:
-            return [None]
+    def pushforward(self, inputs, outputs, eval_points):
+        if isinstance(eval_points[0].type, DisconnectedType):
+            return [disconnected_type()]
         _x, *index_variables = inputs
         return self.make_node(eval_points[0], *index_variables).outputs
 
@@ -2463,8 +2465,8 @@ class AdvancedSubtensor(BaseSubtensor, COp):
 
         return rval
 
-    def grad(self, inputs, grads):
-        (gz,) = grads
+    def pullback(self, inputs, outputs, output_grads):
+        (gz,) = output_grads
         x, *index_variables = inputs
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
@@ -2626,15 +2628,15 @@ class AdvancedIncSubtensor(BaseSubtensor, Op):
 
         return rval
 
-    def R_op(self, inputs, eval_points):
-        if None in eval_points[:2]:
-            return [None]
+    def pushforward(self, inputs, outputs, eval_points):
+        if any(isinstance(t.type, DisconnectedType) for t in eval_points[:2]):
+            return [disconnected_type()]
         _x, _y, *index_variables = inputs
         return self.make_node(eval_points[0], eval_points[1], *index_variables).outputs
 
-    def grad(self, inpt, output_gradients):
-        x, y, *index_variables = inpt
-        (outgrad,) = output_gradients
+    def pullback(self, inputs, outputs, output_grads):
+        x, y, *index_variables = inputs
+        (outgrad,) = output_grads
         if x.dtype in discrete_dtypes:
             # The output dtype is the same as x
             gx = x.zeros_like(dtype=config.floatX)

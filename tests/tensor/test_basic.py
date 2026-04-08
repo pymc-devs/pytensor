@@ -2165,7 +2165,7 @@ def test_ScalarFromTensor(cast_policy):
 
         pts = lscalar()
         ss = scalar_from_tensor(pts)
-        ss.owner.op.grad([pts], [ss])
+        ss.owner.op.pullback([pts], [ss], [ss])
         fff = function([pts], ss)
         v = fff(np.asarray(5))
         assert v == 5
