@@ -500,7 +500,7 @@ predefined_modes = {
 _CACHED_RUNTIME_MODES: dict[Any, Mode] = {}
 
 
-def get_mode(orig_string):
+def get_mode(orig_string=None):
     if orig_string is None:
         string = config.mode
     else:
