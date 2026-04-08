@@ -1014,10 +1014,10 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
 
         self.inputs: tuple[Variable, ...] = nominal_inputs
         self.outputs: tuple[Variable, ...] = frozen_outputs
-        self._variables: frozenset[Variable] | None = None
         self.apply_nodes: frozenset[Apply] = frozenset(sorted_apply_nodes)
-        self._clients: dict[Variable, list[ClientType]] | None = None
         self._toposort: tuple[Apply, ...] = tuple(sorted_apply_nodes)
+        self._variables: frozenset[Variable] | None = None
+        self._clients: dict[Variable, list[ClientType]] | None = None
 
     def __reduce__(self):
         return FrozenFunctionGraph, (self.inputs, self.outputs)
