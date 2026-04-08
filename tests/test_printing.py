@@ -318,7 +318,7 @@ def test_debugprint():
         Inner graphs:
 
         Composite{(i0 + (i1 - i2))}
-        ← add 'o0'
+        ← add
             ├─ i0
             └─ sub
             ├─ i1
@@ -387,8 +387,8 @@ Inner graphs:
 
 MyInnerGraphOp [id A]
  ← op2 [id D] 'igo1'
-    ├─ *0-<MyType()> [id E]
-    └─ *1-<MyType()> [id F]
+    ├─ i0 [id E]
+    └─ i1 [id F]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
@@ -410,13 +410,13 @@ Inner graphs:
 
 MyInnerGraphOp [id A]
  ← MyInnerGraphOp [id C]
-    ├─ *0-<MyType()> [id D]
-    └─ *1-<MyType()> [id E]
+    ├─ i0 [id D]
+    └─ i1 [id E]
 
 MyInnerGraphOp [id C]
  ← op2 [id F] 'igo1'
-    ├─ *0-<MyType()> [id D]
-    └─ *1-<MyType()> [id E]
+    ├─ i0 [id D]
+    └─ i1 [id E]
     """
 
     for exp_line, res_line in zip(exp_res.split("\n"), lines, strict=True):
