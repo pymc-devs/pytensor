@@ -668,7 +668,7 @@ def fgraph_to_python(
     op_conversion_fn: Callable,
     *,
     type_conversion_fn: Callable = lambda x, **kwargs: x,
-    order: list[Apply] | None = None,
+    order: Sequence[Apply] | None = None,
     storage_map: Optional["StorageMapType"] = None,
     fgraph_name: str = "fgraph_to_python",
     global_env: dict[Any, Any] | None = None,
@@ -741,11 +741,7 @@ def fgraph_to_python(
             is_constant = isinstance(inp, Constant)
             input_storage = storage_map.setdefault(
                 inp,
-                [
-                    inp.data  # type: ignore[attr-defined]
-                    if is_constant
-                    else None
-                ],
+                [inp.data if isinstance(inp, Constant) else None],
             )
             if (
                 is_constant or input_storage[0] is not None

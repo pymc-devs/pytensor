@@ -3,7 +3,7 @@ import warnings
 from collections.abc import Sequence
 from functools import partial, reduce
 from itertools import pairwise
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from numpy._core.einsumfunc import (  # type: ignore[attr-defined]
@@ -588,14 +588,19 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
     else:
         # Case 2: All operands have known shapes. In this case, we can use opt_einsum to compute the optimal
         # contraction order.
-        _, contraction_list_raw = np.einsum_path(
-            subscripts,
-            # Numpy einsum_path requires arrays even though only the shapes matter
-            # It's not trivial to duck-type our way around because of internal call to `asanyarray`
-            *[np.empty(shape) for shape in shapes],
-            # einsum_call is not part of public API
-            einsum_call=True,  # type: ignore[arg-type]
-            optimize="optimal",
+        # Numpy einsum_path requires arrays even though only the shapes matter. It's not trivial to duck-type our way
+        # around because of internal call to `asanyarray`
+        _, contraction_list_raw = cast(
+            tuple[Any, list],
+            cast(
+                object,
+                np.einsum_path(
+                    subscripts,
+                    *[np.empty(shape) for shape in shapes],
+                    einsum_call=True,  # type: ignore[arg-type]
+                    optimize="optimal",
+                ),
+            ),
         )
         # Numpy API changed in v2.4.2, and now returns only 3 values instead of 5
         # We never needed the last two but we need the code to work with both cases
@@ -604,15 +609,15 @@ def einsum(subscripts: str, *operands: "TensorLike", optimize=None) -> TensorVar
             match len(contraction_list_raw[0]):
                 case 5:
                     # Old API, the first 3 entries have what we need
-                    contraction_list = [c[:3] for c in contraction_list_raw]  # type: ignore[misc]
+                    contraction_list = [c[:3] for c in contraction_list_raw]
                 case 3:
                     # New API doesn't have index removed
                     contraction_list = []
-                    for pos, step_ein_str, _ in contraction_list_raw:  # type: ignore[str-unpack]
+                    for pos, step_ein_str, _ in contraction_list_raw:
                         # e.g., 'ijp,oij->op' -> removed_str = {'i', 'j'}
                         inp_str, out_str = step_ein_str.replace(",", "").split("->")
                         removed_idx = set(inp_str) - set(out_str)
-                        contraction_list.append((pos, removed_idx, step_ein_str))  # type: ignore[arg-type]
+                        contraction_list.append((pos, removed_idx, step_ein_str))
                 case _:
                     raise ValueError("Unexpected contraction list template")
         del contraction_list_raw

@@ -424,7 +424,7 @@ def numba_funcify_RandomVariable(op: RandomVariableWithCoreShape, node, **kwargs
 
     match core_rv_fn_and_cache_key:
         case (core_rv_fn, (int() | None) as core_cache_key):
-            pass  # type: ignore[unreachable]
+            pass
         case (_core_rv_fn, invalid_core_cache_key):
             raise ValueError(
                 f"Invalid core_cache_key returned from numba_core_rv_funcify: {invalid_core_cache_key}. Must be int or None."
