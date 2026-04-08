@@ -663,7 +663,7 @@ Scan{scan_fn, while_loop=False, inplace=all} [id B]
        └─ 0 [id R]
 
 Composite{switch(lt(0, i0), 1, 0)} [id K]
- ← Switch [id S] 'o0'
+ ← Switch [id S]
     ├─ LT [id T]
     │  ├─ 0 [id U]
     │  └─ i0 [id V]
