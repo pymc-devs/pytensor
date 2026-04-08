@@ -244,21 +244,28 @@ Optional methods or attributes
 If you want your :class:`Op` to work with :func:`pytensor.gradient.grad` you also
 need to implement the functions described below.
 
-Gradient
-========
+Automatic Differentiation
+=========================
 
-These are the function required to work with :func:`pytensor.gradient.grad`.
+These are the functions required to work with :func:`pytensor.gradient.grad`
+and :func:`pytensor.gradient.pushforward`.
 
-.. function:: grad(inputs, output_gradients)
+.. function:: pullback(inputs, outputs, cotangents)
 
-  If the :class:`Op` being defined is differentiable, its gradient may be
-  specified symbolically in this method. Both ``inputs`` and
-  ``output_gradients`` are lists of symbolic PyTensor :class:`Variable`\s and
-  those must be operated on using PyTensor's symbolic language. The :meth:`Op.grad`
-  method must return a list containing one :class:`Variable` for each
-  input. Each returned :class:`Variable` represents the gradient with respect
-  to that input computed based on the symbolic gradients with respect
-  to each output.
+  Implements the vector-Jacobian product (VJP) for reverse-mode automatic
+  differentiation. This is the primary method for gradient computation.
+
+  Given a function :math:`f` with inputs :math:`x` and outputs :math:`y = f(x)`,
+  the pullback computes :math:`\bar{x} = \bar{y} J` where
+  :math:`J = \frac{\partial f}{\partial x}` is the Jacobian and
+  :math:`\bar{y}` are the cotangent (row) vectors (upstream gradients).
+
+  Both ``inputs``, ``outputs``, and ``cotangents`` are lists of symbolic PyTensor
+  :class:`Variable`\s and those must be operated on using PyTensor's symbolic
+  language. The :meth:`Op.pullback` method must return a list containing one
+  :class:`Variable` for each input. Each returned :class:`Variable` represents
+  the cotangent with respect to that input computed based on the symbolic
+  cotangents with respect to each output.
 
   If the output is not differentiable with respect to an input then
   this method should be defined to return a variable of type :class:`NullType`
@@ -269,108 +276,50 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
   :func:`pytensor.gradient.grad_undefined` and
   :func:`pytensor.gradient.grad_not_implemented`, respectively.
 
-  If an element of ``output_gradient`` is of type
+  If an element of ``cotangents`` is of type
   :class:`pytensor.gradient.DisconnectedType`, it means that the cost is not a
   function of this output. If any of the :class:`Op`'s inputs participate in
-  the computation of only disconnected outputs, then :meth:`Op.grad` should
+  the computation of only disconnected outputs, then :meth:`Op.pullback` should
   return :class:`DisconnectedType` variables for those inputs.
 
-  If the :meth:`Op.grad` method is not defined, then PyTensor assumes it has been
+  If :meth:`Op.pullback` is not defined, then PyTensor assumes it has been
   forgotten.  Symbolic differentiation will fail on a graph that
   includes this :class:`Op`.
 
-  It must be understood that the :meth:`Op.grad` method is not meant to
-  return the gradient of the :class:`Op`'s output. :func:`pytensor.grad` computes
-  gradients; :meth:`Op.grad` is a helper function that computes terms that
-  appear in gradients.
-
   If an :class:`Op` has a single vector-valued output ``y`` and a single
-  vector-valued input ``x``, then the :meth:`Op.grad` method will be passed ``x`` and a
-  second vector ``z``. Define ``J`` to be the Jacobian of ``y`` with respect to
-  ``x``. The :meth:`Op.grad` method should return ``dot(J.T,z)``. When
-  :func:`pytensor.grad` calls the :meth:`Op.grad` method, it will set ``z`` to be the
-  gradient of the cost ``C`` with respect to ``y``. If this :class:`Op` is the only :class:`Op`
-  that acts on ``x``, then ``dot(J.T,z)`` is the gradient of C with respect to
-  ``x``.  If there are other :class:`Op`\s that act on ``x``, :func:`pytensor.grad` will
-  have to add up the terms of ``x``'s gradient contributed by the other
-  :meth:`Op.grad` method.
-
-  In practice, an :class:`Op`'s input and output are rarely implemented as
-  single vectors.  Even if an :class:`Op`'s output consists of a list
-  containing a scalar, a sparse matrix, and a 4D tensor, you can think
-  of these objects as being formed by rearranging a vector. Likewise
-  for the input. In this view, the values computed by the :meth:`Op.grad` method
-  still represent a Jacobian-vector product.
+  vector-valued input ``x``, then :meth:`Op.pullback` will be passed ``x``,
+  ``y``, and a cotangent vector ``z``. Define ``J`` to be the Jacobian of ``y``
+  with respect to ``x``. The method should return ``dot(z, J)``. When
+  :func:`pytensor.grad` calls :meth:`Op.pullback`, it will set ``z`` to be the
+  gradient of the cost ``C`` with respect to ``y``. If this :class:`Op` is the only
+  :class:`Op` that acts on ``x``, then ``dot(z, J)`` is the gradient of C with
+  respect to ``x``. If there are other :class:`Op`\s that act on ``x``,
+  :func:`pytensor.grad` will add up the terms of ``x``'s gradient contributed
+  by each :meth:`Op.pullback`.
 
   In practice, it is probably not a good idea to explicitly construct
   the Jacobian, which might be very large and very sparse. However,
-  the returned value should be equal to the Jacobian-vector product.
-
-  So long as you implement this product correctly, you need not
-  understand what :func:`pytensor.gradient.grad` is doing, but for the curious the
-  mathematical justification is as follows:
-
-  In essence, the :meth:`Op.grad` method must simply implement through symbolic
-  :class:`Variable`\s and operations the chain rule of differential
-  calculus. The chain rule is the mathematical procedure that allows
-  one to calculate the total derivative :math:`\frac{d C}{d x}` of the
-  final scalar symbolic `Variable` ``C`` with respect to a primitive
-  symbolic :class:`Variable` x found in the list ``inputs``.  The :meth:`Op.grad` method
-  does this using ``output_gradients`` which provides the total
-  derivative :math:`\frac{d C}{d f}` of ``C`` with respect to a symbolic
-  :class:`Variable` that is returned by the `Op` (this is provided in
-  ``output_gradients``), as well as the knowledge of the total
-  derivative :math:`\frac{d f}{d x}` of the latter with respect to the
-  primitive :class:`Variable` (this has to be computed).
-
-  In mathematics, the total derivative of a scalar variable :math:`C` with
-  respect to a vector of scalar variables :math:`x`, i.e. the gradient, is
-  customarily represented as the row vector of the partial
-  derivatives, whereas the total derivative of a vector of scalar
-  variables :math:`f` with respect to another :math:`x`, is customarily
-  represented by the matrix of the partial derivatives, i.e. the
-  Jacobian matrix. In this convenient setting, the chain rule
-  says that the gradient of the final scalar variable :math:`C` with
-  respect to the primitive scalar variables in :math:`x` through those in
-  :math:`f` is simply given by the matrix product:
-  :math:`\frac{d C}{d x} = \frac{d C}{d f} * \frac{d f}{d x}`.
-
-  Here, the chain rule must be implemented in a similar but slightly
-  more complex setting: PyTensor provides in the list
-  ``output_gradients`` one gradient for each of the :class:`Variable`\s returned
-  by the `Op`. Where :math:`f` is one such particular :class:`Variable`, the
-  corresponding gradient found in ``output_gradients`` and
-  representing :math:`\frac{d C}{d f}` is provided with a shape
-  similar to :math:`f` and thus not necessarily as a row vector of scalars.
-  Furthermore, for each :class:`Variable` :math:`x` of the :class:`Op`'s list of input variables
-  ``inputs``, the returned gradient representing :math:`\frac{d C}{d
-  x}` must have a shape similar to that of :class:`Variable` x.
-
-  If the output list of the :class:`Op` is :math:`[f_1, ... f_n]`, then the
-  list ``output_gradients`` is :math:`[grad_{f_1}(C), grad_{f_2}(C),
-  ... , grad_{f_n}(C)]`.  If ``inputs`` consists of the list
-  :math:`[x_1, ..., x_m]`, then `Op.grad` should return the list
-  :math:`[grad_{x_1}(C), grad_{x_2}(C), ..., grad_{x_m}(C)]`, where
-  :math:`(grad_{y}(Z))_i = \frac{\partial Z}{\partial y_i}` (and
-  :math:`i` can stand for multiple dimensions).
-
-  In other words, :meth:`Op.grad` does not return :math:`\frac{d f_i}{d
-  x_j}`, but instead the appropriate dot product specified by the
-  chain rule: :math:`\frac{d C}{d x_j} = \frac{d C}{d f_i} \cdot
-  \frac{d f_i}{d x_j}`.  Both the partial differentiation and the
-  multiplication have to be performed by :meth:`Op.grad`.
+  the returned value should be equal to the vector-Jacobian product.
+  Note that an :class:`Op`'s inputs and outputs may include scalars,
+  matrices, sparse arrays, or higher-dimensional tensors — not just vectors.
+  The VJP contract still applies: conceptually, each of these can be viewed
+  as a vector that has been reshaped into a tensor. The returned cotangent
+  for each input must have the same shape as that input, and each incoming
+  cotangent in ``cotangents`` will have the same shape as the corresponding
+  output.
 
   PyTensor currently imposes the following constraints on the values
-  returned by the :meth:`Op.grad` method:
+  returned by the :meth:`Op.pullback` method:
 
   1) They must be :class:`Variable` instances.
   2) When they are types that have dtypes, they must never have an integer dtype.
 
-  The output gradients passed *to* :meth:`Op.grad` will also obey these constraints.
+  The output cotangents passed *to* :meth:`Op.pullback` will also obey these
+  constraints.
 
   Integers are a tricky subject. Integers are the main reason for
   having :class:`DisconnectedType`, :class:`NullType` or zero gradient. When you have an
-  integer as an argument to your :meth:`Op.grad` method, recall the definition of
+  integer as an argument to your :meth:`Op.pullback` method, recall the definition of
   a derivative to help you decide what value to return:
 
   :math:`\frac{d f}{d x} = \lim_{\epsilon \rightarrow 0} (f(x+\epsilon)-f(x))/\epsilon`.
@@ -410,7 +359,7 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
 
   1) :math:`f(x,y)` is a dot product between :math:`x` and :math:`y`. :math:`x` and :math:`y` are integers.
      Since the output is also an integer, :math:`f` is a step function.
-     Its gradient is zero almost everywhere, so :meth:`Op.grad` should return
+     Its gradient is zero almost everywhere, so :meth:`Op.pullback` should return
      zeros in the shape of :math:`x` and :math:`y`.
   2) :math:`f(x,y)` is a dot product between :math:`x` and :math:`y`. :math:`x`
      is floating point and :math:`y` is an integer.  In this case the output is
@@ -423,7 +372,7 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
      along a fractional axis?  The gradient with respect to :math:`x` is 0,
      because :math:`f(x+\epsilon, y) = f(x)` almost everywhere.
   4) :math:`f(x,y)` is a vector with :math:`y` elements, each of which taking on
-     the value :math:`x` The :meth:`Op.grad` method should return
+     the value :math:`x` The :meth:`Op.pullback` method should return
      :class:`DisconnectedType` for :math:`y`, because the elements of :math:`f`
      don't depend on :math:`y`. Only the shape of :math:`f` depends on
      :math:`y`. You probably also want to implement a connection_pattern method to encode this.
@@ -432,6 +381,29 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
      g(y) = 0.5 g(f(x))`, then the gradient with respect to :math:`y` will be 0.5,
      even if :math:`y` is an integer. However, the gradient with respect to :math:`x` will be
      0, because the output of :math:`f` is integer-valued.
+
+.. function:: pushforward(inputs, outputs, tangents)
+
+  Implements the Jacobian-vector product (JVP) for forward-mode automatic
+  differentiation.
+
+  Given a function :math:`f` with inputs :math:`x` and outputs :math:`y = f(x)`,
+  the pushforward computes :math:`\dot{y} = J \dot{x}` where
+  :math:`J = \frac{\partial f}{\partial x}` is the Jacobian and
+  :math:`\dot{x}` are the tangent vectors.
+
+  ``inputs`` are the symbolic variables corresponding to the input values,
+  ``outputs`` are the symbolic variables corresponding to the output values,
+  and ``tangents`` are the symbolic variables corresponding to the tangent
+  vectors to right-multiply the Jacobian with. Tangent entries of type
+  :class:`DisconnectedType` indicate that the corresponding input is not being
+  differentiated.
+
+  The method must return the same number of outputs as there are outputs of
+  the :class:`Op`. For each output, the result is the Jacobian of that output
+  with respect to the inputs, right-multiplied by the tangent vector. Return
+  a variable of type :class:`DisconnectedType` for outputs that are disconnected
+  from all inputs.
 
 .. function:: connection_pattern(node):
 
@@ -477,32 +449,4 @@ These are the function required to work with :func:`pytensor.gradient.grad`.
   :func:`pytensor.gradient.grad` returns an expression, that expression will be
   numerically correct.
 
-.. function:: R_op(inputs, eval_points)
-
-   Optional, to work with :func:`pytensor.gradient.R_op`.
-
-   This function implements the application of the R-operator on the
-   function represented by your :class:`Op`. Let assume that function is :math:`f`,
-   with input :math:`x`, applying the R-operator means computing the
-   Jacobian of :math:`f` and right-multiplying it by :math:`v`, the evaluation
-   point, namely: :math:`\frac{\partial f}{\partial x} v`.
-
-   ``inputs`` are the symbolic variables corresponding to the value of
-   the input where you want to evaluate the Jacobian, and ``eval_points``
-   are the symbolic variables corresponding to the value you want to
-   right multiply the Jacobian with.
-
-   Same conventions as for the :meth:`Op.grad` method hold. If your :class:`Op`
-   is not differentiable, you can return None. Note that in contrast to the
-   method :meth:`Op.grad`, for :meth:`Op.R_op` you need to return the
-   same number of outputs as there are outputs of the :class:`Op`. You can think
-   of it in the following terms. You have all your inputs concatenated
-   into a single vector :math:`x`. You do the same with the evaluation
-   points (which are as many as inputs and of the shame shape) and obtain
-   another vector :math:`v`. For each output, you reshape it into a vector,
-   compute the Jacobian of that vector with respect to :math:`x` and
-   multiply it by :math:`v`. As a last step you reshape each of these
-   vectors you obtained for each outputs (that have the same shape as
-   the outputs) back to their corresponding shapes and return them as the
-   output of the :meth:`Op.R_op` method.
 
