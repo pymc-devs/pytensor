@@ -723,6 +723,7 @@ class Function:
             # The first len(maker.outputs) variables are original variables.
             # The rest are the updates.
             out_vars = maker.fgraph.outputs[: len(maker.outputs)]
+
         else:
             out_vars = maker.fgraph.outputs
 
@@ -735,6 +736,23 @@ class Function:
             clone=False,
         )
         fg_cpy.update_mapping = maker.fgraph.update_mapping
+
+        # Warn if any shared variable with a deleted update is being
+        # destroyed (mutated inplace) by a node in the copied graph.
+        # In that case the shared variable storage will still be mutated
+        # even though the update is not applied.
+        if delete_updates and hasattr(maker.fgraph, "destroyers"):
+            for in_idx in maker.fgraph.update_mapping.values():
+                input_var = maker.fgraph.inputs[in_idx]
+                for destroyer in maker.fgraph.destroyers(input_var):
+                    if destroyer in memo:
+                        warnings.warn(
+                            f"Shared variable '{input_var.name}' will still be mutated "
+                            "even though its update is being deleted, because an "
+                            "operation in the graph modifies it inplace.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
 
         # Re initialize Outs and swap update and variable in Ins
         # By doing this, we can pass FunctionMaker.check_unused_inputs()
