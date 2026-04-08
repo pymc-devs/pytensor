@@ -257,7 +257,6 @@ def local_lift_transpose_through_dot(fgraph, node):
     # Output is dot product of transposed inputs in reverse order
     ret = node.op(y.mT, x.mT)
 
-    client.out.dprint(depth=2, print_shape=True)
     # Copy over stack trace to output from result of dot-product
     copy_stack_trace(node.out, ret)
 
