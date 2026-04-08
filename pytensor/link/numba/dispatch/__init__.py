@@ -6,6 +6,7 @@ import pytensor.link.numba.dispatch.blockwise
 import pytensor.link.numba.dispatch.compile_ops
 import pytensor.link.numba.dispatch.elemwise
 import pytensor.link.numba.dispatch.extra_ops
+import pytensor.link.numba.dispatch.join_inplace
 import pytensor.link.numba.dispatch.nlinalg
 import pytensor.link.numba.dispatch.random
 import pytensor.link.numba.dispatch.scan
