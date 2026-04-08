@@ -20,6 +20,7 @@ from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.nlinalg import (
     SVD,
     Det,
+    Eig,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
@@ -1126,4 +1127,116 @@ def test_scalar_solve_to_division(
     c_val = np.vectorize(np.linalg.solve, signature=signature)(a_val, b_val)
     np.testing.assert_allclose(
         f(a_val, b_val), c_val, rtol=1e-7 if config.floatX == "float64" else 1e-5
+    )
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(), (7,), (1, 7), (7, 1), (7, 7)],
+    ids=["scalar", "vector", "row_vec", "col_vec", "matrix"],
+)
+def test_eig_diag_from_eye_mul(shape):
+    # Initializing x based on scalar/vector/matrix
+    x = pt.tensor("x", shape=shape)
+    y = pt.eye(7) * x
+
+    # Calculating eigval and eigvec using pt.linalg.eig
+    eigval, eigvec = pt.linalg.eig(y)
+
+    # REWRITE TEST
+    f_rewritten = function([x], [eigval, eigvec], mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+
+    assert not any(
+        isinstance(node.op, Eig) or isinstance(getattr(node.op, "core_op", None), Eig)
+        for node in nodes
+    )
+
+    # NUMERIC VALUE TEST
+    if len(shape) == 0:
+        x_test = np.array(np.random.rand()).astype(config.floatX)
+    elif len(shape) == 1:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+    else:
+        x_test = np.random.rand(*shape).astype(config.floatX)
+
+    x_test_matrix = np.eye(7) * x_test
+    eigval, _ = np.linalg.eig(x_test_matrix)
+    rewritten_eigval, rewritten_eigvec = f_rewritten(x_test)
+
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        x_test_matrix @ rewritten_eigvec,
+        rewritten_eigvec @ np.diag(rewritten_eigval),
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_eig_eye():
+    n = pt.iscalar("n")
+    x = pt.eye(n)
+    eigval, eigvec = pt.linalg.eig(x)
+
+    # REWRITE TEST
+    f_rewritten = function([n], [eigval, eigvec], mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(
+        isinstance(node.op, Eig) or isinstance(getattr(node.op, "core_op", None), Eig)
+        for node in nodes
+    )
+
+    # NUMERIC VALUE TEST
+    n_test = 10
+    x_test = np.eye(n_test)
+    eigval, _ = np.linalg.eig(x_test)
+    rewritten_eigval, rewritten_eigvec = f_rewritten(n_test)
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        x_test @ rewritten_eigvec,
+        rewritten_eigvec @ np.diag(rewritten_eigval),
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
+def test_eig_diag():
+    x = pt.tensor("x", shape=(None,))
+    x_diag = pt.diag(x)
+    eigval, eigvec = pt.linalg.eig(x_diag)
+
+    # REWRITE TEST
+    f_rewritten = function([x], [eigval, eigvec], mode="FAST_RUN")
+    nodes = f_rewritten.maker.fgraph.apply_nodes
+    assert not any(
+        isinstance(node.op, Eig) or isinstance(getattr(node.op, "core_op", None), Eig)
+        for node in nodes
+    )
+
+    # NUMERIC VALUE TEST
+    x_test = np.random.rand(7).astype(config.floatX)
+    x_test_matrix = np.eye(7) * x_test
+    eigval, _ = np.linalg.eig(x_test_matrix)
+    rewritten_eigval, rewritten_eigvec = f_rewritten(x_test)
+    assert_allclose(
+        eigval,
+        rewritten_eigval,
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+    assert_allclose(
+        x_test_matrix @ rewritten_eigvec,
+        rewritten_eigvec @ np.diag(rewritten_eigval),
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
