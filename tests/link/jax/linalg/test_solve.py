@@ -148,7 +148,7 @@ def test_bilinear_to_direct_rewrite(monkeypatch):
         raise ImportError("Simulated ImportError for testing.")
 
     monkeypatch.setattr(
-        "pytensor.tensor._linalg.solve.rewriting._load_solve_sylvester",
+        "pytensor.tensor.rewriting.linalg.solve._load_solve_sylvester",
         mock_load_solve_sylvester,
     )
 

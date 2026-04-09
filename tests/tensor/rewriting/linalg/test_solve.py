@@ -15,16 +15,16 @@ from pytensor.tensor._linalg.decomposition.lu import LUFactor
 from pytensor.tensor._linalg.solve.core import SolveBase
 from pytensor.tensor._linalg.solve.general import Solve, solve
 from pytensor.tensor._linalg.solve.psd import CholeskySolve, cho_solve
-from pytensor.tensor._linalg.solve.rewriting import (
-    reuse_decomposition_multiple_solves,
-    scan_split_non_sequence_decomposition_and_solve,
-)
 from pytensor.tensor._linalg.solve.triangular import SolveTriangular, solve_triangular
 from pytensor.tensor._linalg.solve.tridiagonal import (
     LUFactorTridiagonal,
     SolveLUFactorTridiagonal,
 )
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
+from pytensor.tensor.rewriting.linalg.solve import (
+    reuse_decomposition_multiple_solves,
+    scan_split_non_sequence_decomposition_and_solve,
+)
 from pytensor.tensor.type import matrix, tensor
 
 

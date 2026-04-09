@@ -17,7 +17,7 @@ from pytensor.tensor._linalg.products import KroneckerProduct
 from pytensor.tensor._linalg.solve.general import Solve
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
-from pytensor.tensor.rewriting.linalg import inv_to_solve
+from pytensor.tensor.rewriting.linalg.inverse import inv_to_solve
 from pytensor.tensor.type import dmatrix, matrix, vector
 from tests import unittest_tools as utt
 from tests.test_rop import break_op
