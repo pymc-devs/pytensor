@@ -1,12 +1,13 @@
 import warnings
 
+import numba
 import numpy as np
 
 from pytensor import config
-from pytensor.link.numba.cache import compile_numba_function_src
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
+    get_numba_type,
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
@@ -39,29 +40,97 @@ from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
     schur_complex,
     schur_real,
 )
-from pytensor.link.numba.dispatch.linalg.solve.cholesky import _cho_solve
-from pytensor.link.numba.dispatch.linalg.solve.general import _solve_gen
-from pytensor.link.numba.dispatch.linalg.solve.hermitian import _solve_hermitian
-from pytensor.link.numba.dispatch.linalg.solve.linear_control import (
-    _trsyl,
-)
-from pytensor.link.numba.dispatch.linalg.solve.posdef import _solve_psd
-from pytensor.link.numba.dispatch.linalg.solve.symmetric import _solve_symmetric
-from pytensor.link.numba.dispatch.linalg.solve.triangular import _solve_triangular
-from pytensor.link.numba.dispatch.linalg.solve.tridiagonal import _solve_tridiagonal
-from pytensor.link.numba.dispatch.string_codegen import (
-    CODE_TOKEN,
-    build_source_code,
-)
-from pytensor.tensor._linalg.constructors import BlockDiagonal
 from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor._linalg.decomposition.eigen import Eig, Eigh
 from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
 from pytensor.tensor._linalg.decomposition.qr import QR
 from pytensor.tensor._linalg.decomposition.schur import QZ, Schur
-from pytensor.tensor._linalg.solve.general import Solve
-from pytensor.tensor._linalg.solve.linear_control import TRSYL
-from pytensor.tensor._linalg.solve.psd import CholeskySolve
-from pytensor.tensor._linalg.solve.triangular import SolveTriangular
+from pytensor.tensor._linalg.decomposition.svd import SVD
+
+
+@register_funcify_default_op_cache_key(SVD)
+def numba_funcify_SVD(op, node, **kwargs):
+    full_matrices = op.full_matrices
+    compute_uv = op.compute_uv
+    out_dtype = np.dtype(node.outputs[0].dtype)
+
+    discrete_input = node.inputs[0].type.numpy_dtype.kind in "ibu"
+    if discrete_input and config.compiler_verbose:
+        print("SVD requires casting discrete input to float")  # noqa: T201
+
+    if not compute_uv:
+
+        @numba_basic.numba_njit
+        def svd(x):
+            if discrete_input:
+                x = x.astype(out_dtype)
+            _, ret, _ = np.linalg.svd(x, full_matrices)
+            return ret
+
+    else:
+
+        @numba_basic.numba_njit
+        def svd(x):
+            if discrete_input:
+                x = x.astype(out_dtype)
+            return np.linalg.svd(x, full_matrices)
+
+    cache_version = 1
+    return svd, cache_version
+
+
+@register_funcify_default_op_cache_key(Eig)
+def numba_funcify_Eig(op, node, **kwargs):
+    w_dtype = node.outputs[0].type.numpy_dtype
+    non_complex_input = node.inputs[0].type.numpy_dtype.kind != "c"
+    if non_complex_input and config.compiler_verbose:
+        print("Eig requires casting input to complex")  # noqa: T201
+
+    @numba_basic.numba_njit
+    def eig(x):
+        if non_complex_input:
+            # Even floats are better cast to complex, otherwise numba may raise
+            # ValueError: eig() argument must not cause a domain change.
+            x = x.astype(w_dtype)
+        w, v = np.linalg.eig(x)
+        return w.astype(w_dtype), v.astype(w_dtype)
+
+    cache_version = 2
+    return eig, cache_version
+
+
+@register_funcify_default_op_cache_key(Eigh)
+def numba_funcify_Eigh(op, node, **kwargs):
+    uplo = op.UPLO
+
+    if uplo != "L":
+        warnings.warn(
+            (
+                "Numba will use object mode to allow the "
+                "`UPLO` argument to `numpy.linalg.eigh`."
+            ),
+            UserWarning,
+        )
+
+        out_dtypes = tuple(o.type.numpy_dtype for o in node.outputs)
+        ret_sig = numba.types.Tuple(
+            [get_numba_type(node.outputs[0].type), get_numba_type(node.outputs[1].type)]
+        )
+
+        @numba_basic.numba_njit
+        def eigh(x):
+            with numba.objmode(ret=ret_sig):
+                out = np.linalg.eigh(x, UPLO=uplo)
+                ret = (out[0].astype(out_dtypes[0]), out[1].astype(out_dtypes[1]))
+            return ret
+
+    else:
+
+        @numba_basic.numba_njit
+        def eigh(x):
+            return np.linalg.eigh(x)
+
+    return eigh
 
 
 @register_funcify_default_op_cache_key(Cholesky)
@@ -201,203 +270,6 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
     cache_version = 2
     return lu_factor, cache_version
-
-
-@register_funcify_default_op_cache_key(BlockDiagonal)
-def numba_funcify_BlockDiagonal(op, node, **kwargs):
-    """
-
-    Because we have variadic arguments we need to use codegen.
-
-    The generated code looks something like:
-
-    def block_diagonal(arr0, arr1, arr2):
-        out_r = arr0.shape[0] + arr1.shape[0] + arr2.shape[0]
-        out_c = arr0.shape[1] + arr1.shape[1] + arr2.shape[1]
-        out = np.zeros((out_r, out_c), dtype=np.float64)
-
-        r, c = 0, 0
-        rr, cc = arr0.shape
-        out[r: r + rr, c: c + cc] = arr0
-        r += rr
-        c += cc
-
-        rr, cc = arr1.shape
-        out[r: r + rr, c: c + cc] = arr1
-        r += rr
-        c += cc
-
-        rr, cc = arr2.shape
-        out[r: r + rr, c: c + cc] = arr2
-        r += rr
-        c += cc
-
-        return out
-    """
-    dtype = node.outputs[0].dtype
-    n_inp = len(node.inputs)
-
-    arg_names = [f"arr{i}" for i in range(n_inp)]
-    code = [
-        f"def block_diagonal({', '.join(arg_names)}):",
-        CODE_TOKEN.INDENT,
-        f"out_r = {' + '.join(f'{a}.shape[0]' for a in arg_names)}",
-        f"out_c = {' + '.join(f'{a}.shape[1]' for a in arg_names)}",
-        f"out = np.zeros((out_r, out_c), dtype=np.{dtype})",
-        CODE_TOKEN.EMPTY_LINE,
-        "r, c = 0, 0",
-    ]
-    for i, arg_name in enumerate(arg_names):
-        code.extend(
-            [
-                f"rr, cc = {arg_name}.shape",
-                f"out[r: r + rr, c: c + cc] = {arg_name}",
-                "r += rr",
-                "c += cc",
-                CODE_TOKEN.EMPTY_LINE,
-            ]
-        )
-    code.append("return out")
-
-    code_txt = build_source_code(code)
-    block_diag = compile_numba_function_src(
-        code_txt,
-        "block_diagonal",
-        globals() | {"np": np},
-    )
-
-    cache_version = 1
-    return numba_basic.numba_njit(block_diag), cache_version
-
-
-@register_funcify_default_op_cache_key(Solve)
-def numba_funcify_Solve(op, node, **kwargs):
-    A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
-    out_dtype = node.outputs[0].type.numpy_dtype
-
-    assume_a = op.assume_a
-
-    must_cast_A = A_dtype != out_dtype
-    if must_cast_A and config.compiler_verbose:
-        print("Solve requires casting first input `A`")  # noqa: T201
-    must_cast_B = b_dtype != out_dtype
-    if must_cast_B and config.compiler_verbose:
-        print("Solve requires casting second input `b`")  # noqa: T201
-
-    overwrite_a = op.overwrite_a
-    lower = op.lower
-    overwrite_a = op.overwrite_a
-    overwrite_b = op.overwrite_b
-    is_complex = out_dtype.kind == "c"
-    transposed = False  # TODO: Solve doesnt currently allow the transposed argument
-
-    if assume_a == "gen":
-        solve_fn = _solve_gen
-    elif assume_a == "sym":
-        solve_fn = _solve_symmetric
-    elif assume_a == "her":
-        # For real inputs, Hermitian == symmetric
-        solve_fn = _solve_hermitian if is_complex else _solve_symmetric
-    elif assume_a == "pos":
-        solve_fn = _solve_psd
-    elif assume_a == "tridiagonal":
-        solve_fn = _solve_tridiagonal
-    else:
-        warnings.warn(
-            f"Numba assume_a={assume_a} not implemented. Falling back to general solve.\n"
-            f"If appropriate, you may want to set assume_a to one of 'sym', 'pos', 'her', 'triangular' or 'tridiagonal' to improve performance.",
-            UserWarning,
-        )
-        solve_fn = _solve_gen
-
-    @numba_basic.numba_njit
-    def solve(a, b):
-        if b.size == 0:
-            return np.zeros(b.shape, dtype=out_dtype)
-
-        if must_cast_A:
-            a = a.astype(out_dtype)
-        if must_cast_B:
-            b = b.astype(out_dtype)
-
-        return solve_fn(a, b, lower, overwrite_a, overwrite_b, transposed)
-
-    cache_version = 2
-    return solve, cache_version
-
-
-@register_funcify_default_op_cache_key(SolveTriangular)
-def numba_funcify_SolveTriangular(op, node, **kwargs):
-    lower = op.lower
-    unit_diagonal = op.unit_diagonal
-    overwrite_b = op.overwrite_b
-
-    A_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
-    out_dtype = node.outputs[0].type.numpy_dtype
-
-    must_cast_A = A_dtype != out_dtype
-    if must_cast_A and config.compiler_verbose:
-        print("SolveTriangular requires casting first input `A`")  # noqa: T201
-    must_cast_B = b_dtype != out_dtype
-    if must_cast_B and config.compiler_verbose:
-        print("SolveTriangular requires casting second input `b`")  # noqa: T201
-
-    @numba_basic.numba_njit
-    def solve_triangular(a, b):
-        if b.size == 0:
-            return np.zeros(b.shape, dtype=out_dtype)
-        if must_cast_A:
-            a = a.astype(out_dtype)
-        if must_cast_B:
-            b = b.astype(out_dtype)
-
-        return _solve_triangular(
-            a,
-            b,
-            trans=0,  # transposing is handled explicitly on the graph, so we never use this argument
-            lower=lower,
-            unit_diagonal=unit_diagonal,
-            overwrite_b=overwrite_b,
-        )
-
-    cache_version = 2
-    return solve_triangular, cache_version
-
-
-@register_funcify_default_op_cache_key(CholeskySolve)
-def numba_funcify_CholeskySolve(op, node, **kwargs):
-    lower = op.lower
-    overwrite_b = op.overwrite_b
-
-    c_dtype, b_dtype = (i.type.numpy_dtype for i in node.inputs)
-    out_dtype = node.outputs[0].type.numpy_dtype
-
-    must_cast_c = c_dtype != out_dtype
-    if must_cast_c and config.compiler_verbose:
-        print("CholeskySolve requires casting first input `c`")  # noqa: T201
-    must_cast_b = b_dtype != out_dtype
-    if must_cast_b and config.compiler_verbose:
-        print("CholeskySolve requires casting second input `b`")  # noqa: T201
-
-    @numba_basic.numba_njit
-    def cho_solve(c, b):
-        if b.size == 0:
-            return np.zeros(b.shape, dtype=out_dtype)
-        if must_cast_c:
-            c = c.astype(out_dtype)
-
-        if must_cast_b:
-            b = b.astype(out_dtype)
-
-        return _cho_solve(
-            c,
-            b,
-            lower=lower,
-            overwrite_b=overwrite_b,
-        )
-
-    cache_version = 2
-    return cho_solve, cache_version
 
 
 @register_funcify_default_op_cache_key(QR)
@@ -622,38 +494,3 @@ def numba_funcify_QZ(op, node, **kwargs):
 
     cache_version = 1
     return qz, cache_version
-
-
-@register_funcify_default_op_cache_key(TRSYL)
-def numba_funcify_TRSYL(op, node, **kwargs):
-    in_dtype_a = node.inputs[0].type.numpy_dtype
-    in_dtype_b = node.inputs[1].type.numpy_dtype
-    in_dtype_c = node.inputs[2].type.numpy_dtype
-    out_dtype = node.outputs[0].type.numpy_dtype
-
-    overwrite_c = op.overwrite_c
-
-    must_cast_a = in_dtype_a != out_dtype
-    if must_cast_a and config.compiler_verbose:
-        print("TRSYL requires casting first input `A`")  # noqa: T201
-    must_cast_b = in_dtype_b != out_dtype
-    if must_cast_b and config.compiler_verbose:
-        print("TRSYL requires casting second input `B`")  # noqa: T201
-    must_cast_c = in_dtype_c != out_dtype
-    if must_cast_c and config.compiler_verbose:
-        print("TRSYL requires casting third input `C`")  # noqa: T201
-
-    @numba_basic.numba_njit
-    def trsyl(a, b, c):
-        if must_cast_a:
-            a = a.astype(out_dtype)
-        if must_cast_b:
-            b = b.astype(out_dtype)
-        if must_cast_c:
-            c = c.astype(out_dtype)
-
-        x = _trsyl(a, b, c, overwrite_c=overwrite_c)
-        return x
-
-    cache_version = 1
-    return trsyl, cache_version
