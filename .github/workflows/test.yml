@@ -101,11 +101,11 @@ jobs:
             default-mode: "CVM"
             python-version: "3.12"
             os: "ubuntu-latest"
-          - part: ["numba link", "tests/link/numba --ignore=tests/link/numba/test_slinalg.py"]
+          - part: ["numba link", "tests/link/numba --ignore=tests/link/numba/linalg"]
             default-mode: "CVM"
             python-version: "3.12"
             os: "ubuntu-latest"
-          - part: ["numba link slinalg", "tests/link/numba/test_slinalg.py"]
+          - part: ["numba link linalg", "tests/link/numba/linalg"]
             default-mode: "CVM"
             python-version: "3.13"
             os: "ubuntu-latest"
