@@ -7,10 +7,12 @@ import pytest
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
 from pytensor.configdefaults import config
-from pytensor.tensor import slinalg as pt_slinalg
 from pytensor.tensor._linalg.decomposition import lu
 from pytensor.tensor._linalg.decomposition.cholesky import cholesky
 from pytensor.tensor._linalg.solve import linear_control
+from pytensor.tensor._linalg.solve.general import lu_solve, solve
+from pytensor.tensor._linalg.solve.psd import cho_solve
+from pytensor.tensor._linalg.solve.triangular import solve_triangular
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -23,7 +25,7 @@ def test_jax_solve():
     A = pt.tensor("A", shape=(5, 5))
     b = pt.tensor("B", shape=(5, 5))
 
-    out = pt_slinalg.solve(A, b, lower=False, transposed=False)
+    out = solve(A, b, lower=False, transposed=False)
 
     A_val = rng.normal(size=(5, 5)).astype(config.floatX)
     b_val = rng.normal(size=(5, 5)).astype(config.floatX)
@@ -76,7 +78,7 @@ def test_jax_SolveTriangular():
     A_val = rng.normal(size=(5, 5)).astype(config.floatX)
     b_val = rng.normal(size=(5, 5)).astype(config.floatX)
 
-    out = pt_slinalg.solve_triangular(
+    out = solve_triangular(
         A,
         b,
         trans=0,
@@ -95,7 +97,7 @@ def test_jax_lu_solve(b_shape):
     A = pt.tensor(name="A", shape=(5, 5))
     b = pt.tensor(name="b", shape=b_shape)
     lu_and_pivots = lu.lu_factor(A)
-    out = pt_slinalg.lu_solve(lu_and_pivots, b)
+    out = lu_solve(lu_and_pivots, b)
 
     compare_jax_and_py([A, b], [out], [A_val, b_val])
 
@@ -111,7 +113,7 @@ def test_jax_cho_solve(b_shape, lower):
     A = pt.tensor(name="A", shape=(5, 5))
     b = pt.tensor(name="b", shape=b_shape)
     c = cholesky(A, lower=lower)
-    out = pt_slinalg.cho_solve((c, lower), b, b_ndim=len(b_shape))
+    out = cho_solve((c, lower), b, b_ndim=len(b_shape))
 
     compare_jax_and_py([A, b], [out], [A_val, b_val])
 

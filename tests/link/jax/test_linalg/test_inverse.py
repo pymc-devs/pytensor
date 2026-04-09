@@ -3,7 +3,7 @@ import pytest
 
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
-from pytensor.tensor import nlinalg as pt_nlinalg
+from pytensor.tensor._linalg.inverse import pinv
 from pytensor.tensor.type import matrix
 from tests.link.jax.test_basic import compare_jax_and_py
 
@@ -13,7 +13,7 @@ jax = pytest.importorskip("jax")
 
 def test_pinv():
     x = matrix("x")
-    x_inv = pt_nlinalg.pinv(x)
+    x_inv = pinv(x)
 
     x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
     compare_jax_and_py([x], [x_inv], [x_np])
@@ -24,7 +24,7 @@ def test_pinv_hermitian():
     A_h_test = np.c_[[3, 3 + 2j], [3 - 2j, 2]]
     A_not_h_test = A_h_test + 0 + 1j
 
-    A_inv = pt_nlinalg.pinv(A, hermitian=False)
+    A_inv = pinv(A, hermitian=False)
     jax_fn = function([A], A_inv, mode="JAX")
 
     assert np.allclose(jax_fn(A_h_test), np.linalg.pinv(A_h_test, hermitian=False))
@@ -36,7 +36,7 @@ def test_pinv_hermitian():
         jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=True)
     )
 
-    A_inv = pt_nlinalg.pinv(A, hermitian=True)
+    A_inv = pinv(A, hermitian=True)
     jax_fn = function([A], A_inv, mode="JAX")
 
     assert np.allclose(jax_fn(A_h_test), np.linalg.pinv(A_h_test, hermitian=False))

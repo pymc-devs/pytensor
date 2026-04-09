@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
 
-from pytensor.tensor import nlinalg as pt_nla
 from pytensor.tensor._linalg.decomposition import qr, svd
+from pytensor.tensor._linalg.decomposition.eigen import eig, eigh
+from pytensor.tensor._linalg.inverse import inv
+from pytensor.tensor._linalg.summary import SLogDet, det
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 
@@ -12,7 +14,7 @@ def assert_fn(x, y):
 
 @pytest.mark.parametrize(
     "func",
-    (pt_nla.eigh, pt_nla.SLogDet(), pt_nla.inv, pt_nla.det),
+    (eigh, SLogDet(), inv, det),
 )
 def test_lin_alg_no_params(func, matrix_test):
     x, test_value = matrix_test
@@ -24,7 +26,7 @@ def test_lin_alg_no_params(func, matrix_test):
 
 def test_eig(matrix_test):
     x, test_value = matrix_test
-    out = pt_nla.eig(x)
+    out = eig(x)
 
     compare_pytorch_and_py([x], out, [test_value], assert_fn=assert_fn)
 

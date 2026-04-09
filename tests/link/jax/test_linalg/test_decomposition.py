@@ -4,10 +4,12 @@ import pytest
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
 from pytensor.configdefaults import config
-from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor import subtensor as pt_subtensor
 from pytensor.tensor._linalg.decomposition import lu, qr, schur, svd
 from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor._linalg.decomposition.eigen import eig, eigh, eigvalsh
+from pytensor.tensor._linalg.inverse import matrix_inverse
+from pytensor.tensor._linalg.summary import det, slogdet
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
 from pytensor.tensor.type_other import NoneConst
@@ -89,12 +91,12 @@ def test_jax_basic():
     out = pt.diag(b)
     compare_jax_and_py([b], [out], [np.arange(10).astype(config.floatX)])
 
-    out = pt_nlinalg.det(x)
+    out = det(x)
     compare_jax_and_py(
         [x], [out], [np.arange(10 * 10).reshape((10, 10)).astype(config.floatX)]
     )
 
-    out = pt_nlinalg.matrix_inverse(x)
+    out = matrix_inverse(x)
     compare_jax_and_py(
         [x],
         [out],
@@ -126,20 +128,20 @@ def test_jax_basic_multiout():
 
     x = matrix("x")
 
-    outs = pt_nlinalg.eig(x)
+    outs = eig(x)
 
     def assert_fn(x, y):
         np.testing.assert_allclose(x.astype(config.floatX), y, rtol=1e-3)
 
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = pt_nlinalg.eigh(x)
+    outs = eigh(x)
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
     outs = svd.svd(x)
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = pt_nlinalg.slogdet(x)
+    outs = slogdet(x)
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
 
@@ -148,9 +150,7 @@ def test_jax_eigvalsh(lower):
     A = matrix("A")
     B = matrix("B")
 
-    from pytensor.tensor import slinalg as pt_slinalg
-
-    out = pt_slinalg.eigvalsh(A, B, lower=lower)
+    out = eigvalsh(A, B, lower=lower)
 
     with pytest.raises(NotImplementedError):
         compare_jax_and_py(
@@ -165,7 +165,7 @@ def test_jax_eigvalsh(lower):
                 ).astype(config.floatX),
             ],
         )
-    out_no_b = pt_slinalg.eigvalsh(A, NoneConst, lower=lower)
+    out_no_b = eigvalsh(A, NoneConst, lower=lower)
     compare_jax_and_py(
         [A],
         [out_no_b],

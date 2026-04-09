@@ -8,15 +8,9 @@ import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
 from pytensor.tensor._linalg.decomposition.lu import lu_factor
-from pytensor.tensor.slinalg import (
-    CholeskySolve,
-    Solve,
-    SolveTriangular,
-    cho_solve,
-    lu_solve,
-    solve,
-    solve_triangular,
-)
+from pytensor.tensor._linalg.solve.general import Solve, lu_solve, solve
+from pytensor.tensor._linalg.solve.psd import CholeskySolve, cho_solve
+from pytensor.tensor._linalg.solve.triangular import SolveTriangular, solve_triangular
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 
