@@ -19,6 +19,7 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
+from pytensor.tensor._linalg.constructors import BlockDiagonal
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -109,7 +110,6 @@ from pytensor.tensor.rewriting.basic import (
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.rewriting.elemwise import apply_local_dimshuffle_lift
 from pytensor.tensor.shape import Shape, Shape_i, specify_shape
-from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.subtensor import Subtensor
 from pytensor.tensor.type import (
     complex_dtypes,

@@ -1495,7 +1495,7 @@ class PatternNodeRewriter(NodeRewriter):
         from pytensor.graph.rewriting.basic import PatternNodeRewriter
         from pytensor.graph.rewriting.unify import OpPattern, LiteralString
         from pytensor.tensor.blockwise import Blockwise
-        from pytensor.tensor.slinalg import Solve
+        from pytensor.tensor._linalg.solve.general import Solve
 
         PatternNodeRewriter(
             (

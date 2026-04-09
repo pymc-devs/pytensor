@@ -25,6 +25,7 @@ from pytensor.graph.traversal import (
 )
 from pytensor.scalar import ScalarType, ScalarVariable
 from pytensor.tensor import as_tensor_variable
+from pytensor.tensor._linalg.solve.general import solve
 from pytensor.tensor.basic import (
     atleast_2d,
     scalar_from_tensor,
@@ -34,7 +35,6 @@ from pytensor.tensor.basic import (
 )
 from pytensor.tensor.math import tensordot
 from pytensor.tensor.reshape import pack, unpack
-from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable, Variable
 from pytensor.utils import unzip
 

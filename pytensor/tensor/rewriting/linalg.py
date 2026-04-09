@@ -10,10 +10,18 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Abs, Exp, Log, Mul, Sign, Sqr
+from pytensor.tensor._linalg.constructors import BlockDiagonal, block_diag
 from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor._linalg.decomposition.qr import QR
 from pytensor.tensor._linalg.decomposition.svd import SVD, svd
+from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor._linalg.products import KroneckerProduct, kron
+from pytensor.tensor._linalg.solve.core import SolveBase
+from pytensor.tensor._linalg.solve.general import Solve, solve
+from pytensor.tensor._linalg.solve.psd import CholeskySolve
+from pytensor.tensor._linalg.solve.triangular import SolveTriangular, solve_triangular
+from pytensor.tensor._linalg.summary import SLogDet, det
 from pytensor.tensor.basic import (
     AllocDiag,
     ExtractDiag,
@@ -28,30 +36,12 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, Prod, log, outer, prod, variadic_mul
-from pytensor.tensor.nlinalg import (
-    KroneckerProduct,
-    MatrixInverse,
-    MatrixPinv,
-    SLogDet,
-    det,
-    kron,
-)
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.slinalg import (
-    BlockDiagonal,
-    CholeskySolve,
-    Solve,
-    SolveBase,
-    SolveTriangular,
-    block_diag,
-    solve,
-    solve_triangular,
-)
 
 
 logger = logging.getLogger(__name__)
