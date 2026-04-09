@@ -5,7 +5,10 @@ import scipy.sparse
 from pytensor.graph import Apply
 from pytensor.sparse import as_sparse_or_tensor_variable, matrix
 from pytensor.tensor import TensorVariable
-from pytensor.tensor.slinalg import BaseBlockDiagonal, _largest_common_dtype
+from pytensor.tensor._linalg.constructors import (
+    BaseBlockDiagonal,
+    _largest_common_dtype,
+)
 
 
 class SparseBlockDiagonal(BaseBlockDiagonal):
