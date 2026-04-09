@@ -3,19 +3,17 @@ import warnings
 import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor._linalg.constructors import BlockDiagonal
 from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor._linalg.decomposition.eigen import Eigvalsh
 from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
 from pytensor.tensor._linalg.decomposition.qr import QR
 from pytensor.tensor._linalg.decomposition.schur import Schur
+from pytensor.tensor._linalg.products import Expm
+from pytensor.tensor._linalg.solve.general import Solve
 from pytensor.tensor._linalg.solve.linear_control import SolveSylvester
-from pytensor.tensor.slinalg import (
-    BlockDiagonal,
-    CholeskySolve,
-    Eigvalsh,
-    Expm,
-    Solve,
-    SolveTriangular,
-)
+from pytensor.tensor._linalg.solve.psd import CholeskySolve
+from pytensor.tensor._linalg.solve.triangular import SolveTriangular
 
 
 @jax_funcify.register(Eigvalsh)

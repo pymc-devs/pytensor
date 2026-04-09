@@ -1,16 +1,11 @@
 import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch import jax_funcify
+from pytensor.tensor._linalg.decomposition.eigen import Eig, Eigh
 from pytensor.tensor._linalg.decomposition.svd import SVD
-from pytensor.tensor.nlinalg import (
-    Det,
-    Eig,
-    Eigh,
-    KroneckerProduct,
-    MatrixInverse,
-    MatrixPinv,
-    SLogDet,
-)
+from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor._linalg.products import KroneckerProduct
+from pytensor.tensor._linalg.summary import Det, SLogDet
 
 
 @jax_funcify.register(SVD)

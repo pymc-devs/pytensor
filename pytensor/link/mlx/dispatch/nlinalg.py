@@ -2,7 +2,8 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor._linalg.decomposition.svd import SVD
-from pytensor.tensor.nlinalg import KroneckerProduct, MatrixInverse, MatrixPinv
+from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor._linalg.products import KroneckerProduct
 
 
 @mlx_funcify.register(SVD)
