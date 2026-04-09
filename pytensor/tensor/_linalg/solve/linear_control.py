@@ -12,12 +12,13 @@ from pytensor.tensor import TensorLike
 from pytensor.tensor._linalg.decomposition.lu import lu
 from pytensor.tensor._linalg.decomposition.qr import qr
 from pytensor.tensor._linalg.decomposition.schur import qz, schur
+from pytensor.tensor._linalg.products import kron, matrix_dot
 from pytensor.tensor._linalg.solve.general import solve
 from pytensor.tensor._linalg.solve.triangular import solve_triangular
+from pytensor.tensor._linalg.summary import norm
 from pytensor.tensor.basic import as_tensor_variable, zeros
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.functional import vectorize
-from pytensor.tensor.nlinalg import kron, matrix_dot, norm
 from pytensor.tensor.reshape import join_dims
 from pytensor.tensor.shape import reshape
 from pytensor.tensor.type import matrix
