@@ -149,7 +149,7 @@ def _multi_svd_norm(
 ):
     """Compute a function of the singular values of the 2-D matrices in `x`.
 
-    This is a private utility function used by `pytensor.tensor.nlinalg.norm()`.
+    This is a private utility function used by `pytensor.tensor.linalg.norm()`.
 
     Copied from `np.linalg._multi_svd_norm`.
 
