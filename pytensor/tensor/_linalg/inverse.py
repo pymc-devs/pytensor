@@ -51,7 +51,7 @@ class MatrixPinv(Op):
         (z,) = outputs
         (gz,) = g_outputs
 
-        from pytensor.tensor.nlinalg import matrix_dot
+        from pytensor.tensor._linalg.products import matrix_dot
 
         x_dot_z = ptm.dot(x, z)
         z_dot_x = ptm.dot(z, x)
@@ -137,7 +137,7 @@ class MatrixInverse(Op):
         (x,) = inputs
         xi = self(x)
         (gz,) = g_outputs
-        from pytensor.tensor.nlinalg import matrix_dot
+        from pytensor.tensor._linalg.products import matrix_dot
 
         # ptm.dot(gz.T,xi)
         return [-matrix_dot(xi, gz.T, xi).T]
@@ -160,7 +160,7 @@ class MatrixInverse(Op):
         (ev,) = eval_points
         if isinstance(ev.type, DisconnectedType):
             return [disconnected_type()]
-        from pytensor.tensor.nlinalg import matrix_dot
+        from pytensor.tensor._linalg.products import matrix_dot
 
         return [-matrix_dot(xi, ev, xi)]
 

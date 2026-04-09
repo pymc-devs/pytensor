@@ -10,70 +10,9 @@ from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
-from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
-from pytensor.tensor.type import matrix
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import unzip
-
-
-class Expm(Op):
-    """
-    Compute the matrix exponential of a square array.
-    """
-
-    __props__ = ()
-    gufunc_signature = "(m,m)->(m,m)"
-
-    def make_node(self, A):
-        A = as_tensor_variable(A)
-        assert A.ndim == 2
-
-        expm = matrix(dtype=A.dtype, shape=A.type.shape)
-
-        return Apply(self, [A], [expm])
-
-    def perform(self, node, inputs, outputs):
-        (A,) = inputs
-        (expm,) = outputs
-        expm[0] = scipy_linalg.expm(A)
-
-    def pullback(self, inputs, outputs, output_grads):
-        # Kalbfleisch and Lawless, J. Am. Stat. Assoc. 80 (1985) Equation 3.4
-        # Kind of... You need to do some algebra from there to arrive at
-        # this expression.
-        (A,) = inputs
-        (_,) = outputs  # Outputs not used; included for signature consistency only
-        (A_bar,) = output_grads
-
-        w, V = pt.linalg.eig(A)
-
-        exp_w = pt.exp(w)
-        numer = pt.sub.outer(exp_w, exp_w)
-        denom = pt.sub.outer(w, w)
-
-        # When w_i ≈ w_j, we have a removable singularity in the expression for X, because
-        # lim b->a (e^a - e^b) / (a - b) = e^a (derivation left for the motivated reader)
-        X = pt.where(pt.abs(denom) < 1e-8, exp_w, numer / denom)
-
-        diag_idx = pt.arange(w.shape[0])
-        X = X[..., diag_idx, diag_idx].set(exp_w)
-
-        inner = solve(V, A_bar.T @ V).T
-        result = solve(V.T, inner * X) @ V.T
-
-        # At this point, result is always a complex dtype. If the input was real, the output should be
-        # real as well (and all the imaginary parts are numerical noise)
-        if A.dtype not in ("complex64", "complex128"):
-            return [result.real]
-
-        return [result]
-
-    def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
-
-
-expm = Blockwise(Expm())
 
 
 def _largest_common_dtype(tensors: Sequence[TensorVariable]) -> np.dtype:
@@ -240,6 +179,9 @@ from pytensor.tensor._linalg.decomposition.schur import (  # noqa: E402, F401
     qz,
     schur,
 )
+
+# Re-exports: product ops that were moved to _linalg/products.py
+from pytensor.tensor._linalg.products import Expm, expm  # noqa: E402, F401
 
 # Re-exports: solve ops that were moved to _linalg/solve/
 from pytensor.tensor._linalg.solve.core import (  # noqa: E402, F401

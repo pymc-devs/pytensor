@@ -5,7 +5,6 @@ from typing import Literal
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_tuple
 
-from pytensor.compile.builders import OpFromGraph
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike
@@ -15,20 +14,6 @@ from pytensor.tensor._linalg.decomposition.svd import svd
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import scalar
-
-
-def matrix_dot(*args):
-    r"""Shorthand for product between several dots.
-
-    Given :math:`N` matrices :math:`A_0, A_1, .., A_N`, ``matrix_dot`` will
-    generate the matrix product between all in the given order, namely
-    :math:`A_0 \cdot A_1 \cdot A_2 \cdot .. \cdot A_N`.
-
-    """
-    rval = args[0]
-    for a in args[1:]:
-        rval = ptm.dot(rval, a)
-    return rval
 
 
 def trace(X):
@@ -155,50 +140,6 @@ def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
     """
     det_val = det(x)
     return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
-
-
-def matrix_power(M, n):
-    r"""Raise a square matrix, ``M``, to the (integer) power ``n``.
-
-    This implementation uses exponentiation by squaring which is
-    significantly faster than the naive implementation.
-    The time complexity for exponentiation by squaring is
-    :math: `\mathcal{O}((n \log M)^k)`
-
-    Parameters
-    ----------
-    M: TensorVariable
-    n: int
-
-    """
-    if n < 0:
-        from pytensor.tensor._linalg.inverse import pinv
-
-        M = pinv(M)
-        n = abs(n)
-
-    # Shortcuts when 0 < n <= 3
-    if n == 0:
-        return ptb.eye(M.shape[-2])
-
-    elif n == 1:
-        return M
-
-    elif n == 2:
-        return ptm.dot(M, M)
-
-    elif n == 3:
-        return ptm.dot(ptm.dot(M, M), M)
-
-    result = z = None
-
-    while n > 0:
-        z = M if z is None else ptm.dot(z, z)
-        n, bit = divmod(n, 2)
-        if bit:
-            result = z if result is None else ptm.dot(result, z)
-
-    return result
 
 
 def _multi_svd_norm(
@@ -401,52 +342,6 @@ def norm(
         )
 
 
-class KroneckerProduct(OpFromGraph):
-    """
-    Wrapper Op for Kronecker graphs
-    """
-
-
-def kron(a, b):
-    """Kronecker product.
-
-    Same as np.kron(a, b)
-
-    Parameters
-    ----------
-    a: array_like
-    b: array_like
-
-    Returns
-    -------
-    array_like with a.ndim + b.ndim - 2 dimensions
-    """
-    a = as_tensor_variable(a)
-    b = as_tensor_variable(b)
-
-    if a is b:
-        # In case a is the same as b, we need a different variable to build the OFG
-        b = a.copy()
-
-    if a.ndim + b.ndim <= 2:
-        raise TypeError(
-            "kron: inputs dimensions must sum to 3 or more. "
-            f"You passed {int(a.ndim)} and {int(b.ndim)}."
-        )
-
-    if a.ndim < b.ndim:
-        a = ptb.expand_dims(a, tuple(range(b.ndim - a.ndim)))
-    elif b.ndim < a.ndim:
-        b = ptb.expand_dims(b, tuple(range(a.ndim - b.ndim)))
-    a_reshaped = ptb.expand_dims(a, tuple(range(1, 2 * a.ndim, 2)))
-    b_reshaped = ptb.expand_dims(b, tuple(range(0, 2 * b.ndim, 2)))
-    out_shape = tuple(a.shape[i] * b.shape[i] for i in range(a.ndim))
-    output_out_of_shape = a_reshaped * b_reshaped
-    output_reshaped = output_out_of_shape.reshape(out_shape)
-
-    return KroneckerProduct(inputs=[a, b], outputs=[output_reshaped])(a, b)
-
-
 # Re-exports: decomposition ops that were moved to _linalg/decomposition/
 # These are kept here for backwards compatibility.
 from pytensor.tensor._linalg.decomposition.eigen import (  # noqa: E402, F401
@@ -468,6 +363,14 @@ from pytensor.tensor._linalg.inverse import (  # noqa: E402, F401
     matrix_inverse,
     pinv,
     tensorinv,
+)
+
+# Re-exports: product ops that were moved to _linalg/products.py
+from pytensor.tensor._linalg.products import (  # noqa: E402, F401
+    KroneckerProduct,
+    kron,
+    matrix_dot,
+    matrix_power,
 )
 
 # Re-exports: solve ops that were moved to _linalg/solve/
