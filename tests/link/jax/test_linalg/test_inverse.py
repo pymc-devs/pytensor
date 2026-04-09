@@ -4,37 +4,11 @@ import pytest
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.tensor import nlinalg as pt_nlinalg
-from pytensor.tensor._linalg.decomposition import svd
 from pytensor.tensor.type import matrix
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
 jax = pytest.importorskip("jax")
-
-
-def test_jax_basic_multiout():
-    rng = np.random.default_rng(213234)
-
-    M = rng.normal(size=(3, 3))
-    X = M.dot(M.T)
-
-    x = matrix("x")
-
-    outs = pt_nlinalg.eig(x)
-
-    def assert_fn(x, y):
-        np.testing.assert_allclose(x.astype(config.floatX), y, rtol=1e-3)
-
-    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
-
-    outs = pt_nlinalg.eigh(x)
-    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
-
-    outs = svd.svd(x)
-    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
-
-    outs = pt_nlinalg.slogdet(x)
-    compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
 
 def test_pinv():
@@ -74,14 +48,3 @@ def test_pinv_hermitian():
     assert not np.allclose(
         jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=True)
     )
-
-
-def test_kron():
-    x = matrix("x")
-    y = matrix("y")
-    z = pt_nlinalg.kron(x, y)
-
-    x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
-    y_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
-
-    compare_jax_and_py([x, y], [z], [x_np, y_np])

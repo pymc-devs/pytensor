@@ -5,7 +5,8 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config
-from pytensor.tensor._linalg.decomposition import svd
+from pytensor.tensor._linalg.decomposition import lu, svd
+from pytensor.tensor._linalg.decomposition.cholesky import cholesky
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
@@ -28,40 +29,38 @@ def test_mlx_svd(compute_uv):
     )
 
 
-def test_mlx_kron():
-    rng = np.random.default_rng(15)
-
-    A = pt.matrix(name="A")
-    B = pt.matrix(name="B")
-    A_val, B_val = rng.normal(scale=0.1, size=(2, 3, 3)).astype(config.floatX)
-    out = pt.linalg.kron(A, B)
-
-    compare_mlx_and_py(
-        [A, B],
-        [out],
-        [A_val, B_val],
-        mlx_mode=mlx_mode,
-        assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
-    )
-
-
-@pytest.mark.parametrize("op", [pt.linalg.inv, pt.linalg.pinv], ids=["inv", "pinv"])
-def test_mlx_inv(op):
+@pytest.mark.parametrize("lower", [True, False])
+def test_mlx_cholesky(lower):
     rng = np.random.default_rng(15)
     n = 3
 
-    A = pt.matrix(name="A")
+    A = pt.tensor("A", shape=(n, n))
     A_val = rng.normal(size=(n, n))
     A_val = (A_val @ A_val.T).astype(config.floatX)
 
-    out = op(A)
+    out = cholesky(A, lower=lower)
 
     compare_mlx_and_py(
         [A],
         [out],
         [A_val],
         mlx_mode=mlx_mode,
-        assert_fn=partial(
-            np.testing.assert_allclose, atol=1e-6, rtol=1e-6, strict=True
-        ),
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
+    )
+
+
+def test_mlx_LU():
+    rng = np.random.default_rng(15)
+
+    A = pt.tensor("A", shape=(5, 5))
+    out = lu.lu(A, permute_l=False, p_indices=True)
+
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    compare_mlx_and_py(
+        [A],
+        out,
+        [A_val],
+        mlx_mode=mlx_mode,
+        assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )

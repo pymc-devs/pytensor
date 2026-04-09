@@ -4,42 +4,8 @@ import pytest
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.tensor import nlinalg as pt_nla
-from pytensor.tensor._linalg.decomposition import svd
 from pytensor.tensor.type import matrix
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
-
-
-def assert_fn(x, y):
-    np.testing.assert_allclose(x, y, rtol=1e-3)
-
-
-@pytest.mark.parametrize(
-    "func",
-    (pt_nla.eigh, pt_nla.SLogDet(), pt_nla.inv, pt_nla.det),
-)
-def test_lin_alg_no_params(func, matrix_test):
-    x, test_value = matrix_test
-
-    outs = func(x)
-
-    compare_pytorch_and_py([x], outs, [test_value], assert_fn=assert_fn)
-
-
-def test_eig(matrix_test):
-    x, test_value = matrix_test
-    out = pt_nla.eig(x)
-
-    compare_pytorch_and_py([x], out, [test_value], assert_fn=assert_fn)
-
-
-@pytest.mark.parametrize("compute_uv", [True, False])
-@pytest.mark.parametrize("full_matrices", [True, False])
-def test_svd(compute_uv, full_matrices, matrix_test):
-    x, test_value = matrix_test
-
-    out = svd.svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
-
-    compare_pytorch_and_py([x], out, [test_value])
 
 
 def test_pinv():
@@ -75,14 +41,3 @@ def test_pinv_hermitian(hermitian):
         )
         is hermitian
     )
-
-
-def test_kron():
-    x = matrix("x")
-    y = matrix("y")
-    z = pt_nla.kron(x, y)
-
-    x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
-    y_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
-
-    compare_pytorch_and_py([x, y], [z], [x_np, y_np])
