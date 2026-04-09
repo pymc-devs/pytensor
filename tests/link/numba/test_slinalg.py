@@ -405,7 +405,7 @@ class TestSolves:
         A_val = rng.normal(size=(5, 5)).astype(floatX)
         b_val = rng.normal(size=b_shape).astype(floatX)
 
-        lu_and_piv = lu.lu_factor(A)
+        lu_and_piv = lu_factor(A)
         X = pt.linalg.lu_solve(
             lu_and_piv,
             b,
@@ -592,7 +592,7 @@ class TestDecompositions:
         )
         A_val = rng.normal(size=shape).astype(config.floatX)
 
-        lu_outputs = lu.lu(A, permute_l=permute_l, p_indices=p_indices)
+        lu_outputs = lu(A, permute_l=permute_l, p_indices=p_indices)
 
         fn, res = compare_numba_and_py(
             [In(A, mutable=overwrite_a)],
@@ -652,7 +652,7 @@ class TestDecompositions:
         A = pt.tensor("A", shape=shape, dtype=config.floatX)
         A_val = rng.normal(size=shape).astype(config.floatX)
 
-        LU, piv = lu.lu_factor(A)
+        LU, piv = lu_factor(A)
 
         fn, res = compare_numba_and_py(
             [In(A, mutable=overwrite_a)],

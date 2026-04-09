@@ -109,8 +109,7 @@ class Cholesky(Op):
 
         def conjugate_solve_triangular(outer, inner):
             """Computes L^{-T} P L^{-1} for lower-triangular L."""
-            # TODO: Import from _linalg.solve.core once solve ops are moved there (commit 2)
-            from pytensor.tensor.slinalg import SolveTriangular
+            from pytensor.tensor._linalg.solve.triangular import SolveTriangular
 
             solve_upper = SolveTriangular(lower=False, b_ndim=2)
             return solve_upper(outer.T, solve_upper(outer.T, inner.T).T)

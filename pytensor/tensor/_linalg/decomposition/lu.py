@@ -116,8 +116,7 @@ class LU(Op):
         Derivation is due to Differentiation of Matrix Functionals Using Triangular Factorization
         F. R. De Hoog, R.S. Anderssen, M. A. Lukas
         """
-        # TODO: Import from _linalg.solve.core once solve ops are moved there (commit 2)
-        from pytensor.tensor.slinalg import solve_triangular
+        from pytensor.tensor._linalg.solve.triangular import solve_triangular
 
         [A] = inputs
         A = cast(TensorVariable, A)
@@ -295,8 +294,7 @@ class LUFactor(Op):
         outputs[1][0] = p
 
     def pullback(self, inputs, outputs, output_gradients):
-        # TODO: Import from _linalg.solve.core once solve ops are moved there (commit 2)
-        from pytensor.tensor.slinalg import solve_triangular
+        from pytensor.tensor._linalg.solve.triangular import solve_triangular
 
         [A] = inputs
         LU_bar, _ = output_gradients

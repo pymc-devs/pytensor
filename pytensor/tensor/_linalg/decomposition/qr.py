@@ -232,9 +232,7 @@ class QR(Op):
         .. [1] Jinguo Liu. "Linear Algebra Autodiff (complex valued)", blog post https://giggleliu.github.io/posts/2019-04-02-einsumbp/
         .. [2] Hai-Jun Liao, Jin-Guo Liu, Lei Wang, Tao Xiang. "Differentiable Programming Tensor Networks", arXiv:1903.09650v2
         """
-
-        # TODO: Import from _linalg.solve.core once solve ops are moved there (commit 2)
-        from pytensor.tensor.slinalg import solve_triangular
+        from pytensor.tensor._linalg.solve.triangular import solve_triangular
 
         (A,) = (cast(ptb.TensorVariable, x) for x in inputs)
         m, n = A.shape
