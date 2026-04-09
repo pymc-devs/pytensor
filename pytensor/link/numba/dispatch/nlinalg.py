@@ -9,15 +9,10 @@ from pytensor.link.numba.dispatch.basic import (
     get_numba_type,
     register_funcify_default_op_cache_key,
 )
+from pytensor.tensor._linalg.decomposition.eigen import Eig, Eigh
 from pytensor.tensor._linalg.decomposition.svd import SVD
-from pytensor.tensor.nlinalg import (
-    Det,
-    Eig,
-    Eigh,
-    MatrixInverse,
-    MatrixPinv,
-    SLogDet,
-)
+from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor._linalg.summary import Det, SLogDet
 
 
 @register_funcify_default_op_cache_key(SVD)
