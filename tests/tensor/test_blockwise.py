@@ -22,6 +22,7 @@ from pytensor.tensor import (
     tensor,
     vector,
 )
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.blockwise import (
     Blockwise,
     BlockwiseWithCoreShape,
@@ -32,11 +33,9 @@ from pytensor.tensor.random import normal
 from pytensor.tensor.random.op import default_rng
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
 from pytensor.tensor.slinalg import (
-    Cholesky,
     Solve,
     SolveBase,
     cho_solve,
-    cholesky,
     solve,
     solve_triangular,
 )

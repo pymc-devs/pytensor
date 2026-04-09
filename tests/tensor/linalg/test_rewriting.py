@@ -7,6 +7,9 @@ from pytensor.compile.mode import get_default_mode
 from pytensor.gradient import grad
 from pytensor.graph import rewrite_graph
 from pytensor.scan.op import Scan
+from pytensor.tensor._linalg.decomposition import lu, qr, svd
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor._linalg.decomposition.lu import LUFactor
 from pytensor.tensor._linalg.solve.rewriting import (
     reuse_decomposition_multiple_solves,
     scan_split_non_sequence_decomposition_and_solve,
@@ -19,9 +22,7 @@ from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg import solve
 from pytensor.tensor.nlinalg import det
 from pytensor.tensor.slinalg import (
-    Cholesky,
     CholeskySolve,
-    LUFactor,
     Solve,
     SolveTriangular,
 )
@@ -305,18 +306,18 @@ def test_local_log_prod_to_sum_log_positive_tag(expected, pos_tag):
     "decomp_fn, expected_fn",
     [
         pytest.param(
-            lambda x: pt.linalg.cholesky(x),
-            lambda x: pt.sqr(pt.prod(pt.diag(pt.linalg.cholesky(x)), axis=0)),
+            lambda x: cholesky(x),
+            lambda x: pt.sqr(pt.prod(pt.diag(cholesky(x)), axis=0)),
             id="cholesky",
         ),
         pytest.param(
-            lambda x: pt.linalg.lu(x)[-1],
-            lambda x: pt.prod(pt.extract_diag(pt.linalg.lu(x)[-1]), axis=0),
+            lambda x: lu.lu(x)[-1],
+            lambda x: pt.prod(pt.extract_diag(lu.lu(x)[-1]), axis=0),
             id="lu",
         ),
         pytest.param(
-            lambda x: pt.linalg.lu_factor(x)[0],
-            lambda x: pt.prod(pt.extract_diag(pt.linalg.lu_factor(x)[0]), axis=0),
+            lambda x: lu.lu_factor(x)[0],
+            lambda x: pt.prod(pt.extract_diag(lu.lu_factor(x)[0]), axis=0),
             id="lu_factor",
         ),
     ],
@@ -338,43 +339,39 @@ def test_det_of_matrix_factorized_elsewhere(decomp_fn, expected_fn):
     "decomp_fn, sign_op, expected_fn",
     [
         pytest.param(
-            lambda x: pt.linalg.svd(x, compute_uv=True)[0],
+            lambda x: svd.svd(x, compute_uv=True)[0],
             pt.abs,
-            lambda x: pt.prod(pt.linalg.svd(x, compute_uv=True)[1], axis=0),
+            lambda x: pt.prod(svd.svd(x, compute_uv=True)[1], axis=0),
             id="svd_abs",
         ),
         pytest.param(
-            lambda x: pt.linalg.svd(x, compute_uv=False),
+            lambda x: svd.svd(x, compute_uv=False),
             pt.abs,
-            lambda x: pt.prod(pt.linalg.svd(x, compute_uv=False), axis=0),
+            lambda x: pt.prod(svd.svd(x, compute_uv=False), axis=0),
             id="svd_no_uv_abs",
         ),
         pytest.param(
-            lambda x: pt.linalg.qr(x)[0],
+            lambda x: qr.qr(x)[0],
             pt.abs,
-            lambda x: pt.prod(
-                pt.diagonal(pt.linalg.qr(x)[1], axis1=-2, axis2=-1), axis=-1
-            ),
+            lambda x: pt.prod(pt.diagonal(qr.qr(x)[1], axis1=-2, axis2=-1), axis=-1),
             id="qr_abs",
         ),
         pytest.param(
-            lambda x: pt.linalg.svd(x, compute_uv=True)[0],
+            lambda x: svd.svd(x, compute_uv=True)[0],
             pt.sqr,
-            lambda x: pt.prod(pt.linalg.svd(x, compute_uv=True)[1], axis=0),
+            lambda x: pt.prod(svd.svd(x, compute_uv=True)[1], axis=0),
             id="svd_sqr",
         ),
         pytest.param(
-            lambda x: pt.linalg.svd(x, compute_uv=False),
+            lambda x: svd.svd(x, compute_uv=False),
             pt.sqr,
-            lambda x: pt.prod(pt.linalg.svd(x, compute_uv=False), axis=0),
+            lambda x: pt.prod(svd.svd(x, compute_uv=False), axis=0),
             id="svd_no_uv_sqr",
         ),
         pytest.param(
-            lambda x: pt.linalg.qr(x)[0],
+            lambda x: qr.qr(x)[0],
             pt.sqr,
-            lambda x: pt.prod(
-                pt.diagonal(pt.linalg.qr(x)[1], axis1=-2, axis2=-1), axis=-1
-            ),
+            lambda x: pt.prod(pt.diagonal(qr.qr(x)[1], axis1=-2, axis2=-1), axis=-1),
             id="qr_sqr",
         ),
     ],
@@ -396,21 +393,17 @@ def test_det_of_matrix_factorized_elsewhere_abs(decomp_fn, sign_op, expected_fn)
     "original_fn, expected_fn",
     [
         pytest.param(
-            lambda x: det(pt.linalg.cholesky(x)),
-            lambda x: pt.prod(
-                pt.diagonal(pt.linalg.cholesky(x), axis1=-2, axis2=-1), axis=-1
-            ),
+            lambda x: det(cholesky(x)),
+            lambda x: pt.prod(pt.diagonal(cholesky(x), axis1=-2, axis2=-1), axis=-1),
             id="det_cholesky",
         ),
         pytest.param(
-            lambda x: det(pt.linalg.lu(x)[-1]),
-            lambda x: pt.prod(
-                pt.diagonal(pt.linalg.lu(x)[-1], axis1=-2, axis2=-1), axis=-1
-            ),
+            lambda x: det(lu.lu(x)[-1]),
+            lambda x: pt.prod(pt.diagonal(lu.lu(x)[-1], axis1=-2, axis2=-1), axis=-1),
             id="det_lu_U",
         ),
         pytest.param(
-            lambda x: det(pt.linalg.lu(x)[-2]),
+            lambda x: det(lu.lu(x)[-2]),
             lambda x: pt.as_tensor(1.0, dtype=x.dtype),
             id="det_lu_L",
         ),
@@ -428,45 +421,43 @@ def test_det_of_factorized_matrix(original_fn, expected_fn):
     "original_fn, expected_fn",
     [
         pytest.param(
-            lambda x: pt.abs(det(pt.linalg.svd(x, compute_uv=True)[0])),
+            lambda x: pt.abs(det(svd.svd(x, compute_uv=True)[0])),
             lambda x: pt.as_tensor(1.0, dtype=x.dtype),
             id="abs_det_svd_U",
         ),
         pytest.param(
-            lambda x: pt.abs(det(pt.linalg.svd(x, compute_uv=True)[2])),
+            lambda x: pt.abs(det(svd.svd(x, compute_uv=True)[2])),
             lambda x: pt.as_tensor(1.0, dtype=x.dtype),
             id="abs_det_svd_Vt",
         ),
         pytest.param(
-            lambda x: pt.abs(det(pt.linalg.qr(x)[0])),
+            lambda x: pt.abs(det(qr.qr(x)[0])),
             lambda x: pt.as_tensor(1.0, dtype=x.dtype),
             id="abs_det_qr_Q",
         ),
         pytest.param(
-            lambda x: pt.sqr(det(pt.linalg.svd(x, compute_uv=True)[0])),
+            lambda x: pt.sqr(det(svd.svd(x, compute_uv=True)[0])),
             lambda x: pt.as_tensor(1.0, dtype=x.dtype),
             id="sqr_det_svd_U",
         ),
         pytest.param(
-            lambda x: pt.sqr(det(pt.linalg.svd(x, compute_uv=True)[2])),
+            lambda x: pt.sqr(det(svd.svd(x, compute_uv=True)[2])),
             lambda x: pt.as_tensor(1.0, dtype=x.dtype),
             id="sqr_det_svd_Vt",
         ),
         pytest.param(
-            lambda x: pt.sqr(det(pt.linalg.qr(x)[0])),
+            lambda x: pt.sqr(det(qr.qr(x)[0])),
             lambda x: pt.as_tensor(1.0, dtype=x.dtype),
             id="sqr_det_qr_Q",
         ),
         pytest.param(
-            lambda x: det(pt.linalg.qr(x)[1]),
-            lambda x: pt.prod(
-                pt.diagonal(pt.linalg.qr(x)[1], axis1=-2, axis2=-1), axis=-1
-            ),
+            lambda x: det(qr.qr(x)[1]),
+            lambda x: pt.prod(pt.diagonal(qr.qr(x)[1], axis1=-2, axis2=-1), axis=-1),
             id="det_qr_R",
         ),
         pytest.param(
-            lambda x: det(pt.linalg.qr(x)[0]),
-            lambda x: det(pt.linalg.qr(x)[0]),
+            lambda x: det(qr.qr(x)[0]),
+            lambda x: det(qr.qr(x)[0]),
             id="det_qr_Q_no_rewrite",
         ),
     ],

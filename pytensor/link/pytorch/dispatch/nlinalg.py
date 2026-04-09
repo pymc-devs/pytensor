@@ -1,8 +1,8 @@
 import torch
 
 from pytensor.link.pytorch.dispatch import pytorch_funcify
+from pytensor.tensor._linalg.decomposition.svd import SVD
 from pytensor.tensor.nlinalg import (
-    SVD,
     Det,
     Eig,
     Eigh,

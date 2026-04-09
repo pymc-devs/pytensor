@@ -12,6 +12,7 @@ from pytensor.graph import Apply, Op, Type
 from pytensor.graph.basic import Variable
 from pytensor.graph.replace import graph_replace
 from pytensor.tensor import alloc, scalar, scalar_from_tensor, tensor_from_scalar
+from pytensor.tensor._linalg.decomposition.cholesky import cholesky
 from pytensor.tensor.optimize import minimize, minimize_scalar, root, root_scalar
 from tests import unittest_tools as utt
 
@@ -227,7 +228,7 @@ def test_minimize_mvn_logp_mu_and_cov():
     d = 3
 
     def objective(mu, cov, data):
-        L = pt.linalg.cholesky(cov)
+        L = cholesky(cov)
         _, logdet = pt.linalg.slogdet(cov)
 
         v = mu - data

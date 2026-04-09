@@ -53,17 +53,14 @@ from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
     build_source_code,
 )
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
+from pytensor.tensor._linalg.decomposition.qr import QR
+from pytensor.tensor._linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor._linalg.solve.linear_control import TRSYL
 from pytensor.tensor.slinalg import (
-    LU,
-    QR,
-    QZ,
     BlockDiagonal,
-    Cholesky,
     CholeskySolve,
-    LUFactor,
-    PivotToPermutations,
-    Schur,
     Solve,
     SolveTriangular,
 )

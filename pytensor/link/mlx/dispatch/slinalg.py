@@ -3,7 +3,9 @@ import warnings
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor.slinalg import LU, Cholesky, Solve, SolveTriangular
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor._linalg.decomposition.lu import LU
+from pytensor.tensor.slinalg import Solve, SolveTriangular
 
 
 @mlx_funcify.register(Cholesky)

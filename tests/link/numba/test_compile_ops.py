@@ -10,9 +10,9 @@ from pytensor.raise_op import assert_op
 from pytensor.scalar import Add
 from pytensor.scan.op import Scan
 from pytensor.tensor import dmatrix, dtensor3, matrix
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.slinalg import Cholesky
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -207,7 +207,7 @@ def test_ofg_with_inner_scan_rewrite():
     # Regression test where inner scan would be mutated when compiling outer OFG
     ys = pt.tensor("ys", shape=(5, 3, 3))
     xs = scan(
-        lambda y: pt.linalg.cholesky(y),
+        lambda y: cholesky(y),
         sequences=[ys],
         return_updates=False,
         mode=Mode(optimizer=None),

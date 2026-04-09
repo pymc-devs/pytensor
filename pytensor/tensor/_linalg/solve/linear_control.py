@@ -9,13 +9,16 @@ import pytensor.tensor.math as ptm
 from pytensor.compile.builders import OpFromGraph
 from pytensor.graph import Apply, Op
 from pytensor.tensor import TensorLike
+from pytensor.tensor._linalg.decomposition.lu import lu
+from pytensor.tensor._linalg.decomposition.qr import qr
+from pytensor.tensor._linalg.decomposition.schur import qz, schur
 from pytensor.tensor.basic import as_tensor_variable, zeros
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.functional import vectorize
 from pytensor.tensor.nlinalg import kron, matrix_dot, norm
 from pytensor.tensor.reshape import join_dims
 from pytensor.tensor.shape import reshape
-from pytensor.tensor.slinalg import lu, qr, qz, schur, solve, solve_triangular
+from pytensor.tensor.slinalg import solve, solve_triangular
 from pytensor.tensor.type import matrix
 from pytensor.tensor.variable import TensorVariable
 

@@ -6,6 +6,8 @@ from pytensor.graph import Constant, graph_inputs
 from pytensor.graph.rewriting.basic import copy_stack_trace, dfs_rewriter, node_rewriter
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
+from pytensor.tensor._linalg.decomposition.cholesky import cholesky
+from pytensor.tensor._linalg.decomposition.lu import lu_factor
 from pytensor.tensor._linalg.solve.linear_control import (
     SolveBilinearDiscreteLyapunov,
     solve_discrete_lyapunov,
@@ -19,7 +21,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.slinalg import Solve, cho_solve, cholesky, lu_factor, lu_solve
+from pytensor.tensor.slinalg import Solve, cho_solve, lu_solve
 from pytensor.tensor.variable import TensorVariable
 
 

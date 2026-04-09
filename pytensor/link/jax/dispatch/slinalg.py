@@ -3,18 +3,16 @@ import warnings
 import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
+from pytensor.tensor._linalg.decomposition.qr import QR
+from pytensor.tensor._linalg.decomposition.schur import Schur
 from pytensor.tensor._linalg.solve.linear_control import SolveSylvester
 from pytensor.tensor.slinalg import (
-    LU,
-    QR,
     BlockDiagonal,
-    Cholesky,
     CholeskySolve,
     Eigvalsh,
     Expm,
-    LUFactor,
-    PivotToPermutations,
-    Schur,
     Solve,
     SolveTriangular,
 )

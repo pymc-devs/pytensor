@@ -4,6 +4,7 @@ import pytest
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
 from pytensor.tensor import nlinalg as pt_nla
+from pytensor.tensor._linalg.decomposition import svd
 from pytensor.tensor.type import matrix
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
@@ -36,7 +37,7 @@ def test_eig(matrix_test):
 def test_svd(compute_uv, full_matrices, matrix_test):
     x, test_value = matrix_test
 
-    out = pt_nla.svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
+    out = svd.svd(x, full_matrices=full_matrices, compute_uv=compute_uv)
 
     compare_pytorch_and_py([x], out, [test_value])
 

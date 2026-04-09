@@ -8,10 +8,10 @@ import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
 from pytensor.graph.replace import clone_replace
+from pytensor.tensor._linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.basic import arange, as_tensor_variable
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.nlinalg import (
-    SVD,
     Eig,
     MatrixInverse,
     TensorInv,
@@ -26,7 +26,6 @@ from pytensor.tensor.nlinalg import (
     norm,
     pinv,
     slogdet,
-    svd,
     tensorinv,
     tensorsolve,
     trace,

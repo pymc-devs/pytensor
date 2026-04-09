@@ -7,21 +7,22 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
-from pytensor.tensor.slinalg import (
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor._linalg.decomposition.lu import (
     LU,
-    QR,
-    Cholesky,
-    CholeskySolve,
     LUFactor,
+    lu,
+    lu_factor,
+    pivot_to_permutation,
+)
+from pytensor.tensor._linalg.decomposition.qr import QR, qr
+from pytensor.tensor._linalg.decomposition.schur import qz, schur
+from pytensor.tensor.slinalg import (
+    CholeskySolve,
     Solve,
     SolveTriangular,
     cho_solve,
-    cholesky,
-    lu,
-    lu_factor,
     lu_solve,
-    qz,
-    schur,
     solve,
     solve_triangular,
 )
@@ -404,7 +405,7 @@ class TestSolves:
         A_val = rng.normal(size=(5, 5)).astype(floatX)
         b_val = rng.normal(size=b_shape).astype(floatX)
 
-        lu_and_piv = pt.linalg.lu_factor(A)
+        lu_and_piv = lu.lu_factor(A)
         X = pt.linalg.lu_solve(
             lu_and_piv,
             b,
@@ -491,7 +492,7 @@ class TestDecompositions:
         dtype = complex_dtype if is_complex else floatX
 
         cov = pt.matrix("cov", dtype=dtype)
-        chol = pt.linalg.cholesky(cov, lower=lower)
+        chol = cholesky(cov, lower=lower)
 
         rng = np.random.default_rng(42)
         x = rng.normal(size=(3, 3))
@@ -544,7 +545,7 @@ class TestDecompositions:
         x = pt.tensor(dtype=floatX, shape=(3, 3))
         x = x.T.dot(x)
         with pytest.warns(FutureWarning):
-            g = pt.linalg.cholesky(x, check_finite=True, on_error="raise")
+            g = cholesky(x, check_finite=True, on_error="raise")
         f = pytensor.function([x], g, mode="NUMBA")
 
         with pytest.raises(
@@ -559,9 +560,9 @@ class TestDecompositions:
         x = pt.tensor(dtype=floatX, shape=(3, 3))
         if on_error == "raise":
             with pytest.warns(FutureWarning):
-                g = pt.linalg.cholesky(x, on_error=on_error)
+                g = cholesky(x, on_error=on_error)
         else:
-            g = pt.linalg.cholesky(x, on_error=on_error)
+            g = cholesky(x, on_error=on_error)
         f = pytensor.function([x], g, mode="NUMBA")
 
         if on_error == "raise":
@@ -591,7 +592,7 @@ class TestDecompositions:
         )
         A_val = rng.normal(size=shape).astype(config.floatX)
 
-        lu_outputs = pt.linalg.lu(A, permute_l=permute_l, p_indices=p_indices)
+        lu_outputs = lu.lu(A, permute_l=permute_l, p_indices=p_indices)
 
         fn, res = compare_numba_and_py(
             [In(A, mutable=overwrite_a)],
@@ -651,7 +652,7 @@ class TestDecompositions:
         A = pt.tensor("A", shape=shape, dtype=config.floatX)
         A_val = rng.normal(size=shape).astype(config.floatX)
 
-        LU, piv = pt.linalg.lu_factor(A)
+        LU, piv = lu.lu_factor(A)
 
         fn, res = compare_numba_and_py(
             [In(A, mutable=overwrite_a)],
@@ -717,7 +718,7 @@ class TestDecompositions:
         else:
             A_val = rng.normal(size=shape).astype(A.dtype)
 
-        qr_outputs = pt.linalg.qr(A, mode=mode, pivoting=pivoting)
+        qr_outputs = qr(A, mode=mode, pivoting=pivoting)
 
         fn, res = compare_numba_and_py(
             [In(A, mutable=overwrite_a)],
@@ -968,8 +969,6 @@ def test_block_diag_with_read_only_inp():
 
 @pytest.mark.parametrize("inverse", [True, False], ids=["p_inv", "p"])
 def test_pivot_to_permutation(inverse):
-    from pytensor.tensor.slinalg import pivot_to_permutation
-
     rng = np.random.default_rng(123)
     A = rng.normal(size=(5, 5)).astype(floatX)
 

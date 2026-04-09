@@ -5,6 +5,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config
+from pytensor.tensor._linalg.decomposition import svd
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
@@ -16,7 +17,7 @@ def test_mlx_svd(compute_uv):
     A_val = rng.normal(size=(3, 3)).astype(config.floatX)
     A_val = A_val @ A_val.T
 
-    out = pt.linalg.svd(A, compute_uv=compute_uv)
+    out = svd.svd(A, compute_uv=compute_uv)
 
     compare_mlx_and_py(
         [A],

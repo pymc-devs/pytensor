@@ -4,7 +4,8 @@ import pytest
 from pytensor import function
 from pytensor.compile.mode import get_default_mode
 from pytensor.tensor import matrix, tensor
-from pytensor.tensor.linalg import block_diag, cholesky
+from pytensor.tensor._linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.linalg import block_diag
 
 
 def _test_cholesky_benchmark(mode, benchmark):

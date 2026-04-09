@@ -1,7 +1,6 @@
 import warnings
-from collections.abc import Callable, Sequence
-from functools import partial
-from typing import Literal, cast
+from collections.abc import Callable
+from typing import Literal
 
 import numpy as np
 from numpy.lib.array_utils import normalize_axis_tuple
@@ -14,17 +13,15 @@ from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
+from pytensor.tensor._linalg.decomposition.svd import svd
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.type import (
-    Variable,
     dmatrix,
     dvector,
     iscalar,
     matrix,
     scalar,
-    tensor,
-    vector,
 )
 
 
@@ -321,429 +318,6 @@ def slogdet(x: TensorLike) -> tuple[ptb.TensorVariable, ptb.TensorVariable]:
     """
     det_val = det(x)
     return ptm.sign(det_val), ptm.log(ptm.abs(det_val))
-
-
-class Eig(Op):
-    """
-    Compute the eigenvalues and right eigenvectors of a square array.
-    """
-
-    __props__: tuple[str, ...] = ()
-    # Can't use numpy directly in Blockwise, because of the dynamic dtype
-    # gufunc_spec = ("numpy.linalg.eig", 1, 2)
-    gufunc_signature = "(m,m)->(m),(m,m)"
-
-    def make_node(self, x):
-        x = as_tensor_variable(x)
-        assert x.ndim == 2
-
-        M, N = x.type.shape
-
-        if M is not None and N is not None and M != N:
-            raise ValueError(
-                f"Input to Eig must be a square matrix, got static shape: ({M}, {N})"
-            )
-
-        dtype = np.promote_types(x.dtype, np.complex64)
-
-        w = tensor(dtype=dtype, shape=(M,))
-        v = tensor(dtype=dtype, shape=(M, N))
-
-        return Apply(self, [x], [w, v])
-
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        dtype = np.promote_types(x.dtype, np.complex64)
-
-        w, v = np.linalg.eig(x)
-
-        # If the imaginary part of the eigenvalues is zero, numpy automatically casts them to real. We require
-        # a statically known return dtype, so we have to cast back to complex to avoid dtype mismatch.
-        outputs[0][0] = w.astype(dtype, copy=False)
-        outputs[1][0] = v.astype(dtype, copy=False)
-
-    def infer_shape(self, fgraph, node, shapes):
-        (x_shapes,) = shapes
-        n, _ = x_shapes
-
-        return [(n,), (n, n)]
-
-    def pullback(self, inputs, outputs, output_grads):
-        raise NotImplementedError(
-            "Gradients for Eig is not implemented because it always returns complex values, "
-            "for which autodiff is not yet supported in PyTensor (PRs welcome :) ).\n"
-            "If you know that your input has strictly real-valued eigenvalues (e.g. it is a "
-            "symmetric matrix), use pt.linalg.eigh instead."
-        )
-
-
-def eig(x: TensorLike):
-    """
-    Return the eigenvalues and right eigenvectors of a square array.
-
-    Note that regardless of the input dtype, the eigenvalues and eigenvectors are returned as complex numbers. As a
-    result, the gradient of this operation is not implemented (because PyTensor does not support autodiff for complex
-    values yet).
-
-    If you know that your input has strictly real-valued eigenvalues (e.g. it is a symmetric matrix), use
-    `pytensor.tensor.linalg.eigh` instead.
-
-    Parameters
-    ----------
-    x: TensorLike
-        Square matrix, or array of such matrices
-    """
-    return Blockwise(Eig())(x)
-
-
-class Eigh(Eig):
-    """
-    Return the eigenvalues and eigenvectors of a Hermitian or symmetric matrix.
-    """
-
-    __props__ = ("UPLO",)
-
-    def __init__(self, UPLO="L"):
-        assert UPLO in ("L", "U")
-        self.UPLO = UPLO
-
-    def make_node(self, x):
-        x = as_tensor_variable(x)
-        assert x.ndim == 2
-        # Numpy's linalg.eigh may return either double or single
-        # presision eigenvalues depending on installed version of
-        # LAPACK.  Rather than trying to reproduce the (rather
-        # involved) logic, we just probe linalg.eigh with a trivial
-        # input.
-        w_dtype = np.linalg.eigh([[np.dtype(x.dtype).type()]])[0].dtype.name
-        w = vector(dtype=w_dtype)
-        v = matrix(dtype=w_dtype)
-        return Apply(self, [x], [w, v])
-
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        (w, v) = outputs
-        w[0], v[0] = np.linalg.eigh(x, self.UPLO)
-
-    def pullback(self, inputs, outputs, output_grads):
-        r"""The gradient function should return
-
-           .. math:: \sum_n\left(W_n\frac{\partial\,w_n}
-                           {\partial a_{ij}} +
-                     \sum_k V_{nk}\frac{\partial\,v_{nk}}
-                           {\partial a_{ij}}\right),
-
-        where [:math:`W`, :math:`V`] corresponds to ``g_outputs``,
-        :math:`a` to ``inputs``, and  :math:`(w, v)=\mbox{eig}(a)`.
-
-        Analytic formulae for eigensystem gradients are well-known in
-        perturbation theory:
-
-           .. math:: \frac{\partial\,w_n}
-                          {\partial a_{ij}} = v_{in}\,v_{jn}
-
-
-           .. math:: \frac{\partial\,v_{kn}}
-                          {\partial a_{ij}} =
-                \sum_{m\ne n}\frac{v_{km}v_{jn}}{w_n-w_m}
-
-        """
-        (x,) = inputs
-        w, v = outputs
-        gw, gv = _zero_disconnected([w, v], output_grads)
-
-        return [EighGrad(self.UPLO)(x, w, v, gw, gv)]
-
-
-def _zero_disconnected(outputs, grads):
-    l = []
-    for o, g in zip(outputs, grads, strict=True):
-        if isinstance(g.type, DisconnectedType):
-            l.append(o.zeros_like())
-        else:
-            l.append(g)
-    return l
-
-
-class EighGrad(Op):
-    """
-    Gradient of an eigensystem of a Hermitian matrix.
-
-    """
-
-    __props__ = ("UPLO",)
-
-    def __init__(self, UPLO="L"):
-        assert UPLO in ("L", "U")
-        self.UPLO = UPLO
-        if UPLO == "L":
-            self.tri0 = np.tril
-            self.tri1 = partial(np.triu, k=1)
-        else:
-            self.tri0 = np.triu
-            self.tri1 = partial(np.tril, k=-1)
-
-    def make_node(self, x, w, v, gw, gv):
-        x, w, v, gw, gv = map(as_tensor_variable, (x, w, v, gw, gv))
-        assert x.ndim == 2
-        assert w.ndim == 1
-        assert v.ndim == 2
-        assert gw.ndim == 1
-        assert gv.ndim == 2
-        out_dtype = ps.upcast(x.dtype, w.dtype, v.dtype, gw.dtype, gv.dtype)
-        out = matrix(dtype=out_dtype)
-        return Apply(self, [x, w, v, gw, gv], [out])
-
-    def perform(self, node, inputs, outputs):
-        """
-        Implements the "reverse-mode" gradient for the eigensystem of
-        a square matrix.
-
-        """
-        x, w, v, W, V = inputs
-        N = x.shape[0]
-        outer = np.outer
-
-        def G(n):
-            return sum(
-                v[:, m] * V.T[n].dot(v[:, m]) / (w[n] - w[m])
-                for m in range(N)
-                if m != n
-            )
-
-        g = sum(outer(v[:, n], v[:, n] * W[n] + G(n)) for n in range(N))
-
-        # Numpy's eigh(a, 'L') (eigh(a, 'U')) is a function of tril(a)
-        # (triu(a)) only.  This means that partial derivative of
-        # eigh(a, 'L') (eigh(a, 'U')) with respect to a[i,j] is zero
-        # for i < j (i > j).  At the same time, non-zero components of
-        # the gradient must account for the fact that variation of the
-        # opposite triangle contributes to variation of two elements
-        # of Hermitian (symmetric) matrix. The following line
-        # implements the necessary logic.
-        out = self.tri0(g) + self.tri1(g).T
-
-        # Make sure we return the right dtype even if NumPy performed
-        # upcasting in self.tri0.
-        outputs[0][0] = np.asarray(out, dtype=node.outputs[0].dtype)
-
-    def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0]]
-
-
-def eigh(a, UPLO="L"):
-    return Eigh(UPLO)(a)
-
-
-class SVD(Op):
-    """
-    Computes singular value decomposition of matrix A, into U, S, V such that A = U @ S @ V
-
-    Parameters
-    ----------
-    full_matrices : bool, optional
-        If True (default), u and v have the shapes (M, M) and (N, N),
-        respectively.
-        Otherwise, the shapes are (M, K) and (K, N), respectively,
-        where K = min(M, N).
-    compute_uv : bool, optional
-        Whether or not to compute u and v in addition to s.
-        True by default.
-
-    """
-
-    # See doc in the docstring of the function just after this class.
-    __props__ = ("full_matrices", "compute_uv")
-
-    def __init__(self, full_matrices: bool = True, compute_uv: bool = True):
-        self.full_matrices = bool(full_matrices)
-        self.compute_uv = bool(compute_uv)
-        if self.compute_uv:
-            if self.full_matrices:
-                self.gufunc_signature = "(m,n)->(m,m),(k),(n,n)"
-            else:
-                self.gufunc_signature = "(m,n)->(m,k),(k),(k,n)"
-        else:
-            self.gufunc_signature = "(m,n)->(k)"
-
-    def make_node(self, x):
-        x = as_tensor_variable(x)
-        assert x.ndim == 2, "The input of svd function should be a matrix."
-
-        in_dtype = x.type.numpy_dtype
-        if in_dtype.name.startswith("int"):
-            out_dtype = np.dtype(f"f{in_dtype.itemsize}")
-        else:
-            out_dtype = in_dtype
-
-        s = vector(dtype=out_dtype)
-
-        if self.compute_uv:
-            u = matrix(dtype=out_dtype)
-            vt = matrix(dtype=out_dtype)
-            return Apply(self, [x], [u, s, vt])
-        else:
-            return Apply(self, [x], [s])
-
-    def perform(self, node, inputs, outputs):
-        (x,) = inputs
-        assert x.ndim == 2, "The input of svd function should be a matrix."
-        if self.compute_uv:
-            u, s, vt = outputs
-            u[0], s[0], vt[0] = np.linalg.svd(x, self.full_matrices, self.compute_uv)
-        else:
-            (s,) = outputs
-            s[0] = np.linalg.svd(x, self.full_matrices, self.compute_uv)
-
-    def infer_shape(self, fgraph, node, shapes):
-        (x_shape,) = shapes
-        M, N = x_shape
-        K = ptm.minimum(M, N)
-        s_shape = (K,)
-        if self.compute_uv:
-            u_shape = (M, M) if self.full_matrices else (M, K)
-            vt_shape = (N, N) if self.full_matrices else (K, N)
-            return [u_shape, s_shape, vt_shape]
-        else:
-            return [s_shape]
-
-    def pullback(
-        self,
-        inputs: Sequence[Variable],
-        outputs: Sequence[Variable],
-        output_grads: Sequence[Variable],
-    ) -> list[Variable]:
-        """
-        Reverse-mode gradient of the SVD function. Adapted from the autograd implementation here:
-        https://github.com/HIPS/autograd/blob/01eacff7a4f12e6f7aebde7c4cb4c1c2633f217d/autograd/numpy/linalg.py#L194
-
-        And the mxnet implementation described in ..[1]
-
-        References
-        ----------
-        .. [1] Seeger, Matthias, et al. "Auto-differentiating linear algebra." arXiv preprint arXiv:1710.08717 (2017).
-        """
-
-        def s_grad_only(
-            U: ptb.TensorVariable, VT: ptb.TensorVariable, ds: ptb.TensorVariable
-        ) -> list[Variable]:
-            A_bar = (U.conj() * ds[..., None, :]) @ VT
-            return [A_bar]
-
-        (A,) = (cast(ptb.TensorVariable, x) for x in inputs)
-
-        if not self.compute_uv:
-            # We need all the components of the SVD to compute the gradient of A even if we only use the singular values
-            # in the cost function.
-            U, _, VT = svd(A, full_matrices=False, compute_uv=True)
-            ds = cast(ptb.TensorVariable, output_grads[0])
-            return s_grad_only(U, VT, ds)
-
-        elif self.full_matrices:
-            raise NotImplementedError(
-                "Gradient of svd not implemented for full_matrices=True"
-            )
-
-        else:
-            U, s, VT = (cast(ptb.TensorVariable, x) for x in outputs)
-
-            # Handle disconnected inputs
-            # If a user asked for all the matrices but then only used a subset in the cost function, the unused outputs
-            # will be DisconnectedType. We replace DisconnectedTypes with zero matrices of the correct shapes.
-            new_output_grads = []
-            is_disconnected = [
-                isinstance(x.type, DisconnectedType) for x in output_grads
-            ]
-            if all(is_disconnected):
-                # This should never actually be reached by Pytensor -- the SVD Op should be pruned from the gradient
-                # graph if it's fully disconnected. It is included for completeness.
-                return [disconnected_type()]  # pragma: no cover
-
-            elif is_disconnected == [True, False, True]:
-                # This is the same as the compute_uv = False, so we can drop back to that simpler computation, without
-                # needing to re-compoute U and VT
-                ds = cast(ptb.TensorVariable, output_grads[1])
-                return s_grad_only(U, VT, ds)
-
-            for disconnected, output_grad, output in zip(
-                is_disconnected, output_grads, [U, s, VT], strict=True
-            ):
-                if disconnected:
-                    new_output_grads.append(output.zeros_like())
-                else:
-                    new_output_grads.append(output_grad)
-
-            (dU, ds, dVT) = (cast(ptb.TensorVariable, x) for x in new_output_grads)
-
-            V = VT.T
-            dV = dVT.T
-
-            m, n = A.shape[-2:]
-
-            k = ptm.min((m, n))
-            eye = ptb.eye(k)
-
-            def h(t):
-                """
-                Approximation of s_i ** 2 - s_j ** 2, from .. [1].
-                Robust to identical singular values (singular matrix input), although
-                gradients are still wrong in this case.
-                """
-                eps = 1e-8
-
-                # sign(0) = 0 in pytensor, which defeats the whole purpose of this function
-                sign_t = ptb.where(ptm.eq(t, 0), 1, ptm.sign(t))
-                return ptm.maximum(ptm.abs(t), eps) * sign_t
-
-            numer = ptb.ones((k, k)) - eye
-            denom = h(s[None] - s[:, None]) * h(s[None] + s[:, None])
-            E = numer / denom
-
-            utgu = U.T @ dU
-            vtgv = VT @ dV
-
-            A_bar = (E * (utgu - utgu.conj().T)) * s[..., None, :]
-            A_bar = A_bar + eye * ds[..., :, None]
-            A_bar = A_bar + s[..., :, None] * (E * (vtgv - vtgv.conj().T))
-            A_bar = U.conj() @ A_bar @ VT
-
-            A_bar = ptb.switch(
-                ptm.eq(m, n),
-                A_bar,
-                ptb.switch(
-                    ptm.lt(m, n),
-                    A_bar
-                    + (
-                        U / s[..., None, :] @ dVT @ (ptb.eye(n) - V @ V.conj().T)
-                    ).conj(),
-                    A_bar
-                    + (V / s[..., None, :] @ dU.T @ (ptb.eye(m) - U @ U.conj().T)).T,
-                ),
-            )
-            return [A_bar]
-
-
-def svd(a, full_matrices: bool = True, compute_uv: bool = True):
-    """
-    This function performs the SVD on CPU.
-
-    Parameters
-    ----------
-    full_matrices : bool, optional
-        If True (default), u and v have the shapes (M, M) and (N, N),
-        respectively.
-        Otherwise, the shapes are (M, K) and (K, N), respectively,
-        where K = min(M, N).
-    compute_uv : bool, optional
-        Whether or not to compute u and v in addition to s.
-        True by default.
-
-    Returns
-    -------
-    U, V, D : matrices
-
-    """
-    return Blockwise(SVD(full_matrices, compute_uv))(a)
 
 
 class Lstsq(Op):
@@ -1181,6 +755,19 @@ def kron(a, b):
     output_reshaped = output_out_of_shape.reshape(out_shape)
 
     return KroneckerProduct(inputs=[a, b], outputs=[output_reshaped])(a, b)
+
+
+# Re-exports: decomposition ops that were moved to _linalg/decomposition/
+# These are kept here for backwards compatibility.
+from pytensor.tensor._linalg.decomposition.eigen import (  # noqa: E402, F401
+    Eig,
+    Eigh,
+    EighGrad,
+    _zero_disconnected,
+    eig,
+    eigh,
+)
+from pytensor.tensor._linalg.decomposition.svd import SVD  # noqa: E402, F401
 
 
 __all__ = [

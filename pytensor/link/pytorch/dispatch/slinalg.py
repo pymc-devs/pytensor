@@ -1,7 +1,7 @@
 import torch
 
 from pytensor.link.pytorch.dispatch import pytorch_funcify
-from pytensor.tensor.slinalg import QR
+from pytensor.tensor._linalg.decomposition.qr import QR
 
 
 @pytorch_funcify.register(QR)

@@ -5,6 +5,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor.tensor import nlinalg
+from pytensor.tensor._linalg.decomposition import svd
 from tests.link.numba.test_basic import compare_numba_and_py
 
 
@@ -224,7 +225,7 @@ def test_matrix_inverses(op, x, exc, op_args):
 )
 def test_SVD(x, full_matrices, compute_uv, exc):
     x, test_x = x
-    g = nlinalg.SVD(full_matrices, compute_uv)(x)
+    g = svd.SVD(full_matrices, compute_uv)(x)
 
     cm = contextlib.suppress() if exc is None else pytest.warns(exc)
     with cm:

@@ -9,8 +9,8 @@ from pytensor.link.numba.dispatch.basic import (
     get_numba_type,
     register_funcify_default_op_cache_key,
 )
+from pytensor.tensor._linalg.decomposition.svd import SVD
 from pytensor.tensor.nlinalg import (
-    SVD,
     Det,
     Eig,
     Eigh,

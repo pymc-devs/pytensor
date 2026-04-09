@@ -3,7 +3,8 @@ import pytest
 
 from pytensor import function
 from pytensor.tensor import diagonal, grad, log, tensor
-from pytensor.tensor.linalg import cholesky, solve_triangular
+from pytensor.tensor._linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.linalg import solve_triangular
 
 
 def _test_blockwise_cholesky_benchmark(mode, benchmark):

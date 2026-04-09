@@ -1,8 +1,8 @@
 import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch import jax_funcify
+from pytensor.tensor._linalg.decomposition.svd import SVD
 from pytensor.tensor.nlinalg import (
-    SVD,
     Det,
     Eig,
     Eigh,

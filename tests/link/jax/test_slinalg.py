@@ -10,6 +10,8 @@ from pytensor.configdefaults import config
 from pytensor.tensor import nlinalg as pt_nlinalg
 from pytensor.tensor import slinalg as pt_slinalg
 from pytensor.tensor import subtensor as pt_subtensor
+from pytensor.tensor._linalg.decomposition import lu, qr, schur
+from pytensor.tensor._linalg.decomposition.cholesky import cholesky
 from pytensor.tensor._linalg.solve import linear_control
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
@@ -53,7 +55,7 @@ def test_jax_basic():
         [x], [out], [np.arange(10 * 10).reshape((10, 10)).astype(config.floatX)]
     )
 
-    out = pt_slinalg.cholesky(x)
+    out = cholesky(x)
     compare_jax_and_py(
         [x],
         [out],
@@ -65,7 +67,7 @@ def test_jax_basic():
     )
 
     # not sure why this isn't working yet with lower=False
-    out = pt_slinalg.Cholesky(lower=False)(x)
+    out = cholesky.Cholesky(lower=False)(x)
     compare_jax_and_py(
         [x],
         [out],
@@ -111,10 +113,10 @@ def test_jax_basic():
     M = rng.normal(size=(3, 3))
     X = M.dot(M.T)
 
-    outs = pt_slinalg.qr(x, mode="full")
+    outs = qr.qr(x, mode="full")
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = pt_slinalg.qr(x, mode="economic")
+    outs = qr.qr(x, mode="economic")
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
 
@@ -337,7 +339,7 @@ def test_jax_lu(permute_l, p_indices, complex, shape: tuple[int]):
         shape=shape,
         dtype=f"complex{int(config.floatX[-2:]) * 2}" if complex else config.floatX,
     )
-    out = pt_slinalg.lu(A, permute_l=permute_l, p_indices=p_indices)
+    out = lu.lu(A, permute_l=permute_l, p_indices=p_indices)
 
     x = rng.normal(size=shape).astype(config.floatX)
     if complex:
@@ -357,7 +359,7 @@ def test_jax_lu_factor(shape):
     rng = np.random.default_rng(utt.fetch_seed())
     A = pt.tensor(name="A", shape=shape)
     A_value = rng.normal(size=shape).astype(config.floatX)
-    out = pt_slinalg.lu_factor(A)
+    out = lu.lu_factor(A)
 
     compare_jax_and_py(
         [A],
@@ -374,7 +376,7 @@ def test_jax_lu_solve(b_shape):
 
     A = pt.tensor(name="A", shape=(5, 5))
     b = pt.tensor(name="b", shape=b_shape)
-    lu_and_pivots = pt_slinalg.lu_factor(A)
+    lu_and_pivots = lu.lu_factor(A)
     out = pt_slinalg.lu_solve(lu_and_pivots, b)
 
     compare_jax_and_py([A, b], [out], [A_val, b_val])
@@ -390,7 +392,7 @@ def test_jax_cho_solve(b_shape, lower):
 
     A = pt.tensor(name="A", shape=(5, 5))
     b = pt.tensor(name="b", shape=b_shape)
-    c = pt_slinalg.cholesky(A, lower=lower)
+    c = cholesky(A, lower=lower)
     out = pt_slinalg.cho_solve((c, lower), b, b_ndim=len(b_shape))
 
     compare_jax_and_py([A, b], [out], [A_val, b_val])
@@ -412,7 +414,7 @@ def test_jax_qr(mode):
     rng = np.random.default_rng(utt.fetch_seed())
     A = pt.tensor(name="A", shape=(5, 5))
     A_val = rng.normal(size=(5, 5)).astype(config.floatX)
-    out = pt_slinalg.qr(A, mode=mode)
+    out = qr.qr(A, mode=mode)
 
     compare_jax_and_py([A], out, [A_val])
 
@@ -422,7 +424,7 @@ def test_jax_schur(output):
     rng = np.random.default_rng(utt.fetch_seed())
     A = pt.tensor(name="A", shape=(5, 5))
     A_val = rng.normal(size=(5, 5)).astype(config.floatX)
-    T, Z = pt_slinalg.schur(A, output=output)
+    T, Z = schur.schur(A, output=output)
 
     compare_jax_and_py([A], [T, Z], [A_val])
 

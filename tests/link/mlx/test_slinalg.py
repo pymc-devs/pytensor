@@ -6,6 +6,8 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config
+from pytensor.tensor._linalg.decomposition import lu
+from pytensor.tensor._linalg.decomposition.cholesky import cholesky
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
@@ -18,7 +20,7 @@ def test_mlx_cholesky(lower):
     A_val = rng.normal(size=(n, n))
     A_val = (A_val @ A_val.T).astype(config.floatX)
 
-    out = pt.linalg.cholesky(A, lower=lower)
+    out = cholesky(A, lower=lower)
 
     compare_mlx_and_py(
         [A],
@@ -96,7 +98,7 @@ def test_mlx_LU():
     rng = np.random.default_rng(15)
 
     A = pt.tensor("A", shape=(5, 5))
-    out = pt.linalg.lu(A, permute_l=False, p_indices=True)
+    out = lu.lu(A, permute_l=False, p_indices=True)
 
     A_val = rng.normal(size=(5, 5)).astype(config.floatX)
 

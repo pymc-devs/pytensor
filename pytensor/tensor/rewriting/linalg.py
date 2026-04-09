@@ -10,6 +10,10 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Abs, Exp, Log, Mul, Sign, Sqr
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor
+from pytensor.tensor._linalg.decomposition.qr import QR
+from pytensor.tensor._linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.basic import (
     AllocDiag,
     ExtractDiag,
@@ -25,14 +29,12 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.math import Dot, Prod, log, outer, prod, variadic_mul
 from pytensor.tensor.nlinalg import (
-    SVD,
     KroneckerProduct,
     MatrixInverse,
     MatrixPinv,
     SLogDet,
     det,
     kron,
-    svd,
 )
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
@@ -41,17 +43,12 @@ from pytensor.tensor.rewriting.basic import (
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.slinalg import (
-    LU,
-    QR,
     BlockDiagonal,
-    Cholesky,
     CholeskySolve,
-    LUFactor,
     Solve,
     SolveBase,
     SolveTriangular,
     block_diag,
-    cholesky,
     solve,
     solve_triangular,
 )

@@ -14,11 +14,12 @@ from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
+from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor._linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.nlinalg import (
-    SVD,
     Det,
     KroneckerProduct,
     MatrixInverse,
@@ -27,18 +28,15 @@ from pytensor.tensor.nlinalg import (
     inv,
     matrix_inverse,
     pinv,
-    svd,
 )
 from pytensor.tensor.rewriting.linalg import inv_to_solve
 from pytensor.tensor.slinalg import (
     BlockDiagonal,
-    Cholesky,
     CholeskySolve,
     Solve,
     SolveBase,
     SolveTriangular,
     cho_solve,
-    cholesky,
     solve,
     solve_triangular,
 )
@@ -308,7 +306,7 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
 
 def test_det_of_cholesky():
     X = matrix("X")
-    L = pt.linalg.cholesky(X)
+    L = cholesky(X)
     det_X = pt.linalg.det(X)
 
     f = function([X], [L, det_X])
@@ -424,7 +422,7 @@ class TestBatchedVectorBSolveToMatrixBSolve:
     "f_op, f",
     [
         (MatrixInverse, pt.linalg.inv),
-        (Cholesky, pt.linalg.cholesky),
+        (Cholesky, cholesky),
         (MatrixPinv, pt.linalg.pinv),
     ],
     ids=["inv", "cholesky", "pinv"],
@@ -897,7 +895,7 @@ def test_slogdet_kronecker_rewrite():
 
 def test_cholesky_eye_rewrite():
     x = pt.eye(10)
-    L = pt.linalg.cholesky(x)
+    L = cholesky(x)
     f_rewritten = function([], L, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
 
@@ -927,7 +925,7 @@ def test_cholesky_diag_from_eye_mul(shape):
     x = pt.tensor("x", shape=shape)
     y = pt.eye(7) * x
     # Performing cholesky decomposition using pt.linalg.cholesky
-    z_cholesky = pt.linalg.cholesky(y)
+    z_cholesky = cholesky(y)
 
     # REWRITE TEST
     f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
@@ -956,7 +954,7 @@ def test_cholesky_diag_from_eye_mul(shape):
 def test_cholesky_of_diag():
     x = pt.dvector("x")
     x_diag = pt.diag(x)
-    x_cholesky = pt.linalg.cholesky(x_diag)
+    x_cholesky = cholesky(x_diag)
 
     # REWRITE TEST
     f_rewritten = function([x], x_cholesky, mode="FAST_RUN")
@@ -982,7 +980,7 @@ def test_cholesky_of_diag_not_applied():
     # Case 1 : y is not a diagonal matrix because of k = -1
     x = pt.tensor("x", shape=(7, 7))
     y = pt.eye(7, k=-1) * x
-    z_cholesky = pt.linalg.cholesky(y)
+    z_cholesky = cholesky(y)
 
     # REWRITE TEST (should not be applied)
     f_rewritten = function([x], z_cholesky, mode="FAST_RUN")
@@ -1101,7 +1099,7 @@ def test_scalar_solve_to_division(
 
     if op is CholeskySolve:
         # cho_solve expects a tuple (c, lower) as the first input
-        c = fn((pt.linalg.cholesky(a), True), b, b_ndim=b_ndim, **extra_kwargs)
+        c = fn((cholesky(a), True), b, b_ndim=b_ndim, **extra_kwargs)
     else:
         c = fn(a, b, b_ndim=b_ndim, **extra_kwargs)
 
