@@ -31,6 +31,7 @@ from pytensor.graph.rewriting.utils import is_same_graph, rewrite_graph
 from pytensor.graph.traversal import ancestors
 from pytensor.printing import debugprint, pprint
 from pytensor.scalar import PolyGamma, Psi, TriGamma
+from pytensor.tensor._linalg.constructors import BlockDiagonal
 from pytensor.tensor.basic import Alloc, constant, join, second, switch
 from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
@@ -116,7 +117,6 @@ from pytensor.tensor.rewriting.math import (
     simplify_mul,
 )
 from pytensor.tensor.shape import Reshape, Shape_i, SpecifyShape, specify_shape
-from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.type import (
     TensorType,
     cmatrix,
