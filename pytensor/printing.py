@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Literal, TextIO
 
 import numpy as np
+import rich.tree
 
 from pytensor.compile import SharedVariable
 from pytensor.compile.debug.profiling import ProfileStats
@@ -457,7 +458,7 @@ def debugprint(
     depth: int = -1,
     print_type: bool = False,
     print_shape: bool = False,
-    file: Literal["str"] | TextIO | None = None,
+    file: Literal["str", "rich"] | TextIO | None = None,
     id_type: IDTypesType = "CHAR",
     stop_on_name: bool = False,
     done: dict[Literal["output"] | Variable | Apply, str] | None = None,
@@ -468,7 +469,7 @@ def debugprint(
     print_view_map: bool = False,
     print_memory_map: bool = False,
     print_fgraph_inputs: bool = False,
-) -> str | TextIO:
+) -> "str | TextIO | rich.tree.Tree":
     r"""Print a graph as text.
 
     Each line printed represents a `Variable` in a graph.
@@ -497,7 +498,8 @@ def debugprint(
     file
         When `file` extends `TextIO`, print to it; when `file` is
         equal to ``"str"``, return a string; when `file` is ``None``, print to
-        `sys.stdout`.
+        `sys.stdout`; when `file` is ``"rich"``, return a ``rich.tree.Tree``
+        that can be rendered with ``rich.print()``.
     id_type
         Determines the type of identifier used for `Variable`\s:
           - ``"id"``: print the python id value,
@@ -531,7 +533,9 @@ def debugprint(
 
     Returns
     -------
-    A string representing the printed graph, if `file` is a string, else `file`.
+    A string representing the printed graph if ``file="str"``, a
+    ``rich.tree.Tree`` if ``file="rich"``, otherwise `file` (or ``None``
+    when printing to stdout).
 
     """
     if not isinstance(depth, int):
@@ -539,6 +543,8 @@ def debugprint(
 
     if file == "str":
         _file: TextIO | StringIO = StringIO()
+    elif file == "rich":
+        _file = sys.stdout  # placeholder; early return below will bypass text path
     elif file is None:
         _file = sys.stdout
     else:
@@ -608,6 +614,22 @@ def debugprint(
             topo_orders.append(None)
         else:
             raise TypeError(f"debugprint cannot print an object type {type(obj)}")
+
+    if file == "rich":
+        return _build_rich_tree(
+            outputs_to_print,
+            depth=depth,
+            id_type=id_type,
+            print_type=print_type,
+            print_shape=print_shape,
+            print_destroy_map=print_destroy_map,
+            print_view_map=print_view_map,
+            print_op_info=print_op_info,
+            stop_on_name=stop_on_name,
+            topo_orders=topo_orders,
+            profiles=profile_list,
+            storage_maps=storage_maps,
+        )
 
     inner_graph_vars: list[Variable] = []
 
@@ -997,6 +1019,219 @@ def _debugprint(
             print(f"{full_prefix}{label}", file=file)
 
     return file
+
+
+def _build_rich_tree(
+    outputs: list[Variable],
+    depth: int = -1,
+    id_type: IDTypesType = "CHAR",
+    print_type: bool = False,
+    print_shape: bool = False,
+    print_destroy_map: bool = False,
+    print_view_map: bool = False,
+    print_op_info: bool = False,
+    stop_on_name: bool = False,
+    topo_orders: list[Sequence[Apply] | None] | None = None,
+    profiles: list | None = None,
+    storage_maps: list | None = None,
+) -> rich.tree.Tree:
+    """Build a ``rich.Tree`` for one or more output `Variable`s.
+
+    Returns a single ``rich.Tree`` with ``hide_root=True`` when there are
+    multiple outputs (so the invisible root holds sibling output trees), or
+    a plain tree when there is exactly one output.
+
+    Parameters
+    ----------
+    outputs
+        List of root `Variable`s to render.
+    depth, id_type, print_type, print_shape, print_destroy_map,
+    print_view_map, print_op_info, stop_on_name
+        Same semantics as the identically-named parameters of `debugprint`.
+    topo_orders, profiles, storage_maps
+        Per-output metadata lists; ``None`` entries mean "not available".
+    """
+    import rich.markup
+
+    if topo_orders is None:
+        topo_orders = [None] * len(outputs)
+    if profiles is None:
+        profiles = [None] * len(outputs)
+    if storage_maps is None:
+        storage_maps = [None] * len(outputs)
+
+    done: dict = {}
+    used_ids: dict = {}
+    op_information: dict[Apply, dict[Variable, str]] = {}
+    inner_graph_vars: list[Variable] = []
+
+    root = rich.tree.Tree("", hide_root=True)
+
+    for var, topo_order, profile, storage_map in zip(
+        outputs, topo_orders, profiles, storage_maps, strict=True
+    ):
+        # Stack maps traversal depth → rich.Tree node at that depth.
+        # Depth 0 is the output variable itself (child of root).
+        depth_stack: list[rich.tree.Tree] = [root]
+
+        for gnode in _iter_graph_nodes(
+            var,
+            depth=depth,
+            done=done,
+            stop_on_name=stop_on_name,
+            inner_graph_ops=inner_graph_vars,
+            topo_order=topo_order,
+            profile=profile,
+            storage_map=storage_map,
+            ancestor_is_last=[],
+            is_last_child=True,
+        ):
+            current_depth = len(gnode.ancestor_is_last)
+
+            label = _build_label(
+                gnode,
+                done=done,
+                used_ids=used_ids,
+                id_type=id_type,
+                print_type=print_type,
+                print_shape=print_shape,
+                print_destroy_map=print_destroy_map,
+                print_view_map=print_view_map,
+                print_op_info=print_op_info,
+                op_information=op_information,
+            )
+
+            label = rich.markup.escape(label)
+            if gnode.is_repeat and not gnode.is_inner_graph_header:
+                label = f"[dim]{label} ···[/dim]"
+
+            parent_tree = depth_stack[current_depth]
+            child_tree = parent_tree.add(label)
+            # Trim the stack to this depth and push the new node.
+            depth_stack = [*depth_stack[: current_depth + 1], child_tree]
+
+    if inner_graph_vars:
+        inner_root = root.add("[bold]Inner graphs:[/bold]")
+        printed = set()
+        for ig_var in inner_graph_vars:
+            if ig_var.owner in printed:
+                continue
+            printed.add(ig_var.owner)
+
+            inner_fn = getattr(ig_var.owner.op, "_fn", None)
+            if inner_fn:
+                inner_inputs = inner_fn.maker.fgraph.inputs
+                inner_outputs = inner_fn.maker.fgraph.outputs
+            else:
+                if hasattr(ig_var.owner.op, "scalar_op"):
+                    inner_inputs = ig_var.owner.op.scalar_op.inner_inputs
+                    inner_outputs = ig_var.owner.op.scalar_op.inner_outputs
+                else:
+                    inner_inputs = ig_var.owner.op.inner_inputs
+                    inner_outputs = ig_var.owner.op.inner_outputs
+
+            outer_inputs = ig_var.owner.inputs
+            inner_to_outer: dict[Variable, Variable] | None
+            if hasattr(ig_var.owner.op, "get_oinp_iinp_iout_oout_mappings"):
+                inner_to_outer = {
+                    inner_inputs[i]: outer_inputs[o]
+                    for i, o in ig_var.owner.op.get_oinp_iinp_iout_oout_mappings()[
+                        "outer_inp_from_inner_inp"
+                    ].items()
+                }
+            else:
+                inner_to_outer = None
+
+            if print_op_info:
+                op_information.update(
+                    op_debug_information(ig_var.owner.op, ig_var.owner)
+                )
+
+            # Header node for the inner graph op
+            ig_depth_stack: list[rich.tree.Tree] = [inner_root]
+            for gnode in _iter_graph_nodes(
+                ig_var,
+                depth=depth,
+                done=done,
+                stop_on_name=stop_on_name,
+                inner_graph_ops=inner_graph_vars,
+                inner_to_outer=inner_to_outer,
+                parent_node=ig_var.owner,
+                inner_graph_node=ig_var.owner,
+                is_inner_graph_header=True,
+                ancestor_is_last=[],
+                is_last_child=True,
+            ):
+                current_depth = len(gnode.ancestor_is_last)
+                label = _build_label(
+                    gnode,
+                    done=done,
+                    used_ids=used_ids,
+                    id_type=id_type,
+                    print_type=print_type,
+                    print_shape=print_shape,
+                    print_destroy_map=print_destroy_map,
+                    print_view_map=print_view_map,
+                    print_op_info=print_op_info,
+                    op_information=op_information,
+                )
+                label = rich.markup.escape(label)
+                if gnode.is_repeat and not gnode.is_inner_graph_header:
+                    label = f"[dim]{label} ···[/dim]"
+                parent_tree = ig_depth_stack[current_depth]
+                child_tree = parent_tree.add(label)
+                ig_depth_stack = [*ig_depth_stack[: current_depth + 1], child_tree]
+
+            # The header tree node is the first child of inner_root
+            header_tree = inner_root.children[-1]
+
+            for out in inner_outputs:
+                if (
+                    out.owner is not None
+                    and (
+                        isinstance(out.owner.op, HasInnerGraph)
+                        or isinstance(
+                            getattr(out.owner.op, "scalar_op", None), HasInnerGraph
+                        )
+                    )
+                    and out not in inner_graph_vars
+                ):
+                    inner_graph_vars.append(out)
+
+                out_stack: list[rich.tree.Tree] = [header_tree]
+                for gnode in _iter_graph_nodes(
+                    out,
+                    depth=depth,
+                    done=done,
+                    stop_on_name=stop_on_name,
+                    inner_graph_ops=inner_graph_vars,
+                    inner_to_outer=inner_to_outer,
+                    parent_node=ig_var.owner,
+                    inner_graph_node=ig_var.owner,
+                    ancestor_is_last=[],
+                    is_last_child=True,
+                ):
+                    current_depth = len(gnode.ancestor_is_last)
+                    label = _build_label(
+                        gnode,
+                        done=done,
+                        used_ids=used_ids,
+                        id_type=id_type,
+                        print_type=print_type,
+                        print_shape=print_shape,
+                        print_destroy_map=print_destroy_map,
+                        print_view_map=print_view_map,
+                        print_op_info=print_op_info,
+                        op_information=op_information,
+                    )
+                    label = rich.markup.escape(label)
+                    if gnode.is_repeat and not gnode.is_inner_graph_header:
+                        label = f"[dim]{label} ···[/dim]"
+                    parent_tree = out_stack[current_depth]
+                    child_tree = parent_tree.add(label)
+                    out_stack = [*out_stack[: current_depth + 1], child_tree]
+
+    return root
 
 
 def _print_fn(op, xin):
