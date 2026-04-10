@@ -783,9 +783,14 @@ def scan(
             _ordered_args[sit_sot_rightOrder[idx]] = [sit_sot_inner_inputs[idx]]
 
     for idx in range(n_untraced_sit_sot):
-        _ordered_args[untraced_sit_sot_rightOrder[idx]] = [
-            untraced_sit_sot_inner_inputs[idx]
-        ]
+        if single_step_requested:
+            _ordered_args[untraced_sit_sot_rightOrder[idx]] = [
+                untraced_sit_sot_scan_inputs[idx]
+            ]
+        else:
+            _ordered_args[untraced_sit_sot_rightOrder[idx]] = [
+                untraced_sit_sot_inner_inputs[idx]
+            ]
 
     ordered_args = list(chain.from_iterable(_ordered_args))
     if single_step_requested:
