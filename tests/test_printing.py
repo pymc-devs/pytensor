@@ -507,6 +507,8 @@ class TestDebugprintRich:
     construct the right tree structure and don't crash on various graph shapes.
     """
 
+    rich = pytest.importorskip("rich")
+
     def test_return_type(self):
         import rich.tree
 

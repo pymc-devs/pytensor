@@ -49,3 +49,4 @@ dependencies:
   - cython
   - graphviz
   - pydot
+  - rich
