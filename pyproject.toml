@@ -56,7 +56,6 @@ dependencies = [
     "logical-unification",
     "miniKanren",
     "cons",
-    "rich",
 ]
 
 [project.urls]

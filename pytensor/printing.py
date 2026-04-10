@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Literal, TextIO
 
 import numpy as np
-import rich.tree
 
 from pytensor.compile import SharedVariable
 from pytensor.compile.debug.profiling import ProfileStats
@@ -484,7 +483,7 @@ def debugprint(
     print_view_map: bool = False,
     print_memory_map: bool = False,
     print_fgraph_inputs: bool = False,
-) -> "str | TextIO | rich.tree.Tree":
+) -> "str | TextIO | Any":  # rich.tree.Tree when file="rich"
     r"""Print a graph as text.
 
     Each line printed represents a `Variable` in a graph.
@@ -1049,7 +1048,7 @@ def _build_rich_tree(
     topo_orders: list[Sequence[Apply] | None] | None = None,
     profiles: list | None = None,
     storage_maps: list | None = None,
-) -> rich.tree.Tree:
+) -> Any:  # rich.tree.Tree when rich is installed
     """Build a ``rich.Tree`` for one or more output `Variable`s.
 
     Returns a single ``rich.Tree`` with ``hide_root=True`` when there are
@@ -1066,7 +1065,13 @@ def _build_rich_tree(
     topo_orders, profiles, storage_maps
         Per-output metadata lists; ``None`` entries mean "not available".
     """
-    import rich.markup
+    try:
+        import rich.markup
+        import rich.tree
+    except ImportError as e:
+        raise ImportError(
+            "rich is required for file='rich'. Install it with: pip install rich"
+        ) from e
 
     if topo_orders is None:
         topo_orders = [None] * len(outputs)
