@@ -3899,16 +3899,46 @@ def local_reciprocal_1_plus_exp(fgraph, node):
                     return [new_out]
 
 
-# 1 - sigmoid(x) -> sigmoid(-x)
-local_1msigmoid = PatternNodeRewriter(
-    (sub, dict(pattern="y", constraint=_is_1), (sigmoid, "x")),
-    (sigmoid, (neg, "x")),
-    tracks=[sigmoid],
-    get_nodes=get_clients_at_depth1,
-    name="local_1msigmoid",
-)
-register_stabilize(local_1msigmoid)
-register_specialize(local_1msigmoid)
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([sigmoid])
+def local_1msigmoid(fgraph, node):
+    """``1 - sigmoid(x) -> sigmoid(-x)``
+
+    Only applied when it doesn't leave an extra sigmoid behind: either ``sigmoid(x)`` has
+    no other client, or ``sigmoid(-x)`` is already in the graph and can be reused. The
+    latter is what lets the two spellings cancel, as in ``grad(log(1 - sigmoid(x)))``,
+    whose numerator holds the ``sigmoid(x) * sigmoid(-x)`` emitted by the sigmoid pullback.
+    """
+    sigm_x = node.outputs[0]
+    one_minus_sigm_x = [
+        client.outputs[0]
+        for client, i in fgraph.clients[sigm_x]
+        if client.op == sub and i == 1 and _is_1(client.inputs[0])
+    ]
+    if not one_minus_sigm_x:
+        return None
+
+    (x,) = node.inputs
+    sigm_minus_x = next(
+        (
+            neg_client.outputs[0]
+            for neg_node, _ in fgraph.clients[x]
+            if neg_node.op == neg
+            for neg_client, _ in fgraph.clients[neg_node.outputs[0]]
+            if neg_client.op == sigmoid
+        ),
+        None,
+    )
+    if sigm_minus_x is None:
+        if len(fgraph.clients[sigm_x]) > len(one_minus_sigm_x):
+            return None
+        sigm_minus_x = sigmoid(neg(x))
+        copy_stack_trace(one_minus_sigm_x[0], sigm_minus_x)
+
+    # The subtracted constant can upcast the output beyond the dtype of sigmoid(x)
+    return {out: cast(sigm_minus_x, out.dtype) for out in one_minus_sigm_x}
 
 
 @register_stabilize
