@@ -974,7 +974,7 @@ def _debugprint(
             base = prefix
         else:
             col_bars = "".join(
-                "   " if last else " │ " for last in gnode.ancestor_is_last
+                "   " if last else " │ " for last in gnode.ancestor_is_last[1:]
             )
             connector = " └─ " if gnode.is_last_child else " ├─ "
             base = prefix_child if has_child_offset else prefix
