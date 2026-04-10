@@ -4,18 +4,11 @@ import pytest
 import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.function import function
-from pytensor.compile.mode import MLX, Mode
 from pytensor.compile.sharedvalue import shared
-from pytensor.link.mlx.linker import MLXLinker
 from pytensor.tensor.random.utils import RandomStream
 
 
 mx = pytest.importorskip("mlx.core")
-
-# MLX mode without mx.compile — needed for ops that use CPU streams internally
-# (e.g. multivariate_normal, which uses SVD via mx.cpu stream and is
-# incompatible with mx.compile's tracing).
-MLX_NO_COMPILE = Mode(linker=MLXLinker(use_compile=False), optimizer=MLX.optimizer)
 
 
 def test_normal_cumsum():
@@ -118,13 +111,23 @@ def test_categorical_shape():
 def test_mvnormal_shape():
     mean = np.zeros(4, dtype=np.float32)
     cov = np.eye(4, dtype=np.float32)
-    # multivariate_normal uses SVD internally (CPU-only in MLX), which is
-    # incompatible with mx.compile — use the no-compile mode.
     check_shape_and_dtype(
         lambda srng: srng.multivariate_normal(mean=mean, cov=cov, size=(6,)),
         (6, 4),
         "float32",
-        mode=MLX_NO_COMPILE,
+    )
+
+
+@pytest.mark.parametrize("method", ["cholesky", "svd", "eigh"])
+def test_mvnormal_decomposition_method(method):
+    mean = np.zeros(4, dtype=np.float32)
+    cov = np.eye(4, dtype=np.float32)
+    check_shape_and_dtype(
+        lambda srng: srng.multivariate_normal(
+            mean=mean, cov=cov, size=(6,), method=method
+        ),
+        (6, 4),
+        "float32",
     )
 
 
