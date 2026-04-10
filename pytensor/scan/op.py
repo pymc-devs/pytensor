@@ -425,6 +425,18 @@ class ScanMethodsMixin:
         offset = self.info.n_mit_sot + n_taps + self.info.n_sit_sot
         return list_outputs[offset : offset + self.info.n_nit_sot]
 
+    def nit_sot_core_shapes(self):
+        """Return static core shapes for nit_sot outputs, or None if any are unknown.
+
+        When all nit_sot inner outputs have fully known static shapes,
+        returns a tuple of shape tuples. Otherwise returns None,
+        meaning n_steps=0 cannot be handled without executing the inner function.
+        """
+        nit_sot_inner_outs = self.inner_nitsot_outs(self.inner_outputs)
+        if all(all(s is not None for s in v.type.shape) for v in nit_sot_inner_outs):
+            return tuple(v.type.shape for v in nit_sot_inner_outs)
+        return None
+
     def outer_nitsot_outs(self, list_outputs):
         offset = self.info.n_mit_mot + self.info.n_mit_sot + self.info.n_sit_sot
         return list_outputs[offset : offset + self.info.n_nit_sot]
@@ -1560,6 +1572,8 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
             isinstance(out, TensorVariable) for out in self.fn.maker.fgraph.outputs
         ]
 
+        _nit_sot_core_shapes = self.nit_sot_core_shapes()
+
         try:
             if impl == "py":
                 raise MissingGXX
@@ -1657,6 +1671,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         outputs,
                         outer_output_dtypes,
                         outer_output_ndims,
+                        _nit_sot_core_shapes,
                         self.fn.vm,
                     )
                 except InnerFunctionError as exc:
@@ -1792,13 +1807,21 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                 output_storage[idx][0] = inputs[self.seqs_arg_offset + idx].copy()
 
         if n_steps == 0:
+            nit_sot_core_shapes = self.nit_sot_core_shapes()
+            if nit_sot_core_shapes is None and info.n_nit_sot > 0:
+                raise ValueError(
+                    "Scan has nit_sot outputs with unknown static shapes "
+                    "and n_steps=0. The output core shapes cannot be "
+                    "determined without executing the inner function."
+                )
             nit_sot_end = self.n_tap_outs + info.n_nit_sot
             for idx in range(self.n_tap_outs, nit_sot_end):
-                out_var = node.outputs[idx]
-                assert isinstance(out_var, TensorVariable)
-                # This is plainly wrong, should use static shape or raise if it can't be inferred
+                core_shape = nit_sot_core_shapes[idx - self.n_tap_outs]
+                nit_sot_var = self.inner_nitsot_outs(self.inner_outputs)[
+                    idx - self.n_tap_outs
+                ]
                 output_storage[idx][0] = np.empty(
-                    (0,) * out_var.type.ndim, dtype=out_var.type.dtype
+                    (0, *core_shape), dtype=nit_sot_var.type.numpy_dtype
                 )
 
             for j in range(info.n_untraced_sit_sot):
