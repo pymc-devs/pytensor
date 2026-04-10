@@ -3652,6 +3652,23 @@ def test_grad_useless_sum():
     )
 
 
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE",
+    reason="Requires stabilize rewrites not present in FAST_COMPILE",
+)
+def test_sigmoid_grad_precision():
+    x = dscalar("x")
+    grad_fn = function([x], grad(sigmoid(x), x))
+
+    # sigmoid'(z) == sigmoid'(-z) for all z (symmetric around 0).
+    # The naive form expit(z) * (1 - expit(z)) breaks this: at z=50,
+    # (1 - expit(50)) rounds to 0, giving sigmoid'(50) = 0 != sigmoid'(-50).
+    for z in [50.0, 100.0, 500.0]:
+        result = grad_fn(z)
+        assert result > 0.0
+        np.testing.assert_allclose(result, grad_fn(-z))
+
+
 def test_tanh_grad_broadcast():
     # FIXME: This is not a real test.
     # This crashed in the past.
