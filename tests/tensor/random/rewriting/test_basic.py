@@ -12,6 +12,7 @@ from pytensor.graph.basic import equal_computations as assert_equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.rewriting.basic import (
     EquilibriumGraphRewriter,
+    MergeOptimizer,
     check_stack_trace,
     dfs_rewriter,
 )
@@ -35,6 +36,7 @@ from pytensor.tensor.random.rewriting import (
     local_rv_size_lift,
     local_subtensor_rv_lift,
 )
+from pytensor.tensor.random.rewriting.basic import sidestep_unused_rng_consumer
 from pytensor.tensor.random.rewriting.numba import introduce_explicit_core_shape_rv
 from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
@@ -977,6 +979,39 @@ def test_Dimshuffle_lift_rename(ds_order, lifted, dist_op, dist_params, size, rt
     )
 
     assert new_out.name == "test_name_lifted"
+
+
+def test_sidestep_unused_rng_consumer_with_duplicate_node():
+    """Sidestep rewrite must not fire when input RNG has another client.
+
+    Reproduces a bug where graph duplication (e.g., inside scan) creates two
+    copies of the same RV node: one whose draw is used and one whose RNG
+    update is used. The rewrite would see the update-only copy's draw as dead
+    and replace its RNG output with the input — destroying the update.
+    """
+    rng = random_generator_type("rng")
+    next_rng_a, draw_a = rng.normal(0, 1, size=3)
+
+    # Simulate scan-like duplication: use draw from clone A, RNG update from clone B
+    next_rng_b, draw_b = draw_a.owner.clone().outputs
+    assert next_rng_a is not next_rng_b
+    assert draw_a is not draw_b
+    fg = FunctionGraph([rng], [draw_a, next_rng_b], clone=False)
+
+    # Clone B's draw is unused, but sidestep should NOT fire because rng has
+    # another client whose draw IS used.
+    dfs_rewriter(sidestep_unused_rng_consumer).rewrite(fg)
+    assert sum(isinstance(n.op, NormalRV) for n in fg.apply_nodes) == 2
+
+    # When neither clone's draw is used, sidestep alone won't fire (rng has multiple clients)
+    fg2 = FunctionGraph([rng], [next_rng_a, next_rng_b], clone=False)
+    dfs_rewriter(sidestep_unused_rng_consumer).rewrite(fg2)
+    assert sum(isinstance(n.op, NormalRV) for n in fg2.apply_nodes) == 2
+
+    # But after merge collapses them into one node it does.
+    MergeOptimizer().rewrite(fg2)
+    dfs_rewriter(sidestep_unused_rng_consumer).rewrite(fg2)
+    assert sum(isinstance(n.op, NormalRV) for n in fg2.apply_nodes) == 0
 
 
 def test_unused_rng():
