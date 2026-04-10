@@ -62,7 +62,7 @@ numpy.import_array()
 
 
 def get_version():
-    return 0.327
+    return 0.328
 
 
 @cython.cdivision(True)
@@ -100,6 +100,7 @@ def perform(
     list outer_outputs not None,
     tuple outer_output_dtypes not None,
     const unsigned int[:] outer_output_ndims not None,
+    tuple nit_sot_core_shapes,
     fn,
 ) -> (time_t, int):
     """
@@ -273,9 +274,16 @@ def perform(
             outer_outputs_idx[0] = outer_inputs_offset_idx.copy()
 
     if n_steps == 0:
+        if nit_sot_core_shapes is None and n_nit_sot > 0:
+            raise ValueError(
+                "Scan has nit_sot outputs with unknown static shapes "
+                "and n_steps=0. The output core shapes cannot be "
+                "determined without executing the inner function."
+            )
         for idx in range(n_outs, n_outs + n_nit_sot):
             if outs_is_tensor[idx]:
-                outer_outputs[idx][0] = numpy.empty((0,) * outer_output_ndims[idx], dtype=outer_output_dtypes[idx])
+                core_shape = nit_sot_core_shapes[idx - n_outs]
+                outer_outputs[idx][0] = numpy.empty((0, *core_shape), dtype=outer_output_dtypes[idx])
             else:
                 outer_outputs[idx][0] = None
         for j in range(n_untraced_sit_sot):

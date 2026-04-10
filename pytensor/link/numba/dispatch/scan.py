@@ -457,12 +457,24 @@ def numba_funcify_Scan(op: Scan, node, **kwargs):
         for s, d in zip(inner_out_to_outer_in_stmts, inner_output_names, strict=True)
     )
 
+    if op.nit_sot_core_shapes() is None and op.info.n_nit_sot > 0:
+        n_steps_zero_guard = (
+            "    if n_steps == 0:\n"
+            '        raise ValueError("Scan has nit_sot outputs with unknown static shapes '
+            "and n_steps=0. The output core shapes cannot be determined without "
+            'executing the inner function.")'
+        )
+    else:
+        n_steps_zero_guard = ""
+
     scan_op_src = f"""
 def scan({", ".join(outer_in_names)}):
 
 {indent(input_storage_block, " " * 4)}
 
 {indent(input_temp_0d_storage_block, " " * 4)}
+
+{n_steps_zero_guard}
 
     i = 0
     cond = np.array(False)

@@ -12,6 +12,7 @@ Questions and notes about scan that should be answered :
 import os
 import pickle
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import mkdtemp
 
@@ -4203,3 +4204,38 @@ def test_zero_steps_untraced_sit_sot(mode):
     assert res1 != res2
 
     assert f(n_steps=0) == np.pi
+
+
+@pytest.mark.parametrize("linker", ["py", "cvm", "numba"])
+@pytest.mark.parametrize(
+    "known_core_shape, expectation",
+    [
+        (True, nullcontext()),
+        (False, pytest.raises(ValueError, match="unknown static shapes")),
+    ],
+)
+def test_zero_steps_nit_sot_core_shape(linker, known_core_shape, expectation):
+    """Regression test: n_steps=0 nit_sot outputs must have correct core shape."""
+    mode = Mode(linker=linker, optimizer=None)
+    x = pt.tensor("x", shape=(None, None))
+    n_steps = pt.iscalar("n_steps")
+
+    if known_core_shape:
+
+        def inner_fn(x_i):
+            return specify_shape(x_i, (5,))
+    else:
+
+        def inner_fn(x_i):
+            return x_i * 2
+
+    result = scan(inner_fn, sequences=x, n_steps=n_steps, return_updates=False)
+    f = function([x, n_steps], result, mode=mode)
+
+    with expectation:
+        out = f(np.empty((0, 5), dtype="float64"), 0)
+        assert out.shape == (0, 5)
+
+    # Non-zero steps should always work regardless of known_core_shape
+    out = f(np.ones((3, 5), dtype="float64"), 3)
+    assert out.shape == (3, 5)
