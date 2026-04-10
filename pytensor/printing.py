@@ -79,9 +79,13 @@ class GraphNode:
         The `Variable` this record represents.  The single source of truth —
         all graph structure is accessed through it via ``var.owner`` etc.
     is_repeat
-        ``True`` if this node's owner `Apply` was already expanded earlier in
-        the traversal.  Renderers should show a placeholder (e.g. ``"···"``)
-        rather than re-expanding children.
+        ``True`` when this record is a synthetic sentinel used to render a
+        ``"···"`` placeholder.  Such sentinels are yielded as the sole child
+        of a node whose children are not expanded — either because the `Apply`
+        owner was already visited earlier in the traversal, or because
+        ``stop_on_name`` stopped recursion.  The text renderer prints
+        ``"···"`` at this position; the rich renderer shows the label dimmed
+        with a ``"···"`` suffix.
     is_last_child
         ``True`` if this node is the last input among its siblings.  Used by
         the text renderer to choose ``"└─"`` vs ``"├─"``.
@@ -380,19 +384,30 @@ def _iter_graph_nodes(
     node = var.owner
     already_done = node in done
 
-    if already_done:
-        gnode.is_repeat = True
-        yield gnode
-        return
+    # Mark as visited before yielding to handle DAG diamonds; the `already_done`
+    # flag is captured above and used below to decide whether to recurse.
+    done[node] = ""
 
     yield gnode
 
-    if stop_on_name and var.name is not None:
-        # Yield the node itself but don't recurse — text renderer adds "···"
+    if already_done or (stop_on_name and var.name is not None):
+        if not is_inner_graph_header:
+            # Yield the node label, then a sentinel that renders as "···"
+            child_ancestor = [*ancestor_is_last, is_last_child]
+            yield GraphNode(
+                var=var,
+                is_repeat=True,
+                is_last_child=True,
+                ancestor_is_last=child_ancestor,
+                parent_node=node,
+                inner_to_outer=inner_to_outer,
+                inner_graph_node=inner_graph_node,
+                is_inner_graph_header=False,
+                topo_order=topo_order,
+                profile=profile,
+                storage_map=storage_map,
+            )
         return
-
-    # Mark as visited before recursing to handle DAG diamonds
-    done[node] = ""
 
     child_ancestor = [*ancestor_is_last, is_last_child]
 
