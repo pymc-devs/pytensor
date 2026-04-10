@@ -311,7 +311,7 @@ class Mode:
         if linker is None:
             linker = config.linker
         if isinstance(linker, str) and linker == "auto":
-            linker = "cvm" if config.cxx else "vm"
+            linker = "numba"
         if isinstance(optimizer, str) and optimizer == "default":
             optimizer = config.optimizer
 

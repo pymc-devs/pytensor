@@ -10,7 +10,11 @@ from pytensor.compile.mode import Mode, get_default_mode
 from pytensor.graph.basic import Constant, Variable
 from pytensor.graph.basic import equal_computations as assert_equal_computations
 from pytensor.graph.fg import FunctionGraph
-from pytensor.graph.rewriting.basic import EquilibriumGraphRewriter, check_stack_trace
+from pytensor.graph.rewriting.basic import (
+    EquilibriumGraphRewriter,
+    check_stack_trace,
+    dfs_rewriter,
+)
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.traversal import ancestors
 from pytensor.tensor import constant
@@ -25,12 +29,13 @@ from pytensor.tensor.random.basic import (
     poisson,
     uniform,
 )
-from pytensor.tensor.random.op import RandomVariable
+from pytensor.tensor.random.op import RandomVariable, RandomVariableWithCoreShape
 from pytensor.tensor.random.rewriting import (
     local_dimshuffle_rv_lift,
     local_rv_size_lift,
     local_subtensor_rv_lift,
 )
+from pytensor.tensor.random.rewriting.numba import introduce_explicit_core_shape_rv
 from pytensor.tensor.random.type import random_generator_type
 from pytensor.tensor.rewriting.shape import ShapeFeature, ShapeOptimizer
 from pytensor.tensor.subtensor import AdvancedSubtensor, AdvancedSubtensor1, Subtensor
@@ -998,6 +1003,10 @@ def test_unused_rng():
     assert (
         sum(
             isinstance(node.op, NormalRV)
+            or (
+                isinstance(node.op, RandomVariableWithCoreShape)
+                and isinstance(node.op.core_op, NormalRV)
+            )
             for node in fn_excluding.maker.fgraph.apply_nodes
         )
         == 3
@@ -1010,7 +1019,18 @@ def test_unused_rng():
         next_rng, _y = next_rng.normal([1.0, 1.0, 1.0], [1])
         final_rng, z = next_rng.normal(1, 2)
 
+        expected = [final_rng, z]
+
+        # In NUMBA mode, RandomVariable nodes are wrapped in RandomVariableWithCoreShape
+        if any(
+            isinstance(node.op, RandomVariableWithCoreShape)
+            for node in fn_excluding.maker.fgraph.apply_nodes
+        ):
+            expected_fg = FunctionGraph(outputs=expected, clone=False)
+            dfs_rewriter(introduce_explicit_core_shape_rv).rewrite(expected_fg)
+            expected = expected_fg.outputs
+
         assert assert_equal_computations(
             fn_excluding.maker.fgraph.outputs,
-            [final_rng, z],
+            expected,
         )
