@@ -497,3 +497,120 @@ def test_summary_with_profile_optimizer():
     s = StringIO()
     f.profile.summary(file=s)
     assert "Rewriter Profile" in s.getvalue()
+
+
+class TestDebugprintRich:
+    """Tests for debugprint(..., file="rich").
+
+    We test PyTensor's tree-building contract only — not Rich's rendering.
+    Rich's own test suite covers rendering; our job is to verify that we
+    construct the right tree structure and don't crash on various graph shapes.
+    """
+
+    def test_return_type(self):
+        import rich.tree
+
+        x = dvector("x")
+        tree = debugprint(x.sum(), file="rich")
+        assert isinstance(tree, rich.tree.Tree)
+
+    def test_single_output_has_one_child(self):
+        # One output variable → the hidden root should have exactly one child.
+        x = dvector("x")
+        tree = debugprint(x.sum(), file="rich")
+        assert len(tree.children) == 1
+
+    def test_multiple_outputs_have_multiple_children(self):
+        # Two output variables → the hidden root has two children.
+        x = dvector("x")
+        mean = x.mean()
+        std = x.std()
+        tree = debugprint([mean, std], file="rich")
+        assert len(tree.children) == 2
+
+    def test_linear_graph(self):
+        # sum(x * 2): root → sum_node → mul_node → [x_leaf, 2_leaf]
+        x = dvector("x")
+        y = (x * 2).sum()
+        tree = debugprint(y, file="rich")
+        sum_node = tree.children[0]
+        mul_node = sum_node.children[0]
+        assert len(mul_node.children) == 2
+
+    def test_named_var(self):
+        # Named intermediate: the label of the mul node contains its name.
+        x = dvector("x")
+        y = x * 2
+        y.name = "doubled"
+        tree = debugprint(y.sum(), file="rich")
+        mul_node = tree.children[0].children[0]
+        assert "doubled" in str(mul_node.label)
+
+    def test_dag_shared_leaf(self):
+        # x + x: the add node has two children, both representing x.
+        x = dvector("x")
+        tree = debugprint(x + x, file="rich")
+        add_node = tree.children[0]
+        assert len(add_node.children) == 2
+
+    def test_diamond_dag(self):
+        # (x*2) + (x+1): add has two children; each has x as a child,
+        # but the second occurrence of x is a repeat (still a child node).
+        x = dvector("x")
+        a = x * 2
+        b = x + 1
+        tree = debugprint(a + b, file="rich")
+        add_node = tree.children[0]
+        assert len(add_node.children) == 2
+        # Each branch (mul, add) has x as a child.
+        assert len(add_node.children[0].children) >= 1
+        assert len(add_node.children[1].children) >= 1
+
+    def test_depth_limit(self):
+        # depth=1: the root op node is present but its inputs are not expanded.
+        x = dvector("x")
+        y = (x * 2).sum()
+        tree = debugprint(y, depth=1, file="rich")
+        sum_node = tree.children[0]
+        assert len(sum_node.children) == 0
+
+    def test_stop_on_name(self):
+        # stop_on_name=True: traversal stops when it hits the named leaf x,
+        # so the mul node's child (x) has no further children.
+        x = dvector("x")
+        x.name = "x"
+        tree = debugprint((x * 2).sum(), stop_on_name=True, file="rich")
+        sum_node = tree.children[0]
+        mul_node = sum_node.children[0]
+        x_node = mul_node.children[0]
+        assert len(x_node.children) == 0
+
+    def test_print_type(self):
+        # print_type=True: the type annotation appears in the root op's label.
+        x = dvector("x")
+        tree = debugprint(x.sum(), print_type=True, file="rich")
+        sum_node = tree.children[0]
+        assert "<" in str(sum_node.label)
+
+    def test_function_graph(self):
+        # FunctionGraph: one output → one child under the hidden root.
+        from pytensor.graph.fg import FunctionGraph
+
+        x = dvector("x")
+        y = x.sum()
+        fg = FunctionGraph([x], [y])
+        tree = debugprint(fg, file="rich")
+        assert len(tree.children) == 1
+
+    def test_inner_graph_op(self):
+        # HasInnerGraph op: the output node is the single root child, with its
+        # two inputs as children.
+        igo_in_1, igo_in_2 = MyVariable("x"), MyVariable("y")
+        igo_out = MyOp("op")(igo_in_1, igo_in_2)
+        op = MyInnerGraphOp([igo_in_1, igo_in_2], [igo_out])
+        a, b = MyVariable("a"), MyVariable("b")
+        out = op(a, b)
+        tree = debugprint(out, file="rich")
+        assert len(tree.children) == 1
+        op_node = tree.children[0]
+        assert len(op_node.children) == 2
