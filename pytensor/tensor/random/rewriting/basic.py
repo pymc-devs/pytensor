@@ -376,5 +376,12 @@ def sidestep_unused_rng_consumer(fgraph, node):
     if any(fgraph.clients[out] for out in non_rng_outputs):
         return None
 
+    # Don't sidestep if any input RNG has other clients.
+    # The graph likely has duplicate nodes that will be merged later,
+    # and sidestepping now would destroy the RNG update prematurely.
+    rng_inputs = set(update_map.keys())
+    if any(len(fgraph.clients[rng_in]) > 1 for rng_in in rng_inputs):
+        return None
+
     # Bypass: map each RNG output back to its corresponding RNG input
     return {rng_out: rng_in for rng_in, rng_out in update_map.items()}
