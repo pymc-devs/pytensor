@@ -4,9 +4,10 @@ import hashlib
 import logging
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from copy import copy
+from dataclasses import dataclass
 from functools import reduce, singledispatch
 from io import StringIO
 from pathlib import Path
@@ -61,6 +62,370 @@ def char_from_number(number: int) -> str:
         remainders = [0]
 
     return "".join(chr(ord("A") + r) for r in remainders[::-1])
+
+
+@dataclass
+class GraphNode:
+    """A record of a single node in a `debugprint` / `print_graph` traversal.
+
+    Carries the graph variable, its structural position in the traversal, and
+    any render-time context needed to build a label.  Renderers consume a
+    stream of these objects produced by `_iter_graph_nodes`.
+
+    Parameters
+    ----------
+    var
+        The `Variable` this record represents.  The single source of truth —
+        all graph structure is accessed through it via ``var.owner`` etc.
+    is_repeat
+        ``True`` if this node's owner `Apply` was already expanded earlier in
+        the traversal.  Renderers should show a placeholder (e.g. ``"···"``)
+        rather than re-expanding children.
+    is_last_child
+        ``True`` if this node is the last input among its siblings.  Used by
+        the text renderer to choose ``"└─"`` vs ``"├─"``.
+    ancestor_is_last
+        One ``bool`` per ancestor level (outermost first), recording whether
+        that ancestor was itself a last child.  ``False`` → draw a ``" │ "``
+        continuation column; ``True`` → draw ``"   "`` (no bar).  Used
+        exclusively by the text renderer — the rich renderer ignores it.
+    parent_node
+        The `Apply` node whose input list contains ``var``.  Needed for
+        ``op_information`` annotation lookup.
+    inner_to_outer
+        Mapping from inner-graph `Variable` s to their corresponding
+        outer-graph counterparts, used to print ``"-> [id X]"`` suffixes.
+    inner_graph_node
+        The `Apply` node that owns the inner graph in which ``var`` lives.
+    is_inner_graph_header
+        ``True`` for the single header line of an inner-graph op (prints
+        only ``op + id``, without type/name/annotation details).
+    topo_order
+        Toposort of the enclosing `FunctionGraph`, used to print topo index.
+    profile
+        Profiling stats for the enclosing compiled function.
+    storage_map
+        VM storage map (only available after a function has been executed
+        with ``allow_gc=False``).
+    """
+
+    var: Variable
+    is_repeat: bool
+    is_last_child: bool
+    ancestor_is_last: list[bool]
+    parent_node: Apply | None
+    inner_to_outer: dict[Variable, Variable] | None
+    inner_graph_node: Apply | None
+    is_inner_graph_header: bool
+    topo_order: Sequence[Apply] | None
+    profile: "ProfileStats | None"
+    storage_map: "StorageMapType | None"
+
+    @property
+    def node(self) -> Apply | None:
+        """The `Apply` node that produced ``var``, or ``None`` for leaves."""
+        return self.var.owner
+
+    @property
+    def is_leaf(self) -> bool:
+        """``True`` if ``var`` has no owner (graph input or constant)."""
+        return self.var.owner is None
+
+    @property
+    def output_idx(self) -> str:
+        """``".N"`` suffix for multi-output ops, empty string otherwise."""
+        node = self.var.owner
+        if node is None or len(node.outputs) == 1:
+            return ""
+        return f".{node.outputs.index(self.var)}"
+
+
+def _assign_id(
+    obj: "Literal['output'] | Apply | Variable",
+    used_ids: dict,
+    done: dict,
+    id_type: IDTypesType,
+    var: "Variable",
+) -> str:
+    """Return (and register) the ``[id X]`` string for *obj*.
+
+    The ``var`` argument is the `Variable` currently being printed; it is
+    used for ``id_type="id"`` and ``id_type="auto"``.
+    """
+    if obj in used_ids:
+        return used_ids[obj]
+    if obj == "output":
+        id_str = "output"
+    elif id_type == "id":
+        id_str = f"[id {id(var)}]"
+    elif id_type == "int":
+        id_str = f"[id {len(used_ids)}]"
+    elif id_type == "CHAR":
+        id_str = f"[id {char_from_number(len(used_ids))}]"
+    elif id_type == "auto":
+        id_str = f"[id {var.auto_name}]"
+    else:
+        id_str = ""
+    done[obj] = id_str
+    used_ids[obj] = id_str
+    return id_str
+
+
+def _build_label(
+    gnode: GraphNode,
+    done: dict,
+    used_ids: dict,
+    id_type: IDTypesType,
+    print_type: bool,
+    print_shape: bool,
+    print_destroy_map: bool,
+    print_view_map: bool,
+    print_op_info: bool,
+    op_information: dict,
+) -> str:
+    """Return the formatted label string for a single `GraphNode`.
+
+    This is a pure function with respect to the graph; its only side-effects
+    are updating the shared ``done`` and ``used_ids`` registries.
+
+    Parameters
+    ----------
+    gnode
+        The node to label.
+    done
+        Shared registry mapping `Apply`/`Variable` objects to their id
+        strings, used for repeat-detection.
+    used_ids
+        Shared registry mapping objects to their ``[id X]`` strings, ensuring
+        stable IDs across an entire print call.
+    id_type, print_type, print_shape, print_destroy_map, print_view_map,
+    print_op_info, op_information
+        Same semantics as the identically-named parameters of `debugprint`.
+
+    Returns
+    -------
+    str
+        The formatted label, ready to be written or passed to ``rich.Tree``.
+    """
+    var = gnode.var
+
+    if print_type:
+        type_str = f" <{var.type}>"
+    else:
+        type_str = ""
+
+    if print_shape and hasattr(var.type, "shape"):
+        shape_str = f" shape={str(var.type.shape).replace('None', '?')}"
+    else:
+        shape_str = ""
+
+    if gnode.is_leaf:
+        id_str = _assign_id(var, used_ids, done, id_type, var)
+        if id_str:
+            id_str = f" {id_str}"
+
+        if gnode.storage_map and var in gnode.storage_map:
+            data = f" {gnode.storage_map[var]}"
+        else:
+            data = ""
+
+        label = f"{var}{id_str}{type_str}{shape_str}{data}"
+
+        if print_op_info and var.owner and var.owner not in op_information:
+            op_information.update(op_debug_information(var.owner.op, var.owner))
+
+        if gnode.inner_to_outer is not None and var in gnode.inner_to_outer:
+            outer_var = gnode.inner_to_outer[var]
+            outer_id_str = _assign_id(
+                outer_var.owner if outer_var.owner else outer_var,
+                used_ids,
+                done,
+                id_type,
+                outer_var,
+            )
+            label = f"{label} -> {outer_id_str}"
+
+        # TODO: This entire approach will only print `Op` info for two levels
+        # of nesting.
+        for node in dict.fromkeys(
+            [gnode.inner_graph_node, gnode.parent_node, var.owner]
+        ):
+            node_info = op_information.get(node)
+            if node_info and var in node_info:
+                label = f"{label} ({node_info[var]})"
+
+        return label
+
+    # Owned variable — label is built from the Apply node
+    node = gnode.node
+    assert node is not None
+
+    id_str = _assign_id(node, used_ids, done, id_type, var)
+    if id_str:
+        id_str = f" {id_str}"
+
+    var_name = getattr(var, "name", "") or ""
+    if var_name:
+        var_name = f" '{var_name}'"
+
+    destroy_map_str = (
+        f" d={node.op.destroy_map}" if print_destroy_map and node.op.destroy_map else ""
+    )
+    view_map_str = (
+        f" v={node.op.view_map}" if print_view_map and node.op.view_map else ""
+    )
+
+    topo_str = f" {gnode.topo_order.index(node)}" if gnode.topo_order else ""
+
+    if gnode.storage_map and node.outputs[0] in gnode.storage_map:
+        data = f" {gnode.storage_map[node.outputs[0]]}"
+    else:
+        data = ""
+
+    if gnode.is_inner_graph_header:
+        return f"{node.op}{id_str}{destroy_map_str}{view_map_str}{topo_str}"
+
+    label = f"{node.op}{gnode.output_idx}{id_str}{type_str}{shape_str}{var_name}{destroy_map_str}{view_map_str}{topo_str}{data}"
+
+    if print_op_info and node not in op_information:
+        op_information.update(op_debug_information(node.op, node))
+
+    node_info = (
+        gnode.parent_node and op_information.get(gnode.parent_node)
+    ) or op_information.get(node)
+    if node_info and var in node_info:
+        label = f"{label} ({node_info[var]})"
+
+    return label
+
+
+def _iter_graph_nodes(
+    var: Variable,
+    depth: int = -1,
+    done: dict | None = None,
+    stop_on_name: bool = False,
+    inner_graph_ops: list | None = None,
+    inner_to_outer: dict | None = None,
+    topo_order: Sequence | None = None,
+    profile: "ProfileStats | None" = None,
+    storage_map: "StorageMapType | None" = None,
+    parent_node: Apply | None = None,
+    inner_graph_node: Apply | None = None,
+    is_inner_graph_header: bool = False,
+    ancestor_is_last: list[bool] | None = None,
+    is_last_child: bool = True,
+    _current_depth: int = 0,
+) -> Generator[GraphNode, None, None]:
+    """Yield `GraphNode` records for a depth-first pre-order traversal of *var*.
+
+    This generator encapsulates all graph-traversal logic that was previously
+    embedded in the recursive `_debugprint` function.  Renderers consume the
+    yielded records without needing to understand graph structure.
+
+    Parameters
+    ----------
+    var
+        The root `Variable` to start traversal from.
+    depth
+        Maximum traversal depth (``-1`` for unlimited).
+    done
+        Shared dict mapping `Apply` nodes to their id strings.  Nodes already
+        present are not re-expanded — a repeat `GraphNode` is yielded instead.
+    stop_on_name
+        When ``True``, stop recursing into a node's inputs if that node's
+        output variable has a non-``None`` name.
+    inner_graph_ops
+        Accumulator list — inner-graph op variables are appended here as they
+        are discovered, for the caller's second-pass inner-graph printing.
+    inner_to_outer, topo_order, profile, storage_map, parent_node,
+    inner_graph_node, is_inner_graph_header
+        Passed through to each yielded `GraphNode` unchanged.
+    ancestor_is_last
+        Tracks whether each ancestor level was itself a last child.
+    is_last_child
+        Whether this call is for the last input among its siblings.
+    _current_depth
+        Internal recursion counter.
+    """
+    if done is None:
+        done = {}
+    if inner_graph_ops is None:
+        inner_graph_ops = []
+    if ancestor_is_last is None:
+        ancestor_is_last = []
+
+    if depth != -1 and _current_depth >= depth:
+        return
+
+    gnode = GraphNode(
+        var=var,
+        is_repeat=False,
+        is_last_child=is_last_child,
+        ancestor_is_last=ancestor_is_last,
+        parent_node=parent_node,
+        inner_to_outer=inner_to_outer,
+        inner_graph_node=inner_graph_node,
+        is_inner_graph_header=is_inner_graph_header,
+        topo_order=topo_order,
+        profile=profile,
+        storage_map=storage_map,
+    )
+
+    if var.owner is None:
+        # Leaf node — input variable or constant
+        yield gnode
+        return
+
+    node = var.owner
+    already_done = node in done
+
+    if already_done:
+        gnode.is_repeat = True
+        yield gnode
+        return
+
+    yield gnode
+
+    if stop_on_name and var.name is not None:
+        # Yield the node itself but don't recurse — text renderer adds "···"
+        return
+
+    # Mark as visited before recursing to handle DAG diamonds
+    done[node] = ""
+
+    child_ancestor = [*ancestor_is_last, is_last_child]
+
+    for in_idx, in_var in enumerate(node.inputs):
+        child_is_last = in_idx == len(node.inputs) - 1
+
+        # Collect inner-graph ops for the second pass
+        if hasattr(in_var, "owner") and hasattr(in_var.owner, "op"):
+            if (
+                isinstance(in_var.owner.op, HasInnerGraph)
+                or (
+                    hasattr(in_var.owner.op, "scalar_op")
+                    and isinstance(in_var.owner.op.scalar_op, HasInnerGraph)
+                )
+            ) and in_var not in inner_graph_ops:
+                inner_graph_ops.append(in_var)
+
+        yield from _iter_graph_nodes(
+            in_var,
+            depth=depth,
+            done=done,
+            stop_on_name=stop_on_name,
+            inner_graph_ops=inner_graph_ops,
+            inner_to_outer=inner_to_outer,
+            topo_order=topo_order,
+            profile=profile,
+            storage_map=storage_map,
+            parent_node=node,
+            inner_graph_node=inner_graph_node,
+            is_inner_graph_header=False,
+            ancestor_is_last=child_ancestor,
+            is_last_child=child_is_last,
+            _current_depth=_current_depth + 1,
+        )
 
 
 @singledispatch
@@ -538,213 +903,98 @@ def _debugprint(
     if depth == 0:
         return file
 
-    if topo_order is None:
-        topo_order = []
-
     if done is None:
-        _done = dict()
-    else:
-        _done = done
-
+        done = {}
+    if used_ids is None:
+        used_ids = {}
     if inner_graph_ops is None:
         inner_graph_ops = []
-
-    if print_type:
-        type_str = f" <{var.type}>"
-    else:
-        type_str = ""
-
-    if print_shape and hasattr(var.type, "shape"):
-        shape_str = f" shape={str(var.type.shape).replace('None', '?')}"
-    else:
-        shape_str = ""
-
-    if prefix_child is None:
-        prefix_child = prefix
-
-    if used_ids is None:
-        _used_ids = dict()
-    else:
-        _used_ids = used_ids
-
     if op_information is None:
         op_information = {}
 
-    def get_id_str(
-        obj: Literal["output"] | Apply | Variable, get_printed: bool = True
-    ) -> str:
-        id_str: str = ""
-        if obj in _used_ids:
-            id_str = _used_ids[obj]
-        elif obj == "output":
-            id_str = "output"
-        elif id_type == "id":
-            id_str = f"[id {id(var)}]"
-        elif id_type == "int":
-            id_str = f"[id {len(_used_ids)}]"
-        elif id_type == "CHAR":
-            id_str = f"[id {char_from_number(len(_used_ids))}]"
-        elif id_type == "auto":
-            id_str = f"[id {var.auto_name}]"
-        elif id_type == "":
-            id_str = ""
-        if get_printed:
-            _done[obj] = id_str
-        _used_ids[obj] = id_str
-        return id_str
+    # In the original recursive _debugprint, `prefix` is the string written
+    # before the current node, and `prefix_child` is the base for children.
+    # Normally prefix_child == prefix; the only exception is inner-graph outputs
+    # which are called with prefix=" ← " and prefix_child="   ".
+    # We replicate this by tracking an effective "child base" string and using
+    # it for all nodes that are not the root of this _debugprint call.
+    if prefix_child is None:
+        prefix_child = prefix
+    has_child_offset = prefix_child != prefix  # True only for inner-graph outputs
 
-    if var.owner:
-        # This variable is the output of a computation, so just print out the
-        # `Apply` node
-        node = var.owner
-
-        var_name = getattr(var, "name", "")
-
-        if var_name is None:
-            var_name = ""
-        if var_name:
-            var_name = f" '{var_name}'"
-
-        if print_destroy_map and node.op.destroy_map:
-            destroy_map_str = f" d={node.op.destroy_map}"
+    for gnode in _iter_graph_nodes(
+        var,
+        depth=depth,
+        done=done,
+        stop_on_name=stop_on_name,
+        inner_graph_ops=inner_graph_ops,
+        inner_to_outer=inner_to_outer_inputs,
+        topo_order=topo_order,
+        profile=profile,
+        storage_map=storage_map,
+        parent_node=parent_node,
+        inner_graph_node=inner_graph_node,
+        is_inner_graph_header=is_inner_graph_header,
+        ancestor_is_last=[],
+        is_last_child=True,
+    ):
+        # Reconstruct the indentation prefix from ancestor_is_last.
+        # The root node (depth 0) has ancestor_is_last=[] and no connector.
+        # Deeper nodes build column bars from all but the last entry, then
+        # append the connector selected by is_last_child.
+        #
+        # When prefix_child != prefix (inner-graph output case), the root uses
+        # `prefix` and all children use `prefix_child` as their base.
+        is_root = not gnode.ancestor_is_last
+        if is_root:
+            col_bars = ""
+            connector = ""
+            base = prefix
         else:
-            destroy_map_str = ""
+            col_bars = "".join(
+                "   " if last else " │ " for last in gnode.ancestor_is_last
+            )
+            connector = " └─ " if gnode.is_last_child else " ├─ "
+            base = prefix_child if has_child_offset else prefix
 
-        if print_view_map and node.op.view_map:
-            view_map_str = f" v={node.op.view_map}"
-        else:
-            view_map_str = ""
+        full_prefix = base + col_bars + connector
 
-        if topo_order:
-            o = f" {topo_order.index(node)}"
-        else:
-            o = ""
+        label = _build_label(
+            gnode,
+            done=done,
+            used_ids=used_ids,
+            id_type=id_type,
+            print_type=print_type,
+            print_shape=print_shape,
+            print_destroy_map=print_destroy_map,
+            print_view_map=print_view_map,
+            print_op_info=print_op_info,
+            op_information=op_information,
+        )
 
-        already_done = node in _done
-        id_str = get_id_str(node)
+        if gnode.is_repeat and not gnode.is_inner_graph_header:
+            print(f"{full_prefix}···", file=file)
+            continue
 
-        if len(node.outputs) == 1:
-            output_idx = ""
-        else:
-            output_idx = f".{node.outputs.index(var)}"
-
-        if id_str:
-            id_str = f" {id_str}"
-
-        if storage_map and node.outputs[0] in storage_map:
-            data = f" {storage_map[node.outputs[0]]}"
-        else:
-            data = ""
-
-        if is_inner_graph_header:
-            var_output = f"{prefix}{node.op}{id_str}{destroy_map_str}{view_map_str}{o}"
-        else:
-            var_output = f"{prefix}{node.op}{output_idx}{id_str}{type_str}{shape_str}{var_name}{destroy_map_str}{view_map_str}{o}{data}"
-
-        if print_op_info and node not in op_information:
-            op_information.update(op_debug_information(node.op, node))
-
-        node_info = (
-            parent_node and op_information.get(parent_node)
-        ) or op_information.get(node)
-        if node_info and var in node_info and not is_inner_graph_header:
-            var_output = f"{var_output} ({node_info[var]})"
-
-        if profile and profile.apply_time and node in profile.apply_time:
-            op_time = profile.apply_time[node]
-            op_time_percent = (op_time / profile.fct_call_time) * 100
-            tot_time_dict = profile.compute_total_times()
+        if (
+            gnode.profile
+            and gnode.profile.apply_time
+            and gnode.node in gnode.profile.apply_time
+        ):
+            node = gnode.node
+            assert node is not None
+            op_time = gnode.profile.apply_time[node]
+            op_time_percent = (op_time / gnode.profile.fct_call_time) * 100
+            tot_time_dict = gnode.profile.compute_total_times()
             tot_time = tot_time_dict[node]
-            tot_time_percent = (tot_time_dict[node] / profile.fct_call_time) * 100
-
+            tot_time_percent = tot_time_dict[node] / gnode.profile.fct_call_time * 100
             print(
-                f"{var_output} --> {op_time:8.2e}s {op_time_percent:4.1f}% {tot_time:8.2e}s {tot_time_percent:4.1f}%",
+                f"{full_prefix}{label} --> {op_time:8.2e}s {op_time_percent:4.1f}%"
+                f" {tot_time:8.2e}s {tot_time_percent:4.1f}%",
                 file=file,
             )
         else:
-            print(var_output, file=file)
-
-        if not already_done and not (
-            stop_on_name and hasattr(var, "name") and var.name is not None
-        ):
-            new_prefix = prefix_child + " ├─ "
-            new_prefix_child = prefix_child + " │ "
-
-            for in_idx, in_var in enumerate(node.inputs):
-                if in_idx == len(node.inputs) - 1:
-                    new_prefix = prefix_child + " └─ "
-                    new_prefix_child = prefix_child + "   "
-
-                if hasattr(in_var, "owner") and hasattr(in_var.owner, "op"):
-                    if (
-                        isinstance(in_var.owner.op, HasInnerGraph)
-                        or (
-                            hasattr(in_var.owner.op, "scalar_op")
-                            and isinstance(in_var.owner.op.scalar_op, HasInnerGraph)
-                        )
-                    ) and in_var not in inner_graph_ops:
-                        inner_graph_ops.append(in_var)
-
-                _debugprint(
-                    in_var,
-                    new_prefix,
-                    depth=depth - 1,
-                    done=_done,
-                    print_type=print_type,
-                    print_shape=print_shape,
-                    file=file,
-                    topo_order=topo_order,
-                    id_type=id_type,
-                    stop_on_name=stop_on_name,
-                    prefix_child=new_prefix_child,
-                    inner_graph_ops=inner_graph_ops,
-                    profile=profile,
-                    inner_to_outer_inputs=inner_to_outer_inputs,
-                    storage_map=storage_map,
-                    used_ids=_used_ids,
-                    op_information=op_information,
-                    parent_node=node,
-                    print_op_info=print_op_info,
-                    print_destroy_map=print_destroy_map,
-                    print_view_map=print_view_map,
-                    inner_graph_node=inner_graph_node,
-                )
-        elif not is_inner_graph_header:
-            print(prefix_child + " └─ ···", file=file)
-    else:
-        id_str = get_id_str(var)
-
-        if id_str:
-            id_str = f" {id_str}"
-
-        if storage_map and var in storage_map:
-            data = f" {storage_map[var]}"
-        else:
-            data = ""
-
-        var_output = f"{prefix}{var}{id_str}{type_str}{shape_str}{data}"
-
-        if print_op_info and var.owner and var.owner not in op_information:
-            op_information.update(op_debug_information(var.owner.op, var.owner))
-
-        if inner_to_outer_inputs is not None and var in inner_to_outer_inputs:
-            outer_var = inner_to_outer_inputs[var]
-
-            if outer_var.owner:
-                outer_id_str = get_id_str(outer_var.owner)
-            else:
-                outer_id_str = get_id_str(outer_var)
-
-            var_output = f"{var_output} -> {outer_id_str}"
-
-        # TODO: This entire approach will only print `Op` info for two levels
-        # of nesting.
-        for node in dict.fromkeys([inner_graph_node, parent_node, var.owner]):
-            node_info = op_information.get(node)
-            if node_info and var in node_info:
-                var_output = f"{var_output} ({node_info[var]})"
-
-        print(var_output, file=file)
+            print(f"{full_prefix}{label}", file=file)
 
     return file
 
