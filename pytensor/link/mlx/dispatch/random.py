@@ -91,10 +91,7 @@ def mlx_sample_fn_uniform(op, node):
 def mlx_sample_fn_bernoulli(op, node):
     def sample_fn(rng_key, size, dtype, p):
         p = mx.array(p)
-        if size is None:
-            shape = p.shape
-        else:
-            shape = mlx_to_list_shape(size)
+        shape = mlx_to_list_shape(size) if size is not None else None
         return mx.random.bernoulli(p=p, shape=shape, key=rng_key)
 
     return sample_fn
@@ -112,18 +109,41 @@ def mlx_sample_fn_categorical(op, node):
 
 @mlx_sample_fn.register(ptr.MvNormalRV)
 def mlx_sample_fn_mvnormal(op, node):
+    method = op.method
+
     def sample_fn(rng_key, size, dtype, mean, cov):
         mlx_dtype = convert_dtype_to_mlx(dtype)
-        shape = mlx_to_list_shape(size) if size is not None else []
-        # multivariate_normal uses SVD internally, which requires mx.cpu in MLX.
-        return mx.random.multivariate_normal(
-            mean=mean,
-            cov=cov,
-            shape=shape,
-            dtype=mlx_dtype,
-            key=rng_key,
-            stream=mx.cpu,
-        )
+        mean = mx.array(mean, dtype=mlx_dtype)
+        cov = mx.array(cov, dtype=mlx_dtype)
+        n = cov.shape[-1]
+        batch_shape = mlx_to_list_shape(size) if size is not None else []
+        if batch_shape:
+            # size is given: PyTensor pads param dims with leading 1s via ExpandDims;
+            # reshape to 2D/1D to strip those before decomposition.
+            cov_2d = cov.reshape(n, n)
+            mean_1d = mean.reshape(n)
+            if method == "cholesky":
+                A = mx.linalg.cholesky(cov_2d, stream=mx.cpu)
+            elif method == "svd":
+                U, s, _ = mx.linalg.svd(cov_2d, stream=mx.cpu)
+                A = U * mx.sqrt(s)[None, :]
+            else:  # eigh
+                w, vecs = mx.linalg.eigh(cov_2d, stream=mx.cpu)
+                A = vecs * mx.sqrt(w)[None, :]
+            z = mx.random.normal(shape=[*batch_shape, n], dtype=mlx_dtype, key=rng_key)
+            return (z @ A.T) + mean_1d
+        else:
+            # size is None: param shape is the true batch (or scalar).
+            if method == "cholesky":
+                A = mx.linalg.cholesky(cov, stream=mx.cpu)
+            elif method == "svd":
+                U, s, _ = mx.linalg.svd(cov, stream=mx.cpu)
+                A = U * mx.sqrt(s)[..., None, :]
+            else:  # eigh
+                w, vecs = mx.linalg.eigh(cov, stream=mx.cpu)
+                A = vecs * mx.sqrt(w)[..., None, :]
+            z = mx.random.normal(shape=mean.shape, dtype=mlx_dtype, key=rng_key)
+            return (z[..., None, :] @ A.swapaxes(-1, -2))[..., 0, :] + mean
 
     return sample_fn
 
@@ -163,12 +183,12 @@ def mlx_sample_fn_gumbel(op, node):
 @mlx_sample_fn.register(ptr.PermutationRV)
 def mlx_sample_fn_permutation(op, node):
     batch_ndim = op.batch_ndim(node)
+    if batch_ndim:
+        raise NotImplementedError(
+            "MLX random.permutation does not support batch dimensions."
+        )
 
     def sample_fn(rng_key, size, dtype, x):
-        if batch_ndim:
-            raise NotImplementedError(
-                "MLX random.permutation does not support batch dimensions."
-            )
         return mx.random.permutation(x, key=rng_key)
 
     return sample_fn
