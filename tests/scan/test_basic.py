@@ -4166,6 +4166,30 @@ def test_scan_mapped_and_non_traced_output_ordering(single_step):
     assert isinstance(final_rng.type, RandomGeneratorType)
 
 
+def test_single_step_untraced_sit_sot():
+    """Single-step scan unrolling must connect untraced sit_sot to actual inputs."""
+    rng = random_generator_type("rng")
+
+    def step(rng):
+        next_rng, x = rng.normal()
+        return next_rng, x
+
+    unrolled_next_rng, unrolled_draw = scan(
+        fn=step,
+        outputs_info=[rng, None],
+        n_steps=1,
+        return_updates=False,
+    )
+
+    del rng.tag.used  # Avoid reuse warning
+    expected_next_rng, draw = step(rng)
+    expected_draw = draw[None]  # unrolling adds an expand_dims
+    assert_equal_computations(
+        [unrolled_next_rng, unrolled_draw],
+        [expected_next_rng, expected_draw],
+    )
+
+
 @pytest.mark.parametrize("mode", [Mode(linker="py"), Mode(linker="cvm"), "numba"])
 def test_zero_steps_untraced_sit_sot(mode):
     """Regression test: 0-step scan with untraced sit_sot must return initial state, not None.
