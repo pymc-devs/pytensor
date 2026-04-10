@@ -3,7 +3,7 @@ import pytest
 
 import pytensor
 import pytensor.tensor as pt
-from pytensor.compile.function import function
+from pytensor.compile.maker import function
 from pytensor.compile.sharedvalue import shared
 from pytensor.tensor.random.utils import RandomStream
 
