@@ -4,6 +4,7 @@ from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
+from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD
 
 
@@ -142,3 +143,28 @@ def mlx_funcify_PivotToPermutations(op, **kwargs):
         return mx.argsort(p_inv)
 
     return pivot_to_permutations
+
+
+@mlx_funcify.register(QR)
+def mlx_funcify_QR(op, node, **kwargs):
+    mode = op.mode
+    A_dtype = getattr(mx, node.inputs[0].dtype)
+
+    if mode not in ("economic", "r"):
+        raise NotImplementedError(
+            f"mode='{mode}' is not supported in the MLX backend. "
+            "Only 'economic' and 'r' modes are available."
+        )
+
+    def qr(a):
+        Q, R = mx.linalg.qr(a.astype(dtype=A_dtype, stream=mx.cpu), stream=mx.cpu)
+        if mode == "r":
+            M = a.shape[-2]
+            K = R.shape[-2]
+            if M > K:
+                pad_width = [(0, 0)] * (R.ndim - 2) + [(0, M - K), (0, 0)]
+                return mx.pad(R, pad_width, stream=mx.cpu)
+            return R
+        return Q, R
+
+    return qr
