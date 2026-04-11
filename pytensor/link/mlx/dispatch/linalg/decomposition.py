@@ -3,7 +3,7 @@ import mlx.core as mx
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
-from pytensor.tensor.linalg.decomposition.lu import LU
+from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
 from pytensor.tensor.linalg.decomposition.svd import SVD
 
 
@@ -112,3 +112,33 @@ def mlx_funcify_Eigvalsh(op, node, **kwargs):
         )
 
     return eigvalsh
+
+
+@mlx_funcify.register(LUFactor)
+def mlx_funcify_LUFactor(op, node, **kwargs):
+    A_dtype = getattr(mx, node.inputs[0].dtype)
+
+    def lu_factor(a):
+        lu, pivots = mx.linalg.lu_factor(
+            a.astype(dtype=A_dtype, stream=mx.cpu), stream=mx.cpu
+        )
+        return lu, pivots.astype(mx.int32, stream=mx.cpu)
+
+    return lu_factor
+
+
+@mlx_funcify.register(PivotToPermutations)
+def mlx_funcify_PivotToPermutations(op, **kwargs):
+    inverse = op.inverse
+
+    def pivot_to_permutations(pivots):
+        pivots = mx.array(pivots)
+        n = pivots.shape[0]
+        p_inv = mx.arange(n, dtype=mx.int32)
+        for i in range(n):
+            p_inv[i], p_inv[pivots[i]] = p_inv[pivots[i]], p_inv[i]
+        if inverse:
+            return p_inv
+        return mx.argsort(p_inv)
+
+    return pivot_to_permutations

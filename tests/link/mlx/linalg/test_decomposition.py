@@ -117,3 +117,28 @@ def test_mlx_eigvalsh(lower):
 
     out_no_b = pt.linalg.eigvalsh(A, NoneConst, lower=lower)
     compare_mlx_and_py([A], [out_no_b], [A_val])
+
+
+def test_mlx_lu_factor():
+    rng = np.random.default_rng(15)
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    out = pt.linalg.lu_factor(A)
+
+    compare_mlx_and_py([A], out, [A_val])
+
+
+def test_mlx_pivot_to_permutations():
+    rng = np.random.default_rng(15)
+
+    A = pt.matrix(name="A")
+    A_val = rng.normal(size=(5, 5)).astype(config.floatX)
+
+    from pytensor.tensor.linalg.decomposition.lu import pivot_to_permutation
+
+    lu_and_pivots = pt.linalg.lu_factor(A)
+    out = pivot_to_permutation(lu_and_pivots[1])
+
+    compare_mlx_and_py([A], [out], [A_val])
