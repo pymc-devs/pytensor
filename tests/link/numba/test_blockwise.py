@@ -8,8 +8,9 @@ from pytensor.tensor import TensorVariable, lvector, tensor, tensor3, vector
 from pytensor.tensor.basic import Alloc, ARange, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
-from pytensor.tensor.nlinalg import SVD, Det
-from pytensor.tensor.slinalg import Cholesky
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.svd import SVD
+from pytensor.tensor.linalg.summary import Det
 from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
 
 

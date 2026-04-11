@@ -27,19 +27,16 @@ from pytensor.tensor.blockwise import (
     BlockwiseWithCoreShape,
     vectorize_node_fallback,
 )
-from pytensor.tensor.nlinalg import MatrixInverse, eig
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eig
+from pytensor.tensor.linalg.inverse import MatrixInverse
+from pytensor.tensor.linalg.solvers.core import SolveBase
+from pytensor.tensor.linalg.solvers.general import Solve, solve
+from pytensor.tensor.linalg.solvers.psd import cho_solve
+from pytensor.tensor.linalg.solvers.triangular import solve_triangular
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.op import default_rng
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot
-from pytensor.tensor.slinalg import (
-    Cholesky,
-    Solve,
-    SolveBase,
-    cho_solve,
-    cholesky,
-    solve,
-    solve_triangular,
-)
 from pytensor.tensor.utils import _parse_gufunc_signature
 
 

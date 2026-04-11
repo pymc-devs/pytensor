@@ -9,13 +9,12 @@ import pytensor.link.jax.dispatch.elemwise
 import pytensor.link.jax.dispatch.extra_ops
 import pytensor.link.jax.dispatch.pad
 import pytensor.link.jax.dispatch.math
-import pytensor.link.jax.dispatch.nlinalg
+import pytensor.link.jax.dispatch.linalg
 import pytensor.link.jax.dispatch.random
 import pytensor.link.jax.dispatch.scalar
 import pytensor.link.jax.dispatch.scan
 import pytensor.link.jax.dispatch.shape
 import pytensor.link.jax.dispatch.signal
-import pytensor.link.jax.dispatch.slinalg
 import pytensor.link.jax.dispatch.sort
 import pytensor.link.jax.dispatch.sparse
 import pytensor.link.jax.dispatch.subtensor

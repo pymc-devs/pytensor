@@ -287,7 +287,7 @@ class OpPattern:
         from pytensor.graph.rewriting.unify import OpPattern
         from pytensor.tensor.elemwise import CAReduce
         from pytensor.tensor.blockwise import Blockwise
-        from pytensor.tensor.slinalg import Solve
+        from pytensor.tensor.linalg.solvers.general import Solve
 
         @node_rewriter(tracks=[OpPattern(CAReduce, axis=None)])
         def local_car_reduce_all_rewriter(fgraph, node):
@@ -352,7 +352,7 @@ class OpPattern:
         import pytensor.tensor as pt
         from pytensor.graph.rewriting.unify import OpPattern
         from pytensor.tensor.blockwise import Blockwise
-        from pytensor.tensor.slinalg import Solve
+        from pytensor.tensor.linalg.solvers.general import Solve
 
         A = var("A")
         b = var("b")

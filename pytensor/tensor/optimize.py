@@ -32,9 +32,9 @@ from pytensor.tensor.basic import (
     tensor_from_scalar,
     zeros_like,
 )
+from pytensor.tensor.linalg.solvers.general import solve
 from pytensor.tensor.math import tensordot
 from pytensor.tensor.reshape import pack, unpack
-from pytensor.tensor.slinalg import solve
 from pytensor.tensor.variable import TensorVariable, Variable
 from pytensor.utils import unzip
 

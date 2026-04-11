@@ -11,7 +11,7 @@ from pytensor.scalar import log as scalar_log
 from pytensor.tensor import add, alloc, iscalar, matrix, scalar, tensor, tensor3
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
-from pytensor.tensor.nlinalg import MatrixPinv
+from pytensor.tensor.linalg.inverse import MatrixPinv
 from pytensor.tensor.rewriting.blockwise import local_useless_blockwise
 from pytensor.tensor.shape import Reshape
 

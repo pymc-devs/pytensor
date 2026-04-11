@@ -36,6 +36,7 @@ from pytensor.tensor.blas import Dot22, Gemv
 from pytensor.tensor.blas_c import CGemv
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
+from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.math import (
     Dot,
     Max,
@@ -116,7 +117,6 @@ from pytensor.tensor.rewriting.math import (
     simplify_mul,
 )
 from pytensor.tensor.shape import Reshape, Shape_i, SpecifyShape, specify_shape
-from pytensor.tensor.slinalg import BlockDiagonal
 from pytensor.tensor.type import (
     TensorType,
     cmatrix,

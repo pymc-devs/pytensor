@@ -1,0 +1,50 @@
+import numpy as np
+import pytest
+
+from pytensor.compile.maker import function
+from pytensor.configdefaults import config
+from pytensor.tensor.linalg.inverse import pinv
+from pytensor.tensor.type import matrix
+from tests.link.jax.test_basic import compare_jax_and_py
+
+
+jax = pytest.importorskip("jax")
+
+
+def test_pinv():
+    x = matrix("x")
+    x_inv = pinv(x)
+
+    x_np = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=config.floatX)
+    compare_jax_and_py([x], [x_inv], [x_np])
+
+
+def test_pinv_hermitian():
+    A = matrix("A", dtype="complex128")
+    A_h_test = np.c_[[3, 3 + 2j], [3 - 2j, 2]]
+    A_not_h_test = A_h_test + 0 + 1j
+
+    A_inv = pinv(A, hermitian=False)
+    jax_fn = function([A], A_inv, mode="JAX")
+
+    assert np.allclose(jax_fn(A_h_test), np.linalg.pinv(A_h_test, hermitian=False))
+    assert np.allclose(jax_fn(A_h_test), np.linalg.pinv(A_h_test, hermitian=True))
+    assert np.allclose(
+        jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=False)
+    )
+    assert not np.allclose(
+        jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=True)
+    )
+
+    A_inv = pinv(A, hermitian=True)
+    jax_fn = function([A], A_inv, mode="JAX")
+
+    assert np.allclose(jax_fn(A_h_test), np.linalg.pinv(A_h_test, hermitian=False))
+    assert np.allclose(jax_fn(A_h_test), np.linalg.pinv(A_h_test, hermitian=True))
+    assert not np.allclose(
+        jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=False)
+    )
+    # Numpy fails differently than JAX when hermitian assumption is violated
+    assert not np.allclose(
+        jax_fn(A_not_h_test), np.linalg.pinv(A_not_h_test, hermitian=True)
+    )

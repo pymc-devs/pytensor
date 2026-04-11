@@ -1,22 +1,16 @@
-..  ../../../../pytensor/sandbox/nlinalg.py
-
-.. _libdoc_linalg:
+.. _libdoc_nlinalg:
 
 ===================================================================
-:mod:`tensor.nlinalg` --  Linear Algebra Ops Using Numpy
+:mod:`tensor.nlinalg` --  Linear Algebra Ops Using Numpy (deprecated)
 ===================================================================
 
 .. module:: tensor.nlinalg
    :platform: Unix, Windows
-   :synopsis: Linear Algebra Ops Using Numpy
+   :synopsis: Linear Algebra Ops Using Numpy (deprecated)
 .. moduleauthor:: LISA
 
-.. note::
-
-   This module is not imported by default. You need to import it to use it.
-
-API
-===
-
-.. automodule:: pytensor.tensor.nlinalg
-    :members:
+.. deprecated:: 2.x
+   The ``nlinalg`` module is deprecated. Use :mod:`pytensor.tensor.linalg` instead.
+   All symbols previously exported from ``nlinalg`` are available from
+   ``pytensor.tensor.linalg`` — see :ref:`libdoc_linalg`. Imports from
+   ``nlinalg`` will be removed in PyTensor 3.0.

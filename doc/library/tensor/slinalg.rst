@@ -1,23 +1,16 @@
-..  ../../../../pytensor/sandbox/slinalg.py
-
 .. _libdoc_slinalg:
 
 ===================================================================
-:mod:`tensor.slinalg` --  Linear Algebra Ops Using Scipy
+:mod:`tensor.slinalg` --  Linear Algebra Ops Using Scipy (deprecated)
 ===================================================================
 
 .. module:: tensor.slinalg
    :platform: Unix, Windows
-   :synopsis: Linear Algebra Ops Using Scipy
+   :synopsis: Linear Algebra Ops Using Scipy (deprecated)
 .. moduleauthor:: LISA
 
-.. note::
-
-   This module is not imported by default. You need to import it to use it.
-
-API
-===
-
-.. automodule:: pytensor.tensor.slinalg
-    :members:
-
+.. deprecated:: 2.x
+   The ``slinalg`` module is deprecated. Use :mod:`pytensor.tensor.linalg` instead.
+   All symbols previously exported from ``slinalg`` are available from
+   ``pytensor.tensor.linalg`` — see :ref:`libdoc_linalg`. Imports from
+   ``slinalg`` will be removed in PyTensor 3.0.

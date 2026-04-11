@@ -24,6 +24,7 @@ symbolic expressions using calls that look just like numpy calls, such as
     elemwise
     extra_ops
     io
+    linalg
     slinalg
     nlinalg
     fft
