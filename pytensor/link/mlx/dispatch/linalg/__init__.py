@@ -3,4 +3,5 @@ from pytensor.link.mlx.dispatch.linalg import (
     inverse,
     products,
     solvers,
+    summary,
 )
