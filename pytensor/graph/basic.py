@@ -753,6 +753,19 @@ class Constant(AtomicVariable[_TypeType]):
         add_tag_trace(self)
 
     def signature(self):
+        """Return a hashable object identifying this Constant by value.
+
+        The returned object must satisfy:
+        1. Hashable: ``hash(sig)`` must not raise.
+        2. Self-equality: ``sig == sig`` must be ``True`` (not an array).
+        3. Pickle-stable: ``pickle.loads(pickle.dumps(sig)) == sig``
+           and same ``hash``. This is required for C module cache keys.
+
+        The default ``(type, data)`` is sufficient for simple Python
+        objects (None, slices, etc.) but breaks for numpy data (NaN,
+        arrays). Subclasses with numeric data must override this.
+        See ``TensorConstantSignature``, ``ScalarConstantSignature``.
+        """
         return (self.type, self.data)
 
     def __str__(self):
