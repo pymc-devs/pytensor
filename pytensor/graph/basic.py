@@ -825,7 +825,7 @@ class FrozenApply(Apply):
     constructing a ``FrozenApply`` with the same op and input variables returns
     the cached instance.
 
-    Constants are keyed by ``(type, data_bytes)`` so that two independently
+    Constants are keyed by their ``signature()`` so that two independently
     created Constants with the same value resolve to the same cached node.
     """
 
@@ -841,15 +841,9 @@ class FrozenApply(Apply):
         cache keys that would prevent GC from collecting chains of
         FrozenApply nodes in a single pass.
 
-        Constants use their byte representation so that independently-created
-        equal constants (including NaN) produce the same key.  Object-dtype
-        constants (e.g. slices) fall back to ``signature()`` since their byte
-        representation stores pointers, not values.
+        Constants use their ``signature()`` for value-based deduplication.
         """
         if isinstance(inp, Constant):
-            a = np.asarray(inp.data)
-            if a.dtype.kind != "O":
-                return (inp.type, a.tobytes(), a.dtype.str, a.shape)
             return inp.signature()
         return id(inp)
 
