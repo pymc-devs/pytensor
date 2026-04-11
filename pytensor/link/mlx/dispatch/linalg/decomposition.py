@@ -2,7 +2,7 @@ import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh
+from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU
 from pytensor.tensor.linalg.decomposition.svd import SVD
 
@@ -93,3 +93,22 @@ def mlx_funcify_Eigh(op, node, **kwargs):
         )
 
     return eigh
+
+
+@mlx_funcify.register(Eigvalsh)
+def mlx_funcify_Eigvalsh(op, node, **kwargs):
+    UPLO = "L" if op.lower else "U"
+    X_dtype = getattr(mx, node.inputs[0].dtype)
+
+    if len(node.inputs) == 2:
+        raise NotImplementedError(
+            "mlx.core.linalg.eigvalsh does not support generalized "
+            "eigenvector problems (b != None)"
+        )
+
+    def eigvalsh(a):
+        return mx.linalg.eigvalsh(
+            a.astype(dtype=X_dtype, stream=mx.cpu), UPLO=UPLO, stream=mx.cpu
+        )
+
+    return eigvalsh

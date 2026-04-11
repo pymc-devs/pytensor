@@ -8,6 +8,7 @@ import pytensor.tensor as pt
 from pytensor import config
 from pytensor.tensor.linalg.decomposition import lu, svd
 from pytensor.tensor.linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.type_other import NoneConst
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 
@@ -98,3 +99,21 @@ def test_mlx_LU():
         mlx_mode=mlx_mode,
         assert_fn=partial(np.testing.assert_allclose, atol=1e-6, strict=True),
     )
+
+
+@pytest.mark.parametrize("lower", [True, False])
+def test_mlx_eigvalsh(lower):
+    rng = np.random.default_rng(15)
+
+    M = rng.normal(size=(3, 3))
+    A_val = (M @ M.T).astype(config.floatX)
+
+    A = pt.matrix(name="A")
+    B = pt.matrix(name="B")
+
+    out_with_b = pt.linalg.eigvalsh(A, B, lower=lower)
+    with pytest.raises(NotImplementedError):
+        compare_mlx_and_py([A, B], [out_with_b], [A_val, A_val])
+
+    out_no_b = pt.linalg.eigvalsh(A, NoneConst, lower=lower)
+    compare_mlx_and_py([A], [out_no_b], [A_val])
