@@ -958,9 +958,30 @@ class ScalarVariable(_scalar_py_operators, Variable):
 ScalarType.variable_type = ScalarVariable
 
 
+class ScalarConstantSignature(tuple):
+    """Signature for ScalarConstant that handles NaN equality and hashing."""
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return False
+        (t0, d0), (t1, d1) = self, other
+        if t0 != t1:
+            return False
+        return (d0 == d1) or (np.isnan(d0) and np.isnan(d1))
+
+    def __hash__(self):
+        t, d = self
+        if np.isnan(d):
+            return hash((type(self), t, "NaN"))
+        return hash((type(self), t, d))
+
+
 class ScalarConstant(ScalarVariable, Constant):
     def __init__(self, *args, **kwargs):
         Constant.__init__(self, *args, **kwargs)
+
+    def signature(self):
+        return ScalarConstantSignature((self.type, self.data))
 
 
 # Register ScalarConstant as the type of Constant corresponding to ScalarType
