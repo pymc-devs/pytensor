@@ -911,6 +911,33 @@ class TestFrozenFunctionGraph:
             for inp in node.inputs:
                 assert inp in fg.variables
 
+    def test_constant_output_equality(self):
+        """FFGs with distinct but equal constant outputs should be equal."""
+        c1 = ScalarConstant(float64, 3.14)
+        c2 = ScalarConstant(float64, 3.14)
+        assert c1 is not c2
+
+        ffg1 = FrozenFunctionGraph([], [c1])
+        ffg2 = FrozenFunctionGraph([], [c2])
+        assert ffg1 == ffg2
+        assert hash(ffg1) == hash(ffg2)
+        assert ffg1.outputs == ffg2.outputs
+
+    def test_output_clients(self):
+        """Output variables should have dummy Output node clients."""
+        x, y = float64("x"), float64("y")
+        ffg = FunctionGraph([x, y], [mul(add(x, y), y)]).freeze()
+
+        for i, out in enumerate(ffg.outputs):
+            out_clients = ffg.clients[out]
+            output_clients = [
+                (node, idx) for node, idx in out_clients if isinstance(node.op, Output)
+            ]
+            assert len(output_clients) == 1
+            node, idx = output_clients[0]
+            assert node.op.idx == i
+            assert idx == 0
+
     def test_freeze_unfreeze_round_trip(self):
         x, y = float64("x"), float64("y")
         ffg = FunctionGraph([x, y], [mul(add(x, y), y)]).freeze()

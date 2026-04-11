@@ -979,9 +979,8 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
                 return inp
             raise ValueError(
                 f"Orphan {inp} found in the graph. "
-                "All variables must be graph inputs, "
-                "Constants, or produced by Apply nodes "
-                "reachable from the inputs."
+                "All variables must be graph inputs, constants, "
+                "or produced by Apply nodes reachable from the inputs."
             )
 
         for node in toposort(outputs, blockers=inputs):
@@ -992,30 +991,36 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
 
             memo.update(zip(node.outputs, new_node.outputs, strict=True))
 
-        # Handle outputs that are Constants or AtomicVariables not
-        # encountered during toposort (e.g. a graph with no Apply nodes)
-        for o in outputs:
-            if o not in memo:
-                # TODO: We could create those dummy ApplyOutput here and get the interned constant
-                if isinstance(o, Constant):
-                    memo[o] = o
-
-        try:
-            frozen_outputs = tuple(memo[o] for o in outputs)
-        except KeyError:
-            # TODO: Can this ever happen if we didn't fail in the previous look?
-            unmapped = [o for o in outputs if o not in memo]
-            raise ValueError(
-                f"Output variable {unmapped[0]} could not be mapped to a frozen "
-                "graph variable. All outputs must be graph inputs, "
-                "constants, or produced by Apply nodes reachable from "
-                "the inputs."
-            )
+        # Create dummy Output nodes for each output, mirroring FunctionGraph.
+        # (It also makes eq/hash cheaper)
+        output_nodes = []
+        for i, o in enumerate(outputs):
+            try:
+                resolved = memo[o]
+            except KeyError:
+                if not isinstance(o, AtomicVariable):
+                    raise ValueError(
+                        f"Output variable {o} could not be mapped to a frozen graph variable. "
+                        "All outputs must be graph inputs, constants, "
+                        "or produced by Apply nodes reachable from the inputs."
+                    )
+                # A constant or graph input passed directly as output;
+                # these are the only cases not already in memo.
+                out_node = FrozenApply(Output(i), (o,), ())
+                output_nodes.append(out_node)
+                # FrozenApply interning may return a cached node that holds a previously seen equal constant.
+                # Store the canonical constant in memo for vars_between/clients.
+                memo[o] = out_node.inputs[0]
+            else:
+                output_nodes.append(FrozenApply(Output(i), (resolved,), ()))
 
         self.inputs: tuple[Variable, ...] = nominal_inputs
-        self.outputs: tuple[Variable, ...] = frozen_outputs
+        self.outputs: tuple[Variable, ...] = tuple(
+            node.inputs[0] for node in output_nodes
+        )
         self.apply_nodes: frozenset[Apply] = frozenset(sorted_apply_nodes)
         self._toposort: tuple[Apply, ...] = tuple(sorted_apply_nodes)
+        self._output_nodes: tuple[Apply, ...] = tuple(output_nodes)
         self._variables: frozenset[Variable] | None = None
         self._clients: dict[Variable, list[ClientType]] | None = None
 
@@ -1023,7 +1028,7 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
         return FrozenFunctionGraph, (self.inputs, self.outputs)
 
     def __hash__(self):
-        return hash(self.outputs)
+        return hash(self._output_nodes)
 
     def __eq__(self, other):
         if self is other:
@@ -1057,6 +1062,8 @@ class FrozenFunctionGraph(AbstractFunctionGraph):
             for node in self.toposort():
                 for i, inp in enumerate(node.inputs):
                     clients[inp].append((node, i))
+            for out_node in self._output_nodes:
+                clients[out_node.inputs[0]].append((out_node, 0))
             self._clients = clients
         return self._clients
 
