@@ -5,8 +5,8 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor import config
-from pytensor.tensor._linalg.decomposition import lu, svd
-from pytensor.tensor._linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.linalg.decomposition import lu, svd
+from pytensor.tensor.linalg.decomposition.cholesky import cholesky
 from tests.link.mlx.test_basic import compare_mlx_and_py, mlx_mode
 
 

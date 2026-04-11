@@ -1,9 +1,9 @@
 import torch
 
 from pytensor.link.pytorch.dispatch import pytorch_funcify
-from pytensor.tensor._linalg.decomposition.eigen import Eig, Eigh
-from pytensor.tensor._linalg.decomposition.qr import QR
-from pytensor.tensor._linalg.decomposition.svd import SVD
+from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh
+from pytensor.tensor.linalg.decomposition.qr import QR
+from pytensor.tensor.linalg.decomposition.svd import SVD
 
 
 @pytorch_funcify.register(SVD)

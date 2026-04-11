@@ -1,7 +1,7 @@
 import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
-from pytensor.tensor._linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.constructors import BlockDiagonal
 
 
 @jax_funcify.register(BlockDiagonal)

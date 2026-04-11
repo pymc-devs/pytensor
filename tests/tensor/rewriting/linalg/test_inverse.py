@@ -9,14 +9,14 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.rewriting.utils import rewrite_graph
-from pytensor.tensor._linalg.constructors import BlockDiagonal
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
-from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv, inv, pinv
-from pytensor.tensor._linalg.inverse import inv as matrix_inverse
-from pytensor.tensor._linalg.products import KroneckerProduct
-from pytensor.tensor._linalg.solve.general import Solve
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv, inv, pinv
+from pytensor.tensor.linalg.inverse import inv as matrix_inverse
+from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.tensor.rewriting.linalg.inverse import inv_to_solve
 from pytensor.tensor.type import dmatrix, matrix, vector
 from tests import unittest_tools as utt

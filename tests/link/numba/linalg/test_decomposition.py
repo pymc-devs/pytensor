@@ -7,18 +7,18 @@ import scipy
 import pytensor
 import pytensor.tensor as pt
 from pytensor import In, config
-from pytensor.tensor._linalg.decomposition import svd
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
-from pytensor.tensor._linalg.decomposition.eigen import Eigh, eig
-from pytensor.tensor._linalg.decomposition.lu import (
+from pytensor.tensor.linalg.decomposition import svd
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import Eigh, eig
+from pytensor.tensor.linalg.decomposition.lu import (
     LU,
     LUFactor,
     lu,
     lu_factor,
     pivot_to_permutation,
 )
-from pytensor.tensor._linalg.decomposition.qr import QR, qr
-from pytensor.tensor._linalg.decomposition.schur import qz, schur
+from pytensor.tensor.linalg.decomposition.qr import QR, qr
+from pytensor.tensor.linalg.decomposition.schur import qz, schur
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 

@@ -3,7 +3,7 @@ import pytest
 
 import pytensor.tensor as pt
 from pytensor.configdefaults import config
-from pytensor.tensor._linalg.constructors import block_diag
+from pytensor.tensor.linalg.constructors import block_diag
 from pytensor.tensor.type import matrix
 from tests.link.jax.test_basic import compare_jax_and_py
 

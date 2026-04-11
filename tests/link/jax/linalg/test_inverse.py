@@ -3,7 +3,7 @@ import pytest
 
 from pytensor.compile.maker import function
 from pytensor.configdefaults import config
-from pytensor.tensor._linalg.inverse import pinv
+from pytensor.tensor.linalg.inverse import pinv
 from pytensor.tensor.type import matrix
 from tests.link.jax.test_basic import compare_jax_and_py
 

@@ -1,7 +1,7 @@
 import torch
 
 from pytensor.link.pytorch.dispatch import pytorch_funcify
-from pytensor.tensor._linalg.summary import Det, SLogDet
+from pytensor.tensor.linalg.summary import Det, SLogDet
 
 
 @pytorch_funcify.register(Det)

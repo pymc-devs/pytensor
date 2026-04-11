@@ -8,19 +8,19 @@ import pytensor
 from pytensor import function
 from pytensor.configdefaults import config
 from pytensor.graph.replace import clone_replace
-from pytensor.tensor._linalg.decomposition.eigen import Eig, eig, eigh
-from pytensor.tensor._linalg.decomposition.svd import SVD, svd
-from pytensor.tensor._linalg.inverse import (
+from pytensor.tensor.basic import arange, as_tensor_variable
+from pytensor.tensor.linalg.decomposition.eigen import Eig, eig, eigh
+from pytensor.tensor.linalg.decomposition.svd import SVD, svd
+from pytensor.tensor.linalg.inverse import (
     MatrixInverse,
     TensorInv,
     matrix_inverse,
     pinv,
     tensorinv,
 )
-from pytensor.tensor._linalg.products import kron, matrix_dot, matrix_power
-from pytensor.tensor._linalg.solve.lstsq import lstsq, tensorsolve
-from pytensor.tensor._linalg.summary import det, norm, slogdet, trace
-from pytensor.tensor.basic import arange, as_tensor_variable
+from pytensor.tensor.linalg.products import kron, matrix_dot, matrix_power
+from pytensor.tensor.linalg.solvers.lstsq import lstsq, tensorsolve
+from pytensor.tensor.linalg.summary import det, norm, slogdet, trace
 from pytensor.tensor.math import _allclose
 from pytensor.tensor.type import (
     lmatrix,

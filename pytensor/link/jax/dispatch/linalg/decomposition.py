@@ -1,12 +1,12 @@
 import jax
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor._linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
-from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
-from pytensor.tensor._linalg.decomposition.qr import QR
-from pytensor.tensor._linalg.decomposition.schur import Schur
-from pytensor.tensor._linalg.decomposition.svd import SVD
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
+from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
+from pytensor.tensor.linalg.decomposition.qr import QR
+from pytensor.tensor.linalg.decomposition.schur import Schur
+from pytensor.tensor.linalg.decomposition.svd import SVD
 
 
 @jax_funcify.register(SVD)

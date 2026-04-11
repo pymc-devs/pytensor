@@ -3,6 +3,6 @@ from pytensor.link.jax.dispatch.linalg import (
     decomposition,
     inverse,
     products,
-    solve,
+    solvers,
     summary,
 )

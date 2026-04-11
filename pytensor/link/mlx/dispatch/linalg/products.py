@@ -1,7 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor._linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import KroneckerProduct
 
 
 @mlx_funcify.register(KroneckerProduct)

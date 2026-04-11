@@ -1,7 +1,7 @@
 import numpy as np
 
 from pytensor.configdefaults import config
-from pytensor.tensor._linalg.products import kron
+from pytensor.tensor.linalg.products import kron
 from pytensor.tensor.type import matrix
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 

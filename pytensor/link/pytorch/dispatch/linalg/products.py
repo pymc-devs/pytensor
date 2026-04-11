@@ -1,7 +1,7 @@
 import torch
 
 from pytensor.link.pytorch.dispatch import pytorch_funcify
-from pytensor.tensor._linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import KroneckerProduct
 
 
 @pytorch_funcify.register(KroneckerProduct)

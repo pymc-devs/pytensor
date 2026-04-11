@@ -19,7 +19,6 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
-from pytensor.tensor._linalg.constructors import BlockDiagonal
 from pytensor.tensor.basic import (
     Alloc,
     Join,
@@ -42,6 +41,7 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.elemwise import CAReduce, DimShuffle, Elemwise
 from pytensor.tensor.exceptions import NotScalarConstantError
 from pytensor.tensor.extra_ops import broadcast_arrays, concat_with_broadcast
+from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.math import (
     Dot,
     Prod,

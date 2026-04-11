@@ -6,9 +6,9 @@ from pytensor import function
 from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph
-from pytensor.tensor._linalg.decomposition import lu, qr, svd
-from pytensor.tensor._linalg.decomposition.cholesky import cholesky
-from pytensor.tensor._linalg.summary import Det, SLogDet, det
+from pytensor.tensor.linalg.decomposition import lu, qr, svd
+from pytensor.tensor.linalg.decomposition.cholesky import cholesky
+from pytensor.tensor.linalg.summary import Det, SLogDet, det
 from pytensor.tensor.type import matrix
 from tests.unittest_tools import assert_equal_computations
 

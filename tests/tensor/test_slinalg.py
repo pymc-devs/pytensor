@@ -15,23 +15,23 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import equal_computations
 from pytensor.link.numba import NumbaLinker
 from pytensor.tensor import TensorVariable
-from pytensor.tensor._linalg.constructors import block_diag
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
-from pytensor.tensor._linalg.decomposition.eigen import eigvalsh
-from pytensor.tensor._linalg.decomposition.lu import lu, lu_factor, pivot_to_permutation
-from pytensor.tensor._linalg.decomposition.qr import qr
-from pytensor.tensor._linalg.decomposition.schur import qz, schur
-from pytensor.tensor._linalg.products import expm
-from pytensor.tensor._linalg.solve.core import SolveBase
-from pytensor.tensor._linalg.solve.general import Solve, lu_solve, solve
-from pytensor.tensor._linalg.solve.linear_control import (
+from pytensor.tensor.linalg.constructors import block_diag
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eigvalsh
+from pytensor.tensor.linalg.decomposition.lu import lu, lu_factor, pivot_to_permutation
+from pytensor.tensor.linalg.decomposition.qr import qr
+from pytensor.tensor.linalg.decomposition.schur import qz, schur
+from pytensor.tensor.linalg.products import expm
+from pytensor.tensor.linalg.solvers.core import SolveBase
+from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
+from pytensor.tensor.linalg.solvers.linear_control import (
     solve_continuous_lyapunov,
     solve_discrete_are,
     solve_discrete_lyapunov,
     solve_sylvester,
 )
-from pytensor.tensor._linalg.solve.psd import CholeskySolve, cho_solve
-from pytensor.tensor._linalg.solve.triangular import SolveTriangular, solve_triangular
+from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
+from pytensor.tensor.linalg.solvers.triangular import SolveTriangular, solve_triangular
 from pytensor.tensor.type import dmatrix, matrix, tensor, vector
 from tests import unittest_tools as utt
 

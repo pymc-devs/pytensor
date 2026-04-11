@@ -5,12 +5,12 @@ from pytensor import function
 from pytensor.graph import Apply
 from pytensor.scalar import ScalarOp
 from pytensor.tensor import TensorVariable, lvector, tensor, tensor3, vector
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor._linalg.decomposition.svd import SVD
-from pytensor.tensor._linalg.summary import Det
 from pytensor.tensor.basic import Alloc, ARange, constant
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.svd import SVD
+from pytensor.tensor.linalg.summary import Det
 from tests.link.numba.test_basic import compare_numba_and_py, numba_mode
 
 

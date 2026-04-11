@@ -1,11 +1,11 @@
 from pytensor import tensor as pt
 from pytensor.graph import Constant
 from pytensor.graph.rewriting.basic import node_rewriter
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor._linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.basic import AllocDiag, Eye
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,

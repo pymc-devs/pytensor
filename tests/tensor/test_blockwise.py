@@ -22,18 +22,18 @@ from pytensor.tensor import (
     tensor,
     vector,
 )
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
-from pytensor.tensor._linalg.decomposition.eigen import eig
-from pytensor.tensor._linalg.inverse import MatrixInverse
-from pytensor.tensor._linalg.solve.core import SolveBase
-from pytensor.tensor._linalg.solve.general import Solve, solve
-from pytensor.tensor._linalg.solve.psd import cho_solve
-from pytensor.tensor._linalg.solve.triangular import solve_triangular
 from pytensor.tensor.blockwise import (
     Blockwise,
     BlockwiseWithCoreShape,
     vectorize_node_fallback,
 )
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eig
+from pytensor.tensor.linalg.inverse import MatrixInverse
+from pytensor.tensor.linalg.solvers.core import SolveBase
+from pytensor.tensor.linalg.solvers.general import Solve, solve
+from pytensor.tensor.linalg.solvers.psd import cho_solve
+from pytensor.tensor.linalg.solvers.triangular import solve_triangular
 from pytensor.tensor.random import normal
 from pytensor.tensor.random.op import default_rng
 from pytensor.tensor.rewriting.blas import specialize_matmul_to_batched_dot

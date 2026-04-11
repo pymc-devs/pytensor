@@ -1,9 +1,9 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor._linalg.decomposition.lu import LU
-from pytensor.tensor._linalg.decomposition.svd import SVD
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.lu import LU
+from pytensor.tensor.linalg.decomposition.svd import SVD
 
 
 @mlx_funcify.register(SVD)

@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
-from pytensor.tensor._linalg.summary import Det, SLogDet
+from pytensor.tensor.linalg.summary import Det, SLogDet
 
 
 @jax_funcify.register(Det)

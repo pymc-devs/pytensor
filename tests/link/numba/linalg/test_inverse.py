@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 from tests.link.numba.test_basic import compare_numba_and_py
 
 

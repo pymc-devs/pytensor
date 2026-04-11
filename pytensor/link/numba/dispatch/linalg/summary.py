@@ -3,7 +3,7 @@ import numpy as np
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
-from pytensor.tensor._linalg.summary import Det, SLogDet
+from pytensor.tensor.linalg.summary import Det, SLogDet
 
 
 @register_funcify_default_op_cache_key(Det)

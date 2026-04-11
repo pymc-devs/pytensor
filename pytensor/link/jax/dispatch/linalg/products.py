@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
-from pytensor.tensor._linalg.products import Expm, KroneckerProduct
+from pytensor.tensor.linalg.products import Expm, KroneckerProduct
 
 
 @jax_funcify.register(KroneckerProduct)

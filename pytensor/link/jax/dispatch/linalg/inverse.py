@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 
 from pytensor.link.jax.dispatch.basic import jax_funcify
-from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 
 
 @jax_funcify.register(MatrixInverse)

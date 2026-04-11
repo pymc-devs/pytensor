@@ -5,7 +5,6 @@ from pytensor.graph import Constant
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Mul
-from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
 from pytensor.tensor.basic import (
     Eye,
     TensorVariable,
@@ -13,6 +12,7 @@ from pytensor.tensor.basic import (
     diagonal,
 )
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 from pytensor.tensor.math import variadic_mul
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,

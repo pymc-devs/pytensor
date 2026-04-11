@@ -7,8 +7,8 @@ from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
-from pytensor.tensor._linalg.constructors import BlockDiagonal
-from pytensor.tensor._linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.products import KroneckerProduct
 
 
 def test_nested_blockdiag_fusion():

@@ -40,12 +40,12 @@ from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
     schur_complex,
     schur_real,
 )
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor._linalg.decomposition.eigen import Eig, Eigh
-from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
-from pytensor.tensor._linalg.decomposition.qr import QR
-from pytensor.tensor._linalg.decomposition.schur import QZ, Schur
-from pytensor.tensor._linalg.decomposition.svd import SVD
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh
+from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
+from pytensor.tensor.linalg.decomposition.qr import QR
+from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
+from pytensor.tensor.linalg.decomposition.svd import SVD
 
 
 @register_funcify_default_op_cache_key(SVD)

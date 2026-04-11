@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from pytensor.tensor._linalg.decomposition import qr, svd
-from pytensor.tensor._linalg.decomposition.eigen import eig, eigh
-from pytensor.tensor._linalg.inverse import inv
-from pytensor.tensor._linalg.summary import SLogDet, det
+from pytensor.tensor.linalg.decomposition import qr, svd
+from pytensor.tensor.linalg.decomposition.eigen import eig, eigh
+from pytensor.tensor.linalg.inverse import inv
+from pytensor.tensor.linalg.summary import SLogDet, det
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
 
 

@@ -6,14 +6,14 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.scalar.basic import Abs, Exp, Log, Sign, Sqr
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor._linalg.decomposition.lu import LU, LUFactor
-from pytensor.tensor._linalg.decomposition.qr import QR
-from pytensor.tensor._linalg.decomposition.svd import SVD
-from pytensor.tensor._linalg.summary import SLogDet, det
 from pytensor.tensor.basic import AllocDiag, ones
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
+from pytensor.tensor.linalg.decomposition.qr import QR
+from pytensor.tensor.linalg.decomposition.svd import SVD
+from pytensor.tensor.linalg.summary import SLogDet, det
 from pytensor.tensor.math import Prod, log, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,

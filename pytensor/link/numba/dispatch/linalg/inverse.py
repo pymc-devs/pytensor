@@ -3,7 +3,7 @@ import numpy as np
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import register_funcify_default_op_cache_key
-from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 
 
 @register_funcify_default_op_cache_key(MatrixInverse)

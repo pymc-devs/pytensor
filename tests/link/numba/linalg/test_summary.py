@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import pytensor.tensor as pt
-from pytensor.tensor._linalg.summary import Det, SLogDet
+from pytensor.tensor.linalg.summary import Det, SLogDet
 from tests.link.numba.test_basic import compare_numba_and_py
 
 

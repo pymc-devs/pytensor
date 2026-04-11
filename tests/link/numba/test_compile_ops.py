@@ -10,9 +10,9 @@ from pytensor.raise_op import assert_op
 from pytensor.scalar import Add
 from pytensor.scan.op import Scan
 from pytensor.tensor import dmatrix, dtensor3, matrix
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import Elemwise
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from tests.link.numba.test_basic import compare_numba_and_py
 
 

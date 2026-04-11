@@ -7,7 +7,7 @@ from pytensor.link.numba.dispatch.string_codegen import (
     CODE_TOKEN,
     build_source_code,
 )
-from pytensor.tensor._linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.constructors import BlockDiagonal
 
 
 @register_funcify_default_op_cache_key(BlockDiagonal)

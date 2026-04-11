@@ -4,14 +4,14 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.tensor._linalg.constructors import BlockDiagonal, block_diag
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
-from pytensor.tensor._linalg.products import KroneckerProduct, kron
-from pytensor.tensor._linalg.solve.general import solve
 from pytensor.tensor.basic import AllocDiag, Eye
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor.linalg.products import KroneckerProduct, kron
+from pytensor.tensor.linalg.solvers.general import solve
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,

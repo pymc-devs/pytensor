@@ -10,10 +10,10 @@ from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.tensor import swapaxes
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
-from pytensor.tensor._linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.type import tensor
 

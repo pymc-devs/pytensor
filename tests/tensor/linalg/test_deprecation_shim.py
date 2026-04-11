@@ -3,7 +3,7 @@
 After the linalg reorganization, the old `nlinalg` and `slinalg` module
 namespaces survive only as `__getattr__`-based shims that emit a
 `DeprecationWarning` and forward attribute access to the new
-`pytensor.tensor._linalg` locations.
+`pytensor.tensor.linalg` locations.
 """
 
 import importlib

@@ -5,11 +5,11 @@ import pytensor.tensor as pt
 import tests.unittest_tools as utt
 from pytensor.configdefaults import config
 from pytensor.tensor import subtensor as pt_subtensor
-from pytensor.tensor._linalg.decomposition import lu, qr, schur, svd
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky, cholesky
-from pytensor.tensor._linalg.decomposition.eigen import eig, eigh, eigvalsh
-from pytensor.tensor._linalg.inverse import matrix_inverse
-from pytensor.tensor._linalg.summary import det, slogdet
+from pytensor.tensor.linalg.decomposition import lu, qr, schur, svd
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eig, eigh, eigvalsh
+from pytensor.tensor.linalg.inverse import matrix_inverse
+from pytensor.tensor.linalg.summary import det, slogdet
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
 from pytensor.tensor.type_other import NoneConst

@@ -1,7 +1,7 @@
 import mlx.core as mx
 
 from pytensor.link.mlx.dispatch.basic import mlx_funcify
-from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 
 
 @mlx_funcify.register(MatrixInverse)

@@ -4,7 +4,7 @@ import pytest
 import pytensor.tensor as pt
 import tests.unittest_tools as utt
 from pytensor.configdefaults import config
-from pytensor.tensor._linalg.products import expm, kron
+from pytensor.tensor.linalg.products import expm, kron
 from pytensor.tensor.type import matrix
 from tests.link.jax.test_basic import compare_jax_and_py
 

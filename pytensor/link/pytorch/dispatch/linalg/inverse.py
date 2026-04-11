@@ -1,7 +1,7 @@
 import torch
 
 from pytensor.link.pytorch.dispatch import pytorch_funcify
-from pytensor.tensor._linalg.inverse import MatrixInverse, MatrixPinv
+from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 
 
 @pytorch_funcify.register(MatrixInverse)

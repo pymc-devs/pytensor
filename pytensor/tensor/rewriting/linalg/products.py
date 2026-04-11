@@ -2,11 +2,11 @@ from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.tensor._linalg.constructors import BlockDiagonal
-from pytensor.tensor._linalg.products import KroneckerProduct
-from pytensor.tensor._linalg.summary import det
 from pytensor.tensor.basic import ExtractDiag, concatenate, diag
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg.constructors import BlockDiagonal
+from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.summary import det
 from pytensor.tensor.math import outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,

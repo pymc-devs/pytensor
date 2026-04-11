@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 
-from pytensor.tensor._linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor._linalg.solve.general import Solve
+from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.xtensor.type import as_xtensor
 from pytensor.xtensor.vectorization import XBlockwise
 
