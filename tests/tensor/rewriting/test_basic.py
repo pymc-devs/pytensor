@@ -113,6 +113,7 @@ from pytensor.tensor.type import (
     vector,
 )
 from tests import unittest_tools as utt
+from tests.unittest_tools import assert_equal_computations
 
 
 rewrite_mode = config.mode
@@ -2072,3 +2073,163 @@ def test_topological_fill_sink_broadcastable_change():
     topological_fill_sink.rewrite(fg)
     [new_out] = fg.outputs
     assert equal_computations([new_out], [a + b])
+
+
+class TestExtractDiagRewrites:
+    rewrite_kw = dict(include=("canonicalize", "stabilize", "specialize"))
+
+    def test_extract_diag_of_alloc_diag(self):
+        v = pt.vector("v", shape=(5,))
+        out = pt.diagonal(pt.diag(v))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [v])
+
+    def test_extract_diag_of_alloc_diag_offset_match(self):
+        v = pt.vector("v", shape=(4,))
+        out = pt.diagonal(pt.diag(v, k=1), offset=1)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [v])
+
+    def test_extract_diag_of_alloc_diag_offset_mismatch(self):
+        """When offsets differ, the rewrite should not fire."""
+        v = pt.vector("v", shape=(4,))
+        out = pt.diagonal(pt.diag(v, k=1), offset=0)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [out])
+
+    def test_extract_diag_of_eye_square(self):
+        out = pt.diagonal(pt.eye(5))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.float64(1.0), 5)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_rectangular(self):
+        out = pt.diagonal(pt.eye(3, 5))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.float64(1.0), 3)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_symbolic(self):
+        n = pt.iscalar("n")
+        out = pt.diagonal(pt.eye(n, n, 0))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [out])
+
+    def test_extract_diag_of_eye_offset_mismatch(self):
+        out = pt.diagonal(pt.eye(5), offset=1)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.zeros(4, dtype=out.dtype)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_zeros(self):
+        out = pt.diagonal(pt.zeros((5, 5)))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.float64(0.0), 5)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_ones(self):
+        out = pt.diagonal(pt.ones((4, 6)))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.float64(1.0), 4)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_full(self):
+        out = pt.diagonal(pt.full((3, 3), 7.0))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.asarray(7.0, dtype=out.dtype), 3)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_alloc_non_scalar_no_rewrite(self):
+        """Alloc of a non-scalar value should not be rewritten."""
+        v = pt.vector("v", shape=(5,))
+        out = pt.diagonal(pt.alloc(v, 5, 5))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [out])
+
+    def test_extract_diag_of_eye_mul_matrix(self):
+        x = pt.matrix("x", shape=(5, 5))
+        out = pt.diagonal(pt.eye(5) * x)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_mul_scalar(self):
+        s = pt.scalar("s")
+        out = pt.diagonal(pt.eye(5) * s)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(s, 5)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_mul_row(self):
+        v = pt.row("v", shape=(1, 5))
+        out = pt.diagonal(pt.eye(5) * v)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = v.squeeze(axis=0)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_mul_col(self):
+        v = pt.col("v", shape=(5, 1))
+        out = pt.diagonal(pt.eye(5) * v)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = v.squeeze(axis=1)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_eye_mul_nonzero_offset(self):
+        """With offset != 0, the eye diagonal is zeros, so the whole product is zeros."""
+        x = pt.matrix("x", shape=(5, 5))
+        out = pt.diagonal(pt.eye(5) * x, offset=1)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.alloc(np.zeros(1, dtype=out.dtype), np.int64(4))
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_transpose(self):
+        x = pt.matrix("x", shape=(4, 6))
+        out = pt.diagonal(x.T)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_transpose_offset(self):
+        x = pt.matrix("x", shape=(4, 6))
+        out = pt.diagonal(x.T, offset=2)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x, offset=-2)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_batched_transpose(self):
+        x = pt.tensor("x", shape=(3, 4, 5))
+        out = pt.diagonal(x.mT, axis1=-2, axis2=-1)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x, axis1=-2, axis2=-1)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_elemwise_unary(self):
+        x = pt.matrix("x", shape=(5, 4))
+        out = pt.diagonal(pt.exp(x))
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.exp(pt.diagonal(x))
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_elemwise_binary(self):
+        x = pt.matrix("x", shape=(5, 5))
+        y = pt.matrix("y", shape=(5, 5))
+        out = pt.diagonal(x + y)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x) + pt.diagonal(y)
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_elemwise_scalar_broadcast(self):
+        x = pt.matrix("x", shape=(5, 5))
+        s = pt.scalar("s")
+        out = pt.diagonal(x * s)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        expected = pt.diagonal(x) * s
+        assert_equal_computations([rewritten], [expected])
+
+    def test_extract_diag_of_elemwise_mixed_broadcast_no_rewrite(self):
+        """Bail when an input is broadcastable in exactly one diagonal axis."""
+        x = pt.matrix("x", shape=(5, 5))
+        r = pt.row("r", shape=(1, 5))
+        out = pt.diagonal(x + r)
+        rewritten = rewrite_graph(out, **self.rewrite_kw)
+        assert_equal_computations([rewritten], [out])
