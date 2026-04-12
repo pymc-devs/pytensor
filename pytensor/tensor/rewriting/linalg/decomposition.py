@@ -122,6 +122,50 @@ def svd_uv_merge(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
+@node_rewriter([blockwise_of(SVD)])
+def svd_of_diag(fgraph, node):
+    """
+    svd(D) has three return values:
+        - S = diag(sort(abs(d)))
+        - U = I
+        - V = diag(sign(sort(d)))
+
+    Where d is the diagonal of D and sort is in descending order. U and V are also permuted to match the sorted order
+    of the diagonal of D.
+    """
+    [X] = node.inputs
+
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
+
+    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+
+    # Singular values are abs of diagonal, sorted descending
+    abs_diag = pt.abs(diag_vals)
+    idx = pt.argsort(-abs_diag)
+    new_s = abs_diag[idx]
+
+    if not node.op.core_op.compute_uv:
+        [s] = node.outputs
+        copy_stack_trace(s, new_s)
+        return [new_s]
+
+    n = X.shape[-1]
+    new_U = pt.eye(n)[:, idx]
+    # Vh = diag(sign(d_sorted)) @ P, where P = I[idx, :]
+    sorted_signs = pt.sign(diag_vals[idx])
+    new_Vh = alloc_diag(sorted_signs, axis1=-1, axis2=-2)[:, idx]
+    u, s, vh = node.outputs
+
+    copy_stack_trace(u, new_U)
+    copy_stack_trace(s, new_s)
+    copy_stack_trace(vh, new_Vh)
+
+    return [new_U, new_s, new_Vh]
+
+
+@register_canonicalize
+@register_stabilize
 @node_rewriter([Eigh])
 def eigh_of_diag(fgraph, node):
     """eigh(D) -> (sort(diagonal(D)), eye permuted by argsort) for diagonal D."""

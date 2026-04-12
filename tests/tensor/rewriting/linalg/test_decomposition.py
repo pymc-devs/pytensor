@@ -11,6 +11,7 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
+from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
@@ -309,3 +310,33 @@ def test_eigvalsh_of_diag(make_diag, include_b):
     rewritten = rewrite_graph(w, include=("canonicalize", "stabilize"))
 
     assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "make_diag, compute_uv",
+    [(lambda d: pt.diag(d), True), (lambda d: pt.eye(5) * d, False)],
+    ids=["alloc_diag_with_uv", "eye_mul_no_uv"],
+)
+def test_svd_of_diag(make_diag, compute_uv):
+    d = pt.dvector("d", shape=(5,))
+    D = make_diag(d)
+    out = svd(D, compute_uv=compute_uv)
+    if not compute_uv:
+        out = [out]
+
+    passes = ("canonicalize", "stabilize", "ShapeOpt")
+    rewritten = rewrite_graph(out, include=passes)
+
+    abs_d = pt.abs(d)
+    idx = pt.argsort(-abs_d)
+
+    if compute_uv:
+        expected_s = abs_d[idx]
+        expected_u = pt.as_tensor(np.eye(5))[:, idx]
+        sorted_signs = pt.sign(d[idx])
+        expected_vh = alloc_diag(sorted_signs, axis1=-1, axis2=-2)[:, idx]
+        expected = rewrite_graph([expected_u, expected_s, expected_vh], include=passes)
+    else:
+        expected = rewrite_graph([abs_d[idx]], include=passes)
+
+    assert_equal_computations(rewritten, expected)
