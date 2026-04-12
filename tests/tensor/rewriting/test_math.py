@@ -4915,6 +4915,83 @@ def test_local_dot_to_mul_unspecified_length_1():
     )
 
 
+class TestDotDiagToElemwise:
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_left_diag_matrix(self, make_diag):
+        d = dvector("d", shape=(5,))
+        X = dmatrix("X", shape=(5, 3))
+        D = make_diag(d)
+        out = D @ X
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = d[:, None] * X
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_left_diag_vector(self, make_diag):
+        d = dvector("d", shape=(5,))
+        x = dvector("x", shape=(5,))
+        D = make_diag(d)
+        out = D @ x
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = d * x
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_right_diag_matrix(self, make_diag):
+        d = dvector("d", shape=(5,))
+        X = dmatrix("X", shape=(3, 5))
+        D = make_diag(d)
+        out = X @ D
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = X * d[None, :]
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_both_diag(self, make_diag):
+        d1 = dvector("d1", shape=(5,))
+        d2 = dvector("d2", shape=(5,))
+        D1 = make_diag(d1)
+        D2 = make_diag(d2)
+        out = D1 @ D2
+
+        rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+        expected = pt.basic.alloc_diag(d1 * d2, axis1=-2, axis2=-1)
+        assert_equal_computations([rewritten], [expected])
+
+
 class TestBlockDiagDotToDotBlockDiag:
     @pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
     @pytest.mark.parametrize(
