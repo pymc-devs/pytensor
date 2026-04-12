@@ -27,7 +27,7 @@ from pytensor.link.c.basic import DualLinker
 from pytensor.link.numba import NumbaLinker
 from pytensor.printing import pprint
 from pytensor.raise_op import Assert
-from pytensor.tensor import blas, blas_c
+from pytensor.tensor import blas
 from pytensor.tensor.basic import (
     as_tensor_variable,
     constant,
@@ -2810,7 +2810,7 @@ class TestInferShape(utt.InferShapeTester):
             [advec, bdvec],
             [dot(advec, bdvec)],
             [advec_val, bdvec_val],
-            (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
+            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
         )
 
         # mat/mat
@@ -2831,7 +2831,7 @@ class TestInferShape(utt.InferShapeTester):
             [advec, bdmat],
             [dot(advec, bdmat)],
             [advec_val, bdmat_val],
-            (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
+            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
         )
 
         # mat/vec
@@ -2840,7 +2840,7 @@ class TestInferShape(utt.InferShapeTester):
             [admat, bdvec],
             [dot(admat, bdvec)],
             [admat_val, bdvec_val],
-            (Dot, blas.Dot22, blas.Gemv, blas_c.CGemv),
+            (Dot, blas.Dot22, blas.Gemv, blas.CGemv),
         )
 
 

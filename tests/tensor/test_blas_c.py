@@ -8,7 +8,7 @@ import pytensor.tensor as pt
 from pytensor.compile import get_mode
 from pytensor.tensor.basic import AllocEmpty
 from pytensor.tensor.blas import Ger
-from pytensor.tensor.blas_c import CGemv, CGer, must_initialize_y_gemv
+from pytensor.tensor.blas.blas_c import CGemv, CGer, must_initialize_y_gemv
 from pytensor.tensor.type import (
     dmatrix,
     dscalar,

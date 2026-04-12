@@ -3,7 +3,7 @@ import pytest
 
 from pytensor import In, function
 from pytensor.tensor import dot, empty, matrix, outer, scalar, tensor, vector
-from pytensor.tensor.blas_c import CGemv
+from pytensor.tensor.blas.blas_c import CGemv
 
 
 @pytest.mark.parametrize("dtype", ("float64", "float32", "mixed"))

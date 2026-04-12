@@ -82,8 +82,6 @@ Optimizations associated with these BLAS Ops are in tensor.rewriting.blas
 from pytensor.tensor.blas._core import (
     _ldflags,
     _logger,
-    blas_header_text,
-    blas_header_version,
     ldflags,
     must_initialize_y_gemv,
     view_roots,
@@ -93,6 +91,26 @@ from pytensor.tensor.blas.batched import (
     _batched_dot,
     batched_dot,
     batched_tensordot,
+)
+from pytensor.tensor.blas.blas_c import (
+    BaseBLAS,
+    CGemv,
+    CGer,
+    cgemv_inplace,
+    cgemv_no_inplace,
+    cger_inplace,
+    cger_no_inplace,
+)
+from pytensor.tensor.blas.blas_c import (
+    must_initialize_y_gemv as must_initialize_y_gemv_c,
+)
+from pytensor.tensor.blas.blas_headers import (
+    blas_header_text,
+    blas_header_version,
+    cblas_header_text,
+    detect_macos_sdot_bug,
+    mkl_threads_text,
+    openblas_threads_text,
 )
 from pytensor.tensor.blas.gemm import (
     Dot22,
@@ -110,36 +128,43 @@ from pytensor.tensor.blas.ger import Ger, ger, ger_destructive
 
 
 __all__ = [
-    # Core utilities
-    "view_roots",
-    "must_initialize_y_gemv",
-    "ldflags",
+    "BaseBLAS",
+    "BatchedDot",
+    "CGemv",
+    "CGer",
+    "Dot22",
+    "Dot22Scalar",
+    "Gemm",
+    "GemmRelated",
+    "Gemv",
+    "Ger",
+    "_batched_dot",
+    "_dot22",
+    "_dot22scalar",
     "_ldflags",
     "_logger",
-    "blas_header_text",
-    "blas_header_version",
-    # Gemv
-    "Gemv",
-    "gemv_no_inplace",
-    "gemv_inplace",
-    "gemv",
-    # Ger
-    "Ger",
-    "ger",
-    "ger_destructive",
-    # GemmRelated / Gemm / Dot22 / Dot22Scalar
-    "GemmRelated",
-    "Gemm",
-    "gemm_inplace",
-    "gemm_no_inplace",
-    "gemm",
-    "Dot22",
-    "_dot22",
-    "Dot22Scalar",
-    "_dot22scalar",
-    # BatchedDot
-    "BatchedDot",
-    "_batched_dot",
     "batched_dot",
     "batched_tensordot",
+    "blas_header_text",
+    "blas_header_version",
+    "cblas_header_text",
+    "cgemv_inplace",
+    "cgemv_no_inplace",
+    "cger_inplace",
+    "cger_no_inplace",
+    "detect_macos_sdot_bug",
+    "gemm",
+    "gemm_inplace",
+    "gemm_no_inplace",
+    "gemv",
+    "gemv_inplace",
+    "gemv_no_inplace",
+    "ger",
+    "ger_destructive",
+    "ldflags",
+    "mkl_threads_text",
+    "must_initialize_y_gemv",
+    "must_initialize_y_gemv_c",
+    "openblas_threads_text",
+    "view_roots",
 ]

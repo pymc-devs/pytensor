@@ -1,10 +1,3 @@
-"""BLAS GEMM family: Gemm, Dot22, Dot22Scalar, and the GemmRelated base class.
-
-Gemm computes: b*z + a*dot(x,y)
-Dot22 computes: dot(x, y)  (matrix-matrix, BLAS-accelerated)
-Dot22Scalar computes: scalar * dot(x, y)
-"""
-
 import numpy as np
 
 import pytensor.scalar
@@ -16,10 +9,12 @@ from pytensor.printing import FunctionPrinter, pprint
 from pytensor.scalar import bool as bool_t
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blas._core import (
-    blas_header_text,
-    blas_header_version,
     ldflags,
     view_roots,
+)
+from pytensor.tensor.blas.blas_headers import (
+    blas_header_text,
+    blas_header_version,
 )
 from pytensor.tensor.type import DenseTensorType, tensor
 
@@ -28,7 +23,6 @@ class GemmRelated(COp):
     """Base class for Gemm and Dot22.
 
     This class provides a kind of templated gemm Op.
-
     """
 
     __props__: tuple[str, ...] = ()
