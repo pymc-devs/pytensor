@@ -30,6 +30,7 @@ from pytensor.tensor.basic import (
     ScalarFromTensor,
     Split,
     TensorFromScalar,
+    alloc_diag,
     as_tensor,
     cast,
     constant,
@@ -2233,3 +2234,33 @@ class TestExtractDiagRewrites:
         out = pt.diagonal(x + r)
         rewritten = rewrite_graph(out, **self.rewrite_kw)
         assert_equal_computations([rewritten], [out])
+
+
+def test_lift_diag_through_elemwise():
+    d1 = pt.vector("d1", shape=(5,))
+    d2 = pt.vector("d2", shape=(5,))
+    out = pt.sin(pt.diag(d1))
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+    expected = alloc_diag(pt.sin(d1))
+    assert_equal_computations([rewritten], [expected])
+
+    out = pt.diag(d1) * pt.diag(d2)
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+    expected = alloc_diag(d1 * d2)
+    assert_equal_computations([rewritten], [expected])
+
+    s = pt.scalar("s")
+    out = pt.diag(d1) * s
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+    expected = alloc_diag(d1 * s)
+    assert_equal_computations([rewritten], [expected])
+
+    out = pt.diag(d1) * d1
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+    expected = alloc_diag(d1 * d1)
+    assert_equal_computations([rewritten], [expected])
+
+    out = pt.diag(d1) * d1[:, None]
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+    expected = alloc_diag(d1 * d1)
+    assert_equal_computations([rewritten], [expected])

@@ -58,6 +58,8 @@ from pytensor.scalar import (
     Second,
     Switch,
 )
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import (
     Alloc,
     AllocDiag,
@@ -70,6 +72,7 @@ from pytensor.tensor.basic import (
     Split,
     TensorFromScalar,
     alloc,
+    alloc_diag,
     as_tensor_variable,
     atleast_Nd,
     cast,
@@ -387,6 +390,48 @@ def local_fill_sink(fgraph, node):
             outputs = [fill(model, output) for output in outputs]
 
     return outputs
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Elemwise])
+def local_lift_diag_through_elemwise(fgraph, node):
+    """Elemwise(f)(D, ...) -> alloc_diag(Elemwise(f)(diagonal(D), ...))
+
+    For zero-preserving elementwise ops on diagonal matrices, operate only on
+    the diagonal entries to avoid materializing and computing on n² zeros.
+    """
+    out = node.outputs[0]
+    if out.type.ndim < 2:
+        return None
+
+    if not check_assumption(fgraph, out, DIAGONAL):
+        return None
+
+    new_inputs = []
+    for inp in node.inputs:
+        if inp.type.ndim < 2:
+            new_inputs.append(inp)
+            continue
+
+        b1, b2 = inp.type.broadcastable[-2:]
+        if not b1 and not b2:
+            # Full matrix: extract its diagonal
+            new_inputs.append(diagonal(inp, axis1=-2, axis2=-1))
+        elif b1 and b2:
+            # Scalar broadcast to matrix dims: squeeze both
+            new_inputs.append(inp.squeeze(axis=(-2, -1)))
+        elif b1:
+            # Row vector (1, n) broadcast: squeeze the row dim
+            new_inputs.append(inp.squeeze(axis=-2))
+        else:
+            # Column vector (n, 1) broadcast: squeeze the col dim
+            new_inputs.append(inp.squeeze(axis=-1))
+
+    new_diag = node.op(*new_inputs)
+    new_output = alloc_diag(new_diag, axis1=-2, axis2=-1)
+    copy_stack_trace(out, new_output)
+    return [new_output]
 
 
 # The rewrite is wrapped in an in2out GraphRewriter
