@@ -12,6 +12,8 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import atleast_Nd
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
@@ -159,6 +161,47 @@ def scalar_solve_to_division(fgraph, node):
 
     copy_stack_trace(old_out, new_out)
 
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
+def diagonal_solve_to_division(fgraph, node):
+    """Replace solve(D, b) with b / diagonal(D) when D is known diagonal."""
+    a, b = node.inputs
+
+    # Scalar case already handled by scalar_solve_to_division
+    if all(a.type.broadcastable[-2:]):
+        return None
+
+    if not check_assumption(fgraph, a, DIAGONAL):
+        return None
+
+    core_op = node.op.core_op
+    b_ndim = core_op.b_ndim
+    a_diag = pt.diagonal(a, axis1=-2, axis2=-1)
+
+    match core_op:
+        case SolveTriangular(unit_diagonal=True):
+            # Unit diagonal means diag is all ones; solve is identity
+            return [b]
+        case Solve() | SolveTriangular():
+            if b_ndim == 1:
+                new_out = b / a_diag
+            else:
+                new_out = b / a_diag[..., :, None]
+        case CholeskySolve():
+            # D is the Cholesky factor; D @ D.T = diag(d^2) for diagonal D
+            if b_ndim == 1:
+                new_out = b / a_diag**2
+            else:
+                new_out = b / (a_diag**2)[..., :, None]
+        case _:
+            return None
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
     return [new_out]
 
 
