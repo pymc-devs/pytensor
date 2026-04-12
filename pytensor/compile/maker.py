@@ -152,6 +152,44 @@ def function(
         A callable object that will compute the outputs (given the inputs) and
         update the implicit function arguments according to the `updates`.
 
+    Examples
+    --------
+    Simple function:
+
+    >>> import numpy as np
+    >>> import pytensor
+    >>> import pytensor.tensor as pt
+    >>> x = pt.vector("x")
+    >>> square = pytensor.function([x], x**2)
+    >>> square(np.array([1.0, 2.0, 3.0], dtype=np.float64))
+    array([1., 4., 9.])
+
+    Custom compilation mode:
+
+    >>> from pytensor.compile.mode import get_mode
+    >>> safe_mode = get_mode().excluding("shape_unsafe")
+    >>> add_one = pytensor.function([x], x + 1, mode=safe_mode)
+    >>> add_one(np.array([1.0, 2.0], dtype=np.float64))
+    array([2., 3.])
+
+    >>> # Use the JAX backend when it is available.
+    >>> jax_add_one = pytensor.function([x], x + 1, mode="JAX")  # doctest: +SKIP
+
+    Manual RNG updates:
+
+    >>> rng = pytensor.shared(np.random.default_rng(123))
+    >>> next_rng, draw = pt.random.uniform(rng=rng).owner.outputs
+    >>> sample_once = pytensor.function([], draw, updates={rng: next_rng})
+    >>> float(sample_once())  # doctest: +SKIP
+    0.6823518632481435
+
+    Substitutions with ``givens``:
+
+    >>> y = pt.vector("y")
+    >>> add_const = pytensor.function([x], x + y, givens={y: pt.ones_like(x)})
+    >>> add_const(np.array([3.0, 4.0], dtype=np.float64))
+    array([4., 5.])
+
     Notes
     -----
     Regarding givens: Be careful to make sure that these
