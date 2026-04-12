@@ -7,6 +7,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eigh, Eigvalsh
+from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
@@ -216,3 +217,68 @@ def eigvalsh_of_diag(fgraph, node):
 
     copy_stack_trace(node.outputs[0], new_w)
     return [new_w]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(LU)])
+def lu_of_diag(fgraph, node):
+    """lu(D) -> (I, I, D) for diagonal D. P=I, L=I, U=D."""
+    [X] = node.inputs
+
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
+
+    core_op = node.op.core_op
+    out_dtype = node.outputs[-1].type.dtype
+    n = X.shape[-1]
+
+    new_U = X.astype(out_dtype) if X.type.dtype != out_dtype else X
+
+    if core_op.permute_l:
+        # Returns (PL, U) — PL = I
+        new_PL = pt.eye(n, dtype=out_dtype)
+        pl, u = node.outputs
+        copy_stack_trace(pl, new_PL)
+        copy_stack_trace(u, new_U)
+        return [new_PL, new_U]
+
+    if core_op.p_indices:
+        # Returns (p_idx, L, U) — p_idx = arange(n), L = I
+        new_p = pt.arange(n, dtype="int32")
+        new_L = pt.eye(n, dtype=out_dtype)
+        p, l, u = node.outputs
+        copy_stack_trace(p, new_p)
+        copy_stack_trace(l, new_L)
+        copy_stack_trace(u, new_U)
+        return [new_p, new_L, new_U]
+
+    # Default: returns (P, L, U) — P = I, L = I
+    p_dtype = node.outputs[0].type.dtype
+    new_P = pt.eye(n, dtype=p_dtype)
+    new_L = pt.eye(n, dtype=out_dtype)
+    p, l, u = node.outputs
+    copy_stack_trace(p, new_P)
+    copy_stack_trace(l, new_L)
+    copy_stack_trace(u, new_U)
+    return [new_P, new_L, new_U]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(LUFactor)])
+def lu_factor_of_diag(fgraph, node):
+    """lu_factor(D) -> (D, arange(n)) for diagonal D."""
+    [X] = node.inputs
+
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
+
+    n = X.shape[-1]
+    new_LU = X
+    new_pivots = pt.arange(n, dtype="int32")
+
+    lu_out, piv_out = node.outputs
+    copy_stack_trace(lu_out, new_LU)
+    copy_stack_trace(piv_out, new_pivots)
+    return [new_LU, new_pivots]

@@ -15,6 +15,7 @@ from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.lu import lu, lu_factor
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.type import tensor
@@ -338,5 +339,62 @@ def test_svd_of_diag(make_diag, compute_uv):
         expected = rewrite_graph([expected_u, expected_s, expected_vh], include=passes)
     else:
         expected = rewrite_graph([abs_d[idx]], include=passes)
+
+    assert_equal_computations(rewritten, expected)
+
+
+@pytest.mark.parametrize(
+    "make_diag, permute_l, p_indices",
+    [
+        pytest.param(lambda d: pt.diag(d), False, False, id="alloc_diag_default"),
+        pytest.param(lambda d: pt.diag(d), True, False, id="alloc_diag_permute_l"),
+        pytest.param(lambda d: pt.eye(5) * d, False, True, id="eye_mul_p_indices"),
+    ],
+)
+def test_lu_of_diag(make_diag, permute_l, p_indices):
+    n = 5
+    d = pt.dvector("d", shape=(n,))
+    D = make_diag(d)
+    diag_idx = np.diag_indices(n)
+    n_64 = np.array(n, dtype="int64")
+    simplified_D = pt.zeros((n_64, n_64))[diag_idx].set(d)
+
+    out = lu(D, permute_l=permute_l, p_indices=p_indices)
+    rewritten = rewrite_graph(
+        out, include=("canonicalize", "stabilize", "specialize", "ShapeOpt")
+    )
+    if permute_l:
+        expected_PL = pt.as_tensor(np.eye(n, dtype="float64"))
+        expected = [expected_PL, simplified_D]
+
+    elif p_indices:
+        expected_p = pt.as_tensor(np.arange(n, dtype="int32"))
+        expected_L = pt.as_tensor(np.eye(n, dtype="float64"))
+        expected = [expected_p, expected_L, simplified_D]
+
+    else:
+        expected_P = pt.as_tensor(np.eye(n, dtype="float64"))
+        expected_L = pt.as_tensor(np.eye(n, dtype="float64"))
+        expected = [expected_P, expected_L, simplified_D]
+
+    assert_equal_computations(rewritten, expected)
+
+
+def test_lu_factor_of_diag():
+    n = 5
+    d = pt.dvector("d", shape=(n,))
+    D = pt.diag(d)
+    diag_idx = np.diag_indices(n)
+    n_64 = np.array(n, dtype="int64")
+    simplified_D = pt.zeros((n_64, n_64))[diag_idx].set(d)
+
+    lu_out, piv_out = lu_factor(D)
+    rewritten = rewrite_graph(
+        [lu_out, piv_out],
+        include=("canonicalize", "stabilize", "specialize", "ShapeOpt"),
+    )
+
+    expected_pivots = pt.as_tensor(np.arange(n, dtype="int32"))
+    expected = [simplified_D, expected_pivots]
 
     assert_equal_computations(rewritten, expected)
