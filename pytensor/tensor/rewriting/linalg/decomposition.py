@@ -9,6 +9,7 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
 from pytensor.tensor.linalg.decomposition.qr import QR
+from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
@@ -322,6 +323,119 @@ def qr_of_diag(fgraph, node):
         n = X.shape[-1]
         new_p = pt.arange(n, dtype="int32")
         results.append(new_p)
+
+    for old, new in zip(node.outputs, results, strict=True):
+        copy_stack_trace(old, new)
+
+    return results
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Schur)])
+def schur_of_diag(fgraph, node):
+    """schur(D) -> (T, Z) for diagonal D.
+
+    Without sort: T=D, Z=I.
+    With sort: T=diag(d[perm]), Z=I[:, perm] where perm puts selected eigenvalues first.
+    """
+    [X] = node.inputs
+
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
+
+    out_dtype = node.outputs[0].type.dtype
+    n = X.shape[-1]
+    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1).astype(out_dtype)
+
+    match node.op.core_op.sort:
+        case None:
+            new_T = X.astype(out_dtype) if X.type.dtype != out_dtype else X
+            new_Z = pt.eye(n, dtype=out_dtype)
+        case "lhp":
+            select = diag_vals < 0
+        case "rhp":
+            select = diag_vals >= 0
+        case "iuc":
+            select = pt.abs(diag_vals) <= 1
+        case "ouc":
+            select = pt.abs(diag_vals) > 1
+
+    if node.op.core_op.sort is not None:
+        sort_idx = pt.argsort(-select.astype("int64"))
+        new_T = alloc_diag(diag_vals[sort_idx], axis1=-2, axis2=-1)
+        new_Z = pt.eye(n, dtype=out_dtype)[:, sort_idx]
+
+    T, Z = node.outputs
+    copy_stack_trace(T, new_T)
+    copy_stack_trace(Z, new_Z)
+    return [new_T, new_Z]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(QZ)])
+def qz_of_diag(fgraph, node):
+    """qz(A, B) -> (AA, BB, Q, Z) for diagonal A, B.
+
+    Without sort: AA=A, BB=B, Q=I, Z=I.
+    With sort: diagonals of AA, BB are permuted so selected eigenvalues come first;
+    Q=Z=permutation matrix.
+    """
+    A, B = node.inputs
+
+    if not check_assumption(fgraph, A, DIAGONAL):
+        return None
+    if not check_assumption(fgraph, B, DIAGONAL):
+        return None
+
+    core_op = node.op.core_op
+    out_dtype = node.outputs[0].type.dtype
+    n = A.shape[-1]
+
+    new_AA = A.astype(out_dtype) if A.type.dtype != out_dtype else A
+    new_BB = B.astype(out_dtype) if B.type.dtype != out_dtype else B
+
+    if core_op.sort is None:
+        new_Q = pt.eye(n, dtype=out_dtype)
+        new_Z = pt.eye(n, dtype=out_dtype)
+        diag_a = pt.diagonal(A, axis1=-2, axis2=-1)
+        diag_b = pt.diagonal(B, axis1=-2, axis2=-1)
+    else:
+        diag_a = pt.diagonal(A, axis1=-2, axis2=-1).astype(out_dtype)
+        diag_b = pt.diagonal(B, axis1=-2, axis2=-1).astype(out_dtype)
+        # Generalized eigenvalues λ_i = a_i / b_i (real diagonal case)
+        # Use pt.neq/pt.eq for elementwise zero checks (== tests identity on TensorVariables)
+        b_nonzero = pt.neq(diag_b, 0)
+        match core_op.sort:
+            case "lhp":
+                select = b_nonzero & (diag_a * diag_b < 0)
+            case "rhp":
+                select = b_nonzero & (diag_a * diag_b >= 0)
+            case "iuc":
+                select = b_nonzero & (pt.abs(diag_a) <= pt.abs(diag_b))
+            case "ouc":
+                select = (pt.eq(diag_b, 0) & pt.neq(diag_a, 0)) | (
+                    pt.abs(diag_a) > pt.abs(diag_b)
+                )
+
+        sort_idx = pt.argsort(-select.astype("int64"))
+        new_AA = alloc_diag(diag_a[sort_idx], axis1=-2, axis2=-1)
+        new_BB = alloc_diag(diag_b[sort_idx], axis1=-2, axis2=-1)
+        # Q = Z = permutation matrix: Q.T @ diag(a) @ Z = diag(a[perm])
+        perm = pt.eye(n, dtype=out_dtype)[:, sort_idx]
+        new_Q = perm
+        new_Z = perm
+        diag_a = diag_a[sort_idx]
+        diag_b = diag_b[sort_idx]
+
+    if core_op.return_eigenvalues:
+        alpha_dtype = node.outputs[2].type.dtype
+        new_alpha = diag_a.astype(alpha_dtype)
+        new_beta = diag_b.astype(out_dtype)
+        results = [new_AA, new_BB, new_alpha, new_beta, new_Q, new_Z]
+    else:
+        results = [new_AA, new_BB, new_Q, new_Z]
 
     for old, new in zip(node.outputs, results, strict=True):
         copy_stack_trace(old, new)

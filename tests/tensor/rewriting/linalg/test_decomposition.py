@@ -8,6 +8,7 @@ from numpy.testing import assert_allclose
 import pytensor
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
+from pytensor.compile.mode import get_mode
 from pytensor.configdefaults import config
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
@@ -17,6 +18,7 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu, lu_factor
 from pytensor.tensor.linalg.decomposition.qr import qr
+from pytensor.tensor.linalg.decomposition.schur import QZ, Schur, qz, schur
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.type import tensor
@@ -444,3 +446,149 @@ def test_qr_of_diag(make_diag, mode, pivoting):
         expected.append(pt.as_tensor(np.arange(n, dtype="int32")))
 
     assert_equal_computations(rewritten, expected)
+
+
+@pytest.mark.parametrize(
+    "make_diag",
+    [
+        pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+        pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+    ],
+)
+def test_schur_of_diag(make_diag):
+    n = 5
+    d = pt.dvector("d", shape=(n,))
+    D = make_diag(d)
+    diag_idx = np.diag_indices(n)
+    n_64 = np.array(n, dtype="int64")
+
+    T, Z = schur(D)
+    passes = ("canonicalize", "stabilize", "specialize", "ShapeOpt")
+    rewritten = rewrite_graph([T, Z], include=passes)
+
+    simplified_D = pt.zeros((n_64, n_64))[diag_idx].set(d)
+    expected = [simplified_D, pt.as_tensor(np.eye(n, dtype="float64"))]
+    assert_equal_computations(rewritten, expected)
+
+
+@pytest.mark.parametrize("sort", ["lhp", "rhp", "iuc", "ouc"])
+def test_schur_of_diag_sort(sort):
+    n = 5
+    rng = np.random.default_rng(sum(map(ord, "schur_of_diag_sort")))
+    d_var = pt.dvector("d", shape=(n,))
+    D = pt.diag(d_var)
+    T, Z = schur(D, sort=sort)
+
+    mode = get_mode("FAST_RUN")
+    f = pytensor.function([d_var], [T, Z], mode=mode)
+    f_no_rewrite = pytensor.function(
+        [d_var], [T, Z], mode=mode.excluding("schur_of_diag")
+    )
+
+    assert not any(
+        isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+        and isinstance(node.op.core_op, Schur)
+        for node in f.maker.fgraph.apply_nodes
+    )
+
+    d_val = rng.uniform(-2, 2, n)
+    T_val, Z_val = f(d_val)
+    T_ref, _ = f_no_rewrite(d_val)
+
+    # T is uniquely determined by the sort criterion; Z can differ by column signs from LAPACK
+    np.testing.assert_allclose(T_val, T_ref, atol=1e-12)
+    np.testing.assert_allclose(Z_val @ T_val @ Z_val.T, np.diag(d_val), atol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "make_diag, return_eigenvalues",
+    [
+        pytest.param(lambda d: pt.diag(d), False, id="alloc_diag_no_eigs"),
+        pytest.param(lambda d: pt.eye(5) * d, False, id="eye_mul_no_eigs"),
+        pytest.param(lambda d: pt.diag(d), True, id="alloc_diag_with_eigs"),
+    ],
+)
+def test_qz_of_diag(make_diag, return_eigenvalues):
+    n = 5
+    a = pt.dvector("a", shape=(n,))
+    b = pt.dvector("b", shape=(n,))
+    A = make_diag(a)
+    B = make_diag(b)
+    diag_idx = np.diag_indices(n)
+    n_64 = np.array(n, dtype="int64")
+
+    out = qz(A, B, return_eigenvalues=return_eigenvalues)
+    passes = ("canonicalize", "stabilize", "specialize", "ShapeOpt")
+    rewritten = rewrite_graph(list(out), include=passes)
+
+    def diag_of(vals):
+        return pt.zeros((n_64, n_64))[diag_idx].set(vals)
+
+    expected_I = pt.as_tensor(np.eye(n, dtype="float64"))
+
+    if return_eigenvalues:
+        expected = [
+            diag_of(a),
+            diag_of(b),
+            a.astype("complex128"),
+            b,
+            expected_I,
+            expected_I,
+        ]
+    else:
+        expected = [diag_of(a), diag_of(b), expected_I, expected_I]
+
+    assert_equal_computations(rewritten, expected)
+
+
+@pytest.mark.parametrize(
+    "sort, return_eigenvalues",
+    [
+        pytest.param("lhp", False, id="lhp"),
+        pytest.param("rhp", False, id="rhp"),
+        pytest.param("iuc", False, id="iuc"),
+        pytest.param("ouc", True, id="ouc_with_eigs"),
+    ],
+)
+def test_qz_of_diag_sort(sort, return_eigenvalues):
+    n = 5
+    rng = np.random.default_rng(42)
+    a_var = pt.dvector("a", shape=(n,))
+    b_var = pt.dvector("b", shape=(n,))
+    A = pt.diag(a_var)
+    B = pt.diag(b_var)
+
+    out = qz(A, B, sort=sort, return_eigenvalues=return_eigenvalues)
+    mode = get_mode("FAST_RUN")
+    f = pytensor.function([a_var, b_var], list(out), mode=mode)
+    f_no_rewrite = pytensor.function(
+        [a_var, b_var], list(out), mode=mode.excluding("qz_of_diag")
+    )
+
+    assert not any(
+        isinstance(node.op, Blockwise | BlockwiseWithCoreShape)
+        and isinstance(node.op.core_op, QZ)
+        for node in f.maker.fgraph.apply_nodes
+    )
+
+    a_val = rng.uniform(-2, 2, n)
+    b_val = rng.uniform(0.5, 2, n)
+    result = f(a_val, b_val)
+    ref = f_no_rewrite(a_val, b_val)
+
+    if return_eigenvalues:
+        AA_val, BB_val, alpha_val, beta_val, Q_val, Z_val = result
+        AA_ref, BB_ref, alpha_ref, beta_ref, *_ = ref
+        # AA, BB, alpha, beta are uniquely determined; Q/Z can differ by column signs from LAPACK
+        np.testing.assert_allclose(AA_val, AA_ref, atol=1e-12)
+        np.testing.assert_allclose(BB_val, BB_ref, atol=1e-12)
+        np.testing.assert_allclose(alpha_val, alpha_ref, atol=1e-12)
+        np.testing.assert_allclose(beta_val, beta_ref, atol=1e-12)
+    else:
+        AA_val, BB_val, Q_val, Z_val = result
+        AA_ref, BB_ref, *_ = ref
+        np.testing.assert_allclose(AA_val, AA_ref, atol=1e-12)
+        np.testing.assert_allclose(BB_val, BB_ref, atol=1e-12)
+
+    np.testing.assert_allclose(Q_val @ AA_val @ Z_val.T, np.diag(a_val), atol=1e-12)
+    np.testing.assert_allclose(Q_val @ BB_val @ Z_val.T, np.diag(b_val), atol=1e-12)
