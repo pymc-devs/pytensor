@@ -16,6 +16,9 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, solve
+from pytensor.tensor.linalg.solvers.linear_control import (
+    solve_sylvester,
+)
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular, solve_triangular
 from pytensor.tensor.linalg.solvers.tridiagonal import (
@@ -505,3 +508,27 @@ class TestDiagonalSolveToDivision:
         expected = b / pt.square(d) if b_ndim == 1 else b / pt.square(d[..., :, None])
 
         assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "make_diag",
+    [
+        pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+        pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+    ],
+)
+def test_solve_sylvester_both_diag(make_diag):
+    n = 5
+    a = pt.dvector("a", shape=(n,))
+    b = pt.dvector("b", shape=(n,))
+    C = pt.dmatrix("C", shape=(n, n))
+
+    A = make_diag(a)
+    B = make_diag(b)
+    X = solve_sylvester(A, B, C)
+
+    rewritten = rewrite_graph(X, include=("canonicalize", "stabilize"))
+
+    expected = C / (a[:, None] + b[None, :])
+
+    assert_equal_computations([rewritten], [expected])

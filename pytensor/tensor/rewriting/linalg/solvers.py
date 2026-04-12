@@ -23,6 +23,7 @@ from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, lu_solve
 from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
+    SolveSylvester,
     solve_discrete_lyapunov,
 )
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
@@ -199,6 +200,32 @@ def diagonal_solve_to_division(fgraph, node):
                 new_out = b / (a_diag**2)[..., :, None]
         case _:
             return None
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveSylvester)])
+def solve_sylvester_of_diag(fgraph, node):
+    """Replace solve_sylvester(A, B, C) with C / (a[:, None] + b[None, :]) when both A, B are diagonal.
+
+    The Sylvester equation A @ X + X @ B = C, when A = diag(a) and B = diag(b),
+    reduces to X_ij = C_ij / (a_i + b_j).
+    """
+    A, B, C = node.inputs
+
+    if not check_assumption(fgraph, A, DIAGONAL):
+        return None
+    if not check_assumption(fgraph, B, DIAGONAL):
+        return None
+
+    a = pt.diagonal(A, axis1=-2, axis2=-1)
+    b = pt.diagonal(B, axis1=-2, axis2=-1)
+
+    new_out = C / (a[..., :, None] + b[..., None, :])
 
     old_out = node.outputs[0]
     copy_stack_trace(old_out, new_out)
