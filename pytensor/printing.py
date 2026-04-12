@@ -387,6 +387,21 @@ def _iter_graph_nodes(
     # flag is captured above and used below to decide whether to recurse.
     done[node] = ""
 
+    # Collect this node itself if it owns an inner graph — needed when the
+    # HasInnerGraph op is a top-level output and never appears as an input.
+    if (
+        not is_inner_graph_header
+        and (
+            isinstance(node.op, HasInnerGraph)
+            or (
+                hasattr(node.op, "scalar_op")
+                and isinstance(node.op.scalar_op, HasInnerGraph)
+            )
+        )
+        and var not in inner_graph_ops
+    ):
+        inner_graph_ops.append(var)
+
     yield gnode
 
     if already_done or (stop_on_name and var.name is not None):
@@ -1085,6 +1100,29 @@ def _build_rich_tree(
     op_information: dict[Apply, dict[Variable, str]] = {}
     inner_graph_vars: list[Variable] = []
 
+    # Colors assigned to shared (repeated) nodes so canonical and repeat
+    # occurrences are visually linked.  Populated lazily when a repeat is seen.
+    _REPEAT_COLORS = ["red", "green", "yellow", "blue", "magenta", "cyan"]
+    node_colors: dict = {}  # Apply/Variable key → color string
+    # All rich.Tree nodes emitted for a given key (for retroactive coloring).
+    node_tree_map: dict = {}  # Apply/Variable key → list[rich.tree.Tree]
+
+    def _color_label(label: str, color: str) -> str:
+        return f"[{color}]{label}[/{color}]"
+
+    def _repeat_label(label: str) -> str:
+        return f"{label} ···"
+
+    def _assign_color(node_key) -> str:
+        """Return the color for node_key, assigning one if needed and
+        retroactively updating all previously-emitted rich.Tree nodes."""
+        if node_key not in node_colors:
+            color = _REPEAT_COLORS[len(node_colors) % len(_REPEAT_COLORS)]
+            node_colors[node_key] = color
+            for prior_tree_node in node_tree_map.get(node_key, []):
+                prior_tree_node.label = _color_label(str(prior_tree_node.label), color)
+        return node_colors[node_key]
+
     root = rich.tree.Tree("", hide_root=True)
 
     for var, topo_order, profile, storage_map in zip(
@@ -1093,6 +1131,13 @@ def _build_rich_tree(
         # Stack maps traversal depth → rich.Tree node at that depth.
         # Depth 0 is the output variable itself (child of root).
         depth_stack: list[rich.tree.Tree] = [root]
+
+        # When a node has already been visited, _iter_graph_nodes yields the
+        # node itself (is_repeat=False) followed immediately by a sentinel
+        # (is_repeat=True) as a synthetic child one level deeper.  We collapse
+        # this pair into a single line by buffering the non-repeat half and
+        # rendering the sentinel at the buffered depth (without a child indent).
+        pending_repeat_parent: GraphNode | None = None
 
         for gnode in _iter_graph_nodes(
             var,
@@ -1107,6 +1152,88 @@ def _build_rich_tree(
             is_last_child=True,
         ):
             current_depth = len(gnode.ancestor_is_last)
+            node_key = gnode.var.owner if gnode.var.owner is not None else gnode.var
+
+            if gnode.is_repeat and not gnode.is_inner_graph_header:
+                if pending_repeat_parent is not None:
+                    # Collapse the buffered parent + this sentinel into one line.
+                    # Use the parent's gnode for the label and depth, but append
+                    # ··· to indicate this is a back-reference.
+                    label = _build_label(
+                        pending_repeat_parent,
+                        done=done,
+                        used_ids=used_ids,
+                        id_type=id_type,
+                        print_type=print_type,
+                        print_shape=print_shape,
+                        print_destroy_map=print_destroy_map,
+                        print_view_map=print_view_map,
+                        print_op_info=print_op_info,
+                        op_information=op_information,
+                    )
+                    label = rich.markup.escape(label)
+                    parent_depth = len(pending_repeat_parent.ancestor_is_last)
+                    pending_repeat_parent = None
+
+                    color = _assign_color(node_key)
+                    label = _color_label(_repeat_label(label), color)
+
+                    parent_tree = depth_stack[parent_depth]
+                    child_tree = parent_tree.add(label)
+                    # Sentinel is a leaf; no need to push onto depth_stack.
+                    continue
+
+                # Fallback: no pending parent (shouldn't occur in normal graphs).
+                label = _build_label(
+                    gnode,
+                    done=done,
+                    used_ids=used_ids,
+                    id_type=id_type,
+                    print_type=print_type,
+                    print_shape=print_shape,
+                    print_destroy_map=print_destroy_map,
+                    print_view_map=print_view_map,
+                    print_op_info=print_op_info,
+                    op_information=op_information,
+                )
+                label = rich.markup.escape(label)
+                color = _assign_color(node_key)
+                label = _color_label(_repeat_label(label), color)
+                parent_tree = depth_stack[current_depth]
+                child_tree = parent_tree.add(label)
+                depth_stack = [*depth_stack[: current_depth + 1], child_tree]
+                continue
+
+            # Flush any pending repeat parent that was NOT followed by a sentinel
+            # (defensive; should not happen with current _iter_graph_nodes).
+            if pending_repeat_parent is not None:
+                flush_gnode = pending_repeat_parent
+                pending_repeat_parent = None
+                flush_depth = len(flush_gnode.ancestor_is_last)
+                flush_label = _build_label(
+                    flush_gnode,
+                    done=done,
+                    used_ids=used_ids,
+                    id_type=id_type,
+                    print_type=print_type,
+                    print_shape=print_shape,
+                    print_destroy_map=print_destroy_map,
+                    print_view_map=print_view_map,
+                    print_op_info=print_op_info,
+                    op_information=op_information,
+                )
+                flush_label = rich.markup.escape(flush_label)
+                flush_key = (
+                    flush_gnode.var.owner
+                    if flush_gnode.var.owner is not None
+                    else flush_gnode.var
+                )
+                if flush_key in node_colors:
+                    flush_label = _color_label(flush_label, node_colors[flush_key])
+                flush_parent = depth_stack[flush_depth]
+                flush_child = flush_parent.add(flush_label)
+                node_tree_map.setdefault(flush_key, []).append(flush_child)
+                depth_stack = [*depth_stack[: flush_depth + 1], flush_child]
 
             label = _build_label(
                 gnode,
@@ -1122,11 +1249,23 @@ def _build_rich_tree(
             )
 
             label = rich.markup.escape(label)
-            if gnode.is_repeat and not gnode.is_inner_graph_header:
-                label = f"[dim]{label} ···[/dim]"
+
+            if node_key in node_colors:
+                # Already known to be shared; color immediately.
+                label = _color_label(label, node_colors[node_key])
+
+            # Check if this non-repeat node is already in node_tree_map, which
+            # means it has been emitted before and will be followed by a sentinel.
+            # Buffer it instead of adding to the tree immediately.
+            # Only Apply nodes (var.owner is not None) get sentinels; leaf
+            # variables are always rendered directly.
+            if node_key in node_tree_map and gnode.var.owner is not None:
+                pending_repeat_parent = gnode
+                continue
 
             parent_tree = depth_stack[current_depth]
             child_tree = parent_tree.add(label)
+            node_tree_map.setdefault(node_key, []).append(child_tree)
             # Trim the stack to this depth and push the new node.
             depth_stack = [*depth_stack[: current_depth + 1], child_tree]
 

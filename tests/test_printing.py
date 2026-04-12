@@ -605,14 +605,66 @@ class TestDebugprintRich:
         assert len(tree.children) == 1
 
     def test_inner_graph_op(self):
-        # HasInnerGraph op: the output node is the single root child, with its
-        # two inputs as children.
+        # HasInnerGraph op: root has two children — the op node and the
+        # "Inner graphs:" section. The op node has the two outer inputs as children.
         igo_in_1, igo_in_2 = MyVariable("x"), MyVariable("y")
         igo_out = MyOp("op")(igo_in_1, igo_in_2)
         op = MyInnerGraphOp([igo_in_1, igo_in_2], [igo_out])
         a, b = MyVariable("a"), MyVariable("b")
         out = op(a, b)
         tree = debugprint(out, file="rich")
-        assert len(tree.children) == 1
+        assert len(tree.children) == 2  # op node + "Inner graphs:" section
         op_node = tree.children[0]
         assert len(op_node.children) == 2
+
+    def test_opfromgraph_expands_inner_graph(self):
+        # OpFromGraph should produce an "Inner graphs:" section as a second
+        # top-level child of the hidden root, matching the text renderer.
+        from pytensor.compile.builders import OpFromGraph
+
+        x = dvector("x")
+        out = OpFromGraph([x], [x.std()])(x)
+        tree = debugprint(out, file="rich")
+        # root child 0: the op node; root child 1: "Inner graphs:" section
+        assert len(tree.children) == 2
+        inner_section = tree.children[1]
+        assert len(inner_section.children) >= 1
+
+    def test_repeated_node_no_duplication(self):
+        # When a node is repeated, it should appear as a single labeled line
+        # with ··· appended (not as a parent line with a ··· child beneath it).
+        x = dvector("x")
+        shared = x * 2
+        tree = debugprint(shared + shared, file="rich")
+        add_node = tree.children[0]
+        # The add has two children: canonical Mul and sentinel Mul ···
+        assert len(add_node.children) == 2
+        sentinel = add_node.children[1]
+        # The sentinel should have ··· in its label and NO children of its own
+        assert "···" in str(sentinel.label), (
+            f"Expected '···' in sentinel label, got: {sentinel.label!r}"
+        )
+        assert len(sentinel.children) == 0, (
+            f"Sentinel should be a leaf, but has children: {sentinel.children}"
+        )
+
+    def test_repeated_nodes_same_color(self):
+        # A shared Apply node appears once canonically and once as a ··· sentinel
+        # on the same level.  Both should carry the same Rich color markup so the
+        # user can visually trace where the shared subgraph comes from.
+        import re
+
+        x = dvector("x")
+        shared = x * 2
+        tree = debugprint(shared + shared, file="rich")
+        add_node = tree.children[0]
+        canonical_mul = add_node.children[0]  # Mul [id B]  (colored)
+        repeat_mul = add_node.children[1]  # Mul [id B] ···  (colored, no children)
+        color_re = re.compile(r"\[(\w+)\]")
+        canonical_colors = color_re.findall(str(canonical_mul.label))
+        repeat_colors = color_re.findall(str(repeat_mul.label))
+        assert canonical_colors, "canonical shared node should have a color tag"
+        assert repeat_colors, "repeat shared node should have a color tag"
+        assert canonical_colors[0] == repeat_colors[0], (
+            "canonical and repeat occurrences of the same node should share a color"
+        )
