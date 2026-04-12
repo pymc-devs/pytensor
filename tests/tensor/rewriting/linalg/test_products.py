@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import scipy.linalg
 from numpy.testing import assert_allclose
 
@@ -7,8 +8,10 @@ from pytensor import tensor as pt
 from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
+from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.products import KroneckerProduct
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_nested_blockdiag_fusion():
@@ -236,3 +239,20 @@ def test_slogdet_kronecker_rewrite():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
+
+@pytest.mark.parametrize(
+    "make_diag",
+    [
+        pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+        pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+    ],
+)
+def test_expm_of_diag(make_diag):
+    d = pt.dvector("d", shape=(5,))
+    D = make_diag(d)
+    out = pt.linalg.expm(D)
+
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
+    expected = alloc_diag(pt.exp(d), axis1=-2, axis2=-1)
+    assert_equal_computations([rewritten], [expected])

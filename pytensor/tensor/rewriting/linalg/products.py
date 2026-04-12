@@ -1,17 +1,21 @@
+from pytensor import tensor as pt
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.tensor.basic import ExtractDiag, concatenate, diag
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.utils import check_assumption
+from pytensor.tensor.basic import ExtractDiag, alloc_diag, concatenate, diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
-from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import Expm, KroneckerProduct
 from pytensor.tensor.linalg.summary import det
 from pytensor.tensor.math import outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_stabilize,
 )
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 
 
 @register_canonicalize
@@ -152,3 +156,22 @@ def det_of_kronecker(fgraph, node):
                 [dets[i] ** (prod_sizes / sizes[i]) for i in range(2)], axis=-1
             )
             return [det_final]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Expm)])
+def expm_of_diag(fgraph, node):
+    """expm(D) -> diag(exp(diagonal(D))) for diagonal D."""
+    [X] = node.inputs
+
+    if all(X.type.broadcastable[-2:]):
+        return [pt.exp(X)]
+
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
+
+    diag_vals = pt.exp(pt.diagonal(X, axis1=-2, axis2=-1))
+    new_out = alloc_diag(diag_vals, axis1=-2, axis2=-1)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
