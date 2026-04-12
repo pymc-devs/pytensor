@@ -1,7 +1,8 @@
 from pytensor import tensor as pt
-from pytensor.graph import Constant
 from pytensor.graph.rewriting.basic import node_rewriter
-from pytensor.tensor.basic import AllocDiag, Eye
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.utils import check_assumption
+from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -13,7 +14,6 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.linalg.utils import is_eye_mul
 
 
 @register_canonicalize
@@ -56,32 +56,17 @@ def cholesky_ldotlt(fgraph, node):
 @register_stabilize
 @node_rewriter([blockwise_of(Cholesky)])
 def cholesky_of_diag(fgraph, node):
+    """cholesky(D) -> diag(sqrt(diagonal(D))) for diagonal D."""
     [X] = node.inputs
 
-    # Check if input is a (1, 1) matrix
     if all(X.type.broadcastable[-2:]):
         return [pt.sqrt(X)]
 
-    match X.owner_op_and_inputs:
-        # Check whether input to Cholesky is Eye and the 1's are on main diagonal
-        case (Eye(), _, _, Constant(0)):
-            return [X]
-        case (AllocDiag(offset=0, axis1=axis1, axis2=axis2), diag_input):
-            ndim = diag_input.ndim
-            if axis1 == ndim - 1 and axis2 == ndim:
-                return [pt.diag(diag_input**0.5)]
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
 
-    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
-    match is_eye_mul(X):
-        case (eye_input, non_eye_input):
-            # Now, we can simply return the matrix consisting of sqrt values of the original diagonal elements
-            # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
-            if non_eye_input.type.broadcastable[-2:] == (False, False):
-                non_eye_input = non_eye_input.diagonal(axis1=-1, axis2=-2)
-                if eye_input.type.ndim > 2:
-                    non_eye_input = pt.shape_padaxis(non_eye_input, -2)
-
-            return [eye_input * (non_eye_input**0.5)]
+    diag_vals = pt.sqrt(pt.diagonal(X, axis1=-2, axis2=-1))
+    return [alloc_diag(diag_vals, axis1=-2, axis2=-1)]
 
 
 @register_canonicalize

@@ -6,7 +6,9 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.scalar.basic import Abs, Exp, Log, Sign, Sqr
-from pytensor.tensor.basic import AllocDiag, ones
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.utils import check_assumption
+from pytensor.tensor.basic import ones
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -20,7 +22,7 @@ from pytensor.tensor.rewriting.basic import (
     register_specialize,
     register_stabilize,
 )
-from pytensor.tensor.rewriting.linalg.utils import is_eye_mul, matrix_diagonal_product
+from pytensor.tensor.rewriting.linalg.utils import matrix_diagonal_product
 
 
 @register_stabilize
@@ -174,55 +176,15 @@ def det_of_factorized_matrix(fgraph, node):
 @register_stabilize("shape_unsafe")
 @node_rewriter([det])
 def det_of_diag(fgraph, node):
-    """
-     This rewrite takes advantage of the fact that for a diagonal matrix, the determinant value is the product of its
-     diagonal elements.
-
-    The presence of a diagonal matrix is detected by inspecting the graph. This rewrite can identify diagonal matrices
-    that arise as the result of elementwise multiplication with an identity matrix. Specialized computation is used to
-    make this rewrite as efficient as possible, depending on whether the multiplication was with a scalar,
-    vector or a matrix.
-
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        Function graph being optimized
-    node: Apply
-        Node of the function graph to be optimized
-
-    Returns
-    -------
-    list of Variable, optional
-        List of optimized variables, or None if no optimization was performed
-    """
+    """det(D) -> prod(diagonal(D)) for diagonal D."""
     inp = node.inputs[0]
 
-    match inp.owner_op_and_inputs:
-        # Check for use of pt.diag first
-        case (AllocDiag(offset=0, axis1=axis1, axis2=axis2), diag_input):
-            ndim = diag_input.ndim
-            if axis1 == ndim - 1 and axis2 == ndim:
-                return [diag_input.prod(axis=-1)]
+    if not check_assumption(fgraph, inp, DIAGONAL):
+        return None
 
-    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
-    match is_eye_mul(inp):
-        case (eye_term, non_eye_term):
-            # Checking if original x was scalar/vector/matrix
-            match non_eye_term.type.broadcastable[-2:]:
-                case (True, True):
-                    # For scalar
-                    det_val = (
-                        non_eye_term.squeeze(axis=(-1, -2)) ** (eye_term.shape[-1])
-                    )
-                case (False, False):
-                    # For Matrix
-                    det_val = non_eye_term.diagonal(axis1=-1, axis2=-2).prod(axis=-1)
-                case _:
-                    # For vector
-                    det_val = non_eye_term.prod(axis=(-1, -2))
-
-            det_val = det_val.astype(node.outputs[0].type.dtype)
-            return [det_val]
+    det_val = pt.diagonal(inp, axis1=-2, axis2=-1).prod(axis=-1)
+    det_val = det_val.astype(node.outputs[0].type.dtype)
+    return [det_val]
 
 
 @register_specialize
