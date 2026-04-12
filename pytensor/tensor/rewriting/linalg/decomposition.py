@@ -1,11 +1,12 @@
 from pytensor import tensor as pt
-from pytensor.graph.rewriting.basic import node_rewriter
+from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.assumptions.diagonal import DIAGONAL
 from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
+from pytensor.tensor.linalg.decomposition.eigen import Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
@@ -117,3 +118,57 @@ def svd_uv_merge(fgraph, node):
                     fgraph.clients[u] or fgraph.clients[v]
                 ):
                     return [s]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Eigh])
+def eigh_of_diag(fgraph, node):
+    """eigh(D) -> (sort(diagonal(D)), eye permuted by argsort) for diagonal D."""
+    [X] = node.inputs
+
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
+
+    w, v = node.outputs
+    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+    sort_idx = pt.argsort(diag_vals)
+
+    new_w = diag_vals[sort_idx]
+    new_v = pt.eye(X.shape[-1])[:, sort_idx]
+
+    copy_stack_trace(w, new_w)
+    copy_stack_trace(v, new_v)
+
+    return [new_w, new_v]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Eigvalsh])
+def eigvalsh_of_diag(fgraph, node):
+    """eigvalsh(D) -> sort(diagonal(D)) for diagonal D.
+
+    Also handles the generalized case eigvalsh(D, B) when both are diagonal:
+    sort(diagonal(D) / diagonal(B)).
+    """
+    if len(node.inputs) == 1:
+        [X] = node.inputs
+        if not check_assumption(fgraph, X, DIAGONAL):
+            return None
+        diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+        new_w = pt.sort(diag_vals)
+    elif len(node.inputs) == 2:
+        X, B = node.inputs
+        if not check_assumption(fgraph, X, DIAGONAL):
+            return None
+        if not check_assumption(fgraph, B, DIAGONAL):
+            return None
+        diag_x = pt.diagonal(X, axis1=-2, axis2=-1)
+        diag_b = pt.diagonal(B, axis1=-2, axis2=-1)
+        new_w = pt.sort(diag_x / diag_b)
+    else:
+        return None
+
+    copy_stack_trace(node.outputs[0], new_w)
+    return [new_w]

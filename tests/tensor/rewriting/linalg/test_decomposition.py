@@ -9,6 +9,7 @@ import pytensor
 from pytensor import tensor as pt
 from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor import swapaxes
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
@@ -16,6 +17,7 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.type import tensor
+from tests.unittest_tools import assert_equal_computations
 
 
 @pytest.mark.parametrize("tag", ("lower", "upper", None))
@@ -259,3 +261,51 @@ def test_cholesky_of_diag_not_applied():
     f_rewritten = pytensor.function([x], z_cholesky, mode="FAST_RUN")
     nodes = f_rewritten.maker.fgraph.apply_nodes
     assert any(isinstance(node.op, Cholesky) for node in nodes)
+
+
+@pytest.mark.parametrize(
+    "make_diag",
+    [
+        pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+        pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+    ],
+)
+def test_eigh_of_diag(make_diag):
+    d = pt.dvector("d", shape=(5,))
+    D = make_diag(d)
+    w, v = pt.linalg.eigh(D)
+
+    # Needs ShapeOpt to rewrite away shape graph used to build Eye for v rewrite
+    rewritten = rewrite_graph([w, v], include=("canonicalize", "stabilize", "ShapeOpt"))
+
+    idx = pt.argsort(d)
+    expected_w = d[idx]
+    expected_v = pt.as_tensor(np.eye(5))[:, idx]
+
+    assert_equal_computations(rewritten, [expected_w, expected_v])
+
+
+@pytest.mark.parametrize(
+    "make_diag, include_b",
+    [
+        (lambda d: pt.diag(d), True),
+        (lambda d: pt.eye(5) * d, False),
+    ],
+    ids=["alloc_diag_with_b", "eye_mul_no_b"],
+)
+def test_eigvalsh_of_diag(make_diag, include_b):
+    d = pt.dvector("d", shape=(5,))
+    D = make_diag(d)
+
+    if include_b:
+        b = pt.dvector("b", shape=(5,))
+        B = make_diag(b)
+    else:
+        B = None
+
+    w = pt.linalg.eigvalsh(D, B)
+
+    expected = pt.sort(d) if not include_b else pt.sort(d / b)
+    rewritten = rewrite_graph(w, include=("canonicalize", "stabilize"))
+
+    assert_equal_computations([rewritten], [expected])
