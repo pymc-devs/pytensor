@@ -14,6 +14,7 @@ from pytensor.tensor.assumptions.triangular import (
     LOWER_TRIANGULAR,
     UPPER_TRIANGULAR,
 )
+from pytensor.tensor.assumptions.utils import check_assumption
 
 
 register_implies(DIAGONAL, LOWER_TRIANGULAR, UPPER_TRIANGULAR, SYMMETRIC)

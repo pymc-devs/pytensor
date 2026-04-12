@@ -1,4 +1,8 @@
+from typing import Any
+
+from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant
+from pytensor.tensor.assumptions import AssumptionFeature, AssumptionKey
 from pytensor.tensor.assumptions.core import FactState
 
 
@@ -85,3 +89,15 @@ def indexes_diagonal(node) -> bool:
         return False
 
     return False
+
+
+def check_assumption(fgraph: FunctionGraph, var: Any, key: AssumptionKey) -> bool:
+    """Return True iff *key* is definitively TRUE for *var* in *fgraph*.
+
+    Lazily attaches :class:`AssumptionFeature` to *fgraph* if it is not already present.
+    """
+    feature = getattr(fgraph, "assumption_feature", None)
+    if feature is None:
+        feature = AssumptionFeature()
+        fgraph.attach_feature(feature)
+    return feature.check(var, key)
