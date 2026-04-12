@@ -28,7 +28,6 @@ class GemmRelated(COp):
     __props__: tuple[str, ...] = ()
 
     def c_support_code(self, **kwargs):
-        # return cblas_header_text()
         mod_str = """
         #ifndef MOD
         #define MOD %
