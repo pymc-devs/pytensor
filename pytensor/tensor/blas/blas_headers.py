@@ -3,8 +3,12 @@
 There is no standard name or location for this header, so we just insert it
 ourselves into the C code.
 
+The static C declarations are stored in .h files under c_code/ for better
+IDE support and maintainability. This module reads those files and assembles
+the complete header text.
 """
 
+import functools
 import logging
 from pathlib import Path
 
@@ -13,10 +17,29 @@ from pytensor.configdefaults import config
 
 _logger = logging.getLogger("pytensor.tensor.blas")
 
+# Directory containing the C header files
+_C_CODE_DIR = Path(__file__).parent / "c_code"
 
+
+@functools.cache
+def _read_c_code_file(filename: str) -> str:
+    """Read a C code file from the c_code directory."""
+    filepath = _C_CODE_DIR / filename
+    try:
+        return filepath.read_text(encoding="utf-8")
+    except OSError as err:
+        msg = f"Unable to load C header file: {filepath}"
+        raise OSError(msg) from err
+
+
+@functools.cache
 def blas_header_text():
-    """C header for the fortran blas interface"""
+    """C header for the fortran blas interface.
 
+    Returns the complete BLAS header text including:
+    - Fortran BLAS declarations (from fortran_blas.h)
+    - NumPy-based fallback BLAS (if no system BLAS available)
+    """
     blas_code = ""
     if not config.blas__ldflags:
         # This code can only be reached by compiling a function with a manually specified GEMM Op.
@@ -25,12 +48,9 @@ def blas_header_text():
         _logger.warning("Using NumPy C-API based implementation for BLAS functions.")
 
         # Include the Numpy version implementation of [sd]gemm_.
-        current_filedir = Path(__file__).parent
-        blas_common_filepath = current_filedir / "c_code/alt_blas_common.h"
-        blas_template_filepath = current_filedir / "c_code/alt_blas_template.c"
         try:
-            common_code = blas_common_filepath.read_text(encoding="utf-8")
-            template_code = blas_template_filepath.read_text(encoding="utf-8")
+            common_code = _read_c_code_file("alt_blas_common.h")
+            template_code = _read_c_code_file("alt_blas_template.c")
         except OSError as err:
             msg = "Unable to load NumPy implementation of BLAS functions from C source files."
             raise OSError(msg) from err
@@ -50,398 +70,28 @@ def blas_header_text():
         blas_code += sblas_code
         blas_code += dblas_code
 
-    header = """
-    extern "C"
-    {
-
-        void xerbla_(char*, void *);
-
-    /***********/
-    /* Level 1 */
-    /***********/
-
-    /* Single Precision */
-
-        void srot_(const int*, float *, const int*, float *, const int*, const float *, const float *);
-        void srotg_(float *,float *,float *,float *);
-        void srotm_( const int*, float *, const int*, float *, const int*, const float *);
-        void srotmg_(float *,float *,float *,const float *, float *);
-        void sswap_( const int*, float *, const int*, float *, const int*);
-        void scopy_( const int*, const float *, const int*, float *, const int*);
-        void saxpy_( const int*, const float *, const float *, const int*, float *, const int*);
-        float sdot_(const int*, const float *, const int*, const float *, const int*);
-        void sdot_sub_(const int*, const float *, const int*, const float *, const int*, float *);
-        void sdsdot_sub_( const int*, const float *, const float *, const int*, const float *, const int*, float *);
-        void sscal_( const int*, const float *, float *, const int*);
-        void snrm2_sub_( const int*, const float *, const int*, float *);
-        void sasum_sub_( const int*, const float *, const int*, float *);
-        void isamax_sub_( const int*, const float * , const int*, const int*);
-
-    /* Double Precision */
-
-        void drot_(const int*, double *, const int*, double *, const int*, const double *, const double *);
-        void drotg_(double *,double *,double *,double *);
-        void drotm_( const int*, double *, const int*, double *, const int*, const double *);
-        void drotmg_(double *,double *,double *,const double *, double *);
-        void dswap_( const int*, double *, const int*, double *, const int*);
-        void dcopy_( const int*, const double *, const int*, double *, const int*);
-        void daxpy_( const int*, const double *, const double *, const int*, double *, const int*);
-        void dswap_( const int*, double *, const int*, double *, const int*);
-        double ddot_(const int*, const double *, const int*, const double *, const int*);
-        void dsdot_sub_(const int*, const float *, const int*, const float *, const int*, double *);
-        void ddot_sub_( const int*, const double *, const int*, const double *, const int*, double *);
-        void dscal_( const int*, const double *, double *, const int*);
-        void dnrm2_sub_( const int*, const double *, const int*, double *);
-        void dasum_sub_( const int*, const double *, const int*, double *);
-        void idamax_sub_( const int*, const double * , const int*, const int*);
-
-    /* Single Complex Precision */
-
-        void cswap_( const int*, void *, const int*, void *, const int*);
-        void ccopy_( const int*, const void *, const int*, void *, const int*);
-        void caxpy_( const int*, const void *, const void *, const int*, void *, const int*);
-        void cswap_( const int*, void *, const int*, void *, const int*);
-        void cdotc_sub_( const int*, const void *, const int*, const void *, const int*, void *);
-        void cdotu_sub_( const int*, const void *, const int*, const void *, const int*, void *);
-        void cscal_( const int*, const void *, void *, const int*);
-        void icamax_sub_( const int*, const void *, const int*, const int*);
-        void csscal_( const int*, const float *, void *, const int*);
-        void scnrm2_sub_( const int*, const void *, const int*, float *);
-        void scasum_sub_( const int*, const void *, const int*, float *);
-
-    /* Double Complex Precision */
-
-        void zswap_( const int*, void *, const int*, void *, const int*);
-        void zcopy_( const int*, const void *, const int*, void *, const int*);
-        void zaxpy_( const int*, const void *, const void *, const int*, void *, const int*);
-        void zswap_( const int*, void *, const int*, void *, const int*);
-        void zdotc_sub_( const int*, const void *, const int*, const void *, const int*, void *);
-        void zdotu_sub_( const int*, const void *, const int*, const void *, const int*, void *);
-        void zdscal_( const int*, const double *, void *, const int*);
-        void zscal_( const int*, const void *, void *, const int*);
-        void dznrm2_sub_( const int*, const void *, const int*, double *);
-        void dzasum_sub_( const int*, const void *, const int*, double *);
-        void izamax_sub_( const int*, const void *, const int*, const int*);
-
-    /***********/
-    /* Level 2 */
-    /***********/
-
-    /* Single Precision */
-
-        void sgemv_(char*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void sgbmv_(char*, const int*, const int*, const int*, const int*, const float *,  const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void ssymv_(char*, const int*, const float *, const float *, const int*, const float *,  const int*, const float *, float *, const int*);
-        void ssbmv_(char*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void sspmv_(char*, const int*, const float *, const float *, const float *, const int*, const float *, float *, const int*);
-        void strmv_( char*, char*, char*, const int*, const float *, const int*, float *, const int*);
-        void stbmv_( char*, char*, char*, const int*, const int*, const float *, const int*, float *, const int*);
-        void strsv_( char*, char*, char*, const int*, const float *, const int*, float *, const int*);
-        void stbsv_( char*, char*, char*, const int*, const int*, const float *, const int*, float *, const int*);
-        void stpmv_( char*, char*, char*, const int*, const float *, float *, const int*);
-        void stpsv_( char*, char*, char*, const int*, const float *, float *, const int*);
-        void sger_( const int*, const int*, const float *, const float *, const int*, const float *, const int*, float *, const int*);
-        void ssyr_(char*, const int*, const float *, const float *, const int*, float *, const int*);
-        void sspr_(char*, const int*, const float *, const float *, const int*, float *);
-        void sspr2_(char*, const int*, const float *, const float *, const int*, const float *, const int*,  float *);
-        void ssyr2_(char*, const int*, const float *, const float *, const int*, const float *, const int*,  float *, const int*);
-
-    /* Double Precision */
-
-        void dgemv_(char*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void dgbmv_(char*, const int*, const int*, const int*, const int*, const double *,  const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void dsymv_(char*, const int*, const double *, const double *, const int*, const double *,  const int*, const double *, double *, const int*);
-        void dsbmv_(char*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void dspmv_(char*, const int*, const double *, const double *, const double *, const int*, const double *, double *, const int*);
-        void dtrmv_( char*, char*, char*, const int*, const double *, const int*, double *, const int*);
-        void dtbmv_( char*, char*, char*, const int*, const int*, const double *, const int*, double *, const int*);
-        void dtrsv_( char*, char*, char*, const int*, const double *, const int*, double *, const int*);
-        void dtbsv_( char*, char*, char*, const int*, const int*, const double *, const int*, double *, const int*);
-        void dtpmv_( char*, char*, char*, const int*, const double *, double *, const int*);
-        void dtpsv_( char*, char*, char*, const int*, const double *, double *, const int*);
-        void dger_( const int*, const int*, const double *, const double *, const int*, const double *, const int*, double *, const int*);
-        void dsyr_(char*, const int*, const double *, const double *, const int*, double *, const int*);
-        void dspr_(char*, const int*, const double *, const double *, const int*, double *);
-        void dspr2_(char*, const int*, const double *, const double *, const int*, const double *, const int*,  double *);
-        void dsyr2_(char*, const int*, const double *, const double *, const int*, const double *, const int*,  double *, const int*);
-
-    /* Single Complex Precision */
-
-        void cgemv_(char*, const int*, const int*, const void *, const void *, const int*, const void *, const int*, const void *, void *, const int*);
-        void cgbmv_(char*, const int*, const int*, const int*, const int*, const void *,  const void *, const int*, const void *, const int*, const void *, void *, const int*);
-        void chemv_(char*, const int*, const void *, const void *, const int*, const void *, const int*, const void *, void *, const int*);
-        void chbmv_(char*, const int*, const int*, const void *, const void *, const int*, const void *, const int*, const void *, void *, const int*);
-        void chpmv_(char*, const int*, const void *, const void *, const void *, const int*, const void *, void *, const int*);
-        void ctrmv_( char*, char*, char*, const int*, const void *, const int*, void *, const int*);
-        void ctbmv_( char*, char*, char*, const int*, const int*, const void *, const int*, void *, const int*);
-        void ctpmv_( char*, char*, char*, const int*, const void *, void *, const int*);
-        void ctrsv_( char*, char*, char*, const int*, const void *, const int*, void *, const int*);
-        void ctbsv_( char*, char*, char*, const int*, const int*, const void *, const int*, void *, const int*);
-        void ctpsv_( char*, char*, char*, const int*, const void *, void *,const int*);
-        void cgerc_( const int*, const int*, const void *, const void *, const int*, const void *, const int*, void *, const int*);
-        void cgeru_( const int*, const int*, const void *, const void *, const int*, const void *, const int*, void *,  const int*);
-        void cher_(char*, const int*, const float *, const void *, const int*, void *, const int*);
-        void cher2_(char*, const int*, const void *, const void *, const int*, const void *, const int*, void *, const int*);
-        void chpr_(char*, const int*, const float *, const void *, const int*, void *);
-        void chpr2_(char*, const int*, const float *, const void *, const int*, const void *, const int*, void *);
-
-    /* Double Complex Precision */
-
-        void zgemv_(char*, const int*, const int*, const void *, const void *, const int*, const void *, const int*, const void *, void *, const int*);
-        void zgbmv_(char*, const int*, const int*, const int*, const int*, const void *,  const void *, const int*, const void *, const int*, const void *, void *, const int*);
-        void zhemv_(char*, const int*, const void *, const void *, const int*, const void *, const int*, const void *, void *, const int*);
-        void zhbmv_(char*, const int*, const int*, const void *, const void *, const int*, const void *, const int*, const void *, void *, const int*);
-        void zhpmv_(char*, const int*, const void *, const void *, const void *, const int*, const void *, void *, const int*);
-        void ztrmv_( char*, char*, char*, const int*, const void *, const int*, void *, const int*);
-        void ztbmv_( char*, char*, char*, const int*, const int*, const void *, const int*, void *, const int*);
-        void ztpmv_( char*, char*, char*, const int*, const void *, void *, const int*);
-        void ztrsv_( char*, char*, char*, const int*, const void *, const int*, void *, const int*);
-        void ztbsv_( char*, char*, char*, const int*, const int*, const void *, const int*, void *, const int*);
-        void ztpsv_( char*, char*, char*, const int*, const void *, void *,const int*);
-        void zgerc_( const int*, const int*, const void *, const void *, const int*, const void *, const int*, void *, const int*);
-        void zgeru_( const int*, const int*, const void *, const void *, const int*, const void *, const int*, void *,  const int*);
-        void zher_(char*, const int*, const double *, const void *, const int*, void *, const int*);
-        void zher2_(char*, const int*, const void *, const void *, const int*, const void *, const int*, void *, const int*);
-        void zhpr_(char*, const int*, const double *, const void *, const int*, void *);
-        void zhpr2_(char*, const int*, const double *, const void *, const int*, const void *, const int*, void *);
-
-    /***********/
-    /* Level 3 */
-    /***********/
-
-    /* Single Precision */
-
-        void sgemm_(char*, char*, const int*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void ssymm_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void ssyrk_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, float *, const int*);
-        void ssyr2k_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void strmm_(char*, char*, char*, char*, const int*, const int*, const float *, const float *, const int*, float *, const int*);
-        void strsm_(char*, char*, char*, char*, const int*, const int*, const float *, const float *, const int*, float *, const int*);
-
-    /* Double Precision */
-
-        void dgemm_(char*, char*, const int*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void dsymm_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void dsyrk_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, double *, const int*);
-        void dsyr2k_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void dtrmm_(char*, char*, char*, char*, const int*, const int*, const double *, const double *, const int*, double *, const int*);
-        void dtrsm_(char*, char*, char*, char*, const int*, const int*, const double *, const double *, const int*, double *, const int*);
-
-    /* Single Complex Precision */
-
-        void cgemm_(char*, char*, const int*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void csymm_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void chemm_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void csyrk_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, float *, const int*);
-        void cherk_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, float *, const int*);
-        void csyr2k_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void cher2k_(char*, char*, const int*, const int*, const float *, const float *, const int*, const float *, const int*, const float *, float *, const int*);
-        void ctrmm_(char*, char*, char*, char*, const int*, const int*, const float *, const float *, const int*, float *, const int*);
-        void ctrsm_(char*, char*, char*, char*, const int*, const int*, const float *, const float *, const int*, float *, const int*);
-
-    /* Double Complex Precision */
-
-        void zgemm_(char*, char*, const int*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void zsymm_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void zhemm_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void zsyrk_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, double *, const int*);
-        void zherk_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, double *, const int*);
-        void zsyr2k_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void zher2k_(char*, char*, const int*, const int*, const double *, const double *, const int*, const double *, const int*, const double *, double *, const int*);
-        void ztrmm_(char*, char*, char*, char*, const int*, const int*, const double *, const double *, const int*, double *, const int*);
-        void ztrsm_(char*, char*, char*, char*, const int*, const int*, const double *, const double *, const int*, double *, const int*);
-
-    }
-    """
+    # Read the Fortran BLAS declarations from the static header file
+    header = _read_c_code_file("fortran_blas.h")
 
     return header + blas_code
 
 
+@functools.cache
 def mkl_threads_text():
-    """C header for MKL threads interface"""
-    header = """
-    extern "C"
-    {
-        int     MKL_Set_Num_Threads_Local(int);
-        #define mkl_set_num_threads_local   MKL_Set_Num_Threads_Local
-
-        void    MKL_Set_Num_Threads(int);
-        #define mkl_set_num_threads         MKL_Set_Num_Threads
-
-        int     MKL_Get_Max_Threads(void);
-        #define mkl_get_max_threads         MKL_Get_Max_Threads
-
-        int     MKL_Domain_Set_Num_Threads(int, int);
-        #define mkl_domain_set_num_threads  MKL_Domain_Set_Num_Threads
-
-        int     MKL_Domain_Get_Max_Threads(int);
-        #define mkl_domain_get_max_threads  MKL_Domain_Get_Max_Threads
-
-        void    MKL_Set_Dynamic(int);
-        #define mkl_set_dynamic             MKL_Set_Dynamic
-
-        int     MKL_Get_Dynamic(void);
-        #define mkl_get_dynamic             MKL_Get_Dynamic
-    }
-    """
-    return header
+    """C header for MKL threads interface."""
+    return _read_c_code_file("mkl_threads.h")
 
 
+@functools.cache
 def openblas_threads_text():
-    """C header for OpenBLAS threads interface"""
-    header = """
-    extern "C"
-    {
-        void openblas_set_num_threads(int);
-        void goto_set_num_threads(int);
-        int openblas_get_num_threads(void);
-    }
-    """
-    return header
+    """C header for OpenBLAS threads interface."""
+    return _read_c_code_file("openblas_threads.h")
 
 
 def blas_header_version():
-    # Version 11: Removed obsolete macOS 10.6 sdot bug workaround
-    return (11,)
+    """Return version tuple for cache invalidation.
 
-
-def ____gemm_code(check_ab, a_init, b_init):
-    mod = "%"
-    return f"""
-        const char * error_string = NULL;
-
-        int type_num = PyArray_DESCR(_x)->type_num;
-        int type_size = PyArray_ITEMSIZE(_x); // in bytes
-
-        npy_intp* Nx = PyArray_DIMS(_x);
-        npy_intp* Ny = PyArray_DIMS(_y);
-        npy_intp* Nz = PyArray_DIMS(_z);
-
-        npy_intp* Sx = PyArray_STRIDES(_x);
-        npy_intp* Sy = PyArray_STRIDES(_y);
-        npy_intp* Sz = PyArray_STRIDES(_z);
-
-        size_t sx_0, sx_1, sy_0, sy_1, sz_0, sz_1;
-
-        int unit = 0;
-
-        if (PyArray_NDIM(_x) != 2) goto _dot_execute_fallback;
-        if (PyArray_NDIM(_y) != 2) goto _dot_execute_fallback;
-        if (PyArray_NDIM(_z) != 2) goto _dot_execute_fallback;
-
-        {check_ab}
-
-        if ((PyArray_DESCR(_x)->type_num != NPY_DOUBLE)
-            && (PyArray_DESCR(_x)->type_num != NPY_FLOAT))
-            goto _dot_execute_fallback;
-
-        if ((PyArray_DESCR(_y)->type_num != NPY_DOUBLE)
-            && (PyArray_DESCR(_y)->type_num != NPY_FLOAT))
-            goto _dot_execute_fallback;
-
-        if ((PyArray_DESCR(_y)->type_num != NPY_DOUBLE)
-            && (PyArray_DESCR(_y)->type_num != NPY_FLOAT))
-            goto _dot_execute_fallback;
-
-        if ((PyArray_DESCR(_x)->type_num != PyArray_DESCR(_y)->type_num)
-            ||(PyArray_DESCR(_x)->type_num != PyArray_DESCR(_z)->type_num))
-            goto _dot_execute_fallback;
-
-
-        if ((Nx[0] != Nz[0]) || (Nx[1] != Ny[0]) || (Ny[1] != Nz[1]))
-        {{
-            error_string = "Input dimensions do not agree";
-            goto _dot_execute_fail;
-        }}
-        if ((Sx[0] < 1) || (Sx[1] < 1) || (Sx[0] {mod} type_size) || (Sx[1] {mod} type_size)
-           || (Sy[0] < 1) || (Sy[1] < 1) || (Sy[0] {mod} type_size) || (Sy[1] {mod} type_size)
-           || (Sz[0] < 1) || (Sz[1] < 1) || (Sz[0] {mod} type_size) || (Sz[1] {mod} type_size))
-        {{
-           goto _dot_execute_fallback;
-        }}
-
-        /*
-        encode the stride structure of _x,_y,_z into a single integer
-        */
-        unit |= ((Sx[1] == type_size) ? 0x0 : (Sx[0] == type_size) ? 0x1 : 0x2) << 0;
-        unit |= ((Sy[1] == type_size) ? 0x0 : (Sy[0] == type_size) ? 0x1 : 0x2) << 4;
-        unit |= ((Sz[1] == type_size) ? 0x0 : (Sz[0] == type_size) ? 0x1 : 0x2) << 8;
-
-        /* create appropriate strides for malformed matrices that are row or column
-         * vectors
-         */
-        sx_0 = (Nx[0] > 1) ? Sx[0]/type_size : Nx[1];
-        sx_1 = (Nx[1] > 1) ? Sx[1]/type_size : Nx[0];
-        sy_0 = (Ny[0] > 1) ? Sy[0]/type_size : Ny[1];
-        sy_1 = (Ny[1] > 1) ? Sy[1]/type_size : Ny[0];
-        sz_0 = (Nz[0] > 1) ? Sz[0]/type_size : Nz[1];
-        sz_1 = (Nz[1] > 1) ? Sz[1]/type_size : Nz[0];
-
-        switch (type_num)
-        {{
-            case NPY_FLOAT:
-            {{
-                #define REAL float
-                float a = {a_init};
-                float b = {b_init};
-
-                float* x = (float*)PyArray_DATA(_x);
-                float* y = (float*)PyArray_DATA(_y);
-                float* z = (float*)PyArray_DATA(_z);
-
-                switch(unit)
-                {{
-                    case 0x000: cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_0, b, z, sz_0); break;
-                    case 0x001: cblas_sgemm(CblasRowMajor, CblasTrans,   CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_0, b, z, sz_0); break;
-                    case 0x010: cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_1, b, z, sz_0); break;
-                    case 0x011: cblas_sgemm(CblasRowMajor, CblasTrans,   CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_1, b, z, sz_0); break;
-                    case 0x100: cblas_sgemm(CblasColMajor, CblasTrans,   CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_0, b, z, sz_1); break;
-                    case 0x101: cblas_sgemm(CblasColMajor, CblasNoTrans, CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_0, b, z, sz_1); break;
-                    case 0x110: cblas_sgemm(CblasColMajor, CblasTrans,   CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_1, b, z, sz_1); break;
-                    case 0x111: cblas_sgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_1, b, z, sz_1); break;
-                    default: goto _dot_execute_fallback;
-                }};
-                #undef REAL
-            }}
-            break;
-            case NPY_DOUBLE:
-            {{
-                #define REAL double
-                double a = {a_init};
-                double b = {b_init};
-
-                double* x = (double*)PyArray_DATA(_x);
-                double* y = (double*)PyArray_DATA(_y);
-                double* z = (double*)PyArray_DATA(_z);
-                switch(unit)
-                {{
-                    case 0x000: cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_0, b, z, sz_0); break;
-                    case 0x001: cblas_dgemm(CblasRowMajor, CblasTrans,   CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_0, b, z, sz_0); break;
-                    case 0x010: cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_1, b, z, sz_0); break;
-                    case 0x011: cblas_dgemm(CblasRowMajor, CblasTrans,   CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_1, b, z, sz_0); break;
-                    case 0x100: cblas_dgemm(CblasColMajor, CblasTrans,   CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_0, b, z, sz_1); break;
-                    case 0x101: cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans,   Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_0, b, z, sz_1); break;
-                    case 0x110: cblas_dgemm(CblasColMajor, CblasTrans,   CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_0, y, sy_1, b, z, sz_1); break;
-                    case 0x111: cblas_dgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, Nz[0], Nz[1], Nx[1], a, x, sx_1, y, sy_1, b, z, sz_1); break;
-                    default: goto _dot_execute_fallback;
-                }};
-                #undef REAL
-            }}
-            break;
-        }}
-
-        return 0;  //success!
-
-        _dot_execute_fallback:
-        PyErr_SetString(PyExc_NotImplementedError,
-            "dot->execute() fallback");
-        return -1;
-
-        _dot_execute_fail:
-        if (error_string == NULL)
-            PyErr_SetString(PyExc_ValueError,
-                "dot->execute() can't run on these inputs");
-        return -1;
-
-        /* v 1 */
+    This version should be bumped when the static header files change.
     """
+    # Version 12: Refactored to use external .h files
+    return (12,)
