@@ -1,5 +1,3 @@
-import warnings
-
 import pytensor.xtensor.rewriting
 from pytensor.xtensor import linalg, math, random, signal
 from pytensor.xtensor.math import dot, where
@@ -9,6 +7,3 @@ from pytensor.xtensor.type import (
     xtensor,
     xtensor_constant,
 )
-
-
-warnings.warn("xtensor module is experimental and full of bugs")
