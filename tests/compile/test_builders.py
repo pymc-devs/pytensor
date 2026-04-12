@@ -153,7 +153,10 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         x, y, z = matrices("xyz")
         s = shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
-        op = cls_ofg([x, y, z], [e])
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            op = cls_ofg([x, y, z], [e])
         # (1+3*5=array of 16) - (3+1*5=array of 8)
         f = op(x, y, z) - op(y, z, x)
 
@@ -173,7 +176,10 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         x, y, z = matrices("xyz")
         s = shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
-        op = cls_ofg([x, y, z], [e])
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            op = cls_ofg([x, y, z], [e])
         f = op(x, y, z)
         f = f - grad(pt_sum(f), y)
         fn = function([x, y, z], f)
@@ -416,7 +422,10 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         out1 = x + rv_u
         out2 = y + 3
         out3 = 3 + rv_u
-        op3 = cls_ofg([x, y], [out1, out2, out3])
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            op3 = cls_ofg([x, y], [out1, out2, out3])
 
         results = op3.connection_pattern(None)
         expect_result = [
@@ -469,7 +478,10 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         x = pt.scalar("x")
         y = shared(1.0, name="y")
 
-        test_ofg = OpFromGraph([x], [x + y], on_unused_input="ignore")
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            test_ofg = OpFromGraph([x], [x + y], on_unused_input="ignore")
         assert test_ofg.shared_inputs == [y]
 
         out = test_ofg(x)
@@ -478,7 +490,10 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         assert y_clone != y
         y_clone.name = "y_clone"
 
-        out_new = test_ofg.make_node(*([*out.owner.inputs[:1], y_clone])).outputs[0]
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            out_new = test_ofg.make_node(*([*out.owner.inputs[:1], y_clone])).outputs[0]
 
         assert "on_unused_input" in out_new.owner.op.kwargs
         assert out_new.owner.op.shared_inputs == [y_clone]
@@ -498,7 +513,10 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         x = pt.scalar("x")
         y = shared(1.0, name="y")
 
-        test_ofg = OpFromGraph([x], [x + y])
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            test_ofg = OpFromGraph([x], [x + y])
         assert test_ofg.shared_inputs == [y]
 
         out = test_ofg(pt.as_tensor(1.0, dtype=config.floatX))
@@ -517,7 +535,10 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         x = pt.scalar("x")
         y = shared(1.0, name="y")
 
-        test_ofg = OpFromGraph([], [y])
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            test_ofg = OpFromGraph([], [y])
         assert test_ofg.shared_inputs == [y]
 
         out_1_fn = function([], test_ofg())
@@ -582,6 +603,15 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
 
         out = test_ofg(y, y)
         assert out.eval() == 4
+
+    def test_implicit_shared_inputs_deprecated(self):
+        x = pt.dscalar("x")
+        y = shared(1.0, name="y")
+
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            OpFromGraph([x], [x + y])
 
     def test_pullback_disconnected_output_grad(self):
         x, y = dscalars("x", "y")
@@ -669,13 +699,22 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         x = scalar("x")
         s = shared(np.array(1.0, dtype=config.floatX))
 
-        op1 = OpFromGraph([x], [x + s])
-        op2 = OpFromGraph([x], [x + s])
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            op1 = OpFromGraph([x], [x + s])
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            op2 = OpFromGraph([x], [x + s])
         assert op1 == op2
 
         # Same value, different shared object -> not equal
         s2 = shared(np.array(1.0, dtype=config.floatX))
-        op3 = OpFromGraph([x], [x + s2])
+        with pytest.warns(
+            FutureWarning, match="Implicit shared-variable capture in OpFromGraph"
+        ):
+            op3 = OpFromGraph([x], [x + s2])
         assert op1 != op3
 
     def test_equality_callable_overrides(self):

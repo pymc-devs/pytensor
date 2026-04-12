@@ -327,6 +327,7 @@ class OpFromGraph(Op, HasInnerGraph):
         strict : bool, optional
             If True, raises when any variables needed to compute the inner graph are not provided
             as explicit inputs. Only relevant for graphs with shared variables. Default False.
+            Under ``strict=False``, implicit shared-variable capture is deprecated.
         name : str, optional
             A name for debugging purposes.
         **kwargs
@@ -366,6 +367,14 @@ class OpFromGraph(Op, HasInnerGraph):
             raise ValueError(
                 "All variables needed to compute inner-graph must be provided as inputs under strict=True. "
                 f"The inner-graph implicitly depends on the following shared variables {self.shared_inputs}"
+            )
+        elif self.shared_inputs:
+            warnings.warn(
+                "Implicit shared-variable capture in OpFromGraph under strict=False is deprecated and "
+                "will be removed in a future release. Include shared variables explicitly in "
+                "OpFromGraph(inputs=..., ...) or use strict=True.",
+                FutureWarning,
+                stacklevel=2,
             )
 
         self.kwargs = kwargs
