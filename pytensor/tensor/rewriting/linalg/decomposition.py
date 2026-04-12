@@ -8,6 +8,7 @@ from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.eigen import Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor
+from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import (
@@ -282,3 +283,47 @@ def lu_factor_of_diag(fgraph, node):
     copy_stack_trace(lu_out, new_LU)
     copy_stack_trace(piv_out, new_pivots)
     return [new_LU, new_pivots]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(QR)])
+def qr_of_diag(fgraph, node):
+    """qr(D) -> (diag(sign(d)), diag(|d|)) for diagonal D.
+
+    Q = diag(sign(diagonal(D))), R = diag(abs(diagonal(D))).
+    """
+    [X] = node.inputs
+
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
+
+    core_op = node.op.core_op
+
+    out_dtype = node.outputs[0].type.dtype
+    diag_vals = pt.diagonal(X, axis1=-2, axis2=-1)
+
+    if core_op.mode == "raw":
+        # Raw returns (H, tau, R). For diagonal: H=D, tau=zeros(n), R=D
+        new_H = X.astype(out_dtype) if X.type.dtype != out_dtype else X
+        n = X.shape[-1]
+        new_tau = pt.zeros(n, dtype=out_dtype)
+        new_R = new_H
+        results = [new_H, new_tau, new_R]
+    elif core_op.mode == "r":
+        new_R = alloc_diag(pt.abs(diag_vals).astype(out_dtype), axis1=-2, axis2=-1)
+        results = [new_R]
+    else:
+        new_Q = alloc_diag(pt.sign(diag_vals).astype(out_dtype), axis1=-2, axis2=-1)
+        new_R = alloc_diag(pt.abs(diag_vals).astype(out_dtype), axis1=-2, axis2=-1)
+        results = [new_Q, new_R]
+
+    if core_op.pivoting:
+        n = X.shape[-1]
+        new_p = pt.arange(n, dtype="int32")
+        results.append(new_p)
+
+    for old, new in zip(node.outputs, results, strict=True):
+        copy_stack_trace(old, new)
+
+    return results

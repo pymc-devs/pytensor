@@ -16,6 +16,7 @@ from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu, lu_factor
+from pytensor.tensor.linalg.decomposition.qr import qr
 from pytensor.tensor.linalg.decomposition.svd import SVD, svd
 from pytensor.tensor.math import dot, matmul
 from pytensor.tensor.type import tensor
@@ -396,5 +397,50 @@ def test_lu_factor_of_diag():
 
     expected_pivots = pt.as_tensor(np.arange(n, dtype="int32"))
     expected = [simplified_D, expected_pivots]
+
+    assert_equal_computations(rewritten, expected)
+
+
+@pytest.mark.parametrize(
+    "make_diag, mode, pivoting",
+    [
+        pytest.param(lambda d: pt.diag(d), "full", False, id="alloc_diag_full"),
+        pytest.param(lambda d: pt.eye(5) * d, "r", False, id="eye_mul_r"),
+        pytest.param(
+            lambda d: pt.diag(d), "economic", True, id="alloc_diag_economic_pivot"
+        ),
+        pytest.param(lambda d: pt.diag(d), "raw", False, id="alloc_diag_raw"),
+    ],
+)
+def test_qr_of_diag(make_diag, mode, pivoting):
+    n = 5
+    d = pt.dvector("d", shape=(n,))
+    D = make_diag(d)
+    diag_idx = np.diag_indices(n)
+    n_64 = np.array(n, dtype="int64")
+
+    out = qr(D, mode=mode, pivoting=pivoting)
+    if not isinstance(out, list | tuple):
+        out = [out]
+    passes = ("canonicalize", "stabilize", "specialize", "ShapeOpt")
+    rewritten = rewrite_graph(out, include=passes)
+
+    def diag_of(vals):
+        return pt.zeros((n_64, n_64))[diag_idx].set(vals)
+
+    expected_R = diag_of(pt.abs(d))
+
+    if mode == "raw":
+        simplified_D = diag_of(d)
+        expected_tau = pt.alloc(np.float64(0.0), n_64)
+        expected = [simplified_D, expected_tau, simplified_D]
+    elif mode == "r":
+        expected = [expected_R]
+    else:
+        expected_Q = diag_of(pt.sign(d))
+        expected = [expected_Q, expected_R]
+
+    if pivoting:
+        expected.append(pt.as_tensor(np.arange(n, dtype="int32")))
 
     assert_equal_computations(rewritten, expected)
