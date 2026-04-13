@@ -1,10 +1,21 @@
+from pathlib import Path
+
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.scalar import bool as bool_t
 from pytensor.tensor.blas._core import ldflags
-from pytensor.tensor.blas.blas_headers import blas_header_text, blas_header_version
+from pytensor.tensor.blas.blas_headers import (
+    _read_c_code_file,
+    blas_header_text,
+    blas_header_version,
+)
 from pytensor.tensor.blas.gemv import Gemv
 from pytensor.tensor.blas.ger import Ger
+
+
+def _read_gemv_helper_h():
+    """Read the GEMV helper header file."""
+    return _read_c_code_file("gemv_helper.h")
 
 
 class BaseBLAS(COp):
@@ -18,10 +29,12 @@ class BaseBLAS(COp):
         return ldflags(libs=False, libs_dir=True)
 
     def c_header_dirs(self, **kwargs):
-        return ldflags(libs=False, include_dir=True)
+        # Include the c_code directory for our header files
+        c_code_dir = str(Path(__file__).parent / "c_code")
+        return [c_code_dir, *ldflags(libs=False, include_dir=True)]
 
     def c_support_code(self, **kwargs):
-        return blas_header_text()
+        return blas_header_text() + _read_gemv_helper_h()
 
 
 # ##### ####### #######
@@ -468,7 +481,7 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, must_initialize_y=False, params=N
                     SA1 = -SA1;  // Iterate over columns in reverse
                     Sx = -Sx;  // Iterate over x in reverse
                 }
-            } else if ((SA0 < 0) || (SA1 < 0) || ((SA0 != 1) && (SA1 != 1)))
+            } else if (pytensor_gemv_needs_copy(SA0, SA1))
             {
                 // Array isn't contiguous, we have to make a copy
                 // - if the copy is too long, maybe call vector/vector dot on each row instead
@@ -494,65 +507,37 @@ def gemv_c_code(y, A, x, z, alpha, beta, fail, must_initialize_y=False, params=N
 
                 if (is_float)
                 {
-                    z_data[0] = dbeta != 0 ? dbeta * z_data[0] : 0.f;
-                    z_data[0] += alpha * sdot_(&NA1,  (float*)(A_data), &SA1,
-                                              (float*)x_data, &Sx);
+                    pytensor_sgemv_dot_case(NA1, SA1,
+                        (float*)A_data, (float*)x_data, (float*)z_data,
+                        alpha, fbeta, Sx);
                 }
                 else
                 {
-                    z_data[0] = dbeta != 0 ? dbeta * z_data[0] : 0.;
-                    z_data[0] += alpha * ddot_(&NA1,  (double*)(A_data), &SA1,
-                                              (double*)x_data, &Sx);
+                    pytensor_dgemv_dot_case(NA1, SA1,
+                        (double*)A_data, (double*)x_data, (double*)z_data,
+                        alpha, dbeta, Sx);
                 }
             }
-            else if (SA0 == 1)
+            else if (SA0 == 1 || SA1 == 1)
             {
-                // F-contiguous
-                char NOTRANS = 'N';
+                // C-contiguous or F-contiguous, use GEMV dispatch helper
                 if (is_float)
                 {
                     float alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
-                    sgemv_(&NOTRANS, &NA0, &NA1,
-                        &alpha,
-                        (float*)(A_data), &SA1,
-                        (float*)x_data, &Sx,
-                        &fbeta,
-                        (float*)z_data, &Sz);
+                    if (pytensor_sgemv_dispatch(NA0, NA1, SA0, SA1,
+                            (float*)A_data, (float*)x_data, (float*)z_data,
+                            alpha, fbeta, Sx, Sz) != 0) {
+                        %(fail)s
+                    }
                 }
                 else
                 {
                     double alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
-                    dgemv_(&NOTRANS, &NA0, &NA1,
-                        &alpha,
-                        (double*)(A_data), &SA1,
-                        (double*)x_data, &Sx,
-                        &dbeta,
-                        (double*)z_data, &Sz);
-                }
-            }
-            else if (SA1 == 1)
-            {
-                // C-contiguous
-                char TRANS = 'T';
-                if (is_float)
-                {
-                    float alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
-                    sgemv_(&TRANS, &NA1, &NA0,
-                        &alpha,
-                        (float*)(A_data), &SA0,
-                        (float*)x_data, &Sx,
-                        &fbeta,
-                        (float*)z_data, &Sz);
-                }
-                else
-                {
-                    double alpha = ((dtype_%(alpha)s*)PyArray_DATA(%(alpha)s))[0];
-                    dgemv_(&TRANS, &NA1, &NA0,
-                        &alpha,
-                        (double*)(A_data), &SA0,
-                        (double*)x_data, &Sx,
-                        &dbeta,
-                        (double*)z_data, &Sz);
+                    if (pytensor_dgemv_dispatch(NA0, NA1, SA0, SA1,
+                            (double*)A_data, (double*)x_data, (double*)z_data,
+                            alpha, dbeta, Sx, Sz) != 0) {
+                        %(fail)s
+                    }
                 }
             }
             else
@@ -604,7 +589,7 @@ class CGemv(BaseBLAS, Gemv):
         return code
 
     def c_code_cache_version(self):
-        return (18, blas_header_version(), must_initialize_y_gemv())
+        return (19, blas_header_version(), must_initialize_y_gemv())
 
 
 cgemv_inplace = CGemv(inplace=True)
