@@ -18,6 +18,11 @@ def _read_gemv_helper_h():
     return _read_c_code_file("gemv_helper.h")
 
 
+def _read_ger_helper_h():
+    """Read the GER helper header file."""
+    return _read_c_code_file("ger_helper.h")
+
+
 class BaseBLAS(COp):
     def c_libraries(self, **kwargs):
         return ldflags()
@@ -34,7 +39,7 @@ class BaseBLAS(COp):
         return [c_code_dir, *ldflags(libs=False, include_dir=True)]
 
     def c_support_code(self, **kwargs):
-        return blas_header_text() + _read_gemv_helper_h()
+        return blas_header_text() + _read_gemv_helper_h() + _read_ger_helper_h()
 
 
 # ##### ####### #######
@@ -117,56 +122,37 @@ def ger_c_code(A, a, x, y, Z, fail, params):
         }}
         if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
         {{
-            float * zoutdata = (float*)PyArray_DATA({Z});
             const float * zdata = (float*)PyArray_DATA({A});
+            float * zoutdata = (float*)PyArray_DATA({Z});
             const float * xdata = (float*)PyArray_DATA({x});
             const float * ydata = (float*)PyArray_DATA({y});
-            const float * adata = (float*)PyArray_DATA({a});
-            const float alpha = adata[0];
-            float tmp, xx;
+            const float alpha = ((float*)PyArray_DATA({a}))[0];
             int Ai = PyArray_STRIDES({A})[0]/sizeof(float);
             int Aj = PyArray_STRIDES({A})[1]/sizeof(float);
             int Zi = PyArray_STRIDES({Z})[0]/sizeof(float);
             int Zj = PyArray_STRIDES({Z})[1]/sizeof(float);
             int xi = PyArray_STRIDES({x})[0]/sizeof(float);
             int yj = PyArray_STRIDES({y})[0]/sizeof(float);
-            for (int i = 0; i < dims[0]; ++i)
-            {{
-                xx = alpha * xdata[xi * i];
-                for (int j = 0; j < dims[1]; ++j)
-                {{
-                    tmp = zdata[Ai*i+Aj*j];
-                    tmp += xx * ydata[yj * j];
-                    zoutdata[Zi*i+Zj*j] = tmp;
-                }}
-            }}
+            pytensor_sger_manual_copy(dims[0], dims[1],
+                zdata, Ai, Aj, zoutdata, Zi, Zj,
+                xdata, xi, ydata, yj, alpha);
         }}
         else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
         {{
-            double * zoutdata = (double*) PyArray_DATA({Z});
             const double * zdata = (double*)PyArray_DATA({A});
+            double * zoutdata = (double*) PyArray_DATA({Z});
             const double * xdata = (double*)PyArray_DATA({x});
             const double * ydata = (double*)PyArray_DATA({y});
-            const double * adata = (double*)PyArray_DATA({a});
-            const double alpha = adata[0];
-            double tmp, xx;
-
+            const double alpha = ((double*)PyArray_DATA({a}))[0];
             int Ai = PyArray_STRIDES({A})[0]/sizeof(double);
             int Aj = PyArray_STRIDES({A})[1]/sizeof(double);
             int Zi = PyArray_STRIDES({Z})[0]/sizeof(double);
             int Zj = PyArray_STRIDES({Z})[1]/sizeof(double);
             int xi = PyArray_STRIDES({x})[0]/sizeof(double);
             int yj = PyArray_STRIDES({y})[0]/sizeof(double);
-            for (int i = 0; i < dims[0]; ++i)
-            {{
-                xx = alpha * xdata[xi * i];
-                for (int j = 0; j < dims[1]; ++j)
-                {{
-                    tmp = zdata[Ai*i+Aj*j];
-                    tmp += xx * ydata[yj * j];
-                    zoutdata[Zi*i+Zj*j] = tmp;
-                }}
-            }}
+            pytensor_dger_manual_copy(dims[0], dims[1],
+                zdata, Ai, Aj, zoutdata, Zi, Zj,
+                xdata, xi, ydata, yj, alpha);
         }}
         else
         {{
@@ -186,50 +172,33 @@ def ger_c_code(A, a, x, y, Z, fail, params):
         npy_intp dims[2];
         dims[0] = PyArray_DIMS({A})[0];
         dims[1] = PyArray_DIMS({A})[1];
-        if ((dims[0] * dims[1]) < 100000)
+        if ((dims[0] * dims[1]) < PYTENSOR_GER_BLAS_THRESHOLD)
         {{
             if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
             {{
                 float * zoutdata = (float*)PyArray_DATA({Z});
                 const float * xdata = (float*)PyArray_DATA({x});
                 const float * ydata = (float*)PyArray_DATA({y});
-                const float * adata = (float*)PyArray_DATA({a});
-                const float alpha = adata[0];
-                float tmp, axi;
+                const float alpha = ((float*)PyArray_DATA({a}))[0];
                 int Zi = PyArray_STRIDES({Z})[0]/sizeof(float);
                 int Zj = PyArray_STRIDES({Z})[1]/sizeof(float);
                 int xi = PyArray_STRIDES({x})[0]/sizeof(float);
                 int yj = PyArray_STRIDES({y})[0]/sizeof(float);
-                for (int i = 0; i < dims[0]; ++i)
-                {{
-                    axi = alpha * xdata[xi * i];
-                    for (int j = 0; j < dims[1]; ++j)
-                    {{
-                        zoutdata[Zi*i+Zj*j] += axi * ydata[yj * j];
-                    }}
-                }}
+                pytensor_sger_manual_inplace(dims[0], dims[1],
+                    zoutdata, Zi, Zj, xdata, xi, ydata, yj, alpha);
             }}
             else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
             {{
                 double * zoutdata = (double*) PyArray_DATA({Z});
                 const double * xdata = (double*)PyArray_DATA({x});
                 const double * ydata = (double*)PyArray_DATA({y});
-                const double * adata = (double*)PyArray_DATA({a});
-                const double alpha = adata[0];
-                double tmp, axi;
-
+                const double alpha = ((double*)PyArray_DATA({a}))[0];
                 int Zi = PyArray_STRIDES({Z})[0]/sizeof(double);
                 int Zj = PyArray_STRIDES({Z})[1]/sizeof(double);
                 int xi = PyArray_STRIDES({x})[0]/sizeof(double);
                 int yj = PyArray_STRIDES({y})[0]/sizeof(double);
-                for (int i = 0; i < dims[0]; ++i)
-                {{
-                    axi = alpha * xdata[xi * i];
-                    for (int j = 0; j < dims[1]; ++j)
-                    {{
-                        zoutdata[Zi*i+Zj*j] += axi * ydata[yj * j];
-                    }}
-                }}
+                pytensor_dger_manual_inplace(dims[0], dims[1],
+                    zoutdata, Zi, Zj, xdata, xi, ydata, yj, alpha);
             }}
         }}
         else
@@ -239,81 +208,39 @@ def ger_c_code(A, a, x, y, Z, fail, params):
             int Sx = PyArray_STRIDES({x})[0] / elemsize;
             int Sy = PyArray_STRIDES({y})[0] / elemsize;
 
-            /* create appropriate strides for Z, if it is a row or column matrix.
-             * In that case, the value of the stride does not really matter, but
-             * some versions of BLAS insist that:
-             *  - they are not smaller than the number of elements in the array,
-             *  - they are not 0.
-             */
-            int Sz0 = (Nz0 > 1) ? (PyArray_STRIDES({Z})[0] / elemsize) : (Nz1 + 1);
-            int Sz1 = (Nz1 > 1) ? (PyArray_STRIDES({Z})[1] / elemsize) : (Nz0 + 1);
-
             dtype_{x}* x_data = (dtype_{x}*) PyArray_DATA({x});
             dtype_{y}* y_data = (dtype_{y}*) PyArray_DATA({y});
-            // gemv expects pointers to the beginning of memory arrays,
-            // but numpy provides provides a pointer to the first element,
+            // ger expects pointers to the beginning of memory arrays,
+            // but numpy provides a pointer to the first element,
             // so when the stride is negative, we need to get the last one.
             if (Sx < 0)
                 x_data += (Nz0 - 1) * Sx;
             if (Sy < 0)
                 y_data += (Nz1 - 1) * Sy;
 
-            if (PyArray_STRIDES({Z})[0] == elemsize)
+            if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
             {{
-                if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
-                {{
-                    float alpha = ((dtype_{a}*)PyArray_DATA({a}))[0];
-                    sger_(&Nz0, &Nz1, &alpha,
-                        (float*)x_data, &Sx,
-                        (float*)y_data, &Sy,
-                        (float*)(PyArray_DATA({Z})), &Sz1);
-                }}
-                else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
-                {{
-                    double alpha = ((dtype_{a}*)PyArray_DATA({a}))[0];
-                    dger_(&Nz0, &Nz1, &alpha,
-                        (double*)x_data, &Sx,
-                        (double*)y_data, &Sy,
-                        (double*)(PyArray_DATA({Z})), &Sz1);
-
-
-                }}
-                else {{
-                    PyErr_SetString(PyExc_NotImplementedError,
-                                    "not float nor double");
+                float alpha = ((dtype_{a}*)PyArray_DATA({a}))[0];
+                if (pytensor_sger_dispatch(Nz0, Nz1,
+                        PyArray_STRIDES({Z})[0], PyArray_STRIDES({Z})[1], elemsize,
+                        (float*)PyArray_DATA({Z}), (float*)x_data, (float*)y_data,
+                        alpha, Sx, Sy) != 0) {{
                     {fail}
                 }}
             }}
-            else if (PyArray_STRIDES({Z})[1] == elemsize)
+            else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
             {{
-                if (PyArray_DESCR({Z})->type_num == NPY_FLOAT)
-                {{
-                    float alpha = ((dtype_{a}*)(PyArray_DATA({a})))[0];
-                    sger_(&Nz1, &Nz0, &alpha,
-                        (float*)y_data, &Sy,
-                        (float*)x_data, &Sx,
-                        (float*)(PyArray_DATA({Z})), &Sz0);
-                }}
-                else if (PyArray_DESCR({Z})->type_num == NPY_DOUBLE)
-                {{
-                    double alpha = ((dtype_{a}*)PyArray_DATA({a}))[0];
-                    dger_(&Nz1, &Nz0, &alpha,
-                        (double*)y_data, &Sy,
-                        (double*)x_data, &Sx,
-                        (double*)(PyArray_DATA({Z})), &Sz0);
-                }}
-                else
-                {{
-                    PyErr_SetString(PyExc_NotImplementedError,
-                                    "not float nor double");
+                double alpha = ((dtype_{a}*)PyArray_DATA({a}))[0];
+                if (pytensor_dger_dispatch(Nz0, Nz1,
+                        PyArray_STRIDES({Z})[0], PyArray_STRIDES({Z})[1], elemsize,
+                        (double*)PyArray_DATA({Z}), (double*)x_data, (double*)y_data,
+                        alpha, Sx, Sy) != 0) {{
                     {fail}
                 }}
             }}
             else
             {{
-                PyErr_SetString(PyExc_AssertionError,
-                    "A is a double-strided matrix, and should have been copied "
-                    "into a memory-contiguous one.");
+                PyErr_SetString(PyExc_NotImplementedError, "not float nor double");
                 {fail}
             }}
         }}
@@ -334,7 +261,7 @@ class CGer(BaseBLAS, Ger):
         return code
 
     def c_code_cache_version(self):
-        return (11, blas_header_version())
+        return (12, blas_header_version())
 
 
 cger_inplace = CGer(True)
