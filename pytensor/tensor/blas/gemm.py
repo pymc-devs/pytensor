@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 import pytensor.scalar
@@ -13,10 +15,16 @@ from pytensor.tensor.blas._core import (
     view_roots,
 )
 from pytensor.tensor.blas.blas_headers import (
+    _read_c_code_file,
     blas_header_text,
     blas_header_version,
 )
 from pytensor.tensor.type import DenseTensorType, tensor
+
+
+def _read_gemm_helper_h():
+    """Read the GEMM helper header file."""
+    return _read_c_code_file("gemm_helper.h")
 
 
 class GemmRelated(COp):
@@ -28,20 +36,8 @@ class GemmRelated(COp):
     __props__: tuple[str, ...] = ()
 
     def c_support_code(self, **kwargs):
-        mod_str = """
-        #ifndef MOD
-        #define MOD %
-        #endif
-        void compute_strides(npy_intp *shape, int N_shape, int type_size, npy_intp *res) {
-            int s;
-            res[N_shape - 1] = type_size;
-            for (int i = N_shape - 1; i > 0; i--) {
-                s = shape[i];
-                res[i - 1] = res[i] * (s > 0 ? s : 1);
-            }
-        }
-        """
-        return blas_header_text() + mod_str
+        # Include BLAS headers and GEMM helper functions
+        return blas_header_text() + _read_gemm_helper_h()
 
     def c_headers(self, **kwargs):
         return []
@@ -59,7 +55,9 @@ class GemmRelated(COp):
         return ldflags(libs=False, libs_dir=True)
 
     def c_header_dirs(self, **kwargs):
-        return ldflags(libs=False, include_dir=True)
+        # Include the c_code directory for our header files
+        c_code_dir = str(Path(__file__).parent / "c_code")
+        return [c_code_dir, *ldflags(libs=False, include_dir=True)]
 
     declare_NS = """
         int unit = 0;
@@ -166,8 +164,7 @@ class GemmRelated(COp):
         If some matrices are not contiguous on either dimensions,
         or have invalid strides, copy their content into a contiguous one
         */
-        if ((Sx[0] < 1) || (Sx[1] < 1) || (Sx[0] MOD type_size) || (Sx[1] MOD type_size)
-            || ((Sx[0] != type_size) && (Sx[1] != type_size)))
+        if (pytensor_needs_copy_for_blas(Nx, Sx, type_size))
         {
             PyArrayObject * _x_copy = (PyArrayObject *) PyArray_Copy(%(_x)s);
             if (!_x_copy)
@@ -180,8 +177,7 @@ class GemmRelated(COp):
             }
         }
 
-        if ((Sy[0] < 1) || (Sy[1] < 1) || (Sy[0] MOD type_size) || (Sy[1] MOD type_size)
-            || ((Sy[0] != type_size) && (Sy[1] != type_size)))
+        if (pytensor_needs_copy_for_blas(Ny, Sy, type_size))
         {
             PyArrayObject * _y_copy = (PyArrayObject *) PyArray_Copy(%(_y)s);
             if (!_y_copy)
@@ -194,8 +190,7 @@ class GemmRelated(COp):
             }
         }
 
-        if ((Sz[0] < 1) || (Sz[1] < 1) || (Sz[0] MOD type_size) || (Sz[1] MOD type_size)
-            || ((Sz[0] != type_size) && (Sz[1] != type_size)))
+        if (pytensor_needs_copy_for_blas(Nz, Sz, type_size))
         {
             PyArrayObject * _z_copy = (PyArrayObject *) PyArray_Copy(%(_zout)s);
             if (!_z_copy)
@@ -213,9 +208,7 @@ class GemmRelated(COp):
         /*
         encode the stride structure of _x,_y,_zout into a single integer
         */
-        unit |= ((Sx[1] == type_size || Nx[1]==1) ? 0x0 : (Sx[0] == type_size || Nx[0]==1) ? 0x1 : 0x2) << 8;
-        unit |= ((Sy[1] == type_size || Ny[1]==1) ? 0x0 : (Sy[0] == type_size || Ny[0]==1) ? 0x1 : 0x2) << 4;
-        unit |= ((Sz[1] == type_size || Nz[1]==1) ? 0x0 : (Sz[0] == type_size || Nz[0]==1) ? 0x1 : 0x2) << 0;
+        unit = pytensor_encode_gemm_strides(Nx, Sx, Ny, Sy, Nz, Sz, type_size);
         """
 
     compute_strides = """
@@ -226,12 +219,10 @@ class GemmRelated(COp):
          *  - they are not smaller than the number of elements in the array,
          *  - they are not 0.
          */
-        sx_0 = (Nx[0] > 1) ? Sx[0]/type_size : (Nx[1] + 1);
-        sx_1 = (Nx[1] > 1) ? Sx[1]/type_size : (Nx[0] + 1);
-        sy_0 = (Ny[0] > 1) ? Sy[0]/type_size : (Ny[1] + 1);
-        sy_1 = (Ny[1] > 1) ? Sy[1]/type_size : (Ny[0] + 1);
-        sz_0 = (Nz[0] > 1) ? Sz[0]/type_size : (Nz[1] + 1);
-        sz_1 = (Nz[1] > 1) ? Sz[1]/type_size : (Nz[0] + 1);
+        pytensor_compute_gemm_strides(Nx, Sx, &sx_0, &sx_1,
+                                      Ny, Sy, &sy_0, &sy_1,
+                                      Nz, Sz, &sz_0, &sz_1,
+                                      type_size);
         """
 
     begin_switch_typenum = """
@@ -250,21 +241,12 @@ class GemmRelated(COp):
                 float* x = (float*)PyArray_DATA(%(_x)s);
                 float* y = (float*)PyArray_DATA(%(_y)s);
                 float* z = (float*)PyArray_DATA(%(_zout)s);
-                char N = 'N';
-                char T = 'T';
                 int Nz0 = Nz[0], Nz1 = Nz[1], Nx1 = Nx[1];
-                switch(unit)
-                {
-                    case 0x000: sgemm_(&N, &N, &Nz1, &Nz0, &Nx1, &a, y, &sy_0, x, &sx_0, &b, z, &sz_0); break;
-                    case 0x100: sgemm_(&N, &T, &Nz1, &Nz0, &Nx1, &a, y, &sy_0, x, &sx_1, &b, z, &sz_0); break;
-                    case 0x010: sgemm_(&T, &N, &Nz1, &Nz0, &Nx1, &a, y, &sy_1, x, &sx_0, &b, z, &sz_0); break;
-                    case 0x110: sgemm_(&T, &T, &Nz1, &Nz0, &Nx1, &a, y, &sy_1, x, &sx_1, &b, z, &sz_0); break;
-                    case 0x001: sgemm_(&T, &T, &Nz0, &Nz1, &Nx1, &a, x, &sx_0, y, &sy_0, &b, z, &sz_1); break;
-                    case 0x101: sgemm_(&N, &T, &Nz0, &Nz1, &Nx1, &a, x, &sx_1, y, &sy_0, &b, z, &sz_1); break;
-                    case 0x011: sgemm_(&T, &N, &Nz0, &Nz1, &Nx1, &a, x, &sx_0, y, &sy_1, &b, z, &sz_1); break;
-                    case 0x111: sgemm_(&N, &N, &Nz0, &Nz1, &Nx1, &a, x, &sx_1, y, &sy_1, &b, z, &sz_1); break;
-                    default: PyErr_SetString(PyExc_ValueError, "some matrix has no unit stride"); %(fail)s;
-                };
+                if (pytensor_sgemm_dispatch(unit, x, y, z, a, b,
+                                            Nz0, Nz1, Nx1,
+                                            sx_0, sx_1, sy_0, sy_1, sz_0, sz_1) != 0) {
+                    %(fail)s;
+                }
         """
 
     case_double = """
@@ -280,31 +262,12 @@ class GemmRelated(COp):
                 double* x = (double*)PyArray_DATA(%(_x)s);
                 double* y = (double*)PyArray_DATA(%(_y)s);
                 double* z = (double*)PyArray_DATA(%(_zout)s);
-                char N = 'N';
-                char T = 'T';
                 int Nz0 = Nz[0], Nz1 = Nz[1], Nx1 = Nx[1];
-                switch(unit)
-                {
-                    case 0x000: dgemm_(&N, &N, &Nz1, &Nz0, &Nx1, &a, y,
-                                       &sy_0, x, &sx_0, &b, z, &sz_0); break;
-                    case 0x100: dgemm_(&N, &T, &Nz1, &Nz0, &Nx1, &a, y,
-                                       &sy_0, x, &sx_1, &b, z, &sz_0); break;
-                    case 0x010: dgemm_(&T, &N, &Nz1, &Nz0, &Nx1, &a, y,
-                                       &sy_1, x, &sx_0, &b, z, &sz_0); break;
-                    case 0x110: dgemm_(&T, &T, &Nz1, &Nz0, &Nx1, &a, y,
-                                       &sy_1, x, &sx_1, &b, z, &sz_0); break;
-                    case 0x001: dgemm_(&T, &T, &Nz0, &Nz1, &Nx1, &a, x,
-                                       &sx_0, y, &sy_0, &b, z, &sz_1); break;
-                    case 0x101: dgemm_(&N, &T, &Nz0, &Nz1, &Nx1, &a, x,
-                                       &sx_1, y, &sy_0, &b, z, &sz_1); break;
-                    case 0x011: dgemm_(&T, &N, &Nz0, &Nz1, &Nx1, &a, x,
-                                       &sx_0, y, &sy_1, &b, z, &sz_1); break;
-                    case 0x111: dgemm_(&N, &N, &Nz0, &Nz1, &Nx1, &a, x,
-                                       &sx_1, y, &sy_1, &b, z, &sz_1); break;
-                    default: PyErr_SetString(PyExc_ValueError,
-                                             "some matrix has no unit stride");
-                             %(fail)s;
-                };
+                if (pytensor_dgemm_dispatch(unit, x, y, z, a, b,
+                                            Nz0, Nz1, Nx1,
+                                            sx_0, sx_1, sy_0, sy_1, sz_0, sz_1) != 0) {
+                    %(fail)s;
+                }
         """
 
     end_switch_typenum = """
@@ -343,7 +306,7 @@ class GemmRelated(COp):
         )
 
     def build_gemm_version(self):
-        return (14, blas_header_version())
+        return (15, blas_header_version())
 
 
 class Gemm(GemmRelated):
