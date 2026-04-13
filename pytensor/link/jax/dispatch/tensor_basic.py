@@ -41,10 +41,32 @@ def jax_funcify_AllocEmpty(op, **kwargs):
 
 @jax_funcify.register(Alloc)
 def jax_funcify_Alloc(op, node, **kwargs):
-    def alloc(x, *shape):
-        res = jnp.broadcast_to(x, shape)
-        Alloc._check_runtime_broadcast(node, jnp.asarray(x), res.shape)
-        return res
+    # Extract concrete shape values at compile time where possible.
+    # Shape inputs that are constants must be baked in as Python ints so that
+    # jnp.broadcast_to receives a concrete tuple even when the surrounding
+    # function is traced by jax.jit / jax.value_and_grad (where JAX array
+    # constants would otherwise become JitTracers, which broadcast_to rejects).
+    static_shapes = []
+    for shape_input in node.inputs[1:]:
+        try:
+            static_shapes.append(int(get_scalar_constant_value(shape_input)))
+        except NotScalarConstantError:
+            static_shapes.append(None)
+
+    if all(s is not None for s in static_shapes):
+        concrete_shape = tuple(static_shapes)
+
+        def alloc(x, *shape):
+            res = jnp.broadcast_to(x, concrete_shape)
+            Alloc._check_runtime_broadcast(node, jnp.asarray(x), res.shape)
+            return res
+
+    else:
+
+        def alloc(x, *shape):
+            res = jnp.broadcast_to(x, shape)
+            Alloc._check_runtime_broadcast(node, jnp.asarray(x), res.shape)
+            return res
 
     return alloc
 
