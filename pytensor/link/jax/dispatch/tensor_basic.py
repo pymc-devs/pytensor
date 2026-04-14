@@ -52,7 +52,9 @@ def jax_funcify_Alloc(op, node, **kwargs):
         concrete_shape = tuple(static_shapes)
 
     def alloc(x, *shape):
-        res = jnp.broadcast_to(x, concrete_shape if concrete_shape is not None else shape)
+        res = jnp.broadcast_to(
+            x, concrete_shape if concrete_shape is not None else shape
+        )
         Alloc._check_runtime_broadcast(node, jnp.asarray(x), res.shape)
         return res
 
