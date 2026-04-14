@@ -19,12 +19,7 @@ from pytensor.tensor.blockwise import Blockwise
 
 
 def make_fgraph(*outputs, **kwargs):
-    inputs = kwargs.pop("inputs", None)
-    if inputs is None:
-        from pytensor.graph.traversal import graph_inputs
-
-        inputs = graph_inputs(outputs)
-    fg = FunctionGraph(inputs, list(outputs), clone=False, **kwargs)
+    fg = FunctionGraph(outputs=outputs, clone=False, **kwargs)
     af = AssumptionFeature()
     fg.attach_feature(af)
     return fg, af
