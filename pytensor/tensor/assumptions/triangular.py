@@ -33,12 +33,12 @@ def _eye_upper(op, feature, fgraph, node, input_states):
 
 @register_assumption(LOWER_TRIANGULAR, AllocDiag)
 def _alloc_diag_lower(op, feature, fgraph, node, input_states):
-    return true_if(AllocDiag.is_offset_zero(node))
+    return true_if(op.offset == 0)
 
 
 @register_assumption(UPPER_TRIANGULAR, AllocDiag)
 def _alloc_diag_upper(op, feature, fgraph, node, input_states):
-    return true_if(AllocDiag.is_offset_zero(node))
+    return true_if(op.offset == 0)
 
 
 @register_assumption(LOWER_TRIANGULAR, Alloc)

@@ -14,6 +14,8 @@ from pytensor.tensor.assumptions import (
     FactState,
     register_assumption,
 )
+from pytensor.tensor.basic import alloc_diag
+from pytensor.tensor.blockwise import Blockwise
 
 
 def make_fgraph(*outputs, **kwargs):
@@ -410,3 +412,19 @@ def test_blockwise_diagonal_propagation():
     _, af = make_fgraph(L, inputs=[x])
     af.set_user_fact(x, DIAGONAL, FactState.TRUE)
     assert af.check(L, DIAGONAL)
+
+
+@pytest.mark.parametrize(
+    "key", [DIAGONAL, SYMMETRIC, LOWER_TRIANGULAR, UPPER_TRIANGULAR]
+)
+def test_blockwise_alloc_diag_properties(key):
+    v_core = pt.vector("v", shape=(3,))
+    d_core = alloc_diag(v_core, offset=0, axis1=0, axis2=1)
+
+    bw = Blockwise(d_core.owner.op, signature="(n)->(n,n)")
+    v_batch = pt.matrix("v_batch", shape=(5, 3))
+    result = bw(v_batch)
+
+    _, af = make_fgraph(result, inputs=[v_batch])
+
+    assert af.check(result, key)

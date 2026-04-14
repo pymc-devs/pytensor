@@ -63,7 +63,7 @@ def _eye(op, feature, fgraph, node, input_states):
 
 @register_assumption(DIAGONAL, AllocDiag)
 def _alloc_diag(op, feature, fgraph, node, input_states):
-    return true_if(AllocDiag.is_offset_zero(node))
+    return true_if(op.offset == 0)
 
 
 @register_assumption(DIAGONAL, Alloc)
