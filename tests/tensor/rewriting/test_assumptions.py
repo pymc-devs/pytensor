@@ -428,3 +428,11 @@ def test_blockwise_alloc_diag_properties(key):
     _, af = make_fgraph(result, inputs=[v_batch])
 
     assert af.check(result, key)
+
+
+def test_deep_graph_no_recursion_error():
+    x = pt.eye(5)
+    for _ in range(2000):
+        x = x * 1.0
+    _, af = make_fgraph(x)
+    assert af.check(x, DIAGONAL)

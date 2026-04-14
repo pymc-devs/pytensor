@@ -206,7 +206,42 @@ class AssumptionFeature(Feature):
             self.invalidate_from_vars([var])
 
     def _compute(self, var: Any, key: AssumptionKey) -> FactState:
-        """Propagate the knowledge state through the function graph to determine the fact state for ``(var, key)``."""
+        """Infer the fact state for ``(var, key)`` by walking ancestors bottom-up.
+
+        Collects uncached ancestors of *var* via DFS, then evaluates them
+        inputs-first so each node's inputs are already cached.
+        """
+        # Phase 1 — collect uncached ancestors via iterative DFS
+        stack = [var]
+        order: list[Any] = []  # will be reversed to get bottom-up
+        visited: set[int] = set()
+
+        while stack:
+            v = stack.pop()
+            vid = id(v)
+            if vid in visited or (v, key) in self.cache:
+                continue
+            visited.add(vid)
+            order.append(v)
+            owner = getattr(v, "owner", None)
+            if owner is not None:
+                stack.extend(owner.inputs)
+
+        # Phase 2 — evaluate bottom-up (inputs before outputs)
+        prev_key = getattr(self, "_current_key", None)
+        self._current_key = key
+        try:
+            for v in reversed(order):
+                if (v, key) in self.cache:
+                    continue
+                self.cache[(v, key)] = self._compute_one(v, key)
+        finally:
+            self._current_key = prev_key
+
+        return self.cache[(var, key)]
+
+    def _compute_one(self, var: Any, key: AssumptionKey) -> FactState:
+        """Evaluate a single variable whose inputs are already cached for *key*."""
         state = FactState.UNKNOWN
         state = FactState.join(state, self.static_fact(var, key))
         state = FactState.join(
@@ -215,16 +250,10 @@ class AssumptionFeature(Feature):
 
         owner = getattr(var, "owner", None)
         if owner is not None:
-            prev_key = getattr(self, "_current_key", None)
-            self._current_key = key
-            try:
-                input_states = [self.get(inp, key) for inp in owner.inputs]
-                output_states = infer_assumption_for_node(
-                    owner.op, key, self, self.fgraph, owner, input_states
-                )
-            finally:
-                self._current_key = prev_key
-
+            input_states = [self.get(inp, key) for inp in owner.inputs]
+            output_states = infer_assumption_for_node(
+                owner.op, key, self, self.fgraph, owner, input_states
+            )
             out_idx = owner.outputs.index(var)
             state = FactState.join(state, output_states[out_idx])
 
