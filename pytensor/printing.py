@@ -83,8 +83,13 @@ class GraphNode:
         of a node whose children are not expanded — either because the `Apply`
         owner was already visited earlier in the traversal, or because
         ``stop_on_name`` stopped recursion.  The text renderer prints
-        ``"···"`` at this position; the rich renderer shows the label dimmed
-        with a ``"···"`` suffix.
+        ``"···"`` at this position; the rich renderer shows a colored ``"···"``
+        at the slot without repeating the node label.
+    is_already_done
+        ``True`` for the node-label record that immediately precedes its
+        ``is_repeat`` sentinel — i.e. the second occurrence of an already-visited
+        node.  The text renderer renders the label normally; the rich renderer
+        suppresses this record and emits a colored ``"···"`` directly instead.
     is_last_child
         ``True`` if this node is the last input among its siblings.  Used by
         the text renderer to choose ``"└─"`` vs ``"├─"``.
@@ -115,6 +120,7 @@ class GraphNode:
 
     var: Variable
     is_repeat: bool
+    is_already_done: bool
     is_last_child: bool
     ancestor_is_last: list[bool]
     parent_node: Apply | None
@@ -364,6 +370,7 @@ def _iter_graph_nodes(
     gnode = GraphNode(
         var=var,
         is_repeat=False,
+        is_already_done=False,
         is_last_child=is_last_child,
         ancestor_is_last=ancestor_is_last,
         parent_node=parent_node,
@@ -376,7 +383,26 @@ def _iter_graph_nodes(
     )
 
     if var.owner is None:
-        # Leaf node — input variable or constant
+        # Leaf node — input variable or constant.
+        # Track repeated leaves (e.g. shared inner-graph inputs like i0) so
+        # they can be colored and replaced by a sentinel on second occurrence.
+        already_done_leaf = var in done
+        done[var] = ""
+        if already_done_leaf:
+            gnode = GraphNode(
+                var=var,
+                is_repeat=False,
+                is_already_done=True,
+                is_last_child=is_last_child,
+                ancestor_is_last=ancestor_is_last,
+                parent_node=parent_node,
+                inner_to_outer=inner_to_outer,
+                inner_graph_node=inner_graph_node,
+                is_inner_graph_header=is_inner_graph_header,
+                topo_order=topo_order,
+                profile=profile,
+                storage_map=storage_map,
+            )
         yield gnode
         return
 
@@ -402,15 +428,32 @@ def _iter_graph_nodes(
     ):
         inner_graph_ops.append(var)
 
+    if already_done and not is_inner_graph_header:
+        gnode = GraphNode(
+            var=var,
+            is_repeat=False,
+            is_already_done=True,
+            is_last_child=is_last_child,
+            ancestor_is_last=ancestor_is_last,
+            parent_node=parent_node,
+            inner_to_outer=inner_to_outer,
+            inner_graph_node=inner_graph_node,
+            is_inner_graph_header=is_inner_graph_header,
+            topo_order=topo_order,
+            profile=profile,
+            storage_map=storage_map,
+        )
+
     yield gnode
 
     if already_done or (stop_on_name and var.name is not None):
         if not is_inner_graph_header:
-            # Yield the node label, then a sentinel that renders as "···"
+            # Yield sentinel that renders as "···"
             child_ancestor = [*ancestor_is_last, is_last_child]
             yield GraphNode(
                 var=var,
                 is_repeat=True,
+                is_already_done=False,
                 is_last_child=True,
                 ancestor_is_last=child_ancestor,
                 parent_node=node,
@@ -1110,13 +1153,13 @@ def _build_rich_tree(
     def _color_label(label: str, color: str) -> str:
         return f"[{color}]{label}[/{color}]"
 
-    def _sentinel_label(color: str) -> str:
-        """Style the ··· sentinel child.  Uses a bright_ variant of the parent's
-        color so the sentinel is visually linked but distinct.  Falls back to
-        italic dim alone if the color is already a bright_ variant."""
+    def _sentinel_label(color: str, dim: bool = False) -> str:
+        """Sentinel for repeated nodes.  Bold+bright color links back to the
+        canonical occurrence.  Pass dim=True for inner graph context."""
+        extra = " dim" if dim else ""
         if color.startswith("bright_"):
-            return "[italic dim]···[/italic dim]"
-        return f"[bright_{color} italic dim]···[/bright_{color} italic dim]"
+            return f"[bold{extra}]···[/bold{extra}]"
+        return f"[bright_{color} bold{extra}]···[/bright_{color} bold{extra}]"
 
     def _assign_color(node_key) -> str:
         """Return the color for node_key, assigning one if needed and
@@ -1152,14 +1195,17 @@ def _build_rich_tree(
             current_depth = len(gnode.ancestor_is_last)
             node_key = gnode.var.owner if gnode.var.owner is not None else gnode.var
 
-            if gnode.is_repeat and not gnode.is_inner_graph_header:
-                # Assign/retrieve color for this shared node, retroactively
-                # coloring all canonical occurrences emitted so far.
+            if gnode.is_already_done:
+                # Second occurrence of an already-visited node: emit a colored
+                # ··· directly at this slot and skip the following sentinel.
                 color = _assign_color(node_key)
-                # Sentinel child: just ··· styled as bright_<color> italic dim.
                 parent_tree = depth_stack[current_depth]
                 parent_tree.add(_sentinel_label(color))
-                # Sentinel is a leaf; no depth_stack push needed.
+                continue
+
+            if gnode.is_repeat and not gnode.is_inner_graph_header:
+                # Sentinel emitted by _iter_graph_nodes after is_already_done node;
+                # already handled above — skip.
                 continue
 
             label = _build_label(
@@ -1240,6 +1286,16 @@ def _build_rich_tree(
                 is_last_child=True,
             ):
                 current_depth = len(gnode.ancestor_is_last)
+                if gnode.is_already_done:
+                    node_key = (
+                        gnode.var.owner if gnode.var.owner is not None else gnode.var
+                    )
+                    color = _assign_color(node_key)
+                    parent_tree = ig_depth_stack[current_depth]
+                    parent_tree.add(_sentinel_label(color, dim=True))
+                    continue
+                if gnode.is_repeat and not gnode.is_inner_graph_header:
+                    continue
                 label = _build_label(
                     gnode,
                     done=done,
@@ -1253,11 +1309,10 @@ def _build_rich_tree(
                     op_information=op_information,
                 )
                 label = rich.markup.escape(label)
-                label = f"[dim]{label}[/dim]"
+                node_key = gnode.var.owner if gnode.var.owner is not None else gnode.var
                 parent_tree = ig_depth_stack[current_depth]
-                child_tree = parent_tree.add(label)
-                if gnode.is_repeat and not gnode.is_inner_graph_header:
-                    child_tree.add("[italic dim]···[/italic dim]")
+                child_tree = parent_tree.add(f"[dim]{label}[/dim]")
+                node_tree_map.setdefault(node_key, []).append(child_tree)
                 ig_depth_stack = [*ig_depth_stack[: current_depth + 1], child_tree]
 
             # The header tree node is the first child of inner_root
@@ -1290,6 +1345,18 @@ def _build_rich_tree(
                     is_last_child=True,
                 ):
                     current_depth = len(gnode.ancestor_is_last)
+                    if gnode.is_already_done:
+                        node_key = (
+                            gnode.var.owner
+                            if gnode.var.owner is not None
+                            else gnode.var
+                        )
+                        color = _assign_color(node_key)
+                        parent_tree = out_stack[current_depth]
+                        parent_tree.add(_sentinel_label(color, dim=True))
+                        continue
+                    if gnode.is_repeat and not gnode.is_inner_graph_header:
+                        continue
                     label = _build_label(
                         gnode,
                         done=done,
@@ -1303,11 +1370,12 @@ def _build_rich_tree(
                         op_information=op_information,
                     )
                     label = rich.markup.escape(label)
-                    label = f"[dim]{label}[/dim]"
+                    node_key = (
+                        gnode.var.owner if gnode.var.owner is not None else gnode.var
+                    )
                     parent_tree = out_stack[current_depth]
-                    child_tree = parent_tree.add(label)
-                    if gnode.is_repeat and not gnode.is_inner_graph_header:
-                        child_tree.add("[italic dim]···[/italic dim]")
+                    child_tree = parent_tree.add(f"[dim]{label}[/dim]")
+                    node_tree_map.setdefault(node_key, []).append(child_tree)
                     out_stack = [*out_stack[: current_depth + 1], child_tree]
 
     return root
