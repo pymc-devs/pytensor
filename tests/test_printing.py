@@ -13,6 +13,7 @@ import pytest
 
 import pytensor
 from pytensor import config
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.mode import get_mode
 from pytensor.compile.ops import deep_copy_op
@@ -620,8 +621,6 @@ class TestDebugprintRich:
     def test_opfromgraph_expands_inner_graph(self):
         # OpFromGraph should produce an "Inner graphs:" section as a second
         # top-level child of the hidden root, matching the text renderer.
-        from pytensor.compile.builders import OpFromGraph
-
         x = dvector("x")
         out = OpFromGraph([x], [x.std()])(x)
         tree = debugprint(out, file="rich")
@@ -629,6 +628,31 @@ class TestDebugprintRich:
         assert len(tree.children) == 2
         inner_section = tree.children[1]
         assert len(inner_section.children) >= 1
+
+    def test_inner_graph_nodes_are_dimmed(self):
+        # The "Inner graphs:" header and all nodes within it should carry [dim]
+        # markup so the inner-graph section has lower visual contrast than the
+        # outer graph, making it easier to focus on the main computation.
+        x = dvector("x")
+        out = OpFromGraph([x], [x.std()])(x)
+        tree = debugprint(out, file="rich")
+        inner_section = tree.children[1]
+        # Header label should be dim
+        assert "dim" in str(inner_section.label), (
+            f"'Inner graphs:' header should have dim markup, got: {inner_section.label!r}"
+        )
+
+        # All nodes beneath the header should also be dim
+        def collect_labels(node):
+            return [str(node.label)] + [
+                lbl for child in node.children for lbl in collect_labels(child)
+            ]
+
+        inner_labels = collect_labels(inner_section)
+        non_dim = [lbl for lbl in inner_labels[1:] if "dim" not in lbl]
+        assert not non_dim, (
+            f"All inner-graph node labels should have dim markup, but these do not: {non_dim}"
+        )
 
     def test_repeated_node_no_duplication(self):
         # A repeated node renders canonically the first time (with full children)

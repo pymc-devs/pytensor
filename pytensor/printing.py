@@ -1188,7 +1188,7 @@ def _build_rich_tree(
             depth_stack = [*depth_stack[: current_depth + 1], child_tree]
 
     if inner_graph_vars:
-        inner_root = root.add("[bold]Inner graphs:[/bold]")
+        inner_root = root.add("[dim bold]Inner graphs:[/dim bold]")
         printed = set()
         for ig_var in inner_graph_vars:
             if ig_var.owner in printed:
@@ -1255,6 +1255,8 @@ def _build_rich_tree(
                 label = rich.markup.escape(label)
                 if gnode.is_repeat and not gnode.is_inner_graph_header:
                     label = f"[dim]{label} ···[/dim]"
+                else:
+                    label = f"[dim]{label}[/dim]"
                 parent_tree = ig_depth_stack[current_depth]
                 child_tree = parent_tree.add(label)
                 ig_depth_stack = [*ig_depth_stack[: current_depth + 1], child_tree]
@@ -1304,6 +1306,8 @@ def _build_rich_tree(
                     label = rich.markup.escape(label)
                     if gnode.is_repeat and not gnode.is_inner_graph_header:
                         label = f"[dim]{label} ···[/dim]"
+                    else:
+                        label = f"[dim]{label}[/dim]"
                     parent_tree = out_stack[current_depth]
                     child_tree = parent_tree.add(label)
                     out_stack = [*out_stack[: current_depth + 1], child_tree]
