@@ -50,6 +50,7 @@ C_CODE_PATH = Path(__file__).parent / "c_code"
 
 class Erf(UnaryScalarOp):
     preserves_zero = True
+    monotonic_increasing = True
     nfunc_spec = ("scipy.special.erf", 1, 1)
 
     def impl(self, x):
@@ -84,6 +85,7 @@ erf = Erf(upgrade_to_float, name="erf")
 
 
 class Erfc(UnaryScalarOp):
+    monotonic_decreasing = True
     nfunc_spec = ("scipy.special.erfc", 1, 1)
 
     def impl(self, x):
@@ -133,6 +135,7 @@ class Erfcx(UnaryScalarOp):
 
     """
 
+    monotonic_decreasing = True
     nfunc_spec = ("scipy.special.erfcx", 1, 1)
 
     def impl(self, x):
@@ -179,6 +182,7 @@ erfcx = Erfcx(upgrade_to_float_no_complex, name="erfcx")
 
 class Erfinv(UnaryScalarOp):
     preserves_zero = True
+    monotonic_increasing = True
     """
     Implements the inverse error function.
 
@@ -225,6 +229,7 @@ erfinv = Erfinv(upgrade_to_float_no_complex, name="erfinv")
 
 
 class Erfcinv(UnaryScalarOp):
+    monotonic_decreasing = True
     nfunc_spec = ("scipy.special.erfcinv", 1, 1)
 
     def impl(self, x):
@@ -1078,6 +1083,7 @@ j0 = J0(upgrade_to_float, name="j0")
 
 class I1(UnaryScalarOp):
     preserves_zero = True
+    monotonic_increasing = True
     """
     Modified Bessel function of the first kind of order 1.
     """
@@ -1181,6 +1187,7 @@ class Sigmoid(UnaryScalarOp):
     Logistic sigmoid function (1 / (1 + exp(-x)), also known as expit or inverse logit
     """
 
+    monotonic_increasing = True
     nfunc_spec = ("scipy.special.expit", 1, 1)
 
     def impl(self, x):
@@ -1234,6 +1241,8 @@ class Softplus(UnaryScalarOp):
     .. [Machler2012] Martin Mächler (2012).
         "Accurately computing `\log(1-\exp(- \mid a \mid))` Assessed by the Rmpfr package"
     """
+
+    monotonic_increasing = True
 
     def impl(self, x):
         # If x is an int8 or uint8, numpy.exp will compute the result in
@@ -1315,6 +1324,8 @@ class Log1mexp(UnaryScalarOp):
     .. [Machler2012] Martin Mächler (2012).
         "Accurately computing `\log(1-\exp(- \mid a \mid))` Assessed by the Rmpfr package"
     """
+
+    monotonic_decreasing = True
 
     def impl(self, x):
         if x < np.log(0.5):
