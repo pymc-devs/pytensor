@@ -2,7 +2,9 @@
 Tests of printing functionality
 """
 
+import io
 import logging
+import re
 from io import StringIO
 from textwrap import dedent
 
@@ -510,11 +512,9 @@ class TestDebugprintRich:
     rich = pytest.importorskip("rich")
 
     def test_return_type(self):
-        import rich.tree
-
         x = dvector("x")
         tree = debugprint(x.sum(), file="rich")
-        assert isinstance(tree, rich.tree.Tree)
+        assert isinstance(tree, self.rich.tree.Tree)
 
     def test_single_output_has_one_child(self):
         # One output variable → the hidden root should have exactly one child.
@@ -656,8 +656,6 @@ class TestDebugprintRich:
         # Both the canonical occurrence and the second (stub) occurrence of a
         # shared node should carry the same Rich color markup so the user can
         # visually trace where the shared subgraph comes from.
-        import re
-
         x = dvector("x")
         shared = x * 2
         tree = debugprint(shared + shared, file="rich")
@@ -676,4 +674,86 @@ class TestDebugprintRich:
         sentinel = second_mul.children[0]
         assert "bright_" in str(sentinel.label), (
             f"Sentinel should use a bright_ color, got: {sentinel.label!r}"
+        )
+
+    def test_two_distinct_shared_nodes_get_different_colors(self):
+        # Two independently shared nodes should each get a distinct color so
+        # they can be visually distinguished from one another.
+        x = dvector("x")
+        a = x * 2
+        b = x + 1
+        tree = debugprint((a + b) + (a - b), file="rich")
+        # Walk the tree and collect all color tags used on colored nodes.
+        color_re = re.compile(r"\[(\w+)\]")
+
+        def collect_colors(node):
+            colors = set()
+            m = color_re.findall(str(node.label))
+            if m:
+                colors.add(m[0])
+            for child in node.children:
+                colors |= collect_colors(child)
+            return colors
+
+        colors = collect_colors(tree)
+        # Both shared nodes must have been assigned a color, and they must differ.
+        assert len(colors) >= 2, (
+            f"Expected at least 2 distinct colors for 2 shared nodes, got: {colors}"
+        )
+
+    def test_markup_escaping(self):
+        # If a variable name or op contains Rich markup delimiters like [ or ],
+        # the label must be escaped so rendering does not raise.
+        x = dvector("x")
+        y = x * 2
+        y.name = "result[0]"  # square brackets would break Rich markup if unescaped
+        tree = debugprint(y.sum(), file="rich")
+        # Verify the name is present in the label (escaped form is still readable).
+        mul_node = tree.children[0].children[0]
+        assert "result" in str(mul_node.label)
+        # Verify Rich can render the tree without raising a markup error.
+        buf = io.StringIO()
+        console = self.rich.console.Console(file=buf, highlight=False)
+        console.print(tree)  # raises MarkupError if escaping is broken
+
+    def test_deep_shared_node_sentinel_depth(self):
+        # A shared node at depth > 1 should have its ··· sentinel as a child of
+        # its own stub entry, not misplaced at the wrong level in the tree.
+        x = dvector("x")
+        shared = x * 2  # will appear at depth 2 (grandchild of add)
+        out = shared.sum() + shared.mean()
+        tree = debugprint(out, file="rich")
+        add_node = tree.children[0]
+        # Second branch is mean (True_div); its Sum child wraps the shared Mul stub.
+        mean_node = add_node.children[1]  # True_div 'mean'
+        sum_under_mean = mean_node.children[0]  # Sum wrapping the shared Mul
+        shared_stub = sum_under_mean.children[0]  # colored Mul stub
+        assert "···" not in str(shared_stub.label), (
+            "The stub label itself should not contain ···; sentinel must be a child"
+        )
+        assert len(shared_stub.children) == 1, (
+            f"Stub should have exactly one child (sentinel), got: {shared_stub.children}"
+        )
+        assert "···" in str(shared_stub.children[0].label)
+
+    def test_shared_node_colored_across_outputs(self):
+        # A node shared between two separate outputs should be colored in both
+        # output subtrees, since node_colors and node_tree_map span all outputs.
+        x = dvector("x")
+        shared = x * 2
+        tree = debugprint([shared.sum(), shared.mean()], file="rich")
+        color_re = re.compile(r"\[(\w+)\]")
+
+        def find_colored_labels(node):
+            labels = []
+            if color_re.search(str(node.label)):
+                labels.append(str(node.label))
+            for child in node.children:
+                labels.extend(find_colored_labels(child))
+            return labels
+
+        colored = find_colored_labels(tree)
+        # The shared Mul node appears at least twice with a color tag.
+        assert len(colored) >= 2, (
+            f"Expected shared node colored in both output subtrees, got: {colored}"
         )
