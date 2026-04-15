@@ -35,15 +35,19 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
 
     ndim = 2 if op == dot else 3
     A = tensor("L", shape=(None,) * ndim)
-    if tag:
-        setattr(A.tag, tag + "_triangular", True)
+    if tag == "lower":
+        A_with_assumption = pt.specify_assumptions(A, lower_triangular=True)
+    elif tag == "upper":
+        A_with_assumption = pt.specify_assumptions(A, upper_triangular=True)
+    else:
+        A_with_assumption = A
 
     if product == "lower":
-        M = op(A, swapaxes(A, -1, -2))
+        M = op(A_with_assumption, swapaxes(A_with_assumption, -1, -2))
     elif product == "upper":
-        M = op(swapaxes(A, -1, -2), A)
+        M = op(swapaxes(A_with_assumption, -1, -2), A_with_assumption)
     else:
-        M = A
+        M = A_with_assumption
 
     C = cholesky(M, lower=(cholesky_form == "lower"))
     f = pytensor.function([A], C, mode=get_default_mode().including("cholesky_ldotlt"))

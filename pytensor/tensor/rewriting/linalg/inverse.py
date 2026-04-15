@@ -37,24 +37,15 @@ def transpose_of_inv(fgraph, node):
 @register_stabilize
 @node_rewriter([Dot])
 def inv_to_solve(fgraph, node):
-    """
-    This utilizes a boolean `symmetric` tag on the matrices.
-
-    TODO: Exploit other assumptions like 'triangular' and 'psd'
-    TODO: Handle expand_dims / matrix transpose between inv and dot
-    """
+    """Replace inv(X) @ b with solve(X, b) and b @ inv(X) with solve(X.T, b.T).T."""
     l, r = node.inputs
     match l.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            assume_a = "sym" if getattr(X.tag, "symmetric", False) else "gen"
-            return [solve(X, r, assume_a=assume_a)]
+            return [solve(X, r)]
 
     match r.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            if getattr(X.tag, "symmetric", False):
-                return [solve(X, (l.mT), assume_a="sym").mT]
-            else:
-                return [solve((X.mT), (l.mT)).mT]
+            return [solve(X.mT, l.mT).mT]
 
     return None
 

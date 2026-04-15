@@ -1,6 +1,7 @@
 from pytensor import tensor as pt
 from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
 from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.triangular import LOWER_TRIANGULAR, UPPER_TRIANGULAR
 from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
@@ -29,31 +30,29 @@ def cholesky_ldotlt(fgraph, node):
     or cholesky(dot(U.T, U), upper=True) = U where U is upper triangular.
 
     Also works with matmul.
-
-    This utilizes a boolean `lower_triangular` or `upper_triangular` tag on matrices.
     """
     A = node.inputs[0]
     lower = node.op.core_op.lower
 
     match A.owner_op_and_inputs:
         case (Blockwise(Dot()) | Dot(), l, r):
-            lower_triangular = getattr(l.tag, "lower_triangular", False)
-            match (lower_triangular, r.owner_op_and_inputs):
-                # cholesky(dot(L,L.T)) case
-                case (
-                    True,
-                    (DimShuffle(is_left_expanded_matrix_transpose=True), l_T),
-                ) if l_T == l:
-                    return [l] if lower else [r]
+            if check_assumption(fgraph, l, LOWER_TRIANGULAR):
+                match r.owner_op_and_inputs:
+                    # cholesky(dot(L,L.T)) case
+                    case (
+                        DimShuffle(is_left_expanded_matrix_transpose=True),
+                        l_T,
+                    ) if l_T == l:
+                        return [l] if lower else [r]
 
-            upper_triangular = getattr(r.tag, "upper_triangular", False)
-            match (upper_triangular, l.owner_op_and_inputs):
-                # cholesky(dot(U.T,U)) case
-                case (
-                    True,
-                    (DimShuffle(is_left_expanded_matrix_transpose=True), r_T),
-                ) if r_T == r:
-                    return [l] if lower else [r]
+            if check_assumption(fgraph, r, UPPER_TRIANGULAR):
+                match l.owner_op_and_inputs:
+                    # cholesky(dot(U.T,U)) case
+                    case (
+                        DimShuffle(is_left_expanded_matrix_transpose=True),
+                        r_T,
+                    ) if r_T == r:
+                        return [l] if lower else [r]
 
 
 @register_canonicalize

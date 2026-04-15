@@ -5,6 +5,8 @@ from pytensor.graph import Constant
 from pytensor.graph.rewriting.basic import node_rewriter
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scalar.basic import Mul
+from pytensor.tensor.assumptions.symmetric import SYMMETRIC
+from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import (
     Eye,
     TensorVariable,
@@ -80,5 +82,5 @@ def is_eye_mul(x) -> None | tuple[TensorVariable, TensorVariable]:
 @node_rewriter([OpPattern(DimShuffle, is_left_expanded_matrix_transpose=True)])
 def useless_symmetric_transpose(fgraph, node):
     x = node.inputs[0]
-    if getattr(x.tag, "symmetric", False):
+    if check_assumption(fgraph, x, SYMMETRIC):
         return [atleast_Nd(x, n=node.outputs[0].type.ndim)]

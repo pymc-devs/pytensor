@@ -75,30 +75,34 @@ def test_generic_solve_to_solve_triangular():
 
 
 def test_psd_solve_with_chol():
-    X = matrix("X")
-    X.tag.psd = True
-    X_inv = pt.linalg.solve(X, pt.identity_like(X))
+    """Test that solve(A, b) with PSD A gets rewritten to cholesky + cho_solve."""
+    A = matrix("A")
+    b = matrix("b")
+    A_psd = pt.specify_assumptions(A, positive_definite=True)
+    out = pt.linalg.solve(A_psd, b)
 
-    f = pytensor.function([X], X_inv, mode="FAST_RUN")
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
 
-    nodes = f.maker.fgraph.apply_nodes
+    L = cholesky(A_psd)
+    expected = cho_solve((L, True), b, b_ndim=2)
 
-    assert not any(isinstance(node.op, Solve) for node in nodes)
-    assert any(isinstance(node.op, Cholesky) for node in nodes)
-    assert any(isinstance(node.op, SolveTriangular) for node in nodes)
+    assert_equal_computations([rewritten], [expected])
 
-    # Numeric test
-    rng = np.random.default_rng(sum(map(ord, "test_psd_solve_with_chol")))
 
-    L = rng.normal(size=(5, 5)).astype(config.floatX)
-    X_psd = L @ L.T
-    X_psd_inv = f(X_psd)
-    assert_allclose(
-        X_psd_inv,
-        np.linalg.inv(X_psd),
-        atol=1e-4 if config.floatX == "float32" else 1e-8,
-        rtol=1e-4 if config.floatX == "float32" else 1e-8,
-    )
+def test_paired_triangular_solves_to_cho_solve():
+    """Test that paired triangular solves from Cholesky get fused into cho_solve."""
+    A = matrix("A")
+    b = matrix("b")
+
+    # Manually create the pattern: solve_triangular(L.T, solve_triangular(L, b))
+    L = pt.linalg.cholesky(A, lower=True)
+    Li_b = pt.linalg.solve_triangular(L, b, lower=True, b_ndim=2)
+    x = pt.linalg.solve_triangular(L.mT, Li_b, lower=False, b_ndim=2)
+
+    rewritten = rewrite_graph(x, include=("canonicalize", "stabilize", "specialize"))
+    expected = cho_solve((L, True), b, b_ndim=2)
+
+    assert_equal_computations([rewritten], [expected])
 
 
 class TestBatchedVectorBSolveToMatrixBSolve:
