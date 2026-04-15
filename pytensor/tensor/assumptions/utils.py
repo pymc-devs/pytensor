@@ -91,11 +91,15 @@ def indexes_diagonal(node) -> bool:
     return False
 
 
-def check_assumption(fgraph: FunctionGraph, var: Any, key: AssumptionKey) -> bool:
+def check_assumption(
+    fgraph: FunctionGraph | None, var: Any, key: AssumptionKey
+) -> bool:
     """Return True iff *key* is definitively TRUE for *var* in *fgraph*.
 
     Lazily attaches :class:`AssumptionFeature` to *fgraph* if it is not already present.
     """
+    if fgraph is None:
+        return None
     feature = getattr(fgraph, "assumption_feature", None)
     if feature is None:
         feature = AssumptionFeature()
