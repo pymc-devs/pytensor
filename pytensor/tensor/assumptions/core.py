@@ -102,7 +102,7 @@ def _validate_output_states(
             f"infer_assumption returned {len(output_states)} states for "
             f"{len(node.outputs)} outputs on node {node!r}"
         )
-    return [FactState(s) for s in output_states]
+    return output_states
 
 
 def infer_assumption_for_node(
@@ -228,7 +228,7 @@ class AssumptionFeature(Feature):
                 stack.extend(owner.inputs)
 
         # Phase 2 — evaluate bottom-up (inputs before outputs)
-        prev_key = getattr(self, "_current_key", None)
+        prev_key: AssumptionKey | None = getattr(self, "_current_key", None)
         self._current_key = key
         try:
             for v in reversed(order):

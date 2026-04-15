@@ -36,7 +36,7 @@ from pytensor.tensor.assumptions.core import (
     FactState,
     register_assumption,
 )
-from pytensor.tensor.assumptions.utils import eye_is_identity, indexes_diagonal, true_if
+from pytensor.tensor.assumptions.utils import eye_is_identity, true_if
 from pytensor.tensor.basic import (
     Alloc,
     AllocDiag,
@@ -50,10 +50,29 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.inverse import MatrixInverse, MatrixPinv
 from pytensor.tensor.linalg.products import KroneckerProduct
 from pytensor.tensor.math import Dot
-from pytensor.tensor.subtensor import AdvancedIncSubtensor, IncSubtensor
+from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
+    IncSubtensor,
+    indices_from_subtensor,
+)
 
 
 DIAGONAL = AssumptionKey("diagonal")
+
+
+def indexes_diagonal(node) -> bool:
+    """True when an ``*IncSubtensor*`` node modifies only diagonal entries."""
+
+    op = node.op
+    if not isinstance(op, AdvancedIncSubtensor | IncSubtensor):
+        return False
+
+    indices = indices_from_subtensor(node.inputs[2:], op.idx_list)
+    if len(indices) < 2:
+        return False
+    if any(isinstance(idx, slice) for idx in indices):
+        return False
+    return all(indices[0] is idx for idx in indices[1:])
 
 
 @register_assumption(DIAGONAL, Eye)

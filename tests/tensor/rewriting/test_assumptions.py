@@ -1,6 +1,7 @@
 import pytest
 
 import pytensor.tensor as pt
+from pytensor.graph import rewrite_graph
 from pytensor.graph.fg import FunctionGraph
 from pytensor.tensor.assumptions import (
     ALL_KEYS,
@@ -339,7 +340,7 @@ class TestSubtensorDiagonalPreservation:
     def test_set_scalar_diagonal_entry(self):
         d = pt.eye(5)
         i = pt.iscalar("i")
-        y = pt.set_subtensor(d[i, i], 1.0)
+        y = rewrite_graph(pt.set_subtensor(d[i, i], 1.0), include=["merge"])
         _, af = make_fgraph(y, inputs=[i])
         assert af.check(y, DIAGONAL)
 
