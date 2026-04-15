@@ -286,6 +286,39 @@ def test_matmul_diagonal_generic_is_unknown():
     assert af.get(y, DIAGONAL) == FactState.UNKNOWN
 
 
+def test_dot_xxt_is_psd_and_symmetric():
+    """dot(x, x.T) is positive semi-definite and symmetric."""
+    x = pt.matrix("x")
+    gram = pt.dot(x, x.T)
+    _, af = make_fgraph(gram, inputs=[x])
+    assert af.check(gram, POSITIVE_DEFINITE)
+    assert af.check(gram, SYMMETRIC)
+
+
+def test_dot_xtx_is_psd_and_symmetric():
+    """dot(x.T, x) is positive semi-definite and symmetric."""
+    x = pt.matrix("x")
+    gram = pt.dot(x.T, x)
+    _, af = make_fgraph(gram, inputs=[x])
+    assert af.check(gram, POSITIVE_DEFINITE)
+    assert af.check(gram, SYMMETRIC)
+
+
+def test_dot_xxH_complex_is_psd():
+    """dot(x, x.conj().T) with complex dtype IS positive semi-definite."""
+    x = pt.cmatrix("x")  # complex64
+
+    # Test x @ x.conj().T
+    gram1 = pt.dot(x, x.conj().T)
+    _, af = make_fgraph(gram1, inputs=[x])
+    assert af.check(gram1, POSITIVE_DEFINITE)
+
+    # Test x @ x.T.conj() (equivalent)
+    gram2 = pt.dot(x, x.T.conj())
+    _, af2 = make_fgraph(gram2, inputs=[x])
+    assert af2.check(gram2, POSITIVE_DEFINITE)
+
+
 class TestSubtensorDiagonalPreservation:
     def test_set_diagonal_entries(self):
         d = pt.eye(5)
