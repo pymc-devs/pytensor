@@ -144,7 +144,9 @@ class AssumptionFeature(Feature):
     Results are cached and automatically invalidated when the graph changes.
     """
 
-    __slots__ = ("cache", "fgraph", "user_facts")
+    __slots__ = ("_current_key", "cache", "fgraph", "user_facts")
+
+    _current_key: "AssumptionKey | None"
 
     def on_attach(self, fgraph: Any) -> None:
         if hasattr(fgraph, "assumption_feature"):

@@ -367,7 +367,7 @@ def _split_decomp_and_solve_steps(
             case (DimShuffle(is_left_expand_dims=True), root_a):  # type: ignore[misc]
                 transposed = False
             case (DimShuffle(is_left_expanded_matrix_transpose=True), root_a):  # type: ignore[misc]
-                transposed = True
+                transposed = True  # type: ignore[unreachable]
 
         return root_a, transposed
 
