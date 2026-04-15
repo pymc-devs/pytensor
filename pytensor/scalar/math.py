@@ -49,6 +49,7 @@ C_CODE_PATH = Path(__file__).parent / "c_code"
 
 
 class Erf(UnaryScalarOp):
+    preserves_zero = True
     nfunc_spec = ("scipy.special.erf", 1, 1)
 
     def impl(self, x):
@@ -177,6 +178,7 @@ erfcx = Erfcx(upgrade_to_float_no_complex, name="erfcx")
 
 
 class Erfinv(UnaryScalarOp):
+    preserves_zero = True
     """
     Implements the inverse error function.
 
@@ -1020,6 +1022,7 @@ jv = Jv(upgrade_to_float, name="jv")
 
 
 class J1(UnaryScalarOp):
+    preserves_zero = True
     """
     Bessel function of the first kind of order 1.
     """
@@ -1074,6 +1077,7 @@ j0 = J0(upgrade_to_float, name="j0")
 
 
 class I1(UnaryScalarOp):
+    preserves_zero = True
     """
     Modified Bessel function of the first kind of order 1.
     """
