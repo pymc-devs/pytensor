@@ -1253,12 +1253,11 @@ def _build_rich_tree(
                     op_information=op_information,
                 )
                 label = rich.markup.escape(label)
-                if gnode.is_repeat and not gnode.is_inner_graph_header:
-                    label = f"[dim]{label} ···[/dim]"
-                else:
-                    label = f"[dim]{label}[/dim]"
+                label = f"[dim]{label}[/dim]"
                 parent_tree = ig_depth_stack[current_depth]
                 child_tree = parent_tree.add(label)
+                if gnode.is_repeat and not gnode.is_inner_graph_header:
+                    child_tree.add("[italic dim]···[/italic dim]")
                 ig_depth_stack = [*ig_depth_stack[: current_depth + 1], child_tree]
 
             # The header tree node is the first child of inner_root
@@ -1304,12 +1303,11 @@ def _build_rich_tree(
                         op_information=op_information,
                     )
                     label = rich.markup.escape(label)
-                    if gnode.is_repeat and not gnode.is_inner_graph_header:
-                        label = f"[dim]{label} ···[/dim]"
-                    else:
-                        label = f"[dim]{label}[/dim]"
+                    label = f"[dim]{label}[/dim]"
                     parent_tree = out_stack[current_depth]
                     child_tree = parent_tree.add(label)
+                    if gnode.is_repeat and not gnode.is_inner_graph_header:
+                        child_tree.add("[italic dim]···[/italic dim]")
                     out_stack = [*out_stack[: current_depth + 1], child_tree]
 
     return root
