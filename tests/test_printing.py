@@ -631,16 +631,20 @@ class TestDebugprintRich:
         assert len(inner_section.children) >= 1
 
     def test_repeated_node_no_duplication(self):
-        # When a node is repeated, it should appear as a single labeled line
-        # with ··· appended (not as a parent line with a ··· child beneath it).
+        # A repeated node renders canonically the first time (with full children)
+        # and as a colored stub the second time, with ··· as its only child.
         x = dvector("x")
         shared = x * 2
         tree = debugprint(shared + shared, file="rich")
         add_node = tree.children[0]
-        # The add has two children: canonical Mul and sentinel Mul ···
+        # The add has two children: canonical Mul and second Mul occurrence
         assert len(add_node.children) == 2
-        sentinel = add_node.children[1]
-        # The sentinel should have ··· in its label and NO children of its own
+        second_mul = add_node.children[1]
+        # The second occurrence has exactly one child: the ··· sentinel
+        assert len(second_mul.children) == 1, (
+            f"Second occurrence should have exactly one (sentinel) child, got: {second_mul.children}"
+        )
+        sentinel = second_mul.children[0]
         assert "···" in str(sentinel.label), (
             f"Expected '···' in sentinel label, got: {sentinel.label!r}"
         )
@@ -649,22 +653,27 @@ class TestDebugprintRich:
         )
 
     def test_repeated_nodes_same_color(self):
-        # A shared Apply node appears once canonically and once as a ··· sentinel
-        # on the same level.  Both should carry the same Rich color markup so the
-        # user can visually trace where the shared subgraph comes from.
+        # Both the canonical occurrence and the second (stub) occurrence of a
+        # shared node should carry the same Rich color markup so the user can
+        # visually trace where the shared subgraph comes from.
         import re
 
         x = dvector("x")
         shared = x * 2
         tree = debugprint(shared + shared, file="rich")
         add_node = tree.children[0]
-        canonical_mul = add_node.children[0]  # Mul [id B]  (colored)
-        repeat_mul = add_node.children[1]  # Mul [id B] ···  (colored, no children)
+        canonical_mul = add_node.children[0]  # Mul [id B]  (colored, full children)
+        second_mul = add_node.children[1]  # Mul [id B]  (colored, ··· child only)
         color_re = re.compile(r"\[(\w+)\]")
         canonical_colors = color_re.findall(str(canonical_mul.label))
-        repeat_colors = color_re.findall(str(repeat_mul.label))
+        second_colors = color_re.findall(str(second_mul.label))
         assert canonical_colors, "canonical shared node should have a color tag"
-        assert repeat_colors, "repeat shared node should have a color tag"
-        assert canonical_colors[0] == repeat_colors[0], (
-            "canonical and repeat occurrences of the same node should share a color"
+        assert second_colors, "second occurrence of shared node should have a color tag"
+        assert canonical_colors[0] == second_colors[0], (
+            "canonical and second occurrences of the same node should share a color"
+        )
+        # The sentinel child beneath the second occurrence uses a bright_ variant.
+        sentinel = second_mul.children[0]
+        assert "bright_" in str(sentinel.label), (
+            f"Sentinel should use a bright_ color, got: {sentinel.label!r}"
         )
