@@ -370,9 +370,8 @@ class OpFromGraph(Op, HasInnerGraph):
             )
         elif self.shared_inputs:
             warnings.warn(
-                "Implicit shared-variable capture in OpFromGraph under strict=False is deprecated and "
-                "will be removed in a future release. Include shared variables explicitly in "
-                "OpFromGraph(inputs=..., ...) or use strict=True.",
+                "Implicit capture of shared variables is deprecated. "
+                "Please provide shared variables explicitly in the 'inputs' list.",
                 FutureWarning,
                 stacklevel=2,
             )
