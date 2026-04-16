@@ -274,7 +274,7 @@ def local_lift_transpose_through_dot(fgraph, node):
 @register_stabilize
 @node_rewriter([_matmul, Dot])
 def dot_diag_to_elemwise(fgraph, node):
-    """Replace matmul with a diagonal operand by elementwise scaling.
+    """Replace matmul with a square and diagonal operand by elementwise scaling.
 
     dot(D1, D2) -> alloc_diag(diagonal(D1) * diagonal(D2))   (both diagonal)
     dot(D, X) -> diagonal(D)[..., :, None] * X   (row scaling)
@@ -283,8 +283,12 @@ def dot_diag_to_elemwise(fgraph, node):
     a, b = node.inputs
     old_out = node.outputs[0]
 
-    a_is_diag = check_assumption(fgraph, a, DIAGONAL)
-    b_is_diag = check_assumption(fgraph, b, DIAGONAL)
+    def _is_static_square(var):
+        shape = var.type.shape
+        return len(shape) >= 2 and shape[-2] == shape[-1] and shape[-2] is not None
+
+    a_is_diag = check_assumption(fgraph, a, DIAGONAL) and _is_static_square(a)
+    b_is_diag = check_assumption(fgraph, b, DIAGONAL) and _is_static_square(b)
 
     if a_is_diag and b_is_diag:
         a_diag = diagonal(a, axis1=-2, axis2=-1)
