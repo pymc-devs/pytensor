@@ -499,8 +499,11 @@ def test_schur_of_diag_sort(sort):
     T_val, Z_val = f(d_val)
     T_ref, _ = f_no_rewrite(d_val)
 
-    # T is uniquely determined by the sort criterion; Z can differ by column signs from LAPACK
-    np.testing.assert_allclose(T_val, T_ref, atol=1e-12)
+    # Order within each sort group (selected / non-selected) is not uniquely
+    # determined, so compare sorted diagonals instead of element-wise.
+    np.testing.assert_allclose(
+        np.sort(np.diag(T_val)), np.sort(np.diag(T_ref)), atol=1e-12
+    )
     np.testing.assert_allclose(Z_val @ T_val @ Z_val.T, np.diag(d_val), atol=1e-12)
 
 
@@ -583,16 +586,27 @@ def test_qz_of_diag_sort(sort, return_eigenvalues):
     if return_eigenvalues:
         AA_val, BB_val, alpha_val, beta_val, Q_val, Z_val = result
         AA_ref, BB_ref, alpha_ref, beta_ref, *_ = ref
-        # AA, BB, alpha, beta are uniquely determined; Q/Z can differ by column signs from LAPACK
-        np.testing.assert_allclose(AA_val, AA_ref, atol=1e-12)
-        np.testing.assert_allclose(BB_val, BB_ref, atol=1e-12)
-        np.testing.assert_allclose(alpha_val, alpha_ref, atol=1e-12)
-        np.testing.assert_allclose(beta_val, beta_ref, atol=1e-12)
+        # Order within each sort group is not uniquely determined, so compare
+        # sorted diagonals / eigenvalue arrays instead of element-wise.
+        np.testing.assert_allclose(
+            np.sort(np.diag(AA_val)), np.sort(np.diag(AA_ref)), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            np.sort(np.diag(BB_val)), np.sort(np.diag(BB_ref)), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            np.sort(np.abs(alpha_val)), np.sort(np.abs(alpha_ref)), atol=1e-12
+        )
+        np.testing.assert_allclose(np.sort(beta_val), np.sort(beta_ref), atol=1e-12)
     else:
         AA_val, BB_val, Q_val, Z_val = result
         AA_ref, BB_ref, *_ = ref
-        np.testing.assert_allclose(AA_val, AA_ref, atol=1e-12)
-        np.testing.assert_allclose(BB_val, BB_ref, atol=1e-12)
+        np.testing.assert_allclose(
+            np.sort(np.diag(AA_val)), np.sort(np.diag(AA_ref)), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            np.sort(np.diag(BB_val)), np.sort(np.diag(BB_ref)), atol=1e-12
+        )
 
     np.testing.assert_allclose(Q_val @ AA_val @ Z_val.T, np.diag(a_val), atol=1e-12)
     np.testing.assert_allclose(Q_val @ BB_val @ Z_val.T, np.diag(b_val), atol=1e-12)
