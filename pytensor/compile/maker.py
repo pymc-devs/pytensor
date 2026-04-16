@@ -177,18 +177,20 @@ def function(
 
     Manual RNG updates:
 
-    >>> rng = pytensor.shared(np.random.default_rng(123))
-    >>> next_rng, draw = pt.random.uniform(rng=rng).owner.outputs
+    >>> rng = pt.random.shared_rng(seed=123)
+    >>> next_rng, draw = rng.normal()
     >>> sample_once = pytensor.function([], draw, updates={rng: next_rng})
     >>> float(sample_once())  # doctest: +SKIP
     0.6823518632481435
 
     Substitutions with ``givens``:
 
-    >>> y = pt.vector("y")
-    >>> add_const = pytensor.function([x], x + y, givens={y: pt.ones_like(x)})
-    >>> add_const(np.array([3.0, 4.0], dtype=np.float64))
-    array([4., 5.])
+    >>> a = pt.scalar("a")
+    >>> b = pt.scalar("b")
+    >>> x = pt.vector("x")
+    >>> affine = pytensor.function([a, x], a + b * x, givens={b: pt.cast(0.0, b.dtype)})
+    >>> affine(2.0, np.array([3.0, 4.0], dtype=np.float64))
+    array([2., 2.])
 
     Notes
     -----

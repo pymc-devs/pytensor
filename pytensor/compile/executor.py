@@ -328,9 +328,9 @@ class Function:
 
         ``copy`` and random shared variables:
 
-        >>> srng = pt.random.RandomStream(seed=123)
-        >>> rv = srng.uniform()
-        >>> f_rng = pytensor.function([], rv)
+        >>> rng = pt.random.shared_rng(seed=123)
+        >>> next_rng, draw = rng.uniform()
+        >>> f_rng = pytensor.function([], draw, updates={rng: next_rng})
         >>> g_rng = f_rng.copy()
         >>> # `f_rng` and `g_rng` share RNG state by default.
         >>> _ = f_rng()  # doctest: +SKIP
@@ -339,10 +339,8 @@ class Function:
         To give the copied function an independent RNG stream, swap the RNG
         shared variable:
 
-        >>> import numpy as np
-        >>> rng_shared = rv.owner.inputs[0]
-        >>> new_rng = pytensor.shared(np.random.default_rng(123))
-        >>> g_independent = f_rng.copy(swap={rng_shared: new_rng})
+        >>> new_rng = pt.random.shared_rng(seed=123)
+        >>> g_independent = f_rng.copy(swap={rng: new_rng})
         """
 
         # helper function
