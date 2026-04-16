@@ -1331,8 +1331,6 @@ class UnaryScalarOp(ScalarOp):
     monotonic_increasing = False
     monotonic_decreasing = False
 
-    domain = (-np.inf, np.inf)
-
     def c_code_contiguous(self, node, name, inputs, outputs, sub):
         (x,) = inputs
         (z,) = outputs
@@ -1664,8 +1662,6 @@ switch = Switch()
 
 
 class UnaryBitOp(UnaryScalarOp):
-    monotonic_decreasing = True
-
     def output_types(self, *input_types):
         for i in input_types[0]:
             if i not in discrete_types:
@@ -1761,6 +1757,7 @@ and_ = AND()
 
 class Invert(UnaryBitOp):
     nfunc_spec = ("invert", 1, 1)
+    monotonic_decreasing = True
 
     def impl(self, x):
         return ~x
