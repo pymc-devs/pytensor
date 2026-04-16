@@ -1327,6 +1327,10 @@ class UnaryScalarOp(ScalarOp):
     amd_float32: str | None = None
     amd_float64: str | None = None
 
+    preserves_zero = False
+    monotonic_increasing = False
+    monotonic_decreasing = False
+
     def c_code_contiguous(self, node, name, inputs, outputs, sub):
         (x,) = inputs
         (z,) = outputs
@@ -1753,6 +1757,7 @@ and_ = AND()
 
 class Invert(UnaryBitOp):
     nfunc_spec = ("invert", 1, 1)
+    monotonic_decreasing = True
 
     def impl(self, x):
         return ~x
@@ -2442,6 +2447,9 @@ second = Second(name="second")
 
 
 class Identity(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     def impl(self, input):
         return input
 
@@ -2558,6 +2566,7 @@ def cast(x, dtype):
 
 
 class Abs(UnaryScalarOp):
+    preserves_zero = True
     nfunc_spec = ("abs", 1, 1)
 
     def make_node(self, x):
@@ -2608,6 +2617,9 @@ abs = Abs(same_out)
 
 
 class Sign(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     nfunc_spec = ("sign", 1, 1)
 
     @staticmethod
@@ -2656,6 +2668,9 @@ sign = Sign(name="sign", output_types_preference=Sign._output_types_preference)
 
 
 class Ceil(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     nfunc_spec = ("ceil", 1, 1)
 
     def impl(self, x):
@@ -2682,6 +2697,9 @@ ceil = Ceil(upgrade_to_float_no_complex, name="ceil")
 
 
 class Floor(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     nfunc_spec = ("floor", 1, 1)
 
     def impl(self, x):
@@ -2708,6 +2726,9 @@ floor = Floor(upgrade_to_float_no_complex, name="floor")
 
 
 class Trunc(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     nfunc_spec = ("trunc", 1, 1)
 
     def impl(self, x):
@@ -2728,6 +2749,9 @@ trunc = Trunc(upgrade_to_float_no_complex, name="trunc")
 
 
 class RoundHalfToEven(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     """
     This function implement the same rounding than numpy: Round half to even.
 
@@ -2816,6 +2840,9 @@ def round_half_away_from_zero_vec(a):
 
 
 class RoundHalfAwayFromZero(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     """
     Implement the same rounding algo as c round() fct.
 
@@ -2850,6 +2877,8 @@ round_half_away_from_zero = RoundHalfAwayFromZero(same_out_float_only)
 
 
 class Neg(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_decreasing = True
     # We can use numpy.negative here, because even if it gives unexpected
     # results on Boolean arrays, it will be passed other dtypes as PyTensor
     # does not have a Boolean type for tensors.
@@ -2925,6 +2954,7 @@ class Log(UnaryScalarOp):
 
     """
 
+    monotonic_increasing = True
     nfunc_spec = ("log", 1, 1)
     amd_float32 = "amd_vrsa_logf"
     amd_float64 = "amd_vrda_log"
@@ -2971,6 +3001,7 @@ class Log2(UnaryScalarOp):
 
     """
 
+    monotonic_increasing = True
     nfunc_spec = ("log2", 1, 1)
     amd_float32 = "amd_vrsa_log2f"
     amd_float64 = "amd_vrda_log2"
@@ -3014,6 +3045,7 @@ class Log10(UnaryScalarOp):
 
     """
 
+    monotonic_increasing = True
     nfunc_spec = ("log10", 1, 1)
     amd_float32 = "amd_vrsa_log10f"
     amd_float64 = "amd_vrda_log10"
@@ -3052,6 +3084,8 @@ log10 = Log10(upgrade_to_float, name="log10")
 
 
 class Log1p(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
     """
     log(1+x).
 
@@ -3093,6 +3127,7 @@ log1p = Log1p(upgrade_to_float, name="log1p")
 
 
 class Exp(UnaryScalarOp):
+    monotonic_increasing = True
     nfunc_spec = ("exp", 1, 1)
     amd_float32 = "amd_vrsa_expf"
     amd_float64 = "amd_vrda_exp"
@@ -3131,6 +3166,7 @@ exp = Exp(upgrade_to_float, name="exp")
 
 
 class Exp2(UnaryScalarOp):
+    monotonic_increasing = True
     nfunc_spec = ("exp2", 1, 1)
 
     def impl(self, x):
@@ -3167,6 +3203,8 @@ exp2 = Exp2(upgrade_to_float, name="exp2")
 
 
 class Expm1(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
     nfunc_spec = ("expm1", 1, 1)
 
     def impl(self, x):
@@ -3206,6 +3244,7 @@ expm1 = Expm1(upgrade_to_float, name="expm1")
 
 
 class Sqr(UnaryScalarOp):
+    preserves_zero = True
     nfunc_spec = ("square", 1, 1)
 
     def impl(self, x):
@@ -3234,6 +3273,9 @@ sqr = Sqr(same_out, name="sqr")
 
 
 class Sqrt(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     nfunc_spec = ("sqrt", 1, 1)
 
     def impl(self, x):
@@ -3270,6 +3312,9 @@ sqrt = Sqrt(upgrade_to_float, name="sqrt")
 
 
 class Deg2Rad(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     nfunc_spec = ("deg2rad", 1, 1)
 
     def impl(self, x):
@@ -3305,6 +3350,9 @@ deg2rad = Deg2Rad(upgrade_to_float, name="deg2rad")
 
 
 class Rad2Deg(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
+
     nfunc_spec = ("rad2deg", 1, 1)
 
     def impl(self, x):
@@ -3378,6 +3426,7 @@ cos = Cos(upgrade_to_float, name="cos")
 
 
 class ArcCos(UnaryScalarOp):
+    monotonic_decreasing = True
     nfunc_spec = ("arccos", 1, 1)
 
     def impl(self, x):
@@ -3414,6 +3463,7 @@ arccos = ArcCos(upgrade_to_float, name="arccos")
 
 
 class Sin(UnaryScalarOp):
+    preserves_zero = True
     nfunc_spec = ("sin", 1, 1)
     amd_float32 = "amd_vrsa_sinf"
     amd_float64 = "amd_vrda_sin"
@@ -3452,6 +3502,8 @@ sin = Sin(upgrade_to_float, name="sin")
 
 
 class ArcSin(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
     nfunc_spec = ("arcsin", 1, 1)
 
     def impl(self, x):
@@ -3488,6 +3540,7 @@ arcsin = ArcSin(upgrade_to_float, name="arcsin")
 
 
 class Tan(UnaryScalarOp):
+    preserves_zero = True
     nfunc_spec = ("tan", 1, 1)
 
     def impl(self, x):
@@ -3524,6 +3577,8 @@ tan = Tan(upgrade_to_float, name="tan")
 
 
 class ArcTan(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
     nfunc_spec = ("arctan", 1, 1)
 
     def impl(self, x):
@@ -3647,6 +3702,7 @@ cosh = Cosh(upgrade_to_float, name="cosh")
 
 
 class ArcCosh(UnaryScalarOp):
+    monotonic_increasing = True
     nfunc_spec = ("arccosh", 1, 1)
 
     def impl(self, x):
@@ -3683,6 +3739,8 @@ arccosh = ArcCosh(upgrade_to_float, name="arccosh")
 
 
 class Sinh(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
     """
     sinh(x) = (exp(x) - exp(-x)) / 2.
 
@@ -3724,6 +3782,8 @@ sinh = Sinh(upgrade_to_float, name="sinh")
 
 
 class ArcSinh(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
     nfunc_spec = ("arcsinh", 1, 1)
 
     def impl(self, x):
@@ -3760,6 +3820,8 @@ arcsinh = ArcSinh(upgrade_to_float, name="arcsinh")
 
 
 class Tanh(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
     """
     tanh(x) = sinh(x) / cosh(x)
             = (exp(2*x) - 1) / (exp(2*x) + 1).
@@ -3802,6 +3864,8 @@ tanh = Tanh(upgrade_to_float, name="tanh")
 
 
 class ArcTanh(UnaryScalarOp):
+    preserves_zero = True
+    monotonic_increasing = True
     nfunc_spec = ("arctanh", 1, 1)
 
     def impl(self, x):
@@ -3838,6 +3902,7 @@ arctanh = ArcTanh(upgrade_to_float, name="arctanh")
 
 
 class Real(UnaryScalarOp):
+    preserves_zero = True
     """
     Extract the real coordinate of a complex number.
 
@@ -3862,6 +3927,7 @@ real = Real(real_out, name="real")
 
 
 class Imag(UnaryScalarOp):
+    preserves_zero = True
     nfunc_spec = ("imag", 1, 1)
 
     def impl(self, x):
@@ -3954,6 +4020,7 @@ complex = Complex(name="complex")
 
 
 class Conj(UnaryScalarOp):
+    preserves_zero = True
     nfunc_spec = ("conj", 1, 1)
 
     def impl(self, x):

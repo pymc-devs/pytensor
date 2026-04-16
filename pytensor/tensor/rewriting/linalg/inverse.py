@@ -160,4 +160,4 @@ def lift_linalg_of_expanded_matrices(fgraph: FunctionGraph, node: Apply):
         case (Blockwise(BlockDiagonal()), *inner_matrices):
             return [block_diag(*(outer_op(m) for m in inner_matrices))]
         case (KroneckerProduct(), *inner_matrices):
-            return [kron(*(outer_op(m) for m in inner_matrices))]  # type: ignore[unreachable]
+            return [kron(*(outer_op(m) for m in inner_matrices))]
