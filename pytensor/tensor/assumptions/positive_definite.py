@@ -94,7 +94,7 @@ def _elemwise(op, feature, fgraph, node, input_states):
                 pass
         return [FactState.UNKNOWN]
 
-    return [FactState.UNKNOWN]
+    return [FactState.UNKNOWN] * len(node.outputs)
 
 
 def _is_conjugate_transpose_of(y, x):

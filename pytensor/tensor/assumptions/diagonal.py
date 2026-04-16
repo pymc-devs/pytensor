@@ -217,4 +217,4 @@ def _elemwise(op, feature, fgraph, node, input_states):
     if isinstance(scalar_op, _ZERO_PRESERVING_UNARY) and len(node.inputs) == 1:
         return true_if(input_states[0])
 
-    return [FactState.UNKNOWN]
+    return [FactState.UNKNOWN] * len(node.outputs)
