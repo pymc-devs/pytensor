@@ -1,0 +1,68 @@
+name: Bump numba upper bound
+
+# Watches PyPI for new numba releases. When one appears above our current
+# upper bound in pyproject.toml, opens a PR raising the cap so our normal
+# CI (Tests workflow) validates the new version before we ship it.
+
+on:
+  schedule:
+    # Every Monday at 08:00 UTC
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging
+        run: python -m pip install --upgrade packaging
+
+      - name: Check PyPI and rewrite pin if needed
+        id: bump
+        run: python scripts/bump_numba_upper_bound.py
+
+      - name: Open PR with bumped pin
+        if: steps.bump.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.bump.outputs.latest }}
+          NEW_CAP: ${{ steps.bump.outputs.new_cap }}
+        run: |
+          set -euo pipefail
+          branch="auto/bump-numba-${NEW_CAP}"
+
+          # The auto-bump may have already been opened in a prior run.
+          if gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q '.'; then
+            echo "PR for $branch already open; skipping."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$branch"
+          git add pyproject.toml
+          git commit -m "Bump numba upper bound to <${NEW_CAP}"
+
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push "$remote" "$branch"
+
+          gh pr create \
+            --title "Bump numba upper bound to <${NEW_CAP}" \
+            --body "numba ${LATEST} is available on PyPI. This PR raises the upper bound in \`pyproject.toml\` to \`<${NEW_CAP}\` so the normal Tests workflow validates the new release. Merge after CI passes." \
+            --head "$branch" \
+            --base main
