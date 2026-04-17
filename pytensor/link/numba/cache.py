@@ -1,6 +1,4 @@
-import itertools
-import os
-import random
+import uuid
 from collections.abc import Callable
 from hashlib import sha256
 from pickle import dump
@@ -21,26 +19,34 @@ NUMBA_CACHE_PATH = config.base_compiledir / "numba"
 NUMBA_CACHE_PATH.mkdir(parents=True, exist_ok=True)
 CACHED_SRC_FUNCTIONS: WeakKeyDictionary[Callable, str] = WeakKeyDictionary()
 
-# Re-seed numba's FunctionIdentity._unique_ids counter on first use and
-# after every os.fork() to avoid LLVM symbol collisions between sibling
-# forks. See https://github.com/numba/numba/issues/10486
-_numba_uid_needs_reseed: bool = True
+
+class _RandomUidIter:
+    """Iterator yielding cryptographically random 128-bit integers.
+
+    Replaces numba's default ``FunctionIdentity._unique_ids`` sequential
+    counter so that sibling forks — which inherit the counter state verbatim —
+    cannot allocate identical uids to same-qualname functions they
+    fresh-compile next. Identical uids produce byte-identical LLVM mangled
+    symbols with different bodies; a later process that loads both hits LLVM's
+    weak-merge and dispatches into the wrong body, segfaulting.
+
+    Numba only consumes ``_unique_ids`` via ``next(cls._unique_ids)`` (see
+    ``numba.core.bytecode.FunctionIdentity.from_function``), so any iterator
+    of unique ints is a drop-in replacement. ``uuid.uuid4`` pulls fresh
+    entropy from the OS on every call, making this generator fork-safe
+    without any re-seed hook.
+
+    See https://github.com/numba/numba/issues/10486.
+    """
+
+    def __iter__(self) -> "_RandomUidIter":
+        return self
+
+    def __next__(self) -> int:
+        return uuid.uuid4().int
 
 
-def _mark_numba_uid_needs_reseed() -> None:
-    global _numba_uid_needs_reseed
-    _numba_uid_needs_reseed = True
-
-
-os.register_at_fork(after_in_child=_mark_numba_uid_needs_reseed)
-
-
-def reseed_numba_uid_counter() -> None:
-    """Re-seed numba's UID counter if needed (after fork or first use)."""
-    global _numba_uid_needs_reseed
-    if _numba_uid_needs_reseed:
-        _numba_uid_needs_reseed = False
-        FunctionIdentity._unique_ids = itertools.count(random.getrandbits(48) | 1)
+FunctionIdentity._unique_ids = _RandomUidIter()
 
 
 class NumbaPyTensorCacheLocator(_CacheLocator):
@@ -92,7 +98,6 @@ class NumbaPyTensorCacheLocator(_CacheLocator):
     def from_function(cls, py_func, py_file):
         """Create a locator instance for functions stored in CACHED_SRC_FUNCTIONS."""
         if py_func in CACHED_SRC_FUNCTIONS and config.numba__cache:
-            reseed_numba_uid_counter()
             return cls(py_func, py_file, CACHED_SRC_FUNCTIONS[py_func])
 
 
