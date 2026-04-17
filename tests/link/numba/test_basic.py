@@ -786,8 +786,8 @@ class TestNumbaCacheMuliprocessSafe:
         mangled names collide. When they have different return types (e.g. 3D vs 4D
         array), this causes a ValueError during LLVM lowering.
 
-        PyTensor prevents this by re-seeding numba's UID counter with a large random
-        offset after every fork, ensuring unique LLVM symbols across sibling processes.
+        PyTensor prevents this by replacing numba's UID counter with a random
+        128-bit UUID iterator, ensuring unique LLVM symbols across sibling processes.
 
         See https://github.com/numba/numba/issues/10486
         """
@@ -845,8 +845,8 @@ class TestNumbaCacheMuliprocessSafe:
         Two compilation patterns are covered:
             pickled_in_parent=False - child compiles the function itself.
             pickled_in_parent=True  - parent lazily compiles and pickles;
-                child's unpickle re-runs NumbaLinker, where the reseed
-                guard fires.
+                child's unpickle re-runs NumbaLinker, which pulls fresh
+                UUIDs from the replacement iterator.
 
         See https://github.com/numba/numba/issues/10486
         """
