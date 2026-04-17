@@ -1,4 +1,3 @@
-import re
 import warnings
 from collections.abc import Callable
 from functools import singledispatch, wraps
@@ -450,20 +449,12 @@ def numba_funcify_ensure_cache(op, *args, **kwargs) -> tuple[Callable, str | Non
             print(f"{op} of type {type(op)} will not be cached by PyTensor.\n")  # noqa: T201
         return jitable_func, None
     else:
-        full_cache_key = f"{cache_key}_fastmath{int(config.numba__fastmath)}"
-        # Include cache_key in the wrapper name to ensure unique LLVM symbol names.
-        # Without this, functions with the same __name__ but different behavior
-        # (e.g. all DimShuffle ops produce "dimshuffle")
-        # get identical mangled names when numba's UID counter overlaps after os.fork().
-        # This could cause compilation errors or silent bugs.
-        # See https://github.com/numba/numba/issues/10486
-        safe_key = re.sub(r"[^a-zA-Z0-9_]", "_", full_cache_key)
-        op_name = f"{jitable_func.__name__}_{safe_key}"
+        op_name = jitable_func.__name__
         cached_func = compile_numba_function_src(
             src=f"def {op_name}(*args): return jitable_func(*args)",
             function_name=op_name,
             global_env=globals() | {"jitable_func": jitable_func},
-            cache_key=full_cache_key,
+            cache_key=f"{cache_key}_fastmath{int(config.numba__fastmath)}",
         )
         return numba_njit(cached_func, cache=True), cache_key
 
