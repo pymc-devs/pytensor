@@ -1,35 +1,10 @@
 from pytensor.scalar.basic import (
-    Abs,
     Add,
-    ArcSin,
-    ArcSinh,
-    ArcTan,
-    ArcTanh,
-    Ceil,
-    Conj,
-    Deg2Rad,
-    Expm1,
-    Floor,
-    Identity,
-    Imag,
-    Log1p,
     Mul,
-    Neg,
     Pow,
-    Rad2Deg,
-    Real,
-    RoundHalfAwayFromZero,
-    RoundHalfToEven,
-    Sign,
-    Sin,
-    Sinh,
-    Sqr,
-    Sqrt,
     Sub,
-    Tan,
-    Tanh,
     TrueDiv,
-    Trunc,
+    UnaryScalarOp,
 )
 from pytensor.tensor.assumptions.core import (
     AssumptionKey,
@@ -153,36 +128,6 @@ def _dimshuffle(op, feature, fgraph, node, input_states):
     return [FactState.UNKNOWN]
 
 
-_ZERO_PRESERVING_UNARY = (
-    Abs,
-    ArcSin,
-    ArcSinh,
-    ArcTan,
-    ArcTanh,
-    Ceil,
-    Conj,
-    Deg2Rad,
-    Expm1,
-    Floor,
-    Identity,
-    Imag,
-    Log1p,
-    Neg,
-    Rad2Deg,
-    Real,
-    RoundHalfAwayFromZero,
-    RoundHalfToEven,
-    Sign,
-    Sin,
-    Sinh,
-    Sqr,
-    Sqrt,
-    Tan,
-    Tanh,
-    Trunc,
-)
-
-
 @register_assumption(DIAGONAL, Elemwise)
 def _elemwise(op, feature, fgraph, node, input_states):
     scalar_op = op.scalar_op
@@ -214,7 +159,7 @@ def _elemwise(op, feature, fgraph, node, input_states):
             pass
         return [FactState.UNKNOWN]
 
-    if isinstance(scalar_op, _ZERO_PRESERVING_UNARY) and len(node.inputs) == 1:
+    if isinstance(scalar_op, UnaryScalarOp) and scalar_op.preserves_zero:
         return true_if(input_states[0])
 
     return [FactState.UNKNOWN] * len(node.outputs)
