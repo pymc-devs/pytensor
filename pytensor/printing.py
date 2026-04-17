@@ -1153,13 +1153,8 @@ def _build_rich_tree(
     def _color_label(label: str, color: str) -> str:
         return f"[{color}]{label}[/{color}]"
 
-    def _sentinel_label(color: str, dim: bool = False) -> str:
-        """Sentinel for repeated nodes.  Bold+bright color links back to the
-        canonical occurrence.  Pass dim=True for inner graph context."""
-        extra = " dim" if dim else ""
-        if color.startswith("bright_"):
-            return f"[bold{extra}]···[/bold{extra}]"
-        return f"[bright_{color} bold{extra}]···[/bright_{color} bold{extra}]"
+    def _sentinel_label() -> str:
+        return "···"
 
     def _assign_color(node_key) -> str:
         """Return the color for node_key, assigning one if needed and
@@ -1172,6 +1167,10 @@ def _build_rich_tree(
         return node_colors[node_key]
 
     root = rich.tree.Tree("", hide_root=True)
+
+    # Track parent tree nodes that have already received a ··· sentinel child
+    # so each parent shows at most one ··· regardless of how many repeated inputs it has.
+    sentinel_emitted: set = set()  # set of id(parent_tree)
 
     for var, topo_order, profile, storage_map in zip(
         outputs, topo_orders, profiles, storage_maps, strict=True
@@ -1196,11 +1195,13 @@ def _build_rich_tree(
             node_key = gnode.var.owner if gnode.var.owner is not None else gnode.var
 
             if gnode.is_already_done:
-                # Second occurrence of an already-visited node: emit a colored
-                # ··· directly at this slot and skip the following sentinel.
-                color = _assign_color(node_key)
+                # Repeated node: color the canonical occurrence and emit one ···
+                # per parent — at most one sentinel child per parent tree node.
+                _assign_color(node_key)
                 parent_tree = depth_stack[current_depth]
-                parent_tree.add(_sentinel_label(color))
+                if id(parent_tree) not in sentinel_emitted:
+                    sentinel_emitted.add(id(parent_tree))
+                    parent_tree.add(_sentinel_label())
                 continue
 
             if gnode.is_repeat and not gnode.is_inner_graph_header:
@@ -1234,7 +1235,7 @@ def _build_rich_tree(
             depth_stack = [*depth_stack[: current_depth + 1], child_tree]
 
     if inner_graph_vars:
-        inner_root = root.add("[dim bold]Inner graphs:[/dim bold]")
+        inner_root = root.add("[bold]Inner graphs:[/bold]")
         printed = set()
         for ig_var in inner_graph_vars:
             if ig_var.owner in printed:
@@ -1290,9 +1291,11 @@ def _build_rich_tree(
                     node_key = (
                         gnode.var.owner if gnode.var.owner is not None else gnode.var
                     )
-                    color = _assign_color(node_key)
+                    _assign_color(node_key)
                     parent_tree = ig_depth_stack[current_depth]
-                    parent_tree.add(_sentinel_label(color, dim=True))
+                    if id(parent_tree) not in sentinel_emitted:
+                        sentinel_emitted.add(id(parent_tree))
+                        parent_tree.add(_sentinel_label())
                     continue
                 if gnode.is_repeat and not gnode.is_inner_graph_header:
                     continue
@@ -1311,7 +1314,7 @@ def _build_rich_tree(
                 label = rich.markup.escape(label)
                 node_key = gnode.var.owner if gnode.var.owner is not None else gnode.var
                 parent_tree = ig_depth_stack[current_depth]
-                child_tree = parent_tree.add(f"[dim]{label}[/dim]")
+                child_tree = parent_tree.add(label)
                 node_tree_map.setdefault(node_key, []).append(child_tree)
                 ig_depth_stack = [*ig_depth_stack[: current_depth + 1], child_tree]
 
@@ -1351,9 +1354,11 @@ def _build_rich_tree(
                             if gnode.var.owner is not None
                             else gnode.var
                         )
-                        color = _assign_color(node_key)
+                        _assign_color(node_key)
                         parent_tree = out_stack[current_depth]
-                        parent_tree.add(_sentinel_label(color, dim=True))
+                        if id(parent_tree) not in sentinel_emitted:
+                            sentinel_emitted.add(id(parent_tree))
+                            parent_tree.add(_sentinel_label())
                         continue
                     if gnode.is_repeat and not gnode.is_inner_graph_header:
                         continue
@@ -1374,7 +1379,7 @@ def _build_rich_tree(
                         gnode.var.owner if gnode.var.owner is not None else gnode.var
                     )
                     parent_tree = out_stack[current_depth]
-                    child_tree = parent_tree.add(f"[dim]{label}[/dim]")
+                    child_tree = parent_tree.add(label)
                     node_tree_map.setdefault(node_key, []).append(child_tree)
                     out_stack = [*out_stack[: current_depth + 1], child_tree]
 

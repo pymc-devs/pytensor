@@ -657,19 +657,18 @@ class TestDebugprintRich:
         )
 
     def test_repeated_nodes_same_color(self):
-        # The canonical occurrence should be colored, and the ··· sentinel that
-        # replaces the second occurrence should share the same color family.
+        # The canonical occurrence should be colored; the ··· sentinel is plain text.
         x = dvector("x")
         shared = x * 2
         tree = debugprint(shared + shared, file="rich")
         add_node = tree.children[0]
         canonical_mul = add_node.children[0]  # Mul [id B]  (colored, full children)
-        sentinel = add_node.children[1]  # ··· colored sentinel
+        sentinel = add_node.children[1]  # ··· plain sentinel
         color_re = re.compile(r"\[(\w+)\]")
         canonical_colors = color_re.findall(str(canonical_mul.label))
         assert canonical_colors, "canonical shared node should have a color tag"
-        assert "bright_" in str(sentinel.label), (
-            f"Sentinel should use a bright_ color, got: {sentinel.label!r}"
+        assert str(sentinel.label) == "···", (
+            f"Sentinel should be plain '···', got: {sentinel.label!r}"
         )
 
     def test_two_distinct_shared_nodes_get_different_colors(self):
