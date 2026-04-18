@@ -1,12 +1,11 @@
+from pytensor.compile.ops import TypeCastingOp
 from pytensor.graph.basic import Apply, Variable
-from pytensor.graph.op import Op
 from pytensor.tensor.basic import as_tensor_variable
 
 
-class SpecifyAssumptions(Op):
+class SpecifyAssumptions(TypeCastingOp):
     """No-op that declares structural assumptions on a tensor for use by graph rewrites."""
 
-    view_map = {0: [0]}
     __props__ = ("assumptions",)
 
     def __init__(self, assumptions: frozenset[str]):
@@ -17,10 +16,6 @@ class SpecifyAssumptions(Op):
         x = as_tensor_variable(x)
         out = x.type()
         return Apply(self, [x], [out])
-
-    def perform(self, node, inputs, output_storage):
-        (x,) = inputs
-        output_storage[0][0] = x
 
     def infer_shape(self, fgraph, node, input_shapes):
         return input_shapes
