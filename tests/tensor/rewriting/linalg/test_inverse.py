@@ -21,6 +21,7 @@ from pytensor.tensor.rewriting.linalg.inverse import inv_to_solve
 from pytensor.tensor.type import dmatrix, matrix, vector
 from tests import unittest_tools as utt
 from tests.test_rop import break_op
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_matrix_inverse_pushforward_pullback():
@@ -245,3 +246,15 @@ def test_lift_linalg_of_expanded_matrices(constructor, f_op, f, g_op, g):
     test_vals = [x @ np.swapaxes(x, -1, -2) for x in test_vals]
 
     np.testing.assert_allclose(f1(*test_vals), f2(*test_vals), atol=1e-8)
+
+
+def test_inv_of_orthogonal_to_transpose():
+    n = 5
+    rewrites = ("canonicalize", "stabilize", "ShapeOpt")
+
+    x = pt.dmatrix("x", shape=(n, n))
+    x_orth = pt.specify_assumptions(x, orthogonal=True)
+    out = pt.linalg.inv(x_orth)
+    rewritten = rewrite_graph(out, include=rewrites)
+    expected = rewrite_graph(x_orth.mT, include=rewrites)
+    assert_equal_computations([rewritten], [expected])

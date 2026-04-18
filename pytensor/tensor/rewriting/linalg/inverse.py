@@ -5,6 +5,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.orthogonal import ORTHOGONAL
 from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
@@ -75,6 +76,17 @@ def inv_of_inv(fgraph, node):
     match node.inputs[0].owner_op_and_inputs:
         case (Blockwise(MatrixInverse() | MatrixPinv()), X):
             return [X]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
+def inv_of_orthogonal_to_transpose(fgraph, node):
+    """inv(Q) -> Q.T when Q is orthogonal."""
+    [X] = node.inputs
+    if not check_assumption(fgraph, X, ORTHOGONAL):
+        return None
+    return [X.mT]
 
 
 @register_canonicalize

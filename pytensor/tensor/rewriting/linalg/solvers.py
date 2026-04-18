@@ -13,6 +13,7 @@ from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
 from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.orthogonal import ORTHOGONAL
 from pytensor.tensor.assumptions.positive_definite import POSITIVE_DEFINITE
 from pytensor.tensor.assumptions.symmetric import SYMMETRIC
 from pytensor.tensor.assumptions.triangular import LOWER_TRIANGULAR, UPPER_TRIANGULAR
@@ -275,6 +276,27 @@ def diagonal_solve_to_division(fgraph, node):
                 new_out = b / (a_diag**2)[..., :, None]
         case _:
             return None
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
+def orthogonal_solve_to_transpose_matmul(fgraph, node):
+    """Replace solve(Q, b) with Q.T @ b when Q is orthogonal."""
+    A, b = node.inputs
+
+    if not check_assumption(fgraph, A, ORTHOGONAL):
+        return None
+
+    b_ndim = node.op.core_op.b_ndim
+    if b_ndim == 1:
+        new_out = (A.mT @ b[..., :, None])[..., 0]
+    else:
+        new_out = A.mT @ b
 
     old_out = node.outputs[0]
     copy_stack_trace(old_out, new_out)
