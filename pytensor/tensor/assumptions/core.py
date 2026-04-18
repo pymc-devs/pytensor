@@ -49,9 +49,9 @@ InferFactFn = Callable[
     list[FactState],
 ]
 
-# The global inference registry maps (AssumptionKey, Op type) pairs to inference functions.  The most specific
-# applicable rule is used for each node.
-ASSUMPTION_INFER_REGISTRY: dict[tuple[AssumptionKey, type], InferFactFn] = {}
+# The global inference registry maps (AssumptionKey, Op type) pairs to lists of inference functions.
+# Rules are tried in registration order; the first to return TRUE wins.
+ASSUMPTION_INFER_REGISTRY: dict[tuple[AssumptionKey, type], list[InferFactFn]] = {}
 
 # Registry mapping assumptions to other assumptions they imply.  For example, a "diagonal" matrix is also "symmetric"
 # and "triangular".  This is consulted after all other inference rules to derive additional facts.
@@ -74,19 +74,19 @@ def register_assumption(
 
     def decorator(fn: InferFactFn) -> InferFactFn:
         for op_type in op_types:
-            ASSUMPTION_INFER_REGISTRY[(key, op_type)] = fn
+            ASSUMPTION_INFER_REGISTRY.setdefault((key, op_type), []).append(fn)
         return fn
 
     return decorator
 
 
-def lookup_assumption_rule(key: AssumptionKey, op: Any) -> InferFactFn | None:
-    """Find the most specific registered rule for *(key, type(op))*, walking the MRO."""
+def lookup_assumption_rules(key: AssumptionKey, op: Any) -> list[InferFactFn]:
+    """Find all registered rules for *(key, type(op))*, walking the MRO for the most specific match."""
     for cls in type(op).__mro__:
-        fn = ASSUMPTION_INFER_REGISTRY.get((key, cls))
-        if fn is not None:
-            return fn
-    return None
+        fns = ASSUMPTION_INFER_REGISTRY.get((key, cls))
+        if fns is not None:
+            return fns
+    return []
 
 
 def _default_infer_assumption(node: Any) -> list[FactState]:
@@ -126,10 +126,12 @@ def infer_assumption_for_node(
         if output_states is not NotImplemented:
             return _validate_output_states(node, output_states)
 
-    fn = lookup_assumption_rule(key, op)
-    if fn is not None:
-        output_states = fn(op, feature, fgraph, node, input_states)
-        return _validate_output_states(node, output_states)
+    for fn in lookup_assumption_rules(key, op):
+        output_states = _validate_output_states(
+            node, fn(op, feature, fgraph, node, input_states)
+        )
+        if any(output_states):
+            return output_states
 
     return _default_infer_assumption(node)
 

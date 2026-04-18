@@ -2,7 +2,7 @@ from pytensor.tensor.assumptions.core import (
     AssumptionFeature,
     AssumptionKey,
     FactState,
-    lookup_assumption_rule,
+    lookup_assumption_rules,
     register_assumption,
     register_implies,
 )
