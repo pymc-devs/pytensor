@@ -313,6 +313,34 @@ class Function:
         -------
         pytensor.Function
             Copied pytensor.Function
+
+        Examples
+        --------
+        Copy a function but swap its shared state:
+
+        >>> import pytensor
+        >>> import pytensor.tensor as pt
+        >>> state = pytensor.shared(0)
+        >>> x = pt.iscalar("x")
+        >>> f = pytensor.function([x], state, updates={state: state + x})
+        >>> other_state = pytensor.shared(100)
+        >>> g = f.copy(swap={state: other_state})
+
+        ``copy`` and random shared variables:
+
+        >>> rng = pt.random.shared_rng(seed=123)
+        >>> next_rng, draw = rng.uniform()
+        >>> f_rng = pytensor.function([], draw, updates={rng: next_rng})
+        >>> g_rng = f_rng.copy()
+        >>> # `f_rng` and `g_rng` share RNG state by default.
+        >>> _ = f_rng()  # doctest: +SKIP
+        >>> _ = g_rng()  # doctest: +SKIP
+
+        To give the copied function an independent RNG stream, swap the RNG
+        shared variable:
+
+        >>> new_rng = pt.random.shared_rng(seed=123)
+        >>> g_independent = f_rng.copy(swap={rng: new_rng})
         """
 
         # helper function
