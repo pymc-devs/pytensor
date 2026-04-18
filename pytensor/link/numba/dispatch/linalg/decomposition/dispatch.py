@@ -58,12 +58,14 @@ def numba_funcify_SVD(op, node, **kwargs):
     if discrete_input and config.compiler_verbose:
         print("SVD requires casting discrete input to float")  # noqa: T201
 
-    if compute_uv:
-        matrix_dtype = np.dtype(node.outputs[0].dtype)
-        s_dtype = np.dtype(node.outputs[1].dtype)
+    # np.linalg.svd always returns real-valued singular values, even for complex input.
+    # The Op may declare s as complex (matching input dtype), but numba returns the real
+    # component dtype, so we must match that to avoid type unification errors.
+    matrix_dtype = out_dtype
+    if out_dtype.kind == "c":
+        s_dtype = np.dtype(f"f{out_dtype.itemsize // 2}")
     else:
         s_dtype = out_dtype
-        matrix_dtype = out_dtype
 
     if not compute_uv:
 
@@ -85,17 +87,19 @@ def numba_funcify_SVD(op, node, **kwargs):
             if x.size == 0:
                 m, n = x.shape
                 k = min(m, n)
+                # The LAPACK dispatch returns matrices in fortran order. To match this for the empty cases,
+                # build flip the shape inputs to np.zeros and transpose.
                 if full_matrices:
                     return (
-                        np.zeros((m, m), dtype=matrix_dtype),
+                        np.zeros((m, m), dtype=matrix_dtype).T,
                         np.zeros((k,), dtype=s_dtype),
-                        np.zeros((n, n), dtype=matrix_dtype),
+                        np.zeros((n, n), dtype=matrix_dtype).T,
                     )
                 else:
                     return (
-                        np.zeros((m, k), dtype=matrix_dtype),
+                        np.zeros((k, m), dtype=matrix_dtype).T,
                         np.zeros((k,), dtype=s_dtype),
-                        np.zeros((k, n), dtype=matrix_dtype),
+                        np.zeros((n, k), dtype=matrix_dtype).T,
                     )
             if discrete_input:
                 x = x.astype(out_dtype)
@@ -330,22 +334,22 @@ def numba_funcify_QR(op, node, **kwargs):
                 R = np.zeros((k, n) if mode == "economic" else (m, n), dtype=out_dtype)
                 return Q, R
             elif mode == "r" and pivoting:
-                R = np.zeros((k, n), dtype=out_dtype)
+                R = np.zeros((m, n), dtype=out_dtype)
                 P = np.zeros(n, dtype=np.int32)
                 return R, P
             elif mode == "r" and not pivoting:
-                R = np.zeros((k, n), dtype=out_dtype)
+                R = np.zeros((m, n), dtype=out_dtype)
                 return R
             elif mode == "raw" and pivoting:
-                H = np.zeros((m, n), dtype=out_dtype).T
+                H = np.zeros((m, m), dtype=out_dtype)
                 tau = np.zeros(k, dtype=out_dtype)
-                R = np.zeros((k, n), dtype=out_dtype)
+                R = np.zeros((m, n), dtype=out_dtype)
                 P = np.zeros(n, dtype=np.int32)
                 return H, tau, R, P
             else:
-                H = np.zeros((m, n), dtype=out_dtype).T
+                H = np.zeros((m, m), dtype=out_dtype)
                 tau = np.zeros(k, dtype=out_dtype)
-                R = np.zeros((k, n), dtype=out_dtype)
+                R = np.zeros((m, n), dtype=out_dtype)
                 return H, tau, R
 
         if integer_input:
