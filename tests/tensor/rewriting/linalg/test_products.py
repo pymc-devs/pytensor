@@ -301,3 +301,28 @@ def test_kron_of_diagonal_to_diagonal():
         da_batch_val, db_batch_val
     )
     assert_allclose(f_batch(da_batch_val, db_batch_val), expected_batch)
+
+
+def test_orthogonal_dot_transpose_to_eye():
+    n = 5
+    rewrites = ("canonicalize", "specialize", "ShapeOpt")
+
+    # 2D: X @ X.T -> eye
+    x = pt.dmatrix("x", shape=(n, n))
+    x_orth = pt.specify_assumptions(x, orthogonal=True)
+    out_xxt = pt.dot(x_orth, x_orth.T)
+    rewritten_xxt = rewrite_graph(out_xxt, include=rewrites)
+    expected = pt.as_tensor(np.eye(n, dtype=config.floatX))
+    assert_equal_computations([rewritten_xxt], [expected])
+
+    # Batched: X @ X.T -> broadcast_to(eye, batch_shape)
+    x_batch = pt.dtensor3("x_batch", shape=(3, n, n))
+    x_batch_orth = pt.specify_assumptions(x_batch, orthogonal=True)
+    out_batch = x_batch_orth @ pt.moveaxis(x_batch_orth, -1, -2)
+    rewritten_batch = rewrite_graph(out_batch, include=rewrites)
+
+    n64 = np.array(n, dtype="int64")
+    b64 = np.array(3, dtype="int64")
+    expected_batch = pt.alloc(np.eye(n, dtype=config.floatX), b64, n64, n64)
+
+    assert_equal_computations([rewritten_batch], [expected_batch])
