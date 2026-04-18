@@ -1,24 +1,18 @@
 import numpy as np
 
 
-_float32 = np.dtype("float32")
-_float64 = np.dtype("float64")
-_complex64 = np.dtype("complex64")
-_complex128 = np.dtype("complex128")
-
-
 def _to_lapack_dtype(dt: np.dtype) -> np.dtype:
     """Map a single numpy dtype to the nearest LAPACK-supported dtype."""
     if dt.kind == "c":
-        return _complex64 if dt.itemsize <= 8 else _complex128
+        return np.dtype("complex64") if dt.itemsize <= 8 else np.dtype("complex128")
     if (dt.kind == "f" and dt.itemsize > 4) or (dt.kind in "ibu" and dt.itemsize > 2):
-        return _float64
-    return _float32
+        return np.dtype("float64")
+    return np.dtype("float32")
 
 
 _COMPLEX_TO_REAL: dict[np.dtype, np.dtype] = {
-    _complex64: _float32,
-    _complex128: _float64,
+    np.dtype("complex64"): np.dtype("float32"),
+    np.dtype("complex128"): np.dtype("float64"),
 }
 
 
