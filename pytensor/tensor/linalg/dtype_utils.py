@@ -16,7 +16,10 @@ def _to_lapack_dtype(dt: np.dtype) -> np.dtype:
     return _float32
 
 
-_COMPLEX_TO_REAL = {_complex64: _float32, _complex128: _float64}
+_COMPLEX_TO_REAL: dict[np.dtype, np.dtype] = {
+    _complex64: _float32,
+    _complex128: _float64,
+}
 
 
 def linalg_output_dtype(*input_dtypes: np.dtype | str) -> str:
@@ -38,4 +41,6 @@ def linalg_real_output_dtype(*input_dtypes: np.dtype | str) -> str:
     hermitian matrices (eigh), log-determinant (slogdet), norms, etc.
     """
     dt = np.dtype(linalg_output_dtype(*input_dtypes))
-    return _COMPLEX_TO_REAL.get(dt, dt).name
+    if dt in _COMPLEX_TO_REAL:
+        return _COMPLEX_TO_REAL[dt].name
+    return dt.name
