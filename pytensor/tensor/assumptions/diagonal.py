@@ -11,6 +11,7 @@ from pytensor.tensor.assumptions.core import (
     FactState,
     register_assumption,
 )
+from pytensor.tensor.assumptions.orthogonal import ORTHOGONAL
 from pytensor.tensor.assumptions.utils import eye_is_identity, true_if
 from pytensor.tensor.basic import (
     Alloc,
@@ -97,8 +98,25 @@ def _kron(op, feature, fgraph, node, input_states):
 
 
 @register_assumption(DIAGONAL, Dot)
-def _dot(op, feature, fgraph, node, input_states):
+def _dot_diagonal_inputs(op, feature, fgraph, node, input_states):
     return true_if(all(input_states))
+
+
+@register_assumption(DIAGONAL, Dot)
+def _dot_orthogonal_xxt(op, feature, fgraph, node, input_states):
+    """x @ x.T is diagonal (identity) when x is orthogonal."""
+    a, b = node.inputs
+    b_owner = b.owner
+    if (
+        feature.check(a, ORTHOGONAL)
+        and b_owner is not None
+        and isinstance(b_owner.op, DimShuffle)
+        and b_owner.op.is_matrix_transpose
+        and b_owner.inputs[0] is a
+    ):
+        return [FactState.TRUE]
+
+    return [FactState.UNKNOWN]
 
 
 @register_assumption(DIAGONAL, IncSubtensor)

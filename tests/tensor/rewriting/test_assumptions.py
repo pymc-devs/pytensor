@@ -320,6 +320,15 @@ def test_dot_xxH_complex_is_psd():
     assert af2.check(gram2, POSITIVE_DEFINITE)
 
 
+def test_dot_orthogonal_xxt_is_diagonal():
+    """dot(x, x.T) is diagonal when x is orthogonal."""
+    x = pt.dmatrix("x")
+    x_orth = pt.specify_assumptions(x, orthogonal=True)
+    y = pt.dot(x_orth, x_orth.T)
+    _, af = make_fgraph(y, inputs=[x])
+    assert af.check(y, DIAGONAL)
+
+
 class TestSubtensorDiagonalPreservation:
     def test_set_diagonal_entries(self):
         d = pt.eye(5)
