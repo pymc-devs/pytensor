@@ -57,6 +57,9 @@ def schur_real_impl(A, lwork, overwrite_a):
 
     def real_schur_impl(A, lwork, overwrite_a):
         _N = np.int32(A.shape[-1])
+        if _N == 0:
+            return A.copy(), np.empty((0, 0), dtype=dtype)
+
         if lwork is None:
             lwork = -1
 
@@ -149,6 +152,9 @@ def schur_complex_impl(A, lwork, overwrite_a):
 
     def complex_schur_impl(A, lwork, overwrite_a):
         _N = np.int32(A.shape[-1])
+        if _N == 0:
+            return A.copy(), np.empty((0, 0), dtype=dtype)
+
         if lwork is None:
             lwork = -1
 
