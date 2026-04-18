@@ -9,6 +9,10 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg.dtype_utils import (
+    linalg_output_dtype,
+    linalg_real_output_dtype,
+)
 from pytensor.tensor.type import matrix, vector
 
 
@@ -48,12 +52,10 @@ class SVD(Op):
         assert x.ndim == 2, "The input of svd function should be a matrix."
 
         in_dtype = x.type.numpy_dtype
-        if in_dtype.name.startswith("int"):
-            out_dtype = np.dtype(f"f{in_dtype.itemsize}")
-        else:
-            out_dtype = in_dtype
+        out_dtype = linalg_output_dtype(in_dtype)
+        s_dtype = linalg_real_output_dtype(in_dtype)
 
-        s = vector(dtype=out_dtype)
+        s = vector(dtype=s_dtype)
 
         if self.compute_uv:
             u = matrix(dtype=out_dtype)
