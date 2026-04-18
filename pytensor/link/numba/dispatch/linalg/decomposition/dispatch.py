@@ -62,6 +62,10 @@ def numba_funcify_SVD(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def svd(x):
+            if x.size == 0:
+                m, n = x.shape
+                k = min(m, n)
+                return np.empty((k,), dtype=out_dtype)
             if discrete_input:
                 x = x.astype(out_dtype)
             _, ret, _ = np.linalg.svd(x, full_matrices)
@@ -71,6 +75,21 @@ def numba_funcify_SVD(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def svd(x):
+            if x.size == 0:
+                m, n = x.shape
+                k = min(m, n)
+                if full_matrices:
+                    return (
+                        np.empty((m, m), dtype=out_dtype),
+                        np.empty((k,), dtype=out_dtype),
+                        np.empty((n, n), dtype=out_dtype),
+                    )
+                else:
+                    return (
+                        np.empty((m, k), dtype=out_dtype),
+                        np.empty((k,), dtype=out_dtype),
+                        np.empty((k, n), dtype=out_dtype),
+                    )
             if discrete_input:
                 x = x.astype(out_dtype)
             return np.linalg.svd(x, full_matrices)
@@ -287,6 +306,37 @@ def numba_funcify_QR(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def qr(a):
+        if a.size == 0:
+            m, n = a.shape
+            k = min(m, n)
+            if (mode == "full" or mode == "economic") and pivoting:
+                Q = np.empty((m, k) if mode == "economic" else (m, m), dtype=out_dtype)
+                R = np.empty((k, n) if mode == "economic" else (m, n), dtype=out_dtype)
+                P = np.empty(n, dtype=np.int32)
+                return Q, R, P
+            elif (mode == "full" or mode == "economic") and not pivoting:
+                Q = np.empty((m, k) if mode == "economic" else (m, m), dtype=out_dtype)
+                R = np.empty((k, n) if mode == "economic" else (m, n), dtype=out_dtype)
+                return Q, R
+            elif mode == "r" and pivoting:
+                R = np.empty((k, n), dtype=out_dtype)
+                P = np.empty(n, dtype=np.int32)
+                return R, P
+            elif mode == "r" and not pivoting:
+                R = np.empty((k, n), dtype=out_dtype)
+                return R
+            elif mode == "raw" and pivoting:
+                H = np.empty((n, m), dtype=out_dtype)
+                tau = np.empty(k, dtype=out_dtype)
+                R = np.empty((k, n), dtype=out_dtype)
+                P = np.empty(n, dtype=np.int32)
+                return H, tau, R, P
+            else:
+                H = np.empty((n, m), dtype=out_dtype)
+                tau = np.empty(k, dtype=out_dtype)
+                R = np.empty((k, n), dtype=out_dtype)
+                return H, tau, R
+
         if integer_input:
             a = a.astype(out_dtype)
 
@@ -389,6 +439,8 @@ def numba_funcify_Schur(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def schur(a):
+            if a.size == 0:
+                return a.copy().astype(out_dtype), np.empty((0, 0), dtype=out_dtype)
             if integer_input:
                 a = a.astype(out_dtype)
             elif needs_complex_cast:
@@ -399,6 +451,8 @@ def numba_funcify_Schur(op, node, **kwargs):
         # Real input with real output
         @numba_basic.numba_njit
         def schur(a):
+            if a.size == 0:
+                return a.copy().astype(out_dtype), np.empty((0, 0), dtype=out_dtype)
             if integer_input:
                 a = a.astype(out_dtype)
             T, Z = schur_real(a, lwork=None, overwrite_a=overwrite_a)
@@ -439,6 +493,8 @@ def numba_funcify_QZ(op, node, **kwargs):
     if (integer_input_a or integer_input_b) and config.compiler_verbose:
         print("QZ requires casting discrete input to float")  # noqa: T201
 
+    alpha_dtype = node.outputs[2].type.numpy_dtype if return_eigenvalues else out_dtype
+
     use_complex = complex_input or complex_output
     use_sort = sort is not None
 
@@ -469,6 +525,14 @@ def numba_funcify_QZ(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def qz(a, b):
+            if a.size == 0:
+                n = a.shape[0]
+                e = np.empty((n, n), dtype=out_dtype)
+                if return_eigenvalues:
+                    alpha = np.empty((n,), dtype=alpha_dtype)
+                    beta = np.empty((n,), dtype=out_dtype)
+                    return e.copy(), e.copy(), alpha, beta, e.copy(), e.copy()
+                return e.copy(), e.copy(), e.copy(), e.copy()
             if integer_input_a:
                 a = a.astype(out_dtype)
             elif needs_complex_cast:
@@ -482,6 +546,14 @@ def numba_funcify_QZ(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def qz(a, b):
+            if a.size == 0:
+                n = a.shape[0]
+                e = np.empty((n, n), dtype=out_dtype)
+                if return_eigenvalues:
+                    alpha = np.empty((n,), dtype=alpha_dtype)
+                    beta = np.empty((n,), dtype=out_dtype)
+                    return e.copy(), e.copy(), alpha, beta, e.copy(), e.copy()
+                return e.copy(), e.copy(), e.copy(), e.copy()
             if integer_input_a:
                 a = a.astype(out_dtype)
             elif needs_complex_cast:
