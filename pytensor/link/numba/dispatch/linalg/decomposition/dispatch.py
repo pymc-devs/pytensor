@@ -58,6 +58,13 @@ def numba_funcify_SVD(op, node, **kwargs):
     if discrete_input and config.compiler_verbose:
         print("SVD requires casting discrete input to float")  # noqa: T201
 
+    if compute_uv:
+        matrix_dtype = np.dtype(node.outputs[0].dtype)
+        s_dtype = np.dtype(node.outputs[1].dtype)
+    else:
+        s_dtype = out_dtype
+        matrix_dtype = out_dtype
+
     if not compute_uv:
 
         @numba_basic.numba_njit
@@ -65,7 +72,7 @@ def numba_funcify_SVD(op, node, **kwargs):
             if x.size == 0:
                 m, n = x.shape
                 k = min(m, n)
-                return np.empty((k,), dtype=out_dtype)
+                return np.empty((k,), dtype=s_dtype)
             if discrete_input:
                 x = x.astype(out_dtype)
             _, ret, _ = np.linalg.svd(x, full_matrices)
@@ -80,15 +87,15 @@ def numba_funcify_SVD(op, node, **kwargs):
                 k = min(m, n)
                 if full_matrices:
                     return (
-                        np.empty((m, m), dtype=out_dtype),
-                        np.empty((k,), dtype=out_dtype),
-                        np.empty((n, n), dtype=out_dtype),
+                        np.empty((m, m), dtype=matrix_dtype),
+                        np.empty((k,), dtype=s_dtype),
+                        np.empty((n, n), dtype=matrix_dtype),
                     )
                 else:
                     return (
-                        np.empty((m, k), dtype=out_dtype),
-                        np.empty((k,), dtype=out_dtype),
-                        np.empty((k, n), dtype=out_dtype),
+                        np.empty((m, k), dtype=matrix_dtype),
+                        np.empty((k,), dtype=s_dtype),
+                        np.empty((k, n), dtype=matrix_dtype),
                     )
             if discrete_input:
                 x = x.astype(out_dtype)
