@@ -310,12 +310,16 @@ def numba_funcify_QR(op, node, **kwargs):
             m, n = a.shape
             k = min(m, n)
             if (mode == "full" or mode == "economic") and pivoting:
-                Q = np.empty((m, k) if mode == "economic" else (m, m), dtype=out_dtype)
+                Q = np.empty(
+                    (k, m) if mode == "economic" else (m, m), dtype=out_dtype
+                ).T
                 R = np.empty((k, n) if mode == "economic" else (m, n), dtype=out_dtype)
                 P = np.empty(n, dtype=np.int32)
                 return Q, R, P
             elif (mode == "full" or mode == "economic") and not pivoting:
-                Q = np.empty((m, k) if mode == "economic" else (m, m), dtype=out_dtype)
+                Q = np.empty(
+                    (k, m) if mode == "economic" else (m, m), dtype=out_dtype
+                ).T
                 R = np.empty((k, n) if mode == "economic" else (m, n), dtype=out_dtype)
                 return Q, R
             elif mode == "r" and pivoting:
@@ -326,13 +330,13 @@ def numba_funcify_QR(op, node, **kwargs):
                 R = np.empty((k, n), dtype=out_dtype)
                 return R
             elif mode == "raw" and pivoting:
-                H = np.empty((n, m), dtype=out_dtype)
+                H = np.empty((m, n), dtype=out_dtype).T
                 tau = np.empty(k, dtype=out_dtype)
                 R = np.empty((k, n), dtype=out_dtype)
                 P = np.empty(n, dtype=np.int32)
                 return H, tau, R, P
             else:
-                H = np.empty((n, m), dtype=out_dtype)
+                H = np.empty((m, n), dtype=out_dtype).T
                 tau = np.empty(k, dtype=out_dtype)
                 R = np.empty((k, n), dtype=out_dtype)
                 return H, tau, R
