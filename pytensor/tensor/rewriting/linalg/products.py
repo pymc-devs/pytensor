@@ -160,6 +160,25 @@ def det_of_kronecker(fgraph, node):
 
 @register_canonicalize
 @register_stabilize
+@node_rewriter([KroneckerProduct])
+def kron_of_diagonal_to_diagonal(fgraph, node):
+    """kron(D1, D2) -> alloc_diag(outer_product) when both inputs are diagonal."""
+    a, b = node.inputs
+
+    if not (
+        check_assumption(fgraph, a, DIAGONAL) and check_assumption(fgraph, b, DIAGONAL)
+    ):
+        return None
+
+    diag_a = pt.diagonal(a, axis1=-2, axis2=-1)
+    diag_b = pt.diagonal(b, axis1=-2, axis2=-1)
+
+    kron_diag = pt.join_dims(diag_a[..., :, None] * diag_b[..., None, :], start_axis=-2)
+    return [alloc_diag(kron_diag, axis1=-2, axis2=-1)]
+
+
+@register_canonicalize
+@register_stabilize
 @node_rewriter([blockwise_of(Expm)])
 def expm_of_diag(fgraph, node):
     """expm(D) -> diag(exp(diagonal(D))) for diagonal D."""

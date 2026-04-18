@@ -256,3 +256,48 @@ def test_expm_of_diag(make_diag):
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize"))
     expected = alloc_diag(pt.exp(d), axis1=-2, axis2=-1)
     assert_equal_computations([rewritten], [expected])
+
+
+def test_kron_of_diagonal_to_diagonal():
+    da = pt.tensor("da", shape=(3, 3))
+    db = pt.tensor("db", shape=(4, 4))
+    A = pt.specify_assumptions(da, diagonal=True)
+    B = pt.specify_assumptions(db, diagonal=True)
+
+    out = pt.linalg.kron(A, B)
+    f = function([da, db], out, mode="FAST_RUN")
+
+    nodes_batch = f.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes_batch)
+
+    rng = np.random.default_rng()
+
+    da_test = np.diag(rng.normal(size=(3,)))
+    db_test = np.diag(rng.normal(size=(4,)))
+    expected = np.kron(da_test, db_test)
+    assert_allclose(f(da_test, db_test), expected)
+
+    # Batched case
+    da_batch = pt.tensor("da_batch", shape=(2, 3, 3))
+    db_batch = pt.tensor("db_batch", shape=(2, 4, 4))
+    A_batch = pt.specify_assumptions(da_batch, diagonal=True)
+    B_batch = pt.specify_assumptions(db_batch, diagonal=True)
+
+    signature = "(m,m),(n,n)->(mn,mn)"
+    kron_batched = pt.vectorize(lambda a, b: pt.linalg.kron(a, b), signature=signature)
+    out_batch = kron_batched(A_batch, B_batch)
+    f_batch = function([da_batch, db_batch], out_batch)
+
+    nodes_batch = f_batch.maker.fgraph.apply_nodes
+    assert not any(isinstance(node.op, KroneckerProduct) for node in nodes_batch)
+
+    a_diags = np.random.normal(size=(2, 3))
+    b_diags = np.random.normal(size=(2, 4))
+    vec_diag = np.vectorize(np.diag, signature="(n)->(n,n)")
+    da_batch_val = vec_diag(a_diags)
+    db_batch_val = vec_diag(b_diags)
+
+    expected_batch = np.vectorize(np.kron, signature=signature)(
+        da_batch_val, db_batch_val
+    )
+    assert_allclose(f_batch(da_batch_val, db_batch_val), expected_batch)
