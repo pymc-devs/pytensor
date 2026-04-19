@@ -130,7 +130,6 @@ def _read_c_code_file(filename: str) -> str:
         raise OSError(msg) from err
 
 
-@functools.cache
 def blas_header_text():
     """C header for the fortran blas interface.
 
