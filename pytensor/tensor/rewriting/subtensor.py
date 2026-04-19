@@ -54,7 +54,6 @@ from pytensor.tensor.math import (
     or_,
     variadic_add,
 )
-from pytensor.tensor.math import all as pt_all
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_specialize,
@@ -501,48 +500,6 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
         all_dim = range(node.inputs[0].ndim)
         remain_dim = [x for x in all_dim if x not in remove_dim]
         return [node.inputs[0].dimshuffle(tuple(remain_dim))]
-
-
-@register_specialize
-@register_canonicalize
-@node_rewriter([Subtensor])
-def local_subtensor_inc_subtensor(fgraph, node):
-    """
-    Subtensor(SetSubtensor(x, y, idx), idx) -> y
-
-    """
-    if isinstance(node.op, Subtensor):
-        x = node.inputs[0]
-        if not (x.owner and isinstance(x.owner.op, IncSubtensor)):
-            return
-        if not x.owner.op.set_instead_of_inc:
-            return
-
-        x_inc, y_inc, *inc_index_variables = x.owner.inputs
-        _sub_x, *sub_index_variables = node.inputs
-
-        if (
-            inc_index_variables == sub_index_variables
-            and x.owner.op.idx_list == node.op.idx_list
-        ):
-            out = node.outputs[0]
-            # If the dtypes differ, cast y into x.dtype
-            if x.dtype != y_inc.dtype:
-                y_inc = y_inc.astype(x.dtype)
-            if (
-                out.type.dtype == y_inc.type.dtype
-                and out.type.broadcastable == y_inc.type.broadcastable
-            ):
-                # if x[idx] and y have the same type, directly return y
-                return [y_inc]
-            else:
-                # The difference is related to broadcasting pattern
-                assert out.broadcastable != y_inc.broadcastable
-                # We have to alloc y to the shape of x[idx]
-                x_subtensor = node.op(x_inc, *inc_index_variables)
-                return [alloc(y_inc, *x_subtensor.shape)]
-        else:
-            return
 
 
 @register_canonicalize
@@ -1209,74 +1166,92 @@ def local_setsubtensor_of_constants(fgraph, node):
             return False
 
 
-@register_canonicalize
-@register_specialize
-@node_rewriter([AdvancedSubtensor1])
-def local_adv_sub1_adv_inc_sub1(fgraph, node):
-    """Rewrite graphs like ``AdvancedSubtensor1(AdvancedSetSubtensor1(...), ...)``.
+def _constant_has_unique_indices(idx) -> bool:
+    """Check whether a constant index has no duplicate entries.
+
+    Boolean indices, scalars, and single-element arrays are trivially unique.
+    For larger integer arrays, indices that mix positive and negative values
+    may alias, so those are treated as potentially duplicated.  The result
+    is cached on ``idx.tag``.
+    """
+    if not isinstance(idx, Constant):
+        return False
+    cached = getattr(idx.tag, "unique_indices", None)
+    if cached is not None:
+        return bool(cached)
+    idx_val = np.asarray(idx.data)
+    if idx_val.dtype == bool:
+        result = True
+    elif idx_val.size <= 1:
+        result = True
+    else:
+        has_pos = (idx_val >= 0).any()
+        has_neg = (idx_val < 0).any()
+        result = not (has_pos and has_neg) and np.unique(idx_val).size == idx_val.size
+    idx.tag.unique_indices = result
+    return result
+
+
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([Subtensor, AdvancedSubtensor1, AdvancedSubtensor])
+def local_read_of_write_same_indices(fgraph, node):
+    """Read of a write at the same indices: ``x[idx].set/inc(v)[idx]``.
 
     .. code::
 
-        AdvancedSubtensor1(AdvancedSetSubtensor1(x, y, idx), idx) -> y
+        x[idx].set(v)[idx] -> v
+        x[idx].inc(v)[idx] -> x[idx] + v   (idx must be duplicate-free)
 
-
-    Notes
-    -----
-    This rewrite adds an `AssertOp`; otherwise, it would remove shape and index
-    error. If you want to get rid of them, see the :ref:`unsafe_rewrites`
-    section.
-
-    A previous version of this rewrite also matched
-    ``AdvancedSubtensor1(AdvancedIncSubtensor1(x, y, idx), idx)``.
-    This is incorrect when there are duplicate indices.
-    The current version warns the user about potential issues.
-
+    Applies when the outer read and inner write share identical index
+    variables (``is`` check) and the same ``idx_list``.  The inc case
+    additionally requires duplicate-free indices: slices and scalar indices
+    are trivially unique, while integer-array indices must be constant with
+    no repeated entries (mixing positive and negative values counts as
+    potentially duplicated since they may alias).
     """
-    if not isinstance(node.op, AdvancedSubtensor1):
-        return
-    inp = node.inputs[0]
-    if not (inp.owner and isinstance(inp.owner.op, AdvancedIncSubtensor1)):
-        return
-    idx = node.inputs[1]
-    idx2 = inp.owner.inputs[2]
-    x = inp.owner.inputs[0]
-    y = inp.owner.inputs[1]
-    if idx is not idx2:
-        return
-    if (
-        not inp.owner.op.set_instead_of_inc
-        and
-        # Don't use only_process_constants=True. We need to
-        # investigate Alloc of 0s but with non constant shape.
-        get_underlying_scalar_constant_value(
-            x, elemwise=False, raise_not_constant=False
-        )
-        != 0
-    ):
-        return
+    if isinstance(node.op, Subtensor):
+        write_type = IncSubtensor
+    elif isinstance(node.op, AdvancedSubtensor1):
+        write_type = AdvancedIncSubtensor1
+    else:
+        write_type = AdvancedIncSubtensor
 
-    if not inp.owner.op.set_instead_of_inc:
-        return
+    inner = node.inputs[0]
+    if not (inner.owner and isinstance(inner.owner.op, write_type)):
+        return None
 
-    cond = [pt_all(and_(lt(idx, x.shape[0]), ge(idx, -x.shape[0])))]
-    if not fgraph.shape_feature.same_shape(idx, y, 0, 0):
-        cond.append(eq(idx.shape[0], y.shape[0]))
-    r = Assert(
-        "Bad indexing or shapes in a AdvancedIncSubtensor1 that was optimized away"
-    )(y, *cond)
-    copy_stack_trace(y, r)
+    if node.op.idx_list != inner.owner.op.idx_list:
+        return None
 
-    if r.dtype == node.outputs[0].dtype:
+    x, v, *inner_idx_vars = inner.owner.inputs
+    outer_idx_vars = node.inputs[1:]
+
+    if not all(o is i for o, i in zip(outer_idx_vars, inner_idx_vars, strict=True)):
+        return None
+
+    out = node.outputs[0]
+
+    if inner.owner.op.set_instead_of_inc:
+        r = cast(v, out.dtype)
+        if not r.type.is_super(out.type):
+            r = alloc(r, *out.shape)
+        copy_stack_trace(out, r)
         return [r]
-    # It is possible that y is upcast or downcast to x.dtype.
-    # In all case, as we set or add with 0, we can just cast y.
-    r2 = cast(r, node.outputs[0].dtype)
+    else:
+        # Inc case: advanced integer-array indices must be duplicate-free;
+        # slices and scalar indices are trivially unique.
+        indices = indices_from_subtensor(outer_idx_vars, node.op.idx_list)
+        for idx in indices:
+            if isinstance(idx, TensorVariable) and idx.type.ndim > 0:
+                if not _constant_has_unique_indices(idx):
+                    return None
 
-    # Copy over stacktrace from before casting, since
-    # we don't expect problems in the casting operation,
-    # and any problems in the indexing would have been spotted above.
-    copy_stack_trace(r, r2)
-    return [r2]
+        x_at_idx = x[tuple(indices)]
+        copy_stack_trace(out, x_at_idx)
+        r = x_at_idx + v
+        copy_stack_trace(out, r)
+        return [r]
 
 
 @register_specialize
