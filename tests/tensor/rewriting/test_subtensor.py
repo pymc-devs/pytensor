@@ -1397,6 +1397,149 @@ class TestReadOfWriteSameIndices:
         utt.assert_equal_computations([rewritten], [x[:stop] + v])
 
 
+class TestReadOfWriteConstantIndices:
+    def setup_method(self):
+        mode = get_default_mode()
+        self.mode = mode.including(
+            "local_replace_AdvancedSubtensor",
+            "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
+            "local_advanced_read_of_write_constant_indices",
+        ).excluding("fusion")
+
+    def test_inc_multi_axis_unique_const(self):
+        """Multi-axis ``x[idx_a, idx_b].inc(v)[idx_a, idx_b]`` with
+        unique-per-axis constant indices collapses to ``x[idx] + v``."""
+        x = matrix("x", dtype="float64")
+        v = vector("v", dtype="float64")
+        cidx_a = pt.constant(np.array([0, 2, 3], dtype="int32"))
+        cidx_b = pt.constant(np.array([1, 2, 4], dtype="int32"))
+
+        out = inc_subtensor(x[cidx_a, cidx_b], v)[cidx_a, cidx_b]
+        f = function([x, v], out, self.mode)
+
+        topo = f.maker.fgraph.toposort()
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+
+        dx = np.random.random((4, 5))
+        dv = np.random.random((3,))
+        expected = dx.copy()
+        expected[[0, 2, 3], [1, 2, 4]] += dv
+        np.testing.assert_allclose(f(dx, dv), expected[[0, 2, 3], [1, 2, 4]])
+
+    def test_non_leading_adv(self):
+        """The constant-indices rewrite must place the advanced axis correctly
+        for non-leading layouts: ``x[:, a, b]`` (consecutive non-leading,
+        adv stays at axis 1) and ``x[a, :, b]`` (non-consecutive, numpy
+        hoists adv to axis 0).
+        """
+        x = pt.tensor3("x", dtype="float64")
+        v = matrix("v", dtype="float64")
+        ca = pt.constant(np.array([0, 1], dtype="int64"))
+        cb = pt.constant(np.array([2, 3], dtype="int64"))
+
+        np.random.seed(0)
+        dx = np.random.random((3, 4, 5))
+        dv = np.random.random((3, 2))  # matches numpy x[:, ca, cb].shape
+
+        # Consecutive non-leading: result shape (3, 2), adv at axis 1
+        for op, expected_fn in (
+            (set_subtensor, lambda dx, dv: dv),
+            (inc_subtensor, lambda dx, dv: dx[:, [0, 1], [2, 3]] + dv),
+        ):
+            out = op(x[:, ca, cb], v)[:, ca, cb]
+            f = function([x, v], out, self.mode)
+            topo = f.maker.fgraph.toposort()
+            assert not any(
+                isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1)
+                for n in topo
+            )
+            np.testing.assert_allclose(f(dx, dv), expected_fn(dx, dv))
+
+        # Non-consecutive: numpy hoists adv to axis 0 → result shape (2, 4)
+        dv2 = np.random.random((2, 4))
+        for op, expected_fn in (
+            (set_subtensor, lambda dx, dv: dv),
+            (inc_subtensor, lambda dx, dv: dx[[0, 1], :, [2, 3]] + dv),
+        ):
+            out = op(x[ca, :, cb], v)[ca, :, cb]
+            f = function([x, v], out, self.mode)
+            topo = f.maker.fgraph.toposort()
+            assert not any(
+                isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1)
+                for n in topo
+            )
+            np.testing.assert_allclose(f(dx, dv2), expected_fn(dx, dv2))
+
+    def test_partial_coverage_set(self):
+        """Partial-coverage set: read indices overlap only some write indices.
+        Covered positions come from ``v``; uncovered positions are read from
+        the base.  Works for both constant-fill and non-constant bases.
+
+        The rewrite transforms a multi-axis write into a 1-axis write on a
+        gathered slice; the marker is that no multi-axis
+        ``AdvancedIncSubtensor`` remains (single-axis ``...1`` variants are
+        the target state).
+        """
+        v = vector("v", dtype="float64")
+        write_a = pt.constant(np.array([0, 1, 2], dtype="int64"))
+        write_b = pt.constant(np.array([0, 1, 2], dtype="int64"))
+        # Read positions: (0,0) covered (=v[0]), (1,2) uncovered (=base), (2,2) covered (=v[2])
+        read_a = pt.constant(np.array([0, 1, 2], dtype="int64"))
+        read_b = pt.constant(np.array([0, 2, 2], dtype="int64"))
+
+        dv = np.array([10.0, 20.0, 30.0])
+
+        # Constant-fill base (zeros).
+        out_zeros = set_subtensor(pt.zeros((4, 4))[write_a, write_b], v)[read_a, read_b]
+        f_zeros = function([v], out_zeros, self.mode)
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor)
+            for n in f_zeros.maker.fgraph.toposort()
+        )
+        np.testing.assert_allclose(f_zeros(dv), [10.0, 0.0, 30.0])
+
+        # Non-constant base: uncovered positions must read from the base.
+        x = matrix("x", dtype="float64")
+        out_x = set_subtensor(x[write_a, write_b], v)[read_a, read_b]
+        f_x = function([x, v], out_x, self.mode)
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor) for n in f_x.maker.fgraph.toposort()
+        )
+        np.random.seed(0)
+        dx = np.random.random((4, 4))
+        # Expected: covered → v values; uncovered (1,2) → dx[1,2]
+        np.testing.assert_allclose(f_x(dx, dv), [10.0, dx[1, 2], 30.0])
+
+    def test_partial_coverage_inc(self):
+        """Partial-coverage inc: works with any base since we read base and
+        add v only at covered positions.  Same marker as
+        ``test_partial_coverage_set``: no multi-axis ``AdvancedIncSubtensor``.
+        """
+        x = matrix("x", dtype="float64")
+        v = vector("v", dtype="float64")
+        write_a = pt.constant(np.array([0, 1, 2], dtype="int64"))
+        write_b = pt.constant(np.array([0, 1, 2], dtype="int64"))
+        # (0,0) covered, (1,2) uncovered, (2,2) covered
+        read_a = pt.constant(np.array([0, 1, 2], dtype="int64"))
+        read_b = pt.constant(np.array([0, 2, 2], dtype="int64"))
+
+        out = inc_subtensor(x[write_a, write_b], v)[read_a, read_b]
+        f = function([x, v], out, self.mode)
+
+        topo = f.maker.fgraph.toposort()
+        assert not any(isinstance(n.op, AdvancedIncSubtensor) for n in topo)
+
+        np.random.seed(0)
+        dx = np.random.random((4, 4))
+        dv = np.array([10.0, 20.0, 30.0])
+        expected = dx[[0, 1, 2], [0, 2, 2]].copy()
+        expected[0] += dv[0]  # (0,0) covered by write index 0
+        expected[2] += dv[2]  # (2,2) covered by write index 2
+        np.testing.assert_allclose(f(dx, dv), expected)
+
+
 class TestSubtensorAllocRewrites:
     def setup_method(self):
         mode = get_default_mode()
