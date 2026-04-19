@@ -11,6 +11,7 @@ from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg.dtype_utils import linalg_real_output_dtype
 from pytensor.tensor.type import Variable, matrix, tensor, vector
 from pytensor.tensor.type_other import NoneTypeT
 
@@ -112,12 +113,7 @@ class Eigh(Eig):
     def make_node(self, x):
         x = as_tensor_variable(x)
         assert x.ndim == 2
-        # Numpy's linalg.eigh may return either double or single
-        # presision eigenvalues depending on installed version of
-        # LAPACK.  Rather than trying to reproduce the (rather
-        # involved) logic, we just probe linalg.eigh with a trivial
-        # input.
-        w_dtype = np.linalg.eigh([[np.dtype(x.dtype).type()]])[0].dtype.name
+        w_dtype = linalg_real_output_dtype(x.type.dtype)
         w = vector(dtype=w_dtype)
         v = matrix(dtype=w_dtype)
         return Apply(self, [x], [w, v])

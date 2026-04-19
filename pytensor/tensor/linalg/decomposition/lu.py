@@ -12,6 +12,10 @@ from pytensor.tensor import TensorLike
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg.dtype_utils import (
+    linalg_output_dtype,
+    linalg_real_output_dtype,
+)
 from pytensor.tensor.type import matrix, tensor, vector
 from pytensor.tensor.variable import TensorVariable
 
@@ -55,13 +59,7 @@ class LU(Op):
                 f"LU only allowed on matrix (2-D) inputs, got {x.type.ndim}-D input"
             )
 
-        if x.type.numpy_dtype.kind in "ibu":
-            if x.type.numpy_dtype.itemsize <= 2:
-                out_dtype = "float32"
-            else:
-                out_dtype = "float64"
-        else:
-            out_dtype = x.type.dtype
+        out_dtype = linalg_output_dtype(x.type.dtype)
         L = tensor(shape=x.type.shape, dtype=out_dtype)
         U = tensor(shape=x.type.shape, dtype=out_dtype)
 
@@ -72,10 +70,7 @@ class LU(Op):
             p_indices = tensor(shape=(x.type.shape[0],), dtype="int32")
             return Apply(self, inputs=[x], outputs=[p_indices, L, U])
 
-        if out_dtype.startswith("complex"):
-            P_dtype = "float64" if out_dtype == "complex128" else "float32"
-        else:
-            P_dtype = out_dtype
+        P_dtype = linalg_real_output_dtype(x.type.dtype)
 
         P = tensor(shape=x.type.shape, dtype=P_dtype)
         return Apply(self, inputs=[x], outputs=[P, L, U])

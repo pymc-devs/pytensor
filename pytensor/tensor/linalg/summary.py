@@ -13,6 +13,10 @@ from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable, diagonal
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition.svd import svd
+from pytensor.tensor.linalg.dtype_utils import (
+    linalg_output_dtype,
+    linalg_real_output_dtype,
+)
 from pytensor.tensor.type import scalar
 
 
@@ -48,10 +52,7 @@ class Det(Op):
             raise ValueError(
                 f"Determinant not defined for non-square matrix inputs. Shape received is {x.type.shape}"
             )
-        if x.type.numpy_dtype.kind in "ibu":
-            out_dtype = "float64"
-        else:
-            out_dtype = x.dtype
+        out_dtype = linalg_output_dtype(x.type.dtype)
         o = scalar(dtype=out_dtype)
         return Apply(self, [x], [o])
 
@@ -92,12 +93,9 @@ class SLogDet(Op):
     def make_node(self, x):
         x = as_tensor_variable(x)
         assert x.ndim == 2
-        if x.type.numpy_dtype.kind in "ibu":
-            out_dtype = "float64"
-        else:
-            out_dtype = x.dtype
+        out_dtype = linalg_output_dtype(x.type.dtype)
         sign = scalar(dtype=out_dtype)
-        det = scalar(dtype=out_dtype)
+        det = scalar(dtype=linalg_real_output_dtype(x.type.dtype))
         return Apply(self, [x], [sign, det])
 
     def perform(self, node, inputs, outputs):

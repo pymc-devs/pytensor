@@ -9,6 +9,7 @@ from pytensor.graph import Apply, Op
 from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import matrix, vector
 from pytensor.tensor.variable import TensorVariable
 
@@ -78,13 +79,13 @@ class Schur(Op):
         A = as_tensor_variable(A)
         assert A.ndim == 2
 
-        out_dtype = A.dtype
-        complex_input = out_dtype in ("complex64", "complex128")
+        out_dtype = linalg_output_dtype(A.dtype)
+        complex_input = np.dtype(out_dtype).kind == "c"
 
         # Scipy behavior: output parameter only affects real inputs
         # Complex inputs always return complex output
         if self.output == "complex" and not complex_input:
-            out_dtype = "complex64" if A.dtype == "float32" else "complex128"
+            out_dtype = "complex64" if out_dtype == "float32" else "complex128"
 
         T = matrix(dtype=out_dtype, shape=A.type.shape)
         Z = matrix(dtype=out_dtype, shape=A.type.shape)
@@ -318,11 +319,9 @@ class QZ(Op):
         assert A.ndim == 2
         assert B.ndim == 2
 
-        out_dtype = pytensor.scalar.upcast(A.dtype, B.dtype)
-        if np.dtype(out_dtype).kind in "ibu":
-            out_dtype = "float64" if np.dtype(out_dtype).itemsize > 2 else "float32"
+        out_dtype = linalg_output_dtype(A.dtype, B.dtype)
 
-        complex_input = out_dtype in ("complex64", "complex128")
+        complex_input = np.dtype(out_dtype).kind == "c"
 
         # Scipy behavior: output parameter only affects real inputs
         # Complex inputs always return complex output

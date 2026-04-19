@@ -1,7 +1,3 @@
-from collections.abc import Sequence
-from functools import reduce
-
-import numpy as np
 import scipy.linalg as scipy_linalg
 
 import pytensor
@@ -10,12 +6,9 @@ from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import basic as ptb
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg.dtype_utils import _largest_common_dtype
 from pytensor.tensor.variable import TensorVariable
 from pytensor.utils import unzip
-
-
-def _largest_common_dtype(tensors: Sequence[TensorVariable]) -> np.dtype:
-    return reduce(lambda l, r: np.promote_types(l, r), [x.dtype for x in tensors])
 
 
 class BaseBlockDiagonal(Op):
