@@ -2427,12 +2427,19 @@ class TestUselessSlice:
         )
 
 
-def test_extract_diag_of_diagonal_set_subtensor():
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE", reason="Test requires specialization rewrites"
+)
+def test_extract_diag_of_write():
+    """``extract_diag`` of a chain of diagonal writes should simplify away
+    the writes when the read overlaps a (fully or partially) written diagonal,
+    and otherwise reduce to ``extract_diag`` of the original base.
+    """
     A = pt.full((2, 6, 6), np.nan)
     rows = pt.arange(A.shape[-2])
     cols = pt.arange(A.shape[-1])
     write_offsets = [-2, -1, 0, 1, 2]
-    # Randomize order of write operations, to make sure rewrite is not sensitive to it
+    # Randomize write order to make sure the rewrite is not sensitive to it
     random.shuffle(write_offsets)
     for offset in write_offsets:
         value = offset + 0.1 * offset
@@ -2443,22 +2450,28 @@ def test_extract_diag_of_diagonal_set_subtensor():
         else:
             offset = -offset
             A = A[..., rows[offset:], cols[:-offset]].set(value)
-    # Add a partial diagonal along offset 3
+    # Partial write along offset 3
     A = A[..., rows[1:-3], cols[4:]].set(np.pi)
 
     read_offsets = [-2, -1, 0, 1, 2, 3]
     outs = [A.diagonal(offset=offset, axis1=-2, axis2=-1) for offset in read_offsets]
-    rewritten_outs = rewrite_graph(outs, include=("ShapeOpt", "canonicalize"))
 
-    # Every output should just be an Alloc with value
-    expected_outs = []
-    for offset in read_offsets[:-1]:
-        value = np.asarray(offset + 0.1 * offset, dtype=A.type.dtype)
-        expected_outs.append(pt.full((np.int64(2), np.int8(6 - abs(offset))), value))
-    # The partial diagonal shouldn't be rewritten
-    expected_outs.append(outs[-1])
+    f_on = function([], outs)
+    f_off = function(
+        [],
+        outs,
+        mode=get_default_mode().excluding("local_extract_diag_of_write"),
+    )
 
-    assert equal_computations(rewritten_outs, expected_outs)
+    # All AdvancedIncSubtensor writes should be eliminated by the rewrite.
+    on_topo = f_on.maker.fgraph.toposort()
+    assert not any(
+        isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in on_topo
+    )
+
+    # Numerical equivalence with the unrewritten reference.
+    for got, ref in zip(f_on(), f_off(), strict=True):
+        np.testing.assert_allclose(got, ref, equal_nan=True)
 
 
 @pytest.mark.skipif(

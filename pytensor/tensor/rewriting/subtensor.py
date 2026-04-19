@@ -29,7 +29,6 @@ from pytensor.tensor.basic import (
     cast,
     concatenate,
     expand_dims,
-    full,
     get_scalar_constant_value,
     get_underlying_scalar_constant_value,
     moveaxis,
@@ -2143,95 +2142,73 @@ optdb["specialize"].register(
 )
 
 
-@register_canonicalize
-@register_stabilize
-@register_specialize
+@register_stabilize("shape_unsafe")
+@register_specialize("shape_unsafe")
 @node_rewriter([ExtractDiag])
-def extract_diag_of_diagonal_set_subtensor(fgraph, node):
-    """Undo extract diagonal from a set diagonal
+def local_extract_diag_of_write(fgraph, node):
+    """Delegate ``extract_diag(advanced_inc_subtensor(...))`` to the constant-indices rewrite.
 
-    This rewrites the following pattern:
-        y = write_diagonal*(x, x_diag, offset=k1)
-        z = extract_diag(y, offset=k2)
+    Rewrites ``extract_diag(x, offset=k)`` as the equivalent
+    ``x[..., arange(d) + max(0, -k), arange(d) + max(0, k), ...]`` and
+    calls ``local_advanced_read_of_write_constant_indices`` to do the
+    work.  Since ``extract_diag`` is a zero-copy view, we only commit the
+    replacement when the downstream rewrite eliminates the gather.
 
-    as:
-        z = diag_x, if k1 == k2
-        z = x if k1 != k2
-
-    * write_diagonal is not an atomic operation, but a sequence of Arange/SetSubtensor operations.
-
+    Requires statically-known sizes on the two diagonal axes.
     """
-
-    def is_cosntant_arange(var) -> bool:
-        if not (isinstance(var, TensorConstant) and var.type.ndim == 1):
-            return False
-
-        data = var.data
-        start, stop = data[0], data[-1] + 1
-        return data.size == (stop - start) and (data == np.arange(start, stop)).all()  # type: ignore
-
-    [diag_x] = node.inputs
-    if not (
-        diag_x.owner is not None
-        and isinstance(diag_x.owner.op, AdvancedIncSubtensor)
-        and diag_x.owner.op.set_instead_of_inc
-    ):
-        return None
-
-    x, y, *idx_variables = diag_x.owner.inputs
-    idxs = indices_from_subtensor(idx_variables, diag_x.owner.op.idx_list)
-
-    if not (
-        x.type.ndim >= 2
-        and None not in x.type.shape[-2:]
-        and x.type.shape[-2] == x.type.shape[-1]
-    ):
-        # TODO: for now we only support rewrite with static square shape for x
-        return None
-
     op = node.op
-    if op.axis2 > len(idxs):
+
+    inner = node.inputs[0]
+    # AdvancedIncSubtensor1 is intentionally not accepted: it writes whole
+    # rows/slices on a single axis, not specific (i, j) positions, so it
+    # can't express "write the diagonal" the way two paired index arrays can.
+    if not (inner.owner and isinstance(inner.owner.op, AdvancedIncSubtensor)):
         return None
 
-    # Check all non-axis indices are full slices
-    axis = {op.axis1, op.axis2}
-    if not all(idx == slice(None) for i, idx in enumerate(idxs) if i not in axis):
+    # Need static sizes on the two diagonal axes to build constant indices.
+    dim_a = inner.type.shape[op.axis1]
+    dim_b = inner.type.shape[op.axis2]
+    if dim_a is None or dim_b is None:
         return None
 
-    # Check axis indices are arange we would expect from setting on the diagonal
-    axis1_idx = idxs[op.axis1]
-    axis2_idx = idxs[op.axis2]
-    if not (is_cosntant_arange(axis1_idx) and is_cosntant_arange(axis2_idx)):
+    k = op.offset
+    row_offset = max(0, -k)
+    col_offset = max(0, k)
+    d = min(dim_a - row_offset, dim_b - col_offset)
+    if d <= 0:
         return None
 
-    dim_length = x.type.shape[-1]
-    offset = op.offset
-    start_stop1 = (axis1_idx.data[0], axis1_idx.data[-1] + 1)
-    start_stop2 = (axis2_idx.data[0], axis2_idx.data[-1] + 1)
-    orig_start1, orig_start2 = start_stop1[0], start_stop2[0]
+    # Build equivalent AdvancedSubtensor: inner[..., arange(d) + row_offset, ..., arange(d) + col_offset, ...]
+    base_arange = np.arange(d, dtype=np.int64)
+    rows = pytensor.tensor.as_tensor_variable(base_arange + row_offset)
+    cols = pytensor.tensor.as_tensor_variable(base_arange + col_offset)
+    idxs = [slice(None)] * inner.type.ndim
+    idxs[op.axis1] = rows
+    idxs[op.axis2] = cols
+    equiv = inner[tuple(idxs)]
 
-    if offset < 0:
-        # The logic for checking if we are selecting or not a diagonal for negative offset is the same
-        # as the one with positive offset but swapped axis
-        start_stop1, start_stop2 = start_stop2, start_stop1
-        offset = -offset
+    if not (equiv.owner and isinstance(equiv.owner.op, AdvancedSubtensor)):
+        return None
 
-    start1, stop1 = start_stop1
-    start2, stop2 = start_stop2
+    # Delegate to the general read-after-write rewrite.
+    result = local_advanced_read_of_write_constant_indices.fn(fgraph, equiv.owner)
+    if not result:
+        return None
+
+    # Stay zero-copy where possible: when the simplification reduced to a
+    # gather of the inner write's base at our diagonal-arange pattern (i.e.
+    # the no-coverage case where the write is irrelevant for this read),
+    # re-emit as ExtractDiag so we keep the view semantics of the original.
+    base = inner.owner.inputs[0]
+    [result_var] = result
     if (
-        start1 == 0
-        and start2 == offset
-        and stop1 == dim_length - offset
-        and stop2 == dim_length
+        result_var.owner
+        and isinstance(result_var.owner.op, AdvancedSubtensor)
+        and result_var.owner.inputs[0] is base
     ):
-        # We are extracting the just written diagonal
-        if y.type.ndim == 0 or y.type.shape[-1] == 1:
-            # We may need to broadcast y
-            y = full((*x.shape[:-2], dim_length - offset), y, dtype=x.type.dtype)
-        return [y]
-    elif (orig_start2 - orig_start1) != op.offset:
-        # Some other diagonal was written, ignore it
-        return [op(x)]
-    else:
-        # A portion, but no the whole diagonal was written, don't do anything
-        return None
+        out = base.diagonal(offset=k, axis1=op.axis1, axis2=op.axis2)
+        copy_stack_trace(node.outputs[0], out)
+        return [out]
+
+    copy_stack_trace(node.outputs[0], result)
+    return result
