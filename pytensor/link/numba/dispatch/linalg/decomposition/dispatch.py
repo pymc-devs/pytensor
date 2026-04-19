@@ -215,8 +215,6 @@ def pivot_to_permutation(op, node, **kwargs):
 @register_funcify_default_op_cache_key(LU)
 def numba_funcify_LU(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.numpy_dtype
-    if inp_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
     discrete_inp = inp_dtype.kind in "ibu"
     if discrete_inp and config.compiler_verbose:
         print("LU requires casting discrete input to float")  # noqa: T201
@@ -225,6 +223,10 @@ def numba_funcify_LU(op, node, **kwargs):
     permute_l = op.permute_l
     p_indices = op.p_indices
     overwrite_a = op.overwrite_a
+    # For the (P, L, U) case, P is real even when input is complex
+    p_dtype = (
+        node.outputs[0].type.numpy_dtype if not (permute_l or p_indices) else inp_dtype
+    )
 
     @numba_basic.numba_njit
     def lu(a):
@@ -237,7 +239,7 @@ def numba_funcify_LU(op, node, **kwargs):
                 P = np.zeros(a.shape[0], dtype="int32")
                 return P, L, U
             else:
-                P = np.zeros(a.shape, dtype=a.dtype)
+                P = np.zeros(a.shape, dtype=p_dtype)
                 return P, L, U
 
         if discrete_inp:
@@ -267,7 +269,7 @@ def numba_funcify_LU(op, node, **kwargs):
 
         return res
 
-    cache_version = 2
+    cache_version = 3
     return lu, cache_version
 
 
