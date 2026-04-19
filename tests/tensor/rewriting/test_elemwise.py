@@ -1095,14 +1095,6 @@ class TestFusion:
         assert not any(len(node.inputs) > 31 for node in composite_nodes)
 
     @pytest.mark.skipif(not config.cxx, reason="No cxx compiler")
-    @pytest.mark.xfail(
-        reason="Elemwise.perform doesn't support >32 operands. "
-        "local_useless_inc_subtensor now triggers get_underlying_scalar_constant_value "
-        "on large fused Add nodes, exposing a pre-existing bug where prepare_node "
-        "refuses to create a ufunc for >32 inputs but perform falls through to the "
-        "ufunc code path anyway (missing return after super().perform()).",
-        raises=AttributeError,
-    )
     def test_big_fusion(self):
         # Make sure that C compilation is used
         mode = Mode("cvm", self.rewrites)
