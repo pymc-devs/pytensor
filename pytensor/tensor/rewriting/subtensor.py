@@ -1312,6 +1312,188 @@ def local_read_of_write_same_indices(fgraph, node):
         return [r]
 
 
+@register_canonicalize("shape_unsafe")
+@register_specialize("shape_unsafe")
+@node_rewriter([AdvancedSubtensor])
+def local_advanced_read_of_write_constant_indices(fgraph, node):
+    """Read of a write at possibly-different constant indices.
+
+    .. code::
+
+        x[w_idx].set(v)[r_idx] ->
+            v[lookup]                     (full coverage — base irrelevant)
+            x[r_idx]                      (no coverage — set irrelevant)
+            x[r_idx].set(v[k])[...]       (partial — mix base and v)
+
+        x[w_idx].inc(v)[r_idx] ->
+            x[r_idx] + v[lookup]          (full coverage, unique writes)
+            x[r_idx]                      (no coverage)
+            x[r_idx].inc(v[k])[...]       (partial, unique writes)
+
+    Fires only when all advanced indices on both sides are 1-D integer
+    constants with matching ``idx_list``.  The inc case additionally requires
+    unique joint write coords so each read coord matches at most one write.
+    """
+    inner = node.inputs[0]
+    if not (inner.owner and isinstance(inner.owner.op, AdvancedIncSubtensor)):
+        return None
+
+    inner_op = inner.owner.op
+    is_set = inner_op.set_instead_of_inc
+
+    # Both must have the same idx_list structure (same axes advanced-indexed).
+    if node.op.idx_list != inner_op.idx_list:
+        return None
+
+    base, v, *write_idx_inputs = inner.owner.inputs
+    read_idx_inputs = node.inputs[1:]
+
+    write_indices = indices_from_subtensor(write_idx_inputs, inner_op.idx_list)
+    read_indices = indices_from_subtensor(read_idx_inputs, node.op.idx_list)
+
+    # Collect advanced (integer) axes; other axes must be identical slices.
+    # Cross-sign indices are rejected since negatives can alias positives
+    # (a normalisation rewrite handles those separately).
+    write_arrs = []
+    read_arrs = []
+    for w, r in zip(write_indices, read_indices, strict=True):
+        if isinstance(w, TensorVariable) and isinstance(r, TensorVariable):
+            if not (isinstance(w, TensorConstant) and isinstance(r, TensorConstant)):
+                return None
+            # Require proper 1-D array indices, not broadcastable length-1.
+            if w.type.broadcastable != (False,) or r.type.broadcastable != (False,):
+                return None
+            w_arr = np.asarray(w.data)
+            r_arr = np.asarray(r.data)
+            # Reject only cross-sign within an axis — negatives can alias
+            # positives on the same axis, but uniformly negative (or
+            # uniformly non-negative) indices compare correctly as raw values.
+            # Short-circuit so the common all-non-negative case skips most checks.
+            if ((w_arr < 0).any() or (r_arr < 0).any()) and (
+                (w_arr >= 0).any() or (r_arr >= 0).any()
+            ):
+                return None
+            write_arrs.append(w_arr)
+            read_arrs.append(r_arr)
+        elif isinstance(w, slice) and isinstance(r, slice):
+            if w != r:
+                return None
+        else:
+            return None
+
+    if not write_arrs:
+        return None
+
+    n_write = len(write_arrs[0])
+
+    # Extend indices with implicit trailing slices so axis bookkeeping is
+    # uniform regardless of whether the subtensor indexed all base dims.
+    n_trailing = base.type.ndim - len(write_indices)
+    full_write = list(write_indices) + [slice(None)] * n_trailing
+
+    # Compute where the advanced axis lands in the result of x[indices], per
+    # numpy semantics: hoisted to position 0 if the adv indices are split by
+    # slices, otherwise kept in place at the position of the first adv axis
+    # (counting only slice axes that come before it, since collapsed adv
+    # axes share one output dim).
+    adv_axes = [
+        i for i, idx in enumerate(full_write) if isinstance(idx, TensorVariable)
+    ]
+    if _non_consecutive_adv_indexing(full_write):
+        adv_pos = 0
+        slice_shapes = [
+            base.shape[i] for i in range(base.type.ndim) if i not in set(adv_axes)
+        ]
+    else:
+        first_adv = min(adv_axes)
+        last_adv = max(adv_axes)
+        pre = [
+            base.shape[i] for i in range(first_adv) if isinstance(full_write[i], slice)
+        ]
+        post = [
+            base.shape[i]
+            for i in range(last_adv + 1, base.type.ndim)
+            if isinstance(full_write[i], slice)
+        ]
+        adv_pos = len(pre)
+        slice_shapes = pre + post
+
+    # Bring v to its full natural shape so we can index the adv axis directly.
+    natural_shape_v = [*slice_shapes[:adv_pos], n_write, *slice_shapes[adv_pos:]]
+    v = alloc(v, *natural_shape_v)
+    # set_subtensor/inc_subtensor cast v to the buffer dtype internally; we need
+    # to do it explicitly so v[lookup] (and subsequent ops) match the output dtype.
+    out_dtype = node.outputs[0].type.dtype
+    if v.type.dtype != out_dtype:
+        v = cast(v, out_dtype)
+
+    write_coords = np.column_stack(write_arrs)  # (n_write, n_axes)
+    read_coords = np.column_stack(read_arrs)  # (n_read, n_axes)
+
+    if is_set:
+        # Set: last-write-wins; uncovered positions need the base.
+        write_dict: dict[tuple, int] = {}
+        for k in range(len(write_coords)):
+            write_dict[tuple(write_coords[k])] = k
+    else:
+        # Inc: require unique write coords so each read matches at most one
+        # write.  With duplicates we'd need a scatter-add at write positions,
+        # which generally isn't simpler than the original inc.
+        write_dict = {}
+        for k in range(len(write_coords)):
+            coord = tuple(write_coords[k])
+            if coord in write_dict:
+                return None
+            write_dict[coord] = k
+
+    lookup = np.array(
+        [write_dict.get(tuple(rc), -1) for rc in read_coords], dtype=np.int64
+    )
+    covered = lookup >= 0
+
+    def index_adv(t, positions):
+        # Index axis `adv_pos` of t with `positions`. Skip if identity.
+        if len(positions) == n_write and np.array_equal(positions, np.arange(n_write)):
+            return t
+        indexer = [slice(None)] * t.type.ndim
+        indexer[adv_pos] = tensor_constant(positions)
+        return t[tuple(indexer)]
+
+    if is_set:
+        if covered.all():
+            # Every read position is overwritten; base is irrelevant.
+            out = index_adv(v, lookup)
+        elif not covered.any():
+            # No read position is overwritten; the set is irrelevant.
+            out = base[tuple(read_indices)]
+        else:
+            # Mix: read base, then overwrite covered positions with v values.
+            base_part = base[tuple(read_indices)]
+            covered_read = np.flatnonzero(covered)
+            covered_write = lookup[covered]
+            indexer = [slice(None)] * base_part.type.ndim
+            indexer[adv_pos] = tensor_constant(covered_read)
+            out = base_part[tuple(indexer)].set(index_adv(v, covered_write))
+    else:
+        # Inc case (write coords are unique by construction above).
+        base_part = base[tuple(read_indices)]
+        copy_stack_trace(node.outputs[0], base_part)
+        if not covered.any():
+            return [base_part]
+
+        if covered.all():
+            out = base_part + index_adv(v, lookup)
+        else:
+            covered_read = np.flatnonzero(covered)
+            covered_write = lookup[covered]
+            indexer = [slice(None)] * base_part.type.ndim
+            indexer[adv_pos] = tensor_constant(covered_read)
+            out = base_part[tuple(indexer)].inc(index_adv(v, covered_write))
+
+    copy_stack_trace(node.outputs[0], out)
+    return [out]
+
+
 @register_specialize
 @register_stabilize
 @register_canonicalize
