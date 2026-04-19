@@ -8,7 +8,9 @@ from pytensor.configdefaults import config
 from pytensor.graph import FunctionGraph, ancestors
 from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.tensor.linalg.constructors import BlockDiagonal
-from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import KroneckerProduct, MultiDot
+from pytensor.tensor.math import Dot
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_nested_blockdiag_fusion():
@@ -236,3 +238,52 @@ def test_slogdet_kronecker_rewrite():
         atol=1e-3 if config.floatX == "float32" else 1e-8,
         rtol=1e-3 if config.floatX == "float32" else 1e-8,
     )
+
+
+class TestMultiDotRewrite:
+    def test_dot_chain_absorbed(self):
+        """A @ B @ C @ D should become MultiDot after canonicalize."""
+        A = pt.matrix("A", shape=(10, 20))
+        B = pt.matrix("B", shape=(20, 5))
+        C = pt.matrix("C", shape=(5, 30))
+        D = pt.matrix("D", shape=(30, 3))
+        out = A @ B @ C @ D
+
+        rewritten = rewrite_graph(out, include=("canonicalize",))
+        assert rewritten.owner and isinstance(rewritten.owner.op, MultiDot)
+        assert len(rewritten.owner.inputs) == 4
+
+    def test_optimal_ordering(self):
+        """Chain ordering should minimize FLOPs, not use naive left-to-right."""
+        # (100x2) @ (2x100) @ (100x100): optimal is A @ (B @ C)
+        A = pt.matrix("A", shape=(100, 2))
+        B = pt.matrix("B", shape=(2, 100))
+        C = pt.matrix("C", shape=(100, 100))
+
+        f = function([A, B, C], A @ B @ C)
+        dot_nodes = [n for n in f.maker.fgraph.toposort() if isinstance(n.op, Dot)]
+        # First dot should be B @ C (2x100), not A @ B (100x100)
+        assert dot_nodes[0].outputs[0].type.shape == (2, 100)
+
+    def test_fuse_multi_dot_operands(self):
+        A = pt.matrix("A", shape=(10, 20))
+        B = pt.matrix("B", shape=(20, 5))
+        C = pt.matrix("C", shape=(5, 30))
+        D = pt.matrix("D", shape=(30, 8))
+        E = pt.matrix("E", shape=(8, 3))
+        F = pt.matrix("F", shape=(3, 12))
+
+        out = pt.linalg.multi_dot([A, B, C]) @ pt.linalg.multi_dot([D, E, F])
+        rewritten = rewrite_graph(out, include=("canonicalize",))
+        expected = pt.linalg.multi_dot([A, B, C, D, E, F])
+        assert_equal_computations([rewritten], [expected])
+
+        out = A @ B @ pt.linalg.multi_dot([C, D, E, F])
+        rewritten = rewrite_graph(out, include=("canonicalize",))
+        expected = pt.linalg.multi_dot([A, B, C, D, E, F])
+        assert_equal_computations([rewritten], [expected])
+
+        out = pt.linalg.multi_dot([A, B, C, D]) @ E @ F
+        rewritten = rewrite_graph(out, include=("canonicalize",))
+        expected = pt.linalg.multi_dot([A, B, C, D, E, F])
+        assert_equal_computations([rewritten], [expected])

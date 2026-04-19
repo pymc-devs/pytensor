@@ -128,7 +128,7 @@ def matrix_dot(*args):
     """
     rval = args[0]
     for a in args[1:]:
-        rval = ptm.dot(rval, a)
+        rval = ptm.matmul(rval, a)
     return rval
 
 
@@ -172,5 +172,73 @@ def matrix_power(M, n):
         n, bit = divmod(n, 2)
         if bit:
             result = z if result is None else ptm.dot(result, z)
+
+    return result
+
+
+class MultiDot(OpFromGraph):
+    """Wrapper Op for a sequence of matrix multiplications.
+
+    Used as a target for rewrites to re-order matrix multiplications for better performance.
+    """
+
+
+def multi_dot(matrices):
+    """Compute the dot product of two or more matrices, selecting the fastest evaluation order automatically.
+
+    The problem of optimal matrix multiplication ordering concerns how to place parenthesis in a sequence of matmuls
+    to make computation as efficient as possible. For a discussion, see the wikipedia page: https://en.wikipedia.org/wiki/Matrix_chain_multiplication
+    The following example from that page illustrates the point. Given 3 matrices A of shape (10, 30), B of shape
+    (30, 5), and C of shape (5, 60), the product X = A @ B @ C can be performed in two ways: (A @ B) @ C or A @ (B @ C).
+
+    The first way requires 10*30*5 + 10*5*60 = 4500 multiplications, while the second way requires
+    30*5*60 + 10*30*60 = 27000 multiplications. Thus, the first way is much more efficient, and multi_dot will
+    automatically select that way for you.
+
+    The exact dynamic programming solution is used to find the optimal contraction path.
+
+    Parameters
+    ----------
+    matrices : list of TensorVariable
+        All inputs must be at least 2d, except for the first and last inputs, which can be 1d. If the first input is
+        1d, it is treated as a row vector. If the last input is 1d, it is treated as a column vector.
+
+    Returns
+    -------
+    result : TensorVariable
+        The dot product of the input matrices, from left to right
+    """
+    if len(matrices) < 2:
+        raise ValueError("multi_dot requires at least 2 matrices")
+
+    matrices = [as_tensor_variable(a) for a in matrices]
+
+    for i, a in enumerate(matrices):
+        if a.ndim < 1:
+            raise ValueError(f"multi_dot: array {i} is a scalar, expected at least 1-D")
+        if a.ndim == 1 and 0 < i < len(matrices) - 1:
+            raise ValueError(
+                f"multi_dot: interior array {i} must be at least 2-D, got 1-D"
+            )
+
+    squeeze_first = matrices[0].ndim == 1
+    squeeze_last = matrices[-1].ndim == 1
+    if squeeze_first:
+        matrices[0] = pt.expand_dims(matrices[0], axis=0)
+    if squeeze_last:
+        matrices[-1] = pt.expand_dims(matrices[-1], axis=1)
+
+    if len(matrices) == 2:
+        result = ptm.matmul(matrices[0], matrices[1])
+    else:
+        # Build naive inner graph, wrap in MultiDot
+        inner_inputs = [a.type.clone()(name=f"i{i}") for i, a in enumerate(matrices)]
+        inner_output = matrix_dot(*inner_inputs)
+        result = MultiDot(inputs=inner_inputs, outputs=[inner_output])(*matrices)
+
+    if squeeze_first:
+        result = result[0] if result.ndim == 2 else result[..., 0, :]
+    if squeeze_last:
+        result = result[..., 0]
 
     return result
