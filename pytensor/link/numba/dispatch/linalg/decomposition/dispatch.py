@@ -274,8 +274,6 @@ def numba_funcify_LU(op, node, **kwargs):
 @register_funcify_default_op_cache_key(LUFactor)
 def numba_funcify_LUFactor(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.numpy_dtype
-    if inp_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
     discrete_inp = inp_dtype.kind in "ibu"
     if discrete_inp and config.compiler_verbose:
         print("LUFactor requires casting discrete input to float")  # noqa: T201
@@ -298,7 +296,7 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
         return LU, piv
 
-    cache_version = 2
+    cache_version = 3
     return lu_factor, cache_version
 
 
