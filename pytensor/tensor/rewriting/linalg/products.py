@@ -254,7 +254,7 @@ class MultiDotAbsorber(GraphRewriter):
 
 multi_dot_absorber = MultiDotAbsorber()
 multi_dot_absorber.name = "multi_dot_absorber"
-register_canonicalize(multi_dot_absorber, "multi_dot", name="multi_dot_absorber")
+register_canonicalize(multi_dot_absorber, "multi_dot", name="multi_dot_absorber")  # type: ignore[arg-type]
 
 
 @register_canonicalize("multi_dot")
