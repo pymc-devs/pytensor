@@ -74,6 +74,8 @@ class QR(Op):
         in_dtype = x.type.numpy_dtype
         if in_dtype.kind in "ibu":
             out_dtype = "float64" if in_dtype.itemsize > 2 else "float32"
+        elif in_dtype.kind == "c":
+            out_dtype = "complex128" if in_dtype.itemsize > 8 else "complex64"
         else:
             out_dtype = "float64" if in_dtype.itemsize > 4 else "float32"
 
