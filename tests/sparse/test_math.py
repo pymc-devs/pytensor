@@ -358,6 +358,7 @@ class TestStructuredDot:
         verify_grad_sparse(buildgraph_T, [spmat, mat], structured=True)
 
     def test_upcast(self):
+        rng = np.random.default_rng(sum(map(ord, "test_upcast")))
         typenames = (
             "float32",
             "int64",
@@ -381,9 +382,7 @@ class TestStructuredDot:
                 M, N, K, nnz = (4, 3, 5, 3)
                 spmat = scipy_sparse.csc_matrix(random_lil((M, N), sparse_dtype, nnz))
                 spmat.dtype = np.dtype(sparse_dtype)
-                mat = np.asarray(
-                    np.random.standard_normal((N, K)) * 9, dtype=dense_dtype
-                )
+                mat = np.asarray(rng.standard_normal((N, K)) * 9, dtype=dense_dtype)
                 pytensor_result = f(spmat, mat)
                 scipy_result = spmat * mat
                 assert pytensor_result.shape == scipy_result.shape
