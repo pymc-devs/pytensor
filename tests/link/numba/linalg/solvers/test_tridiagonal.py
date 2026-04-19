@@ -12,17 +12,24 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 
+@pytest.mark.parametrize("complex", [False, True], ids=lambda x: f"complex={x}")
 @pytest.mark.parametrize("inplace", [False, True], ids=lambda x: f"inplace={x}")
-def test_tridiagonal_lu_factor(inplace):
-    dl = pt.vector("dl", shape=(4,))
-    d = pt.vector("d", shape=(5,))
-    du = pt.vector("du", shape=(4,))
+def test_tridiagonal_lu_factor(inplace, complex):
+    dtype = "complex128" if complex else "float64"
+    dl = pt.vector("dl", shape=(4,), dtype=dtype)
+    d = pt.vector("d", shape=(5,), dtype=dtype)
+    du = pt.vector("du", shape=(4,), dtype=dtype)
     lu_factor_outs = Blockwise(LUFactorTridiagonal())(dl, d, du)
 
     rng = np.random.default_rng(734)
-    dl_test = rng.random(dl.type.shape)
-    d_test = rng.random(d.type.shape)
-    du_test = rng.random(du.type.shape)
+    if complex:
+        dl_test = rng.random((*dl.type.shape, 2)).view(dtype).squeeze(-1)
+        d_test = rng.random((*d.type.shape, 2)).view(dtype).squeeze(-1)
+        du_test = rng.random((*du.type.shape, 2)).view(dtype).squeeze(-1)
+    else:
+        dl_test = rng.random(dl.type.shape)
+        d_test = rng.random(d.type.shape)
+        du_test = rng.random(du.type.shape)
 
     f, results = compare_numba_and_py(
         [
