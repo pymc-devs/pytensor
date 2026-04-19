@@ -46,10 +46,12 @@ from pytensor.tensor.linalg.inverse import (
 from pytensor.tensor.linalg.products import (
     Expm,
     KroneckerProduct,
+    MultiDot,
     expm,
     kron,
     matrix_dot,
     matrix_power,
+    multi_dot,
 )
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import (
@@ -110,6 +112,7 @@ __all__ = [
     "lu_solve",
     "matrix_dot",
     "matrix_power",
+    "multi_dot",
     "norm",
     "ordqz",
     "pinv",

@@ -10,9 +10,9 @@ from pytensor.tensor.linalg import (
     kron,
     matrix_dot,
     matrix_power,
+    multi_dot,
     pinv,
 )
-from pytensor.tensor.math import _allclose
 from pytensor.tensor.type import matrix, tensor, vector
 from tests import unittest_tools as utt
 
@@ -20,19 +20,14 @@ from tests import unittest_tools as utt
 def test_matrix_dot():
     rng = np.random.default_rng(utt.fetch_seed())
     n = rng.integers(4) + 2
-    rs = []
-    xs = []
-    for k in range(n):
-        rs += [rng.standard_normal((4, 4)).astype(config.floatX)]
-        xs += [matrix()]
+    rs = [rng.normal(size=(4, 4)).astype(config.floatX) for _ in range(n)]
+    xs = [matrix() for _ in range(n)]
     sol = matrix_dot(*xs)
 
     pytensor_sol = function(xs, sol)(*rs)
-    numpy_sol = rs[0]
-    for r in rs[1:]:
-        numpy_sol = np.dot(numpy_sol, r)
+    numpy_sol = np.linalg.multi_dot(rs)
 
-    assert _allclose(numpy_sol, pytensor_sol)
+    np.testing.assert_allclose(numpy_sol, pytensor_sol)
 
 
 class TestMatrixPower:
@@ -160,3 +155,27 @@ def test_expm_grad(mode):
             raise ValueError(f"Invalid mode: {mode}")
 
     utt.verify_grad(expm, [A], rng=rng, abs_tol=1e-5, rel_tol=1e-5)
+
+
+def test_multi_dot():
+    rng = np.random.default_rng(utt.fetch_seed())
+
+    shapes_2d = [(10, 20), (20, 5), (5, 30), (30, 3)]
+    arrays_np = [rng.normal(size=s).astype(config.floatX) for s in shapes_2d]
+    arrays_pt = [matrix(f"M{i}", shape=s) for i, s in enumerate(shapes_2d)]
+    out = multi_dot(arrays_pt)
+    f = function(arrays_pt, out)
+    np.testing.assert_allclose(f(*arrays_np), np.linalg.multi_dot(arrays_np), rtol=1e-5)
+
+    shapes_3d = [(7, 10, 20), (7, 20, 5), (7, 5, 30)]
+    arrays_np_3d = [rng.normal(size=s).astype(config.floatX) for s in shapes_3d]
+    arrays_pt_3d = [
+        pytensor.tensor.tensor3(f"B{i}", shape=s) for i, s in enumerate(shapes_3d)
+    ]
+    out_3d = multi_dot(arrays_pt_3d)
+    f_3d = function(arrays_pt_3d, out_3d)
+    np.testing.assert_allclose(
+        f_3d(*arrays_np_3d),
+        arrays_np_3d[0] @ arrays_np_3d[1] @ arrays_np_3d[2],
+        rtol=1e-5,
+    )
