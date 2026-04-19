@@ -13,7 +13,7 @@ from pytensor.compile.ops import DeepCopyOp
 from pytensor.configdefaults import config
 from pytensor.graph import rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
-from pytensor.graph.rewriting.basic import check_stack_trace
+from pytensor.graph.rewriting.basic import check_stack_trace, in2out
 from pytensor.graph.traversal import ancestors
 from pytensor.tensor import as_tensor
 from pytensor.tensor.basic import Alloc, _convert_to_int8
@@ -21,6 +21,7 @@ from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.math import Dot, dot, exp, sqr
 from pytensor.tensor.rewriting.subtensor import (
+    local_add_of_sparse_write,
     local_replace_AdvancedSubtensor,
 )
 from pytensor.tensor.shape import (
@@ -224,6 +225,59 @@ def test_local_useless_inc_subtensor_no_opt():
 
     out = f_shape([[10, 20], [30, 40]])
     assert np.array_equal(out, np.asarray([[11, 21], [31, 41]]))
+
+
+def test_local_add_of_sparse_write():
+    """``x + set(zeros, v, idx) -> inc(x, v, idx)``: avoid materialising
+    the dense sparse representation when adding a sparse set into a base.
+
+    Also covers ``x + inc(zeros, v, idx)`` when ``idx`` is duplicate-free,
+    since then inc-into-zeros is equivalent to set-into-zeros.
+    """
+    sparse_rewriter = in2out(local_add_of_sparse_write, name="add_of_sparse_write")
+
+    x = vector("x")
+    v = vector("v")
+    idx = ivector("idx")
+
+    # set-into-zeros is always rewritten.
+    out = x + pt.zeros(x.shape)[idx].set(v)
+    expected = x[idx].inc(v)
+    rewritten = rewrite_graph(out)
+    utt.assert_equal_computations([rewritten], [expected], strict_dtype=False)
+
+    f = function([x, v, idx], out)
+    f_ref = function([x, v, idx], out, mode=Mode(linker="py", optimizer=None))
+    dx = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=config.floatX)
+    dv = np.array([10.0, 20.0], dtype=config.floatX)
+    didx = np.array([1, 3], dtype="int32")
+    np.testing.assert_allclose(f(dx, dv, didx), f_ref(dx, dv, didx))
+
+    # inc-into-zeros with unique constant indices is rewritten.
+    out_inc = x + pt.zeros(x.shape)[np.array([1, 3])].inc(v)
+    rewritten_inc = rewrite_graph(out_inc)
+    utt.assert_equal_computations(
+        [rewritten_inc], [x[np.array([1, 3])].inc(v)], strict_dtype=False
+    )
+
+    # inc-into-zeros with a non-constant (potentially duplicated) index is
+    # left alone.  Run the rewrite in isolation so other simplifications
+    # don't obscure what happens.
+    out_unsafe = x + pt.zeros(x.shape)[idx].inc(v)
+    rewritten_unsafe = rewrite_graph(
+        out_unsafe, include=[], custom_rewrite=sparse_rewriter
+    )
+    utt.assert_equal_computations([rewritten_unsafe], [out_unsafe])
+
+    # Basic (scalar) inc-into-zeros is trivially unique and should be rewritten.
+    s = iscalar("s")
+    out_basic = x + pt.zeros(x.shape)[s].inc(v[0])
+    rewritten_basic = rewrite_graph(
+        out_basic, include=[], custom_rewrite=sparse_rewriter
+    )
+    utt.assert_equal_computations(
+        [rewritten_basic], [x[s].inc(v[0])], strict_dtype=False
+    )
 
 
 class TestLocalUselessSubtensor:

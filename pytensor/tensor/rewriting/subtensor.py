@@ -614,6 +614,64 @@ def local_set_to_inc_subtensor(fgraph, node):
 
 
 @register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([add])
+def local_add_of_sparse_write(fgraph, node):
+    """Absorb a sparse write into a surrounding add: ``x + zeros[idx].set(v) -> x[idx].inc(v)``.
+
+    A set into a zero-filled base is just the dense form of a sparse update.
+    Adding it to another tensor is equivalent to incrementing in place, which
+    avoids materialising the dense sparse representation.
+
+    Also handles ``zeros[idx].inc(v)`` when ``idx`` is duplicate-free, since
+    with unique indices inc is semantically equivalent to set.
+    """
+    for i, sparse_candidate in enumerate(node.inputs):
+        if not (
+            sparse_candidate.owner
+            and isinstance(
+                sparse_candidate.owner.op,
+                IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor,
+            )
+        ):
+            continue
+
+        inner_op = sparse_candidate.owner.op
+        base, v, *idx_vars = sparse_candidate.owner.inputs
+
+        if (
+            get_underlying_scalar_constant_value(
+                base, elemwise=False, raise_not_constant=False
+            )
+            != 0
+        ):
+            continue
+
+        # An inc into zeros is only equivalent to a set when indices are
+        # duplicate-free. Basic (slice/scalar) indexing is always unique;
+        # advanced integer-array indices must be checked.
+        if not inner_op.set_instead_of_inc and not isinstance(inner_op, IncSubtensor):
+            if not all(_constant_has_unique_indices(idx) for idx in idx_vars):
+                continue
+
+        others = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
+        other = variadic_add(*others)
+
+        if inner_op.set_instead_of_inc:
+            new_op = type(inner_op)(
+                **(inner_op._props_dict() | {"set_instead_of_inc": False})
+            )
+        else:
+            new_op = inner_op
+        r = new_op(other, v, *idx_vars)
+        copy_stack_trace(node.outputs[0], r)
+        return [r]
+
+    return None
+
+
+@register_canonicalize
 @register_specialize
 @node_rewriter([Subtensor])
 def local_useless_subtensor(fgraph, node):
