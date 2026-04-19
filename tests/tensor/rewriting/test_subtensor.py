@@ -15,7 +15,6 @@ from pytensor.graph import rewrite_graph, vectorize_graph
 from pytensor.graph.basic import Constant, Variable, equal_computations
 from pytensor.graph.rewriting.basic import check_stack_trace
 from pytensor.graph.traversal import ancestors
-from pytensor.raise_op import Assert
 from pytensor.tensor import as_tensor
 from pytensor.tensor.basic import Alloc, _convert_to_int8
 from pytensor.tensor.blockwise import Blockwise
@@ -535,7 +534,7 @@ class TestSubtensorIncSubtensor:
     def setup_class(cls):
         cls.rng = np.random.default_rng(utt.fetch_seed())
         cls.mode = get_default_mode().including(
-            "local_subtensor_inc_subtensor",
+            "local_read_of_write_same_indices",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
             "local_replace_AdvancedSubtensor",
         )
@@ -1180,103 +1179,168 @@ class TestLocalSubtensorMerge:
                         f(x_val, *i_val)
 
 
-class TestLocalAdvSub1AdvIncSub1:
+class TestReadOfWriteSameIndices:
     def setup_method(self):
         mode = get_default_mode()
         self.mode = mode.including(
             "local_replace_AdvancedSubtensor",
             "local_AdvancedIncSubtensor_to_AdvancedIncSubtensor1",
-            "local_adv_sub1_adv_inc_sub1",
+            "local_read_of_write_same_indices",
         ).excluding("fusion")
-        self.mode_no_assert = self.mode.including("local_remove_all_assert")
 
-    def test_basic(self):
-        for dtype1, dtype2 in [
+    @pytest.mark.parametrize(
+        "dtype1, dtype2",
+        [
             ("float32", "float32"),
             ("float32", "float64"),
             ("float64", "float32"),
             ("float64", "float64"),
-        ]:
-            x = matrix(dtype=dtype1)
-            y = matrix(dtype=dtype2)
-            idx = ivector()
+        ],
+    )
+    def test_set(self, dtype1, dtype2):
+        x = matrix(dtype=dtype1)
+        y = matrix(dtype=dtype2)
+        idx = ivector()
 
-            dx = np.random.random((4, 5)).astype(dtype1)
-            dy = np.random.random((2, 5)).astype(dtype2)
-            # Duplicate the last row of dy
-            dy = np.vstack([dy, dy[-1:]])
-            # Use the same index twice, with the same corresponding value.
-            # That makes set_subtensor well-defined, and tests
-            # duplication for inc_subtensor.
-            didx = np.asarray([1, 3, 3], "int32")
+        dx = np.random.random((4, 5)).astype(dtype1)
+        dy = np.random.random((2, 5)).astype(dtype2)
+        dy = np.vstack([dy, dy[-1:]])
+        didx = np.asarray([1, 3, 3], "int32")
 
-            # set_subtensor
-            inc = set_subtensor(x[idx], y)
-            o = inc[idx]
-            f = function([x, y, idx], o, self.mode_no_assert)
+        inc = set_subtensor(x[idx], y)
+        o = inc[idx]
+        f = function([x, y, idx], o, self.mode)
 
-            res = f(dx, dy, didx)
-            utt.assert_allclose(dy, res)
-            topo = f.maker.fgraph.toposort()
-            assert len(topo) == 1
-            assert isinstance(topo[0].op, DeepCopyOp | Elemwise)
+        res = f(dx, dy, didx)
+        np.testing.assert_allclose(dy, res)
+        topo = f.maker.fgraph.toposort()
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
 
-            # inc_subtensor(data[idx], y)
-            inc = inc_subtensor(x[idx], y)
-            o = inc[idx]
-            f = function([x, y, idx], o, self.mode_no_assert)
+    def test_inc_unique_constant_idx(self):
+        x = matrix(dtype="float64")
+        y = matrix(dtype="float64")
+        cidx = pt.constant(np.array([0, 2, 3], dtype="int32"))
 
-            res = f(dx, dy, didx)
-            _dx = dx.copy()
-            np.add.at(_dx, didx, dy)
-            utt.assert_allclose(_dx[didx], res)
-            topo = f.maker.fgraph.toposort()
-            len(topo) == 2
+        dx = np.random.random((4, 5))
+        dy = np.random.random((3, 5))
 
-            # inc_subtensor(0[idx], y)
-            inc = inc_subtensor(x.zeros_like()[idx], y)
-            o = inc[idx]
-            f = function([x, y, idx], o, self.mode_no_assert)
+        inc = inc_subtensor(x[cidx], y)
+        o = inc[cidx]
+        f = function([x, y], o, self.mode)
 
-            res = f(dx, dy, didx)
-            utt.assert_allclose(np.vstack([dy[0], 2 * dy[1], 2 * dy[2]]), res)
+        expected = dx.copy()
+        np.add.at(expected, [0, 2, 3], dy)
+        np.testing.assert_allclose(expected[[0, 2, 3]], f(dx, dy))
+        topo = f.maker.fgraph.toposort()
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+        assert check_stack_trace(f, ops_to_check=(AdvancedSubtensor1, Elemwise))
 
-    def test_assert(self):
+    @pytest.mark.parametrize(
+        "cidx_values, n_rows",
+        [
+            pytest.param([1, 3, 3], 4, id="duplicate"),
+            # Positive and negative indices that alias in a 2-row buffer
+            # (0 and -2 both refer to row 0).
+            pytest.param([0, -2], 2, id="mixed_sign"),
+        ],
+    )
+    def test_inc_non_unique_constant_idx(self, cidx_values, n_rows):
+        """Inc with constant indices that may alias must not be rewritten."""
+        x = matrix(dtype="float64")
+        y = matrix(dtype="float64")
+        cidx = pt.constant(np.array(cidx_values, dtype="int32"))
+
+        dx = np.random.random((n_rows, 5))
+        dy = np.random.random((len(cidx_values), 5))
+
+        inc = inc_subtensor(x[cidx], y)
+        o = inc[cidx]
+        f = function([x, y], o, self.mode)
+
+        expected = dx.copy()
+        np.add.at(expected, cidx_values, dy)
+        np.testing.assert_allclose(expected[cidx_values], f(dx, dy))
+        topo = f.maker.fgraph.toposort()
+        assert any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+
+    def test_inc_symbolic_idx_not_rewritten(self):
+        """Non-constant indices cannot be checked, so inc must not be rewritten."""
+        x = matrix(dtype="float64")
+        y = matrix(dtype="float64")
+        idx = ivector()
+
+        inc = inc_subtensor(x[idx], y)
+        o = inc[idx]
+        f = function([x, y, idx], o, self.mode)
+
+        dx = np.random.random((4, 5))
+        dy = np.random.random((3, 5))
+        didx = np.array([0, 2, 3], dtype="int32")
+
+        expected = dx.copy()
+        np.add.at(expected, didx, dy)
+        np.testing.assert_allclose(expected[didx], f(dx, dy, didx))
+        topo = f.maker.fgraph.toposort()
+        assert any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1) for n in topo
+        )
+
+    def test_shape_unsafe_excluded(self):
+        """When shape_unsafe is excluded the rewrite must not fire, so
+        out-of-bounds and shape errors are still caught at runtime."""
+        mode = self.mode.excluding("shape_unsafe")
         x = matrix("x")
         y = matrix("y")
         idx = ivector()
 
+        inc = set_subtensor(x[idx], y)
+        o = inc[idx]
+        f = function([x, y, idx], o, mode)
+
+        topo = f.maker.fgraph.toposort()
+        assert any(
+            isinstance(n.op, AdvancedIncSubtensor1 | AdvancedIncSubtensor) for n in topo
+        )
+
         dx = np.random.random((4, 5)).astype(config.floatX)
         dy = np.random.random((2, 5)).astype(config.floatX)
 
-        # set_subtensor
-        inc = set_subtensor(x[idx], y)
-        o = inc[idx]
-        f = function([x, y, idx], o, self.mode)
-        # test wrong index
-        for i in [dx.shape[0], -dx.shape[0] - 1]:
-            with pytest.raises((AssertionError, IndexError)):
-                f(dx, dy, [i, i])
-        # test wrong shape
-        with pytest.raises((AssertionError, IndexError)):
+        # Out-of-bounds index
+        with pytest.raises((IndexError, ValueError)):
+            f(dx, dy, [dx.shape[0]])
+        with pytest.raises((IndexError, ValueError)):
+            f(dx, dy, [-dx.shape[0] - 1])
+        # Shape mismatch between y and idx
+        with pytest.raises((IndexError, ValueError)):
             f(dx, dy, [1])
 
-    def test_stack_trace(self):
-        x = matrix("x")
-        # test cases with y.dtype
-        # - equal to x.dtype
-        # - different from x.dtype (to trigger the cast in
-        #   local_adv_sub1_adv_inc_sub1)
-        ys = [matrix("y"), dmatrix("y")]
-        idx = ivector()
+    def test_set_multi_axis_symbolic(self):
+        """Multi-axis ``x[idx_a, idx_b].set(v)[idx_a, idx_b]`` with symbolic
+        indices collapses to ``v``."""
+        x = matrix("x", dtype="float64")
+        v = vector("v", dtype="float64")
+        idx_a = ivector("idx_a")
+        idx_b = ivector("idx_b")
 
-        # set_subtensor and then subtensor with both ys
-        incs = [set_subtensor(x[idx], y) for y in ys]
-        outs = [inc[idx] for inc in incs]
+        out = set_subtensor(x[idx_a, idx_b], v)[idx_a, idx_b]
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations([rewritten], [v])
 
-        for y, out in zip(ys, outs, strict=True):
-            f = function([x, y, idx], out, self.mode)
-            assert check_stack_trace(f, ops_to_check=(Assert, ps.Cast))
+    def test_inc_basic_slice(self):
+        """Basic ``x[slice].inc(v)[slice]`` collapses to ``x[slice] + v``."""
+        x = matrix("x", dtype="float64")
+        v = matrix("v", dtype="float64")
+        stop = iscalar("stop")
+
+        out = inc_subtensor(x[:stop], v)[:stop]
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations([rewritten], [x[:stop] + v])
 
 
 class TestSubtensorAllocRewrites:
