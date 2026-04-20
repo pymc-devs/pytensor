@@ -1,11 +1,11 @@
 import numpy as np
-import scipy.linalg as scipy_linalg
 from scipy.linalg import get_lapack_funcs
 
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.linalg.solvers.core import SolveBase, _default_b_ndim
 from pytensor.tensor.type import tensor
 
@@ -27,11 +27,7 @@ class CholeskySolve(SolveBase):
         super_apply = super().make_node(*inputs)
         A, b = super_apply.inputs
         [super_out] = super_apply.outputs
-        # The dtype of chol_solve does not match solve, which the base class checks
-        dtype = scipy_linalg.cho_solve(
-            (np.ones((1, 1), dtype=A.dtype), False),
-            np.ones((1,), dtype=b.dtype),
-        ).dtype
+        dtype = linalg_output_dtype(A.dtype, b.dtype)
         out = tensor(dtype=dtype, shape=super_out.type.shape)
         return Apply(self, [A, b], [out])
 

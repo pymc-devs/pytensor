@@ -753,6 +753,19 @@ class Constant(AtomicVariable[_TypeType]):
         add_tag_trace(self)
 
     def signature(self):
+        """Return a hashable object identifying this Constant by value.
+
+        The returned object must satisfy:
+        1. Hashable: ``hash(sig)`` must not raise.
+        2. Self-equality: ``sig == sig`` must be ``True`` (not an array).
+        3. Pickle-stable: ``pickle.loads(pickle.dumps(sig)) == sig``
+           and same ``hash``. This is required for C module cache keys.
+
+        The default ``(type, data)`` is sufficient for simple Python
+        objects (None, slices, etc.) but breaks for numpy data (NaN,
+        arrays). Subclasses with numeric data must override this.
+        See ``TensorConstantSignature``, ``ScalarConstantSignature``.
+        """
         return (self.type, self.data)
 
     def __str__(self):
@@ -812,7 +825,7 @@ class FrozenApply(Apply):
     constructing a ``FrozenApply`` with the same op and input variables returns
     the cached instance.
 
-    Constants are keyed by ``(type, data_bytes)`` so that two independently
+    Constants are keyed by their ``signature()`` so that two independently
     created Constants with the same value resolve to the same cached node.
     """
 
@@ -828,15 +841,9 @@ class FrozenApply(Apply):
         cache keys that would prevent GC from collecting chains of
         FrozenApply nodes in a single pass.
 
-        Constants use their byte representation so that independently-created
-        equal constants (including NaN) produce the same key.  Object-dtype
-        constants (e.g. slices) fall back to ``signature()`` since their byte
-        representation stores pointers, not values.
+        Constants use their ``signature()`` for value-based deduplication.
         """
         if isinstance(inp, Constant):
-            a = np.asarray(inp.data)
-            if a.dtype.kind != "O":
-                return (inp.type, a.tobytes(), a.dtype.str, a.shape)
             return inp.signature()
         return id(inp)
 

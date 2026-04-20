@@ -172,6 +172,8 @@ def numba_funcify_TRSYL(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def trsyl(a, b, c):
+        if a.size == 0 or b.size == 0 or c.size == 0:
+            return np.empty(c.shape, dtype=out_dtype)
         if must_cast_a:
             a = a.astype(out_dtype)
         if must_cast_b:

@@ -5,10 +5,10 @@ import pytest
 
 from pytensor.configdefaults import config
 from pytensor.graph.basic import NominalVariable
-from pytensor.graph.fg import FunctionGraph, Output
+from pytensor.graph.fg import FrozenFunctionGraph, FunctionGraph, Output
 from pytensor.graph.utils import MissingInputError
 from pytensor.printing import debugprint
-from pytensor.scalar.basic import add, float64, mul
+from pytensor.scalar.basic import ScalarConstant, add, float64, mul
 from tests.graph.utils import (
     MyConstant,
     MyOp,
@@ -810,8 +810,6 @@ class TestFrozenFunctionGraph:
         assert all(a is b for a, b in zip(ffg1.outputs, ffg2.outputs))
 
     def test_pickle_round_trip(self):
-        from pytensor.scalar.basic import add, float64, mul
-
         x, y = float64("x"), float64("y")
         ffg = FunctionGraph([x, y], [mul(add(x, y), y)]).freeze()
 
@@ -822,8 +820,6 @@ class TestFrozenFunctionGraph:
         assert all(o1 is o2 for o1, o2 in zip(ffg.outputs, ffg2.outputs))
 
     def test_pickle_with_constants(self):
-        from pytensor.scalar.basic import ScalarConstant, add, float64
-
         x = float64("x")
         c = ScalarConstant(float64, 3.14)
         ffg = FunctionGraph([x], [add(x, c)]).freeze()
@@ -843,8 +839,6 @@ class TestFrozenFunctionGraph:
 
     def test_pickle_multi_output_shared_subexpr(self):
         """Pickle round-trip with multiple outputs sharing subexpressions."""
-        from pytensor.scalar.basic import add, float64, mul
-
         x, y = float64("x"), float64("y")
         shared = add(x, y)
         out1 = mul(shared, x)
@@ -857,8 +851,6 @@ class TestFrozenFunctionGraph:
 
     def test_pickle_hash_stability(self):
         """Hash is the same before and after pickle, and across independent constructions."""
-        from pytensor.scalar.basic import add, float64, mul
-
         x, y = float64("x"), float64("y")
         ffg = FunctionGraph([x, y], [mul(add(x, y), y)]).freeze()
         h_before = hash(ffg)
@@ -878,8 +870,6 @@ class TestFrozenFunctionGraph:
         assert ffg1 != ffg2
 
     def test_orphan_non_constant_raises(self):
-        from pytensor.graph.fg import FrozenFunctionGraph
-
         var1 = MyVariable("x")
         orphan = MyVariable("orphan")
         out = op1(var1, orphan)
@@ -887,8 +877,6 @@ class TestFrozenFunctionGraph:
             FrozenFunctionGraph([var1], [out])
 
     def test_unmapped_output_raises(self):
-        from pytensor.graph.fg import FrozenFunctionGraph
-
         var1 = MyVariable("x")
         disconnected = MyVariable("disconnected")
         with pytest.raises(ValueError, match="could not be mapped"):
@@ -903,8 +891,6 @@ class TestFrozenFunctionGraph:
         cache hit overwrites memo[c2]=c1, c2 is evicted from variables
         while the cache-miss node still references it.
         """
-        from pytensor.graph.fg import FrozenFunctionGraph
-
         op_shared = MyOp("shared")
         op_unique = MyOp("unique")
 
@@ -924,6 +910,33 @@ class TestFrozenFunctionGraph:
         for node in fg.toposort():
             for inp in node.inputs:
                 assert inp in fg.variables
+
+    def test_constant_output_equality(self):
+        """FFGs with distinct but equal constant outputs should be equal."""
+        c1 = ScalarConstant(float64, 3.14)
+        c2 = ScalarConstant(float64, 3.14)
+        assert c1 is not c2
+
+        ffg1 = FrozenFunctionGraph([], [c1])
+        ffg2 = FrozenFunctionGraph([], [c2])
+        assert ffg1 == ffg2
+        assert hash(ffg1) == hash(ffg2)
+        assert ffg1.outputs == ffg2.outputs
+
+    def test_output_clients(self):
+        """Output variables should have dummy Output node clients."""
+        x, y = float64("x"), float64("y")
+        ffg = FunctionGraph([x, y], [mul(add(x, y), y)]).freeze()
+
+        for i, out in enumerate(ffg.outputs):
+            out_clients = ffg.clients[out]
+            output_clients = [
+                (node, idx) for node, idx in out_clients if isinstance(node.op, Output)
+            ]
+            assert len(output_clients) == 1
+            node, idx = output_clients[0]
+            assert node.op.idx == i
+            assert idx == 0
 
     def test_freeze_unfreeze_round_trip(self):
         x, y = float64("x"), float64("y")

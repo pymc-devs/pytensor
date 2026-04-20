@@ -10,7 +10,6 @@ from scipy import linalg
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
-    generate_fallback_impl,
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.linalg._LAPACK import (
@@ -270,9 +269,6 @@ def _tridiagonal_solve_impl(
 
 @register_funcify_default_op_cache_key(LUFactorTridiagonal)
 def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
-    if any(i.type.numpy_dtype.kind == "c" for i in node.inputs):
-        return generate_fallback_impl(op, node=node)
-
     overwrite_dl = op.overwrite_dl
     overwrite_d = op.overwrite_d
     overwrite_du = op.overwrite_du
@@ -311,7 +307,7 @@ def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
         )
         return dl, d, du, du2, ipiv
 
-    cache_version = 2
+    cache_version = 3
     return lu_factor_tridiagonal, cache_version
 
 
@@ -319,8 +315,6 @@ def numba_funcify_LUFactorTridiagonal(op: LUFactorTridiagonal, node, **kwargs):
 def numba_funcify_SolveLUFactorTridiagonal(
     op: SolveLUFactorTridiagonal, node, **kwargs
 ):
-    if any(i.type.numpy_dtype.kind == "c" for i in node.inputs):
-        return generate_fallback_impl(op, node=node)
     out_dtype = node.outputs[0].type.numpy_dtype
 
     b_ndim = op.b_ndim
@@ -370,5 +364,5 @@ def numba_funcify_SolveLUFactorTridiagonal(
 
         return x
 
-    cache_version = 2
+    cache_version = 3
     return solve_lu_factor_tridiagonal, cache_version

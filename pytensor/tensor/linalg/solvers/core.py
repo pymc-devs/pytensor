@@ -1,13 +1,11 @@
 import logging
 
-import numpy as np
-import scipy.linalg as scipy_linalg
-
 import pytensor.tensor.math as ptm
 from pytensor import tensor as pt
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor.basic import as_tensor_variable
+from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import tensor
 
 
@@ -69,11 +67,7 @@ class SolveBase(Op):
         if b.ndim != self.b_ndim:
             raise ValueError(f"`b` must have {self.b_ndim} dims; got {b.type} instead.")
 
-        # Infer dtype by solving the most simple case with 1x1 matrices
-        o_dtype = scipy_linalg.solve(
-            np.ones((1, 1), dtype=A.dtype),
-            np.ones((1,), dtype=b.dtype),
-        ).dtype
+        o_dtype = linalg_output_dtype(A.dtype, b.dtype)
         x = tensor(dtype=o_dtype, shape=b.type.shape)
         return Apply(self, [A, b], [x])
 

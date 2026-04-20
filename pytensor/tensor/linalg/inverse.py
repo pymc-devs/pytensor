@@ -7,6 +7,7 @@ from pytensor.tensor import basic as ptb
 from pytensor.tensor import math as ptm
 from pytensor.tensor.basic import as_tensor_variable
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.type import matrix
 
 
@@ -20,10 +21,7 @@ class MatrixPinv(Op):
     def make_node(self, x):
         x = as_tensor_variable(x)
         assert x.ndim == 2
-        if x.type.numpy_dtype.kind in "ibu":
-            out_dtype = "float64"
-        else:
-            out_dtype = x.dtype
+        out_dtype = linalg_output_dtype(x.type.dtype)
         return Apply(
             self,
             [x],
@@ -110,10 +108,7 @@ class MatrixInverse(Op):
     def make_node(self, x):
         x = as_tensor_variable(x)
         assert x.ndim == 2
-        if x.type.numpy_dtype.kind in "ibu":
-            out_dtype = "float64"
-        else:
-            out_dtype = x.dtype
+        out_dtype = linalg_output_dtype(x.type.dtype)
         return Apply(self, [x], [matrix(shape=x.type.shape, dtype=out_dtype)])
 
     def perform(self, node, inputs, outputs):

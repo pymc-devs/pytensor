@@ -12,17 +12,24 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
 from tests.link.numba.test_basic import compare_numba_and_py, numba_inplace_mode
 
 
+@pytest.mark.parametrize("complex", [False, True], ids=lambda x: f"complex={x}")
 @pytest.mark.parametrize("inplace", [False, True], ids=lambda x: f"inplace={x}")
-def test_tridiagonal_lu_factor(inplace):
-    dl = pt.vector("dl", shape=(4,))
-    d = pt.vector("d", shape=(5,))
-    du = pt.vector("du", shape=(4,))
+def test_tridiagonal_lu_factor(inplace, complex):
+    dtype = "complex128" if complex else "float64"
+    dl = pt.vector("dl", shape=(4,), dtype=dtype)
+    d = pt.vector("d", shape=(5,), dtype=dtype)
+    du = pt.vector("du", shape=(4,), dtype=dtype)
     lu_factor_outs = Blockwise(LUFactorTridiagonal())(dl, d, du)
 
     rng = np.random.default_rng(734)
-    dl_test = rng.random(dl.type.shape)
-    d_test = rng.random(d.type.shape)
-    du_test = rng.random(du.type.shape)
+    if complex:
+        dl_test = rng.random((*dl.type.shape, 2)).view(dtype).squeeze(-1)
+        d_test = rng.random((*d.type.shape, 2)).view(dtype).squeeze(-1)
+        du_test = rng.random((*du.type.shape, 2)).view(dtype).squeeze(-1)
+    else:
+        dl_test = rng.random(dl.type.shape)
+        d_test = rng.random(d.type.shape)
+        du_test = rng.random(du.type.shape)
 
     f, results = compare_numba_and_py(
         [
@@ -61,30 +68,38 @@ def test_tridiagonal_lu_factor(inplace):
     assert (du_test_not_contig == du_test).all()
 
 
+@pytest.mark.parametrize("complex", [False, True], ids=lambda x: f"complex={x}")
 @pytest.mark.parametrize("transposed", [False, True], ids=lambda x: f"transposed={x}")
 @pytest.mark.parametrize("inplace", [True, False], ids=lambda x: f"inplace={x}")
 @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
-def test_tridiagonal_lu_solve(b_ndim, transposed, inplace):
-    scipy_gttrf = scipy.linalg.get_lapack_funcs("gttrf")
+def test_tridiagonal_lu_solve(b_ndim, transposed, inplace, complex):
+    dtype = "complex128" if complex else "float64"
+    scipy_gttrf = scipy.linalg.get_lapack_funcs("gttrf", dtype=np.dtype(dtype))
 
-    dl = pt.tensor("dl", shape=(9,))
-    d = pt.tensor("d", shape=(10,))
-    du = pt.tensor("du", shape=(9,))
-    du2 = pt.tensor("du2", shape=(8,))
+    dl = pt.tensor("dl", shape=(9,), dtype=dtype)
+    d = pt.tensor("d", shape=(10,), dtype=dtype)
+    du = pt.tensor("du", shape=(9,), dtype=dtype)
+    du2 = pt.tensor("du2", shape=(8,), dtype=dtype)
     ipiv = pt.tensor("ipiv", shape=(10,), dtype="int32")
     diagonals = [dl, d, du, du2, ipiv]
-    b = pt.tensor("b", shape=(10, 25)[:b_ndim])
+    b = pt.tensor("b", shape=(10, 25)[:b_ndim], dtype=dtype)
 
     x = Blockwise(SolveLUFactorTridiagonal(b_ndim=b.type.ndim, transposed=transposed))(
         *diagonals, b
     )
 
     rng = np.random.default_rng(787)
-    A_test = rng.random((d.type.shape[0], d.type.shape[0]))
+    if complex:
+        A_test = (
+            rng.random((d.type.shape[0], d.type.shape[0], 2)).view(dtype).squeeze(-1)
+        )
+        b_test = rng.random((*b.type.shape, 2)).view(dtype).squeeze(-1)
+    else:
+        A_test = rng.random((d.type.shape[0], d.type.shape[0]))
+        b_test = rng.random(b.type.shape)
     *diagonals_test, _ = scipy_gttrf(
         *(np.diagonal(A_test, offset=o) for o in (-1, 0, 1))
     )
-    b_test = rng.random(b.type.shape)
 
     f, res = compare_numba_and_py(
         [

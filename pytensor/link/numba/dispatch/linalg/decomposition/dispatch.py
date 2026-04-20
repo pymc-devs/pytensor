@@ -58,10 +58,23 @@ def numba_funcify_SVD(op, node, **kwargs):
     if discrete_input and config.compiler_verbose:
         print("SVD requires casting discrete input to float")  # noqa: T201
 
+    # np.linalg.svd always returns real-valued singular values, even for complex input.
+    # The Op may declare s as complex (matching input dtype), but numba returns the real
+    # component dtype, so we must match that to avoid type unification errors.
+    matrix_dtype = out_dtype
+    if out_dtype.kind == "c":
+        s_dtype = np.dtype(f"f{out_dtype.itemsize // 2}")
+    else:
+        s_dtype = out_dtype
+
     if not compute_uv:
 
         @numba_basic.numba_njit
         def svd(x):
+            if x.size == 0:
+                m, n = x.shape
+                k = min(m, n)
+                return np.zeros((k,), dtype=s_dtype)
             if discrete_input:
                 x = x.astype(out_dtype)
             _, ret, _ = np.linalg.svd(x, full_matrices)
@@ -71,6 +84,23 @@ def numba_funcify_SVD(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def svd(x):
+            if x.size == 0:
+                m, n = x.shape
+                k = min(m, n)
+                # The LAPACK dispatch returns matrices in fortran order. To match this for the empty cases,
+                # build flip the shape inputs to np.zeros and transpose.
+                if full_matrices:
+                    return (
+                        np.zeros((m, m), dtype=matrix_dtype).T,
+                        np.zeros((k,), dtype=s_dtype),
+                        np.zeros((n, n), dtype=matrix_dtype).T,
+                    )
+                else:
+                    return (
+                        np.zeros((k, m), dtype=matrix_dtype).T,
+                        np.zeros((k,), dtype=s_dtype),
+                        np.zeros((n, k), dtype=matrix_dtype).T,
+                    )
             if discrete_input:
                 x = x.astype(out_dtype)
             return np.linalg.svd(x, full_matrices)
@@ -185,8 +215,6 @@ def pivot_to_permutation(op, node, **kwargs):
 @register_funcify_default_op_cache_key(LU)
 def numba_funcify_LU(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.numpy_dtype
-    if inp_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
     discrete_inp = inp_dtype.kind in "ibu"
     if discrete_inp and config.compiler_verbose:
         print("LU requires casting discrete input to float")  # noqa: T201
@@ -195,6 +223,10 @@ def numba_funcify_LU(op, node, **kwargs):
     permute_l = op.permute_l
     p_indices = op.p_indices
     overwrite_a = op.overwrite_a
+    # For the (P, L, U) case, P is real even when input is complex
+    p_dtype = (
+        node.outputs[0].type.numpy_dtype if not (permute_l or p_indices) else inp_dtype
+    )
 
     @numba_basic.numba_njit
     def lu(a):
@@ -207,7 +239,7 @@ def numba_funcify_LU(op, node, **kwargs):
                 P = np.zeros(a.shape[0], dtype="int32")
                 return P, L, U
             else:
-                P = np.zeros(a.shape, dtype=a.dtype)
+                P = np.zeros(a.shape, dtype=p_dtype)
                 return P, L, U
 
         if discrete_inp:
@@ -237,15 +269,13 @@ def numba_funcify_LU(op, node, **kwargs):
 
         return res
 
-    cache_version = 2
+    cache_version = 3
     return lu, cache_version
 
 
 @register_funcify_default_op_cache_key(LUFactor)
 def numba_funcify_LUFactor(op, node, **kwargs):
     inp_dtype = node.inputs[0].type.numpy_dtype
-    if inp_dtype.kind == "c":
-        return generate_fallback_impl(op, node=node, **kwargs)
     discrete_inp = inp_dtype.kind in "ibu"
     if discrete_inp and config.compiler_verbose:
         print("LUFactor requires casting discrete input to float")  # noqa: T201
@@ -268,7 +298,7 @@ def numba_funcify_LUFactor(op, node, **kwargs):
 
         return LU, piv
 
-    cache_version = 2
+    cache_version = 3
     return lu_factor, cache_version
 
 
@@ -287,6 +317,41 @@ def numba_funcify_QR(op, node, **kwargs):
 
     @numba_basic.numba_njit
     def qr(a):
+        if a.size == 0:
+            m, n = a.shape
+            k = min(m, n)
+            if (mode == "full" or mode == "economic") and pivoting:
+                Q = np.zeros(
+                    (k, m) if mode == "economic" else (m, m), dtype=out_dtype
+                ).T
+                R = np.zeros((k, n) if mode == "economic" else (m, n), dtype=out_dtype)
+                P = np.zeros(n, dtype=np.int32)
+                return Q, R, P
+            elif (mode == "full" or mode == "economic") and not pivoting:
+                Q = np.zeros(
+                    (k, m) if mode == "economic" else (m, m), dtype=out_dtype
+                ).T
+                R = np.zeros((k, n) if mode == "economic" else (m, n), dtype=out_dtype)
+                return Q, R
+            elif mode == "r" and pivoting:
+                R = np.zeros((m, n), dtype=out_dtype)
+                P = np.zeros(n, dtype=np.int32)
+                return R, P
+            elif mode == "r" and not pivoting:
+                R = np.zeros((m, n), dtype=out_dtype)
+                return R
+            elif mode == "raw" and pivoting:
+                H = np.zeros((m, m), dtype=out_dtype)
+                tau = np.zeros(k, dtype=out_dtype)
+                R = np.zeros((m, n), dtype=out_dtype)
+                P = np.zeros(n, dtype=np.int32)
+                return H, tau, R, P
+            else:
+                H = np.zeros((m, m), dtype=out_dtype)
+                tau = np.zeros(k, dtype=out_dtype)
+                R = np.zeros((m, n), dtype=out_dtype)
+                return H, tau, R
+
         if integer_input:
             a = a.astype(out_dtype)
 
@@ -389,6 +454,11 @@ def numba_funcify_Schur(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def schur(a):
+            if a.size == 0:
+                n = a.shape[0]
+                return np.zeros((n, n), dtype=out_dtype), np.zeros(
+                    (n, n), dtype=out_dtype
+                )
             if integer_input:
                 a = a.astype(out_dtype)
             elif needs_complex_cast:
@@ -399,6 +469,11 @@ def numba_funcify_Schur(op, node, **kwargs):
         # Real input with real output
         @numba_basic.numba_njit
         def schur(a):
+            if a.size == 0:
+                n = a.shape[0]
+                return np.zeros((n, n), dtype=out_dtype), np.zeros(
+                    (n, n), dtype=out_dtype
+                )
             if integer_input:
                 a = a.astype(out_dtype)
             T, Z = schur_real(a, lwork=None, overwrite_a=overwrite_a)
@@ -439,6 +514,8 @@ def numba_funcify_QZ(op, node, **kwargs):
     if (integer_input_a or integer_input_b) and config.compiler_verbose:
         print("QZ requires casting discrete input to float")  # noqa: T201
 
+    alpha_dtype = node.outputs[2].type.numpy_dtype if return_eigenvalues else out_dtype
+
     use_complex = complex_input or complex_output
     use_sort = sort is not None
 
@@ -469,6 +546,23 @@ def numba_funcify_QZ(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def qz(a, b):
+            if a.size == 0:
+                n = a.shape[0]
+                if return_eigenvalues:
+                    return (
+                        np.zeros((n, n), dtype=out_dtype),
+                        np.zeros((n, n), dtype=out_dtype),
+                        np.zeros((n,), dtype=alpha_dtype),
+                        np.zeros((n,), dtype=out_dtype),
+                        np.zeros((n, n), dtype=out_dtype),
+                        np.zeros((n, n), dtype=out_dtype),
+                    )
+                return (
+                    np.zeros((n, n), dtype=out_dtype),
+                    np.zeros((n, n), dtype=out_dtype),
+                    np.zeros((n, n), dtype=out_dtype),
+                    np.zeros((n, n), dtype=out_dtype),
+                )
             if integer_input_a:
                 a = a.astype(out_dtype)
             elif needs_complex_cast:
@@ -482,6 +576,23 @@ def numba_funcify_QZ(op, node, **kwargs):
 
         @numba_basic.numba_njit
         def qz(a, b):
+            if a.size == 0:
+                n = a.shape[0]
+                if return_eigenvalues:
+                    return (
+                        np.zeros((n, n), dtype=out_dtype),
+                        np.zeros((n, n), dtype=out_dtype),
+                        np.zeros((n,), dtype=alpha_dtype),
+                        np.zeros((n,), dtype=out_dtype),
+                        np.zeros((n, n), dtype=out_dtype),
+                        np.zeros((n, n), dtype=out_dtype),
+                    )
+                return (
+                    np.zeros((n, n), dtype=out_dtype),
+                    np.zeros((n, n), dtype=out_dtype),
+                    np.zeros((n, n), dtype=out_dtype),
+                    np.zeros((n, n), dtype=out_dtype),
+                )
             if integer_input_a:
                 a = a.astype(out_dtype)
             elif needs_complex_cast:
