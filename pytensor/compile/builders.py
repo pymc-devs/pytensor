@@ -590,20 +590,24 @@ class OpFromGraph(Op, HasInnerGraph):
             pullback_overrides.kwargs["on_unused_input"] = "ignore"
             return pullback_overrides
 
-        # We try to compute the gradient with respect to connected outputs only
+        all_inner_outputs = [inner_out.copy() for inner_out in inner_outputs]
+        all_output_grads = [
+            disconnected_type() if disconnected else out_t()
+            for out_t, disconnected in zip(
+                self.output_types, disconnected_output_grads, strict=True
+            )
+        ]
         connected_inner_outputs = [
-            # We add an identity operation(copy) so that we don't override indirect
-            # gradient contributions to an inner output coming from other inner outputs
-            inner_out.copy()
+            inner_out
             for inner_out, disconnected in zip(
-                inner_outputs, disconnected_output_grads, strict=True
+                all_inner_outputs, disconnected_output_grads, strict=True
             )
             if not disconnected
         ]
         connected_output_grads = [
-            out_t()
-            for out_t, disconnected in zip(
-                self.output_types, disconnected_output_grads, strict=True
+            output_grad
+            for output_grad, disconnected in zip(
+                all_output_grads, disconnected_output_grads, strict=True
             )
             if not disconnected
         ]
@@ -620,8 +624,8 @@ class OpFromGraph(Op, HasInnerGraph):
 
         callable_args = (
             inner_inputs,
-            connected_inner_outputs,
-            connected_output_grads,
+            all_inner_outputs,
+            all_output_grads,
         )
 
         # we need to convert _lop_op into an OfG instance
@@ -658,11 +662,10 @@ class OpFromGraph(Op, HasInnerGraph):
             if not isinstance(inp_grad.type, DisconnectedType | NullType)
         ]
         lop_op = OpFromGraph(
-            inputs=inner_inputs + connected_inner_outputs + connected_output_grads,
+            inputs=inner_inputs + all_inner_outputs + connected_output_grads,
             outputs=connected_input_grads,
             inline=self.is_inline,
             name=(None if self.name is None else f"{self.name}_LOp"),
-            # TODO: We can be eager here and exclude unused inputs in the OFG
             on_unused_input="ignore",
         )
 
@@ -674,18 +677,13 @@ class OpFromGraph(Op, HasInnerGraph):
                 inputs[-nout * 2 : -nout],
                 inputs[-nout:],
             )
-            connected_outputs = [
-                output
-                for output, output_grad in zip(outputs, output_grads, strict=True)
-                if not isinstance(output_grad.type, DisconnectedType | NullType)
-            ]
             connected_output_grads = [
                 output_grad
                 for output_grad in output_grads
                 if not isinstance(output_grad.type, DisconnectedType)
             ]
             connected_input_grads = iter(
-                lop_op(*inputs, *connected_outputs, *connected_output_grads, **kwargs)
+                lop_op(*inputs, *outputs, *connected_output_grads, **kwargs)
             )
             return [
                 input_grad

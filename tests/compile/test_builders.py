@@ -611,6 +611,52 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             )
             assert isinstance(grad_x_wrt_y.type, DisconnectedType)
 
+    def test_pullback_override_full_length_output_grads(self):
+        x = pt.vector("x")
+
+        def pullback(inputs, outputs, out_grads):
+            captured["n_out_grads"] = len(out_grads)
+            captured["dc_pattern"] = tuple(
+                isinstance(g.type, DisconnectedType) for g in out_grads
+            )
+            captured["out_ndims"] = tuple(o.type.ndim for o in outputs)
+            (x_in,) = inputs
+
+            g_a, g_b, g_c = out_grads
+            total = pt.zeros_like(x_in)
+            if not isinstance(g_a.type, DisconnectedType):
+                total = total + g_a
+            if not isinstance(g_b.type, DisconnectedType):
+                total = total + (g_b + g_b.T) @ x_in
+            if not isinstance(g_c.type, DisconnectedType):
+                total = total + pt.ones_like(x_in) * g_c
+            return [total]
+
+        captured: dict = {}
+        op = OpFromGraph(
+            inputs=[x],
+            outputs=[x, pt.outer(x, x), x.sum()],
+            pullback=pullback,
+            inline=True,
+        )
+        a, b, c = op(x)
+
+        # Every downstream connection pattern must observe len(out_grads) == 3.
+        # The dc_pattern should reflect exactly which outputs aren't used downstream.
+        for cost, expected_dc in [
+            (a.sum(), (False, True, True)),
+            (b.sum(), (True, False, True)),
+            (c, (True, True, False)),
+            (a.sum() + c, (False, True, False)),
+            (b.sum() + c, (True, False, False)),
+            (a.sum() + b.sum() + c, (False, False, False)),
+        ]:
+            captured.clear()
+            grad(cost, x)
+            assert captured["n_out_grads"] == 3
+            assert captured["out_ndims"] == (1, 2, 0)
+            assert captured["dc_pattern"] == expected_dc
+
     def test_repeated_inputs(self):
         x = pt.dscalar("x")
         y = pt.dscalar("y")
