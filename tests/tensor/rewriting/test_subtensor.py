@@ -2118,6 +2118,71 @@ def test_extract_diag_of_diagonal_set_subtensor():
     assert equal_computations(rewritten_outs, expected_outs)
 
 
+@pytest.mark.skipif(
+    config.mode == "FAST_COMPILE", reason="Test requires specialization rewrites"
+)
+@pytest.mark.parametrize("exp_before_materialize", [True, False])
+def test_cholesky_unconstrain_grad(exp_before_materialize):
+    """Integration test: gradient of a Cholesky-based log-density.
+
+    Builds a lower-triangular ``L`` from a packed vector via
+    ``set_subtensor``, exponentiates the diagonal, and computes
+    ``sum(log(diag(L))) + sum(L @ L.T)``.  The gradient produces nested
+    inc/set chains at the diagonal indices and diag-of-scatter patterns;
+    the subtensor rewrites should collapse redundant indexing ops.
+    """
+    n = 3
+
+    packed = pt.vector("packed")
+    if exp_before_materialize:
+        # We test the same optimized result regardless of whether
+        # the diagonals are updated before or after materialization
+        packed_diag_indices = pt.arange(n + 1).cumsum()[1:] - 1
+        log_diag = packed[packed_diag_indices]
+        packed_update = packed[packed_diag_indices].set(pt.exp(log_diag))
+    else:
+        packed_update = packed
+
+    tril_r, tril_c = np.tril_indices(n)
+    L = pt.zeros((n, n))
+    L = pt.set_subtensor(L[tril_r, tril_c], packed_update)
+
+    if not exp_before_materialize:
+        diag_indices = np.diag_indices(n)
+        log_diag = L[diag_indices]
+        L = L[diag_indices].set(pt.exp(log_diag))
+
+    Sigma = L @ L.T
+    # log-det via diag(L), not diag(Sigma) — the actual Wishart pattern
+
+    loss = pt.sum(pt.log(pt.diagonal(L))) + pt.sum(Sigma)
+    grad = pt.grad(loss, packed)
+
+    f = function([packed], [loss, grad])
+    f.dprint(print_shape=True)
+
+    idx_types = (
+        Subtensor,
+        AdvancedSubtensor1,
+        AdvancedSubtensor,
+        IncSubtensor,
+        AdvancedIncSubtensor1,
+        AdvancedIncSubtensor,
+    )
+    n_idx = sum(1 for n in f.maker.fgraph.toposort() if isinstance(n.op, idx_types))
+    assert n_idx == 8
+
+    x = np.array([1.0, 0.5, 2.0, 0.3, 0.1, 1.5])
+    # Expected values were computed once by running ``f(x)``.
+    expected_loss = 93.04980520058317
+    expected_grad = np.array(
+        [20.12736312, 7.03656366, 111.67411129, 7.03656366, 14.9781122, 41.17107385]
+    )
+    loss_out, grad_out = f(x)
+    np.testing.assert_allclose(loss_out, expected_loss)
+    np.testing.assert_allclose(grad_out, expected_grad)
+
+
 def test_local_convert_negative_indices():
     x = pt.tensor("x", shape=(None, 3, 1))
 
