@@ -250,11 +250,16 @@ class TestDecompositions:
     @pytest.mark.parametrize(
         "overwrite_a", [True, False], ids=["overwrite_a", "no_overwrite"]
     )
-    def test_lu(self, permute_l, p_indices, overwrite_a):
+    @pytest.mark.parametrize("complex", (False, True))
+    def test_lu(self, permute_l, p_indices, overwrite_a, complex):
         shape = (5, 5)
         rng = np.random.default_rng()
-        A = pt.tensor("A", shape=shape, dtype=config.floatX)
-        A_val = rng.normal(size=shape).astype(config.floatX)
+        dtype = "complex128" if complex else config.floatX
+        A = pt.tensor("A", shape=shape, dtype=dtype)
+        if complex:
+            A_val = rng.normal(size=(*shape, 2)).view(dtype=A.dtype).squeeze(-1)
+        else:
+            A_val = rng.normal(size=shape).astype(dtype)
 
         lu_outputs = lu(A, permute_l=permute_l, p_indices=p_indices)
 
@@ -299,12 +304,17 @@ class TestDecompositions:
     @pytest.mark.parametrize(
         "overwrite_a", [True, False], ids=["overwrite_a", "no_overwrite"]
     )
-    def test_lu_factor(self, overwrite_a):
+    @pytest.mark.parametrize("complex", (False, True))
+    def test_lu_factor(self, overwrite_a, complex):
         shape = (5, 5)
         rng = np.random.default_rng()
 
-        A = pt.tensor("A", shape=shape, dtype=config.floatX)
-        A_val = rng.normal(size=shape).astype(config.floatX)
+        dtype = "complex128" if complex else config.floatX
+        A = pt.tensor("A", shape=shape, dtype=dtype)
+        if complex:
+            A_val = rng.normal(size=(*shape, 2)).view(dtype=A.dtype).squeeze(-1)
+        else:
+            A_val = rng.normal(size=shape).astype(dtype)
 
         LU_out, piv = lu_factor(A)
 

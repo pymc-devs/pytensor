@@ -3,13 +3,14 @@ from typing import Literal
 
 import numpy as np
 from numba.core.extending import overload
-from numba.core.types import Float
+from numba.core.types import Complex, Float
 from numba.np.linalg import ensure_lapack
 from scipy import linalg
 
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.linalg.decomposition.lu_factor import _getrf
 from pytensor.link.numba.dispatch.linalg.utils import _check_linalg_matrix
+from pytensor.tensor.linalg.dtype_utils import linalg_real_output_dtype
 
 
 @numba_basic.numba_njit
@@ -113,7 +114,7 @@ def lu_impl_1(
     False. Returns a tuple of (perm, L, U), where perm an integer array of row swaps, such that L[perm] @ U = A.
     """
     ensure_lapack()
-    _check_linalg_matrix(a, ndim=2, dtype=Float, func_name="lu")
+    _check_linalg_matrix(a, ndim=2, dtype=(Float, Complex), func_name="lu")
     dtype = a.dtype
 
     def impl(
@@ -141,7 +142,7 @@ def lu_impl_2(
     """
 
     ensure_lapack()
-    _check_linalg_matrix(a, ndim=2, dtype=Float, func_name="lu")
+    _check_linalg_matrix(a, ndim=2, dtype=(Float, Complex), func_name="lu")
     dtype = a.dtype
 
     def impl(
@@ -172,8 +173,10 @@ def lu_impl_3(
     False. Returns a tuple of (P, L, U), such that P @ L @ U = A.
     """
     ensure_lapack()
-    _check_linalg_matrix(a, ndim=2, dtype=Float, func_name="lu")
+    _check_linalg_matrix(a, ndim=2, dtype=(Float, Complex), func_name="lu")
     dtype = a.dtype
+    # scipy.linalg.lu returns P as a real permutation matrix even for complex input
+    p_dtype = np.dtype(linalg_real_output_dtype(str(dtype)))
 
     def impl(
         a: np.ndarray,
@@ -182,7 +185,7 @@ def lu_impl_3(
         overwrite_a: bool,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         perm, L, U = _lu_factor_to_lu(a, dtype, overwrite_a)
-        P = np.eye(a.shape[-1], dtype=dtype)[perm]
+        P = np.eye(a.shape[-1], dtype=p_dtype)[perm]
 
         return P, L, U
 
