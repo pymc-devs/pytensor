@@ -1150,6 +1150,48 @@ def constant_fold_branches_of_add_mul(fgraph, node):
     return [new_out]
 
 
+@node_rewriter(tracks=[add, mul])
+def reassociate_broadcast_aware_add_mul(fgraph, node):
+    """Reassociate add/mul to group inputs with the same broadcasting pattern together"""
+    if len(node.inputs) <= 2:
+        return None
+
+    out_bcast = node.outputs[0].type.broadcastable
+    out_ndim = len(out_bcast)
+
+    grouped_inputs: dict[tuple[bool, ...], list[TensorVariable]] = {}
+    ordered_signatures: list[tuple[bool, ...]] = []
+    for inp in node.inputs:
+        inp_bcast = inp.type.broadcastable
+        inp_sig = (True,) * (out_ndim - len(inp_bcast)) + inp_bcast
+        if inp_sig not in grouped_inputs:
+            grouped_inputs[inp_sig] = []
+            ordered_signatures.append(inp_sig)
+        grouped_inputs[inp_sig].append(inp)
+
+    if len(grouped_inputs) <= 1:
+        return None
+
+    new_inputs = []
+    changed = False
+    for inp_sig in ordered_signatures:
+        same_sig_inputs = grouped_inputs[inp_sig]
+        if len(same_sig_inputs) > 1 and inp_sig != out_bcast:
+            new_subgroup = node.op(*same_sig_inputs)
+            copy_stack_trace(node.outputs[0], new_subgroup)
+            new_inputs.append(new_subgroup)
+            changed = True
+        else:
+            new_inputs.extend(same_sig_inputs)
+
+    if not changed:
+        return None
+
+    new_out = node.op(*new_inputs)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
 add_mul_fusion_seqopt = SequenceDB()
 optdb.register(
     "add_mul_fusion",
@@ -1169,6 +1211,13 @@ add_mul_fusion_seqopt.register(
     "fast_run",
     position=1,
 )
+add_mul_fusion_seqopt.register(
+    reassociate_broadcast_aware_add_mul.__name__,
+    in2out(reassociate_broadcast_aware_add_mul, ignore_newtrees=True),
+    "fast_run",
+    position=2,
+)
+
 
 # Register fusion database just before AddDestroyHandler(49.5) (inplace rewrites)
 fuse_seqopt = SequenceDB()
