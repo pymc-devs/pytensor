@@ -75,23 +75,6 @@ def shape_of_variables(
     (array(1024), array(1024))
     """
 
-    if not hasattr(fgraph, "shape_feature"):
-        from pytensor.tensor.rewriting.shape import ShapeFeature
-
-        fgraph.attach_feature(ShapeFeature())
-
-    shape_feature = fgraph.shape_feature  # type: ignore[attr-defined]
-
-    input_dims = [
-        dimension for inp in fgraph.inputs for dimension in shape_feature.shape_of[inp]
-    ]
-
-    output_dims = [
-        dimension for shape in shape_feature.shape_of.values() for dimension in shape
-    ]
-
-    compute_shapes = pytensor.function(input_dims, output_dims)
-
     if any(i not in fgraph.inputs for i in input_shapes):
         raise ValueError(
             "input_shapes keys aren't in the fgraph.inputs. FunctionGraph()"
@@ -99,15 +82,40 @@ def shape_of_variables(
             " To have the old behavior, give it this new parameter `clone=False`."
         )
 
+    from pytensor.compile.builders import infer_shape
+    from pytensor.tensor.type import lscalar
+
+    # Build fresh scalar placeholders for each input's dims, ask
+    # ``builders.infer_shape`` to express every variable's shape in terms
+    # of them, then compile a scalar-in / scalar-out function.  This keeps
+    # memory flat at runtime (we pass int dims, not arrays).
+    input_shape_scalars: dict[Variable, tuple[Variable, ...]] = {
+        inp: tuple(lscalar() for _ in range(inp.type.ndim)) for inp in fgraph.inputs
+    }
+    input_dims = [s for inp in fgraph.inputs for s in input_shape_scalars[inp]]
+
+    all_vars: list[Variable] = [v for v in fgraph.variables if hasattr(v.type, "ndim")]
+    inferred_shapes = infer_shape(
+        outs=all_vars,
+        inputs=list(fgraph.inputs),
+        input_shapes=[input_shape_scalars[inp] for inp in fgraph.inputs],
+    )
+    per_var_shape: dict = dict(zip(all_vars, inferred_shapes, strict=True))
+    output_dims = [dim for shape in per_var_shape.values() for dim in shape]
+
+    compute_shapes = pytensor.function(
+        input_dims, output_dims, on_unused_input="ignore"
+    )
+
     numeric_input_dims = [dim for inp in fgraph.inputs for dim in input_shapes[inp]]
     numeric_output_dims = compute_shapes(*numeric_input_dims)
 
     sym_to_num_dict = dict(zip(output_dims, numeric_output_dims, strict=True))
 
-    l = {}
-    for var in shape_feature.shape_of:
-        l[var] = tuple(sym_to_num_dict[sym] for sym in shape_feature.shape_of[var])
-    return l
+    return {
+        var: tuple(sym_to_num_dict[sym] for sym in shape)
+        for var, shape in per_var_shape.items()
+    }
 
 
 def import_func_from_string(func_string: str):  # -> Optional[Callable]:
