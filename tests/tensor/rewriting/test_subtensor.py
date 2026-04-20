@@ -125,27 +125,33 @@ def test_local_replace_AdvancedSubtensor(indexer, is_none):
 
 
 @pytest.mark.parametrize("s", [slice(None), slice(None, None, -1)])
-def test_local_useless_inc_subtensor(s):
+@pytest.mark.parametrize("op", [set_subtensor, inc_subtensor], ids=["set", "inc"])
+def test_local_useless_inc_subtensor(op, s):
     x = matrix("x")
     y = matrix("y")
 
     mode = get_default_mode().including("local_useless_inc_subtensor")
 
+    dx = np.asarray([[2, 3]], dtype=config.floatX)
+    dy = np.asarray([[3, 4]], dtype=config.floatX)
+    # inc(x[:, s], y) writes y into the s-view of x, so when the result is
+    # viewed normally the y values appear at positions y[:, s] (e.g. reversed
+    # for s=::-1).  Set is the same, sans the base.
+    expected = (dx + dy[:, s]) if op is inc_subtensor else dy[:, s]
+
     # Without shape info: rewrite fires but inserts alloc to handle broadcast
-    o = set_subtensor(x[:, s], y)
+    o = op(x[:, s], y)
     f = function([x, y], o, mode=mode)
     topo = f.maker.fgraph.toposort()
     assert not any(isinstance(n.op, IncSubtensor) for n in topo)
-    out = f([[2, 3]], [[3, 4]])
-    assert np.array_equal(out, np.asarray([[3, 4]])[::, s])
+    np.testing.assert_array_equal(f(dx, dy), expected)
 
     # With shape info: rewrite fires without alloc
-    o_shape = set_subtensor(x[:, s], specify_shape(y, x.shape))
+    o_shape = op(x[:, s], specify_shape(y, x.shape))
     f_shape = function([x, y], o_shape, mode=mode)
     topo = f_shape.maker.fgraph.toposort()
     assert not any(isinstance(n.op, IncSubtensor | Alloc) for n in topo)
-    out = f_shape([[2, 3]], [[3, 4]])
-    assert np.array_equal(out, np.asarray([[3, 4]])[::, s])
+    np.testing.assert_array_equal(f_shape(dx, dy), expected)
 
 
 def test_local_useless_setsubtensor_alloc_empty():
@@ -196,23 +202,29 @@ def test_local_useless_inc_subtensor_no_opt():
     out = f_shape([[2, 3, 6, 7]], [[8, 9]])
     assert np.array_equal(out, np.asarray([[8, 3, 9, 7]]))
 
-    # This is an increment with a non-constant target array
+    # Increment with a non-constant target array, full slices collapse to x + y.
     s = x[:, :]
     o_shape = inc_subtensor(s, specify_shape(y, s.shape))
 
     f_shape = function([x, y], o_shape, mode=mode)
 
     topo = f_shape.maker.fgraph.toposort()
-    assert any(isinstance(n.op, IncSubtensor) for n in topo)
+    assert not any(isinstance(n.op, IncSubtensor) for n in topo)
 
-    # This is an increment with a non-zero target array
+    out = f_shape([[1, 2], [3, 4]], [[10, 20], [30, 40]])
+    assert np.array_equal(out, np.asarray([[11, 22], [33, 44]]))
+
+    # Increment with a non-zero constant target array, same collapse to x + y.
     s = pt.ones((2, 2))[:, :]
     o_shape = inc_subtensor(s, specify_shape(y, s.shape))
 
     f_shape = function([y], o_shape, mode=mode)
 
     topo = f_shape.maker.fgraph.toposort()
-    assert any(isinstance(n.op, IncSubtensor) for n in topo)
+    assert not any(isinstance(n.op, IncSubtensor) for n in topo)
+
+    out = f_shape([[10, 20], [30, 40]])
+    assert np.array_equal(out, np.asarray([[11, 21], [31, 41]]))
 
 
 class TestLocalUselessSubtensor:
