@@ -369,8 +369,13 @@ def local_useless_slice(fgraph, node):
         new_idx_list, new_flat_vars = flatten_index_variables(new_idxs)
         props = op._props_dict() | {"idx_list": new_idx_list}
         if is_inc_subtensor:
-            # We let local_useless_inc_subtensor handle empty new_idx_list
-            out = type(op)(**props)(x, y, *new_flat_vars)
+            new_node = type(op)(**props)(x, y, *new_flat_vars).owner
+            if not new_idx_list:
+                ret = local_useless_inc_subtensor.fn(fgraph, new_node)
+                if ret:
+                    copy_stack_trace(node.outputs, ret)
+                    return ret
+            out = new_node.outputs[0]
         else:
             out = type(op)(**props)(x, *new_flat_vars) if new_idx_list else x
         copy_stack_trace(node.outputs, out)
@@ -546,26 +551,17 @@ def local_subtensor_inc_subtensor(fgraph, node):
 def local_useless_inc_subtensor(fgraph, node):
     r"""Remove redundant `IncSubtensor`\s.
 
-    Replace set_subtensor (or inc_subtensor on zero) that overwrite their whole buffers
-    by the written value (perhaps broadcasted and/or reversed).
+    - ``x[full_slices].set(y)`` → ``y``  (broadcast/cast to x's shape)
+    - ``zeros[full_slices].inc(y)`` → ``y``  (broadcast/cast to x's shape)
+    - ``x[full_slices].inc(y)`` → ``x + y``
     """
 
     x, y, *index_vars = node.inputs
 
-    if node.op.set_instead_of_inc is False:
-        # This is an increment operation, so the array being incremented must
-        # consist of all zeros in order for the entire operation to be useless
-        try:
-            c = get_underlying_scalar_constant_value(x)
-            if c != 0:
-                return
-        except NotScalarConstantError:
-            return
-
     indices = indices_from_subtensor(index_vars, node.op.idx_list)
 
     # Check that all indices are full slices or full reversals
-    if all(
+    if not all(
         isinstance(e, slice)
         and e.start is None
         and e.stop is None
@@ -578,30 +574,42 @@ def local_useless_inc_subtensor(fgraph, node):
         )
         for e in indices
     ):
-        # IncSubtensor casts y to x's dtype and broadcasts y onto x's shape
-        out_dtype = node.outputs[0].type.dtype
+        return
 
-        # Check shapes before casting, as cast creates a new node not in the fgraph
-        static_same = x.type.shape == y.type.shape and all(
-            s is not None for s in x.type.shape
-        )
-        if not static_same:
-            if hasattr(fgraph, "shape_feature") and fgraph.shape_feature.same_shape(
-                x, y
-            ):
-                static_same = True
+    is_inc = not node.op.set_instead_of_inc
+    x_is_zero = False
+    if is_inc:
+        try:
+            x_is_zero = get_underlying_scalar_constant_value(x) == 0
+        except NotScalarConstantError:
+            pass
 
-        if y.type.dtype != out_dtype:
-            y = cast(y, out_dtype)
+    # IncSubtensor casts y to x's dtype and broadcasts y onto x's shape
+    out_dtype = node.outputs[0].type.dtype
 
-        if not static_same:
-            y = alloc(y, *x.shape)
-            copy_stack_trace(node.outputs[0], y)
+    static_same = x.type.shape == y.type.shape and all(
+        s is not None for s in x.type.shape
+    )
+    if not static_same:
+        if hasattr(fgraph, "shape_feature") and fgraph.shape_feature.same_shape(x, y):
+            static_same = True
 
-        if not all(e.step is None for e in node.op.idx_list):
-            y = Subtensor(node.op.idx_list)(y, *index_vars)
+    if y.type.dtype != out_dtype:
+        y = cast(y, out_dtype)
 
+    if not static_same:
+        y = alloc(y, *x.shape)
+        copy_stack_trace(node.outputs[0], y)
+
+    if not all(e.step is None for e in node.op.idx_list):
+        y = Subtensor(node.op.idx_list)(y, *index_vars)
+
+    if not is_inc or x_is_zero:
         return [y]
+
+    r = add(x, y)
+    copy_stack_trace(node.outputs[0], r)
+    return [r]
 
 
 @register_canonicalize
