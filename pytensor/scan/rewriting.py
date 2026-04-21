@@ -601,7 +601,9 @@ def scan_push_out_seq(fgraph, node):
         return replacements
 
     elif not to_keep_set and not op.info.as_while and not op.outer_mitmot(node.inputs):
-        # Nothing in the inner graph should be kept
+        # Nothing in the inner graph should be kept.
+        n_steps = node.inputs[0]
+
         replace_with = {}
         for out, idx in to_replace_map.items():
             if out in local_fgraph_outs_set:
@@ -618,7 +620,26 @@ def scan_push_out_seq(fgraph, node):
                     inp = op.outer_sitsot(node.inputs)[odx]
                     y = set_subtensor(inp[1:], _y)
                 elif out in op.inner_nitsot_outs(ls):
-                    y = _y
+                    # The pushed-out Elemwise has length == n_steps, but the
+                    # nit_sot's outer buffer size (`outer_nitsot` input) may
+                    # be larger. When it is, folding directly would silently
+                    # drop the trailing zero-initialized slots that any
+                    # downstream consumer reading the full buffer expects --
+                    # e.g., `Scan.pullback` emits grad scans where the
+                    # nit_sot size is the forward's step count while
+                    # `n_steps == grad_steps == min(forward_steps, truncate)`
+                    # and its concat padding depends on those trailing zeros.
+                    # Fold into the direct Elemwise only when the two sizes
+                    # are the same Variable; otherwise pad with zeros via
+                    # set_subtensor.
+                    odx = op.inner_nitsot_outs(ls).index(out)
+                    nit_sot_size = op.outer_nitsot(node.inputs)[odx]
+                    if nit_sot_size is n_steps:
+                        y = _y
+                    else:
+                        extra_dims = [_y.shape[i] for i in range(1, _y.ndim)]
+                        zero_buf = pt.zeros((nit_sot_size, *extra_dims), dtype=_y.dtype)
+                        y = set_subtensor(zero_buf[:n_steps], _y)
                 else:
                     y = _y[-1]
                 replace_with[x] = y

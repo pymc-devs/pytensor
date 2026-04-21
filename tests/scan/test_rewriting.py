@@ -15,7 +15,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace
 from pytensor.graph.traversal import ancestors
 from pytensor.link.basic import JITLinker
-from pytensor.scan.op import Scan
+from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.rewriting import ScanInplaceOptimizer, ScanMerge
 from pytensor.scan.utils import until
 from pytensor.tensor import stack
@@ -465,6 +465,53 @@ class TestPushOutNonSeqScan:
         outs = f()
         expected_outs = [[4, 4], [2, 2]]
         utt.assert_allclose(outs, expected_outs)
+
+    def test_pushout_nitsot_buffer_larger_than_nsteps(self):
+        """When folding a stateless nit_sot scan into an Elemwise, the folded
+        result has length == ``n_steps``, which may be less than the nit_sot's
+        declared outer buffer size. Pushout must pad the folded result with
+        zeros so the trailing slots match what the un-folded scan would have
+        produced (uninitialized-but-conventionally-zero nit_sot slots).
+
+        Reproduced here directly by building a Scan op with distinct
+        ``n_steps`` and ``nit_sot_size`` outer inputs -- the same pattern that
+        arises in ``Scan.pullback`` when ``truncate_gradient`` is set.
+        """
+        info = ScanInfo(
+            n_seqs=1,
+            mit_mot_in_slices=(),
+            mit_mot_out_slices=(),
+            mit_sot_in_slices=(),
+            sit_sot_in_slices=(),
+            n_nit_sot=1,
+            n_untraced_sit_sot=0,
+            n_non_seqs=0,
+            as_while=False,
+        )
+
+        inner_seq = pt.dscalar("inner_seq")
+        inner_out = inner_seq * 2.0
+        scan_op = Scan(inputs=[inner_seq], outputs=[inner_out], info=info)
+
+        seq = pt.dvector("seq")
+        n_steps = pt.lscalar("n_steps")
+        nit_sot_size = pt.lscalar("nit_sot_size")
+        out = scan_op(n_steps, seq[:n_steps], nit_sot_size)
+
+        f = function([seq, n_steps, nit_sot_size], out)
+
+        has_scan = any(isinstance(node.op, Scan) for node in f.maker.fgraph.apply_nodes)
+        if config.mode == "FAST_COMPILE":
+            # Rewrite not fired in fast compile
+            assert has_scan
+        else:
+            # Pushout should have fired: no Scan node left.
+            assert not has_scan
+
+        res = f(np.arange(10, dtype="float64"), np.array(3), np.array(7))
+        np.testing.assert_array_equal(
+            res, np.array([0.0, 2.0, 4.0, 0.0, 0.0, 0.0, 0.0])
+        )
 
     def test_dot_not_output(self):
         """
