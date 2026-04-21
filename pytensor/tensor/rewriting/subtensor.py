@@ -1267,6 +1267,12 @@ def local_read_of_write_same_indices(fgraph, node):
     are trivially unique, while integer-array indices must be constant with
     no repeated entries (mixing positive and negative values counts as
     potentially duplicated since they may alias).
+
+    Companion rewrites:
+
+    - ``local_advanced_read_of_write_constant_indices`` handles the multi-axis
+      case when read and write indices differ but are both constant.
+    - ``local_write_of_write_same_indices`` folds nested write chains.
     """
     if isinstance(node.op, Subtensor):
         write_type = IncSubtensor
@@ -1333,6 +1339,12 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
     Fires only when all advanced indices on both sides are 1-D integer
     constants with matching ``idx_list``.  The inc case additionally requires
     unique joint write coords so each read coord matches at most one write.
+
+    Companion rewrites:
+
+    - ``local_read_of_write_same_indices`` handles the identity-check case
+      (symbolic indices allowed) for basic and advanced subtensors.
+    - ``local_write_of_write_same_indices`` folds nested write chains.
     """
     inner = node.inputs[0]
     if not (inner.owner and isinstance(inner.owner.op, AdvancedIncSubtensor)):
@@ -1492,6 +1504,97 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
 
     copy_stack_trace(node.outputs[0], out)
     return [out]
+
+
+@register_canonicalize
+@register_stabilize
+@register_specialize
+@node_rewriter([IncSubtensor, AdvancedIncSubtensor1, AdvancedIncSubtensor])
+def local_write_of_write_same_indices(fgraph, node):
+    """Fold nested write ops that share the same indices.
+
+    .. code::
+
+        x[idx].set/inc(a)[idx].set(b) -> x[idx].set(b)
+        x[idx].inc(a)[idx].inc(b)     -> x[idx].inc(a + b)
+        x[idx].set(a)[idx].inc(b)     -> x[idx].set(a + b)   [unique idx]
+
+    Outer-set always applies (it shadows the inner write).  Inc+inc is safe
+    because addition is associative.  Inc-of-set requires duplicate-free
+    indices: slices are trivially unique, advanced indices are checked
+    per-axis (conservative — joint-tuple uniqueness would be exact).
+
+    If the inc-of-set base is zero-filled the result is emitted as an
+    ``inc`` so downstream zero-aware rewrites can still fire.
+
+    Typically arises from gradient accumulation or user code that writes
+    then updates the same slice (e.g. Scan updates).
+
+    Companion rewrites:
+
+    - ``local_read_of_write_same_indices`` simplifies a read following a
+      write at the same indices.
+    - ``local_advanced_read_of_write_constant_indices`` handles multi-axis
+      reads with differing constant indices.
+    """
+    # AdvancedIncSubtensor.ignore_duplicates is not a concern here:
+    # the outer-set and inc+inc cases are valid regardless of duplicates,
+    # and the inc-of-set case requires verified-unique indices so there
+    # are no duplicates for the flag to affect.
+    inner_x, b, *outer_idx_vars = node.inputs
+    if not (inner_x.owner and isinstance(inner_x.owner.op, type(node.op))):
+        return
+
+    base, a, *inner_idx_vars = inner_x.owner.inputs
+
+    # Same indices: idx_list (slice specs) must match and all index
+    # variables must be identical.  AdvancedIncSubtensor1 has a fixed
+    # class-level idx_list = (0,) so the comparison is trivially true.
+    if node.op.idx_list != inner_x.owner.op.idx_list:
+        return
+    if not all(o is i for o, i in zip(outer_idx_vars, inner_idx_vars, strict=True)):
+        return
+
+    outer_is_set = node.op.set_instead_of_inc
+    inner_is_set = inner_x.owner.op.set_instead_of_inc
+
+    if outer_is_set:
+        # Outer set shadows inner completely.
+        new_val = b
+        use_set = True
+    elif inner_is_set:
+        # x[idx].set(a)[idx].inc(b) — needs unique indices.
+        # Basic indexing (slices/scalars) is always duplicate-free.
+        # For advanced indexing, per-axis uniqueness is conservative but
+        # sufficient: it guarantees no duplicates in the joint cross-product
+        # after broadcasting.
+        if not isinstance(node.op, IncSubtensor):
+            if not all(_constant_has_unique_indices(v) for v in outer_idx_vars):
+                return
+        new_val = a + b
+        if (
+            get_underlying_scalar_constant_value(
+                base, elemwise=False, raise_not_constant=False
+            )
+            == 0
+        ):
+            use_set = False
+        else:
+            use_set = True
+    else:
+        # x[idx].inc(a)[idx].inc(b) — always safe (addition is associative).
+        new_val = a + b
+        use_set = False
+
+    if isinstance(node.op, AdvancedIncSubtensor1):
+        new_op = AdvancedIncSubtensor1(set_instead_of_inc=use_set)
+    else:
+        # ignore_duplicates is deliberately not propagated: the merged op
+        # should use the safe np.add.at path (the default).
+        new_op = type(node.op)(idx_list=node.op.idx_list, set_instead_of_inc=use_set)
+    r = new_op(base, new_val, *outer_idx_vars)
+    copy_stack_trace(node.outputs[0], r)
+    return [r]
 
 
 @register_specialize

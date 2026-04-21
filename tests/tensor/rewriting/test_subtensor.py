@@ -1540,6 +1540,76 @@ class TestReadOfWriteConstantIndices:
         np.testing.assert_allclose(f(dx, dv), expected)
 
 
+class TestWriteOfWriteSameIndices:
+    def test_set_of_set_basic_slice(self):
+        """Outer set shadows inner write: ``x[sl].set(a)[sl].set(b) -> x[sl].set(b)``."""
+        x = matrix("x")
+        a = matrix("a")
+        b = matrix("b")
+        stop = iscalar("stop")
+
+        out = set_subtensor(set_subtensor(x[:stop], a)[:stop], b)
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations([rewritten], [set_subtensor(x[:stop], b)])
+
+    def test_inc_of_inc_basic_slice(self):
+        """Inc+inc folds the increments: ``x[sl].inc(a)[sl].inc(b) -> x[sl].inc(a + b)``."""
+        x = matrix("x")
+        a = matrix("a")
+        b = matrix("b")
+        stop = iscalar("stop")
+
+        out = inc_subtensor(inc_subtensor(x[:stop], a)[:stop], b)
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations([rewritten], [inc_subtensor(x[:stop], a + b)])
+
+    def test_inc_of_set_basic_slice(self):
+        """Inc-of-set with slices (trivially unique):
+        ``x[sl].set(a)[sl].inc(b) -> x[sl].set(a + b)``."""
+        x = matrix("x")
+        a = matrix("a")
+        b = matrix("b")
+        stop = iscalar("stop")
+
+        out = inc_subtensor(set_subtensor(x[:stop], a)[:stop], b)
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations([rewritten], [set_subtensor(x[:stop], a + b)])
+
+    def test_inc_of_set_zero_base_emits_inc(self):
+        """When the set base is zero, inc-of-set becomes an inc so that
+        downstream zero-aware rewrites keep firing."""
+        a = matrix("a")
+        b = matrix("b")
+        stop = iscalar("stop")
+        zeros = pt.zeros((5, 5))
+
+        out = inc_subtensor(set_subtensor(zeros[:stop], a)[:stop], b)
+        rewritten = rewrite_graph(out, include=("canonicalize", "specialize"))
+        utt.assert_equal_computations([rewritten], [inc_subtensor(zeros[:stop], a + b)])
+
+    def test_inc_of_set_advanced_non_unique_not_rewritten(self):
+        """Inc-of-set requires unique indices; duplicate constant indices
+        on advanced axes block the rewrite."""
+        x = matrix("x", dtype="float64")
+        a = matrix("a", dtype="float64")
+        b = matrix("b", dtype="float64")
+        cidx = pt.constant(np.array([1, 3, 3], dtype="int32"))
+
+        out = inc_subtensor(set_subtensor(x[cidx], a)[cidx], b)
+        f = function([x, a, b], out)
+
+        topo = f.maker.fgraph.toposort()
+        # Both writes must remain; rewrite can't prove uniqueness.
+        assert (
+            sum(
+                1
+                for n in topo
+                if isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1)
+            )
+            == 2
+        )
+
+
 class TestSubtensorAllocRewrites:
     def setup_method(self):
         mode = get_default_mode()
@@ -2443,7 +2513,7 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
         AdvancedIncSubtensor,
     )
     n_idx = sum(1 for n in f.maker.fgraph.toposort() if isinstance(n.op, idx_types))
-    assert n_idx == 8
+    assert n_idx == 7
 
     x = np.array([1.0, 0.5, 2.0, 0.3, 0.1, 1.5])
     # Expected values were computed once by running ``f(x)``.
