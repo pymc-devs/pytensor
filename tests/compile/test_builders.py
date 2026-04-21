@@ -622,8 +622,6 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
             OpFromGraph([x], [x + y])
 
     def test_pullback_disconnected_output_grad(self):
-    @pytest.mark.parametrize("use_custom_pullback", [False, True])
-    def test_pullback_disconnected_output_grad(self, use_custom_pullback):
         x, y = dscalars("x", "y")
         rng = np.random.default_rng(594)
         point = list(rng.normal(size=(2,)))
