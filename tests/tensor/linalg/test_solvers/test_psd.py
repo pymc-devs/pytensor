@@ -76,6 +76,22 @@ class TestCholeskySolve(utt.InferShapeTester):
             cho_solve_upper_func(A_val, b_val),
         )
 
+        if config.floatX == "float64":
+            M = rng.normal(size=(5, 5)).astype(config.floatX)
+            C_val = np.linalg.cholesky(M @ M.T + np.eye(5, dtype=config.floatX))
+            for lower, b_shape in itertools.product(
+                (True, False), [(5, 1), (5, 5), (5,)]
+            ):
+                C = C_val if lower else C_val.T
+                b_val = rng.normal(size=b_shape).astype(config.floatX)
+                utt.verify_grad(
+                    lambda c, b: cho_solve((c, lower), b, b_ndim=len(b_shape)),
+                    [C, b_val],
+                    3,
+                    rng,
+                    eps=2e-8,
+                )
+
     def test_solve_dtype(self):
         is_numba = isinstance(get_default_mode().linker, NumbaLinker)
 
