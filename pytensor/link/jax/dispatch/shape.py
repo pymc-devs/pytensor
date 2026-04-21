@@ -4,7 +4,11 @@ from pytensor.graph import Constant
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.link.jax.dispatch.basic import jax_funcify
-from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape # JoinDims, SplitDims
+from pytensor.tensor.reshape import (  # is the placement of joindims/splitdims under reshape instead of shape intentional?
+    JoinDims,
+    SplitDims,
+)
+from pytensor.tensor.shape import Reshape, Shape, Shape_i, SpecifyShape
 from pytensor.tensor.type import TensorType
 
 
@@ -110,10 +114,20 @@ def jax_funcify_SpecifyShape(op, node, **kwargs):
 def jax_funcify_JoinDims(op, node, **kwargs):
     start_axis = op.start_axis
     n_axes = op.n_axes
+
     def join_dims(x):
-        if n_axes == 0:
-            expanded_x = jnp.expand_dims(x, axis=start_axis)
-            return expanded_x
-        if n_axes == 1:
-            return x
+        output_shape = (*x.shape[:start_axis], -1, *x.shape[start_axis + n_axes :])
+        return jnp.reshape(x, output_shape)
+
     return join_dims
+
+
+@jax_funcify.register(SplitDims)
+def jax_funcify_SplitDims(op, node, **kwargs):
+    axis = op.axis
+
+    def split_dims(x, shape):
+        output_shape = (*x.shape[:axis], *shape, *x.shape[axis + 1 :])
+        return jnp.reshape(x, output_shape)
+
+    return split_dims

@@ -152,7 +152,7 @@ def join_dims(
     return JoinDims(start_axis, n_axes)(x)  # type: ignore[return-value]
 
 
-class SplitDims(Op):
+class SplitDims(COp):
     __props__ = ("axis",)
     view_map = {0: [0]}
 
@@ -217,6 +217,12 @@ class SplitDims(Op):
             disconnected_type(),
         ]
 
+    def pushforward() # is this needed?
+
+    def c_code_cache_version(self):
+        return (10,)
+
+    def c_code():
 
 @_vectorize_node.register(SplitDims)
 def _vectorize_splitdims(op, node, x, shape):
