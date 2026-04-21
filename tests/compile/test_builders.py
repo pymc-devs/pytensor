@@ -154,7 +154,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         s = shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             op = cls_ofg([x, y, z], [e])
         # (1+3*5=array of 16) - (3+1*5=array of 8)
@@ -177,7 +178,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         s = shared(np.random.random((2, 2)).astype(config.floatX))
         e = x + y * z + s
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             op = cls_ofg([x, y, z], [e])
         f = op(x, y, z)
@@ -423,7 +425,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         out2 = y + 3
         out3 = 3 + rv_u
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             op3 = cls_ofg([x, y], [out1, out2, out3])
 
@@ -479,7 +482,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         y = shared(1.0, name="y")
 
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             test_ofg = OpFromGraph([x], [x + y], on_unused_input="ignore")
         assert test_ofg.shared_inputs == [y]
@@ -491,7 +495,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         y_clone.name = "y_clone"
 
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             out_new = test_ofg.make_node(*([*out.owner.inputs[:1], y_clone])).outputs[0]
 
@@ -514,7 +519,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         y = shared(1.0, name="y")
 
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             test_ofg = OpFromGraph([x], [x + y])
         assert test_ofg.shared_inputs == [y]
@@ -536,7 +542,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         y = shared(1.0, name="y")
 
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             test_ofg = OpFromGraph([], [y])
         assert test_ofg.shared_inputs == [y]
@@ -609,7 +616,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         y = shared(1.0, name="y")
 
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             OpFromGraph([x], [x + y])
 
@@ -700,11 +708,13 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         s = shared(np.array(1.0, dtype=config.floatX))
 
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             op1 = OpFromGraph([x], [x + s])
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             op2 = OpFromGraph([x], [x + s])
         assert op1 == op2
@@ -712,7 +722,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         # Same value, different shared object -> not equal
         s2 = shared(np.array(1.0, dtype=config.floatX))
         with pytest.warns(
-            FutureWarning, match="Implicit capture of shared variables is deprecated"
+            DeprecationWarning,
+            match="Implicit capture of shared variables is deprecated",
         ):
             op3 = OpFromGraph([x], [x + s2])
         assert op1 != op3

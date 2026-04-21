@@ -372,7 +372,7 @@ class OpFromGraph(Op, HasInnerGraph):
             warnings.warn(
                 "Implicit capture of shared variables is deprecated. "
                 "Please provide shared variables explicitly in the 'inputs' list.",
-                FutureWarning,
+                DeprecationWarning,
                 stacklevel=2,
             )
 
