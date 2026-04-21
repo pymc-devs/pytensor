@@ -650,12 +650,23 @@ def test_local_Shape_of_SpecifyShape_partial(s1):
     assert not any(isinstance(apply.op, SpecifyShape) for apply in fgraph.apply_nodes)
 
 
-def test_local_specify_shape_lift():
+def test_local_lift_specify_shape_elemwise():
     x = vector("x")
     out = specify_shape([1.0] + x, shape=(5,))  # noqa: RUF005
 
     new_out = rewrite_graph(out)
     assert equal_computations([new_out], [[1.0] + specify_shape(x, shape=(5,))])  # noqa: RUF005
+
+
+def test_local_lift_specify_shape_inc_subtensor():
+    x = vector("x")
+    y = vector("y")
+    out = specify_shape(set_subtensor(x[1:4], y), shape=(5,))
+
+    new_out = rewrite_graph(out)
+    assert equal_computations(
+        [new_out], [set_subtensor(specify_shape(x, shape=(5,))[1:4], y)]
+    )
 
 
 def test_local_Shape_i_ground():

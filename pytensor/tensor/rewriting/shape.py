@@ -44,7 +44,13 @@ from pytensor.tensor.shape import (
     SpecifyShape,
     specify_shape,
 )
-from pytensor.tensor.subtensor import Subtensor, get_idx_list
+from pytensor.tensor.subtensor import (
+    AdvancedIncSubtensor,
+    AdvancedIncSubtensor1,
+    IncSubtensor,
+    Subtensor,
+    get_idx_list,
+)
 from pytensor.tensor.type import TensorType, discrete_dtypes, integer_dtypes
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorVariable
@@ -1191,7 +1197,7 @@ def local_Shape_of_SpecifyShape(fgraph, node):
 @register_canonicalize
 @register_specialize
 @node_rewriter([SpecifyShape])
-def local_specify_shape_lift(fgraph, node):
+def local_lift_specify_shape_elemwise(fgraph, node):
     """Lift SpecifyShape of Elemwise towards the inputs."""
     inp, *shape = node.inputs
     if inp.owner and isinstance(inp.owner.op, Elemwise):
@@ -1234,6 +1240,26 @@ def local_specify_shape_lift(fgraph, node):
         new_out = inp.owner.op.make_node(*new_elem_inps).outputs
         copy_stack_trace(node.outputs, new_out)
         return new_out
+
+
+@register_canonicalize
+@register_specialize
+@node_rewriter([SpecifyShape])
+def local_lift_specify_shape_inc_subtensor(fgraph, node):
+    """specify_shape(x[idx].inc(y)) -> specify_shape(x)[idx].inc(y).
+
+    IncSubtensor always preserves the shape of the buffer
+    """
+    inc_x, *specified_shape = node.inputs
+    if isinstance(
+        (inc_op := inc_x.owner_op),
+        IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor,
+    ):
+        x, y, *idx_vars = inc_x.owner.inputs
+        new_x = specify_shape(x, *specified_shape)
+        new_out = inc_op(new_x, y, *idx_vars)
+        copy_stack_trace(node.outputs[0], new_out)
+        return [new_out]
 
 
 @register_infer_shape
