@@ -2513,7 +2513,7 @@ def test_cholesky_unconstrain_grad(exp_before_materialize):
         AdvancedIncSubtensor,
     )
     n_idx = sum(1 for n in f.maker.fgraph.toposort() if isinstance(n.op, idx_types))
-    assert n_idx == 7
+    assert n_idx == 6
 
     x = np.array([1.0, 0.5, 2.0, 0.3, 0.1, 1.5])
     # Expected values were computed once by running ``f(x)``.

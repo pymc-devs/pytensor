@@ -1463,12 +1463,24 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
     )
     covered = lookup >= 0
 
+    def constant_idx(idx, merge_feature=getattr(fgraph, "merge_feature", None)):
+        # Build (or reuse) the TensorConstant that indexes the adv axis.
+        # Read-write graphs on the same idx require structural identity
+        # To not be at the mercy of MergeOptimizer firing in time,
+        # we eagerly reuse index variables if they already exist in the graph
+        # (which is the case in which those rewrites would need)
+        idx = tensor_constant(idx)
+        if merge_feature is None:
+            return idx
+        else:
+            return merge_feature.atomic_sig_inv.get(idx.signature(), idx)
+
     def index_adv(t, positions):
         # Index axis `adv_pos` of t with `positions`. Skip if identity.
         if len(positions) == n_write and np.array_equal(positions, np.arange(n_write)):
             return t
         indexer = [slice(None)] * t.type.ndim
-        indexer[adv_pos] = tensor_constant(positions)
+        indexer[adv_pos] = constant_idx(positions)
         return t[tuple(indexer)]
 
     if is_set:
@@ -1484,7 +1496,7 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
             covered_read = np.flatnonzero(covered)
             covered_write = lookup[covered]
             indexer = [slice(None)] * base_part.type.ndim
-            indexer[adv_pos] = tensor_constant(covered_read)
+            indexer[adv_pos] = constant_idx(covered_read)
             out = base_part[tuple(indexer)].set(index_adv(v, covered_write))
     else:
         # Inc case (write coords are unique by construction above).
@@ -1499,7 +1511,7 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
             covered_read = np.flatnonzero(covered)
             covered_write = lookup[covered]
             indexer = [slice(None)] * base_part.type.ndim
-            indexer[adv_pos] = tensor_constant(covered_read)
+            indexer[adv_pos] = constant_idx(covered_read)
             out = base_part[tuple(indexer)].inc(index_adv(v, covered_write))
 
     copy_stack_trace(node.outputs[0], out)
