@@ -583,7 +583,8 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         out = test_ofg(y, y)
         assert out.eval() == 4
 
-    def test_pullback_disconnected_output_grad(self):
+    @pytest.mark.parametrize("use_custom_pullback", [False, True])
+    def test_pullback_disconnected_output_grad(self, use_custom_pullback):
         x, y = dscalars("x", "y")
         rng = np.random.default_rng(594)
         point = list(rng.normal(size=(2,)))
@@ -591,7 +592,29 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         out1 = x + y
         out2 = x * y
         out3 = out1 * out2  # Create dependency between outputs
-        op = OpFromGraph([x, y], [out1, out2, out3])
+
+        if use_custom_pullback:
+            # Regression test for https://github.com/pymc-devs/pytensor/issues/2064
+            def pullback_3out(inputs, outputs, output_grads):
+                x_, y_ = inputs
+                dout1, dout2, dout3 = output_grads
+                dx = pt.zeros_like(x_)
+                dy = pt.zeros_like(y_)
+                if not isinstance(dout1.type, DisconnectedType):
+                    dx = dx + dout1
+                    dy = dy + dout1
+                if not isinstance(dout2.type, DisconnectedType):
+                    dx = dx + dout2 * y_
+                    dy = dy + dout2 * x_
+                if not isinstance(dout3.type, DisconnectedType):
+                    dx = dx + dout3 * (2 * x_ * y_ + y_**2)
+                    dy = dy + dout3 * (x_**2 + 2 * x_ * y_)
+                return [dx, dy]
+
+            op = OpFromGraph([x, y], [out1, out2, out3], pullback=pullback_3out)
+        else:
+            op = OpFromGraph([x, y], [out1, out2, out3])
+
         verify_grad(lambda x, y: pt.add(*op(x, y)), point, rng=rng)
         verify_grad(lambda x, y: pt.add(*op(x, y)[:-1]), point, rng=rng)
         verify_grad(lambda x, y: pt.add(*op(x, y)[1:]), point, rng=rng)
@@ -600,16 +623,55 @@ class TestOpFromGraph(unittest_tools.InferShapeTester):
         verify_grad(lambda x, y: op(x, y)[1], point, rng=rng)
         verify_grad(lambda x, y: op(x, y)[2], point, rng=rng)
 
-        # Test disconnected graphs are handled correctly
-        op = OpFromGraph([x, y], [x**2, y**3])
+        # Two fully-independent outputs: x**2 only depends on x, y**3 only on y.
+        # Each (output, wrt) combination exercises a distinct disconnection pattern.
+        if use_custom_pullback:
+
+            def pullback_2out(inputs, outputs, output_grads):
+                x_, y_ = inputs
+                dout0, dout1 = output_grads
+                dx = (
+                    disconnected_type()
+                    if isinstance(dout0.type, DisconnectedType)
+                    else dout0 * 2 * x_
+                )
+                dy = (
+                    disconnected_type()
+                    if isinstance(dout1.type, DisconnectedType)
+                    else dout1 * 3 * y_**2
+                )
+                return [dx, dy]
+
+            op = OpFromGraph([x, y], [x**2, y**3], pullback=pullback_2out)
+        else:
+            op = OpFromGraph([x, y], [x**2, y**3])
+
+        # Cross terms are disconnected and must resolve to DisconnectedType with a warning.
         with pytest.warns(UserWarning):
-            grad_x_wrt_y = grad(
+            grad_out0_wrt_y = grad(
                 op(x, y)[0],
                 wrt=y,
                 return_disconnected="disconnected",
                 disconnected_inputs="warn",
             )
-            assert isinstance(grad_x_wrt_y.type, DisconnectedType)
+            assert isinstance(grad_out0_wrt_y.type, DisconnectedType)
+
+        with pytest.warns(UserWarning):
+            grad_out1_wrt_x = grad(
+                op(x, y)[1],
+                wrt=x,
+                return_disconnected="disconnected",
+                disconnected_inputs="warn",
+            )
+            assert isinstance(grad_out1_wrt_x.type, DisconnectedType)
+
+        # Related terms stay connected and must return the correct numerical gradient
+        # even though the sibling output is entirely disconnected from the cost.
+        fn_dx = function([x, y], grad(op(x, y)[0], wrt=x))
+        np.testing.assert_allclose(fn_dx(3.0, 2.0), 6.0)  # d/dx x**2 = 2x
+
+        fn_dy = function([x, y], grad(op(x, y)[1], wrt=y))
+        np.testing.assert_allclose(fn_dy(3.0, 2.0), 12.0)  # d/dy y**3 = 3y**2
 
     def test_repeated_inputs(self):
         x = pt.dscalar("x")
