@@ -4,6 +4,7 @@ from scipy.linalg import get_lapack_funcs
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
 from pytensor.tensor import TensorLike
+from pytensor.tensor import basic as ptb
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.dtype_utils import linalg_output_dtype
 from pytensor.tensor.linalg.solvers.core import SolveBase, _default_b_ndim
@@ -52,9 +53,25 @@ class CholeskySolve(SolveBase):
 
         output_storage[0][0] = x
 
-    def pullback(self, *args, **kwargs):
-        # TODO: Base impl should work, let's try it
-        raise NotImplementedError()
+    def pullback(self, inputs, outputs, output_gradients):
+        r"""Reverse-mode gradient for :math:`x = A^{-1} b`, where :math:`A = C C^\top`
+        (``lower=True``) or :math:`A = C^\top C` (``lower=False``).
+
+        The base impl treats the first input as the full matrix being inverted, so it
+        already returns :math:`\bar A` (correct here because :math:`A` is symmetric) and
+        the correct :math:`\bar b`. We just chain :math:`\bar A \to \bar C` through
+        :math:`A(C)` and keep only the referenced triangle.
+        """
+        [C, _] = inputs
+        A_bar, b_bar = super().pullback(inputs, outputs, output_gradients)
+        sym_A_bar = A_bar + A_bar.mT
+
+        if self.lower:
+            C_bar = ptb.tril(sym_A_bar @ C)
+        else:
+            C_bar = ptb.triu(C @ sym_A_bar)
+
+        return [C_bar, b_bar]
 
     def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
         if 1 in allowed_inplace_inputs:
