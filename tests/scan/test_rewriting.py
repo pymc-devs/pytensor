@@ -1711,7 +1711,11 @@ class TestScanInplaceOptimizer:
 
 
 class TestSaveMem:
-    mode = get_default_mode().including("scan_save_mem").excluding("scan_pushout")
+    mode = (
+        get_default_mode()
+        .including("scan_save_mem", "scan_remove_unused")
+        .excluding("scan_pushout")
+    )
 
     def test_save_mem(self):
         rng = np.random.default_rng(utt.fetch_seed())

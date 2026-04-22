@@ -45,11 +45,9 @@ from pytensor.scalar import ScalarConstant
 from pytensor.scan.op import Scan, ScanInfo
 from pytensor.scan.utils import (
     ScanArgs,
-    compress_outs,
     expand_empty,
     reconstruct_graph,
     safe_new,
-    scan_can_remove_outs,
 )
 from pytensor.tensor.basic import (
     Alloc,
@@ -1499,15 +1497,9 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
     # Keeps track of the original slices that each client represent
     slices: list[None | list] = [None for o in node.outputs]
 
-    # A list for each output indicating how many intermediate values
-    # should be stored. If negative it means none of the intermediate
-    # values (i.e. the output can be removed since it is not used
-    # afterwards in the computations), if 0 it means that all
-    # intermediate values are required, otherwise is up to that number
-    # of intermediate values
-    # Note that for mit_mot outputs and shared outputs we can not change
-    # the number of intermediate steps stored without affecting the
-    # result of the op
+    # For each output: how many intermediate values to store.
+    # 0 means keep all (required for mit_mot and shared outputs);
+    # -1 is a "no decision" sentinel flipped to 0 after the trimming loop.
     store_steps = [0 for o in range(op_info.n_mit_mot)]
     store_steps += [-1 for o in node.outputs[op_info.n_mit_mot : c_outs]]
     # Flag that says if an input has changed and we need to do something
@@ -1693,10 +1685,22 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                     store_steps[i] = pval
                     flag_store = True
 
-    orphane_outs = [
-        i for i, x in enumerate(store_steps) if isinstance(x, int) and (x < 0)
-    ]
-    flag_store = flag_store or (len(orphane_outs) > 0)
+    # A clientless mit_sot / sit_sot may still be read by the inner
+    # recurrence; keep the minimum its taps need (plus one slot under prealloc).
+    prealloc_outs = (
+        backend_supports_output_pre_allocation and config.scan__allow_output_prealloc
+    )
+    for i in range(
+        op_info.n_mit_mot,
+        op_info.n_mit_mot + op_info.n_mit_sot + op_info.n_sit_sot,
+    ):
+        if store_steps[i] == -1:
+            store_steps[i] = init_l[i] + (1 if prealloc_outs else 0)
+            flag_store = True
+    # Remaining -1s are unused nit_sots; leave their buffers untouched (0 =
+    # keep all) -- scan_remove_unused will drop them entirely.
+    store_steps = [0 if x == -1 else x for x in store_steps]
+
     # 3. is there anything to change ?
     if flag_store or global_nsteps is not None:
         # 3.1 initialize inputs for the new scan
@@ -1704,17 +1708,12 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
         nw_inputs = list(node.inputs)
         nw_inputs[0] = nw_steps
 
-        # 3.2 check orphane outputs to see if we can eliminate any
-        required, not_required = scan_can_remove_outs(node.op, orphane_outs)
-
-        # 3.3. compose replace pairs for those nodes that need not store everything in memory
-        # (or ar orphan but required by the inner function)
+        # 3.2. compose replace pairs for those nodes that need not store everything in memory
         replaced_outs = []
         offset = 1 + op_info.n_seqs + op_info.n_mit_mot
         for idx, val in enumerate(store_steps[op_info.n_mit_mot :]):
             i = idx + op_info.n_mit_mot
-            if not (isinstance(val, int) and val <= 0 and i not in required):
-                required_orphan = idx + op_info.n_mit_mot in required
+            if not (isinstance(val, int) and val <= 0):
                 # If the memory for this output has been pre-allocated
                 # before going into the scan op (by an alloc node)
                 if idx < op_info.n_mit_sot + op_info.n_sit_sot:
@@ -1723,17 +1722,11 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
 
                     # Recreate default buffers with new size
                     if _is_default_scan_buffer(nw_input, taps):
-                        if required_orphan:
-                            extra_size = (
-                                1 if backend_supports_output_pre_allocation else 0
-                            )
-                        else:
-                            extra_size = val - taps
+                        extra_size = val - taps
                         nw_input = expand_empty(nw_input.owner.inputs[1], extra_size)
                     # Otherwise, just trim with a slice
                     else:
-                        stop = taps if required_orphan else val
-                        nw_input = nw_input[:stop]
+                        nw_input = nw_input[:val]
 
                     nw_inputs[offset + idx] = nw_input
                     replaced_outs.append(op_info.n_mit_mot + idx)
@@ -1757,7 +1750,7 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                         + op_info.n_untraced_sit_sot
                     )
                     if nw_inputs[pos] == node.inputs[0]:
-                        nw_inputs[pos] = 1 if required_orphan else val
+                        nw_inputs[pos] = val
                     odx = op_info.n_mit_mot + idx
                     replaced_outs.append(odx)
                     old_outputs += [
@@ -1769,7 +1762,7 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                             ],
                         )
                     ]
-        # 3.4. Recompute inputs for everything else based on the new number of steps
+        # 3.3. Recompute inputs for everything else based on the new number of steps
         if global_nsteps is not None:
             for idx, val in enumerate(store_steps[op_info.n_mit_mot :]):
                 if val == 0:
@@ -1792,29 +1785,11 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                         if nw_inputs[in_idx] == node.inputs[0]:
                             nw_inputs[in_idx] = nw_steps
 
-        # 3.5 Remove unwanted orphane outputs
-        (inps, outs, info, node_ins, compress_map) = compress_outs(
-            op, not_required, nw_inputs
-        )
-        inv_compress_map = {v: k for k, v in compress_map.items()}
-
-        # 3.6 Compose the new scan
-
-        new_op = Scan(
-            inps,
-            outs,
-            info,
-            mode=op.mode,
-            profile=op.profile,
-            truncate_gradient=op.truncate_gradient,
-            # TODO: This seems questionable
-            name=op.name,
-            allow_gc=op.allow_gc,
-        )
-        new_outs = cast(list[TensorVariable], new_op(*node_ins, return_list=True))
+        # 3.4. Recreate the same scan with new outer inputs.
+        new_outs = cast(list[TensorVariable], op(*nw_inputs, return_list=True))
 
         old_new = []
-        # 3.7 Get replace pairs for those outputs that do not change
+        # 3.5 Get replace pairs for those outputs that do not change
         # the number of intermediate steps stored
         for idx, sl in enumerate(slices):
             if global_nsteps and sl is not None and store_steps[idx] == 0:
@@ -1833,17 +1808,15 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                     else:
                         fslice = sanitize(cnf_slice[0])
 
-                    nw_pos = inv_compress_map[idx]
-                    new_o = basic_subtensor(new_outs[nw_pos], fslice, *old_slices[1:])
+                    new_o = basic_subtensor(new_outs[idx], fslice, *old_slices[1:])
                     if new_o.ndim > 0:
                         new_o = new_o[:: cnf_slice[1]]
                     replaced_outs.append(idx)
                     old_new += [(cl[0].outputs[0], new_o)]
-        # 3.8. Get replace pairs for those outputs that change
+        # 3.6. Get replace pairs for those outputs that change
         # the number of stored intermediate steps
         for pos, old_outs in old_outputs:
             if len(old_outs) > 0:
-                nw_pos = compress_map[pos]
                 for k, old in enumerate(old_outs):
                     # Get the correct slice
                     cnf_slice, old_slices = slices[pos][k]
@@ -1885,35 +1858,25 @@ def scan_save_mem_rewrite(fgraph, node, backend_supports_output_pre_allocation: 
                             )
 
                         nw_slice = (sanitize(position), *old_slices[1:])
-                    new_o = basic_subtensor(new_outs[nw_pos], *nw_slice)
+                    new_o = basic_subtensor(new_outs[pos], *nw_slice)
                     if new_o.ndim > 0:
                         new_o = new_o[:: cnf_slice[1]]
                     old_new += [(old, new_o)]
 
-        # 3.9. Get replace pairs for all other nodes
-        if flag_store or global_nsteps is not None:
-            for idx, o in enumerate(node.outputs):
-                if idx not in replaced_outs and idx not in not_required:
-                    nw_pos = compress_map[idx]
-                    old_new += [(o, new_outs[nw_pos])]
-            # Check if the new outputs depend on the old scan node
-            old_scan_is_used = [
-                apply_depends_on(new.owner, node) for old, new in old_new
-            ]
-            if any(old_scan_is_used):
-                return False
+        # 3.7. Get replace pairs for all other nodes
+        for idx, o in enumerate(node.outputs):
+            if idx not in replaced_outs:
+                old_new += [(o, new_outs[idx])]
+        # Check if the new outputs depend on the old scan node
+        old_scan_is_used = [apply_depends_on(new.owner, node) for old, new in old_new]
+        if any(old_scan_is_used):
+            return False
 
-            replacements = dict(old_new)
+        replacements = dict(old_new)
+        replacements["remove"] = [node]
+        return replacements
 
-            # remove = [old.owner for (old, new) in old_new]
-            # As Fred suggested assert that also the old node is not in
-            # the Graph as that will make things suboptimal
-            # remove.append(node)
-            replacements["remove"] = [node]
-
-            return replacements
-
-        return False
+    return False
 
 
 @node_rewriter([Scan])
@@ -3026,6 +2989,14 @@ optdb.register(
     position=1.61,
 )
 # After scan_save_mem (it could be merged with it, but that rewrite is already a beast as is)
+optdb.register(
+    "scan_remove_unused_top",
+    dfs_rewriter(scan_remove_unused, ignore_newtrees=True),
+    "fast_run",
+    "scan",
+    "scan_remove_unused",
+    position=1.605,
+)
 optdb.register(
     "scan_sit_sot_to_untraced",
     dfs_rewriter(scan_sit_sot_to_untraced, ignore_newtrees=True),
