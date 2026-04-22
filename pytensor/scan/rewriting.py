@@ -2,8 +2,9 @@
 
 import copy
 import dataclasses
+from collections.abc import Collection
 from itertools import chain
-from typing import cast
+from typing import NamedTuple, cast
 
 import numpy as np
 
@@ -35,6 +36,7 @@ from pytensor.graph.rewriting.utils import get_clients_at_depth
 from pytensor.graph.traversal import (
     ancestors,
     apply_depends_on,
+    explicit_graph_inputs,
     graph_inputs,
 )
 from pytensor.graph.type import HasShape
@@ -85,6 +87,144 @@ list_opt_slice = [
     local_useless_switch,
     constant_folding,
 ]
+
+
+def _rebuild_scan_with_new_signature(
+    op: Scan,
+    node: Apply,
+    *,
+    drop_seqs: Collection[int] = frozenset(),
+    drop_mit_mot: Collection[int] = frozenset(),
+    drop_mit_sot: Collection[int] = frozenset(),
+    drop_sit_sot: Collection[int] = frozenset(),
+    drop_nit_sot: Collection[int] = frozenset(),
+    drop_untraced_sit_sot: Collection[int] = frozenset(),
+    drop_non_seqs: Collection[int] = frozenset(),
+    inner_substitutions: dict[Variable, Variable] | None = None,
+) -> dict:
+    """Build a replacement Scan node with a trimmed signature.
+
+    Each ``drop_*`` argument is a set of indices into its category; the
+    rebuilt op retains only the entries whose index is not listed.
+    ``inner_substitutions``, when provided, is applied via ``clone_replace``
+    on the inner outputs before the rebuild -- use it to inline constants
+    or rewire duplicate inner inputs.
+
+    Returns a ``replacements`` dict: kept outer outputs map to their
+    counterparts on the new op, dropped outputs carry no mapping (they
+    disappear along with the old node), and ``"remove"`` lists the old
+    node.
+    """
+    info = op.info
+
+    keep_seqs = [k for k in range(info.n_seqs) if k not in drop_seqs]
+    keep_mm = [k for k in range(info.n_mit_mot) if k not in drop_mit_mot]
+    keep_ms = [k for k in range(info.n_mit_sot) if k not in drop_mit_sot]
+    keep_ss = [k for k in range(info.n_sit_sot) if k not in drop_sit_sot]
+    keep_ns = [k for k in range(info.n_nit_sot) if k not in drop_nit_sot]
+    keep_us = [
+        k for k in range(info.n_untraced_sit_sot) if k not in drop_untraced_sit_sot
+    ]
+    keep_non_seqs = [k for k in range(info.n_non_seqs) if k not in drop_non_seqs]
+
+    new_info = dataclasses.replace(
+        info,
+        n_seqs=len(keep_seqs),
+        mit_mot_in_slices=tuple(info.mit_mot_in_slices[k] for k in keep_mm),
+        mit_mot_out_slices=tuple(info.mit_mot_out_slices[k] for k in keep_mm),
+        mit_sot_in_slices=tuple(info.mit_sot_in_slices[k] for k in keep_ms),
+        sit_sot_in_slices=tuple(info.sit_sot_in_slices[k] for k in keep_ss),
+        n_nit_sot=len(keep_ns),
+        n_untraced_sit_sot=len(keep_us),
+        n_non_seqs=len(keep_non_seqs),
+    )
+
+    inner_seqs = op.inner_seqs(op.inner_inputs)
+    inner_mm_groups = op.inner_mitmot_grouped(op.inner_inputs)
+    inner_ms_groups = op.inner_mitsot_grouped(op.inner_inputs)
+    inner_ss = op.inner_sitsot(op.inner_inputs)
+    inner_us = op.inner_untraced_sit_sot(op.inner_inputs)
+    inner_non_seqs = op.inner_non_seqs(op.inner_inputs)
+
+    new_inner_inputs = (
+        [inner_seqs[k] for k in keep_seqs]
+        + [v for k in keep_mm for v in inner_mm_groups[k]]
+        + [v for k in keep_ms for v in inner_ms_groups[k]]
+        + [inner_ss[k] for k in keep_ss]
+        + [inner_us[k] for k in keep_us]
+        + [inner_non_seqs[k] for k in keep_non_seqs]
+    )
+
+    inner_outputs = op.inner_outputs
+    if inner_substitutions:
+        inner_outputs = clone_replace(inner_outputs, replace=inner_substitutions)
+    inner_mm_out_groups = op.inner_mitmot_outs_grouped(inner_outputs)
+    inner_ms_outs = op.inner_mitsot_outs(inner_outputs)
+    inner_ss_outs = op.inner_sitsot_outs(inner_outputs)
+    inner_ns_outs = op.inner_nitsot_outs(inner_outputs)
+    inner_us_outs = op.inner_untraced_sit_sot_outs(inner_outputs)
+    # ``as_while`` appends the condition as the final inner output; preserve it.
+    while_cond_tail = [inner_outputs[-1]] if info.as_while else []
+
+    new_inner_outputs = (
+        [v for k in keep_mm for v in inner_mm_out_groups[k]]
+        + [inner_ms_outs[k] for k in keep_ms]
+        + [inner_ss_outs[k] for k in keep_ss]
+        + [inner_ns_outs[k] for k in keep_ns]
+        + [inner_us_outs[k] for k in keep_us]
+        + while_cond_tail
+    )
+
+    outer_seqs = op.outer_seqs(node.inputs)
+    outer_mm = op.outer_mitmot(node.inputs)
+    outer_ms = op.outer_mitsot(node.inputs)
+    outer_ss = op.outer_sitsot(node.inputs)
+    outer_us = op.outer_untraced_sit_sot(node.inputs)
+    outer_ns = op.outer_nitsot(node.inputs)
+    outer_non_seqs = op.outer_non_seqs(node.inputs)
+
+    new_outer_inputs = (
+        [node.inputs[0]]
+        + [outer_seqs[k] for k in keep_seqs]
+        + [outer_mm[k] for k in keep_mm]
+        + [outer_ms[k] for k in keep_ms]
+        + [outer_ss[k] for k in keep_ss]
+        + [outer_us[k] for k in keep_us]
+        + [outer_ns[k] for k in keep_ns]
+        + [outer_non_seqs[k] for k in keep_non_seqs]
+    )
+
+    new_op = Scan(
+        new_inner_inputs,
+        new_inner_outputs,
+        new_info,
+        mode=op.mode,
+        profile=op.profile,
+        truncate_gradient=op.truncate_gradient,
+        name=op.name,
+        allow_gc=op.allow_gc,
+    )
+    new_outs = cast(list[Variable], new_op(*new_outer_inputs, return_list=True))
+
+    # Outer outputs are laid out [mit_mot | mit_sot | sit_sot | nit_sot |
+    # untraced_sit_sot]; walk each category and route each kept old output
+    # to its new counterpart.
+    replacements: dict = {}
+    new_cursor = 0
+    old_offset = 0
+    for keep_list, n_old in (
+        (keep_mm, info.n_mit_mot),
+        (keep_ms, info.n_mit_sot),
+        (keep_ss, info.n_sit_sot),
+        (keep_ns, info.n_nit_sot),
+        (keep_us, info.n_untraced_sit_sot),
+    ):
+        for k in keep_list:
+            replacements[node.outputs[old_offset + k]] = new_outs[new_cursor]
+            new_cursor += 1
+        old_offset += n_old
+    replacements["remove"] = [node]
+    return replacements
 
 
 @node_rewriter([Scan])
@@ -1971,6 +2111,184 @@ def scan_sit_sot_to_untraced(fgraph, node):
     return replacements
 
 
+class _RemoveUnusedCandidate(NamedTuple):
+    category: str  # mit_mot / mit_sot / sit_sot / nit_sot / untraced_sit_sot
+    category_idx: int  # within-category position
+    taps: frozenset  # inner-input vars read by this state; empty for nit_sots
+    out_positions: list[int]  # this state's slots in ``op.inner_outputs``
+
+
+@node_rewriter([Scan])
+def scan_remove_unused(fgraph, node):
+    """Drop unused outputs and inputs from a Scan node.
+
+    Drops:
+      * State slots (mit_mot / mit_sot / sit_sot / nit_sot /
+        untraced_sit_sot) whose outer output has no clients, provided none
+        of their inner inputs is reached from any surviving inner output.
+        Cross-dependent unused states are resolved together.
+      * Sequences and non-sequences that the rebuilt inner graph no longer
+        references.
+
+    Partial-tap trimming of mit_mot / mit_sot is out of scope: a state is
+    dropped as a whole or kept as a whole.
+    """
+    op = node.op
+    info = op.info
+    inner_inputs = op.inner_inputs
+    inner_outputs = op.inner_outputs
+
+    def _clientless(outer_idx):
+        return not fgraph.clients.get(node.outputs[outer_idx])
+
+    # Inner-output and outer-output positions by category -- needed because
+    # the same Variable can occupy multiple inner-output slots, so dropping
+    # must track slots positionally rather than by variable identity.
+    mm_out_lens = [len(s) for s in info.mit_mot_out_slices]
+    ms_out_pos_start = sum(mm_out_lens)
+    ss_out_pos_start = ms_out_pos_start + info.n_mit_sot
+    ns_out_pos_start = ss_out_pos_start + info.n_sit_sot
+    us_out_pos_start = ns_out_pos_start + info.n_nit_sot
+
+    outer_mm_start = 0
+    outer_ms_start = info.n_mit_mot
+    outer_ss_start = outer_ms_start + info.n_mit_sot
+    outer_ns_start = outer_ss_start + info.n_sit_sot
+    outer_us_start = outer_ns_start + info.n_nit_sot
+
+    inner_mm_groups = op.inner_mitmot_grouped(inner_inputs)
+    inner_ms_groups = op.inner_mitsot_grouped(inner_inputs)
+    inner_ss = op.inner_sitsot(inner_inputs)
+    inner_us = op.inner_untraced_sit_sot(inner_inputs)
+
+    # Candidate state slots: those with no external outer clients.
+    candidates: list[_RemoveUnusedCandidate] = []
+    mm_group_starts = [sum(mm_out_lens[:k]) for k in range(info.n_mit_mot + 1)]
+    candidates.extend(
+        _RemoveUnusedCandidate(
+            "mit_mot",
+            k,
+            frozenset(inner_mm_groups[k]),
+            list(range(mm_group_starts[k], mm_group_starts[k + 1])),
+        )
+        for k in range(info.n_mit_mot)
+        if _clientless(outer_mm_start + k)
+    )
+    candidates.extend(
+        _RemoveUnusedCandidate(
+            "mit_sot", k, frozenset(inner_ms_groups[k]), [ms_out_pos_start + k]
+        )
+        for k in range(info.n_mit_sot)
+        if _clientless(outer_ms_start + k)
+    )
+    candidates.extend(
+        _RemoveUnusedCandidate(
+            "sit_sot", k, frozenset({inner_ss[k]}), [ss_out_pos_start + k]
+        )
+        for k in range(info.n_sit_sot)
+        if _clientless(outer_ss_start + k)
+    )
+    candidates.extend(
+        _RemoveUnusedCandidate("nit_sot", k, frozenset(), [ns_out_pos_start + k])
+        for k in range(info.n_nit_sot)
+        if _clientless(outer_ns_start + k)
+    )
+    candidates.extend(
+        _RemoveUnusedCandidate(
+            "untraced_sit_sot", k, frozenset({inner_us[k]}), [us_out_pos_start + k]
+        )
+        for k in range(info.n_untraced_sit_sot)
+        if _clientless(outer_us_start + k)
+    )
+
+    # Fast path: nothing disconnected externally, so no state is droppable.
+    # Only seq / non_seq staleness (from upstream input rewrites) could
+    # remain -- one walk of the inner outputs covers that.
+    if not candidates:
+        final_outputs = inner_outputs
+        droppable_state_idxs: set[int] = set()
+    else:
+        # A candidate is pinned (removed from ``droppable_idxs``) once any
+        # of its taps is reached from a surviving inner output. On
+        # pinning, we walk back from the candidate's own inner outputs
+        # and fold any candidate taps they reach into ``reached_taps``,
+        # so later candidates in the same pass see the update. The
+        # fixpoint stays scoped to candidate taps -- seq / non_seq inputs
+        # are handled in a single post-loop walk.
+        all_candidate_taps: frozenset = frozenset().union(
+            *(cand.taps for cand in candidates)
+        )
+        candidate_out_positions: set[int] = {
+            pos for cand in candidates for pos in cand.out_positions
+        }
+        survivor_outputs = [
+            out
+            for pos, out in enumerate(inner_outputs)
+            if pos not in candidate_out_positions
+        ]
+        reached_taps = all_candidate_taps & set(explicit_graph_inputs(survivor_outputs))
+        droppable_state_idxs = set(range(len(candidates)))
+        while True:
+            changed = False
+            for cand_idx in list(droppable_state_idxs):
+                cand = candidates[cand_idx]
+                if cand.taps & reached_taps:
+                    droppable_state_idxs.discard(cand_idx)
+                    reached_taps |= all_candidate_taps & set(
+                        explicit_graph_inputs(
+                            [inner_outputs[pos] for pos in cand.out_positions]
+                        )
+                    )
+                    changed = True
+            if not changed:
+                break
+
+        final_outputs = survivor_outputs + [
+            inner_outputs[pos]
+            for cand_idx, cand in enumerate(candidates)
+            if cand_idx not in droppable_state_idxs
+            for pos in cand.out_positions
+        ]
+
+    reached_inputs = set(explicit_graph_inputs(final_outputs))
+    drop_seqs = {
+        k
+        for k, seq in enumerate(op.inner_seqs(inner_inputs))
+        if seq not in reached_inputs
+    }
+    drop_non_seqs = {
+        k
+        for k, ns in enumerate(op.inner_non_seqs(inner_inputs))
+        if ns not in reached_inputs
+    }
+
+    if not (droppable_state_idxs or drop_seqs or drop_non_seqs):
+        return None
+
+    drops_by_cat: dict[str, set[int]] = {
+        "mit_mot": set(),
+        "mit_sot": set(),
+        "sit_sot": set(),
+        "nit_sot": set(),
+        "untraced_sit_sot": set(),
+    }
+    for cand_idx in droppable_state_idxs:
+        cand = candidates[cand_idx]
+        drops_by_cat[cand.category].add(cand.category_idx)
+
+    return _rebuild_scan_with_new_signature(
+        op,
+        node,
+        drop_seqs=drop_seqs,
+        drop_mit_mot=drops_by_cat["mit_mot"],
+        drop_mit_sot=drops_by_cat["mit_sot"],
+        drop_sit_sot=drops_by_cat["sit_sot"],
+        drop_nit_sot=drops_by_cat["nit_sot"],
+        drop_untraced_sit_sot=drops_by_cat["untraced_sit_sot"],
+        drop_non_seqs=drop_non_seqs,
+    )
+
+
 class ScanMerge(GraphRewriter):
     r"""Graph optimizer that merges different scan ops.
 
@@ -2844,6 +3162,13 @@ scan_eqopt2.register(
 scan_eqopt2.register(
     "scan_merge_inouts",
     dfs_rewriter(scan_merge_inouts, ignore_newtrees=True),
+    "fast_run",
+    "scan",
+)
+
+scan_eqopt2.register(
+    "scan_remove_unused",
+    scan_remove_unused,
     "fast_run",
     "scan",
 )
