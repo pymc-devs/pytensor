@@ -3799,15 +3799,19 @@ def local_reciprocal_1_plus_exp(fgraph, node):
 
 
 # 1 - sigmoid(x) -> sigmoid(-x)
-local_1msigmoid = PatternNodeRewriter(
-    (sub, dict(pattern="y", constraint=_is_1), (sigmoid, "x")),
-    (sigmoid, (neg, "x")),
-    tracks=[sigmoid],
-    get_nodes=get_clients_at_depth1,
-    name="local_1msigmoid",
-)
-register_stabilize(local_1msigmoid)
-register_specialize(local_1msigmoid)
+# Stabilize version allows multiple clients to handle e.g. sigmoid(x) * (1 - sigmoid(x))
+# TODO: Maybe this is overkill and multiple clients is always fine?
+for _register in (register_stabilize, register_specialize):
+    _register(
+        PatternNodeRewriter(
+            (sub, dict(pattern="y", constraint=_is_1), (sigmoid, "x")),
+            (sigmoid, (neg, "x")),
+            allow_multiple_clients=_register is register_stabilize,
+            tracks=[sigmoid],
+            get_nodes=get_clients_at_depth1,
+            name="local_1msigmoid",
+        )
+    )
 
 
 @register_stabilize
