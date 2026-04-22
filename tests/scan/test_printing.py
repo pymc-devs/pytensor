@@ -540,76 +540,66 @@ def test_debugprint_mitmot():
      │  │  └─ ScalarFromTensor [id BC]
      │  │     └─ Sub [id C]
      │  │        └─ ···
-     │  ├─ Subtensor{:stop} [id BD] (outer_in_seqs-1)
-     │  │  ├─ Subtensor{:stop} [id BE]
-     │  │  │  ├─ Subtensor{::step} [id BF]
+     │  ├─ Subtensor{::step} [id BD] (outer_in_mit_mot-0)
+     │  │  ├─ IncSubtensor{start:} [id BE]
+     │  │  │  ├─ Second [id BF]
      │  │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
      │  │  │  │  │  └─ ···
-     │  │  │  │  └─ -1 [id BG]
-     │  │  │  └─ -1 [id BH]
-     │  │  └─ ScalarFromTensor [id BI]
-     │  │     └─ Sub [id C]
-     │  │        └─ ···
-     │  ├─ Subtensor{::step} [id BJ] (outer_in_mit_mot-0)
-     │  │  ├─ IncSubtensor{start:} [id BK]
-     │  │  │  ├─ Second [id BL]
-     │  │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
-     │  │  │  │  │  └─ ···
-     │  │  │  │  └─ ExpandDims{axes=(0, 1)} [id BM]
-     │  │  │  │     └─ 0.0 [id BN]
-     │  │  │  ├─ IncSubtensor{i} [id BO]
-     │  │  │  │  ├─ Second [id BP]
-     │  │  │  │  │  ├─ Subtensor{start:} [id BQ]
+     │  │  │  │  └─ ExpandDims{axes=(0, 1)} [id BG]
+     │  │  │  │     └─ 0.0 [id BH]
+     │  │  │  ├─ IncSubtensor{i} [id BI]
+     │  │  │  │  ├─ Second [id BJ]
+     │  │  │  │  │  ├─ Subtensor{start:} [id BK]
      │  │  │  │  │  │  ├─ Scan{scan_fn, while_loop=False, inplace=none} [id F] (outer_out_sit_sot-0)
      │  │  │  │  │  │  │  └─ ···
-     │  │  │  │  │  │  └─ 1 [id BR]
-     │  │  │  │  │  └─ ExpandDims{axes=(0, 1)} [id BS]
-     │  │  │  │  │     └─ 0.0 [id BT]
-     │  │  │  │  ├─ Second [id BU]
-     │  │  │  │  │  ├─ Subtensor{i} [id BV]
-     │  │  │  │  │  │  ├─ Subtensor{start:} [id BQ]
+     │  │  │  │  │  │  └─ 1 [id BL]
+     │  │  │  │  │  └─ ExpandDims{axes=(0, 1)} [id BM]
+     │  │  │  │  │     └─ 0.0 [id BN]
+     │  │  │  │  ├─ Second [id BO]
+     │  │  │  │  │  ├─ Subtensor{i} [id BP]
+     │  │  │  │  │  │  ├─ Subtensor{start:} [id BK]
      │  │  │  │  │  │  │  └─ ···
-     │  │  │  │  │  │  └─ -1 [id BW]
-     │  │  │  │  │  └─ ExpandDims{axis=0} [id BX]
-     │  │  │  │  │     └─ Second [id BY]
-     │  │  │  │  │        ├─ Sum{axes=None} [id BZ]
-     │  │  │  │  │        │  └─ Subtensor{i} [id BV]
+     │  │  │  │  │  │  └─ -1 [id BQ]
+     │  │  │  │  │  └─ ExpandDims{axis=0} [id BR]
+     │  │  │  │  │     └─ Second [id BS]
+     │  │  │  │  │        ├─ Sum{axes=None} [id BT]
+     │  │  │  │  │        │  └─ Subtensor{i} [id BP]
      │  │  │  │  │        │     └─ ···
-     │  │  │  │  │        └─ 1.0 [id CA]
-     │  │  │  │  └─ -1 [id BW]
-     │  │  │  └─ 1 [id BR]
-     │  │  └─ -1 [id CB]
-     │  ├─ Alloc [id CC] (outer_in_sit_sot-0)
-     │  │  ├─ 0.0 [id CD]
-     │  │  ├─ Add [id CE]
+     │  │  │  │  │        └─ 1.0 [id BU]
+     │  │  │  │  └─ -1 [id BQ]
+     │  │  │  └─ 1 [id BL]
+     │  │  └─ -1 [id BV]
+     │  ├─ Alloc [id BW] (outer_in_sit_sot-0)
+     │  │  ├─ 0.0 [id BX]
+     │  │  ├─ Add [id BY]
      │  │  │  ├─ Sub [id C]
      │  │  │  │  └─ ···
-     │  │  │  └─ 1 [id CF]
-     │  │  └─ Subtensor{i} [id CG]
-     │  │     ├─ Shape [id CH]
+     │  │  │  └─ 1 [id BZ]
+     │  │  └─ Subtensor{i} [id CA]
+     │  │     ├─ Shape [id CB]
      │  │     │  └─ A [id O]
-     │  │     └─ 0 [id CI]
+     │  │     └─ 0 [id CC]
      │  └─ A [id O] (outer_in_non_seqs-0)
-     └─ -1 [id CJ]
+     └─ -1 [id CD]
 
     Inner graphs:
 
     Scan{grad_of_scan_fn, while_loop=False, inplace=none} [id B]
-     ← Add [id CK] (inner_out_mit_mot-0-0)
-        ├─ Mul [id CL]
-        │  ├─ i2 [id CM] -> [id BJ] (inner_in_mit_mot-0-0)
-        │  └─ i5 [id CN] -> [id O] (inner_in_non_seqs-0)
-        └─ i3 [id CO] -> [id BJ] (inner_in_mit_mot-0-1)
-     ← Add [id CP] (inner_out_sit_sot-0)
-        ├─ Mul [id CQ]
-        │  ├─ i2 [id CM] -> [id BJ] (inner_in_mit_mot-0-0)
-        │  └─ i0 [id CR] -> [id X] (inner_in_seqs-0)
-        └─ i4 [id CS] -> [id CC] (inner_in_sit_sot-0)
+     ← Add [id CE] (inner_out_mit_mot-0-0)
+        ├─ Mul [id CF]
+        │  ├─ i1 [id CG] -> [id BD] (inner_in_mit_mot-0-0)
+        │  └─ i4 [id CH] -> [id O] (inner_in_non_seqs-0)
+        └─ i2 [id CI] -> [id BD] (inner_in_mit_mot-0-1)
+     ← Add [id CJ] (inner_out_sit_sot-0)
+        ├─ Mul [id CK]
+        │  ├─ i1 [id CG] -> [id BD] (inner_in_mit_mot-0-0)
+        │  └─ i0 [id CL] -> [id X] (inner_in_seqs-0)
+        └─ i3 [id CM] -> [id BW] (inner_in_sit_sot-0)
 
     Scan{scan_fn, while_loop=False, inplace=none} [id F]
-     ← Mul [id CT] (inner_out_sit_sot-0)
-        ├─ i0 [id CR] -> [id H] (inner_in_sit_sot-0)
-        └─ i1 [id CU] -> [id O] (inner_in_non_seqs-0)
+     ← Mul [id CN] (inner_out_sit_sot-0)
+        ├─ i0 [id CL] -> [id H] (inner_in_sit_sot-0)
+        └─ i1 [id CG] -> [id O] (inner_in_non_seqs-0)
     """
 
     for truth, out in zip(expected_output.split("\n"), lines, strict=True):
