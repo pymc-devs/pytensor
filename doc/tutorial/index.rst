@@ -11,7 +11,7 @@ Let us start an interactive session (e.g. with ``python`` or ``ipython``) and im
 
 Several of the symbols you will need to use are in the ``tensor`` subpackage
 of PyTensor. Let us import that subpackage under a handy name like
-``at`` (the tutorials will frequently use this convention).
+``pt`` (the tutorials will frequently use this convention).
 
 >>> import pytensor.tensor as pt
 
