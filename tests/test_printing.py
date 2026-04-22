@@ -640,35 +640,51 @@ class TestDebugprintRich:
         )
 
     def test_repeated_node_no_duplication(self):
-        # The second occurrence of a shared node is replaced by a colored ···
-        # sentinel directly — no repeated label, no nesting.
+        # The second occurrence of a shared node shows its colored label with
+        # ··· as a child — no full subtree expansion.
         x = dvector("x")
         shared = x * 2
         tree = debugprint(shared + shared, file="rich")
         add_node = tree.children[0]
-        # The add has two children: canonical Mul and the ··· sentinel
+        # The add has two children: canonical Mul (full subtree) and repeat Mul (··· child)
         assert len(add_node.children) == 2
-        sentinel = add_node.children[1]
+        repeat_entry = add_node.children[1]
+        assert "···" not in str(repeat_entry.label), (
+            f"Repeat entry label should be the node label, not ···: {repeat_entry.label!r}"
+        )
+        assert len(repeat_entry.children) == 1, (
+            f"Repeat entry should have exactly one child (···), got: {repeat_entry.children}"
+        )
+        sentinel = repeat_entry.children[0]
         assert "···" in str(sentinel.label), (
-            f"Expected '···' sentinel as second child of add, got: {sentinel.label!r}"
+            f"Expected '···' as child of repeat entry, got: {sentinel.label!r}"
         )
-        assert len(sentinel.children) == 0, (
-            f"Sentinel should be a leaf, but has children: {sentinel.children}"
-        )
+        assert len(sentinel.children) == 0, "··· should be a leaf"
 
     def test_repeated_nodes_same_color(self):
-        # The canonical occurrence should be colored; the ··· sentinel is plain text.
+        # The canonical label, the repeat entry label, and the ··· sentinel
+        # should all share the same color.
         x = dvector("x")
         shared = x * 2
         tree = debugprint(shared + shared, file="rich")
         add_node = tree.children[0]
-        canonical_mul = add_node.children[0]  # Mul [id B]  (colored, full children)
-        sentinel = add_node.children[1]  # ··· plain sentinel
+        canonical_mul = add_node.children[0]
+        repeat_entry = add_node.children[1]
+        sentinel = repeat_entry.children[0]
         color_re = re.compile(r"\[(\w+)\]")
         canonical_colors = color_re.findall(str(canonical_mul.label))
+        repeat_colors = color_re.findall(str(repeat_entry.label))
+        sentinel_colors = color_re.findall(str(sentinel.label))
         assert canonical_colors, "canonical shared node should have a color tag"
-        assert str(sentinel.label) == "···", (
-            f"Sentinel should be plain '···', got: {sentinel.label!r}"
+        assert repeat_colors, (
+            f"repeat entry should have a color tag, got: {repeat_entry.label!r}"
+        )
+        assert sentinel_colors, (
+            f"sentinel should have a color tag, got: {sentinel.label!r}"
+        )
+        assert canonical_colors[0] == repeat_colors[0] == sentinel_colors[0], (
+            f"canonical, repeat entry, and sentinel should share the same color: "
+            f"{canonical_colors[0]!r}, {repeat_colors[0]!r}, {sentinel_colors[0]!r}"
         )
 
     def test_two_distinct_shared_nodes_get_different_colors(self):
@@ -712,21 +728,25 @@ class TestDebugprintRich:
         console.print(tree)  # raises MarkupError if escaping is broken
 
     def test_deep_shared_node_sentinel_depth(self):
-        # A shared node at depth > 1 should place its ··· sentinel directly at
-        # the node's slot in the tree, not at the wrong level.
+        # A shared node at depth > 1 should show its colored label with ···
+        # as a child at the correct depth in the tree.
         x = dvector("x")
         shared = x * 2  # will appear at depth 2 (grandchild of add)
         out = shared.sum() + shared.mean()
         tree = debugprint(out, file="rich")
         add_node = tree.children[0]
-        # Second branch is mean (True_div); its Sum child has the ··· sentinel.
+        # Second branch is mean (True_div); its Sum child has the repeat entry.
         mean_node = add_node.children[1]  # True_div 'mean'
         sum_under_mean = mean_node.children[0]  # Sum
-        sentinel = sum_under_mean.children[0]  # ··· sentinel directly
-        assert "···" in str(sentinel.label), (
-            f"Expected ··· sentinel as child of Sum, got: {sentinel.label!r}"
+        repeat_entry = sum_under_mean.children[0]  # colored repeat entry
+        assert len(repeat_entry.children) == 1, (
+            f"Repeat entry should have exactly one child (···), got: {repeat_entry.children}"
         )
-        assert len(sentinel.children) == 0, "Sentinel should be a leaf"
+        sentinel = repeat_entry.children[0]
+        assert "···" in str(sentinel.label), (
+            f"Expected ··· as child of repeat entry, got: {sentinel.label!r}"
+        )
+        assert len(sentinel.children) == 0, "··· should be a leaf"
 
     def test_shared_node_colored_across_outputs(self):
         # A node shared between two separate outputs should produce a colored
