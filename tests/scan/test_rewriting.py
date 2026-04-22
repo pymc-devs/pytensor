@@ -44,11 +44,16 @@ from tests.scan.test_basic import asarrayX, scan_nodes_from_fct
 mode = pytensor.compile.mode.get_mode(config.mode)
 
 
-class TestRemoveConstantsAndUnusedInputsScan:
+class TestScanInputAndOutputCleanup:
+    """Integration tests for the combined ``scan_input_and_output_cleanup``
+    pass: ``scan_remove_unused`` + ``scan_inline_invariant_constants`` +
+    ``scan_merge_duplicate_inputs``.
+    """
+
     mode = get_default_mode().including("scan")
 
-    def test_remove_constants_and_unused_inputs_scan_non_seqs(self):
-        """Test the rewrite `remove_constants_and_unused_inputs_scan` for non-sequences."""
+    def test_non_seqs(self):
+        """Duplicate + unused non-sequences are collapsed / dropped."""
         W = matrix(name="W")
         v = ivector(name="v")
         y1 = scan(
@@ -120,8 +125,8 @@ class TestRemoveConstantsAndUnusedInputsScan:
             assert len(inp) == 1
             assert len(inp) == len(set(inp))
 
-    def test_remove_constants_and_unused_inputs_scan_seqs(self):
-        """Test the opt remove_constants_and_unused_inputs_scan for sequences."""
+    def test_seqs(self):
+        """Duplicate + unused sequences are collapsed / dropped."""
         W = matrix(name="W")
         v = ivector(name="v")
         vv = matrix(name="vv")
