@@ -2,7 +2,9 @@
 Tests of printing functionality
 """
 
+import io
 import logging
+import re
 from io import StringIO
 from textwrap import dedent
 
@@ -11,6 +13,7 @@ import pytest
 
 import pytensor
 from pytensor import config
+from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.debug.profiling import ProfileStats
 from pytensor.compile.mode import get_mode
 from pytensor.compile.ops import deep_copy_op
@@ -497,3 +500,274 @@ def test_summary_with_profile_optimizer():
     s = StringIO()
     f.profile.summary(file=s)
     assert "Rewriter Profile" in s.getvalue()
+
+
+class TestDebugprintRich:
+    """Tests for debugprint(..., file="rich").
+
+    We test PyTensor's tree-building contract only — not Rich's rendering.
+    Rich's own test suite covers rendering; our job is to verify that we
+    construct the right tree structure and don't crash on various graph shapes.
+    """
+
+    rich = pytest.importorskip("rich")
+
+    def test_return_type(self):
+        x = dvector("x")
+        tree = debugprint(x.sum(), file="rich")
+        assert isinstance(tree, self.rich.tree.Tree)
+
+    def test_single_output_has_one_child(self):
+        # One output variable → the hidden root should have exactly one child.
+        x = dvector("x")
+        tree = debugprint(x.sum(), file="rich")
+        assert len(tree.children) == 1
+
+    def test_multiple_outputs_have_multiple_children(self):
+        # Two output variables → the hidden root has two children.
+        x = dvector("x")
+        mean = x.mean()
+        std = x.std()
+        tree = debugprint([mean, std], file="rich")
+        assert len(tree.children) == 2
+
+    def test_linear_graph(self):
+        # sum(x * 2): root → sum_node → mul_node → [x_leaf, 2_leaf]
+        x = dvector("x")
+        y = (x * 2).sum()
+        tree = debugprint(y, file="rich")
+        sum_node = tree.children[0]
+        mul_node = sum_node.children[0]
+        assert len(mul_node.children) == 2
+
+    def test_named_var(self):
+        # Named intermediate: the label of the mul node contains its name.
+        x = dvector("x")
+        y = x * 2
+        y.name = "doubled"
+        tree = debugprint(y.sum(), file="rich")
+        mul_node = tree.children[0].children[0]
+        assert "doubled" in str(mul_node.label)
+
+    def test_dag_shared_leaf(self):
+        # x + x: the add node has two children, both representing x.
+        x = dvector("x")
+        tree = debugprint(x + x, file="rich")
+        add_node = tree.children[0]
+        assert len(add_node.children) == 2
+
+    def test_diamond_dag(self):
+        # (x*2) + (x+1): add has two children; each has x as a child,
+        # but the second occurrence of x is a repeat (still a child node).
+        x = dvector("x")
+        a = x * 2
+        b = x + 1
+        tree = debugprint(a + b, file="rich")
+        add_node = tree.children[0]
+        assert len(add_node.children) == 2
+        # Each branch (mul, add) has x as a child.
+        assert len(add_node.children[0].children) >= 1
+        assert len(add_node.children[1].children) >= 1
+
+    def test_depth_limit(self):
+        # depth=1: the root op node is present but its inputs are not expanded.
+        x = dvector("x")
+        y = (x * 2).sum()
+        tree = debugprint(y, depth=1, file="rich")
+        sum_node = tree.children[0]
+        assert len(sum_node.children) == 0
+
+    def test_stop_on_name(self):
+        # stop_on_name=True: traversal stops when it hits the named leaf x,
+        # so the mul node's child (x) has no further children.
+        x = dvector("x")
+        x.name = "x"
+        tree = debugprint((x * 2).sum(), stop_on_name=True, file="rich")
+        sum_node = tree.children[0]
+        mul_node = sum_node.children[0]
+        x_node = mul_node.children[0]
+        assert len(x_node.children) == 0
+
+    def test_print_type(self):
+        # print_type=True: the type annotation appears in the root op's label.
+        x = dvector("x")
+        tree = debugprint(x.sum(), print_type=True, file="rich")
+        sum_node = tree.children[0]
+        assert "<" in str(sum_node.label)
+
+    def test_function_graph(self):
+        # FunctionGraph: one output → one child under the hidden root.
+        from pytensor.graph.fg import FunctionGraph
+
+        x = dvector("x")
+        y = x.sum()
+        fg = FunctionGraph([x], [y])
+        tree = debugprint(fg, file="rich")
+        assert len(tree.children) == 1
+
+    def test_inner_graph_op(self):
+        # HasInnerGraph op: root has two children — the op node and the
+        # "Inner graphs:" section. The op node has the two outer inputs as children.
+        igo_in_1, igo_in_2 = MyVariable("x"), MyVariable("y")
+        igo_out = MyOp("op")(igo_in_1, igo_in_2)
+        op = MyInnerGraphOp([igo_in_1, igo_in_2], [igo_out])
+        a, b = MyVariable("a"), MyVariable("b")
+        out = op(a, b)
+        tree = debugprint(out, file="rich")
+        assert len(tree.children) == 2  # op node + "Inner graphs:" section
+        op_node = tree.children[0]
+        assert len(op_node.children) == 2
+
+    def test_opfromgraph_expands_inner_graph(self):
+        # OpFromGraph should produce an "Inner graphs:" section as a second
+        # top-level child of the hidden root, matching the text renderer.
+        x = dvector("x")
+        out = OpFromGraph([x], [x.std()])(x)
+        tree = debugprint(out, file="rich")
+        # root child 0: the op node; root child 1: "Inner graphs:" section
+        assert len(tree.children) == 2
+        inner_section = tree.children[1]
+        assert len(inner_section.children) >= 1
+
+    def test_inner_graph_header_is_bold(self):
+        # The "Inner graphs:" header should be bold.
+        x = dvector("x")
+        out = OpFromGraph([x], [x.std()])(x)
+        tree = debugprint(out, file="rich")
+        inner_section = tree.children[1]
+        assert "bold" in str(inner_section.label), (
+            f"'Inner graphs:' header should have bold markup, got: {inner_section.label!r}"
+        )
+
+    def test_repeated_node_no_duplication(self):
+        # The second occurrence of a shared node shows its colored label with
+        # ··· as a child — no full subtree expansion.
+        x = dvector("x")
+        shared = x * 2
+        tree = debugprint(shared + shared, file="rich")
+        add_node = tree.children[0]
+        # The add has two children: canonical Mul (full subtree) and repeat Mul (··· child)
+        assert len(add_node.children) == 2
+        repeat_entry = add_node.children[1]
+        assert "···" not in str(repeat_entry.label), (
+            f"Repeat entry label should be the node label, not ···: {repeat_entry.label!r}"
+        )
+        assert len(repeat_entry.children) == 1, (
+            f"Repeat entry should have exactly one child (···), got: {repeat_entry.children}"
+        )
+        sentinel = repeat_entry.children[0]
+        assert "···" in str(sentinel.label), (
+            f"Expected '···' as child of repeat entry, got: {sentinel.label!r}"
+        )
+        assert len(sentinel.children) == 0, "··· should be a leaf"
+
+    def test_repeated_nodes_same_color(self):
+        # The canonical label, the repeat entry label, and the ··· sentinel
+        # should all share the same color.
+        x = dvector("x")
+        shared = x * 2
+        tree = debugprint(shared + shared, file="rich")
+        add_node = tree.children[0]
+        canonical_mul = add_node.children[0]
+        repeat_entry = add_node.children[1]
+        sentinel = repeat_entry.children[0]
+        color_re = re.compile(r"\[(\w+)\]")
+        canonical_colors = color_re.findall(str(canonical_mul.label))
+        repeat_colors = color_re.findall(str(repeat_entry.label))
+        sentinel_colors = color_re.findall(str(sentinel.label))
+        assert canonical_colors, "canonical shared node should have a color tag"
+        assert repeat_colors, (
+            f"repeat entry should have a color tag, got: {repeat_entry.label!r}"
+        )
+        assert sentinel_colors, (
+            f"sentinel should have a color tag, got: {sentinel.label!r}"
+        )
+        assert canonical_colors[0] == repeat_colors[0] == sentinel_colors[0], (
+            f"canonical, repeat entry, and sentinel should share the same color: "
+            f"{canonical_colors[0]!r}, {repeat_colors[0]!r}, {sentinel_colors[0]!r}"
+        )
+
+    def test_two_distinct_shared_nodes_get_different_colors(self):
+        # Two independently shared nodes should each get a distinct color so
+        # they can be visually distinguished from one another.
+        x = dvector("x")
+        a = x * 2
+        b = x + 1
+        tree = debugprint((a + b) + (a - b), file="rich")
+        # Walk the tree and collect all color tags used on colored nodes.
+        color_re = re.compile(r"\[(\w+)\]")
+
+        def collect_colors(node):
+            colors = set()
+            m = color_re.findall(str(node.label))
+            if m:
+                colors.add(m[0])
+            for child in node.children:
+                colors |= collect_colors(child)
+            return colors
+
+        colors = collect_colors(tree)
+        # Both shared nodes must have been assigned a color, and they must differ.
+        assert len(colors) >= 2, (
+            f"Expected at least 2 distinct colors for 2 shared nodes, got: {colors}"
+        )
+
+    def test_markup_escaping(self):
+        # If a variable name or op contains Rich markup delimiters like [ or ],
+        # the label must be escaped so rendering does not raise.
+        x = dvector("x")
+        y = x * 2
+        y.name = "result[0]"  # square brackets would break Rich markup if unescaped
+        tree = debugprint(y.sum(), file="rich")
+        # Verify the name is present in the label (escaped form is still readable).
+        mul_node = tree.children[0].children[0]
+        assert "result" in str(mul_node.label)
+        # Verify Rich can render the tree without raising a markup error.
+        buf = io.StringIO()
+        console = self.rich.console.Console(file=buf, highlight=False)
+        console.print(tree)  # raises MarkupError if escaping is broken
+
+    def test_deep_shared_node_sentinel_depth(self):
+        # A shared node at depth > 1 should show its colored label with ···
+        # as a child at the correct depth in the tree.
+        x = dvector("x")
+        shared = x * 2  # will appear at depth 2 (grandchild of add)
+        out = shared.sum() + shared.mean()
+        tree = debugprint(out, file="rich")
+        add_node = tree.children[0]
+        # Second branch is mean (True_div); its Sum child has the repeat entry.
+        mean_node = add_node.children[1]  # True_div 'mean'
+        sum_under_mean = mean_node.children[0]  # Sum
+        repeat_entry = sum_under_mean.children[0]  # colored repeat entry
+        assert len(repeat_entry.children) == 1, (
+            f"Repeat entry should have exactly one child (···), got: {repeat_entry.children}"
+        )
+        sentinel = repeat_entry.children[0]
+        assert "···" in str(sentinel.label), (
+            f"Expected ··· as child of repeat entry, got: {sentinel.label!r}"
+        )
+        assert len(sentinel.children) == 0, "··· should be a leaf"
+
+    def test_shared_node_colored_across_outputs(self):
+        # A node shared between two separate outputs should produce a colored
+        # canonical label in the first subtree and a colored ··· sentinel in the
+        # second, since node_colors spans all outputs.
+        x = dvector("x")
+        shared = x * 2
+        tree = debugprint([shared.sum(), shared.mean()], file="rich")
+
+        def find_sentinel_and_colored(node):
+            results = []
+            label = str(node.label)
+            if re.search(r"\[(\w+)\]", label) or "···" in label:
+                results.append(label)
+            for child in node.children:
+                results.extend(find_sentinel_and_colored(child))
+            return results
+
+        found = find_sentinel_and_colored(tree)
+        # At minimum: one colored canonical Mul and one ··· sentinel
+        colored = [l for l in found if re.search(r"\[(\w+)\]", l) and "···" not in l]
+        sentinels = [l for l in found if "···" in l]
+        assert colored, "canonical shared node should be colored"
+        assert sentinels, "second occurrence should produce a ··· sentinel"
