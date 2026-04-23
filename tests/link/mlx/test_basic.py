@@ -11,6 +11,7 @@ import pytest
 import pytensor
 from pytensor import config
 from pytensor import tensor as pt
+from pytensor.compile import SymbolicInput
 from pytensor.compile.maker import function
 from pytensor.compile.mode import MLX, Mode
 from pytensor.graph import RewriteDatabaseQuery
@@ -67,7 +68,11 @@ def compare_mlx_and_py(
     if assert_fn is None:
         assert_fn = partial(np.testing.assert_allclose, rtol=1e-4)
 
-    if any(inp.owner is not None for inp in graph_inputs):
+    if any(
+        inp.owner is not None
+        for inp in graph_inputs
+        if not isinstance(inp, SymbolicInput)
+    ):
         raise ValueError("Inputs must be root variables")
 
     pytensor_mlx_fn = function(graph_inputs, graph_outputs, mode=mlx_mode)

@@ -3,6 +3,7 @@ import pytest
 
 import pytensor.scalar.basic as ps
 import pytensor.tensor as pt
+from pytensor.compile.io import In
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
@@ -238,3 +239,13 @@ def test_mlx_logp():
             value_test_value,
         ],
     )
+
+
+def test_mlx_real():
+    x = pt.tensor("x", dtype="complex64", shape=(None,))
+    out = pt.real(x)[0].set(np.float32(99.0))
+    x_val = np.array([1 + 2j, 3 + 4j], dtype="complex64")
+    _, output = compare_mlx_and_py([In(x, mutable=True)], [out], [x_val])
+
+    # Verify that the real Op does not return a view, resulting in mutation of the input
+    assert output[0][0].item() != x_val.real[0].item()

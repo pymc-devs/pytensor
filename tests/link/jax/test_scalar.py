@@ -3,6 +3,7 @@ import pytest
 
 import pytensor.scalar.basic as ps
 import pytensor.tensor as pt
+from pytensor.compile.io import In
 from pytensor.configdefaults import config
 from pytensor.graph.fg import FunctionGraph
 from pytensor.scalar.basic import Composite
@@ -324,3 +325,13 @@ def test_jax_logp():
             value_test_value,
         ],
     )
+
+
+def test_jax_real():
+    x = pt.zvector("x")
+    out = pt.real(x)[0].set(99.0)
+    x_val = np.array([1 + 2j, 3 + 4j])
+    _, output = compare_jax_and_py([In(x, mutable=True)], [out], [x_val])
+
+    # Verify that the real Op does not return a view, resulting in mutation of the input
+    assert output[0].item(0) != x_val.real.item(0)
