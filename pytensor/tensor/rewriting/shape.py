@@ -1256,7 +1256,7 @@ def local_lift_specify_shape_inc_subtensor(fgraph, node):
         IncSubtensor | AdvancedIncSubtensor1 | AdvancedIncSubtensor,
     ):
         x, y, *idx_vars = inc_x.owner.inputs
-        new_x = specify_shape(x, *specified_shape)
+        new_x = specify_shape(x, specified_shape)
         new_out = inc_op(new_x, y, *idx_vars)
         copy_stack_trace(node.outputs[0], new_out)
         return [new_out]

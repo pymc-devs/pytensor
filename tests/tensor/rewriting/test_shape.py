@@ -659,13 +659,13 @@ def test_local_lift_specify_shape_elemwise():
 
 
 def test_local_lift_specify_shape_inc_subtensor():
-    x = vector("x")
+    x = matrix("x")
     y = vector("y")
-    out = specify_shape(set_subtensor(x[1:4], y), shape=(5,))
+    out = specify_shape(set_subtensor(x[1:4], y), shape=(5, None))
 
     new_out = rewrite_graph(out)
     assert equal_computations(
-        [new_out], [set_subtensor(specify_shape(x, shape=(5,))[1:4], y)]
+        [new_out], [set_subtensor(specify_shape(x, shape=(5, None))[1:4], y)]
     )
 
 
