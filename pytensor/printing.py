@@ -1210,7 +1210,8 @@ def _build_rich_tree(
                 )
                 parent_tree = depth_stack[current_depth]
                 repeat_tree = parent_tree.add(_color_label(label, color))
-                repeat_tree.add(_sentinel_label(color))
+                if gnode.var.owner is not None:
+                    repeat_tree.add(_sentinel_label(color))
                 continue
 
             if gnode.is_repeat and not gnode.is_inner_graph_header:
@@ -1317,7 +1318,8 @@ def _build_rich_tree(
                     )
                     parent_tree = ig_depth_stack[current_depth]
                     repeat_tree = parent_tree.add(_color_label(label, color))
-                    repeat_tree.add(_sentinel_label(color))
+                    if gnode.var.owner is not None:
+                        repeat_tree.add(_sentinel_label(color))
                     continue
                 if gnode.is_repeat and not gnode.is_inner_graph_header:
                     continue
@@ -1393,7 +1395,8 @@ def _build_rich_tree(
                         )
                         parent_tree = out_stack[current_depth]
                         repeat_tree = parent_tree.add(_color_label(label, color))
-                        repeat_tree.add(_sentinel_label(color))
+                        if gnode.var.owner is not None:
+                            repeat_tree.add(_sentinel_label(color))
                         continue
                     if gnode.is_repeat and not gnode.is_inner_graph_header:
                         continue
