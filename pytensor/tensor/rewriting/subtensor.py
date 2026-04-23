@@ -1376,6 +1376,12 @@ def local_advanced_read_of_write_constant_indices(fgraph, node):
                 return None
             w_arr = np.asarray(w.data)
             r_arr = np.asarray(r.data)
+            # Convert boolean masks to integer positions so coord-matching below
+            # works uniformly; `a[mask]` and `a[flatnonzero(mask)]` are equivalent.
+            if w_arr.dtype == bool:
+                w_arr = np.flatnonzero(w_arr)
+            if r_arr.dtype == bool:
+                r_arr = np.flatnonzero(r_arr)
             # Reject only cross-sign within an axis — negatives can alias
             # positives on the same axis, but uniformly negative (or
             # uniformly non-negative) indices compare correctly as raw values.

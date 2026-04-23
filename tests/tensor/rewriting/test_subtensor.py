@@ -1539,6 +1539,32 @@ class TestReadOfWriteConstantIndices:
         expected[2] += dv[2]  # (2,2) covered by write index 2
         np.testing.assert_allclose(f(dx, dv), expected)
 
+    @pytest.mark.parametrize("write_bool", [False, True])
+    @pytest.mark.parametrize("read_bool", [False, True])
+    def test_bool_and_int_indices(self, write_bool, read_bool):
+        """Bool and int advanced indices are interchangeable at the rewrite
+        boundary; all four combos must collapse the buffer identically."""
+        write_pos = np.array([0, 1, 3])
+        read_pos = np.array([2, 4])
+        write_idx = np.zeros(5, dtype=bool) if write_bool else write_pos
+        if write_bool:
+            write_idx[write_pos] = True
+        read_idx = np.zeros(5, dtype=bool) if read_bool else read_pos
+        if read_bool:
+            read_idx[read_pos] = True
+
+        x = vector("x", dtype="float64")
+        v = vector("v", dtype="float64")
+        out = set_subtensor(x[pt.constant(write_idx)], v)[pt.constant(read_idx)]
+        f = function([x, v], out, self.mode)
+        assert not any(
+            isinstance(n.op, AdvancedIncSubtensor | AdvancedIncSubtensor1)
+            for n in f.maker.fgraph.toposort()
+        )
+        dx = np.arange(5.0)
+        dv = np.array([10.0, 20.0, 30.0])
+        np.testing.assert_allclose(f(dx, dv), dx[read_pos])
+
 
 class TestWriteOfWriteSameIndices:
     def test_set_of_set_basic_slice(self):
