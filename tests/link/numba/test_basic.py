@@ -1,6 +1,7 @@
 import contextlib
 import copy
 import os
+import pickle
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -25,6 +26,7 @@ from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.op import Op
 from pytensor.graph.rewriting.db import RewriteDatabaseQuery
 from pytensor.graph.type import Type
+from pytensor.link.numba import cache as numba_cache
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     _filter_numba_warnings,
@@ -773,57 +775,125 @@ class TestFgraphCacheKey:
         )
 
 
-@pytest.mark.skipif(not hasattr(os, "fork"), reason="Test requires os.fork (Unix only)")
-def test_fork_cache_no_type_mismatch(tmp_path, monkeypatch):
-    """Regression test for fork-safety of the numba disk cache.
+class TestNumbaCacheMuliprocessSafe:
+    @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+    def test_case1(self, tmp_path, monkeypatch):
+        """Regression test for fork-safety of the numba disk cache.
 
-    After os.fork(), numba's internal UID counter (FunctionIdentity._unique_ids)
-    is shared between parent and child. If two exec()-created wrapper functions
-    with the same qualname get the same UID in different processes, their LLVM
-    mangled names collide. When they have different return types (e.g. 3D vs 4D
-    array), this causes a ValueError during LLVM lowering.
+        After os.fork(), numba's internal UID counter (FunctionIdentity._unique_ids)
+        is shared between parent and child. If two exec()-created wrapper functions
+        with the same qualname get the same UID in different processes, their LLVM
+        mangled names collide. When they have different return types (e.g. 3D vs 4D
+        array), this causes a ValueError during LLVM lowering.
 
-    PyTensor prevents this by including the cache key in the wrapper function
-    name, ensuring unique LLVM symbols even when UIDs overlap after fork.
+        PyTensor prevents this by replacing numba's UID counter with a random
+        128-bit UUID iterator, ensuring unique LLVM symbols across sibling processes.
 
-    See: https://github.com/numba/numba/issues/10486
-    """
-    import pytensor.link.numba.cache as cache_mod
+        See https://github.com/numba/numba/issues/10486
+        """
+        # Use a temporary cache for this test
+        monkeypatch.setattr(numba_cache, "NUMBA_CACHE_PATH", tmp_path)
 
-    # Use a temporary cache for this test
-    monkeypatch.setattr(cache_mod, "NUMBA_CACHE_PATH", tmp_path)
+        def run_in_fork(func):
+            pid = os.fork()
+            if pid == 0:
+                try:
+                    func()
+                    os._exit(0)
+                except BaseException:
+                    os._exit(1)
+            else:
+                _, status = os.waitpid(pid, 0)
+                return os.WEXITSTATUS(status)
 
-    def run_in_fork(func):
-        pid = os.fork()
-        if pid == 0:
-            try:
-                func()
-                os._exit(0)
-            except BaseException:
-                os._exit(1)
+        def graph_a():
+            x = pt.tensor3("x")
+            fn = function([x], x.transpose(2, 0, 1), mode="NUMBA")
+            assert fn(np.zeros((2, 3, 4))).shape == (4, 2, 3)
+
+        def graph_b():
+            x = pt.tensor3("x")
+            fn = function([x], [x.transpose(2, 0, 1), x[None]], mode="NUMBA")
+            r1, r2 = fn(np.zeros((2, 3, 4)))
+            assert r1.shape == (4, 2, 3)
+            assert r2.shape == (1, 2, 3, 4)
+
+        # Fork child compiles graph_a (transpose only)
+        assert run_in_fork(graph_a) == 0, "Fork child failed"
+
+        # Parent compiles graph_b (transpose + expand dims)
+        # This loads fork's cache and also compiles fresh ops
+        graph_b()
+
+        # Running in another fork is also fine
+        assert run_in_fork(graph_a) == 0, "Fork child 1 failed"
+        assert run_in_fork(graph_b) == 0, "Fork child 2 failed"
+
+    @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+    @pytest.mark.parametrize("pickled_in_parent", [False, True])
+    def test_case2(self, tmp_path, monkeypatch, pickled_in_parent):
+        """Regression test: sibling forks compiling/loading cached numba functions
+        must not segfault due to LLVM symbol collisions.
+
+        The 3-fork pattern (fork 0 runs fn_a only; forks 1 and 2 run
+        fn_a + fn_b) reproduces with:
+            fn_a = [x + 1, x * 2]  - two-output elemwise.
+            fn_b = x[:4] + 1       - elemwise over a Subtensor.
+        Dropping fn_a's second output, dropping fn_b's Subtensor, or
+        running fn_b in fork 0 as well all defuse the repro.
+
+        Two compilation patterns are covered:
+            pickled_in_parent=False - child compiles the function itself.
+            pickled_in_parent=True  - parent lazily compiles and pickles;
+                child's unpickle re-runs NumbaLinker, which pulls fresh
+                UUIDs from the replacement iterator.
+
+        See https://github.com/numba/numba/issues/10486
+        """
+        monkeypatch.setattr(numba_cache, "NUMBA_CACHE_PATH", tmp_path)
+        raw_numba = Mode(linker=NumbaLinker(), optimizer=None)
+
+        def make_fn_a():
+            x = pt.vector("x")
+            return function([x], [x + 1.0, x * 2.0], mode=raw_numba)
+
+        def make_fn_b():
+            x = pt.vector("x")
+            return function([x], x[:4] + 1.0, mode=raw_numba)
+
+        if pickled_in_parent:
+            fn_a_blob = pickle.dumps(make_fn_a())
+            fn_b_blob = pickle.dumps(make_fn_b())
+
+            def get_fn_a():
+                return pickle.loads(fn_a_blob)
+
+            def get_fn_b():
+                return pickle.loads(fn_b_blob)
         else:
-            _, status = os.waitpid(pid, 0)
-            return os.WEXITSTATUS(status)
+            get_fn_a = make_fn_a
+            get_fn_b = make_fn_b
 
-    def graph_a():
-        x = pt.tensor3("x")
-        fn = function([x], x.transpose(2, 0, 1), mode="NUMBA")
-        assert fn(np.zeros((2, 3, 4))).shape == (4, 2, 3)
+        def run_in_child(with_fn_b, result_file):
+            a_add, a_mul = get_fn_a()(np.zeros(5))
+            out_b = get_fn_b()(np.zeros(5)) if with_fn_b else np.array([])
+            np.savez(result_file, a_add=a_add, a_mul=a_mul, b=out_b)
 
-    def graph_b():
-        x = pt.tensor3("x")
-        fn = function([x], [x.transpose(2, 0, 1), x[None]], mode="NUMBA")
-        r1, r2 = fn(np.zeros((2, 3, 4)))
-        assert r1.shape == (4, 2, 3)
-        assert r2.shape == (1, 2, 3, 4)
+        for i, with_fn_b in enumerate((False, True, True)):
+            result_file = tmp_path / f"child_{i}.npz"
+            pid = os.fork()
+            if pid == 0:
+                try:
+                    run_in_child(with_fn_b, result_file)
+                    os._exit(0)
+                except BaseException:
+                    os._exit(1)
+            _, st = os.waitpid(pid, 0)
+            assert not os.WIFSIGNALED(st), f"child {i} segfaulted ({os.WTERMSIG(st)})"
+            assert os.WEXITSTATUS(st) == 0
 
-    # Fork child compiles graph_a (transpose only)
-    assert run_in_fork(graph_a) == 0, "Fork child failed"
-
-    # Parent compiles graph_b (transpose + expand dims)
-    # This loads fork's cache and also compiles fresh ops
-    graph_b()
-
-    # Running in another fork is also fine
-    assert run_in_fork(graph_a) == 0, "Fork child 1 failed"
-    assert run_in_fork(graph_b) == 0, "Fork child 2 failed"
+            data = np.load(result_file)
+            np.testing.assert_allclose(data["a_add"], [1.0] * 5)
+            np.testing.assert_allclose(data["a_mul"], [0.0] * 5)
+            if with_fn_b:
+                np.testing.assert_allclose(data["b"], [1.0] * 4)

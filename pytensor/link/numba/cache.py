@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Callable
 from hashlib import sha256
 from pickle import dump
@@ -8,6 +9,7 @@ from weakref import WeakKeyDictionary
 import numba
 from llvmlite import ir
 from numba.core import cgutils
+from numba.core.bytecode import FunctionIdentity
 from numba.core.caching import CacheImpl, _CacheLocator
 
 from pytensor.configdefaults import config
@@ -16,6 +18,35 @@ from pytensor.configdefaults import config
 NUMBA_CACHE_PATH = config.base_compiledir / "numba"
 NUMBA_CACHE_PATH.mkdir(parents=True, exist_ok=True)
 CACHED_SRC_FUNCTIONS: WeakKeyDictionary[Callable, str] = WeakKeyDictionary()
+
+
+class _RandomUidIter:
+    """Iterator yielding cryptographically random 128-bit integers.
+
+    Replaces numba's default ``FunctionIdentity._unique_ids`` sequential
+    counter so that sibling forks — which inherit the counter state verbatim —
+    cannot allocate identical uids to same-qualname functions they
+    fresh-compile next. Identical uids produce byte-identical LLVM mangled
+    symbols with different bodies; a later process that loads both hits LLVM's
+    weak-merge and dispatches into the wrong body, segfaulting.
+
+    Numba only consumes ``_unique_ids`` via ``next(cls._unique_ids)`` (see
+    ``numba.core.bytecode.FunctionIdentity.from_function``), so any iterator
+    of unique ints is a drop-in replacement. ``uuid.uuid4`` pulls fresh
+    entropy from the OS on every call, making this generator fork-safe
+    without any re-seed hook.
+
+    See https://github.com/numba/numba/issues/10486.
+    """
+
+    def __iter__(self) -> "_RandomUidIter":
+        return self
+
+    def __next__(self) -> int:
+        return uuid.uuid4().int
+
+
+FunctionIdentity._unique_ids = _RandomUidIter()
 
 
 class NumbaPyTensorCacheLocator(_CacheLocator):
