@@ -105,7 +105,6 @@ from pytensor.gradient import grad, hessian, jacobian
 # adds shared-variable constructors
 from pytensor.tensor import (
     blas,
-    blas_c,
     sharedvar,
     xlogx,
 )
