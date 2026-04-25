@@ -14,7 +14,8 @@ def assert_fn(x, y):
 
 @pytest.mark.parametrize(
     "func",
-    (eigh, SLogDet(), inv, det),
+    (lambda x: eigh(x, driver="evd"), SLogDet(), inv, det),
+    ids=["eigh", "slogdet", "inv", "det"],
 )
 def test_lin_alg_no_params(func, matrix_test):
     x, test_value = matrix_test
