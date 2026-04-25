@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from pytensor.tensor.linalg.decomposition import qr, svd
-from pytensor.tensor.linalg.decomposition.eigen import eig, eigh
+from pytensor.tensor.linalg.decomposition.eigen import eig, eigh, eigvalsh
 from pytensor.tensor.linalg.inverse import inv
 from pytensor.tensor.linalg.summary import SLogDet, det
 from tests.link.pytorch.test_basic import compare_pytorch_and_py
@@ -14,8 +14,8 @@ def assert_fn(x, y):
 
 @pytest.mark.parametrize(
     "func",
-    (lambda x: eigh(x, driver="evd"), SLogDet(), inv, det),
-    ids=["eigh", "slogdet", "inv", "det"],
+    (lambda x: eigh(x, driver="evd"), eigvalsh, SLogDet(), inv, det),
+    ids=["eigh", "eigvalsh", "slogdet", "inv", "det"],
 )
 def test_lin_alg_no_params(func, matrix_test):
     x, test_value = matrix_test
