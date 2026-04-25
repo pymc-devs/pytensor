@@ -4,8 +4,6 @@ from typing import cast
 import numpy as np
 import scipy.linalg as scipy_linalg
 
-import pytensor
-from pytensor import scalar as ps
 from pytensor.gradient import DisconnectedType
 from pytensor.graph.basic import Apply
 from pytensor.graph.op import Op
@@ -13,8 +11,8 @@ from pytensor.tensor import TensorLike
 from pytensor.tensor.basic import as_tensor_variable, diag, eye, tril, triu
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.dtype_utils import linalg_real_output_dtype
-from pytensor.tensor.type import Variable, matrix, tensor, vector
 from pytensor.tensor.math import sub, switch
+from pytensor.tensor.type import Variable, tensor, vector
 from pytensor.tensor.type_other import NoneTypeT
 
 
@@ -368,100 +366,153 @@ class Eigvalsh(Op):
 
     """
 
-    __props__ = ("lower",)
+    __props__ = ("lower", "overwrite_a", "overwrite_b")
 
-    def __init__(self, lower=True):
+    def __init__(self, lower=True, overwrite_a=False, overwrite_b=False):
         assert lower in [True, False]
+        if overwrite_a and overwrite_b:
+            raise ValueError(
+                "overwrite_a and overwrite_b are mutually exclusive: pytensor "
+                "tracks at most one destroyed input per output. "
+            )
         self.lower = lower
+        self.overwrite_a = overwrite_a
+        self.overwrite_b = overwrite_b
+
+        if overwrite_a:
+            self.destroy_map = {0: [0]}
+        elif overwrite_b:
+            self.destroy_map = {0: [1]}
 
     def make_node(self, a, b=None):
         a = as_tensor_variable(a)
         assert a.ndim == 2
 
+        M, N = a.type.shape
+
+        if M is not None and N is not None and M != N:
+            raise ValueError(
+                f"Input to eigvalsh must be square, got {a} with shape ({M}, {N})"
+            )
+
         if b is None or (isinstance(b, Variable) and isinstance(b.type, NoneTypeT)):
-            w = vector(dtype=a.dtype)
-            return Apply(self, [a], [w])
+            if self.overwrite_b:
+                raise ValueError(
+                    "overwrite_b=True requires the generalized form with a second input"
+                )
+            inputs = [a]
+            probe_dtype = a.type.dtype
         else:
             b = as_tensor_variable(b)
             assert a.ndim == 2
             assert b.ndim == 2
+            probe_dtype = np.result_type(a.type.dtype, b.type.dtype)
+            inputs = [a, b]
 
-            out_dtype = pytensor.scalar.upcast(a.dtype, b.dtype)
-            w = vector(dtype=out_dtype)
-            return Apply(self, [a, b], [w])
+        # Probe scipy for the output dtype (eigenvalues are always real)
+        probe = np.zeros((1, 1), dtype=probe_dtype)
+        out_dtype = scipy_linalg.eigvalsh(probe).dtype.name
+
+        w = vector(dtype=out_dtype, shape=(N,))
+        return Apply(self, inputs, [w])
+
+    def infer_shape(self, fgraph, node, shapes):
+        n = shapes[0][0]
+        return [
+            (n,),
+        ]
 
     def perform(self, node, inputs, outputs):
         (w,) = outputs
         if len(inputs) == 2:
-            w[0] = scipy_linalg.eigvalsh(a=inputs[0], b=inputs[1], lower=self.lower)
+            w[0] = scipy_linalg.eigvalsh(
+                a=inputs[0],
+                b=inputs[1],
+                lower=self.lower,
+                overwrite_a=self.overwrite_a,
+                overwrite_b=self.overwrite_b,
+            )
         else:
-            w[0] = scipy_linalg.eigvalsh(a=inputs[0], b=None, lower=self.lower)
+            w[0] = scipy_linalg.eigvalsh(
+                a=inputs[0],
+                b=None,
+                lower=self.lower,
+                overwrite_a=self.overwrite_a,
+            )
 
     def pullback(self, inputs, outputs, g_outputs):
-        a, b = inputs
         (gw,) = g_outputs
-        return EigvalshGrad(self.lower)(a, b, gw)
 
-    def infer_shape(self, fgraph, node, shapes):
-        n = shapes[0][0]
-        return [(n,)]
+        if len(inputs) == 1:
+            (a,) = inputs
+            w, v = eigh(a, lower=self.lower)
+            gA = v @ diag(gw) @ v.T
 
+            if self.lower:
+                gA = tril(gA) + triu(gA, k=1).T
+            else:
+                gA = triu(gA) + tril(gA, k=-1).T
 
-class EigvalshGrad(Op):
-    """
-    Gradient of generalized eigenvalues of a Hermitian positive definite
-    eigensystem.
+            return [gA]
 
-    """
-
-    # Note: This Op (EigvalshGrad), should be removed and replaced with a graph
-    # of pytensor ops that is constructed directly in Eigvalsh.grad.
-    # But this can only be done once scipy.linalg.eigh is available as an Op
-    # (currently the Eigh uses numpy.linalg.eigh, which doesn't let you
-    # pass the right-hand-side matrix for a generalized eigenproblem.) See the
-    # discussion on GitHub at
-    # https://github.com/Theano/Theano/pull/1846#discussion-diff-12486764
-
-    __props__ = ("lower",)
-
-    def __init__(self, lower=True):
-        assert lower in [True, False]
-        self.lower = lower
-        if lower:
-            self.tri0 = np.tril
-            self.tri1 = lambda a: np.triu(a, 1)
         else:
-            self.tri0 = np.triu
-            self.tri1 = lambda a: np.tril(a, -1)
+            a, b = inputs
+            w, v = eigh(a, b, lower=self.lower)
+            gA = v @ diag(gw) @ v.T
+            gB = -v @ diag(gw * w) @ v.T
 
-    def make_node(self, a, b, gw):
-        a = as_tensor_variable(a)
-        b = as_tensor_variable(b)
-        gw = as_tensor_variable(gw)
-        assert a.ndim == 2
-        assert b.ndim == 2
-        assert gw.ndim == 1
+            if self.lower:
+                gA = tril(gA) + triu(gA, k=1).T
+                gB = tril(gB) + triu(gB, k=1).T
+            else:
+                gA = triu(gA) + tril(gA, k=-1).T
+                gB = triu(gB) + tril(gB, k=-1).T
 
-        out_dtype = pytensor.scalar.upcast(a.dtype, b.dtype, gw.dtype)
-        out1 = matrix(dtype=out_dtype)
-        out2 = matrix(dtype=out_dtype)
-        return Apply(self, [a, b, gw], [out1, out2])
+            return [gA, gB]
 
-    def perform(self, node, inputs, outputs):
-        (a, b, gw) = inputs
-        w, v = scipy_linalg.eigh(a, b, lower=self.lower)
-        gA = v.dot(np.diag(gw).dot(v.T))
-        gB = -v.dot(np.diag(gw * w).dot(v.T))
-
-        # See EighGrad comments for an explanation of these lines
-        out1 = self.tri0(gA) + self.tri1(gA).T
-        out2 = self.tri0(gB) + self.tri1(gB).T
-        outputs[0][0] = np.asarray(out1, dtype=node.outputs[0].dtype)
-        outputs[1][0] = np.asarray(out2, dtype=node.outputs[1].dtype)
-
-    def infer_shape(self, fgraph, node, shapes):
-        return [shapes[0], shapes[1]]
+    def inplace_on_inputs(self, allowed_inplace_inputs: list[int]) -> "Op":
+        # overwrite_a and overwrite_b are mutually exclusive (PyTensor tracks at most one destroyed
+        # input per output). When both can be destroyed, we prefer overwrite_a.
+        new_props = self._props_dict()  # type: ignore
+        if 0 in allowed_inplace_inputs:
+            new_props["overwrite_a"] = True
+        elif 1 in allowed_inplace_inputs:
+            new_props["overwrite_b"] = True
+        else:
+            return self
+        return type(self)(**new_props)
 
 
-def eigvalsh(a, b, lower=True):
-    return Eigvalsh(lower)(a, b)
+def eigvalsh(
+    a: TensorLike,
+    b: TensorLike | None = None,
+    lower: bool = True,
+) -> Variable:
+    """
+    Compute the eigenvalues of a symmetric/Hermitian matrix.
+
+    This is identical to ``eigh(a, b, lower)[0]``, but more efficient when only the eigenvalues are needed.
+
+    Parameters
+    ----------
+    a : TensorLike
+        Symmetric/Hermitian matrix (or batch thereof).
+    b : TensorLike, optional
+        Second matrix for the generalized eigenvalue problem ``A v = w B v``.
+        Must be positive-definite. If ``None``, the standard eigenvalue
+        problem is solved.
+    lower : bool, optional
+        Whether to use the lower or upper triangle of a (and b). Default True.
+
+    Returns
+    -------
+    w : TensorVariable
+        Eigenvalues of the system, in ascending order.
+    """
+    op = Eigvalsh(lower=lower)
+    if b is None:
+        signature = "(m,m)->(m)"
+        return cast(Variable, Blockwise(op, signature=signature)(a))
+
+    signature = "(m,m),(m,m)->(m)"
+    return cast(Variable, Blockwise(op, signature=signature)(a, b))

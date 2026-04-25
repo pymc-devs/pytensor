@@ -11,7 +11,6 @@ from pytensor.tensor.linalg.decomposition.eigen import (
     Eig,
     Eigh,
     Eigvalsh,
-    EigvalshGrad,
     eig,
     eigh,
     eigvalsh,

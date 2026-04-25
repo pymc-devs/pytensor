@@ -183,30 +183,98 @@ class TestEigh(TestEig):
             [a_val, b_val],
             rng=rng,
         )
+
+
+class TestEigvalsh(TestEig):
+    op = staticmethod(eigvalsh)
+    op_class = Eigvalsh
+
+    def test_infer_shape(self):
+        A = self.A
         S = self.S
-        a = matrix(dtype=self.dtype)
-        wu, vu = (out.eval({a: S}) for out in self.op(a, "U"))
-        wl, vl = (out.eval({a: S}) for out in self.op(a, "L"))
-        atol = 1e-14 if np.dtype(self.dtype).itemsize == 8 else 1e-5
-        rtol = 1e-14 if np.dtype(self.dtype).itemsize == 8 else 1e-3
-        np.testing.assert_allclose(wu, wl, atol=atol, rtol=rtol)
-        np.testing.assert_allclose(
-            vu * np.sign(vu[0, :]), vl * np.sign(vl[0, :]), atol=atol, rtol=rtol
+        self._compile_and_check(
+            [A],
+            [self.op(A)],
+            [S],
+            self.op_class,
+            warn=False,
         )
 
-    def test_grad(self):
+    @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
+    def test_eval(self, is_complex):
+        if is_complex:
+            dtype = "complex128" if self.dtype == "float64" else "complex64"
+        else:
+            dtype = self.dtype
+
+        A = matrix(dtype=dtype)
+        fn = function([A], self.op(A))
+
+        A_val = self.rng.normal(size=(5, 5)).astype(dtype)
+        if is_complex:
+            A_val = A_val + 1j * self.rng.normal(size=(5, 5)).astype(dtype)
+            A_val = A_val + A_val.T.conj()
+        else:
+            A_val = A_val + A_val.T
+
+        w = fn(A_val)
+        w_np = scipy.linalg.eigvalsh(A_val)
+        rtol = 1e-2 if np.finfo(dtype).bits <= 32 else 1e-7
+        np.testing.assert_allclose(np.abs(w), np.abs(w_np), rtol=rtol)
+
+    @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
+    def test_eval_generalized(self, is_complex):
+        if is_complex:
+            dtype = "complex128" if self.dtype == "float64" else "complex64"
+        else:
+            dtype = self.dtype
+
+        A = matrix(dtype=dtype)
+        B = matrix(dtype=dtype)
+        fn = function([A, B], self.op(A, B))
+
+        A_val = self.rng.normal(size=(5, 5)).astype(dtype)
+        if is_complex:
+            A_val = A_val + 1j * self.rng.normal(size=(5, 5)).astype(dtype)
+            A_val = A_val + A_val.T.conj()
+        else:
+            A_val = A_val + A_val.T
+
+        B_val = self.rng.normal(size=(5, 5)).astype(dtype)
+        if is_complex:
+            B_val = B_val + 1j * self.rng.normal(size=(5, 5)).astype(dtype)
+        B_val = B_val @ B_val.T.conj() + 50 * np.eye(5, dtype=dtype)
+
+        w = fn(A_val, B_val)
+        w_np = scipy.linalg.eigvalsh(A_val, B_val)
+        rtol = 5e-2 if np.finfo(dtype).bits <= 32 else 1e-7
+        np.testing.assert_allclose(np.abs(w), np.abs(w_np), rtol=rtol)
+
+    @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+    def test_grad_basic(self, lower):
         X = self.X
-        utt.verify_grad(lambda x: self.op(x.dot(x.T))[0], [X], rng=self.rng)
-        utt.verify_grad(lambda x: self.op(x.dot(x.T))[1], [X], rng=self.rng)
-        utt.verify_grad(lambda x: self.op(x.dot(x.T), "U")[0], [X], rng=self.rng)
-        utt.verify_grad(lambda x: self.op(x.dot(x.T), "U")[1], [X], rng=self.rng)
+        utt.verify_grad(lambda x: self.op(x.dot(x.T), lower=lower), [X], rng=self.rng)
 
+    @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+    def test_grad_generalized(self, lower):
+        rng = self.rng
 
-class TestEighFloat32(TestEigh):
-    dtype = "float32"
+        def make_spd(x):
+            return x @ x.T + 50 * pt.eye(x.shape[0])
 
-    def test_uplo(self):
-        super().test_uplo()
+        a_val = rng.normal(size=(5, 5)).astype(self.dtype)
+        b_val = rng.normal(size=(5, 5)).astype(self.dtype)
 
-    def test_grad(self):
-        super().test_grad()
+        # Gradients w.r.t. A
+        utt.verify_grad(
+            lambda a, b: eigh(a + a.T, make_spd(b), lower=lower)[0],
+            [a_val, b_val],
+            rng=rng,
+        )
+
+        # Gradients w.r.t B
+        utt.verify_grad(
+            lambda a, b: eigh(a + a.T, make_spd(b), lower=lower)[1],
+            [a_val, b_val],
+            rng=rng,
+        )
