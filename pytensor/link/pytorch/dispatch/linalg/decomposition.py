@@ -1,7 +1,7 @@
 import torch
 
 from pytensor.link.pytorch.dispatch import pytorch_funcify
-from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh
+from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.svd import SVD
 
@@ -41,6 +41,21 @@ def pytorch_funcify_Eigh(op, node, **kwargs):
         return torch.linalg.eigh(a, UPLO=UPLO)
 
     return eigh
+
+
+@pytorch_funcify.register(Eigvalsh)
+def pytorch_funcify_Eigvalsh(op, node, **kwargs):
+    UPLO = "L" if op.lower else "U"
+
+    if len(node.inputs) == 2:
+        raise NotImplementedError(
+            "torch.linalg.eigvalsh does not support generalized eigenvalue problems (b != None)"
+        )
+
+    def eigvalsh(a):
+        return torch.linalg.eigvalsh(a, UPLO=UPLO)
+
+    return eigvalsh
 
 
 @pytorch_funcify.register(QR)
