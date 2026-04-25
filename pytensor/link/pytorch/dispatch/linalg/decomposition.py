@@ -29,11 +29,16 @@ def pytorch_funcify_Eig(op, **kwargs):
 
 
 @pytorch_funcify.register(Eigh)
-def pytorch_funcify_Eigh(op, **kwargs):
-    uplo = op.UPLO
+def pytorch_funcify_Eigh(op, node, **kwargs):
+    UPLO = "L" if op.lower else "U"
 
-    def eigh(x, uplo=uplo):
-        return torch.linalg.eigh(x, UPLO=uplo)
+    if len(node.inputs) == 2:
+        raise NotImplementedError(
+            "torch.linalg.eigh does not support generalized eigenvalue problems (b != None)"
+        )
+
+    def eigh(a):
+        return torch.linalg.eigh(a, UPLO=UPLO)
 
     return eigh
 

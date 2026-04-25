@@ -12,7 +12,6 @@ from pytensor.tensor.linalg.inverse import matrix_inverse
 from pytensor.tensor.linalg.summary import det, slogdet
 from pytensor.tensor.math import clip, cosh
 from pytensor.tensor.type import matrix, vector
-from pytensor.tensor.type_other import NoneConst
 from tests.link.jax.test_basic import compare_jax_and_py
 
 
@@ -135,7 +134,7 @@ def test_jax_basic_multiout():
 
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
-    outs = eigh(x)
+    outs = eigh(x, driver="evd")
     compare_jax_and_py([x], outs, [X.astype(config.floatX)], assert_fn=assert_fn)
 
     outs = svd.svd(x)
@@ -165,7 +164,8 @@ def test_jax_eigvalsh(lower):
                 ).astype(config.floatX),
             ],
         )
-    out_no_b = eigvalsh(A, NoneConst, lower=lower)
+
+    out_no_b = eigvalsh(A, None, lower=lower)
     compare_jax_and_py(
         [A],
         [out_no_b],

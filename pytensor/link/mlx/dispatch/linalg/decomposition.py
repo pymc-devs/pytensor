@@ -85,12 +85,18 @@ def mlx_funcify_Eig(op, node, **kwargs):
 
 @mlx_funcify.register(Eigh)
 def mlx_funcify_Eigh(op, node, **kwargs):
-    uplo = op.UPLO
+    UPLO = "L" if op.lower else "U"
     X_dtype = getattr(mx, node.inputs[0].dtype)
 
-    def eigh(x):
+    if len(node.inputs) == 2:
+        raise NotImplementedError(
+            "mlx.core.linalg.eigh does not support generalized "
+            "eigenvalue problems (b != None)"
+        )
+
+    def eigh(a):
         return mx.linalg.eigh(
-            x.astype(dtype=X_dtype, stream=mx.cpu), UPLO=uplo, stream=mx.cpu
+            a.astype(dtype=X_dtype, stream=mx.cpu), UPLO=UPLO, stream=mx.cpu
         )
 
     return eigh

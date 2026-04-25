@@ -31,11 +31,15 @@ def jax_funcify_Eig(op, **kwargs):
 
 
 @jax_funcify.register(Eigh)
-def jax_funcify_Eigh(op, **kwargs):
-    uplo = op.UPLO
+def jax_funcify_Eigh(op, node, **kwargs):
+    lower = op.lower
+    if len(node.inputs) == 2:
+        raise NotImplementedError(
+            "jax.scipy.linalg.eigh does not support generalized eigenvalue problems (b != None)"
+        )
 
-    def eigh(x, uplo=uplo):
-        return jax.numpy.linalg.eigh(x, UPLO=uplo)
+    def eigh(a):
+        return jax.scipy.linalg.eigh(a, lower=lower)
 
     return eigh
 
