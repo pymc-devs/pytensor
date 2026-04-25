@@ -10,7 +10,6 @@ from pytensor.tensor.linalg.decomposition.cholesky import (
 from pytensor.tensor.linalg.decomposition.eigen import (
     Eig,
     Eigh,
-    EighGrad,
     Eigvalsh,
     EigvalshGrad,
     eig,

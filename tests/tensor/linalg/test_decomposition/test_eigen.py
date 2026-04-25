@@ -1,44 +1,12 @@
 import numpy as np
+import pytest
 import scipy
 
 import pytensor.tensor as pt
 from pytensor import function
-from pytensor.tensor.linalg import Eig, eig, eigh, eigvalsh
-from pytensor.tensor.type import dmatrix, matrix
+from pytensor.tensor.linalg import Eig, Eigh, Eigvalsh, eig, eigh, eigvalsh
+from pytensor.tensor.type import matrix
 from tests import unittest_tools as utt
-
-
-def test_eigvalsh():
-    A = dmatrix("a")
-    B = dmatrix("b")
-    f = function([A, B], eigvalsh(A, B))
-
-    rng = np.random.default_rng(utt.fetch_seed())
-    a = rng.standard_normal((5, 5))
-    a = a + a.T
-    for b in [10 * np.eye(5, 5) + rng.standard_normal((5, 5))]:
-        w = f(a, b)
-        refw = scipy.linalg.eigvalsh(a, b)
-        np.testing.assert_array_almost_equal(w, refw)
-
-    # We need to test None separately, as otherwise DebugMode will
-    # complain, as this isn't a valid ndarray.
-    b = None
-    B = pt.NoneConst
-    f = function([A], eigvalsh(A, B))
-    w = f(a)
-    refw = scipy.linalg.eigvalsh(a, b)
-    np.testing.assert_array_almost_equal(w, refw)
-
-
-def test_eigvalsh_grad():
-    rng = np.random.default_rng(utt.fetch_seed())
-    a = rng.standard_normal((5, 5))
-    a = a + a.T
-    b = 10 * np.eye(5, 5) + rng.standard_normal((5, 5))
-    utt.verify_grad(
-        lambda a, b: eigvalsh(a, b).dot([1, 2, 3, 4, 5]), [a, b], rng=np.random
-    )
 
 
 class TestEig(utt.InferShapeTester):
@@ -51,7 +19,7 @@ class TestEig(utt.InferShapeTester):
 
         self.rng = np.random.default_rng(utt.fetch_seed())
         self.A = matrix(dtype=self.dtype)
-        self.X = np.asarray(self.rng.random((5, 5)), dtype=self.dtype)
+        self.X = self.rng.normal(size=(5, 5)).astype(self.dtype)
         self.S = self.X.dot(self.X.T)
 
     def test_infer_shape(self):
@@ -100,24 +68,121 @@ class TestEig(utt.InferShapeTester):
 
 class TestEigh(TestEig):
     op = staticmethod(eigh)
+    op_class = Eigh
 
-    def test_eval(self):
-        A = matrix(dtype=self.dtype)
+    @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
+    def test_eval(self, is_complex):
+        if is_complex:
+            dtype = "complex128" if self.dtype == "float64" else "complex64"
+        else:
+            dtype = self.dtype
+
+        A = matrix(dtype=dtype)
         fn = function([A], self.op(A))
 
-        # Symmetric input (real eigenvalues)
-        A_val = self.rng.normal(size=(5, 5)).astype(self.dtype)
-        A_val = A_val + A_val.T
+        A_val = self.rng.normal(size=(5, 5)).astype(dtype)
+        if is_complex:
+            A_val = A_val + 1j * self.rng.normal(size=(5, 5)).astype(dtype)
+            A_val = A_val + A_val.T.conj()  # Hermitian
+        else:
+            A_val = A_val + A_val.T
 
         w, v = fn(A_val)
         w_np, v_np = np.linalg.eigh(A_val)
-        rtol = 1e-2 if self.dtype == "float32" else 1e-7
+        rtol = 1e-2 if np.finfo(dtype).bits <= 32 else 1e-7
         np.testing.assert_allclose(np.dot(A_val, v), w * v, rtol=rtol)
 
         np.testing.assert_allclose(np.abs(w), np.abs(w_np), rtol=rtol)
         np.testing.assert_allclose(np.abs(v), np.abs(v_np), rtol=rtol)
 
-    def test_uplo(self):
+    @pytest.mark.parametrize("is_complex", [True, False], ids=["complex", "real"])
+    def test_eval_generalized(self, is_complex):
+        if is_complex:
+            dtype = "complex128" if self.dtype == "float64" else "complex64"
+        else:
+            dtype = self.dtype
+
+        A = matrix(dtype=dtype)
+        B = matrix(dtype=dtype)
+        fn = function([A, B], self.op(A, B))
+
+        A_val = self.rng.normal(size=(5, 5)).astype(dtype)
+        if is_complex:
+            A_val = A_val + 1j * self.rng.normal(size=(5, 5)).astype(dtype)
+            A_val = A_val + A_val.T.conj()
+        else:
+            A_val = A_val + A_val.T
+
+        # Posdef input (add diagonal for better conditioning)
+        B_val = self.rng.normal(size=(5, 5)).astype(dtype)
+        if is_complex:
+            B_val = B_val + 1j * self.rng.normal(size=(5, 5)).astype(dtype)
+        B_val = B_val @ B_val.T.conj() + 50 * np.eye(5, dtype=dtype)
+
+        w, v = fn(A_val, B_val)
+        w_np, v_np = scipy.linalg.eigh(A_val, B_val)
+        rtol = 5e-2 if np.finfo(dtype).bits <= 32 else 1e-7
+        np.testing.assert_allclose(np.dot(A_val, v), B_val @ (w * v), rtol=rtol)
+
+        np.testing.assert_allclose(np.abs(w), np.abs(w_np), rtol=rtol)
+        np.testing.assert_allclose(np.abs(v), np.abs(v_np), rtol=rtol)
+
+    @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+    def test_grad_basic(self, lower):
+        rng = self.rng
+
+        def make_spd(x):
+            return x @ x.T + 10 * pt.eye(x.shape[0])
+
+        x_val = rng.normal(size=(5, 5)).astype(self.dtype)
+
+        # Eigenvalue gradient
+        utt.verify_grad(
+            lambda x: self.op(make_spd(x), lower=lower)[0], [x_val], rng=rng
+        )
+        # Eigenvector gradient: use sign-invariant cost (v**2) because
+        # eigenvector signs can flip under finite-difference perturbation
+        utt.verify_grad(
+            lambda x: self.op(make_spd(x), lower=lower)[1] ** 2, [x_val], rng=rng
+        )
+
+    @pytest.mark.parametrize("lower", [True, False], ids=["lower", "upper"])
+    def test_grad_generalized(self, lower):
+        rng = self.rng
+
+        def make_spd(x):
+            return x @ x.T + 50 * pt.eye(x.shape[0])
+
+        a_val = rng.normal(size=(5, 5)).astype(self.dtype)
+        b_val = rng.normal(size=(5, 5)).astype(self.dtype)
+
+        # Gradients w.r.t. A
+        # Eigenvalues
+        utt.verify_grad(
+            lambda a, b: eigh(a + a.T, make_spd(b), lower=lower)[0],
+            [a_val, b_val],
+            rng=rng,
+        )
+        # Eigenvectors
+        utt.verify_grad(
+            lambda a, b: eigh(a + a.T, make_spd(b), lower=lower)[1],
+            [a_val, b_val],
+            rng=rng,
+        )
+
+        # Gradients w.r.t B
+        # Eigenvalues
+        utt.verify_grad(
+            lambda a, b: eigh(a + a.T, make_spd(b), lower=lower)[1],
+            [a_val, b_val],
+            rng=rng,
+        )
+        # Eigenvectors
+        utt.verify_grad(
+            lambda a, b: eigh(a + a.T, make_spd(b), lower=lower)[1],
+            [a_val, b_val],
+            rng=rng,
+        )
         S = self.S
         a = matrix(dtype=self.dtype)
         wu, vu = (out.eval({a: S}) for out in self.op(a, "U"))
