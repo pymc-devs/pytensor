@@ -1,5 +1,3 @@
-import contextlib
-
 import numpy as np
 import pytest
 import scipy
@@ -31,9 +29,6 @@ floatX = config.floatX
 rng = np.random.default_rng(42849)
 
 
-# --- From test_nlinalg.py ---
-
-
 @pytest.mark.parametrize("input_dtype", ["int64", "float64", "complex128"])
 @pytest.mark.parametrize("symmetric", [True, False], ids=["symmetric", "general"])
 def test_Eig(input_dtype, symmetric):
@@ -47,7 +42,7 @@ def test_Eig(input_dtype, symmetric):
         x_val = x_val + x_val.T
 
     def assert_fn(x, y):
-        # eig can return equivalent values with some sign flips depending on impl, allow for that
+        # eig can return equivalent values with some sign flips depending on impl
         np.testing.assert_allclose(np.abs(x), np.abs(y), strict=True)
 
     g = eig(x)
@@ -66,93 +61,82 @@ def test_Eig(input_dtype, symmetric):
     )
 
 
+@pytest.mark.parametrize("lower", [True, False], ids=lambda x: f"lower={x}")
 @pytest.mark.parametrize(
-    "x, uplo, exc",
+    "overwrite_a", [False, True], ids=["no_overwrite", "overwrite_a"]
+)
+@pytest.mark.parametrize("driver", ["evr", "evd"], ids=lambda x: f"driver={x}")
+def test_Eigh(lower, overwrite_a, driver):
+    x = pt.dmatrix()
+    test_x = (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64"))
+    g = Eigh(lower=lower, overwrite_a=overwrite_a, driver=driver)(x)
+
+    # The numba c-contig overwrite_a path uses an UPLO flip that scipy's
+    # python implementation doesn't, so eigenvector signs may differ per
+    # column (both are valid). Compare W exactly and |V| element-wise.
+    def eigh_assert(numba_out, py_out):
+        if numba_out.ndim == 1:
+            np.testing.assert_allclose(numba_out, py_out, rtol=1e-4)
+        else:
+            np.testing.assert_allclose(np.abs(numba_out), np.abs(py_out), rtol=1e-4)
+
+    fn, _ = compare_numba_and_py(
+        [In(x, mutable=overwrite_a)],
+        g,
+        [test_x],
+        numba_mode=numba_inplace_mode,
+        inplace=True,
+        assert_fn=eigh_assert,
+    )
+
+    op = fn.maker.fgraph.outputs[0].owner.op
+    assert isinstance(op, Eigh)
+    if overwrite_a:
+        assert op.destroy_map == {1: [0]}
+    else:
+        assert op.destroy_map == {}
+
+    # Eigenvector signs are not unique, so check the eigenvalue equation
+    # A v = w v per call rather than comparing V matrices across calls.
+    def assert_reconstruction(val, expect_mutation):
+        snapshot = np.array(val)
+        w, v = fn(val)
+        np.testing.assert_allclose(test_x @ v, v * w, atol=1e-10)
+        np.testing.assert_allclose(np.sort(w), np.sort(np.linalg.eigvalsh(test_x)))
+        if expect_mutation:
+            assert not np.allclose(val, snapshot)
+        else:
+            np.testing.assert_allclose(val, snapshot)
+
+    # Real symmetric c-contig inputs are reused via UPLO flip when overwrite_a,
+    # so both f- and c-contig get mutated. Non-contig falls back to a copy.
+    assert_reconstruction(np.copy(test_x, order="F"), expect_mutation=overwrite_a)
+    assert_reconstruction(np.copy(test_x, order="C"), expect_mutation=overwrite_a)
+    assert_reconstruction(np.repeat(test_x, 2, axis=0)[::2], expect_mutation=False)
+
+
+def test_Eigh_integer_input():
+    x = pt.lmatrix()
+    test_x = np.array([[2, 1], [1, 3]], dtype="int64")
+    g = Eigh(lower=True)(x)
+    compare_numba_and_py([x], g, [test_x])
+
+
+@pytest.mark.parametrize(
+    "x, full_matrices, compute_uv",
     [
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            "L",
-            None,
-        ),
-        (
-            (
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            "U",
-            UserWarning,
-        ),
+        ((pt.dmatrix(), rng.random(size=(3, 3)).astype("float64")), True, True),
+        ((pt.dmatrix(), rng.random(size=(3, 3)).astype("float64")), False, True),
+        ((pt.lmatrix(), rng.integers(1, 10, size=(3, 3)).astype("int64")), True, True),
+        ((pt.lmatrix(), rng.integers(1, 10, size=(3, 3)).astype("int64")), True, False),
     ],
 )
-def test_Eigh(x, uplo, exc):
+def test_SVD(x, full_matrices, compute_uv):
     x, test_x = x
-    g = Eigh(uplo)(x)
-
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py([x], g, [test_x])
-
-
-@pytest.mark.parametrize(
-    "x, full_matrices, compute_uv, exc",
-    [
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            True,
-            True,
-            None,
-        ),
-        (
-            (
-                pt.dmatrix(),
-                (lambda x: x.T.dot(x))(rng.random(size=(3, 3)).astype("float64")),
-            ),
-            False,
-            True,
-            None,
-        ),
-        (
-            (
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            True,
-            True,
-            None,
-        ),
-        (
-            (
-                pt.lmatrix(),
-                (lambda x: x.T.dot(x))(
-                    rng.integers(1, 10, size=(3, 3)).astype("int64")
-                ),
-            ),
-            True,
-            False,
-            None,
-        ),
-    ],
-)
-def test_SVD(x, full_matrices, compute_uv, exc):
-    x, test_x = x
+    test_x = test_x.T @ test_x
     g = svd.SVD(full_matrices, compute_uv)(x)
 
-    cm = contextlib.suppress() if exc is None else pytest.warns(exc)
-    with cm:
-        compare_numba_and_py([x], g, [test_x])
-
-
-# --- From test_slinalg.py TestDecompositions ---
+    compare_numba_and_py([x], g, [test_x])
 
 
 class TestDecompositions:

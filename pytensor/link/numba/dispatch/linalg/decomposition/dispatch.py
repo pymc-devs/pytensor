@@ -1,16 +1,19 @@
-import warnings
-
-import numba
 import numpy as np
 
 from pytensor import config
 from pytensor.link.numba.dispatch import basic as numba_basic
 from pytensor.link.numba.dispatch.basic import (
     generate_fallback_impl,
-    get_numba_type,
     register_funcify_default_op_cache_key,
 )
 from pytensor.link.numba.dispatch.linalg.decomposition.cholesky import _cholesky
+from pytensor.link.numba.dispatch.linalg.decomposition.eigen import (
+    _eigh,
+    _eigh_evd,
+    _eigh_generalized,
+    _eigvalsh,
+    _eigvalsh_generalized,
+)
 from pytensor.link.numba.dispatch.linalg.decomposition.lu import (
     _lu_1,
     _lu_2,
@@ -41,7 +44,7 @@ from pytensor.link.numba.dispatch.linalg.decomposition.schur import (
     schur_real,
 )
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
-from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh
+from pytensor.tensor.linalg.decomposition.eigen import Eig, Eigh, Eigvalsh
 from pytensor.tensor.linalg.decomposition.lu import LU, LUFactor, PivotToPermutations
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
@@ -131,36 +134,105 @@ def numba_funcify_Eig(op, node, **kwargs):
 
 @register_funcify_default_op_cache_key(Eigh)
 def numba_funcify_Eigh(op, node, **kwargs):
-    uplo = op.UPLO
+    uplo_is_upper = not op.lower
+    generalized = len(node.inputs) == 2
+    driver = op.driver
 
-    if uplo != "L":
-        warnings.warn(
-            (
-                "Numba will use object mode to allow the "
-                "`UPLO` argument to `numpy.linalg.eigh`."
-            ),
-            UserWarning,
-        )
+    inp_dtype = node.inputs[0].type.numpy_dtype
+    discrete_inp = inp_dtype.kind in "ibu"
+    out_dtype = node.outputs[0].type.numpy_dtype
 
-        out_dtypes = tuple(o.type.numpy_dtype for o in node.outputs)
-        ret_sig = numba.types.Tuple(
-            [get_numba_type(node.outputs[0].type), get_numba_type(node.outputs[1].type)]
-        )
+    # Casting discrete input to float allocates a new buffer, so in-place is moot.
+    effective_overwrite_a = op.overwrite_a and not discrete_inp
+    effective_overwrite_b = op.overwrite_b and not discrete_inp
+
+    if generalized:
 
         @numba_basic.numba_njit
-        def eigh(x):
-            with numba.objmode(ret=ret_sig):
-                out = np.linalg.eigh(x, UPLO=uplo)
-                ret = (out[0].astype(out_dtypes[0]), out[1].astype(out_dtypes[1]))
-            return ret
+        def eigh(a, b):
+            if discrete_inp:
+                a = a.astype(out_dtype)
+                b = b.astype(out_dtype)
+            return _eigh_generalized(
+                a,
+                b,
+                np.int32(1) if uplo_is_upper else np.int32(0),
+                effective_overwrite_a,
+                effective_overwrite_b,
+            )
+
+    elif driver == "evd":
+
+        @numba_basic.numba_njit
+        def eigh(a):
+            if discrete_inp:
+                a = a.astype(out_dtype)
+            return _eigh_evd(
+                a,
+                np.int32(1) if uplo_is_upper else np.int32(0),
+                effective_overwrite_a,
+            )
 
     else:
 
         @numba_basic.numba_njit
-        def eigh(x):
-            return np.linalg.eigh(x)
+        def eigh(a):
+            if discrete_inp:
+                a = a.astype(out_dtype)
+            return _eigh(
+                a,
+                np.int32(1) if uplo_is_upper else np.int32(0),
+                effective_overwrite_a,
+            )
 
-    return eigh
+    cache_version = 1
+    return eigh, cache_version
+
+
+@register_funcify_default_op_cache_key(Eigvalsh)
+def numba_funcify_Eigvalsh(op, node, **kwargs):
+    uplo_is_upper = not op.lower
+    generalized = len(node.inputs) == 2
+    overwrite_a = op.overwrite_a
+    overwrite_b = op.overwrite_b
+
+    inp_dtype = node.inputs[0].type.numpy_dtype
+    discrete_inp = inp_dtype.kind in "ibu"
+    out_dtype = node.outputs[0].type.numpy_dtype
+
+    # Casting discrete input to float allocates a new buffer, so in-place is moot.
+    effective_overwrite_a = overwrite_a and not discrete_inp
+    effective_overwrite_b = overwrite_b and not discrete_inp
+
+    if generalized:
+
+        @numba_basic.numba_njit
+        def eigvalsh(a, b):
+            if discrete_inp:
+                a = a.astype(out_dtype)
+                b = b.astype(out_dtype)
+            return _eigvalsh_generalized(
+                a,
+                b,
+                np.int32(1) if uplo_is_upper else np.int32(0),
+                effective_overwrite_a,
+                effective_overwrite_b,
+            )
+
+    else:
+
+        @numba_basic.numba_njit
+        def eigvalsh(a):
+            if discrete_inp:
+                a = a.astype(out_dtype)
+            return _eigvalsh(
+                a,
+                np.int32(1) if uplo_is_upper else np.int32(0),
+                effective_overwrite_a,
+            )
+
+    cache_version = 1
+    return eigvalsh, cache_version
 
 
 @register_funcify_default_op_cache_key(Cholesky)

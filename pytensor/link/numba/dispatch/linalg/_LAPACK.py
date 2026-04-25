@@ -1376,3 +1376,459 @@ class _LAPACK:
                 )
 
         return tgsen
+
+    @classmethod
+    def numba_xsyevd(cls, dtype) -> CPUDispatcher:
+        """
+        Compute all eigenvalues and eigenvectors of a real symmetric matrix
+        using a divide-and-conquer algorithm (LAPACK xSYEVD).
+        """
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        unique_func_name = f"scipy.lapack.{kind}syevd"
+
+        @numba_basic.numba_njit
+        def get_syevd_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "syevd")
+            return ptr
+
+        syevd_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # JOBZ
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_ptr,  # A
+                nb_i32p,  # LDA
+                float_ptr,  # W
+                float_ptr,  # WORK
+                nb_i32p,  # LWORK
+                nb_i32p,  # IWORK (int array passed as i32 ptr)
+                nb_i32p,  # LIWORK
+                nb_i32p,  # INFO
+            )
+        )
+
+        @numba_basic.numba_njit
+        def syevd(JOBZ, UPLO, N, A, LDA, W, WORK, LWORK, IWORK, LIWORK, INFO):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_syevd_pointer,
+                func_type_ref=syevd_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(JOBZ, UPLO, N, A, LDA, W, WORK, LWORK, IWORK, LIWORK, INFO)
+
+        return syevd
+
+    @classmethod
+    def numba_xsygvd(cls, dtype) -> CPUDispatcher:
+        """
+        Compute all eigenvalues and eigenvectors of a generalized real symmetric
+        definite eigenproblem using a divide-and-conquer algorithm (LAPACK xSYGVD).
+
+        Solves A*v = w*B*v (ITYPE=1).
+        """
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        unique_func_name = f"scipy.lapack.{kind}sygvd"
+
+        @numba_basic.numba_njit
+        def get_sygvd_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "sygvd")
+            return ptr
+
+        sygvd_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # ITYPE
+                nb_i32p,  # JOBZ
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_ptr,  # A
+                nb_i32p,  # LDA
+                float_ptr,  # B
+                nb_i32p,  # LDB
+                float_ptr,  # W
+                float_ptr,  # WORK
+                nb_i32p,  # LWORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # LIWORK
+                nb_i32p,  # INFO
+            )
+        )
+
+        @numba_basic.numba_njit
+        def sygvd(
+            ITYPE, JOBZ, UPLO, N, A, LDA, B, LDB, W, WORK, LWORK, IWORK, LIWORK, INFO
+        ):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_sygvd_pointer,
+                func_type_ref=sygvd_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(
+                ITYPE,
+                JOBZ,
+                UPLO,
+                N,
+                A,
+                LDA,
+                B,
+                LDB,
+                W,
+                WORK,
+                LWORK,
+                IWORK,
+                LIWORK,
+                INFO,
+            )
+
+        return sygvd
+
+    @classmethod
+    def numba_xheevd(cls, dtype) -> CPUDispatcher:
+        """
+        Compute all eigenvalues and eigenvectors of a complex Hermitian matrix
+        using a divide-and-conquer algorithm (LAPACK xHEEVD).
+        """
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        real_ptr = nb_f64p if dtype is nb_c128 else nb_f32p
+        unique_func_name = f"scipy.lapack.{kind}heevd"
+
+        @numba_basic.numba_njit
+        def get_heevd_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "heevd")
+            return ptr
+
+        heevd_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # JOBZ
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_ptr,  # A (complex)
+                nb_i32p,  # LDA
+                real_ptr,  # W (real eigenvalues)
+                float_ptr,  # WORK (complex)
+                nb_i32p,  # LWORK
+                real_ptr,  # RWORK (real)
+                nb_i32p,  # LRWORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # LIWORK
+                nb_i32p,  # INFO
+            )
+        )
+
+        @numba_basic.numba_njit
+        def heevd(
+            JOBZ, UPLO, N, A, LDA, W, WORK, LWORK, RWORK, LRWORK, IWORK, LIWORK, INFO
+        ):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_heevd_pointer,
+                func_type_ref=heevd_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(
+                JOBZ,
+                UPLO,
+                N,
+                A,
+                LDA,
+                W,
+                WORK,
+                LWORK,
+                RWORK,
+                LRWORK,
+                IWORK,
+                LIWORK,
+                INFO,
+            )
+
+        return heevd
+
+    @classmethod
+    def numba_xsyevr(cls, dtype) -> CPUDispatcher:
+        """
+        Compute eigenvalues and eigenvectors of a real symmetric matrix using the MRRR algorithm (LAPACK xSYEVR).
+        This is scipy's default driver for eigh.
+        """
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        unique_func_name = f"scipy.lapack.{kind}syevr"
+
+        @numba_basic.numba_njit
+        def get_syevr_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "syevr")
+            return ptr
+
+        syevr_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # JOBZ
+                nb_i32p,  # RANGE
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_ptr,  # A
+                nb_i32p,  # LDA
+                float_ptr,  # VL
+                float_ptr,  # VU
+                nb_i32p,  # IL
+                nb_i32p,  # IU
+                float_ptr,  # ABSTOL
+                nb_i32p,  # M
+                float_ptr,  # W
+                float_ptr,  # Z
+                nb_i32p,  # LDZ
+                nb_i32p,  # ISUPPZ
+                float_ptr,  # WORK
+                nb_i32p,  # LWORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # LIWORK
+                nb_i32p,  # INFO
+            )
+        )
+
+        @numba_basic.numba_njit
+        def syevr(
+            JOBZ,
+            RANGE,
+            UPLO,
+            N,
+            A,
+            LDA,
+            VL,
+            VU,
+            IL,
+            IU,
+            ABSTOL,
+            M,
+            W,
+            Z,
+            LDZ,
+            ISUPPZ,
+            WORK,
+            LWORK,
+            IWORK,
+            LIWORK,
+            INFO,
+        ):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_syevr_pointer,
+                func_type_ref=syevr_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(
+                JOBZ,
+                RANGE,
+                UPLO,
+                N,
+                A,
+                LDA,
+                VL,
+                VU,
+                IL,
+                IU,
+                ABSTOL,
+                M,
+                W,
+                Z,
+                LDZ,
+                ISUPPZ,
+                WORK,
+                LWORK,
+                IWORK,
+                LIWORK,
+                INFO,
+            )
+
+        return syevr
+
+    @classmethod
+    def numba_xheevr(cls, dtype) -> CPUDispatcher:
+        """
+        Compute eigenvalues and eigenvectors of a complex Hermitian matrix using the MRRR algorithm (LAPACK xHEEVR).
+        This is scipy's default driver for eigh with complex inputs.
+        """
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        real_ptr = nb_f64p if dtype is nb_c128 else nb_f32p
+        unique_func_name = f"scipy.lapack.{kind}heevr"
+
+        @numba_basic.numba_njit
+        def get_heevr_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "heevr")
+            return ptr
+
+        heevr_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # JOBZ
+                nb_i32p,  # RANGE
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_ptr,  # A (complex)
+                nb_i32p,  # LDA
+                real_ptr,  # VL
+                real_ptr,  # VU
+                nb_i32p,  # IL
+                nb_i32p,  # IU
+                real_ptr,  # ABSTOL
+                nb_i32p,  # M
+                real_ptr,  # W (real eigenvalues)
+                float_ptr,  # Z (complex eigenvectors)
+                nb_i32p,  # LDZ
+                nb_i32p,  # ISUPPZ
+                float_ptr,  # WORK (complex)
+                nb_i32p,  # LWORK
+                real_ptr,  # RWORK (real)
+                nb_i32p,  # LRWORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # LIWORK
+                nb_i32p,  # INFO
+            )
+        )
+
+        @numba_basic.numba_njit
+        def heevr(
+            JOBZ,
+            RANGE,
+            UPLO,
+            N,
+            A,
+            LDA,
+            VL,
+            VU,
+            IL,
+            IU,
+            ABSTOL,
+            M,
+            W,
+            Z,
+            LDZ,
+            ISUPPZ,
+            WORK,
+            LWORK,
+            RWORK,
+            LRWORK,
+            IWORK,
+            LIWORK,
+            INFO,
+        ):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_heevr_pointer,
+                func_type_ref=heevr_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(
+                JOBZ,
+                RANGE,
+                UPLO,
+                N,
+                A,
+                LDA,
+                VL,
+                VU,
+                IL,
+                IU,
+                ABSTOL,
+                M,
+                W,
+                Z,
+                LDZ,
+                ISUPPZ,
+                WORK,
+                LWORK,
+                RWORK,
+                LRWORK,
+                IWORK,
+                LIWORK,
+                INFO,
+            )
+
+        return heevr
+
+    @classmethod
+    def numba_xhegvd(cls, dtype) -> CPUDispatcher:
+        """
+        Compute all eigenvalues and eigenvectors of a generalized complex Hermitian
+        definite eigenproblem using a divide-and-conquer algorithm (LAPACK xHEGVD).
+
+        Solves A*v = w*B*v (ITYPE=1).
+        """
+        kind = get_blas_kind(dtype)
+        float_ptr = _get_nb_float_from_dtype(kind)
+        real_ptr = nb_f64p if dtype is nb_c128 else nb_f32p
+        unique_func_name = f"scipy.lapack.{kind}hegvd"
+
+        @numba_basic.numba_njit
+        def get_hegvd_pointer():
+            with numba.objmode(ptr=types.intp):
+                ptr = get_lapack_ptr(dtype, "hegvd")
+            return ptr
+
+        hegvd_function_type = types.FunctionType(
+            types.void(
+                nb_i32p,  # ITYPE
+                nb_i32p,  # JOBZ
+                nb_i32p,  # UPLO
+                nb_i32p,  # N
+                float_ptr,  # A (complex)
+                nb_i32p,  # LDA
+                float_ptr,  # B (complex)
+                nb_i32p,  # LDB
+                real_ptr,  # W (real eigenvalues)
+                float_ptr,  # WORK (complex)
+                nb_i32p,  # LWORK
+                real_ptr,  # RWORK (real)
+                nb_i32p,  # LRWORK
+                nb_i32p,  # IWORK
+                nb_i32p,  # LIWORK
+                nb_i32p,  # INFO
+            )
+        )
+
+        @numba_basic.numba_njit
+        def hegvd(
+            ITYPE,
+            JOBZ,
+            UPLO,
+            N,
+            A,
+            LDA,
+            B,
+            LDB,
+            W,
+            WORK,
+            LWORK,
+            RWORK,
+            LRWORK,
+            IWORK,
+            LIWORK,
+            INFO,
+        ):
+            fn = _call_cached_ptr(
+                get_ptr_func=get_hegvd_pointer,
+                func_type_ref=hegvd_function_type,
+                unique_func_name_lit=unique_func_name,
+            )
+            fn(
+                ITYPE,
+                JOBZ,
+                UPLO,
+                N,
+                A,
+                LDA,
+                B,
+                LDB,
+                W,
+                WORK,
+                LWORK,
+                RWORK,
+                LRWORK,
+                IWORK,
+                LIWORK,
+                INFO,
+            )
+
+        return hegvd
