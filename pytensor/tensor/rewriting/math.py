@@ -19,15 +19,19 @@ from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.utils import get_clients_at_depth
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import (
     Alloc,
     Join,
     MakeVector,
     alloc,
+    alloc_diag,
     as_tensor_variable,
     atleast_Nd,
     cast,
     constant,
+    diagonal,
     expand_dims,
     get_underlying_scalar_constant_value,
     moveaxis,
@@ -264,6 +268,46 @@ def local_lift_transpose_through_dot(fgraph, node):
     ret = atleast_Nd(ret, n=replaced_client.type.ndim)
 
     return {replaced_client: ret}
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([_matmul, Dot])
+def dot_diag_to_elemwise(fgraph, node):
+    """Replace matmul with a square and diagonal operand by elementwise scaling.
+
+    dot(D1, D2) -> alloc_diag(diagonal(D1) * diagonal(D2))   (both diagonal)
+    dot(D, X) -> diagonal(D)[..., :, None] * X   (row scaling)
+    dot(X, D) -> X * diagonal(D)[..., None, :]   (column scaling)
+    """
+    a, b = node.inputs
+    old_out = node.outputs[0]
+
+    def _is_static_square(var):
+        shape = var.type.shape
+        return len(shape) >= 2 and shape[-2] == shape[-1] and shape[-2] is not None
+
+    a_is_diag = check_assumption(fgraph, a, DIAGONAL) and _is_static_square(a)
+    b_is_diag = check_assumption(fgraph, b, DIAGONAL) and _is_static_square(b)
+
+    if a_is_diag and b_is_diag:
+        a_diag = diagonal(a, axis1=-2, axis2=-1)
+        b_diag = diagonal(b, axis1=-2, axis2=-1)
+        new_out = alloc_diag(a_diag * b_diag, axis1=-2, axis2=-1)
+        copy_stack_trace(old_out, new_out)
+        return [new_out]
+
+    if a_is_diag:
+        a_diag = diagonal(a, axis1=-2, axis2=-1)
+        new_out = a_diag[..., :, None] * b
+        copy_stack_trace(old_out, new_out)
+        return [new_out]
+
+    if b_is_diag:
+        b_diag = diagonal(b, axis1=-2, axis2=-1)
+        new_out = a * b_diag[..., None, :]
+        copy_stack_trace(old_out, new_out)
+        return [new_out]
 
 
 def _batched_matmul_to_core_matmul(fgraph, node, allow_reshape: bool):

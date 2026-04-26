@@ -9,12 +9,16 @@ from pytensor.compile import get_default_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad
 from pytensor.graph import ancestors
+from pytensor.graph.rewriting.utils import rewrite_graph
 from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, solve
+from pytensor.tensor.linalg.solvers.linear_control import (
+    solve_sylvester,
+)
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
 from pytensor.tensor.linalg.solvers.triangular import SolveTriangular, solve_triangular
 from pytensor.tensor.linalg.solvers.tridiagonal import (
@@ -26,6 +30,7 @@ from pytensor.tensor.rewriting.linalg.solvers import (
     scan_split_non_sequence_decomposition_and_solve,
 )
 from pytensor.tensor.type import matrix, tensor
+from tests.unittest_tools import assert_equal_computations
 
 
 def test_generic_solve_to_solve_triangular():
@@ -70,30 +75,34 @@ def test_generic_solve_to_solve_triangular():
 
 
 def test_psd_solve_with_chol():
-    X = matrix("X")
-    X.tag.psd = True
-    X_inv = pt.linalg.solve(X, pt.identity_like(X))
+    """Test that solve(A, b) with PSD A gets rewritten to cholesky + cho_solve."""
+    A = matrix("A")
+    b = matrix("b")
+    A_psd = pt.assume(A, positive_definite=True)
+    out = pt.linalg.solve(A_psd, b)
 
-    f = pytensor.function([X], X_inv, mode="FAST_RUN")
+    rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
 
-    nodes = f.maker.fgraph.apply_nodes
+    L = cholesky(A_psd)
+    expected = cho_solve((L, True), b, b_ndim=2)
 
-    assert not any(isinstance(node.op, Solve) for node in nodes)
-    assert any(isinstance(node.op, Cholesky) for node in nodes)
-    assert any(isinstance(node.op, SolveTriangular) for node in nodes)
+    assert_equal_computations([rewritten], [expected])
 
-    # Numeric test
-    rng = np.random.default_rng(sum(map(ord, "test_psd_solve_with_chol")))
 
-    L = rng.normal(size=(5, 5)).astype(config.floatX)
-    X_psd = L @ L.T
-    X_psd_inv = f(X_psd)
-    assert_allclose(
-        X_psd_inv,
-        np.linalg.inv(X_psd),
-        atol=1e-4 if config.floatX == "float32" else 1e-8,
-        rtol=1e-4 if config.floatX == "float32" else 1e-8,
-    )
+def test_paired_triangular_solves_to_cho_solve():
+    """Test that paired triangular solves from Cholesky get fused into cho_solve."""
+    A = matrix("A")
+    b = matrix("b")
+
+    # Manually create the pattern: solve_triangular(L.T, solve_triangular(L, b))
+    L = pt.linalg.cholesky(A, lower=True)
+    Li_b = pt.linalg.solve_triangular(L, b, lower=True, b_ndim=2)
+    x = pt.linalg.solve_triangular(L.mT, Li_b, lower=False, b_ndim=2)
+
+    rewritten = rewrite_graph(x, include=("canonicalize", "stabilize", "specialize"))
+    expected = cho_solve((L, True), b, b_ndim=2)
+
+    assert_equal_computations([rewritten], [expected])
 
 
 class TestBatchedVectorBSolveToMatrixBSolve:
@@ -439,3 +448,104 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     resx1 = fn_opt(A_test, x0_test)
     rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+class TestDiagonalSolveToDivision:
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    @pytest.mark.parametrize(
+        "make_diag",
+        [
+            pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+            pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+        ],
+    )
+    def test_solve_diag(self, b_ndim, make_diag):
+        d = pt.dvector("d", shape=(5,))
+        b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
+        D = make_diag(d)
+        out = solve(D, b, b_ndim=b_ndim)
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = b / d if b_ndim == 1 else b / d[..., :, None]
+
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    def test_solve_triangular_diag(self, b_ndim):
+        d = pt.dvector("d")
+        b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
+        D = pt.diag(d)
+        out = solve_triangular(D, b, lower=True, b_ndim=b_ndim)
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = b / d if b_ndim == 1 else b / d[..., :, None]
+
+        assert_equal_computations([rewritten], [expected])
+
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    def test_solve_triangular_unit_diag(self, b_ndim):
+        d = pt.dvector("d")
+        b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
+        D = pt.diag(d)
+        out = solve_triangular(D, b, lower=True, unit_diagonal=True, b_ndim=b_ndim)
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+
+        assert_equal_computations([rewritten], [b])
+
+    @pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+    def test_cho_solve_diag(self, b_ndim):
+        d = pt.dvector("d", shape=(5,))
+        b = pt.tensor("b", shape=(5,) if b_ndim == 1 else (5, 3), dtype="float64")
+        L = pt.diag(d)
+        out = cho_solve((L, True), b, b_ndim=b_ndim)
+
+        rewritten = rewrite_graph(
+            out, include=("canonicalize", "stabilize", "specialize")
+        )
+        expected = b / pt.square(d) if b_ndim == 1 else b / pt.square(d[..., :, None])
+
+        assert_equal_computations([rewritten], [expected])
+
+
+@pytest.mark.parametrize(
+    "make_diag",
+    [
+        pytest.param(lambda d: pt.diag(d), id="alloc_diag"),
+        pytest.param(lambda d: pt.eye(5) * d, id="eye_mul"),
+    ],
+)
+def test_solve_sylvester_both_diag(make_diag):
+    n = 5
+    a = pt.dvector("a", shape=(n,))
+    b = pt.dvector("b", shape=(n,))
+    C = pt.dmatrix("C", shape=(n, n))
+
+    A = make_diag(a)
+    B = make_diag(b)
+    X = solve_sylvester(A, B, C)
+
+    rewritten = rewrite_graph(X, include=("canonicalize", "stabilize"))
+
+    expected = C / (a[:, None] + b[None, :])
+
+    assert_equal_computations([rewritten], [expected])
+
+
+def test_orthogonal_solve_to_transpose_matmul():
+    n = 5
+    rewrites = ("canonicalize", "stabilize", "ShapeOpt")
+
+    Q = pt.dmatrix("Q", shape=(n, n))
+    Q_orth = pt.assume(Q, orthogonal=True)
+    b = pt.dmatrix("b", shape=(n, 3))
+    out = solve(Q_orth, b)
+    rewritten = rewrite_graph(out, include=rewrites)
+    expected = rewrite_graph(Q_orth.mT @ b, include=rewrites)
+    assert_equal_computations([rewritten], [expected])

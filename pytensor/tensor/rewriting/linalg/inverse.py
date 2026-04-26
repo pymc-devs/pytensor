@@ -1,10 +1,13 @@
 from pytensor import tensor as pt
-from pytensor.graph import Apply, Constant, FunctionGraph
+from pytensor.graph import Apply, FunctionGraph
 from pytensor.graph.rewriting.basic import (
     node_rewriter,
 )
 from pytensor.graph.rewriting.unify import OpPattern
-from pytensor.tensor.basic import AllocDiag, Eye
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.orthogonal import ORTHOGONAL
+from pytensor.tensor.assumptions.utils import check_assumption
+from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal, block_diag
@@ -19,7 +22,7 @@ from pytensor.tensor.rewriting.basic import (
     register_stabilize,
 )
 from pytensor.tensor.rewriting.blockwise import blockwise_of
-from pytensor.tensor.rewriting.linalg.utils import MATRIX_INVERSE_OPS, is_eye_mul
+from pytensor.tensor.rewriting.linalg.utils import MATRIX_INVERSE_OPS
 
 
 @register_canonicalize
@@ -35,24 +38,15 @@ def transpose_of_inv(fgraph, node):
 @register_stabilize
 @node_rewriter([Dot])
 def inv_to_solve(fgraph, node):
-    """
-    This utilizes a boolean `symmetric` tag on the matrices.
-
-    TODO: Exploit other assumptions like 'triangular' and 'psd'
-    TODO: Handle expand_dims / matrix transpose between inv and dot
-    """
+    """Replace inv(X) @ b with solve(X, b) and b @ inv(X) with solve(X.T, b.T).T."""
     l, r = node.inputs
     match l.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            assume_a = "sym" if getattr(X.tag, "symmetric", False) else "gen"
-            return [solve(X, r, assume_a=assume_a)]
+            return [solve(X, r)]
 
     match r.owner_op_and_inputs:
         case (Blockwise(MatrixInverse()), X):
-            if getattr(X.tag, "symmetric", False):
-                return [solve(X, (l.mT), assume_a="sym").mT]
-            else:
-                return [solve((X.mT), (l.mT)).mT]
+            return [solve(X.mT, l.mT).mT]
 
     return None
 
@@ -87,43 +81,26 @@ def inv_of_inv(fgraph, node):
 @register_canonicalize
 @register_stabilize
 @node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
+def inv_of_orthogonal_to_transpose(fgraph, node):
+    """inv(Q) -> Q.T when Q is orthogonal."""
+    [X] = node.inputs
+    if not check_assumption(fgraph, X, ORTHOGONAL):
+        return None
+    return [X.mT]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(MATRIX_INVERSE_OPS)])
 def inv_of_diag_to_diag_reciprocal(fgraph, node):
-    """
-     This rewrite takes advantage of the fact that for a diagonal matrix, the inverse is a diagonal matrix with the new diagonal entries as reciprocals of the original diagonal elements.
-     This function deals with diagonal matrix arising from the multiplicaton of eye with a scalar/vector/matrix
-
-    Parameters
-    ----------
-    fgraph: FunctionGraph
-        Function graph being optimized
-    node: Apply
-        Node of the function graph to be optimized
-
-    Returns
-    -------
-    list of Variable, optional
-        List of optimized variables, or None if no optimization was performed
-    """
+    """inv(D) -> AllocDiag(1 / diagonal(D)) for diagonal D."""
     inp = node.inputs[0]
 
-    # Check for diagonal constructors first
-    match inp.owner_op_and_inputs:
-        case (Eye(), _, _, Constant(0)):
-            return [inp]
-        case (AllocDiag(offset=0, axis1=axis1, axis2=axis2), inv_input):
-            ndim = inv_input.type.ndim
-            if axis1 == ndim - 1 and axis2 == ndim:
-                return [pt.diag(1 / inv_input)]
+    if not check_assumption(fgraph, inp, DIAGONAL):
+        return None
 
-    # Check if the input is an elemwise multiply with identity matrix -- this also results in a diagonal matrix
-    match is_eye_mul(inp):
-        case (eye_term, non_eye_term):
-            # For a matrix, we have to first extract the diagonal (non-zero values) and then only use those
-            if non_eye_term.type.broadcastable[-2:] == (False, False):
-                non_eye_diag = non_eye_term.diagonal(axis1=-1, axis2=-2)
-                non_eye_term = pt.shape_padaxis(non_eye_diag, -2)
-
-            return [eye_term / non_eye_term]
+    diag_vals = pt.diagonal(inp, axis1=-2, axis2=-1)
+    return [alloc_diag(1 / diag_vals, axis1=-2, axis2=-1)]
 
 
 @register_specialize
@@ -159,5 +136,5 @@ def lift_linalg_of_expanded_matrices(fgraph: FunctionGraph, node: Apply):
     match y.owner_op_and_inputs:
         case (Blockwise(BlockDiagonal()), *inner_matrices):
             return [block_diag(*(outer_op(m) for m in inner_matrices))]
-        case (KroneckerProduct(), *inner_matrices):
-            return [kron(*(outer_op(m) for m in inner_matrices))]
+        case (KroneckerProduct(), *inner_matrices):  # type: ignore[unreachable, unused-ignore]
+            return [kron(*(outer_op(m) for m in inner_matrices))]  # type: ignore[unreachable]

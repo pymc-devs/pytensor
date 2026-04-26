@@ -1,17 +1,23 @@
+from pytensor import tensor as pt
 from pytensor.graph.rewriting.basic import (
     copy_stack_trace,
     node_rewriter,
 )
-from pytensor.tensor.basic import ExtractDiag, concatenate, diag
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.orthogonal import ORTHOGONAL
+from pytensor.tensor.assumptions.utils import check_assumption
+from pytensor.tensor.basic import ExtractDiag, alloc_diag, concatenate, diag
 from pytensor.tensor.blockwise import Blockwise
+from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.constructors import BlockDiagonal
-from pytensor.tensor.linalg.products import KroneckerProduct
+from pytensor.tensor.linalg.products import Expm, KroneckerProduct
 from pytensor.tensor.linalg.summary import det
-from pytensor.tensor.math import outer, prod
+from pytensor.tensor.math import Dot, outer, prod
 from pytensor.tensor.rewriting.basic import (
     register_canonicalize,
     register_stabilize,
 )
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 
 
 @register_canonicalize
@@ -152,3 +158,71 @@ def det_of_kronecker(fgraph, node):
                 [dets[i] ** (prod_sizes / sizes[i]) for i in range(2)], axis=-1
             )
             return [det_final]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([KroneckerProduct])
+def kron_of_diagonal_to_diagonal(fgraph, node):
+    """kron(D1, D2) -> alloc_diag(outer_product) when both inputs are diagonal."""
+    a, b = node.inputs
+
+    if not (
+        check_assumption(fgraph, a, DIAGONAL) and check_assumption(fgraph, b, DIAGONAL)
+    ):
+        return None
+
+    diag_a = pt.diagonal(a, axis1=-2, axis2=-1)
+    diag_b = pt.diagonal(b, axis1=-2, axis2=-1)
+
+    kron_diag = pt.join_dims(diag_a[..., :, None] * diag_b[..., None, :], start_axis=-2)
+    return [alloc_diag(kron_diag, axis1=-2, axis2=-1)]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(Expm)])
+def expm_of_diag(fgraph, node):
+    """expm(D) -> diag(exp(diagonal(D))) for diagonal D."""
+    [X] = node.inputs
+
+    if all(X.type.broadcastable[-2:]):
+        return [pt.exp(X)]
+
+    if not check_assumption(fgraph, X, DIAGONAL):
+        return None
+
+    diag_vals = pt.exp(pt.diagonal(X, axis1=-2, axis2=-1))
+    new_out = alloc_diag(diag_vals, axis1=-2, axis2=-1)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([Dot, blockwise_of(Dot)])
+def orthogonal_dot_transpose_to_eye(fgraph, node):
+    """Replace X @ X.T -> eye and X.T @ X -> eye when X is orthogonal."""
+    a, b = node.inputs
+    if not check_assumption(fgraph, a, ORTHOGONAL) or not check_assumption(
+        fgraph, b, ORTHOGONAL
+    ):
+        return None
+
+    # X @ X.T case
+    match b.owner_op_and_inputs:
+        case (DimShuffle(is_matrix_transpose=True), b_inner) if b_inner is a:
+            result = pt.eye(a.shape[-2], dtype=a.type.dtype)
+            if a.type.ndim > 2:
+                result = pt.broadcast_to(result, (*a.shape[:-2], *result.shape[-2:]))
+            copy_stack_trace(node.outputs[0], result)
+            return [result]
+
+    # X.T @ X case
+    match a.owner_op_and_inputs:
+        case (DimShuffle(is_matrix_transpose=True), a_inner) if a_inner is b:
+            result = pt.eye(b.shape[-1], dtype=b.type.dtype)
+            if b.type.ndim > 2:
+                result = pt.broadcast_to(result, (*b.shape[:-2], *result.shape[-2:]))
+            copy_stack_trace(node.outputs[0], result)
+            return [result]

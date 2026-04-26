@@ -12,15 +12,22 @@ from pytensor.graph.rewriting.basic import (
 from pytensor.graph.rewriting.unify import OpPattern
 from pytensor.scan.op import Scan
 from pytensor.scan.rewriting import scan_seqopt1
+from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.orthogonal import ORTHOGONAL
+from pytensor.tensor.assumptions.positive_definite import POSITIVE_DEFINITE
+from pytensor.tensor.assumptions.symmetric import SYMMETRIC
+from pytensor.tensor.assumptions.triangular import LOWER_TRIANGULAR, UPPER_TRIANGULAR
+from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import atleast_Nd
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import lu_factor
 from pytensor.tensor.linalg.solvers.core import SolveBase
-from pytensor.tensor.linalg.solvers.general import Solve, lu_solve
+from pytensor.tensor.linalg.solvers.general import Solve, lu_solve, solve
 from pytensor.tensor.linalg.solvers.linear_control import (
     SolveBilinearDiscreteLyapunov,
+    SolveSylvester,
     solve_discrete_lyapunov,
 )
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
@@ -107,18 +114,90 @@ def batched_vector_b_solve_to_matrix_b_solve(fgraph, node):
 @register_stabilize
 @node_rewriter([blockwise_of(OpPattern(Solve, b_ndim=2))])
 def psd_solve_to_chol_solve(fgraph, node):
-    """
-    This utilizes the Solve assume_a flag or a boolean `psd` tag on matrices.
-    """
+    """Rewrite solve(A, b) → triangular solves via Cholesky when A is positive-definite."""
     assume_a = node.op.core_op.assume_a
-    A, b = node.inputs  # result is the solution to Ax=b
-    if assume_a == "pos" or getattr(A.tag, "psd", None) is True:
+    A, b = node.inputs
+    if assume_a == "pos" or check_assumption(fgraph, A, POSITIVE_DEFINITE):
         L = cholesky(A)
-        # N.B. this can be further reduced to cho_solve Op
-        #     if no other Op makes use of the L matrix
         Li_b = solve_triangular(L, b, lower=True, b_ndim=2)
         x = solve_triangular((L.mT), Li_b, lower=False, b_ndim=2)
         return [x]
+
+
+@register_specialize
+@node_rewriter([blockwise_of(SolveTriangular)])
+def paired_triangular_solves_to_cho_solve(fgraph, node):
+    """Fuse paired triangular solves from Cholesky into a single cho_solve.
+
+    solve_triangular(L.T, solve_triangular(L, b), lower=False) -> cho_solve((L, True), b)
+    """
+    core_op = node.op.core_op
+
+    # We're looking for the outer solve: solve_triangular(L.T, ..., lower=False)
+    if core_op.lower:
+        return None
+
+    L_T, inner_result = node.inputs
+
+    # Check L.T is a matrix transpose of a Cholesky factor
+    match L_T.owner_op_and_inputs:
+        case (DimShuffle(is_left_expanded_matrix_transpose=True), L):
+            pass
+        case _:
+            return None
+
+    # L must be output of a Cholesky(lower=True)
+    match L.owner_op:
+        case Blockwise(Cholesky(lower=True)):
+            pass
+        case _:
+            return None
+
+    # inner_result must be solve_triangular(L, b, lower=True)
+    match inner_result.owner_op_and_inputs:
+        case (Blockwise(SolveTriangular(lower=True)), inner_L, b):
+            pass
+        case _:
+            return None
+
+    # inner_L must be the same Cholesky output as L
+    if inner_L is not L:
+        return None
+
+    b_ndim = core_op.b_ndim
+    new_out = cho_solve((L, True), b, b_ndim=b_ndim)
+    copy_stack_trace(node.outputs[0], new_out)
+    return [new_out]
+
+
+@register_stabilize
+@register_canonicalize
+@node_rewriter([blockwise_of(OpPattern(Solve, assume_a="gen"))])
+def generic_solve_to_structured_form(fgraph, node):
+    """Upgrade solve(A, b, assume_a='gen') based on known structure of A.
+
+    Priority order (most specialized first):
+    - LOWER_TRIANGULAR -> solve_triangular(lower=True)
+    - UPPER_TRIANGULAR -> solve_triangular(lower=False)
+    - POSITIVE_DEFINITE -> solve(assume_a='pos')
+    - SYMMETRIC → solve(assume_a='sym')
+    """
+    b_ndim = node.op.core_op.b_ndim
+    A, b = node.inputs
+
+    if check_assumption(fgraph, A, LOWER_TRIANGULAR):
+        return [solve_triangular(A, b, lower=True, b_ndim=b_ndim)]
+
+    if check_assumption(fgraph, A, UPPER_TRIANGULAR):
+        return [solve_triangular(A, b, lower=False, b_ndim=b_ndim)]
+
+    if check_assumption(fgraph, A, POSITIVE_DEFINITE):
+        return [solve(A, b, assume_a="pos", b_ndim=b_ndim)]
+
+    if check_assumption(fgraph, A, SYMMETRIC):
+        return [solve(A, b, assume_a="sym", b_ndim=b_ndim)]
+
+    return None
 
 
 @register_stabilize
@@ -159,6 +238,94 @@ def scalar_solve_to_division(fgraph, node):
 
     copy_stack_trace(old_out, new_out)
 
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
+def diagonal_solve_to_division(fgraph, node):
+    """Replace solve(D, b) with b / diagonal(D) when D is known diagonal."""
+    a, b = node.inputs
+
+    # Scalar case already handled by scalar_solve_to_division
+    if all(a.type.broadcastable[-2:]):
+        return None
+
+    if not check_assumption(fgraph, a, DIAGONAL):
+        return None
+
+    core_op = node.op.core_op
+    b_ndim = core_op.b_ndim
+    a_diag = pt.diagonal(a, axis1=-2, axis2=-1)
+
+    match core_op:
+        case SolveTriangular(unit_diagonal=True):
+            # Unit diagonal means diag is all ones; solve is identity
+            return [b]
+        case Solve() | SolveTriangular():
+            if b_ndim == 1:
+                new_out = b / a_diag
+            else:
+                new_out = b / a_diag[..., :, None]
+        case CholeskySolve():
+            # D is the Cholesky factor; D @ D.T = diag(d^2) for diagonal D
+            if b_ndim == 1:
+                new_out = b / a_diag**2
+            else:
+                new_out = b / (a_diag**2)[..., :, None]
+        case _:
+            return None
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveBase)])
+def orthogonal_solve_to_transpose_matmul(fgraph, node):
+    """Replace solve(Q, b) with Q.T @ b when Q is orthogonal."""
+    A, b = node.inputs
+
+    if not check_assumption(fgraph, A, ORTHOGONAL):
+        return None
+
+    b_ndim = node.op.core_op.b_ndim
+    if b_ndim == 1:
+        new_out = (A.mT @ b[..., :, None])[..., 0]
+    else:
+        new_out = A.mT @ b
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
+    return [new_out]
+
+
+@register_canonicalize
+@register_stabilize
+@node_rewriter([blockwise_of(SolveSylvester)])
+def solve_sylvester_of_diag(fgraph, node):
+    """Replace solve_sylvester(A, B, C) with C / (a[:, None] + b[None, :]) when both A, B are diagonal.
+
+    The Sylvester equation A @ X + X @ B = C, when A = diag(a) and B = diag(b),
+    reduces to X_ij = C_ij / (a_i + b_j).
+    """
+    A, B, C = node.inputs
+
+    if not check_assumption(fgraph, A, DIAGONAL):
+        return None
+    if not check_assumption(fgraph, B, DIAGONAL):
+        return None
+
+    a = pt.diagonal(A, axis1=-2, axis2=-1)
+    b = pt.diagonal(B, axis1=-2, axis2=-1)
+
+    new_out = C / (a[..., :, None] + b[..., None, :])
+
+    old_out = node.outputs[0]
+    copy_stack_trace(old_out, new_out)
     return [new_out]
 
 
@@ -222,7 +389,7 @@ def _split_decomp_and_solve_steps(
             case (DimShuffle(is_left_expand_dims=True), root_a):  # type: ignore[misc]
                 transposed = False
             case (DimShuffle(is_left_expanded_matrix_transpose=True), root_a):  # type: ignore[misc]
-                transposed = True
+                transposed = True  # type: ignore[unreachable]
 
         return root_a, transposed
 
