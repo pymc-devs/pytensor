@@ -6,6 +6,7 @@ from pytensor.tensor.assumptions.core import (
 from pytensor.tensor.assumptions.utils import eye_is_identity, true_if
 from pytensor.tensor.basic import Eye
 from pytensor.tensor.elemwise import DimShuffle
+from pytensor.tensor.linalg.decomposition.eigen import Eigh
 from pytensor.tensor.linalg.decomposition.qr import QR
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur
 from pytensor.tensor.linalg.decomposition.svd import SVD
@@ -69,3 +70,9 @@ def _svd(op, feature, fgraph, node, input_states):
     if op.full_matrices:
         return [FactState.TRUE, FactState.UNKNOWN, FactState.TRUE]
     return [FactState.UNKNOWN] * 3
+
+
+@register_assumption(ORTHOGONAL, Eigh)
+def _eigh(op, feature, fgraph, node, input_states):
+    # Eigh: outputs are (w, v) where v is the orthogonal eigenvector matrix
+    return [FactState.UNKNOWN, FactState.TRUE]
