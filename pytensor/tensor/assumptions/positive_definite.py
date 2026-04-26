@@ -4,7 +4,12 @@ from pytensor.tensor.assumptions.core import (
     FactState,
     register_assumption,
 )
-from pytensor.tensor.assumptions.utils import eye_is_identity, true_if
+from pytensor.tensor.assumptions.utils import (
+    all_inputs_have_key,
+    eye_is_identity,
+    propagate_first,
+    true_if,
+)
 from pytensor.tensor.basic import (
     AllocDiag,
     Eye,
@@ -44,54 +49,48 @@ def _alloc_diag(op, feature, fgraph, node, input_states):
     return [FactState.UNKNOWN]
 
 
-@register_assumption(POSITIVE_DEFINITE, BlockDiagonal)
-def _block_diag(op, feature, fgraph, node, input_states):
-    return true_if(all(feature.check(inp, POSITIVE_DEFINITE) for inp in node.inputs))
+register_assumption(POSITIVE_DEFINITE, BlockDiagonal)(all_inputs_have_key)
+register_assumption(POSITIVE_DEFINITE, MatrixInverse)(propagate_first)
+register_assumption(POSITIVE_DEFINITE, KroneckerProduct)(all_inputs_have_key)
 
 
-@register_assumption(POSITIVE_DEFINITE, MatrixInverse)
-def _inv(op, feature, fgraph, node, input_states):
-    return true_if(feature.check(node.inputs[0], POSITIVE_DEFINITE))
+def _is_psd_full_shape(inp, feature) -> bool:
+    """Whether ``inp`` is a known-PD matrix at full shape over the last two axes.
 
-
-@register_assumption(POSITIVE_DEFINITE, KroneckerProduct)
-def _kron(op, feature, fgraph, node, input_states):
-    return true_if(all(feature.check(inp, POSITIVE_DEFINITE) for inp in node.inputs))
+    PD is a property of square matrices; scalar/vector inputs that broadcast into a matrix shape do not preserve
+    definiteness (e.g. ``A + c`` adds the all-ones matrix scaled by c, which is not generally PD-preserving). Only
+    inputs whose last two axes are both present (non-broadcastable) and that are themselves marked PD count.
+    """
+    if inp.type.ndim < 2:
+        return False
+    if any(inp.type.broadcastable[-2:]):
+        return False
+    return feature.check(inp, POSITIVE_DEFINITE)
 
 
 @register_assumption(POSITIVE_DEFINITE, Elemwise)
 def _elemwise(op, feature, fgraph, node, input_states):
-    """Elementwise operations that preserve positive definiteness.
+    """Elementwise rules that preserve positive definiteness.
 
-    - Add: Sum of PD matrices is PD
-    - Mul by positive scalar: c * A is PD if c > 0 and A is PD
+    - Add: every input is a full-shape PD matrix.
+    - Mul: a positive scalar constant times all-PD-matrix factors.
     """
     scalar_op = op.scalar_op
 
     if isinstance(scalar_op, Add):
-        # Sum of PD matrices is PD
-        return true_if(
-            all(feature.check(inp, POSITIVE_DEFINITE) for inp in node.inputs)
-        )
+        return true_if(all(_is_psd_full_shape(inp, feature) for inp in node.inputs))
 
     if isinstance(scalar_op, Mul):
-        # c * A is PD if c > 0 and A is PD
-        # Check if one input is a positive scalar constant and the other is PD
         for i, inp in enumerate(node.inputs):
             try:
                 val = get_underlying_scalar_constant_value(inp)
-                if val > 0:
-                    # Check if all other inputs are PD
-                    other_inputs = [
-                        node.inputs[j] for j in range(len(node.inputs)) if j != i
-                    ]
-                    if all(
-                        feature.check(other, POSITIVE_DEFINITE)
-                        for other in other_inputs
-                    ):
-                        return [FactState.TRUE]
             except (NotScalarConstantError, TypeError):
-                pass
+                continue
+            if val <= 0:
+                continue
+            other_inputs = [node.inputs[j] for j in range(len(node.inputs)) if j != i]
+            if all(_is_psd_full_shape(other, feature) for other in other_inputs):
+                return [FactState.TRUE]
         return [FactState.UNKNOWN]
 
     return [FactState.UNKNOWN] * len(node.outputs)

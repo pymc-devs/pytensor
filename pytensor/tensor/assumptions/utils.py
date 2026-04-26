@@ -4,6 +4,10 @@ from pytensor.graph import FunctionGraph
 from pytensor.graph.basic import Constant
 from pytensor.tensor.assumptions import AssumptionFeature, AssumptionKey
 from pytensor.tensor.assumptions.core import FactState
+from pytensor.tensor.basic import (
+    NotScalarConstantError,
+    get_underlying_scalar_constant_value,
+)
 
 
 def true_if(cond: bool) -> list[FactState]:
@@ -19,6 +23,15 @@ def propagate_first(op, feature, fgraph, node, input_states) -> list[FactState]:
 def all_inputs_have_key(op, feature, fgraph, node, input_states) -> list[FactState]:
     """Output inherits the assumption iff *every* input has it."""
     return true_if(all(input_states))
+
+
+def alloc_of_zero(op, feature, fgraph, node, input_states) -> list[FactState]:
+    """``Alloc`` rule: TRUE iff the fill value is the scalar 0."""
+    try:
+        val = get_underlying_scalar_constant_value(node.inputs[0])
+    except NotScalarConstantError:
+        return [FactState.UNKNOWN]
+    return true_if(val == 0)
 
 
 def eye_is_identity(node) -> bool:

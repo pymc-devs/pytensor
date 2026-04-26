@@ -1,25 +1,18 @@
-from pytensor.scalar.basic import (
-    Add,
-    Mul,
-    Pow,
-    Sub,
-    TrueDiv,
-    UnaryScalarOp,
-)
+from pytensor.tensor.assumptions._elemwise import elemwise_preserves_zero_pattern
 from pytensor.tensor.assumptions.core import (
     AssumptionKey,
     FactState,
     register_assumption,
 )
 from pytensor.tensor.assumptions.orthogonal import ORTHOGONAL
-from pytensor.tensor.assumptions.utils import eye_is_identity, true_if
-from pytensor.tensor.basic import (
-    Alloc,
-    AllocDiag,
-    Eye,
-    NotScalarConstantError,
-    get_underlying_scalar_constant_value,
+from pytensor.tensor.assumptions.utils import (
+    all_inputs_have_key,
+    alloc_of_zero,
+    eye_is_identity,
+    propagate_first,
+    true_if,
 )
+from pytensor.tensor.basic import Alloc, AllocDiag, Eye
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
@@ -61,45 +54,13 @@ def _alloc_diag(op, feature, fgraph, node, input_states):
     return true_if(op.offset == 0)
 
 
-@register_assumption(DIAGONAL, Alloc)
-def _alloc(op, feature, fgraph, node, input_states):
-    try:
-        val = get_underlying_scalar_constant_value(node.inputs[0])
-        if val == 0:
-            return [FactState.TRUE]
-    except NotScalarConstantError:
-        pass
-    return [FactState.UNKNOWN]
-
-
-@register_assumption(DIAGONAL, Cholesky)
-def _cholesky(op, feature, fgraph, node, input_states):
-    return true_if(input_states[0])
-
-
-@register_assumption(DIAGONAL, BlockDiagonal)
-def _block_diag(op, feature, fgraph, node, input_states):
-    return true_if(all(input_states))
-
-
-@register_assumption(DIAGONAL, MatrixInverse)
-def _inv(op, feature, fgraph, node, input_states):
-    return true_if(input_states[0])
-
-
-@register_assumption(DIAGONAL, MatrixPinv)
-def _pinv(op, feature, fgraph, node, input_states):
-    return true_if(input_states[0])
-
-
-@register_assumption(DIAGONAL, KroneckerProduct)
-def _kron(op, feature, fgraph, node, input_states):
-    return true_if(all(feature.check(inp, DIAGONAL) for inp in node.inputs))
-
-
-@register_assumption(DIAGONAL, Dot)
-def _dot_diagonal_inputs(op, feature, fgraph, node, input_states):
-    return true_if(all(input_states))
+register_assumption(DIAGONAL, Alloc)(alloc_of_zero)
+register_assumption(DIAGONAL, Cholesky)(propagate_first)
+register_assumption(DIAGONAL, BlockDiagonal)(all_inputs_have_key)
+register_assumption(DIAGONAL, MatrixInverse)(propagate_first)
+register_assumption(DIAGONAL, MatrixPinv)(propagate_first)
+register_assumption(DIAGONAL, KroneckerProduct)(all_inputs_have_key)
+register_assumption(DIAGONAL, Dot)(all_inputs_have_key)
 
 
 @register_assumption(DIAGONAL, Dot)
@@ -148,36 +109,4 @@ def _dimshuffle(op, feature, fgraph, node, input_states):
 
 @register_assumption(DIAGONAL, Elemwise)
 def _elemwise(op, feature, fgraph, node, input_states):
-    scalar_op = op.scalar_op
-
-    if isinstance(scalar_op, Mul):
-        return true_if(
-            any(
-                feature.check(inp, DIAGONAL)
-                and inp.type.ndim >= 2
-                and not any(inp.type.broadcastable[-2:])
-                for inp in node.inputs
-            )
-        )
-
-    if isinstance(scalar_op, (Add, Sub)):
-        return true_if(all(feature.check(inp, DIAGONAL) for inp in node.inputs))
-
-    if isinstance(scalar_op, TrueDiv):
-        return true_if(feature.check(node.inputs[0], DIAGONAL))
-
-    if isinstance(scalar_op, Pow):
-        if not feature.check(node.inputs[0], DIAGONAL):
-            return [FactState.UNKNOWN]
-        try:
-            k = get_underlying_scalar_constant_value(node.inputs[1])
-            if k > 0:
-                return [FactState.TRUE]
-        except NotScalarConstantError:
-            pass
-        return [FactState.UNKNOWN]
-
-    if isinstance(scalar_op, UnaryScalarOp) and scalar_op.preserves_zero:
-        return true_if(input_states[0])
-
-    return [FactState.UNKNOWN] * len(node.outputs)
+    return elemwise_preserves_zero_pattern(DIAGONAL, op, feature, node, input_states)

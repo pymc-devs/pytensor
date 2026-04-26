@@ -1,16 +1,18 @@
+from pytensor.tensor.assumptions._elemwise import elemwise_preserves_zero_pattern
 from pytensor.tensor.assumptions.core import (
     AssumptionKey,
     FactState,
     register_assumption,
 )
-from pytensor.tensor.assumptions.utils import eye_is_identity, true_if
-from pytensor.tensor.basic import (
-    Alloc,
-    AllocDiag,
-    Eye,
-    NotScalarConstantError,
-    get_underlying_scalar_constant_value,
+from pytensor.tensor.assumptions.utils import (
+    all_inputs_have_key,
+    alloc_of_zero,
+    eye_is_identity,
+    propagate_first,
+    true_if,
 )
+from pytensor.tensor.basic import Alloc, AllocDiag, Eye
+from pytensor.tensor.elemwise import Elemwise
 from pytensor.tensor.linalg.constructors import BlockDiagonal
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky
 from pytensor.tensor.linalg.decomposition.lu import LU
@@ -44,16 +46,14 @@ def _alloc_diag_upper(op, feature, fgraph, node, input_states):
     return true_if(op.offset == 0)
 
 
-@register_assumption(LOWER_TRIANGULAR, Alloc)
-@register_assumption(UPPER_TRIANGULAR, Alloc)
-def _alloc_tri(op, feature, fgraph, node, input_states):
-    try:
-        val = get_underlying_scalar_constant_value(node.inputs[0])
-        if val == 0:
-            return [FactState.TRUE]
-    except NotScalarConstantError:
-        pass
-    return [FactState.UNKNOWN]
+register_assumption(LOWER_TRIANGULAR, Alloc)(alloc_of_zero)
+register_assumption(UPPER_TRIANGULAR, Alloc)(alloc_of_zero)
+register_assumption(LOWER_TRIANGULAR, BlockDiagonal)(all_inputs_have_key)
+register_assumption(UPPER_TRIANGULAR, BlockDiagonal)(all_inputs_have_key)
+register_assumption(LOWER_TRIANGULAR, MatrixInverse)(propagate_first)
+register_assumption(UPPER_TRIANGULAR, MatrixInverse)(propagate_first)
+register_assumption(LOWER_TRIANGULAR, Dot)(all_inputs_have_key)
+register_assumption(UPPER_TRIANGULAR, Dot)(all_inputs_have_key)
 
 
 @register_assumption(LOWER_TRIANGULAR, Cholesky)
@@ -64,36 +64,6 @@ def _chol_lower(op, feature, fgraph, node, input_states):
 @register_assumption(UPPER_TRIANGULAR, Cholesky)
 def _chol_upper(op, feature, fgraph, node, input_states):
     return true_if(not op.lower)
-
-
-@register_assumption(LOWER_TRIANGULAR, BlockDiagonal)
-def _block_diag_lower(op, feature, fgraph, node, input_states):
-    return true_if(all(input_states))
-
-
-@register_assumption(UPPER_TRIANGULAR, BlockDiagonal)
-def _block_diag_upper(op, feature, fgraph, node, input_states):
-    return true_if(all(input_states))
-
-
-@register_assumption(LOWER_TRIANGULAR, MatrixInverse)
-def _inv_lower(op, feature, fgraph, node, input_states):
-    return true_if(input_states[0])
-
-
-@register_assumption(UPPER_TRIANGULAR, MatrixInverse)
-def _inv_upper(op, feature, fgraph, node, input_states):
-    return true_if(input_states[0])
-
-
-@register_assumption(LOWER_TRIANGULAR, Dot)
-def _dot_lower(op, feature, fgraph, node, input_states):
-    return true_if(all(input_states))
-
-
-@register_assumption(UPPER_TRIANGULAR, Dot)
-def _dot_upper(op, feature, fgraph, node, input_states):
-    return true_if(all(input_states))
 
 
 @register_assumption(UPPER_TRIANGULAR, QR)
@@ -149,3 +119,17 @@ def _lu_upper(op, feature, fgraph, node, input_states):
     # U is always the last output
     states[-1] = FactState.TRUE
     return states
+
+
+@register_assumption(LOWER_TRIANGULAR, Elemwise)
+def _elemwise_lower(op, feature, fgraph, node, input_states):
+    return elemwise_preserves_zero_pattern(
+        LOWER_TRIANGULAR, op, feature, node, input_states
+    )
+
+
+@register_assumption(UPPER_TRIANGULAR, Elemwise)
+def _elemwise_upper(op, feature, fgraph, node, input_states):
+    return elemwise_preserves_zero_pattern(
+        UPPER_TRIANGULAR, op, feature, node, input_states
+    )

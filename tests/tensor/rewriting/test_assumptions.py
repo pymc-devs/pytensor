@@ -437,6 +437,31 @@ class TestElemwiseAssumptions:
         assert af.check(y, DIAGONAL)
 
 
+class TestTriangularElemwiseAssumptions:
+    @pytest.mark.parametrize("key", [LOWER_TRIANGULAR, UPPER_TRIANGULAR])
+    @pytest.mark.parametrize(
+        "build, expected",
+        [
+            pytest.param(lambda a, b: a + b, True, id="add"),
+            pytest.param(lambda a, b: a - b, True, id="sub"),
+            pytest.param(lambda a, b: a * b, True, id="mul"),
+            pytest.param(lambda a, b: 2.0 * a, True, id="scalar_mul"),
+            pytest.param(lambda a, b: -a, True, id="neg"),
+            pytest.param(lambda a, b: a**3, True, id="pow_const"),
+            pytest.param(lambda a, b: pt.exp(a), False, id="non_zero_preserving_unary"),
+        ],
+    )
+    def test_elemwise_propagation(self, key, build, expected):
+        kwarg = {key.name: True}
+        x = pt.matrix("x", shape=(5, 5))
+        y = pt.matrix("y", shape=(5, 5))
+        a = pt.specify_assumptions(x, **kwarg)
+        b = pt.specify_assumptions(y, **kwarg)
+        z = build(a, b)
+        _, af = make_fgraph(z, inputs=[x, y])
+        assert af.check(z, key) is expected
+
+
 class TestSymmetricElemwiseAssumptions:
     @staticmethod
     def _sym(name, shape=(5, 5)):
@@ -504,6 +529,63 @@ class TestSymmetricElemwiseAssumptions:
         z = s + s
         _, af = make_fgraph(z, inputs=[s])
         assert not af.check(z, SYMMETRIC)
+
+
+class TestPSDElemwiseAssumptions:
+    @staticmethod
+    def _psd(name, shape=(5, 5)):
+        x = pt.tensor(name, shape=shape)
+        return pt.specify_assumptions(x, positive_definite=True), x
+
+    def test_add_pd_plus_pd(self):
+        a, x = self._psd("a")
+        b, y = self._psd("b")
+        z = a + b
+        _, af = make_fgraph(z, inputs=[x, y])
+        assert af.check(z, POSITIVE_DEFINITE)
+
+    @pytest.mark.parametrize(
+        "scale, expected",
+        [
+            pytest.param(2.5, True, id="positive"),
+            pytest.param(-1.0, False, id="negative"),
+            pytest.param(0.0, False, id="zero"),
+        ],
+    )
+    def test_scalar_times_pd(self, scale, expected):
+        a, x = self._psd("a")
+        z = scale * a
+        _, af = make_fgraph(z, inputs=[x])
+        assert af.check(z, POSITIVE_DEFINITE) is expected
+
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            pytest.param((), id="0d_scalar"),
+            pytest.param((1, 1), id="1x1_matrix"),
+            pytest.param((5, 1), id="col_vector"),
+            pytest.param((5, 5), id="generic_matrix"),
+        ],
+    )
+    def test_add_pd_plus_other_is_unknown(self, shape):
+        a, x = self._psd("a")
+        y = pt.tensor("y", shape=shape)
+        z = a + y
+        _, af = make_fgraph(z, inputs=[x, y])
+        assert not af.check(z, POSITIVE_DEFINITE)
+
+    def test_batched_pd_plus_pd(self):
+        a, x = self._psd("a", shape=(4, 5, 5))
+        b, y = self._psd("b", shape=(4, 5, 5))
+        z = a + b
+        _, af = make_fgraph(z, inputs=[x, y])
+        assert af.check(z, POSITIVE_DEFINITE)
+
+    def test_unrelated_elemwise_is_unknown(self):
+        a, x = self._psd("a")
+        z = -a
+        _, af = make_fgraph(z, inputs=[x])
+        assert not af.check(z, POSITIVE_DEFINITE)
 
 
 def test_blockwise_cholesky_is_lower_triangular():

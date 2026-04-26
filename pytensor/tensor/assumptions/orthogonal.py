@@ -3,7 +3,11 @@ from pytensor.tensor.assumptions.core import (
     FactState,
     register_assumption,
 )
-from pytensor.tensor.assumptions.utils import eye_is_identity, true_if
+from pytensor.tensor.assumptions.utils import (
+    eye_is_identity,
+    propagate_first,
+    true_if,
+)
 from pytensor.tensor.basic import Eye
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.eigen import Eigh
@@ -21,10 +25,8 @@ def _eye(op, feature, fgraph, node, input_states):
     return true_if(eye_is_identity(node))
 
 
-@register_assumption(ORTHOGONAL, MatrixInverse)
-@register_assumption(ORTHOGONAL, MatrixPinv)
-def _inv(op, feature, fgraph, node, input_states):
-    return true_if(feature.check(node.inputs[0], ORTHOGONAL))
+register_assumption(ORTHOGONAL, MatrixInverse)(propagate_first)
+register_assumption(ORTHOGONAL, MatrixPinv)(propagate_first)
 
 
 @register_assumption(ORTHOGONAL, DimShuffle)
