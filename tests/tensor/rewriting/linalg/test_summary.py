@@ -120,6 +120,38 @@ def test_dont_apply_det_of_diag_from_scalar_eye():
     )
 
 
+@pytest.mark.parametrize(
+    "side, shape",
+    [
+        pytest.param("lower_triangular", (5, 5), id="lower"),
+        pytest.param("upper_triangular", (5, 5), id="upper"),
+        pytest.param("lower_triangular", (3, 5, 5), id="batched_lower"),
+    ],
+)
+def test_det_of_triangular(side, shape):
+    x = pt.tensor("x", shape=shape)
+    y = pt.linalg.det(pt.specify_assumptions(x, **{side: True}))
+
+    f = function([x], y, mode="FAST_RUN")
+    nodes = f.maker.fgraph.apply_nodes
+    assert not any(
+        isinstance(node.op, Det) or isinstance(getattr(node.op, "core_op", None), Det)
+        for node in nodes
+    )
+
+    rng = np.random.default_rng(0)
+    tri = np.tril if side == "lower_triangular" else np.triu
+    x_test = tri(rng.normal(size=shape)).astype(config.floatX)
+    expected = np.linalg.det(x_test)
+
+    assert_allclose(
+        expected,
+        f(x_test),
+        atol=1e-3 if config.floatX == "float32" else 1e-8,
+        rtol=1e-3 if config.floatX == "float32" else 1e-8,
+    )
+
+
 def test_det_of_diag_incorrect_for_rectangle_eye():
     x = pt.matrix("x")
     x_diag = pt.eye(7, 5) * x

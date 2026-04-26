@@ -7,6 +7,7 @@ from pytensor.graph.rewriting.basic import (
 )
 from pytensor.scalar.basic import Abs, Exp, Log, Sign, Sqr
 from pytensor.tensor.assumptions.diagonal import DIAGONAL
+from pytensor.tensor.assumptions.triangular import LOWER_TRIANGULAR, UPPER_TRIANGULAR
 from pytensor.tensor.assumptions.utils import check_assumption
 from pytensor.tensor.basic import ones
 from pytensor.tensor.blockwise import Blockwise
@@ -183,6 +184,23 @@ def det_of_diag(fgraph, node):
         return None
 
     det_val = pt.diagonal(inp, axis1=-2, axis2=-1).prod(axis=-1)
+    det_val = det_val.astype(node.outputs[0].type.dtype)
+    return [det_val]
+
+
+@register_stabilize("shape_unsafe")
+@node_rewriter([det])
+def det_of_triangular(fgraph, node):
+    """det(T) -> prod(diagonal(T)) for triangular T."""
+    inp = node.inputs[0]
+
+    if not (
+        check_assumption(fgraph, inp, LOWER_TRIANGULAR)
+        or check_assumption(fgraph, inp, UPPER_TRIANGULAR)
+    ):
+        return None
+
+    det_val = matrix_diagonal_product(inp)
     det_val = det_val.astype(node.outputs[0].type.dtype)
     return [det_val]
 
