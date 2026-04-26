@@ -16,6 +16,7 @@ from pytensor.tensor.basic import alloc_diag
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.elemwise import DimShuffle
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.decomposition.eigen import eigh
 from pytensor.tensor.linalg.decomposition.lu import lu, lu_factor
 from pytensor.tensor.linalg.decomposition.qr import qr
 from pytensor.tensor.linalg.decomposition.schur import QZ, Schur, qz, schur
@@ -610,3 +611,17 @@ def test_qz_of_diag_sort(sort, return_eigenvalues):
 
     np.testing.assert_allclose(Q_val @ AA_val @ Z_val.T, np.diag(a_val), atol=1e-12)
     np.testing.assert_allclose(Q_val @ BB_val @ Z_val.T, np.diag(b_val), atol=1e-12)
+
+
+def test_eig_to_eigh():
+    x = pt.dmatrix("x", shape=(5, 5))
+    x_sym = pt.specify_assumptions(x, symmetric=True)
+    w, v = pt.linalg.eig(x_sym)
+
+    rewrites = ("canonicalize", "ShapeOpt")
+    w_r, v_r = rewrite_graph([w, v], include=rewrites)
+
+    w_expected, v_expected = eigh(x_sym)
+    w_expected = w_expected.astype("complex128")
+    v_expected = v_expected.astype("complex128")
+    assert_equal_computations([w_r, v_r], [w_expected, v_expected])
