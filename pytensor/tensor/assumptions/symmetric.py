@@ -29,14 +29,14 @@ def _preserves_symmetry_under_broadcast(inp, feature) -> bool:
     """
     ndim = inp.type.ndim
     if ndim < 2:
-        return ndim == 0
+        return bool(ndim == 0)
 
     last_two_bc = inp.type.broadcastable[-2:]
     if all(last_two_bc):
         return True
     if any(last_two_bc):
         return False
-    return feature.check(inp, SYMMETRIC)
+    return bool(feature.check(inp, SYMMETRIC))
 
 
 @register_assumption(SYMMETRIC, Eye)

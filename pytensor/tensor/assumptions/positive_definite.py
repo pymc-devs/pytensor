@@ -65,7 +65,7 @@ def _is_psd_full_shape(inp, feature) -> bool:
         return False
     if any(inp.type.broadcastable[-2:]):
         return False
-    return feature.check(inp, POSITIVE_DEFINITE)
+    return bool(feature.check(inp, POSITIVE_DEFINITE))
 
 
 @register_assumption(POSITIVE_DEFINITE, Elemwise)
