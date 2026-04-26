@@ -130,7 +130,7 @@ def test_dont_apply_det_of_diag_from_scalar_eye():
 )
 def test_det_of_triangular(side, shape):
     x = pt.tensor("x", shape=shape)
-    y = pt.linalg.det(pt.specify_assumptions(x, **{side: True}))
+    y = pt.linalg.det(pt.assume(x, **{side: True}))
 
     f = function([x], y, mode="FAST_RUN")
     nodes = f.maker.fgraph.apply_nodes

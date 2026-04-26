@@ -253,7 +253,7 @@ def test_inv_of_orthogonal_to_transpose():
     rewrites = ("canonicalize", "stabilize", "ShapeOpt")
 
     x = pt.dmatrix("x", shape=(n, n))
-    x_orth = pt.specify_assumptions(x, orthogonal=True)
+    x_orth = pt.assume(x, orthogonal=True)
     out = pt.linalg.inv(x_orth)
     rewritten = rewrite_graph(out, include=rewrites)
     expected = rewrite_graph(x_orth.mT, include=rewrites)

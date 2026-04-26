@@ -141,7 +141,7 @@ from pytensor.tensor.shape import (
     specify_broadcastable,
     specify_shape,
 )
-from pytensor.tensor.assumptions.specify import specify_assumptions
+from pytensor.tensor.assumptions.specify import assume
 
 # isort: on
 

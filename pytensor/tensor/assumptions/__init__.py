@@ -23,7 +23,7 @@ register_implies(POSITIVE_DEFINITE, SYMMETRIC)
 import pytensor.tensor.assumptions.blockwise
 from pytensor.tensor.assumptions.specify import (
     SpecifyAssumptions,
-    specify_assumptions,
+    assume,
 )
 
 

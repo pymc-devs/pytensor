@@ -37,9 +37,9 @@ def test_cholesky_ldotlt(tag, cholesky_form, product, op):
     ndim = 2 if op == dot else 3
     A = tensor("L", shape=(None,) * ndim)
     if tag == "lower":
-        A_with_assumption = pt.specify_assumptions(A, lower_triangular=True)
+        A_with_assumption = pt.assume(A, lower_triangular=True)
     elif tag == "upper":
-        A_with_assumption = pt.specify_assumptions(A, upper_triangular=True)
+        A_with_assumption = pt.assume(A, upper_triangular=True)
     else:
         A_with_assumption = A
 
@@ -615,7 +615,7 @@ def test_qz_of_diag_sort(sort, return_eigenvalues):
 
 def test_eig_to_eigh():
     x = pt.dmatrix("x", shape=(5, 5))
-    x_sym = pt.specify_assumptions(x, symmetric=True)
+    x_sym = pt.assume(x, symmetric=True)
     w, v = pt.linalg.eig(x_sym)
 
     rewrites = ("canonicalize", "ShapeOpt")

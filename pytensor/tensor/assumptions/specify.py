@@ -31,7 +31,7 @@ class SpecifyAssumptions(TypeCastingOp):
         return output_grads
 
 
-def specify_assumptions(
+def assume(
     x: Variable,
     diagonal: bool | None = None,
     lower_triangular: bool | None = None,
@@ -70,7 +70,7 @@ def specify_assumptions(
     --------
     >>> import pytensor.tensor as pt
     >>> x = pt.dmatrix("x")
-    >>> x_diag = pt.specify_assumptions(x, diagonal=True)
+    >>> x_diag = pt.assume(x, diagonal=True)
     """
     x = as_tensor_variable(x)
 

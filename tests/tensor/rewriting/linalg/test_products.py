@@ -261,8 +261,8 @@ def test_expm_of_diag(make_diag):
 def test_kron_of_diagonal_to_diagonal():
     da = pt.tensor("da", shape=(3, 3))
     db = pt.tensor("db", shape=(4, 4))
-    A = pt.specify_assumptions(da, diagonal=True)
-    B = pt.specify_assumptions(db, diagonal=True)
+    A = pt.assume(da, diagonal=True)
+    B = pt.assume(db, diagonal=True)
 
     out = pt.linalg.kron(A, B)
     f = function([da, db], out, mode="FAST_RUN")
@@ -280,8 +280,8 @@ def test_kron_of_diagonal_to_diagonal():
     # Batched case
     da_batch = pt.tensor("da_batch", shape=(2, 3, 3))
     db_batch = pt.tensor("db_batch", shape=(2, 4, 4))
-    A_batch = pt.specify_assumptions(da_batch, diagonal=True)
-    B_batch = pt.specify_assumptions(db_batch, diagonal=True)
+    A_batch = pt.assume(da_batch, diagonal=True)
+    B_batch = pt.assume(db_batch, diagonal=True)
 
     signature = "(m,m),(n,n)->(mn,mn)"
     kron_batched = pt.vectorize(lambda a, b: pt.linalg.kron(a, b), signature=signature)
@@ -309,7 +309,7 @@ def test_orthogonal_dot_transpose_to_eye():
 
     # 2D: X @ X.T -> eye
     x = pt.dmatrix("x", shape=(n, n))
-    x_orth = pt.specify_assumptions(x, orthogonal=True)
+    x_orth = pt.assume(x, orthogonal=True)
     out_xxt = pt.dot(x_orth, x_orth.T)
     rewritten_xxt = rewrite_graph(out_xxt, include=rewrites)
     expected = pt.as_tensor(np.eye(n, dtype=config.floatX))
@@ -317,7 +317,7 @@ def test_orthogonal_dot_transpose_to_eye():
 
     # Batched: X @ X.T -> broadcast_to(eye, batch_shape)
     x_batch = pt.dtensor3("x_batch", shape=(3, n, n))
-    x_batch_orth = pt.specify_assumptions(x_batch, orthogonal=True)
+    x_batch_orth = pt.assume(x_batch, orthogonal=True)
     out_batch = x_batch_orth @ pt.moveaxis(x_batch_orth, -1, -2)
     rewritten_batch = rewrite_graph(out_batch, include=rewrites)
 

@@ -78,7 +78,7 @@ def test_psd_solve_with_chol():
     """Test that solve(A, b) with PSD A gets rewritten to cholesky + cho_solve."""
     A = matrix("A")
     b = matrix("b")
-    A_psd = pt.specify_assumptions(A, positive_definite=True)
+    A_psd = pt.assume(A, positive_definite=True)
     out = pt.linalg.solve(A_psd, b)
 
     rewritten = rewrite_graph(out, include=("canonicalize", "stabilize", "specialize"))
@@ -543,7 +543,7 @@ def test_orthogonal_solve_to_transpose_matmul():
     rewrites = ("canonicalize", "stabilize", "ShapeOpt")
 
     Q = pt.dmatrix("Q", shape=(n, n))
-    Q_orth = pt.specify_assumptions(Q, orthogonal=True)
+    Q_orth = pt.assume(Q, orthogonal=True)
     b = pt.dmatrix("b", shape=(n, 3))
     out = solve(Q_orth, b)
     rewritten = rewrite_graph(out, include=rewrites)

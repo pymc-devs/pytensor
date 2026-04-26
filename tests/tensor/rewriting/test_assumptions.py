@@ -323,7 +323,7 @@ def test_dot_xxH_complex_is_psd():
 def test_dot_orthogonal_xxt_is_diagonal():
     """dot(x, x.T) is diagonal when x is orthogonal."""
     x = pt.dmatrix("x")
-    x_orth = pt.specify_assumptions(x, orthogonal=True)
+    x_orth = pt.assume(x, orthogonal=True)
     y = pt.dot(x_orth, x_orth.T)
     _, af = make_fgraph(y, inputs=[x])
     assert af.check(y, DIAGONAL)
@@ -455,8 +455,8 @@ class TestTriangularElemwiseAssumptions:
         kwarg = {key.name: True}
         x = pt.matrix("x", shape=(5, 5))
         y = pt.matrix("y", shape=(5, 5))
-        a = pt.specify_assumptions(x, **kwarg)
-        b = pt.specify_assumptions(y, **kwarg)
+        a = pt.assume(x, **kwarg)
+        b = pt.assume(y, **kwarg)
         z = build(a, b)
         _, af = make_fgraph(z, inputs=[x, y])
         assert af.check(z, key) is expected
@@ -466,7 +466,7 @@ class TestSymmetricElemwiseAssumptions:
     @staticmethod
     def _sym(name, shape=(5, 5)):
         x = pt.tensor(name, shape=shape)
-        return pt.specify_assumptions(x, symmetric=True), x
+        return pt.assume(x, symmetric=True), x
 
     @pytest.mark.parametrize(
         "binop",
@@ -535,7 +535,7 @@ class TestPSDElemwiseAssumptions:
     @staticmethod
     def _psd(name, shape=(5, 5)):
         x = pt.tensor(name, shape=shape)
-        return pt.specify_assumptions(x, positive_definite=True), x
+        return pt.assume(x, positive_definite=True), x
 
     def test_add_pd_plus_pd(self):
         a, x = self._psd("a")
