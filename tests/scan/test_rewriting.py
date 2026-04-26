@@ -7,16 +7,17 @@ from pytensor import function, scan, shared
 from pytensor.compile.builders import OpFromGraph
 from pytensor.compile.executor import Function
 from pytensor.compile.io import In
-from pytensor.compile.mode import get_default_mode, get_mode
+from pytensor.compile.mode import Mode, get_default_mode, get_mode
 from pytensor.configdefaults import config
 from pytensor.gradient import grad, jacobian
 from pytensor.graph.basic import Constant, equal_computations
 from pytensor.graph.fg import FunctionGraph
 from pytensor.graph.replace import clone_replace
+from pytensor.graph.rewriting.basic import in2out
 from pytensor.graph.traversal import ancestors
 from pytensor.link.basic import JITLinker
-from pytensor.scan.op import Scan
-from pytensor.scan.rewriting import ScanInplaceOptimizer, ScanMerge
+from pytensor.scan.op import Scan, ScanInfo
+from pytensor.scan.rewriting import ScanInplaceOptimizer, ScanMerge, scan_remove_unused
 from pytensor.scan.utils import until
 from pytensor.tensor import stack
 from pytensor.tensor.basic import AllocEmpty
@@ -43,11 +44,16 @@ from tests.scan.test_basic import asarrayX, scan_nodes_from_fct
 mode = pytensor.compile.mode.get_mode(config.mode)
 
 
-class TestRemoveConstantsAndUnusedInputsScan:
+class TestScanInputAndOutputCleanup:
+    """Integration tests for the combined ``scan_input_and_output_cleanup``
+    pass: ``scan_remove_unused`` + ``scan_inline_invariant_constants`` +
+    ``scan_merge_duplicate_inputs``.
+    """
+
     mode = get_default_mode().including("scan")
 
-    def test_remove_constants_and_unused_inputs_scan_non_seqs(self):
-        """Test the rewrite `remove_constants_and_unused_inputs_scan` for non-sequences."""
+    def test_non_seqs(self):
+        """Duplicate + unused non-sequences are collapsed / dropped."""
         W = matrix(name="W")
         v = ivector(name="v")
         y1 = scan(
@@ -119,8 +125,8 @@ class TestRemoveConstantsAndUnusedInputsScan:
             assert len(inp) == 1
             assert len(inp) == len(set(inp))
 
-    def test_remove_constants_and_unused_inputs_scan_seqs(self):
-        """Test the opt remove_constants_and_unused_inputs_scan for sequences."""
+    def test_seqs(self):
+        """Duplicate + unused sequences are collapsed / dropped."""
         W = matrix(name="W")
         v = ivector(name="v")
         vv = matrix(name="vv")
@@ -208,6 +214,366 @@ class TestRemoveConstantsAndUnusedInputsScan:
             assert len(inp) == 1
             inp = scan_node.op.outer_non_seqs(scan_node.inputs)
             assert len(inp) == 1
+
+
+class TestRemoveUnused:
+    """Tests for ``scan_remove_unused``.
+
+    Each test:
+
+        1. Builds a minimal scan and collects its outputs.
+        2. Clones the graph and applies only ``scan_remove_unused`` to the
+           clone (isolated from every other rewrite).
+        3. Asserts structural changes on the rewritten ``Scan`` op
+           (``ScanInfo`` counts including ``n_seqs`` and ``n_non_seqs``).
+        4. Compiles both the original and rewritten graphs under
+           ``Mode(linker="py", optimizer=None)`` and verifies identical output.
+    """
+
+    in2out_scan_remove_unused = in2out(scan_remove_unused, ignore_newtrees=True)
+    NO_OPT = Mode(linker="py", optimizer=None)
+
+    @classmethod
+    def rewrite(cls, inputs, outputs):
+        """Clone ``inputs``/``outputs`` into two fresh FunctionGraphs and apply
+        ``scan_remove_unused`` to one of them.
+
+        Returns ``((orig_fg, *orig_scans), (rewr_fg, *rewr_scans))`` with
+        scans in topological order. ``orig_fg`` is untouched.
+        """
+        inputs = list(inputs)
+        outputs = list(outputs)
+        orig_fg = FunctionGraph(inputs=inputs, outputs=outputs, clone=True)
+        rewr_fg = FunctionGraph(inputs=inputs, outputs=outputs, clone=True)
+        cls.in2out_scan_remove_unused.rewrite(rewr_fg)
+        orig_scans = [n for n in orig_fg.toposort() if isinstance(n.op, Scan)]
+        rewr_scans = [n for n in rewr_fg.toposort() if isinstance(n.op, Scan)]
+        return (orig_fg, *orig_scans), (rewr_fg, *rewr_scans)
+
+    @staticmethod
+    def assert_structure(
+        scan,
+        *,
+        n_seqs=0,
+        n_mit_mot=0,
+        n_mit_sot=0,
+        n_sit_sot=0,
+        n_nit_sot=0,
+        n_untraced_sit_sot=0,
+        n_non_seqs=0,
+        as_while=False,
+    ):
+        info = scan.op.info
+        expected = {
+            "n_seqs": n_seqs,
+            "n_mit_mot": n_mit_mot,
+            "n_mit_sot": n_mit_sot,
+            "n_sit_sot": n_sit_sot,
+            "n_nit_sot": n_nit_sot,
+            "n_untraced_sit_sot": n_untraced_sit_sot,
+            "n_non_seqs": n_non_seqs,
+            "as_while": as_while,
+        }
+        actual = {k: getattr(info, k) for k in expected}
+        assert actual == expected, "\n".join(
+            map(str, zip(actual.keys(), actual.values(), expected.values()))
+        )
+
+    @classmethod
+    def assert_numerical_match(cls, orig_fg, rewr_fg, input_vals):
+        orig_fn = function(
+            orig_fg.inputs,
+            orig_fg.outputs,
+            mode=cls.NO_OPT,
+            on_unused_input="ignore",
+        )
+        rewr_fn = function(
+            rewr_fg.inputs,
+            rewr_fg.outputs,
+            mode=cls.NO_OPT,
+            on_unused_input="ignore",
+        )
+        orig_out = orig_fn(*input_vals)
+        rewr_out = rewr_fn(*input_vals)
+        if not isinstance(orig_out, list | tuple):
+            orig_out = [orig_out]
+        if not isinstance(rewr_out, list | tuple):
+            rewr_out = [rewr_out]
+        for a, b in zip(orig_out, rewr_out, strict=True):
+            np.testing.assert_almost_equal(a, b)
+
+    def test_seq_non_seq(self):
+        x0 = pt.scalar("x0")
+        s = pt.vector("s", shape=(4,))
+        ns = pt.scalar("ns")
+
+        def step(s_t, x_t, ns):
+            # only x_t is used
+            return x_t**2
+
+        xs = scan(
+            step,
+            sequences=[s],
+            outputs_info=[x0],
+            non_sequences=[ns],
+            n_steps=4,
+            return_updates=False,
+        )
+
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite([s, x0, ns], [xs])
+        self.assert_structure(orig_scan, n_seqs=1, n_sit_sot=1, n_non_seqs=1)
+        self.assert_structure(rewr_scan, n_seqs=0, n_sit_sot=1, n_non_seqs=0)
+        self.assert_numerical_match(
+            orig_fg,
+            rewr_fg,
+            [np.arange(4, dtype="float64"), np.array(1.0), np.array(np.pi)],
+        )
+
+    def test_nit_sot(self):
+        s = pt.vector("s", shape=(4,))
+        x = pt.vector("x", shape=(5,))
+
+        def step(s_t, x_ns, x_nsp1):
+            return (x_ns + 1.0), (x_ns * x_nsp1 * s_t * 2.0)
+
+        xs, _ys = scan(
+            step,
+            sequences=[s],
+            outputs_info=[None, None],
+            non_sequences=[x, x + 1],
+            n_steps=4,
+            return_updates=False,
+        )
+
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite([s, x], [xs])
+        self.assert_structure(orig_scan, n_seqs=1, n_nit_sot=2, n_non_seqs=2)
+        self.assert_structure(rewr_scan, n_seqs=0, n_nit_sot=1, n_non_seqs=1)
+        self.assert_numerical_match(
+            orig_fg,
+            rewr_fg,
+            [np.arange(4, dtype="float64"), np.arange(5, dtype="float64")],
+        )
+
+    def test_sit_sot(self):
+        x0 = pt.vector("x0", shape=(5,))
+        y0 = pt.vector("y0", shape=(5,))
+
+        def step(x_prev, y_prev):
+            return x_prev + 1.0, y_prev * 0.5
+
+        xs, _ys = scan(
+            step,
+            outputs_info=[x0, y0],
+            n_steps=4,
+            return_updates=False,
+        )
+
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite([x0, y0], [xs])
+        self.assert_structure(orig_scan, n_sit_sot=2)
+        self.assert_structure(rewr_scan, n_sit_sot=1)
+        self.assert_numerical_match(
+            orig_fg,
+            rewr_fg,
+            [np.zeros(5, dtype="float64"), np.ones(5, dtype="float64")],
+        )
+
+    def test_direct_dependency(self):
+        """Each inner output reads BOTH taps; only x consumed -> BOTH stay."""
+        x0 = pt.vector("x0", shape=(5,))
+        y0 = pt.vector("y0", shape=(5,))
+
+        def step(x_prev, y_prev):
+            return 0.5 * x_prev + 0.3 * y_prev, 0.2 * x_prev + 0.8 * y_prev
+
+        xs, _ys = scan(
+            step,
+            outputs_info=[x0, y0],
+            n_steps=4,
+            return_updates=False,
+        )
+
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite([x0, y0], [xs])
+        self.assert_structure(orig_scan, n_sit_sot=2)
+        self.assert_structure(rewr_scan, n_sit_sot=2)
+        self.assert_numerical_match(
+            orig_fg,
+            rewr_fg,
+            [
+                np.array([1.0, 2.0, 3.0, 4.0, 5.0]),
+                np.array([5.0, 4.0, 3.0, 2.0, 1.0]),
+            ],
+        )
+
+    def test_transitive_dependency(self):
+        """Two sit_sot candidates cross-read each other's tap; a nit_sot
+        pins one -> BOTH stay. ``b_prev`` only enters
+        ``surviving_ancestors`` after A un-confirms, so the fixpoint must
+        grow the set in-pass, else B drops and the rebuilt Scan dangles
+        on ``b_prev``.
+        """
+        a0 = pt.dscalar("a0")
+        b0 = pt.dscalar("b0")
+
+        def step(a_prev, b_prev):
+            a_next = b_prev * 0.5
+            b_next = a_prev * 0.5
+            c = a_prev + 1.0
+            return a_next, b_next, c
+
+        _as, _bs, cs = scan(
+            step,
+            outputs_info=[a0, b0, None],
+            n_steps=4,
+            return_updates=False,
+        )
+
+        fg = FunctionGraph(inputs=[a0, b0], outputs=[cs], clone=True)
+        scan_node = next(n for n in fg.toposort() if isinstance(n.op, Scan))
+        assert scan_remove_unused.fn(fg, scan_node) is None
+
+    def test_untraced_sit_sot(self):
+        rng_a = pt.random.rng("rng_a")
+        rng_b = pt.random.rng("rng_b")
+        # Exclude random_unsafe so unused draws don't drop the rng pre-test.
+        scan_mode = get_default_mode().excluding("random_unsafe")
+
+        def step(prev_rng_a, prev_rng_b):
+            next_rng_a, draw_a = prev_rng_a.normal()
+            next_rng_b, draw_b = prev_rng_b.normal()
+            return (next_rng_a, next_rng_b, draw_a, draw_b)
+
+        final_rng_a, _final_rng_b, _draws_a, draws_b = scan(
+            step,
+            outputs_info=[rng_a, rng_b, None, None],
+            n_steps=4,
+            return_updates=False,
+            mode=scan_mode,
+        )
+
+        rng_a_test = np.random.default_rng(200)
+        rng_b_test = np.random.default_rng(201)
+
+        # Case 1: only draws_b kept -> a-side entirely dropped
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite(
+            [rng_a, rng_b], [draws_b]
+        )
+        self.assert_structure(orig_scan, n_nit_sot=2, n_untraced_sit_sot=2)
+        self.assert_structure(rewr_scan, n_nit_sot=1, n_untraced_sit_sot=1)
+        self.assert_numerical_match(orig_fg, rewr_fg, [rng_a_test, rng_b_test])
+
+        # Case 2: final_rng_a pinned by external use + draws_b kept -> drops
+        # draws_a (but not rng_a, pinned via its outer client).
+        _, draws_a_external = final_rng_a.normal()
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite(
+            [rng_a, rng_b], [draws_b, draws_a_external]
+        )
+        self.assert_structure(orig_scan, n_nit_sot=2, n_untraced_sit_sot=2)
+        self.assert_structure(rewr_scan, n_nit_sot=1, n_untraced_sit_sot=2)
+        self.assert_numerical_match(orig_fg, rewr_fg, [rng_a_test, rng_b_test])
+
+    def test_pullback_disconnected_output(self):
+        # Tests unused mit-mot
+        x0 = pt.vector("x0", shape=(5,))
+        y0 = pt.vector("y0", shape=(5,))
+
+        xs, ys = scan(
+            lambda x, y: (x**2, y * 1.1),
+            outputs_info=[x0, y0],
+            n_steps=4,
+            return_updates=False,
+        )
+
+        # Case 1: Cost depends only on xs. L_op's eager cleanup already drops
+        # the pullback's dead mit_mot, so the orig pullback is already at
+        # ``n_mit_mot=1``. Our rewrite then drops the now-clientless forward
+        # ys, bringing the forward scan to ``n_sit_sot=1``.
+        cost = xs[-1].sum()
+        gx = pt.grad(cost, x0)
+
+        (
+            (orig_fg, orig_forward_scan, orig_pullback_scan),
+            (rewr_fg, rewr_forward_scan, rewr_pullback_scan),
+        ) = self.rewrite([x0, y0], [cost, gx])
+        self.assert_structure(orig_forward_scan, n_sit_sot=2)
+        self.assert_structure(orig_pullback_scan, n_seqs=1, n_mit_mot=1)
+        self.assert_structure(rewr_forward_scan, n_sit_sot=1)
+        self.assert_structure(rewr_pullback_scan, n_seqs=1, n_mit_mot=1)
+        self.assert_numerical_match(
+            orig_fg,
+            rewr_fg,
+            [np.ones(5, dtype="float64"), np.ones(5, dtype="float64")],
+        )
+
+        # Case 2: Cost depends on both outputs -> nothing to clean.
+        cost = xs[-1].sum() + ys[-1].sum()
+        gx = pt.grad(cost, x0)
+        (
+            (orig_fg, orig_forward_scan, orig_pullback_scan),
+            (rewr_fg, rewr_forward_scan, rewr_pullback_scan),
+        ) = self.rewrite([x0, y0], [cost, gx])
+        self.assert_structure(orig_forward_scan, n_sit_sot=2)
+        self.assert_structure(orig_pullback_scan, n_seqs=1, n_mit_mot=1)
+        self.assert_structure(rewr_forward_scan, n_sit_sot=2)
+        self.assert_structure(rewr_pullback_scan, n_seqs=1, n_mit_mot=1)
+        self.assert_numerical_match(
+            orig_fg,
+            rewr_fg,
+            [np.ones(5, dtype="float64"), np.ones(5, dtype="float64")],
+        )
+
+    def test_shared_inner_output(self):
+        x = pt.vector("x", shape=(5,))
+
+        def step(x_ns):
+            y = x_ns + 1.0
+            return y, y  # same Variable in two output slots
+
+        kept, _unused = scan(
+            step,
+            outputs_info=[None, None],
+            non_sequences=[x],
+            n_steps=4,
+            return_updates=False,
+        )
+
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite([x], [kept])
+        self.assert_structure(orig_scan, n_nit_sot=2, n_non_seqs=1)
+        self.assert_structure(rewr_scan, n_nit_sot=1, n_non_seqs=1)
+        self.assert_numerical_match(orig_fg, rewr_fg, [np.arange(5, dtype="float64")])
+
+    def test_while_scan(self):
+        x0 = pt.scalar("x0", dtype="float64")
+        y0 = pt.scalar("y0", dtype="float64")
+
+        def step(x_prev, y_prev):
+            return (x_prev + 1.0, y_prev * 0.5), until(x_prev > 5.0)
+
+        xs, ys = scan(
+            step,
+            outputs_info=[x0, y0],
+            n_steps=20,
+            return_updates=False,
+        )
+
+        # Should drop state if condition doesn't depend on it.
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite([x0, y0], [xs])
+        self.assert_structure(orig_scan, n_sit_sot=2, as_while=True)
+        self.assert_structure(rewr_scan, n_sit_sot=1, as_while=True)
+        self.assert_numerical_match(
+            orig_fg,
+            rewr_fg,
+            [np.float64(0.0), np.float64(1.0)],
+        )
+
+        # But not if the condition depends on it.
+        (orig_fg, orig_scan), (rewr_fg, rewr_scan) = self.rewrite([x0, y0], [ys])
+        self.assert_structure(orig_scan, n_sit_sot=2, as_while=True)
+        self.assert_structure(rewr_scan, n_sit_sot=2, as_while=True)
+        self.assert_numerical_match(
+            orig_fg,
+            rewr_fg,
+            [np.float64(0.0), np.float64(1.0)],
+        )
 
 
 class TestPushOutDot:
@@ -465,6 +831,53 @@ class TestPushOutNonSeqScan:
         outs = f()
         expected_outs = [[4, 4], [2, 2]]
         utt.assert_allclose(outs, expected_outs)
+
+    def test_pushout_nitsot_buffer_larger_than_nsteps(self):
+        """When folding a stateless nit_sot scan into an Elemwise, the folded
+        result has length == ``n_steps``, which may be less than the nit_sot's
+        declared outer buffer size. Pushout must pad the folded result with
+        zeros so the trailing slots match what the un-folded scan would have
+        produced (uninitialized-but-conventionally-zero nit_sot slots).
+
+        Reproduced here directly by building a Scan op with distinct
+        ``n_steps`` and ``nit_sot_size`` outer inputs -- the same pattern that
+        arises in ``Scan.pullback`` when ``truncate_gradient`` is set.
+        """
+        info = ScanInfo(
+            n_seqs=1,
+            mit_mot_in_slices=(),
+            mit_mot_out_slices=(),
+            mit_sot_in_slices=(),
+            sit_sot_in_slices=(),
+            n_nit_sot=1,
+            n_untraced_sit_sot=0,
+            n_non_seqs=0,
+            as_while=False,
+        )
+
+        inner_seq = pt.dscalar("inner_seq")
+        inner_out = inner_seq * 2.0
+        scan_op = Scan(inputs=[inner_seq], outputs=[inner_out], info=info)
+
+        seq = pt.dvector("seq")
+        n_steps = pt.lscalar("n_steps")
+        nit_sot_size = pt.lscalar("nit_sot_size")
+        out = scan_op(n_steps, seq[:n_steps], nit_sot_size)
+
+        f = function([seq, n_steps, nit_sot_size], out)
+
+        has_scan = any(isinstance(node.op, Scan) for node in f.maker.fgraph.apply_nodes)
+        if config.mode == "FAST_COMPILE":
+            # Rewrite not fired in fast compile
+            assert has_scan
+        else:
+            # Pushout should have fired: no Scan node left.
+            assert not has_scan
+
+        res = f(np.arange(10, dtype="float64"), np.array(3), np.array(7))
+        np.testing.assert_array_equal(
+            res, np.array([0.0, 2.0, 4.0, 0.0, 0.0, 0.0, 0.0])
+        )
 
     def test_dot_not_output(self):
         """
@@ -1303,7 +1716,11 @@ class TestScanInplaceOptimizer:
 
 
 class TestSaveMem:
-    mode = get_default_mode().including("scan_save_mem").excluding("scan_pushout")
+    mode = (
+        get_default_mode()
+        .including("scan_save_mem", "scan_remove_unused")
+        .excluding("scan_pushout")
+    )
 
     def test_save_mem(self):
         rng = np.random.default_rng(utt.fetch_seed())
