@@ -437,6 +437,75 @@ class TestElemwiseAssumptions:
         assert af.check(y, DIAGONAL)
 
 
+class TestSymmetricElemwiseAssumptions:
+    @staticmethod
+    def _sym(name, shape=(5, 5)):
+        x = pt.tensor(name, shape=shape)
+        return pt.specify_assumptions(x, symmetric=True), x
+
+    @pytest.mark.parametrize(
+        "binop",
+        [
+            pytest.param(lambda a, b: a + b, id="add"),
+            pytest.param(lambda a, b: a - b, id="sub"),
+            pytest.param(lambda a, b: a * b, id="mul"),
+            pytest.param(lambda a, b: a / b, id="truediv"),
+            pytest.param(lambda a, b: a**b, id="pow"),
+        ],
+    )
+    def test_binop_of_symmetric_is_symmetric(self, binop):
+        a, x = self._sym("a")
+        b, y = self._sym("b")
+        z = binop(a, b)
+        _, af = make_fgraph(z, inputs=[x, y])
+        assert af.check(z, SYMMETRIC)
+
+    @pytest.mark.parametrize(
+        "unop",
+        [
+            pytest.param(lambda a: -a, id="neg"),
+            pytest.param(lambda a: pt.exp(a), id="exp"),
+            pytest.param(abs, id="abs"),
+        ],
+    )
+    def test_unop_of_symmetric_is_symmetric(self, unop):
+        a, x = self._sym("a")
+        z = unop(a)
+        _, af = make_fgraph(z, inputs=[x])
+        assert af.check(z, SYMMETRIC)
+
+    @pytest.mark.parametrize(
+        "shape, expected",
+        [
+            pytest.param((), True, id="0d_scalar"),
+            pytest.param((1, 1), True, id="1x1_matrix"),
+            pytest.param((5,), False, id="1d_vector"),
+            pytest.param((5, 1), False, id="col_vector"),
+            pytest.param((1, 5), False, id="row_vector"),
+            pytest.param((5, 5), False, id="generic_matrix"),
+        ],
+    )
+    def test_add_symmetric_plus_other(self, shape, expected):
+        a, x = self._sym("a")
+        y = pt.tensor("y", shape=shape)
+        z = a + y
+        _, af = make_fgraph(z, inputs=[x, y])
+        assert af.check(z, SYMMETRIC) is expected
+
+    def test_batched_symmetric_add(self):
+        a, x = self._sym("a", shape=(4, 5, 5))
+        b, y = self._sym("b", shape=(4, 5, 5))
+        z = a + b
+        _, af = make_fgraph(z, inputs=[x, y])
+        assert af.check(z, SYMMETRIC)
+
+    def test_scalar_only_elemwise_is_unknown(self):
+        s = pt.scalar("s")
+        z = s + s
+        _, af = make_fgraph(z, inputs=[s])
+        assert not af.check(z, SYMMETRIC)
+
+
 def test_blockwise_cholesky_is_lower_triangular():
     x = pt.tensor("x", shape=(5, 3, 3))
     L = pt.linalg.cholesky(x, lower=True)
