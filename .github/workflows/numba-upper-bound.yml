@@ -41,9 +41,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LATEST: ${{ steps.bump.outputs.latest }}
           NEW_CAP: ${{ steps.bump.outputs.new_cap }}
+          BASE: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          branch="auto/bump-numba-${NEW_CAP}"
+          branch="auto/bump-numba-${BASE}-${NEW_CAP}"
 
           # The auto-bump may have already been opened in a prior run.
           if gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q '.'; then
@@ -62,7 +63,7 @@ jobs:
           git push "$remote" "$branch"
 
           gh pr create \
-            --title "Bump numba upper bound to <=${NEW_CAP}" \
+            --title "Bump numba upper bound to <=${NEW_CAP} (${BASE})" \
             --body "numba ${LATEST} is available on PyPI. This PR raises the upper bound in \`pyproject.toml\` to \`<=${NEW_CAP}\` so the normal Tests workflow validates the new release. Merge after CI passes." \
             --head "$branch" \
-            --base main
+            --base "${BASE}"
