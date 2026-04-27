@@ -1,4 +1,7 @@
+import jax.numpy as jnp
+
 from pytensor.link.jax.dispatch.basic import jax_funcify
+from pytensor.tensor.basic import Roll
 from pytensor.tensor.subtensor import (
     AdvancedIncSubtensor,
     AdvancedIncSubtensor1,
@@ -99,3 +102,13 @@ def jax_funcify_MakeSlice(op, **kwargs):
         return slice(*x)
 
     return makeslice
+
+
+@jax_funcify.register(Roll)
+def jax_funcify_Roll(op, **kwargs):
+    axis = op.axis
+
+    def roll(x, shift):
+        return jnp.roll(x, shift, axis=axis)
+
+    return roll
