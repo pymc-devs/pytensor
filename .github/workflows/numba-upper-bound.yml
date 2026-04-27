@@ -62,8 +62,11 @@ jobs:
           remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push "$remote" "$branch"
 
+          body="numba ${LATEST} is available on PyPI. This PR raises the upper bound in \`pyproject.toml\` to \`<=${NEW_CAP}\` so the normal Tests workflow validates the new release. Merge after CI passes."
+          body="${body}"$'\n\n'"**Note:** GitHub suppresses workflow runs triggered by the default \`GITHUB_TOKEN\`, so CI (Tests, mypy, etc.) will not start automatically on this PR. Close and reopen it (or push an empty commit) to trigger the checks."
+
           gh pr create \
             --title "Bump numba upper bound to <=${NEW_CAP} (${BASE})" \
-            --body "numba ${LATEST} is available on PyPI. This PR raises the upper bound in \`pyproject.toml\` to \`<=${NEW_CAP}\` so the normal Tests workflow validates the new release. Merge after CI passes." \
+            --body "$body" \
             --head "$branch" \
             --base "${BASE}"
