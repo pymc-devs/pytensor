@@ -917,7 +917,7 @@ local_usmm = PatternNodeRewriter(
     ),
     (spm.usmm, (neg, "alpha"), "x", "y", "z"),
 )
-register_specialize(local_usmm, name="local_usmm")
+register_specialize(local_usmm, "cxx_only", name="local_usmm")
 
 
 # register a specialization to replace usmm_csc_dense -> usmm_csc_dense_inplace

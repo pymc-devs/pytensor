@@ -56,7 +56,12 @@ def make_c_gemv_destructive(fgraph, node):
 
 
 blas_optdb.register(
-    "use_c_blas", dfs_rewriter(use_c_ger, use_c_gemv), "fast_run", "c_blas", position=20
+    "use_c_blas",
+    dfs_rewriter(use_c_ger, use_c_gemv),
+    "fast_run",
+    "c_blas",
+    "cxx_only",
+    position=20,
 )
 
 # this matches the InplaceBlasOpt defined in blas.py
