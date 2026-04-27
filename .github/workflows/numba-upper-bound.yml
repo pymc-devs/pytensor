@@ -69,4 +69,7 @@ jobs:
             --title "Bump numba upper bound to <=${NEW_CAP} (${BASE})" \
             --body "$body" \
             --head "$branch" \
-            --base "${BASE}"
+            --base "${BASE}" \
+            --label numba \
+            --label dependencies \
+            --label maintenance
