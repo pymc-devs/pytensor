@@ -68,6 +68,30 @@ def test_arange_of_shape():
     compare_jax_and_py([x], [out], [np.zeros((5,))], jax_mode="JAX")
 
 
+def test_jax_dynamic_subtensor_slice():
+    import numpy as np
+
+    import pytensor
+    import pytensor.tensor as pt
+
+    x = pt.dvector("x")
+    i = pt.iscalar("i")
+
+    # Test a dynamic start index with a statically provable length of 3
+    out = x[i : i + 3]
+
+    # If the JAX dispatcher fails to prove the static length, this will raise a JitTracer IndexError
+    f_jax = pytensor.function([x, i], out, mode="JAX")
+
+    x_val = np.arange(10, dtype=np.float64)
+    i_val = 2
+
+    result = f_jax(x_val, i_val)
+    expected = x_val[i_val : i_val + 3]
+
+    assert np.array_equal(result, expected)
+
+
 def test_arange_nonconcrete():
     """JAX cannot JIT-compile `jax.numpy.arange` when arguments are not concrete values."""
 
