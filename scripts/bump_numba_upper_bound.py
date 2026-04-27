@@ -77,39 +77,53 @@ def parse_spec(spec: str) -> tuple[str, str | None, Version | None]:
 
 
 def main() -> int:
-    text = PYPROJECT.read_text()
-    matches = list(PIN_RE.finditer(text))
-    if not matches:
+    lines = PYPROJECT.read_text().splitlines(keepends=True)
+    # Skip full-line TOML comments so a commented-out dep list doesn't get
+    # treated as a real pin (and doesn't get rewritten).
+    pin_hits = [
+        (i, m)
+        for i, line in enumerate(lines)
+        if not line.lstrip().startswith("#")
+        for m in PIN_RE.finditer(line)
+    ]
+    if not pin_hits:
         print(f"no numba pin found in {PYPROJECT}", file=sys.stderr)
         return 1
 
-    parsed = [parse_spec(m.group("spec")) for m in matches]
-    if len(set(parsed)) != 1:
-        print(f"inconsistent numba pins: {parsed}", file=sys.stderr)
+    parsed = [parse_spec(m.group("spec")) for _, m in pin_hits]
+    lowers = {lower for lower, _, _ in parsed}
+    if len(lowers) != 1:
+        print(f"inconsistent numba lower bounds: {lowers}", file=sys.stderr)
         return 1
-    lower, upper_op, current_cap = parsed[0]
+    lower = lowers.pop()
+    upper_ops = {op for _, op, _ in parsed}
+    caps = {cap for _, _, cap in parsed if cap is not None}
 
     latest = fetch_latest_numba()
     latest_str = f"{latest.major}.{latest.minor}.{latest.micro}"
-    print(f"current pin spec: numba{matches[0].group('spec')}")
+    print(f"current pin specs: {sorted({m.group('spec') for _, m in pin_hits})}")
     print(f"latest numba release: {latest}")
 
-    if upper_op == "<=" and current_cap == latest:
+    if upper_ops == {"<="} and caps == {latest}:
         print("no bump needed")
         emit_output("bumped", "false")
         return 0
 
     new_spec = f"{lower},<={latest_str}"
-    new_text = PIN_RE.sub(f'"numba{new_spec}"', text)
-    PYPROJECT.write_text(new_text)
+    for i, _ in pin_hits:
+        lines[i] = PIN_RE.sub(f'"numba{new_spec}"', lines[i])
+    PYPROJECT.write_text("".join(lines))
 
-    if upper_op is None:
-        reason = "pin had no upper bound"
-    elif upper_op != "<=":
-        reason = "pin used '<' instead of '<='"
-    else:
-        reason = f"upper bound was {current_cap}, latest is {latest}"
-    print(f"rewrote pin ({reason}); new spec: numba{new_spec}")
+    reasons = []
+    if None in upper_ops:
+        reasons.append("missing upper bound")
+    if "<" in upper_ops:
+        reasons.append("'<' cap")
+    if caps and caps != {latest}:
+        reasons.append(f"cap was {sorted(map(str, caps))}, latest is {latest}")
+    print(
+        f"rewrote pin ({'; '.join(reasons) or 'normalized'}); new spec: numba{new_spec}"
+    )
     emit_output("bumped", "true")
     emit_output("latest", str(latest))
     emit_output("new_cap", latest_str)
