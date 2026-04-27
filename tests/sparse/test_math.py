@@ -821,9 +821,10 @@ class TestUsmm:
         up = upcast(dtype1, dtype2, dtype3, dtype4)
 
         fast_compile = pytensor.config.mode == "FAST_COMPILE"
+        cxx_only_excluded = "cxx_only" in f_a.maker.linker.incompatible_rewrites
 
-        if not pytensor.config.blas__ldflags:
-            # Usmm should not be inserted, because it relies on BLAS
+        if not pytensor.config.blas__ldflags or cxx_only_excluded:
+            # Usmm should not be inserted, because it relies on BLAS / cxx
             assert len(topo) == 4, topo
             assert isinstance(topo[0].op, psm.Dot)
             assert isinstance(topo[1].op, DimShuffle)
@@ -837,7 +838,6 @@ class TestUsmm:
             y.type.dtype == up
             and format1 == "csc"
             and format2 == "dense"
-            and "cxx_only" not in f_a.maker.linker.incompatible_rewrites
             and up in ("float32", "float64")
         ):
             # The op UsmmCscDense should be inserted
