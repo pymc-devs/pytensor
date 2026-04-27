@@ -4884,6 +4884,72 @@ def test_local_dot_to_mul_unspecified_length_1():
     )
 
 
+@pytest.mark.parametrize(
+    "x_shape, y_shape, x_is_ones, y_is_ones",
+    [
+        # Right-side ones: x @ ones(n, p)
+        ((3, 4), (4, 2), False, True),
+        # Left-side ones: ones(m, n) @ y
+        ((3, 4), (4, 2), True, False),
+        # Both ones
+        ((3, 4), (4, 2), True, True),
+        # 1x1 identity: x @ ones(1, 1)
+        ((5, 1), (1, 1), False, True),
+        # 1x1 identity: ones(1, 1) @ y
+        ((1, 1), (1, 5), True, False),
+    ],
+    ids=[
+        "right_ones",
+        "left_ones",
+        "both_ones",
+        "right_1x1",
+        "left_1x1",
+    ],
+)
+def test_local_1_dot_x(x_shape, y_shape, x_is_ones, y_is_ones):
+    rng = np.random.default_rng(42)
+    mode = get_default_mode()
+
+    x = pt.matrix("x", dtype="float64")
+    y = pt.matrix("y", dtype="float64")
+
+    if x_is_ones:
+        x_val = np.ones(x_shape, dtype="float64")
+    else:
+        x_val = rng.normal(size=x_shape).astype("float64")
+
+    if y_is_ones:
+        y_val = np.ones(y_shape, dtype="float64")
+    else:
+        y_val = rng.normal(size=y_shape).astype("float64")
+
+    if x_is_ones and y_is_ones:
+        out = dot(pt.constant(x_val), pt.constant(y_val))
+        fn = pytensor.function([], out, mode=mode)
+    elif x_is_ones:
+        out = dot(pt.constant(x_val), y)
+        fn = pytensor.function([y], out, mode=mode)
+    else:
+        out = dot(x, pt.constant(y_val))
+        fn = pytensor.function([x], out, mode=mode)
+
+    # Verify no Dot node remains in the graph
+    assert not any(isinstance(node.op, Dot) for node in fn.maker.fgraph.apply_nodes), (
+        "Dot op should have been rewritten away"
+    )
+
+    # Verify numerical correctness
+    expected = np.dot(x_val, y_val)
+    if x_is_ones and y_is_ones:
+        result = fn()
+    elif x_is_ones:
+        result = fn(y_val)
+    else:
+        result = fn(x_val)
+
+    np.testing.assert_allclose(result, expected)
+
+
 class TestBlockDiagDotToDotBlockDiag:
     @pytest.mark.parametrize("left_multiply", [True, False], ids=["left", "right"])
     @pytest.mark.parametrize(

@@ -159,6 +159,63 @@ def local_0_dot_x(fgraph, node):
         return [zeros((x.shape[0], y.shape[1]), dtype=node.outputs[0].type.dtype)]
 
 
+@register_canonicalize("shape_unsafe")
+@register_stabilize("shape_unsafe")
+@node_rewriter([Dot])
+def local_1_dot_x(fgraph, node):
+    """Simplify dot(x, y) when x or y is a tensor of all ones.
+
+    dot(x, ones(n, p)) -> alloc(sum(x, axis=1, keepdims=True), x.shape[0], y.shape[1])
+    dot(ones(m, n), y) -> alloc(sum(y, axis=0, keepdims=True), x.shape[0], y.shape[1])
+    dot(ones(m, n), ones(n, p)) -> alloc(cast(n, out_dtype), x.shape[0], y.shape[1])
+    """
+    x, y = node.inputs
+    out_dtype = node.outputs[0].type.dtype
+
+    x_is_ones = (
+        get_underlying_scalar_constant_value(
+            x, only_process_constants=False, raise_not_constant=False
+        )
+        == 1
+    )
+    y_is_ones = (
+        get_underlying_scalar_constant_value(
+            y, only_process_constants=False, raise_not_constant=False
+        )
+        == 1
+    )
+
+    if not (x_is_ones or y_is_ones):
+        return None
+
+    if x_is_ones and y_is_ones:
+        # ones(m, n) @ ones(n, p) = n * ones(m, p)
+        n = cast(x.shape[1], out_dtype)
+        result = alloc(n, x.shape[0], y.shape[1])
+        copy_stack_trace(node.outputs[0], result)
+        return [result]
+
+    if y_is_ones:
+        # x @ ones(n, p) -> sum(x, axis=1, keepdims=True) broadcast to (m, p)
+        result = alloc(
+            cast(pt_sum(x, axis=1, keepdims=True), out_dtype),
+            x.shape[0],
+            y.shape[1],
+        )
+        copy_stack_trace(node.outputs[0], result)
+        return [result]
+
+    if x_is_ones:
+        # ones(m, n) @ y -> sum(y, axis=0, keepdims=True) broadcast to (m, p)
+        result = alloc(
+            cast(pt_sum(y, axis=0, keepdims=True), out_dtype),
+            x.shape[0],
+            y.shape[1],
+        )
+        copy_stack_trace(node.outputs[0], result)
+        return [result]
+
+
 @register_stabilize
 @node_rewriter([blockwise_of(BlockDiagonal)])
 def local_block_diag_dot_to_dot_block_diag(fgraph, node):
