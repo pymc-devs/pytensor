@@ -247,18 +247,38 @@ class BadOptimization(Exception):
         return sio.getvalue()
 
 
+def register_feature_callback(method):
+    """Mark a Feature method as dispatched by ``execute_callbacks``.
+
+    The decorated method's name is collected into the owning class's
+    ``_feature_callbacks`` set at class-definition time. Subclasses inherit
+    the registration via the MRO walk in ``Feature.__init_subclass__`` —
+    they can override the method without re-decorating; the override will
+    still be invoked by ``execute_callbacks``.
+    """
+    method._is_feature_callback = True
+    return method
+
+
 class Feature:
     """
     Base class for FunctionGraph extensions.
 
-    A Feature is an object with several callbacks that are triggered
-    by various operations on FunctionGraphs. It can be used to enforce
-    graph properties at all stages of graph optimization.
+    A Feature has two ways to integrate with a ``FunctionGraph``:
 
-    A Feature may also expose callables on the FunctionGraph itself by
-    listing their names in ``provides``. A name listed there becomes callable
-    as ``fgraph.<name>(...)``, dispatched through ``FunctionGraph.__getattr__``
-    to ``feature.<name>(fgraph, ...)``.
+    1. **Callbacks.** Methods decorated with ``@register_feature_callback``
+       are invoked by ``FunctionGraph.execute_callbacks`` (or
+       ``collect_callbacks``) at well-defined points in the graph's lifecycle
+       — attach/detach, import/prune, input change, validation, and toposort
+       ordering queries. The registered name is what ``execute_callbacks``
+       dispatches by.
+
+    2. **Provided methods.** Names listed in ``provides`` become callable
+       as ``fgraph.<name>(...)``, dispatched through
+       ``FunctionGraph.__getattr__`` to ``feature.<name>(fgraph, ...)``.
+
+    A name cannot appear in both ``provides`` and the callback registry —
+    ``__init_subclass__`` enforces this at import time.
 
     See Also
     --------
@@ -267,7 +287,24 @@ class Feature:
     """
 
     provides: tuple[str, ...] = ()
+    _feature_callbacks: frozenset[str] = frozenset()
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        callbacks: set[str] = set()
+        for base in cls.__mro__:
+            for name, val in vars(base).items():
+                if getattr(val, "_is_feature_callback", False):
+                    callbacks.add(name)
+        cls._feature_callbacks = frozenset(callbacks)
+        clash = set(cls.provides) & callbacks
+        if clash:
+            raise TypeError(
+                f"{cls.__name__}: names {sorted(clash)} appear in both "
+                "`provides` and as callbacks; pick one role per name"
+            )
+
+    @register_feature_callback
     def on_attach(self, fgraph):
         """
         Called by `FunctionGraph.attach_feature`, the method that attaches the
@@ -280,11 +317,9 @@ class Feature:
         implementing the same functionality is already attached to the
         `FunctionGraph`.
 
-        The feature has great freedom in what it can do with the `fgraph`: it
-        may, for example, add methods to it dynamically.
-
         """
 
+    @register_feature_callback
     def on_detach(self, fgraph):
         """
         Called by `FunctionGraph.remove_feature`.  Should remove any
@@ -292,6 +327,7 @@ class Feature:
 
         """
 
+    @register_feature_callback
     def on_import(self, fgraph, node, reason):
         """
         Called whenever a node is imported into `fgraph`, which is just before
@@ -303,6 +339,7 @@ class Feature:
 
         """
 
+    @register_feature_callback
     def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         """
         Called whenever ``node.inputs[i]`` is changed from `var` to `new_var`.
@@ -313,6 +350,7 @@ class Feature:
 
         """
 
+    @register_feature_callback
     def on_prune(self, fgraph, node, reason):
         """
         Called whenever a node is pruned (removed) from the `fgraph`, after it
@@ -320,6 +358,16 @@ class Feature:
 
         """
 
+    @register_feature_callback
+    def on_validate(self, fgraph):
+        """
+        Called by ``Validator.validate`` to give each Feature a chance to
+        veto the current graph state. Implementations should raise
+        ``InconsistencyError`` if the graph is invalid.
+
+        """
+
+    @register_feature_callback
     def orderings(self, fgraph):
         """
         Called by `FunctionGraph.toposort`. It should return a dictionary of

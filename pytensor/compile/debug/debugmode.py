@@ -26,7 +26,7 @@ from pytensor.compile.ops import ViewOp
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.destroyhandler import DestroyHandler
-from pytensor.graph.features import AlreadyThere, BadOptimization
+from pytensor.graph.features import AlreadyThere, BadOptimization, Feature
 from pytensor.graph.fg import Output
 from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.traversal import io_toposort
@@ -1146,7 +1146,7 @@ class _FunctionGraphEvent:
         return not (self == other)
 
 
-class _VariableEquivalenceTracker:
+class _VariableEquivalenceTracker(Feature):
     """
     A FunctionGraph Feature that keeps tabs on an FunctionGraph and
     tries to detect problems.

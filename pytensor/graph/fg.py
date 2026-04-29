@@ -721,37 +721,30 @@ class FunctionGraph(AbstractFunctionGraph):
     def execute_callbacks(self, name: str, *args, **kwargs) -> None:
         """Execute callbacks.
 
-        Calls ``getattr(feature, name)(*args)`` for each feature which has
-        a method called after name.
-
+        For each attached feature whose class registered ``name`` via
+        ``@register_feature_callback``, call ``feature.<name>(self, *args)``.
         """
         t0 = time.perf_counter()
         for feature in self._features:
-            try:
-                fn = getattr(feature, name)
-            except AttributeError:
-                # this is safe because there is no work done inside the
-                # try; the AttributeError really must come from feature.${name}
-                # not existing
+            if name not in type(feature)._feature_callbacks:
                 continue
             tf0 = time.perf_counter()
-            fn(self, *args, **kwargs)
+            getattr(feature, name)(self, *args, **kwargs)
             self.execute_callbacks_times[feature] += time.perf_counter() - tf0
         self.execute_callbacks_time += time.perf_counter() - t0
 
     def collect_callbacks(self, name: str, *args) -> dict[Feature, Any]:
-        """Collects callbacks
+        """Collect callback return values.
 
-        Returns a dictionary d such that ``d[feature] == getattr(feature, name)(*args)``
-        For each feature which has a method called after name.
+        Returns a dict mapping each attached feature whose class registered
+        ``name`` via ``@register_feature_callback`` to the result of
+        ``feature.<name>(*args)``.
         """
         d = {}
         for feature in self._features:
-            try:
-                fn = getattr(feature, name)
-            except AttributeError:
+            if name not in type(feature)._feature_callbacks:
                 continue
-            d[feature] = fn(*args)
+            d[feature] = getattr(feature, name)(*args)
         return d
 
     def toposort(self) -> list[Apply]:
