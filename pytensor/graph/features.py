@@ -624,12 +624,12 @@ class Validator(Feature):
         # Don't call unpickle here, as ReplaceValidate.on_attach()
         # call to History.on_attach() will call the
         # ReplaceValidate.unpickle and not History.unpickle
-        fgraph.validate = partial(self.validate_, fgraph)
-        fgraph.consistent = partial(self.consistent_, fgraph)
+        fgraph.validate = partial(self.validate, fgraph)
+        fgraph.consistent = partial(self.consistent, fgraph)
 
     def unpickle(self, fgraph):
-        fgraph.validate = partial(self.validate_, fgraph)
-        fgraph.consistent = partial(self.consistent_, fgraph)
+        fgraph.validate = partial(self.validate, fgraph)
+        fgraph.consistent = partial(self.consistent, fgraph)
 
     def on_detach(self, fgraph):
         """
@@ -639,7 +639,7 @@ class Validator(Feature):
         del fgraph.validate
         del fgraph.consistent
 
-    def validate_(self, fgraph):
+    def validate(self, fgraph):
         """
         If the caller is replace_all_validate, just raise the
         exception. replace_all_validate will print out the
@@ -647,7 +647,7 @@ class Validator(Feature):
         """
         t0 = time.perf_counter()
         try:
-            ret = fgraph.execute_callbacks("validate")
+            ret = fgraph.execute_callbacks("on_validate")
         except Exception as e:
             cf = inspect.currentframe()
             uf = cf.f_back
@@ -671,7 +671,7 @@ class Validator(Feature):
             fgraph.profile.validate_time += t1 - t0
         return ret
 
-    def consistent_(self, fgraph):
+    def consistent(self, fgraph):
         try:
             fgraph.validate()
             return True
@@ -828,7 +828,7 @@ class ReplaceValidate(History, Validator):
         if node in self._nodes_removed:
             self.fail_validate = True
 
-    def validate(self, fgraph):
+    def on_validate(self, fgraph):
         if self.fail_validate:
             self.fail_validate = False
             raise InconsistencyError("Trying to reintroduce a removed node")
@@ -865,7 +865,7 @@ class NoOutputFromInplace(Feature):
     def clone(self):
         return type(self)(self.protected_out_ids)
 
-    def validate(self, fgraph):
+    def on_validate(self, fgraph):
         if not hasattr(fgraph, "destroyers"):
             return True
 

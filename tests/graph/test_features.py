@@ -29,7 +29,7 @@ class TestReplaceValidate:
         )
 
         class TestFeature(Feature):
-            def validate(self, *args):
+            def on_validate(self, *args):
                 raise Exception()
 
         fg.attach_feature(TestFeature())

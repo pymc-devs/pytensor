@@ -644,7 +644,7 @@ class DestroyHandler(Bookkeeper):
                 self.fast_destroy(fgraph, app, reason)
         self.stale_droot = True
 
-    def validate(self, fgraph):
+    def on_validate(self, fgraph):
         """
         Return None.
 
