@@ -1753,14 +1753,32 @@ class Alloc(COp):
         if not clients:
             return False
 
+        from pytensor.tensor.blas import Gemv, Ger
+        from pytensor.tensor.blas_c import CGemv, CGer
+        from pytensor.tensor.subtensor import (
+            AdvancedIncSubtensor,
+            AdvancedIncSubtensor1,
+            IncSubtensor,
+            Subtensor,
+        )
+
         for client, idx in clients:
             client_op = client.op
             if isinstance(client_op, Output):
                 # If the output is a constant, it will have to be deepcopied
                 # each time the function is called.  So we do not fold.
                 return False
-            # Op's through which Alloc can be lifted
-            elif isinstance(client_op, Elemwise | DimShuffle | Alloc | Join):
+            # Op's through which Alloc can be lifted. ``Subtensor`` is
+            # included because ``local_subtensor_of_alloc`` rewrites
+            # ``alloc(val, *shape)[idx]`` into ``alloc(val[...], *new_shape)``,
+            # preserving the Alloc structure that downstream rewrites
+            # (e.g. ``local_blockwise_alloc_inputs``) rely on. Folding the
+            # Alloc here would short-circuit that lift and produce a
+            # broadcast-equivalent constant whose batch dim is no longer
+            # type-broadcastable.
+            elif isinstance(
+                client_op, Elemwise | DimShuffle | Alloc | Join | Subtensor
+            ):
                 return False
             # Same for Blockwise, unless it has no batch_dims
             elif isinstance(client_op, Blockwise) and client.op.batch_ndim(client):
@@ -1770,13 +1788,13 @@ class Alloc(COp):
                 idx == 0
                 and isinstance(
                     client_op,
-                    pytensor.tensor.subtensor.IncSubtensor
-                    | pytensor.tensor.subtensor.AdvancedIncSubtensor1
-                    | pytensor.tensor.subtensor.AdvancedIncSubtensor
-                    | pytensor.tensor.blas.Gemv
-                    | pytensor.tensor.blas_c.CGemv
-                    | pytensor.tensor.blas.Ger
-                    | pytensor.tensor.blas_c.CGer,
+                    IncSubtensor
+                    | AdvancedIncSubtensor1
+                    | AdvancedIncSubtensor
+                    | Gemv
+                    | CGemv
+                    | Ger
+                    | CGer,
                 )
             ):
                 # Ops that will work inplace on the Alloc. So if they
