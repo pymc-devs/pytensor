@@ -1,9 +1,17 @@
+import pickle
+
 import pytest
 
 import pytensor.tensor as pt
 from pytensor.graph import rewrite_graph
 from pytensor.graph.basic import equal_computations
-from pytensor.graph.features import Feature, FullHistory, ReplaceValidate
+from pytensor.graph.destroyhandler import DestroyHandler
+from pytensor.graph.features import (
+    Feature,
+    FullHistory,
+    ReplaceValidate,
+    register_feature_callback,
+)
 from pytensor.graph.fg import FunctionGraph
 from tests.graph.utils import MyVariable, op1
 
@@ -71,3 +79,80 @@ def test_full_history():
         history.next()
 
     assert equal_computations(fg.outputs, [pt.special.log_softmax(x)])
+
+
+class TestPickleRoundTrip:
+    """A pickled FunctionGraph must support the same Feature operations as a fresh one.
+
+    Regression: ``ReplaceValidate``'s history dict, the checkpoint counter,
+    and the ``execute_callbacks_times`` accumulator all used to be silently
+    dropped on pickle without being re-initialized on unpickle, so the next
+    rewrite would crash with ``'ReplaceValidate' object has no attribute 'history'``
+    or similar.
+    """
+
+    def _round_trip(self, fg):
+        return pickle.loads(pickle.dumps(fg))
+
+    def test_checkpoint_after_pickle(self):
+        x = pt.vector("x")
+        fg = FunctionGraph([x], [x * 2 + 1])
+        fg2 = self._round_trip(fg)
+        chk = fg2.checkpoint()
+        fg2.revert(chk)
+
+    def test_replace_all_validate_after_pickle(self):
+        x = pt.vector("x")
+        fg = FunctionGraph([x], [x * 2 + 1])
+        fg2 = self._round_trip(fg)
+        out = fg2.outputs[0]
+        fg2.replace_all_validate([(out, out + 0)], reason="test")
+
+    def test_execute_callbacks_after_pickle(self):
+        x = pt.vector("x")
+        fg = FunctionGraph([x], [x * 2 + 1])
+        fg2 = self._round_trip(fg)
+        fg2.execute_callbacks("on_import", next(iter(fg2.apply_nodes)), "test")
+        assert fg2.execute_callbacks_times
+
+    def test_destroy_handler_after_pickle(self):
+        x = pt.vector("x")
+        fg = FunctionGraph([x], [x * 2 + 1])
+        fg.attach_feature(DestroyHandler())
+        fg2 = self._round_trip(fg)
+        assert fg2.destroyers(fg2.inputs[0]) == []
+        assert fg2.has_destroyers([fg2.inputs[0]]) is False
+        assert isinstance(fg2.destroy_handler, DestroyHandler)
+
+
+def test_provides_callback_collision_rejected_at_class_time():
+    """A name cannot appear in both ``provides`` and the callback registry."""
+    with pytest.raises(TypeError, match="appear in both `provides` and as callbacks"):
+
+        class Bad(Feature):
+            provides = ("on_validate",)
+
+            @register_feature_callback
+            def on_validate(self, fgraph):
+                pass
+
+
+@pytest.mark.parametrize(
+    "feature_factory",
+    [ReplaceValidate, DestroyHandler],
+    ids=["ReplaceValidate", "DestroyHandler"],
+)
+def test_feature_provides_dispatch_contract(feature_factory):
+    """Names listed in ``Feature.provides`` are reachable as ``fgraph.<name>``
+    via ``__getattr__`` dispatch, both fresh and after a pickle round-trip."""
+    x = pt.vector("x")
+    fg = FunctionGraph([x], [x * 2 + 1])
+    feature = feature_factory()
+    fg.attach_feature(feature)
+
+    for name in feature.provides:
+        assert callable(getattr(fg, name)), name
+
+    fg2 = pickle.loads(pickle.dumps(fg))
+    for name in feature.provides:
+        assert callable(getattr(fg2, name)), name
