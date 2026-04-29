@@ -3,6 +3,7 @@
 import abc
 import copy
 import functools
+import importlib
 import inspect
 import logging
 import sys
@@ -181,6 +182,18 @@ class NodeRewriter(Rewriter):
         print(f"{' ' * level}{self.__class__.__name__} id={id(self)}", file=stream)
 
 
+def _restore_decorated_rewriter(module_name, qualname):
+    """Re-import a decorator-applied rewriter wrapper by ``module.qualname``.
+
+    The ``@graph_rewriter`` / ``@node_rewriter`` decorators bind the wrapper
+    instance at the same attribute as the raw function, so the wrapper is
+    name-resolvable. ``__reduce__`` uses this on ``FromFunctionGraphRewriter``
+    and ``FromFunctionNodeRewriter`` to pickle by lookup, since ``self.fn``
+    no longer matches the module attr after decoration.
+    """
+    return getattr(importlib.import_module(module_name), qualname)
+
+
 class FromFunctionGraphRewriter(GraphRewriter):
     """A `GraphRewriter` constructed from a given function."""
 
@@ -203,6 +216,9 @@ class FromFunctionGraphRewriter(GraphRewriter):
 
     def __str__(self):
         return self.__name__
+
+    def __reduce__(self):
+        return _restore_decorated_rewriter, (self.fn.__module__, self.fn.__qualname__)
 
 
 def graph_rewriter(f):
@@ -1007,6 +1023,9 @@ class FromFunctionNodeRewriter(NodeRewriter):
 
     def print_summary(self, stream=sys.stdout, level=0, depth=-1):
         print(f"{' ' * level}{self.transform} id={id(self)}", file=stream)
+
+    def __reduce__(self):
+        return _restore_decorated_rewriter, (self.fn.__module__, self.fn.__qualname__)
 
 
 def node_rewriter(

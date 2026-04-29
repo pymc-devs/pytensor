@@ -3,6 +3,7 @@ import sys
 import time
 import warnings
 from io import StringIO
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -11,6 +12,19 @@ from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.traversal import toposort
 from pytensor.graph.utils import InconsistencyError
+
+
+class HistoryEntry(NamedTuple):
+    """A recorded edit to a `FunctionGraph` input.
+
+    Used by `History` and `FullHistory` to remember a ``change_node_input``
+    that can later be replayed (forward) or undone (backward).
+    """
+
+    node: Any
+    i: int
+    var: Any
+    reason: Any
 
 
 class AlreadyThere(Exception):
@@ -402,20 +416,6 @@ class Bookkeeper(Feature):
             self.on_prune(fgraph, node, "Bookkeeper.detach")
 
 
-class LambdaExtract:
-    def __init__(self, fgraph, node, i, r, reason=None):
-        self.fgraph = fgraph
-        self.node = node
-        self.i = i
-        self.r = r
-        self.reason = reason
-
-    def __call__(self):
-        return self.fgraph.change_node_input(
-            self.node, self.i, self.r, reason=("Revert", self.reason), check=False
-        )
-
-
 class History(Feature):
     """Keep an history of changes to an FunctionGraph.
 
@@ -447,9 +447,10 @@ class History(Feature):
         del self._checkpoint_counters[fgraph]
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
-        if self.history[fgraph] is None:
+        h = self.history[fgraph]
+        if h is None:
             return
-        self.history[fgraph].append(LambdaExtract(fgraph, node, i, r, reason))
+        h.append(HistoryEntry(node, i, r, reason))
 
     def checkpoint(self, fgraph):
         self.history[fgraph] = []
@@ -466,8 +467,14 @@ class History(Feature):
         self.history[fgraph] = None
         assert self._checkpoint_counters[fgraph] == checkpoint
         while h:
-            f = h.pop()
-            f()
+            entry = h.pop()
+            fgraph.change_node_input(
+                entry.node,
+                entry.i,
+                entry.var,
+                reason=("Revert", entry.reason),
+                check=False,
+            )
         self.history[fgraph] = h
 
 
@@ -578,8 +585,8 @@ class FullHistory(Feature):
         self.fg = fgraph
 
     def on_change_input(self, fgraph, node, i, r, new_r, reason=None):
-        self.bw.append(LambdaExtract(fgraph, node, i, r, reason))
-        self.fw.append(LambdaExtract(fgraph, node, i, new_r, reason))
+        self.bw.append(HistoryEntry(node, i, r, reason))
+        self.fw.append(HistoryEntry(node, i, new_r, reason))
         self.pointer += 1
         if self.callback:
             self.callback()
@@ -598,19 +605,23 @@ class FullHistory(Feature):
 
         # Go backwards
         while pointer > checkpoint - 1:
-            reverse_fn = self.bw[pointer]
+            node, i, r, reason = self.bw[pointer]
             if verbose:
-                print(reverse_fn.reason)  # noqa: T201
-            reverse_fn()
+                print(reason)  # noqa: T201
+            self.fg.change_node_input(
+                node, i, r, reason=("Revert", reason), check=False
+            )
             pointer -= 1
 
         # Go forward
         while pointer < checkpoint - 1:
             pointer += 1
-            forward_fn = self.fw[pointer]
+            node, i, r, reason = self.fw[pointer]
             if verbose:
-                print(forward_fn.reason)  # noqa: T201
-            forward_fn()
+                print(reason)  # noqa: T201
+            self.fg.change_node_input(
+                node, i, r, reason=("Revert", reason), check=False
+            )
 
         # Remove history changes caused by the foward/backward!
         self.bw = self.bw[:history_len]
