@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from pytensor import Mode, config, function, ifelse, scan, shared
+from pytensor.compile.mode import get_default_mode
 from pytensor.gradient import hessian
 from pytensor.scan.op import Scan
 from pytensor.tensor import (
@@ -20,6 +21,7 @@ from pytensor.tensor import (
     vertical_stack,
     zeros,
 )
+from pytensor.tensor.subtensor import Subtensor
 
 
 def SEIR_model_logp():
@@ -573,6 +575,48 @@ def test_scan_reordering_benchmark(benchmark):
 
     np.testing.assert_allclose(pytensor_x, v_x)
     np.testing.assert_allclose(pytensor_y, v_y)
+
+
+def test_scan_grad_subtensor_compile_benchmark(benchmark):
+    """Compile time for ``grad(xs[-1], x0)`` over a symbolic-``n_steps`` Scan.
+
+    The most extreme pathology in issue #112: the gradient produces nested
+    Subtensor chains on Scan outputs, and the unguarded ``local_subtensor_merge_slice``
+    used to expand each into a deep ``switch / min / max`` tree.
+    """
+    no_fusion = get_default_mode().excluding("fusion")
+
+    def build():
+        x0 = scalar("x0")
+        n = scalar("n", dtype="int64")
+        xs = scan(
+            fn=lambda xtm1: xtm1**2,
+            outputs_info=[x0],
+            n_steps=n,
+            return_updates=False,
+        )
+        g = grad(xs[-1], x0)
+        return [n, x0], g
+
+    function(*build(), mode=no_fusion)  # warm
+    fn = benchmark(lambda: function(*build(), mode=no_fusion))
+
+    # The unguarded ``local_subtensor_merge`` produces hundreds of
+    # switch/min/max nodes here (issue #112). Record the current size
+    # as a regression guard; subsequent commits tighten it as the
+    # rewrite pipeline learns to bail out / collapse the chain.
+    n_apply = len(fn.maker.fgraph.apply_nodes)
+    assert n_apply <= 350, f"Graph has {n_apply} nodes, expected <= 350"
+
+    subtensor_nodes = [
+        n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Subtensor)
+    ]
+    assert len(subtensor_nodes) == 3, (
+        f"Expected 3 Subtensor, got {len(subtensor_nodes)}"
+    )
+
+    scan_nodes = [n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]
+    assert len(scan_nodes) == 2  # forward Scan + backward grad-of-Scan
 
 
 def _jax_cyclical_reduction():
