@@ -180,7 +180,7 @@ def _build_droot_impact(destroy_handler):
     impact = {}  # destroyed nonview variable -> it + all views of it
     root_destroyer = {}  # root -> destroyer apply
 
-    for app in destroy_handler.destroyers:
+    for app in destroy_handler._destroying_apps:
         for input_idx_list in app.op.destroy_map.values():
             if len(input_idx_list) != 1:
                 raise NotImplementedError()
@@ -321,7 +321,7 @@ class DestroyHandler(Bookkeeper):
 
     """
 
-    pickle_rm_attr = ["destroyers", "has_destroyers"]
+    provides = ("destroyers", "has_destroyers")
 
     def __init__(self, do_imports_on_attach=True, algo=None):
         self.fgraph = None
@@ -378,7 +378,9 @@ class DestroyHandler(Bookkeeper):
 
         """
 
-        if any(hasattr(fgraph, attr) for attr in ("destroyers", "destroy_handler")):
+        if "destroyers" in fgraph._feature_methods or hasattr(
+            fgraph, "destroy_handler"
+        ):
             raise AlreadyThere("DestroyHandler feature is already present")
 
         if self.fgraph is not None and self.fgraph != fgraph:
@@ -386,66 +388,50 @@ class DestroyHandler(Bookkeeper):
                 "A DestroyHandler instance can only serve one FunctionGraph"
             )
 
-        # Annotate the FunctionGraph #
-        self.unpickle(fgraph)
         fgraph.destroy_handler = self
-
         self.fgraph = fgraph
-        self.destroyers = (
-            OrderedSet()
-        )  # set of Apply instances with non-null destroy_map
-        self.view_i = {}  # variable -> variable used in calculation
-        self.view_o = {}  # variable -> set of variables that use this one as a direct input
-        # clients: how many times does an apply use a given variable
-        self.clients = {}  # variable -> apply -> ninputs
+        self._destroying_apps = OrderedSet()
+        self.view_i = {}
+        self.view_o = {}
+        self.clients = {}
         self.stale_droot = True
-
         self.debug_all_apps = set()
         if self.do_imports_on_attach:
             Bookkeeper.on_attach(self, fgraph)
 
-    def unpickle(self, fgraph):
-        def get_destroyers_of(r):
+    def destroyers(self, fgraph, r):
+        droot, _, root_destroyer = self.refresh_droot_impact()
+        try:
+            return [root_destroyer[droot[r]]]
+        except Exception:
+            return []
+
+    def has_destroyers(self, fgraph, protected_list):
+        if self.algo != "fast":
             droot, _, root_destroyer = self.refresh_droot_impact()
-            try:
-                return [root_destroyer[droot[r]]]
-            except Exception:
-                return []
-
-        fgraph.destroyers = get_destroyers_of
-
-        def has_destroyers(protected_list):
-            if self.algo != "fast":
-                droot, _, root_destroyer = self.refresh_droot_impact()
-                for protected_var in protected_list:
-                    try:
-                        root_destroyer[droot[protected_var]]
-                        return True
-                    except KeyError:
-                        pass
-                return False
-
-            def recursive_destroys_finder(protected_var):
-                # protected_var is the idx'th input of app.
-                for app, idx in fgraph.clients[protected_var]:
-                    destroy_maps = app.op.destroy_map.values()
-                    # If True means that the apply node, destroys the protected_var.
-                    if idx in [dmap for sublist in destroy_maps for dmap in sublist]:
-                        return True
-                    for var_idx in app.op.view_map:
-                        if idx in app.op.view_map[var_idx]:
-                            # We need to recursively check the destroy_map of all the
-                            # outputs that we have a view_map on.
-                            if recursive_destroys_finder(app.outputs[var_idx]):
-                                return True
-                return False
-
             for protected_var in protected_list:
-                if recursive_destroys_finder(protected_var):
+                try:
+                    root_destroyer[droot[protected_var]]
                     return True
+                except KeyError:
+                    pass
             return False
 
-        fgraph.has_destroyers = has_destroyers
+        def recursive_destroys_finder(protected_var):
+            for app, idx in fgraph.clients[protected_var]:
+                destroy_maps = app.op.destroy_map.values()
+                if idx in [dmap for sublist in destroy_maps for dmap in sublist]:
+                    return True
+                for var_idx in app.op.view_map:
+                    if idx in app.op.view_map[var_idx]:
+                        if recursive_destroys_finder(app.outputs[var_idx]):
+                            return True
+            return False
+
+        for protected_var in protected_list:
+            if recursive_destroys_finder(protected_var):
+                return True
+        return False
 
     def refresh_droot_impact(self):
         """
@@ -461,14 +447,12 @@ class DestroyHandler(Bookkeeper):
     def on_detach(self, fgraph):
         if fgraph is not self.fgraph:
             raise Exception("detaching wrong fgraph", fgraph)
-        del self.destroyers
+        del self._destroying_apps
         del self.view_i
         del self.view_o
         del self.clients
         del self.stale_droot
-        assert self.fgraph.destroyer_handler is self
-        delattr(self.fgraph, "destroyers")
-        delattr(self.fgraph, "has_destroyers")
+        assert self.fgraph.destroy_handler is self
         delattr(self.fgraph, "destroy_handler")
         self.fgraph = None
 
@@ -535,7 +519,7 @@ class DestroyHandler(Bookkeeper):
         dmap = app.op.destroy_map
         vmap = app.op.view_map
         if dmap:
-            self.destroyers.add(app)
+            self._destroying_apps.add(app)
             if self.algo == "fast":
                 self.fast_destroy(fgraph, app, reason)
 
@@ -574,7 +558,7 @@ class DestroyHandler(Bookkeeper):
             del self.clients[input][app]
 
         if app.op.destroy_map:
-            self.destroyers.remove(app)
+            self._destroying_apps.remove(app)
 
         # Note: leaving empty client dictionaries in the struct.
         # Why? It's a pain to remove them. I think they aren't doing any harm, they will be
@@ -653,7 +637,7 @@ class DestroyHandler(Bookkeeper):
         b) orderings cannot be topologically sorted.
 
         """
-        if self.destroyers:
+        if self._destroying_apps:
             if self.algo == "fast":
                 if self.fail_validate:
                     app_err_pairs = self.fail_validate
@@ -702,7 +686,7 @@ class DestroyHandler(Bookkeeper):
         set_type = OrderedSet if ordered else set
         rval = {}
 
-        if self.destroyers:
+        if self._destroying_apps:
             # BUILD DATA STRUCTURES
             # CHECK for multiple destructions during construction of variables
 
@@ -720,7 +704,7 @@ class DestroyHandler(Bookkeeper):
                 )
 
             # add destroyed variable clients as computational dependencies
-            for app in self.destroyers:
+            for app in self._destroying_apps:
                 # keep track of clients that should run before the current Apply
                 root_clients = set_type()
                 # for each destroyed input...
