@@ -1145,7 +1145,13 @@ def local_subtensor_shape_constant(fgraph, node):
     if not isinstance(shape_arg.type, TensorType):
         return False
 
-    shape_parts = shape_arg.type.broadcastable[idx_val]
+    try:
+        shape_parts = shape_arg.type.broadcastable[idx_val]
+    except IndexError:
+        # An out-of-bounds index here is an error in the source graph
+        # (e.g. ``scalar.shape[0]``), but it should fail at runtime rather
+        # than abort the rewrite pass.
+        return False
 
     if isinstance(shape_parts, Iterable):
         if all(shape_parts):

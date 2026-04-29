@@ -2374,17 +2374,18 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
                         shp.append(v_shp_i[0])
                 scan_outs.append(tuple(shp))
 
-        scan_outs += list(input_shapes[offset : offset + info.n_untraced_sit_sot])
-        # if we are dealing with a repeat-until, then we do not know the
-        # leading dimension so we replace it for every entry with Shape_i
+        # Untraced sit_sot outputs hold only the last value, so their shape
+        # equals the input shape (no leading time dimension). Skip the
+        # as_while leading-dim override for them.
         if info.as_while:
-            scan_outs_init = scan_outs
-            scan_outs = []
-            for o, x in zip(node.outputs, scan_outs_init, strict=True):
-                if x is None:
-                    scan_outs.append(None)
-                else:
-                    scan_outs.append((Shape_i(0)(o), *x[1:]))
+            # Repeat-until: we don't know the leading dimension of the
+            # traced outputs, so override it with Shape_i.
+            traced_outs = node.outputs[: len(scan_outs)]
+            scan_outs = [
+                None if x is None else (Shape_i(0)(o), *x[1:])
+                for o, x in zip(traced_outs, scan_outs, strict=True)
+            ]
+        scan_outs += list(input_shapes[offset : offset + info.n_untraced_sit_sot])
         return scan_outs
 
     def connection_pattern(self, node):

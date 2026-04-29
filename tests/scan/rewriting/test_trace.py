@@ -527,6 +527,22 @@ class TestSaveMem:
         assert stored_ys_steps == expected_y_steps
         assert stored_zs_steps == 1
 
+    def test_while_scan_untraced_sit_sot_shape(self):
+        # Regression: ``Scan.infer_shape`` for while-scans used to call
+        # ``Shape_i(0)`` on every output, including untraced sit_sot ones
+        # that are 0-d (no leading time dimension), which crashed
+        # compilation under ``on_shape_error=raise``.
+        x0 = scalar("x0")
+        n_steps = scalar("n_steps", dtype="int64")
+        [ys, zs] = pytensor.scan(
+            lambda xtm1: ((xtm1 + 1, xtm1 * 2), {}, until(xtm1 >= 10)),
+            outputs_info=[x0, None],
+            n_steps=n_steps,
+            return_updates=False,
+        )
+        f = pytensor.function([x0, n_steps], [ys[-1], zs[-1]])
+        np.testing.assert_allclose(f(x0=0, n_steps=100), [11, 20])
+
     @pytest.mark.parametrize("val_ndim", (0, 1))
     @pytest.mark.parametrize("keep_beginning", (False, True))
     def test_broadcasted_init(self, keep_beginning, val_ndim):
