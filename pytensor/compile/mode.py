@@ -306,7 +306,7 @@ class Mode:
         self,
         linker: str | Linker | None = None,
         optimizer: str | RewriteDatabaseQuery = "default",
-        db: RewriteDatabase = None,
+        db: RewriteDatabase | None = None,
     ):
         if linker is None:
             linker = config.linker
@@ -317,6 +317,7 @@ class Mode:
 
         self.__setstate__((linker, optimizer))
 
+        self.optdb: RewriteDatabase
         if db is None:
             global optdb
             self.optdb = optdb

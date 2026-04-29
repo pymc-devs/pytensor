@@ -89,9 +89,9 @@ class TestGradSourcesInputs:
                 outputs = [vector()]
                 return Apply(self, inputs, outputs)
 
-            def grad(self, inp, grads):
-                (_x,) = inp
-                (_gz,) = grads
+            def grad(self, inputs, output_grads):
+                (_x,) = inputs
+                (_gz,) = output_grads
 
             def perform(self, *args, **kwargs):
                 raise NotImplementedError()
@@ -110,7 +110,7 @@ class TestGradSourcesInputs:
                 outputs = [vector()]
                 return Apply(self, inputs, outputs)
 
-            def grad(self, inputs, grads):
+            def grad(self, inputs, output_grads):
                 return [inputs[0].zeros_like()]
 
             def perform(self, *args, **kwargs):
@@ -136,7 +136,7 @@ class TestGradSourcesInputs:
                 outputs = [matrix()]
                 return Apply(self, inputs, outputs)
 
-            def grad(self, inp, grads):
+            def grad(self, inputs, output_grads):
                 return (gval,)
 
             def perform(self, *args, **kwargs):
@@ -158,9 +158,9 @@ class TestGradSourcesInputs:
                 outputs = [scalar(), scalar()]
                 return Apply(self, inputs, outputs)
 
-            def grad(self, inp, grads):
-                (_x,) = inp
-                _gz1, _gz2 = grads
+            def grad(self, inputs, output_grads):
+                (_x,) = inputs
+                _gz1, _gz2 = output_grads
                 return (gval,)
 
             def perform(self, *args, **kwargs):
@@ -183,9 +183,9 @@ class TestGradSourcesInputs:
                 outputs = [matrix()]
                 return Apply(self, inputs, outputs)
 
-            def grad(self, inp, grads):
-                _x0, _x1 = inp
-                (_gz,) = grads
+            def grad(self, inputs, output_grads):
+                _x0, _x1 = inputs
+                (_gz,) = output_grads
                 return (gval0, gval1)
 
             def perform(self, *args, **kwargs):
@@ -209,7 +209,7 @@ class TestGradSourcesInputs:
                 outputs = [matrix(), matrix()]
                 return Apply(self, inputs, outputs)
 
-            def grad(self, inp, grads):
+            def grad(self, inputs, output_grads):
                 return gval0, gval1
 
             def perform(self, *args, **kwargs):
@@ -232,9 +232,9 @@ class TestGrad:
             outputs = [scalar("b"), scalar("d")]
             return Apply(self, inputs, outputs)
 
-        def grad(self, inp, grads):
-            _x0, _x1 = inp
-            _gz0, _gz1 = grads
+        def grad(self, inputs, output_grads):
+            _x0, _x1 = inputs
+            _gz0, _gz1 = output_grads
             return self.gval0, self.gval1
 
         def perform(self, *args, **kwargs):

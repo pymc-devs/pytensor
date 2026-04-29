@@ -81,31 +81,31 @@ class CheckAndRaise(COp):
             [value.type()],
         )
 
-    def perform(self, node, inputs, outputs):
-        (out,) = outputs
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         val, *conds = inputs
         out[0] = val
         if not all(conds):
             raise self.exc_type(self.msg)
 
-    def grad(self, input, output_gradients):
+    def grad(self, inputs, output_gradients):
         return [
             *output_gradients,
-            *(disconnected_type() for _ in range(len(input) - 1)),
+            *(disconnected_type() for _ in range(len(inputs) - 1)),
         ]
 
     def connection_pattern(self, node):
         return [[1]] + [[0]] * (len(node.inputs) - 1)
 
-    def c_code(self, node, name, inames, onames, props):
+    def c_code(self, node, name, inputs, outputs, sub):
         if not isinstance(node.inputs[0].type, DenseTensorType | ScalarType):
             raise NotImplementedError(
                 f"CheckAndRaise c_code not implemented for input type {node.inputs[0].type}"
             )
-        value_name, *cond_names = inames
-        out_name = onames[0]
-        fail_code = props["fail"]
-        param_struct_name = props["params"]
+        value_name, *cond_names = inputs
+        out_name = outputs[0]
+        fail_code = sub["fail"]
+        param_struct_name = sub["params"]
         msg = self.msg.replace('"', '\\"').replace("\n", "\\n")
 
         all_conds = " && ".join(cond_names)

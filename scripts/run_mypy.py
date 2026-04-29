@@ -101,9 +101,7 @@ def check_no_unexpected_results(mypy_df: pd.DataFrame, show_expected: bool):
         print("!!!!!!!!!")
         print(f"{len(unexpected_passing)} files unexpectedly passed the type checks:")
         print("\n".join(sorted(map(str, unexpected_passing))))
-        print(
-            "This is good news! Go to scripts/run_mypy.py and remove them from the `FAILING` list."
-        )
+        print("This is good news! Remove them from scripts/mypy-failing.txt.")
         if all_files.issubset(passing):
             print("WOW! All files are passing the mypy type checks!")
             print("scripts\\run_mypy.py may no longer be needed.")

@@ -37,16 +37,16 @@ class SoftmaxGrad(COp):
 
         return Apply(self, [dy, sm], [sm.type()])
 
-    def perform(self, node, input_storage, output_storage):
-        dy, sm = input_storage
+    def perform(self, node, inputs, output_storage):
+        dy, sm = inputs
 
         dy_times_sm = dy * sm
         dx = dy_times_sm - np.sum(dy_times_sm, axis=self.axis, keepdims=True) * sm
         output_storage[0][0] = dx
 
-    def grad(self, inp, grads):
-        dy, sm = inp
-        (g,) = grads
+    def grad(self, inputs, output_grads):
+        dy, sm = inputs
+        (g,) = output_grads
 
         tmp = g + neg(sum(g * sm, axis=self.axis, keepdims=True))
         g_dy = tmp * sm
@@ -62,9 +62,9 @@ class SoftmaxGrad(COp):
     def c_code_cache_version(self):
         return (6,)
 
-    def c_code(self, node, name, inp, out, sub):
-        dy, sm = inp
-        (dx,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        dy, sm = inputs
+        (dx,) = outputs
         axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
 
@@ -268,14 +268,14 @@ class Softmax(COp):
 
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, input_storage, output_storage):
-        (x,) = input_storage
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
         (z,) = output_storage
         z[0] = scipy.special.softmax(x, axis=self.axis)
 
-    def L_op(self, inp, outputs, grads):
-        (_x,) = inp
-        (g_sm,) = grads
+    def L_op(self, inputs, outputs, output_grads):
+        (_x,) = inputs
+        (g_sm,) = output_grads
         return [SoftmaxGrad(axis=self.axis)(g_sm, outputs[0])]
 
     def R_op(self, inputs, eval_points):
@@ -291,9 +291,9 @@ class Softmax(COp):
     def c_headers(self, **kwargs):
         return ["<cmath>"]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (sm,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (sm,) = outputs
         axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
         # dtype = node.inputs[0].type.dtype_specs()[1]
@@ -523,15 +523,17 @@ class LogSoftmax(COp):
 
         return Apply(self, [x], [x.type()])
 
-    def perform(self, node, input_storage, output_storage):
-        (x,) = input_storage
+    def perform(self, node, inputs, output_storage):
+        (x,) = inputs
         (z,) = output_storage
         z[0] = scipy.special.log_softmax(x, axis=self.axis)
 
-    def grad(self, inp, grads):
-        (x,) = inp
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
         sm = Softmax(axis=self.axis)(x)
-        return [grads[0] - sum(grads[0], axis=self.axis, keepdims=True) * sm]
+        return [
+            output_grads[0] - sum(output_grads[0], axis=self.axis, keepdims=True) * sm
+        ]
 
     def R_op(self, inputs, eval_points):
         # I think the Jacobian is symmetric so the R_op
@@ -546,9 +548,9 @@ class LogSoftmax(COp):
     def c_headers(self, **kwargs):
         return ["<cmath>"]
 
-    def c_code(self, node, name, inp, out, sub):
-        (x,) = inp
-        (sm,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        (x,) = inputs
+        (sm,) = outputs
         axis = self.axis if self.axis is not None else "NPY_RAVEL_AXIS"
         fail = sub["fail"]
 

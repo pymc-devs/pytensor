@@ -272,9 +272,9 @@ class StructuredDotCSC(COp):
         )
         return r
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (a_val, a_ind, a_ptr, a_nrows, b) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         a = scipy.sparse.csc_matrix(
             (a_val, a_ind, a_ptr), (a_nrows, b.shape[0]), copy=False
         )
@@ -471,9 +471,9 @@ class StructuredDotCSR(COp):
         )
         return r
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         (a_val, a_ind, a_ptr, b) = inputs
-        (out,) = outputs
+        (out,) = output_storage
         a = scipy.sparse.csr_matrix(
             (a_val, a_ind, a_ptr), (len(a_ptr) - 1, b.shape[0]), copy=True
         )  # use view_map before setting this to False

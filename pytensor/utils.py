@@ -9,6 +9,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from functools import partial
 from pathlib import Path
+from typing import TypeVar
 
 import numpy as np
 
@@ -55,6 +56,9 @@ The value of the numpy C API NPY_RAVEL_AXIS.
 """
 
 NDARRAY_C_VERSION = np._core._multiarray_umath._get_ndarray_c_version()  # type: ignore[attr-defined]
+
+
+T = TypeVar("T")
 
 
 def __call_excepthooks(type, value, trace):
@@ -205,7 +209,7 @@ def hash_from_code(msg: str | bytes) -> str:
     return f"m{hashlib.sha256(msg).hexdigest()}"
 
 
-def uniq(seq: Sequence) -> list:
+def uniq(seq: Sequence[T]) -> list[T]:
     """
     Do not use set, this must always return the same value at the same index.
     If we just exchange other values, but keep the same pattern of duplication,
@@ -217,7 +221,7 @@ def uniq(seq: Sequence) -> list:
     return [x for i, x in enumerate(seq) if seq.index(x) == i]
 
 
-def difference(seq1: Iterable, seq2: Iterable):
+def difference(seq1: Iterable[T], seq2: Iterable[T]) -> list[T]:
     r"""
     Returns all elements in seq1 which are not in seq2: i.e ``seq1\seq2``.
 
@@ -236,7 +240,7 @@ def difference(seq1: Iterable, seq2: Iterable):
         return [x for x in seq1 if x not in seq2]
 
 
-def to_return_values(values):
+def to_return_values(values: Sequence[T]) -> T | Sequence[T]:
     if len(values) == 1:
         return values[0]
     else:

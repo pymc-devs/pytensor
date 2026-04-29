@@ -111,18 +111,18 @@ class JAXOp(Op):
         outputs = [output_type() for output_type in self.output_types]
         return Apply(self, filtered_inputs, outputs)
 
-    def perform(self, node, inputs, outputs):
+    def perform(self, node, inputs, output_storage):
         """Execute the JAX function and store results in output storage."""
         results = self.jitted_func(*inputs)
         if not isinstance(results, tuple):
             raise TypeError("JAX function must return a tuple of outputs.")
-        if len(results) != len(outputs):
+        if len(results) != len(output_storage):
             raise ValueError(
                 f"JAX function returned {len(results)} outputs, but "
-                f"{len(outputs)} were expected."
+                f"{len(output_storage)} were expected."
             )
         for output_container, result, out_type in zip(
-            outputs, results, self.output_types
+            output_storage, results, self.output_types
         ):
             output_container[0] = np.array(result, dtype=out_type.dtype)
 
@@ -135,14 +135,14 @@ class JAXOp(Op):
             return outputs[0]
         return outputs
 
-    def grad(self, inputs, output_gradients):
+    def grad(self, inputs, output_grads):
         """Compute gradients using JAX's vector-Jacobian product (VJP)."""
         import jax
 
         # Find indices of outputs that need gradients
         connected_output_indices = [
             i
-            for i, output_grad in enumerate(output_gradients)
+            for i, output_grad in enumerate(output_grads)
             if not isinstance(output_grad.type, DisconnectedType)
         ]
 
@@ -190,7 +190,7 @@ class JAXOp(Op):
         )
 
         return vjp_op(
-            *[*inputs, *[output_gradients[i] for i in connected_output_indices]],
+            *[*inputs, *[output_grads[i] for i in connected_output_indices]],
             return_list=True,
         )
 

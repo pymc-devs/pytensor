@@ -239,10 +239,10 @@ class IfElse(_NoPythonOp):
     def R_op(self, inputs, eval_points):
         return self(inputs[0], *eval_points[1:], return_list=True)
 
-    def grad(self, ins, grads):
-        condition = ins[0]
-        inputs_true_branch = ins[1:][: self.n_outs]
-        inputs_false_branch = ins[1:][self.n_outs :]
+    def grad(self, inputs, output_grads):
+        condition = inputs[0]
+        inputs_true_branch = inputs[1:][: self.n_outs]
+        inputs_false_branch = inputs[1:][self.n_outs :]
 
         if self.name is not None:
             nw_name_t = self.name + "_grad_t"
@@ -260,19 +260,19 @@ class IfElse(_NoPythonOp):
         # dtypes.
         inputs_true_grad = (
             [condition]
-            + grads
+            + output_grads
             + [
-                pt.basic.zeros_like(t, dtype=grads[i].dtype)
+                pt.basic.zeros_like(t, dtype=output_grads[i].dtype)
                 for i, t in enumerate(inputs_true_branch)
             ]
         )
         inputs_false_grad = (
             [condition]
             + [
-                pt.basic.zeros_like(f, dtype=grads[i].dtype)
+                pt.basic.zeros_like(f, dtype=output_grads[i].dtype)
                 for i, f in enumerate(inputs_false_branch)
             ]
-            + grads
+            + output_grads
         )
 
         # `condition` does affect the elements of the output so it is connected.

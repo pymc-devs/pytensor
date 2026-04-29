@@ -1637,7 +1637,7 @@ class FunctionMaker:
         if any(self.refeed):
             warnings.warn("Inputs with default values are deprecated.", FutureWarning)
 
-    def create(self, input_storage=None, storage_map=None):
+    def create(self, input_storage=None, storage_map=None) -> Function:
         """
         Create a function.
 
@@ -1730,7 +1730,7 @@ class FunctionMaker:
             import_time = pytensor.link.c.cmodule.import_time - start_import_time
             self.profile.import_time += import_time
 
-        fn = self.function_builder(
+        fn: Function = self.function_builder(
             _fn,
             _i,
             _o,

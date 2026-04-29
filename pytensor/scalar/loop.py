@@ -312,15 +312,15 @@ class ScalarLoop(ScalarInnerGraphOp):
 
         return self._c_code
 
-    def c_code(self, node, nodename, inames, onames, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         d = dict(
             chain(
-                zip((f"i{i}" for i in range(len(inames))), inames, strict=True),
-                zip((f"o{i}" for i in range(len(onames))), onames, strict=True),
+                zip((f"i{i}" for i in range(len(inputs))), inputs, strict=True),
+                zip((f"o{i}" for i in range(len(outputs))), outputs, strict=True),
             ),
             **sub,
         )
-        d["nodename"] = nodename
+        d["nodename"] = name
         if "id" not in sub:
             # The use of a dummy id is safe as the code is in a separate block.
             # It won't generate conflicting variable name.
@@ -328,7 +328,7 @@ class ScalarLoop(ScalarInnerGraphOp):
 
         # When called inside Elemwise we don't have access to the dtype
         # via the usual `f"dtype_{inames[i]}"` variable
-        d["n_steps"] = inames[0]
+        d["n_steps"] = inputs[0]
         d["n_steps_dtype"] = "npy_" + node.inputs[0].dtype
 
         res = self.c_code_template % d

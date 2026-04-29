@@ -15,7 +15,7 @@ def is_variable(x):
 
 
 class MyType(Type):
-    def filter(self, data):
+    def filter(self, data, strict=False, allow_downcast=None):
         return data
 
     def __eq__(self, other):

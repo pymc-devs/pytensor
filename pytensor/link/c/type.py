@@ -73,7 +73,7 @@ class Generic(CType, Singleton):
     def filter(self, data, strict=False, allow_downcast=None):
         return data
 
-    def is_valid_value(self, a):
+    def is_valid_value(self, data, strict: bool = True) -> bool:
         return True
 
     def c_declare(self, name, sub, check_input=True):

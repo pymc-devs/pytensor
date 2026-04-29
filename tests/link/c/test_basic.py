@@ -106,8 +106,8 @@ class MyOp(COp):
     def __str__(self):
         return self.name
 
-    def perform(self, node, inputs, out_):
-        (out,) = out_
+    def perform(self, node, inputs, output_storage):
+        (out,) = output_storage
         out[0] = self.impl(*inputs)
 
     def c_code_cache_version(self):
@@ -125,9 +125,9 @@ class Binary(MyOp):
 
 
 class Add(Binary):
-    def c_code(self, node, name, inp, out, sub):
-        x, y = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y = inputs
+        (z,) = outputs
         return f"{z} = {x} + {y};"
 
     def impl(self, x, y):
@@ -138,9 +138,9 @@ add = Add()
 
 
 class Sub(Binary):
-    def c_code(self, node, name, inp, out, sub):
-        x, y = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y = inputs
+        (z,) = outputs
         return f"{z} = {x} - {y};"
 
     def impl(self, x, y):
@@ -151,9 +151,9 @@ sub = Sub()
 
 
 class BadSub(Binary):
-    def c_code(self, node, name, inp, out, sub):
-        x, y = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y = inputs
+        (z,) = outputs
         return f"{z} = {x} - {y};"
 
     def impl(self, x, y):
@@ -164,9 +164,9 @@ bad_sub = BadSub()
 
 
 class Mul(Binary):
-    def c_code(self, node, name, inp, out, sub):
-        x, y = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y = inputs
+        (z,) = outputs
         return f"{z} = {x} * {y};"
 
     def impl(self, x, y):
@@ -177,9 +177,9 @@ mul = Mul()
 
 
 class Div(Binary):
-    def c_code(self, node, name, inp, out, sub):
-        x, y = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y = inputs
+        (z,) = outputs
         return f"{z} = {x} / {y};"
 
     def impl(self, x, y):
@@ -499,9 +499,9 @@ def test_duallinker_mismatch():
 
 
 class AddFail(Binary):
-    def c_code(self, node, name, inp, out, sub):
-        x, y = inp
-        (z,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        x, y = inputs
+        (z,) = outputs
         fail = sub["fail"]
         return f"""{z} = {x} + {y};
             PyErr_SetString(PyExc_RuntimeError, "failing here");
@@ -603,16 +603,16 @@ def test_cmodule_key_empty_props():
         def __str__(self):
             return self.name
 
-        def perform(self, node, inputs, out_):
-            (out,) = out_
+        def perform(self, node, inputs, output_storage):
+            (out,) = output_storage
             out[0] = sum(*inputs)
 
         def c_code_cache_version(self):
             return (1,)
 
-        def c_code(self, node, name, inp, out, sub):
-            x, y = inp
-            (z,) = out
+        def c_code(self, node, name, inputs, outputs, sub):
+            x, y = inputs
+            (z,) = outputs
             return f"{z} = {x} + {y};"
 
     x = tdouble("x")

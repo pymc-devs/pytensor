@@ -521,72 +521,72 @@ class DestroyHandler(Bookkeeper):
                 # assert len(v) <= 1
                 # assert len(d) <= 1
 
-    def on_import(self, fgraph, app, reason):
+    def on_import(self, fgraph, node, reason):
         """
         Add Apply instance to set which must be computed.
 
         """
-        if app in self.debug_all_apps:
+        if node in self.debug_all_apps:
             raise ProtocolError("double import")
-        self.debug_all_apps.add(app)
+        self.debug_all_apps.add(node)
         # print 'DH IMPORT', app, id(app), id(self), len(self.debug_all_apps)
 
         # If it's a destructive op, add it to our watch list
-        dmap = app.op.destroy_map
-        vmap = app.op.view_map
+        dmap = node.op.destroy_map
+        vmap = node.op.view_map
         if dmap:
-            self.destroyers.add(app)
+            self.destroyers.add(node)
             if self.algo == "fast":
-                self.fast_destroy(fgraph, app, reason)
+                self.fast_destroy(fgraph, node, reason)
 
         # add this symbol to the forward and backward maps
         for o_idx, i_idx_list in vmap.items():
             if len(i_idx_list) > 1:
                 raise NotImplementedError(
-                    "destroying this output invalidates multiple inputs", (app.op)
+                    "destroying this output invalidates multiple inputs", (node.op)
                 )
-            o = app.outputs[o_idx]
-            i = app.inputs[i_idx_list[0]]
+            o = node.outputs[o_idx]
+            i = node.inputs[i_idx_list[0]]
             self.view_i[o] = i
             self.view_o.setdefault(i, OrderedSet()).add(o)
 
         # update self.clients
-        for i, input in enumerate(app.inputs):
-            self.clients.setdefault(input, {}).setdefault(app, 0)
-            self.clients[input][app] += 1
+        for i, input in enumerate(node.inputs):
+            self.clients.setdefault(input, {}).setdefault(node, 0)
+            self.clients[input][node] += 1
 
-        for i, output in enumerate(app.outputs):
+        for i, output in enumerate(node.outputs):
             self.clients.setdefault(output, {})
 
         self.stale_droot = True
 
-    def on_prune(self, fgraph, app, reason):
+    def on_prune(self, fgraph, node, reason):
         """
         Remove Apply instance from set which must be computed.
 
         """
-        if app not in self.debug_all_apps:
+        if node not in self.debug_all_apps:
             raise ProtocolError("prune without import")
-        self.debug_all_apps.remove(app)
+        self.debug_all_apps.remove(node)
 
         # UPDATE self.clients
-        for input in set(app.inputs):
-            del self.clients[input][app]
+        for input in set(node.inputs):
+            del self.clients[input][node]
 
-        if app.op.destroy_map:
-            self.destroyers.remove(app)
+        if node.op.destroy_map:
+            self.destroyers.remove(node)
 
         # Note: leaving empty client dictionaries in the struct.
         # Why? It's a pain to remove them. I think they aren't doing any harm, they will be
         # deleted on_detach().
 
         # UPDATE self.view_i, self.view_o
-        for o_idx, i_idx_list in app.op.view_map.items():
+        for o_idx, i_idx_list in node.op.view_map.items():
             if len(i_idx_list) > 1:
                 # destroying this output invalidates multiple inputs
                 raise NotImplementedError()
-            o = app.outputs[o_idx]
-            i = app.inputs[i_idx_list[0]]
+            o = node.outputs[o_idx]
+            i = node.inputs[i_idx_list[0]]
 
             del self.view_i[o]
 
@@ -595,53 +595,53 @@ class DestroyHandler(Bookkeeper):
                 del self.view_o[i]
 
         self.stale_droot = True
-        if app in self.fail_validate:
-            del self.fail_validate[app]
+        if node in self.fail_validate:
+            del self.fail_validate[node]
 
-    def on_change_input(self, fgraph, app, i, old_r, new_r, reason):
+    def on_change_input(self, fgraph, node, i, var, new_var, reason=None):
         """
-        app.inputs[i] changed from old_r to new_r.
+        node.inputs[i] changed from var to new_var.
 
         """
-        if isinstance(app.op, Output):
-            # app == 'output' is special key that means FunctionGraph is redefining which nodes are being
+        if isinstance(node.op, Output):
+            # node == 'output' is special key that means FunctionGraph is redefining which nodes are being
             # considered 'outputs' of the graph.
             pass
         else:
-            if app not in self.debug_all_apps:
+            if node not in self.debug_all_apps:
                 raise ProtocolError("change without import")
 
             # UPDATE self.clients
-            self.clients[old_r][app] -= 1
-            if self.clients[old_r][app] == 0:
-                del self.clients[old_r][app]
+            self.clients[var][node] -= 1
+            if self.clients[var][node] == 0:
+                del self.clients[var][node]
 
-            self.clients.setdefault(new_r, {}).setdefault(app, 0)
-            self.clients[new_r][app] += 1
+            self.clients.setdefault(new_var, {}).setdefault(node, 0)
+            self.clients[new_var][node] += 1
 
             # UPDATE self.view_i, self.view_o
-            for o_idx, i_idx_list in app.op.view_map.items():
+            for o_idx, i_idx_list in node.op.view_map.items():
                 if len(i_idx_list) > 1:
                     # destroying this output invalidates multiple inputs
                     raise NotImplementedError()
                 i_idx = i_idx_list[0]
-                output = app.outputs[o_idx]
+                output = node.outputs[o_idx]
                 if i_idx == i:
-                    if app.inputs[i_idx] is not new_r:
+                    if node.inputs[i_idx] is not new_var:
                         raise ProtocolError("wrong new_r on change")
 
-                    self.view_i[output] = new_r
+                    self.view_i[output] = new_var
 
-                    self.view_o[old_r].remove(output)
-                    if not self.view_o[old_r]:
-                        del self.view_o[old_r]
+                    self.view_o[var].remove(output)
+                    if not self.view_o[var]:
+                        del self.view_o[var]
 
-                    self.view_o.setdefault(new_r, OrderedSet()).add(output)
+                    self.view_o.setdefault(new_var, OrderedSet()).add(output)
 
             if self.algo == "fast":
-                if app in self.fail_validate:
-                    del self.fail_validate[app]
-                self.fast_destroy(fgraph, app, reason)
+                if node in self.fail_validate:
+                    del self.fail_validate[node]
+                self.fast_destroy(fgraph, node, reason)
         self.stale_droot = True
 
     def validate(self, fgraph):

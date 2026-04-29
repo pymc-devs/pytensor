@@ -29,7 +29,8 @@ from pytensor.compile.ops import OutputGuard, _output_guard
 from pytensor.configdefaults import config
 from pytensor.graph.basic import Variable
 from pytensor.graph.destroyhandler import DestroyHandler
-from pytensor.graph.features import AlreadyThere, BadOptimization
+from pytensor.graph.features import AlreadyThere
+from pytensor.graph.features import BadOptimization as _BadOptimization
 from pytensor.graph.fg import Output
 from pytensor.graph.op import HasInnerGraph, Op
 from pytensor.graph.traversal import io_toposort
@@ -144,7 +145,7 @@ class BadThunkOutput(DebugModeError):
         return ret
 
 
-class BadOptimization(DebugModeError, BadOptimization):
+class BadOptimization(DebugModeError, _BadOptimization):
     pass
 
 
@@ -2244,8 +2245,7 @@ class DebugMode(Mode):
 
     """
 
-    check_preallocated_output = config.DebugMode__check_preallocated_output
-    check_preallocated_output = check_preallocated_output.split(":")
+    check_preallocated_output = config.DebugMode__check_preallocated_output.split(":")
     """
     List of strings representing ways to pre-allocate output memory in
     tests.  Valid values are: "previous" (previously-returned memory),

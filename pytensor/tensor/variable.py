@@ -3,7 +3,7 @@ import traceback as tb
 import warnings
 from collections.abc import Iterable
 from numbers import Number
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import numpy as np
 
@@ -1117,8 +1117,8 @@ TensorType.constant_type = TensorConstant
 
 
 class DenseVariableMeta(MetaType):
-    def __instancecheck__(self, o):
-        if type(o) is TensorVariable or isinstance(o, DenseVariableMeta):
+    def __instancecheck__(self, instance: Any) -> bool:
+        if type(instance) is TensorVariable or isinstance(instance, DenseVariableMeta):
             return True
         return False
 
@@ -1132,8 +1132,8 @@ class DenseTensorVariable(TensorType, metaclass=DenseVariableMeta):
 
 
 class DenseConstantMeta(MetaType):
-    def __instancecheck__(self, o):
-        if type(o) is TensorConstant or isinstance(o, DenseConstantMeta):
+    def __instancecheck__(self, instance: Any) -> bool:
+        if type(instance) is TensorConstant or isinstance(instance, DenseConstantMeta):
             return True
         return False
 

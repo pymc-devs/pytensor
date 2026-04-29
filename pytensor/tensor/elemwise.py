@@ -224,8 +224,8 @@ class DimShuffle(ExternalCOp):
             return f"Transpose{{axes={self.shuffle}}}"
         return f"DimShuffle{{order=[{','.join(map(str, self.new_order))}]}}"
 
-    def perform(self, node, inp, out):
-        (res,) = inp
+    def perform(self, node, inputs, output_storage):
+        (res,) = inputs
 
         # This C-like impl is very slow in Python compared to transpose+reshape
         # new_order = self._new_order
@@ -243,7 +243,7 @@ class DimShuffle(ExternalCOp):
         new_shape = list(res.shape[: len(self.shuffle)])
         for augm in self.augment:
             new_shape.insert(augm, 1)
-        out[0][0] = res.reshape(new_shape)
+        output_storage[0][0] = res.reshape(new_shape)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishp,) = shapes
@@ -260,9 +260,9 @@ class DimShuffle(ExternalCOp):
             return [None]
         return self(*eval_points, return_list=True)
 
-    def grad(self, inp, grads):
-        (x,) = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        (x,) = inputs
+        (gz,) = output_grads
         grad_order = ["x"] * x.type.ndim
         for i, v in enumerate(self.new_order):
             if v != "x":
@@ -285,12 +285,12 @@ class DimShufflePrinter(Printer):
             return f"{pstate.pprinter.process(r)}.T"
         return f"DimShuffle{{{', '.join(str(o) for o in new_order)}}}({pstate.pprinter.process(r)})"
 
-    def process(self, r, pstate):
-        if r.owner is None:
+    def process(self, var, pstate):
+        if var.owner is None:
             raise TypeError("Can only print DimShuffle.")
-        elif isinstance(r.owner.op, DimShuffle):
-            ord = r.owner.op.new_order
-            return self.__p(ord, pstate, r.owner.inputs[0])
+        elif isinstance(var.owner.op, DimShuffle):
+            ord = var.owner.op.new_order
+            return self.__p(ord, pstate, var.owner.inputs[0])
         else:
             raise TypeError("Can only print DimShuffle.")
 
@@ -509,11 +509,11 @@ class Elemwise(OpenMPOp):
 
         return [[True for output in node.outputs] for ipt in node.inputs]
 
-    def L_op(self, inputs, outs, ograds):
+    def L_op(self, inputs, outputs, output_grads):
         from pytensor.tensor.math import sum as pt_sum
 
         # Compute grad with respect to broadcasted input
-        rval = self._bgrad(inputs, outs, ograds)
+        rval = self._bgrad(inputs, outputs, output_grads)
 
         # sum out the broadcasted dimensions
         for i, ipt in enumerate(inputs):
@@ -526,7 +526,7 @@ class Elemwise(OpenMPOp):
             to_sum = [
                 j
                 for j, in_s in enumerate(ipt.type.shape)
-                if in_s == 1 and outs[0].type.shape[j] != 1
+                if in_s == 1 and outputs[0].type.shape[j] != 1
             ]
 
             if to_sum:
@@ -1072,7 +1072,7 @@ class Elemwise(OpenMPOp):
             """
         return decl, checks, alloc, loop, ""
 
-    def c_code(self, node, nodename, inames, onames, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         if (
             any(i.dtype == "float16" for i in node.inputs)
             or any(o.dtype == "float16" for o in node.outputs)
@@ -1082,7 +1082,7 @@ class Elemwise(OpenMPOp):
         ):
             # Disable C code for float16 vars
             raise NotImplementedError()
-        code = "\n".join(self._c_all(node, nodename, inames, onames, sub))
+        code = "\n".join(self._c_all(node, name, inputs, outputs, sub))
         return code
 
     def c_headers(self, **kwargs):
@@ -1094,8 +1094,8 @@ class Elemwise(OpenMPOp):
     def c_support_code(self, **kwargs):
         return self.scalar_op.c_support_code(**kwargs)
 
-    def c_support_code_apply(self, node, nodename):
-        support_code = self.scalar_op.c_support_code_apply(node, nodename + "_scalar_")
+    def c_support_code_apply(self, node, name):
+        support_code = self.scalar_op.c_support_code_apply(node, name + "_scalar_")
         return support_code
 
     def c_code_cache_version_apply(self, node):
@@ -1396,9 +1396,9 @@ class CAReduce(COp):
         else:
             return f"{type(self).__name__}{{{self.scalar_op}, {self._axis_str()}}}"
 
-    def perform(self, node, inp, out):
-        (input,) = inp
-        (output,) = out
+    def perform(self, node, inputs, output_storage):
+        (input,) = inputs
+        (output,) = output_storage
         axis = self.axis
 
         out_dtype = node.outputs[0].type.dtype
@@ -1412,9 +1412,9 @@ class CAReduce(COp):
 
         input = np.array(input, dtype=acc_dtype)
 
-        out = self.ufunc.reduce(input, axis=axis, dtype=acc_dtype)
+        output_storage = self.ufunc.reduce(input, axis=axis, dtype=acc_dtype)
 
-        output[0] = np.asarray(out, dtype=out_dtype)
+        output[0] = np.asarray(output_storage, dtype=out_dtype)
 
     def infer_shape(self, fgraph, node, shapes):
         (ishape,) = shapes
@@ -1583,8 +1583,8 @@ class CAReduce(COp):
 
         return setup, alloc, loop, cast
 
-    def c_code(self, node, name, inames, onames, sub):
-        code = "\n".join(self._c_all(node, name, inames, onames, sub))
+    def c_code(self, node, name, inputs, outputs, sub):
+        code = "\n".join(self._c_all(node, name, inputs, outputs, sub))
         return code
 
     def c_headers(self, **kwargs):

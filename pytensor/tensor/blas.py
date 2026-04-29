@@ -198,7 +198,7 @@ class Gemv(Op):
 
         return Apply(self, inputs, [y.type()])
 
-    def perform(self, node, inputs, out_storage):
+    def perform(self, node, inputs, output_storage):
         from scipy.linalg.blas import get_blas_funcs
 
         y, alpha, A, x, beta = inputs
@@ -232,7 +232,7 @@ class Gemv(Op):
             #  trans flag don't seam to cause slowdown.
             # out_storage[0][0] = gemv(alpha, A, x, beta, y,
             #                         overwrite_y=self.inplace)
-            out_storage[0][0] = gemv(
+            output_storage[0][0] = gemv(
                 alpha, A.T, x, beta, y, overwrite_y=self.inplace, trans=True
             )
         else:
@@ -244,7 +244,7 @@ class Gemv(Op):
                     out += beta * y
                 else:
                     out += y
-            out_storage[0][0] = np.asarray(out, dtype=y.dtype)
+            output_storage[0][0] = np.asarray(out, dtype=y.dtype)
 
     def infer_shape(self, fgraph, node, input_shapes):
         return [input_shapes[0]]
@@ -909,9 +909,9 @@ class Gemm(GemmRelated):
         output = z.type()
         return Apply(self, inputs, [output])
 
-    def perform(self, node, inp, out):
-        z, a, x, y, b = inp
-        (zout,) = out
+    def perform(self, node, inputs, output_storage):
+        z, a, x, y, b = inputs
+        (zout,) = output_storage
         assert a.shape == ()
         assert b.shape == ()
         if not self.inplace:
@@ -1096,9 +1096,9 @@ class Gemm(GemmRelated):
         #undef REAL
         """
 
-    def c_code(self, node, name, inp, out, sub):
-        _z, _a, _x, _y, _b = inp
-        (_zout,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        _z, _a, _x, _y, _b = inputs
+        (_zout,) = outputs
         if node.inputs[0].type.dtype.startswith("complex"):
             raise MethodNotDefined(f"{self.__class__.__name__}.c_code")
         full_code = self.build_gemm_call() % dict(locals(), **sub)
@@ -1185,9 +1185,9 @@ class Dot22(GemmRelated):
                 double b = 0.0;
         """
 
-    def c_code(self, node, name, inp, out, sub):  # DEBUG
-        _x, _y = inp
-        (_zout,) = out
+    def c_code(self, node, name, inputs, outputs, sub):  # DEBUG
+        _x, _y = inputs
+        (_zout,) = outputs
         if node.inputs[0].type.dtype.startswith("complex"):
             raise MethodNotDefined(f"{self.__class__.__name__}.c_code")
         if len(self.c_libraries()) <= 0:
@@ -1241,9 +1241,9 @@ class Dot22Scalar(GemmRelated):
         outputs = [tensor(dtype=x.type.dtype, shape=sz)]
         return Apply(self, [x, y, a], outputs)
 
-    def perform(self, node, inp, out):
-        x, y, scalar = inp
-        (z,) = out
+    def perform(self, node, inputs, output_storage):
+        x, y, scalar = inputs
+        (z,) = output_storage
         try:
             z[0] = np.asarray(scalar * np.dot(x, y))
         except ValueError as e:
@@ -1283,9 +1283,9 @@ class Dot22Scalar(GemmRelated):
         double b = 0.0;
         """
 
-    def c_code(self, node, name, inp, out, sub):
-        _x, _y, _a = inp
-        (_zout,) = out
+    def c_code(self, node, name, inputs, outputs, sub):
+        _x, _y, _a = inputs
+        (_zout,) = outputs
         if node.inputs[0].type.dtype.startswith("complex"):
             raise MethodNotDefined(f"{self.__class__.__name__}.c_code")
         if len(self.c_libraries()) <= 0:
@@ -1354,14 +1354,14 @@ class BatchedDot(COp):
         out = tensor(dtype=dtype, shape=out_shape)
         return Apply(self, [x, y], [out])
 
-    def perform(self, node, inp, out):
-        x, y = inp
-        (z,) = out
+    def perform(self, node, inputs, output_storage):
+        x, y = inputs
+        (z,) = output_storage
 
         if x.shape[0] != y.shape[0]:
             raise TypeError(
-                f"Inputs [{', '.join(map(str, inp))}] must have the"
-                f" same size in axis 0, but have sizes [{', '.join(str(i.shape[0]) for i in inp)}]."
+                f"Inputs [{', '.join(map(str, inputs))}] must have the"
+                f" same size in axis 0, but have sizes [{', '.join(str(i.shape[0]) for i in inputs)}]."
             )
 
         z[0] = np.matmul(x, y)
@@ -1462,13 +1462,13 @@ class BatchedDot(COp):
     def c_header_dirs(self, **kwargs):
         return ldflags(libs=False, include_dir=True)
 
-    def c_code(self, node, name, inp, out, sub):
+    def c_code(self, node, name, inputs, outputs, sub):
         # Can only compile if linked to blas libraries
         if len(self.c_libraries()) <= 0:
             raise NotImplementedError()
 
-        _x, _y = inp
-        (_z,) = out
+        _x, _y = inputs
+        (_z,) = outputs
         fail = sub["fail"]
 
         # generate contiguity condition
@@ -1597,9 +1597,9 @@ class BatchedDot(COp):
 
         return (6, blas_header_version())
 
-    def grad(self, inp, grads):
-        x, y = inp
-        (gz,) = grads
+    def grad(self, inputs, output_grads):
+        x, y = inputs
+        (gz,) = output_grads
 
         xgrad = _batched_dot(gz, y.dimshuffle(0, 2, 1))
         ygrad = _batched_dot(x.dimshuffle(0, 2, 1), gz)
