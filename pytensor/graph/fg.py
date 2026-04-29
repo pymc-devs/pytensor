@@ -4,6 +4,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable, Sequence, Set
+from functools import partial
 from typing import Any, Union, cast
 
 from pytensor.configdefaults import config
@@ -148,6 +149,7 @@ class FunctionGraph(AbstractFunctionGraph):
             features = []
 
         self._features: list[Feature] = []
+        self._feature_methods: dict[str, Feature] = {}
         # All apply nodes in the subgraph defined by inputs and
         # outputs are cached in this field
         self.apply_nodes: set[Apply] = set()
@@ -682,8 +684,9 @@ class FunctionGraph(AbstractFunctionGraph):
         #    raise TypeError("Expected Feature instance, got "+\
         #            str(type(feature)))
 
-        # Add the feature
         self._features.append(feature)
+        for name in getattr(feature, "provides", ()):
+            self._feature_methods[name] = feature
 
     def remove_feature(self, feature: Feature) -> None:
         """Remove a feature from the graph.
@@ -693,13 +696,28 @@ class FunctionGraph(AbstractFunctionGraph):
 
         """
         try:
-            # Why do we catch the exception anyway?
             self._features.remove(feature)
         except ValueError:
             return
+        for name in list(self._feature_methods):
+            if self._feature_methods[name] is feature:
+                del self._feature_methods[name]
         detach = getattr(feature, "on_detach", None)
         if detach is not None:
             detach(self)
+
+    def __getattr__(self, name: str):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            feature_methods = self.__dict__["_feature_methods"]
+        except KeyError:
+            raise AttributeError(name)
+        try:
+            feature = feature_methods[name]
+        except KeyError:
+            raise AttributeError(name)
+        return partial(getattr(feature, name), self)
 
     def execute_callbacks(self, name: str, *args, **kwargs) -> None:
         """Execute callbacks.

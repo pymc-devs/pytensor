@@ -256,11 +256,18 @@ class Feature:
     by various operations on FunctionGraphs. It can be used to enforce
     graph properties at all stages of graph optimization.
 
+    A Feature may also expose callables on the FunctionGraph itself by
+    listing their names in ``provides``. A name listed there becomes callable
+    as ``fgraph.<name>(...)``, dispatched through ``FunctionGraph.__getattr__``
+    to ``feature.<name>(fgraph, ...)``.
+
     See Also
     --------
     pytensor.graph.features : for common extensions.
 
     """
+
+    provides: tuple[str, ...] = ()
 
     def on_attach(self, fgraph):
         """
