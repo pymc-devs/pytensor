@@ -78,13 +78,10 @@ from pytensor.tensor.subtensor import (
     _non_consecutive_adv_indexing,
     advanced_inc_subtensor1,
     advanced_subtensor1,
-    as_index_constant,
     as_index_literal,
-    basic_subtensor,
     flatten_index_variables,
     get_canonical_form_slice,
     get_constant_idx,
-    get_idx_list,
     get_slice_elements,
     inc_subtensor,
     indices_from_subtensor,
@@ -462,10 +459,10 @@ def local_useless_slice(fgraph, node):
 
     Applies to all Subtensor Ops with slices (basic and advanced, get and set).
 
-    - ``X[0, :]`` → ``X[0]`` (trailing full slices dropped)
-    - ``X[:]`` → ``X``
-    - ``X[0:7:1]`` → ``X[:]`` when ``X.shape[0] <= 7``
-    - ``X[-1:-8:-1]`` → ``X[::-1]`` when ``X.shape[0] <= 7``
+    - ``X[0, :]`` -> ``X[0]`` (trailing full slices dropped)
+    - ``X[:]`` -> ``X``
+    - ``X[0:7:1]`` -> ``X[:]`` when ``X.shape[0] <= 7``
+    - ``X[-1:-8:-1]`` -> ``X[::-1]`` when ``X.shape[0] <= 7``
     """
     op = node.op
     idx_list = op.idx_list
@@ -593,81 +590,396 @@ def local_useless_slice(fgraph, node):
         return [out]
 
 
+def _merge_slice_into_slice_no_shape_ref(slice1, slice2):
+    """Merge ``slice1`` then ``slice2`` (both pure slices on the same dim)
+    when the result is computable from the bounds alone -- no shape required.
+
+    Returns the merged slice, or ``None`` if the merge would need to know the
+    array length (and thus would emit a switch / min / max tree).
+
+    Cases handled (steps in ``{None, -1}``):
+
+    * Both forward (step ``None``): combine starts and stops by addition,
+      with sign-aware checks. Examples: ``x[1:-1][1:-1]`` -> ``x[2:-2]``.
+    * ``x[a:b][::-1]`` -> single negative-step slice over the same range.
+    * ``x[::-1][a:b]`` -> negative-step slice via index reflection.
+    * ``x[::-1][a:b:-1]`` -> forward slice via double reflection
+      (subsumes ``x[::-1][::-1]`` -> ``x[:]``).
+    * ``x[a:b:-1][::-1]`` -> forward slice, restricted to non-negative
+      ``a`` / ``b`` (or ``None``).
+
+    Anything else returns ``None``.
+    """
+
+    def _const_int_or_none(v):
+        if v is None:
+            return None
+        if isinstance(v, Constant):
+            return int(v.data)
+        return "unknown"
+
+    s1_step = _const_int_or_none(slice1.step)
+    s2_step = _const_int_or_none(slice2.step)
+
+    if s1_step not in (None, -1) or s2_step not in (None, -1):
+        # Unknown or non unit: don't bother
+        # Wait for canonicalize: step = 1 -> None
+        return None
+
+    a1, b1 = _const_int_or_none(slice1.start), _const_int_or_none(slice1.stop)
+    a2, b2 = _const_int_or_none(slice2.start), _const_int_or_none(slice2.stop)
+
+    if "unknown" in (a1, a2, b1, b2):
+        return None  # TODO: Handle symbolic cases with known sign
+
+    if s2_step is None:
+        if s1_step is None:
+            # [a1:b1][a2:b2]
+
+            # Ignore here as it will be canonicalized
+            # a1 = None, b1 = None -> useless slice
+
+            if a2 is None or a2 >= 0:
+                # [±a1:±b1][a2:±b2]
+                if a2 is None:
+                    a2 = 0
+
+                if a1 is None or a1 >= 0:
+                    # [a1:±b1][a2:±b2]
+                    if a1 is None:
+                        a1 = 0
+                    if b1 is None:
+                        # [a1:][a2:±b2]
+                        if b2 is None:
+                            # [a1:][a2:]
+                            return slice(a1 + a2, None)
+                        elif b2 > 0:
+                            # [a1:][a2:b2]
+                            return slice(a1 + a2, a1 + b2)
+                        else:  # b2 <= 0
+                            # [a1:][a2:-b2]
+                            return slice(a1 + a2, b2)
+                    else:
+                        # [a1:±b1][a2:±b2]
+                        if b2 is None:
+                            # [a1:±b1][a2:]
+                            return slice(a1 + a2, b1)
+                        elif b2 < 0:
+                            if b1 < 0:
+                                # [a1:-b1][a2:-b2]
+                                return slice(a1 + a2, b1 + b2)
+                            else:
+                                # [a1:b1][a2:-b2] -- b1 + b2 would flip sign, needs shape
+                                return None
+                        elif b1 > 0:
+                            # [a1:b1][a2:b2]
+                            return slice(a1 + a2, min(b1, a1 + b2))
+                        else:
+                            # [a1:-b1][a2:b2] -- needs shape
+                            return None
+                else:  # a1 < 0
+                    # [-a1:±b1][a2:±b2]
+                    # Only sound if a2 == 0; otherwise the start mapping
+                    # depends on whether len(x) >= |a1|.
+                    if a2 != 0:
+                        return None
+                    if b1 is None:
+                        # [-a1:][:b2]
+                        if b2 is None:
+                            return slice(a1, None)
+                        elif b2 < 0:
+                            return slice(a1, b2)
+                        else:
+                            # [-a1:][:b2] with b2 > 0 -- needs shape
+                            return None
+                    elif b1 < 0:
+                        # [-a1:-b1][:b2]
+                        if b2 is None:
+                            return slice(a1, b1)
+                        elif b2 < 0:
+                            return slice(a1, b1 + b2)
+                        else:
+                            return None
+                    else:
+                        # [-a1:b1] with b1 >= 0 -- needs shape
+                        return None
+
+            else:  # a2 < 0
+                # [±a1:±b1][-a2:±b2]
+                if (
+                    (a1 is not None and a1 < 0)
+                    and b1 is None
+                    and (b2 is None or b2 < 0)
+                ):
+                    # [-a1:][-a2:-b2]
+                    return slice(max(a1, a2), b2)
+                else:
+                    return None  # complex (or trivially useless)
+
+    if s1_step is None and s2_step == -1:
+        # [a1:b1][a2:b2:-1] -- only handle the full-reverse outer.
+        if a2 is None and b2 is None:
+            # [a1:b1][::-1] -> single negative-step slice over the same range
+            if b1 == 0:
+                # [a1:0][::-1] -- always empty
+                return slice(0, 0, -1)
+            new_start = None if b1 is None else b1 - 1
+            new_stop = None if (a1 is None or a1 == 0) else a1 - 1
+            return slice(new_start, new_stop, -1)
+        return None
+
+    if s1_step == -1 and s2_step is None:
+        # [a1:b1:-1][a2:b2] -- only handle the full-reverse inner.
+        if a1 is None and b1 is None:
+            # [::-1][a2:b2] -> negative-step slice via index reflection
+            new_start = None if a2 is None else -a2 - 1
+            new_stop = None if b2 is None else -b2 - 1
+            return slice(new_start, new_stop, -1)
+        return None
+
+    if s1_step == -1 and s2_step == -1:
+        # [a1:b1:-1][a2:b2:-1]
+        if a1 is None and b1 is None:
+            # [::-1][a2:b2:-1] -> forward slice via double reflection
+            if a2 is None and b2 is None:
+                # [::-1][::-1] -> [:]
+                return slice(None)
+            new_start = None if a2 is None else -a2 - 1
+            new_stop = None if b2 is None else -b2 - 1
+            return slice(new_start, new_stop, None)
+        if a2 is None and b2 is None:
+            # [a1:b1:-1][::-1] -> forward slice
+            # Sound only when a1 in {None, >=0} and b1 in {None, >=0}.
+            # a1 == -1 or b1 == -1 are danger cases: a1+1 == 0 / b1+1 == 0
+            # flip between "before idx 0" and "L" semantics.
+            if (a1 is None or a1 >= 0) and (b1 is None or b1 >= 0):
+                new_start = None if b1 is None else b1 + 1
+                new_stop = None if a1 is None else a1 + 1
+                return slice(new_start, new_stop, None)
+        return None
+
+    return None
+
+
+def _merge_scalar_into_slice_unsafe(inner_slice, scalar_index, dim, xshape):
+    """Merge ``x[slice][scalar]`` into a single scalar index, or return None.
+
+    Returns None when the step is symbolic or has magnitude != 1.
+
+    Each sign of idx uses exactly one endpoint: positive idx counts from
+    start, negative idx counts from stop. We clamp the used endpoint
+    when it overflows (e.g. stop > n for step=1, start > n-1 for step=-1).
+    We don't clamp the unused endpoint, so invalid indices may silently
+    produce a wrong result. Valid indices always remain valid after the
+    conversion. This is part of the shape_unsafe contract.
+    """
+
+    def _eager_lt_0(x):
+        """Return ``True``/``False`` (Python bool) when the sign of *x* is
+        known, otherwise return the ``lt(x, 0)`` graph node."""
+        if _is_provably_non_negative(x):
+            return False
+        if isinstance(x, Constant):
+            return int(x.data) < 0
+        return lt(x, 0)
+
+    def _eager_switch(cond, a, b):
+        if cond is True:
+            return a
+        if cond is False:
+            return b
+        if a is b:
+            return a
+        return switch(cond, a, b)
+
+    def _eager_minimum(a, b):
+        if a is b:
+            return a
+        if _eager_lt_0(a) is True and _is_provably_non_negative(b):
+            return a
+        if _eager_lt_0(b) is True and _is_provably_non_negative(a):
+            return b
+        return minimum(a, b)
+
+    step = inner_slice.step
+    step_val = (
+        1 if step is None else int(step.data) if isinstance(step, Constant) else None
+    )
+
+    start = inner_slice.start
+    stop = inner_slice.stop
+
+    if step_val == 1:
+        # x[±a:±b][±idx]
+        # Positive idx counts from effective start in [0, ∞).
+        # Negative idx counts from effective stop in (-∞, n].
+        if start is None:
+            pos_idx_result = scalar_index
+        else:
+            a_eff = _eager_switch(
+                _eager_lt_0(start),
+                maximum(start + xshape[dim], 0),
+                start,
+            )
+            pos_idx_result = a_eff + scalar_index
+
+        if stop is None:
+            neg_idx_result = scalar_index
+        else:
+            neg_idx_result = _eager_minimum(stop, xshape[dim]) + scalar_index
+
+        return _eager_switch(_eager_lt_0(scalar_index), neg_idx_result, pos_idx_result)
+
+    if step_val == -1:
+        # x[±a:±b:-1][±idx]
+        # Positive idx counts from effective start in (-∞, n-1].
+        # Negative idx counts from effective stop in [-1, ∞).
+        # When both are None (x[::-1]), both branches give -1 - idx
+        # and _eager_switch deduplicates via identity check.
+        default = -1 - scalar_index
+
+        if start is None:
+            pos_idx_result = default
+        else:
+            a_eff = _eager_switch(
+                _eager_lt_0(start),
+                maximum(start + xshape[dim], 0),
+                _eager_minimum(start, xshape[dim] - 1),
+            )
+            pos_idx_result = a_eff - scalar_index
+
+        if stop is None:
+            neg_idx_result = default
+        else:
+            b_eff = _eager_switch(
+                _eager_lt_0(stop),
+                maximum(stop + xshape[dim], -1),
+                stop,
+            )
+            neg_idx_result = b_eff - scalar_index
+
+        return _eager_switch(_eager_lt_0(scalar_index), neg_idx_result, pos_idx_result)
+
+    return None
+
+
+def _local_subtensor_merge_rewrite(fgraph, node, *, merge_integer_index):
+    """Merge ``Subtensor(Subtensor(x))`` into fewer operations.
+
+    Both modes try shape-free slice+slice merges and constant-only
+    ``merge_two_slices``.  Pairs that can't be merged are kept as a
+    residual outer ``Subtensor``.
+
+    When *merge_integer_index* is ``True`` (``local_subtensor_merge_integer``),
+    scalar-into-slice merges are additionally attempted even with symbolic
+    bounds (tagged ``shape_unsafe`` because it assumes indices are in-bounds).
+    """
+
+    u, *outer_index_vars = node.inputs
+    match u.owner_op_and_inputs:
+        case (Subtensor(idx_list=inner_idx_list), x, *inner_index_vars):
+            pass
+        case _:
+            return None
+
+    indices_inner = unflatten_index_variables(inner_index_vars, inner_idx_list)
+    indices_outer = unflatten_index_variables(outer_index_vars, node.op.idx_list)
+
+    try:
+        xshape = fgraph.shape_feature.shape_of[x]
+    except AttributeError:
+        xshape = tuple(x.shape)
+
+    try:
+        ushape = fgraph.shape_feature.shape_of[u]
+    except AttributeError:
+        ushape = tuple(u.shape)
+
+    merged_inner = []
+    unmerged_outer = []
+    pos_outer = 0
+    any_merged = False
+
+    for pos_inner, idx_inner in enumerate(indices_inner):
+        if pos_outer >= len(indices_outer):
+            # No more outer indices to pair; keep remaining inner as-is
+            merged_inner.extend(indices_inner[pos_inner:])
+            break
+
+        if not isinstance(idx_inner, slice):
+            # Integer index consumes input dim without producing output dim
+            merged_inner.append(idx_inner)
+            continue
+
+        idx_outer = indices_outer[pos_outer]
+        pos_outer += 1
+
+        if isinstance(idx_outer, slice) and idx_outer == slice(None):
+            # Useless outer slice, nothing to merge
+            merged_inner.append(idx_inner)
+            unmerged_outer.append(slice(None))
+            continue
+
+        merged = None
+
+        if isinstance(idx_outer, slice):
+            merged = _merge_slice_into_slice_no_shape_ref(idx_inner, idx_outer)
+        elif merge_integer_index:
+            merged = _merge_scalar_into_slice_unsafe(
+                idx_inner, idx_outer, pos_inner, xshape
+            )
+
+        if merged is None:
+            merged = merge_two_slices(
+                fgraph,
+                idx_inner,
+                xshape[pos_inner],
+                idx_outer,
+                ushape[pos_outer - 1],
+                allow_symbolic_refs=False,
+            )
+
+        if merged is not None:
+            any_merged = True
+            merged_inner.append(merged)
+            if isinstance(merged, slice):
+                # Placeholder to keep unmerged_outer aligned; stripped at the end
+                unmerged_outer.append(slice(None))
+        else:
+            merged_inner.append(idx_inner)
+            unmerged_outer.append(idx_outer)
+    else:  # no-break
+        # Outer had more indices not paired to an inner index
+        if indices_outer[pos_outer:]:
+            any_merged = True
+            merged_inner.extend(indices_outer[pos_outer:])
+
+    if not any_merged:
+        return None
+
+    # Strip trailing slice(None) from unmerged outer
+    while unmerged_outer and unmerged_outer[-1] == slice(None):
+        unmerged_outer.pop()
+
+    out = x[tuple(merged_inner)]
+    if unmerged_outer:
+        out = out[tuple(unmerged_outer)]
+
+    copy_stack_trace([node.outputs[0], u], out)
+    return [out]
+
+
 @register_canonicalize
 @register_specialize
 @node_rewriter([Subtensor])
-def local_subtensor_merge(fgraph, node):
-    """
-    Refactored optimization to deal with all cases of tensor merging.
-    Given a subgraph of the form Subtensor(Subtensor(u)), the optimization
-    expresses all slices in a canonical form, and then merges them together.
+def local_subtensor_merge_slice(fgraph, node):
+    return _local_subtensor_merge_rewrite(fgraph, node, merge_integer_index=False)
 
-    """
-    from pytensor.scan.op import Scan
 
-    u = node.inputs[0]
-    if not (u.owner is not None and isinstance(u.owner.op, Subtensor)):
-        return None
-
-    # We can merge :)
-    # x actual tensor on which we are picking slices
-    x = u.owner.inputs[0]
-    # slices of the first applied subtensor
-    slices1 = get_idx_list(u.owner.inputs, u.owner.op.idx_list)
-    slices2 = get_idx_list(node.inputs, node.op.idx_list)
-
-    # Don't try to do the optimization on do-while scan outputs,
-    # as it will create a dependency on the shape of the outputs
-    if (
-        x.owner is not None
-        and isinstance(x.owner.op, Scan)
-        and x.owner.op.info.as_while
-    ):
-        return None
-
-    # Get the shapes of the vectors !
-    try:
-        # try not to introduce new shape into the graph
-        xshape = fgraph.shape_feature.shape_of[x]
-        ushape = fgraph.shape_feature.shape_of[u]
-    except AttributeError:
-        # Following the suggested use of shape_feature which should
-        # consider the case when the compilation mode doesn't
-        # include the ShapeFeature
-        xshape = x.shape
-        ushape = u.shape
-
-    merged_slices = []
-    pos_2 = 0
-    pos_1 = 0
-    while (pos_1 < len(slices1)) and (pos_2 < len(slices2)):
-        slice1 = slices1[pos_1]
-        if isinstance(slice1, slice):
-            merged_slices.append(
-                merge_two_slices(
-                    fgraph, slice1, xshape[pos_1], slices2[pos_2], ushape[pos_2]
-                )
-            )
-            pos_2 += 1
-        else:
-            merged_slices.append(slice1)
-        pos_1 += 1
-
-    if pos_2 < len(slices2):
-        merged_slices += slices2[pos_2:]
-    else:
-        merged_slices += slices1[pos_1:]
-
-    merged_slices = tuple(as_index_constant(s) for s in merged_slices)
-    out = basic_subtensor(x, *merged_slices)
-
-    # Copy over previous output stacktrace
-    # and stacktrace from previous slicing operation.
-    # Why? Because, the merged slicing operation could have failed
-    # because of either of the two original slicing operations
-    orig_out = node.outputs[0]
-    copy_stack_trace([orig_out, node.inputs[0]], out)
-    return [out]
+@register_specialize("shape_unsafe")
+@node_rewriter([Subtensor])
+def local_subtensor_merge_integer(fgraph, node):
+    return _local_subtensor_merge_rewrite(fgraph, node, merge_integer_index=True)
 
 
 @register_specialize
@@ -720,9 +1032,9 @@ def local_subtensor_remove_broadcastable_index(fgraph, node):
 def local_useless_inc_subtensor(fgraph, node):
     r"""Remove redundant `IncSubtensor`\s.
 
-    - ``x[full_slices].set(y)`` → ``y``  (broadcast/cast to x's shape)
-    - ``zeros[full_slices].inc(y)`` → ``y``  (broadcast/cast to x's shape)
-    - ``x[full_slices].inc(y)`` → ``x + y``
+    - ``x[full_slices].set(y)`` -> ``y``  (broadcast/cast to x's shape)
+    - ``zeros[full_slices].inc(y)`` -> ``y``  (broadcast/cast to x's shape)
+    - ``x[full_slices].inc(y)`` -> ``x + y``
     """
 
     x, y, *index_vars = node.inputs
@@ -1243,22 +1555,19 @@ def local_adv_idx_to_slice(fgraph, node):
     return [out]
 
 
-def merge_two_slices(fgraph, slice1, len1, slice2, len2):
-    """
-     This function merges two slices into a single slice. The code works on
-     the assumption that:
+def merge_two_slices(fgraph, slice1, len1, slice2, len2, allow_symbolic_refs=True):
+    """Merge two consecutive slices into a single indexing operation.
 
-     a) slice1 is actually a slice and not an index, while slice2
-        can be just an index.
+    ``slice1`` must be a ``slice``; ``slice2`` can be a ``slice`` or a
+    scalar index.  Both must have been applied consecutively on the same
+    tensor.  ``len1`` / ``len2`` are the dimension lengths *before* and
+    *after* applying ``slice1``.
 
-     b) the two slices **have been applied consecutively** on the same
-        tensor
-
-    The output slice is **not** in canonical form, but actually just a slice
-    that can be applied to a tensor to produce the same output as applying
-    the two consecutive slices.
-    ``len1`` is the length of the tensor **before** applying the first slice,
-    while ``len2`` is the length **after** applying the first slice.
+    When *allow_symbolic_refs* is ``False``, the merge is only attempted
+    when all components (slice bounds, steps, lengths) are constants.
+    This avoids the symbolic ``switch / min / max`` trees that
+    ``get_canonical_form_slice`` would otherwise produce.  Returns
+    ``None`` when a symbolic component is detected and the flag is off.
     """
 
     if not isinstance(slice1, slice):
@@ -1269,6 +1578,15 @@ def merge_two_slices(fgraph, slice1, len1, slice2, len2):
         return slice2
     elif slice2 == slice(None):
         return slice1
+
+    if not allow_symbolic_refs:
+        vals = [len1, len2, slice1.start, slice1.stop, slice1.step]
+        if isinstance(slice2, slice):
+            vals.extend([slice2.start, slice2.stop, slice2.step])
+        else:
+            vals.append(slice2)
+        if not all(v is None or isinstance(v, Constant) for v in vals):
+            return None
 
     sl1, reverse1 = get_canonical_form_slice(slice1, len1)
     sl2, reverse2 = get_canonical_form_slice(slice2, len2)

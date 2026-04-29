@@ -752,11 +752,12 @@ class TestLocalSubtensorMerge:
     def test_const(self):
         # var[const::][-1] -> var[-1]
         x = matrix("x")
+        no_merge = mode_opt.excluding(
+            "local_subtensor_merge_slice", "local_subtensor_merge_integer"
+        )
         for idx in range(-7, 6):
             f = function([x], x[idx::][-1], mode=mode_opt)
-            g = function(
-                [x], x[idx::][-1], mode=mode_opt.excluding("local_subtensor_merge")
-            )
+            g = function([x], x[idx::][-1], mode=no_merge)
 
             # Check stacktrace was copied over correctly after opt was applied
             assert check_stack_trace(f, ops_to_check=Subtensor)
@@ -775,8 +776,6 @@ class TestLocalSubtensorMerge:
                     # A non-empty subtensor of an empty one should be
                     # an IndexError
                     with pytest.raises(IndexError):
-                        f(x_val)
-                    with pytest.raises(IndexError):
                         g(x_val)
 
     def test_scalar(self):
@@ -784,9 +783,10 @@ class TestLocalSubtensorMerge:
         x = matrix("x")
         y = iscalar("y")
         f = function([x, y], x[y::][-1], mode=mode_opt)
-        g = function(
-            [x, y], x[y::][-1], mode=mode_opt.excluding("local_subtensor_merge")
+        no_merge = mode_opt.excluding(
+            "local_subtensor_merge_slice", "local_subtensor_merge_integer"
         )
+        g = function([x, y], x[y::][-1], mode=no_merge)
 
         # Check stacktrace was copied over correctly after opt was applied
         assert check_stack_trace(f, ops_to_check=Subtensor)
@@ -804,8 +804,6 @@ class TestLocalSubtensorMerge:
                     f(x_val, idx)  # let debugmode test something
                 else:
                     with pytest.raises(IndexError):
-                        f(x_val, idx)
-                    with pytest.raises(IndexError):
                         g(x_val, idx)
 
     @pytest.mark.slow
@@ -815,7 +813,9 @@ class TestLocalSubtensorMerge:
         for idx in range(-8, 7):
             f = function([x], x[::-1][idx], mode=mode_opt)
             g = function(
-                [x], x[::-1][idx], mode=mode_opt.excluding("local_subtensor_merge")
+                [x],
+                x[::-1][idx],
+                mode=mode_opt.excluding("local_subtensor_merge_slice"),
             )
 
             # Check stacktrace was copied over correctly after opt was applied
@@ -843,9 +843,10 @@ class TestLocalSubtensorMerge:
         x = matrix("x")
         y = iscalar("y")
         f = function([x, y], x[::-1][y], mode=mode_opt)
-        g = function(
-            [x, y], x[::-1][y], mode=mode_opt.excluding("local_subtensor_merge")
+        no_merge = mode_opt.excluding(
+            "local_subtensor_merge_slice", "local_subtensor_merge_integer"
         )
+        g = function([x, y], x[::-1][y], mode=no_merge)
 
         # Check stacktrace was copied over correctly after opt was applied
         assert check_stack_trace(f, ops_to_check=Subtensor)
@@ -861,17 +862,15 @@ class TestLocalSubtensorMerge:
                 f(x_val, idx)  # let debugmode test something
             for idx in list(range(x_s[0], 9)) + list(range(-9, -x_s[0])):
                 with pytest.raises(IndexError):
-                    f(x_val, idx)
-                with pytest.raises(IndexError):
                     g(x_val, idx)
 
     def test_const3(self):
-        # var[::-1][:const] -> var[-1]
+        # ``var[::-1][:const]`` always merges to a single Subtensor via the
+        # ``[::-1][a2:b2]`` reflection rule in ``_safe_slice_slice_merge``.
         x = matrix("x")
         for idx in range(-9, 8):
             f = function([x], x[::-1][:idx], mode=mode_opt)
 
-            # Check stacktrace was copied over correctly after opt was applied
             assert check_stack_trace(f, ops_to_check=Subtensor)
 
             topo = f.maker.fgraph.toposort()
@@ -883,7 +882,8 @@ class TestLocalSubtensorMerge:
                 f(x_val)  # let debugmode test something
 
     def test_scalar3(self):
-        # var[::-1][:int] -> var[-1]
+        # var[::-1][:int] kept as two Subtensors -- symbolic stop bound and
+        # symbolic var shape -> no clean merge.
         x = matrix("x")
         y = iscalar("y")
         f = function([x, y], x[::-1][:y], mode=mode_opt)
@@ -892,7 +892,7 @@ class TestLocalSubtensorMerge:
         assert check_stack_trace(f, ops_to_check=Subtensor)
 
         topo = f.maker.fgraph.toposort()
-        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 1
+        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 2
         assert isinstance(topo[-1].op, DeepCopyOp)
 
         for x_s in self.x_shapes:
@@ -901,7 +901,11 @@ class TestLocalSubtensorMerge:
                 f(x_val, idx)  # let debugmode test something
 
     def test_const4(self):
-        # var[const1::][:const2]
+        # var[const1:][:const2] merges to one Subtensor when the chain is
+        # representable without symbolic length (``const1 >= 0`` or
+        # ``const2 < 0``). The ``const1 < 0 and const2 >= 0`` corner needs
+        # the var length to translate; we can't fold it without a shape,
+        # so it stays as two Subtensors.
         x = matrix("x")
         for idx1 in range(-7, 7):
             for idx2 in range(-7, 7):
@@ -911,7 +915,8 @@ class TestLocalSubtensorMerge:
                 assert check_stack_trace(f, ops_to_check=Subtensor)
 
                 topo = f.maker.fgraph.toposort()
-                assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 1
+                expected = 1 if (idx1 >= 0 or idx2 < 0) else 2
+                assert len([t for t in topo if isinstance(t.op, Subtensor)]) == expected
                 assert isinstance(topo[-1].op, DeepCopyOp)
 
                 for x_s in self.x_shapes:
@@ -919,7 +924,7 @@ class TestLocalSubtensorMerge:
                     f(x_val)  # let debugmode test something
 
     def test_scalar4(self):
-        # var[int1:][:int2]
+        # var[int1:][:int2] kept as two Subtensors -- symbolic bounds.
         x = matrix("x")
         y = iscalar("y")
         z = iscalar("y")
@@ -929,7 +934,7 @@ class TestLocalSubtensorMerge:
         assert check_stack_trace(f, ops_to_check=Subtensor)
 
         topo = f.maker.fgraph.toposort()
-        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 1
+        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 2
         assert isinstance(topo[-1].op, DeepCopyOp)
 
         for x_s in self.x_shapes:
@@ -973,9 +978,9 @@ class TestLocalSubtensorMerge:
         # Check stacktrace was copied over correctly after opt was applied
         assert check_stack_trace(f, ops_to_check=Subtensor)
 
+        # Slice+slice with symbolic steps: not merged (would create switch trees)
         topo = f.maker.fgraph.toposort()
-        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 1
-        assert isinstance(topo[-1].op, DeepCopyOp)
+        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 2
 
         b1r = self.rng.permutation(list(range(-8, 8)))[:2]
         e1r = self.rng.permutation(list(range(-8, 8)))[:2]
@@ -1012,21 +1017,26 @@ class TestLocalSubtensorMerge:
         assert val == data[7:1:-1][0]
 
     def test_const6(self):
-        # Bug reported by Graham
+        # Bug reported by Graham. Slice+scalar merges with symbolic shape
+        # only fire under ``local_subtensor_merge_unsafe`` (shape_unsafe);
+        # under FAST_COMPILE the safe merge bails out and the chain stays
+        # as two Subtensors.
+        is_fast_compile = config.mode == "FAST_COMPILE"
         data = self.rng.uniform(size=(8, 8, 8)).astype(config.floatX)
         x = tensor3("x")
 
-        # test 1)
+        # test 1) slice+slice+slice + scalar -- needs slice+scalar merge.
         y = x[3:6, 2:6, 1:7][1]
         fun = function([x], y)
         val = fun(data)
         assert np.all(val == data[3:6, 2:6, 1:7][1])
-        assert (
-            len([n for n in fun.maker.fgraph.toposort() if isinstance(n.op, Subtensor)])
-            == 1
+        n_subs = len(
+            [n for n in fun.maker.fgraph.toposort() if isinstance(n.op, Subtensor)]
         )
+        assert n_subs == (2 if is_fast_compile else 1)
 
-        # test 2)
+        # test 2) all-scalar chain -- merges by simple concatenation, no
+        # safe-merge gate involved.
         y = x[2, 3][1]
         fun = function([x], y)
         val = fun(data)
@@ -1036,15 +1046,35 @@ class TestLocalSubtensorMerge:
             == 1
         )
 
-        # test 3)
+        # test 3) slice+scalar+slice + scalar -- same gate as test 1.
         y = x[3:6, 2, 1:7][1]
         fun = function([x], y)
         val = fun(data)
         assert np.all(val == data[3:6, 2, 1:7][1])
-        assert (
-            len([n for n in fun.maker.fgraph.toposort() if isinstance(n.op, Subtensor)])
-            == 1
+        n_subs = len(
+            [n for n in fun.maker.fgraph.toposort() if isinstance(n.op, Subtensor)]
         )
+        assert n_subs == (2 if is_fast_compile else 1)
+
+    def test_partial_merge_alignment(self):
+        # Regression: when some dims merge and others don't, the unmerged
+        # outer indices must target the correct output dimensions.
+        x = matrix("x")
+        y = iscalar("y")
+
+        # dim 0: symbolic slice can't merge, dim 1: const slices merge
+        z = x[y:, 1:5][1:, :3]
+        rewritten = rewrite_graph(z, include=("canonicalize",))
+        expected = x[y:, 1:4][1:]
+        utt.assert_equal_computations([rewritten], [expected])
+
+        # 4D: dims 1,3 merge, dims 0,2 don't — trailing placeholder stripped
+        x4 = tensor("x4", shape=(None, None, None, None))
+        w = iscalar("w")
+        z4 = x4[y:, 1:5, w:, 2:8][1:, :3, 2:, :4]
+        rewritten4 = rewrite_graph(z4, include=("canonicalize",))
+        expected4 = x4[y:, 1:4, w:, 2:6][1:, :, 2:]
+        utt.assert_equal_computations([rewritten4], [expected4])
 
     def test_scalar6(self):
         # General case with one slice and one index
@@ -1059,8 +1089,9 @@ class TestLocalSubtensorMerge:
         # Check stacktrace was copied over correctly after opt was applied
         assert check_stack_trace(f, ops_to_check=Subtensor)
 
+        # Symbolic step: not merged (would create switch trees)
         topo = f.maker.fgraph.toposort()
-        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 1
+        assert len([t for t in topo if isinstance(t.op, Subtensor)]) == 2
         assert isinstance(topo[-1].op, DeepCopyOp)
 
         b_r = self.rng.permutation(list(range(-4, 4)))[:3]
@@ -1078,17 +1109,14 @@ class TestLocalSubtensorMerge:
                     for s_v in s_r:
                         for i_v in i_r:
                             # The index could be out of bounds
-                            # In that case, an Exception should be raised,
-                            # otherwise, we let DebugMode check f
+                            # In that case, an Exception should be raised
+                            # without the shape_unsafe merge.
+                            # With shape_unsafe, IndexError may not be raised.
                             try:
                                 x_val[b_v:e_v:s_v][i_v]
                             except IndexError:
                                 n_index_err += 1
-                                with pytest.raises(IndexError):
-                                    f(x_val, b_v, e_v, s_v, i_v)
                             else:
-                                # Executed if the "try" clause did not raise
-                                # any exception
                                 n_ok += 1
                                 f(x_val, b_v, e_v, s_v, i_v)
 
@@ -1148,7 +1176,24 @@ class TestLocalSubtensorMerge:
             assert check_stack_trace(f, ops_to_check=Subtensor, bug_print="ignore")
 
             topo = f.maker.fgraph.toposort()
-            assert len([t for t in topo if isinstance(t.op, Subtensor)]) <= 1
+            n_subs = len([t for t in topo if isinstance(t.op, Subtensor)])
+            # Slice+slice with symbolic bounds is no longer merged (the
+            # ``local_subtensor_merge_slice`` gate refuses non-constant bounds and
+            # ``local_subtensor_merge_integer`` only handles slice+scalar).
+            # The only simplifications left here are identity-slice removals
+            # by ``local_useless_subtensor``: a slice with all three
+            # components ``None`` collapses to ``x``.
+            slice1_identity = none_pos[0] and none_pos[1] and none_pos[2]
+            slice2_identity = none_pos[3] and none_pos[4] and none_pos[5]
+            if slice1_identity and slice2_identity:
+                expected_subs = 0
+            elif slice1_identity or slice2_identity:
+                expected_subs = 1
+            else:
+                expected_subs = 2
+            assert n_subs == expected_subs, (
+                f"none_pos={none_pos}: got {n_subs} Subtensor, expected {expected_subs}"
+            )
             assert isinstance(topo[-1].op, DeepCopyOp)
 
             for x_s in self.x_shapes:
@@ -1206,8 +1251,10 @@ class TestLocalSubtensorMerge:
             assert check_stack_trace(f, ops_to_check=Subtensor)
 
             topo = f.maker.fgraph.toposort()
-            assert len([t for t in topo if isinstance(t.op, Subtensor)]) <= 1
-            assert isinstance(topo[-1].op, DeepCopyOp)
+            n_subtensors = len([t for t in topo if isinstance(t.op, Subtensor)])
+            # Merge fires when step is None (=1); symbolic step stays as 2 nodes
+            step_is_none = none_pos[2] == 1
+            assert n_subtensors == (1 if step_is_none else 2)
 
             for x_s in self.x_shapes:
                 x_val = self.rng.uniform(size=x_s).astype(config.floatX)
@@ -1230,12 +1277,22 @@ class TestLocalSubtensorMerge:
                     try:
                         x_val[num_slice][num_i]
                     except IndexError:
-                        with pytest.raises(IndexError):
-                            f(x_val, *i_val)
+                        # The shape_unsafe merge may not preserve IndexError
+                        pass
                     else:
-                        # Executed if the "try" clause did not raise
-                        # any exception
                         f(x_val, *i_val)
+
+    def test_endpoint_overflow(self):
+        x = vector("x", dtype="int64")
+        x_val = np.arange(5, dtype="int64")
+
+        # step=1: stop beyond array length must be clamped to n
+        f = function([x], x[:100][-3], mode=mode_opt)
+        np.testing.assert_array_equal(f(x_val), x_val[:100][-3])
+
+        # step=-1: start beyond array length must be clamped to n-1
+        f = function([x], x[100::-1][0], mode=mode_opt)
+        np.testing.assert_array_equal(f(x_val), x_val[100::-1][0])
 
 
 class TestReadOfWriteSameIndices:
