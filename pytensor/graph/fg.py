@@ -905,12 +905,11 @@ class FunctionGraph(AbstractFunctionGraph):
         aren't picklable); the property re-creates it transparently.
         """
         d = self.__dict__
-        try:
-            return d["_execute_callbacks_times_dict"]
-        except KeyError:
-            cbt: dict[Feature, float] = defaultdict(float)
+        cbt: dict[Feature, float] | None = d.get("_execute_callbacks_times_dict")
+        if cbt is None:
+            cbt = defaultdict(float)
             d["_execute_callbacks_times_dict"] = cbt
-            return cbt
+        return cbt
 
     def __getstate__(self):
         d = self.__dict__.copy()

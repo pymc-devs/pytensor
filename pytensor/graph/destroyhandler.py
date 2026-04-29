@@ -321,7 +321,7 @@ class DestroyHandler(Bookkeeper):
 
     """
 
-    provides = ("destroyers", "has_destroyers")
+    provides: tuple[str, ...] = ("destroyers", "has_destroyers")
 
     def __init__(self, do_imports_on_attach=True, algo=None):
         self.fgraph = None

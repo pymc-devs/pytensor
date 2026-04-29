@@ -425,7 +425,7 @@ class History(Feature):
 
     """
 
-    provides = ("checkpoint", "revert")
+    provides: tuple[str, ...] = ("checkpoint", "revert")
 
     def __init__(self):
         self.history: dict = {}
@@ -638,7 +638,7 @@ class FullHistory(Feature):
 
 
 class Validator(Feature):
-    provides = ("validate", "consistent")
+    provides: tuple[str, ...] = ("validate", "consistent")
 
     def on_attach(self, fgraph):
         if "validate" in fgraph._feature_methods:
@@ -688,7 +688,7 @@ class Validator(Feature):
 
 
 class ReplaceValidate(History, Validator):
-    provides = (
+    provides: tuple[str, ...] = (
         *History.provides,
         *Validator.provides,
         "replace_validate",
