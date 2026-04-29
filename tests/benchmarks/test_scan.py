@@ -601,18 +601,17 @@ def test_scan_grad_subtensor_compile_benchmark(benchmark):
     function(*build(), mode=no_fusion)  # warm
     fn = benchmark(lambda: function(*build(), mode=no_fusion))
 
-    # The unguarded ``local_subtensor_merge`` produces hundreds of
-    # switch/min/max nodes here (issue #112). Record the current size
-    # as a regression guard; subsequent commits tighten it as the
-    # rewrite pipeline learns to bail out / collapse the chain.
+    # Gating ``local_subtensor_merge`` cuts the graph from hundreds of
+    # switch/min/max nodes down to ~110. Subsequent rewrite work in
+    # later commits tightens this further.
     n_apply = len(fn.maker.fgraph.apply_nodes)
-    assert n_apply <= 350, f"Graph has {n_apply} nodes, expected <= 350"
+    assert n_apply <= 110, f"Graph has {n_apply} nodes, expected <= 110"
 
     subtensor_nodes = [
         n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Subtensor)
     ]
-    assert len(subtensor_nodes) == 3, (
-        f"Expected 3 Subtensor, got {len(subtensor_nodes)}"
+    assert len(subtensor_nodes) == 6, (
+        f"Expected 6 Subtensor, got {len(subtensor_nodes)}"
     )
 
     scan_nodes = [n for n in fn.maker.fgraph.apply_nodes if isinstance(n.op, Scan)]

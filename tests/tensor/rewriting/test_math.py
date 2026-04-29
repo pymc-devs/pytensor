@@ -3624,7 +3624,7 @@ class TestIntDivByOne:
         self.mode = self.mode.including("local_div_by_one")
 
     def test_remove_floor(self):
-        """Tests removing the extra floor_div by 1 introduced by `local_subtensor_merge` rewrite."""
+        """Tests removing the extra floor_div by 1 introduced by `local_subtensor_merge_slice` rewrite."""
 
         y = tensor4("y")
         self.mode = self.mode.excluding("fusion")

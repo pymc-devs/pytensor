@@ -59,7 +59,6 @@ from pytensor.tensor.type import (
     discrete_dtypes,
     integer_dtypes,
     tensor,
-    uint_dtypes,
 )
 from pytensor.tensor.type_other import NoneTypeT
 from pytensor.tensor.variable import TensorConstant, TensorVariable
@@ -259,17 +258,15 @@ def _is_provably_non_negative(var) -> bool:
     """
     if isinstance(var, int | np.integer):
         return bool(var >= 0)
-    if isinstance(var, ScalarConstant | TensorConstant):
+    if var.type.dtype.startswith("uint"):
+        return True
+    if isinstance(var, Constant):
         cached: bool | None = getattr(var.tag, "is_non_negative", None)
         if cached is not None:
             return cached
         result = bool((np.asarray(var.data) >= 0).all())
         var.tag.is_non_negative = result
         return result
-    if not isinstance(var, Variable):
-        return False
-    if var.type.dtype in uint_dtypes:
-        return True
     op = var.owner_op
     if isinstance(op, Shape | Shape_i):
         return True
