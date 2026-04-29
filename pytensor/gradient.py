@@ -742,7 +742,7 @@ def grad(
     for var in grad_dict:
         g = grad_dict[var]
         if hasattr(g.type, "dtype"):
-            assert g.type.dtype in pytensor.tensor.type.float_dtypes
+            assert g.type.dtype in pytensor.tensor.type.continuous_dtypes
 
     _rval: Sequence[Variable] = _populate_grad_dict(
         var_to_app_to_idx, grad_dict, _wrt, cost_name
@@ -1411,7 +1411,7 @@ def _populate_grad_dict(var_to_app_to_idx, grad_dict, wrt, cost_name=None):
                                 )
 
                 if not isinstance(term.type, NullType | DisconnectedType):
-                    if term.type.dtype not in pytensor.tensor.type.float_dtypes:
+                    if term.type.dtype not in pytensor.tensor.type.continuous_dtypes:
                         raise TypeError(
                             str(node.op) + ".grad illegally "
                             " returned an integer-valued variable."
@@ -1562,7 +1562,7 @@ def _float_ones_like(x):
     """
 
     dtype = x.type.dtype
-    if dtype not in pytensor.tensor.type.float_dtypes:
+    if dtype not in pytensor.tensor.type.continuous_dtypes:
         dtype = config.floatX
 
     return x.ones_like(dtype=dtype)
@@ -1633,15 +1633,34 @@ class numeric_grad:
                 rval *= i
             return rval
 
+        def real_array(x):
+            dtype = np.array(x).dtype
+            if str(dtype).startswith("complex"):
+                return (
+                    np.stack([np.real(x), np.imag(x)], axis=-1),
+                    np.array([1.0, 1j]),
+                )
+            else:
+                return (np.expand_dims(np.array(x), axis=-1), np.array([1.0]))
+
+        def real_wrapper(f, c_stack):
+            def wrapped_f(*arr):
+                c_arr = [t @ s for (t, s) in zip(arr, c_stack, strict=True)]
+                return f(*c_arr)
+
+            return wrapped_f
+
         packed_pt = False
         if not isinstance(pt, list | tuple):
             pt = [pt]
             packed_pt = True
 
-        apt = [np.array(p) for p in pt]
+        apt, complex_stack = list(map(list, zip(*map(real_array, pt), strict=True)))
 
         shapes = [p.shape for p in apt]
         dtypes = [str(p.dtype) for p in apt]
+
+        real_f = real_wrapper(f, complex_stack)
 
         # TODO: remove this eventually (why was this here in the first place ?)
         # In the case of CSM, the arguments are a mixture of floats and
@@ -1677,7 +1696,7 @@ class numeric_grad:
             apt[i][...] = p
             cur_pos += p_size
 
-        f_x = f(*[p.copy() for p in apt])
+        real_f_x = real_f(*[p.copy() for p in apt])
 
         # now iterate over the elements of x, and call f on apt.
         x_copy = x.copy()
@@ -1685,14 +1704,18 @@ class numeric_grad:
             x[:] = x_copy
 
             x[i] += eps
-            f_eps = f(*apt)
+            real_f_eps = real_f(*apt)
 
             # TODO: remove this when it is clear that the next
             # replacemement does not pose problems of its own.  It was replaced
             # for its inability to handle complex variables.
             # gx[i] = numpy.asarray((f_eps - f_x) / eps)
 
-            gx[i] = (f_eps - f_x) / eps
+            gx[i] = (real_f_eps - real_f_x) / eps
+
+        self.gf = [
+            (p @ s).conj() for (p, s) in zip(self.gf, complex_stack, strict=True)
+        ]
 
         if packed_pt:
             self.gf = self.gf[0]
@@ -1874,14 +1897,18 @@ def verify_grad(
     pt = [np.array(p) for p in pt]
 
     for i, p in enumerate(pt):
-        if p.dtype not in ("float16", "float32", "float64"):
+        if p.dtype not in pytensor.tensor.type.continuous_dtypes:
             raise TypeError(
                 "verify_grad can work only with floating point "
                 f'inputs, but input {i} has dtype "{p.dtype}".'
             )
 
     _type_tol = dict(  # relative error tolerances for different types
-        float16=5e-2, float32=1e-2, float64=1e-4
+        float16=5e-2,
+        float32=1e-2,
+        float64=1e-4,
+        complex64=1e-2,
+        complex128=1e-4,
     )
 
     if abs_tol is None:
