@@ -18,7 +18,6 @@ from pytensor.graph.replace import _vectorize_node
 from pytensor.link.c.op import COp
 from pytensor.link.c.params_type import ParamsType
 from pytensor.link.c.type import EnumList, Generic
-from pytensor.npy_2_compat import old_np_unique
 from pytensor.raise_op import Assert
 from pytensor.scalar import int64 as int_t
 from pytensor.scalar import upcast
@@ -36,7 +35,6 @@ from pytensor.tensor.math import (
     lt,
     maximum,
     minimum,
-    prod,
     sign,
     switch,
 )
@@ -1203,31 +1201,36 @@ class Unique(Op):
         if axis is None:
             out_shape = (None,)
         else:
-            if axis >= x.type.ndim:
-                raise ValueError(
-                    f"Axis {axis} out of range for input {x} with ndim={x.type.ndim}."
-                )
             out_shape = tuple(
                 None if dim == axis else s for dim, s in enumerate(x.type.shape)
             )
-
         outputs = [TensorType(dtype=x.dtype, shape=out_shape)()]
-        typ = TensorType(dtype="int64", shape=(None,))
+
+        index_type = TensorType("int64", shape=(None,))
+        count_type = TensorType("int64", shape=(None,))
+
+        # inverse gets NumPy-2 behavior
+        if axis is None:
+            inverse_shape = x.type.shape  # same as input
+        else:
+            inverse_shape = (x.type.shape[axis],)
+
+        inverse_type = TensorType("int64", shape=inverse_shape)
 
         if self.return_index:
-            outputs.append(typ())
+            outputs.append(index_type())
 
         if self.return_inverse:
-            outputs.append(typ())
+            outputs.append(inverse_type())
 
         if self.return_counts:
-            outputs.append(typ())
+            outputs.append(count_type())
 
         return Apply(self, [x], outputs)
 
     def perform(self, node, inputs, output_storage):
         [x] = inputs
-        outs = old_np_unique(
+        outs = np.unique(
             x,
             return_index=self.return_index,
             return_inverse=self.return_inverse,
@@ -1254,10 +1257,12 @@ class Unique(Op):
         if self.return_inverse:
             return_index_out_idx = 2 if self.return_index else 1
 
-            if self.axis is not None:
-                shape = (x_shape[axis],)
+            if self.axis is None:
+                # NumPy 2: inverse has same shape as input
+                shape = x_shape
             else:
-                shape = (prod(x_shape),)
+                # NumPy 2: inverse has same shape as reduction axis
+                shape = (x_shape[self.axis],)
 
             out_shapes[return_index_out_idx] = shape
 
