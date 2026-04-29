@@ -13,6 +13,7 @@ from pytensor.scan.op import Scan
 from pytensor.tensor.blockwise import Blockwise, BlockwiseWithCoreShape
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.decomposition.lu import LUFactor
+from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.solvers.core import SolveBase
 from pytensor.tensor.linalg.solvers.general import Solve, solve
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
@@ -24,6 +25,7 @@ from pytensor.tensor.linalg.solvers.tridiagonal import (
 from pytensor.tensor.rewriting.linalg.solvers import (
     reuse_decomposition_multiple_solves,
     scan_split_non_sequence_decomposition_and_solve,
+    solve_of_inv_to_matmul,
 )
 from pytensor.tensor.type import matrix, tensor
 
@@ -439,3 +441,26 @@ def test_lu_decomposition_reused_scan(assume_a, counter, transposed):
     resx1 = fn_opt(A_test, x0_test)
     rtol = 1e-7 if config.floatX == "float64" else 1e-4
     np.testing.assert_allclose(resx0, resx1, rtol=rtol)
+
+
+@pytest.mark.parametrize("b_ndim", [1, 2], ids=lambda x: f"b_ndim={x}")
+def test_solve_of_inv_to_matmul(b_ndim):
+    X = pt.dmatrix("X")
+    if b_ndim == 1:
+        b = pt.dvector("b")
+    else:
+        b = pt.dmatrix("b")
+
+    out = solve(pt.linalg.inv(X), b, b_ndim=b_ndim)
+
+    # Graph rewrite test
+    rewrite_name = solve_of_inv_to_matmul.__name__
+    mode = get_default_mode()
+
+    fn_opt = function([X, b], out, mode=mode.including(rewrite_name))
+    opt_nodes = fn_opt.maker.fgraph.apply_nodes
+
+    assert not any(
+        isinstance(getattr(node.op, "core_op", node.op), Solve | MatrixInverse)
+        for node in opt_nodes
+    )
