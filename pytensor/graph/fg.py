@@ -143,7 +143,6 @@ class FunctionGraph(AbstractFunctionGraph):
             inputs = [cast(Variable, _memo[i]) for i in inputs]
 
         self.execute_callbacks_time: float = 0.0
-        self.execute_callbacks_times: dict[Feature, float] = defaultdict(float)
 
         if features is None:
             features = []
@@ -903,29 +902,27 @@ class FunctionGraph(AbstractFunctionGraph):
                 e.attach_feature(feature.clone())
         return e, equiv
 
+    @property
+    def execute_callbacks_times(self) -> dict[Feature, float]:
+        """Per-feature accumulator of callback execution time.
+
+        Lazily initialized and stored under a private key so it stays out of
+        ``__dict__`` until first read. ``__getstate__`` drops it on pickle
+        (callback-time entries may close over optimizer references that
+        aren't picklable); the property re-creates it transparently.
+        """
+        d = self.__dict__
+        try:
+            return d["_execute_callbacks_times_dict"]
+        except KeyError:
+            cbt: dict[Feature, float] = defaultdict(float)
+            d["_execute_callbacks_times_dict"] = cbt
+            return cbt
+
     def __getstate__(self):
-        # This is needed as some features introduce instance methods
-        # This is not picklable
         d = self.__dict__.copy()
-        for feature in self._features:
-            for attr in getattr(feature, "pickle_rm_attr", []):
-                del d[attr]
-
-        # XXX: The `Feature` `DispatchingFeature` takes functions as parameter
-        # and they can be lambda functions, making them unpicklable.
-
-        # execute_callbacks_times have reference to optimizer, and they can't
-        # be pickled as the decorators with parameters aren't pickable.
-        if "execute_callbacks_times" in d:
-            del d["execute_callbacks_times"]
-
+        d.pop("_execute_callbacks_times_dict", None)
         return d
-
-    def __setstate__(self, dct):
-        self.__dict__.update(dct)
-        for feature in self._features:
-            if hasattr(feature, "unpickle"):
-                feature.unpickle(self)
 
     def __contains__(self, item: Variable | Apply) -> bool:
         if isinstance(item, Variable):
