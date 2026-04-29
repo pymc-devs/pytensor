@@ -921,7 +921,7 @@ def add_nitsot_outputs(
     # replacements = dict(zip(old_scan_node.outputs, new_node_old_outputs))
     # replacements["remove"] = [old_scan_node]
     # return new_scan_node, replacements
-    fgraph.replace_all_validate_remove(  # type: ignore
+    fgraph.replace_all_validate_remove(
         list(zip(old_scan_node.outputs, new_node_old_outputs, strict=True)),
         remove=[old_scan_node],
         reason="scan_pushout_add",
@@ -1142,7 +1142,7 @@ class ScanInplaceOptimizer(GraphRewriter):
         new_node: Apply = new_op.make_node(*inputs)
 
         try:
-            fgraph.replace_all_validate_remove(  # type: ignore
+            fgraph.replace_all_validate_remove(
                 list(zip(node.outputs, new_node.outputs, strict=True)),
                 remove=[node],
                 reason="scan_make_inplace",

@@ -1965,7 +1965,7 @@ class NodeProcessingGraphRewriter(GraphRewriter):
         if len(repl_pairs) == 0:
             return False
         try:
-            fgraph.replace_all_validate_remove(  # type: ignore
+            fgraph.replace_all_validate_remove(
                 repl_pairs, reason=node_rewriter, remove=remove
             )
             return True

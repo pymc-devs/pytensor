@@ -80,7 +80,7 @@ def shape_of_variables(
 
         fgraph.attach_feature(ShapeFeature())
 
-    shape_feature = fgraph.shape_feature  # type: ignore[attr-defined]
+    shape_feature = fgraph.shape_feature
 
     input_dims = [
         dimension for inp in fgraph.inputs for dimension in shape_feature.shape_of[inp]
