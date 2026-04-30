@@ -454,6 +454,26 @@ class TestLocalReshapeToDimshuffle:
             [new_out], [x.dimshuffle("x", "x", "x")], strict_dtype=False
         )
 
+    def test_constant_shape_with_stale_static_output(self):
+        # Regression test: when the Reshape's static output shape has unknown
+        # entries (e.g. because the shape input was originally non-constant
+        # and only became constant via constant folding), but the shape input
+        # is now a constant of all ones, the rewrite must still produce an
+        # output with the same rank as the original Reshape.
+        x = pt.vector("x")
+        const_shape = as_tensor_variable([1, 1, 1])
+        # Build a Reshape node whose output type has shape (None, 1, 1) while
+        # its shape input is the constant [1, 1, 1].
+        stale_type = tensor(dtype=x.type.dtype, shape=(None, 1, 1))
+        reshape_node = Apply(Reshape(3), [x, const_shape], [stale_type])
+        out = reshape_node.outputs[0]
+
+        fg = FunctionGraph([x], [out], clone=False)
+        out2in(local_reshape_to_dimshuffle).rewrite(fg)
+
+        new_out = fg.outputs[0]
+        assert new_out.type.ndim == out.type.ndim
+
 
 def test_expand_dims_squeeze_reshape_fusion():
     x = pt.tensor("x", shape=(1, 9))
