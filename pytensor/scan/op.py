@@ -2251,7 +2251,7 @@ class Scan(Op, ScanMethodsMixin, HasInnerGraph):
         self.t_call = t_call
         self.t_fn = t_fn
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         # input_shapes correspond to the shapes of node.inputs
         for inp, inp_shp in zip(node.inputs, input_shapes, strict=True):
             assert inp_shp is None or len(inp_shp) == inp.type.ndim

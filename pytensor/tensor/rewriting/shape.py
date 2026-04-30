@@ -136,12 +136,10 @@ class ShapeFeature(Feature):
             shape_infer = self.default_infer_shape
 
         try:
-            o_shapes = shape_infer(
-                self.fgraph, node, [self.shape_of[r] for r in node.inputs]
-            )
+            o_shapes = shape_infer(node, [self.shape_of[r] for r in node.inputs])
         except ShapeError:
             o_shapes = self.default_infer_shape(
-                self.fgraph, node, [self.shape_of[r] for r in node.inputs]
+                node, [self.shape_of[r] for r in node.inputs]
             )
         except NotImplementedError as e:
             raise NotImplementedError(
@@ -162,7 +160,7 @@ class ShapeFeature(Feature):
             else:
                 warn(msg)
             o_shapes = self.default_infer_shape(
-                self.fgraph, node, [self.shape_of[r] for r in node.inputs]
+                node, [self.shape_of[r] for r in node.inputs]
             )
 
         return o_shapes
@@ -231,7 +229,7 @@ class ShapeFeature(Feature):
             return None
         return tuple(self.shape_ir(i, r) for i in range(r.type.ndim))
 
-    def default_infer_shape(self, fgraph, node, i_shapes):
+    def default_infer_shape(self, node, i_shapes):
         """Return a list of shape tuple or None for the outputs of node.
 
         This function is used for Ops that don't implement infer_shape.

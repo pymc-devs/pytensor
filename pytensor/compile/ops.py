@@ -90,7 +90,7 @@ class ViewOp(TypeCastingOp):
     def make_node(self, x):
         return Apply(self, [x], [x.type()])
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return input_shapes
 
     def pullback(self, args, outputs, g_outs):
@@ -179,7 +179,7 @@ class DeepCopyOp(COp):
         # Else, no C code
         raise NotImplementedError()
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return input_shapes
 
 
@@ -251,8 +251,8 @@ class FromFunctionOp(Op):
                 )
         return load_back, (mod, name)
 
-    def _infer_shape(self, fgraph, node, input_shapes):
-        return self.__infer_shape(fgraph, node, input_shapes)
+    def _infer_shape(self, node, input_shapes):
+        return self.__infer_shape(node, input_shapes)
 
 
 def as_op(itypes, otypes, infer_shape=None):
@@ -275,7 +275,7 @@ def wrap_py(itypes, otypes, infer_shape=None):
     It takes an optional infer_shape parameter that should be a callable with
     this signature:
 
-        def infer_shape(fgraph, node, input_shapes):
+        def infer_shape(node, input_shapes):
             ...
             return output_shapes
 

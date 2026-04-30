@@ -137,7 +137,7 @@ class CheckAndRaise(COp):
     def c_code_cache_version(self):
         return (2,)
 
-    def infer_shape(self, fgraph, node, input_shapes):
+    def infer_shape(self, node, input_shapes):
         return [input_shapes[0]]
 
     def do_constant_folding(self, fgraph, node):

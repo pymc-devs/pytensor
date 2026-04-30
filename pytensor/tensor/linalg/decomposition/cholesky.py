@@ -33,7 +33,7 @@ class Cholesky(Op):
         if self.overwrite_a:
             self.destroy_map = {0: [0]}
 
-    def infer_shape(self, fgraph, node, shapes):
+    def infer_shape(self, node, shapes):
         return [shapes[0]]
 
     def make_node(self, x):
